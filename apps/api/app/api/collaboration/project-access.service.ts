@@ -3,6 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { DatabaseService } from '#database/database.service.js';
+import { assertActiveProjectLocked, assertProjectActive } from '#database/project-lifecycle.js';
 import { project, projectCollaborator, projectInvitation, user } from '#database/schema.js';
 
 /** What an account may do with a project. The owner is implicit and manages the rest (D27). */
@@ -83,6 +84,8 @@ export class ProjectAccessService {
    * @throws ForbiddenException When the caller is a member whose role is below `need`.
    */
   public async authorize(projectId: string, userId: string, need: ProjectNeed): Promise<ProjectAccess> {
+    // A deletion intent fences every replica immediately, including positive cache hits.
+    await assertProjectActive(this.databaseService.database, projectId, userId);
     const access = await this.#resolve(projectId, userId);
     if (access === undefined) {
       throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: 'Project not found' });
@@ -140,35 +143,36 @@ export class ProjectAccessService {
       expiresAt,
     };
     const { database } = this.databaseService;
-    await database
-      .insert(projectInvitation)
-      .values(values)
-      .onConflictDoUpdate({
-        target: [projectInvitation.projectId, projectInvitation.email],
-        /* A re-invite is a fresh invitation: a new token, a new expiry, and the
-           revocation and any previous acceptance cleared. */
-        set: {
-          role: args.role,
-          tokenHash: values.tokenHash,
-          invitedBy: args.ownerId,
-          expiresAt,
-          acceptedAt: null,
-          acceptedBy: null,
-          revokedAt: null,
-        },
-      });
-
-    /* Re-inviting at a different role is how an owner changes one, so it has to
-       reach the membership the first invitation already granted — the new
-       invitation's own `role` only matters if the address accepts again. The
-       update no-ops when the address holds no membership. */
     const accountId = await this.#accountFor(email);
-    if (accountId !== undefined) {
-      await database
-        .update(projectCollaborator)
-        .set({ role: args.role })
-        .where(and(eq(projectCollaborator.projectId, args.projectId), eq(projectCollaborator.userId, accountId)));
-    }
+    await database.transaction(async (transaction) => {
+      await assertActiveProjectLocked(transaction, args.projectId, args.ownerId);
+      await transaction
+        .insert(projectInvitation)
+        .values(values)
+        .onConflictDoUpdate({
+          target: [projectInvitation.projectId, projectInvitation.email],
+          /* A re-invite is a fresh invitation: a new token, a new expiry, and the
+             revocation and any previous acceptance cleared. */
+          set: {
+            role: args.role,
+            tokenHash: values.tokenHash,
+            invitedBy: args.ownerId,
+            expiresAt,
+            acceptedAt: null,
+            acceptedBy: null,
+            revokedAt: null,
+          },
+        });
+
+      /* Re-inviting changes an existing membership's role atomically with the
+         invitation, under the same project lock as acceptance and deletion. */
+      if (accountId !== undefined) {
+        await transaction
+          .update(projectCollaborator)
+          .set({ role: args.role })
+          .where(and(eq(projectCollaborator.projectId, args.projectId), eq(projectCollaborator.userId, accountId)));
+      }
+    });
 
     this.invalidate(args.projectId);
     return { email, role: args.role, token, expiresAt: expiresAt.toISOString() };
@@ -190,46 +194,54 @@ export class ProjectAccessService {
    */
   public async accept(token: string, userId: string): Promise<{ projectId: string; role: 'read' | 'write' }> {
     const { database } = this.databaseService;
-    const [invitation] = await database
-      .select({
-        projectId: projectInvitation.projectId,
-        email: projectInvitation.email,
-        role: projectInvitation.role,
-        expiresAt: projectInvitation.expiresAt,
-        revokedAt: projectInvitation.revokedAt,
-      })
+    const tokenHash = hashToken(token);
+    // Resolve only the lock key here. Invitation validity and caller identity
+    // must be read again after any competing revoke, re-invite or deletion.
+    const [target] = await database
+      .select({ projectId: projectInvitation.projectId })
       .from(projectInvitation)
-      .where(eq(projectInvitation.tokenHash, hashToken(token)))
+      .where(eq(projectInvitation.tokenHash, tokenHash))
       .limit(1);
-    if (invitation === undefined || invitation.revokedAt !== null || invitation.expiresAt.getTime() <= Date.now()) {
+    if (target === undefined) {
       throw new NotFoundException({ code: 'INVITATION_NOT_FOUND', message: 'This invitation is no longer valid' });
     }
 
-    const [viewer] = await database
-      .select({ email: user.email, emailVerified: user.emailVerified })
-      .from(user)
-      .where(eq(user.id, userId))
-      .limit(1);
-    /* Two refusals, not one, because only the first is the invitee's to fix: an
-       unverified account verifies its address and tries again, while a
-       mismatched one has to sign in as somebody else. An account that no longer
-       exists is answered as unverified — it holds no verified address either,
-       and naming a mismatch would be claiming to know an address it does not. */
-    if (viewer === undefined || !viewer.emailVerified) {
-      throw new ForbiddenException({
-        code: 'INVITATION_EMAIL_UNVERIFIED',
-        message: 'Verify your email address before accepting this invitation.',
-      });
-    }
-    if (normalizeEmail(viewer.email) !== invitation.email) {
-      throw new ForbiddenException({
-        code: 'INVITATION_EMAIL_MISMATCH',
-        message: 'This invitation was sent to a different email address.',
-      });
-    }
+    const accepted = await database.transaction(async (transaction) => {
+      await assertActiveProjectLocked(transaction, target.projectId, userId);
+      const [invitation] = await transaction
+        .select({
+          projectId: projectInvitation.projectId,
+          email: projectInvitation.email,
+          role: projectInvitation.role,
+          expiresAt: projectInvitation.expiresAt,
+          revokedAt: projectInvitation.revokedAt,
+        })
+        .from(projectInvitation)
+        .where(and(eq(projectInvitation.projectId, target.projectId), eq(projectInvitation.tokenHash, tokenHash)))
+        .limit(1);
+      if (invitation === undefined || invitation.revokedAt !== null || invitation.expiresAt.getTime() <= Date.now()) {
+        throw new NotFoundException({ code: 'INVITATION_NOT_FOUND', message: 'This invitation is no longer valid' });
+      }
 
-    const role = invitation.role === 'write' ? 'write' : 'read';
-    await database.transaction(async (transaction) => {
+      const [viewer] = await transaction
+        .select({ email: user.email, emailVerified: user.emailVerified })
+        .from(user)
+        .where(eq(user.id, userId))
+        .limit(1);
+      if (viewer === undefined || !viewer.emailVerified) {
+        throw new ForbiddenException({
+          code: 'INVITATION_EMAIL_UNVERIFIED',
+          message: 'Verify your email address before accepting this invitation.',
+        });
+      }
+      if (normalizeEmail(viewer.email) !== invitation.email) {
+        throw new ForbiddenException({
+          code: 'INVITATION_EMAIL_MISMATCH',
+          message: 'This invitation was sent to a different email address.',
+        });
+      }
+
+      const role = invitation.role === 'write' ? 'write' : 'read';
       await transaction
         .insert(projectCollaborator)
         .values({ projectId: invitation.projectId, userId, role })
@@ -240,12 +252,11 @@ export class ProjectAccessService {
       await transaction
         .update(projectInvitation)
         .set({ acceptedAt: new Date(), acceptedBy: userId })
-        .where(
-          and(eq(projectInvitation.projectId, invitation.projectId), eq(projectInvitation.email, invitation.email)),
-        );
+        .where(and(eq(projectInvitation.projectId, invitation.projectId), eq(projectInvitation.tokenHash, tokenHash)));
+      return { projectId: invitation.projectId, role } as const;
     });
-    this.invalidate(invitation.projectId);
-    return { projectId: invitation.projectId, role };
+    this.invalidate(accepted.projectId);
+    return accepted;
   }
 
   /**
@@ -269,17 +280,18 @@ export class ProjectAccessService {
   }): Promise<{ email: string; role: 'read' | 'write' }> {
     const email = normalizeEmail(args.email);
     const { database } = this.databaseService;
-    const [invitation] = await database
-      .select({ email: projectInvitation.email })
-      .from(projectInvitation)
-      .where(and(eq(projectInvitation.projectId, args.projectId), eq(projectInvitation.email, email)))
-      .limit(1);
-    if (invitation === undefined) {
-      throw new NotFoundException({ code: 'INVITATION_NOT_FOUND', message: 'This address has no invitation' });
-    }
     const accountId = await this.#accountFor(email);
 
     await database.transaction(async (transaction) => {
+      await assertActiveProjectLocked(transaction, args.projectId);
+      const [invitation] = await transaction
+        .select({ email: projectInvitation.email })
+        .from(projectInvitation)
+        .where(and(eq(projectInvitation.projectId, args.projectId), eq(projectInvitation.email, email)))
+        .limit(1);
+      if (invitation === undefined) {
+        throw new NotFoundException({ code: 'INVITATION_NOT_FOUND', message: 'This address has no invitation' });
+      }
       await transaction
         .update(projectInvitation)
         .set({ role: args.role })
@@ -314,17 +326,18 @@ export class ProjectAccessService {
   public async revoke(args: { projectId: string; email: string }): Promise<void> {
     const email = normalizeEmail(args.email);
     const { database } = this.databaseService;
-    const [invitation] = await database
-      .select({ email: projectInvitation.email })
-      .from(projectInvitation)
-      .where(and(eq(projectInvitation.projectId, args.projectId), eq(projectInvitation.email, email)))
-      .limit(1);
-    if (invitation === undefined) {
-      throw new NotFoundException({ code: 'INVITATION_NOT_FOUND', message: 'This address has no invitation' });
-    }
     const accountId = await this.#accountFor(email);
 
     await database.transaction(async (transaction) => {
+      await assertActiveProjectLocked(transaction, args.projectId);
+      const [invitation] = await transaction
+        .select({ email: projectInvitation.email })
+        .from(projectInvitation)
+        .where(and(eq(projectInvitation.projectId, args.projectId), eq(projectInvitation.email, email)))
+        .limit(1);
+      if (invitation === undefined) {
+        throw new NotFoundException({ code: 'INVITATION_NOT_FOUND', message: 'This address has no invitation' });
+      }
       await transaction
         .update(projectInvitation)
         .set({ revokedAt: new Date() })

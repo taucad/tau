@@ -16,7 +16,6 @@ const paymentIconIds = new Set([
   'mastercard',
   'paypal',
   'unionpay',
-  'usd',
   'visa',
 ]);
 

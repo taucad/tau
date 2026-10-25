@@ -33,16 +33,16 @@ describe('screenshot section in metres', () => {
     expectTypeOf(cutAt({ plane: 'xy', offset: 0.006 })).toEqualTypeOf<number>();
     expectTypeOf(cutAt({ plane: 'yz', offset: -0.0125, keep: 'negative' })).toEqualTypeOf<number>();
 
-    // @ts-expect-error -- a parsed section carries offset alone; offsetMm is parsed away
+    // @ts-expect-error -- offset is the only spelling; offsetMm was removed
     cutAt({ plane: 'xy', offsetMm: 6 });
     // @ts-expect-error -- offset is required once parsed
     cutAt({ plane: 'xy' });
-    // @ts-expect-error -- offsetMm never reaches a consumer of the parsed section
+    // @ts-expect-error -- offsetMm never reaches a consumer of the section
     cutAt({ plane: 'xy', offset: 0.006, offsetMm: 6 });
   });
 
-  it('should still accept the deprecated millimetre spelling as input', () => {
-    expectTypeOf<{ plane: 'xy'; offsetMm: number }>().toExtend<z.input<typeof screenshotSectionSchema>>();
-    expectTypeOf<{ plane: 'xy'; offset: number }>().toExtend<z.input<typeof screenshotSectionSchema>>();
+  it('should take the same metre section as input as it gives as output', () => {
+    expectTypeOf<z.input<typeof screenshotSectionSchema>>().toEqualTypeOf<ScreenshotSection>();
+    expectTypeOf<{ plane: 'xy'; offsetMm: number }>().not.toExtend<z.input<typeof screenshotSectionSchema>>();
   });
 });

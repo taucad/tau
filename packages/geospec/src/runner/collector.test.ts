@@ -146,6 +146,135 @@ afterEach(() => {
   clearCollectorGlobals();
 });
 
+describe('per-claim invalid expectations', () => {
+  /** The 0.4 engine refuses one malformed claim alone; this double answers the same shape for a payload with `bogus`. */
+  const invalidExpectation: GeometryDiagnostic = {
+    code: 'GEOSPEC_INVALID_EXPECTATION',
+    severity: 'error',
+    message: "volume payload has unknown field 'bogus'.",
+    suggestion: "Correct the expectation to the matcher's documented fields and values.",
+    details: { field: 'bogus', path: '$.bogus' },
+  };
+  /** A variable, not a literal, so the extra field reaches the engine the way an untyped spec sends it. */
+  const malformedVolume = { value: 1, bogus: true };
+  const createRefusingFixture = (sibling: { status: string; diagnostics: readonly GeometryDiagnostic[] }) => {
+    const evaluated: string[] = [];
+    const engine: GeoSpecAssertionClientOptions['engine'] = {
+      processRequest: (input) => input,
+      evaluateClaim: (input) => {
+        const envelope = JSON.parse(new TextDecoder().decode(input)) as {
+          plan: { claims: Array<{ claimId: string; capability: string; payload: unknown }> };
+        };
+        const [claim] = envelope.plan.claims;
+        const malformed = JSON.stringify(claim?.payload).includes('"bogus"');
+        evaluated.push(claim?.capability ?? '');
+        const result = malformed
+          ? { claimId: claim?.claimId, status: 'refused', diagnostics: [invalidExpectation] }
+          : { claimId: claim?.claimId, ...sibling };
+        return {
+          canonicalClaim: encode(claim),
+          canonicalPlan: encode(envelope.plan),
+          canonicalResult: encode({ results: [result] }),
+        };
+      },
+    };
+    const options: GeoSpecAssertionClientOptions = { engine, workUnitLimit: 1000 };
+    return { engine, evaluated, options };
+  };
+  const bind = (engine: GeoSpecAssertionClientOptions['engine'], options: GeoSpecAssertionClientOptions) =>
+    bindGeoSpecSubject({
+      engine,
+      client: createGeoSpecAssertionClient(options),
+      identity: { subjectHash: 'a'.repeat(64) },
+      isLive: () => true,
+    });
+
+  it('should refuse the malformed claim alone, keep its typed diagnostic and still decide its sibling', async () => {
+    const fixture = createRefusingFixture({ status: 'passed', diagnostics: [] });
+    const subject = bind(fixture.engine, fixture.options);
+    const collector = createCollector({ nativeAssertions: fixture.options });
+    collector.it('malformed beside passed', () => {
+      try {
+        collector.expectGeo(subject).toHaveVolume(malformedVolume);
+      } catch {
+        /* The refused claim is still recorded; the test goes on to its sibling. */
+      }
+      collector.expectGeo(subject).toBeWatertight();
+    });
+    await collector.waitForCompletion();
+    const [test] = collector.tests;
+    expect(fixture.evaluated).toHaveLength(2);
+    expect(test?.status).toBe('inconclusive');
+    expect(test?.assertions.map((assertion) => [assertion.report?.status, assertion.passed])).toStrictEqual([
+      ['refused', false],
+      ['passed', true],
+    ]);
+    expect(test?.assertions[0]?.diagnostics).toStrictEqual([invalidExpectation]);
+  });
+
+  it('should keep a test failed when the sibling of a malformed claim is decided false', async () => {
+    const fixture = createRefusingFixture({ status: 'failed', diagnostics: [failure] });
+    const subject = bind(fixture.engine, fixture.options);
+    const collector = createCollector({ nativeAssertions: fixture.options });
+    collector.it('malformed beside failed', () => {
+      try {
+        collector.expectGeo(subject).toHaveVolume(malformedVolume);
+      } catch {
+        /* Recorded. */
+      }
+      collector.expectGeo(subject).toBeWatertight();
+    });
+    await collector.waitForCompletion();
+    expect(collector.tests[0]?.status).toBe('failed');
+    expect(collector.tests[0]?.assertions.map((assertion) => assertion.report?.status)).toStrictEqual([
+      'refused',
+      'failed',
+    ]);
+  });
+
+  it('should never count a malformed claim as a pass: the module run is not green', async () => {
+    const run = async (source: string) => {
+      const fixture = createRefusingFixture({ status: 'passed', diagnostics: [] });
+      const filesystem = new SpecFileSystem();
+      filesystem.setText(
+        'part.geospec.ts',
+        `import { it, expectGeo } from 'geospec'; import { loadModel } from 'geospec/model';
+        it('part', async () => { const model = await loadModel({ file: 'part.glb' }); ${source} });`,
+      );
+      return runGeoSpecModule({
+        filesystem,
+        entryPath: 'part.geospec.ts',
+        nativeAssertions: fixture.options,
+        nativeModelLoader: async () => ({
+          subjectHash: 'a'.repeat(64),
+          load: {
+            loadId: 'host-load',
+            status: 'complete',
+            format: 'glb',
+            parameters: {},
+            ingestOptions: {},
+            artifacts: [{ name: 'part.glb', sha256: 'b'.repeat(64), byteLength: 1 }],
+          },
+        }),
+      });
+    };
+    // The control: the same module with a well-formed expectation is green.
+    await expect(
+      run(`expectGeo(model).toHaveVolume({ value: 1 }); expectGeo(model).toBeWatertight();`),
+    ).resolves.toMatchObject({ success: true, passed: true, lineage: { status: 'complete' } });
+    const refused = await run(
+      `try { expectGeo(model).toHaveVolume({ value: 1, bogus: true }); } catch {} expectGeo(model).toBeWatertight();`,
+    );
+    expect(refused).toMatchObject({
+      success: true,
+      passed: false,
+      lineage: { status: 'complete' },
+      tests: [{ status: 'inconclusive', assertions: [{ diagnostics: [invalidExpectation] }, { passed: true }] }],
+      accounting: { completed: 1, passed: 0, failed: 0, inconclusive: 1 },
+    });
+  });
+});
+
 describe('collector globals', () => {
   it('should install, read, and clear the collector global', () => {
     const collector = createTestCollector();

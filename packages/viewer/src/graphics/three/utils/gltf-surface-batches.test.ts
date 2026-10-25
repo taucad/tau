@@ -7,8 +7,11 @@ import {
   Matrix4,
   Mesh,
   MeshStandardMaterial,
+  Object3D,
+  Raycaster,
   Texture,
   TextureLoader,
+  Vector3,
 } from 'three';
 import {
   createGltfSurfaceBatches,
@@ -17,6 +20,8 @@ import {
   sealGltfSurfaceMaterial,
 } from '#graphics/three/utils/gltf-surface-batches.js';
 import { applyMatcap } from '#graphics/three/materials/gltf-matcap.js';
+import { ensureBvh } from '#graphics/three/utils/bvh-cache.js';
+import { raycastFirstVisibleMeshHit } from '#graphics/three/utils/bvh-raycast.js';
 import {
   applyGltfSurfaceDepthBias,
   refreshGltfSurfaceDepthBias,
@@ -66,6 +71,127 @@ const fixture = (count = 100) => {
 };
 
 describe('glTF surface batches', () => {
+  it('should retain posed canonical picks and conservative instance bounds under a nested placement', async () => {
+    const { root, geometry, occurrences } = fixture(3);
+    const parent = new Group();
+    parent.position.set(10, 20, 30);
+    root.add(parent);
+    parent.add(...occurrences);
+    const batches = createBatches(root, occurrences);
+    batches.sync();
+    parent.position.y = 40;
+    occurrences[1]!.position.x = 20;
+    batches.syncMatrices([parent]);
+    const [batch] = batches.group.children;
+    if (!(batch instanceof InstancedMesh)) {
+      throw new Error('Expected a posed instance batch');
+    }
+    expect(batch.boundingBox!.min.toArray()).toEqual([9.5, 39.5, 29.5]);
+    expect(batch.boundingBox!.max.toArray()).toEqual([30.5, 40.5, 30.5]);
+    expect(batch.boundingSphere!.center.distanceTo(batch.boundingBox!.min)).toBeLessThanOrEqual(
+      batch.boundingSphere!.radius + 1e-12,
+    );
+    expect(batch.boundingSphere!.center.distanceTo(batch.boundingBox!.max)).toBeLessThanOrEqual(
+      batch.boundingSphere!.radius + 1e-12,
+    );
+    await ensureBvh(geometry);
+    const raycaster = new Raycaster(new Vector3(30, 40, 40), new Vector3(0, 0, -1));
+    const result = raycastFirstVisibleMeshHit({ raycaster, meshes: occurrences });
+    expect(result.pending).toBe(false);
+    expect(result.hit?.object).toBe(occurrences[1]);
+    expect(result.hit?.point.toArray()).toEqual([30, 40, 30.5]);
+    occurrences[1]!.scale.x = -1;
+    batches.syncMatrices([occurrences[1]!]);
+    expect(occurrences[1]!.layers.mask).toBe(1);
+    expect(raycaster.layers.test(getGltfOccurrenceLayers(occurrences[1]!))).toBe(true);
+    expect(raycaster.intersectObject(occurrences[1]!, false)[0]?.point.toArray()).toEqual([30, 40, 30.5]);
+  });
+
+  it('should pose mixed canonical and batched sources without revisiting material membership', () => {
+    const { root, geometry, occurrences } = fixture(7);
+    const [moving, , singleton, transparent, custom, mirrored, hidden] = occurrences;
+    singleton!.material.color.setHex(0xff_00_00);
+    transparent!.material.transparent = true;
+    custom!.onBeforeRender = () => undefined;
+    mirrored!.scale.x = -1;
+    hidden!.visible = false;
+    const batches = createBatches(root, occurrences);
+    batches.sync();
+    const [batch] = batches.group.children;
+    if (!(batch instanceof InstancedMesh)) {
+      throw new Error('Expected a shared opaque batch');
+    }
+    expect(batch.count).toBe(2);
+    const position = geometry.getAttribute('position');
+    const matrixBuffer = batch.instanceMatrix;
+    const fingerprints = vi.spyOn(Object, 'getOwnPropertyDescriptors');
+    const moved = [moving!, singleton!, transparent!, custom!, mirrored!, hidden!];
+    for (const mesh of moved) {
+      mesh.position.y = 20;
+    }
+    batches.syncMatrices(moved);
+    const materialVisits = fingerprints.mock.calls.filter(([value]) => value instanceof MeshStandardMaterial).length;
+    expect(materialVisits).toBe(0);
+    expect(batches.group.children).toEqual([batch]);
+    expect(batch.instanceMatrix).toBe(matrixBuffer);
+    expect(geometry.getAttribute('position')).toBe(position);
+    const placed = new Matrix4();
+    batch.getMatrixAt(0, placed);
+    expect(placed.elements[13]).toBe(20);
+    for (const mesh of moved.slice(1)) {
+      expect(mesh.layers.mask).toBe(1);
+      expect(mesh.matrixWorld.elements[13]).toBe(20);
+    }
+    expect(hidden!.visible).toBe(false);
+    expect(batch.boundingBox!.min.y).toBeLessThanOrEqual(19.5);
+    expect(batch.boundingBox!.max.y).toBeGreaterThanOrEqual(20.5);
+  });
+
+  it('should reclassify a transform only when it crosses instancing eligibility', () => {
+    const { root, occurrences } = fixture(3);
+    const moved = occurrences[1]!;
+    const batches = createBatches(root, occurrences);
+    batches.sync();
+    moved.scale.x = -1;
+    batches.syncMatrices([moved]);
+    expect(moved.layers.mask).toBe(1);
+    const [batch] = batches.group.children;
+    if (!(batch instanceof InstancedMesh)) {
+      throw new Error('Expected the remaining opaque batch');
+    }
+    expect(batch.count).toBe(2);
+    const fingerprints = vi.spyOn(Object, 'getOwnPropertyDescriptors');
+    moved.position.y = 4;
+    batches.syncMatrices([moved]);
+    const materialVisits = fingerprints.mock.calls.filter(([value]) => value instanceof MeshStandardMaterial).length;
+    expect(materialVisits).toBe(0);
+    expect(moved.matrixWorld.elements[13]).toBe(4);
+    moved.scale.x = 1;
+    batches.syncMatrices([moved]);
+    expect(moved.layers.mask).toBe(0);
+    expect(batch.count).toBe(3);
+    const placed = new Matrix4();
+    batch.getMatrixAt(1, placed);
+    expect(placed.elements[13]).toBe(4);
+  });
+
+  it('should update a changed ancestor once rather than walking it for every surface', () => {
+    const { root, occurrences } = fixture(6);
+    const moved = new Group();
+    root.add(moved);
+    moved.add(...occurrences.slice(0, 3));
+    const batches = createBatches(root, occurrences);
+    batches.sync();
+    const update = vi.spyOn(Object3D.prototype, 'updateWorldMatrix');
+    moved.position.y = 12;
+    batches.syncMatrices([moved]);
+    const parentWalks = update.mock.calls.filter(([parents]) => parents).length;
+    expect(parentWalks).toBeLessThan(6);
+    for (const mesh of occurrences.slice(0, 3)) {
+      expect(mesh.matrixWorld.elements[13]).toBe(12);
+    }
+  });
+
   it.each(['webgl', 'webgpu'] as const)(
     'should retain initially partial dim capacity through actual PBR to matcap and preserve opaque depth overrides on %s',
     async (backend) => {

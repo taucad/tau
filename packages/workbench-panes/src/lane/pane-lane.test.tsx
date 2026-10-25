@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { PaneLane } from '#lane/pane-lane.jsx';
@@ -51,13 +51,15 @@ describe('PaneLane', () => {
     const user = userEvent.setup();
     renderLane();
 
-    await user.click(screen.getByRole('tab', { name: 'Model' }));
+    await user.click(screen.getByRole('tab', { name: 'Model tree' }));
     expect(screen.getByText('model body')).toBeVisible();
     // The close glyph is a pointer target inside the tab's row, never a second focusable control.
-    const modelTab = screen.getByRole('tab', { name: 'Model' }).closest<HTMLElement>('[data-slot="workbench-tab"]')!;
+    const modelTab = screen
+      .getByRole('tab', { name: 'Model tree' })
+      .closest<HTMLElement>('[data-slot="workbench-tab"]')!;
     await user.click(modelTab.querySelector<HTMLElement>('.fade-action')!);
 
-    expect(screen.queryByRole('tab', { name: 'Model' })).toBeNull();
+    expect(screen.queryByRole('tab', { name: 'Model tree' })).toBeNull();
     expect(screen.getByRole('tab', { name: 'Parameters' })).toHaveAttribute('aria-selected', 'true');
   });
 
@@ -117,7 +119,7 @@ describe('PaneLane', () => {
     renderLane({ initialOpen: ['parameters', 'model', 'kinematics'] });
 
     const tabs = screen.getAllByRole('tab');
-    expect(tabs.map((tab) => tab.textContent)).toEqual(['Parameters', 'Model', 'Kinematics']);
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['Parameters', 'Model tree', 'Kinematics']);
     expect(screen.getByRole('button', { name: 'Open workbench tab' })).toBeVisible();
 
     await user.hover(screen.getByRole('tab', { name: 'Kinematics' }));
@@ -128,7 +130,7 @@ describe('PaneLane', () => {
   it('should draw each tab with the shared tab leaf, shrinking to 48 px and scrolling past that', () => {
     renderLane({ initialOpen: ['parameters', 'model'] });
 
-    const row = screen.getByRole('tab', { name: 'Model' }).closest('[data-slot="workbench-tab"]');
+    const row = screen.getByRole('tab', { name: 'Model tree' }).closest('[data-slot="workbench-tab"]');
     expect(row).toHaveClass('fade-row', 'w-36', 'min-w-12', 'shrink');
     expect(screen.getByRole('tablist')).toHaveClass('overflow-x-auto');
     expect(row?.querySelectorAll('button')).toHaveLength(1);
@@ -142,5 +144,29 @@ describe('PaneLane', () => {
     const toggle = screen.getByRole('button', { name: 'Toggle Workbench lane' });
     expect(plus.compareDocumentPosition(toggle)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(toggle.parentElement).toBe(screen.getByRole('tablist').parentElement);
+  });
+
+  it('should restore a saved layout, dropping panes it no longer offers and clamping the width', () => {
+    renderLane({
+      panes: ['parameters', 'model', 'export'],
+      initialLayout: { open: ['export', 'share', 'model'], active: 'model', width: 9000 },
+    });
+
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Export', 'Model tree']);
+    expect(screen.getByRole('tab', { name: 'Model tree' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('separator', { name: 'Resize workbench' })).toHaveAttribute('aria-valuenow', '640');
+  });
+
+  it('should report each layout change, not the layout it mounted with', async () => {
+    const user = userEvent.setup();
+    const onLayoutChange = vi.fn();
+    renderLane({ onLayoutChange });
+    expect(onLayoutChange).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('tab', { name: 'Model tree' }));
+    expect(onLayoutChange).toHaveBeenLastCalledWith({ open: ['parameters', 'model'], active: 'model', width: 340 });
+    fireEvent.keyDown(screen.getByRole('separator', { name: 'Resize workbench' }), { key: 'ArrowLeft' });
+
+    expect(onLayoutChange).toHaveBeenLastCalledWith({ open: ['parameters', 'model'], active: 'model', width: 356 });
   });
 });

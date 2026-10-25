@@ -1,5 +1,5 @@
 /* oxlint-disable @typescript-eslint/consistent-type-assertions -- Dockview structural test doubles cover only exercised fields */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { isValidElement, useEffect, useState, StrictMode, Fragment } from 'react';
@@ -1480,7 +1480,11 @@ describe('Workbench file reconciliation', () => {
     expect(
       within(screen.getByRole('group', { name: 'Activity' })).getByRole('button', { name: /Agents/ }),
     ).toBeVisible();
-    expect(within(screen.getByRole('group', { name: 'Activity' })).getByRole('button', { name: /Jobs/ })).toBeVisible();
+    // Jobs is unfinished, and Browser drives the desktop app's guest view.
+    expect(within(screen.getByRole('group', { name: 'Activity' })).queryByRole('button', { name: /Jobs/ })).toBeNull();
+    expect(
+      within(screen.getByRole('group', { name: 'Activity' })).queryByRole('button', { name: /Browser/ }),
+    ).toBeNull();
     expect(
       within(screen.getByRole('group', { name: 'Project' })).getByRole('button', { name: /Export/ }),
     ).toBeVisible();
@@ -1631,8 +1635,11 @@ describe('Workbench file reconciliation', () => {
       within(screen.getByRole('group', { name: 'Activity' })).getByRole('menuitem', { name: /Agents/ }),
     ).toBeVisible();
     expect(
-      within(screen.getByRole('group', { name: 'Activity' })).getByRole('menuitem', { name: /Jobs/ }),
-    ).toBeVisible();
+      within(screen.getByRole('group', { name: 'Activity' })).queryByRole('menuitem', { name: /Jobs/ }),
+    ).toBeNull();
+    expect(
+      within(screen.getByRole('group', { name: 'Activity' })).queryByRole('menuitem', { name: /Browser/ }),
+    ).toBeNull();
     expect(
       within(screen.getByRole('group', { name: 'Project' })).getByRole('menuitem', { name: /Export/ }),
     ).toBeVisible();
@@ -1801,8 +1808,6 @@ describe('Workbench file reconciliation', () => {
     expect(isWorkbenchSurfaceAllowed('share', 'shared')).toBe(false);
     expect(isWorkbenchSurfaceAllowed('agents', 'editor')).toBe(true);
     expect(isWorkbenchSurfaceAllowed('agents', 'shared')).toBe(false);
-    expect(isWorkbenchSurfaceAllowed('jobs', 'editor')).toBe(true);
-    expect(isWorkbenchSurfaceAllowed('jobs', 'shared')).toBe(false);
     expect(isWorkbenchSurfaceAllowed('export', 'shared')).toBe(true);
     // Posing is transient view state, so shared and builtin example pages offer it too.
     expect(isWorkbenchSurfaceAllowed('kinematics', 'shared')).toBe(true);
@@ -1989,7 +1994,30 @@ describe('Workbench file reconciliation', () => {
     expect(dockview.addPanel).not.toHaveBeenCalled();
   });
 
-  it('opens browser pages as separate workbench tabs', () => {
+  it('offers Browser only in the desktop app and Jobs in no build', () => {
+    expect(isWorkbenchSurfaceAllowed('browser', 'editor')).toBe(false);
+    expect(isWorkbenchSurfaceAllowed('jobs', 'editor')).toBe(false);
+    const dockview = createTestDockview();
+    openWorkbenchUtility(dockview.api, 'browser');
+    openWorkbenchUtility(dockview.api, 'jobs');
+    expect(dockview.addPanel).not.toHaveBeenCalled();
+
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    onTestFinished(() => {
+      vi.unstubAllEnvs();
+    });
+    expect(isWorkbenchSurfaceAllowed('browser', 'editor')).toBe(true);
+    expect(isWorkbenchSurfaceAllowed('browser', 'shared')).toBe(false);
+    expect(isWorkbenchSurfaceAllowed('jobs', 'editor')).toBe(false);
+    openWorkbenchUtility(dockview.api, 'jobs');
+    expect(dockview.addPanel).not.toHaveBeenCalled();
+  });
+
+  it('opens browser pages as separate workbench tabs in the desktop app', () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    onTestFinished(() => {
+      vi.unstubAllEnvs();
+    });
     const dockview = createTestDockview();
     openWorkbenchUtility(dockview.api, 'browser');
     openWorkbenchUtility(dockview.api, 'browser');

@@ -1,6 +1,7 @@
 export { workbenchPaths, workbenchRecords } from '#records.js';
 export type { WorkbenchRecordCodec, WorkbenchRecordRead, WorkbenchRecordRefusal } from '#records.js';
 export {
+  cameraPresetOrientations,
   cameraPresets,
   componentDisplaySchema,
   entrySettingsSchema,
@@ -20,6 +21,7 @@ export {
   viewerTabSchema,
   viewFieldsSchema,
   viewGridSchema,
+  viewSettingsSchema,
   viewTabSchema,
   workbenchDeviceSchema,
   workbenchEntriesSchema,
@@ -33,11 +35,13 @@ export {
   workbenchViewSchema,
 } from '#records.schema.js';
 export type {
+  ComponentDisplay,
   EntrySettings,
   NamedLayout,
   ViewCamera,
   ViewerNode,
   ViewerTab,
+  ViewSettings,
   WorkbenchDevice,
   WorkbenchEntries,
   WorkbenchGroup,

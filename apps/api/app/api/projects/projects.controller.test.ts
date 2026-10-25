@@ -1,391 +1,427 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { BadRequestException, HttpStatus, NotFoundException } from '@nestjs/common';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import {
+  BadRequestException,
+  ForbiddenException,
+  GoneException,
+  HttpException,
+  HttpStatus,
+  NotFoundException,
+} from '@nestjs/common';
+import type { ConfigService } from '@nestjs/config';
+import { PgDialect } from 'drizzle-orm/pg-core';
 import type { SQL } from 'drizzle-orm';
+import type { Environment } from '#config/environment.config.js';
 import type { DatabaseService } from '#database/database.service.js';
+import type { OwnerLockTransaction } from '#database/owner-lock.js';
+import { projectDeletion } from '#database/schema.js';
+import type { project } from '#database/schema.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import { registeredProjectLimitPerOwner } from '#api/git/git.constants.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { ProjectsController } from '#api/projects/projects.controller.js';
-import type { RegisterProjectDto } from '#api/projects/projects.dto.js';
 
-/**
- * W18 DEF-1 / ruling P51: *Connect Tau Cloud* is what registers a project.
- *
- * The wire-level proof (a never-published project's advertisement answering
- * `200` after a connect, and `404` for a stranger) is
- * `apps/api-e2e/src/git/tau-hosted-remote.spec.ts`; these rows pin the
- * decisions the route itself makes.
- */
+type ListedRow = Pick<typeof project.$inferSelect, 'id' | 'ownerId' | 'name' | 'updatedAt'> & {
+  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- SQL left joins return null for an absent collaborator.
+  role: string | null;
+  deletionRequestedAt: (typeof projectDeletion.$inferSelect)['deletedAt'];
+};
+
+// Real lifecycle/access helpers run against typed dependency mocks. PostgreSQL
+// lock serialization and SQL result semantics belong to the integration suite.
 describe('ProjectsController', () => {
   const ownerId = 'user-owner';
   const strangerId = 'user-someone-else';
   const projectId = 'proj_w18connect';
-  /**
-   * Every project row the fixture holds, across both accounts.
-   *
-   * The list stub filters this table by the owner the controller asked for,
-   * which is read back out of the `where` condition — so a route that forgot
-   * the filter, or filtered on the wrong column, answers with rows that are not
-   * the caller's (W18 DEF-2).
-   */
-  const table: Array<{
-    id: string;
-    ownerId: string;
-    name: string;
-    updatedAt: Date;
-    /** D27: the project's collaborators, which the listing joins the caller against. */
-    collaborators: Record<string, string>;
-  }> = [
-    {
+  const dialect = new PgDialect();
+  let rows: Array<{ ownerId: string; role?: 'read' | 'write' }>;
+  let deletion: Pick<typeof projectDeletion.$inferSelect, 'ownerId' | 'deletedAt'> | undefined;
+  let owned: number;
+  let inserted: Array<typeof project.$inferInsert>;
+  let listRows: ListedRow[];
+  let listCondition: SQL | undefined;
+  let countCondition: SQL | undefined;
+  let locks: unknown[][];
+  let beforeProjectLock: () => void;
+  let databaseService: DatabaseService;
+  let controller: ProjectsController;
+  let access: ProjectAccessService;
+  const rateLimiter = mock<PublicationRateLimiterService>();
+  const entitlements = mock<CommercialEntitlementsService>();
+  const config = mock<ConfigService<Environment, true>>();
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    rows = [];
+    deletion = undefined;
+    owned = 0;
+    inserted = [];
+    listRows = [];
+    listCondition = undefined;
+    countCondition = undefined;
+    locks = [];
+    beforeProjectLock = () => undefined;
+    config.get.mockReturnValue(true);
+    rateLimiter.consumeDailyBudget.mockResolvedValue({ allowed: true, count: 1 });
+    entitlements.getEntitlements.mockResolvedValue({
+      canSyncFiles: true,
+      canCreatePrivateShares: true,
+      canUseProKernels: true,
+    });
+    const select = vi.fn().mockImplementation((projection?: Record<string, unknown>) => ({
+      from: (table: unknown) => {
+        const query = {
+          leftJoin: () => query,
+          where: (condition: SQL) => ({
+            limit: async () => {
+              if (table === projectDeletion) {
+                return deletion ? [deletion] : [];
+              }
+              if (projection && 'value' in projection) {
+                countCondition = condition;
+                return [{ value: owned }];
+              }
+              return rows;
+            },
+            orderBy: async () => {
+              listCondition = condition;
+              return listRows;
+            },
+          }),
+        };
+        return query;
+      },
+    }));
+    const transaction = mock<OwnerLockTransaction>({
+      select,
+      execute: vi.fn().mockImplementation(async (statement: SQL) => {
+        locks.push(dialect.sqlToQuery(statement).params);
+        if (locks.length === 2) {
+          beforeProjectLock();
+        }
+        return [];
+      }),
+      insert: vi.fn().mockImplementation(() => ({
+        values: async (values: typeof project.$inferInsert) => {
+          // Every durable registration must hold the owner lock before the project lock.
+          expect(locks.slice(-2)).toEqual([[ownerId], [projectId]]);
+          inserted.push(values);
+          rows = [{ ownerId: values.ownerId }];
+        },
+      })),
+    });
+    databaseService = Object.assign(mock<DatabaseService>(), {
+      database: mock<DatabaseService['database']>({
+        select,
+        transaction: vi
+          .fn()
+          .mockImplementation(async (run: (value: OwnerLockTransaction) => Promise<unknown>) => run(transaction)),
+      }),
+    });
+    access = new ProjectAccessService(databaseService);
+    controller = new ProjectsController(databaseService, rateLimiter, entitlements, access, config);
+  });
+
+  it('should register a project after an earlier access lookup missed it', async () => {
+    const missed = access.authorize(projectId, ownerId, 'owner');
+    await expect(missed).rejects.toBeInstanceOf(NotFoundException);
+    await expect(missed).rejects.toThrow('Project not found');
+    await expect(controller.register(projectId, { name: 'Bracket' }, ownerId)).resolves.toEqual({ id: projectId });
+    await expect(access.authorize(projectId, ownerId, 'owner')).resolves.toEqual({ projectId, ownerId, role: 'owner' });
+  });
+
+  it('should create the caller’s project row without a repository dependency', async () => {
+    await expect(controller.register(projectId, { name: 'Bracket' }, ownerId)).resolves.toEqual({ id: projectId });
+    expect(inserted).toEqual([{ id: projectId, ownerId, name: 'Bracket', origin: 'local-mirror' }]);
+    expect(rateLimiter.consumeDailyBudget).toHaveBeenCalledOnce();
+  });
+
+  it('should default the name when none is supplied', async () => {
+    await controller.register(projectId, {}, ownerId);
+    expect(inserted).toEqual([{ id: projectId, ownerId, name: 'Untitled project', origin: 'local-mirror' }]);
+  });
+
+  it('should reject an unentitled caller before writing or spending registration budget', async () => {
+    entitlements.getEntitlements.mockResolvedValue({
+      canSyncFiles: false,
+      canCreatePrivateShares: false,
+      canUseProKernels: false,
+    });
+    const registration = controller.register(projectId, { name: 'Bracket' }, ownerId);
+    await expect(registration).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(registration).rejects.toMatchObject({
+      response: { code: 'GIT_SYNC_NOT_ENTITLED', message: 'Syncing files to Tau Cloud is a paid plan feature.' },
+    });
+    expect(inserted).toEqual([]);
+    expect(rateLimiter.consumeDailyBudget).not.toHaveBeenCalled();
+    expect(databaseService.database.transaction).not.toHaveBeenCalled();
+  });
+
+  it('should leave an owner’s existing project unchanged on registration retry', async () => {
+    rows = [{ ownerId }];
+    await expect(controller.register(projectId, { name: 'Changed' }, ownerId)).resolves.toEqual({ id: projectId });
+    expect(inserted).toEqual([]);
+    expect(rateLimiter.consumeDailyBudget).toHaveBeenCalledOnce();
+    expect(rateLimiter.consumeDailyBudget.mock.calls[0]?.[0].key).toBe(`project:register:${ownerId}`);
+  });
+
+  it('should hide another owner’s project before asking for a plan or spending budget', async () => {
+    rows = [{ ownerId: strangerId }];
+    const registration = controller.register(projectId, {}, ownerId);
+    await expect(registration).rejects.toBeInstanceOf(NotFoundException);
+    await expect(registration).rejects.toMatchObject({
+      response: { code: 'PROJECT_NOT_FOUND', message: 'Project not found' },
+    });
+    expect(inserted).toEqual([]);
+    expect(entitlements.getEntitlements).not.toHaveBeenCalled();
+    expect(rateLimiter.consumeDailyBudget).not.toHaveBeenCalled();
+  });
+
+  it('should answer 404 when another owner wins registration before the project lock', async () => {
+    beforeProjectLock = () => {
+      rows = [{ ownerId: strangerId }];
+    };
+    const registration = controller.register(projectId, {}, ownerId);
+    await expect(registration).rejects.toBeInstanceOf(NotFoundException);
+    await expect(registration).rejects.toMatchObject({
+      response: { code: 'PROJECT_NOT_FOUND', message: 'Project not found' },
+    });
+    expect(locks).toEqual([[ownerId], [projectId]]);
+    expect(inserted).toEqual([]);
+  });
+
+  it('should enforce the account ceiling while allowing existing owner retries at the limit', async () => {
+    owned = registeredProjectLimitPerOwner;
+    const registration = controller.register(projectId, {}, ownerId);
+    await expect(registration).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(registration).rejects.toMatchObject({
+      response: {
+        code: 'PROJECT_LIMIT_REACHED',
+        message: `This account has reached its limit of ${String(registeredProjectLimitPerOwner)} projects on Tau Cloud.`,
+      },
+    });
+    expect(inserted).toEqual([]);
+    expect(countCondition).toBeDefined();
+    if (!countCondition) {
+      throw new Error('Missing account ceiling query');
+    }
+    expect(dialect.sqlToQuery(countCondition)).toMatchObject({
+      sql: '("project"."owner_id" = $1 and "project_deletion"."deleted_at" is null)',
+      params: [ownerId],
+    });
+    owned -= 1;
+    await expect(controller.register(projectId, {}, ownerId)).resolves.toEqual({ id: projectId });
+    owned = registeredProjectLimitPerOwner;
+    inserted = [];
+    await expect(controller.register(projectId, {}, ownerId)).resolves.toEqual({ id: projectId });
+    expect(inserted).toEqual([]);
+  });
+
+  it('should refuse an exhausted daily budget before entering the write transaction', async () => {
+    rateLimiter.consumeDailyBudget.mockResolvedValue({ allowed: false, count: 100 });
+    const registration = controller.register(projectId, {}, ownerId);
+    await expect(registration).rejects.toBeInstanceOf(HttpException);
+    await expect(registration).rejects.toMatchObject({
+      response: { code: 'PROJECT_REGISTRATION_RATE_LIMITED', message: 'Too many project registrations today' },
+      status: HttpStatus.TOO_MANY_REQUESTS,
+    });
+    expect(inserted).toEqual([]);
+    expect(databaseService.database.transaction).not.toHaveBeenCalled();
+  });
+
+  it.each(['../escape', '', 'repo/other'])(
+    'should reject invalid repository id %j before any reads or writes',
+    async (id) => {
+      const registration = controller.register(id, {}, ownerId);
+      await expect(registration).rejects.toBeInstanceOf(BadRequestException);
+      await expect(registration).rejects.toMatchObject({
+        response: { code: 'PROJECT_ID_INVALID', message: 'Not a project id' },
+      });
+      expect(databaseService.database.select).not.toHaveBeenCalled();
+      expect(inserted).toEqual([]);
+      expect(rateLimiter.consumeDailyBudget).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['read', 'write'] as const)(
+    'should answer a %s collaborator without writes, entitlement checks or budget',
+    async (role) => {
+      rows = [{ ownerId: strangerId, role }];
+      await expect(controller.register(projectId, { name: 'Member rename' }, ownerId)).resolves.toEqual({
+        id: projectId,
+      });
+      expect(inserted).toEqual([]);
+      expect(entitlements.getEntitlements).not.toHaveBeenCalled();
+      expect(rateLimiter.consumeDailyBudget).not.toHaveBeenCalled();
+      expect(databaseService.database.transaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([null, new Date('2026-10-24T00:00:00.000Z')])(
+    'should reject an owner’s registration with durable deletion progress %s',
+    async (deletedAt) => {
+      deletion = { ownerId, deletedAt };
+      const registration = controller.register(projectId, {}, ownerId);
+      await expect(registration).rejects.toBeInstanceOf(GoneException);
+      await expect(registration).rejects.toMatchObject({
+        response: { code: 'PROJECT_DELETED', message: 'This project has been deleted from Tau Cloud.' },
+      });
+      expect(inserted).toEqual([]);
+      expect(rateLimiter.consumeDailyBudget).not.toHaveBeenCalled();
+      expect(entitlements.getEntitlements).not.toHaveBeenCalled();
+    },
+  );
+
+  it('should hide deletion progress from a former collaborator even with cached access', async () => {
+    rows = [{ ownerId: strangerId, role: 'write' }];
+    await access.authorize(projectId, ownerId, 'read');
+    deletion = { ownerId: strangerId, deletedAt: null };
+    const registration = controller.register(projectId, {}, ownerId);
+    await expect(registration).rejects.toBeInstanceOf(NotFoundException);
+    await expect(registration).rejects.toThrow('Project not found');
+    expect(inserted).toEqual([]);
+    expect(rateLimiter.consumeDailyBudget).not.toHaveBeenCalled();
+  });
+
+  it('should recheck deletion intent after acquiring the owner and project locks', async () => {
+    beforeProjectLock = () => {
+      deletion = { ownerId, deletedAt: null };
+    };
+    const registration = controller.register(projectId, {}, ownerId);
+    await expect(registration).rejects.toBeInstanceOf(GoneException);
+    await expect(registration).rejects.toThrow('This project has been deleted from Tau Cloud.');
+    expect(locks).toEqual([[ownerId], [projectId]]);
+    expect(inserted).toEqual([]);
+  });
+
+  it('should list owned and shared projects with roles and owner-only deletion capability', async () => {
+    const bracket = {
       id: 'proj_ownerbracket00000',
       ownerId,
       name: 'Bracket',
       updatedAt: new Date('2026-09-13T02:00:00.000Z'),
-      collaborators: { [strangerId]: 'write' },
-    },
-    {
+      role: null,
+      deletionRequestedAt: null,
+    };
+    const hinge = {
+      ...bracket,
       id: 'proj_ownerhinge0000000',
-      ownerId,
       name: 'Hinge',
       updatedAt: new Date('2026-09-13T01:00:00.000Z'),
-      collaborators: {},
-    },
-    {
-      id: 'proj_strangerpart00000',
-      ownerId: strangerId,
-      name: 'Theirs',
-      updatedAt: new Date('2026-09-13T03:00:00.000Z'),
-      collaborators: {},
-    },
-  ];
-  let rows: Array<{ ownerId: string }>;
-  /** What the owner's project count answers, for the R5 ceiling. */
-  let owned: number;
-  /** Whether the daily registration budget has room left (review R5). */
-  let withinBudget: boolean;
-  let inserted: Array<Record<string, unknown>>;
-  /** What the caller's plan entitles, which N5 checks before either write. */
-  let canSyncFiles: boolean;
-  let controller: ProjectsController;
-  /** The route's own database stub, reused by rows that build a second controller. */
-  let databaseStub: unknown;
-
-  const entitlements = (): CommercialEntitlementsService => ({
-    getEntitlements: async () => ({
-      canSyncFiles,
-      canCreatePrivateShares: canSyncFiles,
-      canUseProKernels: canSyncFiles,
-    }),
-  });
-
-  /**
-   * D27: the route's ownership decision is `ProjectAccessService.authorize`,
-   * not a comparison of its own. The stub answers from the same `rows` fixture
-   * the route's existence probe reads, so a registration that is not the
-   * caller's still ends in the ruling-P55 `404`.
-   *
-   * @returns The access authority the controller is constructed with.
-   */
-  const access = (): ProjectAccessService =>
-    ({
-      authorize: async (id: string, callerId: string) => {
-        const owner = rows[0]?.ownerId;
-        if (owner === undefined || owner !== callerId) {
-          throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: 'Project not found' });
-        }
-        return { projectId: id, ownerId: owner, role: 'owner' };
-      },
-      invalidate: () => undefined,
-    }) as unknown as ProjectAccessService;
-
-  /** The one string a `column = $1` condition carries: the owner being asked for. */
-  const ownerOf = (condition: SQL | undefined): string | undefined => {
-    /* The listing's condition is an `or(...)` of two `eq(...)`s, so the caller's
-       id is one level down; the registration route's conditions are flat. */
-    const strings = (chunks: unknown[]): string[] =>
-      chunks.flatMap((chunk) => {
-        const { value } = chunk as Readonly<{ value?: unknown }>;
-        if (typeof value === 'string') {
-          return [value];
-        }
-        const nested = (chunk as Readonly<{ queryChunks?: unknown[] }>).queryChunks;
-        return nested === undefined ? [] : strings(nested);
-      });
-    return condition === undefined ? undefined : strings(condition.queryChunks)[0];
-  };
-
-  /**
-   * The joined read `ProjectAccessService` makes, over the same `rows` fixture
-   * the route's own existence probe reads.
-   *
-   * @param read - Where the project row comes from at call time.
-   * @returns A database stub with the one query the access service issues.
-   */
-  const databaseStubFor = (read: () => Array<{ ownerId: string }>): unknown => ({
-    database: {
-      select: () => ({
-        from: () => ({
-          leftJoin: () => ({
-            where: () => ({ limit: async (): Promise<unknown[]> => read().map((row) => ({ ...row, role: null })) }),
-          }),
-        }),
-      }),
-    },
-  });
-
-  const body = (name?: string): RegisterProjectDto => {
-    const dto: RegisterProjectDto = { name };
-    return dto;
-  };
-
-  beforeEach(() => {
-    rows = [];
-    owned = 0;
-    withinBudget = true;
-    inserted = [];
-    canSyncFiles = true;
-    databaseStub = {
-      database: {
-        /* The projection says which query this is: `{ value: count() }` is the
-           R5 ceiling's count, anything else is a row read. */
-        select: (projection?: Record<string, unknown>) => ({
-          from: () => ({
-            /* Only the listing joins, so the join is what separates it from the
-               registration route's existence probe and its ceiling count. */
-            leftJoin: () => ({
-              where: (condition: SQL) => {
-                const caller = ownerOf(condition);
-                const visible = table.filter(
-                  (row) => row.ownerId === caller || (caller !== undefined && caller in row.collaborators),
-                );
-                return {
-                  orderBy: async (): Promise<unknown[]> =>
-                    visible.map((row) => ({
-                      id: row.id,
-                      name: row.name,
-                      updatedAt: row.updatedAt,
-                      ownerId: row.ownerId,
-                      role: caller === undefined ? null : (row.collaborators[caller] ?? null),
-                    })),
-                };
-              },
-            }),
-            where: () => {
-              const counting = projection !== undefined && 'value' in projection;
-              return {
-                limit: async (): Promise<unknown[]> => (counting ? [{ value: owned }] : rows),
-              };
-            },
-          }),
-        }),
-        insert: () => ({
-          values: (values: Record<string, unknown>) => ({
-            onConflictDoNothing: async (): Promise<void> => {
-              inserted.push(values);
-              /* What a real insert does, so the route's re-read (review R6) sees
-                 the row it just wrote rather than an empty table. */
-              if (rows.length === 0) {
-                rows = [{ ownerId: String(values['ownerId']) }];
-              }
-            },
-          }),
-        }),
-      },
     };
-    controller = new ProjectsController(
-      databaseStub as DatabaseService,
-      {
-        consumeDailyBudget: async () => ({ allowed: withinBudget, count: 1 }),
-      } as unknown as PublicationRateLimiterService,
-      entitlements(),
-      access(),
-    );
-  });
-
-  /* F2: registration probes for the id, inserts, then authorizes. With a real
-     `ProjectAccessService` in the seat, a miss cached by an earlier lookup would
-     answer `404` for the row this call just wrote. */
-  it('registers a project the caller asked about moments earlier', async () => {
-    const live = new ProjectAccessService(databaseStubFor(() => rows) as DatabaseService);
-    const contested = new ProjectsController(
-      databaseStub as DatabaseService,
-      { consumeDailyBudget: async () => ({ allowed: true, count: 1 }) } as unknown as PublicationRateLimiterService,
-      entitlements(),
-      live,
-    );
-
-    await expect(live.authorize(projectId, ownerId, 'owner')).rejects.toBeInstanceOf(NotFoundException);
-    await expect(contested.register(projectId, body('Bracket'), ownerId)).resolves.toEqual({ id: projectId });
-  });
-
-  it('creates the caller’s project row, and no repository (D1)', async () => {
-    await expect(controller.register(projectId, body('Bracket'), ownerId)).resolves.toEqual({ id: projectId });
-    expect(inserted).toEqual([{ id: projectId, ownerId, name: 'Bracket', origin: 'local-mirror' }]);
-  });
-
-  /**
-   * N5 (review C11): the connect verb refuses before it writes anything.
-   *
-   * Registration used to spend the daily budget, insert the row and create a
-   * bare repository with hooks on the shared volume before anything looked at
-   * the plan — and every push that followed was refused at `git.service.ts`
-   * with this same sentence. A free account therefore connected successfully,
-   * could never use what it connected, and spent a slot of the 200-project
-   * ceiling doing it. The wire-level proof (403, no row, no directory) is
-   * `apps/api-e2e/src/git/tau-hosted-remote.spec.ts`.
-   */
-  it('refuses a caller whose plan does not entitle syncing, before the row and the repository', async () => {
-    canSyncFiles = false;
-    await expect(controller.register(projectId, body('Bracket'), ownerId)).rejects.toMatchObject({
-      response: { code: 'GIT_SYNC_NOT_ENTITLED', message: 'Syncing files to Tau Cloud is a paid plan feature.' },
-    });
-    expect(inserted).toEqual([]);
-  });
-
-  it('is idempotent for the owner and still reconciles the repository', async () => {
-    rows = [{ ownerId }];
-    await expect(controller.register(projectId, body('Bracket'), ownerId)).resolves.toEqual({ id: projectId });
-    expect(inserted).toEqual([]);
-  });
-
-  /* Ruling P55: the same answer for "no such project" and "not yours", so a
-     signed-in caller cannot use this route as an oracle for which ids exist —
-     the rule `git.service.ts` already states for the git surface. */
-  it('answers an id another account already owns with 404, without touching the volume', async () => {
-    rows = [{ ownerId: strangerId }];
-    await expect(controller.register(projectId, body(), ownerId)).rejects.toBeInstanceOf(NotFoundException);
-    await expect(controller.register(projectId, body(), ownerId)).rejects.toMatchObject({
-      response: { code: 'PROJECT_NOT_FOUND' },
-    });
-    expect(inserted).toEqual([]);
-  });
-
-  /* Review R6: the loser of a race on one id inserts nothing, so the re-read is
-     the only thing that can tell it the id is not its own. Without it the loser
-     is answered `200` for somebody else's project. */
-  it('answers 404 when it loses the insert race for the id', async () => {
-    const racing = {
-      database: {
-        select: () => ({
-          from: () => ({
-            /* Absent when the route looks, so it goes on to insert. */
-            where: () => ({ limit: async (): Promise<Array<{ ownerId: string }>> => [] }),
-          }),
-        }),
-        insert: () => ({
-          values: (values: Record<string, unknown>) => ({
-            onConflictDoNothing: async (): Promise<void> => {
-              inserted.push(values);
-            },
-          }),
-        }),
-      },
-    };
-    const contested = new ProjectsController(
-      racing as unknown as DatabaseService,
-      { consumeDailyBudget: async () => ({ allowed: true, count: 1 }) } as unknown as PublicationRateLimiterService,
-      entitlements(),
-      /* The winner's row by the time the loser re-checks: `authorize` is what
-         tells the loser the id is not its own (review R6). */
-      {
-        authorize: async () => {
-          throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: 'Project not found' });
-        },
-        invalidate: () => undefined,
-      } as unknown as ProjectAccessService,
-    );
-
-    await expect(contested.register(projectId, body(), ownerId)).rejects.toMatchObject({
-      response: { code: 'PROJECT_NOT_FOUND' },
-    });
-  });
-
-  /* Review R5: P51 made registration reachable without a publish, so it needs a
-     ceiling. The cap counts projects, not calls, so an owner at the cap can
-     still re-register what it already has. */
-  it('refuses the registration past the per-account project ceiling', async () => {
-    owned = registeredProjectLimitPerOwner;
-    await expect(controller.register(projectId, body(), ownerId)).rejects.toMatchObject({
-      response: { code: 'PROJECT_LIMIT_REACHED' },
-    });
-    expect(inserted).toEqual([]);
-
-    owned = registeredProjectLimitPerOwner - 1;
-    await expect(controller.register(projectId, body(), ownerId)).resolves.toEqual({ id: projectId });
-
-    /* At the cap and already registered: still idempotent, still no new row. */
-    owned = registeredProjectLimitPerOwner;
-    rows = [{ ownerId }];
-    inserted = [];
-    await expect(controller.register(projectId, body(), ownerId)).resolves.toEqual({ id: projectId });
-    expect(inserted).toEqual([]);
-  });
-
-  it('refuses a caller over its daily registration budget before it writes anything', async () => {
-    withinBudget = false;
-    await expect(controller.register(projectId, body(), ownerId)).rejects.toMatchObject({
-      response: { code: 'PROJECT_REGISTRATION_RATE_LIMITED' },
-      status: HttpStatus.TOO_MANY_REQUESTS,
-    });
-    expect(inserted).toEqual([]);
-  });
-
-  /* D22 / L6-F15: the budget is spent after the ownership and entitlement
-     checks, so a refused call costs the caller nothing. */
-  it('spends no registration budget on a call refused for ownership or plan', async () => {
-    let spent = 0;
-    const counting = new ProjectsController(
-      databaseStub as DatabaseService,
-      {
-        consumeDailyBudget: async () => {
-          spent += 1;
-          return { allowed: true, count: spent };
-        },
-      } as unknown as PublicationRateLimiterService,
-      entitlements(),
-      access(),
-    );
-
-    rows = [{ ownerId: strangerId }];
-    await expect(counting.register(projectId, body(), ownerId)).rejects.toBeInstanceOf(NotFoundException);
-    rows = [];
-    canSyncFiles = false;
-    await expect(counting.register(projectId, body(), ownerId)).rejects.toMatchObject({
-      response: { code: 'GIT_SYNC_NOT_ENTITLED' },
-    });
-    expect(spent).toBe(0);
-
-    canSyncFiles = true;
-    await expect(counting.register(projectId, body(), ownerId)).resolves.toEqual({ id: projectId });
-    expect(spent).toBe(1);
-  });
-
-  it('refuses an id that cannot name a repository before it writes anything', async () => {
-    await expect(controller.register('../escape', body(), ownerId)).rejects.toBeInstanceOf(BadRequestException);
-    expect(inserted).toEqual([]);
-  });
-
-  /**
-   * W18 DEF-2 red pin (a): a second device cannot open what it cannot name.
-   *
-   * Two accounts, one table: each caller gets its own rows and nothing else.
-   * The filter is asserted twice over — as the condition the query carries, and
-   * as the rows that come back — because this is the only route that answers
-   * with more than one project id. The `desc(updatedAt)` ordering is the
-   * database's and is not asserted here; the fixture is already in that order.
-   */
-  it('lists the caller’s own projects and the collaborations they hold, each with its role', async () => {
+    listRows = [bracket, hinge];
     await expect(controller.list(ownerId)).resolves.toEqual([
-      { id: 'proj_ownerbracket00000', name: 'Bracket', updatedAt: '2026-09-13T02:00:00.000Z', role: 'owner' },
-      { id: 'proj_ownerhinge0000000', name: 'Hinge', updatedAt: '2026-09-13T01:00:00.000Z', role: 'owner' },
+      {
+        id: bracket.id,
+        name: 'Bracket',
+        updatedAt: bracket.updatedAt.toISOString(),
+        role: 'owner',
+        canDeleteCloud: true,
+        cloudState: 'active',
+      },
+      {
+        id: hinge.id,
+        name: 'Hinge',
+        updatedAt: hinge.updatedAt.toISOString(),
+        role: 'owner',
+        canDeleteCloud: true,
+        cloudState: 'active',
+      },
     ]);
-
-    /* D27: the stranger owns one project and collaborates on another, and the
-       listing is what a second device names either from. */
+    // These predicates preserve caller isolation, hide completed rows, and
+    // retain pending rows only for their owner. PostgreSQL evaluates them in integration tests.
+    if (!listCondition) {
+      throw new Error('Missing project listing filter');
+    }
+    expect(dialect.sqlToQuery(listCondition)).toMatchObject({
+      sql: '(("project"."owner_id" = $1 or "project_collaborator"."user_id" = $2) and "project_deletion"."deleted_at" is null and ("project_deletion"."requested_at" is null or "project"."owner_id" = $3))',
+      params: [ownerId, ownerId, ownerId],
+    });
+    listRows = [
+      { ...bracket, role: 'write' },
+      { ...hinge, id: 'proj_strangerpart00000', ownerId: strangerId, name: 'Theirs' },
+    ];
     await expect(controller.list(strangerId)).resolves.toEqual([
-      { id: 'proj_ownerbracket00000', name: 'Bracket', updatedAt: '2026-09-13T02:00:00.000Z', role: 'write' },
-      { id: 'proj_strangerpart00000', name: 'Theirs', updatedAt: '2026-09-13T03:00:00.000Z', role: 'owner' },
+      {
+        id: bracket.id,
+        name: 'Bracket',
+        updatedAt: bracket.updatedAt.toISOString(),
+        role: 'write',
+        canDeleteCloud: false,
+        cloudState: 'active',
+      },
+      {
+        id: 'proj_strangerpart00000',
+        name: 'Theirs',
+        updatedAt: hinge.updatedAt.toISOString(),
+        role: 'owner',
+        canDeleteCloud: true,
+        cloudState: 'active',
+      },
+    ]);
+    expect(dialect.sqlToQuery(listCondition).params).toEqual([strangerId, strangerId, strangerId]);
+  });
+
+  it('should expose the owner’s pending deletion as deleting', async () => {
+    listRows = [
+      {
+        id: projectId,
+        ownerId,
+        name: 'Pending',
+        updatedAt: new Date('2026-10-24T00:00:00.000Z'),
+        role: null,
+        deletionRequestedAt: new Date('2026-10-24T00:00:00.000Z'),
+      },
+    ];
+    await expect(controller.list(ownerId)).resolves.toEqual([
+      {
+        id: projectId,
+        name: 'Pending',
+        updatedAt: '2026-10-24T00:00:00.000Z',
+        role: 'owner',
+        canDeleteCloud: true,
+        cloudState: 'deleting',
+      },
     ]);
   });
+
+  it.each([false, undefined])(
+    'should report false deletion capability when the admission flag is %s',
+    async (enabled) => {
+      const configuration = mock<ConfigService<Environment, true>>();
+      configuration.get.mockImplementation((_key, defaultValue) => enabled ?? defaultValue);
+      const disabled = new ProjectsController(databaseService, rateLimiter, entitlements, access, configuration);
+      listRows = [
+        {
+          id: projectId,
+          ownerId,
+          name: 'Bracket',
+          updatedAt: new Date('2026-10-24T00:00:00.000Z'),
+          role: null,
+          deletionRequestedAt: null,
+        },
+      ];
+      const listed = await disabled.list(ownerId);
+      expect(listed[0]?.canDeleteCloud).toBe(false);
+    },
+  );
+
+  it.each(['read', null, 'unexpected'])(
+    'should never infer deletion capability from fallback display role %s',
+    async (role) => {
+      listRows = [
+        {
+          id: projectId,
+          ownerId: strangerId,
+          name: 'Shared',
+          updatedAt: new Date('2026-10-24T00:00:00.000Z'),
+          role,
+          deletionRequestedAt: null,
+        },
+      ];
+      const listed = await controller.list(ownerId);
+      expect(listed[0]).toMatchObject({ role: 'read', canDeleteCloud: false });
+    },
+  );
 });

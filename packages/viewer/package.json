@@ -1,6 +1,6 @@
 {
   "name": "@taucad/viewer",
-  "version": "0.1.0-beta.8",
+  "version": "0.1.0-beta.9",
   "description": "Tau's interactive CAD viewer: the React Three Fiber canvas, graphics machines and model controls",
   "type": "module",
   "sideEffects": [
@@ -615,6 +615,7 @@
     "@taucad/types": "workspace:*",
     "@taucad/ui": "workspace:*",
     "@taucad/utils": "workspace:*",
+    "@taucad/xstate-testing": "workspace:*",
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
     "@testing-library/user-event": "^14.6.1",

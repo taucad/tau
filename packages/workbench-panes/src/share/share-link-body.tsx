@@ -61,7 +61,7 @@ function ShareLinkEncryption({
             onEncryptedChange(checked === true);
           }}
         />
-        <Label htmlFor='portable-share-encrypted' className='font-normal'>
+        <Label htmlFor='portable-share-encrypted' className='font-normal pointer-coarse:min-h-6'>
           Encrypt with a password
         </Label>
       </div>
@@ -93,7 +93,7 @@ function ShareLinkEncryption({
                 onIncludePasswordChange(checked === true);
               }}
             />
-            <Label htmlFor='portable-share-include-password' className='font-normal'>
+            <Label htmlFor='portable-share-include-password' className='font-normal pointer-coarse:min-h-6'>
               Include password in the link
             </Label>
           </div>
@@ -153,7 +153,7 @@ function ShareLinkOptions({
               onChange(option.id, checked === true);
             }}
           />
-          <Label htmlFor={`portable-share-${option.id}`} className='font-normal'>
+          <Label htmlFor={`portable-share-${option.id}`} className='font-normal pointer-coarse:min-h-6'>
             {option.label}
           </Label>
         </div>

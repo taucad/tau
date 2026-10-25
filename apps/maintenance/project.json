@@ -1,0 +1,25 @@
+{
+  "name": "maintenance",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/maintenance",
+  "projectType": "application",
+  "metadata": {
+    "description": "Deploy unit for tau-maintenance, the private singleton maintenance app (north star DC4). Its code is the api project's maintenance command, built from apps/api/Dockerfile's `maintenance` target; this project holds only its Fly configs so ci.yml's staging plan deploys it whenever api or these configs change."
+  },
+  "tags": ["scope:api", "type:app", "deploy:staging"],
+  "implicitDependencies": ["api"],
+  "targets": {
+    "deploy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "fly deploy --config ./apps/maintenance/fly.staging.toml --dockerfile ./apps/api/Dockerfile --ignorefile ./apps/api/Dockerfile.dockerignore --target maintenance --ha=false --no-public-ips"
+      }
+    },
+    "deploy:prod": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "fly deploy --config ./apps/maintenance/fly.prod.toml --dockerfile ./apps/api/Dockerfile --ignorefile ./apps/api/Dockerfile.dockerignore --target maintenance --ha=false --no-public-ips"
+      }
+    }
+  }
+}

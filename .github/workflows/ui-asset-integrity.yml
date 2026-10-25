@@ -9,6 +9,7 @@ on:
     paths:
       - apps/ui/asset-integrity.vite-plugin.ts
       - apps/ui/scripts/check-asset-integrity.mts
+      - apps/ui/scripts/subresource-integrity.mts
       - apps/ui/vite.config.ts
       - apps/ui/serve/vite.config.ts
       - packages/runtime/src/framework/wasm-loader.ts

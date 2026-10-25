@@ -100,6 +100,7 @@ const readAll = async (sessionId: string, chatId: string, endCursor?: number): P
     end = answer.status === 'applied' && answer.effect === 'not-applied' ? Number(answer.details['endCursor'] ?? 0) : 0;
   }
   const events: AgentLogEvent[] = [];
+  let sourceGeneration: string | undefined;
   for (let cursor = 0; cursor < end; ) {
     // oxlint-disable-next-line no-await-in-loop -- pages are read in order.
     const answer = await sessionOf(sessionId).read({
@@ -107,10 +108,12 @@ const readAll = async (sessionId: string, chatId: string, endCursor?: number): P
       cursor,
       limit: agentWireLimits.batchRows,
       maxBytes: agentWireLimits.batchBytes,
+      sourceGeneration,
     });
     if (answer.status !== 'batch') {
       throw new Error(`The read of chat ${chatId} was refused (${answer.reason}).`);
     }
+    sourceGeneration = answer.sourceGeneration;
     events.push(...(answer.events as AgentLogEvent[]));
     cursor = answer.nextCursor;
   }
@@ -163,6 +166,34 @@ const closeSession = async (sessionId: string): Promise<void> => {
   session?.client.close();
   await session?.host.close();
 };
+
+it('should observe chat log appends through the rooted fixture bridge', async () => {
+  const fileSystemProvider = new DirectIdbProvider(`agent-host-watch-${crypto.randomUUID()}`);
+  provider = fileSystemProvider;
+  await fileSystemProvider.initialize();
+  const { createFileSystemBridgePort, createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+  const workspace = rootedProvider(fileSystemProvider, 'project');
+  const bridge = createFileSystemBridgeProxy(createFileSystemBridgePort(workspace));
+  const path = '.tau/chats/observed/events.jsonl';
+  const changed = vi.fn();
+  const subscription = bridge.watchReady({ paths: [path] }, changed);
+  try {
+    await subscription.ready;
+    await workspace.writeFile(path, 'first\n');
+    await vi.waitFor(() => {
+      expect(changed).toHaveBeenCalledWith({ type: 'change', path });
+    });
+    changed.mockClear();
+    await workspace.appendFile!(path, 'second\n');
+    await vi.waitFor(() => {
+      expect(changed).toHaveBeenCalledWith({ type: 'change', path });
+    });
+    await expect(bridge.readFile(path, 'utf8')).resolves.toBe('first\nsecond\n');
+  } finally {
+    subscription.unsubscribe();
+    bridge.dispose();
+  }
+});
 
 it('runs a gateway turn in the dedicated launcher and commits its OPFS event log', async () => {
   const fileSystemProvider = new OPFSProvider();

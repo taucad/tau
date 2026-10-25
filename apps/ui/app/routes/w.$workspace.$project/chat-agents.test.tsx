@@ -2,10 +2,11 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { AgentProjection } from '#hooks/use-agent-projections.js';
 import type * as AgentProjectionsModule from '#hooks/use-agent-projections.js';
 import { useAgentProjections } from '#hooks/use-agent-projections.js';
-import { AgentList, AgentsPanelBody } from '#routes/w.$workspace.$project/chat-agents.js';
+import { AgentList, AgentsPanelBody, ChatAgents } from '#routes/w.$workspace.$project/chat-agents.js';
 
 vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
 
@@ -123,6 +124,17 @@ describe('AgentList', () => {
 });
 
 describe('AgentsPanelBody', () => {
+  it('names the panel Close after Agents, as its tooltip does (I6)', () => {
+    render(
+      <MemoryRouter>
+        <TooltipProvider>
+          <ChatAgents />
+        </TooltipProvider>
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('button', { name: 'Close Agents' })).toBeInTheDocument();
+  });
+
   it('delays the full transcript query for a hidden Agents panel', () => {
     render(
       <MemoryRouter>
@@ -150,7 +162,8 @@ describe('AgentsPanelBody', () => {
       </MemoryRouter>,
     );
 
-    const overview = screen.getByLabelText('Agent overview');
+    // A named status region, polite by its role (aria-label is prohibited on a bare div).
+    const overview = screen.getByRole('status', { name: 'Agent overview' });
     expect(overview.textContent).toContain('3agents');
     expect(overview.textContent).toContain('2 active');
     expect(overview.textContent).toContain('2need attention');

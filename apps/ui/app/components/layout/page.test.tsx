@@ -73,6 +73,7 @@ vi.mock('#hooks/use-typed-matches.js', () => ({
       breadcrumb: state.hasBreadcrumb
         ? [{ id: 'breadcrumb', handle: { breadcrumb: () => <span>Projects</span> } }]
         : [],
+      title: [],
       actions: [],
       commandPalette: state.commandPalette,
       enablePageWrapper:
@@ -263,19 +264,18 @@ describe('Page application shell', () => {
     expect(controls).not.toBeNull();
     const controlRegion = controls!;
 
-    expect([...controlRegion.children].map((element) => element.getAttribute('aria-label'))).toEqual([
-      'Toggle Sidebar',
-      'Home',
-    ]);
+    expect(
+      [...controlRegion.children].map((element) => element.getAttribute('aria-label') ?? element.textContent),
+    ).toEqual(['Toggle Sidebar', 'Home']);
     expect(controlRegion).toHaveClass('pl-2', 'pr-1', 'gap-1');
     const shell = container.querySelector<HTMLElement>('[data-slot=application-shell]');
     expect(shell?.style.getPropertyValue('--titlebar-controls-width')).toBe('calc(var(--sidebar-panel-width) - 1px)');
     state.sidebarOpen = false;
     view.rerender(<Page />);
     expect(within(controlRegion).queryByRole('link', { name: 'Home' })).not.toBeInTheDocument();
-    expect([...controlRegion.children].map((element) => element.getAttribute('aria-label'))).toEqual([
-      'Toggle Sidebar',
-    ]);
+    expect(
+      [...controlRegion.children].map((element) => element.getAttribute('aria-label') ?? element.textContent),
+    ).toEqual(['Toggle Sidebar']);
     expect(shell?.style.getPropertyValue('--titlebar-controls-width')).toBe('calc(var(--spacing) * 10)');
   });
 

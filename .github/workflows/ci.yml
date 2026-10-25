@@ -841,8 +841,16 @@ jobs:
       # PostgreSQL, driven by stock `git` and `git-lfs`. The target brings up its own
       # compose services (idempotent against the ones above) and migrates before it
       # boots either process.
-      - name: Run the git end-to-end tier (two API processes, one object store)
+      # Since DC1 the tier is two API processes and two tau-storage workers.
+      - name: Run the git end-to-end tier (two API processes, two storage workers, one object store)
         run: pnpm nx run-many -t test:git
+
+      # DC1 (review FR20): no API or storage log line of the tier may carry a grant,
+      # a receipt signature or a presigned `X-Amz-Signature`/`X-Amz-Credential`.
+      # The same checker runs over a captured staging sample.
+      - name: Check the git tier's logs for signed tokens
+        if: ${{ !cancelled() && hashFiles('out/test-results/api-e2e-git/*.log') != '' }}
+        run: cat out/test-results/api-e2e-git/*.log | node apps/api/scripts/check-storage-log-sample.mts /dev/stdin
 
   # Credential-free database and Stripe adapter contracts, including fork PRs.
   # Keep the job id stable and gate API deployment on its actual result.
@@ -888,14 +896,19 @@ jobs:
   # with no implicit `success()`, a `plan` that failed before its output step
   # leaves `deploy-apps` empty and `fromJSON('')` errors.
   # Both staging deploys wait for `affected-lane` directly.
+  # The API waits for the storage deploy when that runs (DC1, FR12): tau-storage
+  # verifies the grants the API signs, and a key or contract change deploys the
+  # verifier first. A skipped storage deploy (nothing of it changed) does not hold
+  # the API back; a failed one does.
   deploy-api-staging:
     name: Deploy API (Staging)
-    needs: [workspace, affected-lane, plan, api, billing-e2e]
+    needs: [workspace, affected-lane, plan, api, billing-e2e, deploy-storage-staging]
     if: >-
       !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
       needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'api') &&
       needs.workspace.result == 'success' && needs.affected-lane.result == 'success' &&
-      needs.api.result == 'success' && needs.billing-e2e.result == 'success'
+      needs.api.result == 'success' && needs.billing-e2e.result == 'success' &&
+      (needs.deploy-storage-staging.result == 'success' || needs.deploy-storage-staging.result == 'skipped')
     # `actions: read` lets the deploy see whether a newer run already deployed.
     permissions:
       contents: read
@@ -904,6 +917,80 @@ jobs:
     with:
       environment: staging
       app: api
+    secrets: inherit
+
+  # The private B2 copier (`tau-mirror-staging`, W13 DM1): the `mirror` project,
+  # whose code is `api`'s mirror command (implicit dependency), so the plan lists it
+  # whenever `api` or its Fly configs change. It waits for the API deploy when that
+  # runs: the API's release command owns migrations and the `tau_mirror` role, and
+  # the copier refuses to start against a schema it was not built for.
+  # `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
+  deploy-mirror-staging:
+    name: Deploy mirror (Staging)
+    needs: [workspace, affected-lane, plan, api, deploy-api-staging]
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
+      needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'mirror') &&
+      needs.workspace.result == 'success' && needs.affected-lane.result == 'success' &&
+      needs.api.result == 'success' &&
+      (needs.deploy-api-staging.result == 'success' || needs.deploy-api-staging.result == 'skipped')
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: staging
+      app: mirror
+    secrets: inherit
+
+  # The private git storage app (`tau-storage-staging`, north star DC1): the
+  # `storage` project, whose code is `api`'s storage worker (implicit dependency),
+  # so the plan lists it whenever `api` or its Fly config changes. It runs before
+  # the API deploy: it is the grant verifier, and the verifier deploys first
+  # (FR12). It holds no database, so it does not wait for the API's migrations.
+  # `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
+  deploy-storage-staging:
+    name: Deploy storage (Staging)
+    needs: [workspace, affected-lane, plan, api]
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
+      needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'storage') &&
+      needs.workspace.result == 'success' && needs.affected-lane.result == 'success' &&
+      needs.api.result == 'success'
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: staging
+      app: storage
+    secrets: inherit
+
+  # The private maintenance app (`tau-maintenance-staging`, north star DC4): the
+  # `maintenance` project, whose code is `api`'s maintenance command (implicit
+  # dependency), so the plan lists it whenever `api` or its Fly configs change. It
+  # waits for the API deploy when that runs: the API's release command owns
+  # migrations and the `tau_maintenance` role, and the maintenance image must not
+  # run ahead of the schema. Until the DC4 cutover it holds in standby
+  # (`TAU_MAINTENANCE_STANDBY`), so the API's own `revisions-maintenance` group
+  # stays the one worker.
+  # `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
+  deploy-maintenance-staging:
+    name: Deploy maintenance (Staging)
+    needs: [workspace, affected-lane, plan, api, deploy-api-staging]
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
+      needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'maintenance') &&
+      needs.workspace.result == 'success' && needs.affected-lane.result == 'success' &&
+      needs.api.result == 'success' &&
+      (needs.deploy-api-staging.result == 'success' || needs.deploy-api-staging.result == 'skipped')
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: staging
+      app: maintenance
     secrets: inherit
 
   # The staging UI: built in Actions and published by the Netlify CLI. It waits for

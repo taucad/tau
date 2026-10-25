@@ -1,3 +1,4 @@
+import { useThreeGraphicsBackend } from '#graphics/three/three-graphics-backend-context.jsx';
 import React, { useLayoutEffect, useMemo, useState } from 'react';
 import { selectCameraProjection } from '@taucad/camera/machine';
 import { toThreeRenderPoint } from '@taucad/three/spatial';
@@ -54,6 +55,7 @@ export const Controls = React.memo(function ({
   zoomSpeed,
   gizmoContainer,
 }: ControlsProperties) {
+  const backend = useThreeGraphicsBackend();
   const cameraRig = useCameraRig();
   const renderFrame = useRenderFrame();
   const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
@@ -69,13 +71,13 @@ export const Controls = React.memo(function ({
       setPlanePicker(undefined);
       return undefined;
     }
-    const picker = createSectionPlanePicker();
+    const picker = createSectionPlanePicker(backend);
     // oxlint-disable-next-line react/set-state-in-effect -- The effect owns allocation and StrictMode-safe teardown of this external resource.
     setPlanePicker(picker);
     return () => {
       picker.dispose();
     };
-  }, [enableGizmo, isSectionViewActive]);
+  }, [backend, enableGizmo, isSectionViewActive]);
   /* `initialTarget` is read once, in the controls' own state initializer, which writes the live
    * camera's orientation before `ActorBridge` is mounted. It is a render-unit API, so the actor's
    * metre target is converted here rather than landing 1/metersPerRenderUnit away for two frames. */
@@ -87,7 +89,14 @@ export const Controls = React.memo(function ({
     return [point.x, point.y, point.z];
   }, [cameraRig, renderFrame]);
   const controlProps = useMemo(
-    () => resolveCameraControlProps({ enablePan, enableZoom, secondaryMouseButtonMode, projectionKind, zoomSpeed }),
+    () =>
+      resolveCameraControlProps({
+        enablePan,
+        enableZoom,
+        secondaryMouseButtonMode,
+        projectionKind,
+        zoomSpeed,
+      }),
     [enablePan, enableZoom, projectionKind, secondaryMouseButtonMode, zoomSpeed],
   );
 

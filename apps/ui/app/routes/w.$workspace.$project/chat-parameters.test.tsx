@@ -389,7 +389,11 @@ vi.mock('#components/ui/floating-panel.js', () => ({
   FloatingPanelContentHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   FloatingPanelContentHeaderActions: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   FloatingPanelContentTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  FloatingPanelClose: () => <button type='button'>Close</button>,
+  FloatingPanelClose: ({ label }: { readonly label?: string }) => (
+    <button type='button' aria-label={label}>
+      Close
+    </button>
+  ),
   FloatingPanelMenuButton: ({
     children,
     onClick,
@@ -545,6 +549,14 @@ describe('ChatParameters', () => {
         },
       ],
     ]);
+  });
+
+  it('should name its Close after the panel, as its tooltip does (I6)', async () => {
+    mockGeometryUnits.set('main.ts', mockCadRef);
+
+    render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Close Parameters' })).toBeInTheDocument();
   });
 
   it('should render single geometry unit inside PaneviewReact', async () => {
@@ -802,10 +814,11 @@ describe('ChatParameters', () => {
     }
   });
 
-  it('shows empty message when no geometry units', async () => {
+  it('explains an empty pane and what to ask for when no geometry units (PN-PAR-4)', async () => {
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
-    expect(screen.getByText('No geometry units.')).toBeInTheDocument();
+    expect(screen.getByText('No parameters yet')).toBeInTheDocument();
+    expect(screen.getByText(/Ask the agent to expose a value as a parameter/u)).toBeInTheDocument();
   });
 
   it('returns empty params when entry is missing', async () => {

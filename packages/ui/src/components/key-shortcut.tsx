@@ -2,8 +2,9 @@ import type { VariantProps } from 'class-variance-authority';
 import { cva } from 'class-variance-authority';
 import { cn } from '#utils/cn.js';
 
+/* A key chip only helps someone with a keyboard: phones hide it by width and touch tablets by pointer. */
 const keyboardShortcutVariants = cva(
-  'font-normal select-none text-xs flex items-center rounded-xs p-0 pl-1 pr-0.5 hidden md:inline-flex',
+  'font-normal select-none text-xs flex items-center rounded-xs p-0 pl-1 pr-0.5 hidden md:inline-flex pointer-coarse:hidden',
   {
     variants: {
       variant: {

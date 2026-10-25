@@ -47,6 +47,11 @@ describe('geospec run with a non-Tau commandExporter', () => {
       { name: 'passes: the box is 10 mm', status: 'passed', codes: [] },
       { name: 'passes: parameters resize the box', status: 'passed', codes: [] },
       { name: 'fails: the box is not 12 mm', status: 'failed', codes: ['GEOSPEC_BOUNDING_BOX_MISMATCH'] },
+      {
+        name: 'refuses alone: a malformed expectation beside a passing claim',
+        status: 'inconclusive',
+        codes: ['GEOSPEC_INVALID_EXPECTATION'],
+      },
       { name: 'refuses: the exporter writes no GLB', status: 'failed', codes: ['GEOSPEC_EXPORTER_UNSUPPORTED'] },
     ]);
   }, 90_000);

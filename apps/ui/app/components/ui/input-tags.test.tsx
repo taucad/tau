@@ -43,14 +43,25 @@ afterEach(() => {
 });
 
 describe('Tags', () => {
+  it('keeps a name when existing tags hide the placeholder', () => {
+    render(
+      <Tags tags={['reviewed']} onTagsChange={vi.fn()}>
+        <TagsTrigger placeholder='Add tags…' />
+      </Tags>,
+    );
+
+    expect(screen.getByRole('combobox', { name: 'Add tags…' })).toHaveAttribute('placeholder', '');
+  });
+
   it('adds normalized tags with Enter', async () => {
     const user = userEvent.setup();
     const onTagsChange = vi.fn();
     render(<TagsHarness onTagsChange={onTagsChange} />);
 
-    await user.type(screen.getByRole('textbox', { name: 'Tags' }), 'Friend@Example.com{Enter}');
+    await user.type(screen.getByRole('combobox', { name: 'Tags' }), 'Friend@Example.com{Enter}');
 
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Tags' })).toHaveAccessibleName('Tags');
     expect(onTagsChange).toHaveBeenLastCalledWith(['friend@example.com']);
   });
 
@@ -59,7 +70,7 @@ describe('Tags', () => {
     const onTagsChange = vi.fn();
     render(<TagsHarness onTagsChange={onTagsChange} shouldRenderNextFocusable />);
 
-    await user.type(screen.getByRole('textbox', { name: 'Tags' }), 'Friend@Example.com');
+    await user.type(screen.getByRole('combobox', { name: 'Tags' }), 'Friend@Example.com');
     await user.tab();
 
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
@@ -72,7 +83,7 @@ describe('Tags', () => {
     const onTagsChange = vi.fn();
     render(<TagsHarness initialTags={['friend@example.com']} onTagsChange={onTagsChange} />);
 
-    await user.type(screen.getByRole('textbox', { name: 'Tags' }), 'Friend@Example.com{Enter}');
+    await user.type(screen.getByRole('combobox', { name: 'Tags' }), 'Friend@Example.com{Enter}');
 
     expect(screen.getAllByText('friend@example.com')).toHaveLength(1);
     expect(onTagsChange).not.toHaveBeenCalled();
@@ -95,7 +106,7 @@ describe('Tags', () => {
     const onTagsChange = vi.fn();
     render(<TagsHarness initialTags={['friend@example.com', 'team@example.com']} onTagsChange={onTagsChange} />);
 
-    const input = screen.getByRole('textbox', { name: 'Tags' });
+    const input = screen.getByRole('combobox', { name: 'Tags' });
     await user.click(input);
     await user.keyboard('{Backspace}');
 
@@ -109,11 +120,56 @@ describe('Tags', () => {
     const onTagsChange = vi.fn();
     render(<TagsHarness initialTags={['friend@example.com']} isDisabled onTagsChange={onTagsChange} />);
 
-    await user.type(screen.getByRole('textbox', { name: 'Tags' }), 'team@example.com{Enter}');
-    await user.click(screen.getByRole('button', { name: 'Remove friend@example.com' }));
+    await user.type(screen.getByRole('combobox', { name: 'Tags' }), 'team@example.com{Enter}');
 
+    // A disabled field shows its tags with no Remove button that looks usable.
+    expect(screen.queryByRole('button', { name: 'Remove friend@example.com' })).toBeNull();
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
     expect(screen.queryByText('team@example.com')).not.toBeInTheDocument();
     expect(onTagsChange).not.toHaveBeenCalled();
+  });
+
+  it('opens the popover when an existing tag is clicked', async () => {
+    const user = userEvent.setup();
+    render(<TagsHarness initialTags={['friend@example.com']} />);
+
+    await user.click(screen.getByText('friend@example.com'));
+
+    const input = screen.getByRole('combobox', { name: 'Tags' });
+    expect(input).toHaveFocus();
+    expect(input).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('toggles the popover only through the input trigger when the input is clicked', async () => {
+    const user = userEvent.setup();
+    render(<TagsHarness />);
+
+    const input = screen.getByRole('combobox', { name: 'Tags' });
+    await user.click(input);
+    expect(input).toHaveAttribute('aria-expanded', 'true');
+
+    await user.click(input);
+    expect(input).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('keeps the popover closed when a remove button is clicked', async () => {
+    const user = userEvent.setup();
+    render(<TagsHarness initialTags={['friend@example.com', 'team@example.com']} />);
+
+    await user.click(screen.getByRole('button', { name: 'Remove friend@example.com' }));
+
+    expect(screen.getByRole('combobox', { name: 'Tags' })).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('gives Remove the 24px floor under a coarse pointer while it still removes the tag (I3)', async () => {
+    const user = userEvent.setup();
+    const onTagsChange = vi.fn();
+    render(<TagsHarness initialTags={['friend@example.com']} onTagsChange={onTagsChange} />);
+    const remove = screen.getByRole('button', { name: 'Remove friend@example.com' });
+
+    // Jsdom applies no media queries; the coarse rule is asserted as written and measured by the 320px e2e.
+    expect(remove).toHaveClass('size-auto', 'pointer-coarse:size-6');
+    await user.click(remove);
+    expect(onTagsChange).toHaveBeenLastCalledWith([]);
   });
 });

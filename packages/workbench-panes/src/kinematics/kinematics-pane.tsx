@@ -131,6 +131,7 @@ type KinematicsReveal = Readonly<{ entryPath: string; componentId: string; reque
 type UnitContextValue = Readonly<{
   kinematicsRef: KinematicsRef;
   unitId: string;
+  isShown: boolean;
   mechanism: Mechanism;
   dofs: readonly DegreeOfFreedom[];
   structure: KinematicsStructure;
@@ -213,10 +214,11 @@ const JointRow = memo(function JointRow({
   readonly label: string;
   readonly componentIds: readonly string[];
 }): React.JSX.Element {
-  const { kinematicsRef, unitId, mechanism, term, partNames } = useUnitContext();
+  const { kinematicsRef, unitId, isShown, mechanism, term, partNames } = useUnitContext();
   const value = useSelector(
     kinematicsRef,
     unitSelector(unitId, (unit) => unit.pose?.coordinates[dof.id] ?? 0),
+    (previous, next) => !isShown || previous === next,
   );
   const isAtLimit = useSelector(
     kinematicsRef,
@@ -327,17 +329,19 @@ const FollowerRow = memo(function FollowerRow({
   readonly groupDriverId: string;
   readonly componentIds: readonly string[];
 }): React.JSX.Element {
-  const { kinematicsRef, unitId, mechanism, dofs, term, partNames } = useUnitContext();
+  const { kinematicsRef, unitId, isShown, mechanism, dofs, term, partNames } = useUnitContext();
   const driver = dofs.find((candidate) => candidate.id === dof.coupling?.driver);
   const value = useSelector(
     kinematicsRef,
     unitSelector(unitId, (unit) => unit.pose?.coordinates[dof.id] ?? 0),
+    (previous, next) => !isShown || previous === next,
   );
   const driverValue = useSelector(
     kinematicsRef,
     unitSelector(unitId, (unit) =>
       dof.coupling === undefined ? 0 : (unit.pose?.coordinates[dof.coupling.driver] ?? 0),
     ),
+    (previous, next) => !isShown || previous === next,
   );
   const isAtLimit = useSelector(
     kinematicsRef,
@@ -398,10 +402,11 @@ const FollowerRow = memo(function FollowerRow({
 
 /** A closed driver group still shows where its driver is. */
 function CollapsedValue({ dof }: { readonly dof: DegreeOfFreedom }): React.JSX.Element {
-  const { kinematicsRef, unitId, mechanism } = useUnitContext();
+  const { kinematicsRef, unitId, isShown, mechanism } = useUnitContext();
   const value = useSelector(
     kinematicsRef,
     unitSelector(unitId, (unit) => unit.pose?.coordinates[dof.id] ?? 0),
+    (previous, next) => !isShown || previous === next,
   );
   return (
     <span className='shrink-0 text-xs text-muted-foreground tabular-nums'>
@@ -749,20 +754,22 @@ function KinematicsJointList({
 
 /** A joint's live glyph, subscribed to its own value for the Structure tree. */
 function LiveJointGlyph({ dof }: { readonly dof: DegreeOfFreedom }): React.JSX.Element {
-  const { kinematicsRef, unitId } = useUnitContext();
+  const { kinematicsRef, unitId, isShown } = useUnitContext();
   const value = useSelector(
     kinematicsRef,
     unitSelector(unitId, (unit) => unit.pose?.coordinates[dof.id] ?? 0),
+    (previous, next) => !isShown || previous === next,
   );
   return <LiveGlyph dof={dof} value={value} />;
 }
 
 /** A joint's live value in the Structure tree. */
 function LiveJointValue({ dof }: { readonly dof: DegreeOfFreedom }): React.JSX.Element {
-  const { kinematicsRef, unitId, mechanism } = useUnitContext();
+  const { kinematicsRef, unitId, isShown, mechanism } = useUnitContext();
   const value = useSelector(
     kinematicsRef,
     unitSelector(unitId, (unit) => unit.pose?.coordinates[dof.id] ?? 0),
+    (previous, next) => !isShown || previous === next,
   );
   return (
     <span className='shrink-0 text-muted-foreground tabular-nums'>
@@ -964,6 +971,7 @@ function LiveKinematicsUnit({
         : {
             kinematicsRef,
             unitId,
+            isShown,
             mechanism,
             dofs,
             structure: getKinematicsStructure(mechanism, dofs),
@@ -971,14 +979,20 @@ function LiveKinematicsUnit({
             partNames,
             pointAt,
           },
-    [dofs, kinematicsRef, mechanism, partNames, pointAt, term, unitId],
+    [dofs, isShown, kinematicsRef, mechanism, partNames, pointAt, term, unitId],
   );
   const isBuilding = mechanism === undefined && mechanismIssue === undefined && isUpdating;
 
   return (
     <div className={cn('flex h-full flex-col', paneviewAttachedBodyClassName)}>
       {mechanism === undefined ? null : (
-        <KinematicsPlayer kinematicsRef={kinematicsRef} unitId={unitId} mechanism={mechanism} dofs={dofs} />
+        <KinematicsPlayer
+          kinematicsRef={kinematicsRef}
+          unitId={unitId}
+          mechanism={mechanism}
+          dofs={dofs}
+          isShown={isShown}
+        />
       )}
       <div
         data-slot='kinematics-unit-scroller'
@@ -1112,7 +1126,7 @@ function KinematicsHeaderControls({
       ) : null}
       {grouped.length > 0 ? (
         <PaneviewHeaderControls>
-          <PaneviewHeaderActionGroup className='opacity-0 transition-opacity duration-150 group-focus-within/paneview-header:opacity-100 group-hover/paneview-header:opacity-100 motion-reduce:transition-none [@media(hover:none)]:opacity-100'>
+          <PaneviewHeaderActionGroup className='opacity-0 transition-opacity duration-150 group-focus-within/paneview-header:opacity-100 group-hover/paneview-header:opacity-100 motion-reduce:transition-none pointer-coarse:opacity-100 [@media(hover:none)]:opacity-100'>
             <PaneviewHeaderContentActions>
               <PaneviewHeaderAction
                 aria-expanded={isAllExpanded}
@@ -1262,7 +1276,14 @@ function KinematicsContent({
   }, [claimUnits, entryKey, isShown]);
 
   if (units.length === 0) {
-    return <PanelEmptyState icon={Rotate3d} title='No geometry units' className='min-h-16' />;
+    return (
+      <PanelEmptyState
+        icon={Rotate3d}
+        title='No geometry units'
+        description='Joints appear here when an open model file declares a mechanism.'
+        className='min-h-16'
+      />
+    );
   }
   return (
     <KinematicsPaneview
@@ -1309,14 +1330,15 @@ export function KinematicsPane(): React.JSX.Element {
     <div
       data-slot='kinematics-panel-body'
       data-testid='kinematics-pane'
-      className='flex size-full min-h-0 flex-col overflow-hidden bg-sidebar'
+      /* Each joint's typed value takes the 40px touch row under a coarse pointer, as a parameter does (PN-KIN-1, I3). */
+      className='flex size-full min-h-0 flex-col overflow-hidden bg-sidebar pointer-coarse:[--param-field-h:2.5rem] pointer-coarse:[&_input]:text-base'
     >
       <div data-slot='kinematics-filter' className='shrink-0 bg-sidebar px-2 pt-2'>
         <SearchInput
           aria-label='Filter joints and parts'
           placeholder='Filter joints and parts…'
           value={filterTerm}
-          className='h-7 min-w-0 bg-background'
+          className='h-7 min-w-0 bg-background pointer-coarse:h-10'
           onChange={(event) => {
             setFilterTerm(event.target.value);
           }}

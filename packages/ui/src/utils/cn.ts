@@ -1,6 +1,9 @@
 import { clsx } from 'clsx';
 import type { ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import { extendTailwindMerge } from 'tailwind-merge';
+
+/* Theme spacing beyond Tailwind's numeric scale, so `size-touch-row` replaces `h-8` rather than sitting beside it. */
+const twMerge = extendTailwindMerge({ extend: { theme: { spacing: ['touch-row'] } } });
 
 /**
  * Merge conditional class names and resolve conflicting Tailwind utilities.

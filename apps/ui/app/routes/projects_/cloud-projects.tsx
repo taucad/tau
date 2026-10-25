@@ -16,6 +16,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { ProjectActionMenu } from '#components/project-library/project-cloud-delete.js';
 import { ProjectCard } from '#components/project-card.js';
 import { CloudProjectPreview } from '#components/project-library/cloud-project-preview.js';
 import { ArrowRight, Cloud, Users } from 'lucide-react';
@@ -25,6 +26,9 @@ import { Loader } from '@taucad/ui/components/loader';
 import { CardFooter, CardHeader } from '@taucad/ui/components/card';
 import {
   isCloudProjectPending,
+  assertCloudProjectActive,
+  CloudProjectUnavailableError,
+  getCloudDeletionState,
   materializedCloudProjects,
   tauCloudIntent,
   useMaterializeOnSignInLocation,
@@ -46,7 +50,9 @@ export type CloudOnlyRow = CloudProject & {
 };
 
 /** One row of the one library: this device's project (and whether Tau Cloud has it too), or Tau Cloud's alone. @public */
-export type LibraryRow = (ProjectListItem & { readonly onCloud?: boolean }) | CloudOnlyRow;
+export type LibraryRow =
+  | (ProjectListItem & { readonly onCloud?: boolean; readonly cloud?: CloudProject })
+  | CloudOnlyRow;
 
 /**
  * Whether a row is Tau Cloud's alone.
@@ -91,7 +97,9 @@ export const toLibraryRows = ({
           description: '',
         };
       }
-      return onCloud.has(project.id) ? { ...project, onCloud: true } : project;
+      return onCloud.has(project.id)
+        ? { ...project, onCloud: true, cloud: cloud.find((entry) => entry.id === project.id) }
+        : project;
     }),
     ...(includeCloudOnly
       ? cloud
@@ -161,9 +169,12 @@ export function OpenCloudProjectButton({
       size={isCard ? 'default' : 'sm'}
       variant='outline'
       className={className}
-      disabled={isOpening}
+      disabled={isOpening || entry.cloudState === 'deleting'}
       aria-busy={isOpening}
       onClick={async () => {
+        if (entry.cloudState === 'deleting' || getCloudDeletionState(entry.id) !== undefined) {
+          return;
+        }
         setIsOpening(true);
         try {
           await onOpen(entry);
@@ -172,7 +183,7 @@ export function OpenCloudProjectButton({
         }
       }}
     >
-      {isOpening ? 'Opening…' : 'Open'}
+      {entry.cloudState === 'deleting' ? 'Deleting from Tau Cloud…' : isOpening ? 'Opening…' : 'Open'}
       <span className='sr-only'> {entry.name}</span>
       {isOpening ? <Loader /> : <ArrowRight aria-hidden />}
     </Button>
@@ -192,7 +203,13 @@ function CloudOnlyWhere({ entry }: { readonly entry: CloudProject }): React.JSX.
   return (
     <div className='flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground'>
       <Glyph aria-hidden className='size-3 shrink-0' />
-      <span className='truncate'>Tau Cloud</span>
+      <span className='truncate' role={entry.cloudState === 'deleting' ? 'status' : undefined}>
+        {entry.cloudState === 'deleting'
+          ? entry.isCheckingDeletion
+            ? 'Checking deletion…'
+            : 'Deleting from Tau Cloud…'
+          : 'Tau Cloud'}
+      </span>
       {shared === undefined ? undefined : <Badge variant='secondary'>{shared.badge}</Badge>}
     </div>
   );
@@ -237,8 +254,11 @@ export function CloudProjectCard({
       data-slot='cloud-project-card'
       className='flex flex-col'
       linkLabel={`${isOpening ? 'Opening…' : 'Open'} ${entry.name}`}
-      isOpening={isOpening}
+      isOpening={isOpening || entry.cloudState === 'deleting'}
       onOpen={async () => {
+        if (entry.cloudState === 'deleting' || getCloudDeletionState(entry.id) !== undefined) {
+          return;
+        }
         setIsOpening(true);
         try {
           await onOpen(entry);
@@ -254,13 +274,16 @@ export function CloudProjectCard({
           <CloudOnlyWhere entry={entry} />
         </div>
       </CardHeader>
-      <CardFooter className='mt-auto'>
+      <CardFooter className='mt-auto flex items-center justify-between'>
         <Button asChild variant='outline'>
           <span aria-hidden='true' className='pointer-events-none'>
-            {isOpening ? 'Opening…' : 'Open'}
+            {entry.cloudState === 'deleting' ? 'Deleting…' : isOpening ? 'Opening…' : 'Open'}
             {isOpening ? <Loader /> : <ArrowRight />}
           </span>
         </Button>
+        <div className='relative z-20'>
+          <ProjectActionMenu name={entry.name} cloud={entry} isCloudOnly />
+        </div>
       </CardFooter>
     </ProjectCard>
   );
@@ -320,7 +343,11 @@ export const useMaterializeCloudProjects = ({
       .join(' ');
     const wanted = cloud.filter(
       (entry) =>
-        !heldIds.has(entry.id) && asked.current.get(entry.id) !== listing && !materializedCloudProjects.has(entry.id),
+        entry.cloudState !== 'deleting' &&
+        getCloudDeletionState(entry.id) === undefined &&
+        !heldIds.has(entry.id) &&
+        asked.current.get(entry.id) !== listing &&
+        !materializedCloudProjects.has(entry.id),
     );
     if (wanted.length === 0) {
       return;
@@ -333,16 +360,38 @@ export const useMaterializeCloudProjects = ({
        never connected. */
     const bring = async (entry: CloudProject): Promise<void> => {
       const existing = tauCloudIntent.get(entry.id);
-      tauCloudIntent.set(entry.id, 'open');
+      let hasStartedCreation = false;
       try {
+        await assertCloudProjectActive(entry.id);
+        tauCloudIntent.set(entry.id, 'open');
+        hasStartedCreation = true;
         await createProject({ ...cloudProjectStub(entry), location });
         materializedCloudProjects.add(entry.id);
+        try {
+          await assertCloudProjectActive(entry.id);
+        } catch (error) {
+          // Keep a shell and any edits. A network outage keeps first-open recovery owed.
+          if (error instanceof CloudProjectUnavailableError) {
+            tauCloudIntent.set(entry.id, undefined);
+          }
+        }
       } catch (error) {
+        if (!hasStartedCreation) {
+          console.error(`Error bringing ${entry.name} from Tau Cloud:`, error);
+          return;
+        }
         /* On this device all the same — refused as already held, or written and
            then failed: brought, and whatever mark it already had stands. */
         if ((await getProjectFileSystemConfig(entry.id).catch(() => undefined)) !== undefined) {
           materializedCloudProjects.add(entry.id);
-          tauCloudIntent.set(entry.id, existing ?? 'open');
+          try {
+            await assertCloudProjectActive(entry.id);
+            tauCloudIntent.set(entry.id, existing ?? 'open');
+          } catch (error) {
+            if (error instanceof CloudProjectUnavailableError) {
+              tauCloudIntent.set(entry.id, undefined);
+            }
+          }
           return;
         }
         /* Not created: nothing may point at it. Asked again once the listing's

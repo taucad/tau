@@ -255,6 +255,7 @@ export function CodeEditor({ className, options: optionsFromProps, ...rest }: Co
       cn(
         // Override Monaco CSS variables to match the app theme
         '[&_.monaco-editor]:![--vscode-editor-background:var(--background)]',
+        '[&_.monaco-editor-background]:bg-background!',
         '[&_.monaco-editor]:![--vscode-editorStickyScroll-background:var(--background)]',
         '[&_.monaco-editor]:![--vscode-breadcrumb-background:transparent]',
         '[&_.monaco-editor]:![--vscode-multiDiffEditor-background:var(--background)]',

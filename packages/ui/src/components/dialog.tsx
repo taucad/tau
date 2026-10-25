@@ -1,3 +1,4 @@
+import { useResponsiveSurfaceContainer } from '#hooks/responsive-surface.js';
 import * as React from 'react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import { XIcon } from 'lucide-react';
@@ -50,7 +51,14 @@ function DialogTrigger({ ...properties }: React.ComponentProps<typeof DialogPrim
  */
 function DialogPortal({ ...properties }: React.ComponentProps<typeof DialogPrimitive.Portal>): React.JSX.Element {
   const fullscreenElement = useFullscreenElement();
-  return <DialogPrimitive.Portal data-slot='dialog-portal' container={fullscreenElement} {...properties} />;
+  const surfaceContainer = useResponsiveSurfaceContainer();
+  return (
+    <DialogPrimitive.Portal
+      data-slot='dialog-portal'
+      container={surfaceContainer ?? fullscreenElement}
+      {...properties}
+    />
+  );
 }
 
 /**

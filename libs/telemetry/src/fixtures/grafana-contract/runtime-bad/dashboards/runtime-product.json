@@ -1,0 +1,38 @@
+{
+  "uid": "seeded-runtime-product",
+  "title": "Seeded runtime product",
+  "templating": {
+    "list": [
+      { "name": "app", "type": "constant", "query": ".*" },
+      {
+        "name": "population",
+        "type": "custom",
+        "query": "signed-in,signed-out",
+        "current": { "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "title": "Exports, every population",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(tau_runtime_exports_total{app=~\"$app\"}[5m]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Hard-coded Fly logs",
+      "type": "logs",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "{fly_app_name=\"tau-api-staging\"} | json | event=\"runtime.operation\"",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

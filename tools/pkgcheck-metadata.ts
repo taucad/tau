@@ -331,7 +331,7 @@ export type PeerRule = {
 };
 
 /** Leaves under npm-policy Rule 1: they never re-export schemas or runtime types, so they satisfy peers with dependencies. */
-const leafPackages = ['@taucad/cli', 'geospec', '@taucad/geospec-engine'];
+const leafPackages = ['@taucad/cli', 'geospec'];
 
 /** The one registry shared by publishable-peer and internal-library rules. */
 export const peerRules: readonly PeerRule[] = [

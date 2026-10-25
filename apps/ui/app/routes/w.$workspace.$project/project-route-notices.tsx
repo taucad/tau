@@ -362,7 +362,7 @@ export const ProjectRouteNotice = ({ state }: { readonly state: ProjectRouteStat
           isMobile && 'h-10',
         )}
       >
-        {isMobile ? <SidebarTrigger aria-label='Toggle Sidebar' /> : null}
+        {isMobile ? <SidebarTrigger /> : null}
         {heading === '' ? null : <span className='truncate'>{heading}</span>}
       </header>
       <div className='flex min-h-0 flex-1 flex-col' role={spec.live} aria-busy={spec.live === 'status' || undefined}>

@@ -121,11 +121,12 @@ vi.mock('#components/chat/chat-textarea.js', () => ({
     readonly ref?: React.Ref<ChatTextareaHandle>;
     readonly onSubmit?: ChatTextareaProperties['onSubmit'];
     readonly className?: string;
+    readonly enableMobileCollapse?: boolean;
   }): React.JSX.Element => {
     capturedTextarea.onSubmit = properties.onSubmit;
     capturedTextarea.className = properties.className;
     useImperativeHandle(properties.ref, () => ({ focus: capturedTextarea.focus }), []);
-    return <div data-testid='chat-textarea' />;
+    return <div data-testid='chat-textarea' data-collapsible={properties.enableMobileCollapse === true} />;
   },
 }));
 
@@ -174,7 +175,9 @@ vi.mock('#routes/w.$workspace.$project/chat-error.js', () => ({
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-title-bar.js', () => ({
-  ChatTitleBar: () => <span data-testid='chat-title-bar' />,
+  ChatTitleBar: ({ closeButton }: { readonly closeButton?: React.ReactNode }) => (
+    <span data-testid='chat-title-bar'>{closeButton}</span>
+  ),
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-history-empty.js', () => ({
@@ -183,7 +186,7 @@ vi.mock('#routes/w.$workspace.$project/chat-history-empty.js', () => ({
 
 vi.mock('#components/ui/floating-panel.js', () => ({
   FloatingPanel: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
-  FloatingPanelClose: () => null,
+  FloatingPanelClose: ({ label }: { readonly label?: string }) => <button type='button' aria-label={label} />,
   FloatingPanelContent: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   FloatingPanelContentHeader: ({
     children,
@@ -264,6 +267,7 @@ vi.mock('react-virtuoso', () => ({
 }));
 
 const { ChatHistory } = await import('#routes/w.$workspace.$project/chat-history.js');
+const { ResponsiveSurfaceProvider } = await import('@taucad/ui/hooks/use-mobile');
 
 const draftAttachment = storedRef({ hash: 'f'.repeat(64), mediaType: 'application/pdf', filename: 'spec.pdf' });
 
@@ -317,6 +321,12 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
     expect(screen.getByTestId('chat-textarea')).toBeInTheDocument();
   });
 
+  it('names its Close after the panel, as its tooltip does (I6)', () => {
+    render(<ChatHistory />);
+
+    expect(screen.getByRole('button', { name: 'Close Chat' })).toBeInTheDocument();
+  });
+
   it('opens with one header row that holds the title bar, and no status row under it', () => {
     const { container } = render(<ChatHistory />);
 
@@ -335,6 +345,19 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
     expect(screen.getByRole('button', { name: 'Scroll to bottom' }).parentElement).toBe(
       screen.getByTestId('chat-textarea').parentElement,
     );
+  });
+
+  it.each([
+    ['a phone', true],
+    ['desktop and tablets', false],
+  ] as const)('lets the composer rest as one row only on %s (D14, D12)', (_device, isMobile) => {
+    render(
+      <ResponsiveSurfaceProvider isMobile={isMobile} container={undefined}>
+        <ChatHistory />
+      </ResponsiveSurfaceProvider>,
+    );
+
+    expect(screen.getByTestId('chat-textarea')).toHaveAttribute('data-collapsible', String(isMobile));
   });
 
   it('calls cadChat.submit with the text and attachment references from the textarea', async () => {

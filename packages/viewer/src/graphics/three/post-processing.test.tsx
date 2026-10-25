@@ -16,7 +16,9 @@ vi.mock('@react-three/fiber', () => ({
   useFrame: mocks.frame,
   useThree: () => ({ invalidate: mocks.invalidate, gl: mocks.gl }),
 }));
-vi.mock('#hooks/use-graphics.jsx', () => ({ useGraphicsSelector: () => mocks.enabled }));
+vi.mock('#hooks/use-graphics.jsx', () => ({
+  useGraphicsSelector: () => mocks.enabled,
+}));
 vi.mock('#graphics/three/three-graphics-backend-context.jsx', () => ({
   useThreeGraphicsBackend: () => mocks.backend,
 }));
@@ -32,19 +34,7 @@ vi.mock('#graphics/three/post-processing-webgpu.jsx', () => ({
   },
 }));
 
-it('requests a fresh demand frame when disabling AO without moving the camera', async () => {
-  const { PostProcessing } = await import('#graphics/three/post-processing.jsx');
-  const view = render(<PostProcessing />);
-  mocks.invalidate.mockClear();
-
-  mocks.enabled = false;
-  view.rerender(<PostProcessing />);
-
-  expect(mocks.invalidate).toHaveBeenCalledOnce();
-  expect(mocks.frame).toHaveBeenCalledWith(expect.any(Function), 1);
-});
-
-it('keeps the chosen display transform when AO is disabled', async () => {
+it('keeps the chosen display transform despite a legacy disabled post-processing setting', async () => {
   const { PostProcessing } = await import('#graphics/three/post-processing.jsx');
   mocks.enabled = true;
   const view = render(<PostProcessing settings={{ toneMapping: 'neutral' }} />);
@@ -56,7 +46,7 @@ it('keeps the chosen display transform when AO is disabled', async () => {
   expect(mocks.gl.toneMapping).toBe(NoToneMapping);
 });
 
-it('tone-maps inside the WebGPU scene pass and keeps it mounted when AO is disabled', async () => {
+it('tone-maps inside the WebGPU scene pass and keeps it mounted despite a legacy disabled post-processing setting', async () => {
   const { PostProcessing } = await import('#graphics/three/post-processing.jsx');
   mocks.backend = 'webgpu';
   mocks.enabled = false;
@@ -65,7 +55,10 @@ it('tone-maps inside the WebGPU scene pass and keeps it mounted when AO is disab
   // The output pass only encodes sRGB, so overlays drawn after the scene stay untone-mapped.
   expect(mocks.gl.toneMapping).toBe(NoToneMapping);
   expect(mocks.webGpuProperties).toHaveBeenLastCalledWith(
-    expect.objectContaining({ aoAllowed: false, toneMapping: NeutralToneMapping }),
+    expect.objectContaining({
+      aoAllowed: true,
+      toneMapping: NeutralToneMapping,
+    }),
   );
   expect(mocks.frame).not.toHaveBeenCalled();
   mocks.backend = 'webgl';

@@ -134,6 +134,8 @@ const config: KnipConfig = {
         // `open-to-frame-observation.test.ts` spawn the other two.
         'apps/ui-e2e/production-server.ts',
         'apps/ui-e2e/src/support/{host-fixture,open-to-frame}.ts',
+        // The isolated deletion race target selects this nested Vitest configuration.
+        'apps/api-e2e/src/git/project-deletion-race.vitest.config.ts',
       ],
       project: ['**/*.{ts,tsx,mts}'],
       ignore: [
@@ -159,6 +161,8 @@ const config: KnipConfig = {
       entry: [
         'app/main.ts',
         'app/*-command.ts',
+        // tau-storage (DC1): the Dockerfile `storage` target runs it, built by vite.storage-worker.config.ts.
+        'app/storage-worker.ts',
         'app/api/**/*.module.ts',
         'app/database/**/*.ts',
         'app/telemetry/**/*.ts',
@@ -170,6 +174,8 @@ const config: KnipConfig = {
         'app/testing/billing-load/{run,driver,cluster}.ts',
         'app/testing/development-billing-account.ts',
         'app/testing/{billable-invocation-child,billing-payments-process-worker}.ts',
+        // The deletion recovery integration test spawns this process by path.
+        'app/testing/project-deletion-process.ts',
         'app/lifecycle/graceful-shutdown.signal-fixture.ts',
       ],
       ignoreDependencies: [
@@ -266,6 +272,8 @@ const config: KnipConfig = {
         'app/**/*.{cloud,self-host,desktop}.{ts,tsx}',
         // Vite alias replacement for `@resvg/resvg-js` in the browser bundle.
         'app/lib/browser-stubs/resvg-js.ts',
+        // The deletion component browser suite selects this nested config with --config.
+        'app/components/project-library/project-cloud-delete.vitest.browser.config.ts',
       ],
       ignore: ['public/**'],
       // The desktop and serve builds are separate React Router apps (`build:desktop`,
@@ -325,8 +333,9 @@ const config: KnipConfig = {
       entry: ['src/**/*.test-d.ts'],
     },
     'packages/cli': {
-      // The `stage-acp` target runs it from the workspace root.
-      entry: ['scripts/stage-acp-adapters.mts'],
+      // The `stage-acp` target runs the first from the workspace root; runtime-e2e, warehouse and
+      // the example-packaging skill spawn the second, `geospec run` with Tau's exporter, by path.
+      entry: ['scripts/stage-acp-adapters.mts', 'scripts/geospec.mts'],
       // `stage-acp` copies the pinned ACP adapters into `dist-acp` by name, and `tau serve`
       // resolves them there (`acpAdapterResolveFrom`, packages/host/src/acp/registry.ts).
       ignoreDependencies: ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp'],
@@ -343,8 +352,6 @@ const config: KnipConfig = {
         // `scripts:prepare-geospec-test-consumer` stages from this directory.
         'host-tests/{f1-public-a1,m3-corpus}/vitest.config.mjs',
       ],
-    },
-    'packages/geospec-engine': {
       // Fixture model sources: the runtime CLI evaluates them to regenerate the committed
       // STEP corpus, and each fixture manifest records its script as provenance.
       ignore: ['fixtures/scripts/*/**'],
@@ -352,6 +359,8 @@ const config: KnipConfig = {
     'packages/host': {
       // `runtime-child-render.integration.test.ts` spawns it by path.
       entry: ['src/fixtures/render-child-probe.ts'],
+      // `pose_model` in the bundled `@taucad/agent-tools` imports it at runtime.
+      ignoreDependencies: ['@taucad/kinematics'],
     },
     'packages/plugins/bambu': {
       // The `qualify-x1c` target runs it from the workspace root.
@@ -370,6 +379,10 @@ const config: KnipConfig = {
     'packages/plugins/build123d': {
       // Nx targets run every script from the workspace root.
       entry: ['scripts/*.mts'],
+    },
+    'packages/plugins/esbuild': {
+      // `esbuild-core.{permission,release}.test.ts` run these under Node flags in a child process.
+      entry: ['src/vm/*.test.child.ts'],
     },
     'packages/plugins/image': {
       // copy-files-from-to.cjson (run by the copy-files-from-to Nx plugin) copies Geist's TTF.

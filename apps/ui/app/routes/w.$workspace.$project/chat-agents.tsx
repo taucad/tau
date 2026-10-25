@@ -58,21 +58,21 @@ const statePresentation: Readonly<
     label: 'Waiting',
     icon: Clock3,
     rail: 'before:bg-warning',
-    tone: 'border-warning/30 bg-warning/10 text-warning',
+    tone: 'border-warning/30 bg-warning/10 text-foreground',
     iconClassName: 'text-warning',
   },
   running: {
     label: 'Running',
     icon: Radio,
     rail: 'before:bg-information',
-    tone: 'border-information/30 bg-information/10 text-information',
+    tone: 'border-information/30 bg-information/10 text-foreground',
     iconClassName: 'text-information animate-pulse motion-reduce:animate-none',
   },
   error: {
     label: 'Error',
     icon: CircleAlert,
     rail: 'before:bg-feature',
-    tone: 'border-feature/30 bg-feature/10 text-feature',
+    tone: 'border-feature/30 bg-feature/10 text-foreground',
     iconClassName: 'text-feature',
   },
   idle: {
@@ -97,7 +97,11 @@ export const ChatAgents = ({
       <FloatingPanelContentHeader>
         <FloatingPanelContentTitle>Agents</FloatingPanelContentTitle>
         <FloatingPanelContentHeaderActions>
-          <FloatingPanelClose icon={XIcon} tooltipContent={(isOpen) => <div>{isOpen ? 'Close' : 'Open'} Agents</div>} />
+          <FloatingPanelClose
+            label='Close Agents'
+            icon={XIcon}
+            tooltipContent={(isOpen) => <div>{isOpen ? 'Close' : 'Open'} Agents</div>}
+          />
         </FloatingPanelContentHeaderActions>
       </FloatingPanelContentHeader>
       <FloatingPanelContentBody className='p-0'>
@@ -178,9 +182,10 @@ const AgentsOverview = ({ agents }: { readonly agents: readonly AgentProjection[
     (agent) => agent.state === 'waiting' || agent.state === 'error' || agent.unread,
   ).length;
   return (
+    // A named live region needs a role: aria-label is prohibited on a bare div (ARIA 1.2), and status is polite.
     <div
+      role='status'
       aria-label='Agent overview'
-      aria-live='polite'
       className='flex min-h-10 shrink-0 items-center gap-3 border-b border-border/70 px-3 text-xs text-muted-foreground'
     >
       <span className='flex min-w-0 items-center gap-1.5'>
@@ -277,7 +282,10 @@ const AgentRowContent = ({ agent }: { readonly agent: AgentProjection }): React.
           <div className='flex min-w-0 items-center gap-1.5'>
             <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>{agent.name}</h3>
             {agent.focused ? (
-              <Badge variant='outline' className='h-5 border-primary/30 bg-primary/5 px-1.5 text-[10px] text-primary'>
+              <Badge
+                variant='outline'
+                className='h-5 border-primary/30 bg-primary/5 px-1.5 text-[10px] text-foreground'
+              >
                 Focused
               </Badge>
             ) : null}

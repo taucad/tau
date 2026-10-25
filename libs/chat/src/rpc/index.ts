@@ -7,6 +7,8 @@ export type {
   RpcWorkbenchClient,
   RpcGraphicsClient,
   RpcImageClient,
+  CaptureImagesClientInput,
+  CaptureWorkbenchView,
   RpcGeoSpecClient,
   RpcGraphicsExportModelResult,
   RpcSkillResolver,

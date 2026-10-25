@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '#runtime/runtime-agent-clients.js';
 import type { RuntimeAgentClient, RuntimeAgentImageExporter } from '#runtime/runtime-agent-clients.js';
+import { glbChunks } from '#runtime/glb-chunks.js';
+import { planetaryGlb } from '#runtime/planetary-glb.fixture.js';
+import type { CaptureWorkbenchView } from '@taucad/chat/rpc';
 import type {
   Description,
   Evaluation,
@@ -616,6 +619,117 @@ describe('createRuntimeAgentClients per-call parameters and sections', () => {
     );
   });
 
+  it('poses a 3D capture from the mechanism its GLB carries, keys it and lists the coordinates', async () => {
+    const fixture = runtimeFixture({
+      render: () => rendering({ mimeType: 'model/gltf-binary', content: planetaryGlb() }),
+    });
+    const clients = clientsFor(fixture);
+
+    await clients.images.captureImages({ targetFile: 'main.ts', mode: 'single' });
+    const posed = await clients.images.captureImages({
+      targetFile: 'main.ts',
+      mode: 'single',
+      pose: { animation: { id: 'four-sun-turns', time: 2 } },
+    });
+
+    expect(posed).toMatchObject({ success: true, message: 'Posed: sun 360, carrier 90.' });
+    const [plainJob, poseJob] = clients.exporter.mock.calls.map(([job]) => job);
+    expect(poseJob?.identity).not.toBe(plainJob?.identity);
+    expect(poseJob?.sourceFormat === 'glb' ? poseJob.geometryHash : undefined).not.toBe(
+      plainJob?.sourceFormat === 'glb' ? plainJob.geometryHash : undefined,
+    );
+    const nodes = glbChunks(poseJob?.content as Uint8Array<ArrayBuffer>)?.json['nodes'] as ReadonlyArray<
+      Readonly<Record<string, unknown>>
+    >;
+    expect(nodes[1]).toHaveProperty('matrix');
+  });
+
+  it('captures a saved workbench view from its camera with its cuts, keyed by the record, and says what it left out', async () => {
+    const fixture = runtimeFixture();
+    const clients = clientsFor(fixture);
+    const workbenchView: CaptureWorkbenchView = {
+      id: 'front-cut',
+      camera: { kind: 'preset', preset: 'front' },
+      fieldOfView: 0,
+      upDirection: 'z',
+      display: {
+        surfaces: true,
+        lines: true,
+        gizmo: false,
+        grid: true,
+        axes: true,
+        matcap: false,
+        postProcessing: false,
+      },
+      section: { active: true, cuts: [{ kind: 'plane', plane: 'xz', offset: 0.006, isFlipped: false }] },
+    };
+
+    await clients.images.captureImages({ targetFile: 'main.ts', mode: 'single' });
+    const result = await clients.images.captureImages({ targetFile: 'main.ts', mode: 'single', workbenchView });
+
+    expect(result).toMatchObject({
+      success: true,
+      images: [{ angle: 'front' }],
+      message:
+        'Workbench view front-cut: front preset, orthographic. Section: kept y ≤ 0.006 m; the cut faces are capped. The grid, pinned measurements and components hidden in the viewer are not drawn.',
+    });
+    const [plainJob, viewJob] = clients.exporter.mock.calls.map(([job]) => job);
+    expect(viewJob?.identity).not.toBe(plainJob?.identity);
+    expect(viewJob?.exportOptions).toMatchObject({
+      axes: false,
+      camera: { framing: 'bounds', direction: [0, -1, 0], projection: { kind: 'orthographic' } },
+      sections: { planes: [{ point: [0, 0.006, 0], normal: [0, -1, 0] }] },
+    });
+  });
+
+  it('refuses a saved view with a revolution cut before rendering an image', async () => {
+    const clients = clientsFor(runtimeFixture());
+
+    await expect(
+      clients.images.captureImages({
+        targetFile: 'main.ts',
+        mode: 'single',
+        workbenchView: {
+          id: 'wedge',
+          camera: { kind: 'preset', preset: 'isometric' },
+          fieldOfView: 60,
+          upDirection: 'z',
+          display: {
+            surfaces: true,
+            lines: true,
+            gizmo: true,
+            grid: true,
+            axes: true,
+            matcap: false,
+            postProcessing: false,
+          },
+          section: { active: true, cuts: [{ kind: 'revolution', axis: 'z', origin: [0, 0, 0], start: 0, sweep: 90 }] },
+        },
+      }),
+    ).resolves.toMatchObject({ success: false, errorCode: 'VALIDATION_ERROR' });
+    expect(clients.exporter).not.toHaveBeenCalled();
+  });
+
+  it('refuses a pose the mechanism cannot take before rendering an image', async () => {
+    const fixture = runtimeFixture({
+      render: () => rendering({ mimeType: 'model/gltf-binary', content: planetaryGlb() }),
+    });
+    const clients = clientsFor(fixture);
+
+    await expect(
+      clients.images.captureImages({
+        targetFile: 'main.ts',
+        mode: 'single',
+        pose: { animation: { id: 'spin', time: 0 } },
+      }),
+    ).resolves.toEqual({
+      success: false,
+      errorCode: 'VALIDATION_ERROR',
+      message: "This model's mechanism has no animation spin; it offers four-sun-turns.",
+    });
+    expect(clients.exporter).not.toHaveBeenCalled();
+  });
+
   it('refuses a section on a 2D view before rendering an image', async () => {
     const fixture = runtimeFixture({
       evaluate: () => evaluation([{ id: 'drawing', title: 'Drawing', mimeType: 'image/svg+xml' }]),
@@ -897,7 +1011,14 @@ describe('createRuntimeAgentClients default view options', () => {
 });
 
 describe('createRuntimeParameterAgentClient', () => {
-  const fixture = async (gate?: Promise<void>, options: Readonly<{ sourceUnit?: boolean; unbound?: boolean }> = {}) => {
+  const fixture = async (
+    gate?: Promise<void>,
+    options: Readonly<{
+      sourceUnit?: boolean;
+      unbound?: boolean;
+      sourceDigests?: (paths: readonly string[]) => Promise<Readonly<Record<string, string>>>;
+    }> = {},
+  ) => {
     const target = { authority: 'test', root: '/project', entry: 'main.py' };
     const digest = `sha256:${'1'.repeat(64)}` as Parameters<typeof compileParameterManifest>[0]['dependency'];
     const manifest = await compileParameterManifest({
@@ -933,6 +1054,7 @@ describe('createRuntimeParameterAgentClient', () => {
       source: { id: 'fixture', version: '1', revision: digest, capability: 'json-structure' },
       dependency: digest,
       middleware: digest,
+      ...(options.sourceDigests === undefined ? {} : { sourceFiles: { 'main.py': digest } }),
     });
     const current = resolveParameterSnapshot({
       target,
@@ -966,6 +1088,7 @@ describe('createRuntimeParameterAgentClient', () => {
     const adapter = createRuntimeParameterAgentClient({
       parameterActorFor: () => actor,
       mapRuntimeError: (error) => ({ success: false, errorCode: 'VALIDATION_ERROR', message: String(error) }),
+      ...(options.sourceDigests === undefined ? {} : { sourceDigests: options.sourceDigests }),
     });
     const request = {
       action: 'propose',
@@ -1129,6 +1252,34 @@ describe('createRuntimeParameterAgentClient', () => {
       }),
     ).resolves.toMatchObject({ success: true, outcome: { status: 'committed', requestId: 'agent:unit' } });
     expect(commit).toHaveBeenCalledOnce();
+    actor.stop();
+  });
+
+  it('answers a read from the resolved manifest while its source files are unchanged, and resolves after an edit', async () => {
+    let main = `sha256:${'1'.repeat(64)}`;
+    const sourceDigests = vi.fn(async (paths: readonly string[]) =>
+      Object.fromEntries(paths.map((path) => [path, path === 'main.py' ? main : 'missing'])),
+    );
+    const { actor, adapter, loads } = await fixture(undefined, { sourceDigests });
+    const loadsBefore = loads.mock.calls.length;
+
+    const reads = [
+      await adapter.getParameters({ targetFile: 'main.py' }),
+      await adapter.getParameters({ targetFile: 'main.py', detail: 'full' }),
+    ];
+    expect(reads).toMatchObject([
+      { success: true, status: 'resolved', parameters: { '/width': { value: 1 } } },
+      { success: true, status: 'resolved', detail: 'full' },
+    ]);
+    expect(loads.mock.calls.length).toBe(loadsBefore);
+    expect(sourceDigests).toHaveBeenCalledWith(['main.py']);
+
+    main = `sha256:${'2'.repeat(64)}`;
+    await expect(adapter.getParameters({ targetFile: 'main.py' })).resolves.toMatchObject({ status: 'resolved' });
+    expect(loads.mock.calls.length).toBe(loadsBefore + 1);
+    /* Another admission mode always resolves. */
+    await adapter.getParameters({ targetFile: 'main.py', resolutionMode: 'declared-only' });
+    expect(loads.mock.calls.length).toBe(loadsBefore + 2);
     actor.stop();
   });
 

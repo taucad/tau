@@ -161,37 +161,9 @@ describe('AxesWebGpuFatLine resource guard', () => {
     expect(materialDisposeSpy).toHaveBeenCalledTimes(1);
   });
 
-  /**
-   * Policy Rule 13 (pipeline pre-warm): the static line pays a one-time
-   * `createRenderPipelineAsync` cost on first mount. `compileAsync` is invoked
-   * from a `useLayoutEffect` before the first `useFrame` tick so that cost is paid off
-   * the critical path. Regression here would re-introduce a cold-cache first-frame skip.
-   */
-  it('invokes renderer.compileAsync for both persistent endpoint cameras on mount', async () => {
+  it('should defer compilation to the active frame without allocating a canvas output target', async () => {
     const harness = await mountFatLine();
-
-    expect(harness.gl.compileAsync).toHaveBeenCalledTimes(2);
-    const firstCall = harness.gl.compileAsync.mock.calls[0] as unknown as readonly [unknown, unknown];
-    const warmedScene = firstCall[0];
-    const warmedCamera = firstCall[1];
-    // The argument is the persistent `THREE.Group` that holds the axis line.
-    expect(warmedScene).toBeInstanceOf(ActualThree.Group);
-    const meshChildren = (warmedScene as ActualThree.Group).children.filter(
-      (child): child is ActualThree.Object3D => child instanceof ActualThree.Object3D,
-    );
-    expect(meshChildren).toHaveLength(1);
-    expect(warmedCamera).toBe(cameraRig.perspectiveCamera);
-    expect(harness.gl.compileAsync.mock.calls[1]?.[1]).toBe(cameraRig.orthographicCamera);
-
-    // The warm-up builds the node graph outside a render; the live frame must rebuild it.
-    const line = meshChildren[0] as ActualThree.Mesh;
-    const material = line.material as ActualThree.Material;
-    const versionBeforeWarmup = material.version;
-    await act(async () => {
-      harness.gl.resolveNext();
-      await Promise.resolve();
-    });
-    expect(material.version).toBeGreaterThan(versionBeforeWarmup);
+    expect(harness.gl.compileAsync).not.toHaveBeenCalled();
     harness.unmountScene();
   });
 });

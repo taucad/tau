@@ -25,6 +25,17 @@ export const gitE2EApiUrl = process.env['TAU_E2E_API_URL'] ?? 'http://localhost:
 export const gitE2ESecondaryApiUrl = process.env['TAU_E2E_API_URL_SECONDARY'] ?? 'http://localhost:4016';
 
 /**
+ * The two tau-storage workers this tier boots (DC1): every API process of the
+ * tier forwards its git RPCs to them over `TAU_STORAGE_URL`, so the specs
+ * drive the deployed shape, two APIs and two workers over one MinIO. `:4021`
+ * and `:4022` are free in both e2e tiers (`:4018` is W10's victim API).
+ */
+export const gitE2EStorageUrls = (process.env['TAU_E2E_STORAGE_URLS'] ?? 'http://localhost:4021,http://localhost:4022')
+  .split(',')
+  .map((url) => url.trim())
+  .filter((url) => url !== '');
+
+/**
  * The web origin the API derives better-auth's `trustedOrigins` and its CORS
  * allow-list from. Nothing listens on it in this tier — every caller here is
  * node-side, where CORS does not apply — but the sign-up and sign-in calls must
@@ -47,7 +58,10 @@ export const gitE2EStore = ((): {
   readonly secretAccessKey: string;
   readonly region: string;
 } => {
-  const file = readFileSync(resolve(import.meta.dirname, '../../../api/.env'), 'utf8');
+  const file =
+    process.env['TAU_E2E_COMPLETED_ARTIFACT'] === 'true'
+      ? ''
+      : readFileSync(resolve(import.meta.dirname, '../../../api/.env'), 'utf8');
   const read = (name: string, fallback: string): string =>
     process.env[name] ?? new RegExp(`^${name}=(.*)$`, 'mu').exec(file)?.[1] ?? fallback;
   return {

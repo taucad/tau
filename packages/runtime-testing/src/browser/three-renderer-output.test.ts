@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { Camera, Scene, Vector4 } from 'three';
 import type { WebGLRenderer } from 'three';
-import { WebGPURenderer } from 'three/webgpu';
+import { WebGLBackend, WebGPURenderer } from 'three/webgpu';
 import {
   captureRendererOutput,
   createRendererOutputCanvas,
@@ -14,7 +14,10 @@ import {
 const renderers: Array<WebGPURenderer | WebGLRenderer> = [];
 const createFixture = (): WebGPURenderer => {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(mock<CanvasRenderingContext2D>());
-  const renderer = new WebGPURenderer({ canvas: document.createElement('canvas'), antialias: true });
+  const renderer = new WebGPURenderer({
+    canvas: document.createElement('canvas'),
+    antialias: true,
+  });
   renderer.setPixelRatio(2);
   renderer.setSize(100, 80);
   renderer.render = vi.fn();
@@ -44,7 +47,10 @@ describe('fixture renderer output', () => {
         if (operation === 'install') {
           installRendererOutput(renderer, 'software');
         } else {
-          createRendererOutputCanvas({ renderer, pixels: new Uint8ClampedArray(200 * 160 * 4) });
+          createRendererOutputCanvas({
+            renderer,
+            pixels: new Uint8ClampedArray(200 * 160 * 4),
+          });
         }
       };
       expect(attempt).toThrow('A 2D context is required for renderer capture');
@@ -98,7 +104,10 @@ describe('fixture renderer output', () => {
       expect(captured).toEqual(pixels);
       expect(context.drawImage).toHaveBeenCalledWith(renderer.domElement, 0, 0);
       expect(context.getImageData).toHaveBeenCalledWith(0, 0, 2, 2);
-      const snapshot = createRendererOutputCanvas({ renderer, pixels: captured });
+      const snapshot = createRendererOutputCanvas({
+        renderer,
+        pixels: captured,
+      });
       expect([snapshot.width, snapshot.height]).toEqual([2, 2]);
       expect(context.putImageData).toHaveBeenCalledWith(expect.objectContaining({ data: pixels }), 0, 0);
     },
@@ -247,7 +256,16 @@ describe('fixture renderer output', () => {
     expect(renderer.getRenderTarget()).toBeNull();
   });
 
-  it('should retain hardware canvas output and reject fallback qualification', async () => {
+  it.each(['hardware', 'software'] as const)('should retain node WebGL2 canvas output in %s capture', (profile) => {
+    const renderer = createFixture();
+    renderer.backend = new WebGLBackend();
+    const originalRender = renderer.render;
+    installRendererOutput(renderer, profile);
+    expect(renderer.getOutputRenderTarget()).toBeNull();
+    expect(renderer.render).toBe(originalRender);
+  });
+
+  it('should retain hardware canvas output and reject unknown backends', async () => {
     const renderer = createFixture();
     const originalRender = renderer.render;
     installRendererOutput(renderer, 'hardware');
@@ -257,7 +275,7 @@ describe('fixture renderer output', () => {
     Reflect.set(renderer.backend, 'isWebGPUBackend', false);
     expect(() => {
       installRendererOutput(renderer, 'software');
-    }).toThrow('native WebGPU backend');
+    }).toThrow('recognized initialized backend');
     expect(() => {
       installRendererOutput(renderer, 'software');
     }).toThrow(Error);

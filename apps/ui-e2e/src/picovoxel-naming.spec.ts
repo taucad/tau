@@ -56,7 +56,7 @@ const components = async () =>
   target.evaluate(() => (globalThis as ViewerWindow).__TAU_SECTION_VIEW_TEST__?.getModelComponents() ?? []);
 
 const checkParts = async (leftName: string, reordered: boolean) => {
-  await openCommand('Open model structure');
+  await openCommand('Open model tree');
   const names = reordered ? ['Shape 1', 'Mesh', leftName] : [leftName, 'Mesh', 'Shape 3'];
   await expect
     .poll(components, { timeout: 120_000 })

@@ -1,6 +1,6 @@
 # geospec — Functions
 
-46 top-level symbols. Signatures are verbatim typescript.
+47 top-level symbols. Signatures are verbatim typescript.
 
 // GeoSpec suite helper used inside VM-executed test modules
 // describe (function)
@@ -243,6 +243,21 @@ export declare function installGeoSpecVitest(client: GeoSpecAssertionClient): Ge
 // setupGeoSpecVitest (function)
 export declare function setupGeoSpecVitest(options: GeoSpecAssertionClientOptions): GeoSpecVitestAdapter;
 //   options: Flat native assertion-client options
+
+// Configure GeoSpec for the active Vitest file from the project's `geospec.config.*`
+// Remarks: Call it at the top level of a test file or a setup file and await it. Subjects are released, and an engine this call created is closed, after the file's tests.
+// setupGeoSpecVitestProject (function)
+export declare function setupGeoSpecVitestProject(options: SetupGeoSpecVitestProjectOptions): Promise<GeoSpecVitestProject>;
+//   options: Project root, config file, overrides and assertion-client options
+// Example (A Vitest file over a project with a geospec.config.ts):
+//   import { expect, it } from 'vitest';
+//   import { setupGeoSpecVitestProject } from 'geospec/vitest/node';
+//   
+//   const geo = await setupGeoSpecVitestProject({ projectPath: import.meta.dirname });
+//   
+//   it('has the intended volume', async () => {
+//   await expect(await geo.loadModel({ file: 'part.step' })).toHaveVolume({ value: 1000, tolerance: 1 });
+//   });
 
 // Type a `geospec.config.*` default export
 // Remarks: An identity at runtime. The parameter is not generic, so an object literal gets the excess-property and contextual checks `satisfies GeoSpecConfig` gives, in `.ts` and `.js` alike.

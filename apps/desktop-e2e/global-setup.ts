@@ -15,6 +15,7 @@ import {
   desktopE2EPackagedExecutable,
   desktopE2EProviderStubKey,
   desktopE2EProviderStubUrl,
+  desktopE2EStorageUrl,
 } from './src/support/config.ts';
 /* oxlint-enable no-restricted-imports */
 
@@ -68,6 +69,31 @@ const waitForApi = async (child: ChildProcess): Promise<void> => {
   }
 };
 
+/** Waits for a child's `/health/live`, failing early if it exits. */
+const waitForLive = async (child: ChildProcess, url: string): Promise<void> => {
+  const deadline = Date.now() + apiReadyTimeout;
+  for (;;) {
+    try {
+      const response = await fetch(new URL('/health/live', url));
+      if (response.ok) {
+        return;
+      }
+    } catch {
+      /* Not listening yet. */
+    }
+    if (child.exitCode !== null) {
+      throw new Error(`The test server for ${url} exited with code ${String(child.exitCode)}`);
+    }
+    if (Date.now() >= deadline) {
+      child.kill('SIGTERM');
+      throw new Error(`The test server did not become ready at ${url}`);
+    }
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 250);
+    });
+  }
+};
+
 const stopChild = async (child: ChildProcess): Promise<void> => {
   if (child.exitCode !== null || child.signalCode !== null) {
     return;
@@ -90,9 +116,24 @@ const closeLog = async (apiLog: ReturnType<typeof createWriteStream>): Promise<v
     apiLog.end(resolve);
   });
 
+/** Refuse shared service defaults before starting a completed artifact. */
+const assertExternalServices = (): void => {
+  for (const [value, defaultPort] of [
+    [process.env['DATABASE_URL'], '5432'],
+    [process.env['REDIS_URL'], '6379'],
+    [process.env['TAU_S3_ENDPOINT'], '9000'],
+  ]) {
+    const url = new URL(value ?? 'http://invalid');
+    if (!['127.0.0.1', 'localhost'].includes(url.hostname) || !url.port || url.port === defaultPort) {
+      throw new Error('Completed desktop acceptance requires explicit alternate-port loopback services.');
+    }
+  }
+};
+
 export const setup = async (): Promise<() => void> => {
   if (desktopE2ECompletedArtifact) {
     desktopE2EPackagedExecutable();
+    assertExternalServices();
     const apiUrl = new URL(desktopE2EApiUrl);
     if (
       !['127.0.0.1', '[::1]', 'localhost'].includes(apiUrl.hostname) ||
@@ -114,7 +155,17 @@ export const setup = async (): Promise<() => void> => {
    * was six days old and predated the bearer plugin. `nx build api` cannot be
    * used — its dependency chain reaches `runtime:build`, which is red on Node
    * 24 for a tsdown config-loader bug. */
-  execFileSync(resolve(workspaceRoot, 'node_modules/.bin/vite'), ['build'], { cwd: apiRoot, stdio: 'ignore' });
+  if (!desktopE2ECompletedArtifact) {
+    execFileSync(resolve(workspaceRoot, 'node_modules/.bin/vite'), ['build'], { cwd: apiRoot, stdio: 'ignore' });
+    execFileSync(
+      resolve(workspaceRoot, 'node_modules/.bin/vite'),
+      ['build', '--config', 'vite.storage-worker.config.ts'],
+      {
+        cwd: apiRoot,
+        stdio: 'ignore',
+      },
+    );
+  }
 
   const environment = { ...process.env };
   environment['AUTH_URL'] = desktopE2EApiUrl;
@@ -123,6 +174,9 @@ export const setup = async (): Promise<() => void> => {
   environment['TAU_API_URL'] = desktopE2EApiUrl;
   environment['TAU_FRONTEND_URL'] = desktopE2EFrontendUrl;
   environment['TAU_TEST_MODE'] = 'true';
+  /* DC1: git RPCs and repository tombstones are forwarded to the tau-storage
+   * worker booted below, with the development grant and receipt keys. */
+  environment['TAU_STORAGE_URL'] = desktopE2EStorageUrl;
   /* No `TAU_GIT_ROOT`: the git storage substrate charter retired it (D1, S3)
    * and `environment.config.ts` now *refuses to boot* a process that carries
    * one, which is what stopped this whole tier starting (W10 defect 3).
@@ -192,6 +246,45 @@ export const setup = async (): Promise<() => void> => {
   if (!apiCwd) {
     throw new Error('Completed-artifact E2E requires the isolated launcher API directory.');
   }
+  /* The worker first: it is what the API forwards to, and it holds no database
+   * or Redis (blanked so `.env` cannot fill them in). */
+  const storageLog = createWriteStream(resolve(logDirectory, apiLogName.replace(/^api/u, 'storage')), { flags: 'w' });
+  const storage = spawn(
+    process.execPath,
+    [
+      ...(desktopE2ECompletedArtifact ? [] : ['--env-file-if-exists=.env']),
+      '--import',
+      new URL('register.mjs', pathToFileURL(createRequire(import.meta.url).resolve('@oxc-node/core/package.json')))
+        .href,
+      resolve(apiRoot, 'dist/storage-worker.js'),
+    ],
+    {
+      cwd: apiCwd,
+      /* eslint-disable @typescript-eslint/naming-convention -- process environment names */
+      env: {
+        ...process.env,
+        NODE_ENV: 'development',
+        PORT: new URL(desktopE2EStorageUrl).port,
+        DATABASE_URL: '',
+        REDIS_URL: '',
+        OTEL_SERVICE_NAME: 'tau-storage',
+        OTEL_METRICS_PORT: '0',
+        TAU_STORAGE_RECEIPT_URL: new URL('/v1/internal/storage/receipts', desktopE2EApiUrl).href,
+      },
+      /* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
+  storage.stdout.pipe(storageLog);
+  storage.stderr.pipe(storageLog);
+  try {
+    await waitForLive(storage, desktopE2EStorageUrl);
+  } catch (error) {
+    await stopChild(storage);
+    await closeLog(storageLog);
+    throw error;
+  }
+
   const api = spawn(
     process.execPath,
     [
@@ -211,11 +304,15 @@ export const setup = async (): Promise<() => void> => {
   } catch (error) {
     await stopChild(api);
     await closeLog(apiLog);
+    await stopChild(storage);
+    await closeLog(storageLog);
     throw error;
   }
 
   return async () => {
     await stopChild(api);
     await closeLog(apiLog);
+    await stopChild(storage);
+    await closeLog(storageLog);
   };
 };

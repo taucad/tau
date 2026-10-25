@@ -26,6 +26,8 @@ export type InitializeMemoryHandle = {
   fileSystemPort?: MessagePortLike;
   computeStorePort?: MessagePortLike;
   computeBindingMode?: 'off' | 'memory' | 'durable';
+  /** The binding's `memoryConstrained`: size the worker's compute caches for a phone-class device. */
+  computeMemoryConstrained?: boolean;
   devtoolsTelemetry?: boolean;
   compiledWasmModules?: readonly CompiledWasmModuleHandle[];
 };
@@ -50,6 +52,16 @@ export type TelemetryBatch = {
   readonly entries: readonly TelemetryEntry[];
   readonly origin: TelemetryOrigin;
   readonly epoch: number;
+  /**
+   * Spans the producer lost since its previous batch: its bounded queue was full, or a span ended
+   * after the producer was recycled. Absent from an older producer, which means unknown, not zero.
+   */
+  readonly dropped?: number;
+  /**
+   * Operation roots among the lost spans, as span id → `operation.id`, so the surviving children of a
+   * lost root can still be placed in the trace of their operation.
+   */
+  readonly droppedRoots?: Readonly<Record<string, string>>;
 };
 
 /** One retained span with its producer and clock anchor. @public */
@@ -71,6 +83,8 @@ export type RuntimeInitializeArgs = {
   memoryHandle?: InitializeMemoryHandle;
   sessionId?: string;
   resumeToken?: string;
+  /** The client's id for this attempt; the worker's `kernel.bootstrap` root carries it as `operation.id`. */
+  operationId?: string;
 };
 
 /** Runtime worker initialize result. @public */
@@ -91,6 +105,8 @@ export type RuntimeTranscodeArgs = {
   readonly to: string;
   readonly files: ExportFile[];
   readonly options: Record<string, unknown>;
+  /** The client's id for this attempt; the worker's operation root carries it as `operation.id`. */
+  readonly operationId?: string;
 };
 
 /** Request-scoped source-closure collection without evaluation. @public */

@@ -166,7 +166,7 @@ export function TelemetryPanelContent(): React.JSX.Element {
           aria-label='Filter telemetry'
           placeholder='Filter telemetry…'
           value={query}
-          className='h-7 min-w-0 bg-background'
+          className='h-7 min-w-0 bg-background pointer-coarse:h-10'
           onChange={(event) => {
             setQuery(event.target.value);
           }}
@@ -202,6 +202,7 @@ export const ChatKernel = memo(
           <FloatingPanelContentTitle>Telemetry</FloatingPanelContentTitle>
           <FloatingPanelContentHeaderActions>
             <FloatingPanelClose
+              label='Close Telemetry'
               icon={XIcon}
               tooltipContent={(isOpen) => (
                 <div className='flex items-center gap-2'>{isOpen ? 'Close' : 'Open'} Telemetry</div>

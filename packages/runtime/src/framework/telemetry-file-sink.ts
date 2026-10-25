@@ -8,20 +8,26 @@
  * worker — reconcile on one clock in one directory.
  *
  * It is deliberately an *enqueue-and-return* exporter. The dispatcher flushes
- * telemetry inside the render response turn (before `geometryComputed`), so any
- * synchronous filesystem work here would land on the render path; a
+ * telemetry in the turn that posts an operation's terminal reply, so any
+ * synchronous filesystem work here would delay the next operation; a
  * `WriteStream` buffers the line and returns. It also never throws: a stream
  * reports disk-full or `EACCES` as an `'error'` event, which Node rethrows out
  * of the event loop when nothing listens, and telemetry must not be able to
- * take a kernel process down.
+ * take a kernel process down. Every span it accepts and does not write is
+ * counted in `dropped`; one bad record never turns the sink off.
  */
 
 import { isNode } from '#framework/environment.js';
 import { toOtlpJson } from '#framework/telemetry-otlp.js';
 import type { TelemetryBatch, TelemetrySpanRecord } from '#types/runtime-wire.types.js';
 
-/** A sink that accepts batches without blocking the emitting thread. */
+/** A sink that accepts batches without blocking the emitting thread. @public */
 export type TelemetryExporter = {
+  /**
+   * Spans this sink has accepted but not written: a record that would not serialize, a batch refused
+   * while the stream buffer was full or a rotation was in flight, or anything after the file failed.
+   */
+  readonly dropped: number;
   /** Enqueue one batch. Never throws, never performs synchronous I/O. */
   write(batch: TelemetryBatch): void;
   /** Stop accepting batches and flush what is already queued. */
@@ -43,6 +49,7 @@ const maxBufferedBytes = 1024 * 1024;
  * `TAU_TELEMETRY_DIR` to redirect it, or `TAU_TELEMETRY=0` to turn it off.
  *
  * @returns The traces directory, or `undefined` when this realm writes no files.
+ * @public
  */
 export function telemetryDirectory(): string | undefined {
   if (!isNode()) {
@@ -57,7 +64,7 @@ export function telemetryDirectory(): string | undefined {
   return base ? `${base}/traces` : undefined;
 }
 
-/** The line shape a sink writes. */
+/** The line shape a sink writes. @public */
 export type TelemetryFileFormat = 'jsonl' | 'otlp';
 
 /**
@@ -68,6 +75,7 @@ export type TelemetryFileFormat = 'jsonl' | 'otlp';
  * hands the same spans to an external collector instead (D8).
  *
  * @returns The configured format, `jsonl` unless OTLP was asked for.
+ * @public
  */
 export function telemetryFormat(): TelemetryFileFormat {
   // oxlint-disable-next-line n/prefer-global/process -- same environment `telemetryDirectory` reads
@@ -79,6 +87,22 @@ export function telemetryFormat(): TelemetryFileFormat {
  *
  * @param options - Target directory, file name, and rotation threshold.
  * @returns The exporter, or `undefined` when the directory cannot be opened.
+ * @public
+ *
+ * @example <caption>Write a Node host's span batches to its traces directory</caption>
+ * ```typescript
+ * import { openTelemetryFileSink, telemetryDirectory, telemetryFormat } from '@taucad/runtime/node';
+ * import type { TelemetryBatch } from '@taucad/runtime/types';
+ *
+ * declare const batch: TelemetryBatch;
+ * const directory = telemetryDirectory();
+ * const sink =
+ *   directory === undefined
+ *     ? undefined
+ *     : await openTelemetryFileSink({ directory, fileName: `cli-${process.pid}.jsonl`, format: telemetryFormat() });
+ * sink?.write(batch);
+ * sink?.close();
+ * ```
  */
 export async function openTelemetryFileSink(options: {
   /** Directory that receives the file; created when absent. */
@@ -101,6 +125,8 @@ export async function openTelemetryFileSink(options: {
   let stream: ReturnType<typeof createWriteStream> | undefined;
   let bytes = 0;
   let disabled = false;
+  let closed = false;
+  let dropped = 0;
 
   const open = (): void => {
     const opened = createWriteStream(filePath, { flags: 'a' });
@@ -119,9 +145,9 @@ export async function openTelemetryFileSink(options: {
   }
 
   /* Rename only once the outgoing stream has flushed, so no line is written to a
-   * file that is about to move. Spans emitted inside that window are dropped —
-   * telemetry is observational, and a queue that grows under backpressure is the
-   * failure this sink exists to avoid. */
+   * file that is about to move. Spans emitted inside that window are dropped and
+   * counted — telemetry is observational, and a queue that grows under
+   * backpressure is the failure this sink exists to avoid. */
   const rotate = (): void => {
     const previous = stream;
     stream = undefined;
@@ -136,21 +162,43 @@ export async function openTelemetryFileSink(options: {
     });
   };
 
+  /* One record that will not serialize (a BigInt attribute, a cycle) costs that record, never
+   * the sink: the rest of the batch and every later batch are still written. */
+  const serialize = (batch: TelemetryBatch): string => {
+    if (options.format === 'otlp') {
+      try {
+        return `${toOtlpJson(batch)}\n`;
+      } catch {
+        dropped += batch.entries.length;
+        return '';
+      }
+    }
+    let lines = '';
+    for (const entry of batch.entries) {
+      try {
+        const record: TelemetrySpanRecord = { ...entry, origin: batch.origin, epoch: batch.epoch };
+        lines += `${JSON.stringify(record)}\n`;
+      } catch {
+        dropped++;
+      }
+    }
+    return lines;
+  };
+
   return {
+    get dropped() {
+      return dropped;
+    },
     write(batch) {
-      if (disabled || batch.entries.length === 0) {
+      if (closed || batch.entries.length === 0) {
         return;
       }
-      let lines = '';
-      if (options.format === 'otlp') {
-        lines = `${toOtlpJson(batch)}\n`;
-      } else {
-        for (const entry of batch.entries) {
-          const record: TelemetrySpanRecord = { ...entry, origin: batch.origin, epoch: batch.epoch };
-          lines += `${JSON.stringify(record)}\n`;
-        }
+      if (disabled || !stream || stream.writableLength > maxBufferedBytes) {
+        dropped += batch.entries.length;
+        return;
       }
-      if (!stream || stream.writableLength > maxBufferedBytes) {
+      const lines = serialize(batch);
+      if (lines === '') {
         return;
       }
       /* Span JSON is ASCII, so length is the byte count; the only consumer of
@@ -162,6 +210,7 @@ export async function openTelemetryFileSink(options: {
       }
     },
     close() {
+      closed = true;
       disabled = true;
       stream?.end();
       stream = undefined;

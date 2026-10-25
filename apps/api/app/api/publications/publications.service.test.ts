@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -24,6 +25,7 @@ import type { RepositoryLease } from '#api/git/store/lease.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import {
   isPublishableTreePath,
+  leaseGitRunner,
   parseLfsPointer,
   readPublishedTree,
 } from '#api/publications/publication-materializer.js';
@@ -34,6 +36,30 @@ import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.
 import * as schema from '#database/schema.js';
 
 type PublicationsServiceDeps = ConstructorParameters<typeof PublicationsService>;
+
+// Lifecycle interleavings use real PostgreSQL in publication-deletion.integration.test.ts.
+// These unit fixtures retain their existing statement-level data stubs.
+vi.mock('#database/project-lifecycle.js', () => ({
+  assertProjectActive: vi.fn(),
+  assertActiveProjectLocked: vi.fn(),
+}));
+
+const createTestService = (...dependencies: PublicationsServiceDeps): PublicationsService => {
+  const { database } = dependencies[0];
+  // oxlint-disable-next-line typescript/no-unnecessary-condition -- legacy partial database stubs intentionally omit unused members.
+  if (database !== undefined && database.transaction === undefined) {
+    type Transaction = Parameters<Parameters<typeof database.transaction>[0]>[0];
+    database.transaction = async <T>(body: (transaction: Transaction) => Promise<T>): Promise<T> =>
+      body(
+        mock<Transaction>({
+          select: database.select,
+          insert: database.insert,
+          update: database.update,
+        }),
+      );
+  }
+  return new PublicationsService(...dependencies);
+};
 
 /**
  * A real repository holding one named version of the given files.
@@ -133,6 +159,8 @@ function createStoreStub(repositoryPath: string): PublicationsServiceDeps[8] {
 function leaseDependencies(repositoryPath: string): readonly [PublicationsServiceDeps[8], PublicationsServiceDeps[9]] {
   const store = createStoreStub(repositoryPath);
   const repositories = {
+    /* The lease here is a real directory, so its git is a local child (DC1 sends it to tau-storage). */
+    leaseGit: leaseGitRunner,
     withLease: async <T>(
       access: { ownerId: string; projectId: string },
       work: (lease: RepositoryLease) => Promise<T>,
@@ -342,7 +370,7 @@ function createProjectShareService(args: { readonly selectRows: unknown[][] }): 
     select.mockReturnValueOnce(createSelectReturningRows(rows));
   }
 
-  return new PublicationsService(
+  return createTestService(
     { database: { select } } as unknown as PublicationsServiceDeps[0],
     createStorageStub(),
     createConfigStub(),
@@ -633,7 +661,7 @@ describe('PublicationsService.publishFromRevision', () => {
       ]),
     );
 
-    const service = new PublicationsService(
+    const service = createTestService(
       createPublishDatabase().databaseService,
       storage,
       createConfigStub(),
@@ -658,7 +686,7 @@ describe('PublicationsService.publishFromRevision', () => {
     const { databaseService, txInserts } = createPublishDatabase();
     const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('code')]]));
 
-    const service = new PublicationsService(
+    const service = createTestService(
       databaseService,
       createStorageStub(),
       createConfigStub(),
@@ -692,7 +720,7 @@ describe('PublicationsService.publishFromRevision', () => {
     const { databaseService } = createPublishDatabase();
     const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('code')]]));
 
-    const service = new PublicationsService(
+    const service = createTestService(
       databaseService,
       createStorageStub(),
       createConfigStub(),
@@ -724,7 +752,7 @@ describe('PublicationsService.publishFromRevision', () => {
     );
     const { databaseService } = createPublishDatabase();
 
-    const service = new PublicationsService(
+    const service = createTestService(
       databaseService,
       createStorageStub(),
       createConfigStub(),
@@ -960,7 +988,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       publicUrl: vi.fn(() => 'https://cdn.example/blob'),
     };
 
-    const service = new PublicationsService(
+    const service = createTestService(
       createDatabaseChainReturning([publicRow]),
       storage as unknown as PublicationsServiceDeps[1],
       createConfigStub(),
@@ -982,7 +1010,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
 
   it('resolves default thumbnail/og URLs without double-prefixing the namespace', async () => {
     const storage = createStorageForManifest();
-    const service = new PublicationsService(
+    const service = createTestService(
       createDatabaseChainReturning([{ ...publicationRow, ownerSnapshot: { id: 'user_owner', name: 'Owner' } }]),
       storage as unknown as PublicationsServiceDeps[1],
       createConfigStub(),
@@ -1004,7 +1032,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
 
   it('resolves an uploaded thumbnail from the blobs namespace', async () => {
     const storage = createStorageForManifest();
-    const service = new PublicationsService(
+    const service = createTestService(
       createDatabaseChainReturning([
         { ...publicationRow, thumbnailKey: 'blobs/ab/cdef', ownerSnapshot: { id: 'user_owner', name: 'Owner' } },
       ]),
@@ -1043,7 +1071,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       publicUrl: vi.fn(() => 'https://cdn.example/blob'),
     };
 
-    const service = new PublicationsService(
+    const service = createTestService(
       createDatabaseChainReturning([
         { ...publicationRow, visibility: 'public', ownerSnapshot: { id: 'user_owner', name: 'Owner' } },
       ]),
@@ -1066,7 +1094,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
   });
 
   it('requires authentication before opening private publications', async () => {
-    const service = new PublicationsService(
+    const service = createTestService(
       createDatabaseChainReturning([
         { ...publicationRow, visibility: 'private', ownerSnapshot: { id: 'user_owner', name: 'Owner' } },
       ]),
@@ -1118,7 +1146,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       .mockReturnValueOnce({ from: accessFrom });
     const database = { database: { select } } as unknown as PublicationsServiceDeps[0];
 
-    const service = new PublicationsService(
+    const service = createTestService(
       database,
       createStorageForManifest() as unknown as PublicationsServiceDeps[1],
       createConfigStub(),
@@ -1168,7 +1196,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       .mockReturnValueOnce({ from: accessFrom });
     const database = { database: { select } } as unknown as PublicationsServiceDeps[0];
 
-    const service = new PublicationsService(
+    const service = createTestService(
       database,
       createStorageStub(),
       createConfigStub(),
@@ -1232,7 +1260,7 @@ describe('PublicationsService.updateVisibility', () => {
 
     const storage = args.storage ?? createManifestStorageStub();
 
-    const service = new PublicationsService(
+    const service = createTestService(
       { database: { select, update } } as unknown as PublicationsServiceDeps[0],
       storage,
       createConfigStub(),
@@ -1451,7 +1479,7 @@ describe('PublicationsService access grants', () => {
 
     const select = vi.fn().mockReturnValueOnce({ from: ownerFrom }).mockReturnValueOnce({ from: accessFrom });
     const database = { database: { select } } as unknown as PublicationsServiceDeps[0];
-    const service = new PublicationsService(
+    const service = createTestService(
       database,
       createStorageStub(),
       createConfigStub(),
@@ -1479,14 +1507,18 @@ describe('PublicationsService access grants', () => {
     const existingWhere = vi.fn().mockReturnValue({ limit: existingLimit });
     const existingFrom = vi.fn().mockReturnValue({ where: existingWhere });
 
-    const select = vi.fn().mockReturnValueOnce({ from: ownerFrom }).mockReturnValueOnce({ from: existingFrom });
+    const select = vi
+      .fn()
+      .mockReturnValueOnce({ from: ownerFrom })
+      .mockReturnValueOnce({ from: ownerFrom })
+      .mockReturnValueOnce({ from: existingFrom });
     const returning = vi.fn().mockResolvedValue([accessRow]);
     const onConflictDoUpdate = vi.fn().mockReturnValue({ returning });
     const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
     const insert = vi.fn().mockReturnValue({ values });
     const database = { database: { select, insert } } as unknown as PublicationsServiceDeps[0];
     const email = createEmailStub();
-    const service = new PublicationsService(
+    const service = createTestService(
       database,
       createStorageStub(),
       createConfigStub(),
@@ -1518,14 +1550,18 @@ describe('PublicationsService access grants', () => {
     const existingWhere = vi.fn().mockReturnValue({ limit: existingLimit });
     const existingFrom = vi.fn().mockReturnValue({ where: existingWhere });
 
-    const select = vi.fn().mockReturnValueOnce({ from: ownerFrom }).mockReturnValueOnce({ from: existingFrom });
+    const select = vi
+      .fn()
+      .mockReturnValueOnce({ from: ownerFrom })
+      .mockReturnValueOnce({ from: ownerFrom })
+      .mockReturnValueOnce({ from: existingFrom });
     const returning = vi.fn().mockResolvedValue([accessRow]);
     const onConflictDoUpdate = vi.fn().mockReturnValue({ returning });
     const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
     const insert = vi.fn().mockReturnValue({ values });
     const database = { database: { select, insert } } as unknown as PublicationsServiceDeps[0];
     const email = createEmailStub();
-    const service = new PublicationsService(
+    const service = createTestService(
       database,
       createStorageStub(),
       createConfigStub(),
@@ -1562,7 +1598,11 @@ describe('PublicationsService access grants', () => {
     const existingWhere = vi.fn().mockReturnValue({ limit: existingLimit });
     const existingFrom = vi.fn().mockReturnValue({ where: existingWhere });
 
-    const select = vi.fn().mockReturnValueOnce({ from: ownerFrom }).mockReturnValueOnce({ from: existingFrom });
+    const select = vi
+      .fn()
+      .mockReturnValueOnce({ from: ownerFrom })
+      .mockReturnValueOnce({ from: ownerFrom })
+      .mockReturnValueOnce({ from: existingFrom });
     const returning = vi.fn().mockResolvedValue([accessRow]);
     const onConflictDoUpdate = vi.fn().mockReturnValue({ returning });
     const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
@@ -1570,7 +1610,7 @@ describe('PublicationsService access grants', () => {
     const database = { database: { select, insert } } as unknown as PublicationsServiceDeps[0];
     const email = createEmailStub();
     const metrics = createMetricsStub();
-    const service = new PublicationsService(
+    const service = createTestService(
       database,
       createStorageStub(),
       createConfigStub(),
@@ -1607,7 +1647,11 @@ describe('PublicationsService access grants', () => {
     const existingWhere = vi.fn().mockReturnValue({ limit: existingLimit });
     const existingFrom = vi.fn().mockReturnValue({ where: existingWhere });
 
-    const select = vi.fn().mockReturnValueOnce({ from: ownerFrom }).mockReturnValueOnce({ from: existingFrom });
+    const select = vi
+      .fn()
+      .mockReturnValueOnce({ from: ownerFrom })
+      .mockReturnValueOnce({ from: ownerFrom })
+      .mockReturnValueOnce({ from: existingFrom });
     const returning = vi.fn().mockResolvedValue([accessRow]);
     const onConflictDoUpdate = vi.fn().mockReturnValue({ returning });
     const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
@@ -1615,7 +1659,7 @@ describe('PublicationsService access grants', () => {
     const database = { database: { select, insert } } as unknown as PublicationsServiceDeps[0];
     const email = createEmailStub();
     const metrics = createMetricsStub();
-    const service = new PublicationsService(
+    const service = createTestService(
       database,
       createStorageStub(),
       createConfigStub(),
@@ -1673,7 +1717,7 @@ describe('PublicationsService.recordView', () => {
     rateLimiter?: PublicationsServiceDeps[4];
     metrics?: PublicationsServiceDeps[5];
   }): PublicationsService {
-    return new PublicationsService(
+    return createTestService(
       args.database,
       createStorageStub(),
       createConfigStub(),
@@ -1827,7 +1871,7 @@ describe('PublicationsService.publishFromRevision storage tiers (R2/R8)', () => 
     );
     const storage = args?.storage ?? createStorageStub();
     const repositoryPath = seedRepository(args?.files ?? new Map([['main.ts', encodeUtf8('code')]]));
-    const service = new PublicationsService(
+    const service = createTestService(
       databaseService,
       storage,
       createConfigStub(),
@@ -1884,7 +1928,7 @@ describe('PublicationsService.publishFromRevision storage tiers (R2/R8)', () => 
         return { ...read, manifest: encodeManifest({ ...manifest, refs: references }) };
       },
     } as unknown as PublicationsServiceDeps[8];
-    const service = new PublicationsService(
+    const service = createTestService(
       databaseService,
       createStorageStub(),
       createConfigStub(),
@@ -2036,6 +2080,40 @@ describe('PublicationsService.publishFromRevision storage tiers (R2/R8)', () => 
     expect(outerInsert).not.toHaveBeenCalled();
   });
 
+  it('should retain held blob references when republishing the same revision', async () => {
+    const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('code')]]));
+    const manifestKey = `publications/pub_existing/${seededRevision(repositoryPath)}.json`;
+    const { databaseService, txInserts } = createPublishDatabase({
+      existingRows: [
+        {
+          id: 'pub_existing',
+          projectId: 'proj_1',
+          tag: 'v1',
+          manifestKey,
+          visibility: 'public',
+          entryPath: 'main.ts',
+        },
+      ],
+    });
+    const service = createTestService(
+      databaseService,
+      createManifestStorageStub(),
+      createConfigStub(),
+      createRedisStub(),
+      createRateLimiterStub(),
+      createMetricsStub(),
+      createEmailStub(),
+      createBillingStub(),
+      ...leaseDependencies(repositoryPath),
+    );
+    await service.publishFromRevision({
+      ownerId: 'user_1',
+      request: publishRequest(repositoryPath, { visibility: 'public' }),
+    });
+    expect(txInserts.filter((entry) => entry.table === schema.blobRef)).toEqual([]);
+    expect(txInserts.find((entry) => entry.table === schema.publication)?.payload['manifestKey']).toBe(manifestKey);
+  });
+
   it('should re-point an existing publication rather than creating a second one (AC13)', async () => {
     const existing = {
       id: 'pub_existing',
@@ -2048,7 +2126,7 @@ describe('PublicationsService.publishFromRevision storage tiers (R2/R8)', () => 
     const { databaseService, txInserts } = createPublishDatabase({ existingRows: [existing] });
     const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('code')]]));
     const storage = createManifestStorageStub();
-    const service = new PublicationsService(
+    const service = createTestService(
       databaseService,
       storage,
       createConfigStub(),
@@ -2178,7 +2256,7 @@ describe('PublicationsService derived-state repair', () => {
     };
     const database = createDerivedDatabase({ publication, generation: 4, derivedGeneration: 2 });
 
-    const service = new PublicationsService(
+    const service = createTestService(
       database.databaseService,
       createManifestStorageStub(),
       createConfigStub(),
@@ -2230,7 +2308,7 @@ describe('PublicationsService derived-state repair', () => {
     };
     const database = createDerivedDatabase({ publication, generation: 4, derivedGeneration: 2 });
 
-    const service = new PublicationsService(
+    const service = createTestService(
       database.databaseService,
       createManifestStorageStub(),
       createConfigStub(),
@@ -2273,7 +2351,7 @@ describe('PublicationsService derived-state repair', () => {
     };
     const database = createDerivedDatabase({ publication, generation: 4, derivedGeneration: 4 });
 
-    const service = new PublicationsService(
+    const service = createTestService(
       database.databaseService,
       createManifestStorageStub(),
       createConfigStub(),
@@ -2325,7 +2403,7 @@ describe('PublicationsService.resolvePublicationFile (R3)', () => {
     readonly storage?: PublicationsServiceDeps[1];
   }): { readonly service: PublicationsService; readonly storage: PublicationsServiceDeps[1] } {
     const storage = args.storage ?? createManifestStorageStub();
-    const service = new PublicationsService(
+    const service = createTestService(
       args.database,
       storage,
       createConfigStub(),
@@ -2470,7 +2548,7 @@ describe('PublicationsService.openPublicationFile (R3)', () => {
         contentLength: 12,
       });
 
-    const service = new PublicationsService(
+    const service = createTestService(
       {} as unknown as PublicationsServiceDeps[0],
       storage,
       createConfigStub(),
@@ -2501,7 +2579,7 @@ describe('PublicationsService.openPublicationFile (R3)', () => {
     const storage = createStorageStub();
     vi.mocked(storage.getBlob).mockRejectedValue(Object.assign(new Error('denied'), { name: 'AccessDenied' }));
 
-    const service = new PublicationsService(
+    const service = createTestService(
       {} as unknown as PublicationsServiceDeps[0],
       storage,
       createConfigStub(),
@@ -2526,7 +2604,7 @@ describe('PublicationsService.openPublicationFile (R3)', () => {
       etag: 'e',
       contentLength: thumbnail.byteLength,
     });
-    const service = new PublicationsService(
+    const service = createTestService(
       {} as unknown as PublicationsServiceDeps[0],
       storage,
       createConfigStub(),
@@ -2586,7 +2664,7 @@ describe('PublicationsService.getPublicationForViewer tiered file URLs (R4/R6)',
       etag: 'etag',
     }));
 
-    const service = new PublicationsService(
+    const service = createTestService(
       createDatabaseChainReturning([args.row]),
       storage,
       createConfigStub(),
@@ -2675,7 +2753,7 @@ describe('PublicationsService private-visibility entitlement gate (T4/T16)', () 
   }
 
   function createGateService(args: { entitled: boolean; parentRows: unknown[] }): PublicationsService {
-    return new PublicationsService(
+    return createTestService(
       createGateDatabase(args.parentRows),
       createStorageStub(),
       createConfigStub(),
@@ -2711,7 +2789,7 @@ describe('PublicationsService private-visibility entitlement gate (T4/T16)', () 
 
   it('allows private publishes for entitled users without consulting grandfather state', async () => {
     const database = createGateDatabase([]);
-    const service = new PublicationsService(
+    const service = createTestService(
       database,
       createStorageStub(),
       createConfigStub(),

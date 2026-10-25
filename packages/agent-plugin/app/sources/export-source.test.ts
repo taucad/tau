@@ -2,12 +2,26 @@ import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TauViewerModel } from '@taucad/mcp/viewer-protocol';
-import type { ExportEntryState, ExportSource } from '@taucad/workbench-panes/export/export-source';
+import { defaultExportPreferences } from '@taucad/workbench-panes/export/export-source';
+import type {
+  ExportEntryState,
+  ExportPreferencesState,
+  ExportSource,
+} from '@taucad/workbench-panes/export/export-source';
 // oxlint-disable-next-line no-restricted-imports -- relative import is the only portable way to load this package's own package.json (matches `packages/runtime/src/utils/package-info.ts`).
 import packageJson from '../../package.json' with { type: 'json' };
 import { ToolCallError } from '#app/host-bridge.js';
 import type { HostBridge, HostView } from '#app/host-bridge.js';
 import { createExportSource, viewerExportTool } from '#app/sources/export-source.js';
+import { createExportOptionStorage } from '#app/sources/export-preferences.js';
+import { laneStoreFor } from '#app/lane-store.js';
+
+/** Option storage over an empty storage that keeps nothing, so a test starts from the defaults. */
+const memoryStorage = () =>
+  createExportOptionStorage('test', {
+    getItem: () => null,
+    setItem: () => undefined,
+  });
 
 const model: TauViewerModel = {
   id: 'm1',
@@ -31,6 +45,19 @@ const listed = {
       exportOptions: {
         schema: { type: 'object', properties: { binary: { type: 'boolean' } } },
         defaults: { binary: true },
+      },
+    },
+    {
+      format: 'glb',
+      fidelity: 'mesh',
+      direct: true,
+      provider: 'replicad',
+      content: {
+        schema: {
+          type: 'object',
+          properties: { includeTopology: { type: 'boolean' } },
+        },
+        defaults: {},
       },
     },
     {
@@ -77,7 +104,9 @@ const createBridge = (kind: HostView['kind']) => {
     throw new Error(`unexpected ${name}`);
   });
   const view: Pick<HostView, 'kind'> = { kind };
-  const partial: Pick<HostBridge, 'callTool'> & { view: () => Pick<HostView, 'kind'> } = { view: () => view, callTool };
+  const partial: Pick<HostBridge, 'callTool'> & {
+    view: () => Pick<HostView, 'kind'>;
+  } = { view: () => view, callTool };
   const bridge = partial as unknown as HostBridge;
   return { bridge, callTool };
 };
@@ -87,6 +116,17 @@ const readEntry = (source: ExportSource, entryPath: string): ExportEntryState =>
   let state: ExportEntryState | undefined;
   const probe = () => {
     state = source.useEntry(entryPath);
+    return null;
+  };
+  renderToString(createElement(probe));
+  return state!;
+};
+
+/** Render the source's preferences hook once, the way the pane calls it. */
+const readPreferences = (source: ExportSource): ExportPreferencesState => {
+  let state: ExportPreferencesState | undefined;
+  const probe = () => {
+    state = source.usePreferences!();
     return null;
   };
   renderToString(createElement(probe));
@@ -104,6 +144,22 @@ describe('createExportSource', () => {
     vi.unstubAllGlobals();
   });
 
+  it("should keep the pane's choices in the shown project's lane store, apart from another project's", () => {
+    const { bridge } = createBridge('mcp-app');
+    const [, persist] = readPreferences(createExportSource(bridge, { ...model, projectKey: 'export-project-a' }));
+    persist({ ...defaultExportPreferences, selectedFormats: ['stl'], formatOptions: { stl: { binary: false } } });
+
+    const store = laneStoreFor('export-project-a');
+    expect(store.readOption('export/preferences')).toMatchObject({ selectedFormats: ['stl'] });
+    expect(store.readOption('export/stl/options')).toEqual({ binary: false });
+    /* A newer model of the same project keeps the choices; another project starts from the defaults. */
+    const newer = createExportSource(bridge, { ...model, id: 'm2', projectKey: 'export-project-a' });
+    expect(readPreferences(newer)[0].selectedFormats).toEqual(['stl']);
+    const other = createExportSource(bridge, { ...model, projectKey: 'export-project-b' });
+    expect(readPreferences(other)[0].selectedFormats).toEqual([]);
+    expect(laneStoreFor('export-project-b').readOption('export/preferences')).toBeUndefined();
+  });
+
   it('should offer a download only on the loopback page', () => {
     expect(createExportSource(createBridge('loopback').bridge, model).destinations).toEqual(['download', 'project']);
     expect(createExportSource(createBridge('mcp-app').bridge, model).destinations).toEqual(['project']);
@@ -118,7 +174,7 @@ describe('createExportSource', () => {
       formats: undefined,
     });
     await vi.waitFor(() => {
-      expect(readEntry(source, 'gear.ts').formats?.map(({ format }) => format)).toEqual(['step', 'stl']);
+      expect(readEntry(source, 'gear.ts').formats?.map(({ format }) => format)).toEqual(['step', 'stl', 'glb']);
     });
     expect(callTool).toHaveBeenCalledOnce();
     expect(callTool).toHaveBeenCalledWith(viewerExportTool.formats, {
@@ -148,13 +204,21 @@ describe('createExportSource', () => {
   });
 
   it.each([
-    { failure: 'NO_KERNEL', thrown: new ToolCallError('NO_KERNEL', 'No kernel exports gear.ts.'), code: 'NO_KERNEL' },
+    {
+      failure: 'NO_KERNEL',
+      thrown: new ToolCallError('NO_KERNEL', 'No kernel exports gear.ts.'),
+      code: 'NO_KERNEL',
+    },
     {
       failure: 'FORMATS_UNAVAILABLE',
       thrown: new ToolCallError('FORMATS_UNAVAILABLE', 'The runtime is still starting.'),
       code: 'FORMATS_UNAVAILABLE',
     },
-    { failure: 'an uncoded error', thrown: new Error('Failed to fetch'), code: 'FORMATS_UNAVAILABLE' },
+    {
+      failure: 'an uncoded error',
+      thrown: new Error('Failed to fetch'),
+      code: 'FORMATS_UNAVAILABLE',
+    },
   ])('should show why the formats are missing after $failure and ask again on retry', async ({ thrown, code }) => {
     const { bridge, callTool } = createBridge('mcp-app');
     callTool.mockRejectedValueOnce(thrown);
@@ -162,16 +226,22 @@ describe('createExportSource', () => {
 
     readEntry(source, 'gear.ts');
     await vi.waitFor(() => {
-      expect(readEntry(source, 'gear.ts').unavailable).toMatchObject({ code, message: thrown.message });
+      expect(readEntry(source, 'gear.ts').unavailable).toMatchObject({
+        code,
+        message: thrown.message,
+      });
     });
     const { hasGeometry, unavailable } = readEntry(source, 'gear.ts');
     expect(hasGeometry).toBe(true);
     expect(unavailable?.retry).toBeTypeOf('function');
 
     unavailable?.retry?.();
-    expect(readEntry(source, 'gear.ts')).toEqual({ hasGeometry: true, formats: undefined });
+    expect(readEntry(source, 'gear.ts')).toEqual({
+      hasGeometry: true,
+      formats: undefined,
+    });
     await vi.waitFor(() => {
-      expect(readEntry(source, 'gear.ts').formats?.map(({ format }) => format)).toEqual(['step', 'stl']);
+      expect(readEntry(source, 'gear.ts').formats?.map(({ format }) => format)).toEqual(['step', 'stl', 'glb']);
     });
     expect(callTool).toHaveBeenCalledTimes(2);
   });
@@ -180,7 +250,10 @@ describe('createExportSource', () => {
     const { bridge, callTool } = createBridge('mcp-app');
     const source = createExportSource(bridge, { ...model, byteLength: 0 });
 
-    expect(readEntry(source, 'gear.ts')).toEqual({ hasGeometry: false, formats: undefined });
+    expect(readEntry(source, 'gear.ts')).toEqual({
+      hasGeometry: false,
+      formats: undefined,
+    });
     expect(callTool).not.toHaveBeenCalled();
   });
 
@@ -245,10 +318,41 @@ describe('createExportSource', () => {
       artifactPath: '.tau/artifacts/x/model.stl',
       offset: 0,
       length: 5,
+      encodings: ['gzip'],
     });
-    expect(callTool).toHaveBeenCalledWith('export_model', { modelId: 'm1', targetFile: 'gear.ts', to: 'stl' });
+    expect(callTool).toHaveBeenCalledWith('export_model', {
+      modelId: 'm1',
+      targetFile: 'gear.ts',
+      to: 'stl',
+    });
     expect(anchor.download).toBe('Gear.stl');
     expect(click).toHaveBeenCalledOnce();
+  });
+
+  it("should pass the content flags the format's route carries", async () => {
+    const { bridge, callTool } = createBridge('mcp-app');
+    const source = createExportSource(bridge, model, {
+      storage: memoryStorage(),
+    });
+    readEntry(source, 'gear.ts');
+    await vi.waitFor(() => {
+      expect(readEntry(source, 'gear.ts').formats).toBeDefined();
+    });
+
+    await source.export({
+      ...request,
+      formats: ['glb'],
+      formatContent: { glb: { includeTopology: true, includeEdges: true } },
+      formatOptions: {},
+      download: false,
+      saveToProject: true,
+    });
+
+    expect(callTool).toHaveBeenCalledWith('export_model', {
+      targetFile: 'gear.ts',
+      to: 'glb',
+      content: { includeTopology: true },
+    });
   });
 
   it('should count a format whose export fails without stopping the rest', async () => {

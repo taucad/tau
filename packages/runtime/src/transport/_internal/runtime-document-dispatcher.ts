@@ -21,6 +21,9 @@ import { createComputeStoreChannelClient } from '#transport/_internal/compute-st
 import { runtimeChannelSessionKey } from '#transport/_internal/runtime-channel-bindings.js';
 import type { BinaryEncoder, DocumentWorkerDispatcherOptions } from '#transport/_internal/runtime-channel-bindings.js';
 
+/** Operation ids remembered while their terminal reply and their settlement meet; older ids are forgotten. */
+const pendingReplyLimit = 64;
+
 const inlineBinary: BinaryEncoder = (_key, source) => {
   const bytes = new Uint8Array(source);
   return { value: { delivery: 'inline', bytes }, transferables: [bytes.buffer], tier: 'transfer' };
@@ -66,9 +69,66 @@ export function createDocumentWorkerDispatcher(
     logTimer ??= setTimeout(flushLogs, logFlushDebounce);
   };
   const telemetryOrigin = createTelemetryOrigin();
-  worker.setTelemetrySend((entries) => {
-    notify('telemetry', { entries, origin: telemetryOrigin, epoch: telemetryEpoch() });
+  worker.setTelemetrySend(({ entries, dropped, droppedRoots }) => {
+    notify('telemetry', {
+      entries,
+      origin: telemetryOrigin,
+      epoch: telemetryEpoch(),
+      dropped,
+      ...(droppedRoots === undefined ? {} : { droppedRoots }),
+    });
   });
+  /* An operation's spans leave after its terminal reply, never before it and never with the next
+   * operation: notify replies (evaluated, rendered) usually post before the operation settles, call
+   * replies (initialize, describe, export, transcode) are posted by the channel after it settles,
+   * and a reply for a thrown evaluation or render is published after it settles. */
+  const repliedBeforeSettle = new Set<string>();
+  const settledBeforeReply = new Set<string>();
+  const afterCallReply = new WeakMap<WeakKey, () => void>();
+  const remember = (ids: Set<string>, operationId: string): void => {
+    ids.add(operationId);
+    if (ids.size > pendingReplyLimit) {
+      ids.delete(ids.values().next().value!);
+    }
+  };
+  const afterTerminalReply = (): void => {
+    try {
+      worker.flushTelemetry();
+    } catch {
+      // Telemetry is observational and must not change runtime outcomes.
+    }
+  };
+  const notifyReplied = (operationId: string): void => {
+    if (settledBeforeReply.delete(operationId)) {
+      afterTerminalReply();
+    } else {
+      remember(repliedBeforeSettle, operationId);
+    }
+  };
+  worker.onOperationSettled = (settled) => {
+    if (settled.operation !== 'evaluate' && settled.operation !== 'render') {
+      return; // A call's reply is posted by the channel after this returns; see `replyThen`.
+    }
+    if (
+      repliedBeforeSettle.delete(settled.operationId) ||
+      settled.outcome === 'cancelled' ||
+      settled.outcome === 'timed-out'
+    ) {
+      afterTerminalReply(); // Replied already, or no reply will come.
+      return;
+    }
+    remember(settledBeforeReply, settled.operationId);
+  };
+  /**
+   * Run the after-reply step once the channel has posted this call's result.
+   *
+   * @param value - The exact object the call returns as its result payload.
+   * @returns The same value.
+   */
+  const replyThen = <T extends WeakKey>(value: T): T => {
+    afterCallReply.set(value, afterTerminalReply);
+    return value;
+  };
   worker.onDescribed = (event) => {
     notify('described', event);
   };
@@ -77,9 +137,9 @@ export function createDocumentWorkerDispatcher(
   };
   worker.onEvaluated = (event) => {
     flushLogs();
-    worker.flushTelemetry();
     notify('evaluated', event);
     worker.permitComputePublication();
+    notifyReplied(`evaluate:${event.documentId}:${event.id}`);
   };
   worker.onRendering = (event) => {
     notify('rendering', event);
@@ -98,11 +158,12 @@ export function createDocumentWorkerDispatcher(
   };
   worker.onRendered = (event) => {
     const transferables: Transferable[] = [];
+    const operationId = `render:${event.subscriptionId}:${event.evaluationId}:${event.requestId}`;
     if (!event.success) {
       flushLogs();
-      worker.flushTelemetry();
       notify('rendered', event);
       worker.permitComputePublication();
+      notifyReplied(operationId);
       return;
     }
     const { content } = event.artifact;
@@ -120,9 +181,9 @@ export function createDocumentWorkerDispatcher(
     };
     const envelope: WithTransferables<typeof value> = { value, transferables };
     flushLogs();
-    worker.flushTelemetry();
     notify('rendered', envelope);
     worker.permitComputePublication();
+    notifyReplied(operationId);
   };
   const initialize = async (
     args: RuntimeDocumentProtocol['calls']['initialize']['args'],
@@ -140,9 +201,10 @@ export function createDocumentWorkerDispatcher(
         worker.setSignalBuffer(memoryHandle.signalBuffer);
       }
       const computeStorePort = options?.computeStorePort ?? memoryHandle?.computeStorePort;
+      const sizing = memoryHandle?.computeMemoryConstrained === true ? { memoryConstrained: true } : {};
       if (computeStorePort) {
         computeStore = createComputeStoreChannelClient(computeStorePort);
-        worker.setComputeBinding({ mode: 'durable', store: computeStore.store });
+        worker.setComputeBinding({ mode: 'durable', store: computeStore.store, ...sizing });
       } else if ((options?.computeBindingMode ?? memoryHandle?.computeBindingMode) === 'off') {
         worker.setComputeBinding({ mode: 'off' });
       } else if (
@@ -150,7 +212,7 @@ export function createDocumentWorkerDispatcher(
         memoryHandle?.computeBindingMode === 'memory' ||
         memoryHandle?.computeBindingMode === 'durable'
       ) {
-        worker.setComputeBinding({ mode: 'memory' });
+        worker.setComputeBinding({ mode: 'memory', ...sizing });
       }
       if (options?.bindingsFactory && memoryHandle) {
         const bindings = options.bindingsFactory(memoryHandle);
@@ -165,14 +227,16 @@ export function createDocumentWorkerDispatcher(
             inlineFileSystem: options?.inlineFileSystem,
           },
           config: args.config,
+          ...(args.operationId === undefined ? {} : { operationId: args.operationId }),
         }),
         trap,
       ]);
       initialized = true;
-      return { capabilities: worker.capabilitiesManifest };
+      return replyThen({ capabilities: worker.capabilitiesManifest });
     } catch (error) {
       computeStore?.dispose();
       computeStore = undefined;
+      afterTerminalReply();
       throw error;
     } finally {
       initializing = false;
@@ -196,6 +260,20 @@ export function createDocumentWorkerDispatcher(
     }
     return { files: encoded as [WireExportFile, ...WireExportFile[]], transferables };
   };
+  /**
+   * Run a call, flushing its spans when it throws: the error reply needs no after-reply step.
+   *
+   * @param run - The call.
+   * @returns The call's result.
+   */
+  const afterThrow = async <T>(run: () => Promise<T>): Promise<T> => {
+    try {
+      return await run();
+    } catch (error) {
+      afterTerminalReply();
+      throw error;
+    }
+  };
   type CallResult = RuntimeDocumentProtocol['calls'][keyof RuntimeDocumentProtocol['calls']]['result'];
   // The RPC callback is generic over the call name. The switch checks each
   // branch against its schema result, but TypeScript cannot correlate N after
@@ -209,24 +287,26 @@ export function createDocumentWorkerDispatcher(
           return (await initialize(args as RuntimeDocumentProtocol['calls']['initialize']['args'])) as CallResult;
         }
         case 'describe': {
-          return (await worker.describe(
-            args as RuntimeDocumentProtocol['calls']['describe']['args'],
-            signal,
-          )) as CallResult;
+          return replyThen(
+            await afterThrow(async () =>
+              worker.describe(args as RuntimeDocumentProtocol['calls']['describe']['args'], signal),
+            ),
+          ) as CallResult;
         }
         case 'export': {
           let result: Awaited<ReturnType<typeof worker.exportDocument>>;
           try {
-            result = await worker.exportDocument(args as RuntimeDocumentProtocol['calls']['export']['args'], signal);
+            result = await afterThrow(async () =>
+              worker.exportDocument(args as RuntimeDocumentProtocol['calls']['export']['args'], signal),
+            );
           } finally {
             flushLogs();
-            worker.flushTelemetry();
           }
           if (!result.success) {
-            return result as CallResult;
+            return replyThen(result) as CallResult;
           }
           const { files, transferables } = encodeExport(result.files);
-          const wire: WireExportResult = { ...result, files };
+          const wire: WireExportResult = replyThen({ ...result, files });
           const response: WithTransferables<RuntimeDocumentProtocol['calls']['export']['result']> = {
             value: wire,
             transferables,
@@ -254,9 +334,11 @@ export function createDocumentWorkerDispatcher(
           return response;
         }
         case 'transcode': {
-          const result = await worker.transcode(args as RuntimeDocumentProtocol['calls']['transcode']['args'], signal);
+          const result = await afterThrow(async () =>
+            worker.transcode(args as RuntimeDocumentProtocol['calls']['transcode']['args'], signal),
+          );
           if (!result.success) {
-            return result as CallResult;
+            return replyThen(result) as CallResult;
           }
           const transferables: Transferable[] = [];
           const data = result.data.map((file, index) => {
@@ -265,7 +347,7 @@ export function createDocumentWorkerDispatcher(
             return { ...file, bytes: delivery.value };
           });
           const response: WithTransferables<RuntimeDocumentProtocol['calls']['transcode']['result']> = {
-            value: { ...result, data },
+            value: replyThen({ ...result, data }),
             transferables,
           };
           return response;
@@ -330,6 +412,14 @@ export function createDocumentWorkerDispatcher(
       port.postMessage(message, transferables);
       if (typeof message === 'object' && message !== null && 'k' in message && message.k === 'rs') {
         worker.permitComputePublication();
+        const payload = 'd' in message ? message.d : undefined;
+        if (typeof payload === 'object' && payload !== null) {
+          const after = afterCallReply.get(payload);
+          if (after) {
+            afterCallReply.delete(payload);
+            after();
+          }
+        }
       }
     },
   };

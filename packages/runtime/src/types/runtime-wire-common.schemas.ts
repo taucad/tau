@@ -82,6 +82,7 @@ export const runtimeInitializeMemoryHandleSchema = z
     fileSystemPort: messagePortSchema.optional(),
     computeStorePort: messagePortSchema.optional(),
     computeBindingMode: z.enum(['off', 'memory', 'durable']).optional(),
+    computeMemoryConstrained: z.boolean().optional(),
     devtoolsTelemetry: z.boolean().optional(),
     compiledWasmModules: z
       .array(z.object({ url: z.string(), module: compiledWasmModuleSchema }).loose())
@@ -98,6 +99,7 @@ export const runtimeInitializeArgsSchema = z
     memoryHandle: runtimeInitializeMemoryHandleSchema.optional(),
     sessionId: z.string().optional(),
     resumeToken: z.string().optional(),
+    operationId: z.string().min(1).optional(),
   })
   .catchall(z.unknown());
 
@@ -131,6 +133,8 @@ export const runtimeTelemetryArgsSchema = z
     entries: z.array(telemetryEntrySchema),
     origin: telemetryOriginSchema,
     epoch: z.number(),
+    dropped: z.number().int().nonnegative().optional(),
+    droppedRoots: z.record(z.string(), z.string()).optional(),
   })
   .catchall(z.unknown());
 

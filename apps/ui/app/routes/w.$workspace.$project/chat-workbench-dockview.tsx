@@ -57,6 +57,7 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import type { WorkbenchLaneNode } from '@taucad/workbench';
 import { fromDockview, toDockview } from '#workbench-records/converters.js';
 import { paneTitle } from '#workbench-records/pane-titles.js';
+import { isSurfaceShipped, withoutUnshippedPanes } from '#workbench-records/surface-availability.js';
 import {
   languageFromExtension,
   tauFileDragMime,
@@ -509,7 +510,9 @@ const sharedWorkbenchSurfaceIds = new Set<WorkbenchPanelId>([
 ]);
 
 export const isWorkbenchSurfaceAllowed = (id: WorkbenchPanelId, profile: WorkbenchProfile): boolean =>
-  (id !== 'print' || isFeatureEnabled('machines')) && (profile === 'editor' || sharedWorkbenchSurfaceIds.has(id));
+  isSurfaceShipped(id) &&
+  (id !== 'print' || isFeatureEnabled('machines')) &&
+  (profile === 'editor' || sharedWorkbenchSurfaceIds.has(id));
 
 const visibleWorkbenchSurfaceGroups = (
   isTauDebugEnabled: boolean,
@@ -549,7 +552,7 @@ export function replaceWorkbenchPlaceholderWithUtility({
   readonly placeholder: IDockviewPanel;
   readonly panelId: WorkbenchUtilityPanelId;
 }): void {
-  if (panelId === 'print' && !isFeatureEnabled('machines')) {
+  if (!isSurfaceShipped(panelId) || (panelId === 'print' && !isFeatureEnabled('machines'))) {
     return;
   }
   const definition = workbenchPanels[panelId];
@@ -887,7 +890,7 @@ export function openWorkbenchUtility(
   panelId: WorkbenchUtilityPanelId,
   group?: DockviewGroupPanel,
 ): void {
-  if (panelId === 'print' && !isFeatureEnabled('machines')) {
+  if (!isSurfaceShipped(panelId) || (panelId === 'print' && !isFeatureEnabled('machines'))) {
     return;
   }
   const definition = workbenchPanels[panelId];
@@ -1823,8 +1826,10 @@ export const WorkbenchDockview = memo(function ({
       const active = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
       isRestoringLayout.current = true;
       try {
+        // Pruned here, not in the record: a web session's next edit writes the pruned layout back, dropping a desktop
+        // Browser tab. That is intended, since Browser tabs are window-local.
         api.fromJSON(
-          toDockview('workbench', node, {
+          toDockview('workbench', withoutUnshippedPanes(node), {
             dimensions: { width: Math.max(1, api.width), height: Math.max(1, api.height) },
             files,
           }),

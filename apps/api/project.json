@@ -73,7 +73,7 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "Bootstrap and maintain the local database exactly as the Fly release_command does: apply the Drizzle migrations, install the billing protections and the runtime role, and \u2014 with TAU_CLOUD_ENABLED=true \u2014 derive the development tariff from the code route table over infra/billing/development.commercial.json and publish it when its content moved. Idempotent: a second run reports `unchanged`."
+        "description": "Bootstrap and maintain the local database exactly as the Fly release_command does: apply the Drizzle migrations, install the billing protections and the runtime role, and — with TAU_CLOUD_ENABLED=true — derive the development tariff from the code route table over infra/billing/development.commercial.json and publish it when its content moved. Idempotent: a second run reports `unchanged`."
       },
       "dependsOn": ["build:billing-command"],
       "options": {
@@ -196,10 +196,29 @@
         "cwd": "{projectRoot}"
       }
     },
+    "build:mirror-command": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/dist/mirror-command.js", "{projectRoot}/dist/mirror-command.js.map"],
+      "options": {
+        "command": "vite build --config vite.mirror-command.config.ts",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "build:storage-worker": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/dist/storage-worker.js", "{projectRoot}/dist/storage-worker.js.map"],
+      "options": {
+        "command": "vite build --config vite.storage-worker.config.ts",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "dev": {
+      "dependsOn": ["storage-worker"]
+    },
     "dev:cloud": {
       "executor": "nx:run-commands",
       "continuous": true,
-      "dependsOn": ["billing-operations"],
+      "dependsOn": ["billing-operations", "storage-worker"],
       "metadata": {
         "description": "Start the API dev server with the billing-operations worker deployments run beside it. With TAU_CLOUD_ENABLED=true the webhook only records a Stripe event; billing-operations fulfils purchases, subscriptions and automatic reloads. Without it a paid checkout stays Processing. The API itself settles abandoned LLM operations; the billing-recovery target is optional scale-out."
       },
@@ -232,11 +251,29 @@
         }
       }
     },
+    "storage-worker": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "dependsOn": ["build:storage-worker"],
+      "metadata": {
+        "description": "Run tau-storage, the git storage worker (DC1), beside the API dev server on :3100. Since DC1 the API holds no lease and runs no git child: it forwards every git RPC to TAU_STORAGE_URL (http://localhost:3100 in .env.example) under the development grant and receipt keys. The worker reads the API's .env for its TAU_S3_* settings and ignores DATABASE_URL and REDIS_URL outside production."
+      },
+      "options": {
+        "command": "node --env-file-if-exists=apps/api/.env apps/api/dist/storage-worker.js",
+        "cwd": "{workspaceRoot}",
+        "env": {
+          "PORT": "3100",
+          "OTEL_METRICS_PORT": "9467",
+          "OTEL_SERVICE_NAME": "tau-storage",
+          "TAU_STORAGE_RECEIPT_URL": "http://localhost:4000/v1/internal/storage/receipts"
+        }
+      }
+    },
     "test:billing-load": {
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "Run one B8.3 local capacity profile on a disposable PostgreSQL 17 cluster it creates and destroys itself; never touches the developer database. Reports land under docs/research/artifacts/tau-cloud-credit-billing-launch-charter/runs/implementation/chunks/C09/lanes/i3/, raw logs under out/research/. Append `-- --runtime=native --postgres-bin=\u2026` for a PostgreSQL 17 keg; the default compose runtime needs a local postgres:17-alpine image."
+        "description": "Run one B8.3 local capacity profile on a disposable PostgreSQL 17 cluster it creates and destroys itself; never touches the developer database. Reports land under docs/research/artifacts/tau-cloud-credit-billing-launch-charter/runs/implementation/chunks/C09/lanes/i3/, raw logs under out/research/. Append `-- --runtime=native --postgres-bin=…` for a PostgreSQL 17 keg; the default compose runtime needs a local postgres:17-alpine image."
       },
       "dependsOn": ["build:billing-command"],
       "options": {

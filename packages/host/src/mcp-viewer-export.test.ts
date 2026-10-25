@@ -4,12 +4,26 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createMcpViewerExport, listKernelExportFormats, shownModelContent } from '#mcp-viewer-export.js';
+import { createMcpViewerExport, listKernelExportFormats } from '#mcp-viewer-export.js';
 import type { ViewerExportRoute, ViewerExportRuntime } from '#mcp-viewer-export.js';
-import type { HostRuntimeClient } from '#agent-tools.js';
+import type { RuntimeClient } from '@taucad/runtime';
 
-/** The host's runtime client is what the server passes as `runtimeFor`'s result. */
-export const hostRuntimeIsViewerExportRuntime = (client: HostRuntimeClient): ViewerExportRuntime => client;
+/** The project's runtime client is what the server passes as `runtimeFor`'s result. */
+export const runtimeClientIsViewerExportRuntime = (client: RuntimeClient): ViewerExportRuntime => client;
+
+/**
+ * A runtime that takes the last matching route, unlike the real ranking, so a test shows the listing follows the
+ * runtime's choice rather than ranking routes itself.
+ */
+const choosing = (
+  routes: readonly ViewerExportRoute[],
+): Pick<ViewerExportRuntime, 'capabilities' | 'bestRouteFor'> => ({
+  capabilities: { routes },
+  bestRouteFor: (format, options) =>
+    routes.findLast(
+      (route) => route.targetFormat === format && route.kernelId === (options?.kernelId ?? route.kernelId),
+    ),
+});
 
 const stlOptions = {
   schema: { type: 'object', properties: { binary: { type: 'boolean' } } },
@@ -59,8 +73,8 @@ const routes: ViewerExportRoute[] = [
 ];
 
 describe('listKernelExportFormats', () => {
-  it("should reduce each of the kernel's formats to its best route, sorted", () => {
-    expect(listKernelExportFormats(routes, 'replicad')).toEqual([
+  it("should list each of the kernel's formats on the route the runtime takes, sorted", () => {
+    expect(listKernelExportFormats(choosing(routes), 'replicad')).toEqual([
       { format: 'glb', fidelity: 'mesh', direct: true, provider: 'replicad' },
       {
         format: 'obj',
@@ -79,85 +93,41 @@ describe('listKernelExportFormats', () => {
     ]);
   });
 
-  it('should prefer a BREP route over a mesh one for the same format', () => {
+  it("should carry the route's content form", () => {
+    const content = {
+      schema: {
+        type: 'object',
+        properties: { includeEdges: { type: 'boolean' } },
+      },
+    } as const;
     const formats = listKernelExportFormats(
-      [
+      choosing([
         {
-          targetFormat: 'step',
+          targetFormat: 'glb',
           kernelId: 'k',
-          transcoderId: 't',
           fidelity: 'mesh',
           exportOptions: none,
+          content,
         },
-        {
-          targetFormat: 'step',
-          kernelId: 'k',
-          transcoderId: 't',
-          fidelity: 'brep',
-          exportOptions: none,
-        },
-      ],
+      ]),
       'k',
     );
-    expect(formats).toEqual([{ format: 'step', fidelity: 'brep', direct: false, provider: 'k+t' }]);
-  });
-});
-
-describe('shownModelContent', () => {
-  const topology: ViewerExportRoute['content'] = {
-    schema: { type: 'object', properties: { includeEdges: { type: 'boolean' }, includeTopology: { type: 'boolean' } } },
-  };
-  const edgesOnly: ViewerExportRoute['content'] = {
-    schema: { type: 'object', properties: { includeEdges: { type: 'boolean' } } },
-  };
-  const glbRoute = (route: Partial<ViewerExportRoute>): ViewerExportRoute => ({
-    targetFormat: 'glb',
-    kernelId: 'k',
-    fidelity: 'mesh',
-    exportOptions: none,
-    ...route,
-  });
-  const contentFor = async (kernelId: string | undefined, glbRoutes: readonly ViewerExportRoute[]) =>
-    shownModelContent({
-      runtimeFor: async () => ({
-        capabilities: { routes: [...routes, ...glbRoutes] },
-        connect: async () => undefined,
-        describe: async () => ({ kernelId }),
-      }),
-      root: '/project',
-      targetFile: 'main.ts',
-    });
-
-  it("should ask for topology when the kernel's own GLB route carries it", async () => {
-    expect(await contentFor('k', [glbRoute({ content: topology })])).toEqual({ includeTopology: true });
-  });
-
-  it('should follow the route the runtime takes: the direct one first, else a transcoded one', async () => {
-    const transcoded = glbRoute({ transcoderId: 't', content: topology });
-    expect(await contentFor('k', [transcoded, glbRoute({ content: edgesOnly })])).toBeUndefined();
-    expect(await contentFor('k', [transcoded])).toEqual({ includeTopology: true });
-  });
-
-  it('should ask for nothing on a route without topology, for an entry without a kernel, or when describing fails', async () => {
-    expect(await contentFor('k', [glbRoute({})])).toBeUndefined();
-    expect(await contentFor('other', [glbRoute({ content: topology })])).toBeUndefined();
-    expect(await contentFor(undefined, [glbRoute({ content: topology })])).toBeUndefined();
-    expect(
-      await shownModelContent({
-        runtimeFor: async () => {
-          throw new Error('runtime unavailable');
-        },
-        root: '/project',
-        targetFile: 'main.ts',
-      }),
-    ).toBeUndefined();
+    expect(formats).toEqual([
+      {
+        format: 'glb',
+        fidelity: 'mesh',
+        direct: true,
+        provider: 'k',
+        content: { ...content, defaults: {} },
+      },
+    ]);
   });
 });
 
 describe('createMcpViewerExport', () => {
   let root: string;
   const runtime: ViewerExportRuntime = {
-    capabilities: { routes },
+    ...choosing(routes),
     connect: vi.fn(async () => undefined),
     describe: vi.fn(async () => ({ kernelId: 'replicad' })),
   };
@@ -179,7 +149,10 @@ describe('createMcpViewerExport', () => {
     expect(runtime.describe).toHaveBeenCalledWith({
       source: { path: 'model.ts' },
     });
-    expect(result).toEqual({ kernelId: 'replicad', formats: listKernelExportFormats(routes, 'replicad') });
+    expect(result).toEqual({
+      kernelId: 'replicad',
+      formats: listKernelExportFormats(runtime, 'replicad'),
+    });
   });
 
   it('should refuse an entry outside the project and report a runtime failure', async () => {
@@ -276,5 +249,21 @@ describe('createMcpViewerExport', () => {
         length: 10,
       }),
     ).toMatchObject({ errorCode: 'NOT_FOUND' });
+  });
+
+  it('should gzip an artifact range when the page can undo it and it gets smaller', async () => {
+    await writeFile(join(root, '.tau/artifacts/abc/zeros.stl'), new Uint8Array(4096));
+    const read = await handlers.readArtifact(root, {
+      artifactPath: '.tau/artifacts/abc/zeros.stl',
+      offset: 0,
+      length: 4096,
+      encodings: ['gzip'],
+    });
+    expect(read).toMatchObject({
+      offset: 0,
+      byteLength: 4096,
+      totalBytes: 4096,
+      encoding: 'gzip',
+    });
   });
 });

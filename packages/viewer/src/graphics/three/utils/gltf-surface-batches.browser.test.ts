@@ -304,9 +304,20 @@ describe.each(['webgl', 'webgpu'] as const)('surface batching actual %s', (backe
       expect(
         split.group.children.map((object) => (object instanceof InstancedMesh ? object.instanceMatrix : undefined)),
       ).toEqual(buffers);
-      const moved = sources[1]!;
-      moved.position.y += 0.5;
-      split.syncMatrices([moved]);
+      // Pose mixed canonical and instance paths together: singleton appearance,
+      // reflection, transparency and a custom callback must retain their direct draws.
+      sources[1]!.material.color.setHex(0x33_ff_33);
+      sources[3]!.scale.x = -1;
+      sources[5]!.material.transparent = true;
+      sources[5]!.material.opacity = 0.5;
+      sources[5]!.material.depthWrite = false;
+      sources[9]!.onBeforeRender = () => undefined;
+      split.sync();
+      const moved = [sources[1]!, sources[3]!, sources[5]!, sources[7]!, sources[9]!];
+      for (const source of moved) {
+        source.position.y += 0.5;
+      }
+      split.syncMatrices(moved);
       const posed = await render();
       split.dispose();
       expect(await render()).toEqual(posed);

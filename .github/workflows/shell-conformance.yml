@@ -1,0 +1,137 @@
+# The native shell conformance rows (desktop Bash/Terminal blueprint W2, testing contract
+# `native-process-core:test:shell-conformance`, extended by the W3 service rows `host:test:shell-conformance`): the real sandbox provider and the machine's own Bash on each
+# row, positive controls before negatives, network negatives judged by canaries outside the sandbox, and one
+# JSON receipt per row binding source, host, runtime, Bash and node-pty identities (I12).
+#
+# - LNX-U and LNX-D: a disposable stock Ubuntu 24.04 or Debian 13 cloud guest under KVM. The guest keeps its
+#   shipped AppArmor policy and `kernel.apparmor_restrict_unprivileged_userns`; the sandbox reaches user
+#   namespaces only through the Tau-scoped profile the real APT selector installs with its bwrap copy. This
+#   row never uses `setup-linux-sandbox`, which relaxes that sysctl for the CAD workers.
+# - MAC-A and MAC-X: hosted `macos-26` (arm64) and `macos-26-intel` (x64), Seatbelt through the same
+#   provider. The macOS Terminal rows are recorded `operator-validation-pending`, never run here.
+# - WIN-ARM is not a row yet: the Windows provider is paused.
+#
+# Noncacheable by construction: the target sets `cache: false` and every row passes `--skip-nx-cache`.
+name: Shell conformance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'packages/core/native-process/**'
+      - 'packages/host/src/shell/**'
+      - 'packages/host/project.json'
+      - 'apps/desktop/scripts/linux-apt-package.mts'
+      - 'apps/desktop/scripts/hosted-linux-bwrap-fixture.mts'
+      - 'apps/desktop/src/shared/linux-installation.ts'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/shell-conformance.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/core/native-process/**'
+      - 'packages/host/src/shell/**'
+      - 'apps/desktop/scripts/linux-apt-package.mts'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/shell-conformance.yml'
+
+permissions:
+  contents: read
+
+env:
+  NX_NO_CLOUD: 'true'
+  NX_DAEMON: 'false'
+  pnpm_config_verify_deps_before_run: warn
+
+concurrency:
+  group: shell-conformance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  linux:
+    name: Shell conformance on ${{ matrix.row }} (stock ${{ matrix.distro }} guest)
+    if: github.event_name != 'pull_request' || github.triggering_actor != 'dependabot[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: ubuntu
+            row: LNX-U
+          - distro: debian
+            row: LNX-D
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Run the conformance target in the stock guest
+        env:
+          TAU_VM_DISTRO: ${{ matrix.distro }}
+        run: bash packages/core/native-process/scripts/shell-conformance-vm.sh
+
+      - name: Upload the receipt
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: shell-conformance-${{ matrix.row }}
+          path: out/test-results/shell-conformance/${{ matrix.row }}/
+          retention-days: 14
+          if-no-files-found: error
+
+  macos:
+    name: Shell conformance on ${{ matrix.row }} (${{ matrix.runner }})
+    if: github.event_name != 'pull_request' || github.triggering_actor != 'dependabot[bot]'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            row: MAC-A
+          - runner: macos-26-intel
+            row: MAC-X
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      # The runtime searches mandatory deny paths with ripgrep; the hosted image does not always carry it.
+      - name: Install ripgrep
+        run: command -v rg || brew install ripgrep
+
+      - name: Run the conformance target
+        env:
+          TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
+          TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/receipt.json
+        run: pnpm nx run native-process-core:test:shell-conformance --skip-nx-cache
+
+      - name: Run the shell service conformance target
+        if: success() || failure()
+        env:
+          TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
+          TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/service-receipt.json
+        run: pnpm nx run host:test:shell-conformance --skip-nx-cache
+
+      - name: Upload the receipt
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: shell-conformance-${{ matrix.row }}
+          path: out/test-results/shell-conformance/${{ matrix.row }}/
+          retention-days: 14
+          if-no-files-found: error

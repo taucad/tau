@@ -15,6 +15,13 @@ import { isAbsolute, resolve } from 'node:path';
 export const desktopE2EApiUrl = process.env['TAU_E2E_API_URL'] ?? 'http://localhost:4014';
 
 /**
+ * The tau-storage worker this suite's API forwards git to (DC1): since DC1 the
+ * API holds no lease and runs no git child. `:4021` is the git tier's first
+ * worker port; the two tiers never run at once.
+ */
+export const desktopE2EStorageUrl = process.env['TAU_E2E_STORAGE_URL'] ?? 'http://localhost:4021';
+
+/**
  * The provider upstream this suite's API is pointed at, and the gateway fixture serves.
  *
  * Fixed rather than ephemeral because the API learns it once, at boot, from

@@ -176,7 +176,7 @@ export function Dockview({
     layout();
     return () => {
       observer.disconnect();
-      apiRef.current = undefined;
+      // Dockview retains its API across StrictMode/Activity effect replay without another onReady call.
     };
   }, []);
 

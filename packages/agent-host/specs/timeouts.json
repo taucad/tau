@@ -28,6 +28,14 @@
       "owner": "storage-gateway W15"
     },
     {
+      "id": "STORAGE-HTTP-RETRY",
+      "bound": "Abortable Tau git HTTP client retry wait: a 429, or a 503 that names Retry-After, waits Retry-After plus up to 1 s of jitter (without one, 0.5 to 1 s doubling); a wait over 10 s is not taken, at most four attempts per request",
+      "site": "packages/revisions/src/http-client.ts",
+      "token": "signal?.removeEventListener('abort', abort)",
+      "class": "Backoff",
+      "owner": "Hosted Remote Storage DA6"
+    },
+    {
       "id": "STORAGE-PROCESS-CLEANUP",
       "bound": "Windows taskkill process-tree cleanup, 1 second inside the close persistence margin; failure is reported",
       "site": "packages/revisions/src/git-command.ts",
@@ -918,12 +926,20 @@
       "owner": "agent-plugin-ui-blueprint W10"
     },
     {
-      "id": "D29",
-      "bound": "Viewer Share pane's direct link: each git call that lists the project's files, 10 s",
-      "site": "packages/host/src/mcp-viewer-share.ts",
-      "token": "timeout: gitTimeout",
+      "id": "D30",
+      "bound": "Viewer Files pane: a project's file changes settle 100 ms before a held app_sync answers with the new filesVersion",
+      "site": "packages/host/src/mcp-viewer-files.ts",
+      "token": "}, settle);",
+      "class": "Debounce",
+      "owner": "agent-plugin-workbench-parity-closeout-blueprint PAR-9"
+    },
+    {
+      "id": "D31",
+      "bound": "show_model on a watched source waits at most the entry's render timeout (Viewer settings, .tau/workbench/entries.json) before RENDER_TIMEOUT",
+      "site": "packages/host/src/mcp-viewer.ts",
+      "token": "AbortSignal.timeout(renderTimeout)",
       "class": "External edge",
-      "owner": "agent-plugin-viewer-parity-blueprint V10"
+      "owner": "agent-plugin-workbench-parity-closeout-blueprint PAR-8"
     },
     {
       "id": "M11",
@@ -972,6 +988,22 @@
       "token": "await delay(pollInterval, undefined, { signal })",
       "class": "External edge",
       "owner": "CLI-A1"
+    },
+    {
+      "id": "SHELL-COMMAND-TIMEOUT",
+      "bound": "Agent shell command deadline: the call's timeoutMs clamped to 1 s..600 s (default 120 s); on expiry the provider stops the command and every descendant and the call returns timed-out",
+      "site": "packages/host/src/shell/shell-service.ts",
+      "token": "admitted.commandTimeout",
+      "class": "External edge",
+      "owner": "desktop-bash-terminal W3"
+    },
+    {
+      "id": "SHELL-PROBE-TIMEOUT",
+      "bound": "30-second bound on the shell availability probe's version command",
+      "site": "packages/host/src/shell/shell-service.ts",
+      "token": "AbortSignal.timeout(30_000)",
+      "class": "External edge",
+      "owner": "desktop-bash-terminal W3"
     }
   ]
 }

@@ -4,6 +4,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { GoneException } from '@nestjs/common';
+import { requestProjectDeletion } from '#api/projects/project-deletion.js';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
@@ -16,6 +18,7 @@ import { mock } from 'vitest-mock-extended';
 import { getEnvironment } from '#config/environment.config.js';
 import type { Environment } from '#config/environment.config.js';
 import { DatabaseService } from '#database/database.service.js';
+import type { Database } from '#database/owner-lock.js';
 import { project, projectGit, projectGitLfsObject, user } from '#database/schema.js';
 import * as schema from '#database/schema.js';
 import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';
@@ -30,7 +33,8 @@ import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import type { GitAccess } from '#api/git/git.service.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
-import { relocateLegacyLfsObjects, tenantLfsObjectKey } from '#api/git/lfs-keys.js';
+import { tenantLfsObjectKey } from '#api/git/lfs-keys.js';
+import { relocateLegacyLfsObjects } from '#api/git/maintenance/lfs-relocation.js';
 import {
   retireDueLfsObjects as streamDueLfsObjects,
   retireLfsObjects as streamLfsObjects,
@@ -265,6 +269,29 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('LFS retirement through
       rmSync(directory, { recursive: true, force: true });
     }
   }, 60_000);
+
+  it('should leave bytes and accounting unchanged when deletion wins after the retirement snapshot', async () => {
+    const locator = await newProject();
+    const object = pointerFor('late retirement');
+    const now = new Date();
+    await seedObject(locator, object, new Date(now.getTime() - retentionWindowMilliseconds - 1));
+    const originalRead = store.readManifest.bind(store);
+    const snapshot = vi.spyOn(store, 'readManifest').mockImplementationOnce(async (location, signal) => {
+      const read = await originalRead(location, signal);
+      await requestProjectDeletion({ database, projectId: locator.projectId, userId: locator.ownerId, enabled: true });
+      return read;
+    });
+    const remove = vi.spyOn(driver, 'deleteBlob');
+    try {
+      await expect(retireLfsObjects(deps(), { ...locator, now })).rejects.toBeInstanceOf(GoneException);
+      expect(remove).not.toHaveBeenCalled();
+      expect(await rowFor(locator, object.oid)).toBeDefined();
+      expect(await tenantBytes(locator, object.oid)).toBeDefined();
+    } finally {
+      snapshot.mockRestore();
+      remove.mockRestore();
+    }
+  });
 
   it('should preserve referenced and renewed later-page objects while draining a backlog and releasing quota exactly once', async () => {
     const locator = await newProject();
@@ -817,6 +844,7 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('LFS retirement through
        when `verify` finalizes, and a stubbed `finalizeLfsObject` would say so
        whether or not it did. */
     const repositories = mock<GitRepositoryService>({
+      resolveActiveLocator: async () => locator,
       reserveLfsObjects: async (reserveArgs) => {
         for (const requested of reserveArgs.objects) {
           // oxlint-disable-next-line no-await-in-loop -- one fixture object
@@ -954,6 +982,53 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('legacy LFS key relocat
     await client.end();
     await moduleRef.close();
   }, 60_000);
+
+  it('should refuse a paused relocation after deletion without copying or removing bytes', async () => {
+    const ownerId = `user-w4l-${randomBytes(6).toString('hex')}`;
+    const projectId = `proj-${randomBytes(6).toString('hex')}`;
+    owners.push(ownerId);
+    await database.insert(user).values({ id: ownerId, name: 'Relocation race', email: `${ownerId}@tau.test` });
+    await database.insert(project).values({ id: projectId, ownerId, name: 'relocation' });
+    const object = pointerFor('relocation race');
+    const legacy = { namespace: 'blobs', key: gitLfsObjectKey(projectId, object.oid), tier: 'private' } as const;
+    await driver.putBlob({ ...legacy, body: object.body, contentType: 'application/octet-stream' });
+    await database
+      .insert(projectGitLfsObject)
+      .values({ projectId, oid: object.oid, sizeBytes: object.size, finalizedAt: new Date() });
+    const paused = Object.assign(mock<Database>(), { select: database.select.bind(database) });
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    paused.transaction.mockImplementation(async (run) => {
+      entered.resolve();
+      await resume.promise;
+      return database.transaction(run);
+    });
+    const put = vi.spyOn(driver, 'putBlob');
+    const remove = vi.spyOn(driver, 'deleteBlob');
+    const operation = relocateLegacyLfsObjects({ database: paused, storage: driver }, { ownerId, projectId });
+    const rejected = expect(operation).rejects.toBeInstanceOf(GoneException);
+    try {
+      await entered.promise;
+      await requestProjectDeletion({ database, projectId, userId: ownerId, enabled: true });
+      resume.resolve();
+      await rejected;
+      expect(put).not.toHaveBeenCalled();
+      expect(remove).not.toHaveBeenCalled();
+      expect(await driver.headBlob(legacy)).toMatchObject({ size: object.size });
+      expect(
+        await driver.headBlob({
+          namespace: 'tenants',
+          key: tenantLfsObjectKey(ownerId, projectId, object.oid),
+          tier: 'private',
+        }),
+      ).toBeUndefined();
+    } finally {
+      resume.resolve();
+      await operation.catch(() => undefined);
+      put.mockRestore();
+      remove.mockRestore();
+    }
+  });
 
   it('should keep the legacy key when an earlier run left a wrong-sized tenant copy', async () => {
     const ownerId = `user-w4l-${randomBytes(6).toString('hex')}`;

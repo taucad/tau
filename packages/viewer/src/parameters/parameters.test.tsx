@@ -1275,8 +1275,8 @@ describe('Parameters - Search Highlighting', () => {
     const networkField = screen.getByLabelText('Parameter: Network Name');
     expect(networkField).toBeTruthy();
 
-    // Should have highlighted text - use within() to scope queries and aria-label
-    const highlight = within(networkField).getByLabelText('Highlighted: Network');
+    // Should have highlighted text - use within() to scope the semantic mark
+    const highlight = within(networkField).getByText('Network', { selector: 'mark' });
     expect(highlight).toBeTruthy();
     expect(highlight).toHaveTextContent('Network');
   });
@@ -1325,8 +1325,8 @@ describe('Parameters - Search Highlighting', () => {
     });
     expect(description).toBeTruthy();
 
-    // Should have highlighted text in description - use within() to scope queries and aria-label
-    const highlight = within(description).getByLabelText('Highlighted: server');
+    // Should have highlighted text in description - use within() to scope the semantic mark
+    const highlight = within(description).getByText('server', { selector: 'mark' });
     expect(highlight).toBeTruthy();
     expect(highlight).toHaveTextContent('server');
   });
@@ -1372,9 +1372,9 @@ describe('Parameters - Search Highlighting', () => {
     const group = screen.getByLabelText('Group: Configuration');
     expect(group).toBeTruthy();
 
-    // Should have highlighted text in group title - use within() to scope queries and aria-label
+    // Should have highlighted text in group title - use within() to scope the semantic mark
     // Search term "config" matches "Config" in "Configuration" (case-insensitive)
-    const highlight = within(group).getByLabelText('Highlighted: Config');
+    const highlight = within(group).getByText('Config', { selector: 'mark' });
     expect(highlight).toBeTruthy();
     expect(highlight.textContent.toLowerCase()).toBe('config');
   });
@@ -3884,4 +3884,96 @@ it('should keep array disclosure choices on the surviving item after removal', a
   await userEvent.click(screen.getAllByRole('button', { name: 'Group: Config' })[1]!);
   await userEvent.click(screen.getByRole('button', { name: 'Remove Parts 1' }));
   expect(screen.getByRole('button', { name: 'Group: Config' })).toHaveAttribute('aria-expanded', 'false');
+});
+
+describe('Parameters - boolean rows on touch (canvas review R2)', () => {
+  const schema: RJSFSchema = {
+    type: 'object',
+    properties: { countersink: { type: 'boolean', title: 'Countersink', default: false } },
+  };
+
+  function ControlledBoolean({ onChange }: { readonly onChange: Mock }) {
+    const [parameters, setParameters] = useState<Record<string, unknown>>({});
+    return (
+      <TestWrapper>
+        <Parameters
+          parameters={parameters}
+          defaultParameters={{ countersink: false }}
+          jsonSchema={schema}
+          units={defaultUnits}
+          onParametersChange={(next) => {
+            onChange(next);
+            setParameters(next);
+          }}
+        />
+      </TestWrapper>
+    );
+  }
+
+  it('toggles a boolean from its name, which labels the switch', async () => {
+    const onChange = vi.fn();
+    render(<ControlledBoolean onChange={onChange} />);
+    const toggle = screen.getByRole('switch', { name: 'Toggle for Countersink' });
+
+    await userEvent.click(screen.getByText('Countersink'));
+
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(onChange).toHaveBeenLastCalledWith({ countersink: true });
+  });
+
+  it('resets a changed boolean from its Reset action without toggling it again', async () => {
+    const onChange = vi.fn();
+    render(<ControlledBoolean onChange={onChange} />);
+    const toggle = screen.getByRole('switch', { name: 'Toggle for Countersink' });
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reset Countersink' }));
+
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(screen.queryByRole('button', { name: 'Reset Countersink' })).toBeNull();
+  });
+
+  it('spreads the switch hit area across the row while reset stays its own control outside any label', async () => {
+    const onChange = vi.fn();
+    render(<ControlledBoolean onChange={onChange} />);
+    const toggle = screen.getByRole('switch', { name: 'Toggle for Countersink' });
+    await userEvent.click(toggle);
+
+    const reset = screen.getByRole('button', { name: 'Reset Countersink' });
+    const row = toggle.closest('[data-switch-row]');
+    // Interactive content never sits inside another control's label.
+    expect(reset.closest('label')).toBeNull();
+    expect(toggle.closest('label')).toBeNull();
+    // The row positions the switch's full-row ::after; reset is stacked above it.
+    expect(row).toHaveClass(
+      'relative',
+      '[&_[data-slot=switch]]:after:absolute',
+      '[&_[data-slot=switch]]:after:inset-0',
+    );
+    expect(reset).toHaveClass('z-10');
+    expect(row).toContainElement(reset);
+  });
+
+  it('gives a read-only boolean row no action cursor', () => {
+    render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={{ countersink: false }}
+          jsonSchema={{
+            type: 'object',
+            properties: { countersink: { type: 'boolean', title: 'Countersink', readOnly: true } },
+          }}
+          units={defaultUnits}
+          onParametersChange={vi.fn()}
+        />
+      </TestWrapper>,
+    );
+    const toggle = screen.getByRole('switch', { name: 'Toggle for Countersink' });
+
+    expect(toggle).toBeDisabled();
+    expect(toggle.closest('[data-switch-row]')).not.toHaveClass('[&_[data-slot=switch]]:cursor-action');
+    expect(screen.getByText('Countersink').closest('label')).not.toHaveClass('cursor-action');
+  });
 });

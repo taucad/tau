@@ -11,7 +11,7 @@ import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { ActorRefFrom } from 'xstate';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import { newViewRecord } from '#workbench-records/projection.js';
+import { newViewRecord } from '@taucad/workbench-panes/records/view-record';
 
 const state = vi.hoisted(() => ({
   records: new Map<string, WorkbenchView>(),

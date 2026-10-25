@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ParameterManifest } from '@taucad/parameters';
+import { ToolCallError } from '#app/host-bridge.js';
 import type { HostBridge } from '#app/host-bridge.js';
 import { createParametersSource } from '#app/sources/parameters-source.js';
 
@@ -44,7 +45,7 @@ const settle = async (): Promise<void> => {
 describe('createParametersSource', () => {
   it('should read the full manifest and the current record when the pane first observes an entry', async () => {
     const { bridge, callTool } = bridgeWith({ read: () => resolved({ width: 15 }) });
-    const source = createParametersSource(bridge, { onCommitted: vi.fn() });
+    const source = createParametersSource(bridge);
     const listener = vi.fn();
 
     expect(source.snapshot('main.ts')).toEqual({ manifest: undefined, entry: undefined, failure: undefined });
@@ -67,7 +68,7 @@ describe('createParametersSource', () => {
         diagnostics: [{ code: 'INVALID_SCHEMA', message: 'The schema is not an object.' }],
       }),
     });
-    const source = createParametersSource(bridge, { onCommitted: vi.fn() });
+    const source = createParametersSource(bridge);
     source.subscribe('main.ts', vi.fn());
     await settle();
 
@@ -87,7 +88,7 @@ describe('createParametersSource', () => {
         return resolved({});
       },
     });
-    const source = createParametersSource(bridge, { onCommitted: vi.fn() });
+    const source = createParametersSource(bridge);
     source.subscribe('main.ts', vi.fn());
     await settle();
     expect(source.snapshot('main.ts').failure).toEqual({ code: 'RESOLUTION_FAILED', message: 'UNKNOWN_TOOL' });
@@ -98,7 +99,7 @@ describe('createParametersSource', () => {
     expect(source.snapshot('main.ts').failure).toBeUndefined();
   });
 
-  it('should propose a committed value against the read revision, read again and then show the model', async () => {
+  it('should propose a committed value against the read revision and read again', async () => {
     const order: string[] = [];
     let width = 15;
     const { bridge, callTool } = bridgeWith({
@@ -112,8 +113,7 @@ describe('createParametersSource', () => {
         return committed(String(args['requestId']));
       },
     });
-    const onCommitted = vi.fn(() => order.push('committed'));
-    const source = createParametersSource(bridge, { onCommitted });
+    const source = createParametersSource(bridge);
     source.subscribe('main.ts', vi.fn());
     await settle();
 
@@ -128,18 +128,18 @@ describe('createParametersSource', () => {
     expect(callTool).toHaveBeenCalledWith('apply_parameter_operation', {
       action: 'propose',
       targetFile: 'main.ts',
-      requestId: expect.stringMatching(/^page-/u) as unknown,
+      requestId: expect.stringMatching(/^pane-/u) as unknown,
       expected: { manifestRevision: 'manifest-1' },
       pressure: 'final',
       operation: { kind: 'native-value', group: 'default', pointer: '/width', value: 42 },
     });
-    expect(order).toEqual(['read', 'propose', 'read', 'committed']);
+    expect(order).toEqual(['read', 'propose', 'read']);
     expect(source.snapshot('main.ts').entry?.groups['default']?.values).toEqual({ width: 42 });
   });
 
   it('should not write transient drag values', async () => {
     const { bridge, callTool } = bridgeWith({ read: () => resolved({}) });
-    const source = createParametersSource(bridge, { onCommitted: vi.fn() });
+    const source = createParametersSource(bridge);
 
     const outcome = await source.commitValue('main.ts', manifest, {
       group: 'default',
@@ -152,20 +152,18 @@ describe('createParametersSource', () => {
     expect(callTool).not.toHaveBeenCalled();
   });
 
-  it('should return a refusal without showing the model, and read the authority value again', async () => {
+  it('should return a refusal and read the authority value again', async () => {
     const { bridge, callTool } = bridgeWith({
       read: () => resolved({ width: 15 }),
       propose: () => ({
         outcome: { status: 'rejected', requestId: 'request', code: 'STALE_MANIFEST', message: 'Stale.' },
       }),
     });
-    const onCommitted = vi.fn();
-    const source = createParametersSource(bridge, { onCommitted });
+    const source = createParametersSource(bridge);
 
     const outcome = await source.commitValue('main.ts', manifest, { group: 'default', pointer: '/width', value: 1 });
 
     expect(outcome).toEqual({ status: 'rejected', requestId: 'request', code: 'STALE_MANIFEST', message: 'Stale.' });
-    expect(onCommitted).not.toHaveBeenCalled();
     expect(callTool.mock.calls.filter(([name]) => name === 'get_parameters')).toHaveLength(2);
   });
 
@@ -174,7 +172,7 @@ describe('createParametersSource', () => {
       read: () => resolved({ width: 15 }, 'tall'),
       propose: () => ({ outcome: { status: 'indeterminate', requestId: 'r', message: 'Unknown.' } }),
     });
-    const source = createParametersSource(bridge, { onCommitted: vi.fn() });
+    const source = createParametersSource(bridge);
     source.subscribe('main.ts', vi.fn());
     await settle();
 
@@ -194,8 +192,7 @@ describe('createParametersSource', () => {
         return committed();
       },
     });
-    const onCommitted = vi.fn();
-    const source = createParametersSource(bridge, { onCommitted });
+    const source = createParametersSource(bridge);
     const groups = source.groups!;
 
     await Promise.all([
@@ -211,12 +208,11 @@ describe('createParametersSource', () => {
       { kind: 'rename-group', group: 'tall', nextGroup: 'taller' },
       { kind: 'delete-group', group: 'taller' },
     ]);
-    expect(onCommitted).toHaveBeenCalledTimes(4);
   });
 
   it('should read observed entries again on refresh', async () => {
     const { bridge, callTool } = bridgeWith({ read: () => resolved({}) });
-    const source = createParametersSource(bridge, { onCommitted: vi.fn() });
+    const source = createParametersSource(bridge);
     source.subscribe('main.ts', vi.fn());
     await settle();
 
@@ -232,7 +228,83 @@ describe('createParametersSource', () => {
 
   it('should hand failures to the page only when it shows them', () => {
     const onError = vi.fn();
-    expect(createParametersSource(bridgeWith({}).bridge, { onCommitted: vi.fn(), onError }).reportError).toBe(onError);
-    expect(createParametersSource(bridgeWith({}).bridge, { onCommitted: vi.fn() }).reportError).toBeUndefined();
+    expect(createParametersSource(bridgeWith({}).bridge, { onError }).reportError).toBe(onError);
+    expect(createParametersSource(bridgeWith({}).bridge).reportError).toBeUndefined();
+  });
+
+  it('should preview a drag on the shown model, write only the released value, and stop on a server that cannot', async () => {
+    const previews: Array<Record<string, unknown>> = [];
+    let isLive = true;
+    const callTool = vi.fn(async (name: string, args: Readonly<Record<string, unknown>>) => {
+      if (name === 'app_preview_parameters') {
+        if (!isLive) {
+          throw new ToolCallError('NOT_LIVE', 'models/part.glb is a drawn file, not a watched source.');
+        }
+        previews.push({ ...args });
+        return { accepted: true };
+      }
+      if (name === 'get_parameters') {
+        return resolved({ width: 10 });
+      }
+      return committed(String(args['requestId']));
+    });
+    const bridge = { callTool } as unknown as HostBridge;
+    const source = createParametersSource(bridge, { modelId: () => 'model-1', previewInterval: 0 });
+    const lane = source.useScrub?.('main.ts');
+    if (lane?.scrub === undefined || lane.endScrub === undefined) {
+      throw new Error('The source offers no drag lane.');
+    }
+
+    lane.scrub({ pointer: '/width', value: 12 });
+    await settle();
+    lane.scrub({ pointer: '/width', value: 14 });
+    await settle();
+    const pending = source.commitValue('main.ts', manifest, { group: 'default', pointer: '/width', value: 14 });
+    await lane.endScrub(Promise.resolve(true));
+    const written = await pending;
+    expect(written.status).toBe('committed');
+
+    expect(previews).toEqual([
+      { modelId: 'model-1', parameters: { width: 12 } },
+      { modelId: 'model-1', parameters: { width: 14 } },
+    ]);
+    /* A committed release renders through the sidecar the server watches; nothing restores. */
+    expect(callTool.mock.calls.filter(([name]) => name === 'apply_parameter_operation')).toHaveLength(1);
+
+    /* A cancelled drag restores the committed render. */
+    lane.scrub({ pointer: '/width', value: 20 });
+    await settle();
+    await lane.endScrub();
+    expect(previews.at(-1)).toEqual({ modelId: 'model-1' });
+
+    isLive = false;
+    lane.scrub({ pointer: '/width', value: 30 });
+    await settle();
+    await expect(lane.endScrub()).resolves.toBeUndefined();
+  });
+
+  it('should keep a refused final in its row with the server message', async () => {
+    const { bridge } = bridgeWith({
+      read: () => resolved({ width: 10 }),
+      propose: () => ({ outcome: { status: 'rejected', requestId: 'r', code: 'OUT_OF_RANGE', message: 'Too wide.' } }),
+    });
+    const source = createParametersSource(bridge);
+    const base = { pointer: '/width', value: 10 };
+    const key = { entryPath: 'main.ts', group: 'default', pointer: '/width' };
+
+    const outcome = await source.commitValue('main.ts', manifest, {
+      group: 'default',
+      pointer: '/width',
+      value: 99,
+      base,
+      draft: { text: '99', valid: true },
+    });
+
+    expect(outcome.status).toBe('rejected');
+    expect(source.drafts?.draft(key)).toEqual({
+      text: '99',
+      valid: true,
+      final: { status: 'refused', requestId: 'r', base, message: 'Too wide.' },
+    });
   });
 });

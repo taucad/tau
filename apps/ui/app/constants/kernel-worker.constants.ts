@@ -1,3 +1,4 @@
+import type { ComputeBinding } from '@taucad/runtime';
 import { webWorkerTransport } from '@taucad/runtime/transport/web';
 import type { RuntimeKernels } from '@taucad/runtime/worker';
 import type { KernelOptionsFactory } from '#types/runtime-client.alias.js';
@@ -16,6 +17,25 @@ const createDebugRuntimeWorker = (): Worker =>
     name: 'tau-ui-runtime-debug-worker',
     type: 'module',
   });
+
+/**
+ * Size the worker's compute caches by the device memory class (geometry cache result-path T5).
+ *
+ * A phone's Memory engine retains 32 MiB and its Durable read cache 16 MiB, so the editor, agent
+ * and GeoSpec runtimes it can carry at once stay within the budget iOS allows a tab (D-RT-02).
+ * An omitted binding is the library's Memory default.
+ *
+ * @param compute - The binding the host selected.
+ * @param memoryConstrained - The page's device memory class.
+ * @returns The binding the worker sizes its caches from.
+ */
+export const sizeComputeBinding = (
+  compute: ComputeBinding | undefined,
+  memoryConstrained: boolean | undefined,
+): ComputeBinding | undefined =>
+  memoryConstrained === true && compute?.mode !== 'off'
+    ? { ...(compute ?? { mode: 'memory' }), memoryConstrained: true }
+    : compute;
 
 /**
  * Build the editor's default {@link RuntimeClientOptions} with a
@@ -47,7 +67,7 @@ export const createDefaultKernelOptions: KernelOptionsFactory = ({ fileSystem, r
   transport: webWorkerTransport({
     createWorker: createDefaultRuntimeWorker,
     fileSystem,
-    compute,
+    compute: sizeComputeBinding(compute, runtimeConfig.memoryConstrained),
   }),
 });
 
@@ -66,6 +86,6 @@ export const createDebugKernelOptions: KernelOptionsFactory = (deps) => ({
     createWorker: createDebugRuntimeWorker,
     devtoolsTelemetry: true,
     fileSystem: deps.fileSystem,
-    compute: deps.compute,
+    compute: sizeComputeBinding(deps.compute, deps.runtimeConfig.memoryConstrained),
   }),
 });

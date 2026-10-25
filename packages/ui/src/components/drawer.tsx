@@ -1,8 +1,34 @@
+import { useResponsiveSurfaceContainer } from '#hooks/responsive-surface.js';
 import * as React from 'react';
 import { Drawer as DrawerPrimitive } from 'vaul';
 import { cn } from '#utils/cn.js';
 
 const DrawerContext = React.createContext(false);
+
+type SnapPoint = number | string;
+type ActiveSnapPoint = React.ComponentProps<typeof DrawerPrimitive.Root>['activeSnapPoint'];
+type DrawerSnapState = {
+  readonly points: SnapPoint[];
+  readonly active: ActiveSnapPoint;
+  readonly setActive: (point: ActiveSnapPoint) => void;
+};
+const DrawerSnapContext = React.createContext<DrawerSnapState | undefined>(undefined);
+
+function useDrawerSnapState(properties: React.ComponentProps<typeof DrawerPrimitive.Root>): DrawerSnapState {
+  const [localPoint, setLocalPoint] = React.useState<ActiveSnapPoint>(properties.snapPoints?.[0] ?? null);
+  const setActive = React.useCallback(
+    (point: ActiveSnapPoint) => {
+      setLocalPoint(point);
+      properties.setActiveSnapPoint?.(point ?? null);
+    },
+    [properties.setActiveSnapPoint],
+  );
+  return {
+    points: properties.snapPoints ?? [],
+    active: properties.activeSnapPoint === undefined ? localPoint : properties.activeSnapPoint,
+    setActive,
+  };
+}
 
 /** A visual viewport shorter than the layout viewport by less than this is browser chrome, not a keyboard. CSS pixels. */
 const softKeyboardThreshold = 120;
@@ -92,13 +118,24 @@ function Drawer({
   repositionInputs = false,
   ...properties
 }: React.ComponentProps<typeof DrawerPrimitive.Root>): React.JSX.Element {
+  const container = useResponsiveSurfaceContainer();
+  const snaps = useDrawerSnapState(properties);
   return (
     // oxlint-disable-next-line react/jsx-boolean-value -- we want to explicitly set the value to true
     <DrawerContext.Provider value={true}>
       {/* DrawerContent keeps a focused field above the keyboard. Vaul's own repositioning moves the
           drawer a second time on top of iOS's pan, and with snap points it counts the snap offset
           twice, so it pushes the field off screen. */}
-      <DrawerPrimitive.Root data-slot='drawer' repositionInputs={repositionInputs} {...properties} />
+      <DrawerSnapContext.Provider value={snaps}>
+        <DrawerPrimitive.Root
+          data-slot='drawer'
+          container={container}
+          repositionInputs={repositionInputs}
+          {...properties}
+          activeSnapPoint={snaps.active ?? null}
+          setActiveSnapPoint={snaps.setActive}
+        />
+      </DrawerSnapContext.Provider>
     </DrawerContext.Provider>
   );
 }
@@ -119,8 +156,19 @@ function DrawerNestedRoot({
   repositionInputs = false,
   ...properties
 }: React.ComponentProps<typeof DrawerPrimitive.NestedRoot>): React.JSX.Element {
+  const container = useResponsiveSurfaceContainer();
+  const snaps = useDrawerSnapState(properties);
   return (
-    <DrawerPrimitive.NestedRoot data-slot='drawer-nested-root' repositionInputs={repositionInputs} {...properties} />
+    <DrawerSnapContext.Provider value={snaps}>
+      <DrawerPrimitive.NestedRoot
+        data-slot='drawer-nested-root'
+        container={container}
+        repositionInputs={repositionInputs}
+        {...properties}
+        activeSnapPoint={snaps.active ?? null}
+        setActiveSnapPoint={snaps.setActive}
+      />
+    </DrawerSnapContext.Provider>
   );
 }
 
@@ -173,7 +221,27 @@ function DrawerClose({ ...properties }: React.ComponentProps<typeof DrawerPrimit
 }
 
 /**
- * Supplies Vaul's draggable drawer handle.
+ * The spoken name of a detent, by its place: the lowest is the peek, the tallest is full, and the one between three is
+ * half. Names, not percentages, so the same detent reads the same at every viewport height.
+ *
+ * @param index - The detent's place, from the lowest.
+ * @param count - How many detents the drawer has.
+ * @returns The detent's name.
+ */
+function detentName(index: number, count: number): string {
+  if (index === 0) {
+    return 'Peek';
+  }
+  if (index === count - 1) {
+    return 'Full';
+  }
+  return count === 3 ? 'Half' : `Detent ${index + 1} of ${count}`;
+}
+
+/**
+ * Supplies Vaul's draggable drawer handle. For multiple snap points it implements the APG slider pattern:
+ * arrows step, Home/End select the extremes, and Enter/Space cycle without dismissing. The current detent is announced
+ * by name (Peek, Half, Full).
  *
  * @public
  * @example <caption>Render a drawer handle.</caption>
@@ -184,18 +252,70 @@ function DrawerClose({ ...properties }: React.ComponentProps<typeof DrawerPrimit
  * createElement(DrawerHandle);
  * ```
  */
-function DrawerHandle({ ...properties }: React.ComponentProps<typeof DrawerPrimitive.Handle>): React.JSX.Element {
-  return <DrawerPrimitive.Handle data-slot='drawer-handle' {...properties} />;
+function DrawerHandle({
+  onKeyDown,
+  ...properties
+}: React.ComponentProps<typeof DrawerPrimitive.Handle>): React.JSX.Element {
+  const snaps = React.useContext(DrawerSnapContext);
+  const adjustable = snaps !== undefined && snaps.points.length > 1;
+  const index = adjustable ? Math.max(0, snaps.points.indexOf(snaps.active ?? snaps.points[0]!)) : 0;
+  return (
+    <DrawerPrimitive.Handle
+      data-slot='drawer-handle'
+      {...(adjustable
+        ? {
+            role: 'slider',
+            tabIndex: 0,
+            'aria-hidden': false,
+            'aria-label': 'Drawer height',
+            'aria-orientation': 'vertical',
+            'aria-valuemin': 1,
+            'aria-valuemax': snaps.points.length,
+            'aria-valuenow': index + 1,
+            'aria-valuetext': detentName(index, snaps.points.length),
+          }
+        : {})}
+      {...properties}
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (event.defaultPrevented || !adjustable) {
+          return;
+        }
+        const next =
+          event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? snaps.points.length - 1
+              : event.key === 'ArrowUp' || event.key === 'ArrowRight'
+                ? Math.min(index + 1, snaps.points.length - 1)
+                : event.key === 'ArrowDown' || event.key === 'ArrowLeft'
+                  ? Math.max(index - 1, 0)
+                  : event.key === 'Enter' || event.key === ' '
+                    ? (index + 1) % snaps.points.length
+                    : undefined;
+        if (next === undefined) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        snaps.setActive(snaps.points[next]);
+      }}
+    />
+  );
 }
 
+/**
+ * The grabber row. Its 44px target (D4) is the 36px row plus 8px above the sheet's edge: the row's foot belongs to the
+ * surface's header actions, and content docked above a sheet keeps 8px clear of its edge.
+ */
 function DrawerHandleIndicator({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
   return (
-    <div className='relative'>
-      <DrawerHandle className='absolute! inset-0! m-auto! size-full! opacity-0!' />
+    <div className='relative hidden h-(--drawer-handle-height) shrink-0 group-data-[vaul-drawer-direction=bottom]/drawer-content:block has-[:focus-visible]:focus-outline'>
+      <DrawerHandle className='absolute! inset-x-0! -top-2! bottom-0! m-0! h-auto! w-full! opacity-0! [&>[data-vaul-handle-hitarea]]:size-full!' />
       <div
         data-slot='drawer-handle-indicator'
         className={cn(
-          'relative mx-auto mt-1 hidden h-1 w-15 shrink-0 rounded-full bg-accent group-data-[vaul-drawer-direction=bottom]/drawer-content:block',
+          'pointer-events-none absolute inset-x-0 top-1/2 mx-auto h-1 w-15 -translate-y-1/2 rounded-full bg-accent',
           className,
         )}
         {...properties}
@@ -280,7 +400,7 @@ function DrawerContent({
         data-keyboard={keyboard ? 'open' : undefined}
         style={frameStyle ? { ...style, ...frameStyle } : style}
         className={cn(
-          'group/drawer-content fixed z-50 flex h-auto flex-col bg-background',
+          'group/drawer-content fixed z-50 flex h-auto flex-col bg-background [--drawer-handle-height:calc(var(--spacing)*9)]',
           'select-none',
           /* A field is editable text even inside an unselectable drawer: WebKit inherits
              user-select, and iOS will not place a caret in an editor under user-select: none. */
@@ -290,8 +410,8 @@ function DrawerContent({
           'data-[keyboard=open]:data-[vaul-drawer-direction=bottom]:bottom-(--keyboard-frame-bottom)!',
           'data-[keyboard=open]:data-[vaul-drawer-direction=bottom]:max-h-(--keyboard-frame-height)!',
           'data-[keyboard=open]:data-[vaul-drawer-direction=bottom]:transform-none!',
-          /* A drawer is a touch surface: its list rows are 44px thumb targets (Tau's spacing unit is 4.4px). */
-          '[&_[data-slot=command-item]]:min-h-10',
+          /* A drawer is a touch surface: its list rows and their filter field take the touch row height. */
+          '[&_[data-slot=command-item]]:min-h-touch-row [&_[data-slot=command-input]]:h-touch-row',
           'data-[vaul-drawer-direction=bottom]:pb-[env(safe-area-inset-bottom)]',
           'data-[vaul-drawer-direction=top]:inset-x-0 data-[vaul-drawer-direction=top]:top-0 data-[vaul-drawer-direction=top]:mb-24 data-[vaul-drawer-direction=top]:max-h-[80vh] data-[vaul-drawer-direction=top]:rounded-b-lg data-[vaul-drawer-direction=top]:border-b',
           'data-[vaul-drawer-direction=bottom]:inset-x-0 data-[vaul-drawer-direction=bottom]:bottom-0 data-[vaul-drawer-direction=bottom]:mt-24 data-[vaul-drawer-direction=bottom]:max-h-[80vh] data-[vaul-drawer-direction=bottom]:rounded-t-lg data-[vaul-drawer-direction=bottom]:border-t',

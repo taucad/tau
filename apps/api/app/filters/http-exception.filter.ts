@@ -12,7 +12,7 @@ import { httpHeader } from '#constants/http-header.constant.js';
 import { resolveRequestId } from '#middlewares/request-id.middleware.js';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import { ReadinessRefusalException } from '#api/health/readiness-refusal.exception.js';
-import { reportServerError } from '#telemetry/sentry.js';
+import { isRetryableGitRefusal, reportServerError } from '#telemetry/sentry.js';
 
 /**
  * Bounded retry estimates for the funded-admission refusals (B9 `:292`).
@@ -159,16 +159,30 @@ export class HttpExceptionFilter implements ExceptionFilter {
   }
 
   /**
+   * Log a retryable git refusal (X3): the client retries it, so it is one warning line with a
+   * stable message and a bounded `code`, and is neither a Sentry error nor an errored span.
+   *
+   * @param code - The refusal code, one of `retryableGitRefusalCodes`.
+   * @param statusCode - The HTTP status, 503.
+   * @param requestId - The `req_…` id the response carries, when there is one.
+   */
+  protected logRetryableGitRefusal(code: string | undefined, statusCode: number, requestId: string | undefined): void {
+    this.logger.warn({ code, statusCode, requestId }, 'Retryable git refusal');
+  }
+
+  /**
    * Log, report and annotate the active span for a failed request by its status.
    *
    * @param exception - The thrown value.
    * @param response - The error body the request is answered with.
    */
-  private recordFailure(exception: unknown, { statusCode, error, requestId }: HttpErrorResponse): void {
+  private recordFailure(exception: unknown, { statusCode, error, code, requestId }: HttpErrorResponse): void {
     // Log error details. A readiness refusal was already logged, counted and reported
     // per indicator by the health controller: it is the probe working, not a fault.
     if (exception instanceof ReadinessRefusalException) {
       this.logger.debug(`Readiness refusal: ${exception.failures.map((failure) => failure.indicator).join(', ')}`);
+    } else if (isRetryableGitRefusal(statusCode, code)) {
+      this.logRetryableGitRefusal(code, statusCode, requestId);
     } else if (statusCode >= 500) {
       this.logger.error(exception, `Unhandled exception: ${error}`);
       reportServerError(exception, requestId);

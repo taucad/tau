@@ -1270,6 +1270,10 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
             filesystem,
             http: createRevisionHttpClient({
               authorization: () => 'Bearer session-token',
+              /* This row proves the scheduler's own retry of a race-lost line. The transport
+               * would otherwise replay the push after the 503's Retry-After (DA6), which
+               * `http-client.test.ts` proves; turned off here so the line meets the scheduler. */
+              retry: false,
               fetch: async (input, init) => {
                 const url = input instanceof Request ? input.url : String(input);
                 if (racing && init?.method === 'POST' && url.endsWith('/git-receive-pack')) {

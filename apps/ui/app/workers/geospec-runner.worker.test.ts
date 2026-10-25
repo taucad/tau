@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
+import { rpcClientErrorCode } from '@taucad/chat';
 import type { GeoSpecRunnerResult } from 'geospec/runner/worker';
 import type {
   GeoSpecRunnerWorkerRequest,
@@ -366,6 +367,66 @@ describe('geospec-runner.worker', () => {
     ]);
     expect(posted.every((message) => !('requestId' in message) || message.requestId === 'progress-1')).toBe(true);
     expect(handlers.size).toBe(0);
+  });
+
+  it('should refuse a project config testTimeout over the host maximum without running', async () => {
+    let messageListener: WorkerMessageListener | undefined;
+    vi.stubGlobal(
+      'addEventListener',
+      vi.fn((type: string, listener: WorkerMessageListener) => {
+        if (type === 'message') {
+          messageListener = listener;
+        }
+      }),
+    );
+    const postMessage = vi.fn<(message: GeoSpecRunnerWorkerResponse) => void>();
+    vi.stubGlobal('postMessage', postMessage);
+    vi.stubGlobal('close', vi.fn());
+    workerMocks.createFileSystemBridgeProxy.mockReturnValue(workerMocks.fsProxy);
+    workerMocks.fromFsLike.mockReturnValue({ kind: 'runtime-fs' });
+    workerMocks.createDefaultKernelOptions.mockImplementation((options: unknown) => ({ options }));
+    workerMocks.createRuntimeClient.mockReturnValue(workerMocks.runtimeClient);
+    mockProjectTree('', ['main.geospec.ts', 'geospec.config.ts']);
+    const runner = { close: vi.fn(async () => undefined), on: vi.fn(() => () => undefined), run: vi.fn() };
+    nativeMocks.createNativeGeoSpecRunner.mockReturnValue(runner);
+    vi.doMock('geospec/config', () => ({
+      readGeoSpecConfig: vi.fn(async () => ({
+        status: 'applied',
+        configPath: 'geospec.config.ts',
+        options: { testTimeout: 900_000 },
+      })),
+    }));
+
+    try {
+      await import('#workers/geospec-runner.worker.js');
+      messageListener?.({
+        data: {
+          type: 'initialize',
+          requestId: 'limit-initialize',
+          sessionId: 'limit-session',
+          runtimeConfig: defaultRuntimeConfig,
+          fileSystemPort: new MessageChannel().port1,
+          maxRunBudget: 600_000,
+        },
+      } as MessageEvent<GeoSpecRunnerWorkerRequest>);
+      await vi.waitFor(() => {
+        expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'initialized' }));
+      });
+      sendRunRequest({ messageListener, requestId: 'limit-run', sessionId: 'limit-session', args: {} });
+
+      await vi.waitFor(() => {
+        expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'result', requestId: 'limit-run' }));
+      });
+      const result = postMessage.mock.calls.map(([message]) => message).find((message) => message.type === 'result');
+      // The host's maximum refuses the config's default, as it refuses the same input field; nothing is clamped.
+      expect(result).toMatchObject({ result: { success: false, errorCode: rpcClientErrorCode.validationError } });
+      expect(result?.type === 'result' && !result.result.success ? result.result.message : '').toContain(
+        'testTimeout 900000 exceeds',
+      );
+      expect(runner.run).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock('geospec/config');
+    }
   });
 
   it('should read kernel facts from the runtime description and its STEP routes', async () => {

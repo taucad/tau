@@ -726,6 +726,12 @@ describe('failure categories and suggestions', () => {
       next: /^Change the model so it meets this requirement/u,
     },
     {
+      code: 'GEOSPEC_INVALID_EXPECTATION',
+      message: "connectedComponents payload has unknown field 'counts'.",
+      category: 'invalid-expectation',
+      next: /^Not a geometry verdict: the engine refused this claim because its expectation is malformed[^]*Keep the assertion/u,
+    },
+    {
       code: 'GEOSPEC_ANALYSIS_LIMIT',
       message: 'Connectivity scratch 6.1 GB exceeds the 256 MiB analysis limit.',
       category: 'analysis-limit',
@@ -1129,6 +1135,56 @@ describe('failure categories and suggestions', () => {
     );
     expect(failure).toMatchObject({ category: 'unsupported-evidence', suggestion });
     expect(failure.suggestion).not.toMatch(/workUnitLimit|brep|step/iu);
+  });
+
+  it('should read a malformed expectation as its own category and keep the claim beside a passed sibling', () => {
+    const invalid: GeometryDiagnostic = {
+      code: 'GEOSPEC_INVALID_EXPECTATION',
+      severity: 'error',
+      message: "connectedComponents payload has unknown field 'counts'.",
+      suggestion: "Correct the expectation to the matcher's documented fields and values.",
+      details: { field: 'counts', path: '$.counts' },
+    };
+    const test = refused(invalid);
+    test.assertions.unshift({
+      kind: 'watertight',
+      subject: {},
+      expected: true,
+      passed: true,
+      loadId: 'load-1',
+      diagnostics: [],
+      report: claimReport({ claimId: 'claim-0', polarity: 'positive', seed: 4, status: 'passed' }),
+    });
+    const failure = failureOf(test);
+    expect(failure).toMatchObject({
+      status: 'inconclusive',
+      category: 'invalid-expectation',
+      diagnostics: [{ code: 'GEOSPEC_INVALID_EXPECTATION', details: { field: 'counts', path: '$.counts' } }],
+    });
+    expect(failure.suggestion).toContain("'counts' at $.counts");
+    expect(failure.suggestion).toContain('Keep the assertion');
+    expect(failure.suggestion).not.toMatch(weakening);
+    expect(failure.suggestion).not.toMatch(/\b(?:remove|delete|drop|skip)\b/iu);
+    expect(failure).not.toHaveProperty('limit');
+  });
+
+  it('should keep a decided false sibling as geometry over a malformed expectation', () => {
+    const test = refused({
+      code: 'GEOSPEC_INVALID_EXPECTATION',
+      severity: 'error',
+      message: "connectedComponents payload has unknown field 'counts'.",
+    });
+    test.status = 'failed';
+    test.assertions.push({
+      kind: 'watertight',
+      subject: {},
+      expected: true,
+      passed: false,
+      loadId: 'load-1',
+      diagnostics: [{ code: 'GEOSPEC_NOT_WATERTIGHT', severity: 'error', message: 'The mesh has 4 open edges.' }],
+      report: claimReport({ claimId: 'claim-2', polarity: 'positive', seed: 7, status: 'failed' }),
+    });
+    expect(failureOf(test)).toMatchObject({ status: 'failed', category: 'geometry' });
   });
 
   it('should read the shared evidence code as an evidence gap even when its message names a limit', () => {

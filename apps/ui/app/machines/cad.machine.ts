@@ -64,6 +64,11 @@ export type CadContext = {
   runtimeCloseError?: Error;
   document?: RuntimeDocument;
   defaultView?: ViewSubscription;
+  /**
+   * Whether each viewer presenting this unit shows lines, by viewer id. The default view asks for
+   * GLB edges while any of them does, or while none has said (captures and previews).
+   */
+  edgeViewers: Readonly<Record<string, boolean>>;
   capabilities?: AppCapabilitiesManifest;
   activeKernelId?: string;
   eventCleanups: Array<() => void>;
@@ -138,6 +143,8 @@ type CadEvent =
     }
   | { type: 'stateChanged'; state: 'idle' | 'busy' | 'error'; detail?: string }
   | { type: 'setOperationTimeout'; operationTimeout: number }
+  /** A viewer shows or hides lines; `undefined` when it stops presenting this unit. */
+  | { type: 'setViewerEdges'; viewerId: string; shown: boolean | undefined }
   | { type: 'capabilitiesUpdated'; capabilities: AppCapabilitiesManifest }
   | { type: 'activeKernelChanged'; kernelId: string | undefined }
   | { type: 'parkRuntime' }
@@ -171,6 +178,24 @@ type CadInput = {
   operationTimeout?: number;
   /** Kernel heap in bytes above which the unit recycles its runtime once idle (`runtimeRecycleHeapBytes`). */
   recycleHeapBytes?: number;
+};
+
+/**
+ * Whether the default view asks for GLB edges: while any viewer shows lines, or while no viewer has
+ * said, so captures and previews without a viewer keep them.
+ */
+export const cadEdgesWanted = (edgeViewers: Readonly<Record<string, boolean>>): boolean => {
+  const shown = Object.values(edgeViewers);
+  return shown.length === 0 || shown.includes(true);
+};
+
+/** Ask an open default view for edges or none; the view's own events report the outcome. */
+const requestDefaultViewEdges = async (view: ViewSubscription, includeEdges: boolean): Promise<void> => {
+  try {
+    await view.update({ content: { includeEdges } });
+  } catch {
+    // The view closed before the update; its replacement opens with the current answer.
+  }
 };
 
 /** Release the runtime resources held by one CAD unit. */
@@ -220,6 +245,8 @@ type ConnectKernelInput = {
 
 type RenderModelInput = {
   client: AppRuntimeClient | undefined;
+  /** Whether a newly opened default view should ask for GLB edges. */
+  edgesWanted: () => boolean;
   document: RuntimeDocument | undefined;
   machineRef: AnyActorRef;
   requestId: number;
@@ -459,7 +486,14 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input, s
         return;
       }
       const offer = evaluation.views[0];
-      const content = interactiveViewContent(offer?.mimeType, kernelId, input.client?.capabilities);
+      const content = interactiveViewContent({
+        mimeType: offer?.mimeType,
+        kernelId,
+        capabilities: input.client?.capabilities,
+        edgesShown: input.edgesWanted(),
+      });
+      // Keyed on whether the route takes content, not on its value: `setViewerEdges` updates the
+      // open view in place, so showing or hiding lines never reopens it.
       const key = `${offer?.id ?? ''}:${Boolean(content)}`;
       if (key === selectedViewKey) {
         return;
@@ -1018,6 +1052,7 @@ export const cadMachine = setup({
     kernelClient: undefined,
     document: undefined,
     defaultView: undefined,
+    edgeViewers: {},
     capabilities: undefined,
     activeKernelId: undefined,
     eventCleanups: [],
@@ -1096,6 +1131,21 @@ export const cadMachine = setup({
      * kernel; releasing it here as well would dispose the same client twice,
      * because this transition reads the context from before that exit (S12). */
     filesystemBindingChanged: { target: '.connecting', reenter: true },
+    setViewerEdges: ({ context, event }, enq) => {
+      const { [event.viewerId]: _previous, ...others } = context.edgeViewers;
+      const edgeViewers = event.shown === undefined ? others : { ...others, [event.viewerId]: event.shown };
+      const wanted = cadEdgesWanted(edgeViewers);
+      const view = context.defaultView;
+      const requested = view?.request.content?.includeEdges;
+      // Only a view whose route takes edges carries an explicit `includeEdges`.
+      if (view && requested !== undefined && requested !== wanted) {
+        enq(() => {
+          // async-iife: fire-and-forget; the view's own events report the new rendering.
+          void requestDefaultViewEdges(view, wanted);
+        });
+      }
+      return { context: { edgeViewers } };
+    },
     setOperationTimeout: ({ context, event }, enq) => {
       const client = context.kernelClient;
       enq(() => {
@@ -1287,6 +1337,7 @@ export const cadMachine = setup({
             src: 'renderModelActor',
             input: ({ context, self }) => ({
               client: context.kernelClient,
+              edgesWanted: () => cadEdgesWanted(self.getSnapshot().context.edgeViewers),
               entryPath: context.entryPath,
               parameterRender: context.parameterRender,
               document: context.document,

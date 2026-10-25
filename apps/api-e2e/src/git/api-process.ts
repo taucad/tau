@@ -7,6 +7,8 @@ import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
+/* oxlint-disable-next-line no-restricted-imports -- Loaded by the global setup before test aliases exist. */
+import { gitE2EApiUrl, gitE2EStorageUrls } from './config.ts';
 
 /**
  * Booting one API process of this tier (charter W8, W10).
@@ -98,6 +100,10 @@ export const sharedEnvironment = (frontendUrl: string): NodeJS.ProcessEnv => {
   environment['STRIPE_WEBHOOK_SECRET'] = 'whsec_api_e2e_git';
   environment['STRIPE_PRICE_ID_PRO_MONTHLY'] = 'price_api_e2e_git';
   environment['STRIPE_PRODUCT_ID_CREDIT_PACK'] = 'prod_api_e2e_git';
+  /* DC1: the API holds no lease and runs no git child; it forwards every git
+   * RPC to the tier's tau-storage workers (`startStorage`). A spec that needs
+   * its own worker passes `TAU_STORAGE_URL` in `overrides`. */
+  environment['TAU_STORAGE_URL'] = gitE2EStorageUrls.join(',');
   /* Never set `TAU_GIT_REMOTE_ALLOW_PRIVATE` here: three rows in this tier
    * assert the proxy's loopback and private-address refusals, and P50's
    * relaxation inverts two of them (W18 review, Q2). */
@@ -131,17 +137,22 @@ export const startApi = async (args: {
   environment['TAU_API_URL'] = url;
   Object.assign(environment, overrides);
 
+  const completed = process.env['TAU_E2E_COMPLETED_ARTIFACT'] === 'true';
+  const cwd = completed ? process.env['TAU_E2E_API_CWD'] : apiRoot;
+  if (!cwd || (completed && process.env['TAU_E2E_EXTERNAL_SERVICES'] !== 'true')) {
+    throw new Error('Completed API acceptance requires an isolated API working directory and external services.');
+  }
   const log = createWriteStream(resolve(logDirectory, `api-${label}.log`), { flags: 'w' });
   const child = spawn(
     process.execPath,
     [
-      '--env-file-if-exists=.env',
+      ...(completed ? [] : ['--env-file-if-exists=.env']),
       '--import',
       new URL('register.mjs', pathToFileURL(createRequire(import.meta.url).resolve('@oxc-node/core/package.json')))
         .href,
       resolve(apiRoot, 'dist/main.js'),
     ],
-    { cwd: apiRoot, env: environment, stdio: ['ignore', 'pipe', 'pipe'] },
+    { cwd, env: environment, stdio: ['ignore', 'pipe', 'pipe'] },
   );
   child.stdout.pipe(log);
   child.stderr.pipe(log);
@@ -166,5 +177,69 @@ export const startApi = async (args: {
     throw error;
   }
 
+  return { child, log };
+};
+
+/**
+ * One tau-storage worker (DC1), live and ready.
+ *
+ * The worker is the API image's `storage` entry (`dist/storage-worker.js`):
+ * plain `node:http`, the development grant and receipt keys the API also falls
+ * back to outside production, and the tier's MinIO. It is given no database
+ * and no Redis (Z1): both are blanked so `.env` cannot fill them in.
+ *
+ * @param args - `url`, the origin it listens on; `label`, the log file's name;
+ *   `overrides`, environment applied last (a fault proxy's `TAU_S3_ENDPOINT`).
+ * @returns The child and its log stream.
+ */
+export const startStorage = async (args: {
+  readonly url: string;
+  readonly label: string;
+  readonly overrides?: Readonly<Record<string, string>>;
+}): Promise<{ child: ChildProcess; log: WriteStream }> => {
+  const { url, label, overrides = {} } = args;
+  if (await isApiLive(url)) {
+    throw new Error(`Git-server E2E requires ownership of its dedicated storage worker at ${url}`);
+  }
+  mkdirSync(logDirectory, { recursive: true });
+  const completed = process.env['TAU_E2E_COMPLETED_ARTIFACT'] === 'true';
+  const cwd = completed ? process.env['TAU_E2E_API_CWD'] : apiRoot;
+  if (!cwd) {
+    throw new Error('Completed API acceptance requires an isolated API working directory.');
+  }
+  /* eslint-disable @typescript-eslint/naming-convention -- process environment names */
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    NODE_ENV: 'development',
+    PORT: new URL(url).port,
+    DATABASE_URL: '',
+    REDIS_URL: '',
+    OTEL_SERVICE_NAME: 'tau-storage',
+    OTEL_METRICS_PORT: '0',
+    TAU_STORAGE_RECEIPT_URL: new URL('/v1/internal/storage/receipts', gitE2EApiUrl).href,
+    ...overrides,
+  };
+  /* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
+  const log = createWriteStream(resolve(logDirectory, `storage-${label}.log`), { flags: 'w' });
+  const child = spawn(
+    process.execPath,
+    [
+      ...(completed ? [] : ['--env-file-if-exists=.env']),
+      '--import',
+      new URL('register.mjs', pathToFileURL(createRequire(import.meta.url).resolve('@oxc-node/core/package.json')))
+        .href,
+      resolve(apiRoot, 'dist/storage-worker.js'),
+    ],
+    { cwd, env: environment, stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+  child.stdout.pipe(log);
+  child.stderr.pipe(log);
+  try {
+    await waitForApi(child, url);
+  } catch (error) {
+    await stopChild(child);
+    log.end();
+    throw error;
+  }
   return { child, log };
 };

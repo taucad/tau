@@ -2,8 +2,8 @@ import { setRevisionSessionUser } from '#lib/revision-actor.js';
 import { mock } from 'vitest-mock-extended';
 // @vitest-environment jsdom
 import type { ReactNode } from 'react';
-import { act, render, renderHook } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, render, renderHook, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RemoteFacet, RevisionStatusProjection } from '@taucad/revisions';
 
 /* eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
@@ -306,8 +306,10 @@ describe('fetchCloudProjects', () => {
         name: 'Gearbox',
         role: 'owner',
         updatedAt: Date.parse('2026-09-13T01:00:00Z'),
+        canDeleteCloud: false,
+        cloudState: 'active',
       },
-      { id: 'proj_bbbbbbbbbbbbbbbbbbbbb', name: 'Bracket', role: 'owner' },
+      { id: 'proj_bbbbbbbbbbbbbbbbbbbbb', name: 'Bracket', role: 'owner', canDeleteCloud: false, cloudState: 'active' },
     ]);
   });
 });
@@ -322,7 +324,14 @@ describe('useTauCloudIntentConnection', () => {
   beforeEach(() => {
     localStorage.clear();
     vi.clearAllMocks();
+    setRevisionSessionUser({ id: 'account-a', name: 'A' });
     Object.assign(account, { auth: 'authed', isResolved: true, canSyncFiles: true });
+  });
+
+  afterEach(() => {
+    cleanup();
+    setRevisionSessionUser(undefined);
+    vi.restoreAllMocks();
   });
 
   function Connector({
@@ -345,6 +354,7 @@ describe('useTauCloudIntentConnection', () => {
   const renderConnection = (head: string | undefined) => {
     const view = render(<Session head={head} />);
     return {
+      unmount: view.unmount,
       rerender: ({ head: next }: { head: string | undefined }) => {
         view.rerender(<Session head={next} />);
       },
@@ -423,12 +433,18 @@ describe('useTauCloudIntentConnection', () => {
   });
 
   // ── D20: materialized projects ───────────────────────────────────────────
-  it('should connect a materialized project on open and keep it owed until the connection lands', () => {
+  it('should connect a materialized project on open and keep it owed until the connection lands', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json([{ id: projectId, name: 'Gearbox', role: 'owner' }])),
+    );
     tauCloudIntent.set(projectId, 'open');
 
     renderConnection(undefined);
 
-    expect(connectRemote).toHaveBeenCalledWith('tau');
+    await waitFor(() => {
+      expect(connectRemote).toHaveBeenCalledWith('tau');
+    });
     expect(tauCloudIntent.get(projectId)).toBe('open');
   });
 
@@ -441,4 +457,74 @@ describe('useTauCloudIntentConnection', () => {
     expect(connectRemote).not.toHaveBeenCalled();
     expect(tauCloudIntent.get(projectId)).toBe('open');
   });
+
+  it('should settle an unavailable open durably and not reconnect after remount', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const fetchMock = vi.fn(async () => Response.json([]));
+    vi.stubGlobal('fetch', fetchMock);
+    tauCloudIntent.set(projectId, 'open');
+    const view = renderConnection(undefined);
+    await waitFor(() => {
+      expect(tauCloudIntent.get(projectId)).toBeUndefined();
+    });
+    expect(logged).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ name: 'CloudProjectUnavailableError' }),
+    );
+    expect(localStorage.getItem(`tau:tau-cloud-intent:${projectId}`)).toBeNull();
+    expect(localStorage.getItem(`tau:tau-cloud-intent:${projectId}:account`)).toBeNull();
+    view.unmount();
+    renderConnection(undefined);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(connectRemote).not.toHaveBeenCalled();
+  });
+
+  it('should retain a first-open intent after a network failure and recover on remount', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const fetchMock = vi.fn<typeof fetch>().mockRejectedValueOnce(new TypeError('offline'));
+    vi.stubGlobal('fetch', fetchMock);
+    tauCloudIntent.set(projectId, 'open');
+    const view = renderConnection(undefined);
+    await waitFor(() => {
+      expect(logged).toHaveBeenCalled();
+    });
+    expect(tauCloudIntent.get(projectId)).toBe('open');
+    expect(connectRemote).not.toHaveBeenCalled();
+    view.unmount();
+    fetchMock.mockResolvedValue(Response.json([{ id: projectId, name: 'Kept project', role: 'write' }]));
+    renderConnection(undefined);
+    await waitFor(() => {
+      expect(connectRemote).toHaveBeenCalledExactlyOnceWith('tau');
+    });
+  });
+
+  it.each(['account', 'intent'])(
+    'should not clear a newer %s intent when an earlier access check refuses',
+    async (change) => {
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const response = Promise.withResolvers<Response>();
+      const fetchMock = vi.fn<typeof fetch>().mockReturnValue(response.promise);
+      vi.stubGlobal('fetch', fetchMock);
+      tauCloudIntent.set(projectId, 'open');
+      const view = renderConnection(undefined);
+      await waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledOnce();
+      });
+      view.unmount();
+      if (change === 'account') {
+        setRevisionSessionUser({ id: 'account-b', name: 'B' });
+      }
+      const next = change === 'account' ? 'open' : 'connected';
+      tauCloudIntent.set(projectId, next);
+      await act(async () => {
+        response.resolve(Response.json([]));
+      });
+      expect(logged).toHaveBeenCalled();
+      expect(tauCloudIntent.get(projectId)).toBe(next);
+      expect(connectRemote).not.toHaveBeenCalled();
+      if (change === 'account') {
+        expect(localStorage.getItem(`tau:tau-cloud-intent:${projectId}:account`)).toBe('account-b');
+      }
+    },
+  );
 });

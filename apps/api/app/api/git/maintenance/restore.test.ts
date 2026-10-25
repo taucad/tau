@@ -3,11 +3,14 @@ import { createHash, randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import type { Database, OwnerLockTransaction } from '#database/owner-lock.js';
 import { getEnvironment } from '#config/environment.config.js';
 import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
@@ -17,7 +20,15 @@ import { hydrateLease } from '#api/git/store/lease.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import { decodeManifest } from '#api/git/store/manifest.js';
 import type { Manifest } from '#api/git/store/manifest.js';
-import type { RepositoryLocator } from '#api/git/store/port.js';
+import {
+  incompressibleClient,
+  largePackMebibytes,
+  measureGrowth,
+  mebibytes,
+  recordMeasurement,
+  streamedGrowthBoundMebibytes,
+} from '#api/git/store/pack-memory.fixture.js';
+import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { restoreRepository } from '#api/git/maintenance/restore.js';
 
@@ -34,6 +45,11 @@ import { restoreRepository } from '#api/git/maintenance/restore.js';
  */
 
 // === harness =============================================================
+
+// The storage-only suite uses an active lifecycle; deletion refusal has its own database test.
+vi.mock('#database/project-lifecycle.js', () => ({ assertActiveProjectLocked: async () => undefined }));
+const database = mock<Database>();
+database.transaction.mockImplementation(async (run) => run(mock<OwnerLockTransaction>()));
 
 const restoreBucket = 'tau-content-restore';
 
@@ -211,7 +227,7 @@ describe('repository restore from a second bucket', () => {
     await pushAndCommit(source, locator, client.directory);
     const sourceManifest = await readManifest(source, locator);
 
-    const result = await restoreRepository({ source, primary, locator, operator: 'rifont' });
+    const result = await restoreRepository({ database, source, primary, locator, operator: 'rifont' });
 
     expect(await readManifest(primary, locator)).toStrictEqual(result.manifest);
     expect(result.manifest.generation).toBe((sourceManifest?.generation ?? 0) + 1);
@@ -235,7 +251,7 @@ describe('repository restore from a second bucket', () => {
     const before = await readManifest(primary, locator);
     const bytesBefore = await packKeys(primary, locator);
 
-    const result = await restoreRepository({ source, primary, locator, operator: 'rifont' });
+    const result = await restoreRepository({ database, source, primary, locator, operator: 'rifont' });
 
     expect(result.manifest.generation).toBe(Math.max(before?.generation ?? 0, sourceManifest?.generation ?? 0) + 1);
     expect(result.manifest.incarnation).not.toBe(before?.incarnation);
@@ -259,7 +275,7 @@ describe('repository restore from a second bucket', () => {
     await pushAndCommit(source, locator, newClient().directory);
     const sourceManifest = await readManifest(source, locator);
 
-    const result = await restoreRepository({ source, primary, locator, operator: 'rifont' });
+    const result = await restoreRepository({ database, source, primary, locator, operator: 'rifont' });
 
     const sourceKeys = new Set((sourceManifest?.packs ?? []).map((pack) => pack.key));
     const primaryKeys = new Set(await packKeys(primary, locator));
@@ -287,9 +303,72 @@ describe('repository restore from a second bucket', () => {
       checksumSha256: createHash('sha256').update(body).digest('base64'),
     });
 
-    await expect(restoreRepository({ source, primary, locator, operator: 'rifont' })).rejects.toThrow(corrupted);
+    await expect(restoreRepository({ database, source, primary, locator, operator: 'rifont' })).rejects.toThrow(
+      corrupted,
+    );
     expect(await readManifest(primary, locator)).toBeUndefined();
   }, 120_000);
+
+  it('should refuse a source that answers the upload read with bytes other than the ones it verified', async () => {
+    const locator = newRepository();
+    await pushAndCommit(source, locator, newClient().directory);
+    const sourceManifest = await readManifest(source, locator);
+    const packKey = sourceManifest?.packs[0]?.key ?? '';
+    let reads = 0;
+    // The first read is the verified one; the second, which is uploaded, has one byte flipped.
+    const shifting: RepositoryStore = {
+      capabilities: source.capabilities,
+      readManifest: async (target) => source.readManifest(target),
+      commitManifest: async (target, next, expected) => source.commitManifest(target, next, expected),
+      // oxlint-disable-next-line max-params -- the port's own signature
+      putObject: async (target, key, body, options) => source.putObject(target, key, body, options),
+      getObject: async (target, key, range) => {
+        const stream = await source.getObject(target, key, range);
+        if (key !== packKey) {
+          return stream;
+        }
+        reads += 1;
+        if (reads === 1) {
+          return stream;
+        }
+        const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+        for await (const chunk of stream) {
+          chunks.push(chunk as Uint8Array<ArrayBuffer>);
+        }
+        const bytes = new Uint8Array(Buffer.concat(chunks));
+        bytes[0] = ((bytes[0] ?? 0) + 1) % 256;
+        return Readable.from([bytes]);
+      },
+      listObjects: (target, prefix) => source.listObjects(target, prefix),
+      deleteObjects: async (target, keys) => source.deleteObjects(target, keys),
+    };
+
+    await expect(
+      restoreRepository({ database, source: shifting, primary, locator, operator: 'rifont' }),
+    ).rejects.toThrow();
+
+    expect(reads).toBe(2);
+    expect(await readManifest(primary, locator)).toBeUndefined();
+    expect(await packKeys(primary, locator)).toStrictEqual([]);
+  }, 120_000);
+
+  it(`should restore a ${String(largePackMebibytes)} MiB pack with retained memory growth under ${String(streamedGrowthBoundMebibytes)} MiB`, async () => {
+    const locator = newRepository();
+    await pushAndCommit(source, locator, incompressibleClient(scratch('large-client'), largePackMebibytes));
+    const sourceManifest = await readManifest(source, locator);
+
+    const { result, growth } = await measureGrowth(async () =>
+      restoreRepository({ database, source, primary, locator, operator: 'rifont' }),
+    );
+    recordMeasurement(
+      `da4 restore pack=${String(largePackMebibytes)}MiB retained heap+arrayBuffers peak growth=${mebibytes(growth.heapAndBuffers)}MiB rss peak growth=${mebibytes(growth.rss)}MiB`,
+    );
+
+    expect(result.manifest.refs).toStrictEqual(sourceManifest?.refs);
+    expect(growth.heapAndBuffers).toBeLessThan(streamedGrowthBoundMebibytes * 1024 * 1024);
+    const restored = await packKeys(primary, locator);
+    expect(restored.filter((key) => key.endsWith('.pack'))).toHaveLength(1);
+  }, 600_000);
 
   it('should refuse to restore over a tombstoned primary', async () => {
     const locator = newRepository();
@@ -298,6 +377,8 @@ describe('repository restore from a second bucket', () => {
     await pushAndCommit(primary, locator, primaryClient.directory);
     await commitTombstone({ store: primary, locator, committedBy: 'test' });
 
-    await expect(restoreRepository({ source, primary, locator, operator: 'rifont' })).rejects.toThrow(/tombstoned/u);
+    await expect(restoreRepository({ database, source, primary, locator, operator: 'rifont' })).rejects.toThrow(
+      /tombstoned/u,
+    );
   }, 120_000);
 });

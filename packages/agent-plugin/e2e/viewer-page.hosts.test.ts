@@ -7,7 +7,7 @@
  * Screenshots land in `TAU_E2E_EVIDENCE_DIR` when it is set.
  */
 
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,7 +20,7 @@ import type { Browser, Frame, Locator, Page } from 'playwright';
 import { build } from 'vite';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 
-import type { TauViewerShowResult, TauViewerViewState } from '@taucad/mcp/viewer-protocol';
+import type { TauViewerReadResult, TauViewerShowResult, TauViewerViewState } from '@taucad/mcp/viewer-protocol';
 import { tauViewerReadLimit } from '@taucad/mcp/viewer-protocol';
 
 import type { HostRecord, TauHost } from '#e2e/basic-host/host.js';
@@ -190,6 +190,28 @@ const connect = async (name: string, capabilities: Record<string, unknown>): Pro
 
 const callTool = async (client: Client, name: string, args: Record<string, unknown>): Promise<CallToolResult> =>
   (await client.callTool({ name, arguments: args }, undefined, { timeout: kernelCallLimit })) as CallToolResult;
+
+/**
+ * Read a shown model's bytes through `app_read`, as the page does, in raw slices.
+ *
+ * @param client - The connected client.
+ * @param modelId - The shown model's id.
+ * @returns The model's bytes.
+ */
+const readShown = async (client: Client, modelId: string) => {
+  const slices: Array<Uint8Array<ArrayBuffer>> = [];
+  let offset = 0;
+  let totalBytes = 1;
+  while (offset < totalBytes) {
+    // oxlint-disable-next-line no-await-in-loop -- each slice starts where the last ended.
+    const result = await callTool(client, 'app_read', { modelId, offset, length: tauViewerReadLimit });
+    const slice = result.structuredContent as TauViewerReadResult;
+    slices.push(Buffer.from(slice.data, 'base64'));
+    offset += slice.byteLength;
+    ({ totalBytes } = slice);
+  }
+  return Buffer.concat(slices);
+};
 
 const shown = (result: CallToolResult): TauViewerShowResult => {
   expect(result.isError).toBeFalsy();
@@ -589,7 +611,7 @@ describe('exchange formats (W7)', () => {
         // oxlint-disable-next-line no-await-in-loop -- one kernel conversion at a time.
         const { model } = shown(await callTool(client, 'show_model', { targetFile }));
         expect(model).toMatchObject({ sourceFile: targetFile, mimeType: 'model/gltf-binary' });
-        expect(model.path).toMatch(/^\.tau\/artifacts\/.+\.glb$/u);
+        expect(model.path).toBe(targetFile);
       }
       const result = await callTool(client, 'show_model', { targetFile: 'cylinders.step' });
       const page = await mountInHarness(client, result, { displayMode: 'fullscreen' });
@@ -615,9 +637,11 @@ describe('a moving assembly (LRP-9)', () => {
    * the shown GLB carries `TAU_cad_topology` and `show_model` reports it preserved.
    *
    * @param client - The connected client.
+   * @param readsBytes - Whether the client reads the render through `app_read`, as an MCP Apps host's page does; a
+   * text host's loopback page reads it over the loopback server instead.
    * @returns The `show_model` result.
    */
-  const showPlanetary = async (client: Client): Promise<CallToolResult> => {
+  const showPlanetary = async (client: Client, readsBytes = true): Promise<CallToolResult> => {
     const evaluated = await callTool(client, 'evaluate_model', { targetFile: 'planetary.ts' });
     expect(evaluated.isError).toBeFalsy();
     expect(evaluated.structuredContent).toMatchObject({
@@ -627,15 +651,19 @@ describe('a moving assembly (LRP-9)', () => {
     const showResult = await callTool(client, 'show_model', { targetFile: 'planetary.ts' });
     const result = shown(showResult);
     expect(result.model).toMatchObject({ sourceFile: 'planetary.ts', mimeType: 'model/gltf-binary' });
-    /* The GLB's JSON chunk: its length at byte 12, its text from byte 20. */
-    const glb = await readFile(join(project, result.model.path));
+    expect(result.mechanism).toEqual({ preserved: true, joints: 3, animations: [animation.id] });
+    if (!readsBytes) {
+      return showResult;
+    }
+    /* The render lives in the server's memory (PAR-1): read it as the page does. The JSON chunk's length is at byte
+     * 12, its text from byte 20. */
+    const glb = await readShown(client, result.model.id);
     const gltf = JSON.parse(glb.subarray(20, 20 + glb.readUInt32LE(12)).toString('utf8')) as {
       extensionsUsed?: readonly string[];
       extensions?: Record<string, { topologyBufferView?: number }>;
     };
     expect(gltf.extensionsUsed ?? []).toContain('TAU_cad_topology');
     expect(gltf.extensions?.['TAU_cad_topology']?.topologyBufferView).toEqual(expect.any(Number));
-    expect(result.mechanism).toEqual({ preserved: true, joints: 3, animations: [animation.id] });
     return showResult;
   };
 
@@ -673,7 +701,7 @@ describe('a moving assembly (LRP-9)', () => {
     'should carry the mechanism to the loopback page of a text host',
     async () => {
       const client = await connect('claude-code', claudeCodeCapabilities);
-      const { viewerUrl } = shown(await showPlanetary(client));
+      const { viewerUrl } = shown(await showPlanetary(client, false));
       const page = await launched().newPage({ viewport: { width: 900, height: 640 } });
       await page.goto(viewerUrl ?? '');
       await drawn(page, 'Export');
@@ -740,9 +768,9 @@ describe("the tab's panels (W10)", () => {
       await page.keyboard.press('Escape');
 
       /* The person hides a component; Tau opens the project with the page's camera and that display (Q14). */
-      await panels.getByRole('tab', { name: 'Model' }).click();
+      await panels.getByRole('tab', { name: 'Model tree' }).click();
       await panels
-        .getByRole('tabpanel', { name: 'Model' })
+        .getByRole('tabpanel', { name: 'Model tree' })
         .getByRole('button', { name: /^Hide / })
         .first()
         .click();
@@ -775,6 +803,71 @@ describe("the tab's panels (W10)", () => {
         }),
       ).toContainEqual({ entryPath: 'plate.ts', camera: 'pose' });
       await capture(page, 'panels');
+      expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    'should preview a dragged parameter on the shown model and write only the released value (PAR-2)',
+    async () => {
+      const first = await callTool(client, 'show_model', { targetFile: 'plate.ts' });
+      const calls: Array<Readonly<{ name: string; at: number }>> = [];
+      const page = await mountInHarness(client, first, {
+        displayMode: 'fullscreen',
+        answer: (name) => {
+          calls.push({ name, at: Date.now() });
+          return undefined;
+        },
+      });
+      const frame = viewerFrame(page);
+      await drawn(frame, 'Export');
+      const panels = frame.getByRole('complementary', { name: 'Workbench' });
+      const width = panels.getByRole('tabpanel', { name: 'Parameters' }).getByRole('spinbutton', { name: /Width/u });
+      await width.waitFor({ timeout: 60_000 });
+      const sidecar = async (): Promise<string> => {
+        try {
+          return await readFile(join(project, '.tau/parameters/plate.ts.json'), 'utf8');
+        } catch {
+          return '';
+        }
+      };
+      const before = await sidecar();
+      const box = await width.boundingBox();
+      if (box === null) {
+        throw new Error('The Width field has no box.');
+      }
+
+      /* A drag of about a second: the page previews it, throttled, and writes nothing. */
+      const startX = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      await page.mouse.move(startX, y);
+      await page.mouse.down();
+      const dragStart = Date.now();
+      for (let step = 1; step <= 20; step += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one pointer move at a time, as a hand drags.
+        await page.mouse.move(startX + step * 4, y);
+        // oxlint-disable-next-line no-await-in-loop -- one pointer move at a time, as a hand drags.
+        await page.waitForTimeout(50);
+      }
+      const previews = calls.filter((call) => call.name === 'app_preview_parameters');
+      expect(previews.length).toBeGreaterThan(0);
+      /* At most one per 200 ms on the page's clock, counted rather than spaced: delivery to the recorder jitters. */
+      expect(previews.length).toBeLessThanOrEqual(Math.floor((Date.now() - dragStart) / 200) + 1);
+      expect(calls.some((call) => call.name === 'apply_parameter_operation')).toBe(false);
+      expect(await sidecar()).toBe(before);
+
+      const released = calls.length;
+      await page.mouse.up();
+      await expect.poll(sidecar, { timeout: 60_000 }).not.toBe(before);
+      /* The release is one checked write; the watched source renders it, so the page only reads and syncs after. */
+      const after = calls.slice(released).map((call) => call.name);
+      const written = after.indexOf('apply_parameter_operation');
+      expect(written).toBeGreaterThanOrEqual(0);
+      expect(
+        after.slice(written + 1).filter((name) => !['get_parameters', 'app_sync', 'app_read'].includes(name)),
+      ).toEqual([]);
       expect(pageErrors).toEqual([]);
       await page.close();
     },
@@ -823,10 +916,70 @@ describe("the tab's panels (W10)", () => {
       await capture(failing, 'export-retry');
       isFailing = false;
       await failure.getByRole('button', { name: 'Retry' }).click();
-      await panel.getByRole('region', { name: 'Formats' }).waitFor({ timeout: 60_000 });
+      await panel.getByRole('region', { name: 'Format' }).waitFor({ timeout: 60_000 });
       expect(await panel.getByRole('checkbox', { name: 'Save to project' }).isChecked()).toBe(true);
       expect(pageErrors).toEqual([]);
       await failing.close();
+    },
+    kernelCallLimit,
+  );
+});
+
+describe('the Files pane (PAR-9)', () => {
+  it(
+    'should list the project, open another file in this page alone, and list a file created on disk',
+    async () => {
+      const client = await connect('claude-ai', mcpAppsCapabilities);
+      const first = await callTool(client, 'show_model', { targetFile: 'surface.glb' });
+      const shownId = shown(first).model.id;
+      const asking = await mountInHarness(client, first, { displayMode: 'fullscreen' });
+      const other = await mountInHarness(client, first, { displayMode: 'fullscreen' });
+      await drawn(viewerFrame(asking), 'Export');
+      await drawn(viewerFrame(other), 'Export');
+
+      /* The pane lists the project's root, folders first; `.tau` is never listed. */
+      const panel = await openPane(viewerFrame(asking), 'Files');
+      await panel.getByRole('option', { name: /^small\.glb/u }).waitFor({ timeout: 30_000 });
+      expect(await panel.getByRole('option', { name: /^main\.ts/u }).count()).toBe(1);
+      expect(await panel.getByRole('option', { name: /^\.tau/u }).count()).toBe(0);
+      expect(await panel.getByRole('option', { name: /^surface\.glb/u }).getAttribute('aria-current')).toBe('true');
+
+      /* Opening another file shows it in the asking page, without show_model. */
+      await panel.getByRole('option', { name: /^small\.glb/u }).click();
+      await expect
+        .poll(
+          async () => {
+            const calls = await recorded(asking, 'toolCalls');
+            return calls.some((call) => call.name === 'app_read' && call.arguments['modelId'] !== shownId);
+          },
+          { timeout: 60_000 },
+        )
+        .toBe(true);
+      await expect
+        .poll(async () => panel.getByRole('option', { name: /^small\.glb/u }).getAttribute('aria-current'))
+        .toBe('true');
+      const askingCalls = await recorded(asking, 'toolCalls');
+      const opens = askingCalls.filter((call) => call.name === 'app_open_file');
+      expect(opens.map((call) => call.arguments)).toEqual([
+        expect.objectContaining({ path: 'small.glb', modelId: shownId }) as unknown,
+      ]);
+      expect(askingCalls.some((call) => call.name === 'show_model')).toBe(false);
+
+      /* The second page keeps its model, and the agent's model shown last has not moved. */
+      const otherCalls = await recorded(other, 'toolCalls');
+      const otherReads = otherCalls.filter((call) => call.name === 'app_read');
+      expect(new Set(otherReads.map((call) => call.arguments['modelId']))).toEqual(new Set([shownId]));
+      const lastShown = await callTool(client, 'show_model', {});
+      expect(shown(lastShown).model.path).toBe('surface.glb');
+
+      /* A file written on disk appears through app_sync's filesVersion; one the viewer cannot show is disabled. */
+      await writeFile(join(project, 'notes.md'), '# Notes\n');
+      const notes = panel.getByRole('option', { name: /^notes\.md/u });
+      await notes.waitFor({ timeout: 60_000 });
+      expect(await notes.getAttribute('aria-disabled')).toBe('true');
+      await capture(asking, 'files-pane');
+      await rm(join(project, 'notes.md'));
+      expect(pageErrors).toEqual([]);
     },
     kernelCallLimit,
   );
@@ -867,6 +1020,60 @@ describe('the live view (W6)', () => {
       const calls = await recorded(page, 'toolCalls');
       const reads = calls.filter((call) => call.name === 'app_read');
       expect(new Set(reads.map((call) => call.arguments['modelId']))).toEqual(new Set([shown(first).model.id]));
+      expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    'should show an edit to the shown source without show_model, and keep its render out of the project (PAR-1)',
+    async () => {
+      const source = (width: number): string =>
+        `import { drawRectangle } from 'replicad';\n\nexport default function main() {\n  return drawRectangle(${String(width)}, 10).sketchOnPlane('XY').extrude(3);\n}\n`;
+      await writeFile(join(project, 'live.ts'), source(20));
+      const artifactsBefore = await readdir(join(project, '.tau/artifacts')).catch(() => []);
+      const first = await callTool(client, 'show_model', { targetFile: 'live.ts' });
+      expect(first.isError).toBeFalsy();
+      expect(await readdir(join(project, '.tau/artifacts')).catch(() => [])).toEqual(artifactsBefore);
+      const page = await mountInHarness(client, first, { displayMode: 'fullscreen' });
+      await drawn(viewerFrame(page), 'Export');
+      const viewNow = async (): Promise<TauViewerViewState | undefined> => {
+        const result = await callTool(client, 'view_state', {});
+        return result.isError ? undefined : (result.structuredContent as { view: TauViewerViewState }).view;
+      };
+      const modelIdNow = async (): Promise<string | undefined> => {
+        const view = await viewNow();
+        return view?.model.id;
+      };
+      const toolCallsNow = async () => {
+        const calls = await recorded(page, 'toolCalls');
+        return calls;
+      };
+      await expect.poll(modelIdNow, { timeout: 120_000 }).toBe(shown(first).model.id);
+      /* The page reports what it draws on its next sync, which can follow the model's own report. */
+      const revisionEntryNow = async (): Promise<string | undefined> => {
+        const view = await viewNow();
+        return view?.sourceRevision?.entry;
+      };
+      await expect.poll(revisionEntryNow, { timeout: 30_000 }).toBe('live.ts');
+      const before = await viewNow();
+      const { length: callsBefore } = await toolCallsNow();
+
+      /* An editor, the agent or sed changes the file: the server's watched document renders it again. */
+      await writeFile(join(project, 'live.ts'), source(30));
+      await expect.poll(modelIdNow, { timeout: kernelCallLimit - 60_000 }).not.toBe(shown(first).model.id);
+      const after = await viewNow();
+      expect(after?.model).toMatchObject({ path: 'live.ts', sourceFile: 'live.ts' });
+      expect(after?.sourceRevision?.files['live.ts']).not.toBe(before?.sourceRevision?.files['live.ts']);
+      const recordedCalls = await toolCallsNow();
+      const calls = recordedCalls.slice(callsBefore);
+      expect(calls.map((call) => call.name)).not.toContain('show_model');
+      expect(calls.filter((call) => call.name === 'app_read').map((call) => call.arguments['modelId'])).toContain(
+        after?.model.id,
+      );
+      expect(await readdir(join(project, '.tau/artifacts')).catch(() => [])).toEqual(artifactsBefore);
+      await capture(page, 'live-file-edit');
       expect(pageErrors).toEqual([]);
       await page.close();
     },
@@ -991,8 +1198,10 @@ describe('Add to chat on each route (VUI-3)', () => {
    */
   const addPart = async (root: Frame | Page, part: string, item: string): Promise<void> => {
     const lane = root.getByRole('complementary', { name: 'Workbench' });
-    await lane.getByRole('tab', { name: 'Model' }).click();
-    const actions = lane.getByRole('tabpanel', { name: 'Model' }).getByRole('button', { name: `Actions for ${part}` });
+    await lane.getByRole('tab', { name: 'Model tree' }).click();
+    const actions = lane
+      .getByRole('tabpanel', { name: 'Model tree' })
+      .getByRole('button', { name: `Actions for ${part}` });
     await actions.waitFor({ timeout: 60_000 });
     await actions.click();
     const menu = root.getByRole('menu');
@@ -1090,6 +1299,101 @@ describe('Add to chat on each route (VUI-3)', () => {
   );
 });
 
+describe("desktop's structured errors (PAR-4)", () => {
+  beforeAll(async () => {
+    await writeFile(join(project, 'broken.ts'), `export default function main() {\n  return (;\n}\n`);
+  });
+
+  /**
+   * Open the bar's issues list.
+   *
+   * @param root - The frame the viewer is in, drawn in the tab composition.
+   * @param name - The segment's accessible name.
+   * @returns The list.
+   */
+  const openIssues = async (root: Frame, name: RegExp): Promise<Locator> => {
+    const segment = root.getByRole('group', { name: 'Viewer controls' }).getByRole('button', { name });
+    await segment.waitFor({ timeout: 120_000 });
+    await segment.click();
+    const list = root.getByRole('region', { name: 'Issues' });
+    await list.waitFor();
+    return list;
+  };
+
+  it(
+    'should list a failed build in the bar and hand an issue to the chat',
+    async () => {
+      const client = await connect('claude-ai', mcpAppsCapabilities);
+      const result = await callTool(client, 'show_model', { targetFile: 'broken.ts' });
+      expect(result.isError).toBe(true);
+      const page = await mountInHarness(client, result, { displayMode: 'fullscreen' });
+      const frame = viewerFrame(page);
+
+      const list = await openIssues(frame, /^Build failed\. Issues: 1 error$/u);
+      await capture(page, 'structured-errors');
+      await list.getByRole('button', { name: 'Add to chat', exact: true }).click();
+      await expect.poll(async () => recorded(page, 'modelContext')).toHaveLength(1);
+      expect(JSON.stringify(await recorded(page, 'modelContext'))).toContain('Fix this issue');
+      await frame.getByRole('status').filter({ hasText: 'Added to chat' }).waitFor();
+      expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    'should prepare a kernel that is not prepared and show the model again',
+    async () => {
+      const client = await connect('claude-ai', mcpAppsCapabilities);
+      const result = await callTool(client, 'show_model', { targetFile: 'small.glb' });
+      const clean = shown(result);
+      const refused: CallToolResult = {
+        ...result,
+        structuredContent: {
+          ...clean,
+          model: {
+            ...clean.model,
+            issues: [
+              {
+                message: 'The picogk kernel is not prepared on this computer.',
+                code: 'KERNEL_NOT_PREPARED',
+                severity: 'error',
+                details: { kernel: 'picogk' },
+              },
+            ],
+          },
+        },
+      };
+      const page = await mountInHarness(client, refused, {
+        displayMode: 'fullscreen',
+        answer: (name) =>
+          name === 'prepare_kernel'
+            ? { content: [{ type: 'text', text: 'ready' }], structuredContent: { outcome: 'ready' } }
+            : name === 'show_model'
+              ? result
+              : undefined,
+      });
+      const frame = viewerFrame(page);
+
+      const list = await openIssues(frame, /^Issues: 1 error$/u);
+      await list.getByRole('button', { name: 'Prepare', exact: true }).click();
+      await expect
+        .poll(async () => {
+          const calls = await recorded(page, 'toolCalls');
+          return calls.filter((call) => call.name === 'prepare_kernel');
+        })
+        .toEqual([{ name: 'prepare_kernel', arguments: { kernel: 'picogk' } }]);
+      /* The model shows again without the refusal, so the segment goes. */
+      await expect
+        .poll(async () => frame.getByRole('button', { name: /Issues:/u }).count(), { timeout: 60_000 })
+        .toBe(0);
+      expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+});
+
 describe('the part menu from the keyboard (VUI-6)', () => {
   /** A wide part at the framed centre, so a right press there lands on it, and a narrow one beside it. */
   const keysSource = `import { drawRectangle } from 'replicad';\n\nexport default function main() {\n  return [\n    { shape: drawRectangle(40, 20).sketchOnPlane('XY').extrude(4), name: 'Wide' },\n    { shape: drawRectangle(10, 10).sketchOnPlane('XY').extrude(4).translate(35, 0, 0), name: 'Narrow' },\n  ];\n}\n`;
@@ -1126,8 +1430,8 @@ describe('the part menu from the keyboard (VUI-6)', () => {
     async () => {
       const { page } = await openKeys();
       const lane = page.getByRole('complementary', { name: 'Workbench' });
-      await lane.getByRole('tab', { name: 'Model' }).click();
-      const row = lane.getByRole('tabpanel', { name: 'Model' }).getByRole('button', { name: 'Wide', exact: true });
+      await lane.getByRole('tab', { name: 'Model tree' }).click();
+      const row = lane.getByRole('tabpanel', { name: 'Model tree' }).getByRole('button', { name: 'Wide', exact: true });
       await row.waitFor({ timeout: 60_000 });
       await row.click();
 
@@ -1135,7 +1439,8 @@ describe('the part menu from the keyboard (VUI-6)', () => {
       const trigger = page.getByRole('button', { name: 'Actions for Wide' }).filter({ hasText: 'Wide' });
       await trigger.waitFor();
 
-      /* Shift+F10 on the focused canvas region opens the menu on its first item; ↓ reaches the chat item. */
+      /* Shift+F10 on the focused canvas region opens the menu on its first item; ↓ reaches the chat item, one row
+       * further down since the page's part gallery put Open preview at the top (PAR-7). */
       const region = page.getByRole('application', { name: 'Model viewer' });
       await region.focus();
       await page.keyboard.press('Shift+F10');
@@ -1148,6 +1453,7 @@ describe('the part menu from the keyboard (VUI-6)', () => {
           .evaluate((item) => item === document.activeElement),
       ).toBe(true);
       const copy = menu.getByRole('menuitem', { name: 'Copy reference' });
+      await page.keyboard.press('ArrowDown');
       await page.keyboard.press('ArrowDown');
       await page.keyboard.press('ArrowDown');
       expect(await isFocused(copy)).toBe(true);
@@ -1163,7 +1469,7 @@ describe('the part menu from the keyboard (VUI-6)', () => {
       /* The Menu key opens the same menu; Escape closes it and gives focus back to the canvas region. */
       await page.keyboard.press('ContextMenu');
       await menu.waitFor();
-      expect(await menu.getByRole('menuitem', { name: 'Reveal in Explorer' }).count()).toBe(1);
+      expect(await menu.getByRole('menuitem', { name: 'Reveal in model tree' }).count()).toBe(1);
       await page.keyboard.press('Escape');
       await expect.poll(async () => menu.count()).toBe(0);
       await expect.poll(async () => isFocused(region)).toBe(true);
@@ -1172,7 +1478,7 @@ describe('the part menu from the keyboard (VUI-6)', () => {
       await trigger.focus();
       await page.keyboard.press('Enter');
       await menu.waitFor();
-      for (const name of ['Focus on part', 'Copy reference', 'Reveal in Explorer', 'Hide', 'Isolate']) {
+      for (const name of ['Focus on part', 'Copy reference', 'Reveal in model tree', 'Hide', 'Isolate']) {
         // oxlint-disable-next-line no-await-in-loop -- one item at a time.
         expect(await menu.getByRole('menuitem', { name, exact: true }).count()).toBe(1);
       }
@@ -1320,7 +1626,7 @@ describe('the viewer page from a text host', () => {
       const lane = page.getByRole('complementary', { name: 'Workbench' });
       const tablist = lane.getByRole('tablist', { name: 'Open panes' });
       const tabs = tablist.getByRole('tab');
-      expect(await tabs.allTextContents()).toEqual(['Parameters', 'Model', 'Kinematics']);
+      expect(await tabs.allTextContents()).toEqual(['Parameters', 'Model tree', 'Kinematics']);
       expect(await lane.getByRole('button', { name: 'Hide workbench' }).count()).toBe(0);
       expect(await tablist.evaluate((list) => list.scrollWidth <= list.clientWidth)).toBe(true);
       /* Each tab's centre hits the tab, never a header button drawn over it. */
@@ -1369,6 +1675,128 @@ describe('the viewer page from a text host', () => {
       const lane = await page.getByRole('complementary', { name: 'Workbench' }).boundingBox();
       await page.mouse.move((lane?.x ?? 0) + 40, (lane?.y ?? 0) + 200, { steps: 4 });
       await expect.poll(async () => badge.count()).toBe(0);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    'should restore an arranged view and the camera the person left after a reload (PAR-3)',
+    async () => {
+      const records = join(project, '.tau/workbench');
+      await rm(records, { recursive: true, force: true });
+      onTestFinished(async () => {
+        await rm(records, { recursive: true, force: true });
+      });
+      const client = await connect('claude-code', claudeCodeCapabilities);
+      const { viewerUrl } = shown(await callTool(client, 'show_model', { targetFile: 'small.glb' }));
+      const page = await launched().newPage({ viewport: { width: 1200, height: 800 } });
+      page.on('pageerror', (error) => {
+        pageErrors.push(error.message);
+      });
+      await page.goto(viewerUrl ?? '');
+      await drawn(page, 'Export');
+      const viewNow = async (): Promise<TauViewerViewState> => {
+        const result = await callTool(client, 'view_state', {});
+        expect(result.isError).toBeFalsy();
+        return (result.structuredContent as { view: TauViewerViewState }).view;
+      };
+      const canvas = await page.getByRole('application', { name: 'Model viewer' }).boundingBox();
+      if (canvas === null) {
+        throw new Error('The canvas region has no box.');
+      }
+      const middle = { x: canvas.x + canvas.width / 2, y: canvas.y + canvas.height / 2 };
+      /* The person picks the surface, once it is under the pointer, so its component id is known. */
+      await page.mouse.move(middle.x, middle.y, { steps: 4 });
+      await expect
+        .poll(async () => page.getByTestId('model-component-name-badge').textContent(), { timeout: 30_000 })
+        .toBe('surface');
+      await page.mouse.click(middle.x, middle.y);
+      await expect
+        .poll(
+          async () => {
+            const view = await viewNow();
+            return view.selected.length;
+          },
+          { timeout: 30_000 },
+        )
+        .toBeGreaterThan(0);
+      const picked = await viewNow();
+      const [surface] = picked.selected;
+
+      /* The agent arranges a view from the top with a section, a measurement and the surface hidden. */
+      const arranged = await callTool(client, 'arrange_workbench', {
+        views: [
+          {
+            id: 'saved',
+            entryPath: 'small.glb',
+            camera: { kind: 'preset', preset: 'top' },
+            section: { active: true, cuts: [{ kind: 'plane', plane: 'xy', offset: 0, isFlipped: false }] },
+            measurements: [{ id: 'gap', startPoint: [0, 0, 0], endPoint: [1, 0, 0] }],
+          },
+        ],
+        entries: [{ path: 'small.glb', components: { hidden: [surface?.componentId] } }],
+      });
+      expect(arranged.isError).toBeFalsy();
+
+      await page.reload();
+      await drawn(page, 'Export');
+      await expect
+        .poll(
+          async () => {
+            const view = await viewNow();
+            /* The reloaded page has had no input yet; the page before it had. */
+            return {
+              fresh: view.interactedAt === 0,
+              direction: view.camera?.direction.map((axis) => Math.round(axis * 1000) / 1000),
+              sectionActive: view.sectionActive,
+              measurementCount: view.measurementCount,
+              hidden: view.hidden,
+            };
+          },
+          { timeout: 60_000 },
+        )
+        .toEqual({
+          fresh: true,
+          direction: [0, 0, 1],
+          sectionActive: true,
+          measurementCount: 1,
+          hidden: [surface?.componentId],
+        });
+      await capture(page, 'restored-arranged');
+
+      /* The person orbits; once the pose is kept, a reload opens on it. */
+      /* Away from the middle, where the measurement's label sits and a press would act on it. */
+      const corner = { x: canvas.x + canvas.width / 4, y: canvas.y + (canvas.height * 3) / 4 };
+      await page.mouse.move(corner.x, corner.y);
+      await page.mouse.down();
+      await page.mouse.move(corner.x + 120, corner.y - 60, { steps: 8 });
+      await page.mouse.up();
+      const savedPose = async (): Promise<unknown> => {
+        const text = await readFile(join(records, 'views/saved.json'), 'utf8').catch(() => '{}');
+        return (JSON.parse(text) as { camera?: { kind?: string } }).camera?.kind;
+      };
+      await expect.poll(savedPose, { timeout: 30_000 }).toBe('pose');
+      const { camera: orbited } = await viewNow();
+      expect(orbited?.direction.map((axis) => Math.round(axis * 1000) / 1000)).not.toEqual([0, 0, 1]);
+
+      await page.reload();
+      await drawn(page, 'Export');
+      await expect
+        .poll(
+          async () => {
+            const view = await viewNow();
+            return view.interactedAt === 0
+              ? view.camera?.direction.map((axis) => Math.round(axis * 100) / 100)
+              : 'stale';
+          },
+          { timeout: 60_000 },
+        )
+        .toEqual(orbited?.direction.map((axis) => Math.round(axis * 100) / 100));
+      const restored = await viewNow();
+      expect(restored).toMatchObject({ sectionActive: true, measurementCount: 1, hidden: [surface?.componentId] });
+      expect(restored.camera?.verticalSpan).toBeCloseTo(orbited?.verticalSpan ?? 0, 3);
+      expect(pageErrors).toEqual([]);
       await page.close();
     },
     kernelCallLimit,

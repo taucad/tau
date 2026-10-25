@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { mock } from 'vitest-mock-extended';
@@ -54,6 +57,15 @@ const createTopCamera = (): THREE.PerspectiveCamera => {
 };
 
 describe('section plane picker', () => {
+  it('should guard the observer shortcut bypassed by the moving picker tiles', () => {
+    expect(THREE.REVISION).toBe('184');
+    const require = createRequire(import.meta.url);
+    const source = readFileSync(require.resolve('three/src/materials/nodes/manager/NodeMaterialObserver.js'));
+    expect(createHash('sha256').update(source).digest('hex')).toBe(
+      '44e67b66854b65a96dfafe03f5b0ebd8100ede28c56a28853b974fef28089b83',
+    );
+  });
+
   it('should sit just left of the view cube, centred on it', () => {
     expect(resolveSectionPlanePickerRect({ left: 704, top: 10, size: 96 })).toEqual({ left: 620, top: 14, size: 88 });
   });
@@ -103,9 +115,44 @@ describe('section plane picker', () => {
     expect(renderer.render).toHaveBeenCalledOnce();
   });
 
+  it('should draw in the linear target viewport at DPR two and restore it after failure', () => {
+    const renderer = createRenderer(true);
+    const target = new THREE.WebGLRenderTarget(1600, 1200);
+    const viewport = target.viewport.clone();
+    const scissor = target.scissor.clone();
+    renderer.getRenderTarget.mockReturnValue(target);
+    renderer.getPixelRatio.mockReturnValue(2);
+    const picker = createSectionPlanePicker('webgpu');
+    picker.setStyle(style);
+    renderer.render.mockImplementation(() => {
+      expect(target.viewport.toArray()).toEqual([1240, 12, 176, 176]);
+      expect(target.scissor.toArray()).toEqual(target.viewport.toArray());
+      throw new Error('picker draw failed');
+    });
+    try {
+      expect(() => {
+        picker.render({
+          renderer,
+          camera: new THREE.PerspectiveCamera(),
+          cubeViewport: [704, 2, 96, 96],
+        });
+      }).toThrow('picker draw failed');
+      expect(target.viewport.equals(viewport)).toBe(true);
+      expect(target.scissor.equals(scissor)).toBe(true);
+      expect(renderer.autoClear).toBe(true);
+    } finally {
+      picker.dispose();
+      target.dispose();
+    }
+  });
+
   it('should pick the tile under a point in its square, and nothing outside it', () => {
     const picker = createStyledPicker();
-    picker.render({ renderer: createRenderer(false), camera: createTopCamera(), cubeViewport: [704, 494, 96, 96] });
+    picker.render({
+      renderer: createRenderer(false),
+      camera: createTopCamera(),
+      cubeViewport: [704, 494, 96, 96],
+    });
 
     expect(picker.pick(620 + 44, 14 + 44)).toBe('xy');
     expect(picker.pick(600, 14 + 44)).toBeUndefined();
@@ -122,7 +169,11 @@ describe('section plane picker', () => {
       }
     });
     const picker = createStyledPicker();
-    picker.render({ renderer, camera: createTopCamera(), cubeViewport: [704, canvasHeight - 96, 96, 96] });
+    picker.render({
+      renderer,
+      camera: createTopCamera(),
+      cubeViewport: [704, canvasHeight - 96, 96, 96],
+    });
 
     expect(picker.camera).toHaveProperty('reversedDepth', true);
     expect(picker.pick(620 + 44, 508 + 44)).toBe('xy');
@@ -132,7 +183,11 @@ describe('section plane picker', () => {
     const picker = createSectionPlanePicker();
     const renderer = createRenderer(false);
 
-    picker.render({ renderer, camera: createTopCamera(), cubeViewport: [704, 494, 96, 96] });
+    picker.render({
+      renderer,
+      camera: createTopCamera(),
+      cubeViewport: [704, 494, 96, 96],
+    });
 
     expect(renderer.render).not.toHaveBeenCalled();
     expect(picker.rect).toBeUndefined();
@@ -140,18 +195,58 @@ describe('section plane picker', () => {
 
   it.each([
     // The camera on each side of each axis; the tile faces it, printed right-way round from there.
-    { plane: 'xy', side: 1, right: [1, 0, 0], up: [0, 1, 0], normal: [0, 0, 1] },
-    { plane: 'xy', side: -1, right: [1, 0, 0], up: [0, -1, 0], normal: [0, 0, -1] },
-    { plane: 'xz', side: -1, right: [1, 0, 0], up: [0, 0, 1], normal: [0, -1, 0] },
-    { plane: 'xz', side: 1, right: [-1, 0, 0], up: [0, 0, 1], normal: [0, 1, 0] },
-    { plane: 'yz', side: 1, right: [0, 1, 0], up: [0, 0, 1], normal: [1, 0, 0] },
-    { plane: 'yz', side: -1, right: [0, -1, 0], up: [0, 0, 1], normal: [-1, 0, 0] },
+    {
+      plane: 'xy',
+      side: 1,
+      right: [1, 0, 0],
+      up: [0, 1, 0],
+      normal: [0, 0, 1],
+    },
+    {
+      plane: 'xy',
+      side: -1,
+      right: [1, 0, 0],
+      up: [0, -1, 0],
+      normal: [0, 0, -1],
+    },
+    {
+      plane: 'xz',
+      side: -1,
+      right: [1, 0, 0],
+      up: [0, 0, 1],
+      normal: [0, -1, 0],
+    },
+    {
+      plane: 'xz',
+      side: 1,
+      right: [-1, 0, 0],
+      up: [0, 0, 1],
+      normal: [0, 1, 0],
+    },
+    {
+      plane: 'yz',
+      side: 1,
+      right: [0, 1, 0],
+      up: [0, 0, 1],
+      normal: [1, 0, 0],
+    },
+    {
+      plane: 'yz',
+      side: -1,
+      right: [0, -1, 0],
+      up: [0, 0, 1],
+      normal: [-1, 0, 0],
+    },
   ] as const)('should print the $plane tile outward and unmirrored on side $side', ({ plane, side, ...expected }) => {
     const [right, up, normal] = resolveSectionPlaneTileBasis(plane, side);
 
     // `+ 0` folds negated zeros, which `toEqual` tells apart.
     const plain = (vector: THREE.Vector3): number[] => vector.toArray().map((value) => value + 0);
-    expect({ right: plain(right), up: plain(up), normal: plain(normal) }).toEqual({
+    expect({
+      right: plain(right),
+      up: plain(up),
+      normal: plain(normal),
+    }).toEqual({
       right: [...expected.right],
       up: [...expected.up],
       normal: [...expected.normal],
@@ -166,7 +261,11 @@ describe('section plane picker', () => {
     camera.up.set(0, 0, 1);
     camera.position.set(-4, -6, 5);
     camera.lookAt(0, 0, 0);
-    picker.render({ renderer: createRenderer(false), camera, cubeViewport: [704, 494, 96, 96] });
+    picker.render({
+      renderer: createRenderer(false),
+      camera,
+      cubeViewport: [704, 494, 96, 96],
+    });
 
     const normals = Object.fromEntries(
       ['xy', 'xz', 'yz'].map((plane) => {
@@ -211,7 +310,12 @@ describe('section plane picker', () => {
 
     picker.paint({ current: 'xy', hovered: 'xz', active: 'yz' });
     const [current, hovered, pressed] = look(picker);
-    expect(current).toEqual({ scale: 1, band: 0x50_80_f0, face: 0x80_a0_e0, opacity: 1 });
+    expect(current).toEqual({
+      scale: 1,
+      band: 0x50_80_f0,
+      face: 0x80_a0_e0,
+      opacity: 1,
+    });
     expect(hovered).toMatchObject({ scale: 1.08, band: 0x50_d0_50 });
     // Washed part-way from the face tone toward the axis colour.
     expect(hovered?.['face']).not.toBe(0xdd_dd_dd);
@@ -224,7 +328,12 @@ describe('section plane picker', () => {
 
     picker.paint({ current: 'xz', hovered: 'xz' });
 
-    expect(look(picker)[1]).toEqual({ scale: 1.08, band: 0x30_90_30, face: 0x50_d0_50, opacity: 1 });
+    expect(look(picker)[1]).toEqual({
+      scale: 1.08,
+      band: 0x30_90_30,
+      face: 0x50_d0_50,
+      opacity: 1,
+    });
   });
 
   it('should set every tile back and fade it while dimmed, hovered or not', () => {
@@ -244,9 +353,17 @@ describe('section plane picker', () => {
 
     picker.setStyle({
       ...style,
-      planeTiles: { ...style.planeTiles, x: { edge: 0x11_11_11, strong: 0x22_22_22, deep: 0x33_33_33 } },
+      planeTiles: {
+        ...style.planeTiles,
+        x: { edge: 0x11_11_11, strong: 0x22_22_22, deep: 0x33_33_33 },
+      },
     });
 
-    expect(look(picker)[2]).toEqual({ scale: 1, band: 0x22_22_22, face: 0x11_11_11, opacity: 1 });
+    expect(look(picker)[2]).toEqual({
+      scale: 1,
+      band: 0x22_22_22,
+      face: 0x11_11_11,
+      opacity: 1,
+    });
   });
 });

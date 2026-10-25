@@ -312,3 +312,78 @@ it.each(['immediate', 'delayed', 'moved', 'surviving', 'cancel', 'escape'] as co
     expect(reset).toHaveBeenCalledTimes(mode === 'cancel' || mode === 'escape' ? 0 : 1);
   },
 );
+
+describe('RecordIssuesAction inline (the phone project sheet, D2)', () => {
+  it('lists the records without a trigger or a second announcement, and closes the sheet before a file opens', async () => {
+    const onBeforeOpenFile = vi.fn(() => {
+      expect(editorSend).not.toHaveBeenCalled();
+    });
+    render(
+      <TooltipProvider>
+        <RecordIssuesAction variant='inline' fallbackFocus={() => undefined} onBeforeOpenFile={onBeforeOpenFile} />
+      </TooltipProvider>,
+    );
+    expect(screen.queryByRole('listitem')).toBeNull();
+
+    publish('entries', issue({ state: 'newer' }));
+
+    expect(screen.queryByRole('button', { name: /record/u })).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.getByText('Radial Engine · 1 settings record')).toBeDefined();
+    await userEvent.click(
+      within(screen.getByRole('listitem', { name: 'Model display settings' })).getByRole('button', {
+        name: 'Open file',
+      }),
+    );
+    expect(onBeforeOpenFile).toHaveBeenCalledTimes(1);
+    expect(editorSend).toHaveBeenCalledWith({ type: 'openFile', path: '.tau/workbench/entries.json', source: 'user' });
+  });
+});
+
+it.each(['cancel', 'escape', 'settled'] as const)(
+  'should return focus inline to the row’s More actions after a %s Reset, or the fallback once the row is gone',
+  async (mode) => {
+    const fallback = createRef<HTMLButtonElement>();
+    render(
+      <TooltipProvider>
+        <RecordIssuesAction variant='inline' fallbackFocus={() => fallback.current?.focus()} />
+        <button ref={fallback} type='button'>
+          Close project sheet
+        </button>
+      </TooltipProvider>,
+    );
+    const reset = vi.fn(async () => {
+      publishRecordIssue('radial', 'entries', undefined);
+      return true;
+    });
+    publish('entries', issue({ bytes: encoder.encode('{broken'), reset }));
+    const user = userEvent.setup();
+    const more = screen.getByRole('button', { name: 'More actions for Model display settings' });
+    act(() => {
+      more.focus();
+    });
+    await user.keyboard('{Enter}');
+    await user.keyboard('{ArrowDown}{Enter}');
+    const dialog = await screen.findByRole('alertdialog');
+    if (mode === 'escape') {
+      await user.keyboard('{Escape}');
+    } else {
+      act(() => {
+        within(dialog)
+          .getByRole('button', { name: mode === 'cancel' ? 'Cancel' : 'Reset settings' })
+          .focus();
+      });
+      await user.keyboard('{Enter}');
+    }
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        mode === 'settled'
+          ? fallback.current
+          : screen.getByRole('button', { name: 'More actions for Model display settings' }),
+      );
+    });
+  },
+);

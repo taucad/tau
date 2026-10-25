@@ -278,7 +278,7 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
-              expr: sum(rate(gen_ai_client_operation_duration_count{app=~".*",service_name="tau-api",error_type!=""}[10m])) / sum(rate(gen_ai_client_operation_duration_count{app=~".*",service_name="tau-api"}[10m])) > 0.05
+              expr: (sum(rate(gen_ai_client_operation_duration_count{app=~".*",service_name="tau-api",error_type!=""}[10m])) / sum(rate(gen_ai_client_operation_duration_count{app=~".*",service_name="tau-api"}[10m])) and sum(increase(gen_ai_client_operation_duration_count{app=~".*",service_name="tau-api"}[10m])) >= 20) > 0.05
               intervalMs: 15000
               maxDataPoints: 20
               refId: llm_errors
@@ -287,7 +287,7 @@ groups:
         for: 5m
         annotations:
           runbook_url: docs/handbooks/cloud/playbooks/chat-llm-failing.md
-          summary: LLM API error rate exceeds 5%.
+          summary: LLM API error rate exceeds 5% over at least 20 calls in 10 min; below that volume a handful of failures is not a rate.
         labels:
           severity: warning
           service: tau-api
@@ -565,7 +565,7 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
-              expr: (max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{app=~".*",service_name="tau-api",tau_billing_unpriced_reason=~"missing_rate|dimension_mismatch"}) > on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{app=~".*",service_name="tau-api",tau_billing_unpriced_reason=~"missing_rate|dimension_mismatch"} offset 2h)) or (max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{app=~".*",service_name="tau-api",tau_billing_unpriced_reason=~"missing_rate|dimension_mismatch"}) > 0 unless on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{app=~".*",service_name="tau-api",tau_billing_unpriced_reason=~"missing_rate|dimension_mismatch"} offset 2h))
+              expr: (max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{app=~".*",service_name="tau-api",tau_billing_unpriced_reason=~"missing_rate|dimension_mismatch"}) > on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (max_over_time(tau_billing_supplier_unpriced_operations{app=~".*",service_name="tau-api",tau_billing_unpriced_reason=~"missing_rate|dimension_mismatch"}[1h] offset 2h))) or (max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{app=~".*",service_name="tau-api",tau_billing_unpriced_reason=~"missing_rate|dimension_mismatch"}) > 0 unless on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (max_over_time(tau_billing_supplier_unpriced_operations{app=~".*",service_name="tau-api",tau_billing_unpriced_reason=~"missing_rate|dimension_mismatch"}[1h] offset 2h)))
               intervalMs: 15000
               maxDataPoints: 20
               refId: supplier_unpriced
@@ -574,7 +574,7 @@ groups:
         for: 0s
         annotations:
           runbook_url: docs/handbooks/cloud/system/services/llm-suppliers.md
-          summary: "New settled operations carry no supplier-cost estimate because a route's supplier valuation is incomplete (tau_billing_supplier_unpriced_operations with reason `missing_rate` or `dimension_mismatch` grew, or a provider/SKU/reason appeared, in the last 2 h): it needs a code fix. Cut streams (`absorbed`) have their own rate rule, billing-supplier-absorbed-usage. The gauge is a running total recorded hourly by billing-operations, so this rule watches its growth, not its level. Clears 2 h after the last increase."
+          summary: "New settled operations carry no supplier-cost estimate because a route's supplier valuation is incomplete (tau_billing_supplier_unpriced_operations with reason `missing_rate` or `dimension_mismatch` grew, or a provider/SKU/reason appeared, in the last 2 h): it needs a code fix. Cut streams (`absorbed`) have their own rate rule, billing-supplier-absorbed-usage. The gauge is a running total recorded hourly by billing-operations, so this rule watches its growth, not its level; the baseline is the gauge's maximum over the hour ending 2 h ago, so a scrape gap is not read as a new series. Clears 2 h after the last increase."
         labels:
           severity: warning
           service: tau-api
@@ -590,7 +590,7 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
-              expr: (max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{app=~".*",service_name="tau-api",tau_billing_unpriced_reason="absorbed"}) - on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{app=~".*",service_name="tau-api",tau_billing_unpriced_reason="absorbed"} offset 1h) > 10) or (max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{app=~".*",service_name="tau-api",tau_billing_unpriced_reason="absorbed"}) > 10 unless on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{app=~".*",service_name="tau-api",tau_billing_unpriced_reason="absorbed"} offset 1h))
+              expr: (max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{app=~".*",service_name="tau-api",tau_billing_unpriced_reason="absorbed"}) - on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (max_over_time(tau_billing_supplier_unpriced_operations{app=~".*",service_name="tau-api",tau_billing_unpriced_reason="absorbed"}[1h] offset 1h)) > 10) or (max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{app=~".*",service_name="tau-api",tau_billing_unpriced_reason="absorbed"}) > 10 unless on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (max_over_time(tau_billing_supplier_unpriced_operations{app=~".*",service_name="tau-api",tau_billing_unpriced_reason="absorbed"}[1h] offset 1h)))
               intervalMs: 15000
               maxDataPoints: 20
               refId: supplier_absorbed
@@ -599,7 +599,7 @@ groups:
         for: 0s
         annotations:
           runbook_url: docs/handbooks/cloud/system/services/llm-suppliers.md
-          summary: 'More than 10 settled operations in one provider/SKU were absorbed unpriced in the last hour (tau_billing_supplier_unpriced_operations with reason `absorbed` grew by more than 10, or appeared above 10): cut streams or expired recoveries at an unusual rate, so a client, the gateway or a provider is aborting turns. A single client abort is expected and does not fire. The gauge is a running total recorded hourly by billing-operations.'
+          summary: 'More than 10 settled operations in one provider/SKU were absorbed unpriced in the last hour (tau_billing_supplier_unpriced_operations with reason `absorbed` grew by more than 10, or appeared above 10): cut streams or expired recoveries at an unusual rate, so a client, the gateway or a provider is aborting turns. A single client abort is expected and does not fire. The gauge is a running total recorded hourly by billing-operations; the baseline is its maximum over the hour ending 1 h ago, so a scrape gap is not read as a new series.'
         labels:
           severity: warning
           service: tau-api
@@ -629,3 +629,428 @@ groups:
           severity: warning
           service: tau-api
           component: billing
+      - uid: runtime-implementation-failures
+        title: TauRuntimeImplementationFailures
+        condition: implementation_failures
+        data:
+          - refId: implementation_failures
+            queryType: ''
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum by (tau_runtime_operation) (rate(tau_runtime_operations_total{app=~".*",service_name="tau-api",tau_runtime_cause="implementation"}[15m])) / sum by (tau_runtime_operation) (rate(tau_runtime_operations_total{app=~".*",service_name="tau-api",tau_runtime_outcome!~"superseded|cancelled|abandoned"}[15m])) > 0.05 and sum by (tau_runtime_operation) (increase(tau_runtime_operations_total{app=~".*",service_name="tau-api",tau_runtime_cause="implementation"}[15m])) >= 10 and sum by (tau_runtime_operation) (increase(tau_runtime_operations_total{app=~".*",service_name="tau-api",tau_runtime_outcome!~"superseded|cancelled|abandoned"}[15m])) >= 50
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: implementation_failures
+        noDataState: OK
+        execErrState: OK
+        for: 10m
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/runtime-observability-bootstrap.md
+          summary: "More than 5 % of one operation's completed runtime attempts failed with an implementation-class cause (failed, discarded, or an implementation-class issue) over 15 min, with at least 10 failures and 50 completed attempts. Completed excludes superseded, cancelled and abandoned, so merged counts cannot move the ratio. Drill: T14 fixture, which stops at its own deadline."
+        labels:
+          severity: warning
+          service: tau-api
+          component: runtime
+      - uid: runtime-host-kills-deadlines
+        title: TauRuntimeHostKillsAndDeadlines
+        condition: host_kills
+        data:
+          - refId: host_kills
+            queryType: ''
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum(increase(tau_runtime_operation_errors_total{app=~".*",service_name="tau-api",error_type=~"HOST_LIMIT_EXCEEDED|HOST_EXITED|TIMEOUT_RECOVERY|RUNTIME_OPERATION_TIMEOUT"}[15m])) >= 5
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: host_kills
+        noDataState: OK
+        execErrState: OK
+        for: 5m
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/runtime-observability-bootstrap.md
+          summary: 'At least 5 runtime attempts in 15 min ended in a host limit kill, an unexplained host exit, a timeout recovery or a client deadline (error.type on the errors counter; a timed-out attempt carries RUNTIME_OPERATION_TIMEOUT). Drill: a desktop runner with a low residentLimit.'
+        labels:
+          severity: warning
+          service: tau-api
+          component: runtime
+      - uid: runtime-boot-failures
+        title: TauRuntimeBootFailures
+        condition: boot_failures
+        data:
+          - refId: boot_failures
+            queryType: ''
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum(increase(tau_runtime_operations_total{app=~".*",service_name="tau-api",tau_runtime_operation="initialize",tau_runtime_outcome!~"succeeded|cancelled|abandoned|superseded"}[15m])) / sum(increase(tau_runtime_operations_total{app=~".*",service_name="tau-api",tau_runtime_operation="initialize"}[15m])) > 0.1 and sum(increase(tau_runtime_operations_total{app=~".*",service_name="tau-api",tau_runtime_operation="initialize",tau_runtime_outcome!~"succeeded|cancelled|abandoned|superseded"}[15m])) >= 5 and sum(increase(tau_runtime_operations_total{app=~".*",service_name="tau-api",tau_runtime_operation="initialize"}[15m])) >= 20
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: boot_failures
+        noDataState: OK
+        execErrState: OK
+        for: 10m
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/runtime-observability-bootstrap.md
+          summary: 'More than 10 % of runtime worker boots (initialize) failed over 15 min, with at least 5 failures and 20 boots. Drill: T04 fixture.'
+        labels:
+          severity: warning
+          service: tau-api
+          component: runtime
+      - uid: runtime-capacity-refusal-surge
+        title: TauRuntimeCapacityRefusalSurge
+        condition: capacity_surge
+        data:
+          - refId: capacity_surge
+            queryType: ''
+            relativeTimeRange:
+              from: 608400
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum(rate(tau_runtime_capacity_refusals_total{app=~".*",service_name="tau-api"}[1h])) > 2 * avg_over_time(sum(rate(tau_runtime_capacity_refusals_total{app=~".*",service_name="tau-api"}[1h]))[7d:1h]) and sum(increase(tau_runtime_capacity_refusals_total{app=~".*",service_name="tau-api"}[1h])) >= 20
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: capacity_surge
+        noDataState: OK
+        execErrState: OK
+        for: 30m
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/runtime-observability-bootstrap.md
+          summary: 'Capacity refusals (RESOURCE_LIMIT issues and supervisor limit kills) over the last hour are more than twice their 7-day hourly mean, with at least 20 in the hour. Info until a 7-day baseline exists, then warning. Added paused (package.md §12.2): info rules stay paused until Tau Cloud PR-5a gives them per-rule repeat and routing, so they never mail the operator contact every four hours.'
+        labels:
+          severity: info
+          service: tau-api
+          component: runtime
+          kind: trigger
+          trigger: runtime-capacity-refusal-surge
+          package: runtime-observability
+        isPaused: true
+      - uid: runtime-stalls
+        title: TauRuntimeStalls
+        condition: stalls
+        data:
+          - refId: stalls
+            queryType: ''
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: (sum(increase(tau_runtime_late_terminals_total{app=~".*",service_name="tau-api"}[1h])) or vector(0)) + ((sum(increase(tau_runtime_operation_duration_bucket{app=~".*",service_name="tau-api",tau_runtime_outcome="abandoned",le="+Inf"}[1h])) - sum(increase(tau_runtime_operation_duration_bucket{app=~".*",service_name="tau-api",tau_runtime_outcome="abandoned",le="120"}[1h]))) or vector(0)) >= 5
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: stalls
+        noDataState: OK
+        execErrState: OK
+        for: 30m
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/runtime-observability-bootstrap.md
+          summary: 'Stall evidence: worker replies that arrived after their attempt settled plus abandoned attempts longer than 120 s reached 5 in an hour. Cancellation, supersession and abandonment never page. Drill: T23 in CI only. Added paused (package.md §12.2): info rules stay paused until Tau Cloud PR-5a gives them per-rule repeat and routing, so they never mail the operator contact every four hours.'
+        labels:
+          severity: info
+          service: tau-api
+          component: runtime
+          kind: trigger
+          trigger: runtime-stalls
+          package: runtime-observability
+        isPaused: true
+      - uid: runtime-viewer-context-loss
+        title: TauRuntimeViewerContextLoss
+        condition: viewer_context_loss
+        data:
+          - refId: viewer_context_loss
+            queryType: ''
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum by (tau_runtime_backend) (increase(tau_runtime_viewer_events_total{app=~".*",service_name="tau-api",tau_runtime_viewer_event="context-lost"}[1h])) / sum by (tau_runtime_backend) (increase(tau_runtime_viewer_events_total{app=~".*",service_name="tau-api",tau_runtime_viewer_event="first-frame"}[1h])) > 0.02 and sum by (tau_runtime_backend) (increase(tau_runtime_viewer_events_total{app=~".*",service_name="tau-api",tau_runtime_viewer_event="first-frame"}[1h])) >= 200
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: viewer_context_loss
+        noDataState: OK
+        execErrState: OK
+        for: 30m
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/runtime-observability-bootstrap.md
+          summary: 'More than 2 % of viewer first frames on one backend (webgl, webgpu) were followed by a context loss in the last hour, with at least 200 first frames (FR-17). Drill: Playwright forced WEBGL_lose_context in T12. Added paused (package.md §12.2): info rules stay paused until Tau Cloud PR-5a gives them per-rule repeat and routing, so they never mail the operator contact every four hours.'
+        labels:
+          severity: info
+          service: tau-api
+          component: runtime
+          kind: trigger
+          trigger: runtime-viewer-context-loss
+          package: runtime-observability
+        isPaused: true
+      - uid: runtime-jobs-need-attention
+        title: TauRuntimeJobsNeedAttention
+        condition: jobs_attention
+        data:
+          - refId: jobs_attention
+            queryType: ''
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum by (tau_runtime_plugin) (increase(tau_runtime_job_attention_total{app=~".*",service_name="tau-api"}[1h])) >= 5
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: jobs_attention
+        noDataState: OK
+        execErrState: OK
+        for: 30m
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/runtime-observability-bootstrap.md
+          summary: 'At least 5 jobs of one provider entered attention_required in the last hour (FR-15). Read from the job attention counter, once per job, never from the operations denominator. Drill: T20 fixture.'
+        labels:
+          severity: warning
+          service: tau-api
+          component: runtime
+      - uid: telemetry-ingest-rejections
+        title: TauTelemetryIngestRejections
+        condition: ingest_rejections
+        data:
+          - refId: ingest_rejections
+            queryType: ''
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum(increase(tau_telemetry_ingest_entries_total{app=~".*",service_name="tau-api",disposition=~"rejected.*|overflow"}[15m])) >= 100
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: ingest_rejections
+        noDataState: OK
+        execErrState: OK
+        for: 10m
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/runtime-observability-bootstrap.md
+          summary: 'The runtime telemetry ingest rejected or overflowed at least 100 entries in 15 min (invalid, rate-limited, unknown entry or Loki event overflow). Drill: T10, with a hard deadline.'
+        labels:
+          severity: warning
+          service: tau-api
+          component: runtime
+      - uid: telemetry-spans-dropped
+        title: TauTelemetrySpansDropped
+        condition: spans_dropped
+        data:
+          - refId: spans_dropped
+            queryType: ''
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum(increase(tau_telemetry_spans_dropped_total{app=~".*",service_name="tau-api"}[1h])) >= 10000
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: spans_dropped
+        noDataState: OK
+        execErrState: OK
+        for: 1h
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/runtime-observability-bootstrap.md
+          summary: 'Hosts reported at least 10,000 spans refused by worker collectors at their 10,000-entry bound in an hour (D-T5): local traces are being lost under load. Drill: T22 in CI. Added paused (package.md §12.2): info rules stay paused until Tau Cloud PR-5a gives them per-rule repeat and routing, so they never mail the operator contact every four hours.'
+        labels:
+          severity: info
+          service: tau-api
+          component: runtime
+          kind: trigger
+          trigger: telemetry-spans-dropped
+          package: runtime-observability
+        isPaused: true
+      - uid: telemetry-runtime-absent
+        title: TauRuntimeTelemetryAbsent
+        condition: telemetry_absent
+        data:
+          - refId: telemetry_absent
+            queryType: ''
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: (sum(rate(http_server_request_duration_count{app=~".*",service_name="tau-api",http_route!="/v1/telemetry/ingest",http_route=~"/v1/(projects|chat|privacy).*"}[30m])) > 0.05) and on() (max(tau_telemetry_runtime_enabled{app=~".*",service_name="tau-api"}) == 1) and on() (absent_over_time(tau_telemetry_ingest_entries_total{app=~".*",service_name="tau-api",disposition="recorded"}[30m]) or on() (sum(increase(tau_telemetry_ingest_entries_total{app=~".*",service_name="tau-api",disposition="recorded"}[30m])) == 0))
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: telemetry_absent
+        noDataState: OK
+        execErrState: OK
+        for: 15m
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/runtime-observability-bootstrap.md
+          summary: 'Other UI traffic reaches the API but no runtime telemetry entry was recorded for 30 min, on a deployment whose runtime telemetry is on (the clause on tau_telemetry_runtime_enabled keeps a self-hosted or paused API silent; the billing gate plays no part). Route labels are illustrative until W4 reads the real http_route values. Drill: T15, a self-expiring pause.'
+        labels:
+          severity: warning
+          service: tau-api
+          component: runtime
+      - uid: telemetry-delivery-delay
+        title: TauTelemetryDeliveryDelay
+        condition: delivery_delay
+        data:
+          - refId: delivery_delay
+            queryType: ''
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: histogram_quantile(0.95, sum by (le) (rate(tau_telemetry_client_delivery_delay_bucket{app=~".*",service_name="tau-api"}[30m]))) > 120 and sum(increase(tau_telemetry_client_delivery_delay_count{app=~".*",service_name="tau-api"}[30m])) >= 20
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: delivery_delay
+        noDataState: OK
+        execErrState: OK
+        for: 15m
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/runtime-observability-bootstrap.md
+          summary: 'The p95 age of the oldest entry in delivered runtime telemetry batches exceeded 120 s over 30 min, with at least 20 batches. Drill: throttled network in Playwright. Added paused (package.md §12.2): info rules stay paused until Tau Cloud PR-5a gives them per-rule repeat and routing, so they never mail the operator contact every four hours.'
+        labels:
+          severity: info
+          service: tau-api
+          component: runtime
+          kind: trigger
+          trigger: telemetry-delivery-delay
+          package: runtime-observability
+        isPaused: true
+      - uid: telemetry-metric-overflow
+        title: TauTelemetryMetricOverflow
+        condition: metric_overflow
+        data:
+          - refId: metric_overflow
+            queryType: ''
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: count({app=~".*",service_name="tau-api",otel_metric_overflow="true"}) > 0
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: metric_overflow
+        noDataState: OK
+        execErrState: OK
+        for: 15m
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/runtime-observability-bootstrap.md
+          summary: 'An API instrument reached its cardinality limit and is recording into its otel_metric_overflow="true" series, so it undercounts. Every registry metric is covered, not only tau_runtime_*: today''s instruments keep the SDK default of 2,000 series (FR-29, D-T16). Drill: T10 label-stress script.'
+        labels:
+          severity: warning
+          service: tau-api
+          component: runtime
+      - uid: telemetry-ingest-redis-unavailable
+        title: TauTelemetryIngestRedisUnavailable
+        condition: ingest_redis
+        data:
+          - refId: ingest_redis
+            queryType: ''
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum(increase(tau_telemetry_ingest_unavailable_total{app=~".*",service_name="tau-api"}[10m])) > 0
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: ingest_redis
+        noDataState: OK
+        execErrState: OK
+        for: 10m
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/runtime-observability-bootstrap.md
+          summary: 'The runtime telemetry ingest admitted batches while Redis was unavailable for the rate budget or the dedupe key for 10 min (fail-open, counted; FR-23). Drill: Redis fault injection in CI only (T29); on staging the rule is observational.'
+        labels:
+          severity: warning
+          service: tau-api
+          component: runtime
+      - uid: telemetry-signed-out-surge
+        title: TauTelemetrySignedOutSurge
+        condition: signed_out_surge
+        data:
+          - refId: signed_out_surge
+            queryType: ''
+            relativeTimeRange:
+              from: 608400
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: (sum(rate(tau_telemetry_ingest_entries_total{app=~".*",service_name="tau-api",disposition="recorded",tau_runtime_population="signed-out"}[1h])) > 3 * avg_over_time(sum(rate(tau_telemetry_ingest_entries_total{app=~".*",service_name="tau-api",disposition="recorded",tau_runtime_population="signed-out"}[1h]))[7d:1h]) and sum(increase(tau_telemetry_ingest_entries_total{app=~".*",service_name="tau-api",disposition="recorded",tau_runtime_population="signed-out"}[1h])) >= 2000) or sum(increase(tau_telemetry_ingest_entries_total{app=~".*",service_name="tau-api",disposition="rejected-rate-limit",tau_runtime_population="signed-out"}[15m])) >= 1000
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: signed_out_surge
+        noDataState: OK
+        execErrState: OK
+        for: 15m
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/runtime-observability-bootstrap.md
+          summary: 'Signed-out runtime telemetry surged: recorded signed-out entries over the last hour exceed three times their 7-day hourly mean with at least 2,000 in the hour, or at least 1,000 signed-out entries were rate-limited in 15 min (AR-W4-07). Drill: T10 many-network flood, with a hard deadline.'
+        labels:
+          severity: warning
+          service: tau-api
+          component: runtime
+      - uid: telemetry-heartbeat
+        title: TauTelemetryHeartbeat
+        condition: heartbeat
+        data:
+          - refId: heartbeat
+            queryType: ''
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: vector(1)
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: heartbeat
+        noDataState: OK
+        execErrState: OK
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/runtime-observability-bootstrap.md
+          summary: "Always firing: the operator's weekly receipt proves the notification path, and a missing receipt is the alarm (resolved Q19). Requires Tau Cloud PR-5a for a 7-day repeat interval; until then it stays paused and the operator's scheduled contact-point test replaces it."
+        labels:
+          severity: info
+          service: tau-api
+          component: runtime
+          kind: trigger
+          trigger: telemetry-heartbeat
+          package: runtime-observability
+        isPaused: true
+      - uid: alerting-rule-health
+        title: TauAlertingRuleHealth
+        condition: rule_health
+        data:
+          - refId: rule_health
+            queryType: ''
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum(increase(grafana_alerting_rule_evaluation_failures_total{app=~".*"}[15m])) > 0
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: rule_health
+        noDataState: OK
+        execErrState: OK
+        for: 15m
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/runtime-observability-bootstrap.md
+          summary: Grafana failed to evaluate an alert rule in the last 15 min. The series name is Grafana's own and is unverified on the hosted Prometheus datasource (package.md §12.2); added paused until W4 confirms it or replaces it with an operator check of rule state. Rules that fail to evaluate also report through their execution-error state.
+        labels:
+          severity: warning
+          service: tau-api
+          component: alerting
+        isPaused: true

@@ -140,11 +140,12 @@ type OpenCascadeSerializedShapeEntry = {
   metadata: OpenCascadeSerializedShapeMetadata;
 };
 
+/** Binary BRep (`BinTools`) without triangulation; the format is keyed by the kernel version. */
 type OpenCascadeSerializedNativeHandle = {
   kind: 'opencascade-native-handle';
-  version: 1;
-  format: 'brep-ascii';
-  occtFormatVersion: 'TopTools_FormatVersion_CURRENT';
+  version: 2;
+  format: 'bintools';
+  occtFormatVersion: 'BinTools_FormatVersion_CURRENT';
   entries: OpenCascadeSerializedShapeEntry[];
 };
 
@@ -321,7 +322,7 @@ function createSnapshotPathAllocator(): (index: number) => string {
   let counter = 0;
   return (index) => {
     counter += 1;
-    return `/tmp/tau_opencascade_native_handle_${counter}_${index}.brep`;
+    return `/tmp/tau_opencascade_native_handle_${counter}_${index}.bin`;
   };
 }
 
@@ -343,12 +344,14 @@ function serializeShapeEntry(
   const progress = new oc.Message_ProgressRange();
 
   try {
-    const ok = oc.BRepTools.Write(
+    // Binary writes 3-8x faster than ASCII and needs no transient stream copy in WASM; the display
+    // triangulation a render left on the shape is excluded, so the snapshot is geometry only.
+    const ok = oc.BinTools.Write(
       entry.shape,
       filePath,
       false,
       false,
-      oc.TopTools_FormatVersion.TopTools_FormatVersion_CURRENT,
+      oc.BinTools_FormatVersion.BinTools_FormatVersion_CURRENT,
       progress,
     );
     if (!ok) {
@@ -382,13 +385,12 @@ function deserializeShapeEntry(
   const { oc } = context;
   const filePath = context.nextSnapshotPath(index);
   const shape = new oc.TopoDS_Shape();
-  const builder = new oc.BRep_Builder();
   const progress = new oc.Message_ProgressRange();
   let ownsShape = true;
 
   try {
     oc.FS.writeFile(filePath, entry.brep);
-    const ok = oc.BRepTools.Read(shape, filePath, builder, progress);
+    const ok = oc.BinTools.Read(shape, filePath, progress);
     if (!ok || shape.IsNull()) {
       throw new Error(`OpenCascade native-handle snapshot read failed for shape ${index}.`);
     }
@@ -405,7 +407,6 @@ function deserializeShapeEntry(
     throw error;
   } finally {
     progress.delete();
-    builder.delete();
     unlinkIfExists(oc, filePath);
   }
 }
@@ -416,11 +417,11 @@ function assertSerializedNativeHandle(serialized: unknown): asserts serialized i
   }
 
   const { kind, version, format, occtFormatVersion, entries } = serialized;
-  if (kind !== 'opencascade-native-handle' || version !== 1) {
+  if (kind !== 'opencascade-native-handle' || version !== 2) {
     throw new Error(`Unsupported OpenCascade native-handle snapshot schema: ${String(kind)}/${String(version)}`);
   }
 
-  if (format !== 'brep-ascii' || occtFormatVersion !== 'TopTools_FormatVersion_CURRENT' || !Array.isArray(entries)) {
+  if (format !== 'bintools' || occtFormatVersion !== 'BinTools_FormatVersion_CURRENT' || !Array.isArray(entries)) {
     throw new Error(
       `Unsupported OpenCascade native-handle snapshot format: ${String(format)}/${String(occtFormatVersion)}`,
     );
@@ -609,7 +610,9 @@ export const opencascadeKernel = defineKernel({
   builtinModuleNames: ['libcascade'],
   builtinPackages: { libcascade: { name: 'libcascade', version: '3.1.0' } },
   name: 'OpenCascadeKernel',
-  version: '1.1.0',
+  // 1.2.0: native-handle snapshots are binary BRep. The version keys every cached entry, so text
+  // snapshots from 1.1.0 stop matching and age out; there is nothing to migrate.
+  version: '1.2.0',
   optionsSchema: opencascadeOptionsSchema,
   views: { model: { title: 'Model', mimeType: 'model/gltf-binary', optionsSchema: opencascadeRenderSchema } },
   exports: {
@@ -930,9 +933,9 @@ export const opencascadeKernel = defineKernel({
   serializeHandle({ handle }, _runtime, context): OpenCascadeSerializedNativeHandle {
     return {
       kind: 'opencascade-native-handle',
-      version: 1,
-      format: 'brep-ascii',
-      occtFormatVersion: 'TopTools_FormatVersion_CURRENT',
+      version: 2,
+      format: 'bintools',
+      occtFormatVersion: 'BinTools_FormatVersion_CURRENT',
       entries: handle.map((entry, index) => serializeShapeEntry(context, entry, index)),
     };
   },
@@ -944,6 +947,8 @@ export const opencascadeKernel = defineKernel({
 
   // D-RT-03: the realm's one OCCT instance; the host recycles the worker when this outgrows its device.
   heapBytes: (context) => context.occt.value.wasmMemory.buffer.byteLength,
+  // Observation only (PR-1b): the same linear memory, read for operation facts and never for recycling.
+  observedHeapBytes: (context) => context.occt.value.wasmMemory.buffer.byteLength,
 
   async onDispose(context) {
     context.occt.release();

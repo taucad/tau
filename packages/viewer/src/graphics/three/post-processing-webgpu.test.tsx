@@ -484,6 +484,7 @@ const mount = async (
   properties: {
     aoAllowed?: boolean;
     speculativePreparation?: boolean;
+    antialiasAllowed?: boolean;
     settings?: Partial<PostProcessingSettings>;
     toneMapping?: ToneMapping;
   } = {},
@@ -630,9 +631,12 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     mocks.scene.traverseVisible.mockImplementation((visit) => {
       visit(surface);
     });
-    const mounted = await mount({ aoAllowed: false, speculativePreparation: false });
+    mocks.fxaa.mockClear();
+    const mounted = await mount({ aoAllowed: false, speculativePreparation: false, antialiasAllowed: false });
     try {
       expect(mocks.ao).not.toHaveBeenCalled();
+      // The FXAA filter's shader alone takes a software adapter over thirty seconds to compile.
+      expect(mocks.fxaa).not.toHaveBeenCalled();
       expect(mocks.denoise).not.toHaveBeenCalled();
       expect(mocks.scenePasses[0]!.setMRT).toHaveBeenCalledWith({ output: { kind: 'output' } });
       mocks.getFrame()?.(mocks.state, 0);
@@ -652,6 +656,16 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
       visibility.mockRestore();
       vi.useRealTimers();
     }
+  });
+
+  it('should filter a beauty-only composition with FXAA unless the rasterizer cannot afford it', async () => {
+    const filtered = await mount({ aoAllowed: false });
+    expect(mocks.fxaa).toHaveBeenCalledOnce();
+    filtered.unmount();
+    mocks.fxaa.mockClear();
+    const unfiltered = await mount({ aoAllowed: false, antialiasAllowed: false });
+    expect(mocks.fxaa).not.toHaveBeenCalled();
+    unfiltered.unmount();
   });
 
   it.each([false, true])('should isolate CAD draws and restore renderer state after failure=%s', async (fails) => {

@@ -39,6 +39,44 @@ export async function probeWebGpuSupport(): Promise<boolean> {
 }
 
 /**
+ * Record that the browser destroyed a canvas's WebGPU device underneath a live viewer. Later probes answer `false`, so
+ * viewers mounted afterwards start on WebGL instead of repeating a WebGPU start the browser cannot present.
+ * @public
+ */
+export function reportWebGpuCanvasLoss(): void {
+  webGpuSupportProbe = Promise.resolve(false);
+}
+
+/**
+ * How long a viewer waits for the WebGPU adapter answer before it mounts on WebGL instead. The adapter normally
+ * answers within milliseconds, a software adapter within a second or two; the bound only covers a browser whose
+ * adapter request never settles, so the stage never waits on it forever. Milliseconds.
+ * @public
+ */
+export const webGpuProbeTimeout = 10_000;
+
+/**
+ * {@link probeWebGpuSupport}, answering `false` when the adapter has not answered within `probeTimeout`.
+ *
+ * @param probeTimeout - The longest wait for the answer, in milliseconds.
+ * @returns Whether a WebGPU adapter is available, or `false` once the wait runs out.
+ * @public
+ */
+export async function probeWebGpuSupportWithin(probeTimeout: number = webGpuProbeTimeout): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const probeDeadline = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => {
+      resolve(false);
+    }, probeTimeout);
+  });
+  try {
+    return await Promise.race([probeWebGpuSupport(), probeDeadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Whether an `OffscreenCanvas` can acquire a WebGPU context (Chromium; often false in Firefox).
  *
  * Used for shared off-thread renderers that want WebGPU when available.
@@ -105,7 +143,7 @@ export function gpuAdapterIdentity(adapter: GpuAdapterIdentity): string {
 
 /**
  * Whether the adapter rasterizes on the CPU: the browser's fallback adapter, or one that names a software
- * implementation (SwiftShader, llvmpipe, lavapipe). Work that is cheap on a GPU, such as ambient occlusion, can
+ * implementation (SwiftShader, llvmpipe, lavapipe, or Windows WARP, the Microsoft Basic Render Driver). Work that is cheap on a GPU, such as ambient occlusion, can
  * saturate such an adapter and stall the page.
  *
  * @param adapter - The adapter, or a device's `adapterInfo` wrapped as `{ info }`.
@@ -117,5 +155,7 @@ export function isSoftwareGpuAdapter(adapter: GpuAdapterIdentity): boolean {
     return true;
   }
 
-  return /\b(?:swiftshader|llvmpipe|lavapipe|software|cpu)\b/u.test(gpuAdapterIdentity(adapter));
+  return /\b(?:swiftshader|llvmpipe|lavapipe|software|cpu|warp|basic render driver)\b/u.test(
+    gpuAdapterIdentity(adapter),
+  );
 }

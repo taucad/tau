@@ -25,6 +25,9 @@ const hoisted = vi.hoisted(() => {
     initializationError: undefined as Error | undefined,
     nativeBackend: true,
     destroyDevice: vi.fn(),
+    /** The browser destroys the device as the canvas presents its first frame (no swap chain backing). */
+    presentationDestroysDevice: false,
+    presentedFrames: 0,
   };
 });
 
@@ -52,8 +55,35 @@ vi.mock('three/webgpu', async (importOriginal) => {
 
     public constructor(options: unknown) {
       this.options = options;
+      let loseDevice: (info: { reason: string; message: string }) => void = () => undefined;
+      const lost = new Promise<{ reason: string; message: string }>((resolve) => {
+        loseDevice = resolve;
+      });
       Object.assign(this.backend, {
-        device: { destroy: hoisted.destroyDevice },
+        device: {
+          destroy: hoisted.destroyDevice,
+          lost,
+          createCommandEncoder: () => ({
+            beginRenderPass: () => ({ end: () => undefined }),
+            finish: () => ({}),
+          }),
+          queue: {
+            submit: () => {
+              hoisted.presentedFrames += 1;
+              if (hoisted.presentationDestroysDevice) {
+                loseDevice({ reason: 'destroyed', message: 'Device was destroyed.' });
+              }
+            },
+            onSubmittedWorkDone: async () => {
+              if (hoisted.presentationDestroysDevice) {
+                throw new Error('A valid external Instance reference no longer exists.');
+              }
+            },
+          },
+        },
+      });
+      Object.defineProperty(this.backend, 'context', {
+        value: { getCurrentTexture: () => ({ createView: () => ({}) }) },
       });
       hoisted.createdRenderers.push({
         setTransparentSort: this.setTransparentSort,
@@ -107,6 +137,36 @@ describe('createRenderer', () => {
     hoisted.initializationError = undefined;
     hoisted.nativeBackend = true;
     hoisted.destroyDevice.mockClear();
+    hoisted.presentationDestroysDevice = false;
+    hoisted.presentedFrames = 0;
+  });
+
+  it('should present one frame on a WebGPU viewport before the scene compiles anything', async () => {
+    const { createRenderer } = await import('#graphics/three/renderer.js');
+    await createRenderer('viewport', 'webgpu', document.createElement('canvas'));
+    expect(hoisted.presentedFrames).toBe(1);
+    expect(hoisted.destroyDevice).not.toHaveBeenCalled();
+    await createRenderer('offscreen', 'webgpu', document.createElement('canvas'));
+    expect(hoisted.presentedFrames).toBe(1);
+  });
+
+  it('should reject a WebGPU viewport whose canvas cannot present, so the viewer starts on WebGL', async () => {
+    const { createRenderer } = await import('#graphics/three/renderer.js');
+    const { WebGpuInitializationError } = await import('#graphics/three/webgpu-initialization-error.js');
+    const { probeWebGpuSupport } = await import('#graphics/graphics-backend.js');
+    hoisted.presentationDestroysDevice = true;
+    const creation = createRenderer('viewport', 'webgpu', document.createElement('canvas'));
+    await expect(creation).rejects.toBeInstanceOf(WebGpuInitializationError);
+    await expect(creation).rejects.toThrow('The WebGPU canvas could not present a frame: Device was destroyed.');
+    expect(hoisted.createdRenderers[0]?.dispose).toHaveBeenCalledOnce();
+    expect(hoisted.destroyDevice).toHaveBeenCalledOnce();
+    // Later viewers start on WebGL instead of repeating the start, though an adapter is still offered.
+    Object.defineProperty(navigator, 'gpu', { configurable: true, value: { requestAdapter: async () => ({}) } });
+    try {
+      expect(await probeWebGpuSupport()).toBe(false);
+    } finally {
+      Reflect.deleteProperty(navigator, 'gpu');
+    }
   });
 
   it('should keep the lean node viewport single-sample without changing classic or offscreen antialiasing', async () => {

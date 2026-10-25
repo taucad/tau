@@ -47,6 +47,51 @@ describe('probeWebGpuSupport', () => {
   });
 });
 
+describe('probeWebGpuSupportWithin', () => {
+  const requestAdapter = vi.fn<() => Promise<unknown>>();
+
+  beforeEach(() => {
+    vi.resetModules();
+    requestAdapter.mockReset();
+    Object.defineProperty(navigator, 'gpu', { configurable: true, value: { requestAdapter } });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    Reflect.deleteProperty(navigator, 'gpu');
+  });
+
+  it('should answer with the adapter probe when it settles in time', async () => {
+    requestAdapter.mockResolvedValue({});
+    const { probeWebGpuSupportWithin } = await importBackend();
+
+    expect(await probeWebGpuSupportWithin(1000)).toBe(true);
+  });
+
+  it('should answer false once an adapter request that never settles runs out of time', async () => {
+    vi.useFakeTimers();
+    requestAdapter.mockReturnValue(
+      new Promise<never>(() => {
+        // Never settles, like a stalled adapter request.
+      }),
+    );
+    const { probeWebGpuSupportWithin, webGpuProbeTimeout } = await importBackend();
+
+    const answer = probeWebGpuSupportWithin();
+    await vi.advanceTimersByTimeAsync(webGpuProbeTimeout);
+
+    expect(await answer).toBe(false);
+  });
+
+  it('should answer false at once without WebGPU (SSR, unsupported browsers)', async () => {
+    Reflect.deleteProperty(navigator, 'gpu');
+    const { probeWebGpuSupportWithin } = await importBackend();
+
+    expect(await probeWebGpuSupportWithin(1000)).toBe(false);
+    expect(requestAdapter).not.toHaveBeenCalled();
+  });
+});
+
 describe('isSoftwareGpuAdapter', () => {
   it('should treat the fallback adapter and named CPU rasterizers as software', async () => {
     const { isSoftwareGpuAdapter } = await importBackend();
@@ -56,6 +101,19 @@ describe('isSoftwareGpuAdapter', () => {
     expect(isSoftwareGpuAdapter({ info: { vendor: 'google', architecture: 'swiftshader' } })).toBe(true);
     expect(isSoftwareGpuAdapter({ info: { vendor: 'mesa', device: 'llvmpipe (LLVM 17.0.6, 256 bits)' } })).toBe(true);
     expect(isSoftwareGpuAdapter({ info: { vendor: 'mesa', device: 'lavapipe' } })).toBe(true);
+  });
+
+  it('should treat Windows WARP, the Microsoft Basic Render Driver, as software', async () => {
+    const { isSoftwareGpuAdapter } = await importBackend();
+
+    expect(isSoftwareGpuAdapter({ info: { vendor: 'microsoft', description: 'Microsoft Basic Render Driver' } })).toBe(
+      true,
+    );
+    expect(isSoftwareGpuAdapter({ info: { vendor: 'microsoft', architecture: 'WARP' } })).toBe(true);
+    // Whole words only: a hardware name that merely contains "warp" is not WARP.
+    expect(
+      isSoftwareGpuAdapter({ info: { vendor: 'acme', device: 'warpdrive x1', description: 'render driver' } }),
+    ).toBe(false);
   });
 
   it('should treat a hardware adapter, or one that reports nothing, as hardware', async () => {

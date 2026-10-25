@@ -6,6 +6,7 @@ import { syncGltfSurfaceDepthBias } from '#graphics/three/materials/gltf-surface
 import { installWebGpuDepthSampling } from '#graphics/three/webgpu-depth-sampling.js';
 import { installWebGpuStencilState } from '#graphics/three/webgpu-stencil-state.js';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
+import { reportWebGpuCanvasLoss } from '#graphics/graphics-backend.js';
 
 /**
  * WebGL renderer instantiated by Tau helpers.
@@ -90,6 +91,67 @@ const destroyAllocatedDevice = (backend: WebGpuRenderer['backend']): void => {
     gpuBackend.device?.destroy();
   }
 };
+
+/** The parts of Three's WebGPU backend a presentation check uses; the published Backend declaration omits them. */
+type PresentableWebGpuBackend = Readonly<{
+  device?: Readonly<{
+    lost: Promise<Readonly<{ reason: string; message: string }>>;
+    createCommandEncoder: () => {
+      beginRenderPass: (descriptor: unknown) => { end: () => void };
+      finish: () => unknown;
+    };
+    queue: Readonly<{ submit: (buffers: unknown[]) => void; onSubmittedWorkDone: () => Promise<void> }>;
+  }>;
+  context?: Readonly<{ getCurrentTexture: () => { createView: () => unknown } }>;
+}>;
+
+/**
+ * Present one cleared frame and report whether the device survived it. A browser that cannot allocate the canvas's
+ * swap chain (Chromium on a software adapter, whose compositor has no backing to share with the WebGPU canvas)
+ * destroys the device within milliseconds of the first presented texture. Checking here, before the scene compiles a
+ * single pipeline, lets the viewer start on WebGL at once; found later, the scene's pipeline builds hold the GPU
+ * process for tens of seconds on a software adapter before anything can draw again.
+ * @param renderer - The initialized renderer, on Three's WebGPU backend.
+ * @returns The loss's message when the device did not survive the frame, otherwise `undefined`.
+ */
+async function presentFirstCanvasFrame(renderer: WebGpuRenderer): Promise<string | undefined> {
+  const backend = renderer.backend as unknown as PresentableWebGpuBackend;
+  const { device, context } = backend;
+  if (device === undefined || context === undefined) {
+    return undefined;
+  }
+  let lossMessage: string | undefined;
+  // Settles only if the device is lost; a healthy device leaves it pending with nothing to release.
+  const loss = (async (): Promise<void> => {
+    const info = await device.lost;
+    lossMessage = info.message || info.reason;
+  })();
+  try {
+    const encoder = device.createCommandEncoder();
+    encoder
+      .beginRenderPass({
+        colorAttachments: [
+          {
+            view: context.getCurrentTexture().createView(),
+            loadOp: 'clear',
+            storeOp: 'store',
+            clearValue: { r: 0, g: 0, b: 0, a: 0 },
+          },
+        ],
+      })
+      .end();
+    device.queue.submit([encoder.finish()]);
+    await Promise.race([device.queue.onSubmittedWorkDone(), loss]);
+  } catch (error) {
+    // A dropped device rejects the work-done promise; the loss above carries its reason.
+    lossMessage ??= error instanceof Error ? error.message : String(error);
+  }
+  // The loss is delivered as its own task; let it land before answering.
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 0);
+  });
+  return lossMessage;
+}
 
 /**
  * Instantiate a Tau-normalised Three.js renderer for the given GPU backend and UI surface.
@@ -193,6 +255,16 @@ export async function createRenderer(
       renderer.dispose();
       destroyAllocatedDevice(requestedBackend);
       throw new WebGpuInitializationError('WebGPU initialization did not select a native WebGPU backend');
+    }
+
+    if (useCase === 'viewport' && backend === 'webgpu') {
+      const lossMessage = await presentFirstCanvasFrame(renderer);
+      if (lossMessage !== undefined) {
+        renderer.dispose();
+        destroyAllocatedDevice(requestedBackend);
+        reportWebGpuCanvasLoss();
+        throw new WebGpuInitializationError(`The WebGPU canvas could not present a frame: ${lossMessage}`);
+      }
     }
 
     if (useCase === 'viewport') {

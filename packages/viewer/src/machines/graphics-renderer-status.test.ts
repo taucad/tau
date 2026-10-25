@@ -3,6 +3,56 @@ import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import { describe, expect, it } from 'vitest';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 
+describe('WebGPU capability probe', () => {
+  it('should report the probe unsettled until it answers', async () => {
+    let answer: (value: boolean) => void = () => undefined;
+    const actor = createActor(
+      graphicsMachine.provide({
+        actors: {
+          probeWebGpu: createAsyncLogic({
+            run: async () =>
+              new Promise<boolean>((resolve) => {
+                answer = resolve;
+              }),
+          }),
+        },
+      }),
+      { input: { graphicsBackend: 'webgpu' } },
+    );
+    actor.start();
+    try {
+      expect(actor.getSnapshot().context).toMatchObject({ webGpuProbeSettled: false, webGpuAvailable: false });
+      answer(true);
+      await waitFor(actor, (snapshot) => snapshot.context.webGpuProbeSettled, { timeout: 1000 });
+      expect(actor.getSnapshot().context).toMatchObject({ webGpuAvailable: true, resolvedGraphicsBackend: 'webgpu' });
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('should settle the probe on WebGL when it fails', async () => {
+    const actor = createActor(
+      graphicsMachine.provide({
+        actors: {
+          probeWebGpu: createAsyncLogic({
+            run: async () => {
+              throw new Error('adapter request failed');
+            },
+          }),
+        },
+      }),
+      { input: { graphicsBackend: 'webgpu' } },
+    );
+    actor.start();
+    try {
+      await waitFor(actor, (snapshot) => snapshot.context.webGpuProbeSettled, { timeout: 1000 });
+      expect(actor.getSnapshot().context).toMatchObject({ webGpuAvailable: false, resolvedGraphicsBackend: 'webgl' });
+    } finally {
+      actor.stop();
+    }
+  });
+});
+
 describe('initialized renderer status', () => {
   it('should distinguish a capability probe from initialization and ignore retired-canvas cleanup', async () => {
     const guard = guardActors();

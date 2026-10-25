@@ -31,6 +31,11 @@ import { cn } from '@taucad/ui/utils/cn';
 import { useCameraRig, useGraphics } from '#hooks/use-graphics.jsx';
 import { useViewerEnvironment, useViewerFeature } from '#environment/viewer-environment.jsx';
 import { resolveViewerPixelRatio } from '#graphics/three/utils/device-tier.js';
+import { reportWebGpuCanvasLoss } from '#graphics/graphics-backend.js';
+import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
+
+/** The part of a `GPUDevice` that reports its loss; `lib.dom` baselines may predate the WebGPU types. */
+type WebGpuLossObservable = Readonly<{ lost: Promise<Readonly<{ reason: string; message: string }>> }>;
 
 /**
  * Props for {@link ThreeCanvasInstance}: the Three.js context properties plus a retry callback for context loss.
@@ -308,6 +313,26 @@ export function ThreeCanvasInstance({
           previousOnDeviceLost.call(webGpuRenderer, info);
           setIsContextLost(true);
         };
+        // Three ignores a loss whose reason is "destroyed", taking it for its own `dispose()`. Only this factory disposes
+        // the renderer, and it retires first, so a destroyed device on a live canvas was revoked by the browser: a GPU
+        // process that cannot allocate the canvas's swap chain (Chromium on a software adapter) destroys the device right
+        // after the first frame. Nothing would draw again, so the canvas is remounted on WebGL, as for a failed start.
+        const { device } = webGpuRenderer.backend as { readonly device?: WebGpuLossObservable };
+        if (device) {
+          // async-iife: bootstrap -- A canvas callback cannot await a loss that may never come; it only reports one.
+          void (async (): Promise<void> => {
+            const info = await device.lost;
+            if (info.reason !== 'destroyed' || glProperty.isRetired()) {
+              return;
+            }
+            reportWebGpuCanvasLoss();
+            setRendererError(
+              new WebGpuInitializationError(`The browser destroyed the WebGPU device: ${info.message}`, {
+                cause: info,
+              }),
+            );
+          })();
+        }
       } else {
         renderer.domElement.addEventListener('webglcontextlost', (event): void => {
           if (glProperty.isRetired()) {

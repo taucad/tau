@@ -4,11 +4,36 @@ import { act, render, cleanup } from '@testing-library/react';
 import { Canvas, createRoot, _roots, flushSync as flushThreeSync } from '@react-three/fiber';
 import { OrthographicCamera, PerspectiveCamera, WebGLCoordinateSystem } from 'three';
 import { WebGPURenderer } from 'three/webgpu';
-import { StrictMode } from 'react';
+import { Component, StrictMode } from 'react';
 import type { ReactNode } from 'react';
 import { ThreeCanvasInstance } from '#graphics/three/three-canvas-instance.jsx';
+import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
 
-const allocation = vi.hoisted(() => ({ createRenderer: vi.fn() }));
+/** Stands in for the viewer's error boundary: records what the canvas throws and renders nothing after. */
+class CatchRendererError extends Component<
+  { readonly children: ReactNode; readonly onError: (error: unknown) => void },
+  { readonly failed: boolean }
+> {
+  public override state = { failed: false };
+
+  public static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+
+  public override componentDidCatch(error: unknown): void {
+    this.props.onError(error);
+  }
+
+  public override render(): ReactNode {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
+const allocation = vi.hoisted(() => ({
+  createRenderer: vi.fn(),
+  /** A device the next renderers report, standing in for the GPUDevice Three's init would request. */
+  device: undefined as { lost: Promise<{ reason: string; message: string }> } | undefined,
+}));
 vi.mock('#graphics/three/renderer.js', () => ({
   createRenderer: allocation.createRenderer,
 }));
@@ -152,6 +177,9 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
         vi.spyOn(backend, 'updateSize').mockImplementation(() => undefined);
         vi.spyOn(backend, 'dispose').mockImplementation(() => undefined);
         vi.spyOn(renderer, 'render').mockImplementation(() => undefined);
+        if (allocation.device) {
+          Object.assign(renderer.backend, { device: allocation.device });
+        }
         disposeCalls.push(vi.spyOn(renderer, 'dispose'));
         renderers.push(renderer);
         await renderer.init();
@@ -184,6 +212,7 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
     observers.clear();
     frameCallbacks.clear();
     release = undefined;
+    allocation.device = undefined;
     allocation.createRenderer.mockReset();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -300,6 +329,57 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
     expect(view.container.querySelector('canvas')).toBeNull();
     expect(disposeCalls[0]).toHaveBeenCalledOnce();
     expect(frameCallbacks.has(animationTokens[0]!)).toBe(false);
+  });
+
+  it('should hand a device the browser destroyed under a live canvas to the WebGL fallback', async () => {
+    let loseDevice: (info: { reason: string; message: string }) => void = () => undefined;
+    allocation.device = {
+      lost: new Promise((resolve) => {
+        loseDevice = resolve;
+      }),
+    };
+    const { probeWebGpuSupport } = await import('#graphics/graphics-backend.js');
+    const caught: unknown[] = [];
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const view = render(
+      <CatchRendererError onError={(error) => caught.push(error)}>
+        <ThreeCanvasInstance graphicsBackend='webgpu' onRetry={() => undefined} />
+      </CatchRendererError>,
+    );
+    await measure();
+    await act(async () => {
+      loseDevice({ reason: 'destroyed', message: 'Device was destroyed.' });
+    });
+    await drain();
+    expect(caught).toHaveLength(1);
+    expect(caught[0]).toBeInstanceOf(WebGpuInitializationError);
+    expect(view.container.querySelector('canvas')).toBeNull();
+    // Viewers mounted afterwards start on WebGL rather than repeating the start the browser could not present.
+    expect(await probeWebGpuSupport()).toBe(false);
+  });
+
+  it('should take a destroyed device on a retired canvas for its own disposal', async () => {
+    let loseDevice: (info: { reason: string; message: string }) => void = () => undefined;
+    allocation.device = {
+      lost: new Promise((resolve) => {
+        loseDevice = resolve;
+      }),
+    };
+    const caught: unknown[] = [];
+    const view = render(
+      <CatchRendererError onError={(error) => caught.push(error)}>
+        <ThreeCanvasInstance graphicsBackend='webgpu' onRetry={() => undefined} />
+      </CatchRendererError>,
+    );
+    await measure();
+    view.unmount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(501);
+      loseDevice({ reason: 'destroyed', message: 'Device was destroyed.' });
+    });
+    await drain();
+    expect(caught).toHaveLength(0);
+    expect(disposeCalls[0]).toHaveBeenCalledOnce();
   });
 
   it('should not dispose a caller-owned external renderer on R3F Canvas removal', async () => {

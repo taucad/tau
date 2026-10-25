@@ -84,16 +84,17 @@ describe('Model component rows', () => {
 
     const preview = screen.getByRole('button', { name: 'Preview planetary_housing' });
     const row = preview.parentElement;
-    expect(row).toHaveClass('h-22');
-    expect(preview).toHaveClass('size-20', 'rounded-xs');
+    // The preview is fixed in px so enlarged text grows the name, not the picture.
+    expect(row).toHaveClass('h-[calc(80px+--spacing(2))]');
+    expect(preview).toHaveClass('size-[80px]', 'rounded-xs');
     expect(preview).toHaveAttribute('tabindex', '-1');
     // A refreshing preview keeps its last image, dimmed.
     expect(preview.querySelector('img')).toHaveClass('opacity-50');
     // The frame is a sibling of the selection button, never nested in it.
-    // The refreshing preview's status is part of the selection button's name.
-    expect(
-      screen.getByRole('button', { name: 'planetary_housing, preview loading' }).querySelector('button'),
-    ).toBeNull();
+    // The refreshing preview's status describes the selection button; its name stays the part's.
+    const selection = screen.getByRole('button', { name: 'planetary_housing' });
+    expect(selection).toHaveAccessibleDescription('Preview loading');
+    expect(selection.querySelector('button')).toBeNull();
 
     await userEvent.setup().click(preview);
     expect(openPartGallery).toHaveBeenCalledWith({
@@ -306,17 +307,23 @@ describe('Model tree rows on touch (PN-TREE-1, PN-TREE-2)', () => {
     expect(rowButton).toHaveTextContent('Hidden');
   });
 
-  it('names a part whose preview is loading or unavailable, so assistive technology hears the status', () => {
+  it('keeps a part named by itself while its preview loads or fails, and describes the preview status', () => {
     const node = createNode(firstComponentId, 'planetary_housing');
     const view = renderComponentRow(rowProperties({ node, preview: { status: 'pending' } }));
-    expect(screen.getByRole('button', { name: 'planetary_housing, preview loading' })).toHaveAttribute(
-      'aria-busy',
-      'true',
-    );
+    const loading = screen.getByRole('button', { name: 'planetary_housing' });
+    expect(loading).toHaveAttribute('aria-busy', 'true');
+    expect(loading).toHaveAccessibleDescription('Preview loading');
     view.unmount();
 
-    renderComponentRow(rowProperties({ node, isHidden: true, preview: { status: 'failed' } }));
-    expect(screen.getByRole('button', { name: 'planetary_housing, hidden, preview unavailable' })).toBeInTheDocument();
+    const failedView = renderComponentRow(rowProperties({ node, isHidden: true, preview: { status: 'failed' } }));
+    expect(screen.getByRole('button', { name: 'planetary_housing, hidden' })).toHaveAccessibleDescription(
+      'Preview unavailable',
+    );
+    failedView.unmount();
+
+    renderComponentRow(rowProperties({ node, preview: undefined }));
+    const ready = screen.getByRole('button', { name: 'planetary_housing' });
+    expect(ready).not.toHaveAttribute('aria-describedby');
   });
 
   it('keeps a hidden part Show action in view without hover, and shows it again', () => {

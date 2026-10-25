@@ -1,6 +1,6 @@
 import type { VmFileSystem } from '@taucad/esbuild/vm';
 import { describe, expect, it, vi } from 'vitest';
-import type { SourceRevision } from '@taucad/runtime/types';
+import type { SourceRevision } from '#support/types.js';
 import { createGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
 import type { GeoSpecNativeLoadModelOptions, GeoSpecNativeModelEngine } from '#model/native-model-loader.js';
 import { GeoSpecModelLoadError } from '#model/errors.js';

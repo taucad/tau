@@ -1,4 +1,4 @@
-import type { JSONValue, KernelIssueCode } from '@taucad/runtime/types';
+import type { JSONValue, KernelIssueCode } from '#support/types.js';
 import type { GeoSpecUnit } from '#geometry-unit.js';
 import type { XdeReadResult } from '#step/types.js';
 

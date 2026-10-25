@@ -1,7 +1,7 @@
 import { createEsbuildModuleVm } from '@taucad/esbuild/vm';
 import { defineConfigBuiltinCode } from '#config/define-config.js';
 import type { VmFileSystem } from '@taucad/esbuild/vm';
-import { sha256Bytes } from '@taucad/runtime/kernel';
+import { sha256Bytes } from '#support/hash.js';
 import { createCollector } from '#runner/collector.js';
 import { createGeoSpecAssertionClient } from '#assertion-client/client.js';
 import { compileGeoSpecTestNamePattern, filterGeoSpecTests } from '#runner/filter.js';

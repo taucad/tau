@@ -15,8 +15,10 @@ import type {
   LoadModelSourceOptions,
 } from '#model/types.js';
 import type { GeometryDiagnostic } from '#mesh/types.js';
-import type { SourceRevision } from '@taucad/runtime/types';
-import { assertRootedPath, isNotFoundError, joinRelativePath, sha256Bytes } from '@taucad/runtime/kernel';
+import type { SourceRevision } from '#support/types.js';
+import { isNotFoundError } from '#support/filesystem-errors.js';
+import { sha256Bytes } from '#support/hash.js';
+import { assertRootedPath, joinRelativePath } from '#support/path.js';
 
 const protocolHeader = {
   canonicalProfile: 'geospec-jcs-v1',

@@ -23,6 +23,8 @@
  * @module
  */
 
+import { geoSpecCheckSpecPath, planGeoSpecCheck } from '#cli/check.js';
+import type { GeoSpecCliCheckOptions } from '#cli/check.js';
 import { protocolWireValue } from '#cli/wire-value.js';
 import type { GeoSpecConfigData } from '#config/types.js';
 import { discoverGeoSpecFiles } from '#runner/discovery.js';
@@ -32,6 +34,7 @@ import type { GeoSpecRunner, GeoSpecRunnerResult } from '#runner/worker/runner-t
 /** Parsed CLI invocation, or the reason it could not be parsed. */
 export type GeoSpecCliCommand =
   | { kind: 'run'; options: GeoSpecCliRunOptions }
+  | { kind: 'check'; options: GeoSpecCliCheckOptions }
   | { kind: 'help'; message: string }
   | { kind: 'error'; message: string };
 
@@ -57,6 +60,7 @@ export const geoSpecCliUsage = `geospec — CAD geometry specs
 
 Usage:
   geospec run [projectPath] [options]
+  geospec check <file.step|file.stp|file.glb> [--components <n>] [--json]
 
 Options:
   --file <path>              GeoSpec file or directory root (repeatable)
@@ -70,6 +74,14 @@ Options:
   --config <path>            geospec.config.* to use (default: the one in projectPath)
   --json                     Print one JSON result document and nothing else
   -h, --help                 Show this help
+
+Check:
+  geospec check runs one bundled validity spec on a STEP or GLB file, with no
+  *.geospec.ts to write: no error diagnostics, closed edge incidence and a
+  bounding box with positive size, plus mesh integrity for GLB or a valid BRep
+  with closed shells for STEP. --components <n> also requires exactly n
+  connected components. The file's folder is the project root; the exit code
+  is the verdict.
 
 Timeouts:
   Every host reports wall-clock timeouts with one code family. None of them is
@@ -89,6 +101,48 @@ const numericFlag = (raw: string | undefined, flag: string): number | { error: s
 };
 
 /**
+ * Parse the arguments after `check`; like `run`, every unrecognized flag is an error.
+ *
+ * @param argv - Arguments after `check`.
+ * @returns The parsed command.
+ */
+const parseCheckArguments = (argv: readonly string[]): GeoSpecCliCommand => {
+  let file: string | undefined;
+  let components: number | undefined;
+  let json = false;
+  for (let index = 0; index < argv.length; index++) {
+    const argument = argv[index]!;
+    if (argument === '-h' || argument === '--help') {
+      return { kind: 'help', message: geoSpecCliUsage };
+    }
+    if (argument === '--json') {
+      json = true;
+      continue;
+    }
+    if (argument === '--components') {
+      const value = Number(argv[index + 1]);
+      if (!Number.isInteger(value) || value < 1) {
+        return { kind: 'error', message: '--components needs a whole number of at least 1.' };
+      }
+      components = value;
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith('-')) {
+      return { kind: 'error', message: `Unknown option '${argument}'.` };
+    }
+    if (file !== undefined) {
+      return { kind: 'error', message: `Unexpected argument '${argument}'.` };
+    }
+    file = argument;
+  }
+  if (file === undefined) {
+    return { kind: 'error', message: 'geospec check needs a STEP or GLB file.' };
+  }
+  return { kind: 'check', options: { file, json, ...(components === undefined ? {} : { components }) } };
+};
+
+/**
  * Parse an argument vector.
  *
  * Pure: no filesystem, no environment, no process. Every unrecognized flag is
@@ -102,6 +156,9 @@ const numericFlag = (raw: string | undefined, flag: string): number | { error: s
 export const parseGeoSpecCliArguments = (argv: readonly string[]): GeoSpecCliCommand => {
   if (argv.length === 0 || argv[0] === '-h' || argv[0] === '--help') {
     return { kind: 'help', message: geoSpecCliUsage };
+  }
+  if (argv[0] === 'check') {
+    return parseCheckArguments(argv.slice(1));
   }
   if (argv[0] !== 'run') {
     return { kind: 'error', message: `Unknown command '${argv[0]}'.` };
@@ -353,6 +410,8 @@ export type GeoSpecCliHost = {
     configPath: string | undefined;
     workers: number | undefined;
     shardTimeout: number | undefined;
+    /** In-memory spec sources keyed by project-rooted path, served in place of the disk (`geospec check`). */
+    sources?: Readonly<Record<string, string>>;
   }): GeoSpecRunner;
 };
 
@@ -516,6 +575,10 @@ export const runGeoSpecCli = async (argv: readonly string[], host: GeoSpecCliHos
     return 1;
   }
 
+  if (command.kind === 'check') {
+    return runGeoSpecCheck(command.options, host);
+  }
+
   const { options } = command;
   const projectPath = options.projectPath.startsWith('/')
     ? options.projectPath
@@ -571,12 +634,78 @@ export const runGeoSpecCli = async (argv: readonly string[], host: GeoSpecCliHos
     await runner.close();
   }
 
-  if (options.json) {
+  writeRunResult(result, options.json, host);
+  return result.success ? 0 : 1;
+};
+
+/**
+ * Print a run's report: one JSON document under `--json`, otherwise the human lines.
+ *
+ * @param result - The run result.
+ * @param json - Whether to print the JSON document.
+ * @param host - The injected platform.
+ */
+const writeRunResult = (result: GeoSpecRunnerResult, json: boolean, host: GeoSpecCliHost): void => {
+  if (json) {
     for (const chunk of jsonChunks(runReportJson(result))) {
       host.write(chunk);
     }
   } else {
     host.write(formatRunReport(result).join('\n'));
   }
+};
+
+/**
+ * Whether a path names a file, without throwing for a missing one.
+ *
+ * @param filesystem - The discovery filesystem.
+ * @param path - Absolute path.
+ * @returns True for an existing file.
+ */
+const isFile = async (
+  filesystem: ReturnType<GeoSpecCliHost['discoveryFileSystem']>,
+  path: string,
+): Promise<boolean> => {
+  try {
+    const entry = await filesystem.stat(path);
+    return entry.kind === 'file';
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Run `geospec check`: the bundled validity spec, served from memory, in the model's folder.
+ *
+ * @param options - The parsed check options.
+ * @param host - The injected platform.
+ * @returns The process exit code.
+ */
+const runGeoSpecCheck = async (options: GeoSpecCliCheckOptions, host: GeoSpecCliHost): Promise<number> => {
+  const refuse = (message: string): number => {
+    host.write(options.json ? JSON.stringify({ success: false, error: message }) : message);
+    return 1;
+  };
+  const plan = planGeoSpecCheck(options, host.cwd());
+  if ('error' in plan) {
+    return refuse(plan.error);
+  }
+  if (!(await isFile(host.discoveryFileSystem(plan.projectPath), `${plan.projectPath}/${plan.file}`))) {
+    return refuse(`geospec check found no file at '${options.file}'.`);
+  }
+  const runner = host.createRunner({
+    projectPath: plan.projectPath,
+    configPath: undefined,
+    workers: undefined,
+    shardTimeout: undefined,
+    sources: plan.sources,
+  });
+  let result: GeoSpecRunnerResult;
+  try {
+    result = await runner.run({ files: [geoSpecCheckSpecPath] });
+  } finally {
+    await runner.close();
+  }
+  writeRunResult(result, options.json, host);
   return result.success ? 0 : 1;
 };

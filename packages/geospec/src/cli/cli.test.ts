@@ -20,7 +20,7 @@ const bundle = { code: '', issues: [], success: true, dependencies: [], unresolv
 const parsed = (...argv: string[]) => {
   const command = parseGeoSpecCliArguments(argv);
   if (command.kind !== 'run') {
-    throw new Error(`expected a run command, got ${command.kind}: ${command.message}`);
+    throw new Error(`expected a run command, got ${command.kind}: ${'message' in command ? command.message : ''}`);
   }
   return command.options;
 };
@@ -919,5 +919,89 @@ describe('the empty-selection message', () => {
     await runGeoSpecCli(['run', '.'], host);
 
     expect(host.written[0]).toBe('No GeoSpec files matched (unmatched: .).');
+  });
+});
+
+describe('geospec check', () => {
+  it('should parse the file, the component count and --json', () => {
+    expect(parseGeoSpecCliArguments(['check', 'part.step'])).toStrictEqual({
+      kind: 'check',
+      options: { file: 'part.step', json: false },
+    });
+    expect(parseGeoSpecCliArguments(['check', '--json', 'part.glb', '--components', '3'])).toStrictEqual({
+      kind: 'check',
+      options: { file: 'part.glb', json: true, components: 3 },
+    });
+    expect(parseGeoSpecCliArguments(['check', '--help'])).toStrictEqual({ kind: 'help', message: geoSpecCliUsage });
+  });
+
+  it('should refuse a missing file, a second file, an unknown option and a bad component count', () => {
+    expect(parseGeoSpecCliArguments(['check'])).toStrictEqual({
+      kind: 'error',
+      message: 'geospec check needs a STEP or GLB file.',
+    });
+    expect(parseGeoSpecCliArguments(['check', 'a.step', 'b.step'])).toStrictEqual({
+      kind: 'error',
+      message: "Unexpected argument 'b.step'.",
+    });
+    expect(parseGeoSpecCliArguments(['check', 'a.step', '--workers'])).toStrictEqual({
+      kind: 'error',
+      message: "Unknown option '--workers'.",
+    });
+    for (const count of [[], ['0'], ['1.5'], ['two']]) {
+      expect(parseGeoSpecCliArguments(['check', 'a.step', '--components', ...count])).toStrictEqual({
+        kind: 'error',
+        message: '--components needs a whole number of at least 1.',
+      });
+    }
+  });
+
+  it("should run the bundled spec from memory in the model's folder and close once", async () => {
+    const host = cliHost({});
+
+    const code = await runGeoSpecCli(['check', 'parts/bracket.step', '--components', '2'], host);
+
+    expect(code).toBe(0);
+    const [runner, run] = host.runs as [{ projectPath: string; sources: Record<string, string> }, unknown];
+    expect(runner).toMatchObject({ projectPath: '/project/parts', configPath: undefined, workers: undefined });
+    expect(Object.keys(runner.sources)).toStrictEqual(['.geospec-check.geospec.ts']);
+    expect(runner.sources['.geospec-check.geospec.ts']).toContain(
+      'loadModel({ source: "bracket.step", format: \'step\' })',
+    );
+    expect(run).toStrictEqual({ files: ['.geospec-check.geospec.ts'] });
+    expect(host.closed()).toBe(1);
+    expect(host.written[0]).toContain('GeoSpec passed');
+  });
+
+  it('should return the verdict and print one JSON document under --json', async () => {
+    const host = cliHost({ result: { success: false, passed: 3, failed: 1, selectedTests: 4, files: [] } });
+
+    const code = await runGeoSpecCli(['check', '/models/part.glb', '--json'], host);
+
+    expect(code).toBe(1);
+    expect(host.runs[0]).toMatchObject({ projectPath: '/models' });
+    expect(JSON.parse(host.written.join(''))).toMatchObject({ success: false, failed: 1 });
+  });
+
+  it('should refuse a format it cannot read and a file that is not there, without running', async () => {
+    const host = cliHost({});
+    const missing = {
+      ...cliHost({}),
+      discoveryFileSystem: () => ({
+        readdir: async () => [],
+        stat: async () => {
+          throw new Error('ENOENT');
+        },
+      }),
+    };
+
+    expect(await runGeoSpecCli(['check', 'part.obj'], host)).toBe(1);
+    expect(host.written[0]).toBe("geospec check reads .step, .stp or .glb files, not 'part.obj'.");
+    expect(await runGeoSpecCli(['check', 'gone.stp', '--json'], missing)).toBe(1);
+    expect(JSON.parse(missing.written[0] ?? '{}')).toStrictEqual({
+      success: false,
+      error: "geospec check found no file at 'gone.stp'.",
+    });
+    expect([...host.runs, ...missing.runs]).toStrictEqual([]);
   });
 });

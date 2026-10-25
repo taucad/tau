@@ -45,21 +45,6 @@ export type {
   GeoSpecVoidWaypoint,
   GeoSpecVolumeExpectation,
 } from '#runner/types.js';
-export type {
-  BrepEvidence,
-  GeometryFileFormat,
-  GeometryCapability,
-  GeometryDiagnostic,
-  GeometryProvenance,
-  GeometrySource,
-  GeometrySubject,
-  GeometrySubjectMeshEvidence,
-  MeshEvidence,
-  MeshFileFormat,
-  MeshQualityStats,
-  MeshTriangle,
-  StepEvidence,
-  Vec3,
-} from '#mesh/types.js';
+export type { GeometryDiagnostic, Vec3 } from '#mesh/types.js';
 
 export type { Vec3 as GeoSpecVec3 } from '#mesh/types.js';

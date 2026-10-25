@@ -65,6 +65,7 @@
   },
   "dependencies": {
     "@gltf-transform/core": "catalog:",
+    "@gltf-transform/extensions": "catalog:",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/occt-core": "workspace:*",
     "libcascade": "catalog:"
@@ -75,6 +76,7 @@
   },
   "devDependencies": {
     "@taucad/esbuild": "workspace:*",
+    "@taucad/middleware": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
     "zod": "catalog:"

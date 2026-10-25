@@ -87,6 +87,8 @@ import { canonicalPath } from '#main/project-roots.js';
 import { createGeometryRunnerClient } from '#tau/geometry-runner-client.js';
 import { agentRuntimeIdleMilliseconds, retireIdleClients } from '#tau/idle-runtime-clients.js';
 import type { createDesktopRuntime } from '#tau/desktop-runtime.factory.js';
+import { createTerminalConcern } from '#tau/services-host.terminal.js';
+import type { TerminalConcernOptions } from '#tau/services-host.terminal.js';
 import { createPermissionHost } from '#tau/permission-host.js';
 import { createPermissionStore, permissionModeOfRun, recordShellCall } from '#tau/permission-store.js';
 import type { PermissionStore } from '#tau/permission-store.js';
@@ -313,6 +315,8 @@ export type ServicesHostOptions = {
   readonly machinesStreaming?: (requestId: string, machines: readonly StreamingMachine[]) => void;
   /** The contained shell the agent's `shell` tool runs on (`services-host-shell.ts`); absent, no project offers it. */
   readonly shell?: DesktopShell | undefined;
+  /** The desktop shell probe the `terminal` concern opens human sessions through; absent, each is refused. */
+  readonly terminalShell?: TerminalConcernOptions['shell'];
   /** Tell main this project can record nothing, so a person is told (W5). */
   readonly onRevisionsUnavailable?: (
     workspaceRoot: string,
@@ -521,6 +525,13 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
      * matching `…/home`. */
     return [...trustedRoots].some((trusted) => candidate === trusted || candidate.startsWith(trusted + sep));
   };
+
+  const terminals = createTerminalConcern({
+    shell: options.terminalShell,
+    isTrustedRoot,
+    canonicalRoot: canonicalPath,
+    log,
+  });
 
   const isInternalRoot = (root: string): boolean => {
     if (isTrustedRoot(root)) {
@@ -1179,6 +1190,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
           trustedRoots.add(canonicalPath(root));
         }
         log('roots-updated', { count: trustedRoots.size });
+        terminals.revokeUntrusted();
         return;
       }
       case 'permissions-request': {
@@ -1543,6 +1555,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       refuse({ type: 'quiesce-refused', reason: 'streaming', machines: streaming });
     }
     const failures: unknown[] = [];
+    await settleAll([terminals.closeAll()], failures);
     const fileSystemDisposers = [...nodeFileSystemDisposers];
     const runtimeDisposers = [...runtimeFileSystemDisposers];
     const owned = [...projectHosts.values()];
@@ -1624,6 +1637,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
        * Tracked rather than fire-and-forget: the internal authority has to stay
        * up until these closes finish. */
       const closingLaunchers = [...projectHosts.values()].map(async (actor) => closeForDispose(actor));
+      closingLaunchers.push(terminals.closeAll());
       for (const port of connections.values()) {
         port.close();
       }
@@ -1778,6 +1792,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         case 'machines': {
           // async-iife: bootstrap -- the host opens on first use; a control frame has no caller to return to.
           void serveMachines(port, 'person');
+          return;
+        }
+        case 'terminal': {
+          terminals.serve(port, context);
           return;
         }
         default: {

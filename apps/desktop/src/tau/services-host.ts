@@ -151,7 +151,7 @@ const prepareNativeKernel: HostPrepareKernel = async ({ kernel }, { signal, onPr
 /* The `git` main resolved from the bundle, when this build ships one (OQ3);
  * absent, the toolchain comes from `PATH` and says so once if it is not there. */
 const gitExecutable = process.env['TAU_GIT_EXECUTABLE'];
-/* The agent's contained shell, probed on first use (desktop shell W4). */
+/* The contained shell the agent's tool and the human Terminal share, probed on first use (desktop shell W4, W5). */
 const shell = createDesktopShell({
   appDataRoots: [process.env['TAU_DESKTOP_USER_DATA_DIR'], process.env['TAU_CONFIG_DIR'], authorityDirectory].filter(
     (root): root is string => root !== undefined && root !== '',
@@ -179,6 +179,8 @@ const host = createServicesHost({
   nativeKernels: { prepare: prepareNativeKernel, preparable: preparableKernels(desktopNativeDeployments) },
   ...(gitExecutable === undefined || gitExecutable === '' ? {} : { gitExecutable }),
   shell,
+  /* The human Terminal (W5) opens its sessions through the same memoized probe. */
+  terminalShell: shell.probe,
   runtimeContext: (action, workspaceRoot, projectRoot) => {
     parentPort.postMessage({ type: `runtime-context-${action}`, workspaceRoot, projectRoot });
   },

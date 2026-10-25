@@ -12,7 +12,7 @@
     "limit": "38 kB"
   },
   {
-    "name": "Node-only subpaths (cli, config/node, model/node, runner/node, vitest/node) — measured 9.82 kB brotli on 2026-10-23 (adds the CLI, the Node pool, the engine selector and the Vitest project setup)",
+    "name": "Node-only subpaths (cli, config/node, model/node, runner/node, vitest/node) — measured 9.82 kB brotli on 2026-10-23 (adds the CLI, the Node pool, the engine selector and the Vitest project setup); `geospec check <file>` and the in-memory spec sources about 1.49 kB (11.31 kB in CI on 2026-10-24; limit raised from 10 kB to 11.5 kB under the owner's standing size-limit approval)",
     "path": [
       "dist/cli/**/*.mjs",
       "dist/config/node/**/*.mjs",
@@ -20,6 +20,6 @@
       "dist/runner/node/**/*.mjs",
       "dist/vitest/node/**/*.mjs"
     ],
-    "limit": "10 kB"
+    "limit": "11.5 kB"
   }
 ]

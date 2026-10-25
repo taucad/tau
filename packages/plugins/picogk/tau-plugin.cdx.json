@@ -12,28 +12,64 @@
   },
   "components": [
     {
-      "bom-ref": "102348acf0348d1d21498688e620c9cbadb11cb1b804dd8c5fac25afc1a738df",
+      "bom-ref": "4e0bfb0a4dbcde8a4e1238fa0f533af12b34f720dbfee801eb4118eacbf36c7d",
       "type": "library",
       "supplier": {
         "name": "Tau"
       },
       "name": "tau-picogk-layer",
-      "version": "picogk-layer-102348acf0348d1d",
-      "purl": "pkg:github/taucad/tau@picogk-layer-102348acf0348d1d?file_name=tau-picogk-layer-darwin-arm64.tar.gz",
+      "version": "picogk-layer-4e0bfb0a4dbcde8a",
+      "purl": "pkg:github/taucad/tau@picogk-layer-4e0bfb0a4dbcde8a?file_name=tau-picogk-layer-linux-x64.tar.gz",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "102348acf0348d1d21498688e620c9cbadb11cb1b804dd8c5fac25afc1a738df"
+          "content": "4e0bfb0a4dbcde8a4e1238fa0f533af12b34f720dbfee801eb4118eacbf36c7d"
         }
       ],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://cdn.tau.new/blobs/sha256/102348acf0348d1d21498688e620c9cbadb11cb1b804dd8c5fac25afc1a738df"
+          "url": "https://cdn.tau.new/blobs/sha256/4e0bfb0a4dbcde8a4e1238fa0f533af12b34f720dbfee801eb4118eacbf36c7d"
         },
         {
           "type": "distribution",
-          "url": "https://github.com/taucad/tau/releases/download/picogk-layer-102348acf0348d1d/tau-picogk-layer-darwin-arm64.tar.gz"
+          "url": "https://github.com/taucad/tau/releases/download/picogk-layer-4e0bfb0a4dbcde8a/tau-picogk-layer-linux-x64.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "linux-x64"
+        },
+        {
+          "name": "taucad:sbom",
+          "value": "tau-worker/tau-picogk-sbom.cdx.json"
+        }
+      ]
+    },
+    {
+      "bom-ref": "629eff24263a72e0c56eb4f469a513874f9a228dd37e7116457e7a1e20f04565",
+      "type": "library",
+      "supplier": {
+        "name": "Tau"
+      },
+      "name": "tau-picogk-layer",
+      "version": "picogk-layer-629eff24263a72e0",
+      "purl": "pkg:github/taucad/tau@picogk-layer-629eff24263a72e0?file_name=tau-picogk-layer-darwin-arm64.tar.gz",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "629eff24263a72e0c56eb4f469a513874f9a228dd37e7116457e7a1e20f04565"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://cdn.tau.new/blobs/sha256/629eff24263a72e0c56eb4f469a513874f9a228dd37e7116457e7a1e20f04565"
+        },
+        {
+          "type": "distribution",
+          "url": "https://github.com/taucad/tau/releases/download/picogk-layer-629eff24263a72e0/tau-picogk-layer-darwin-arm64.tar.gz"
         }
       ],
       "properties": [
@@ -77,42 +113,6 @@
         {
           "name": "taucad:target",
           "value": "linux-x64"
-        }
-      ]
-    },
-    {
-      "bom-ref": "8ff3218955898790660758a63884a38d4b056ef8504667ea49748784c2094ddd",
-      "type": "library",
-      "supplier": {
-        "name": "Tau"
-      },
-      "name": "tau-picogk-layer",
-      "version": "picogk-layer-8ff3218955898790",
-      "purl": "pkg:github/taucad/tau@picogk-layer-8ff3218955898790?file_name=tau-picogk-layer-linux-x64.tar.gz",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "8ff3218955898790660758a63884a38d4b056ef8504667ea49748784c2094ddd"
-        }
-      ],
-      "externalReferences": [
-        {
-          "type": "distribution",
-          "url": "https://cdn.tau.new/blobs/sha256/8ff3218955898790660758a63884a38d4b056ef8504667ea49748784c2094ddd"
-        },
-        {
-          "type": "distribution",
-          "url": "https://github.com/taucad/tau/releases/download/picogk-layer-8ff3218955898790/tau-picogk-layer-linux-x64.tar.gz"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "linux-x64"
-        },
-        {
-          "name": "taucad:sbom",
-          "value": "tau-worker/tau-picogk-sbom.cdx.json"
         }
       ]
     },

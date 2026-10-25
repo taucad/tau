@@ -1236,8 +1236,9 @@ const planMessage = (token: string, at: number): ProviderMessage => {
 /**
  * Where a batch's carried turns go and the history it leaves (T14, round 21; `carriedPlace`, `openToolCalls`,
  * `historyWellFormed`): histories with calls open, answered, or followed by another message, and batches of outputs,
- * rewinds and other rows, each with no, one or two carried turns, and each with its run's person's turn still ahead
- * past it or not (round 23).
+ * rewinds, turn commits (round 24: `p<keep>`, the one row that keeps what it names and says the run's turn) and other
+ * rows, each with no, one or two carried turns, and each with its run's person's turn still ahead past it or not (round
+ * 23).
  */
 const planTrace = (): Trace => {
   const text = ['T plans'];
@@ -1257,6 +1258,10 @@ const planTrace = (): Trace => {
     'c3,o3',
     'l,o2,o1',
     's7,k0',
+    /* Round 24: a turn's commit keeps what it names and says the turn at once, one row. */
+    'p1',
+    'l,p2',
+    'l,k1,p1,c3',
   ];
   for (const history of histories) {
     for (const batch of batches) {
@@ -1270,15 +1275,19 @@ const planTrace = (): Trace => {
         /* The batch as it is built: a rewind names the messages it keeps then, before anything is carried. */
         let building: readonly ProviderMessage[] = before;
         const bodies = (batch === '-' ? [] : batch.split(',')).map((token, at): LogRowBody => {
+          const kept = building.slice(0, Number(token.slice(1))).map((message) => message.id);
           const body: LogRowBody = token.startsWith('k')
-            ? {
-                type: 'history.rewound',
-                trigger: 'retry',
-                retainedMessageIds: building.slice(0, Number(token.slice(1))).map((message) => message.id),
-              }
-            : token === 'l'
-              ? { type: 'run.lifecycle', state: 'running' }
-              : { type: 'message.appended', message: planMessage(token, 100 + at) };
+            ? { type: 'history.rewound', trigger: 'retry', retainedMessageIds: kept }
+            : token.startsWith('p')
+              ? {
+                  type: 'turn.history-projection-committed',
+                  retainedMessageIds: kept,
+                  message: { id: 's1000', role: 'user', content: 'words' },
+                  context: { version: 1, systemPrompt: '', initialMessages: [], postCompactionMessages: [] },
+                }
+              : token === 'l'
+                ? { type: 'run.lifecycle', state: 'running' }
+                : { type: 'message.appended', message: planMessage(token, 100 + at) };
           building = historyAfter(building, body);
           return body;
         });

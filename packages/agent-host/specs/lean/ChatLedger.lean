@@ -1032,28 +1032,34 @@ def wfFrom : List Nat → List Msg → Bool
 def wf (h : List Msg) : Bool := wfFrom [] h
 
 /-- A batch's row as it changes the history: a message appended; a rewind that keeps the first `keep` messages it
-names (`history.rewound`, and a turn's projection commit or a compaction, which drop what they do not keep); or a row
-that is no message (a lifecycle or interrupt row). A rewind names the messages it keeps when its batch is built, before
-anything is carried into it. -/
+names (`history.rewound`, and a compaction, which drops what it does not keep); a turn's commit
+(`turn.history-projection-committed`, round 24), one row that keeps the first `keep` messages it names and says the
+person's turn `id` at once, so nothing goes between the two; or a row that is no message (a lifecycle or interrupt
+row). A rewind or a commit names the messages it keeps when its batch is built, before anything is carried into it. -/
 inductive Op where
   | msg (m : Msg)
   | rewind (keep : Nat)
+  | commit (keep id : Nat)
   | other
   deriving DecidableEq, Repr
 
 def Op.apply (h : List Msg) : Op → List Msg
   | .msg m => h ++ [m]
   | .rewind k => h.take k
+  | .commit k id => h.take k ++ [.say id]
   | .other => h
 
+/-- A row that drops the messages it does not keep (`dropsMessages`): a rewind, or a turn's commit. -/
 def Op.isRewind : Op → Bool
   | .rewind _ => true
+  | .commit _ _ => true
   | _ => false
 
 def applyAll (h : List Msg) (ops : List Op) : List Msg := ops.foldl Op.apply h
 
 /-- `saysNext` (round 23): whether the next message the rows append is a say. A say leaves every open call to the
-adapter, so turns carried just before it leave the same calls to the adapter it did, and no output follows them. -/
+adapter, so turns carried just before it leave the same calls to the adapter it did, and no output follows them. A
+commit is passed over, as `saysNext` passes over a row that appends no message: a place is only ever after it. -/
 def nextSays : List Op → Bool
   | [] => false
   | .msg (.say _) :: _ => true
@@ -1083,13 +1089,16 @@ def plan (h : List Msg) (says : List Nat) (ops : List Op) : Option (List Op) :=
 def planAhead (h : List Msg) (says : List Nat) (ops : List Op) (t : Nat) : Option (List Op) :=
   (placeAhead h ops t).map fun i => ops.take i ++ says.map (fun s => Op.msg (.say s)) ++ ops.drop i
 
-/-- A batch the host writes, by the kinds of its rows: a person's turn (a start, or a run settling before it committed
-its turn); a Retry, which rewinds to `keep` messages first; the model's reply calling `calls`; a tool's output; a
-Resume, which rewinds a transport failure's marker (`cut`, the history's last message), then writes an output for each
-call the history leaves open (`CLIENT_DISCONNECTED`) and a reminder `r` when there are any; any other rows. -/
+/-- A batch the host writes, by the kinds of its rows: a person's turn (a run settling before it committed its turn);
+a Retry, which rewinds to `keep` messages first; a turn's commit, which keeps `keep` messages and says the turn `id`
+(round 24: a start's or a Retry's admission batch says nothing, and its commit says the turn); the model's reply calling
+`calls`; a tool's output; a Resume, which rewinds a transport failure's marker (`cut`, the history's last message),
+then writes an output for each call the history leaves open (`CLIENT_DISCONNECTED`) and a reminder `r` when there are
+any; any other rows. -/
 inductive Batch where
   | turn (id : Nat)
   | retry (keep id : Nat)
+  | commit (keep id : Nat)
   | reply (calls : List Nat)
   | output (c : Nat)
   | resume (cut : Bool) (r : Nat)
@@ -1100,6 +1109,7 @@ inductive Batch where
 def Batch.ops (h : List Msg) : Batch → List Op
   | .turn id => [.other, .msg (.say id)]
   | .retry k id => [.other, .rewind k, .msg (.say id)]
+  | .commit k id => [.commit k id]
   | .reply cs => [.msg (.call cs)]
   | .output c => [.msg (.out c)]
   | .resume cut r =>
@@ -1108,6 +1118,30 @@ def Batch.ops (h : List Msg) : Batch → List Op
     [.other] ++ (if cut then [.rewind (h.length - 1)] else []) ++ outs ++
       (if outs.isEmpty then [] else [.msg (.say r)])
   | .other => [.other]
+
+/-- `turnAheadOf` (round 24): a run whose turn the ledger does not hold committed says that turn next, past any batch
+before its commit. -/
+def turnAhead (committed : Bool) : Bool := !committed
+
+/-- The batch a run writes with its carried turns `says` at their place: past it, its person's turn `t` when that is
+still ahead (`carriedPlace(history, bodies, turnAhead)`). -/
+def planFor (ahead : Bool) (h : List Msg) (says : List Nat) (ops : List Op) (t : Nat) : Option (List Op) :=
+  if ahead then planAhead h says ops t else plan h says ops
+
+/-- A start's or a Retry's turn `t` as the host writes it (round 24): its admission's batch `ops`, which says nothing
+(the lifecycle row, and a Retry's rewind), with the turns the run carries at their place when it has one; then the
+turn's commit (`Batch.commit`), which keeps every message the history then holds (`retainedMessageIds` is read as it is
+written) and says the turn, with the carried turns at their place in it when the admission's batch had none.
+`committed`: whether the ledger holds the run's turn as the admission's batch is written. -/
+def turnWritten (committed : Bool) (h : List Msg) (says : List Nat) (ops : List Op) (t : Nat) : List Msg :=
+  match planFor (turnAhead committed) h says ops t with
+  | some ops' =>
+    let h1 := applyAll h ops'
+    applyAll h1 ((Batch.commit h1.length t).ops h1)
+  | none =>
+    let h1 := applyAll h ops
+    let c := (Batch.commit h1.length t).ops h1
+    applyAll h1 ((plan h1 says c).getD c)
 
 /-- What the host writes only where it may: a tool's output only for a call the history leaves open (its driver runs
 the calls of the reply it just wrote). -/

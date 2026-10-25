@@ -39,7 +39,8 @@ A row is `<term> <seq> <run> <kind> <arg> <ms> <epoch> <attempt>` (`epoch`/`atte
                                `w<run>.<heartbeat>`, `h<run>` (a batch with no place for them, round 21),
                                `a<command>.<applied>`   → `QC <each write's says, + apart|->,…>`
   PLAN <history|-> <says|-> <rows|->   where a batch's carried turns go (round 21): history messages `c<calls|->`,
-                               `o<call>`, `s<id>`; rows those, `k<keep>` a rewind, `l` no message
+                               `o<call>`, `s<id>`; rows those, `k<keep>` a rewind, `p<keep>` a turn's commit that
+                               keeps that many and says the turn `1000` (round 24), `l` no message
                                → `QW <open calls|-> <place|-> <well formed after> <carried survive>`
   PLANT <history|-> <says|-> <rows|->   the same for a batch whose run says its person's turn next, past the batch
                                (round 23, `placeAhead`) → `QW …`
@@ -169,10 +170,12 @@ def msgOf (t : String) : Msg :=
   | "o" => .out (num rest)
   | _ => .say (num rest)
 
-/-- A batch row of a `PLAN` line: a message, `k<keep>` a rewind, `l` a row that is no message. -/
+/-- A batch row of a `PLAN` line: a message, `k<keep>` a rewind, `p<keep>` the run's turn's commit (round 24), which
+keeps that many messages and says the turn `1000` at once, `l` a row that is no message. -/
 def opOf (t : String) : Op :=
   match (t.take 1).toString with
   | "k" => .rewind (num (t.drop 1).toString)
+  | "p" => .commit (num (t.drop 1).toString) 1000
   | "l" => .other
   | _ => .msg (msgOf t)
 
@@ -320,10 +323,11 @@ def runLine (st : St) (line : String) : St × List String :=
     let h := (if hs == "-" then [] else hs.splitOn ",").map msgOf
     let says := (if ss == "-" then [] else ss.splitOn "+").map num
     let ops := (if os == "-" then [] else os.splitOn ",").map opOf
-    /- `PLANT` (round 23): the batch's run says its person's turn next, past the batch (`turnAhead`). -/
-    let ahead := line.startsWith "PLANT "
+    /- `PLANT` (round 23): the batch's run has not committed its turn, so it says that turn next, past the batch
+    (`turnAhead`, round 24). -/
+    let ahead := turnAhead (!line.startsWith "PLANT ")
     let place := if ahead then placeAhead h ops 1000 else placeAt h ops
-    let after := applyAll h ((if ahead then planAhead h says ops 1000 else plan h says ops).getD ops)
+    let after := applyAll h ((planFor ahead h says ops 1000).getD ops)
     let survive := place.isSome && says.all (fun s => after.contains (.say s))
     let at_ := match place with | some i => toString i | none => "-"
     (st, [s!"QW {listText ((openCalls h).map toString)} {at_} {bit (wf after)} {bit survive}"])

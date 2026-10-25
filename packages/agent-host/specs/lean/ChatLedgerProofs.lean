@@ -4462,6 +4462,7 @@ theorem applyAll_noRewind (h : List Msg) (ops : List Op) (hn : ops.all (fun op =
       simp only [applyAll, List.foldl_cons, Op.apply] at this ⊢
       rw [this]; simp [opMsgs]
     | rewind k => simp [Op.isRewind] at hn
+    | commit k id => simp [Op.isRewind] at hn
     | other =>
       have := ih h hn.2
       simp only [applyAll, List.foldl_cons, Op.apply] at this ⊢
@@ -4494,6 +4495,9 @@ theorem nextSays_msgs {ops : List Op} (hs : nextSays ops = true) : ∃ x rest, o
       | call cs => simp [nextSays] at hs
       | out c => simp [nextSays] at hs
     | rewind k =>
+      obtain ⟨x, rest, he⟩ := ih (by simpa [nextSays] using hs)
+      exact ⟨x, rest, by simpa [opMsgs] using he⟩
+    | commit k id =>
       obtain ⟨x, rest, he⟩ := ih (by simpa [nextSays] using hs)
       exact ⟨x, rest, by simpa [opMsgs] using he⟩
     | other =>
@@ -4573,6 +4577,7 @@ theorem batch_wf (h : List Msg) (b : Batch) (hw : wf h = true) (hl : b.legal h =
   cases b with
   | turn id => simp [Batch.ops, applyAll, Op.apply, wf_append, hw, wfFrom, Msg.fits]
   | retry k id => simp [Batch.ops, applyAll, Op.apply, wf_append, wf_take k hw, wfFrom, Msg.fits]
+  | commit k id => simp [Batch.ops, applyAll, Op.apply, wf_append, wf_take k hw, wfFrom, Msg.fits]
   | reply cs => simp [Batch.ops, applyAll, Op.apply, wf_append, hw, wfFrom, Msg.fits]
   | output c =>
     simp only [Batch.legal] at hl
@@ -4620,30 +4625,63 @@ theorem t14_turns_place (h : List Msg) (id k r : Nat) (cut : Bool) :
 
 /-! ## T16: a person's turn stays last past the turns its run carries (round 23) -/
 
-/-- **T16** (a person's turn stays last): whatever history a turn or a Retry is written over, a call left open at its
-tail included, the turns its run carries go before the person's turn, which is the history's last message; and a run
-whose turn is still ahead past its batch has a place in it (`placeAhead`), so its carried turns never wait for the
-turn's commit, where its own rewind would cut them. -/
-theorem t16_turn_last (h : List Msg) (says : List Nat) (id k : Nat) (ops : List Op) :
-    (applyAll h ((plan h says ((Batch.turn id).ops h)).getD ((Batch.turn id).ops h))).getLast? = some (.say id) ∧
-      (applyAll h ((plan h says ((Batch.retry k id).ops h)).getD ((Batch.retry k id).ops h))).getLast? =
-        some (.say id) ∧
-      (placeAhead h ops id).isSome = true := by
-  refine ⟨?_, ?_, ?_⟩
-  · simp [plan, placeAt, Batch.ops, List.range, List.range.loop, nextSays, Op.isRewind, applyAll,
-      List.foldl_append, Op.apply]
-  · simp [plan, placeAt, Batch.ops, List.range, List.range.loop, nextSays, Op.isRewind, applyAll,
-      List.foldl_append, Op.apply]
-  · unfold placeAhead placeAt
-    rw [List.find?_isSome]
-    refine ⟨ops.length, List.mem_range.mpr (by simp; omega), ?_⟩
-    simp [List.drop_left', nextSays, Op.isRewind]
+/-- Where `placeAhead` puts a batch's carried turns, its rows from there on drop nothing: the place is in the batch, or
+just past it. -/
+theorem placeAhead_spec {h : List Msg} {ops : List Op} {t i : Nat} (hp : placeAhead h ops t = some i) :
+    (ops.drop i).all (fun op => !op.isRewind) = true := by
+  have hn := (placeAt_spec hp).1
+  rw [List.drop_append] at hn
+  exact (Bool.and_eq_true_iff.mp (by simpa only [List.all_append] using hn)).1
 
-/-- **T16** (the bug round 23 fixed): over a history ending in a call no output answers, a turn's carried turns had no
-place before its say, and went after it: the model answered the stale prompt. -/
+/-- A batch whose run's turn is still ahead always has a place: just past the batch, before that turn, at the latest. -/
+theorem placeAhead_isSome (h : List Msg) (ops : List Op) (t : Nat) : (placeAhead h ops t).isSome = true := by
+  unfold placeAhead placeAt
+  rw [List.find?_isSome]
+  refine ⟨ops.length, List.mem_range.mpr (by simp; omega), ?_⟩
+  simp [List.drop_left', nextSays, Op.isRewind]
+
+/-- The batch with its carried turns where `placeAhead` puts them, as the history it leaves: they are all in it. -/
+theorem planAhead_says {h : List Msg} {says : List Nat} {ops ops' : List Op} {t : Nat}
+    (hp : planAhead h says ops t = some ops') (s : Nat) (hs : s ∈ says) : Msg.say s ∈ applyAll h ops' := by
+  unfold planAhead at hp
+  cases hi : placeAhead h ops t with
+  | none => simp [hi] at hp
+  | some i =>
+    simp only [hi, Option.map_some, Option.some.injEq] at hp
+    subst hp
+    rw [applyAll_append, applyAll_append, applyAll_noRewind _ _ (map_msg_noRewind says Msg.say),
+      applyAll_noRewind _ _ (placeAhead_spec hi), opMsgs_map]
+    exact List.mem_append_left _ (List.mem_append_right _ (List.mem_map_of_mem hs))
+
+/-- **T16** (a person's turn stays last, round 24): a start's or a Retry's turn is two batches, its admission's, which
+says nothing, and its commit, one row that keeps the history and says the turn at once. While the run's turn is not
+committed (`turnAheadOf`), the turns its run carries go in the admission's batch, whatever history it is written over,
+a call no output answers included; the commit keeps them, and the person's turn is the history's last message after
+them. Were the turn not known to be ahead, an admission's batch over such a call would have no place, and the carried
+turns would follow the commit, after the person's turn (`t16_stale_prompt`). -/
+theorem t16_turn_last (h : List Msg) (says : List Nat) (ops : List Op) (t : Nat) (committed : Bool)
+    (hc : committed = false) :
+    (turnWritten committed h says ops t).getLast? = some (.say t) ∧
+      ∀ s ∈ says, Msg.say s ∈ turnWritten committed h says ops t := by
+  subst hc
+  have hsome := placeAhead_isSome h ops t
+  have hplan : (planAhead h says ops t).isSome = true := by
+    unfold planAhead; cases hi : placeAhead h ops t <;> simp_all
+  obtain ⟨ops', hp⟩ := Option.isSome_iff_exists.mp hplan
+  have hw : turnWritten false h says ops t = applyAll h ops' ++ [.say t] := by
+    simp [turnWritten, planFor, turnAhead, hp, Batch.ops, applyAll, Op.apply]
+  rw [hw]
+  exact ⟨List.getLast?_concat .., fun s hs => List.mem_append_left _ (planAhead_says hp s hs)⟩
+
+/-- **T16** (the bugs rounds 23 and 24 fixed): over a history ending in a call no output answers, a turn's admission
+batch had no place for the turns its run carried, which then went after the person's turn its commit says: the model
+answered the stale prompt. Known ahead, they go before it. -/
 theorem t16_stale_prompt :
-    plan [Msg.say 0, .call [1]] [9] ((Batch.turn 5).ops []) = some [.msg (.say 9), .other, .msg (.say 5)] ∧
-      placeAhead [Msg.say 0, .call [1]] [.other] 5 = some 0 ∧ placeAt [Msg.say 0, .call [1]] [.other] = none := by
+    turnWritten false [Msg.say 0, .call [1]] [9] [.other] 5 = [.say 0, .call [1], .say 9, .say 5] ∧
+      plan [Msg.say 0, .call [1]] [9] [.other] = none ∧
+      applyAll [Msg.say 0, .call [1]]
+          ((plan [Msg.say 0, .call [1]] [9] [.commit 2 5]).getD [.commit 2 5]) = [.say 0, .call [1], .say 5, .say 9] ∧
+      placeAhead [Msg.say 0, .call [1]] [.other] 5 = some 0 := by
   decide
 
 /-- **T14** (round 21's finding 1): the turns a Resume carried at the head of its batch, before the outputs that close

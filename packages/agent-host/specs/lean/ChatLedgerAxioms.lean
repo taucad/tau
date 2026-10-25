@@ -358,3 +358,6 @@ import ChatLedgerProofs
 #print axioms ChatLedger.t15_unread_refused
 #print axioms ChatLedger.t16_turn_last
 #print axioms ChatLedger.t16_stale_prompt
+#print axioms ChatLedger.placeAhead_spec
+#print axioms ChatLedger.placeAhead_isSome
+#print axioms ChatLedger.planAhead_says

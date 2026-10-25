@@ -452,6 +452,13 @@
     "replace": "              false,\n"
   },
   {
+    "id": "turn-ahead-ignored-model",
+    "drift": "round 24: the model never knows a run's turn is still ahead, so a turn's admission batch over a call no output answers has no place, the carried turns follow the commit, and the person's new turn is no longer last (T16: t16_turn_last, t16_stale_prompt)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "def turnAhead (committed : Bool) : Bool := !committed",
+    "replace": "def turnAhead (_committed : Bool) : Bool := false"
+  },
+  {
     "id": "replay-reads-unloaded-ledger",
     "drift": "round 23: the replay check reads the in-memory ledger, so after an idle eviction a copy of an applied approval runs full admission and is refused because another device started a run",
     "file": "src/host/tau-agent-host.ts",

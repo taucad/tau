@@ -11,7 +11,7 @@ public sealed partial class WorkerTests
     [InlineData(.4f)]
     [InlineData(1f)]
     [InlineData(2f)]
-    public void ScalarBuilderRetainsResidualDistancesInactiveSignsAndIndependentOwnership(float size)
+    public void ScalarBuilderSelectsOnlyVoxelsBelowTheThresholdAndOwnsItsField(float size)
     {
         using var library = new Library(size);
         using var source = Voxels.voxSphere(library, Vector3.Zero, 3);
@@ -27,21 +27,23 @@ public sealed partial class WorkerTests
             for (var z = oz - 1; z <= oz + sz; z++)
             {
                 var position = new Vector3(x * size, y * size, z * size);
-                var beforeOn = original.bGetValue(position, out var before);
+                _ = original.bGetValue(position, out var before);
                 var insideBounds = x >= ox && x < ox + sx && y >= oy && y < oy + sy && z >= oz && z < oz + sz;
                 var selected = insideBounds && before < threshold;
                 var afterOn = field.bGetValue(position, out var after);
-                Assert.Equal(selected || beforeOn, afterOn);
-                Assert.Equal(BitConverter.SingleToInt32Bits(selected ? 7 : before), BitConverter.SingleToInt32Bits(after));
+                // RC4: the field starts empty, so a voxel the threshold does not select keeps no residual distance.
+                Assert.Equal(selected, afterOn);
+                Assert.Equal(BitConverter.SingleToInt32Bits(selected ? 7 : 0), BitConverter.SingleToInt32Bits(after));
             }
         }
-        using var retained = new ScalarField(source, 7, float.NegativeInfinity);
+        using var retained = new ScalarField(source, 7, float.PositiveInfinity);
         var expected = new ImportScalarRecords();
         retained.TraverseActive(expected);
         source.Offset(size);
         source.Dispose();
         var actual = new ImportScalarRecords();
         retained.TraverseActive(actual);
+        Assert.NotEmpty(expected.Values);
         Assert.Equal(expected.Values, actual.Values);
     }
 }

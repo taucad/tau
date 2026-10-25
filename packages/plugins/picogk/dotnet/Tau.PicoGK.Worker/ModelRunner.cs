@@ -45,7 +45,12 @@ internal sealed record ModelExecutionResult(
     MaterialResources? Resources = null, WorkCounters? WorkCounters = null,
     IReadOnlyList<TauComputeStableRecord>? ComputeRecords = null,
     // The voxel edge length in millimetres `Library.Go` ran the model with; null without a library.
-    float? VoxelSize = null);
+    float? VoxelSize = null,
+    // The display meshing the host applied to captured Voxels; null for the uniform mesh.
+    MeshingOptions? Meshing = null);
+
+/// <summary>Display meshing for captured Voxels: OpenVDB adaptivity in (0, 1) and its relax pass.</summary>
+internal sealed record MeshingOptions(float Adaptivity, bool Relax);
 
 internal sealed record LayoutStability(float MinimumArea, float MaximumEdgeSum, float CreaseMargin, float MinimumFanArea, int MaximumFanFaces, float UvAxisMargin);
 
@@ -66,27 +71,38 @@ internal static class ModelRunner
     private static byte[]? retainedAssemblyBytes;
     private static AssemblyLoadContext? retainedContext;
     private static Assembly? retainedAssembly;
+    /*
+     * CH9: a source edit releases the previous context before its build and collects it only after the
+     * response, so the drains no longer delay the edit's first result. A context still alive after them
+     * asks the host to recycle this worker after the next response.
+     */
+    private static WeakReference? releasedContext;
+    private static bool recycleAfterNextResponse;
 
     internal static ModelExecutionResult Execute(
         CompiledModel compiled,
         string artifactRoot,
         JsonElement? parameters = null,
         CancellationToken cancellation = default,
-        ComputeWorkerSession? compute = null)
+        ComputeWorkerSession? compute = null,
+        MeshingOptions? meshing = null)
     {
         var values = CompilationService.BindParameters(
             compiled,
             parameters ?? JsonSerializer.SerializeToElement(new Dictionary<string, object?>()));
         var unload = Stopwatch.StartNew();
-        var recycleAfterResponse = false;
+        // A release whose response was never written (its build failed) is collected here instead.
+        CollectReleased();
+        var recycleAfterResponse = recycleAfterNextResponse;
+        recycleAfterNextResponse = false;
         if (retainedAssemblyBytes is not null && !ReferenceEquals(retainedAssemblyBytes, compiled.Assembly))
         {
-            recycleAfterResponse = Collect(ReleaseRetained());
+            releasedContext = ReleaseRetained();
         }
         unload.Stop();
         var assembly = Retain(compiled);
         var invoke = Stopwatch.StartNew();
-        var execution = RunAndExtract(assembly, artifactRoot, values, cancellation, compute);
+        var execution = RunAndExtract(assembly, artifactRoot, values, cancellation, compute, meshing);
         invoke.Stop();
         return execution with
         {
@@ -128,15 +144,22 @@ internal static class ModelRunner
         return weak;
     }
 
-    private static bool Collect(WeakReference context)
+    /// <summary>
+    /// Collects the context the last source edit released, after its response was written.
+    /// </summary>
+    /// <returns>Whether that context survived the drains, so the next response recycles the worker.</returns>
+    internal static bool CollectReleased()
     {
+        if (releasedContext is not { } context) return false;
+        releasedContext = null;
         for (var attempt = 0; attempt < 8 && context.IsAlive; attempt++)
         {
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
         }
-        return context.IsAlive;
+        recycleAfterNextResponse = context.IsAlive;
+        return recycleAfterNextResponse;
     }
 
     private static ModelExecutionResult RunAndExtract(
@@ -144,9 +167,10 @@ internal static class ModelRunner
         string artifactRoot,
         IReadOnlyDictionary<string, object?> values,
         CancellationToken cancellation,
-        ComputeWorkerSession? compute)
+        ComputeWorkerSession? compute,
+        MeshingOptions? meshing)
     {
-        using var host = new HostedLibraryHost(artifactRoot, cancellation, compute);
+        using var host = new HostedLibraryHost(artifactRoot, cancellation, compute, meshing);
         using (Library.UseHost(host))
         {
             ApplyParameters(assembly, values);
@@ -254,8 +278,8 @@ internal static class ModelRunner
             }
         }
 
-        // Compact edge adjacency: O(T log T) sorting, with no scan of a vertex's entire fan.
-        Array.Sort(edges, corners);
+        // Compact edge adjacency: a linear counting sort, with no scan of a vertex's entire fan.
+        SortEdges(edges, corners, vertexCount);
         for (var start = 0; start < edges.Length;)
         {
             var end = start + 1;
@@ -382,6 +406,41 @@ internal static class ModelRunner
             parents[first] += parents[second];
             parents[second] = first;
         }
+    }
+
+    /*
+     * CH11: orders edge keys (smaller vertex << 32 | larger vertex) ascending, collapsed edges (ulong.MaxValue)
+     * last, as Array.Sort(edges, corners) did, with two stable counting passes: by the larger vertex, then by
+     * the smaller. Equal keys stay adjacent; the order of the corners inside a key may differ from the
+     * comparison sort's, which the pairing below never observes: it reads only pairs, symmetrically, and the
+     * union-find partition does not depend on join order.
+     */
+    internal static void SortEdges(ulong[] edges, int[] corners, int vertexCount)
+    {
+        if (edges.Length < 2) return;
+        var swapEdges = new ulong[edges.Length];
+        var swapCorners = new int[corners.Length];
+        var counts = new int[vertexCount + 2];
+        CountingPass(edges, corners, swapEdges, swapCorners, counts, vertexCount, high: false);
+        Array.Clear(counts);
+        CountingPass(swapEdges, swapCorners, edges, corners, counts, vertexCount, high: true);
+
+        static void CountingPass(ulong[] sourceEdges, int[] sourceCorners, ulong[] targetEdges, int[] targetCorners,
+            int[] counts, int vertexCount, bool high)
+        {
+            // Bucket vertexCount holds collapsed edges, after every vertex bucket.
+            foreach (var edge in sourceEdges) counts[Bucket(edge, vertexCount, high) + 1]++;
+            for (var bucket = 1; bucket < counts.Length; bucket++) counts[bucket] += counts[bucket - 1];
+            for (var index = 0; index < sourceEdges.Length; index++)
+            {
+                var target = counts[Bucket(sourceEdges[index], vertexCount, high)]++;
+                targetEdges[target] = sourceEdges[index];
+                targetCorners[target] = sourceCorners[index];
+            }
+        }
+
+        static int Bucket(ulong edge, int vertexCount, bool high) =>
+            edge == ulong.MaxValue ? vertexCount : (int)(high ? edge >> 32 : edge & uint.MaxValue);
     }
 
     private static WorkerException RuntimeError(string message) =>

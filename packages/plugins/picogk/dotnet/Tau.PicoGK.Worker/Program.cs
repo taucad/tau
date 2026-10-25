@@ -51,25 +51,19 @@ internal static class Program
              * while it can still stop it. The reader pairs each request with the token it can be
              * cancelled through; the lane is serialized, so a cancel can only mean the request whose
              * frame was read last. */
-            var frames = new BlockingCollection<(string Line, CancellationTokenSource Cancellation)>();
+            var frames = new BlockingCollection<(Frame Frame, CancellationTokenSource Cancellation)>();
             var reader = new Thread(() => ReadFrames(input, frames))
             {
                 IsBackground = true,
                 Name = "Tau protocol reader",
             };
             reader.Start();
-            foreach (var (line, cancellation) in frames.GetConsumingEnumerable())
+            foreach (var (frame, cancellation) in frames.GetConsumingEnumerable())
             {
-                if (line.Length > MaximumRequestCharacters) return 2;
-                Request request;
-                try
+                if (frame.Oversized) return 2;
+                if (frame.Request is not { } request)
                 {
-                    request = JsonSerializer.Deserialize<Request>(line, JsonOptions)
-                        ?? throw new JsonException("Request was null.");
-                }
-                catch (JsonException exception)
-                {
-                    error.WriteLine(exception.Message);
+                    error.WriteLine(frame.Error);
                     return 2;
                 }
                 if (request.ProtocolVersion != ProtocolVersion) return 2;
@@ -109,34 +103,40 @@ internal static class Program
         }
     }
 
-    private static void ReadFrames(TextReader input, BlockingCollection<(string, CancellationTokenSource)> frames)
+    /// <summary>One protocol line, parsed once by the reader (CH16): a request, or why it is not one.</summary>
+    internal sealed record Frame(Request? Request, string? Error, bool Oversized);
+
+    private static void ReadFrames(TextReader input, BlockingCollection<(Frame, CancellationTokenSource)> frames)
     {
         CancellationTokenSource? active = null;
         string? line;
         while ((line = input.ReadLine()) is not null)
         {
-            if (IsCancelFrame(line))
+            var frame = ParseFrame(line);
+            if (frame.Request?.Method == "cancel")
             {
                 active?.Cancel();
                 continue;
             }
             active = new CancellationTokenSource();
-            frames.Add((line, active));
+            frames.Add((frame, active));
         }
         frames.CompleteAdding();
     }
 
-    private static bool IsCancelFrame(string line)
+    // An oversized or malformed frame is not a cancel; the request loop owns its rejection.
+    internal static Frame ParseFrame(string line)
     {
-        // An oversized or malformed frame is not a cancel; the request loop owns its rejection.
-        if (line.Length > MaximumRequestCharacters) return false;
+        if (line.Length > MaximumRequestCharacters) return new Frame(null, null, true);
         try
         {
-            return JsonSerializer.Deserialize<Request>(line, JsonOptions)?.Method == "cancel";
+            return JsonSerializer.Deserialize<Request>(line, JsonOptions) is { } request
+                ? new Frame(request, null, false)
+                : new Frame(null, "Request was null.", false);
         }
-        catch (JsonException)
+        catch (JsonException exception)
         {
-            return false;
+            return new Frame(null, exception.Message, false);
         }
     }
 
@@ -186,7 +186,8 @@ internal static class Program
                     try{compute=new ComputeWorkerSession(computeRequest,arguments.Artifacts,cancellation);}
                     catch(Exception error) when(ComputeWorkerSession.IsDisposableFailure(error)){ComputeWorkerSession.ReportBypass("preload",error);}
                 }
-                var execution = ModelRunner.Execute(compiled, arguments.Artifacts, parameters, cancellation, compute);
+                var meshing = ParseMeshing(request.Params);
+                var execution = ModelRunner.Execute(compiled, arguments.Artifacts, parameters, cancellation, compute, meshing);
                 var result = MeshArtifactWriter.Write(
                     arguments.Artifacts,
                     execution,
@@ -214,6 +215,7 @@ internal static class Program
                 }
                 cancellation.ThrowIfCancellationRequested();
                 Write(new { protocolVersion = ProtocolVersion, requestId = request.RequestId, result });
+                ModelRunner.CollectReleased();
                 return false;
             }
             case "shutdown":
@@ -222,6 +224,26 @@ internal static class Program
             default:
                 throw new WorkerException(new Issue($"Unknown PicoGK worker method '{request.Method}'.", "CS_TAU_PROTOCOL", "validation", "error"));
         }
+    }
+
+    /// <summary>
+    /// Reads the optional <c>meshing</c> build parameter: <c>{ adaptivity, relax }</c> with adaptivity in [0, 1).
+    /// The host sends it only for an adaptive mesh; adaptivity 0 is the uniform mesh, as if it were absent.
+    /// </summary>
+    internal static MeshingOptions? ParseMeshing(JsonElement parameters)
+    {
+        if (!parameters.TryGetProperty("meshing", out var meshing)) return null;
+        if (meshing.ValueKind != JsonValueKind.Object ||
+            !meshing.TryGetProperty("adaptivity", out var adaptivity) || adaptivity.ValueKind != JsonValueKind.Number ||
+            !adaptivity.TryGetSingle(out var value) || !float.IsFinite(value) || value < 0 || value >= 1 ||
+            !meshing.TryGetProperty("relax", out var relax) || relax.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
+            meshing.EnumerateObject().Count() != 2)
+        {
+            throw new WorkerException(new Issue(
+                "PicoGK meshing must be { adaptivity: number in [0, 1), relax: boolean }.",
+                "CS_TAU_PROTOCOL", "validation", "error"));
+        }
+        return value > 0 ? new MeshingOptions(value, relax.GetBoolean()) : null;
     }
 
     /// <returns>The entry as the workspace-relative, forward-slash path its source is compiled under.</returns>

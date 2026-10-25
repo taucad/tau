@@ -758,7 +758,8 @@ export const projectAgentHostUserTurn = (event: PresentationEvent): MyUIMessage 
   }
   if (event.type === 'message.appended' && event.message.role === 'user') {
     const internal = event.message.metadata?.tauInternal;
-    if (internal !== undefined && internal['kind'] !== 'external-agent') {
+    /* A copy of an abandoned turn (XD3) is another run's words said as data, an external agent's keeping its marker. */
+    if (internal !== undefined && (internal['kind'] !== 'external-agent' || internal['abandoned'] === true)) {
       return undefined;
     }
     if (event.message.id.startsWith('tau:')) {

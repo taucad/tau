@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { spawn } from 'node:child_process';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { ownedProcesses, processTable, terminateOwnedProcesses } from '#shell/process-tree.js';
+import { ownedProcesses, processTable, terminateOwnedProcesses, trackDescendants } from '#shell/process-tree.js';
 
 describe('ownedProcesses', () => {
   it('should own the tree under the root and the root group, without zombies', () => {
@@ -21,6 +21,32 @@ describe('ownedProcesses', () => {
 });
 
 describe('terminateOwnedProcesses', () => {
+  it('should kill already frozen descendants when reading the process table fails', async () => {
+    const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+    let reads = 0;
+    try {
+      await expect(
+        terminateOwnedProcesses({
+          root: 100,
+          group: 100,
+          deadlineMilliseconds: 10,
+          table: async () => {
+            reads += 1;
+            if (reads > 1) {
+              throw new Error('process table unavailable');
+            }
+            return [{ pid: 101, ppid: 100, pgid: 101, zombie: false }];
+          },
+        }),
+      ).rejects.toThrow('process table unavailable');
+      expect(kill).toHaveBeenCalledWith(101, 'SIGSTOP');
+      expect(kill).toHaveBeenCalledWith(101, 'SIGKILL');
+      expect(kill).toHaveBeenCalledWith(-100, 'SIGKILL');
+    } finally {
+      kill.mockRestore();
+    }
+  });
+
   it('should do nothing for a launch that never started', async () => {
     expect(await terminateOwnedProcesses({ root: -1, group: -1, deadlineMilliseconds: 10 })).toStrictEqual([]);
   });
@@ -52,6 +78,77 @@ describe('terminateOwnedProcesses', () => {
       expect(owned.size).toBe(5);
       expect(survivors).toStrictEqual([]);
       expect([...owned].filter((pid) => pid !== child.pid && after.has(pid))).toStrictEqual([]);
+    },
+  );
+});
+
+describe('trackDescendants', () => {
+  it('should drop remembered ownership when a process id is reused', async () => {
+    let row = { pid: 11, ppid: 10, pgid: 11, zombie: false, started: 'first' };
+    const tracker = trackDescendants(10, async () => [row]);
+    try {
+      expect(await tracker.table()).toStrictEqual([row]);
+      row = { ...row, ppid: 1 };
+      expect(await tracker.table()).toStrictEqual([{ ...row, ppid: 10 }]);
+      row = { ...row, started: 'replacement' };
+      expect(await tracker.table()).toStrictEqual([row]);
+    } finally {
+      await tracker.stop();
+    }
+  });
+
+  it.runIf(process.platform === 'linux' || process.platform === 'darwin')(
+    'should retain a separately grouped child after its parent dies',
+    async () => {
+      const child = spawn('/bin/bash', ['--noprofile', '--norc', '-c', 'set -m; sleep 300 & echo $!; wait'], {
+        detached: true,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      const tracker = trackDescendants(child.pid!);
+      let sleeper = 0;
+      try {
+        sleeper = Number(
+          await new Promise<string>((resolve) => {
+            child.stdout.once('data', (chunk: Uint8Array<ArrayBuffer>) => {
+              resolve(new TextDecoder().decode(chunk).trim());
+            });
+          }),
+        );
+        const before = await tracker.table();
+        const row = before.find((entry) => entry.pid === sleeper);
+
+        expect(row?.pgid).not.toBe(child.pid);
+        expect(row?.ppid).toBe(child.pid);
+
+        const exited = new Promise((resolve) => {
+          child.once('exit', resolve);
+        });
+        child.kill('SIGKILL');
+        await exited;
+
+        const retained = await tracker.table();
+        expect(retained.find((entry) => entry.pid === sleeper)?.ppid).toBe(child.pid);
+        expect(
+          await terminateOwnedProcesses({
+            root: child.pid!,
+            group: child.pid!,
+            deadlineMilliseconds: 5000,
+            table: tracker.table,
+          }),
+        ).toStrictEqual([]);
+        const remaining = await processTable();
+        expect(remaining.some((entry) => entry.pid === sleeper && !entry.zombie)).toBe(false);
+      } finally {
+        child.kill('SIGKILL');
+        if (sleeper > 1) {
+          try {
+            process.kill(sleeper, 'SIGKILL');
+          } catch {
+            /* Already reaped by the tested cleanup. */
+          }
+        }
+        await tracker.stop();
+      }
     },
   );
 });

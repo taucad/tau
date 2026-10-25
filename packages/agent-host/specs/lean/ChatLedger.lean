@@ -12,7 +12,9 @@ the code through the committed goldens `corpus/*.expected`:
                                                                              `reopens`, `gateCode`, `stamp`, tables
   host/tau-agent-host.ts     appendChatRows (M1's append) of a settlement    → `hostSettle`
   log/segments.ts            mergeLogSegments (CL-R14)                        → `merge`
-  log/foreign-runs.ts        foreignRunStanding (XD3)                         → `standing`, `pullAt`
+  log/foreign-runs.ts        foreignRunStanding (XD3)                         → `standing`
+  revisions chat-ref.ts      notePull (XD3, round 19)                         → `notePull`, `recordOf`
+  host/tau-agent-host.ts     the chat's terms (round 19)                      → `Terms`
 
 Every list is in PHYSICAL (file) order. A row is the trace's `<term> <seq> <run> <kind> <arg> <ms> <epoch>
 <attempt>`: `term` is the `leaderEpoch` `e<NN>`, `epoch`/`attempt` 0 mean absent, and `(kind, arg)` names the
@@ -842,39 +844,115 @@ def rowsTerm (a : Admission) (_slotHeld : Bool) (held fresh : Nat) : Nat :=
   | .newTerm => fresh
   | _ => held
 
-/-! ## foreign-runs.ts: where another device's run stands (XD3, round 18) -/
+/-! ## tau-agent-host.ts: a chat's terms on this host (round 19) -/
 
-/-- `foreignRunStanding`: the run still holds the chat until a moment (`changesAt`); it holds it until a pull shows
-whether it stayed quiet (`awaitsPull`); or it is abandoned. -/
+/-- A chat's terms while its incarnation stays open (`ChatTerms`): `held` is the incarnation's own term; `opened` a term
+this host opened in its place, which a row written under it committed; `proposed` the terms admitted commands opened
+for their runs' rows, each `(command, run, term)`, which only that run's first row (never a heartbeat) commits;
+`wrote` the term this host last wrote the chat under. -/
+structure Terms where
+  held : Nat
+  opened : Option Nat := none
+  proposed : List (Nat × Nat × Nat) := []
+  wrote : Option Nat := none
+  deriving DecidableEq, Repr
+
+/-- `chatTermOf`: the chat's term now, the one heartbeats and the term check read. A proposal is no part of it. -/
+def Terms.term (s : Terms) : Nat := s.opened.getD s.held
+
+/-- The proposal a batch of `run`'s rows (`heartbeat`: a lone `run.heartbeat`) commits: the first for its run. -/
+def Terms.taken (s : Terms) (run : Nat) (heartbeat : Bool) : Option (Nat × Nat × Nat) :=
+  if heartbeat then none else s.proposed.find? (fun p => p.2.1 == run)
+
+/-- `writtenTermOf`: the term a batch is written under. -/
+def Terms.rowsTerm (s : Terms) (run : Nat) (heartbeat : Bool) : Nat :=
+  match s.taken run heartbeat with
+  | some p => p.2.2
+  | none => s.term
+
+inductive TermOp where
+  /-- An admitted command opens `fresh` for its `run`'s rows (`rehome`). -/
+  | propose (command run fresh : Nat)
+  /-- A batch of `run`'s rows is written. -/
+  | write (run : Nat) (heartbeat : Bool)
+  /-- The command is answered: `applied`, or refused or superseded. -/
+  | answer (command : Nat) (applied : Bool)
+  deriving DecidableEq, Repr
+
+/-- `termsAfter…`: one step. A batch's write commits the proposal it is written under; a command answered other than
+applied withdraws its proposal, so nothing of it is left, and nothing of any other command's. -/
+def Terms.step (s : Terms) : TermOp → Terms
+  | .propose c r f => { s with proposed := s.proposed ++ [(c, r, f)] }
+  | .write r hb =>
+    match s.taken r hb with
+    | some p => { s with opened := some p.2.2, proposed := s.proposed.erase p, wrote := some p.2.2 }
+    | none => { s with wrote := some s.term }
+  | .answer c applied => if applied then s else { s with proposed := s.proposed.filter (fun p => p.1 != c) }
+
+def Terms.run (s : Terms) (ops : List TermOp) : Terms := ops.foldl Terms.step s
+
+/-- `heartbeatTarget`'s term: a heartbeat is written only under the chat's term, and only once this host wrote under it
+(a heartbeat never opens a term). -/
+def Terms.heartbeat (s : Terms) : Option Nat := if s.wrote = some s.term then some s.term else none
+
+/-! ## foreign-runs.ts and chat-ref.ts: where another device's run stands (XD3, rounds 18 and 19) -/
+
+/-- `foreignRunStanding`: the run still holds the chat until a moment (`changesAt`); it holds it and its reader asks
+for pulls (`awaitsPull`); or it is abandoned. -/
 inductive Standing where
   | holds (changesAt : Nat)
   | awaitsPull
   | abandoned
   deriving DecidableEq, Repr
 
-/-- How far this device has observed the remote: its last pull (`pulledAt`), never past its own clock; nothing before
-any pull. -/
-def observedThrough (pulled : Option Nat) (now : Nat) : Nat :=
-  match pulled with
-  | some p => min p now
-  | none => 0
+/-- One chat segment's entry in a pull record (`events/pulled-at`): the device clock of the last recorded pull (`clock`),
+the segment's size here after it, and the quiet this device's pulls evidenced for exactly those bytes. -/
+structure PullRec where
+  clock : Nat
+  size : Nat
+  quiet : Nat
+  deriving DecidableEq, Repr
 
-/-- `foreignRunStanding(run, now, bound)`. `changed`: when the run's segment last changed on this device
-(`observedAt`); `pulled`: when this device last held everything the remote held of the chat (`pulledAt`); `now`: this
-device's clock; `takenOver`: another device said the run's turn. Abandoned only on evidence: a pull more than `bound`
-after the segment last changed here, which found nothing newer. A run quiet here past the bound with no such pull
-awaits one; this device's clock alone never abandons it. -/
-def standing (bound changed now : Nat) (pulled : Option Nat) (takenOver : Bool) : Standing :=
-  if takenOver || decide (observedThrough pulled now > changed + bound) then .abandoned
-  else if now > changed + bound then .awaitsPull
-  else .holds (changed + bound + 1)
+/-- `notePull` (chat-ref.ts, round 19): a pull at device clock `now` that left the segment `size` bytes long here.
+Quiet is never one clock reading against another: it is the sum of the gaps between recorded pulls that found the
+same bytes, each gap counted at most `cap` and a gap the clock ran backwards across counted as nothing (`Nat`
+subtraction), so a backward jump only shortens it and a forward jump adds at most `cap`. A pull under `throttle`
+after the recorded one that changed nothing records nothing. Any change of size starts it again. -/
+def notePull (cap throttle : Nat) (prior : Option PullRec) (now size : Nat) : PullRec :=
+  match prior with
+  | none => ⟨now, size, 0⟩
+  | some r =>
+    if r.size = size then
+      if r.clock ≤ now ∧ now - r.clock < throttle then r
+      else ⟨now, size, r.quiet + min cap (now - r.clock)⟩
+    else ⟨now, size, 0⟩
 
-/-- A pull at `p` (`projectChats`): the remote's segment changed at the times `remote`, and the local copy last changed
-at `changed`. A pull that finds a change it lacks writes the segment, which changes it here at the pull (sync writes
-at or after the time the pull read the remote's refs, which is when `pulledAt` says it pulled); one that finds none
-leaves it as it was. -/
-def pullAt (remote : List Nat) (changed p : Nat) : Nat :=
-  if remote.any (fun t => decide (changed < t ∧ t ≤ p)) then p else changed
+/-- The record after the pulls `ps`, newest first, each `(clock, size)`. -/
+def recordOf (cap throttle : Nat) : List (Nat × Nat) → Option PullRec
+  | [] => none
+  | p :: older => some (notePull cap throttle (recordOf cap throttle older) p.1 p.2)
+
+/-- How many of the newest pulls found the segment `size` bytes long, in a row. -/
+def quietPulls : List (Nat × Nat) → Nat → Nat
+  | [], _ => 0
+  | p :: older, s => if p.2 = s then quietPulls older s + 1 else 0
+
+/-- `pulledQuietOf`: the quiet a record evidences for the segment as this reader read it (`size`), none for any other
+bytes. -/
+def quietFor (r : Option PullRec) (size : Nat) : Option Nat :=
+  match r with
+  | some r => if r.size = size then some r.quiet else none
+  | none => none
+
+/-- `foreignRunStanding(run, now, bound)`. `quiet`: what this device's pulls evidenced for the run's segment as read
+(`pulledQuiet`); `changed`: when the segment last changed here (`observedAt`); `now`: this device's clock; `ask`: how
+long a run may be quiet here before its reader asks for pulls; `takenOver`: another device said the run's turn.
+Abandoned only on the evidence of pulls: their quiet past `bound`. The clock decides only when pulls are asked for,
+and a clock behind `changed` asks at once. -/
+def standing (bound ask changed now : Nat) (quiet : Option Nat) (takenOver : Bool) : Standing :=
+  if takenOver || decide (quiet.getD 0 > bound) then .abandoned
+  else if now > changed + ask ∨ now < changed then .awaitsPull
+  else .holds (changed + ask + 1)
 
 /-! ## segments.ts: `mergeLogSegments` (CL-R14) -/
 

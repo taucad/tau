@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  foreignRunAskPullMilliseconds,
   foreignRunStaleMilliseconds,
   foreignRunStanding,
   isAbandonedForeignRun,
@@ -29,20 +30,23 @@ const lifecycle = (runId: string, sequence: number, row: Readonly<{ state: strin
     state: row.state,
   }) as AgentLogEvent;
 
-const segment = (deviceId: string, events: readonly AgentLogEvent[], pulledAt?: number) => ({
+const segment = (deviceId: string, events: readonly AgentLogEvent[], pulledQuiet?: number) => ({
   deviceId,
   bytes: encoder.encode(events.map((event) => serializeLogEvent(event)).join('')),
-  ...(pulledAt === undefined ? {} : { pulledAt }),
+  ...(pulledQuiet === undefined ? {} : { pulledQuiet }),
 });
 
-/** A run this device saw change at `observedAt`, and last pulled the remote at `pulledAt` (`now` by default). */
+/**
+ * A run this device saw change at `observedAt`, whose segment pulls found as it is for `pulledQuiet` (since then, by
+ * default: `now - observedAt`).
+ */
 const run = (
   observedAt: number,
   {
     runId = 'run-1',
     lastRecordedAt = observedAt,
-    pulledAt = now,
-  }: Readonly<{ runId?: string; lastRecordedAt?: number; pulledAt?: number }> = {},
+    pulledQuiet = now - observedAt,
+  }: Readonly<{ runId?: string; lastRecordedAt?: number; pulledQuiet?: number | undefined }> = {},
 ): ForeignRun => ({
   deviceId: 'device-desktop',
   runId,
@@ -50,7 +54,7 @@ const run = (
   lastRecordedAt,
   tip: { leaderEpoch: `epoch-${runId}`, sequence: 1 },
   observedAt,
-  pulledAt,
+  pulledQuiet,
 });
 
 describe('the cross-device run fence (XD3)', () => {
@@ -137,7 +141,12 @@ describe('the cross-device run fence (XD3)', () => {
     const [held] = unsettledForeignRuns([segment('device-desktop', [...paused, heartbeat])], now);
 
     expect(held).toMatchObject({ state: 'paused', lastRecordedAt: Date.parse(heartbeat.recordedAt), observedAt: now });
-    expect(liveForeignRun(unsettledForeignRuns([segment('device-desktop', paused, now)], now), now)).toBeUndefined();
+    expect(
+      liveForeignRun(
+        unsettledForeignRuns([segment('device-desktop', paused, foreignRunStaleMilliseconds + 1)], now),
+        now,
+      ),
+    ).toBeUndefined();
     expect(liveForeignRun([held!], now)).toBe(held);
   });
 
@@ -146,12 +155,12 @@ describe('the cross-device run fence (XD3)', () => {
     expect(liveForeignRun([run(now - 60_000)], now)).toEqual(run(now - 60_000));
   });
 
-  it('should treat a run as abandoned once a pull more than the bound after it last changed here found nothing newer', () => {
+  it('should treat a run as abandoned once pulls found its segment as it is for more than the bound', () => {
     expect(isAbandonedForeignRun(run(now - foreignRunStaleMilliseconds - 1), now)).toBe(true);
     expect(liveForeignRun([run(now - foreignRunStaleMilliseconds - 1)], now)).toBeUndefined();
     expect(
       isAbandonedForeignRun(
-        run(now - foreignRunStaleMilliseconds - 1, { lastRecordedAt: now, pulledAt: now - 1 }),
+        run(now - foreignRunStaleMilliseconds - 1, { pulledQuiet: foreignRunStaleMilliseconds }),
         now,
       ),
     ).toBe(false);
@@ -164,8 +173,8 @@ describe('the cross-device run fence (XD3)', () => {
    */
   it('should hold the chat for a run quiet here for hours while no pull has observed the remote since', () => {
     const hours = 2 * 60 * 60 * 1000;
-    const slept = run(now - hours, { pulledAt: now - hours + 60_000 });
-    const neverPulled: ForeignRun = { ...slept, pulledAt: undefined };
+    const slept = run(now - hours, { pulledQuiet: 60_000 });
+    const neverPulled: ForeignRun = { ...slept, pulledQuiet: undefined };
 
     expect(isAbandonedForeignRun(slept, now)).toBe(false);
     expect(isAbandonedForeignRun(neverPulled, now)).toBe(false);
@@ -174,16 +183,36 @@ describe('the cross-device run fence (XD3)', () => {
     expect(foreignRunStanding(neverPulled, now)).toEqual({ abandoned: false, awaitsPull: true, changesAt: undefined });
   });
 
-  it('should hold a run until the bound passes here, and say when that is', () => {
+  it('should hold a run, and ask for pulls once it has been quiet here a while, and say when that is', () => {
     expect(foreignRunStanding(run(now - 60_000), now)).toEqual({
       abandoned: false,
       awaitsPull: false,
-      changesAt: now - 60_000 + foreignRunStaleMilliseconds + 1,
+      changesAt: now - 60_000 + foreignRunAskPullMilliseconds + 1,
     });
-    /* A pull dated past this clock (a clock stepped back) is read as no later than now. */
-    const ahead = run(now - 60_000, { lastRecordedAt: now, pulledAt: now + 2 * foreignRunStaleMilliseconds });
-    expect(isAbandonedForeignRun(ahead, now)).toBe(false);
-    expect(isAbandonedForeignRun(ahead, now - 60_000 + foreignRunStaleMilliseconds + 1)).toBe(true);
+    expect(foreignRunStanding(run(now - foreignRunAskPullMilliseconds - 1), now)).toEqual({
+      abandoned: false,
+      awaitsPull: true,
+      changesAt: undefined,
+    });
+  });
+
+  /*
+   * Round 19: no reading of this device's clock decides abandonment. Past the bound by the clock but with quiet pulls
+   * short of it, a run holds; a clock that reads earlier than when the segment last changed (it went back) asks for
+   * pulls at once rather than wait for the clock to catch up.
+   */
+  it('should decide a run only on the quiet its pulls found, whatever this device’s clock reads', () => {
+    const day = 24 * 60 * 60 * 1000;
+    const quietShort = run(now - day, { pulledQuiet: foreignRunStaleMilliseconds });
+
+    expect(isAbandonedForeignRun(quietShort, now)).toBe(false);
+    expect(isAbandonedForeignRun(quietShort, now + day)).toBe(false);
+    expect(foreignRunStanding(run(now + day, { pulledQuiet: 0 }), now)).toEqual({
+      abandoned: false,
+      awaitsPull: true,
+      changesAt: undefined,
+    });
+    expect(isAbandonedForeignRun(run(now + day, { pulledQuiet: foreignRunStaleMilliseconds + 1 }), now)).toBe(true);
   });
 
   /* Round 16: one fast or corrupt clock must not decide the fence; the run's own `recordedAt` is never read for it. */
@@ -238,8 +267,8 @@ describe('the cross-device run fence (XD3)', () => {
   /*
    * Round 17: the page and the agent host's worker are two module instances on one device. Each first reads a segment
    * when it happens to, so a sighting each keeps for itself makes them disagree about the same run for up to the bound.
-   * Both read the same file's modification time here, and the same record of this device's last pull (round 18), so
-   * both measure from them.
+   * Both read the same file's modification time here, and the same record of this device's pulls (rounds 18 and 19), so
+   * both decide alike.
    */
   it('should measure a run from when its segment last changed on this device, whichever reader first reads it', async () => {
     const rows = [lifecycle('run-shared', 0, { state: 'admitted', at: '2026-10-23T09:00:00.000Z' })];
@@ -247,7 +276,7 @@ describe('the cross-device run fence (XD3)', () => {
       deviceId: 'device-desktop',
       events: rows,
       receivedAt: now - foreignRunStaleMilliseconds - 1,
-      pulledAt: now,
+      pulledQuiet: foreignRunStaleMilliseconds + 1,
     };
     vi.resetModules();
     const page = await import('#log/foreign-runs.js');

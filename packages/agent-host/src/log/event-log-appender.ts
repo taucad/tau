@@ -233,7 +233,7 @@ const sameSegments = (left: readonly ChatLogSegment[], right: readonly ChatLogSe
       segment.deviceId === right[index]!.deviceId &&
       segment.bytes === right[index]!.bytes &&
       segment.receivedAt === right[index]!.receivedAt &&
-      segment.pulledAt === right[index]!.pulledAt,
+      segment.pulledQuiet === right[index]!.pulledQuiet,
   );
 
 const encoder = new TextEncoder();
@@ -523,7 +523,7 @@ export const createEventLogAppender = async (
       deviceId: segment.deviceId,
       events: parse(segment.deviceId, segment.bytes),
       receivedAt: segment.receivedAt,
-      pulledAt: segment.pulledAt,
+      pulledQuiet: segment.pulledQuiet,
     }));
     introduceRead();
     /*

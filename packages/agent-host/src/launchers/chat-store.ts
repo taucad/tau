@@ -131,24 +131,43 @@ export const segmentDeviceIdOf = (name: string): string | undefined =>
   /^[^/\\]+\.jsonl$/u.test(name) ? name.slice(0, -'.jsonl'.length) : undefined;
 
 /**
- * The entry of a chat's `events/` directory that says when this device last pulled the chat, restated from
- * `@taucad/revisions` (`chatPulledAtPath`: `events/pulled-at`): epoch milliseconds on this device's clock, as decimal
- * text, which sync writes once a pull projected the chat (XD3, round 18). Never a segment. @public
+ * The entry of a chat's `events/` directory that records this device's pulls of the chat, restated from
+ * `@taucad/revisions` (`chatPulledAtPath`: `events/pulled-at`; XD3, rounds 18 and 19). Sync writes it once a pull
+ * projected the chat: a first line with the device clock of the last recorded pull, then one line per other device's
+ * segment, `<file name> <size> <quiet>`, the segment's size here after that pull and how long, in milliseconds, pulls
+ * have found it that size. Never a segment. @public
  */
 export const chatPulledAtFileName = 'pulled-at';
 
 const pulledAtDecoder = new TextDecoder();
 
 /**
- * When this device last pulled a chat, from its `pulled-at` entry's bytes ({@link chatPulledAtFileName}).
+ * How long this device's pulls found one segment exactly as it is now, from the chat's pull record
+ * ({@link chatPulledAtFileName}): the quiet the record holds for the segment's file name at this size, so a reader
+ * that holds newer bytes than the last pull found reads none.
  *
- * @param bytes - The entry's bytes, or `undefined` when it is not there.
- * @returns Epoch milliseconds, or `undefined` before any pull or for an entry that is not a positive number.
+ * @param record - The record's bytes, or `undefined` when there is none.
+ * @param name - The segment's file name in `events/`.
+ * @param size - The segment's size as this reader read it.
+ * @returns Milliseconds, or `undefined` when no pull found these bytes.
  * @public
  */
-export const pulledAtOf = (bytes: Uint8Array<ArrayBuffer> | undefined): number | undefined => {
-  const at = bytes === undefined ? Number.NaN : Number(pulledAtDecoder.decode(bytes));
-  return Number.isFinite(at) && at > 0 ? at : undefined;
+export const pulledQuietOf = (
+  record: Uint8Array<ArrayBuffer> | undefined,
+  name: string,
+  size: number,
+): number | undefined => {
+  const prefix = `${name} ${String(size)} `;
+  const line =
+    record === undefined
+      ? undefined
+      : pulledAtDecoder
+          .decode(record)
+          .split('\n')
+          .slice(1)
+          .find((entry) => entry.startsWith(prefix));
+  const quiet = line === undefined ? Number.NaN : Number(line.slice(prefix.length));
+  return Number.isFinite(quiet) && quiet >= 0 ? quiet : undefined;
 };
 
 /**
@@ -239,12 +258,17 @@ export const createChatSegmentsReader = (
   };
   /* Each segment as last answered with the chat's last pull, so an unchanged pair answers the very same object. */
   const pulled = new Map<string, Readonly<{ base: ChatLogSegment; segment: ChatLogSegment }>>();
-  const withPull = (name: string, base: ChatLogSegment, pulledAt: number | undefined): ChatLogSegment => {
+  const withPull = (
+    name: string,
+    base: ChatLogSegment,
+    record: Uint8Array<ArrayBuffer> | undefined,
+  ): ChatLogSegment => {
+    const pulledQuiet = pulledQuietOf(record, name, base.bytes.byteLength);
     const prior = pulled.get(name);
-    if (prior?.base === base && prior.segment.pulledAt === pulledAt) {
+    if (prior?.base === base && prior.segment.pulledQuiet === pulledQuiet) {
       return prior.segment;
     }
-    const segment = pulledAt === undefined ? base : { ...base, pulledAt };
+    const segment = pulledQuiet === undefined ? base : { ...base, pulledQuiet };
     pulled.set(name, { base, segment });
     return segment;
   };
@@ -262,10 +286,10 @@ export const createChatSegmentsReader = (
         }
       }
     }
-    /* Read before the segments: sync records a pull only once the segments it brought are written, so the pull read
-     * here is never paired with bytes older than the ones it brought. */
-    const pulledAt = listed.includes(chatPulledAtFileName)
-      ? pulledAtOf(await source.read(chatPulledAtFileName).catch(() => undefined))
+    /* Read before the segments: sync records a pull only once the segments it brought are written, and a record
+     * counts only for a segment of the very size it names, so newer bytes read here carry no quiet. */
+    const record = listed.includes(chatPulledAtFileName)
+      ? await source.read(chatPulledAtFileName).catch(() => undefined)
       : undefined;
     const found = await Promise.all(
       names.map(async (name): Promise<ChatLogSegment | undefined> => {
@@ -297,9 +321,7 @@ export const createChatSegmentsReader = (
         return segment;
       }),
     );
-    return found.flatMap((segment, index) =>
-      segment === undefined ? [] : [withPull(names[index]!, segment, pulledAt)],
-    );
+    return found.flatMap((segment, index) => (segment === undefined ? [] : [withPull(names[index]!, segment, record)]));
   };
 };
 

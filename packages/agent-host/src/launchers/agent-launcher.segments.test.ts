@@ -5,7 +5,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -751,11 +751,18 @@ describe('a chat continued on a second device', () => {
       await mkdir(directory, { recursive: true });
       await writeFile(join(directory, `${deviceId}.jsonl`), bytes);
     };
-    /** A pull of the remote that found nothing newer, as sync records it beside the segments (`events/pulled-at`). */
-    const pulled = async (root: string, at = Date.now()): Promise<void> => {
+    /**
+     * Pulls of the remote that found the desktop's segment as it is now for `quiet` milliseconds (past the bound by
+     * default), as sync records them beside the segments (`events/pulled-at`, round 19).
+     */
+    const pulled = async (root: string, quiet = foreignRunStaleMilliseconds + 1): Promise<void> => {
       const directory = join(root, '.tau', 'chats', chatId, 'events');
       await mkdir(directory, { recursive: true });
-      await writeFile(join(directory, 'pulled-at'), String(at));
+      const { size } = await stat(join(directory, 'device-desktop.jsonl'));
+      await writeFile(
+        join(directory, 'pulled-at'),
+        `${String(Date.now())}\ndevice-desktop.jsonl ${String(size)} ${String(quiet)}`,
+      );
     };
     /** A model whose first call streams nothing until `release`, then answers like {@link recordingModel}. */
     const heldModel = (reply: string) => {
@@ -934,7 +941,7 @@ describe('a chat continued on a second device', () => {
         const slept = new Date(Date.now() - hours);
         await project(phone, 'device-desktop', inFlight.bytes);
         await utimes(join(phone, '.tau', 'chats', chatId, 'events', 'device-desktop.jsonl'), slept, slept);
-        await pulled(phone, slept.getTime() + 60_000);
+        await pulled(phone, 60_000);
 
         expect(await start(onPhone, 'run-phone-1', 'second, on the phone')).toMatchObject({
           status: 'refused',
@@ -954,13 +961,21 @@ describe('a chat continued on a second device', () => {
           type: 'run.heartbeat',
         };
         await project(phone, 'device-desktop', `${inFlight.bytes}${JSON.stringify(heartbeat)}\n`);
-        await pulled(phone);
+        await pulled(phone, 0);
         expect(await start(onPhone, 'run-phone-1', 'second, on the phone')).toMatchObject({
           code: 'RUN_ACTIVE_ON_ANOTHER_DEVICE',
         });
 
-        /* Two hours of quiet observed on the phone's own segment copy: a pull past the bound finds nothing newer. */
-        await utimes(join(phone, '.tau', 'chats', chatId, 'events', 'device-desktop.jsonl'), slept, slept);
+        /* A record of quiet for the bytes before the heartbeat says nothing of the bytes the phone holds now. */
+        await writeFile(
+          join(phone, '.tau', 'chats', chatId, 'events', 'pulled-at'),
+          `${String(Date.now())}\ndevice-desktop.jsonl ${String(Buffer.byteLength(inFlight.bytes))} ${String(foreignRunStaleMilliseconds + 1)}`,
+        );
+        expect(await start(onPhone, 'run-phone-1', 'second, on the phone')).toMatchObject({
+          code: 'RUN_ACTIVE_ON_ANOTHER_DEVICE',
+        });
+
+        /* Pulls past the bound find nothing newer than the phone's copy. */
         await pulled(phone);
         await turn(onPhone, 'run-phone-1', 'second, on the phone');
       } finally {
@@ -1831,6 +1846,61 @@ describe('a chat continued on a second device', () => {
       expect(resolved?.leaderEpoch).toBeDefined();
       expect(resolved?.leaderEpoch).not.toBe(paused?.leaderEpoch);
       expect(Date.parse(resolved!.recordedAt)).toBeGreaterThan(Date.parse(at));
+    });
+
+    /*
+     * Round 19: a command refused after its term check leaves no trace. A new term opens with the first row written
+     * under it, so a Send refused while the run is live, or an approval of no pending request, never moves the chat's
+     * term away from the one its paused run wrote under, and the run keeps writing heartbeats under it.
+     */
+    it.each([
+      [
+        'a Send refused while the run is live',
+        {
+          type: 'start',
+          payload: {
+            chatId,
+            runId: 'run-2',
+            trigger: 'submit',
+            message: { id: 'user-2', role: 'user', content: 'again' },
+          },
+        },
+      ],
+      [
+        'an approval of no pending request',
+        {
+          type: 'resolve-interrupt',
+          payload: { chatId, runId: 'run-1', interruptId: 'int-unknown', outcome: 'approved' },
+        },
+      ],
+    ] as const)('should keep a paused run’s heartbeats under its own term after %s', async (_name, command) => {
+      const { root, launcher } = await pausedRunOn({ runHeartbeat: 20, publish: sharedPublish });
+      await rowsUntil(root, (found) => heartbeatsAfter(found, 'paused').length > 0);
+      const at = new Date(Date.now() + 1000).toISOString();
+      const phone = (sequence: number, body: Record<string, unknown>): string =>
+        `${JSON.stringify({ version: 1, leaderEpoch: 'phone', sequence, recordedAt: at, runId: 'run-phone', ...body })}\n`;
+      const segments = join(root, '.tau', 'chats', chatId, 'events');
+      await mkdir(segments, { recursive: true });
+      await writeFile(
+        join(segments, 'device-phone.jsonl'),
+        phone(0, { type: 'run.lifecycle', state: 'admitted' }) +
+          phone(1, { type: 'run.lifecycle', state: 'completed' }),
+      );
+
+      const answer = await launcher.execute({ ...command, commandId: key() } as Parameters<
+        AgentLauncher['execute']
+      >[0]);
+
+      expect(answer, JSON.stringify(answer)).toMatchObject({ status: 'refused' });
+      const refusedAt = rowsOf(await readFile(ownLog(root), 'utf8')).length;
+      const rows = await rowsUntil(
+        root,
+        (found) => found.slice(refusedAt).filter((row) => row.type === 'run.heartbeat').length >= 2,
+      );
+      const paused = rows.find((row) => row.type === 'run.lifecycle' && row.state === 'paused');
+      expect(rows.slice(refusedAt).map((row) => [row.type, row.leaderEpoch])).toEqual(
+        rows.slice(refusedAt).map(() => ['run.heartbeat', paused?.leaderEpoch]),
+      );
     });
 
     it('should keep a paused run alive with heartbeats while its session is open here', async () => {

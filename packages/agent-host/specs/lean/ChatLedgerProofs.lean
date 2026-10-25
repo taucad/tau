@@ -4059,81 +4059,215 @@ theorem t10_new_term_whatever_the_slot (slotHeld : Bool) (held fresh : Nat) :
     rowsTerm .newTerm slotHeld held fresh = fresh := by
   rfl
 
-/-! ## T11: a foreign run is abandoned only on evidence (XD3, round 18)
+/-! ## T11: a foreign run is abandoned only on the evidence of pulls (XD3, rounds 18 and 19)
 
 Another device's run is abandoned when it went quiet for the staleness bound. Quiet is evidenced, never inferred from
-this device's clock or a segment's age: only a pull more than the bound after the segment last changed here shows that
-the remote held nothing newer meanwhile. -/
+this device's clock or a segment's age, and never one reading of this device's clock against another, either of
+which can jump: pulls that each found the run's segment as it was evidence it, gap by gap, each gap counted at most
+`cap`, a gap the clock ran backwards across counted as nothing. -/
 
-/-- **T11** (no observation, no abandonment): a device whose last pull is no more than the bound after the run's
-segment last changed here never finds the run abandoned, however late its clock reads (it slept, or was closed). -/
-theorem t11_unobserved_never_abandoned (bound changed now : Nat) (pulled : Option Nat)
-    (h : ∀ p, pulled = some p → p ≤ changed + bound) :
-    standing bound changed now pulled false ≠ .abandoned := by
-  have hobs : ¬ observedThrough pulled now > changed + bound := by
-    cases pulled with
-    | none => simp [observedThrough]
-    | some p =>
-      have hp := h p rfl
-      have := Nat.min_le_left p now
-      simp only [observedThrough]
-      omega
-  have hf : (false || decide (observedThrough pulled now > changed + bound)) = false := by simp [hobs]
+theorem notePull_size (cap th : Nat) (prior : Option PullRec) (now size : Nat) :
+    (notePull cap th prior now size).size = size := by
+  unfold notePull
+  split
+  · rfl
+  · rename_i r
+    by_cases hs : r.size = size
+    · by_cases hk : r.clock ≤ now ∧ now - r.clock < th
+      · simp [hs, hk]
+      · simp [hs, hk]
+    · simp [hs]
+
+theorem quietPulls_head (p : Nat × Nat) (older : List (Nat × Nat)) :
+    quietPulls (p :: older) p.2 = quietPulls older p.2 + 1 := by
+  simp [quietPulls]
+
+/-- **T11** (quiet needs pulls): the quiet a record holds for a segment is at most `cap` for each pull after the first
+of the newest pulls that found it that long, in a row. However this device's clock jumps, quiet past a bound needs more
+than `bound / cap` gaps between pulls that found nothing new. -/
+theorem t11_quiet_needs_pulls (cap th : Nat) (ps : List (Nat × Nat)) (r : PullRec)
+    (h : recordOf cap th ps = some r) : r.quiet + cap ≤ cap * quietPulls ps r.size := by
+  induction ps generalizing r with
+  | nil => simp [recordOf] at h
+  | cons p older ih =>
+    simp only [recordOf, Option.some.injEq] at h
+    subst h
+    rw [notePull_size, quietPulls_head, Nat.mul_succ]
+    cases ho : recordOf cap th older with
+    | none => simp [notePull]
+    | some r0 =>
+      have hi := ih r0 ho
+      by_cases hs : r0.size = p.2
+      · rw [hs] at hi
+        by_cases hk : r0.clock ≤ p.1 ∧ p.1 - r0.clock < th
+        · simp only [notePull, hs, hk, and_self, ite_true]
+          omega
+        · simp only [notePull, hs, ite_true, hk, ite_false]
+          have := Nat.min_le_left cap (p.1 - r0.clock)
+          omega
+      · simp [notePull, hs]
+
+/-- **T11** (abandonment needs a span of quiet pulls): a run is found abandoned only after more than `bound / cap + 1`
+pulls in a row found its segment as this reader holds it, whatever this device's clock did meanwhile. -/
+theorem t11_abandon_needs_quiet_pulls (cap th bound ask changed now size : Nat) (ps : List (Nat × Nat))
+    (h : standing bound ask changed now (quietFor (recordOf cap th ps) size) false = .abandoned) :
+    bound + cap < cap * quietPulls ps size := by
+  unfold standing quietFor at h
+  cases hr : recordOf cap th ps with
+  | none => rw [hr] at h; simp at h; split at h <;> simp at h
+  | some r =>
+    rw [hr] at h
+    have hq := t11_quiet_needs_pulls cap th ps r hr
+    by_cases hs : r.size = size
+    · subst hs
+      by_cases hb : r.quiet > bound
+      · omega
+      · simp [hb] at h; split at h <;> simp at h
+    · simp [hs] at h; split at h <;> simp at h
+
+/-- **T11** (a live run holds): a pull that found the run's segment changed starts its quiet again, so the run holds
+however long this device was away and whatever its clock reads. -/
+theorem t11_changed_segment_holds (cap th : Nat) (p : Nat × Nat) (older : List (Nat × Nat))
+    (hc : ∀ r0, recordOf cap th older = some r0 → r0.size ≠ p.2) :
+    (recordOf cap th (p :: older)).map PullRec.quiet = some 0 := by
+  simp only [recordOf, Option.map_some]
+  cases ho : recordOf cap th older with
+  | none => simp [notePull]
+  | some r0 => simp [notePull, hc r0 ho]
+
+/-- **T11** (no evidence, no abandonment): with no pull record for the bytes this reader holds, a run is never found
+abandoned, however late this device's clock reads (it slept, was closed, or its clock jumped). -/
+theorem t11_unobserved_never_abandoned (bound ask changed now : Nat) :
+    standing bound ask changed now none false ≠ .abandoned := by
   unfold standing
-  simp only [hf, Bool.false_eq_true, ite_false]
+  simp only [Option.getD_none, Bool.false_or]
+  have : ¬ (0 > bound) := by omega
+  simp only [this, decide_false, Bool.false_eq_true, ite_false]
   split <;> simp
 
-/-- **T11** (a live run holds): a run whose device wrote within the bound before this device's pull holds the chat
-after that pull, whatever this device's clock reads, even when this device's copy of its segment was hours old. -/
-theorem t11_live_run_holds (bound changed now p t : Nat) (remote : List Nat) (ht : t ∈ remote) (htp : t ≤ p)
-    (hpt : p ≤ t + bound) :
-    standing bound (pullAt remote changed p) now (some p) false ≠ .abandoned := by
-  apply t11_unobserved_never_abandoned
-  intro q hq
-  simp only [Option.some.injEq] at hq
-  subst hq
-  unfold pullAt
-  split
-  · omega
-  · rename_i hno
-    have : ¬ (changed < t ∧ t ≤ p) := by
-      intro hc
-      apply hno
-      exact List.any_eq_true.mpr ⟨t, ht, by simp [hc.1, hc.2]⟩
-    omega
-
-/-- **T11** (a dead device cannot lock a chat): once a pull more than the bound after the run's segment last changed
-here finds nothing newer, the run is abandoned. -/
-theorem t11_quiet_run_released (bound changed now p : Nat) (remote : List Nat)
-    (hq : ∀ t ∈ remote, ¬ (changed < t ∧ t ≤ p)) (hp : p > changed + bound) (hn : now ≥ p) :
-    standing bound (pullAt remote changed p) now (some p) false = .abandoned := by
-  have hall : remote.any (fun t => decide (changed < t ∧ t ≤ p)) = false := by
-    rw [List.any_eq_false]
-    intro t ht
-    simp only [decide_eq_true_eq]
-    exact hq t ht
-  unfold standing observedThrough pullAt
-  rw [hall]
-  simp only [Bool.false_or]
-  have : min p now = p := Nat.min_eq_left hn
-  simp [this, hp]
-
-/-- **T11** (a pull is asked for): a run quiet here past the bound that no pull has shown abandoned awaits one, so a
-reader of it asks for a pull rather than wait on a pull nobody makes. -/
-theorem t11_quiet_run_awaits_pull (bound changed now : Nat) (pulled : Option Nat) (hn : now > changed + bound)
-    (hnot : standing bound changed now pulled false ≠ .abandoned) :
-    standing bound changed now pulled false = .awaitsPull := by
+/-- **T11** (pulls are asked for): a run quiet here past `ask`, or whose segment changed later than this device's
+clock now reads, that its pulls have not shown abandoned awaits pulls, so a reader asks for them rather than wait on
+pulls nobody makes. -/
+theorem t11_quiet_run_awaits_pull (bound ask changed now : Nat) (quiet : Option Nat)
+    (hn : now > changed + ask ∨ now < changed)
+    (hnot : standing bound ask changed now quiet false ≠ .abandoned) :
+    standing bound ask changed now quiet false = .awaitsPull := by
   unfold standing at *
   split
   · simp_all
-  · simp
+  · simp [hn]
 
-/-- **T11** (the finding of round 18): a device that slept two hours with its copy of a live run's segment from before
-the sleep, and whose last pull was then, finds the run holding the chat; its first pull after waking brings the rows
-the run kept writing, and the run still holds. -/
-theorem t11_slept_device_holds :
-    standing 600 0 7200 (some 60) false = .awaitsPull ∧
-      standing 600 (pullAt [0, 3600, 7140] 0 7200) 7200 (some 7200) false = .holds 7801 := by
+/-- **T11** (a dead device cannot lock a chat): pulls once a minute that keep finding the segment as it was free the
+chat once they span more than the bound. -/
+theorem t11_quiet_run_released :
+    standing 600 120 0 660 (quietFor (recordOf 120 30 ((List.range 12).reverse.map fun i => (60 * i, 7))) 7) false
+      = .abandoned := by
   decide
+
+/-- **T11** (a forward jump counts one capped gap): a pull an hour later on a clock that jumped forward adds `cap`,
+not an hour; the run still holds. -/
+theorem t11_forward_jump_bounded :
+    recordOf 120 30 [(3660, 7), (60, 7), (0, 7)] = some ⟨3660, 7, 180⟩ ∧
+      standing 600 120 0 3660 (some 180) false = .awaitsPull := by
+  decide
+
+/-- **T11** (round 19's finding): a pull recorded on a clock that ran an hour ahead, then corrected back, counts the
+gap back as nothing; the pulls after it count as they go, so the run is freed only once they span the bound, and
+then it is. -/
+theorem t11_back_jump_recovers :
+    (recordOf 120 30 ([(600, 7), (540, 7), (480, 7), (420, 7), (360, 7), (300, 7), (240, 7), (180, 7), (120, 7),
+        (60, 7), (0, 7), (3600, 7)])).map PullRec.quiet = some 600 ∧
+      (recordOf 120 30 ([(660, 7), (600, 7), (540, 7), (480, 7), (420, 7), (360, 7), (300, 7), (240, 7), (180, 7),
+        (120, 7), (60, 7), (0, 7), (3600, 7)])).map PullRec.quiet = some 660 := by
+  decide
+
+/-! ## T12: a refused command leaves no trace, and a live run's heartbeat keeps its term (round 19)
+
+An admitted command may need a new term for its rows (T10). The term is proposed, and it becomes the chat's only with
+the first row of the command's run written under it; a command answered otherwise withdraws it. So what heartbeats
+read, the chat's term and the term this host last wrote it under, never part. -/
+
+theorem t12_step_keeps_heartbeat (s : Terms) (op : TermOp) (h : s.wrote = some s.term) :
+    (s.step op).wrote = some (s.step op).term := by
+  cases op with
+  | propose c r f => simpa [Terms.step, Terms.term] using h
+  | write r hb =>
+    unfold Terms.step
+    cases ht : s.taken r hb with
+    | none => simp [ht, Terms.term]
+    | some p => simp [ht, Terms.term]
+  | answer c applied =>
+    cases applied
+    · simpa [Terms.step, Terms.term] using h
+    · simpa [Terms.step] using h
+
+/-- **T12** (heartbeat liveness): once this host wrote a chat under its term, a heartbeat target stays, under the
+chat's term, whatever commands are proposed, refused or applied and whatever rows are written. -/
+theorem t12_heartbeat_kept (s : Terms) (ops : List TermOp) (h : s.wrote = some s.term) :
+    (s.run ops).heartbeat = some (s.run ops).term := by
+  induction ops generalizing s with
+  | nil => simp [Terms.run, Terms.heartbeat, h]
+  | cons op rest ih => exact ih (s.step op) (t12_step_keeps_heartbeat s op h)
+
+theorem t12_writes_keep (u : Terms) (c r f : Nat) (hu : u.proposed = [(c, r, f)]) (ws : List (Nat × Bool))
+    (hw : ∀ w ∈ ws, ¬ (w.1 = r ∧ w.2 = false)) :
+    (u.run (ws.map fun w => .write w.1 w.2)).opened = u.opened ∧
+      (u.run (ws.map fun w => .write w.1 w.2)).proposed = [(c, r, f)] ∧
+      (u.run (ws.map fun w => .write w.1 w.2)).held = u.held := by
+  induction ws generalizing u with
+  | nil => simp [Terms.run, hu]
+  | cons w rest ih =>
+    have hnone : u.taken w.1 w.2 = none := by
+      have hw' := hw w (List.mem_cons_self ..)
+      unfold Terms.taken
+      cases h2 : w.2
+      · have hne : r ≠ w.1 := fun e => hw' ⟨e.symm, h2⟩
+        simp [hu, hne]
+      · simp
+    have hstep : u.step (.write w.1 w.2) = { u with wrote := some u.term } := by
+      simp only [Terms.step, hnone]
+    have hrest := ih { u with wrote := some u.term } hu (fun x hx => hw x (List.mem_cons_of_mem _ hx))
+    have hrun : u.run ((w :: rest).map fun w => .write w.1 w.2) =
+        ({ u with wrote := some u.term } : Terms).run (rest.map fun w => .write w.1 w.2) := by
+      simp only [List.map_cons, Terms.run, List.foldl_cons, hstep]
+    rw [hrun]
+    exact hrest
+
+/-- **T12** (a refused command leaves no trace): a command that proposed a term and was refused leaves the chat's
+terms as they were, though other runs' rows and heartbeats were written meanwhile: they never land under its term. -/
+theorem t12_refused_no_trace (s : Terms) (hp : s.proposed = []) (c r f : Nat) (ws : List (Nat × Bool))
+    (hw : ∀ w ∈ ws, ¬ (w.1 = r ∧ w.2 = false)) :
+    (((s.step (.propose c r f)).run (ws.map fun w => .write w.1 w.2)).step (.answer c false)).opened = s.opened ∧
+      (((s.step (.propose c r f)).run (ws.map fun w => .write w.1 w.2)).step (.answer c false)).proposed =
+        s.proposed ∧
+      (((s.step (.propose c r f)).run (ws.map fun w => .write w.1 w.2)).step (.answer c false)).term = s.term := by
+  have ⟨ho, hq, hh⟩ := t12_writes_keep (s.step (.propose c r f)) c r f (by simp [Terms.step, hp]) ws hw
+  have hs : (s.step (.propose c r f)).opened = s.opened ∧ (s.step (.propose c r f)).held = s.held := by
+    simp [Terms.step]
+  rw [hs.1] at ho
+  rw [hs.2] at hh
+  generalize (s.step (.propose c r f)).run (ws.map fun w => .write w.1 w.2) = u at ho hq hh ⊢
+  obtain ⟨uh, uo, up, uw⟩ := u
+  simp only at ho hq hh
+  subst hq ho hh
+  simp [Terms.step, Terms.term, hp]
+
+/-- **T12** (a refusal spares the others): a command refused while another's proposal waits for its run's first row
+withdraws only its own, and that row still goes under the term proposed for it. -/
+theorem t12_refusal_spares_others (s : Terms) (hp : s.proposed = []) (a ra fa b rb fb : Nat) (hab : a ≠ b) :
+    (((s.step (.propose a ra fa)).step (.propose b rb fb)).step (.answer b false)).rowsTerm ra false = fa := by
+  have hf : List.filter (fun p : Nat × Nat × Nat => p.1 != b) [(a, ra, fa), (b, rb, fb)] = [(a, ra, fa)] := by
+    have : (a != b) = true := bne_iff_ne.mpr hab
+    simp [List.filter, this]
+  simp only [Terms.step, hp, List.nil_append, List.cons_append, Bool.false_eq_true, ite_false, Terms.rowsTerm,
+    Terms.taken, hf]
+  simp
+
+/-- **T12** (the command's rows go under its term): the first batch of the command's run is written under the term it
+proposed, which is the chat's from then on. -/
+theorem t12_command_commits (s : Terms) (hp : s.proposed = []) (c r f : Nat) :
+    (s.step (.propose c r f)).rowsTerm r false = f ∧
+      ((s.step (.propose c r f)).step (.write r false)).heartbeat = some f := by
+  simp [Terms.step, Terms.rowsTerm, Terms.taken, Terms.heartbeat, Terms.term, hp]
 
 end ChatLedger

@@ -35,11 +35,11 @@ export type ForeignRun = Readonly<{
    */
   observedAt: number;
   /**
-   * When this device last held everything the remote held of the chat, on this device's clock: the time its last
-   * pull read the remote's refs (`chatPulledAtFileName` beside the segments, written by sync). `undefined` before any
-   * pull. Quiet is measured from {@link ForeignRun.observedAt} to it, never to this device's clock alone.
+   * How long this device's pulls of the remote found the run's segment exactly as this reader holds it, in milliseconds
+   * (`pulledQuietOf` over `chatPulledAtFileName` beside the segments, written by sync; round 19). `undefined` when no
+   * pull found these bytes. The run is abandoned only on this quiet, never on this device's clock.
    */
-  pulledAt?: number | undefined;
+  pulledQuiet?: number | undefined;
   /** The person's message the run holds: its committed turn, else the message it was admitted with. */
   words?: UserProviderMessage | undefined;
   /**
@@ -60,16 +60,28 @@ export type ForeignRun = Readonly<{
  * so a dead device cannot lock a chat, and the device that goes on appends the person's turn the run holds
  * (`abandonedTurnOf`).
  *
- * Quiet is evidenced, never inferred (round 18): the bound must pass between when the run's segment last changed on
- * this device and a later pull of the remote ({@link ForeignRun.pulledAt}), which shows the remote held nothing newer
- * all that while. This device's clock alone, or a segment's age, shows nothing: a device that slept or was closed for
- * hours holds an old copy of a run another device kept writing, until it pulls. Both times are this device's, so no
- * other device's clock decides it, and the page and the agent host read both from the same files. A run quiet here
- * past the bound that no pull has shown abandoned awaits one ({@link foreignRunStanding}), and its reader asks for it.
+ * Quiet is evidenced, never inferred (rounds 18 and 19): only pulls of the remote that kept finding the run's segment
+ * as it was show the remote held nothing newer all that while ({@link ForeignRun.pulledQuiet}). This device's clock
+ * alone, or a segment's age, shows nothing: a device that slept or was closed for hours holds an old copy of a run
+ * another device kept writing, until it pulls. Nor is quiet ever one reading of this device's clock against another,
+ * either of which can jump: sync adds up the gaps between pulls that found the same bytes, each counted at most two
+ * minutes and a gap the clock ran backwards across counted as nothing, so a backward jump only shortens the quiet and
+ * a forward jump adds at most two minutes (`notePull` in ChatLedger.lean, T11). No other device's clock decides it, and
+ * the page and the agent host read it from the same files. A run quiet here past {@link foreignRunAskPullMilliseconds}
+ * that no pulls have shown abandoned awaits them ({@link foreignRunStanding}), and its reader asks for them.
  *
  * @public
  */
 export const foreignRunStaleMilliseconds = 10 * 60 * 1000;
+
+/**
+ * How long a foreign run may go without a new row here before its reader asks for pulls of the remote: two heartbeat
+ * intervals (round 19). Only pulls evidence quiet ({@link ForeignRun.pulledQuiet}), so they are asked for well before
+ * the staleness bound, and a dead device's run is freed about one bound after its reader starts asking.
+ *
+ * @public
+ */
+export const foreignRunAskPullMilliseconds = 2 * 60 * 1000;
 
 /**
  * When this module instance first saw each foreign run's newest row, by device, run and row key: the fallback for a
@@ -87,7 +99,7 @@ const sightingsLimit = 4096;
  * falls back to when this module instance first saw the run's newest row.
  */
 const sighted = (
-  run: Omit<ForeignRun, 'observedAt' | 'pulledAt' | 'takenOver'>,
+  run: Omit<ForeignRun, 'observedAt' | 'pulledQuiet' | 'takenOver'>,
   receivedAt: number | undefined,
   now: number,
 ): number => {
@@ -115,7 +127,7 @@ const timeOf = (event: AgentLogEvent): number => {
 type RunFold = Readonly<{
   ledger: ChatLedger;
   seen: ReadonlyMap<string, RunSeen>;
-  runs: ReadonlyArray<Omit<ForeignRun, 'observedAt' | 'pulledAt' | 'takenOver'>>;
+  runs: ReadonlyArray<Omit<ForeignRun, 'observedAt' | 'pulledQuiet' | 'takenOver'>>;
   /** The runs whose person's turn this segment says as abandoned. */
   saidAbandoned: ReadonlySet<string>;
 }>;
@@ -162,7 +174,7 @@ const foldRuns = (deviceId: string, prior: RunFold | undefined, rows: readonly A
     });
   }
   const runs = [...seen].flatMap(
-    ([runId, { lastRecordedAt, tip, words }]): Array<Omit<ForeignRun, 'observedAt' | 'pulledAt' | 'takenOver'>> => {
+    ([runId, { lastRecordedAt, tip, words }]): Array<Omit<ForeignRun, 'observedAt' | 'pulledQuiet' | 'takenOver'>> => {
       const lifecycle = ledger.runs[runId]?.lifecycle;
       return lifecycle === undefined || !unsettledStates.has(lifecycle)
         ? []
@@ -198,17 +210,21 @@ export const unsettledParsedRuns = (
   const saidAbandoned = new Set(folds.flatMap((fold) => [...fold.saidAbandoned]));
   return folds.flatMap((fold, index) =>
     fold.runs.map((run) => {
-      const { receivedAt, pulledAt } = segments[index]!;
+      const { receivedAt, pulledQuiet } = segments[index]!;
       const observedAt = sighted(run, receivedAt, now);
       const takenOver = saidAbandoned.has(run.runId);
       const prior = observed.get(run);
-      if (prior?.observedAt === observedAt && prior.pulledAt === pulledAt && (prior.takenOver === true) === takenOver) {
+      if (
+        prior?.observedAt === observedAt &&
+        prior.pulledQuiet === pulledQuiet &&
+        (prior.takenOver === true) === takenOver
+      ) {
         return prior;
       }
       const next: ForeignRun = {
         ...run,
         observedAt,
-        ...(pulledAt === undefined ? {} : { pulledAt }),
+        ...(pulledQuiet === undefined ? {} : { pulledQuiet }),
         ...(takenOver ? { takenOver: true } : {}),
       };
       observed.set(run, next);
@@ -218,7 +234,7 @@ export const unsettledParsedRuns = (
 };
 
 /* Each folded run as last answered, so a refold that sees nothing new answers the very same run. */
-const observed = new WeakMap<Omit<ForeignRun, 'observedAt' | 'pulledAt' | 'takenOver'>, ForeignRun>();
+const observed = new WeakMap<Omit<ForeignRun, 'observedAt' | 'pulledQuiet' | 'takenOver'>, ForeignRun>();
 
 /*
  * A segment's run fold, by its parsed rows and device: a refold reads every segment again, and one whose rows are the
@@ -329,9 +345,9 @@ export const unsettledForeignRuns = (
 ): readonly ForeignRun[] => unsettledParsedRuns(parseLogSegments(segments), now);
 
 /**
- * Whether a foreign run no longer holds the chat: a pull of the remote more than {@link foreignRunStaleMilliseconds}
- * after its rows last changed on this device found nothing newer, or another device already found it abandoned and
- * went on ({@link ForeignRun.takenOver}).
+ * Whether a foreign run no longer holds the chat: pulls of the remote found its segment as this reader holds it for
+ * more than {@link foreignRunStaleMilliseconds}, or another device already found it abandoned and went on
+ * ({@link ForeignRun.takenOver}).
  *
  * @param run - The foreign run.
  * @param now - This device's time, in epoch milliseconds.
@@ -340,18 +356,19 @@ export const unsettledForeignRuns = (
  * @public
  */
 export const isAbandonedForeignRun = (
-  run: Pick<ForeignRun, 'observedAt' | 'pulledAt' | 'takenOver'>,
+  run: Pick<ForeignRun, 'observedAt' | 'pulledQuiet' | 'takenOver'>,
   now: number,
   bound: number = foreignRunStaleMilliseconds,
-): boolean => foreignRunStanding(run, now, bound).abandoned;
+): boolean => foreignRunStanding(run, now, { bound }).abandoned;
 
 /** Where a foreign run stands at a moment ({@link foreignRunStanding}). @public */
 export type ForeignRunStanding = Readonly<{
   /** The run no longer holds the chat. */
   abandoned: boolean;
   /**
-   * The run has been quiet here past the bound, and no pull has shown whether it stayed quiet on the remote: it
-   * still holds the chat, and only a pull can change that, so its reader asks for one.
+   * The run has been quiet here past {@link foreignRunAskPullMilliseconds}, or its segment changed later than this
+   * device's clock now reads (the clock went back), and no pulls have shown it abandoned: it still holds the chat, and
+   * only pulls can change that, so its reader asks for them.
    */
   awaitsPull: boolean;
   /** When the answer next changes with this device's clock alone; `undefined`: only a pull or a new row changes it. */
@@ -360,28 +377,32 @@ export type ForeignRunStanding = Readonly<{
 
 /**
  * Where a foreign run stands at `now` (`standing` in ChatLedger.lean, T11): the one decision the fence and the page both
- * read, so they never disagree about a run. Every time is this device's. The run is abandoned once a pull more than
- * the bound after it last changed here found nothing newer (a pull is never read as later than `now`). Short of that,
- * it holds the chat; once it has been quiet here past the bound it awaits a pull.
+ * read, so they never disagree about a run. The run is abandoned once pulls found its segment unchanged for more than
+ * the bound ({@link ForeignRun.pulledQuiet}); this device's clock decides only when pulls are asked for. Short of
+ * that, it holds the chat; once it has been quiet here past `ask`, or the clock reads earlier than its segment last
+ * changed, it awaits pulls.
  *
  * @param run - The foreign run.
  * @param now - This device's time, in epoch milliseconds.
- * @param bound - The staleness bound.
- * @returns Whether it is abandoned or awaits a pull now, and when that changes with no pull and no new row.
+ * @param limits - The staleness bound, and how long it may be quiet here before pulls are asked for.
+ * @returns Whether it is abandoned or awaits pulls now, and when that changes with no pull and no new row.
  * @public
  */
 export const foreignRunStanding = (
-  run: Pick<ForeignRun, 'observedAt' | 'pulledAt' | 'takenOver'>,
+  run: Pick<ForeignRun, 'observedAt' | 'pulledQuiet' | 'takenOver'>,
   now: number,
-  bound: number = foreignRunStaleMilliseconds,
+  {
+    bound = foreignRunStaleMilliseconds,
+    ask = foreignRunAskPullMilliseconds,
+  }: Readonly<{ bound?: number; ask?: number }> = {},
 ): ForeignRunStanding => {
-  const quietAfter = run.observedAt + bound;
-  if (run.takenOver === true || Math.min(run.pulledAt ?? Number.NEGATIVE_INFINITY, now) > quietAfter) {
+  if (run.takenOver === true || (run.pulledQuiet ?? 0) > bound) {
     return { abandoned: true, awaitsPull: false, changesAt: undefined };
   }
-  return now > quietAfter
+  const asksAfter = run.observedAt + ask;
+  return now > asksAfter || now < run.observedAt
     ? { abandoned: false, awaitsPull: true, changesAt: undefined }
-    : { abandoned: false, awaitsPull: false, changesAt: quietAfter + 1 };
+    : { abandoned: false, awaitsPull: false, changesAt: asksAfter + 1 };
 };
 
 /**

@@ -330,12 +330,12 @@ type ChatStore = {
   /** The run whose start already asked the placement about sharing, so it is asked once per run. */
   sharingAsked?: string | undefined;
   /**
-   * A term this host opened for the chat while its incarnation stayed open (XD1, round 18): the incarnation's own term
-   * (`replaces`), and the term every row written under it is written under from then on. A command admitted after
-   * this device read another device's rows opens it before the command's rows ({@link termAdmission}), whether or not
-   * the incarnation holds its run's slot, so nothing waits on a close and nothing falls back to the old term.
+   * The terms this host opened for the chat while its incarnation stayed open (XD1, rounds 18 and 19; {@link ChatTerms}).
+   * A command admitted after this device read another device's rows proposes one before its rows
+   * ({@link termAdmission}), whether or not the incarnation holds its run's slot, so nothing waits on a close; its run's
+   * first row makes it the chat's term, and a command answered otherwise withdraws it.
    */
-  term?: Readonly<{ replaces: string; leaderEpoch: string }> | undefined;
+  terms?: ChatTerms | undefined;
   /** When this host last asked the placement to pull, for another device's run that awaits one (XD3, round 18). */
   pullAskedAt?: number | undefined;
 };
@@ -416,6 +416,93 @@ export const termAdmission = (
  */
 export const rowsTermOf = (admitted: TermAdmission, held: string, open: () => string): string =>
   admitted === 'new-term' ? open() : held;
+
+/** A term this host opened in place of its incarnation's own (`replaces`). @internal */
+export type TermOpening = Readonly<{ replaces: string; leaderEpoch: string }>;
+
+/** A term an admitted command proposed for its run's rows (round 19). @internal */
+export type TermProposal = TermOpening & Readonly<{ commandId: string; runId: string }>;
+
+/**
+ * A chat's terms on this host while its incarnation stays open (round 19; `Terms` in ChatLedger.lean, T12). `opened`:
+ * the term this host opened in place of the incarnation's, which a row written under it made the chat's. `proposed`:
+ * the terms admitted commands opened for their runs' rows ({@link rowsTermOf}), each the chat's only once the first of
+ * those rows is written under it ({@link termsAfterWrite}); a command answered otherwise withdraws its own
+ * ({@link termsAfterAnswer}). So a refused command leaves no trace, and the chat's term, which a heartbeat writes
+ * under only once this host wrote under it, never moves away from the term a live run wrote under without a row.
+ *
+ * @internal
+ */
+export type ChatTerms = Readonly<{
+  opened?: TermOpening | undefined;
+  proposed?: readonly TermProposal[] | undefined;
+}>;
+
+/**
+ * The chat's term now (`Terms.term`): the one this host opened in place of the incarnation's, else the incarnation's.
+ * A proposal is no part of it.
+ *
+ * @internal
+ * @param terms - The chat's terms.
+ * @param held - The incarnation's term.
+ * @returns The term.
+ */
+export const chatTermOf = (terms: ChatTerms, held: string): string =>
+  terms.opened?.replaces === held ? terms.opened.leaderEpoch : held;
+
+/** The proposal a batch commits (`Terms.taken`): the first for a run the batch writes a row of that is no heartbeat. */
+const takenProposal = (terms: ChatTerms, held: string, rows: readonly ChatRunRow[]): TermProposal | undefined =>
+  terms.proposed?.find(
+    (proposal) =>
+      proposal.replaces === held &&
+      rows.some((row) => row.runId === proposal.runId && row.body.type !== 'run.heartbeat'),
+  );
+
+/**
+ * The term a batch is written under (`Terms.rowsTerm`): the term proposed for its run, else the chat's term.
+ *
+ * @internal
+ * @param terms - The chat's terms.
+ * @param held - The incarnation's term.
+ * @param rows - The batch.
+ * @returns The term.
+ */
+export const writtenTermOf = (terms: ChatTerms, held: string, rows: readonly ChatRunRow[]): string =>
+  takenProposal(terms, held, rows)?.leaderEpoch ?? chatTermOf(terms, held);
+
+/**
+ * The chat's terms once a batch is written (`Terms.step`, `write`): the proposal it was written under is the chat's term.
+ *
+ * @internal
+ * @param terms - The chat's terms.
+ * @param held - The incarnation's term.
+ * @param rows - The batch.
+ * @returns The terms.
+ */
+export const termsAfterWrite = (terms: ChatTerms, held: string, rows: readonly ChatRunRow[]): ChatTerms => {
+  const taken = takenProposal(terms, held, rows);
+  return taken === undefined
+    ? terms
+    : {
+        opened: { replaces: held, leaderEpoch: taken.leaderEpoch },
+        proposed: terms.proposed?.filter((proposal) => proposal !== taken),
+      };
+};
+
+/**
+ * The chat's terms once a command is answered (`Terms.step`, `answer`): one answered other than applied withdraws the
+ * terms it proposed that none of its rows were written under, and no other command's.
+ *
+ * @internal
+ * @param terms - The chat's terms.
+ * @param commandId - The command.
+ * @param applied - Whether it was applied.
+ * @returns The terms.
+ */
+export const termsAfterAnswer = (terms: ChatTerms, commandId: string, applied: boolean): ChatTerms =>
+  applied || terms.proposed === undefined
+    ? terms
+    : { ...terms, proposed: terms.proposed.filter((proposal) => proposal.commandId !== commandId) };
 
 const liveRunStates: ReadonlySet<string> = new Set(['admitted', 'running', 'paused']);
 
@@ -720,13 +807,12 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
 
   const createTerm = options.createLeaderEpoch ?? createPortableId;
   /**
-   * The term the chat's rows are written under now: the one this host opened in place of the incarnation's
-   * ({@link rehome}), else the incarnation's own.
+   * The chat's term now ({@link chatTermOf}): the one this host opened in place of the incarnation's and wrote under
+   * ({@link rehome}), else the incarnation's own. A term only proposed is no part of it.
    */
   const termOf = (chatId: string): string | undefined => {
     const held = registry.termOf(chatId);
-    const term = stores.get(chatId)?.term;
-    return term !== undefined && term.replaces === held ? term.leaderEpoch : held;
+    return held === undefined ? undefined : chatTermOf(stores.get(chatId)?.terms ?? {}, held);
   };
 
   const storeOf = (chatId: string): ChatStore => {
@@ -1296,10 +1382,10 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   };
 
   /**
-   * Ask the placement to pull the project's remote (XD3, round 18): another device's run on the chat has been quiet
-   * here past the staleness bound, and only a pull shows whether it stayed quiet there (`foreignRunStanding`). At most
-   * once a heartbeat interval per chat, and not awaited: the command it is asked for is refused `wait` either way, and
-   * the next one reads what the pull brought.
+   * Ask the placement to pull the project's remote (XD3, rounds 18 and 19): another device's run on the chat has been
+   * quiet here a while, and only pulls show whether it stayed quiet there for the staleness bound
+   * (`foreignRunStanding`). At most once a heartbeat interval per chat (a clock that went back asks again), and not
+   * awaited: the command it is asked for is refused `wait` either way, and the next one reads what the pull brought.
    *
    * @param chatId - The chat.
    * @param at - This device's time.
@@ -1307,7 +1393,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const askPull = (chatId: string, at: number): void => {
     const store = storeOf(chatId);
     const pull = options.placement?.pull;
-    if (pull === undefined || (store.pullAskedAt !== undefined && at - store.pullAskedAt < heartbeatInterval)) {
+    const since = store.pullAskedAt === undefined ? heartbeatInterval : at - store.pullAskedAt;
+    if (pull === undefined || (since >= 0 && since < heartbeatInterval)) {
       return;
     }
     store.pullAskedAt = at;
@@ -1318,9 +1405,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    * The cross-device run fence (XD3): another device's synced segment holds a run it has not settled, and that run is
    * not abandoned, so this host runs nothing on the chat until it settles. A run is never moved between devices while
    * it is in flight (OQ-N21: refuse or interrupt-and-seal; this host refuses). The refusal is a `wait`: the same
-   * command is admitted once sync brings that run's settlement, or once a pull more than
-   * {@link foreignRunStaleMilliseconds} after its rows last changed here found nothing newer. A run quiet here past the
-   * bound awaits such a pull, so the refusal asks the placement for one ({@link askPull}).
+   * command is admitted once sync brings that run's settlement, or once pulls found its segment as it is for more than
+   * {@link foreignRunStaleMilliseconds}. A run quiet here a while awaits such pulls, so the refusal asks the placement
+   * for one ({@link askPull}).
    *
    * @param chatId - The chat.
    * @param log - Its log, refreshed from sync.
@@ -1399,19 +1486,44 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     return leaderEpoch !== undefined && stores.get(chatId)?.wrote?.leaderEpoch === leaderEpoch;
   };
   /*
-   * Admitted under a new term, open it for the chat's next rows, now and synchronously (round 18, {@link rowsTermOf}):
-   * every row written under the incarnation's term is written under it from here on (`ChatStore.term`). Nothing is
-   * closed, so it holds whatever the incarnation holds (an external agent waiting on its person keeps its slot), nothing
-   * behind it waits on a close, and the command's rows never land under the old term.
+   * Admitted under a new term, propose it for the command's run's rows, now and synchronously (rounds 18 and 19,
+   * {@link rowsTermOf}, {@link ChatTerms}): the run's first row is written under it and makes it the chat's term, and a
+   * command answered other than applied withdraws it ({@link withdrawTerm}), so a refused command leaves the chat's
+   * term, and a live run's heartbeats, as they were. Nothing is closed, so it holds whatever the incarnation holds (an
+   * external agent waiting on its person keeps its slot), nothing behind it waits on a close, and the command's rows
+   * never land under the old term.
    */
-  const rehome = (chatId: string, admitted: TermAdmission): void => {
+  const rehome = (
+    chatId: string,
+    admitted: TermAdmission,
+    { commandId, runId }: Pick<TermProposal, 'commandId' | 'runId'>,
+  ): void => {
     const held = registry.termOf(chatId);
     if (held === undefined) {
       return;
     }
     const leaderEpoch = rowsTermOf(admitted, held, createTerm);
     if (leaderEpoch !== held) {
-      storeOf(chatId).term = { replaces: held, leaderEpoch };
+      const store = storeOf(chatId);
+      store.terms = {
+        ...store.terms,
+        proposed: [...(store.terms?.proposed ?? []), { replaces: held, leaderEpoch, commandId, runId }],
+      };
+    }
+  };
+  /** A command's answer: one other than applied withdraws the term it proposed ({@link termsAfterAnswer}). */
+  const withdrawTerm = async (
+    chatId: string,
+    commandId: string,
+    answer: Promise<CommandAnswer> | undefined,
+  ): Promise<void> => {
+    const applied = await (answer ?? Promise.resolve(undefined)).then(
+      (settled) => settled?.status === 'applied',
+      () => false,
+    );
+    const store = stores.get(chatId);
+    if (store?.terms !== undefined) {
+      store.terms = termsAfterAnswer(store.terms, commandId, applied);
     }
   };
   /**
@@ -1423,11 +1535,14 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    * starting now. What "since" means is what this host read, not when the other device's clock says it wrote.
    *
    * @param chatId - The chat whose incarnation may be closed.
-   * @param commandId - The command the check runs for: it shares that dispatch's refresh.
-   * @param verb - The command: a start or a Resume ({@link termAdmission}).
+   * @param command - The command the check runs for (it shares that dispatch's refresh), the run it starts or resumes
+   * (its rows are the ones a new term is opened for), and whether it is a start or a Resume ({@link termAdmission}).
    * @returns The check in flight, or `undefined` when there is nothing to check.
    */
-  const rehomeStaleTerm = (chatId: string, commandId: string, verb: AdmissionVerb): Promise<void> | undefined => {
+  const rehomeStaleTerm = (
+    chatId: string,
+    command: Pick<TermProposal, 'commandId' | 'runId'> & Readonly<{ verb: AdmissionVerb }>,
+  ): Promise<void> | undefined => {
     const store = stores.get(chatId);
     const opened = store?.log;
     if (opened === undefined || !wroteUnderTerm(chatId)) {
@@ -1436,9 +1551,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     const check = async (): Promise<void> => {
       try {
         const log = await opened;
-        await refreshFor(log, commandId);
+        await refreshFor(log, command.commandId);
         const foreignWrote = (await log.foreignWroteSinceTermBegan?.()) === true;
-        rehome(chatId, termAdmission(verb, { takenOver: false, foreignWrote }));
+        rehome(chatId, termAdmission(command.verb, { takenOver: false, foreignWrote }), command);
       } catch {
         /* A live run, a closed log or an unread segment: the command is answered as it would be without this. */
       }
@@ -1532,7 +1647,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           undefined,
         );
       }
-      rehome(chatId, admitted);
+      rehome(chatId, admitted, { commandId, runId });
       return undefined;
     } catch (error) {
       const { code, message, details } = codedFailureDetail(error);
@@ -1695,8 +1810,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   ): Promise<Readonly<{ ledger: ChatLedger; messageIds: readonly string[] }>> => {
     const store = storeOf(chatId);
     const messageIds: string[] = [];
-    const { term } = store;
-    const leaderEpoch = term?.replaces === incarnationTerm ? term.leaderEpoch : incarnationTerm;
+    const terms = store.terms ?? {};
+    const leaderEpoch = writtenTermOf(terms, incarnationTerm, rows);
     try {
       const log = await logOf(chatId);
       /* The hybrid clock (XD1): after every term start the history read, never past its bound ahead of this clock. */
@@ -1712,6 +1827,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         rows: await withPersonsTurns(log, prior, rows),
         onAppended: (row, ledger) => {
           store.ledger = ledger;
+          /* The batch's first row makes the term it was written under the chat's (round 19). */
+          store.terms = termsAfterWrite(store.terms ?? {}, incarnationTerm, rows);
           store.wrote = { leaderEpoch, at: now().getTime() };
           if (row.type === 'run.lifecycle' && row.state === 'paused') {
             store.pausedAt = now().getTime();
@@ -2538,7 +2655,11 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         }
         if (admits) {
           /* Only an incarnation that already wrote under its term is checked: a first command is reserved synchronously. */
-          const rehoming = rehomeStaleTerm(command.payload.chatId, command.commandId, command.type);
+          const rehoming = rehomeStaleTerm(command.payload.chatId, {
+            commandId: command.commandId,
+            runId: command.payload.runId,
+            verb: command.type,
+          });
           if (rehoming !== undefined) {
             await rehoming;
           }
@@ -2564,6 +2685,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         if (admits) {
           void releaseDispatch(command.commandId, dispatch, reached);
         }
+        /* A command refused or superseded, here or by the registry, leaves no term behind (round 19). */
+        void withdrawTerm(ordered, command.commandId, reached);
       }
     }
     if (command.type === 'resolve-interrupt' || command.type === 'cancel' || command.type === 'resume') {

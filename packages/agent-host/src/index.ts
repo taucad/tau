@@ -15,6 +15,7 @@ export { reduceEventLog } from '#log/reducer.js';
 export { compareSegmentDeviceIds, mergeLogSegments, mergeSegmentRows, parseLogSegments } from '#log/segments.js';
 export type { ChatLogSegment, MergeLogSegmentsOptions, ParsedLogSegment } from '#log/segments.js';
 export {
+  foreignRunAskPullMilliseconds,
   foreignRunStaleMilliseconds,
   foreignRunStanding,
   isAbandonedForeignRun,
@@ -24,7 +25,7 @@ export {
   unsettledParsedRuns,
 } from '#log/foreign-runs.js';
 export type { ForeignRun, ForeignRunStanding, SegmentParse } from '#log/foreign-runs.js';
-export { chatPulledAtFileName, pulledAtOf, segmentDeviceIdOf } from '#launchers/chat-store.js';
+export { chatPulledAtFileName, pulledQuietOf, segmentDeviceIdOf } from '#launchers/chat-store.js';
 export {
   agentLogEventSchema,
   jsonValueSchema,

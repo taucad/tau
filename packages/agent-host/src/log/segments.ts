@@ -55,16 +55,16 @@ export type ChatLogSegment = {
   readonly unreadable?: string | undefined;
   /**
    * When the segment file last changed on this device, in epoch milliseconds on this device's clock (its modification
-   * time): when its newest rows arrived here. The foreign-run fence measures quiet from it, so every reader on the
-   * device agrees (XD3). `undefined` when the platform gives none.
+   * time): when its newest rows arrived here. The foreign-run fence asks for pulls once a run has been quiet since
+   * it, so every reader on the device agrees (XD3). `undefined` when the platform gives none.
    */
   readonly receivedAt?: number | undefined;
   /**
-   * When this device last held everything the remote held of the chat, in epoch milliseconds on this device's clock:
-   * when its last pull read the remote's refs (`chatPulledAtFileName`). The fence finds a run abandoned only when the
-   * bound passed between {@link ChatLogSegment.receivedAt} and it (XD3, round 18). `undefined` before any pull.
+   * How long this device's pulls of the remote found this segment exactly as these bytes, in milliseconds
+   * (`pulledQuietOf` over `chatPulledAtFileName`): the fence finds a run abandoned only once it passes the bound (XD3,
+   * round 19). `undefined` when no pull found these bytes.
    */
-  readonly pulledAt?: number | undefined;
+  readonly pulledQuiet?: number | undefined;
 };
 
 /**
@@ -154,8 +154,8 @@ export type ParsedLogSegment = Readonly<{
   events: readonly AgentLogEvent[];
   /** {@link ChatLogSegment.receivedAt}. */
   receivedAt?: number | undefined;
-  /** {@link ChatLogSegment.pulledAt}. */
-  pulledAt?: number | undefined;
+  /** {@link ChatLogSegment.pulledQuiet}. */
+  pulledQuiet?: number | undefined;
 }>;
 
 /**
@@ -171,7 +171,7 @@ export const parseLogSegments = (segments: readonly ChatLogSegment[]): readonly 
     deviceId: segment.deviceId,
     events: parseEventLogBytes(segment.bytes).events,
     receivedAt: segment.receivedAt,
-    pulledAt: segment.pulledAt,
+    pulledQuiet: segment.pulledQuiet,
   }));
 
 /**

@@ -17,12 +17,22 @@
  *   retains nothing (`C` and `K` in merge traces only).
  * - Commands: `E` append through the appender, `W` another writer's row, `WJ` a junk line, `TEAR` a torn tail,
  *   `RELOAD`, `LEDGER`, `SETTLE`, `LIFE`, `RESOLVE`, `PREP`, `BATCH`, `READER`, `READ`, `DELIVER`, `DELIVER1`, `RLEDGER`, `SEG`,
- *   `ROW`, `MERGE`, `MERGEB`, `MH`, `TABLES`, `ADMIT`, `TERMOF`, `STAND`.
+ *   `ROW`, `MERGE`, `MERGEB`, `MH`, `TABLES`, `ADMIT`, `TERMOF`, `TERMS`, `STAND` (and `PULL`, which the
+ *   revisions package's `notePull` answers from `corpus/pull-records.trace`).
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { appendChatRows, rowsTermOf, termAdmission } from '#host/tau-agent-host.js';
+import {
+  appendChatRows,
+  chatTermOf,
+  rowsTermOf,
+  termAdmission,
+  termsAfterAnswer,
+  termsAfterWrite,
+  writtenTermOf,
+} from '#host/tau-agent-host.js';
+import type { ChatTerms } from '#host/tau-agent-host.js';
 import {
   chatRunState,
   emptyChatLedger,
@@ -1005,22 +1015,85 @@ const admissionTrace = (): Trace => {
 };
 
 /**
- * Where another device's run stands on this device, over every case of the evidence rule (T11, round 18): when its
- * segment last changed here, this device's clock, its last pull of the remote (or none) and a takeover.
+ * A chat's terms on this host over every sequence of up to four steps (T12, round 19): an admitted command proposing a
+ * term for its run's rows, a batch of a run's rows or a heartbeat written, a command answered applied or not. Each
+ * trace says the terms the writes went under, the chat's term after, and the term a heartbeat would write under.
+ */
+const termsTrace = (): Trace => {
+  const text = ['T terms'];
+  const expected = ['T terms'];
+  const steps = ['p1.1.2', 'p2.2.3', 'w1.0', 'w1.1', 'w2.0', 'w3.0', 'a1.0', 'a1.1', 'a2.0'];
+  /* Every sequence of up to three steps, and the four-step ones that open with two proposals (two commands racing). */
+  const sequences: string[][] = [[]];
+  for (let length = 1; length <= 4; length++) {
+    for (const prefix of sequences.filter((sequence) => sequence.length === length - 1)) {
+      if (length < 4 || (prefix[0]?.startsWith('p') === true && prefix[1]?.startsWith('p') === true)) {
+        sequences.push(...steps.map((step) => [...prefix, step]));
+      }
+    }
+  }
+  for (const wroteFirst of [0, 1]) {
+    for (const sequence of sequences) {
+      text.push(`TERMS ${String(wroteFirst)} ${sequence.length === 0 ? '-' : sequence.join(',')}`);
+      let terms: ChatTerms = {};
+      let wrote = wroteFirst === 1 ? 't1' : undefined;
+      const written: string[] = [];
+      for (const step of sequence) {
+        const [a, b, c] = step.slice(1).split('.');
+        if (step.startsWith('p')) {
+          terms = {
+            ...terms,
+            proposed: [
+              ...(terms.proposed ?? []),
+              { replaces: 't1', leaderEpoch: `t${c!}`, commandId: `c${a!}`, runId: `r${b!}` },
+            ],
+          };
+        } else if (step.startsWith('w')) {
+          const rows = [
+            {
+              runId: `r${a!}`,
+              body: (b === '1' ? { type: 'run.heartbeat' } : { type: 'run.lifecycle', state: 'running' }) as LogRowBody,
+            },
+          ];
+          wrote = writtenTermOf(terms, 't1', rows);
+          terms = termsAfterWrite(terms, 't1', rows);
+          written.push(wrote.slice(1));
+        } else {
+          terms = termsAfterAnswer(terms, `c${a!}`, b === '1');
+        }
+      }
+      const term = chatTermOf(terms, 't1');
+      expected.push(
+        `QM ${written.length === 0 ? '-' : written.join(',')} ${term.slice(1)} ${wrote === term ? term.slice(1) : '-'}`,
+      );
+    }
+  }
+  text.push('X');
+  expected.push('X');
+  return { text, expected };
+};
+
+/**
+ * Where another device's run stands on this device, over every case of the evidence rule (T11, rounds 18 and 19): when
+ * its segment last changed here, this device's clock (behind that included), the quiet its pulls found (or none) and
+ * a takeover.
  */
 const standingTrace = (): Trace => {
   const text = ['T standings'];
   const expected = ['T standings'];
   const bound = 600;
+  const ask = 120;
   for (const changed of [0, 1000]) {
-    for (const now of [changed, changed + bound, changed + bound + 1, changed + 7200]) {
-      for (const pulled of [undefined, changed, changed + bound, changed + bound + 1, now, now + 5000]) {
+    for (const now of [changed - 1, changed, changed + ask, changed + ask + 1, changed + 7200].filter(
+      (at) => at >= 0,
+    )) {
+      for (const quiet of [undefined, 0, bound, bound + 1, 7200]) {
         for (const takenOver of [false, true]) {
-          text.push(`STAND ${bound} ${changed} ${now} ${pulled ?? '-'} ${takenOver ? 1 : 0}`);
+          text.push(`STAND ${bound} ${ask} ${changed} ${now} ${quiet ?? '-'} ${takenOver ? 1 : 0}`);
           const standing = foreignRunStanding(
-            { observedAt: changed, pulledAt: pulled, ...(takenOver ? { takenOver: true } : {}) },
+            { observedAt: changed, pulledQuiet: quiet, ...(takenOver ? { takenOver: true } : {}) },
             now,
-            bound,
+            { bound, ask },
           );
           expected.push(
             standing.abandoned
@@ -1085,7 +1158,7 @@ const generate = async (corpus: Corpus, seed = corpus.seed): Promise<Trace[]> =>
     traces.push(interruptResolutionTrace());
   }
   if (corpus.name === 'base') {
-    traces.push(admissionTrace(), standingTrace());
+    traces.push(admissionTrace(), termsTrace(), standingTrace());
   }
   return traces;
 };

@@ -29,8 +29,13 @@ A row is `<term> <seq> <run> <kind> <arg> <ms> <epoch> <attempt>` (`epoch`/`atte
   ADMIT <verb> <takenOver> <wrote>   the host's admission of a start, resume or approval
                                                                            → `QA <admission>`
   TERMOF <admission> <slotHeld>   the term an admitted command's rows go under → `QT held|fresh`
-  STAND <bound> <changed> <now> <pulled|-> <takenOver>   where another device's run stands
+  TERMS <wrote> <steps|->       a chat's terms on this host: from the incarnation's term `1`, written under or not,
+                               steps `p<command>.<run>.<term>`, `w<run>.<heartbeat>`, `a<command>.<applied>`
+                                                                           → `QM <written|-> <term> <heartbeat|->`
+  STAND <bound> <ask> <changed> <now> <quiet|-> <takenOver>   where another device's run stands
                                                                            → `QF <standing> [changesAt]`
+  PULL <cap> <throttle> <clock:size:quiet|-> <now> <size>   a pull's record of one segment (chat-ref.ts `notePull`)
+                                                                           → `QN <clock> <size> <quiet>`
   X                            end the trace
 -/
 open ChatLedger
@@ -231,8 +236,28 @@ def runLine (st : St) (line : String) : St × List String :=
   | ["TERMOF", a, h] =>
     let adm : Admission := match a with | "taken-over" => .takenOver | "new-term" => .newTerm | _ => .sameTerm
     (st, [s!"QT {if rowsTerm adm (h == "1") 1 2 = 2 then "fresh" else "held"}"])
-  | ["STAND", b, c, n, p, t] =>
-    let text := match standing (num b) (num c) (num n) (if p == "-" then none else some (num p)) (t == "1") with
+  | ["TERMS", w, ops] =>
+    let start : Terms := { held := 1, wrote := if w == "1" then some 1 else none }
+    let steps := if ops == "-" then [] else ops.splitOn ","
+    let (fin, written) := steps.foldl (fun (acc : Terms × List Nat) step =>
+      let args := ((step.drop 1).toString.splitOn ".").map num
+      let a := args.getD 0 0
+      let b := args.getD 1 0
+      match (step.take 1).toString with
+      | "p" => (acc.1.step (.propose a b (args.getD 2 0)), acc.2)
+      | "w" => (acc.1.step (.write a (b == 1)), acc.2 ++ [acc.1.rowsTerm a (b == 1)])
+      | _ => (acc.1.step (.answer a (b == 1)), acc.2)) (start, [])
+    let hb := match fin.heartbeat with | some t => toString t | none => "-"
+    (st, [s!"QM {if written.isEmpty then "-" else ",".intercalate (written.map toString)} {fin.term} {hb}"])
+  | ["PULL", cap, th, prior, n, sz] =>
+    let rec_ := if prior == "-" then none else
+      match (prior.splitOn ":").map num with
+      | [c, s, q] => some ⟨c, s, q⟩
+      | _ => none
+    let r := notePull (num cap) (num th) rec_ (num n) (num sz)
+    (st, [s!"QN {r.clock} {r.size} {r.quiet}"])
+  | ["STAND", b, a, c, n, p, t] =>
+    let text := match standing (num b) (num a) (num c) (num n) (if p == "-" then none else some (num p)) (t == "1") with
       | .holds at_ => s!"QF holds {at_}" | .awaitsPull => "QF awaits-pull" | .abandoned => "QF abandoned"
     (st, [text])
   | ["MH"] =>

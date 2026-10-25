@@ -212,17 +212,17 @@
   },
   {
     "id": "M30",
-    "drift": "a foreign run is found abandoned from this device's clock, not from its last pull of the remote (round 17's segment-age rule; T11: t11_unobserved_never_abandoned, t11_live_run_holds)",
+    "drift": "a pull's gap is counted whole, so one forward clock jump between two pulls reads as the bound of quiet and a live run is abandoned (round 19, finding 3; T11: t11_quiet_needs_pulls, t11_forward_jump_bounded)",
     "file": "specs/lean/ChatLedger.lean",
-    "find": "  | some p => min p now\n  | none => 0",
-    "replace": "  | some _ => now\n  | none => now"
+    "find": "      else ⟨now, size, r.quiet + min cap (now - r.clock)⟩",
+    "replace": "      else ⟨now, size, r.quiet + (now - r.clock)⟩"
   },
   {
     "id": "M31",
-    "drift": "a device that never pulled the remote finds a foreign run abandoned once its own clock passes the bound (T11: t11_unobserved_never_abandoned)",
+    "drift": "a pull that found the segment changed keeps its quiet, so a live run's new rows do not hold the chat (T11: t11_changed_segment_holds, t11_quiet_needs_pulls)",
     "file": "specs/lean/ChatLedger.lean",
-    "find": "  | some p => min p now\n  | none => 0",
-    "replace": "  | some p => min p now\n  | none => now"
+    "find": "    else ⟨now, size, 0⟩",
+    "replace": "    else ⟨now, size, r.quiet⟩"
   },
   {
     "id": "M32",
@@ -230,5 +230,47 @@
     "file": "specs/lean/ChatLedger.lean",
     "find": "  | .newTerm => fresh\n",
     "replace": "  | .newTerm => if _slotHeld then held else fresh\n"
+  },
+  {
+    "id": "M33",
+    "drift": "a pull record is never moved back, so after the clock goes back no pull is recorded until it catches up (round 19, finding 2; T11: t11_back_jump_recovers)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "      if r.clock ≤ now ∧ now - r.clock < throttle then r",
+    "replace": "      if now - r.clock < throttle then r"
+  },
+  {
+    "id": "M34",
+    "drift": "a foreign run is found abandoned from this device's clock rather than from the quiet its pulls found (round 17's segment-age rule; T11: t11_unobserved_never_abandoned)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  if takenOver || decide (quiet.getD 0 > bound) then .abandoned",
+    "replace": "  if takenOver || decide (now > changed + bound) then .abandoned"
+  },
+  {
+    "id": "M35",
+    "drift": "a term opened for a command is the chat's at once, before any row under it, so a refused command stops the live run's heartbeats (round 19, finding 1; T12: t12_heartbeat_kept)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | .propose c r f => { s with proposed := s.proposed ++ [(c, r, f)] }",
+    "replace": "  | .propose c r f => { s with opened := some f, proposed := s.proposed ++ [(c, r, f)] }"
+  },
+  {
+    "id": "M36",
+    "drift": "a refused command's proposed term is never withdrawn (T12: t12_refused_no_trace)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | .answer c applied => if applied then s else { s with proposed := s.proposed.filter (fun p => p.1 != c) }",
+    "replace": "  | .answer c applied => if applied || true then s else { s with proposed := s.proposed.filter (fun p => p.1 != c) }"
+  },
+  {
+    "id": "M37",
+    "drift": "a heartbeat commits a command's proposed term, so a heartbeat opens a term (T12: t12_refused_no_trace)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  if heartbeat then none else s.proposed.find? (fun p => p.2.1 == run)",
+    "replace": "  s.proposed.find? (fun p => p.2.1 == run)"
+  },
+  {
+    "id": "M38",
+    "drift": "a refused command withdraws every proposed term, so a start still waiting for its first row loses its term to another command's refusal (T12: t12_refusal_spares_others)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "{ s with proposed := s.proposed.filter (fun p => p.1 != c) }",
+    "replace": "{ s with proposed := [] }"
   }
 ]

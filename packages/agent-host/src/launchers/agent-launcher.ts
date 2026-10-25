@@ -78,6 +78,8 @@ export type AgentLauncherOptions = Readonly<{
   toolRegistry: ToolRegistry;
   /** External agents; omit and a `start` naming one is refused `EXTERNAL_AGENT_UNAVAILABLE`. */
   externalAgents?: ExternalAgentPort | undefined;
+  /** Which device this host is: stamped on external turns' markers (`CreateTauAgentHostOptions.deviceId`). */
+  deviceId?: CreateTauAgentHostOptions['deviceId'];
   createId?: (() => string) | undefined;
   clientContext?: CreateTauAgentHostOptions['clientContext'];
   /**
@@ -604,6 +606,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     createId,
     ...(options.clientContext === undefined ? {} : { clientContext: options.clientContext }),
     ...(options.externalAgents ? { externalRunners: { acp: options.externalAgents } } : {}),
+    ...(options.deviceId === undefined ? {} : { deviceId: options.deviceId }),
     ...(options.turnPlacement === undefined ? {} : { placement: options.turnPlacement }),
     ...(options.delays === undefined ? {} : { delays: options.delays }),
     ...(options.clock === undefined ? {} : { clock: options.clock }),

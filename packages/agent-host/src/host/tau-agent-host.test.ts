@@ -2830,6 +2830,66 @@ the cancelled tools left the system unchanged.
     expect(closedChats).toEqual(['chat-external-session', 'chat-external-session']);
   });
 
+  /* Every desktop places its own agents as `desktop`: the device's id on the marker says whose session a record names. */
+  it('stamps this device on an external turn’s marker, and restores the session it stamped', async () => {
+    const file = createMemoryLogFile();
+    const seen: Array<JsonObject | undefined> = [];
+    const placement = fakePlacement({ registry: tools(async () => ({ content: null, isError: false })) });
+    const externalPort: ExternalAgentPort = {
+      list: () => ['stub-agent'],
+      run: async (turn) => {
+        seen.push(turn.state);
+        await turn.remember({ acpSessionId: 'session-1', hostId: 'desktop' });
+      },
+    };
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: file.open,
+        transport: {
+          funding: { type: 'unfunded' },
+          stream: () => {
+            throw new Error('An external turn must never reach the Tau model.');
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'external-device',
+      }),
+      deviceId: 'device-1',
+      placement: placement.port,
+      externalRunners: { acp: externalPort },
+    });
+    const start = async (runId: string, messageId: string): Promise<void> => {
+      await host.admit({
+        chatId: 'chat-external-device',
+        runId,
+        trigger: 'submit',
+        message: { id: messageId, role: 'user', content: 'Run this here.' },
+        config: {
+          systemPrompt: 'unused by an external turn',
+          toolChoice: 'none',
+          agent: { kind: 'acp', id: 'stub-agent', hostId: 'desktop' },
+        },
+      });
+      await host.cancel({ runId });
+      await vi.waitFor(() => {
+        const acknowledged = placement.calls.filter((call) => call.verb === 'acknowledge');
+        expect(acknowledged.map((call) => call.key.runId)).toContain(runId);
+      });
+    };
+
+    try {
+      await start('run-1', 'turn-1');
+      await start('run-2', 'turn-2');
+      const log = await file.open();
+      const marker = reduceEventLog(await log.read()).find((message) => message.id === 'turn-1')?.metadata?.tauInternal;
+
+      expect(marker).toMatchObject({ kind: 'external-agent', deviceId: 'device-1', acpSessionId: 'session-1' });
+      expect(seen[1]).toMatchObject({ acpSessionId: 'session-1', deviceId: 'device-1' });
+    } finally {
+      await host.close();
+    }
+  });
+
   it('should record the stop details an external runner throws on its failed run', async () => {
     const file = createMemoryLogFile();
     const details = {

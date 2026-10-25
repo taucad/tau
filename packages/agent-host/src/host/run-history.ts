@@ -5,6 +5,7 @@
  */
 
 import { transportFailureDiagnosticType } from '#harness/session-record.js';
+import { isAbandonedTurn } from '#log/event-types.js';
 import { reduceEventLog } from '#log/reducer.js';
 import type { LogRowBody } from '#log/chat-ledger.js';
 import type { AgentLogEvent, JsonObject, JsonValue, ProviderMessage, RunLifecycleState } from '#log/event-types.js';
@@ -77,7 +78,8 @@ export const externalRefusalOf = (
 export const externalTurnKind = 'external-agent';
 
 /**
- * The external-agent marker on the turn's own user message.
+ * The external-agent marker on the turn's own user message: never on a copy another device's turn is said as
+ * (`abandonedTurnOf`), which this device's run did not admit.
  *
  * Deliberately *not* a new event type: the vocabulary already carries
  * per-message provider metadata, and `tauInternal` is where Tau's own
@@ -96,7 +98,8 @@ export const externalMarker = (
     typeof marker !== 'object' ||
     Array.isArray(marker) ||
     marker['kind'] !== externalTurnKind ||
-    typeof marker['agentId'] !== 'string'
+    typeof marker['agentId'] !== 'string' ||
+    isAbandonedTurn(message)
   ) {
     return undefined;
   }
@@ -142,13 +145,16 @@ export const externalTurnOf = (
  *
  * @param events - The chat's durable events.
  * @param agentId - Agent this turn selected; a different agent gets its own session.
- * @param hostId - Admitted placement; only records owned by that host may restore its session.
+ * @param owner - Whose session it is.
+ * @param owner.hostId - Admitted placement; only records owned by that host may restore its session.
+ * @param owner.deviceId - This device, as the host's `deviceId` option names it: a record another device stamped names
+ *   a session on that device, whatever host id the two share (every desktop places as `desktop`).
  * @returns The record the runner resumes from, or `undefined` for a first turn.
  */
 export const externalSessionOf = (
   events: readonly AgentLogEvent[],
   agentId: string,
-  hostId?: string,
+  { hostId, deviceId }: Readonly<{ hostId?: string | undefined; deviceId?: string | undefined }> = {},
 ): (JsonObject & ExternalSessionState) | undefined => {
   /* Reduced, not raw: `remember` records the session id by *replacing* the
    * user message's envelope, so only the reducer's view carries it. */
@@ -166,7 +172,8 @@ export const externalSessionOf = (
       !marker ||
       marker.agentId !== agentId ||
       typeof marker['acpSessionId'] !== 'string' ||
-      (hostId !== undefined && marker['hostId'] !== hostId)
+      (hostId !== undefined && marker['hostId'] !== hostId) ||
+      (marker['deviceId'] !== undefined && marker['deviceId'] !== deviceId)
     ) {
       continue;
     }

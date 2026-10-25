@@ -162,6 +162,12 @@ export type CreateTauAgentHostOptions = {
    */
   readonly externalRunners?: Readonly<Record<string, ExternalAgentPort>> | undefined;
   /**
+   * Which device this host is, stable across restarts: the id its chat segment is synced under. Stamped on every
+   * external turn's marker, so a vendor session is told apart from another device's that shares its host id (every
+   * desktop places its own agents as `desktop`), and only this device's records restore a session here.
+   */
+  readonly deviceId?: string | undefined;
+  /**
    * W8's placement port: every attempt is placed, settled and acknowledged (RA-R12). A host without one only reads: it
    * refuses every `start` and `resume` `REVISIONS_UNAVAILABLE` before any row, so no run edits unplaced (D13).
    */
@@ -2360,11 +2366,10 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       if (agent !== undefined) {
         /* The chat's own session (VSC3). A rewind keeps the selection and drops the vendor session, which holds a
          * turn Tau has just retracted. */
-        const remembered = externalSessionOf(
-          events,
-          agent.id,
-          typeof agent['hostId'] === 'string' ? agent['hostId'] : undefined,
-        );
+        const remembered = externalSessionOf(events, agent.id, {
+          hostId: typeof agent['hostId'] === 'string' ? agent['hostId'] : undefined,
+          deviceId: options.deviceId,
+        });
         let state: JsonObject | undefined = remembered;
         if (rewind !== undefined) {
           await closeExternalChat(chatId);
@@ -2377,7 +2382,13 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           ...start.message,
           metadata: {
             ...start.message.metadata,
-            tauInternal: { ...agent, kind: externalTurnKind, runKind: agent.kind, agentId: agent.id },
+            tauInternal: {
+              ...agent,
+              kind: externalTurnKind,
+              runKind: agent.kind,
+              agentId: agent.id,
+              ...(options.deviceId === undefined ? {} : { deviceId: options.deviceId }),
+            },
           },
         };
         return {
@@ -2562,11 +2573,10 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
             const state =
               mode === 'start'
                 ? admission?.state
-                : (externalSessionOf(
-                    events,
-                    agentId,
-                    typeof agent['hostId'] === 'string' ? agent['hostId'] : undefined,
-                  ) ?? admission?.state);
+                : (externalSessionOf(events, agentId, {
+                    hostId: typeof agent['hostId'] === 'string' ? agent['hostId'] : undefined,
+                    deviceId: options.deviceId,
+                  }) ?? admission?.state);
             const remember = async (remembered: JsonObject): Promise<void> => {
               const current = externalTurnOf(await log.read());
               const message =

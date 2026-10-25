@@ -193,6 +193,55 @@ describe('operation observation over the in-process transport', () => {
     }
   });
 
+  it.each([
+    { label: 'no parameters', supplied: undefined, modified: 0 },
+    { label: 'its default', supplied: { width: 10 }, modified: 0 },
+    { label: 'a changed value', supplied: { width: 12 }, modified: 1 },
+  ])('should count $modified modified leaves when the document opens with $label', async ({ supplied, modified }) => {
+    const client = createClient();
+    const seen: RuntimeOperationObservation[] = [];
+    client.on('operation', (observation) => seen.push(observation));
+    client.observe('facts');
+    const document = client.open({ source, ...(supplied === undefined ? {} : { parameters: supplied }), watch: false });
+    try {
+      await document.evaluation();
+      await vi.waitFor(() => {
+        expect(byOperation(seen, 'evaluate')[0]?.facts).toBe('joined');
+      });
+      expect(byOperation(seen, 'evaluate')[0]?.worker?.parameters).toMatchObject({ declared: 1, modified });
+    } finally {
+      document.close();
+      await client.shutdown();
+    }
+  });
+
+  it('should settle a view the caller closes once the evaluation lands as abandoned, and its replacement as succeeded', async () => {
+    const client = createClient();
+    const seen: RuntimeOperationObservation[] = [];
+    client.on('operation', (observation) => seen.push(observation));
+    client.observe('facts');
+    const document = client.open({ source, watch: false });
+    try {
+      // A view opened before the offer is known, closed and reopened under its id once the evaluation lands.
+      const placeholder = document.view();
+      await document.evaluation();
+      placeholder.close();
+      const view = document.view('primary');
+      await view.rendering();
+      await vi.waitFor(() => {
+        expect(byOperation(seen, 'render').map(({ outcome }) => outcome)).toEqual([
+          { type: 'abandoned', reason: 'closed' },
+          { type: 'succeeded' },
+        ]);
+      });
+      expect(byOperation(seen, 'render')[0]?.worker).toBeUndefined();
+      view.close();
+    } finally {
+      document.close();
+      await client.shutdown();
+    }
+  });
+
   it('should start and stop the facts from the next operation when the mode changes', async () => {
     const client = createClient();
     const seen: RuntimeOperationObservation[] = [];

@@ -218,7 +218,12 @@ describe('PicoVoxel packaged runtime', () => {
     `);
     const client = await createNodeClient({ runtime: createRuntime('serial'), projectPath });
     try {
-      const document = client.open({ source: { path: 'main.ts' }, evaluateOptions: { lane: 'fast' } });
+      // A uniform fast mesh keeps DP1 a pure lane check. Adaptive previews (the Balanced preview-default ruling)
+      // deviate further by design; their deviation is measured in the W6 analysis, not by this test.
+      const document = client.open({
+        source: { path: 'main.ts' },
+        evaluateOptions: { lane: 'fast', meshAdaptivity: 0 },
+      });
       const renderGlb = async (lane: 'fast' | 'exact'): Promise<Uint8Array<ArrayBuffer>> => {
         if (lane === 'exact') {
           await document.update({ evaluateOptions: { lane } });

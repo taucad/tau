@@ -117,11 +117,13 @@ function useProjectCreation() {
           },
           chatName: 'Initial design',
           location: projectData.location,
-          // Start in the code-oriented Workbench lane.
+          // Desktop starts in the code-oriented Workbench lane. A phone starts on the chat over the empty stage
+          // (WB-10), never on the Editor: that surface is the dockview workbench, which a phone loads only when a
+          // file is opened there, so opening the new project paints the phone layout without it (D13, T8).
           editorState: {
             panelState: {
               desktopLayout: { workbenchOpen: true, compactAuxiliary: 'workbench' },
-              mobileActiveTab: 'editor',
+              mobileActiveTab: 'chat',
             },
           },
         });

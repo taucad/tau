@@ -13,6 +13,9 @@ import { z } from 'zod';
 import { gltfExportConventionSchema } from '@taucad/runtime/kernel';
 import { getIsolationStatus } from '@taucad/runtime/cross-origin-isolation';
 
+import { picovoxelBuild } from '#picovoxel-build.js';
+import { picovoxelDefaultAdaptivity } from '#picovoxel-meshing.js';
+
 /** The two lanes Tau exposes. `'open'` and `'auto'` stay out of Tau: every Tau session claims a lane. @public */
 export const picovoxelLanes = ['fast', 'exact'] as const;
 
@@ -143,18 +146,38 @@ export type PicovoxelRegion = z.output<typeof picovoxelRegionSchema>;
 
 /**
  * Construction options for renders. The viewer never sends render options, so this default decides
- * its lane: `'fast'`.
+ * its lane: `'fast'`. An unset `meshAdaptivity` resolves here, per lane and installed release, so the
+ * parsed options (the build's cache key) name the mesh the build makes: an exact or uniform render
+ * keys like the export that replays it.
  *
  * @public
  */
-export const picovoxelRenderSchema = z.object({
-  lane: laneSchema
-    .default('fast')
-    .describe(
-      "'fast' (default) builds with the lane's Class-2 accelerations for the viewer. 'exact' builds the byte-reproducible model; exports replay it automatically.",
-    ),
-  region: picovoxelRegionSchema.optional(),
-});
+export const picovoxelRenderSchema = z
+  .object({
+    lane: laneSchema
+      .default('fast')
+      .describe(
+        "'fast' (default) builds with the lane's Class-2 accelerations for the viewer. 'exact' builds the byte-reproducible model; exports replay it automatically.",
+      ),
+    region: picovoxelRegionSchema.optional(),
+    meshAdaptivity: z
+      .number()
+      .min(0)
+      .lt(1)
+      .optional()
+      .describe(
+        "OpenVDB mesh adaptivity in [0, 1) for the displayed Voxels parts: 0 is the uniform mesh; higher values merge flat regions into fewer, larger triangles. Only lane 'fast' meshes adaptively, it never changes the voxels, and exports always mesh at 0. Unset, it is 0.25 (Balanced) on lane 'fast' of a PicoVoxel release whose toMesh takes options, and 0 on lane 'exact' and under PicoVoxel 0.1.0.",
+      ),
+    meshRelax: z
+      .boolean()
+      .default(false)
+      .describe('Relax disoriented triangles of an adaptive mesh (meshAdaptivity above 0). Default false.'),
+  })
+  .overwrite((options) =>
+    options.meshAdaptivity === undefined
+      ? { ...options, meshAdaptivity: picovoxelDefaultAdaptivity(options.lane, picovoxelBuild.version) }
+      : options,
+  );
 
 const exportLaneSchema = z.object({
   lane: laneSchema
@@ -163,13 +186,16 @@ const exportLaneSchema = z.object({
       "'exact' (default) replays the model in a deterministic session. 'fast' exports fast-lane geometry: STL is stamped LANE=fast, GLB and glTF are refused.",
     ),
   region: picovoxelRegionSchema.optional(),
+  // Exports always mesh uniformly: a view's adaptivity never reaches an exported file.
+  meshAdaptivity: z.literal(0).default(0).describe('Exports always use the uniform mesh (0).'),
+  meshRelax: z.literal(false).default(false).describe('Exports never relax the mesh.'),
 });
 
 const vector3Schema = z.tuple([z.number(), z.number(), z.number()]);
 
 /**
- * Per-format PicoVoxel export schemas. Each carries `lane`, defaulting to `'exact'`, and an optional
- * `region` the runtime replays into the native build.
+ * Per-format PicoVoxel export schemas. Each carries `lane`, defaulting to `'exact'`, an optional
+ * `region` the runtime replays into the native build, and the uniform mesh (`meshAdaptivity` 0).
  * @public
  */
 export const picovoxelExportSchemas = {

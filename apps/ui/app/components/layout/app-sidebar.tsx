@@ -99,7 +99,7 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
         <div className='sticky top-0 z-10 space-y-1 bg-sidebar px-2 pb-1'>
           {/* Global search entries register when search opens. */}
           {isMobile ? null : <Commands />}
-          <NavChat isCompact={isCompact} />
+          <NavChat isCompact={isCompact} isTouchSized={isMobile && !desktopTarget} />
         </div>
         <div className='flex-1 overflow-y-auto'>
           <div className='flex flex-col justify-between'>

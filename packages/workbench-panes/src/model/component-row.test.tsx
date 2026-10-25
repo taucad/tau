@@ -90,7 +90,10 @@ describe('Model component rows', () => {
     // A refreshing preview keeps its last image, dimmed.
     expect(preview.querySelector('img')).toHaveClass('opacity-50');
     // The frame is a sibling of the selection button, never nested in it.
-    expect(screen.getByRole('button', { name: 'planetary_housing' }).querySelector('button')).toBeNull();
+    // The refreshing preview's status is part of the selection button's name.
+    expect(
+      screen.getByRole('button', { name: 'planetary_housing, preview loading' }).querySelector('button'),
+    ).toBeNull();
 
     await userEvent.setup().click(preview);
     expect(openPartGallery).toHaveBeenCalledWith({
@@ -301,6 +304,19 @@ describe('Model tree rows on touch (PN-TREE-1, PN-TREE-2)', () => {
 
     const rowButton = screen.getByRole('button', { name: 'planetary_housing, hidden' });
     expect(rowButton).toHaveTextContent('Hidden');
+  });
+
+  it('names a part whose preview is loading or unavailable, so assistive technology hears the status', () => {
+    const node = createNode(firstComponentId, 'planetary_housing');
+    const view = renderComponentRow(rowProperties({ node, preview: { status: 'pending' } }));
+    expect(screen.getByRole('button', { name: 'planetary_housing, preview loading' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    view.unmount();
+
+    renderComponentRow(rowProperties({ node, isHidden: true, preview: { status: 'failed' } }));
+    expect(screen.getByRole('button', { name: 'planetary_housing, hidden, preview unavailable' })).toBeInTheDocument();
   });
 
   it('keeps a hidden part Show action in view without hover, and shows it again', () => {

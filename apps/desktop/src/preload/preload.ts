@@ -64,6 +64,7 @@ import type {
 } from '#shared/quick-look.js';
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
 import { createTerminalBridge } from '#preload/terminal-bridge.js';
+import { permissionBridge } from '#preload/permission-bridge.js';
 
 const bootstrap = readBootstrap(process.argv);
 
@@ -199,6 +200,7 @@ contextBridge.exposeInMainWorld('tau', {
       await ipcRenderer.invoke(agentHostSessionChannels.release, { workspaceRoot, projectId, attachmentId });
     },
   },
+  permissions: permissionBridge(ipcRenderer),
   machines: {
     /* The one route a secret takes: invoke → main → the utility's ceremony,
      * which saves it once the printer accepts it. Omit `accessCode` to reuse

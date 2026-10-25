@@ -8,6 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import { cn } from '@taucad/ui/utils/cn';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { ghostPillClass } from '#components/chat/chat-agent-sheet.js';
+import { ChatPermissionModeControl } from '#components/chat/chat-permission-mode-control.js';
 import { configOptionOf, configValues } from '#components/chat/use-agent-config.js';
 import type { AgentConfig } from '#components/chat/use-agent-config.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
@@ -42,8 +43,9 @@ const glyphOf = (id: string): { readonly icon: LucideIcon; readonly tone?: strin
 /**
  * An external agent's permission mode: ghost, glyph first, its label the
  * second to leave when the bar needs the room. ⌘. steps to the next mode.
- * Tau has no mode in the composer (Q11), and an agent that reports none shows
- * nothing.
+ * The Tau agent shows its desktop permission mode instead (Ask or Bypass, W9),
+ * which ⌘. never steps, because Bypass needs its confirmation; an agent that
+ * reports none shows nothing.
  *
  * @public
  */
@@ -75,7 +77,7 @@ export function ChatAgentModeControl({
   });
 
   if (!option || !current) {
-    return undefined;
+    return <ChatPermissionModeControl focusEditor={focusEditor} />;
   }
   const { icon: Icon, tone } = glyphOf(current.value);
   return (

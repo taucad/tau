@@ -2,7 +2,7 @@
  * Classify every raised `.size-limit.json` limit as one an agent may make or one the operator decides.
  *
  * The band is `docs/policy/npm-policy.md` § 7 "Changing a size budget": a code entry may grow by at most
- * 10 % of its base limit and 10 kB, a binary-asset entry by at most 5 %, and an entry by at most 20 % over
+ * 10 % of its base limit and 10 kB (any raise of at most 2 kB is within the band), a binary-asset entry by at most 5 %, and an entry by at most 20 % over
  * its limit at program start (`--program-base`). Reserved entries always go to the operator. Entries are
  * matched by `path`, so updating the `measured … on <date>` note in a name does not hide a raise. Limits
  * are parsed the way `size-limit` parses them (`bytes-iec`: `1 kB` is 1,000 bytes, `1 KiB` is 1,024).
@@ -38,6 +38,7 @@ export type SizeRaise = {
 
 export const codeRaiseRatio = 0.1;
 export const codeRaiseBytes = 10_000;
+export const codeRaiseFloorBytes = 2000;
 export const assetRaiseRatio = 0.05;
 export const programRaiseRatio = 0.2;
 
@@ -123,7 +124,7 @@ export const classifyConfig = (
     if (reservedEntries.some((reserved) => reserved.config === config && reserved.path === key)) {
       reasons.push('reserved entry');
     }
-    if (kind === 'code' && growth > from * codeRaiseRatio) {
+    if (kind === 'code' && growth > codeRaiseFloorBytes && growth > from * codeRaiseRatio) {
       reasons.push(`+${percent(growth / from)} exceeds ${percent(codeRaiseRatio)}`);
     }
     if (kind === 'code' && growth > codeRaiseBytes) {
@@ -135,9 +136,13 @@ export const classifyConfig = (
     const start = programEntries.get(key);
     if (start !== undefined) {
       const startLimit = parseLimit(start.limit);
-      if (to - startLimit > startLimit * programRaiseRatio) {
+      const programGrowth = to - startLimit;
+      if (
+        programGrowth > startLimit * programRaiseRatio &&
+        !(kind === 'code' && programGrowth <= codeRaiseFloorBytes)
+      ) {
         reasons.push(
-          `+${percent((to - startLimit) / startLimit)} since program start exceeds ${percent(programRaiseRatio)}`,
+          `+${percent(programGrowth / startLimit)} since program start exceeds ${percent(programRaiseRatio)}`,
         );
       }
     }

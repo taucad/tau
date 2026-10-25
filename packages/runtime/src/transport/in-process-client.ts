@@ -165,6 +165,7 @@ export const inProcessClient = (
       }
       worker = new kernelWorkerModule.KernelRuntimeWorker({ runtime });
       dispatcher = createDocumentWorkerDispatcher(worker, hostPort, {
+        realm: 'in-process',
         inlineFileSystem,
         encodeBinary,
         acknowledgeBinary: (key) => ensurePoolsAndPorts().geometryPool?.acknowledge(key),

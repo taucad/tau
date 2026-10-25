@@ -11,19 +11,34 @@ type SpanAttributes = Record<string, string | number | boolean>;
  * telemetry batcher. Optional Performance Timeline mirroring exists only for
  * explicit Chrome DevTools profiling sessions.
  *
+ * Ancestry is an open-span stack: a new span's parent is the innermost span
+ * that is still open. A span that ends pops itself and any descendant that is
+ * still open above it, so a child that outlives its parent never leaves the
+ * next sibling parented to a span that already ended. Operations open their
+ * root span first, so a span started after an earlier sibling ended still
+ * lands under that operation's root.
+ *
  * All heavy lifting happens here on the worker side — the client simply
  * reads `detail.spanId` / `detail.parentSpanId` to build a tree.
  */
 export class RuntimeTracer implements RuntimeSpanTracer {
   private nextId = 0;
   private epoch = 0;
-  private activeSpanId: string | undefined;
+  /** Ids of the spans that are open, outermost first. The only per-span ancestry state. */
+  private readonly open: string[] = [];
   private entrySink: ((entry: TelemetryEntry) => void) | undefined;
+  private droppedSink: (() => void) | undefined;
   private devtoolsTimelineEnabled = false;
 
-  /** Route completed spans directly to the worker telemetry batcher. */
-  public setEntrySink(sink: ((entry: TelemetryEntry) => void) | undefined): void {
+  /**
+   * Route completed spans directly to the worker telemetry batcher.
+   *
+   * @param sink - Receives every completed span of the current epoch.
+   * @param onDropped - Told about each span that ended after {@link RuntimeTracer.reset}, so the loss is counted.
+   */
+  public setEntrySink(sink: ((entry: TelemetryEntry) => void) | undefined, onDropped?: () => void): void {
     this.entrySink = sink;
+    this.droppedSink = onDropped;
   }
 
   /** Mirror spans into the Performance Timeline for explicit DevTools profiling. */
@@ -32,7 +47,7 @@ export class RuntimeTracer implements RuntimeSpanTracer {
   }
 
   /**
-   * Starts a new tracing span, optionally nested under the currently active span.
+   * Starts a new tracing span, nested under the innermost span that is still open.
    *
    * @param name - the span name used for the performance mark
    * @param attributes - optional key-value attributes attached to the span
@@ -40,18 +55,38 @@ export class RuntimeTracer implements RuntimeSpanTracer {
    */
   public startSpan(name: string, attributes?: SpanAttributes): SpanHandle {
     const id = String(this.nextId++);
-    const parentId = this.activeSpanId;
+    const { open } = this;
+    const parentId = open.at(-1);
     const spanEpoch = this.epoch;
     const startTime = performance.now();
     let ended = false;
-    this.activeSpanId = id;
+    open.push(id);
 
     return {
       end: (endAttributes?: SpanAttributes) => {
-        if (ended || spanEpoch !== this.epoch) {
+        if (ended) {
           return;
         }
         ended = true;
+        /* Pop this span and every still-open descendant above it. In the common
+         * case this span is on top and the pop is one array operation. */
+        const stack = this.open;
+        if (stack.at(-1) === id) {
+          stack.pop();
+        } else {
+          const at = stack.lastIndexOf(id);
+          if (at !== -1) {
+            stack.length = at;
+          }
+        }
+        if (spanEpoch !== this.epoch) {
+          try {
+            this.droppedSink?.();
+          } catch {
+            // Telemetry is observational and must not change runtime outcomes.
+          }
+          return;
+        }
 
         const mergedAttributes = {
           ...attributes,
@@ -99,15 +134,19 @@ export class RuntimeTracer implements RuntimeSpanTracer {
             // DevTools mirroring is optional and must not change runtime outcomes.
           }
         }
-
-        this.activeSpanId = parentId;
       },
     };
   }
 
-  /** Reset span ancestry without mutating the realm-wide Performance Timeline. */
+  /**
+   * Start a new span epoch without mutating the realm-wide Performance Timeline.
+   *
+   * Every span still open belongs to the previous epoch: it is forgotten as a
+   * parent, and if it ends later it is counted through the dropped sink rather
+   * than discarded silently.
+   */
   public reset(): void {
     this.epoch++;
-    this.activeSpanId = undefined;
+    this.open.length = 0;
   }
 }

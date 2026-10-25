@@ -88,6 +88,10 @@ import { agentRuntimeIdleMilliseconds, retireIdleClients } from '#tau/idle-runti
 import type { createDesktopRuntime } from '#tau/desktop-runtime.factory.js';
 import { createTerminalConcern } from '#tau/services-host.terminal.js';
 import type { TerminalConcernOptions } from '#tau/services-host.terminal.js';
+import { createPermissionHost } from '#tau/permission-host.js';
+import { createPermissionStore } from '#tau/permission-store.js';
+import type { PermissionStore } from '#tau/permission-store.js';
+import type { PermissionAnswerFrame } from '#shared/permission-channels.js';
 
 /**
  * Context label every dispatch on the channel carries.
@@ -240,6 +244,10 @@ export type ServicesHostOptions = {
   readonly machinesDirectory?: string;
   /** The app's old machine directory, imported once into the store when it is another directory. */
   readonly legacyMachinesDirectory?: string;
+  /** `<userData>/permissions`, the permission store's home (W9). Absent, permission requests are refused. */
+  readonly permissionsDirectory?: string;
+  /** Reply to main with one permission request's answer (W9). */
+  readonly permissionsAnswered?: (frame: PermissionAnswerFrame) => void;
   /**
    * Diagnostics sink; defaults to stdout, which main forwards to
    * `userData/logs`. `level` is omitted for the ordinary informational trace
@@ -340,6 +348,8 @@ export class ServicesQuiesceRefusedError extends Error {
 
 /** The services host, seen by its entry and by tests. */
 export type ServicesHost = {
+  /** The permission store, the one reader and writer of chat modes (W9); its `permissionModeOfRun` feeds the shell. */
+  readonly permissions: PermissionStore | undefined;
   /** Handle one `process.parentPort` message. */
   handleMessage(message: UtilityMessage): void;
   /** Whether a renderer-named root may be served. */
@@ -531,6 +541,25 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       return candidate === trusted || candidate.startsWith(trusted + sep);
     });
   };
+
+  const permissions =
+    options.permissionsDirectory === undefined
+      ? undefined
+      : createPermissionStore({
+          directory: options.permissionsDirectory,
+          onError: (event, message) => {
+            log(event, message, 'warn');
+          },
+        });
+  const permissionHost =
+    permissions === undefined
+      ? undefined
+      : createPermissionHost({
+          store: permissions,
+          isTrustedRoot,
+          answer: (frame) => options.permissionsAnswered?.(frame),
+          log,
+        });
 
   const internalPorts = authority === undefined ? undefined : new MessageChannel();
   const stopInternalAuthority =
@@ -1136,6 +1165,22 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         terminals.revokeUntrusted();
         return;
       }
+      case 'permissions-request': {
+        const { requestId } = frame;
+        if (permissionHost === undefined) {
+          if (typeof requestId === 'string') {
+            options.permissionsAnswered?.({
+              type: 'permissions-failed',
+              requestId,
+              message: 'This build keeps no permissions.',
+            });
+          }
+          return;
+        }
+        // async-iife: bootstrap -- the host answers through `permissionsAnswered`; a control frame has no caller.
+        void permissionHost.handle(frame);
+        return;
+      }
       case 'authToken': {
         /* Held, not captured: main refreshes it on better-auth's 24 h
          * `updateAge`, and launcher 2's model transport reads it per request. */
@@ -1543,6 +1588,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   return {
     isTrustedRoot,
     agentHostConfig: () => agentHostConfig,
+    permissions,
     quiesce,
     dispose() {
       disposed = true;

@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createTelemetryOrigin, WorkerTelemetryCollector, toAbsoluteTime } from '#framework/worker-telemetry.js';
+import {
+  createTelemetryOrigin,
+  WorkerTelemetryCollector,
+  toAbsoluteTime,
+  workerTelemetryCollectorLimit,
+} from '#framework/worker-telemetry.js';
 import type { TelemetryEntry } from '#types/runtime-wire.types.js';
 
 const entry = (name: string): TelemetryEntry => ({
@@ -36,7 +41,7 @@ describe('WorkerTelemetryCollector', () => {
     collector.flush();
 
     expect(send).toHaveBeenCalledOnce();
-    expect(send).toHaveBeenCalledWith([entry('kernel.render'), entry('kernel.compute')]);
+    expect(send).toHaveBeenCalledWith({ entries: [entry('kernel.render'), entry('kernel.compute')], dropped: 0 });
   });
 
   it('does not send an empty batch', () => {
@@ -59,6 +64,49 @@ describe('WorkerTelemetryCollector', () => {
     collector.dispose();
 
     expect(send).toHaveBeenCalledOnce();
-    expect(send).toHaveBeenCalledWith([entry('before-dispose')]);
+    expect(send).toHaveBeenCalledWith({ entries: [entry('before-dispose')], dropped: 0 });
+  });
+
+  it('should hold at most the limit and count the overflow on the next batch', () => {
+    const send = vi.fn();
+    const collector = new WorkerTelemetryCollector(send);
+    for (let index = 0; index <= workerTelemetryCollectorLimit; index++) {
+      collector.collect(entry('fs.read'));
+    }
+
+    collector.flush();
+
+    expect(send).toHaveBeenCalledOnce();
+    const [batch] = send.mock.calls[0] as [{ entries: TelemetryEntry[]; dropped: number; droppedRoots?: unknown }];
+    expect(batch.entries).toHaveLength(workerTelemetryCollectorLimit);
+    expect(batch.dropped).toBe(1);
+    expect(batch.droppedRoots).toBeUndefined();
+  });
+
+  it('should name a dropped operation root by its operation id', () => {
+    const send = vi.fn();
+    const collector = new WorkerTelemetryCollector(send, 1);
+    collector.collect(entry('fs.read'));
+    collector.collect({ ...entry('kernel.render'), detail: { spanId: '7', 'operation.id': 'render:v1:e1:r1' } });
+
+    collector.flush();
+
+    expect(send).toHaveBeenCalledWith({
+      entries: [entry('fs.read')],
+      dropped: 1,
+      droppedRoots: { '7': 'render:v1:e1:r1' },
+    });
+  });
+
+  it('should send a batch that only reports loss, then reset the count', () => {
+    const send = vi.fn();
+    const collector = new WorkerTelemetryCollector(send);
+    collector.noteDropped();
+
+    collector.flush();
+    collector.flush();
+
+    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith({ entries: [], dropped: 1 });
   });
 });

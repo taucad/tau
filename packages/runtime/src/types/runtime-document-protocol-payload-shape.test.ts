@@ -66,7 +66,7 @@ describe('document protocol payload-shape coverage (C18)', () => {
     expect(wire.calls.dispose.args.safeParse(undefined).success).toBe(false);
   });
 
-  it('admits all eight client commands and rejects missing operation identity', () => {
+  it('admits all nine client commands and rejects missing operation identity', () => {
     const commands = {
       open: { documentId: 'doc', intent: 0, file, parameters: {}, watch: false },
       update: { documentId: 'doc', intent: 1, parameters: { count: 2 } },
@@ -76,6 +76,7 @@ describe('document protocol payload-shape coverage (C18)', () => {
       closeView: { subscriptionId: 'view' },
       abort: { operationId: 'export-1', reason: 2 },
       binaryMaterialised: { key: 'pool-1' },
+      observe: { mode: 'facts' },
     } as const;
     for (const name of Object.keys(commands) as Array<keyof typeof commands>) {
       expect(wire.notifies[name].safeParse(commands[name]).success, name).toBe(true);
@@ -87,7 +88,7 @@ describe('document protocol payload-shape coverage (C18)', () => {
     );
   });
 
-  it('admits all twelve host notifications, including failed view and telemetry envelopes', () => {
+  it('admits all thirteen host notifications, including failed view, telemetry and operation facts envelopes', () => {
     const events = {
       described: { documentId: 'doc', intent: 0, evaluationId: 'evaluation-1', success: false, issues: [issue] },
       evaluating: { documentId: 'doc', intent: 0, evaluationId: 'evaluation-1', transient: false },
@@ -134,6 +135,19 @@ describe('document protocol payload-shape coverage (C18)', () => {
         epoch: 1,
       },
       capabilitiesUpdated: { capabilities },
+      operationFacts: {
+        operationId: 'evaluate:doc:evaluation-1',
+        facts: {
+          queue: 0,
+          execution: 3,
+          cold: true,
+          reuse: 'computed',
+          heapSource: 'none',
+          realm: 'node-worker',
+          phases: { prepare: 1, compute: 2 },
+          middleware: { total: 0.5, slowestId: 'GeometryCache', slowest: 0.5, ran: ['GeometryCache'] },
+        },
+      },
     } as const;
     for (const name of Object.keys(events) as Array<keyof typeof events>) {
       expect(wire.notifies[name].safeParse(events[name]).success, name).toBe(true);

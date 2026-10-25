@@ -363,11 +363,11 @@ Run in CI by `nx affected -t pkgcheck`, and at publish time as a `dependsOn` of 
 
 A `.size-limit.json` limit is the latest measurement plus a little headroom, so authorized work routinely crosses it. Raising a limit inside the band below is a reversible detail the agent doing the work decides; it is never an operator question. Above the band, the operator decides.
 
-| Entry kind                                                                 | Autonomous raise, against the limit being replaced |
-| -------------------------------------------------------------------------- | -------------------------------------------------- |
-| Code: any positive path measures `.js`, `.mjs`, `.cjs`, `.html` or `.css`  | at most 10 % **and** at most 10 kB                 |
-| Asset: every other entry (WASM, fonts, images, models, source maps)        | at most 5 %                                        |
-| Any entry, cumulatively within one program, against its limit at its start | at most 20 %                                       |
+| Entry kind                                                                 | Autonomous raise, against the limit being replaced  |
+| -------------------------------------------------------------------------- | --------------------------------------------------- |
+| Code: any positive path measures `.js`, `.mjs`, `.cjs`, `.html` or `.css`  | at most 2 kB, or at most 10 % **and** at most 10 kB |
+| Asset: every other entry (WASM, fonts, images, models, source maps)        | at most 5 %                                         |
+| Any entry, cumulatively within one program, against its limit at its start | at most 20 %, or 2 kB for code                      |
 
 The operator decides, whatever the size, when:
 

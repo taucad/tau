@@ -153,7 +153,11 @@ describe('storage restore drill workflow', () => {
     expect(result.calls).toContain('machine exec m1');
   });
 
-  function runValidation(overrides: Record<string, string>): { status: number | undefined; stdout: string; output: string } {
+  function runValidation(overrides: Record<string, string>): {
+    status: number | undefined;
+    stdout: string;
+    output: string;
+  } {
     const directory = mkdtempSync(join(tmpdir(), 'tau-restore-drill-'));
     try {
       const output = join(directory, 'output');

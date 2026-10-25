@@ -5,7 +5,7 @@ import { resolveTxt } from 'node:dns/promises';
  * over. Fly answers a TXT query on its internal DNS with every Machine's id and
  * region; the name is configuration (`TAU_STORAGE_MEMBERS_DNS`), because
  * tau-storage sits on its own 6PN and only it can resolve its own `.internal`
- * names. tau-api asks for the list on `GET /v1/storage/members`.
+ * names. tau-api asks for the list on `GET /v1/members`.
  */
 
 /** A Fly Machine id: lower-case hex. */

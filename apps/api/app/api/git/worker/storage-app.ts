@@ -12,7 +12,7 @@ import { storageKeepAliveTimeoutMilliseconds } from '#api/git/forwarding/contrac
 import { parsePublicKeys, parseSigningKey } from '#api/git/forwarding/contract/keys.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
-import { probeGitToolchain } from '#api/git/worker/git-toolchain.js';
+import { gitVersionProbe } from '#api/git/worker/git-toolchain.js';
 import { createReceiptChannel } from '#api/git/worker/receipt-channel.js';
 import { dnsMembers } from '#api/git/worker/storage-members.js';
 import { StorageGitService } from '#api/git/worker/storage-git.service.js';
@@ -75,8 +75,6 @@ export const startStorageApp = async (args: {
   });
   service.slowBodyMinimumBytes = environment.TAU_STORAGE_SLOW_BODY_MINIMUM_BYTES;
   service.slowBodyWindowMilliseconds = environment.TAU_STORAGE_SLOW_BODY_WINDOW_SECONDS * 1000;
-  /* Probed once: binaries do not appear at runtime. No git-lfs here by design. */
-  let toolchain: ReturnType<typeof probeGitToolchain> | undefined;
   const server = createServer(
     /* The keep-alive outlives the API's pool timeout, so the API never reuses a
        connection this side is closing (review S6); headers still arrive fast. */
@@ -95,11 +93,8 @@ export const startStorageApp = async (args: {
       ...(environment.TAU_STORAGE_MEMBERS_DNS === undefined
         ? {}
         : { members: dnsMembers(environment.TAU_STORAGE_MEMBERS_DNS) }),
-      gitVersion: async () => {
-        toolchain ??= probeGitToolchain(false);
-        const { git } = await toolchain;
-        return git;
-      },
+      /* No git-lfs here by design. */
+      gitVersion: gitVersionProbe(),
     }),
   );
   /* No host: Node binds the unspecified IPv6 address, dual-stack, where the

@@ -41,3 +41,27 @@ export const probeGitToolchain = async (withLfs: boolean): Promise<GitToolchain>
   const lfs = withLfs ? await probe(['lfs', 'version']) : undefined;
   return { git, lfs };
 };
+
+/**
+ * The readiness probe of git on tau-storage of git. A found git is kept, as binaries do
+ * not disappear at runtime; a failed probe is not, so one spawn that failed
+ * (a fork refused under load, a slow boot) never refuses the Machine for life.
+ * Concurrent probes share one spawn.
+ *
+ * @param probeToolchain - The probe, replaced in tests.
+ * @returns A function answering git's version, or `undefined` without git.
+ */
+export const gitVersionProbe = (
+  probeToolchain: (withLfs: boolean) => Promise<GitToolchain> = probeGitToolchain,
+): (() => Promise<string | undefined>) => {
+  let toolchain: Promise<GitToolchain> | undefined;
+  return async () => {
+    toolchain ??= probeToolchain(false);
+    const probing = toolchain;
+    const { git } = await probing;
+    if (git === undefined && toolchain === probing) {
+      toolchain = undefined;
+    }
+    return git;
+  };
+};

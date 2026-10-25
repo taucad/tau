@@ -394,3 +394,25 @@ describe('tau-storage names itself and its members for the router (DC2)', () => 
     }
   });
 });
+
+describe('tau-storage answers when a probe or the member list throws (DC2/DC3 review)', () => {
+  it('should answer readiness 503 when the git probe throws, and refuse the member list when it throws', async () => {
+    const failing = await serve(grantContractVersion, {
+      gitVersion: async () => {
+        throw new Error('spawn EAGAIN');
+      },
+      members: async () => {
+        throw new Error('the DNS lookup failed');
+      },
+    });
+    try {
+      const ready = await fetch(new URL('/health/ready', failing.url), { signal: AbortSignal.timeout(2000) });
+      expect(ready.status).toBe(503);
+      const listed = await fetch(new URL('/v1/members', failing.url), { signal: AbortSignal.timeout(2000) });
+      expect(listed.status).toBe(500);
+      expect(await listed.json()).toMatchObject({ code: 'GIT_STORAGE_ERROR' });
+    } finally {
+      await failing.close();
+    }
+  });
+});

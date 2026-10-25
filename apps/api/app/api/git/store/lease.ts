@@ -190,7 +190,7 @@ export const hydrateLease = async (args: HydrateLeaseArguments): Promise<Reposit
   }
 
   const directory = await mkdtemp(path.join(args.parentDirectory ?? tmpdir(), 'tau-lease-'));
-  const holds: PackCacheHold[] = [];
+  const holds = new LeaseHolds();
   try {
     // `--template=` keeps git's sample hooks out: the only hook in a lease is Tau's.
     await runGit(directory, ['init', '--bare', '--quiet', '--template=', '--initial-branch=main', '.']);
@@ -215,29 +215,58 @@ export const hydrateLease = async (args: HydrateLeaseArguments): Promise<Reposit
       hydratedPackFiles: fetched.files,
       drawnBytes: fetched.drawnBytes,
       dispose: async () => {
-        try {
-          await rm(directory, { recursive: true, force: true });
-        } finally {
-          releaseAll(holds);
-        }
+        /* Released only once the links are gone: a directory that could not be
+           removed still holds the bytes, so they stay pinned rather than
+           counted as space eviction could give admission. */
+        await rm(directory, { recursive: true, force: true });
+        holds.release();
       },
     };
   } catch (error) {
+    /* A failed hydrate forgets what it linked: a cached object may be what
+       failed it (a corrupt pack `index-pack` refused), so the next lease reads
+       it again. A forgotten entry is never counted again, whether or not the
+       directory could be removed. */
     try {
       await rm(directory, { recursive: true, force: true });
     } finally {
-      releaseAll(holds);
+      await holds.discard();
     }
     throw error;
   }
 };
 
-/** Gives every cache entry a lease linked back to eviction. */
-const releaseAll = (holds: readonly PackCacheHold[]): void => {
-  for (const hold of holds) {
-    hold.release();
+/**
+ * The cache entries one lease linked. Once it has released or discarded them,
+ * a hold that arrives later (a fill still running when a sibling read failed
+ * the hydrate) gets the same answer at once, so no pin outlives the lease.
+ */
+class LeaseHolds {
+  readonly #holds: PackCacheHold[] = [];
+  #closed: 'release' | 'discard' | undefined;
+
+  public async add(hold: PackCacheHold): Promise<void> {
+    if (this.#closed === undefined) {
+      this.#holds.push(hold);
+    } else if (this.#closed === 'release') {
+      hold.release();
+    } else {
+      await hold.discard();
+    }
   }
-};
+
+  public release(): void {
+    this.#closed = 'release';
+    for (const hold of this.#holds.splice(0)) {
+      hold.release();
+    }
+  }
+
+  public async discard(): Promise<void> {
+    this.#closed = 'discard';
+    await Promise.allSettled(this.#holds.splice(0).map(async (hold) => hold.discard()));
+  }
+}
 
 /**
  * The hook `git.service.ts` installs today, unchanged: the ref allow-list, the
@@ -264,7 +293,7 @@ const fetchPacks = async (args: {
   directory: string;
   cache: PackCache | undefined;
   /** Filled with every cache entry this lease linked, for its disposal to release. */
-  holds: PackCacheHold[];
+  holds: LeaseHolds;
 }): Promise<FetchedPacks> => {
   const { store, locator, manifest, directory } = args;
   const packDirectory = path.join(directory, 'objects/pack');
@@ -288,14 +317,20 @@ const fetchPacks = async (args: {
   }
 
   /** One stored object into the lease: linked from the cache, or read from the store if the cache fails it. */
-  const place = async (key: string, file: string): Promise<boolean> => {
+  const place = async (key: string, file: string, expectedBytes?: number): Promise<boolean> => {
     if (cache === undefined) {
       await download(key, file);
       return false;
     }
     try {
-      const hold = await cache.acquire({ store, locator, key, destination: path.join(packDirectory, file) });
-      args.holds.push(hold);
+      const hold = await cache.acquire({
+        store,
+        locator,
+        key,
+        destination: path.join(packDirectory, file),
+        ...(expectedBytes === undefined ? {} : { expectedBytes }),
+      });
+      await args.holds.add(hold);
       return hold.hit;
     } catch (error) {
       if (error instanceof RepositoryStoreError) {
@@ -323,7 +358,7 @@ const fetchPacks = async (args: {
     manifest.packs.map(async (pack) => {
       const name = packFileName(pack.key);
       if (!pack.indexStored) {
-        if (await place(pack.key, name)) {
+        if (await place(pack.key, name, pack.bytes)) {
           cachedBytes += pack.bytes;
         }
         /* The derived index is written beside the link, in the lease, and never
@@ -331,10 +366,14 @@ const fetchPacks = async (args: {
         await runGit(directory, ['index-pack', path.join('objects/pack', name)]);
         return;
       }
-      const [packHit] = await Promise.all([
-        place(pack.key, name),
+      /* Settled, as the outer round is: a pack fill still running when its
+         index's read fails must land before the hydrate gives its holds back. */
+      const [packPlaced, indexPlaced] = await Promise.allSettled([
+        place(pack.key, name, pack.bytes),
         place(indexKeyFor(pack.key), indexFileName(pack.key)),
       ]);
+      const packHit = placedOrThrow(packPlaced);
+      placedOrThrow(indexPlaced);
       if (packHit) {
         cachedBytes += pack.bytes;
       }
@@ -356,6 +395,15 @@ const fetchPacks = async (args: {
     );
   }
   throw reason instanceof Error ? reason : new Error(String(reason));
+};
+
+/** A settled placement's answer, or its failure rethrown for the outer round to report. */
+const placedOrThrow = (outcome: PromiseSettledResult<boolean>): boolean => {
+  if (outcome.status === 'rejected') {
+    const reason: unknown = outcome.reason;
+    throw reason instanceof Error ? reason : new Error(String(reason));
+  }
+  return outcome.value;
 };
 
 /**

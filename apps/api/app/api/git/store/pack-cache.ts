@@ -62,7 +62,21 @@ export type PackCacheHold = {
   readonly hit: boolean;
   /** Gives the entry back to eviction. Idempotent. */
   release(): void;
+  /**
+   * Gives the entry back and forgets it, removing the cached file: what a lease
+   * whose hydrate failed does, so bytes that may be what failed it are read
+   * again by the next lease. Idempotent, and a no-op after `release`.
+   */
+  discard(): Promise<void>;
 };
+
+/** A filled object whose size is not what the manifest records: a short read, never cached. */
+export class PackCacheSizeError extends Error {
+  public constructor(key: string, expected: number, actual: number) {
+    super(`read ${String(actual)} bytes of ${key}, the manifest records ${String(expected)}`);
+    this.name = 'PackCacheSizeError';
+  }
+}
 
 /** `ENOENT`, which is what a wiped cache directory answers a link or a rename with. */
 const isMissing = (error: unknown): boolean => (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
@@ -128,16 +142,18 @@ export class PackCache {
    * Hard-links one stored object into a lease, reading it from the store only
    * on a miss.
    *
-   * @param args - The store and repository, the object's key, and the path in the lease it is linked to.
+   * @param args - The store and repository, the object's key, the path in the lease it is linked to, and the
+   *   object's size when the manifest records it (a pack's), which a fill must match before it is cached.
    * @returns The hold, which the lease releases when it is disposed.
-   * @throws Whatever the store raised on a miss (a `missing-pack` stays one), or a filesystem error the
-   *   caller answers by reading the object straight from the store.
+   * @throws Whatever the store raised on a miss (a `missing-pack` stays one), a {@link PackCacheSizeError},
+   *   or a filesystem error: the caller answers the last two by reading the object straight from the store.
    */
   public async acquire(args: {
     readonly store: RepositoryStore;
     readonly locator: RepositoryLocator;
     readonly key: string;
     readonly destination: string;
+    readonly expectedBytes?: number;
   }): Promise<PackCacheHold> {
     const id = `${args.locator.ownerId}/${args.locator.projectId}/${args.key}`;
     /* Twice at most: a link that finds the file gone (the directory was wiped)
@@ -164,19 +180,42 @@ export class PackCache {
       }
       this.#events?.lookup(cached === undefined ? 'miss' : 'hit');
       let released = false;
+      const giveBack = (): boolean => {
+        if (released) {
+          return false;
+        }
+        released = true;
+        entry.pins -= 1;
+        return true;
+      };
       const hold: PackCacheHold = {
         hit: cached !== undefined,
         release: () => {
-          if (!released) {
-            released = true;
-            entry.pins -= 1;
+          if (giveBack()) {
             this.#report();
           }
         },
+        discard: async () => {
+          if (!giveBack()) {
+            return;
+          }
+          if (this.#entries.get(entry.id) === entry) {
+            /* Another lease's link keeps its bytes; only the cache forgets them. */
+            await this.#remove(entry);
+          }
+          this.#report();
+        },
       };
       if (cached === undefined) {
-        // oxlint-disable-next-line no-await-in-loop -- one fill's eviction, after the entry is pinned
-        await this.#evict(this.#budget);
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- one fill's eviction, after the entry is pinned
+          await this.#evict(this.#budget);
+        } catch {
+          /* The object is linked and the hold is the lease's whatever eviction
+             did: the next fill evicts again, and an entry this one failed to
+             unlink was already forgotten. */
+          this.#report();
+        }
       } else {
         this.#report();
       }
@@ -227,7 +266,12 @@ export class PackCache {
   /** Reads one object into the cache, once however many leases miss on it together. */
   async #fill(
     id: string,
-    args: { readonly store: RepositoryStore; readonly locator: RepositoryLocator; readonly key: string },
+    args: {
+      readonly store: RepositoryStore;
+      readonly locator: RepositoryLocator;
+      readonly key: string;
+      readonly expectedBytes?: number;
+    },
   ): Promise<Entry> {
     const running = this.#filling.get(id);
     if (running !== undefined) {
@@ -246,6 +290,12 @@ export class PackCache {
       try {
         await pipeline(await args.store.getObject(args.locator, args.key), createWriteStream(partial, { mode: 0o444 }));
         await chmod(partial, 0o444);
+        /* A short or long read is not the object the manifest names: it must
+           never become an entry every later lease links. */
+        const { size: filled } = await stat(partial);
+        if (args.expectedBytes !== undefined && filled !== args.expectedBytes) {
+          throw new PackCacheSizeError(args.key, args.expectedBytes, filled);
+        }
         await rename(partial, file);
       } catch (error) {
         await rm(partial, { force: true });

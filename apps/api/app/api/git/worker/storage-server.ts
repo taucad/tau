@@ -113,7 +113,7 @@ export type StorageServerOptions = {
   readonly gitVersion?: () => Promise<string | undefined>;
   /** This Machine's id (`FLY_MACHINE_ID`), sent on every response so tau-api knows who answered (DC2). */
   readonly member?: string;
-  /** The deployed members tau-api ranks over (DC2), answered on `GET /v1/storage/members`. */
+  /** The deployed members tau-api ranks over (DC2), answered on `GET /v1/members`. */
   readonly members?: () => Promise<readonly string[]>;
   /** The grant contract version this build verifies; defaults to the current one. Tests set the mixed-fleet cases. */
   readonly grantVersion?: number;
@@ -252,9 +252,13 @@ export const createStorageRequestHandler = (
       response.writeHead(503, plain).end('stopping');
       return;
     }
-    if (options.gitVersion !== undefined && (await options.gitVersion()) === undefined) {
-      response.writeHead(503, plain).end('git is not installed');
-      return;
+    if (options.gitVersion !== undefined) {
+      /* A probe that threw is no evidence of git: not ready, never unanswered. */
+      const git = await options.gitVersion().catch(() => undefined);
+      if (git === undefined) {
+        response.writeHead(503, plain).end('git is not installed');
+        return;
+      }
     }
     response.writeHead(200, plain).end('ok');
   };
@@ -278,8 +282,12 @@ export const createStorageRequestHandler = (
   };
 
   const serveMembers = async (response: ServerResponse): Promise<void> => {
-    const members = (await options.members?.()) ?? [];
-    response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ members }));
+    try {
+      const members = (await options.members?.()) ?? [];
+      response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ members }));
+    } catch (error) {
+      refuse(response, error, options.logger);
+    }
   };
 
   return (request, response) => {

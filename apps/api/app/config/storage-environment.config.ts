@@ -64,7 +64,7 @@ export const storageEnvironmentSchema = environmentSchemaBase
       .string()
       .optional()
       .describe(
-        'TXT name listing every deployed tau-storage Machine (DC2 affinity), answered on /v1/storage/members; unset answers none',
+        'TXT name listing every deployed tau-storage Machine (DC2 affinity), answered on /v1/members; unset answers none',
       ),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
     /* eslint-enable @typescript-eslint/naming-convention -- end of environment variables */

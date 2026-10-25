@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { buffer } from 'node:stream/consumers';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { commitLease } from '#api/git/store/commit.js';
@@ -42,6 +43,8 @@ const gitEnvironment = {
   GIT_CONFIG_SYSTEM: '/dev/null',
   GIT_TERMINAL_PROMPT: '0',
   TAU_GIT_PUSH_ADMITTED: '1',
+  /* Cast, not annotated: the repository augments `ProcessEnv` with every required
+     environment key, which a git child's minimal environment does not carry. */
 } as unknown as NodeJS.ProcessEnv;
 /* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
 
@@ -455,5 +458,83 @@ describe('PackCache (DC2)', () => {
         expect(mode).toBe(0o444);
       }
     });
+  });
+});
+
+describe('PackCache failure paths (DC2 review)', () => {
+  /** A seeded repository and its manifest's pack key. */
+  const seeded = async (
+    ownerId: string,
+    content: string,
+  ): Promise<{ store: RepositoryStore; locator: RepositoryLocator; packKey: string }> => {
+    const store = createMemoryRepositoryStore();
+    const locator = repositoryLocator({ ownerId, projectId: 'proj-dc2-review' });
+    await seed(store, locator, source(content));
+    const manifest = decodeManifest((await store.readManifest(locator))!.manifest);
+    return { store, locator, packKey: manifest.packs[0]!.key };
+  };
+
+  const isPack = (file: string): boolean => file.endsWith('.pack');
+
+  it('should not cache a pack whose read came back shorter than the manifest says', async () => {
+    const { store, locator, packKey } = await seeded('user-dc2-short', 'export const short = 1;\n');
+    const truncating: RepositoryStore = {
+      ...store,
+      getObject: async (at, key, range) => {
+        const whole = await buffer(await store.getObject(at, key, range));
+        return Readable.from([key === packKey ? whole.subarray(0, whole.byteLength - 7) : whole]);
+      },
+    };
+    const cache = newCache();
+    const lease = await hydrateLease({ store: truncating, locator, parentDirectory: scratch, cache }).catch(
+      (error: unknown) => error,
+    );
+    if (!(lease instanceof Error)) {
+      await (lease as RepositoryLease).dispose();
+    }
+    expect(cachedFiles(cache).filter((file) => isPack(file))).toEqual([]);
+  });
+
+  it('should drop a cached pack a failed hydrate used, so the next lease reads it again', async () => {
+    const { store, locator, packKey } = await seeded('user-dc2-corrupt', 'export const corrupt = 1;\n');
+    /* Same size, wrong bytes, and no stored index: `index-pack` in the lease is what fails. */
+    const read = (await store.readManifest(locator))!;
+    const manifest = decodeManifest(read.manifest);
+    const garbage = new Uint8Array(manifest.packs[0]!.bytes).fill(7);
+    await store.putObject(locator, packKey, garbage, {
+      contentLength: garbage.byteLength,
+      sha256: createHash('sha256').update(garbage).digest('hex'),
+    });
+    const unindexed = { ...manifest, packs: [{ ...manifest.packs[0]!, indexStored: false }] };
+    expect(await store.commitManifest(locator, encodeManifest(unindexed), read.token)).not.toBe('lost');
+
+    const cache = newCache();
+    await expect(hydrateLease({ store, locator, parentDirectory: scratch, cache })).rejects.toThrow();
+    expect(cachedFiles(cache).filter((file) => isPack(file))).toEqual([]);
+    expect(cache.bytes).toBe(0);
+  });
+
+  it('should give back the hold when the eviction after a fill fails', async () => {
+    const first = await seeded('user-dc2-evict-a', 'export const a = 1;\n');
+    const second = await seeded('user-dc2-evict-b', 'export const b = 2;\n');
+    let budget = 1024 ** 3;
+    caches += 1;
+    const cache = new PackCache({
+      root: path.join(scratch, `cache-${String(caches)}`),
+      budgetBytes: async () => budget,
+      events: {
+        ...recordingEvents(),
+        evicted: () => {
+          throw new Error('the eviction failed');
+        },
+      },
+    });
+    const warm = await hydrateLease({ store: first.store, locator: first.locator, parentDirectory: scratch, cache });
+    await warm.dispose();
+    /* Room for the next pack's bytes, not for the idle entries as well: the fill evicts, and that fails. */
+    budget = decodeManifest((await second.store.readManifest(second.locator))!.manifest).packs[0]!.bytes;
+    const lease = await hydrateLease({ store: second.store, locator: second.locator, parentDirectory: scratch, cache });
+    await lease.dispose();
+    expect(cache.evictableBytes).toBe(cache.bytes);
   });
 });

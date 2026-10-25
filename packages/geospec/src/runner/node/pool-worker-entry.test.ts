@@ -80,6 +80,18 @@ describe('startGeoSpecNodePoolWorker', () => {
     expect(owner.host.mock.calls.at(-1)?.[0]).not.toHaveProperty('createModuleVm');
   });
 
+  it('should refuse a module VM module without a default factory', async () => {
+    const { projectPath } = await project();
+    const moduleVmModule = join(projectPath, 'module-vm.mjs');
+    await writeFile(moduleVmModule, 'export const createModuleVm = async () => ({});');
+
+    await expect(start({ projectPath, moduleVmModule: pathToFileURL(moduleVmModule).href })).rejects.toThrow(
+      'must default-export a CreateModuleVm',
+    );
+    expect(owner.close).toHaveBeenCalledOnce();
+    expect(owner.host).not.toHaveBeenCalled();
+  });
+
   it('should close the engine when the config cannot load', async () => {
     const { projectPath } = await project();
 

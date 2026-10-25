@@ -73,6 +73,18 @@ const extensionSwaps = new Map<string, readonly string[]>([
  * @param importer - Rooted importer path.
  * @returns The rooted path of the file, or undefined when none exists.
  */
+/** A directory is not a module file: `exists` reports it as `EISDIR`, so index probing can continue. */
+const isFile = async (filesystem: VmFileSystem, path: string): Promise<boolean> => {
+  try {
+    return await filesystem.exists(path);
+  } catch (error) {
+    if ((error as { readonly code?: unknown }).code === 'EISDIR') {
+      return false;
+    }
+    throw error;
+  }
+};
+
 const resolveProjectFile = async (
   filesystem: VmFileSystem,
   specifier: string,
@@ -86,7 +98,7 @@ const resolveProjectFile = async (
     const directory = separator === -1 ? '' : importer.slice(0, separator);
     path = resolveRootedPath(`${directory ? `${directory}/` : ''}${specifier}`);
   }
-  if (await filesystem.exists(path)) {
+  if (await isFile(filesystem, path)) {
     return path;
   }
   const extension = /\.[jt]sx?$/u.exec(path)?.[0];
@@ -95,7 +107,7 @@ const resolveProjectFile = async (
     : sourceExtensions.map((suffix) => path + suffix);
   for (const candidate of candidates) {
     // oxlint-disable-next-line no-await-in-loop -- ordered probing is observable resolution behaviour
-    if (await filesystem.exists(candidate)) {
+    if (await isFile(filesystem, candidate)) {
       return candidate;
     }
   }

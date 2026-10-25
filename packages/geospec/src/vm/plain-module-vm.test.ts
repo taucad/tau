@@ -1,6 +1,10 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readGeoSpecConfig } from '#config/read-geospec-config.js';
 import { runGeoSpecModule } from '#runner/run-geospec-module.js';
+import { createNodeVmFileSystem } from '#runner/node/node-vm-filesystem.js';
 import { memoryFileSystem, passingSpec } from '#runner/testing/memory-filesystem.js';
 import { createPlainModuleVm } from '#vm/plain-module-vm.js';
 import type { CreateModuleVm, ModuleVm } from '#vm/types.js';
@@ -49,6 +53,22 @@ describe('createPlainModuleVm', () => {
         details: { code: reason, specifier },
       }),
     ]);
+  });
+
+  it('should resolve a directory import to its index file on the Node filesystem', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'geospec-plain-vm-'));
+    try {
+      await mkdir(join(root, 'lib'));
+      await writeFile(join(root, 'lib', 'index.ts'), 'export const size: number = 3;');
+      await writeFile(join(root, 'main.ts'), "import { size } from './lib';\nexport default size;");
+      const vm = await createPlainModuleVm({ filesystem: createNodeVmFileSystem(root) });
+      const bundle = await vm.bundle('main.ts');
+      expect(bundle).toMatchObject({ success: true, issues: [] });
+      expect(bundle.dependencies).toEqual(['main.ts', 'lib/index.ts']);
+      vm.dispose();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('should refuse a missing project import', async () => {

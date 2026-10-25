@@ -77,10 +77,15 @@ export const startGeoSpecNodePoolWorker = async (
   );
   try {
     const filesystem = createNodeVmFileSystem(options.projectPath);
-    const createModuleVm =
-      options.moduleVmModule === undefined
-        ? undefined
-        : ((await import(options.moduleVmModule)) as GeoSpecModuleVmModule).default;
+    let createModuleVm: GeoSpecModuleVmModule['default'] | undefined;
+    if (options.moduleVmModule !== undefined) {
+      const loaded = (await import(options.moduleVmModule)) as Partial<GeoSpecModuleVmModule>;
+      // A configured module without a factory would silently fall back to the plain VM and hide the cause.
+      if (typeof loaded.default !== 'function') {
+        throw new TypeError(`The module VM module '${options.moduleVmModule}' must default-export a CreateModuleVm.`);
+      }
+      createModuleVm = loaded.default;
+    }
     const nativeModelLoader = createGeoSpecNativeModelLoader({
       engine,
       projectPath: options.projectPath,

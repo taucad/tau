@@ -2974,7 +2974,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       const context = await chatContext();
       return context?.deviceId;
     },
-    pullsChats: async () => (await projectSyncPreferences()).syncChats && (await chatContext()) !== undefined,
+    pullsChats: async () => {
+      const { syncChats } = await projectSyncPreferences();
+      return syncChats && (await chatContext()) !== undefined;
+    },
     checkout: {
       cut: fromAuthorityPromise<CheckoutCutActorOutput, CheckoutCutActorInput>(async ({ input }) => {
         /* A comparison running when this cut was asked, over the same write

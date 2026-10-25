@@ -1,0 +1,329 @@
+# Restore drill on staging: runs the B2 restore (restore v2, DR1, taucad/tau#1052)
+# on `tau-maintenance-staging` without anyone's Fly CLI. Manual dispatch only.
+#
+# Staging only, by construction: the app name, the GitHub environment and the
+# token are fixed here, and no input names an environment. Production restores
+# stay with an operator shell and the storage-failure playbook.
+#
+# What it runs is `node /app/dist/maintenance-command.js` on the app's one
+# `revisions-maintenance` Machine (apps/maintenance/fly.staging.toml), which
+# holds the restore key (`TAU_S3_RESTORE_*`, pushed by tau-cloud Terraform):
+#   list           restore --project <id> --owner <id> --list
+#   dry-run        restore --project <id> --owner <id> --dry-run [...]
+#   restore        restore --project <id> --owner <id> [...]
+#   owner-dry-run  restore-owner --owner <id> --dry-run
+#   owner-restore  restore-owner --owner <id>
+# `restore` is non-destructive: it writes under fresh keys and commits a new
+# incarnation above every known generation; it deletes and overwrites nothing.
+# `--operator` is `github-<login>` of whoever dispatched the run, so the
+# committed manifest names them (`committedBy: restore:github-<login>`).
+#
+# The Machine sits stopped in standby. The job starts it if it is stopped, runs
+# the command over `flyctl ssh console` (or `flyctl machine exec`, the
+# `transport` input), and stops it again only if this run started it.
+#
+# This repository is public and so are its run logs. Inputs are validated before
+# any shell sees them and reach scripts only through `env`. The command prints
+# JSON lines and plan lines (ids, keys, counts, SHA-256s), never a credential;
+# even so, any output line that looks credential-bearing is withheld from the
+# log and the job summary. Nothing here lists secrets or dumps an environment.
+
+name: Storage restore drill (staging)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'list | dry-run | restore (one project); owner-dry-run | owner-restore (every project of the owner)'
+        required: true
+        type: choice
+        default: list
+        options:
+          - list
+          - dry-run
+          - restore
+          - owner-dry-run
+          - owner-restore
+      owner_id:
+        description: 'Owner (user) id, user_<alphanumerics>'
+        required: true
+        type: string
+      project_id:
+        description: 'Project id, proj_<alphanumerics>; empty for the owner modes'
+        required: false
+        type: string
+        default: ''
+      generation_floor:
+        description: 'Optional --generation-floor (whole number); dry-run and restore only'
+        required: false
+        type: string
+        default: ''
+      generation:
+        description: 'Optional --generation to restore an older snapshot (whole number); dry-run and restore only'
+        required: false
+        type: string
+        default: ''
+      confirm_snapshot:
+        description: 'Optional --confirm-snapshot (64 hex SHA-256 from list); needs generation'
+        required: false
+        type: string
+        default: ''
+      transport:
+        description: 'How to reach the Machine: ssh (flyctl ssh console) or exec (flyctl machine exec)'
+        required: true
+        type: choice
+        default: ssh
+        options:
+          - ssh
+          - exec
+
+permissions:
+  contents: read
+
+# One drill at a time; a queued drill never cancels a running one.
+concurrency:
+  group: storage-restore-drill-staging
+  cancel-in-progress: false
+
+jobs:
+  drill:
+    name: Restore drill (${{ inputs.mode }}) on tau-maintenance-staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment:
+      name: staging
+      deployment: false
+    env:
+      FLY_APP: tau-maintenance-staging
+    steps:
+      # Every input is checked against a closed pattern here; later steps take
+      # only this step's output, which contains nothing but validated tokens.
+      - name: Validate the dispatch
+        id: args
+        env:
+          MODE: ${{ inputs.mode }}
+          OWNER_ID: ${{ inputs.owner_id }}
+          PROJECT_ID: ${{ inputs.project_id }}
+          GENERATION_FLOOR: ${{ inputs.generation_floor }}
+          GENERATION: ${{ inputs.generation }}
+          CONFIRM_SNAPSHOT: ${{ inputs.confirm_snapshot }}
+          TRANSPORT: ${{ inputs.transport }}
+          ACTOR: ${{ github.triggering_actor }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          [ "$REF" = 'refs/heads/main' ] || fail 'Dispatch the restore drill from main.'
+          [[ "$OWNER_ID" =~ ^user_[A-Za-z0-9]{1,59}$ ]] || fail 'owner_id must be user_ followed by letters and digits.'
+          [[ "$ACTOR" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]] || fail 'The dispatching actor is not a plain GitHub login.'
+          case "$TRANSPORT" in ssh | exec) ;; *) fail 'transport must be ssh or exec.' ;; esac
+          if [ -n "$GENERATION_FLOOR" ]; then
+            [[ "$GENERATION_FLOOR" =~ ^[0-9]{1,15}$ ]] || fail 'generation_floor must be a whole number.'
+          fi
+          if [ -n "$GENERATION" ]; then
+            [[ "$GENERATION" =~ ^[0-9]{1,15}$ ]] || fail 'generation must be a whole number.'
+          fi
+          if [ -n "$CONFIRM_SNAPSHOT" ]; then
+            [[ "$CONFIRM_SNAPSHOT" =~ ^[0-9a-f]{64}$ ]] || fail 'confirm_snapshot must be a lowercase hex SHA-256 as list prints it.'
+            [ -n "$GENERATION" ] || fail 'confirm_snapshot needs generation.'
+          fi
+          args=()
+          case "$MODE" in
+            list | dry-run | restore)
+              [[ "$PROJECT_ID" =~ ^proj_[A-Za-z0-9]{1,59}$ ]] || fail 'project_id must be proj_ followed by letters and digits.'
+              args=(restore --project "$PROJECT_ID" --owner "$OWNER_ID")
+              if [ "$MODE" = list ]; then
+                [ -z "$GENERATION_FLOOR$GENERATION$CONFIRM_SNAPSHOT" ] || fail 'list takes no generation, generation_floor or confirm_snapshot.'
+                args+=(--list)
+              else
+                args+=(--operator "github-${ACTOR}")
+                [ "$MODE" = restore ] || args+=(--dry-run)
+                [ -z "$GENERATION" ] || args+=(--generation "$GENERATION")
+                [ -z "$CONFIRM_SNAPSHOT" ] || args+=(--confirm-snapshot "$CONFIRM_SNAPSHOT")
+                [ -z "$GENERATION_FLOOR" ] || args+=(--generation-floor "$GENERATION_FLOOR")
+              fi
+              ;;
+            owner-dry-run | owner-restore)
+              [ -z "$PROJECT_ID" ] || fail 'The owner modes restore every project of the owner: leave project_id empty.'
+              [ -z "$GENERATION_FLOOR$GENERATION$CONFIRM_SNAPSHOT" ] || fail 'restore-owner takes no generation, generation_floor or confirm_snapshot.'
+              args=(restore-owner --owner "$OWNER_ID" --operator "github-${ACTOR}")
+              [ "$MODE" = owner-restore ] || args+=(--dry-run)
+              ;;
+            *) fail 'mode must be list, dry-run, restore, owner-dry-run or owner-restore.' ;;
+          esac
+          command="node /app/dist/maintenance-command.js ${args[*]}"
+          echo "command=${command}" >> "$GITHUB_OUTPUT"
+          echo "Command: ${command}"
+
+      - name: Require the maintenance deploy token
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_MAINTENANCE_API_TOKEN }}
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "::error::Set fly_maintenance_deploy_token_staging in HCP tau-repo and apply its FLY_MAINTENANCE_API_TOKEN GitHub environment mapping."
+            exit 1
+          fi
+
+      - name: Setup Fly.io CLI
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # master
+
+      # Charter D21: the app has exactly one Machine, in the revisions-maintenance
+      # group. Start it when it is stopped or suspended, and say so for the stop step.
+      - name: Start the maintenance Machine if it is stopped
+        id: machine
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_MAINTENANCE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          machines=$(flyctl machines list --app "$FLY_APP" --json)
+          count=$(jq 'length' <<< "$machines")
+          if [ "$count" != 1 ]; then
+            echo "::error::${FLY_APP} has ${count} Machines; it must have exactly one (charter D21)."
+            exit 1
+          fi
+          id=$(jq -r '.[0].id' <<< "$machines")
+          state=$(jq -r '.[0].state' <<< "$machines")
+          group=$(jq -r '.[0].config.metadata.fly_process_group // ""' <<< "$machines")
+          if [ "$group" != 'revisions-maintenance' ]; then
+            echo "::error::Machine ${id} is in process group '${group}', not revisions-maintenance."
+            exit 1
+          fi
+          echo "id=${id}" >> "$GITHUB_OUTPUT"
+          echo "Machine ${id}: ${state}"
+          case "$state" in
+            started) echo "started=false" >> "$GITHUB_OUTPUT" ;;
+            stopped | suspended)
+              echo "started=true" >> "$GITHUB_OUTPUT"
+              flyctl machine start "$id" --app "$FLY_APP"
+              flyctl machine wait "$id" --app "$FLY_APP" --state started --wait-timeout 3m
+              ;;
+            *)
+              echo "::error::Machine ${id} is ${state}; wait for it to settle and dispatch again."
+              exit 1
+              ;;
+          esac
+
+      # `--help` prints the usage and exits before reading any configuration, so
+      # this proves the transport (and the token's right to use it) and that the
+      # command is in the image, retrying while the Machine's SSH server comes up.
+      - name: Reach the Machine
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_MAINTENANCE_API_TOKEN }}
+          MACHINE_ID: ${{ steps.machine.outputs.id }}
+          TRANSPORT: ${{ inputs.transport }}
+        run: |
+          set -uo pipefail
+          probe='node /app/dist/maintenance-command.js --help'
+          for attempt in 1 2 3 4 5 6; do
+            if [ "$TRANSPORT" = exec ]; then
+              code=$(flyctl machine exec "$MACHINE_ID" "$probe" --app "$FLY_APP" --timeout 60 --json | jq -r '.exit_code // 0') && [ "$code" = 0 ] && ok=1 || ok=0
+            else
+              flyctl ssh console --app "$FLY_APP" --machine "$MACHINE_ID" --quiet --command "$probe" > /dev/null && ok=1 || ok=0
+            fi
+            if [ "$ok" = 1 ]; then
+              echo "Reached ${MACHINE_ID} over ${TRANSPORT} (attempt ${attempt})."
+              exit 0
+            fi
+            echo "attempt ${attempt}: ${MACHINE_ID} not reachable over ${TRANSPORT} yet"
+            sleep 10
+          done
+          echo "::error::Could not run the maintenance command on ${MACHINE_ID} over ${TRANSPORT}. If the token cannot use this transport, dispatch again with the other one."
+          exit 1
+
+      # Run once, never retried: a retried restore would commit another generation.
+      # Lines that look credential-bearing are withheld; JSON event lines and the
+      # plan and commit lines go to the job summary.
+      - name: Run the restore command
+        timeout-minutes: 90
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_MAINTENANCE_API_TOKEN }}
+          MACHINE_ID: ${{ steps.machine.outputs.id }}
+          TRANSPORT: ${{ inputs.transport }}
+          COMMAND: ${{ steps.args.outputs.command }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -uo pipefail
+          raw="$RUNNER_TEMP/restore-raw.txt"
+          shown="$RUNNER_TEMP/restore-output.txt"
+          if [ "$TRANSPORT" = exec ]; then
+            # The Machines API answers when the command ends: one JSON document
+            # with exit_code, stdout and stderr. `flyctl machine exec` exits 0 either way.
+            if flyctl machine exec "$MACHINE_ID" "$COMMAND" --app "$FLY_APP" --timeout 5400 --json > "$RUNNER_TEMP/exec.json"; then
+              jq -r '(.stdout // ""), (.stderr // "")' "$RUNNER_TEMP/exec.json" > "$raw"
+              status=$(jq -r '.exit_code // 0' "$RUNNER_TEMP/exec.json")
+            else
+              status=$?
+              : > "$raw"
+            fi
+            rm -f "$RUNNER_TEMP/exec.json"
+          else
+            flyctl ssh console --app "$FLY_APP" --machine "$MACHINE_ID" --quiet --command "$COMMAND" > "$raw" 2>&1
+            status=$?
+          fi
+          # A connection URL, userinfo in a URL, a credential-named field or
+          # assignment (`secretAccessKey":`, `..._SECRET_ACCESS_KEY=`), or an
+          # AWS or B2 key shape. Plan keys (`"key":"tenants/...`) do not match.
+          credential='(postgres(ql)?|rediss?)://|://[^/[:space:]@]+:[^/[:space:]@]+@|(secret|password|passwd|token|authorization|bearer|(api|access|private)[_-]?key)[A-Za-z_-]*"?[[:space:]]*[=:]|AKIA[0-9A-Z]{16}|K00[0-9A-Za-z+/]{20,}'
+          withheld=0
+          : > "$shown"
+          while IFS= read -r line || [ -n "$line" ]; do
+            if grep -Eiq "$credential" <<< "$line"; then
+              withheld=$((withheld + 1))
+            else
+              printf '%s\n' "$line" >> "$shown"
+            fi
+          done < "$raw"
+          rm -f "$raw"
+          cat "$shown"
+          {
+            echo "## Restore drill: ${MODE} on ${FLY_APP}"
+            echo
+            echo "Machine \`${MACHINE_ID}\` over ${TRANSPORT}; exit status ${status}."
+            echo
+            echo '```text'
+            echo "${COMMAND}"
+            echo '```'
+            echo
+            events=$(grep -E '^\{"event":"revisions_maintenance\.' "$shown" || true)
+            if [ -n "$events" ]; then
+              echo '```json'
+              echo "$events"
+              echo '```'
+            else
+              echo 'No revisions_maintenance JSON line was printed.'
+            fi
+            plan=$(grep -E '^(would restore|restoring|committed generation|no version of|skipped version) ' "$shown" || true)
+            if [ -n "$plan" ]; then
+              echo
+              echo '```text'
+              echo "$plan"
+              echo '```'
+            fi
+            if [ "$status" != 0 ]; then
+              echo
+              echo "Last output line:"
+              echo
+              echo '```text'
+              grep -v '^[[:space:]]*$' "$shown" | tail -n 1 || true
+              echo '```'
+            fi
+            if [ "$withheld" != 0 ]; then
+              echo
+              echo "${withheld} output line(s) withheld because they matched a credential pattern."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$withheld" != 0 ]; then
+            echo "::warning::${withheld} output line(s) withheld because they matched a credential pattern."
+          fi
+          if [ "$status" != 0 ]; then
+            echo "::error::The maintenance command exited ${status}."
+            exit 1
+          fi
+
+      # Leave the Machine as it was found: stop it only if this run started it.
+      - name: Stop the maintenance Machine this run started
+        if: always() && steps.machine.outputs.started == 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_MAINTENANCE_API_TOKEN }}
+          MACHINE_ID: ${{ steps.machine.outputs.id }}
+        run: flyctl machine stop "$MACHINE_ID" --app "$FLY_APP"

@@ -481,16 +481,20 @@ export const createHostGeoSpecRunner = async (
   });
   await previous;
   try {
-    const [session, { createNativeGeoSpecRunner }, { createNodeVmFileSystem }, exporter] = await Promise.all([
-      openNativeGeoSpecSession(workspaceRoot),
-      import('geospec/runner/native'),
-      import('geospec/runner/node'),
-      tauClientExporter({ client: runtime }),
-    ]);
+    const [session, { createNativeGeoSpecRunner }, { createNodeVmFileSystem }, { createEsbuildModuleVm }, exporter] =
+      await Promise.all([
+        openNativeGeoSpecSession(workspaceRoot),
+        import('geospec/runner/native'),
+        import('geospec/runner/node'),
+        // Tau's esbuild VM resolves the npm packages a spec imports; GeoSpec's plain default does not.
+        import('@taucad/esbuild/vm'),
+        tauClientExporter({ client: runtime }),
+      ]);
 
     const filesystem = createNodeVmFileSystem(workspaceRoot);
     const runner = createNativeGeoSpecRunner({
       filesystem,
+      createModuleVm: createEsbuildModuleVm,
       // PERF-OUTPUT-01: the product reads verdicts and localized failures, so
       // it selects the bounded success evidence (ruling 13).
       nativeAssertions: { engine: session.engine, evidenceProfile: 'bounded' },
@@ -938,12 +942,17 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
      */
     const configSession = createGeoSpecConfigSession();
     const readConfig = async (): Promise<GeoSpecTestModelConfig> => {
-      const [{ readGeoSpecConfig }, { createNodeVmFileSystem }] = await Promise.all([
+      const [{ readGeoSpecConfig }, { createNodeVmFileSystem }, { createEsbuildModuleVm }] = await Promise.all([
         import('geospec/config'),
         import('geospec/runner/node'),
+        import('@taucad/esbuild/vm'),
       ]);
       return configSession(
-        await readGeoSpecConfig({ filesystem: createNodeVmFileSystem(workspaceRoot), projectPath: '' }),
+        await readGeoSpecConfig({
+          filesystem: createNodeVmFileSystem(workspaceRoot),
+          projectPath: '',
+          createModuleVm: createEsbuildModuleVm,
+        }),
       );
     };
 

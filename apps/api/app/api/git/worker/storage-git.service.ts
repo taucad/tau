@@ -214,12 +214,15 @@ export class StorageGitService extends GitLeaseHost {
     readonly metrics?: MetricsService;
     /** Where catalog previews are written; tau-storage's app binds the object store's. */
     readonly previews?: PreviewWriter;
+    /** The share of the lease filesystem the pack cache may hold (DC2); 0 or absent runs without one. */
+    readonly packCacheFraction?: number;
   }) {
     super({
       store: args.store,
       shutdown: args.shutdown ?? new ShutdownService(),
       metrics: args.metrics ?? new MetricsService(),
       loggerName: 'StorageGitService',
+      ...(args.packCacheFraction === undefined ? {} : { packCacheFraction: args.packCacheFraction }),
     });
     this.receipts = args.receipts;
     this.previews = args.previews;

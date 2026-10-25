@@ -2,7 +2,7 @@ import { mkdtemp, open, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { createNodeVmFileSystem, resolveUnderRoot } from '#runner/node/node-vm-filesystem.js';
+import { createNodeVmFileSystem, resolveUnderRoot, withInMemorySources } from '#runner/node/node-vm-filesystem.js';
 
 let root: string;
 
@@ -73,5 +73,35 @@ describe('createNodeVmFileSystem', () => {
     await expect(filesystem.readFile('inside-link', 'utf8')).resolves.toBe('inside');
     await expect(filesystem.exists('inside-link')).resolves.toBe(true);
     await expect(filesystem.writeFile('inside-link', 'replacement')).rejects.toMatchObject({ code: 'ELOOP' });
+  });
+});
+
+describe('withInMemorySources', () => {
+  it('should serve a source from memory in front of the disk and pass every other path through', async () => {
+    await writeFile(join(root, 'served.geospec.ts'), 'on disk\n', 'utf8');
+    const filesystem = withInMemorySources(root, createNodeVmFileSystem(root), {
+      'served.geospec.ts': 'in memory\n',
+      'virtual.geospec.ts': 'only in memory\n',
+    });
+
+    await expect(filesystem.readFile('served.geospec.ts', 'utf8')).resolves.toBe('in memory\n');
+    await expect(filesystem.readFile('virtual.geospec.ts')).resolves.toStrictEqual(
+      new TextEncoder().encode('only in memory\n'),
+    );
+    await expect(filesystem.exists('virtual.geospec.ts')).resolves.toBe(true);
+    await expect(filesystem.exists('absent.ts')).resolves.toBe(false);
+    await expect(filesystem.readFile('main.ts', 'utf8')).resolves.toBe('export default 1;\n');
+  });
+
+  it('should refuse to write a served path and leave the file on disk alone', async () => {
+    await writeFile(join(root, 'kept.geospec.ts'), 'mine\n', 'utf8');
+    const filesystem = withInMemorySources(root, createNodeVmFileSystem(root), { 'kept.geospec.ts': 'served\n' });
+
+    await expect(filesystem.writeFile('kept.geospec.ts', 'replaced\n')).rejects.toMatchObject({ code: 'EACCES' });
+    await filesystem.writeFile('other.txt', 'written\n');
+    await filesystem.ensureDir('nested/dir');
+
+    await expect(readFile(join(root, 'kept.geospec.ts'), 'utf8')).resolves.toBe('mine\n');
+    await expect(readFile(join(root, 'other.txt'), 'utf8')).resolves.toBe('written\n');
   });
 });

@@ -39,21 +39,19 @@ describe('GeoSpec public type extraction', () => {
       throw new Error('Missing public MeshSource union');
     }
     expect(options.type.types).toHaveLength(7);
-    const statsSource = generated['geospec']!.files['mesh/types.d.ts']!;
-    const statsAst = ts.createSourceFile('mesh/types.d.ts', statsSource, ts.ScriptTarget.Latest, true);
-    const stats = statsAst.statements.find(
-      (statement) => ts.isTypeAliasDeclaration(statement) && statement.name.text === 'GeometryStats',
-    );
-    if (!stats || !ts.isTypeAliasDeclaration(stats) || !ts.isTypeLiteralNode(stats.type)) {
-      throw new Error('Missing public GeometryStats');
-    }
-    expect(stats.type.members.map((member) => member.name?.getText(statsAst))).toEqual([
-      'vertexCount',
-      'meshCount',
-      'triangleCount',
-      'meshQuality',
-      'watertight',
-      'boundingBox',
+    // The legacy TypeScript engine's evidence and STEP structure types left the public surface with it.
+    const meshSource = generated['geospec']!.files['mesh/types.d.ts']!;
+    const meshAst = ts.createSourceFile('mesh/types.d.ts', meshSource, ts.ScriptTarget.Latest, true);
+    expect(meshAst.statements.filter(ts.isTypeAliasDeclaration).map((statement) => statement.name.text)).toStrictEqual([
+      'Vec3',
+      'MeshFileFormat',
+      'GeometryFileFormat',
+      'GeometryExportIntent',
+      'GeometryDiagnostic',
     ]);
+    for (const legacy of ['BrepEvidence', 'GeometrySubject', 'MeshQualityStats', 'StepEvidence', 'XdeReadResult']) {
+      expect(bundle.content).not.toContain(legacy);
+      expect(bundle.files['mesh/index.d.ts']).not.toContain(legacy);
+    }
   }, 30_000);
 });

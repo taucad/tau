@@ -226,6 +226,18 @@ export class RootedViews {
         : resolution.provider.readFile(resolution.path);
     }
 
+    /* One provider call for the whole set: a remote provider digests beside its bytes. */
+    const providerHashFiles = captured.provider.hashFiles?.bind(captured.provider);
+    const hashFiles =
+      providerHashFiles === undefined
+        ? undefined
+        : async (paths: readonly string[]): Promise<Record<string, string>> => {
+            const providerPaths = paths.map((path) => resolveLocal(path).resolution.path);
+            const digests = await providerHashFiles(providerPaths);
+            assertCurrent();
+            return Object.fromEntries(paths.map((path, index) => [path, digests[providerPaths[index]!]!]));
+          };
+
     const readFileStream = (path: string, options?: FileReadStreamOptions): ReadableStream<Uint8Array<ArrayBuffer>> => {
       validateFileReadStreamOptions(options);
       const { resolution } = resolveLocal(path);
@@ -581,6 +593,7 @@ export class RootedViews {
       dispose() {
         // The provider and rooted view lifetime remain owned by WorkspaceFileService.
       },
+      ...(hashFiles === undefined ? {} : { hashFiles }),
       readFile,
       readFileStream,
       writeFile,

@@ -27,6 +27,7 @@ import type {
 import type { NodeFsPort } from '#backend/node/port.js';
 import type { NodeFsRequest, NodeFsResponse, NodeFsWatchEvent } from '#backend/node/protocol.js';
 import {
+  maximumHashFilesPaths,
   nodeFsProtocolVersion,
   nodeFsResponseSchema,
   nodeFsResultSchemas,
@@ -379,6 +380,31 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
         },
       );
     }
+  }
+
+  /**
+   * Digest files on the host, beside their bytes: one round trip, no bodies.
+   *
+   * @param paths - Root-relative file paths.
+   * @returns Each path's lowercase hexadecimal SHA-256, or `'missing'` when absent.
+   */
+  public async hashFiles(paths: readonly string[]): Promise<Record<string, string>> {
+    for (const path of paths) {
+      this._assertRootedPath(path);
+    }
+    const digests: Record<string, string> = {};
+    for (let offset = 0; offset < paths.length; offset += maximumHashFilesPaths) {
+      Object.assign(
+        digests,
+        // oxlint-disable-next-line no-await-in-loop -- requests are bounded, and almost every call is one.
+        await this._channel.request({
+          root: this._root,
+          op: 'hashFiles',
+          paths: paths.slice(offset, offset + maximumHashFilesPaths),
+        }),
+      );
+    }
+    return digests;
   }
 
   public async readdir(path: string): Promise<string[]> {

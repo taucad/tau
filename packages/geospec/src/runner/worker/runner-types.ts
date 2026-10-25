@@ -5,7 +5,7 @@ import type {
   GeoSpecTestCase,
 } from '#runner/types.js';
 import type { ManagedGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
-import type { VmFileSystem, VmIssue } from '@taucad/esbuild/vm';
+import type { VmFileSystem, VmIssue } from '#vm/types.js';
 
 /**
  * One GeoSpec test file executed by a worker-style runner.
@@ -130,6 +130,8 @@ export type GeoSpecRunnerOptions = {
   nativeModelLoader?: ManagedGeoSpecNativeModelLoader;
   /** Additional in-memory modules made available to the VM. */
   builtinModules?: RunGeoSpecModuleOptions['builtinModules'];
+  /** Module VM factory for every file; defaults to GeoSpec's plain VM (see `RunGeoSpecModuleOptions`). */
+  createModuleVm?: RunGeoSpecModuleOptions['createModuleVm'];
 };
 
 /**

@@ -60,6 +60,7 @@ import {
   writeShapesGlb,
 } from '#opencascade-mesh.js';
 import type { ShapeEntry } from '#opencascade.types.js';
+import { extractShapeEdges } from '#opencascade-edges.js';
 
 import { opencascadeDetectPattern } from '#opencascade.constants.js';
 
@@ -610,11 +611,18 @@ export const opencascadeKernel = defineKernel({
   builtinModuleNames: ['libcascade'],
   builtinPackages: { libcascade: { name: 'libcascade', version: '3.1.0' } },
   name: 'OpenCascadeKernel',
-  // 1.2.0: native-handle snapshots are binary BRep. The version keys every cached entry, so text
-  // snapshots from 1.1.0 stop matching and age out; there is nothing to migrate.
-  version: '1.2.0',
+  // 1.3.0: the model view and GLB export claim `includeEdges` and draw B-rep edge lines themselves,
+  // so a render cached by 1.2.0 with fallback overlay lines stops matching and ages out.
+  version: '1.3.0',
   optionsSchema: opencascadeOptionsSchema,
-  views: { model: { title: 'Model', mimeType: 'model/gltf-binary', optionsSchema: opencascadeRenderSchema } },
+  views: {
+    model: {
+      title: 'Model',
+      mimeType: 'model/gltf-binary',
+      optionsSchema: opencascadeRenderSchema,
+      content: ['includeEdges'],
+    },
+  },
   exports: {
     stl: { title: 'STL', mimeType: 'model/stl', extension: 'stl', optionsSchema: opencascadeExportSchemas.stl },
     step: {
@@ -628,6 +636,7 @@ export const opencascadeKernel = defineKernel({
       mimeType: 'model/gltf-binary',
       extension: 'glb',
       optionsSchema: opencascadeExportSchemas.glb,
+      content: ['includeEdges'],
     },
   },
 
@@ -807,7 +816,7 @@ export const opencascadeKernel = defineKernel({
     }
   },
 
-  async render({ handle, options }, runtime, context) {
+  async render({ handle, options, content }, runtime, context) {
     if (handle.length === 0) {
       return { content: asBuffer(createEmptyGlb()) };
     }
@@ -825,6 +834,7 @@ export const opencascadeKernel = defineKernel({
           request: { tessellation: options.tessellation, explicitDefaults: occtExplicitTessellationDefaults.preview },
           budget: context.previewTriangleBudget,
           inParallel: context.isParallelMeshing,
+          includeEdges: content?.includeEdges === true,
         });
       } finally {
         meshSpan.end();
@@ -853,6 +863,7 @@ export const opencascadeKernel = defineKernel({
         }
 
         const { coordinateSystem, unit } = options;
+        const { content } = input;
         const requested = resolveOpencascadeTessellation(context.oc, handle, {
           tessellation: options.tessellation,
           explicitDefaults: occtExplicitTessellationDefaults.export,
@@ -865,7 +876,11 @@ export const opencascadeKernel = defineKernel({
           unit,
         });
         assertWithinExportBudget(requested, countGlbMesh(rawGlb).triangles);
-        const gltfData = await finishShapesGlb(rawGlb, handle);
+        const edges =
+          content?.includeEdges === true
+            ? handle.map((entry) => extractShapeEdges(context.oc, entry.shape, toMeshTolerances(requested)))
+            : undefined;
+        const gltfData = await finishShapesGlb(rawGlb, handle, { edges, coordinateSystem, unit });
 
         return { files: [createExportFile('glb', 'model.glb', asBuffer(gltfData))] };
       }

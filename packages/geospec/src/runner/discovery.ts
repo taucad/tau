@@ -1,4 +1,4 @@
-import { assertRootedPath } from '@taucad/runtime/kernel';
+import { assertRootedPath } from '#support/path.js';
 
 /**
  * Default file globs used by GeoSpec test discovery.

@@ -93,6 +93,15 @@ export type RuntimeFileSystemBase = FileSystemProvider & {
    * Returns an unsubscribe function. Events are filtered server-side.
    */
   watch?(request: RuntimeWatchRequest, handler: (event: RuntimeWatchEvent) => void): () => void;
+  /**
+   * Digest files where their bytes live, in one call and without returning bodies.
+   *
+   * Each value is the lowercase hexadecimal SHA-256 of the file's current bytes,
+   * the digest the kernel worker computes itself, or `'missing'` when nothing is
+   * at that path; every requested path is a key of the result. Optional: without it
+   * the runtime reads the bodies and digests them on its own side.
+   */
+  hashFiles?(paths: readonly string[]): Promise<Record<string, string>>;
 };
 
 /** Watch request for runtime filesystem subscriptions. @public */

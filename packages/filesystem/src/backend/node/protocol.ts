@@ -15,8 +15,12 @@ import { assertRootedPath } from '@taucad/utils/path';
 import type { FileMode, FileStat, HeadFileStat } from '#types.js';
 import { streamChunkSize } from '#backend/stream-utils.js';
 
-/** Wire version. Version 7 carries directory entry kinds without per-child stat requests. @public */
-export const nodeFsProtocolVersion = 7;
+/**
+ * Wire version. Version 7 carries directory entry kinds without per-child stat
+ * requests; version 8 adds `hashFiles`, digests computed beside the bytes.
+ * @public
+ */
+export const nodeFsProtocolVersion = 8;
 
 /**
  * Most watch events one frame carries. The host sends what one native callback reported as one frame, so a bulk
@@ -56,6 +60,8 @@ const bytesSchema = z.instanceof(Uint8Array);
 const dataSchema = z.union([bytesSchema, z.string()]);
 const maximumCheckedWritePreconditions = 32;
 const maximumCheckedWriteBytes = 8 * 1024 * 1024;
+/** Paths one `hashFiles` request may name; a caller with more splits them. @internal */
+export const maximumHashFilesPaths = 4096;
 const rootedPathSchema = z
   .string()
   .max(4096)
@@ -144,6 +150,7 @@ export const nodeFsRequestSchema = z.discriminatedUnion('op', [
   z.object({ ...rooted, op: z.literal('writeFile'), path: z.string(), data: dataSchema }),
   checkedWriteRequestSchema,
   checkedDeleteRequestSchema,
+  z.object({ ...rooted, op: z.literal('hashFiles'), paths: z.array(rootedPathSchema).max(maximumHashFilesPaths) }),
   z.object({ ...rooted, op: z.literal('readdir'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('readdirEntries'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('readdirWithStats'), path: z.string() }),
@@ -225,6 +232,7 @@ export const nodeFsResultSchemas = {
   writeFile: z.undefined(),
   writeFileChecked: checkedWriteResultSchema,
   deleteFileChecked: checkedWriteResultSchema,
+  hashFiles: z.record(z.string(), z.union([z.string().regex(/^[0-9a-f]{64}$/u), z.literal('missing')])),
   readdir: z.array(z.string()),
   readdirEntries: z.array(z.object({ name: z.string(), kind: z.enum(['file', 'dir']) })),
   readdirWithStats: z.array(z.object({ name: z.string() }).and(fileStatSchema)),

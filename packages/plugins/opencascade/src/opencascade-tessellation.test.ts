@@ -3,13 +3,15 @@
 /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- vitest asymmetric matchers return any */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ExportResult, Rendering } from '@taucad/runtime';
-import { assertRenderingSuccess, createTestRuntimeClient } from '@taucad/runtime-testing';
+import { assertRenderingSuccess, createTestRuntimeClient, glbToDocument } from '@taucad/runtime-testing';
 import { esbuildBundler } from '@taucad/esbuild';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { initOcct, occtExplicitTessellationDefaults } from '@taucad/occt-core';
 import type { OpenCascadeInstance } from 'libcascade/init';
 import { opencascadeKernel } from '#opencascade.kernel.js';
-import { measureShapesDiagonal, renderShapesWithinBudget } from '#opencascade-mesh.js';
+import { Primitive } from '@gltf-transform/core';
+import { extractShapeEdges } from '#opencascade-edges.js';
+import { countGlbMesh, measureShapesDiagonal, renderShapesWithinBudget, toMeshTolerances } from '#opencascade-mesh.js';
 
 const sphere = (radius: number): string =>
   `import { BRepPrimAPI_MakeSphere } from 'libcascade';
@@ -163,6 +165,61 @@ describe('OpenCascade preview budget (P4)', () => {
     ]);
     shape.delete();
     maker.delete();
+  });
+
+  it('should sample edges at the downgraded tolerances and keep lines out of the triangle count', async () => {
+    const maker = new oc.BRepPrimAPI_MakeSphere(50);
+    const sphere = maker.Shape();
+    const axis = new oc.gp_Ax2();
+    const circle = new oc.gp_Circ(axis, 40);
+    const edgeMaker = new oc.BRepBuilderAPI_MakeEdge(circle);
+    const ring = edgeMaker.Edge();
+    const shapes = [
+      { name: 'Sphere', shape: sphere },
+      { name: 'Ring', shape: ring },
+    ];
+    const request = { tessellation: 'medium', explicitDefaults: occtExplicitTessellationDefaults.preview } as const;
+    const fitted = await renderShapesWithinBudget(oc, shapes, { request, budget: Number.POSITIVE_INFINITY });
+    const budget = Math.floor(fitted.tessellation.triangles / 3);
+    const plain = await renderShapesWithinBudget(oc, shapes, { request, budget });
+    const budgeted = await renderShapesWithinBudget(oc, shapes, { request, budget, includeEdges: true });
+    const effective = {
+      linearTolerance: budgeted.tessellation.linearTolerance!,
+      angularTolerance: budgeted.tessellation.angularTolerance!,
+    };
+
+    expect(budgeted.tessellation.downgraded).toBeGreaterThanOrEqual(1);
+    // Lines never count as triangles: the report matches the same render without edges.
+    expect({ ...budgeted.tessellation, elapsed: 0 }).toEqual({ ...plain.tessellation, elapsed: 0 });
+    expect(countGlbMesh(budgeted.content).triangles).toBe(budgeted.tessellation.triangles);
+
+    const delivered = await glbToDocument(budgeted.content);
+    const meshes = delivered.getRoot().listMeshes();
+    const points = (name: string, mode: number): number[][] =>
+      meshes
+        .find((mesh) => mesh.getName() === name)!
+        .listPrimitives()
+        .filter((primitive) => primitive.getMode() === mode)
+        .flatMap((primitive) => {
+          const positions = primitive.getAttribute('POSITION')!;
+          return Array.from({ length: positions.getCount() }, (_, index) => positions.getElement(index, []));
+        });
+    // The sphere seam lies on the admitted, coarser surface mesh.
+    const surface = points('Sphere', Primitive.Mode['TRIANGLES']!);
+    const seam = points('Sphere', Primitive.Mode['LINES']!);
+    expect(seam.length).toBeGreaterThan(0);
+    for (const [x, y, z] of seam) {
+      expect(Math.min(...surface.map(([u, v, w]) => Math.hypot(x! - u!, y! - v!, z! - w!)))).toBeLessThan(1e-9);
+    }
+    // The free ring is sampled from its curve at the effective tolerances, not the requested ones.
+    const ringLines = points('Ring', Primitive.Mode['LINES']!);
+    const atEffective = extractShapeEdges(oc, ring, toMeshTolerances(effective));
+    const atRequested = extractShapeEdges(oc, ring, toMeshTolerances(fitted.tessellation as typeof effective));
+    expect(ringLines).toHaveLength(atEffective.lines.length / 3);
+    expect(atRequested.lines.length).toBeGreaterThan(atEffective.lines.length);
+    for (const handle of [ring, edgeMaker, circle, axis, sphere, maker]) {
+      handle.delete();
+    }
   });
 
   it('measures the diagonal of every shape together from the B-rep', () => {

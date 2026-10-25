@@ -13,16 +13,15 @@ const readPackageJson = async (): Promise<PackageJson> =>
   JSON.parse(await readFile(resolve(import.meta.dirname, '../package.json'), 'utf8')) as PackageJson;
 
 describe('geospec package metadata', () => {
-  it('declares the runtime and VM substrate surfaces directly', async () => {
+  it('depends on no Tau package and bundles specs over plain esbuild', async () => {
     const packageJson = await readPackageJson();
 
-    expect(packageJson.dependencies?.['@taucad/runtime']).toBe('workspace:*');
-    expect(packageJson.dependencies?.['@taucad/types']).toBeUndefined();
-    // The VM is `@taucad/esbuild`'s own source, published under its `./vm` subpath.
-    expect(packageJson.dependencies?.['@taucad/esbuild']).toBe('workspace:*');
-    expect(packageJson.devDependencies?.['@taucad/runtime']).toBeUndefined();
-    expect(packageJson.peerDependencies?.['@taucad/runtime']).toBeUndefined();
-    expect(packageJson.peerDependenciesMeta?.['@taucad/runtime']).toBeUndefined();
+    // D11: geospec is severed from Tau. A host injects Tau's VM through `createModuleVm` instead.
+    for (const field of [packageJson.dependencies, packageJson.peerDependencies] as const) {
+      expect(Object.keys(field ?? {}).filter((name) => name.startsWith('@taucad/'))).toEqual([]);
+    }
+    expect(packageJson.dependencies?.['esbuild']).toBe('catalog:');
+    expect(packageJson.dependencies?.['esbuild-wasm']).toBeUndefined();
   });
 
   it('depends on the compiled engine and on no kernel', async () => {

@@ -1847,6 +1847,36 @@ describe('a branch refusal over the host channel', () => {
   }, 30_000);
 });
 
+/* Round 27: the page reads a foreign run by the answer the placement's own pull gives, as the agent host's fence does. */
+describe('a pull the page asks for over the host channel', () => {
+  it('answers whether the placement can pull the chat, and pulls before any placement', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-page-pull-'));
+    roots.push(workspaceRoot);
+    const revisions = createProjectRevisions({
+      workspaceRoot,
+      projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
+      port: createIsomorphicGitRevisionPort({
+        filesystem: new NodeFsProvider(workspaceRoot),
+        checkouts: { projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA', root: () => new NodeFsProvider(workspaceRoot) },
+      }),
+    });
+    try {
+      await revisions.channel.request({ command: 'open' });
+      /* No placement yet: nothing evidences that this device cannot pull. */
+      await expect(revisions.channel.request({ command: 'pullRemote', chatId: 'chat-1' })).resolves.toMatchObject({
+        result: { pulls: true },
+      });
+      /* A project with no remote: the placement refuses the pull CHAT_NOT_SHARED, and the page hears it. */
+      revisions.placement(() => undefined);
+      await expect(revisions.channel.request({ command: 'pullRemote', chatId: 'chat-1' })).resolves.toMatchObject({
+        result: { pulls: false },
+      });
+    } finally {
+      await revisions.release();
+    }
+  }, 30_000);
+});
+
 describe('a restore refusal over the host channel', () => {
   it('carries the refusal code, not only a sentence', async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-restore-refusal-'));

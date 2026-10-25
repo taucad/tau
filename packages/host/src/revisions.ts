@@ -1298,6 +1298,9 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     };
   };
 
+  /* The session `placement` opened last, whose pull answers the page's (round 27): one rule for the page and the host. */
+  let placed: Pick<TurnPlacementAdapter<unknown>, 'pull'> | undefined;
+
   // oxlint-disable-next-line complexity -- One validated dispatch table mirrors the established worker wire without another protocol layer.
   const sendRevisionRequest = async (value: JsonValue): Promise<JsonValue> => {
     const request = hostRevisionRequestSchema.parse(value) as {
@@ -1581,10 +1584,16 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       case 'syncNow':
         actor.send({ type: 'syncNow' });
         break;
-      /* XD3, rounds 18 and 19: another device's run has been quiet here a while; pulls show whether it stayed quiet. */
-      case 'pullRemote':
-        actor.send({ type: 'sync', event: { type: 'remoteMoved', generation: 0, refs: [] } });
-        break;
+      /* XD3, rounds 18 and 19: another device's run has been quiet here a while; pulls show whether it stayed quiet.
+       * Round 27: through the placement's pull, so the page hears where this device cannot pull the chat at all. */
+      case 'pullRemote': {
+        const chatId = optionalText(request, 'chatId') ?? '';
+        const answer = await placed?.pull({ requestId: `page-pull:${chatId}:${String(Date.now())}`, chatId });
+        if (answer === undefined) {
+          actor.send({ type: 'sync', event: { type: 'remoteMoved', generation: 0, refs: [] } });
+        }
+        return { pulls: !(answer?.status === 'refused' && answer.code === 'CHAT_NOT_SHARED') };
+      }
       case 'publishProject':
         actor.send({
           type: 'publish',
@@ -1765,14 +1774,17 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       }),
       events: channelEvents,
     },
-    placement: (openTools) =>
-      createTurnPlacementPort({
+    placement: (openTools) => {
+      const session = createTurnPlacementPort({
         revisions: tree,
         openTools,
         root: (checkout) => (checkout.kind === 'live' ? options.workspaceRoot : checkout.root),
         /* E1: the watcher catches up before an admission's dirty base and before a completion cut. */
         settle: settleWatch,
-      }),
+      });
+      placed = session;
+      return session;
+    },
   };
   startWatching();
   return revisions;

@@ -465,6 +465,14 @@
       "owner": "W10"
     },
     {
+      "id": "RUNTIME-OBS-CHILD-RESIDENT",
+      "bound": "Native worker resident-memory sample answer: 1 s, then the sample reports none",
+      "site": "packages/host/src/runtime-child-workers.ts",
+      "token": "sampleAnswerTimeout",
+      "class": "External edge",
+      "owner": "Runtime Observability PR-1c"
+    },
+    {
       "id": "E24",
       "bound": "ACP CLI version probe",
       "site": "packages/host/src/acp/registry.ts",

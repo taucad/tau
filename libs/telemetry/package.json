@@ -22,8 +22,10 @@
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
+  "dependencies": {
+    "@taucad/events": "workspace:*"
+  },
   "devDependencies": {
-    "@taucad/events": "workspace:*",
     "@taucad/types": "workspace:*",
     "zod": "catalog:"
   }

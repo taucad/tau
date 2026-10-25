@@ -340,7 +340,10 @@ describe.runIf(enabled)('desktop terminal conformance', () => {
   conformance('T05', 'Ctrl-D at an empty prompt ends the shell with its own status', async () => {
     const pane = openPane();
     await opened(pane);
-    await pane.run('echo READY-$((2+3))', 'READY-5');
+    /* The prompt only exists once expanded, so the typed line never matches; EOF waits for it. */
+    await pane.run('p=PROMPT; PS1="$p-SET> "; echo READY-$((2+3))', 'READY-5');
+    const ready = pane.text().indexOf('READY-5');
+    await pane.until(() => pane.text().includes('PROMPT-SET> ', ready), 'the prompt before EOF');
     pane.send({ type: 'input', data: '\u0004' });
     await pane.until(() => pane.of('exited').length > 0, 'exited');
     expect(pane.of('exited')[0]).toMatchObject({ reason: 'shell-exited', exitCode: 0 });

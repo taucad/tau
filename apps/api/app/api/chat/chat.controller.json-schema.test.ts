@@ -1054,6 +1054,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                       "get_print_profiles",
                       "request_job",
                       "check_job",
+                      "shell",
                     ],
                     "type": "string",
                   },

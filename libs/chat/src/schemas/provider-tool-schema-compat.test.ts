@@ -136,6 +136,7 @@ describe('provider-facing tool schema compatibility', () => {
       toolName.getPrintProfiles,
       toolName.requestJob,
       toolName.checkJob,
+      toolName.shell,
     ]);
     expect(toolDescriptions[toolName.arrangeWorkbench]).toBe(arrangeWorkbenchDescription);
     expect(toolDescriptions[toolName.arrangeWorkbench].length).toBeGreaterThan(0);
@@ -176,6 +177,21 @@ describe('provider-facing tool schema compatibility', () => {
     });
     expect(installPackagesInputSchema.safeParse({ add: ['simplex-noise@^4.0.3'] }).success).toBe(false);
     expect(installPackagesInputSchema.safeParse({ add: { 'simplex-noise': '' } }).success).toBe(false);
+  });
+
+  it('keeps shell provider-safe: a strict top-level object with nested strict access and no pattern keyword', () => {
+    const schema = providerSchemaFor(toolName.shell) as ProviderToolSchema & {
+      additionalProperties?: unknown;
+      properties: Record<string, { additionalProperties?: unknown; properties?: Record<string, unknown> }>;
+    };
+    expect(Object.keys(schema.properties)).toEqual(['command', 'cwd', 'timeoutMs', 'access']);
+    expect(schema.required).toEqual(['command']);
+    expect(schema.additionalProperties).toBe(false);
+    expect(schema.properties['access']?.additionalProperties).toBe(false);
+    expect(Object.keys(schema.properties['access']?.properties ?? {})).toEqual(['reason', 'read', 'write', 'domains']);
+    expect(collectKeywordPaths(schema)).toEqual(emptyKeywordPaths());
+    expect(JSON.stringify(schema)).not.toContain('"pattern"');
+    expect(anthropicProjection(schema).required).toEqual(['command']);
   });
 
   it('should omit test_model when testing is disabled', () => {

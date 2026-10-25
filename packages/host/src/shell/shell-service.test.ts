@@ -209,15 +209,23 @@ describe('the launch Tau compiles (D4, D20, D26, A05)', () => {
     expect(launch!.filesystem.denied).toEqual(
       expect.arrayContaining([
         join(project, '.git'),
-        join(project, '.tau', 'chats'),
-        join(project, '.tau', 'offloaded-tool-results'),
+        join(project, '.tau', 'project.json'),
         join(project, 'vendor', 'lib', '.git'),
         other,
         join(other, '.tau'),
         appData,
       ]),
     );
+    expect(launch!.filesystem.readOnly).toEqual(
+      expect.arrayContaining([
+        join(project, '.tau', 'chats'),
+        join(project, '.tau', 'offloaded-tool-results'),
+        join(project, 'exports'),
+      ]),
+    );
+    expect(launch!.filesystem.denied).not.toContain(join(project, '.tau', 'chats'));
     expect(launch!.filesystem.denied).not.toContain(join(project, '.tau', 'parameters'));
+    expect(launch!.filesystem.readOnly).not.toContain(join(project, '.tau', 'parameters'));
     expect(Object.keys(launch!.environment).toSorted()).toEqual([
       'HOME',
       'LANG',

@@ -31,7 +31,7 @@ including how it builds and links OCCT, is at [github.com/taucad/geospec](https:
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 808 packages, with the license each declares.
+The web and desktop apps include the following 809 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -49,6 +49,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | @anthropic-ai/claude-agent-sdk-{platform} | 0.3.232 | SEE LICENSE IN LICENSE.md |
 | [@anthropic-ai/sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime) | 0.0.75 | Apache-2.0 |
 | [@anthropic-ai/sdk](https://github.com/anthropics/anthropic-sdk-typescript) | 0.91.1 | MIT |
+| [@aurigax-ai/ghostty-web](https://github.com/aurigax-ai/ghostty-web) | 0.3.6 | MIT |
 | [@aws-crypto/sha256-browser](https://github.com/aws/aws-sdk-js-crypto-helpers) | 5.2.0 | Apache-2.0 |
 | [@aws-crypto/sha256-js](https://github.com/aws/aws-sdk-js-crypto-helpers) | 5.2.0 | Apache-2.0 |
 | [@aws-crypto/supports-web-crypto](https://github.com/aws/aws-sdk-js-crypto-helpers) | 5.2.0 | Apache-2.0 |

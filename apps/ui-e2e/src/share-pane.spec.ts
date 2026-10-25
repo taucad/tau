@@ -8,6 +8,9 @@ const navigationFixtureRoute = '/__e2e/project-navigation';
 const seededProjectName = 'sgenoud/models file-tree e2e';
 
 const shareRegion = (): Locator => selectors.getByRole('region', { name: 'Share project' });
+/** The "Share with" method picker, named by the method it shows. */
+const shareMethodPicker = (method: string): Locator =>
+  shareRegion().getByRole('button', { name: `Share with ${method}`, exact: true });
 const shareTab = (): Locator => selectors.getByCss('.dv-tab[aria-label="Share"]');
 
 const openSeededProject = async (): Promise<void> => {
@@ -38,9 +41,13 @@ test('keeps one movable Share pane, restores it, and resolves an unencrypted Dir
 
   await target.expectCount(shareTab(), 1);
   await target.expectCount(selectors.getByRole('dialog', { name: 'Share project' }), 0);
-  await target.expectVisible(shareRegion().getByRole('tab', { name: 'Direct link' }));
-  await target.expectVisible(shareRegion().getByRole('tab', { name: 'Tau link' }));
-  await target.expectVisible(shareRegion().getByRole('tab', { name: 'GitHub Gist' }));
+  /* The methods are one "Share with" picker (#765), not tabs: it shows the chosen method and lists all three. */
+  await target.click(shareMethodPicker('Direct link'));
+  await target.expectVisible(selectors.getByRole('option', { name: 'Direct link' }));
+  await target.expectVisible(selectors.getByRole('option', { name: 'Hosted link' }));
+  await target.expectVisible(selectors.getByRole('option', { name: 'GitHub Gist' }));
+  await target.keyboardPress('Escape');
+  await target.expectCount(selectors.getByRole('option', { name: 'GitHub Gist' }), 0);
 
   await target.click(selectors.getByRole('button', { name: 'Share', exact: true }).first());
   await target.expectCount(shareTab(), 1);
@@ -78,6 +85,10 @@ test('keeps one movable Share pane, restores it, and resolves an unencrypted Dir
 
   const parsed = new URL(plainUrl);
   await target.openSecondary(`${parsed.pathname}${parsed.search}${parsed.hash}`);
+  /* A shared model is someone's code, so the link asks before it runs (shared-project-workbench's run consent). */
+  const runModel = selectors.getByRole('button', { name: 'Run this model' });
+  await target.expectVisible(runModel, 60_000, 'secondary');
+  await target.click(runModel, undefined, 'secondary');
   await target.expectVisible(selectors.getByRole('button', { name: 'Download source' }), 60_000, 'secondary');
   await target.expectCount(shareTab(), 0, 10_000, 'secondary');
   expect(await target.currentUrl()).toContain('/w/');
@@ -97,7 +108,7 @@ test('restores a GitHub authorization return and routes sidebar Share to the sel
 
   await target.expectVisible(shareRegion(), 60_000);
   await target.expectVisible(shareRegion().getByText('GitHub Gist access was not granted.', { exact: true }));
-  await target.expectAttribute(shareRegion().getByRole('tab', { name: 'GitHub Gist' }), 'data-state', 'active');
+  await target.expectVisible(shareMethodPicker('GitHub Gist'));
   await target.waitFor(() => {
     const url = new URL(location.href);
     return (
@@ -110,6 +121,9 @@ test('restores a GitHub authorization return and routes sidebar Share to the sel
     );
   });
 
+  const projectA = new URL(await target.currentUrl());
+  expect(projectA.searchParams.get('chat')).not.toBeNull();
+
   /* Row actions show on hover or focus (sidebar v2 D7). */
   await target.hover(selectors.getByRole('link', { name: 'Project Navigation B', exact: true }));
   await target.click(selectors.getByRole('button', { name: 'More actions for Project Navigation B' }));
@@ -118,7 +132,10 @@ test('restores a GitHub authorization return and routes sidebar Share to the sel
   await target.expectVisible(shareRegion(), 60_000);
   const next = new URL(await target.currentUrl());
   expect(next.pathname).toMatch(/\/w\/[^/]+\/project-navigation-b$/u);
-  expect(next.searchParams.has('chat')).toBe(false);
+  /* Nothing of project A's URL comes along. Project B may name its own focused chat once it resolves (the project
+   * route writes the resolved chat back to the URL), so only A's chat is ruled out. */
+  expect(next.searchParams.has('keep')).toBe(false);
+  expect(next.searchParams.get('chat')).not.toBe(projectA.searchParams.get('chat'));
   expect(next.searchParams.has('workbench')).toBe(false);
 });
 
@@ -141,7 +158,9 @@ test('uses the same Share body in the mobile drawer without clipping its navigat
   expect(navigationBounds.x).toBeGreaterThanOrEqual(0);
   expect(navigationBounds.x + navigationBounds.width).toBeLessThanOrEqual(390);
 
-  await target.click(shareRegion().getByRole('tab', { name: 'GitHub Gist' }));
+  await target.click(shareMethodPicker('Direct link'));
+  await target.click(selectors.getByRole('option', { name: 'GitHub Gist' }));
+  await target.expectVisible(shareMethodPicker('GitHub Gist'));
   await target.expectVisible(shareRegion().getByText(/Tau sends the compressed project to GitHub/u));
   await target.click(mobileNavigation.getByRole('button', { name: 'Model', exact: true }));
   await target.expectHidden(shareRegion());

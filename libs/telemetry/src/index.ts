@@ -69,6 +69,7 @@ export {
   codeClasses,
   runtimeCauses,
   terminationCodes,
+  geoSpecVerifyCodes,
   errorTypes,
   codeClassOf,
   causeOf,

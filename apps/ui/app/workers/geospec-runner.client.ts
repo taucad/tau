@@ -15,6 +15,8 @@ import { randomUuid } from '@taucad/utils/id';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import { createBrowserGeoSpecWorker } from '#services/browser-geospec-worker.js';
 import type { GeoSpecRunnerWorkerRequest, GeoSpecRunnerWorkerResponse } from '#workers/geospec-runner.types.js';
+import type { RuntimeIngestEntry } from '@taucad/telemetry/client';
+import type { WorkerTelemetry } from '#telemetry/worker-forwarding.js';
 
 type CreateGeoSpecWorker = () => Worker;
 
@@ -45,6 +47,11 @@ export type GeoSpecWorkerRpcClientOptions = {
    * provisioned for larger claims raises it. A call above it is refused.
    */
   maxWorkUnitLimit?: number;
+  /**
+   * Runtime telemetry (FR-16): the page's context, handed to the runner, and the forward its entries return through.
+   * Absent where the page would not record, so the runner maps nothing.
+   */
+  telemetry?: WorkerTelemetry;
   /** Milliseconds to wait for worker initialization before failing in-flight runs. */
   initTimeout?: number;
   /** Milliseconds to wait after cooperative abort before hard-resetting the worker. */
@@ -308,6 +315,16 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
   function onMessage(event: MessageEvent<GeoSpecRunnerWorkerResponse>): void {
     const message = event.data;
 
+    if (message.type === 'telemetry') {
+      /* Passed through unchanged; the page validates and the ingest admits. Fire-and-forget. */
+      try {
+        options.telemetry?.forward(message.entry as RuntimeIngestEntry);
+      } catch {
+        /* A lost forward is never retried. */
+      }
+      return;
+    }
+
     if (message.type === 'initialized') {
       if (message.requestId !== initializeRequestId) {
         return;
@@ -401,6 +418,7 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
         fileSystemPort,
         maxWorkUnitLimit: hostLimits.maxWorkUnitLimit,
         maxRunBudget: hostLimits.maxRunBudget,
+        ...(options.telemetry === undefined ? {} : { telemetry: options.telemetry.context }),
       };
       worker.postMessage(request, [fileSystemPort]);
     } catch (error) {

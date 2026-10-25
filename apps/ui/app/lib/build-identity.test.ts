@@ -5,6 +5,8 @@ import {
   liveBuildIdTimeout,
   readBuildId,
   readBuildIdentity,
+  readBuildRelease,
+  unknownBuildRelease,
 } from '#lib/build-identity.js';
 
 afterEach(() => {
@@ -18,6 +20,29 @@ describe('readBuildId', () => {
     vi.stubGlobal('window', { ENV: { TAU_BUILD_ID: '1' } });
 
     expect(readBuildId()).toBe(tauBuildId);
+  });
+});
+
+describe('readBuildRelease', () => {
+  it('should read the release the server published into window.ENV', () => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- the host contract names window.ENV and its keys.
+    vi.stubGlobal('window', { ENV: { TAU_RELEASE: 'abcdef012345' } });
+
+    expect(readBuildRelease()).toBe('abcdef012345');
+  });
+
+  it('should accept a desktop semver release', () => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- the host contract names window.ENV and its keys.
+    vi.stubGlobal('window', { ENV: { TAU_RELEASE: '1.2.3' } });
+
+    expect(readBuildRelease()).toBe('1.2.3');
+  });
+
+  it.each([undefined, '', 'main', 'v1.2.3'])('should answer the unknown release for %s', (release) => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- the host contract names window.ENV and its keys.
+    vi.stubGlobal('window', { ENV: { TAU_RELEASE: release } });
+
+    expect(readBuildRelease()).toBe(unknownBuildRelease);
   });
 });
 

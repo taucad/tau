@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { webPosthogOptions } from '#lib/web-posthog.lib.js';
 import { useCookieConsent } from '#hooks/use-cookie-consent.js';
 import { PostHogAnalyticsProvider } from '#providers/posthog-analytics-provider.js';
 import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
+import { pageTelemetry } from '#telemetry/runtime-telemetry.js';
 
 /**
  * Web analytics boundary: PostHog only after accepted consent, with session
@@ -13,6 +14,10 @@ import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
  */
 export function WebAnalyticsProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const consentStatus = useCookieConsent();
+  /* A declined analytics decision also denies runtime telemetry on this browser (Q21); `unknown` does not block. */
+  useEffect(() => {
+    pageTelemetry()?.setAnalyticsDecision(consentStatus);
+  }, [consentStatus]);
   const options = useMemo(() => webPosthogOptions(), []);
   const [isReplayEnabled] = useState(() => !isMemoryConstrainedDevice());
   return (

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { reactRouter } from '@react-router/dev/vite';
@@ -14,11 +15,15 @@ import { base64Loader } from '@taucad/vite/base64-loader';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- see above.
 import { createUiReactCompilerPlugin, createUiSourceAliasPlugin, uiResolveAlias, uiSsrOptions } from '../vite.config';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- config-load seam is outside the app alias root.
-import { resolveTauCloudBuildEnabled } from '../build-environment';
+import { resolveTauCloudBuildEnabled, resolveTauTelemetryHostCloud } from '../build-environment';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
 import { createGeoSpecMtAssets } from '../geospec-mt-assets.vite-plugin';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+/* The renderer stamps the desktop app's own semver as its runtime telemetry release, as desktop main does. */
+const desktopRelease = (
+  JSON.parse(readFileSync(path.resolve(__dirname, '../../desktop/package.json'), 'utf8')) as { version: string }
+).version;
 // oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
 const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
 const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
@@ -43,7 +48,11 @@ export default defineConfig({
     // No Netlify deploy-preview origin exists for a desktop bundle.
     tauBuildFrontendUrl: JSON.stringify(''),
     tauBuildId: JSON.stringify(Date.now()),
+    tauBuildRelease: JSON.stringify(desktopRelease),
     tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
+    /* The renderer's runtime telemetry signal; the release workflow sets `TAU_TELEMETRY_HOST: cloud` literally. */
+    // oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
+    tauTelemetryHostCloudBuild: JSON.stringify(resolveTauTelemetryHostCloud(process.env['TAU_TELEMETRY_HOST'])),
     tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
     // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
     'import.meta.env.TAU_TARGET': '"desktop"',

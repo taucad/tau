@@ -92,6 +92,10 @@ export const cookieName = {
   // Whether to download multiple files as ZIP.
   converterMultifileZip: 'converter-multifile-zip',
 
+  /* Privacy */
+  // The device's runtime telemetry preference: `on`, `off` (sticky) or unset (`on`).
+  telemetry: 'telemetry',
+
   /* Docs */
   // Whether the docs sidebar is open.
   docsOpSidebar: 'docs-op-sidebar',

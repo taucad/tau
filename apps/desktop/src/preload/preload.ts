@@ -35,6 +35,7 @@ import { exposeElectronRuntime, relayElectronPorts } from '@taucad/runtime/elect
 
 import {
   appIconThemeChannel,
+  telemetryConsentChannel,
   openDirectoryChannel,
   directoryGrantChannels,
   revealPathChannel,
@@ -270,6 +271,12 @@ contextBridge.exposeInMainWorld('tau', {
   appIcon: {
     setTheme: (theme: AppIconTheme): void => {
       ipcRenderer.send(appIconThemeChannel, theme);
+    },
+  },
+  telemetry: {
+    /* The renderer's resolved consent on every change; main persists it for its own producers (AR-W4-03c). */
+    setConsent: (consent: 'granted' | 'denied' | 'unknown'): void => {
+      ipcRenderer.send(telemetryConsentChannel, consent);
     },
   },
   window: {

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { entitlementsFromTier } from '@taucad/billing';
 import { GeneralSettings } from '#components/settings/general-settings.js';
 import type { ThemeOption } from '#hooks/use-theme.js';
+import type * as TelemetrySwitchModule from '#hooks/use-telemetry-switch.js';
 
 const clientEnvironment = globalThis.window.ENV;
 const useEntitlementsMock = vi.hoisted(() => vi.fn());
@@ -43,6 +44,22 @@ vi.mock('#hooks/use-privacy-preferences.js', () => ({
     isUpdating: false,
   }),
 }));
+
+const mockTelemetryChange = vi.fn();
+let mockTelemetrySwitch: { checked: boolean; pending: boolean; forcedOff: boolean };
+
+vi.mock('#hooks/use-telemetry-switch.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof TelemetrySwitchModule>();
+  return {
+    telemetryCopy: actual.telemetryCopy,
+    useTelemetrySwitch: () => ({
+      ...mockTelemetrySwitch,
+      consent: mockTelemetrySwitch.checked ? 'granted' : 'denied',
+      onCheckedChange: mockTelemetryChange,
+      description: actual.telemetryCopy.untilActivation.description,
+    }),
+  };
+});
 
 vi.mock('#hooks/use-theme.js', () => {
   /* eslint-disable @typescript-eslint/naming-convention -- Mirrors the production Theme values. */
@@ -159,6 +176,7 @@ describe('GeneralSettings', () => {
     mockCodeInlayHintsValue = false;
     mockPointerCursorsValue = false;
     mockAllowsUsageMetrics = true;
+    mockTelemetrySwitch = { checked: true, pending: false, forcedOff: false };
   });
 
   afterEach(() => {
@@ -222,36 +240,55 @@ describe('GeneralSettings', () => {
   );
 
   it.each(['free', 'pro'] as const)(
-    'should offer the usage metrics switch beside the training choice on every tier (%s)',
+    'should offer the usage and diagnostics switch beside the training choice on every tier (%s)',
     (tier) => {
       useEntitlementsMock.mockReturnValue(entitlementsFromTier(tier));
 
       render(<GeneralSettings />);
 
-      const toggle = screen.getByRole('switch', { name: 'Share anonymous usage metrics' });
+      const toggle = screen.getByRole('switch', { name: 'Share usage and diagnostics data' });
       expect(toggle).toHaveAttribute('data-state', 'checked');
-      expect(toggle).toHaveAccessibleDescription(/no prompts, code, file names or identity/i);
+      expect(toggle).toHaveAccessibleDescription(/never prompts, code, parameter values, file names or geometry/i);
+      expect(toggle).toHaveAccessibleDescription(/three things are still sent whatever this switch says/i);
     },
   );
 
-  it('should persist switching usage metrics off', async () => {
+  it('should route switching usage and diagnostics off through the one switch', async () => {
     render(<GeneralSettings />);
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole('switch', { name: 'Share anonymous usage metrics' }));
+    await user.click(screen.getByRole('switch', { name: 'Share usage and diagnostics data' }));
 
-    expect(mockUpdatePreferences).toHaveBeenCalledWith({ allowsUsageMetrics: false });
+    expect(mockTelemetryChange).toHaveBeenCalledWith(false);
   });
 
-  it('should render usage metrics as off when the user switched them off', () => {
-    mockAllowsUsageMetrics = false;
+  it('should render the switch as off when the resolved consent is off', () => {
+    mockTelemetrySwitch = { checked: false, pending: false, forcedOff: false };
 
     render(<GeneralSettings />);
 
-    expect(screen.getByRole('switch', { name: 'Share anonymous usage metrics' })).toHaveAttribute(
+    expect(screen.getByRole('switch', { name: 'Share usage and diagnostics data' })).toHaveAttribute(
       'data-state',
       'unchecked',
     );
+  });
+
+  it('should disable the switch and say why when GPC or declined analytics force it off', () => {
+    mockTelemetrySwitch = { checked: false, pending: false, forcedOff: true };
+
+    render(<GeneralSettings />);
+
+    const toggle = screen.getByRole('switch', { name: 'Share usage and diagnostics data' });
+    expect(toggle).toBeDisabled();
+    expect(toggle).toHaveAccessibleDescription(/global privacy control/i);
+  });
+
+  it('should disable the switch while a signed-in preference loads', () => {
+    mockTelemetrySwitch = { checked: false, pending: true, forcedOff: false };
+
+    render(<GeneralSettings />);
+
+    expect(screen.getByRole('switch', { name: 'Share usage and diagnostics data' })).toBeDisabled();
   });
 
   it('should render code inlay hints disabled by default', () => {

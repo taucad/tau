@@ -182,9 +182,10 @@ const AgentsOverview = ({ agents }: { readonly agents: readonly AgentProjection[
     (agent) => agent.state === 'waiting' || agent.state === 'error' || agent.unread,
   ).length;
   return (
+    // A named live region needs a role: aria-label is prohibited on a bare div (ARIA 1.2), and status is polite.
     <div
+      role='status'
       aria-label='Agent overview'
-      aria-live='polite'
       className='flex min-h-10 shrink-0 items-center gap-3 border-b border-border/70 px-3 text-xs text-muted-foreground'
     >
       <span className='flex min-w-0 items-center gap-1.5'>

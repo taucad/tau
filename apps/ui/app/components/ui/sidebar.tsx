@@ -64,6 +64,8 @@ const SidebarBehavior = () => {
   useKeybinding(sidebarToggleKeyCombo, toggleSidebar, {
     preventDefault: true,
     stopPropagation: true,
+    // The phone sidebar sheet is a dialog; its own toggle still closes it.
+    allowedScopes: ['sidebar'],
   });
 
   return <MobileSidebarRouteReset key={key} />;

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ChatInterfaceMobile } from '#routes/w.$workspace.$project/chat-interface-mobile.js';
@@ -108,7 +108,27 @@ vi.mock('#routes/w.$workspace.$project/chat-agents.js', () => ({ AgentsPanelBody
 vi.mock('#routes/w.$workspace.$project/chat-jobs.js', () => ({ JobsPanelBody: () => <p>Job list</p> }));
 vi.mock('#routes/w.$workspace.$project/chat-kernel.js', () => ({ TelemetryPanelContent: () => <p>Kernel spans</p> }));
 vi.mock('#routes/w.$workspace.$project/chat-console.js', () => ({ ChatConsole: () => <p>Console log</p> }));
-vi.mock('#components/terminal/terminal-pane.js', () => ({ ProjectTerminalPane: () => <p>Shell session</p> }));
+const terminal = vi.hoisted(() => ({ mounted: vi.fn(), closed: vi.fn() }));
+vi.mock('#components/terminal/terminal-pane.js', () => ({
+  ProjectTerminalPane: () => {
+    const [input, setInput] = useState('');
+    useEffect(() => {
+      terminal.mounted();
+      return terminal.closed;
+    }, []);
+    return (
+      <label>
+        Shell session
+        <input
+          value={input}
+          onChange={(event) => {
+            setInput(event.target.value);
+          }}
+        />
+      </label>
+    );
+  },
+}));
 vi.mock('#routes/w.$workspace.$project/project-unavailable-overlay.js', () => ({
   ProjectUnavailableOverlay: () => null,
 }));
@@ -200,6 +220,8 @@ afterEach(() => {
   state.listeners.clear();
   state.generation += 1;
   vi.unstubAllGlobals();
+  terminal.mounted.mockClear();
+  terminal.closed.mockClear();
 });
 
 /* Vaul returns a closed drawer to its first snap point on a 500ms timer that outlives the test that closed it. Let the
@@ -211,6 +233,52 @@ afterAll(async () => {
 });
 
 describe('ChatInterfaceMobile', () => {
+  it('should preserve the Terminal across sheet hiding and surface switches until named Close', async () => {
+    const { unmount } = renderShell();
+    expect(terminal.mounted).not.toHaveBeenCalled();
+    act(() => {
+      selectSurface('terminal');
+    });
+    const input = await screen.findByRole('textbox', { name: 'Shell session' });
+    fireEvent.change(input, { target: { value: 'running shell state' } });
+    expect(terminal.mounted).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(screen.getByRole('region', { name: 'Terminal' }), { key: 'Escape' });
+    expect(state.drawerOpen).toBe(false);
+    expect(screen.queryByRole('textbox', { name: 'Shell session' })).not.toBeInTheDocument();
+    expect(terminal.closed).not.toHaveBeenCalled();
+    act(() => {
+      selectSurface('terminal');
+    });
+    expect(await screen.findByRole('textbox', { name: 'Shell session' })).toBe(input);
+    expect(input).toHaveValue('running shell state');
+
+    act(() => {
+      selectSurface('chat');
+    });
+    expect(await screen.findByRole('textbox', { name: 'Message' })).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Shell session' })).not.toBeInTheDocument();
+    expect(terminal.closed).not.toHaveBeenCalled();
+    act(() => {
+      selectSurface('terminal');
+    });
+    expect(await screen.findByRole('textbox', { name: 'Shell session' })).toBe(input);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close Terminal' }));
+    expect(terminal.closed).toHaveBeenCalledTimes(1);
+    expect(state.drawerOpen).toBe(false);
+    act(() => {
+      selectSurface('terminal');
+    });
+    expect(await screen.findByRole('textbox', { name: 'Shell session' })).toHaveValue('');
+    expect(terminal.mounted).toHaveBeenCalledTimes(2);
+    act(() => {
+      selectSurface('viewer');
+    });
+    unmount();
+    expect(terminal.closed).toHaveBeenCalledTimes(2);
+  });
+
   it('should name the open surface by its title, with no tab panel left pointing at a missing tab', async () => {
     state.drawerOpen = true;
     state.activeTab = 'revisions';

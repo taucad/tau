@@ -380,6 +380,9 @@ Library.Go(1f, () => {
             entry: 'main.cs',
             files: { 'main.cs': source, 'map.png': image },
           },
+          /* The uniform mesh the export pins, so the view and the export share one build: an unset meshAdaptivity
+           * keys a Balanced preview apart from the export, which then builds again (an intended cost of that default). */
+          evaluateOptions: { meshAdaptivity: 0 },
         });
         const result = await opened.view('model').rendering();
         if (result.superseded) {

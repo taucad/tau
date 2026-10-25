@@ -565,6 +565,44 @@ describe('an event log with other devices’ segments (XD1)', () => {
   });
 
   /*
+   * Round 28: a read that never returns (a hung network mount) holds one of the few threads every file read in this
+   * process shares. Each refresh used to start a read of its own, so a few resends behind one hung read took every
+   * thread. A refresh now shares the read in flight, or the one read queued behind it.
+   */
+  describe('while a segment read never returns', () => {
+    it('should start one read however many refreshes ask, and one more for them all once it ends', async () => {
+      const { storage } = memoryEventLogStorage(bytesOf(phoneTurn));
+      const reads: Array<PromiseWithResolvers<readonly ChatLogSegment[]>> = [];
+      const log = await createEventLogAppender(
+        {
+          ...storage,
+          segments: async () => {
+            const read = Promise.withResolvers<readonly ChatLogSegment[]>();
+            reads.push(read);
+            return read.promise;
+          },
+        },
+        { now: () => clock.now, segmentReadMilliseconds: 5 },
+      );
+      expect(reads).toHaveLength(1);
+
+      const refreshes = Array.from({ length: 5 }, async () => log.refresh?.());
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      expect(reads).toHaveLength(1);
+
+      reads[0]?.resolve([]);
+      await expect.poll(() => reads.length).toBe(2);
+      reads[1]?.resolve([segment('device-desktop', desktopTurn)]);
+      await Promise.all(refreshes);
+
+      expect(reads).toHaveLength(2);
+      expect(ids(await log.messages())).toEqual(['epoch-desktop-0', 'epoch-desktop-1', 'epoch-phone-0']);
+    });
+  });
+
+  /*
    * Round 21, finding 3: the merge orders terms by their start, so a row this device appends under a term that began
    * before another device's later term merges before that term, not at the merge's tail. The appender kept the merged
    * fold incrementally by putting every own row at the tail, so `messages()` served a tool output after the other

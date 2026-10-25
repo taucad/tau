@@ -509,8 +509,8 @@
     "drift": "round 27: a refresh reads the segments inside the log's write queue, so a read that never returns holds every later append, a Stop's and a denial's included, past the admission's bound",
     "file": "src/log/event-log-appender.ts",
     "test": "src/launchers/agent-launcher.segments.test.ts",
-    "find": "            const { order, result } = beginRead(readSegments);\n            const read = await result;\n            await enqueue(async () => {\n              assertOpen();\n              land(order, read);\n            });\n",
-    "replace": "            await enqueue(async () => {\n              assertOpen();\n              const { order, result } = beginRead(readSegments);\n              land(order, await result);\n            });\n"
+    "find": "            const { order, read } = await sharedRead(readSegments);\n            await enqueue(async () => {\n              assertOpen();\n              land(order, read);\n            });\n",
+    "replace": "            await enqueue(async () => {\n              assertOpen();\n              const { order, read } = await sharedRead(readSegments);\n              land(order, read);\n            });\n"
   },
   {
     "id": "open-read-unbounded",
@@ -518,7 +518,7 @@
     "file": "src/log/event-log-appender.ts",
     "test": "src/launchers/agent-launcher.segments.test.ts",
     "find": "    const first = await Promise.race([result, expired.promise]);\n",
-    "replace": "    const first: SegmentRead | 'expired' = await result;\n"
+    "replace": "    const first: Landing | 'expired' = await result;\n"
   },
   {
     "id": "standing-ignores-pulls",
@@ -527,5 +527,13 @@
     "test": "src/log/chat-ledger.differential.test.ts",
     "find": "    return pulls\n      ? { abandoned: false, awaitsPull: true, changesAt: undefined }\n      : { abandoned: true, awaitsPull: false, changesAt: undefined };\n",
     "replace": "    return { abandoned: false, awaitsPull: true, changesAt: undefined };\n"
+  },
+  {
+    "id": "segment-reads-unshared",
+    "drift": "round 28: every refresh starts a segment read of its own while an earlier read is still in flight, so on a hung network mount a few resends hold every thread the process's file reads share and stall all file access in the host",
+    "file": "src/log/event-log-appender.ts",
+    "test": "src/log/event-log-appender.segments.test.ts",
+    "find": "      if (!reading || inFlight === undefined) {\n",
+    "replace": "      if (queued === undefined) {\n"
   }
 ]

@@ -624,20 +624,48 @@ export const createEventLogAppender = async (
   });
   let readsBegun = 0;
   let readLanded = 0;
-  const beginRead = (
-    read: () => Promise<readonly ChatLogSegment[]>,
-  ): Readonly<{ order: number; result: Promise<SegmentRead> }> => {
+  type Landing = Readonly<{ order: number; read: SegmentRead }>;
+  /*
+   * Round 28: one read runs at a time, and at most one waits behind it. A read that never returns (a hung network mount)
+   * holds one of the few threads every file read in this process shares, and a bound only stops the wait: a refresh
+   * that began a read of its own each time took every thread after a few resends. A refresh while a read runs shares
+   * the one read that begins when it ends, which still sees every write made before that refresh.
+   */
+  let inFlight: Promise<Landing> | undefined;
+  let reading = false;
+  let queued: Promise<Landing> | undefined;
+  const readOnce = async (read: () => Promise<readonly ChatLogSegment[]>): Promise<Landing> => {
     readsBegun += 1;
-    return {
-      order: readsBegun,
-      result: (async (): Promise<SegmentRead> => {
-        try {
-          return { segments: await read() };
-        } catch (error) {
-          return { failure: unreadAnomaly(error instanceof Error ? error.message : String(error)) };
-        }
-      })(),
-    };
+    const order = readsBegun;
+    reading = true;
+    try {
+      return { order, read: { segments: await read() } };
+    } catch (error) {
+      return { order, read: { failure: unreadAnomaly(error instanceof Error ? error.message : String(error)) } };
+    } finally {
+      reading = false;
+    }
+  };
+  const startRead = async (read: () => Promise<readonly ChatLogSegment[]>): Promise<Landing> => {
+    inFlight = readOnce(read);
+    return inFlight;
+  };
+  const afterRead = async (
+    running: Promise<Landing>,
+    read: () => Promise<readonly ChatLogSegment[]>,
+  ): Promise<Landing> => {
+    await running;
+    queued = undefined;
+    return startRead(read);
+  };
+  const sharedRead = async (read: () => Promise<readonly ChatLogSegment[]>): Promise<Landing> => {
+    if (queued === undefined) {
+      if (!reading || inFlight === undefined) {
+        return startRead(read);
+      }
+      queued = afterRead(inFlight, read);
+    }
+    return queued;
   };
   /* Inside the write queue: the read's result, unless a read that began after it already landed. */
   const land = (order: number, read: SegmentRead): void => {
@@ -657,9 +685,8 @@ export const createEventLogAppender = async (
   };
   const readSegments = storage.segments?.bind(storage);
   /* An open's first read that ended past the bound, landing whenever it ends; never awaited by a command. */
-  const lateReads = new Map<number, Promise<void>>();
-  const landLate = async (order: number, result: Promise<SegmentRead>): Promise<void> => {
-    const read = await result;
+  const landLate = async (result: Promise<Landing>): Promise<void> => {
+    const { order, read } = await result;
     try {
       await enqueue(async () => {
         if (!closed) {
@@ -668,8 +695,6 @@ export const createEventLogAppender = async (
       });
     } catch {
       /* A fold that fails leaves the segments unread; the next admission's read tries again. */
-    } finally {
-      lateReads.delete(order);
     }
   };
   /*
@@ -678,7 +703,7 @@ export const createEventLogAppender = async (
    * applies, and the read lands whenever it ends.
    */
   if (readSegments !== undefined) {
-    const { order, result } = beginRead(readSegments);
+    const result = startRead(readSegments);
     const expired = Promise.withResolvers<'expired'>();
     const timer = setTimeout(() => {
       expired.resolve('expired');
@@ -688,9 +713,9 @@ export const createEventLogAppender = async (
     clearTimeout(timer);
     if (first === 'expired') {
       segmentFailure = unreadAnomaly('the read did not finish in time.');
-      lateReads.set(order, landLate(order, result));
+      void landLate(result);
     } else {
-      land(order, first);
+      land(first.order, first.read);
     }
   }
   /**
@@ -934,8 +959,7 @@ export const createEventLogAppender = async (
       : {
           refresh: async () => {
             assertOpen();
-            const { order, result } = beginRead(readSegments);
-            const read = await result;
+            const { order, read } = await sharedRead(readSegments);
             await enqueue(async () => {
               assertOpen();
               land(order, read);

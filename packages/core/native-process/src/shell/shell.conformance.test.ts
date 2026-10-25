@@ -362,6 +362,63 @@ describe.runIf(enabled)('shell conformance', () => {
     },
   );
 
+  conformance(
+    'C13',
+    'reserved containers keep future names off the host while authored and record access stays exact',
+    async () => {
+      const reserved = join(work, '.tau');
+      const authored = join(reserved, 'parameters');
+      const records = join(reserved, 'chats');
+      const agents = join(reserved, 'AGENTS.md');
+      for (const directory of [authored, records]) {
+        mkdirSync(directory, { recursive: true });
+      }
+      writeFileSync(agents, 'AUTHORED');
+      writeFileSync(join(records, 'record.json'), 'RECORD');
+      writeFileSync(join(reserved, 'hidden'), 'HIDDEN-CANARY');
+      // Prove the test owner can create the future name before testing containment.
+      writeFileSync(join(reserved, 'future'), 'OWNER-CONTROL');
+      rmSync(join(reserved, 'future'));
+      const filesystem = {
+        readable: [readonly, home],
+        writable: [work, authored, agents],
+        readOnly: [records],
+        denied: [secret, join(reserved, 'hidden')],
+        masked: [reserved],
+      };
+      const positive = await run(
+        'printf UPDATED > .tau/AGENTS.md && printf CHILD > .tau/parameters/value && cat .tau/chats/record.json',
+        { filesystem },
+      );
+      expect(positive.exitCode, positive.stderr).toBe(0);
+      expect(positive.stdout).toBe('RECORD');
+      expect(readFileSync(agents, 'utf8')).toBe('UPDATED');
+      expect(readFileSync(join(authored, 'value'), 'utf8')).toBe('CHILD');
+      const before = digestOf(join(records, 'record.json'));
+      const probes = [
+        'printf UNKNOWN > .tau/future',
+        'mkdir .tau/future-dir',
+        'printf CHANGED > .tau/chats/record.json',
+        'cat .tau/hidden',
+      ];
+      const outcomes = await Promise.all(probes.map(async (command) => run(command, { filesystem })));
+      expect(outcomes.map((outcome) => outcome.stdout).join('')).not.toContain('HIDDEN-CANARY');
+      expect(existsSync(join(reserved, 'future'))).toBe(false);
+      expect(existsSync(join(reserved, 'future-dir'))).toBe(false);
+      expect(digestOf(join(records, 'record.json'))).toBe(before);
+      expect(readFileSync(join(reserved, 'hidden'), 'utf8')).toBe('HIDDEN-CANARY');
+      if (linux) {
+        const fileOperations = [
+          'rm .tau/AGENTS.md',
+          'printf REPLACEMENT > replacement && mv replacement .tau/AGENTS.md',
+        ];
+        const limited = await Promise.all(fileOperations.map(async (command) => run(command, { filesystem })));
+        expect(limited.every((outcome) => outcome.exitCode !== 0)).toBe(true);
+        expect(readFileSync(agents, 'utf8')).toBe('UPDATED');
+      }
+    },
+  );
+
   conformance('C03', 'startup hooks are refused and the shell sees only the environment it was given', async () => {
     const positive = await run('printf %s "$GIVEN"', {
       environment: { PATH: '/usr/bin:/bin', HOME: work, LANG: 'C', GIVEN: 'GIVEN-VALUE' },

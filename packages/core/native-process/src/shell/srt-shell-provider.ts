@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { deniedReadRoots, deniedWriteRoots, physicalVariants, sandboxRuntimeReadRoots } from '#native-sandbox.js';
 import { processTable, terminateOwnedProcesses } from '#shell/process-tree.js';
 import type { ProcessRow } from '#shell/process-tree.js';
+import { bindMaskedDirectories, maskProblem } from '#shell/shell-project-mask.js';
 import { shellBaselineDenied } from '#shell/shell-baseline.js';
 import { refusedShellEnvironment } from '#shell/shell-environment.js';
 import type {
@@ -192,7 +193,7 @@ export const shellSandboxProfile = (
   return {
     network: { allowedDomains: [...domains], deniedDomains: domains.length > 0 ? [] : ['*'], strictAllowlist: true },
     filesystem: {
-      denyRead: [...new Set([...deniedReadRoots(), ...denied])],
+      denyRead: [...new Set([...deniedReadRoots(), ...denied, ...deniedVariants(launch.filesystem.masked ?? [])])],
       allowRead: physicalVariants([
         ...launch.filesystem.readable,
         ...launch.filesystem.writable,
@@ -699,6 +700,10 @@ const admit = (launch: ShellLaunch, options: SandboxShellProviderOptions): Shell
   if (refused.length > 0) {
     return unsupported('environment', `the shell may not receive ${refused.join(', ')}.`);
   }
+  const maskRefusal = maskProblem(launch.filesystem);
+  if (maskRefusal !== undefined) {
+    return unsupported('filesystem-mask', maskRefusal);
+  }
   const { readable, writable, denied, readOnly = [] } = launch.filesystem;
   const paths = [launch.executablePath, launch.workingDirectory, ...readable, ...writable, ...readOnly, ...denied];
   if (paths.some((path) => !isAbsolute(path) || path.includes('\0'))) {
@@ -773,7 +778,17 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
       await supervisor.close();
       launch.signal.throwIfAborted();
     }
-    const { argv } = supervisor.reply;
+    const argv =
+      process.platform === 'darwin'
+        ? bindMaskedDirectories(supervisor.reply.argv, launch.filesystem)
+        : supervisor.reply.argv;
+    if (argv === undefined) {
+      await supervisor.close();
+      return {
+        status: 'sandbox-unavailable',
+        message: 'the sandbox profile could not enforce masked directory creation.',
+      };
+    }
     if (launch.stdio.kind === 'pipes') {
       return { status: 'started', process: startPipes(argv, launch, supervisor) };
     }

@@ -699,7 +699,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   const events = new Topic<WorkerRevisionEvent>({ name: 'WorkerProjectRevisionEvents' });
   const toasts = new Topic<RevisionToast>({ name: 'WorkerProjectRevisionToasts' });
 
-  const { actor, settled, turns, recordEditorConflict, readConflict } = createProjectRevisionsActor({
+  const { actor, settled, turns, recordEditorConflict, readConflict, pullsChats } = createProjectRevisionsActor({
     port: options.port,
     projectId,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
@@ -1593,7 +1593,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       await session?.fence();
       /* Each attempt's tools are a filesystem bridge over its checkout, sent to the agent host as a transferable. */
       session = createTurnPlacementPort({
-        revisions: { actor, turns },
+        /* Round 27: a pull this device cannot make for the chats is refused, so its host stops waiting for one. */
+        revisions: { actor, turns, pullsChats },
         openTools: ({ filesystem }) => createFileSystemBridgePort(filesystem),
       });
       return session;

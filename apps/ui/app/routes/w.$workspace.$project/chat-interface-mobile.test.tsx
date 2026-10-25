@@ -613,6 +613,107 @@ describe('ChatInterfaceMobile', () => {
     expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
   });
 
+  it('should re-check on a scroll, at most every 100ms, while a list settles at its end (I5)', async () => {
+    driveableObservers();
+    state.drawerOpen = true;
+    state.activeTab = 'jobs';
+    state.activeSnapPoint = mobileDrawerPeekSnapPoint;
+    renderShell();
+    // Still settling: the transcript is short of its end, so the failure below its foot is not the detent's doing.
+    const transcript = await scrollerInSurface({ box: rect(40, 140), scrolled: true });
+    decision(transcript, { 'data-decision': 'run-error', 'data-decision-id': 'run:r1:1' }, (point) =>
+      point === mobileDrawerPeekSnapPoint ? rect(100, 180) : rect(60, 120),
+    );
+    await act(async () => {
+      await new Promise((resolve) => {
+        requestAnimationFrame(resolve);
+      });
+    });
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      // The list reaches its end over a few scrolls; the check runs once, 100ms after the first.
+      transcript.scrollTop = 400;
+      fireEvent.scroll(transcript);
+      fireEvent.scroll(transcript);
+      act(() => {
+        vi.advanceTimersByTime(99);
+      });
+      expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should not count the closed sheet returning to its first detent as the person moving it (I5)', async () => {
+    const drive = driveableObservers();
+    state.drawerOpen = true;
+    state.activeTab = 'jobs';
+    state.activeSnapPoint = mobileDrawerOpenSnapPoint;
+    renderShell();
+    await scrollerInSurface({ box: rect(40, 140) });
+    drive();
+
+    // Closed with Escape, the sheet goes back to its first detent on Vaul's own timer: not a move the person made.
+    fireEvent.keyDown(screen.getByRole('region', { name: 'Jobs' }), { key: 'Escape' });
+    expect(state.drawerOpen).toBe(false);
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 600);
+      });
+    });
+
+    // Reopened at the peek with rows that no longer fit there, which the person never chose: the sheet rises.
+    act(() => {
+      state.activeSnapPoint = mobileDrawerPeekSnapPoint;
+      selectSurface('jobs');
+    });
+    const transcript = await scrollerInSurface({ box: rect(40, 140) });
+    Object.defineProperty(transcript.parentElement!, 'scrollHeight', { configurable: true, value: 360 });
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+  });
+
+  it('should retire a settled approval only once no copy of it still waits (I5)', async () => {
+    const drive = driveableObservers();
+    state.drawerOpen = true;
+    state.activeTab = 'jobs';
+    state.activeSnapPoint = mobileDrawerOpenSnapPoint;
+    renderShell();
+    const grabber = screen.getByRole('slider', { name: 'Drawer height' });
+    const tray = await scrollerInSurface({ tray: true, box: rect(200, 260) });
+    const atPeek = (point: number | string): DOMRect =>
+      point === mobileDrawerPeekSnapPoint ? rect(210, 330) : rect(205, 255);
+    const waiting = { 'data-decision': 'approval', 'data-decision-id': 'approval:i1', 'data-decision-state': 'open' };
+    const settled = { 'data-decision-id': 'approval:i1', 'data-decision-state': 'settled' };
+    // The banner's copy and the message's copy of one approval.
+    const banner = decision(tray, waiting, atPeek);
+    const message = decision(tray, waiting, atPeek);
+    drive();
+    fireEvent.keyDown(grabber, { key: 'Home' });
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+
+    // The message's copy settles first; the banner's still waits, still acknowledged.
+    delete message.dataset['decision'];
+    message.dataset['decisionState'] = 'settled';
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+
+    // Both settled: the identity retires, so the same approval waiting again is a new decision.
+    banner.remove();
+    message.remove();
+    decision(tray, settled, () => rect(0, 0));
+    drive();
+    decision(tray, waiting, atPeek);
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+  });
+
   it('should keep a detent chosen on Chat after the person moves the sheet on another surface (I5)', async () => {
     const drive = driveableObservers();
     state.drawerOpen = true;

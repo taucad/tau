@@ -366,15 +366,17 @@ function useRaiseWhenClipped(
       return;
     }
     const check = (): void => {
+      const open = decisionsIn(section);
+      const openKeys = new Set(open.map(([key]) => key));
       for (const settled of section.querySelectorAll<HTMLElement>(settledSelector)) {
         const key = decisionKey(settled);
-        if (key !== undefined) {
+        // One copy can settle before another (an approval shows in the banner and in its message): the identity
+        // retires only once no copy is still waiting.
+        if (key !== undefined && !openKeys.has(key)) {
           acknowledged.current.delete(key);
         }
       }
-      const fresh = decisionsIn(section).filter(
-        ([key, decision]) => !acknowledged.current.has(key) && hasBox(decision),
-      );
+      const fresh = open.filter(([key, decision]) => !acknowledged.current.has(key) && hasBox(decision));
       if (fresh.length > 0) {
         // Something new arrived: the person has not chosen a detent for it.
         acknowledged.current.delete(fixedRowsKey);

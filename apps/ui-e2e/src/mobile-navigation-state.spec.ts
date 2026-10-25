@@ -301,23 +301,11 @@ test.each(phoneViewports)(
   },
 );
 
-/**
- * The chat transcript, moved as a person's swipe would. It is found by its geometry, the Chat surface's tallest
- * scrolling box: the transcript has no accessible handle of its own (its rows are the record, not its scroller).
- */
+/** The chat transcript's scroller, which names itself (`chat-history.tsx`), moved as a person's swipe would. */
 const scrollTranscript = async (to: 'top' | 'end'): Promise<void> =>
   target.evaluateLocator(
-    surface('Chat'),
-    (region, where) => {
-      const scrollers = [...region.querySelectorAll<HTMLElement>('*')].filter(
-        (element) =>
-          ['auto', 'scroll'].includes(getComputedStyle(element).overflowY) &&
-          element.scrollHeight > element.clientHeight + 1,
-      );
-      const scroller = scrollers.toSorted((a, b) => b.scrollHeight - a.scrollHeight)[0];
-      if (!scroller) {
-        throw new Error('The chat transcript has no scroller.');
-      }
+    surface('Chat').getByRole('region', { name: 'Chat history', exact: true }),
+    (scroller, where) => {
       scroller.scrollTop = where === 'top' ? 0 : scroller.scrollHeight;
       scroller.dispatchEvent(new Event('scroll'));
     },

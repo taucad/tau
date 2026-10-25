@@ -1509,6 +1509,33 @@ the cancelled tools left the system unchanged.
     await host.close();
   });
 
+  /*
+   * Round 23: the replay check read the chat's in-memory ledger, which an idle eviction, a fenced log, a reopen or a
+   * restart unloads. A copy of an approval that already applied then ran full admission, and was refused because another
+   * device had since started a run: a replay is never admitted (`t15_replay_no_change`), whatever is loaded.
+   */
+  it('should answer a copy of an applied approval replayed after the chat was evicted', async () => {
+    const { host, reads, chatId } = await pausedPastAbandonedRun('replayed-after-eviction');
+    reads.foreignRuns = () => [];
+    const approve = {
+      type: 'resolve-interrupt',
+      commandId: 'approve-evicted',
+      payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
+    } as const;
+
+    await expect(host.command(approve)).resolves.toMatchObject({ status: 'applied' });
+    await vi.waitFor(async () => host.resume(chatId));
+    expect(await host.snapshot(chatId)).toMatchObject({ runId: 'run-1', state: 'completed' });
+    await vi.waitFor(async () => {
+      await expect(host.evictChat(chatId)).resolves.toBeUndefined();
+    });
+    /* Another device starts a run in the chat. */
+    reads.foreignRuns = () => [{ ...abandonedDesktopRun, state: 'running', pulledQuiet: 0, observedAt: Date.now() }];
+
+    await expect(host.command(approve)).resolves.toMatchObject({ status: 'replayed' });
+    await host.close();
+  });
+
   it('ends a run paused on a tool approval when the person declines, and asks nothing of the tool', async () => {
     const file = createMemoryLogFile();
     const outcomes: string[] = [];

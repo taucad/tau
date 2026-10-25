@@ -401,8 +401,8 @@
     "drift": "round 22, finding 1: a copy of a command this host already applied is admitted again, so it reads the other devices' segments and proposes and carries for its run again (T15: t15_replay_no_change)",
     "file": "src/host/tau-agent-host.ts",
     "test": "src/host/tau-agent-host.test.ts",
-    "find": "        if (storeOf(ordered).ledger?.applied[command.commandId] !== undefined) {",
-    "replace": "        if (storeOf(ordered).ledger?.applied[command.commandId] === null) {"
+    "find": "        if (applied === true || (applied !== false && (await applied))) {",
+    "replace": "        if (applied !== applied) {"
   },
   {
     "id": "replay-withdraws-original",
@@ -450,5 +450,13 @@
     "test": "src/host/history-well-formed.test.ts",
     "find": "              turnAheadOf(prior, carried.runId, history),\n",
     "replace": "              false,\n"
+  },
+  {
+    "id": "replay-reads-unloaded-ledger",
+    "drift": "round 23: the replay check reads the in-memory ledger, so after an idle eviction a copy of an applied approval runs full admission and is refused because another device started a run",
+    "file": "src/host/tau-agent-host.ts",
+    "test": "src/host/tau-agent-host.test.ts",
+    "find": "        const applied = appliedDurably(ordered, command);\n",
+    "replace": "        const applied = storeOf(ordered).ledger?.applied[command.commandId] !== undefined;\n"
   }
 ]

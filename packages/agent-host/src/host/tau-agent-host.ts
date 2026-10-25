@@ -1918,6 +1918,34 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     return folded;
   };
 
+  /**
+   * Whether the chat's durable ledger records the command applied, read before this host admits it (round 23): from
+   * the ledger as loaded ({@link ledgerOf}), never only from what happens to be in memory, since an idle eviction, a
+   * fenced log, a reopen or a restart unloads it, and a copy read against nothing ran full admission. A command this
+   * host does not admit itself before the registry (a start or resume on a chat whose log is not open) is left to the
+   * registry, which reads the ledger as it opens the chat and answers a copy `replayed`. A log that does not open reads
+   * as nothing applied: admission then fails closed.
+   *
+   * @param chatId - The chat the command is ordered in.
+   * @param command - The command, a copy of an applied one or not.
+   * @returns Whether it is applied: at once when the ledger is loaded or need not be.
+   */
+  const appliedDurably = (chatId: string, command: HostCommand): boolean | Promise<boolean> => {
+    const store = storeOf(chatId);
+    const applied = (ledger: ChatLedger | undefined): boolean => ledger?.applied[command.commandId] !== undefined;
+    const admitsHere =
+      store.log !== undefined || (command.type === 'resolve-interrupt' && command.payload.outcome === 'approved');
+    /* Answered at once when nothing need be loaded: a start's reservation is synchronous with its command. */
+    const loaded = async (): Promise<boolean> => {
+      try {
+        return applied(await ledgerOf(chatId));
+      } catch {
+        return false;
+      }
+    };
+    return store.ledger !== undefined || !admitsHere ? applied(store.ledger) : loaded();
+  };
+
   const dropLog = async (chatId: string): Promise<void> => {
     const store = storeOf(chatId);
     const { log } = store;
@@ -2900,7 +2928,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           answer = replayOf(original);
           return await answer;
         }
-        if (storeOf(ordered).ledger?.applied[command.commandId] !== undefined) {
+        const applied = appliedDurably(ordered, command);
+        if (applied === true || (applied !== false && (await applied))) {
           answer = registry.execute(command);
           return await answer;
         }

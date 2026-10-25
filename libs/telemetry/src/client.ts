@@ -4,7 +4,7 @@
  * bounded, identity-pinned, policy-first delivery queue. Structural input only: no import of `@taucad/runtime`.
  */
 import { Topic } from '@taucad/events';
-import { z } from 'zod';
+import type { z } from 'zod';
 import {
   RuntimeEntryName,
   ingestBodyBounds,
@@ -16,15 +16,13 @@ import {
   runtimeVocabulary as v,
   telemetryPolicyAnswerSchema,
 } from '#runtime-ingest.js';
+import type { dropReasons, IngestReceipt, TelemetryPolicyAnswer } from '#runtime-ingest.js';
 import type {
-  dropReasons,
-  IngestReceipt,
-  TelemetryPolicyAnswer,
   deliveryHealthEntrySchema,
   runtimeLateEntrySchema,
   runtimeOperationEntrySchema,
   runtimeViewerEntrySchema,
-} from '#runtime-ingest.js';
+} from '#runtime-entry.js';
 
 /* ------------------------------------------------------------------------------------------------ *
  * Consent and host membership.                                                                     *
@@ -1559,10 +1557,3 @@ export const createIngestReporter = (input: IngestReporterInput): IngestReporter
     },
   };
 };
-
-/** The ingest body schema the reporter writes, for tests and hosts that validate locally. @public */
-export const ingestBatchSchema = z.object({
-  batch: z.string().regex(ingestBodyBounds.batchId),
-  reason: z.enum(['interval', 'pagehide', 'shutdown']).optional(),
-  entries: z.array(z.object({ name: z.string() }).loose()).max(ingestBodyBounds.maxEntries),
-});

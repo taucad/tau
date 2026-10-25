@@ -178,7 +178,9 @@ describe('createNodeHostTelemetry', () => {
       },
     } as unknown as NodeObservedClient;
 
-    expect(() => telemetry.observe(client, 'agent')()).not.toThrow();
+    expect(() => {
+      telemetry.observe(client, 'agent')();
+    }).not.toThrow();
   });
 
   it('should ask a client for facts only once the policy is on, and tell it off on unsubscribe', async () => {

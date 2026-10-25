@@ -10,15 +10,14 @@ import {
   ingestReceiptSchema,
   otherValue,
   parameterClassOf,
-  parseRuntimeEntry,
   parseRuntimeTelemetryMode,
   resolveRuntimeTelemetry,
-  runtimeEntryEnvelopeSchema,
   runtimeVocabulary,
   sizeClassOf,
   telemetryPolicyAnswerSchema,
   usageCoverage,
 } from '#runtime-ingest.js';
+import { parseRuntimeEntry, runtimeEntryEnvelopeSchema } from '#runtime-entry.js';
 import { runtimeMetrics } from '#runtime-metrics.js';
 
 const release = '0123abc';

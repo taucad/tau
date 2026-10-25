@@ -330,7 +330,7 @@ export const mcpCommand = defineCommand({
       /* One realm per project (kernel-realm-shared-state blueprint, I8): each
        * project's kernels run in their own thread, which loads every kernel
        * module there — never in this process, never before `initialize`. */
-      /* Runtime telemetry: its reporter composes only when this process is a Tau Cloud host (signed in, or `tau telemetry on`). */
+      /* Reports only as a Tau Cloud host. */
       const telemetry = cliRuntimeTelemetry('mcp', packageJson.version);
       const openClient = async (projectPath: string): Promise<ProjectRuntimeClient> => {
         const [{ createRuntimeClient }, { nodeWorkerTransport }, { fromNodeFs }] = await Promise.all([
@@ -565,7 +565,6 @@ export const mcpCommand = defineCommand({
           const opened = await preparation;
           await opened.dispose();
         }
-        /* Last, bounded at two seconds: the client shutdowns above may still settle operations. */
         await telemetry?.shutdown();
       };
       await Promise.race([close().catch(() => undefined), sleep(shutdownGrace)]);

@@ -219,7 +219,7 @@ export const exportCommand = defineCommand({
       projectPath: projectRoot,
     });
     profileLedger?.checkpoint('runtime.create-client');
-    /* Runtime telemetry: its reporter composes only when this CLI is a Tau Cloud host (signed in, or `tau telemetry on`). */
+    /* Reports only as a Tau Cloud host. */
     const runtimeTelemetry = cliRuntimeTelemetry('cli', packageJson.version);
     runtimeTelemetry?.observe(client, 'host');
     const telemetryEntries: TelemetryEntry[] = [];
@@ -390,7 +390,6 @@ export const exportCommand = defineCommand({
         document?.close();
       } finally {
         await client.shutdown();
-        /* Bounded at two seconds; the export never waits longer for telemetry. */
         await runtimeTelemetry?.shutdown();
       }
       profileLedger?.checkpoint('runtime.shutdown');

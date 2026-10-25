@@ -106,36 +106,6 @@ export const resolveAuthToken = async (
 };
 
 /**
- * The bearer a telemetry composition reads at every send (runtime observability PR-3, `readTauIdentity`):
- * `TAU_AUTH_TOKEN`, then the OS keyring for this origin. Never rejects: a credential store that cannot be read is
- * `unavailable`, which the composition treats as an unresolved identity and retries.
- *
- * @param origin - Selected API origin.
- * @param environment - Process environment or explicit overrides.
- * @returns The token source.
- */
-export const authTokenReader =
-  (
-    origin: string,
-    environment: Environment = process.env,
-  ): (() => Promise<
-    Readonly<{ kind: 'token'; token: string }> | Readonly<{ kind: 'none' }> | Readonly<{ kind: 'unavailable' }>
-  >) =>
-  async () => {
-    const variable = environment['TAU_AUTH_TOKEN'];
-    if (variable) {
-      return { kind: 'token', token: variable };
-    }
-    try {
-      const entry = await credentialEntry(origin);
-      const token = await entry.getPassword();
-      return token ? { kind: 'token', token } : { kind: 'none' };
-    } catch {
-      return { kind: 'unavailable' };
-    }
-  };
-
-/**
  * Credential-bearing requests never follow redirects or echo a provider response in errors.
  * @param origin - Selected API origin.
  * @param path - Relative authentication endpoint.

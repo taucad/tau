@@ -3,6 +3,7 @@
   "version": "0.1.0-beta.0",
   "description": "Private telemetry metric registry, reporter, and ingest contracts for Tau applications",
   "type": "module",
+  "sideEffects": false,
   "private": true,
   "repository": {
     "type": "git",

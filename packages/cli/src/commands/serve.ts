@@ -1108,9 +1108,7 @@ export const serveCommand = defineCommand({
       }
       reportEvent(event);
     };
-    /* Runtime telemetry: a self-hosted `tau serve` and its runtime children never report, so the role marks this process
-     * (inherited by its children). The one `tau serve` that does is the cloud host container, which the provisioner
-     * marks with `TAU_CLOUD_HOST=1`; it reports to its own `TAU_API_URL` with route `cloud`. */
+    /* Telemetry: self-hosted serve never reports; the provisioned cloud host (`TAU_CLOUD_HOST=1`) does. */
     process.env['TAU_SERVE_ROLE'] ??= 'serve';
     const runtimeTelemetry =
       process.env['TAU_CLOUD_HOST'] === '1' ? cliRuntimeTelemetry('cloud', packageJson.version) : undefined;

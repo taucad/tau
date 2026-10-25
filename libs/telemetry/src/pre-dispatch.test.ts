@@ -11,7 +11,7 @@ import {
   submitEntry,
 } from '#client.js';
 import type { RuntimeOperationEntry } from '#client.js';
-import { parseRuntimeEntry } from '#runtime-ingest.js';
+import { parseRuntimeEntry } from '#runtime-entry.js';
 
 const context = { route: 'cli', caller: 'host', release: '1.2.3', platform: 'node', os: 'linux' } as const;
 

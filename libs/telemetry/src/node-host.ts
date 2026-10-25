@@ -231,7 +231,7 @@ export const createNodeHostTelemetry = (input: NodeHostTelemetryInput): NodeHost
   let heldDropped = 0;
 
   const signedInAsLastSeen = (): boolean =>
-    resolvedOnce ? lastPrincipal !== undefined : input.env['TAU_AUTH_TOKEN'] !== undefined;
+    resolvedOnce ? lastPrincipal !== undefined : Boolean(input.env['TAU_AUTH_TOKEN']);
 
   /** `GET /v1/privacy` with the bearer, once per principal; `undefined` until it answers (held as `unknown`). */
   const loadServerPreference = async (principal: string, authorization: string): Promise<void> => {

@@ -78,7 +78,7 @@ export function useTelemetrySwitch(): TelemetrySwitch {
       : 'none';
 
   useEffect(() => {
-    pageTelemetry()?.onConsentInputsChanged({ updatePending: isUpdating });
+    pageTelemetry()?.onConsentInputsChanged({ updatePending: isUpdating, observed: { server, device, analytics } });
   }, [server, device, analytics, isUpdating]);
 
   const consent = resolveTelemetryConsent({ globalPrivacyControl, analytics, device, server });

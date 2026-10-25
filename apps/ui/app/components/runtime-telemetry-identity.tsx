@@ -65,7 +65,7 @@ export function RuntimeTelemetryIdentity(): ReactNode {
           : { kind: 'unresolved' }
         : { kind: 'signed-in', accountId },
     );
-    telemetry.onConsentInputsChanged({ updatePending });
+    telemetry.onConsentInputsChanged({ updatePending, observed: { device, globalPrivacyControl } });
   }, [accountId, isResolved, server, updatePending, device, globalPrivacyControl]);
 
   return null;

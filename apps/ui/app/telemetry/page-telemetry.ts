@@ -102,8 +102,13 @@ export type PageTelemetry = Readonly<{
   recordViewerEvent: (input: ViewerEventInput) => void;
   /** Report a runtime client's attempts under `caller`; returns the unsubscribe. */
   observeRuntimeClient: (client: ObservedRuntimeClient, caller: PageCaller) => () => void;
-  /** A consent input changed. */
-  onConsentInputsChanged: (input: Readonly<{ updatePending: boolean }>) => void;
+  /**
+   * A consent input changed. `observed` is the caller's snapshot of the inputs it watches, read so a compiled caller
+   * re-runs on each (P66); the rule itself reads every input afresh from its dependencies.
+   */
+  onConsentInputsChanged: (
+    input: Readonly<{ updatePending: boolean; observed?: Readonly<Record<string, unknown>> }>,
+  ) => void;
   /** `pagehide`: settle clients unless the page entered the back/forward cache, then flush with keepalive. */
   pageHide: (persisted: boolean) => void;
   /** The context a page worker stamps on its entries, or `undefined` when nothing would be recorded. */
@@ -425,7 +430,7 @@ export const createPageTelemetry = (deps: PageTelemetryDependencies): PageTeleme
    *
    * @param input - Whether a preference update is in flight.
    */
-  const onConsentInputsChanged = (input: Readonly<{ updatePending: boolean }>): void => {
+  const onConsentInputsChanged: PageTelemetry['onConsentInputsChanged'] = (input) => {
     lastUpdatePending = input.updatePending;
     const server = effectiveIdentity().kind === 'signed-in' ? serverPreference : undefined;
     if (server === false && lastServer !== false && !input.updatePending) {

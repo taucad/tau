@@ -113,7 +113,7 @@ describe('useTelemetrySwitch', () => {
     state.updating = true;
     renderHook(() => useTelemetrySwitch());
 
-    expect(onConsentInputsChanged).toHaveBeenCalledWith({ updatePending: true });
+    expect(onConsentInputsChanged).toHaveBeenCalledWith(expect.objectContaining({ updatePending: true }));
   });
 
   it('should disclose the producers the switch does not stop yet', () => {

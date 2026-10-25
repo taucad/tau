@@ -14,6 +14,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { SquareTerminal } from 'lucide-react';
 import { terminalAccessSchema, terminalLimits } from '@taucad/types/desktop-terminal';
 import type {
+  DesktopTerminalBridge,
   DesktopTerminalSession,
   TerminalAccess,
   TerminalExitReason,
@@ -251,6 +252,8 @@ export function TerminalPane({
   const restartRef = useRef(false);
   const startRef = useRef<(() => Promise<void>) | undefined>(undefined);
   const screenReaderModeRef = useRef(screenReaderMode);
+  /* The project root and bridge the current or last session was started against. */
+  const targetRef = useRef<{ projectRoot: string; bridge: DesktopTerminalBridge } | undefined>(undefined);
 
   const projectRoot = availability.status === 'available' ? availability.projectRoot : undefined;
   const bridge = availability.status === 'available' ? availability.bridge : undefined;
@@ -266,6 +269,11 @@ export function TerminalPane({
   /* The pane closing, the project changing or the Terminal becoming unavailable all end the session. */
   useEffect(
     () => () => {
+      const target = targetRef.current;
+      if (!target || target.projectRoot !== projectRoot || target.bridge !== bridge) {
+        return;
+      }
+      targetRef.current = undefined;
       teardown();
       setState({ phase: 'idle' });
       setAccessRequest(undefined);
@@ -313,6 +321,7 @@ export function TerminalPane({
       return;
     }
     teardown();
+    targetRef.current = { projectRoot, bridge };
     const generation = generationRef.current;
     setState({ phase: 'starting' });
     setAccessRequest(undefined);

@@ -322,6 +322,7 @@ const awaitingPanel: Readonly<Record<string, string>> = {
   tau_sync_sweeps_total: 'OB9',
   tau_sync_client_attempts_total: 'OB9',
   tau_sync_client_lag: 'OB9',
+  tau_sync_client_attempt_duration: 'OB9',
   tau_sync_client_pending: 'OB9',
   // DA2 (#1032) shipped these without panels; OB2's storage-critical rows read them.
   tau_sync_refusals_total: 'OB2',

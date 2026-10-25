@@ -27,8 +27,13 @@ import type { PreviewWriter } from '#api/projects/project-preview-store.js';
 
 type GitExecutionMode = 'forwarded' | 'in_process';
 
+/** DC2: how a forwarded request picks its tau-storage member. */
+type GitAffinity = 'off' | 'rendezvous';
+
 export type GitExecution = {
   readonly mode: GitExecutionMode;
+  /** The affinity in effect: `off` in process, where there is no member to choose. Labels `tau.sync.operation.duration`. */
+  readonly affinity: GitAffinity;
   readonly executor: GitExecutor;
   /** In process only: the keys its receipts verify with, which replace the configured receipt keys. */
   readonly receiptKeys: VerificationKeys | undefined;
@@ -55,7 +60,7 @@ export const createGitExecution = (args: {
   readonly storageUrl: string | undefined;
   readonly grantSigningKey: string | undefined;
   /** DC2 affinity; absent or `off` forwards as DC1 did. */
-  readonly affinity?: 'off' | 'rendezvous';
+  readonly affinity?: GitAffinity;
   readonly metrics: MetricsService;
   readonly store: RepositoryStore;
   readonly shutdown: ShutdownService;
@@ -81,7 +86,7 @@ export const createGitExecution = (args: {
       { gitExecution: 'in_process' },
       'git_execution=in_process: TAU_STORAGE_URL is unset, so git runs in this process',
     );
-    return { mode: 'in_process', executor: storage.executor, receiptKeys: storage.receiptKeys };
+    return { mode: 'in_process', affinity: 'off', executor: storage.executor, receiptKeys: storage.receiptKeys };
   }
   const key = parseSigningKey(
     args.grantSigningKey ?? developmentSigningKeyJson('grant'),
@@ -104,6 +109,7 @@ export const createGitExecution = (args: {
       : undefined;
   return {
     mode: 'forwarded',
+    affinity,
     executor: new StorageForwarder({ urls, key, metrics: args.metrics, ...(router === undefined ? {} : { router }) }),
     receiptKeys: undefined,
   };

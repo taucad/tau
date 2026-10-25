@@ -53,6 +53,12 @@ const gitOperations = [
   'restore',
 ] as const;
 
+/** `tau.git.execution`: where this API runs git (DC1), decided once at boot from `TAU_STORAGE_URL`. */
+const gitExecutionModes = ['in_process', 'forwarded'] as const;
+
+/** `tau.git.affinity`: how a forwarded request picks its tau-storage member (DC2); always `off` in process. */
+const gitAffinityModes = ['off', 'rendezvous'] as const;
+
 /** Repository and hydrate sizes, 64 KiB to D20's 1 GiB ceiling in doublings. */
 const repositoryByteBuckets = Array.from({ length: 15 }, (_, step) => 65_536 * 2 ** step);
 
@@ -992,11 +998,15 @@ export const TauMetrics = {
   syncOperationDuration: defineHistogram({
     name: 'tau.sync.operation.duration',
     unit: 's',
-    description: 'Whole Tau Sync request latency, lease hydrate and commit included',
-    buckets: [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120],
+    description:
+      'Whole Tau Sync request latency, lease hydrate and commit included, by where git ran and how tau-storage was chosen',
+    /* 3 and 4 resolve the 3–5 s push band the Hosted Remote Storage changes are qualified on. */
+    buckets: [0.05, 0.1, 0.25, 0.5, 1, 2, 3, 4, 5, 10, 30, 60, 120],
     attributes: z.object({
       'tau.sync.operation': z.enum(syncOperationNames),
       outcome: z.enum(syncOutcomes),
+      'tau.git.execution': z.enum(gitExecutionModes),
+      'tau.git.affinity': z.enum(gitAffinityModes),
     }),
   }),
 
@@ -1342,8 +1352,22 @@ export const TauMetrics = {
     name: 'tau.sync.client.lag',
     unit: 's',
     description: 'Client-reported time from the first unsynced mint to the server acknowledging it',
-    buckets: [0.5, 1, 2, 3, 5, 10, 30, 60, 300, 900, 3600],
+    /* Dense through 3–30 s, where a save's debounce, a push and one retry land. */
+    buckets: [0.5, 1, 2, 3, 4, 5, 7.5, 10, 15, 20, 30, 60, 120, 300, 900, 3600],
     attributes: z.object({
+      'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
+    }),
+  }),
+
+  syncClientAttemptDuration: defineHistogram({
+    name: 'tau.sync.client.attempt.duration',
+    unit: 's',
+    description:
+      'Client-reported wall time of one push or pull attempt, from its start to its settle, by direction, outcome and agent placement',
+    buckets: [0.1, 0.25, 0.5, 1, 2, 3, 4, 5, 7.5, 10, 15, 20, 30, 60, 120, 300, 900],
+    attributes: z.object({
+      direction: z.enum(['push', 'pull']),
+      outcome: z.enum(['ok', 'retry', 'quota_refused', 'offline', 'error']),
       'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
     }),
   }),

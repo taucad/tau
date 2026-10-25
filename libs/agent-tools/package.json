@@ -55,7 +55,7 @@
     "@taucad/units": "workspace:*",
     "@taucad/utils": "workspace:*",
     "@taucad/workbench": "workspace:*",
-    "geospec": "workspace:*"
+    "geospec": "catalog:"
   },
   "imports": {
     "#*.js": "./src/*.ts",

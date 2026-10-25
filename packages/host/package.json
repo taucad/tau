@@ -118,7 +118,7 @@
     "@taucad/utils": "workspace:*",
     "@taucad/xstate-testing": "workspace:*",
     "@types/ws": "^8.18.1",
-    "geospec": "workspace:*",
+    "geospec": "catalog:",
     "geospec-engine": "catalog:",
     "xstate": "catalog:",
     "zod": "catalog:"

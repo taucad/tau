@@ -31,7 +31,7 @@ including how it builds and links OCCT, is at [github.com/taucad/geospec](https:
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 808 packages, with the license each declares.
+The web and desktop apps include the following 823 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -261,7 +261,20 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@tanstack/react-query](https://github.com/TanStack/query) | 5.104.2 | MIT |
 | [@tanstack/react-store](https://github.com/TanStack/store) | 0.11.2 | MIT |
 | [@tanstack/store](https://github.com/TanStack/store) | 0.11.2 | MIT |
+| [@taucad/archive-core](https://github.com/taucad/tau) | 0.1.0-beta.9 | Apache-2.0 |
+| [@taucad/bundler-core](https://github.com/taucad/tau) | 0.1.0-beta.9 | Apache-2.0 |
+| [@taucad/cache-core](https://github.com/taucad/tau) | 0.1.0-beta.9 | Apache-2.0 |
+| [@taucad/esbuild](https://github.com/taucad/tau) | 0.1.0-beta.9 | Apache-2.0 |
+| [@taucad/filesystem](https://github.com/taucad/tau) | 0.1.0-beta.9 | Apache-2.0 |
 | [@taucad/kcl-wasm-lib](https://github.com/taucad/modeling-app) | 0.1.191 | MIT |
+| [@taucad/kinematics](https://github.com/taucad/tau) | 0.1.0-beta.9 | Apache-2.0 |
+| [@taucad/parameters](https://github.com/taucad/tau) | 0.1.0-beta.9 | Apache-2.0 |
+| [@taucad/project-core](https://github.com/taucad/tau) | 0.1.0-beta.9 | Apache-2.0 |
+| [@taucad/revisions](https://github.com/taucad/tau) | 0.1.0-beta.9 | Apache-2.0 |
+| [@taucad/rpc](https://github.com/taucad/tau) | 0.1.0-beta.9 | Apache-2.0 |
+| [@taucad/runtime](https://github.com/taucad/tau) | 0.1.0-beta.9 | Apache-2.0 |
+| [@taucad/spatial](https://github.com/taucad/tau) | 0.1.0-beta.9 | Apache-2.0 |
+| [@taucad/units](https://github.com/taucad/tau) | 0.1.0-beta.9 | Apache-2.0 |
 | [@taulabs/openrscad-engine](https://github.com/taucad/openrscad) | 0.11.0-beta.4 | Apache-2.0 OR MIT |
 | [@taulabs/openrscad-engine-{platform}](https://github.com/taucad/openrscad) | 0.11.0-beta.4 | Apache-2.0 OR MIT |
 | [@taulabs/replicad](https://github.com/taucad/replicad) | 1.1.0-taulabs.1 | MIT |
@@ -487,6 +500,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [function-bind](https://github.com/Raynos/function-bind) | 1.1.2 | MIT |
 | [gaxios](https://github.com/googleapis/google-cloud-node) | 7.3.1 | Apache-2.0 |
 | [gcp-metadata](https://github.com/googleapis/google-cloud-node-core) | 8.1.2 | Apache-2.0 |
+| [geospec](https://github.com/taucad/tau) | 0.1.0-beta.9 | Apache-2.0 |
+| [geospec-engine](https://github.com/taucad/geospec) | 0.3.1 | Apache-2.0 |
 | [geospec-engine](https://github.com/taucad/geospec) | 0.4.0 | Apache-2.0 |
 | [geospec-engine-darwin-arm64](https://github.com/taucad/geospec) | 0.4.0 | Apache-2.0 |
 | [geospec-engine-linux-arm64-gnu](https://github.com/taucad/geospec) | 0.4.0 | Apache-2.0 |

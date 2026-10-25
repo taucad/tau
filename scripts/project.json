@@ -147,7 +147,6 @@
             "archive-core",
             "bundler-core",
             "esbuild",
-            "geospec",
             "camera",
             "spatial",
             "geometry-core",

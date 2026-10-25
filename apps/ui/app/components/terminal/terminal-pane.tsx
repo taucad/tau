@@ -321,6 +321,7 @@ export function TerminalPane({
       return;
     }
     teardown();
+    restartRef.current = false;
     targetRef.current = { projectRoot, bridge };
     const generation = generationRef.current;
     setState({ phase: 'starting' });
@@ -413,6 +414,8 @@ export function TerminalPane({
             break;
           }
           sessionRef.current = undefined;
+          /* A refusal ends a pending restart too, so a later exit never starts a session on its own (D21). */
+          restartRef.current = false;
           setAccessRequest(undefined);
           setState({ phase: 'refused', refusal: frame });
           break;

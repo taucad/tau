@@ -284,6 +284,24 @@ describe('TerminalPane', () => {
     });
   });
 
+  it('never restarts on its own after a restart the host refused', async () => {
+    render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
+    await startTerminal();
+    await userEvent.click(screen.getByRole('button', { name: 'Restart' }));
+    harness.emit({
+      type: 'refused',
+      code: 'sandbox-unavailable',
+      message: 'This computer has no shell sandbox Tau can use yet.',
+      recovery: 'Use the typed Tau tools.',
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    harness.emit(opened);
+    expect(harness.open).toHaveBeenCalledTimes(2);
+    harness.emit({ type: 'exited', exitCode: 0, signal: null, reason: 'shell-exited' });
+    expect(screen.getByText('The shell exited. Exit code 0.')).toBeInTheDocument();
+    expect(harness.open).toHaveBeenCalledTimes(2);
+  });
+
   it('finds in screen and scrollback from the pane chrome', async () => {
     render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
     await startTerminal();

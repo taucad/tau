@@ -38,7 +38,7 @@ import type { RefusalCode } from '#wire/refusals.js';
 import { chatStoreBinding, requireChatPathSegment } from '#launchers/chat-store.js';
 import { createReplayView, isBytePrefix } from '#launchers/replay-view.js';
 import type { ReplayView } from '#launchers/replay-view.js';
-import type { ChatStore, LeadershipPort } from '#launchers/chat-store.js';
+import type { ChatStore, ChatWriterOpen, LeadershipPort } from '#launchers/chat-store.js';
 
 /**
  * Whether this host may admit a Tau run (RH-R13): only `unpaired` refuses, with `HOST_NOT_PAIRED`. `principal` is the
@@ -323,6 +323,8 @@ const runOf = async (chatId: string, view: ChatView): Promise<HostRunSnapshot | 
  */
 export const createAgentLauncher = (options: AgentLauncherOptions): AgentLauncher => {
   const binding = chatStoreBinding(options.chats);
+  /* A writer's open reads the other devices' segments under the admission's own bound (round 27). */
+  const writerOpen: ChatWriterOpen = { segmentReadMilliseconds: options.delays?.segmentRefresh };
   const createId = options.createId ?? createPortableId;
   const liveOwners = new Map<string, number>();
   const live = createFanOut<SourceLiveEvent>((chatId) => {
@@ -543,7 +545,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     requireChatPathSegment(chatId);
     const handed = views.get(chatId);
     views.delete(chatId);
-    const log = await (handed ?? binding.openWriter(chatId));
+    const log = await (handed ?? binding.openWriter(chatId, writerOpen));
     writers.add(chatId);
     writerGenerations.set(chatId, createPortableId());
     acquiring.delete(chatId);
@@ -686,7 +688,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
 
   const port: LeadershipPort = binding.leadership({
     openView: async (chatId) => {
-      const opening = views.get(chatId) ?? binding.openWriter(chatId);
+      const opening = views.get(chatId) ?? binding.openWriter(chatId, writerOpen);
       views.set(chatId, opening);
       try {
         const log = await opening;

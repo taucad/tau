@@ -100,7 +100,7 @@ export type ChatStoreBinding = Readonly<{
       ) => Promise<() => void>)
     | undefined;
   /** A write open: the binding's lock, then a read of the log whose tail is the fence register (W3). */
-  openWriter: (chatId: string) => Promise<EventLogAppender>;
+  openWriter: (chatId: string, open?: ChatWriterOpen) => Promise<EventLogAppender>;
   leadership: (host: LeadershipHost) => LeadershipPort;
   /**
    * Whether the chat's record (`chat.json`) carries a permanent delete's tombstone, `purgedAt` (OQ2). A purged chat's
@@ -119,6 +119,12 @@ export const chatRecordFileName = 'chat.json';
  * (`chatSegmentPath`: `events/<deviceId>.jsonl`), which this package does not import. @internal
  */
 export const chatSegmentsDirectoryName = 'events';
+
+/**
+ * How a launcher opens a chat's writer: how long the open waits for its first read of the other devices' segments
+ * (`EventLogAppenderOptions.segmentReadMilliseconds`; round 27). @internal
+ */
+export type ChatWriterOpen = Readonly<{ segmentReadMilliseconds?: number | undefined }>;
 
 /**
  * The device a segment file belongs to: what every reader of a chat's `events/` directory, host or page, names it.
@@ -390,9 +396,9 @@ const fencePurged = (binding: ChatStoreBinding): ChatStoreBinding => {
               await write(chatId, path, bytes);
             },
           },
-    openWriter: async (chatId) => {
+    openWriter: async (chatId, open) => {
       await refuse(chatId);
-      const log = await binding.openWriter(chatId);
+      const log = await binding.openWriter(chatId, open);
       return {
         ...log,
         append: async (event) => {

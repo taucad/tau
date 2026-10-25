@@ -72,6 +72,7 @@ import type {
   UserProviderMessage,
 } from '#log/event-types.js';
 import { abandonedTurnOf } from '#log/event-types.js';
+import { segmentRefreshMilliseconds } from '#log/segments.js';
 import type {
   AgentLiveEvent,
   DurableEventLog,
@@ -386,15 +387,6 @@ export const runHeartbeatMilliseconds = 60_000;
  * @public
  */
 export const pausedRunHoldMilliseconds = 30 * 60 * 1000;
-
-/**
- * How long an admission (a start, a Resume or an approval) waits to read the other devices' segments before it is
- * refused `SEGMENTS_UNREADABLE` (`wait`) rather than run on a fence it could not check: ten seconds. The read runs in
- * the chat's dispatch turn, so the bound is also how long the commands behind it can wait on it (round 26).
- *
- * @public
- */
-export const segmentRefreshMilliseconds = 10_000;
 
 /** A command admitted across devices: a turn's start, a Resume, or an approval of a paused run's request. @internal */
 export type AdmissionVerb = 'start' | 'resume' | 'approve';

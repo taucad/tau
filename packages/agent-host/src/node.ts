@@ -26,7 +26,7 @@ import {
   purgedChatError,
   requireChatPathSegment,
 } from '#launchers/chat-store.js';
-import type { ChatStore } from '#launchers/chat-store.js';
+import type { ChatStore, ChatWriterOpen } from '#launchers/chat-store.js';
 import { createNodeLeadership } from '#launchers/node/node-leadership.js';
 
 /* A host-saved tool result (the MCP endpoint's oversized `test_model` verdict) shares the chat's attachment directory
@@ -355,7 +355,11 @@ const nodeSegmentsReader = (directory: string): (() => Promise<readonly ChatLogS
  *   bare log file has none.
  * @returns The appender.
  */
-const openWriter = async (filePath: string, segmentsDirectory?: string): Promise<EventLogAppender> => {
+const openWriter = async (
+  filePath: string,
+  segmentsDirectory?: string,
+  writerOpen?: ChatWriterOpen,
+): Promise<EventLogAppender> => {
   await mkdir(dirname(filePath), { recursive: true });
   const kernelLock = await acquireKernelLock(filePath);
   const releaseKernelLock = async (): Promise<void> => kernelLock?.release();
@@ -435,7 +439,7 @@ const openWriter = async (filePath: string, segmentsDirectory?: string): Promise
   };
 
   try {
-    return await createEventLogAppender(storage);
+    return await createEventLogAppender(storage, { segmentReadMilliseconds: writerOpen?.segmentReadMilliseconds });
   } catch (error) {
     try {
       await file.close();
@@ -577,8 +581,8 @@ export const createNodeChatStore = (options: NodeChatStoreOptions): ChatStore =>
       return release;
     },
     /* The writer appends to this device's file only; its history also reads the other devices' segments (XD1). */
-    openWriter: async (chatId) =>
-      openWriter(filePath(chatId), join(dirname(filePath(chatId)), chatSegmentsDirectoryName)),
+    openWriter: async (chatId, writerOpen) =>
+      openWriter(filePath(chatId), join(dirname(filePath(chatId)), chatSegmentsDirectoryName), writerOpen),
     leadership: createNodeLeadership,
   });
 };

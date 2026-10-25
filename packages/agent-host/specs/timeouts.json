@@ -109,6 +109,14 @@
       "owner": "XD3"
     },
     {
+      "id": "SEGMENT-OPEN",
+      "bound": "Opening a chat log waits at most ten seconds for its first read of the other devices' segments, then opens with them unread (SEGMENTS_UNREADABLE at admission) and applies the read whenever it ends; every segment read runs outside the log's write queue, so a read that never returns holds no append, Stop or denial (round 27)",
+      "site": "packages/agent-host/src/log/event-log-appender.ts",
+      "token": "segmentRefreshMilliseconds",
+      "class": "Liveness",
+      "owner": "XD3"
+    },
+    {
       "id": "CHAT-CLOSING-WAIT",
       "bound": "A command that reaches a chat whose incarnation is closing waits at most ten seconds for its log to close, then is refused WRITER_LOCKED (wait)",
       "site": "packages/agent-host/src/host/chat-run-registry.ts",

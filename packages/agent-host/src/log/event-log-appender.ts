@@ -4,7 +4,7 @@ import { createEventLogReducer } from '#log/reducer.js';
 import type { ReplayAnomaly } from '#log/reducer.js';
 import { parseSegmentFrom, unsettledParsedRuns } from '#log/foreign-runs.js';
 import type { ForeignRun, SegmentParse } from '#log/foreign-runs.js';
-import { foreignClockAheadMilliseconds, mergeSegmentsUpTo } from '#log/segments.js';
+import { foreignClockAheadMilliseconds, mergeSegmentsUpTo, segmentRefreshMilliseconds } from '#log/segments.js';
 import type { ChatLogSegment, ParsedLogSegment } from '#log/segments.js';
 import { parseEventLogBytes, serializeLogEventBytes } from '#log/serialization.js';
 import type { AgentLogEvent, ProviderMessage, RowKey } from '#log/event-types.js';
@@ -193,6 +193,8 @@ export type EventLogStorage = {
 export type EventLogAppenderOptions = Readonly<{
   /** This device's time in epoch milliseconds, which the foreign-run staleness bound reads; `Date.now` by default. */
   now?: (() => number) | undefined;
+  /** How long opening waits for the first read of the other devices' segments; {@link segmentRefreshMilliseconds}. */
+  segmentReadMilliseconds?: number | undefined;
 }>;
 
 /**
@@ -593,33 +595,104 @@ export const createEventLogAppender = async (
     mergedReplayAnomalies = replayAnomalies;
     mergedAnomalies = [...conflicts, ...replayAnomalies];
   };
+  let closed = false;
+  let pending: Promise<void> = Promise.resolve();
+  const enqueue = async <Result>(operation: () => Promise<Result>): Promise<Result> => {
+    const prior = pending;
+    const next = Promise.withResolvers<void>();
+    pending = next.promise;
+    await prior;
+    try {
+      const result = await operation();
+      return result;
+    } finally {
+      next.resolve();
+    }
+  };
   /*
    * Reading never fails a chat (D16): segments that cannot be read leave the history as it was, and say so. The fence
    * does not read that as "no other device": `foreignRuns` refuses until a read succeeds.
+   *
+   * Round 27: a read runs outside the write queue, and only its result is applied inside it, so a read that never
+   * returns (an offline provider, a stale mount) holds no append, read or fence check behind it. Reads land in the
+   * order they began: one that ends after a later read has landed is dropped, so the history never steps back.
    */
-  const readSegments = async (): Promise<void> => {
-    if (storage.segments === undefined) {
+  type SegmentRead = Readonly<{ segments: readonly ChatLogSegment[] }> | Readonly<{ failure: EventLogAnomaly }>;
+  const unreadAnomaly = (reason: string): EventLogAnomaly => ({
+    kind: 'history',
+    message: `The other devices' segments could not be read, so the history leaves out what they hold now: ${reason}`,
+  });
+  let readsBegun = 0;
+  let readLanded = 0;
+  const beginRead = (
+    read: () => Promise<readonly ChatLogSegment[]>,
+  ): Readonly<{ order: number; result: Promise<SegmentRead> }> => {
+    readsBegun += 1;
+    return {
+      order: readsBegun,
+      result: (async (): Promise<SegmentRead> => {
+        try {
+          return { segments: await read() };
+        } catch (error) {
+          return { failure: unreadAnomaly(error instanceof Error ? error.message : String(error)) };
+        }
+      })(),
+    };
+  };
+  /* Inside the write queue: the read's result, unless a read that began after it already landed. */
+  const land = (order: number, read: SegmentRead): void => {
+    if (order <= readLanded) {
       return;
     }
-    let next: readonly ChatLogSegment[];
-    try {
-      next = await storage.segments();
-      segmentFailure = undefined;
-    } catch (error) {
-      segmentFailure = {
-        kind: 'history',
-        message: `The other devices' segments could not be read, so the history leaves out what they hold now: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      };
+    readLanded = order;
+    if ('failure' in read) {
+      segmentFailure = read.failure;
       return;
     }
-    if (!sameSegments(segments, next) || (refoldAt !== undefined && now() >= refoldAt)) {
-      segments = next;
+    segmentFailure = undefined;
+    if (!sameSegments(segments, read.segments) || (refoldAt !== undefined && now() >= refoldAt)) {
+      segments = read.segments;
       fold();
     }
   };
-  await readSegments();
+  const readSegments = storage.segments?.bind(storage);
+  /* An open's first read that ended past the bound, landing whenever it ends; never awaited by a command. */
+  const lateReads = new Map<number, Promise<void>>();
+  const landLate = async (order: number, result: Promise<SegmentRead>): Promise<void> => {
+    const read = await result;
+    try {
+      await enqueue(async () => {
+        if (!closed) {
+          land(order, read);
+        }
+      });
+    } catch {
+      /* A fold that fails leaves the segments unread; the next admission's read tries again. */
+    } finally {
+      lateReads.delete(order);
+    }
+  };
+  /*
+   * Opening waits for the first read at most the admission's bound (`segmentRefreshMilliseconds`): past it the chat
+   * opens with its segments unread (`segmentFailure`), so a start is refused `SEGMENTS_UNREADABLE` and a Stop still
+   * applies, and the read lands whenever it ends.
+   */
+  if (readSegments !== undefined) {
+    const { order, result } = beginRead(readSegments);
+    const expired = Promise.withResolvers<'expired'>();
+    const timer = setTimeout(() => {
+      expired.resolve('expired');
+    }, options.segmentReadMilliseconds ?? segmentRefreshMilliseconds); // Bound: segmentRefreshMilliseconds.
+    (timer as { unref?: () => void }).unref?.();
+    const first = await Promise.race([result, expired.promise]);
+    clearTimeout(timer);
+    if (first === 'expired') {
+      segmentFailure = unreadAnomaly('the read did not finish in time.');
+      lateReads.set(order, landLate(order, result));
+    } else {
+      land(order, first);
+    }
+  }
   /**
    * Whether this device's row, appended now, lands at the tail of a whole merge of the same rows (round 21;
    * `appendMerged` in ChatLedger.lean, T14), so the merged fold may take it there: it extends the merge's last term at
@@ -699,23 +772,8 @@ export const createEventLogAppender = async (
   let tornTail: Uint8Array<ArrayBuffer> | undefined = parsed.discardedTail
     ? bytesAtOpen.slice(parsed.validByteLength)
     : undefined;
-  let closed = false;
   let poisoned = false;
   let fenced = false;
-  let pending: Promise<void> = Promise.resolve();
-
-  const enqueue = async <Result>(operation: () => Promise<Result>): Promise<Result> => {
-    const prior = pending;
-    const next = Promise.withResolvers<void>();
-    pending = next.promise;
-    await prior;
-    try {
-      const result = await operation();
-      return result;
-    } finally {
-      next.resolve();
-    }
-  };
 
   const assertOpen = (): void => {
     if (closed) {
@@ -871,14 +929,18 @@ export const createEventLogAppender = async (
         }
         return [...anomalies.filter((anomaly) => anomaly.kind !== 'history'), ...mergedAnomaliesNow(), ...failure];
       }),
-    ...(storage.segments === undefined
+    ...(readSegments === undefined
       ? {}
       : {
-          refresh: async () =>
-            enqueue(async () => {
+          refresh: async () => {
+            assertOpen();
+            const { order, result } = beginRead(readSegments);
+            const read = await result;
+            await enqueue(async () => {
               assertOpen();
-              await readSegments();
-            }),
+              land(order, read);
+            });
+          },
           historyUnknown: async () => enqueue(async () => historyUnknown()),
           stampAfterRead: async (wall: number) =>
             enqueue(async () => {

@@ -18,7 +18,7 @@ import {
   isPurgedChatRecord,
   requireChatPathSegment,
 } from '#launchers/chat-store.js';
-import type { ChatStore } from '#launchers/chat-store.js';
+import type { ChatStore, ChatWriterOpen } from '#launchers/chat-store.js';
 
 type SyncAccessHandle = {
   getSize(): number;
@@ -171,6 +171,7 @@ const refuseNullOrigin = (): void => {
 const openOpfsWriter = async (
   fileHandle: FileSystemFileHandle,
   segments?: () => Promise<readonly ChatLogSegment[]>,
+  open?: ChatWriterOpen,
 ): Promise<EventLogAppender> => {
   refuseNullOrigin();
   const acquire = (fileHandle as SyncAccessCapableFileHandle).createSyncAccessHandle;
@@ -211,7 +212,7 @@ const openOpfsWriter = async (
   };
 
   try {
-    return await createEventLogAppender(storage);
+    return await createEventLogAppender(storage, { segmentReadMilliseconds: open?.segmentReadMilliseconds });
   } catch (error) {
     handle.close();
     throw error;
@@ -260,6 +261,7 @@ export async function createProviderEventLog(
 const openProviderWriter = async (
   options: ProviderEventLogOptions,
   segments?: () => Promise<readonly ChatLogSegment[]>,
+  open?: ChatWriterOpen,
 ): Promise<EventLogAppender> => {
   const { filePath, fileSystem } = options;
   const readBytes = async (): Promise<Uint8Array<ArrayBuffer>> =>
@@ -318,7 +320,7 @@ const openProviderWriter = async (
   };
 
   try {
-    return await createEventLogAppender(storage);
+    return await createEventLogAppender(storage, { segmentReadMilliseconds: open?.segmentReadMilliseconds });
   } catch (error) {
     await releaseWriterLock();
     throw error;
@@ -561,7 +563,7 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
         return isPurgedChatRecord(record === undefined ? undefined : decoder.decode(record));
       },
       /* The writer appends to this device's file only; its history also reads the other devices' segments (XD1). */
-      openWriter: async (chatId) =>
+      openWriter: async (chatId, open) =>
         openOpfsWriter(
           (await opfsFile(directory, logPath(chatId), true))!,
           createChatSegmentsReader({
@@ -576,6 +578,7 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
             },
             read: async (name) => bytesOf(`${segmentsPath(chatId)}/${name}`),
           }),
+          open,
         ),
       /* OPFS's exclusive handle cannot be stolen from a frozen holder (RH-R12). */
       leadership: leadershipOf(options, false),
@@ -601,7 +604,7 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
         (await fileSystem.exists(filePath)) ? decoder.decode(await fileSystem.readFile(filePath)) : undefined,
       );
     },
-    openWriter: async (chatId) => {
+    openWriter: async (chatId, open) => {
       const filePath = logPath(chatId);
       /* This open runs under the chat's Web Lock (M2), so a surviving marker is a dead or stolen holder's; the
        * per-append fence refuses that holder's appends whatever the marker says (EQ2, RH-R12). */
@@ -635,6 +638,7 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
               /* One round trip: a segment that went away is the read's `ENOENT`. */
               read: async (name) => readOrAbsent(async () => fileSystem.readFile(`${directory}/${name}`), undefined),
             }),
+        open,
       );
     },
     /* The provider leg fences each append, so a steal from a silent holder can serve (RH-R12). */

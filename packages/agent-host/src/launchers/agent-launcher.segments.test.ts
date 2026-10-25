@@ -2173,5 +2173,169 @@ describe('a chat continued on a second device', () => {
 
       expect(asked.filter((path) => path.includes('/events/'))).toEqual([]);
     });
+
+    describe('when a segment read never returns', () => {
+      /** A provider whose listing of the chat's `events/` directory never answers once the stall is armed. */
+      const stallingFileSystem = (): Readonly<{ fileSystem: MemoryFileSystem; stall: { armed: boolean } }> => {
+        const fileSystem = listingFileSystem();
+        const stall = { armed: false };
+        const { readdir } = fileSystem;
+        return {
+          stall,
+          fileSystem: {
+            ...fileSystem,
+            readdir: async (path) => {
+              if (stall.armed && path.endsWith(`/${chatId}/events`)) {
+                await new Promise<never>(() => {
+                  /* A provider round trip that never returns. */
+                });
+              }
+              return readdir!(path);
+            },
+          },
+        };
+      };
+      const pausing: ModelTransport = {
+        ...recordingModel('answer').transport,
+        async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
+          await new Promise((resolve) => {
+            request.signal.addEventListener('abort', resolve, { once: true });
+          });
+          yield { type: 'completed', stopReason: 'aborted' };
+        },
+      };
+      const rowsIn = (fileSystem: MemoryFileSystem): AgentLogEvent[] =>
+        rowsOf(fileSystem.files.get(ownLog) ?? new Uint8Array());
+      /** A run paused on an approval on this tab, its segments read once, with a segment read bounded at 100 ms. */
+      const pausedOn = async (fileSystem: MemoryFileSystem): Promise<AgentLauncher> => {
+        const launcher = launch(store(fileSystem, 'tab-1'), pausing, { segmentRefresh: 100 });
+        await launcher.execute({
+          type: 'start',
+          commandId: key(),
+          payload: {
+            chatId,
+            runId: 'run-1',
+            trigger: 'submit',
+            message: { id: 'user-1', role: 'user', content: 'go' },
+          },
+        });
+        await vi.waitFor(() => {
+          expect(rowsIn(fileSystem).some((row) => row.type === 'run.lifecycle' && row.state === 'running')).toBe(true);
+        });
+        await launcher.execute({
+          type: 'interrupt',
+          commandId: key(),
+          payload: { chatId, runId: 'run-1', interruptId: 'int-1', kind: 'approval', prompt: 'Write?' },
+        });
+        await vi.waitFor(() => {
+          expect(rowsIn(fileSystem).some((row) => row.type === 'turn.finalized')).toBe(true);
+        });
+        return launcher;
+      };
+      const resolvedIn = (fileSystem: MemoryFileSystem): boolean =>
+        rowsIn(fileSystem).some((row) => row.type === 'interrupt.recorded' && row.phase === 'resolved');
+      const settledRun1 = (fileSystem: MemoryFileSystem): string | undefined =>
+        rowsIn(fileSystem)
+          .filter((row) => row.type === 'run.lifecycle' && row.runId === 'run-1')
+          .map((row) => (row.type === 'run.lifecycle' ? row.state : ''))
+          .find((state) => state === 'cancelled' || state === 'failed' || state === 'completed');
+
+      /*
+       * Round 27: the bound stops the read, not only the wait. A read that never returns runs outside the log's write
+       * queue, so an Approve refused at the bound leaves the queue free and the Stop behind it still applies.
+       */
+      it('should apply a Stop within the bound after an Approve whose segment read hung', async () => {
+        const { fileSystem, stall } = stallingFileSystem();
+        const launcher = await pausedOn(fileSystem);
+        stall.armed = true;
+
+        const approved = await launcher.execute({
+          type: 'resolve-interrupt',
+          commandId: key(),
+          payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
+        });
+        const stopped = await launcher.execute({
+          type: 'cancel',
+          commandId: key(),
+          payload: { chatId, runId: 'run-1' },
+        });
+
+        expect(approved, JSON.stringify(approved)).toMatchObject({ status: 'refused', code: 'SEGMENTS_UNREADABLE' });
+        expect(stopped, JSON.stringify(stopped)).toMatchObject({ status: 'applied' });
+        await vi.waitFor(() => {
+          expect(settledRun1(fileSystem)).toBe('cancelled');
+        });
+      }, 3000);
+
+      it('should apply a denial within the bound after an Approve whose segment read hung', async () => {
+        const { fileSystem, stall } = stallingFileSystem();
+        const launcher = await pausedOn(fileSystem);
+        stall.armed = true;
+
+        const approved = await launcher.execute({
+          type: 'resolve-interrupt',
+          commandId: key(),
+          payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
+        });
+        const denied = await launcher.execute({
+          type: 'resolve-interrupt',
+          commandId: key(),
+          payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'denied' },
+        });
+
+        expect(approved, JSON.stringify(approved)).toMatchObject({ status: 'refused', code: 'SEGMENTS_UNREADABLE' });
+        expect(denied, JSON.stringify(denied)).toMatchObject({ status: 'applied' });
+        await vi.waitFor(() => {
+          expect(resolvedIn(fileSystem)).toBe(true);
+        });
+      }, 3000);
+
+      /*
+       * Opening reads the segments under the same bound: a chat whose segments never answer opens with them unread,
+       * and a start is refused `SEGMENTS_UNREADABLE` (`wait`) at the bound.
+       */
+      it('should open a chat whose segment read hangs and refuse a start at the bound', async () => {
+        const { fileSystem, stall } = stallingFileSystem();
+        await turn(launch(store(fileSystem, 'tab-1'), recordingModel('answer').transport), 'run-1', 'first');
+        await launchers.pop()!.close();
+        stall.armed = true;
+        const reopened = launch(store(fileSystem, 'tab-2'), recordingModel('answer').transport, {
+          segmentRefresh: 100,
+        });
+
+        const started = await reopened.execute({
+          type: 'start',
+          commandId: key(),
+          payload: {
+            chatId,
+            runId: 'run-2',
+            trigger: 'submit',
+            message: { id: 'user-2', role: 'user', content: 'again' },
+          },
+        });
+
+        expect(started, JSON.stringify(started)).toMatchObject({ status: 'refused', code: 'SEGMENTS_UNREADABLE' });
+      }, 3000);
+
+      /* A Stop of a paused run on a chat whose segments never answer opens the chat and applies, within the bound. */
+      it('should apply a Stop on a reopened chat whose segment read hangs', async () => {
+        const { fileSystem, stall } = stallingFileSystem();
+        const first = await pausedOn(fileSystem);
+        await first.close();
+        stall.armed = true;
+        const reopened = launch(store(fileSystem, 'tab-2'), pausing, { segmentRefresh: 100 });
+
+        const stopped = await reopened.execute({
+          type: 'cancel',
+          commandId: key(),
+          payload: { chatId, runId: 'run-1' },
+        });
+
+        expect(stopped, JSON.stringify(stopped)).toMatchObject({ status: 'applied' });
+        await vi.waitFor(() => {
+          expect(settledRun1(fileSystem)).toBe('cancelled');
+        });
+      }, 3000);
+    });
   });
 });

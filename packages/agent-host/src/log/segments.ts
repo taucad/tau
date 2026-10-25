@@ -189,6 +189,16 @@ export const mergeSegmentRows = (
 ): readonly AgentLogEvent[] => mergeSegmentsUpTo(segments, Number.POSITIVE_INFINITY, options).rows;
 
 /**
+ * How long an admission (a start, a Resume or an approval) waits to read the other devices' segments before it is
+ * refused `SEGMENTS_UNREADABLE` (`wait`) rather than run on a fence it could not check: ten seconds. The read runs in
+ * the chat's dispatch turn, so the bound is also how long the commands behind it can wait on it (round 26). Opening
+ * a chat log waits for its first read at most as long, and opens with the segments unread past it (round 27).
+ *
+ * @internal
+ */
+export const segmentRefreshMilliseconds = 10_000;
+
+/**
  * How far ahead of this device's clock another device's term may start and still join the history it reads (XD1): ten
  * minutes. A term dated further ahead is left out until this clock comes within the bound, and said so; the clock a
  * writer stamps its rows by (`stampAfterRead`) never follows it there, so one fast or corrupt clock cannot carry every

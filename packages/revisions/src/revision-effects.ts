@@ -422,8 +422,9 @@ export type RevisionActors = Readonly<{
   chatDevice: () => Promise<string | undefined>;
   /**
    * Whether this host pulls the project's chats from a remote at all (round 27): the project syncs its chats
-   * (`tau.json` `syncChats`, read each time) and this host has a record identity to read them under. Without either, no
-   * pull ever brings another device's segment, or a record of its quiet.
+   * (`tau.json` `syncChats`, read each time) and this host has a device id to read them under (one not told yet, or
+   * whose record devices cannot be read now, still pulls). Without either, no pull ever brings another device's
+   * segment, or a record of its quiet.
    */
   pullsChats: () => Promise<boolean>;
 }>;
@@ -2974,9 +2975,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       const context = await chatContext();
       return context?.deviceId;
     },
+    /* Round 28: only a host with no device id says no. One that has not been told its id yet, or cannot read its
+     * record devices now, cannot tell, so it pulls: a read failure is never taken for no identity. */
     pullsChats: async () => {
       const { syncChats } = await projectSyncPreferences();
-      return syncChats && (await chatContext()) !== undefined;
+      return syncChats && options.deviceId !== undefined && options.deviceId() !== '';
     },
     checkout: {
       cut: fromAuthorityPromise<CheckoutCutActorOutput, CheckoutCutActorInput>(async ({ input }) => {

@@ -99,13 +99,16 @@ const createProject = async (withAuthority = false): Promise<Project> => {
   return {
     filesystem,
     port,
-    /** `deviceId`: the host's id, which gives it a record identity to sync chats under; none by default. */
-    open: (options: Readonly<{ deviceId?: string }> = {}) => {
+    /**
+     * `deviceId`: the host's id, which gives it a record identity to sync chats under; none by default. `revisionPort`:
+     * the port the root reads through, this project's own by default.
+     */
+    open: (options: Readonly<{ deviceId?: () => string | undefined; revisionPort?: RevisionPort }> = {}) => {
       const { deviceId } = options;
       const revisions = createProjectRevisionsActor({
-        port,
+        port: options.revisionPort ?? port,
         projectId: 'project-1',
-        ...(deviceId === undefined ? {} : { deviceId: () => deviceId }),
+        ...(deviceId === undefined ? {} : { deviceId }),
         filesystem: async (checkout: Checkout) =>
           checkout.kind === 'live' ? filesystem : linkedFilesystem(checkout.id),
       });
@@ -177,6 +180,21 @@ const withRemote = (opened: ProjectRevisions): ProjectRevisions => {
     },
   });
   return { ...opened, actor };
+};
+
+/**
+ * The root once its remotes read has settled on `state` (round 28): only a settled read is evidence of no remote.
+ *
+ * @param opened - The root and its store.
+ * @param state - The remote child's settled state.
+ * @returns The same revisions, once the remote child is in `state`.
+ */
+const remoteSettled = async (
+  opened: ProjectRevisions,
+  state: 'none' | 'failed' = 'none',
+): Promise<ProjectRevisions> => {
+  await waitFor(opened.actor, (snapshot) => snapshot.children.remote?.getSnapshot().value === state);
+  return opened;
 };
 
 /**
@@ -943,7 +961,7 @@ describe('createTurnPlacementPort (TS-S3)', () => {
    * read the row as opaque, so the host writes none where the publish says the chat reaches no other device. */
   it('should refuse a publish CHAT_NOT_SHARED, and record nothing, where the project syncs with no remote', async () => {
     const project = await createProject();
-    const { revisions, syncs } = observeSyncs(project.open().revisions);
+    const { revisions, syncs } = observeSyncs(await remoteSettled(project.open().revisions));
     const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
 
     expect(await placement.publish({ requestId: 'publish:1', chatId: key.chatId })).toMatchObject({
@@ -956,7 +974,7 @@ describe('createTurnPlacementPort (TS-S3)', () => {
   /* XD3: a foreign run's quiet is evidenced only by a pull, so a host that holds a chat for one asks for it. */
   it('should ask the root to pull the remote when the host asks, and nothing once fenced', async () => {
     const project = await createProject();
-    const { revisions, syncs } = observeSyncs(withRemote(project.open({ deviceId: 'device-1' }).revisions));
+    const { revisions, syncs } = observeSyncs(withRemote(project.open({ deviceId: () => 'device-1' }).revisions));
     const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
 
     expect(await placement.pull({ requestId: 'pull:1', chatId: key.chatId })).toEqual({
@@ -980,7 +998,9 @@ describe('createTurnPlacementPort (TS-S3)', () => {
 
     it('should refuse a pull CHAT_NOT_SHARED, and pull nothing, where the project syncs with no remote', async () => {
       const project = await createProject();
-      const { revisions, syncs } = observeSyncs(project.open({ deviceId: 'device-1' }).revisions);
+      const { revisions, syncs } = observeSyncs(
+        await remoteSettled(project.open({ deviceId: () => 'device-1' }).revisions),
+      );
       const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
 
       expect(await placement.pull({ requestId: 'pull:1', chatId: key.chatId })).toMatchObject(notShared);
@@ -990,7 +1010,7 @@ describe('createTurnPlacementPort (TS-S3)', () => {
     it('should refuse a pull CHAT_NOT_SHARED, and pull nothing, where the project does not sync its chats', async () => {
       const project = await createProject();
       await project.filesystem.writeFile('tau.json', JSON.stringify({ syncChats: false }));
-      const { revisions, syncs } = observeSyncs(withRemote(project.open({ deviceId: 'device-1' }).revisions));
+      const { revisions, syncs } = observeSyncs(withRemote(project.open({ deviceId: () => 'device-1' }).revisions));
       const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
 
       expect(await placement.pull({ requestId: 'pull:1', chatId: key.chatId })).toMatchObject(notShared);
@@ -1004,6 +1024,49 @@ describe('createTurnPlacementPort (TS-S3)', () => {
 
       expect(await placement.pull({ requestId: 'pull:1', chatId: key.chatId })).toMatchObject(notShared);
       expect(syncs).toEqual([]);
+    });
+  });
+
+  /*
+   * Round 28: only a settled answer refuses a pull. A remotes read that failed, or an identity the host has not told
+   * the root yet, or a device file it could not read, is no evidence that this device cannot pull, so the pull is
+   * asked and the host keeps waiting on it.
+   */
+  describe('where this device cannot tell yet whether it pulls the chat', () => {
+    const pulled = { requestId: 'pull:1', status: 'applied' } as const;
+
+    it('should pull, never refuse CHAT_NOT_SHARED, where reading the remotes failed', async () => {
+      const project = await createProject();
+      const revisionPort: RevisionPort = {
+        ...project.port,
+        listRemotes: vi.fn(project.port.listRemotes).mockRejectedValueOnce(new Error('The config is locked.')),
+      };
+      const { revisions, syncs } = observeSyncs(
+        await remoteSettled(project.open({ deviceId: () => 'device-1', revisionPort }).revisions, 'failed'),
+      );
+      const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
+
+      expect(await placement.pull({ requestId: 'pull:1', chatId: key.chatId })).toEqual(pulled);
+      expect(syncs).toEqual([{ type: 'sync', event: { type: 'remoteMoved', generation: 0, refs: [] } }]);
+    });
+
+    it('should pull, never refuse CHAT_NOT_SHARED, where the record devices could not be read', async () => {
+      const project = await createProject();
+      await project.filesystem.writeFile('.git/ops-devices.json', '{ not json');
+      const { revisions, syncs } = observeSyncs(withRemote(project.open({ deviceId: () => 'device-1' }).revisions));
+      const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
+
+      expect(await placement.pull({ requestId: 'pull:1', chatId: key.chatId })).toEqual(pulled);
+      expect(syncs).toEqual([{ type: 'sync', event: { type: 'remoteMoved', generation: 0, refs: [] } }]);
+    });
+
+    it('should pull, never refuse CHAT_NOT_SHARED, before the host has said which device it is', async () => {
+      const project = await createProject();
+      const { revisions, syncs } = observeSyncs(withRemote(project.open({ deviceId: () => undefined }).revisions));
+      const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
+
+      expect(await placement.pull({ requestId: 'pull:1', chatId: key.chatId })).toEqual(pulled);
+      expect(syncs).toEqual([{ type: 'sync', event: { type: 'remoteMoved', generation: 0, refs: [] } }]);
     });
   });
 

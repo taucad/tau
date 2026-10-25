@@ -728,11 +728,13 @@ export const createTurnPlacementPort = <Tools>(
 
   /*
    * XD4: whether a branch this device lacks may still arrive: only a project that syncs with a remote can bring one.
-   * Without that evidence a missing branch is gone for good, and waiting on it would hold the chat forever.
+   * Without that evidence a missing branch is gone for good, and waiting on it would hold the chat forever. Round 28:
+   * the evidence is a remotes read that settled on none (`none`), never a read still running or one that failed, whose
+   * `kind` is `'none'` too: a read failure is never taken for no remote.
    */
   const branchMayArrive = (): boolean => {
-    const kind = actor.getSnapshot().children.remote?.getSnapshot().context.kind;
-    return kind !== undefined && kind !== 'none';
+    const remote = actor.getSnapshot().children.remote?.getSnapshot();
+    return remote !== undefined && remote.value !== 'none';
   };
 
   /*

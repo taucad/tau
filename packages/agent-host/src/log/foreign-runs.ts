@@ -151,6 +151,12 @@ const wordsOf = (event: AgentLogEvent): UserProviderMessage | undefined => {
     : undefined;
 };
 
+/** The words a row says for its run, given what it said before: an envelope replaced on them names the session. */
+const wordsAfter = (event: AgentLogEvent, known: UserProviderMessage | undefined): UserProviderMessage | undefined =>
+  event.type === 'message.envelope-replaced' && event.messageId === known?.id && event.replacement.role === 'user'
+    ? event.replacement
+    : (wordsOf(event) ?? known);
+
 /**
  * Fold rows onto a segment's runs, from where an earlier fold of its first rows left off (or from nothing): every run
  * the rows name keeps its newest time and its last row, and the runs whose lifecycle the ledger leaves unsettled are
@@ -166,7 +172,7 @@ const foldRuns = (deviceId: string, prior: RunFold | undefined, rows: readonly A
     }
     const at = timeOf(event);
     const known = seen.get(event.runId);
-    const words = wordsOf(event) ?? known?.words;
+    const words = wordsAfter(event, known?.words);
     seen.set(event.runId, {
       lastRecordedAt: known === undefined ? at : Math.max(known.lastRecordedAt, at),
       tip: event,

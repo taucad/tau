@@ -173,7 +173,8 @@ export const isPersonsMessage = (message: ProviderMessage): boolean => {
 /**
  * The Tau-internal kind of a person's message that joins the history as data because its run settled before it
  * committed the turn (XD3): the run failed, or another device found it abandoned. The ledger reads the run's turn as
- * committed, and the history keeps one copy however many devices append it.
+ * committed, and the history keeps one copy however many devices append it. A message that already carries a kind (an
+ * external agent's turn) keeps it, and is marked `abandoned` beside it instead.
  *
  * @internal
  */
@@ -182,24 +183,36 @@ export const abandonedTurnKind = 'abandoned-turn';
 /**
  * The person's message of a run that settles before committing its turn, as the row that says it (XD3).
  *
- * @param message - The message the run was admitted with.
- * @returns The same message, marked {@link abandonedTurnKind}.
+ * An external agent's turn keeps its marker, the session it names included, so the handoff still credits that session
+ * with it; the copy is told apart by `abandoned`.
+ *
+ * @param message - The message the run was admitted with, or its newest envelope.
+ * @returns The same message, marked {@link abandonedTurnKind} or, when it has a kind, `abandoned`.
  * @internal
  */
-export const abandonedTurnOf = (message: UserProviderMessage): UserProviderMessage => ({
-  ...message,
-  metadata: { ...message.metadata, tauInternal: { ...message.metadata?.tauInternal, kind: abandonedTurnKind } },
-});
+export const abandonedTurnOf = (message: UserProviderMessage): UserProviderMessage => {
+  const internal = message.metadata?.tauInternal;
+  return {
+    ...message,
+    metadata: {
+      ...message.metadata,
+      tauInternal:
+        internal?.['kind'] === undefined ? { ...internal, kind: abandonedTurnKind } : { ...internal, abandoned: true },
+    },
+  };
+};
 
 /**
  * Whether a message is a person's turn appended as its run settled ({@link abandonedTurnOf}).
  *
  * @param message - One message of a transcript.
- * @returns Whether it is marked {@link abandonedTurnKind}.
+ * @returns Whether it is marked {@link abandonedTurnKind}, or `abandoned`.
  * @internal
  */
 export const isAbandonedTurn = (message: ProviderMessage): boolean =>
-  message.role === 'user' && message.metadata?.tauInternal?.['kind'] === abandonedTurnKind;
+  message.role === 'user' &&
+  (message.metadata?.tauInternal?.['kind'] === abandonedTurnKind ||
+    message.metadata?.tauInternal?.['abandoned'] === true);
 
 /** Catalog provider identities accepted by the portable host. @public */
 export const modelProviderKinds = [

@@ -12,7 +12,7 @@ import {
 import type { ForeignRun } from '#log/foreign-runs.js';
 import { serializeLogEvent } from '#log/serialization.js';
 import { abandonedTurnOf } from '#log/event-types.js';
-import type { AgentLogEvent } from '#log/event-types.js';
+import type { AgentLogEvent, UserProviderMessage } from '#log/event-types.js';
 
 const encoder = new TextEncoder();
 
@@ -255,6 +255,45 @@ describe('the cross-device run fence (XD3)', () => {
     expect(liveForeignRun([alone!], now)).toBe(alone);
     expect(taken).toMatchObject({ runId: 'run-taken', takenOver: true });
     expect(liveForeignRun([taken!], now)).toBeUndefined();
+  });
+
+  /*
+   * An external turn's words are its marked message as its session last named it (`remember` replaces the envelope):
+   * the copy a takeover says keeps the external marker and the session it went to, so the handoff still credits it.
+   */
+  it('should carry an external turn’s words as its session named them, and keep its marker on the copy', () => {
+    const marker = { kind: 'external-agent', runKind: 'acp', agentId: 'claude', hostId: 'desktop', deviceId: 'd1' };
+    const message: UserProviderMessage = {
+      id: 'user-ext',
+      role: 'user',
+      content: 'go',
+      metadata: { tauInternal: marker },
+    };
+    const named: UserProviderMessage = {
+      ...message,
+      metadata: { tauInternal: { ...marker, acpSessionId: 'session-1' } },
+    };
+    const base = {
+      version: 1,
+      leaderEpoch: 'epoch-ext',
+      recordedAt: '2026-10-23T09:59:00.000Z',
+      runId: 'run-ext',
+    } as const;
+    const rows: AgentLogEvent[] = [
+      lifecycle('run-ext', 0, { state: 'admitted', at: '2026-10-23T09:59:00.000Z' }),
+      { ...base, sequence: 1, type: 'message.appended', message },
+      { ...base, sequence: 2, type: 'message.envelope-replaced', messageId: 'user-ext', replacement: named },
+    ];
+    const [external] = unsettledForeignRuns([segment('device-desktop', rows)], now);
+
+    expect(external?.words).toEqual(named);
+    expect(abandonedTurnOf(external!.words!).metadata?.tauInternal).toMatchObject({
+      kind: 'external-agent',
+      agentId: 'claude',
+      acpSessionId: 'session-1',
+      deviceId: 'd1',
+      abandoned: true,
+    });
   });
 
   it('should name the most recently changed of several live runs', () => {

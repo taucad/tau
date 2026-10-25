@@ -66,13 +66,6 @@ const extensionSwaps = new Map<string, readonly string[]>([
   ['.jsx', ['.tsx']],
 ]);
 
-/**
- * Resolve a project specifier against its importer, probing extensions the way Tau's bundler does.
- * @param filesystem - Project filesystem.
- * @param specifier - Relative or root-absolute specifier.
- * @param importer - Rooted importer path.
- * @returns The rooted path of the file, or undefined when none exists.
- */
 /** A directory is not a module file: `exists` reports it as `EISDIR`, so index probing can continue. */
 const isFile = async (filesystem: VmFileSystem, path: string): Promise<boolean> => {
   try {
@@ -85,6 +78,13 @@ const isFile = async (filesystem: VmFileSystem, path: string): Promise<boolean> 
   }
 };
 
+/**
+ * Resolve a project specifier against its importer, probing extensions the way Tau's bundler does.
+ * @param filesystem - Project filesystem.
+ * @param specifier - Relative or root-absolute specifier.
+ * @param importer - Rooted importer path.
+ * @returns The rooted path of the file, or undefined when none exists.
+ */
 const resolveProjectFile = async (
   filesystem: VmFileSystem,
   specifier: string,

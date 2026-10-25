@@ -424,12 +424,12 @@ describe('geospec-runner.worker', () => {
       );
       expect(runner.run).not.toHaveBeenCalled();
       // GeoSpec has no browser VM: the worker injects Tau's esbuild VM into the config read and the runner (D11).
-      const { createEsbuildModuleVm } = await import('@taucad/esbuild/vm');
+      // Matched by name, because `vi.resetModules()` gives the worker its own module instance.
       expect(readGeoSpecConfig).toHaveBeenCalledWith(
-        expect.objectContaining({ createModuleVm: createEsbuildModuleVm }),
+        expect.objectContaining({ createModuleVm: expect.objectContaining({ name: 'createEsbuildModuleVm' }) }),
       );
       expect(nativeMocks.createNativeGeoSpecRunner).toHaveBeenCalledWith(
-        expect.objectContaining({ createModuleVm: createEsbuildModuleVm }),
+        expect.objectContaining({ createModuleVm: expect.objectContaining({ name: 'createEsbuildModuleVm' }) }),
       );
     } finally {
       vi.doUnmock('geospec/config');

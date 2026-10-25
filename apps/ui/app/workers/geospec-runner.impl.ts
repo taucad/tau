@@ -21,6 +21,8 @@ import { geoSpecHostLimitProblem } from '@taucad/chat/constants';
 import { createGeoSpecConfigSession, runGeoSpecTests } from '@taucad/agent-tools/geospec';
 import type { GeoSpecKernelEvidence, GeoSpecTestModelConfig } from '@taucad/agent-tools/geospec';
 import { tauClientExporter } from '@taucad/agent-tools/geospec/exporter';
+// GeoSpec has no browser VM of its own: Tau's esbuild VM bundles specs and configs, npm packages included.
+import { createEsbuildModuleVm } from '@taucad/esbuild/vm';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
 import { fromFsLike } from '@taucad/runtime/filesystem';
@@ -398,16 +400,13 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       }),
     );
     {
-      const [native, { createNativeGeoSpecRunner }, { readGeoSpecConfig }, { createEsbuildModuleVm }, exporter] =
-        await Promise.all([
-          import('geospec-engine'),
-          import('geospec/runner/native'),
-          import('geospec/config'),
-          // GeoSpec has no browser VM of its own: Tau's esbuild VM bundles specs and configs, npm packages included.
-          import('@taucad/esbuild/vm'),
-          // The session owns the client and terminates it on close; the exporter only borrows it.
-          tauClientExporter({ client: runtimeClient }),
-        ]);
+      const [native, { createNativeGeoSpecRunner }, { readGeoSpecConfig }, exporter] = await Promise.all([
+        import('geospec-engine'),
+        import('geospec/runner/native'),
+        import('geospec/config'),
+        // The session owns the client and terminates it on close; the exporter only borrows it.
+        tauClientExporter({ client: runtimeClient }),
+      ]);
       await native.initialize();
       const engine = new native.Engine();
       closeEngine = () => {

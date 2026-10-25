@@ -1525,6 +1525,61 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   };
 
   /**
+   * This device for an external turn (round 27): what its marker is stamped with and whose records restore a session.
+   * A host with no device provider stamps none and restores as it always has. A host given one that cannot read its
+   * device (it answers none, or fails) fails closed: restoring without it would pass over this device's own stamped
+   * sessions for an older unstamped one, and its marker, unstamped, would be restored by every device.
+   *
+   * @returns The device, `undefined` where no provider is configured, or `unreadable`.
+   */
+  const deviceOf = async (): Promise<Readonly<{ deviceId: string | undefined }> | 'unreadable'> => {
+    if (options.deviceId === undefined) {
+      return { deviceId: undefined };
+    }
+    try {
+      const deviceId = await options.deviceId();
+      return deviceId === undefined || deviceId === '' ? 'unreadable' : { deviceId };
+    } catch {
+      return 'unreadable';
+    }
+  };
+  /** An external start's device: one that cannot be read refuses it `REVISIONS_UNAVAILABLE` (`wait`), before any row. */
+  const deviceForExternalTurn = async (): Promise<Readonly<{ deviceId: string | undefined }>> => {
+    const device = await deviceOf();
+    if (device === 'unreadable') {
+      throw coded(
+        'REVISIONS_UNAVAILABLE' satisfies RefusalCode,
+        'This device’s identity for its chats could not be read, so the external agent was not started; send it again.',
+      );
+    }
+    return device;
+  };
+  /**
+   * The session an external run resumes on: the newest this device's records name for the agent and its host, else the
+   * run's own admission's. Where this device cannot be read, the run's own turn's record, which its own device wrote,
+   * else its admission's: never another turn's, whose device is then unknown.
+   */
+  const resumedSession = async (
+    events: readonly AgentLogEvent[],
+    run: Readonly<{
+      agentId: string;
+      agent: ExternalRunKind;
+      admission: Readonly<{ turnId?: string | undefined; state?: JsonObject | undefined }> | undefined;
+    }>,
+  ): Promise<JsonObject | undefined> => {
+    const { agentId, agent, admission } = run;
+    const hostId = typeof agent['hostId'] === 'string' ? agent['hostId'] : undefined;
+    const device = await deviceOf();
+    const turnId = admission?.turnId ?? externalTurnOf(events)?.messageId;
+    const remembered =
+      device === 'unreadable'
+        ? turnId === undefined
+          ? undefined
+          : externalSessionOf(events, agentId, { hostId, turnId })
+        : externalSessionOf(events, agentId, { hostId, deviceId: device.deviceId });
+    return remembered ?? admission?.state;
+  };
+  /**
    * Ask the placement to pull the project's remote now (XD3, rounds 18 and 19), and answer whether this device can pull
    * the chat at all (round 27). Another device's run on the chat has been quiet here a while, and only pulls show
    * whether it stayed quiet there for the staleness bound (`foreignRunStanding`). At most once a heartbeat interval per
@@ -2393,7 +2448,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       if (agent !== undefined) {
         /* The chat's own session (VSC3). A rewind keeps the selection and drops the vendor session, which holds a
          * turn Tau has just retracted. */
-        const deviceId = await options.deviceId?.();
+        const { deviceId } = await deviceForExternalTurn();
         const remembered = externalSessionOf(events, agent.id, {
           hostId: typeof agent['hostId'] === 'string' ? agent['hostId'] : undefined,
           deviceId,
@@ -2599,12 +2654,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
             /* The session this chat reached, not the one its admission asked for: `remember` replaces the user
              * message's envelope, which only the reducer's view carries. */
             const state =
-              mode === 'start'
-                ? admission?.state
-                : (externalSessionOf(events, agentId, {
-                    hostId: typeof agent['hostId'] === 'string' ? agent['hostId'] : undefined,
-                    deviceId: await options.deviceId?.(),
-                  }) ?? admission?.state);
+              mode === 'start' ? admission?.state : await resumedSession(events, { agentId, agent, admission });
             const remember = async (remembered: JsonObject): Promise<void> => {
               const current = externalTurnOf(await log.read());
               const message =

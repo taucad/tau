@@ -2901,6 +2901,167 @@ the cancelled tools left the system unchanged.
     expect(seen[2]?.state).toMatchObject({ deviceId: 'device-1' });
   });
 
+  /*
+   * Round 27: a host given a device provider that cannot read its device fails closed. Restoring without the device
+   * would skip this device's own stamped sessions for an older unstamped one, and its marker, written unstamped, would
+   * be restored by every device: so an external start is refused `REVISIONS_UNAVAILABLE` (`wait`) before any row.
+   */
+  it.each([
+    ['answers no device', async (): Promise<string | undefined> => undefined],
+    [
+      'fails',
+      async (): Promise<string | undefined> => {
+        throw new Error('The record devices could not be read.');
+      },
+    ],
+  ] as const)('refuses an external start, writing no marker, when its device provider %s', async (label, deviceId) => {
+    const file = createMemoryLogFile();
+    const seen: ExternalAgentTurn[] = [];
+    const placement = fakePlacement({ registry: tools(async () => ({ content: null, isError: false })) });
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: file.open,
+        transport: {
+          funding: { type: 'unfunded' },
+          stream: () => {
+            throw new Error('An external turn must never reach the Tau model.');
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: `external-no-device-${label.replaceAll(' ', '-')}`,
+      }),
+      deviceId,
+      placement: placement.port,
+      externalRunners: {
+        acp: {
+          list: () => ['stub-agent'],
+          run: async (turn) => {
+            seen.push(turn);
+          },
+        },
+      },
+    });
+    try {
+      await expect(
+        host.admit({
+          chatId: 'chat-external-no-device',
+          runId: 'run-1',
+          trigger: 'submit',
+          message: { id: 'turn-1', role: 'user', content: 'Run this here.' },
+          config: {
+            systemPrompt: 'unused by an external turn',
+            toolChoice: 'none',
+            agent: { kind: 'acp', id: 'stub-agent', hostId: 'desktop' },
+          },
+        }),
+      ).rejects.toMatchObject({ code: 'REVISIONS_UNAVAILABLE' });
+      expect(refusalOf('REVISIONS_UNAVAILABLE').retry).toBe('wait');
+      expect(seen).toEqual([]);
+      const rows = await readLog(file);
+      expect(rows.filter((event) => event.type === 'message.appended')).toEqual([]);
+    } finally {
+      await host.close();
+    }
+  });
+
+  /*
+   * Round 27: a Resume on a host whose device cannot be read continues the run's own session, the one its own turn's
+   * marker names, never an older unstamped marker another device may have written before markers named devices.
+   */
+  it('resumes an external run on its own session when its device cannot be read, never an older unstamped one', async () => {
+    const file = createMemoryLogFile();
+    const seen: Array<JsonObject | undefined> = [];
+    const placement = fakePlacement({ registry: tools(async () => ({ content: null, isError: false })) });
+    let opened = 0;
+    const hostOf = (
+      deviceId: (() => Promise<string | undefined>) | undefined,
+      run: ExternalAgentPort['run'],
+    ): ReturnType<typeof createTauAgentHost> => {
+      opened += 1;
+      return createTauAgentHost({
+        ...hostOptions({
+          openEventLog: file.open,
+          transport: {
+            funding: { type: 'unfunded' },
+            stream: () => {
+              throw new Error('An external turn must never reach the Tau model.');
+            },
+          },
+          toolRegistry: tools(async () => ({ content: null, isError: false })),
+          idPrefix: `external-own-session-${opened}`,
+        }),
+        ...(deviceId === undefined ? {} : { deviceId }),
+        placement: placement.port,
+        externalRunners: { acp: { list: () => ['stub-agent'], run } },
+      });
+    };
+    const agent = { kind: 'acp', id: 'stub-agent', hostId: 'desktop' } as const;
+    const config = { systemPrompt: 'unused by an external turn', toolChoice: 'none', agent } as const;
+
+    /* A turn from before markers named devices: its marker is unstamped. */
+    const legacy = hostOf(undefined, async (turn) => {
+      await turn.remember({ acpSessionId: 'session-legacy', hostId: 'desktop' });
+    });
+    await legacy.admit({
+      chatId: 'chat-own-session',
+      runId: 'run-1',
+      trigger: 'submit',
+      message: { id: 'turn-1', role: 'user', content: 'First.' },
+      config,
+    });
+    await legacy.cancel({ runId: 'run-1' });
+    await vi.waitFor(() => {
+      expect(placement.calls.filter((call) => call.verb === 'acknowledge').map((call) => call.key.runId)).toContain(
+        'run-1',
+      );
+    });
+    await legacy.close();
+
+    /* This device's run: it opens its own session, then stops on a limit a Resume continues. */
+    const own = hostOf(
+      async () => 'device-1',
+      async (turn) => {
+        await turn.remember({ acpSessionId: 'session-own', hostId: 'desktop' });
+        throw Object.assign(new Error('The agent is rate limited.'), {
+          code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+          details: {
+            agentId: 'stub-agent',
+            failure: { category: 'limit', title: 'The agent is rate limited.', actions: ['retry'] },
+          },
+        });
+      },
+    );
+    await own.admit({
+      chatId: 'chat-own-session',
+      runId: 'run-2',
+      trigger: 'submit',
+      message: { id: 'turn-2', role: 'user', content: 'Second.' },
+      config,
+    });
+    await vi.waitFor(async () => {
+      const stopped = await own.snapshot('chat-own-session');
+      expect(stopped.state).toBe('failed');
+    });
+    await own.close();
+
+    const resumed = hostOf(
+      async () => undefined,
+      async (turn) => {
+        seen.push(turn.state);
+      },
+    );
+    try {
+      await resumed.resume('chat-own-session');
+      await vi.waitFor(() => {
+        expect(seen).toHaveLength(1);
+      });
+    } finally {
+      await resumed.close();
+    }
+
+    expect(seen[0]).toMatchObject({ acpSessionId: 'session-own', deviceId: 'device-1' });
+  });
+
   it('should record the stop details an external runner throws on its failed run', async () => {
     const file = createMemoryLogFile();
     const details = {

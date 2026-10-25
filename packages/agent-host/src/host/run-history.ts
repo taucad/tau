@@ -149,12 +149,18 @@ export const externalTurnOf = (
  * @param owner.hostId - Admitted placement; only records owned by that host may restore its session.
  * @param owner.deviceId - This device, as the host's `deviceId` option names it: a record another device stamped names
  *   a session on that device, whatever host id the two share (every desktop places as `desktop`).
+ * @param owner.turnId - Only this turn's own record, whatever device it names (round 27): a resume on a device that
+ *   cannot read its own id continues the run's own session, never another turn's.
  * @returns The record the runner resumes from, or `undefined` for a first turn.
  */
 export const externalSessionOf = (
   events: readonly AgentLogEvent[],
   agentId: string,
-  { hostId, deviceId }: Readonly<{ hostId?: string | undefined; deviceId?: string | undefined }> = {},
+  {
+    hostId,
+    deviceId,
+    turnId,
+  }: Readonly<{ hostId?: string | undefined; deviceId?: string | undefined; turnId?: string | undefined }> = {},
 ): (JsonObject & ExternalSessionState) | undefined => {
   /* Reduced, not raw: `remember` records the session id by *replacing* the
    * user message's envelope, so only the reducer's view carries it. */
@@ -173,7 +179,9 @@ export const externalSessionOf = (
       marker.agentId !== agentId ||
       typeof marker['acpSessionId'] !== 'string' ||
       (hostId !== undefined && marker['hostId'] !== hostId) ||
-      (marker['deviceId'] !== undefined && marker['deviceId'] !== deviceId)
+      (turnId === undefined
+        ? marker['deviceId'] !== undefined && marker['deviceId'] !== deviceId
+        : message.id !== turnId)
     ) {
       continue;
     }

@@ -1,6 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { HealthIndicatorService } from '@nestjs/terminus';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Environment } from '#config/environment.config.js';
 import { inProcessGitToolchain } from '#api/git/forwarding/in-process-executor.js';
 import { GitToolchainHealthIndicator } from '#api/health/git-toolchain-health.indicator.js';
@@ -21,12 +21,20 @@ describe('GitToolchainHealthIndicator', () => {
     vi.mocked(inProcessGitToolchain).mockClear();
   });
 
-  const indicator = (storageUrl: string | undefined): GitToolchainHealthIndicator =>
-    new GitToolchainHealthIndicator(
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  /* `ConfigService` reads `process.env` before its own values, and CI's `.env`
+     (from `.env.example`) sets `TAU_STORAGE_URL`, so the variable is stubbed too. */
+  const indicator = (storageUrl: string | undefined): GitToolchainHealthIndicator => {
+    vi.stubEnv('TAU_STORAGE_URL', storageUrl ?? '');
+    return new GitToolchainHealthIndicator(
       new HealthIndicatorService(),
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
       new ConfigService<Environment, true>({ TAU_STORAGE_URL: storageUrl }),
     );
+  };
 
   it('should be up without git when git is forwarded to tau-storage, and never probe for it', async () => {
     const result = await indicator('http://tau-storage.flycast').isHealthy();

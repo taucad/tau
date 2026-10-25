@@ -185,11 +185,15 @@ const resolveLocation = async (
         scope = root;
       }
     } catch (error) {
+      // Git stops discovery at a filesystem boundary, such as a tmpfs `/tmp`, and says so
+      // with "or any parent up to mount point"; both spellings mean no repository.
       if (
         !(error instanceof Error) ||
         !('stderr' in error) ||
         typeof error.stderr !== 'string' ||
-        !error.stderr.includes('not a git repository (or any of the parent directories): .git')
+        !/^fatal: not a git repository \(or any (?:of the parent directories\): \.git|parent up to mount point )/mu.test(
+          error.stderr,
+        )
       ) {
         return undefined;
       }

@@ -262,6 +262,8 @@ jobs:
         run: |
           echo '::group::Sandbox host'
           sysctl kernel.apparmor_restrict_unprivileged_userns kernel.unprivileged_userns_clone user.max_user_namespaces 2>&1 || true
+          sudo grep -Ei 'bwrap|unshare|userns' /sys/kernel/security/apparmor/profiles || echo 'no bwrap, unshare or userns AppArmor profile loaded'
+          findmnt -no FSTYPE /tmp || true
           bwrap --unshare-user --cap-drop ALL --ro-bind / / --dev /dev --unshare-pid --proc /proc -- \
             unshare --user --map-root-user --pid --fork --mount-proc true \
             && echo 'nested user namespace: ok' || echo 'nested user namespace: blocked'

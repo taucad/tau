@@ -9,7 +9,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createAgentLauncher } from '@taucad/agent-host/launcher';
 import { createNodeChatStore } from '@taucad/agent-host/node';
-import { createTauCloudGatewayModelTransport, foreignRunStaleMilliseconds } from '@taucad/agent-host';
+import {
+  createTauCloudGatewayModelTransport,
+  foreignRunAskPullMilliseconds,
+  foreignRunStaleMilliseconds,
+} from '@taucad/agent-host';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { createUIMessageStream, readUIMessageStream } from 'ai';
@@ -538,11 +542,11 @@ describe('chatProjectionLogic (PV-S7)', () => {
   /* XD3: a run in flight on another device holds this chat's composer until it settles or goes stale. */
   describe('another device’s run in flight', () => {
     const at = Date.parse('2026-09-28T00:00:00.000Z');
-    const remoteOf = (rows: readonly unknown[], pulledAt?: number) => [
+    const remoteOf = (rows: readonly unknown[], pulledQuiet?: number) => [
       {
         deviceId: 'other-device',
         bytes: new TextEncoder().encode(rows.map((row) => JSON.stringify(row)).join('\n')),
-        ...(pulledAt === undefined ? {} : { pulledAt }),
+        ...(pulledQuiet === undefined ? {} : { pulledQuiet }),
       },
     ];
 
@@ -562,8 +566,8 @@ describe('chatProjectionLogic (PV-S7)', () => {
       });
     });
 
-    /* Round 18: gone stale means a pull past the bound found nothing newer, never this clock alone. */
-    it('names none once the run settles, or once a pull past the bound found nothing newer', () => {
+    /* Rounds 18 and 19: gone stale means pulls found nothing newer for more than the bound, never this clock alone. */
+    it('names none once the run settles, or once pulls found nothing newer for more than the bound', () => {
       const settled = reduceChatProjection(initialChatProjection, {
         type: 'remote',
         at,
@@ -581,7 +585,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
       const pulled = reduceChatProjection(running, {
         type: 'remote',
         at,
-        segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other')], at + foreignRunStaleMilliseconds + 1),
+        segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other')], foreignRunStaleMilliseconds + 1),
       }).state;
 
       expect(selectRunElsewhere(settled, at)).toBeUndefined();
@@ -604,7 +608,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
       }).state;
       const changesAt = selectRunElsewhereChangesAt(running, at + 60_000);
 
-      expect(changesAt).toBe(at + foreignRunStaleMilliseconds + 1);
+      expect(changesAt).toBe(at + foreignRunAskPullMilliseconds + 1);
       expect(selectRunElsewhereAwaitsPull(running, changesAt! - 1)).toBe(false);
       /* From then on only a pull changes it: the run awaits one, and still holds the chat. */
       expect(selectRunElsewhereAwaitsPull(running, changesAt!)).toBe(true);
@@ -614,8 +618,8 @@ describe('chatProjectionLogic (PV-S7)', () => {
       expect(selectRunElsewhereChangesAt(initialChatProjection, at)).toBeUndefined();
     });
 
-    /* Round 16: a far-future foreign clock decides nothing; the reader waits the bound from when it saw the run. */
-    it('waits for the next change the bound from when it saw the run, whatever its clock, and not at all when nothing can change', () => {
+    /* Round 16: a far-future foreign clock decides nothing; the reader waits from when it saw the run (round 19: until it asks for pulls). */
+    it('waits for the next change from when it saw the run, whatever its clock, and not at all when nothing can change', () => {
       const farAhead = reduceChatProjection(initialChatProjection, {
         type: 'remote',
         at,
@@ -627,9 +631,9 @@ describe('chatProjectionLogic (PV-S7)', () => {
         segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other')]),
       }).state;
 
-      expect(selectRunElsewhereRecheckDelay(farAhead, at)).toBe(foreignRunStaleMilliseconds + 1);
-      expect(selectRunElsewhereRecheckDelay(running, at)).toBe(foreignRunStaleMilliseconds + 1);
-      expect(selectRunElsewhereRecheckDelay(running, at + foreignRunStaleMilliseconds + 5)).toBeUndefined();
+      expect(selectRunElsewhereRecheckDelay(farAhead, at)).toBe(foreignRunAskPullMilliseconds + 1);
+      expect(selectRunElsewhereRecheckDelay(running, at)).toBe(foreignRunAskPullMilliseconds + 1);
+      expect(selectRunElsewhereRecheckDelay(running, at + foreignRunAskPullMilliseconds + 5)).toBeUndefined();
       expect(selectRunElsewhereRecheckDelay(initialChatProjection, at)).toBeUndefined();
     });
 

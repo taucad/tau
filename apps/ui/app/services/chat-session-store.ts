@@ -103,7 +103,7 @@ import type {
   ChatProjectionReadAnswer,
   ChatRunPhase as ProjectedRunPhase,
 } from '#machines/chat-projection.logic.js';
-import { chatPulledAtFileName, pulledAtOf, segmentDeviceIdOf } from '@taucad/agent-host';
+import { chatPulledAtFileName, pulledQuietOf, segmentDeviceIdOf } from '@taucad/agent-host';
 import type { RowKey } from '@taucad/agent-host';
 import type { HostCommand } from '@taucad/agent-host/wire';
 import { sdkWatch } from '#chat-clients/_internal/sdk-watch.js';
@@ -3933,19 +3933,23 @@ export class ChatSessionStore {
             },
           }),
           /* The chat owns intent; the device owns placement (XD2). `chat.json` takes the portable execution, and a
-           * placement that names a host only on this device is this chat's composer record on this device. */
+           * placement that names a host only on this device is this chat's composer record on this device. Every
+           * change of where the chat runs comes here, a pick or this tab's reach (round 19): only a pick is written,
+           * and every change moves the log observer and marks the queued commands. */
           persistActiveExecutionActor: createAsyncLogic({
             run: async ({ input, signal }) => {
               /*
                * Written on every change, never compared with a cached copy: another tab may have changed the record. A
                * local choice in a tab that could not reach this device's placement leaves it for the tab that can.
                */
-              const placement = chatPlacementOf(input.activeExecution);
-              if (placement !== undefined || input.heldPlacement === undefined) {
-                await writeChatPlacement({ client: depsRef().client, projectId, chatId: input.chatId, placement });
+              if (input.persist) {
+                const placement = chatPlacementOf(input.activeExecution);
+                if (placement !== undefined || input.heldPlacement === undefined) {
+                  await writeChatPlacement({ client: depsRef().client, projectId, chatId: input.chatId, placement });
+                }
+                /* The chat store writes it portable: a device-relative host never reaches the synced record. */
+                await depsRef().patchChat(input.chatId, 'activeExecution', input.activeExecution);
               }
-              /* The chat store writes it portable: a device-relative host never reaches the synced record. */
-              await depsRef().patchChat(input.chatId, 'activeExecution', input.activeExecution);
               signal.throwIfAborted();
               if (this.#sessions.get(input.chatId) !== session) {
                 return;
@@ -4431,19 +4435,24 @@ export class ChatSessionStore {
       return deviceId === undefined ? [] : [{ name, deviceId }];
     });
     /*
-     * This device's last pull of the chat, as the agent host's reader reads it (XD3, round 18): read before the
-     * segments, since sync records a pull only once the segments it brought are written.
+     * This device's record of its pulls of the chat, as the agent host's reader reads it (XD3, rounds 18 and 19): read
+     * before the segments, since sync records a pull only once the segments it brought are written, and its quiet
+     * counts only for a segment of the very size it names.
      */
-    const pulledAt = entries.includes(chatPulledAtFileName)
-      ? pulledAtOf(await client.readFile(`${directory}/${chatPulledAtFileName}`).catch(() => undefined))
+    const record = entries.includes(chatPulledAtFileName)
+      ? await client.readFile(`${directory}/${chatPulledAtFileName}`).catch(() => undefined)
       : undefined;
     const segments = await Promise.all(
-      named.map(async ({ name, deviceId }) => ({
-        deviceId,
-        bytes: await this.#readForeignSegment(`${directory}/${name}`, client),
-        ...(await receivedAtOf(client, `${directory}/${name}`)),
-        ...(pulledAt === undefined ? {} : { pulledAt }),
-      })),
+      named.map(async ({ name, deviceId }) => {
+        const bytes = await this.#readForeignSegment(`${directory}/${name}`, client);
+        const pulledQuiet = pulledQuietOf(record, name, bytes.byteLength);
+        return {
+          deviceId,
+          bytes,
+          ...(await receivedAtOf(client, `${directory}/${name}`)),
+          ...(pulledQuiet === undefined ? {} : { pulledQuiet }),
+        };
+      }),
     );
     if (
       this.#remoteReadVersions.get(chatId) === version &&

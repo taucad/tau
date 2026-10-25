@@ -855,10 +855,10 @@ function useSessionRunElsewhere(chatId: string): ForeignRun | undefined {
 }
 
 /**
- * Ask for a pull of the project's remote while another device's run on this chat awaits one (XD3, round 18): quiet
- * here past the staleness bound, it holds the chat until a pull shows whether it stayed quiet there, and the composer
- * holds its send meanwhile, so nothing else would ask. Asked once it starts awaiting one, then once a heartbeat's
- * interval while it still does (a pull that failed offline is asked again).
+ * Ask for pulls of the project's remote while another device's run on this chat awaits them (XD3, rounds 18 and 19):
+ * quiet here a while, it holds the chat until pulls show it stayed quiet there for the staleness bound, and the
+ * composer holds its send meanwhile, so nothing else would ask. Asked once it starts awaiting them, then once a
+ * heartbeat's interval while it still does (a pull that failed offline is asked again); sync records each of them.
  */
 function useRunElsewherePull(chatId: string): void {
   const store = useChatSessionStore();

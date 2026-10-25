@@ -35,6 +35,12 @@ export type ChatPersistenceMachineContext = {
    * `origin` on a page no daemon served), so `activeExecution` runs locally instead and the composer says so (XD2).
    */
   heldPlacement?: TauAgentHostId;
+  /**
+   * The person chose `activeExecution` and it is not written yet. A change of where the chat runs that only this tab's
+   * reach made (`placementReachable`, `placementUnreachable`) goes through the same persistence step, which moves the
+   * log observer and marks queued commands, but writes nothing (round 19).
+   */
+  executionUnwritten?: boolean;
   activeKernel?: KernelId;
   fault?: string;
 };
@@ -91,6 +97,8 @@ const persistActiveExecutionActor = createAsyncLogic<
     activeExecution: CadAgentExecution | undefined;
     /** The placement this tab holds but cannot reach, which a local choice leaves in place for the tab that can. */
     heldPlacement: TauAgentHostId | undefined;
+    /** Write the execution (the person chose it); else only follow it, as for a change of this tab's reach. */
+    persist: boolean;
   }
 >({
   run: async () => {
@@ -200,15 +208,25 @@ export const chatPersistenceMachine = setup({
               hasValidChatId(context)
                 ? {
                     target: 'persisting',
-                    context: { activeExecution: event.execution, heldPlacement: stillHeld(context, event.execution) },
+                    context: {
+                      activeExecution: event.execution,
+                      heldPlacement: stillHeld(context, event.execution),
+                      executionUnwritten: true,
+                    },
                   }
                 : undefined,
-            placementReachable: ({ event }) => ({
-              context: { activeExecution: event.execution, heldPlacement: undefined },
-            }),
-            placementUnreachable: ({ event }) => ({
-              context: { activeExecution: event.execution, heldPlacement: event.heldPlacement },
-            }),
+            /* Reach moves where the chat runs as a pick does, through the one step that follows it (round 19). */
+            placementReachable: ({ context, event }) =>
+              hasValidChatId(context)
+                ? { target: 'persisting', context: { activeExecution: event.execution, heldPlacement: undefined } }
+                : undefined,
+            placementUnreachable: ({ context, event }) =>
+              hasValidChatId(context)
+                ? {
+                    target: 'persisting',
+                    context: { activeExecution: event.execution, heldPlacement: event.heldPlacement },
+                  }
+                : undefined,
           },
         },
         persisting: {
@@ -218,9 +236,10 @@ export const chatPersistenceMachine = setup({
               chatId: context.activeChatId!,
               activeExecution: context.activeExecution,
               heldPlacement: context.heldPlacement,
+              persist: context.executionUnwritten === true,
             }),
-            onDone: { target: 'idle' },
-            onError: { target: 'idle' },
+            onDone: { target: 'idle', context: { executionUnwritten: false } },
+            onError: { target: 'idle', context: { executionUnwritten: false } },
           },
           on: {
             setActiveExecution: ({ context, event }) =>
@@ -228,15 +247,30 @@ export const chatPersistenceMachine = setup({
                 ? {
                     target: 'persisting',
                     reenter: true,
-                    context: { activeExecution: event.execution, heldPlacement: stillHeld(context, event.execution) },
+                    context: {
+                      activeExecution: event.execution,
+                      heldPlacement: stillHeld(context, event.execution),
+                      executionUnwritten: true,
+                    },
                   }
                 : undefined,
-            placementReachable: ({ event }) => ({
-              context: { activeExecution: event.execution, heldPlacement: undefined },
-            }),
-            placementUnreachable: ({ event }) => ({
-              context: { activeExecution: event.execution, heldPlacement: event.heldPlacement },
-            }),
+            /* A pick still being written stays unwritten: the step that follows reach writes it too. */
+            placementReachable: ({ context, event }) =>
+              hasValidChatId(context)
+                ? {
+                    target: 'persisting',
+                    reenter: true,
+                    context: { activeExecution: event.execution, heldPlacement: undefined },
+                  }
+                : undefined,
+            placementUnreachable: ({ context, event }) =>
+              hasValidChatId(context)
+                ? {
+                    target: 'persisting',
+                    reenter: true,
+                    context: { activeExecution: event.execution, heldPlacement: event.heldPlacement },
+                  }
+                : undefined,
           },
         },
       },

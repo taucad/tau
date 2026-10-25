@@ -6449,6 +6449,125 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     expect(listeners.size).toBe(0);
   });
 
+  /*
+   * Round 19: reach changes where the chat runs as the person's own pick does. When this tab comes to reach its held
+   * daemon (`tau open --desktop` handing it over), or learns after the load that it cannot reach the placement it
+   * applied, the chat's log observer moves to the host its turns now go to and its queued commands are marked
+   * unconfirmed, so that host's run shows; nothing is persisted.
+   */
+  it.each([
+    {
+      name: 'reaches its held daemon',
+      placement: 'loopback:http://127.0.0.1:4100',
+      knownAtLoad: false,
+      reachableAfter: true,
+    },
+    {
+      name: 'cannot reach the placement it applied at load',
+      placement: 'origin',
+      knownAtLoad: undefined,
+      reachableAfter: false,
+    },
+  ] as const)(
+    'should move the chat’s observer and mark its queued commands when this tab $name',
+    async ({ placement, knownAtLoad, reachableAfter }) => {
+      const chatId = `chat_observer_follows_${String(reachableAfter)}`;
+      const deps = createStubDeps();
+      seedPlacement(deps, chatId, placement);
+      deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+      const prepared = {
+        id: 'queued_message',
+        requestId: 'queued_request',
+        message: { id: 'queued_message', role: 'user', parts: [{ type: 'text', text: 'queued' }] },
+        command: {
+          type: 'start',
+          commandId: 'queued_request',
+          payload: {
+            chatId,
+            runId: 'queued_request',
+            trigger: 'submit',
+            message: { id: 'queued_message', role: 'user', content: 'queued' },
+          },
+        },
+      };
+      await deps.client.writeFile(
+        chatMessageQueuePath(projectId, chatId),
+        new TextEncoder().encode(JSON.stringify({ version: 1, items: [prepared] })),
+      );
+      let reachable: boolean = knownAtLoad ?? false;
+      const probe = Promise.withResolvers<boolean>();
+      const listeners = new Set<() => void>();
+      const store = new ChatSessionStore({ chatSession });
+      store.setDependencies({
+        ...deps,
+        isPlacementOnThisDevice: async () => (knownAtLoad === undefined ? probe.promise : reachable),
+        ...(knownAtLoad === undefined ? { isPlacementOnThisDeviceNow: () => undefined } : {}),
+        onPlacementReachabilityChanged: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      });
+      const session = store.acquire(chatId, projectId);
+      await vi.waitFor(() => {
+        expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+      });
+      const connected: Array<string | undefined> = [];
+      const closed: Array<string | undefined> = [];
+      /* As the project's connector does: the host this device runs the chat on now. */
+      const unpublish = store.publishProjectHostConnector(projectId, async (id) => {
+        const settings = await store.getChatHostSettings(id);
+        const hostId = settings?.activeExecution?.hostId;
+        connected.push(hostId);
+        return {
+          placement: { hostId },
+          catchUp: writerOwnedCatchUp,
+          read: vi.fn<AgentHostClient['read']>(),
+          subscribe: vi.fn<AgentHostClient['subscribe']>(() => vi.fn()),
+          hostCommand: vi.fn<AgentHostClient['hostCommand']>(),
+          close: vi.fn(async () => {
+            closed.push(hostId);
+          }),
+        };
+      });
+      const unobserve = store.observe(chatId, projectId);
+      try {
+        await vi.waitFor(() => {
+          expect(connected.length).toBeGreaterThan(0);
+        });
+        const before = connected.at(-1);
+
+        if (knownAtLoad === undefined) {
+          probe.resolve(reachableAfter);
+        } else {
+          reachable = reachableAfter;
+          for (const listener of listeners) {
+            listener();
+          }
+        }
+
+        const after = reachableAfter ? placement : undefined;
+        await vi.waitFor(() => {
+          expect(session.persistenceActorRef.getSnapshot().context.activeExecution?.hostId).toBe(after);
+          expect(connected.at(-1)).toBe(after);
+        });
+        expect(before).not.toBe(after);
+        await vi.waitFor(() => {
+          expect(closed).toContain(before);
+          expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toHaveProperty('items', [
+            { ...prepared, commandPlacement: 'unconfirmed' },
+          ]);
+        });
+        /* Reach is this tab's, not the chat's: neither the chat record nor the device's placement changes. */
+        expect(deps.patchChat).not.toHaveBeenCalledWith(chatId, 'activeExecution', expect.anything());
+        expect(placementOnDisk(deps, chatId)).toBe(placement);
+      } finally {
+        unpublish();
+        unobserve();
+        store.release(chatId);
+      }
+    },
+  );
+
   /* A legacy host the chat store declines (the tab knows it cannot reach it) is never written as this device's. */
   it('should write no placement for a legacy host the chat store declines', async () => {
     const chatId = 'chat_legacy_drop_refused';
@@ -6797,11 +6916,11 @@ describe('ChatSessionStore — a run on another device (XD3)', () => {
   });
 
   /*
-   * Round 18: quiet is evidenced by a pull, as the agent host reads it. The page reads this device's last pull of the
-   * chat beside the segments, so a run quiet here for twenty minutes holds the chat until a pull past the bound finds
-   * nothing newer, and the page asks its project for that pull meanwhile.
+   * Rounds 18 and 19: quiet is evidenced by pulls, as the agent host reads it. The page reads this device's record of
+   * its pulls beside the segments, so a run quiet here for twenty minutes holds the chat until pulls found its segment
+   * as it is for more than the bound, and the page asks its project for pulls meanwhile.
    */
-  it('should hold a foreign run until a pull past the bound, and ask the project for that pull', async () => {
+  it('should hold a foreign run until pulls found it quiet past the bound, and ask the project for them', async () => {
     const projectId = 'project_run_pulled';
     const chatId = 'chat_run_pulled';
     const receivedAt = Date.now() - 20 * 60 * 1000;
@@ -6811,11 +6930,13 @@ describe('ChatSessionStore — a run on another device (XD3)', () => {
     const events = `/projects/${projectId}/.tau/chats/${chatId}/events`;
     const row = (sequence: number, state: string) =>
       `${JSON.stringify({ version: 1, leaderEpoch: 'desk', sequence, recordedAt: new Date(receivedAt).toISOString(), runId: 'run-pulled', type: 'run.lifecycle', state })}\n`;
-    await client.writeFile(
-      `${events}/device-desktop.jsonl`,
-      new TextEncoder().encode(row(0, 'admitted') + row(1, 'running')),
-    );
-    await client.writeFile(`${events}/pulled-at`, new TextEncoder().encode(String(receivedAt + 60_000)));
+    const segment = new TextEncoder().encode(row(0, 'admitted') + row(1, 'running'));
+    await client.writeFile(`${events}/device-desktop.jsonl`, segment);
+    const record = (quiet: number) =>
+      new TextEncoder().encode(
+        `${String(Date.now())}\ndevice-desktop.jsonl ${String(segment.byteLength)} ${String(quiet)}`,
+      );
+    await client.writeFile(`${events}/pulled-at`, record(60_000));
     const pulls: string[] = [];
     const store = new ChatSessionStore({ chatSession });
     store.setDependencies({ ...createStubDeps(client), pullRemote: (id) => pulls.push(id) });
@@ -6825,7 +6946,7 @@ describe('ChatSessionStore — a run on another device (XD3)', () => {
     await store.refreshRemoteSegments(chatId, projectId);
     await vi.waitFor(() => {
       expect(store.getProjection(chatId)?.remote?.unsettled).toEqual([
-        expect.objectContaining({ runId: 'run-pulled', observedAt: receivedAt, pulledAt: receivedAt + 60_000 }),
+        expect.objectContaining({ runId: 'run-pulled', observedAt: receivedAt, pulledQuiet: 60_000 }),
       ]);
     });
     const projection = store.getProjection(chatId)!;
@@ -6834,8 +6955,8 @@ describe('ChatSessionStore — a run on another device (XD3)', () => {
     store.requestRemotePull(chatId);
     expect(pulls).toEqual([projectId]);
 
-    /* The pull found nothing newer, twenty minutes after the run last changed here: the run no longer holds. */
-    await client.writeFile(`${events}/pulled-at`, new TextEncoder().encode(String(Date.now())));
+    /* Pulls found nothing newer for more than the bound: the run no longer holds. */
+    await client.writeFile(`${events}/pulled-at`, record(20 * 60 * 1000));
     await store.refreshRemoteSegments(chatId, projectId);
     await vi.waitFor(() => {
       expect(selectRunElsewhere(store.getProjection(chatId)!, Date.now())).toBeUndefined();

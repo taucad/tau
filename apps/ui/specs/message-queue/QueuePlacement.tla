@@ -23,6 +23,10 @@ Init == \E c \in Cases :
 
 \* The initial prepared state is after A's durable acceptance and a lost ACK.
 \* Acceptance sets are host-local; B cannot deduplicate A's command id.
+\* A switch is any change of the host the chat's turns go to: the person's pick,
+\* or this tab coming to reach a held placement or finding it cannot reach the
+\* one it applied. Each takes the one persistence step that grants, rebinds the
+\* observer and marks prepared commands; only a pick is written to the records.
 Switch(h) == /\ ~s.switched /\ h \in Hosts \ {Home}
              /\ s' = [s EXCEPT !.selected = h, !.switched = TRUE,
                  !.pendingGrant = IF s.after /\ s.afterPlacement = Unknown /\ ~s.prepared

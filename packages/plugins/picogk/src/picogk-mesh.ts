@@ -440,12 +440,13 @@ export const picogkArtifactToGlb = (
 /**
  * What the delivered PicoGK mesh cost: triangles and vertices drawn across every occurrence, and the
  * worker's mesh construction, extraction and normal generation time, with the voxel size the model
- * ran at when it had one. Line prototypes carry no triangles and are not counted.
+ * ran at when it had one, and the adaptive meshing the worker applied when the view asked for one. Line
+ * prototypes carry no triangles and are not counted.
  * @param result - Validated build descriptor returned by the worker.
  * @returns The rendered view's tessellation report.
  */
 export const picogkTessellation = (
-  result: Pick<PicogkBuild, 'prototypes' | 'occurrences' | 'timings' | 'voxelSize'>,
+  result: Pick<PicogkBuild, 'prototypes' | 'occurrences' | 'timings' | 'voxelSize' | 'meshing'>,
 ): TessellationReport => {
   const meshes = new Map(
     result.prototypes.filter(({ kind }) => kind === 'triangles').map((prototype) => [prototype.id, prototype]),
@@ -465,6 +466,7 @@ export const picogkTessellation = (
     vertices,
     elapsed: meshConstruction + meshExtraction + normalGeneration,
     ...(result.voxelSize === undefined ? {} : { voxelSize: result.voxelSize }),
+    ...(result.meshing === undefined ? {} : { adaptivity: result.meshing.adaptivity, relax: result.meshing.relax }),
   };
 };
 
@@ -477,5 +479,7 @@ export const picogkTessellationSchema: z.ZodType<TessellationReport> = z
     vertices: meshCount,
     elapsed: z.number().nonnegative(),
     voxelSize: z.number().positive().optional(),
+    adaptivity: z.number().gt(0).lt(1).optional(),
+    relax: z.boolean().optional(),
   })
   .strict();

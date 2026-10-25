@@ -74,3 +74,48 @@ export function resolveGraphicsBackendPreference(
 
   return 'webgl';
 }
+
+/**
+ * What a WebGPU adapter says about itself: `GPUAdapter` (with its `info`) or a device's `adapterInfo`.
+ *
+ * @public
+ */
+export type GpuAdapterIdentity = Readonly<{
+  isFallbackAdapter?: boolean;
+  info?: Readonly<{
+    architecture?: string;
+    description?: string;
+    device?: string;
+    isFallbackAdapter?: boolean;
+    vendor?: string;
+  }>;
+}>;
+
+/**
+ * The adapter's self-reported vendor, architecture, device and description, lowercased; empty when it reports none.
+ *
+ * @param adapter - The adapter, or a device's `adapterInfo` wrapped as `{ info }`.
+ * @returns The identity string.
+ * @public
+ */
+export function gpuAdapterIdentity(adapter: GpuAdapterIdentity): string {
+  const { info } = adapter;
+  return [info?.vendor, info?.architecture, info?.device, info?.description].join(' ').trim().toLowerCase();
+}
+
+/**
+ * Whether the adapter rasterizes on the CPU: the browser's fallback adapter, or one that names a software
+ * implementation (SwiftShader, llvmpipe, lavapipe). Work that is cheap on a GPU, such as ambient occlusion, can
+ * saturate such an adapter and stall the page.
+ *
+ * @param adapter - The adapter, or a device's `adapterInfo` wrapped as `{ info }`.
+ * @returns True for a software adapter; false for hardware or an adapter that reports nothing.
+ * @public
+ */
+export function isSoftwareGpuAdapter(adapter: GpuAdapterIdentity): boolean {
+  if (adapter.isFallbackAdapter === true || adapter.info?.isFallbackAdapter === true) {
+    return true;
+  }
+
+  return /\b(?:swiftshader|llvmpipe|lavapipe|software|cpu)\b/u.test(gpuAdapterIdentity(adapter));
+}

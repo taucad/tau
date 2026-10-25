@@ -3,7 +3,7 @@ title: 'Kernel Telemetry Policy'
 description: 'Kernel worker telemetry: span naming, hierarchy rules, attribute conventions, and performance contracts. Covers RuntimeTracer, OC API tracing, and WorkerTelemetryCollector.'
 status: active
 created: '2026-02-20'
-updated: '2026-09-30'
+updated: '2026-10-24'
 related:
   - docs/policy/runtime-api-policy.md
   - docs/research/realtime-cad-performance-charter.md
@@ -208,6 +208,18 @@ Spans are produced in every realm. Where they go is the host's answer, not the t
 - **The renderer is a producer like any other**: one page-scoped `origin` (`label: 'renderer'`), `epoch` re-anchored per record, `renderer.presentation` for the frame that presented a model with the presentation pipeline's durations as attributes, and `renderer.long-animation-frame` from a `PerformanceObserver`. These observers are out-of-band by construction — the platform reports a Long Animation Frame only after a frame has already blocked for 50 ms — and the "no `PerformanceObserver`" rule scopes to the span-producer path (`WorkerTelemetryCollector` and the tracer), not to them.
 - **`Document-Policy: js-profiling`** is served on development and staging documents only: the SSR document sets it off the canonical production origin, and the desktop's `app://` handler sets it on an unpackaged build. Neither production nor a packaged app offers a profiler.
 
+## Operation Observation
+
+Spans describe how an operation ran; an observation says what happened to it. Every client attempt — `initialize`, `describe`, `evaluate`, `render`, `export`, `transcode` — settles as exactly one `RuntimeOperationObservation` on the client's `operation` event, built at the session's settle sites from the reason the attempt settled. Its outcome is one closed case (`succeeded`, `issue`, `superseded`, `timed-out`, `cancelled`, `abandoned`, `terminated`, `discarded`, `failed`), never a message.
+
+- **Nothing is built without a subscriber.** A settle site with no `operation` or `operation-late` subscriber returns before it allocates. A throwing subscriber is isolated and never changes a result.
+- **Worker facts are opt-in and computed after the reply.** `observe('facts')` asks a worker that advertised `observation: ['facts']` in its `initialize` result; the mode is decided per operation at admission, so a change never splits one. With observation `off` the worker takes no mark, slices nothing, walks nothing, reads no heap and counts no parameters. With `facts`, the operation records a collector mark at dequeue and a stamped-facts thunk at settle; after the dispatcher posts the terminal reply it walks that operation's slice once, posts one trailing `operationFacts` notify, and only then flushes that operation's spans — so the next operation's spans stay pending.
+- **Phases come from an explicit span map.** `phaseOfSpan` names a `RuntimePhase` for every non-root `kernel.*` span the framework starts, and a test fails when a new framework span has no entry. A middleware wrap's self-time is subtracted only from a mapped ancestor phase; a wrap directly under the root counts in `middleware` alone. Third-party middleware names close to `_OTHER`.
+- **Parameter facts are counts.** The lockstep walk compares defaults with resolved values without building pointer strings, stops at 1,000 leaves or 0.1 ms (`truncated`), counts a structured leaf too large to compare canonically as `unknown`, and retains the resolved values only while observing.
+- **Heap facts name their source.** The kernel's `observedHeapBytes` hook wins, then its `heapBytes`, then a native child sample bounded at 50 ms, then the resident set of a realm that owns its process. A `worker_threads` or in-process realm without a hook reports `none`, never the process.
+- **The client joins for one second.** The status is `joined`, `none` (no reply to join), `not-observed`, `missing-timeout`, or `missing-worker-gone`, which is emitted synchronously when the worker goes away. A worker that predates observation yields `not-observed` and is never sent `observe`. A terminal reply landing after its attempt timed out, was cancelled or was abandoned is emitted once as `operation-late`, within ten minutes.
+- **Costs** (advisory until calibrated, `operation-facts.bench.test.ts`): the walk ≤ 1,500 ns p95 per span, `parameterFacts` ≤ 15 µs p95 at 50 leaves and ≤ 100 µs on the truncated sweep, ≤ 2 µs per observation including the join.
+
 ## OC API Call Tracing
 
 The Replicad kernel supports automatic OpenCASCADE API call tracing via a JavaScript Proxy that wraps the OC WASM instance. Controlled by the `ocTracing` kernel option.
@@ -303,6 +315,9 @@ Kernel-owned JavaScript libraries registered through Tau's built-in module regis
 | `createKernelLibraryTracer`      | `packages/runtime/src/framework/kernel-library-tracing.ts`                | First-party kernel library attribution proxy                 |
 | `WorkerTelemetryCollector`       | `packages/runtime/src/framework/worker-telemetry.ts`                      | Direct-entry batching                                        |
 | `createDocumentWorkerDispatcher` | `packages/runtime/src/transport/_internal/runtime-document-dispatcher.ts` | Telemetry wiring and flush after each terminal reply         |
+| `WorkerOperationObserver`        | `packages/runtime/src/framework/worker-operation-observer.ts`             | Worker facts after each terminal reply                       |
+| `workerFactsFromEntries`         | `packages/runtime/src/framework/operation-facts.ts`                       | Phase map, slice walk, parameter and heap facts              |
+| `ClientOperationObserver`        | `packages/runtime/src/client/runtime-operation-observer.ts`               | Per-attempt observations and the facts join                  |
 | `KernelWorker`                   | `packages/runtime/src/framework/kernel-worker.ts`                         | Framework span instrumentation                               |
 | `KernelRuntimeWorker`            | `packages/runtime/src/framework/kernel-runtime-worker.ts`                 | Kernel selection spans                                       |
 | `wrapOcWithTracing`              | `packages/core/occt/src/oc-tracing.ts`                                    | OC API call tracing proxy (shared by Replicad + OpenCascade) |

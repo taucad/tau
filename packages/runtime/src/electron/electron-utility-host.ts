@@ -204,6 +204,7 @@ export const electronUtilityHost = (
               const { worker } = hostOptions;
               debugLog('utility:host', 'kernel-runtime-worker-instantiated');
               const dispatcher = createDocumentWorkerDispatcher(worker, wireport, {
+                realm: 'utility',
                 inlineFileSystem: transferredFileSystem ?? utilityFsBase!,
                 computeBindingMode: event.data?.computeBindingMode === 'off' ? 'off' : 'memory',
                 ...(wrappedComputeStorePort ? { computeStorePort: wrappedComputeStorePort } : {}),

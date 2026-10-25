@@ -8,6 +8,7 @@ import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { picovoxelKernel } from '#picovoxel.kernel.js';
 
 const source = readFileSync(new URL('picovoxel.kernel.ts', import.meta.url), 'utf8');
+const buildSource = readFileSync(new URL('picovoxel-build.ts', import.meta.url), 'utf8');
 const packageRoot = dirname(fileURLToPath(import.meta.resolve('picovoxel/package.json')));
 const installedVersion = (JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')) as { version: string })
   .version;
@@ -32,7 +33,7 @@ const scriptsDigest = (): string => {
   return hash.digest('hex');
 };
 
-const declared = (key: string): string => new RegExp(`${key}: '([^']+)'`, 'u').exec(source)?.[1] ?? 'not declared';
+const declared = (key: string): string => new RegExp(`${key}: '([^']+)'`, 'u').exec(buildSource)?.[1] ?? 'not declared';
 
 describe('PicoVoxel asset ownership', () => {
   it('should load both artifacts through picovoxel asset subpaths the runtime asset plugin rewrites (D20)', () => {

@@ -172,7 +172,17 @@ serial build, so exact output is identical in every host.
 - An exact build that reads fast-lane data (a `LANE=fast` STL or `.vdb`, or a `fastRenorm: true`
   offset) is refused with a typed `REPRESENTATION_UNSUPPORTED` issue naming the remedy.
 - Exactly-zero-area triangles are dropped from every snapshot; area, volume and every other triangle
-  are unchanged.
+  are unchanged. An adaptive view keeps the ones whose three corners are distinct and in line, and
+  drops only those that repeat an index or place two corners at one position: adaptive meshes use
+  in-line triangles to stitch merged cells to their neighbours, and dropping them would open cracks.
+
+The render options `meshAdaptivity` (0 to below 1) and `meshRelax` (default `false`) ask for an adaptive
+display mesh in the fast lane; exports always mesh at 0. An exact render that asks for adaptivity is
+refused with a typed `REPRESENTATION_UNSUPPORTED` issue, and the pinned PicoVoxel 0.1.0, whose `toMesh()`
+takes no options, refuses every adaptive request with `KERNEL_CAPABILITY_MISSING`. An unset
+`meshAdaptivity` never refuses: it meshes uniformly on the exact lane and under 0.1.0, and at 0.25
+(Balanced) on the fast lane of a release whose `toMesh()` takes options. Under the pinned 0.1.0 every
+unset view therefore meshes uniformly; the default turns on with the release that meshes adaptively.
 
 ### Runtime lifetime
 

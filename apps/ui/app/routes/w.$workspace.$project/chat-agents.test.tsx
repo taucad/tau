@@ -162,7 +162,8 @@ describe('AgentsPanelBody', () => {
       </MemoryRouter>,
     );
 
-    const overview = screen.getByLabelText('Agent overview');
+    // A named status region, polite by its role (aria-label is prohibited on a bare div).
+    const overview = screen.getByRole('status', { name: 'Agent overview' });
     expect(overview.textContent).toContain('3agents');
     expect(overview.textContent).toContain('2 active');
     expect(overview.textContent).toContain('2need attention');

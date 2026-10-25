@@ -233,6 +233,11 @@ export interface GraphicsContext {
   resolvedGraphicsBackend: ResolvedGraphicsBackend;
   /** Successfully initialized canvas; cleared on matching loss or teardown, never persisted. */
   activeRenderer: Readonly<{ canvasId: string; backend: ResolvedGraphicsBackend }> | undefined;
+  /**
+   * The mounted canvas that draws frames, and whether its first frame is on screen. Only a Three canvas sets it, so a
+   * stage showing other content (an SVG, a placeholder) is never waiting. The stage is busy while `presented` is false.
+   */
+  canvasPresentation: Readonly<{ canvasId: string; presented: boolean }> | undefined;
 
   // Section view state
   isSectionViewActive: boolean;
@@ -321,6 +326,12 @@ export type GraphicsEvent =
   | { type: 'setGraphicsBackendPreference'; payload: GraphicsBackendPreference }
   | { type: 'rendererInitialized'; payload: NonNullable<GraphicsContext['activeRenderer']> }
   | { type: 'rendererRemoved'; canvasId: string }
+  /** A canvas that draws frames has mounted; the stage waits for its first frame. */
+  | { type: 'canvasMounted'; canvasId: string }
+  /** The canvas's first frame is on screen. */
+  | { type: 'rendererPresented'; canvasId: string }
+  /** The canvas no longer draws frames (unmounted, or replaced by its context-lost fallback). */
+  | { type: 'canvasUnmounted'; canvasId: string }
   // Section view events
   /** Turning the section on with no cuts adds the default plane, removing the side `viewDirection` faces. */
   | { type: 'setSectionViewActive'; payload: boolean; viewDirection?: SectionVector }
@@ -831,6 +842,7 @@ const graphicsMachineDefinition = setup({
       webGpuAvailable: false,
       resolvedGraphicsBackend: resolveGraphicsBackendPreference(preference, false),
       activeRenderer: undefined,
+      canvasPresentation: undefined,
 
       // Section view state (the cuts are durable and entry-scoped)
       ...createSectionViewSeed(input.sectionView),
@@ -993,6 +1005,23 @@ const graphicsMachineDefinition = setup({
         },
 
         rendererInitialized: { context: ({ event }) => ({ activeRenderer: event.payload }) },
+        canvasMounted: {
+          context: ({ event }) => ({ canvasPresentation: { canvasId: event.canvasId, presented: false } }),
+        },
+        rendererPresented: {
+          context: ({ context, event }) => ({
+            canvasPresentation:
+              context.canvasPresentation?.canvasId === event.canvasId
+                ? { canvasId: event.canvasId, presented: true }
+                : context.canvasPresentation,
+          }),
+        },
+        canvasUnmounted: {
+          context: ({ context, event }) => ({
+            canvasPresentation:
+              context.canvasPresentation?.canvasId === event.canvasId ? undefined : context.canvasPresentation,
+          }),
+        },
         rendererRemoved: {
           context: ({ context, event }) => ({
             activeRenderer: context.activeRenderer?.canvasId === event.canvasId ? undefined : context.activeRenderer,

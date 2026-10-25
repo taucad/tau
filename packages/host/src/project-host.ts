@@ -291,7 +291,8 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     /*
      * The record device this project's chat segments sync under, read once the store has opened: an external turn's
      * session is this device's, whatever its host id. Never the machine's name, which a rename changes, two machines
-     * can share, and a synced row must not carry (EQ10(a)). A store that cannot say stamps no device.
+     * can share, and a synced row must not carry (EQ10(a)). A store that cannot say answers none, and the host then
+     * refuses an external start retryably and resumes a run only on its own session (round 27): it never stamps none.
      */
     deviceId: async () => {
       try {

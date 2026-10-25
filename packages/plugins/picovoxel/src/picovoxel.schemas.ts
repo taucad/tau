@@ -166,7 +166,7 @@ export const picovoxelRenderSchema = z
       .lt(1)
       .optional()
       .describe(
-        "OpenVDB mesh adaptivity in [0, 1) for the displayed Voxels parts: 0 is the uniform mesh; higher values merge flat regions into fewer, larger triangles. Only lane 'fast' meshes adaptively, it never changes the voxels, and exports always mesh at 0. Unset, it is 0 on lane 'exact' and under PicoVoxel 0.1.0; on lane 'fast' it becomes 0.25 (Balanced) on a release whose toMesh takes options once its adaptive previews are watertight, and is 0 until then.",
+        "OpenVDB mesh adaptivity in [0, 1) for the displayed Voxels parts: 0 is the uniform mesh; higher values merge flat regions into fewer, larger triangles. Only lane 'fast' meshes adaptively, it never changes the voxels, and exports always mesh at 0. Unset, it is 0.25 (Balanced) on lane 'fast' of a PicoVoxel release whose toMesh takes options, and 0 on lane 'exact' and under PicoVoxel 0.1.0.",
       ),
     meshRelax: z
       .boolean()

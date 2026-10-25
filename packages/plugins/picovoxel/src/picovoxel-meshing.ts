@@ -24,12 +24,14 @@ const withoutAdaptiveMeshing: ReadonlySet<string> = new Set(['0.1.0']);
 export const picovoxelPreviewAdaptivity = 0.25;
 
 /**
- * Whether an unset `meshAdaptivity` takes {@link picovoxelPreviewAdaptivity}. Off until PicoVoxel's adaptive
- * previews of base-box and helix-heat-x come back watertight (the preview watertightness obligation of the
- * Balanced-adaptivity ruling); until then every unset view meshes uniformly. Turning it on changes the
- * default views' bytes, so the same change bumps the kernel version, the cache key.
+ * Whether an unset `meshAdaptivity` takes {@link picovoxelPreviewAdaptivity}: the gate of the preview
+ * watertightness obligation of the Balanced-adaptivity ruling. It is on because adaptive previews keep the in-line
+ * seam triangles that stitch merged cells (D36, `dropZeroAreaTriangles`), which measured base-box and helix-heat-x
+ * at 0.25 with no boundary and no non-manifold edges. Turn it off again if an adaptive preview opens. Under
+ * PicoVoxel 0.1.0 it changes nothing: that release resolves every unset view to 0, and the release that meshes
+ * adaptively moves the kernel version, the cache key, by itself.
  */
-export const picovoxelAdaptivePreviewsWatertight = false;
+export const picovoxelAdaptivePreviewsWatertight = true;
 
 /**
  * The adaptivity an unset `meshAdaptivity` resolves to: {@link picovoxelPreviewAdaptivity} on the fast lane of a

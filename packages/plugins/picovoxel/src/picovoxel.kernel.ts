@@ -52,7 +52,7 @@ import {
 } from '@taucad/geometry-core';
 import type { GlbMaterial, GlbResources } from '@taucad/geometry-core';
 
-import { dropZeroAreaTriangles, picovoxelToGlb, picovoxelToGltf } from '#picovoxel.geometry.js';
+import { dropZeroAreaTriangles, hasArea, picovoxelToGlb, picovoxelToGltf } from '#picovoxel.geometry.js';
 import {
   meshPicovoxelField,
   picovoxelMeshingReport,
@@ -542,35 +542,40 @@ const restoredWords = (value: Uint8Array, index: number, field: 'vertices' | 'tr
  *
  * The facade's `vertices`/`triangles` are fresh JS-owned copies read out of wasm once, so the kernel
  * adds no second copy; it only checks the trust boundary in indexed passes. Exactly-zero-area
- * triangles are dropped here, once, so the viewer and every export see the same mesh (D36).
+ * triangles are dropped here, once, so the viewer and every export see the same mesh; an adaptive
+ * build keeps the in-line seam triangles that stitch its merged cells (D36).
  *
  * @param mesh - A mesh `main()` returned, or one derived from returned voxels.
  * @param part - Resolved display name and zero-based output index.
- * @param sessionLane - The session's resolved lane, used when a mesh carries no lane.
+ * @param session - The session the mesh was built in.
+ * @param session.lane - The session's resolved lane, used when a mesh carries no lane.
+ * @param session.adaptive - Whether the build meshes adaptively, which keeps in-line triangles.
  * @returns The durable snapshot.
  */
 const snapshotMesh = (
   mesh: Mesh,
   part: Readonly<{ index: number; name: string }>,
-  sessionLane: PicovoxelLane,
+  session: Readonly<{ lane: PicovoxelLane; adaptive: boolean }>,
 ): PicovoxelShapeSnapshot => {
   const { name, index } = part;
   const label = `${name} (output ${index + 1})`;
   const vertices = ownedFloat32(mesh.vertices);
   const triangles = ownedUint32(mesh.triangles);
-  const kept = validateMeshArrays({ vertices, triangles, label });
+  const kept = validateMeshArrays({ vertices, triangles, label, keepInLine: session.adaptive });
   const meshLane: unknown = mesh.lane;
-  return { name, vertices, triangles: kept, lane: isLane(meshLane) ? meshLane : sessionLane };
+  return { name, vertices, triangles: kept, lane: isLane(meshLane) ? meshLane : session.lane };
 };
 
 const validateMeshArrays = ({
   vertices,
   triangles,
   label,
+  keepInLine,
 }: {
   vertices: Float32Array<ArrayBuffer>;
   triangles: Uint32Array<ArrayBuffer>;
   label: string;
+  keepInLine: boolean;
 }): Uint32Array<ArrayBuffer> => {
   if (vertices.length === 0 || triangles.length === 0) {
     throw new TypeError(`PicoVoxel ${label} is empty. Return [] for an empty scene.`);
@@ -593,8 +598,8 @@ const validateMeshArrays = ({
       );
     }
   }
-  const kept = dropZeroAreaTriangles(vertices, triangles);
-  if (kept.length === 0) {
+  const kept = dropZeroAreaTriangles(vertices, triangles, keepInLine);
+  if (!hasArea(vertices, kept)) {
     // Checked after the D36 filter: a shape of zero-area triangles only is empty, not an index-less mesh.
     throw new TypeError(`PicoVoxel ${label} is empty: every triangle has zero area. Return [] for an empty scene.`);
   }
@@ -793,6 +798,7 @@ const normalizeResult = (
     meshing,
   }: { readonly voxelSize: number; readonly region?: PicovoxelRegion; readonly meshing?: PicovoxelMeshing },
 ): PicovoxelNativeHandle => {
+  const session = { lane: sessionLane, adaptive: meshing !== undefined };
   const model = isRecordObject(result) && 'shapes' in result ? result : undefined;
   const modelShapes = model?.['shapes'];
   if (model && !Array.isArray(modelShapes)) {
@@ -841,7 +847,7 @@ const normalizeResult = (
         );
       }
       const started = performance.now();
-      const snapshot = { ...snapshotMesh(shape, part, sessionLane), ...appearance };
+      const snapshot = { ...snapshotMesh(shape, part, session), ...appearance };
       return { shape: snapshot, elapsed: performance.now() - started };
     }
     if (isVoxels(shape)) {
@@ -856,7 +862,7 @@ const normalizeResult = (
       if (field.isEmpty) {
         return undefined;
       }
-      const snapshot = { ...snapshotMesh(meshPicovoxelField(field, meshing), part, sessionLane), ...appearance };
+      const snapshot = { ...snapshotMesh(meshPicovoxelField(field, meshing), part, session), ...appearance };
       const elapsed = performance.now() - started;
       // Read after meshing so the grid query never counts toward the reported meshing time.
       const memoryBytes = field.memUsage;
@@ -1447,7 +1453,13 @@ export const picovoxelKernel = defineKernel({
             `Invalid PicoVoxel serialized shape ${index}: vertex/triangle bytes must contain scalar triples.`,
           );
         }
-        const kept = validateMeshArrays({ vertices, triangles, label: `${name} (output ${index + 1})` });
+        const kept = validateMeshArrays({
+          vertices,
+          triangles,
+          label: `${name} (output ${index + 1})`,
+          // A snapshot restores as it was built: an adaptive handle kept its in-line seam triangles.
+          keepInLine: tessellation?.adaptivity !== undefined,
+        });
         const material = snapshotMaterial(
           value['material'],
           `${name} (output ${index + 1})`,

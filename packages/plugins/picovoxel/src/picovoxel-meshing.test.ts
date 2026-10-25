@@ -29,14 +29,20 @@ describe('PicoVoxel adaptive meshing', () => {
     });
   });
 
-  it('keeps the preview default behind the watertightness gate, which is off', () => {
-    expect(picovoxelAdaptivePreviewsWatertight).toBe(false);
+  it('opens the watertightness gate, so only the lane and the release decide the default', () => {
+    expect(picovoxelAdaptivePreviewsWatertight).toBe(true);
     expect(picovoxelPreviewAdaptivity).toBe(0.25);
-    for (const lane of ['fast', 'exact'] as const) {
-      for (const version of ['0.1.0', '0.2.0']) {
-        expect(picovoxelDefaultAdaptivity(lane, version)).toBe(0);
-        expect(resolvePicovoxelMeshing({ meshRelax: true }, lane, version)).toEqual({});
-      }
+    expect(picovoxelDefaultAdaptivity('fast', '0.2.0')).toBe(0.25);
+    expect(resolvePicovoxelMeshing({ meshRelax: true }, 'fast', '0.2.0')).toEqual({
+      meshing: { adaptivity: 0.25, relax: true },
+    });
+    for (const [lane, version] of [
+      ['fast', '0.1.0'],
+      ['exact', '0.1.0'],
+      ['exact', '0.2.0'],
+    ] as const) {
+      expect(picovoxelDefaultAdaptivity(lane, version)).toBe(0);
+      expect(resolvePicovoxelMeshing({ meshRelax: true }, lane, version)).toEqual({});
     }
   });
 

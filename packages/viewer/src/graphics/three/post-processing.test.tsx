@@ -8,7 +8,10 @@ const mocks = vi.hoisted(() => ({
   enabled: true,
   invalidate: vi.fn(),
   frame: vi.fn(),
-  gl: { toneMapping: 0 },
+  gl: {
+    toneMapping: 0,
+    backend: { device: { adapterInfo: undefined as Record<string, unknown> | undefined } },
+  },
   webGpuProperties: vi.fn(),
 }));
 
@@ -51,6 +54,7 @@ it('tone-maps inside the WebGPU scene pass and keeps it mounted despite a legacy
   mocks.backend = 'webgpu';
   mocks.enabled = false;
   mocks.frame.mockClear();
+  mocks.gl.backend.device.adapterInfo = { vendor: 'apple', architecture: 'metal-3', isFallbackAdapter: false };
   render(<PostProcessing settings={{ toneMapping: 'neutral' }} />);
   // The output pass only encodes sRGB, so overlays drawn after the scene stay untone-mapped.
   expect(mocks.gl.toneMapping).toBe(NoToneMapping);
@@ -62,6 +66,49 @@ it('tone-maps inside the WebGPU scene pass and keeps it mounted despite a legacy
   );
   expect(mocks.frame).not.toHaveBeenCalled();
   mocks.backend = 'webgl';
+  mocks.gl.backend.device.adapterInfo = undefined;
+});
+
+it('composes with AO and camera preparation on a hardware WebGPU adapter', async () => {
+  const { PostProcessing } = await import('#graphics/three/post-processing.jsx');
+  mocks.backend = 'webgpu';
+  mocks.frame.mockClear();
+  mocks.webGpuProperties.mockClear();
+  mocks.gl.backend.device.adapterInfo = { vendor: 'nvidia', architecture: 'ampere', isFallbackAdapter: false };
+  try {
+    render(<PostProcessing settings={{ toneMapping: 'neutral' }} />);
+    expect(mocks.webGpuProperties).toHaveBeenLastCalledWith(
+      expect.objectContaining({ aoAllowed: true, speculativePreparation: true, toneMapping: NeutralToneMapping }),
+    );
+    expect(mocks.gl.toneMapping).toBe(NoToneMapping);
+    expect(mocks.frame).not.toHaveBeenCalled();
+  } finally {
+    mocks.backend = 'webgl';
+    mocks.gl.backend.device.adapterInfo = undefined;
+  }
+});
+
+it.each([
+  { adapter: 'the fallback adapter', adapterInfo: { vendor: 'google', architecture: '', isFallbackAdapter: true } },
+  { adapter: 'SwiftShader', adapterInfo: { vendor: 'google', architecture: 'swiftshader' } },
+])('keeps a beauty-only composition with no AO or camera preparation on $adapter', async ({ adapterInfo }) => {
+  const { PostProcessing } = await import('#graphics/three/post-processing.jsx');
+  mocks.backend = 'webgpu';
+  mocks.frame.mockClear();
+  mocks.webGpuProperties.mockClear();
+  mocks.gl.backend.device.adapterInfo = adapterInfo;
+  try {
+    render(<PostProcessing settings={{ toneMapping: 'neutral' }} />);
+    // The composition still owns tone mapping and the canvas's depth; only the AO graph and speculation go.
+    expect(mocks.webGpuProperties).toHaveBeenLastCalledWith(
+      expect.objectContaining({ aoAllowed: false, speculativePreparation: false, toneMapping: NeutralToneMapping }),
+    );
+    expect(mocks.gl.toneMapping).toBe(NoToneMapping);
+    expect(mocks.frame).not.toHaveBeenCalled();
+  } finally {
+    mocks.backend = 'webgl';
+    mocks.gl.backend.device.adapterInfo = undefined;
+  }
 });
 
 it('should resolve viewport AO radius from the CSS diagonal independently of DPR above the physical minimum', () => {

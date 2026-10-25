@@ -1,18 +1,11 @@
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { renderSvgPng, renderSvgWebp } from '@taucad/image/svg';
+import { gpuAdapterIdentity, isSoftwareGpuAdapter } from '@taucad/viewer/graphics/graphics-backend';
+import type { GpuAdapterIdentity } from '@taucad/viewer/graphics/graphics-backend';
 import type { imageRuntime } from '#runtime/image-runtime.definition.js';
 import type { HeadlessImageBackend } from '#services/headless-image.service.js';
 
 type GpuAdapterProbe = { requestAdapter(): Promise<unknown> };
-type AutomaticAdapter = {
-  readonly isFallbackAdapter?: boolean;
-  readonly info?: {
-    readonly architecture?: string;
-    readonly description?: string;
-    readonly device?: string;
-    readonly vendor?: string;
-  };
-};
 
 const automaticAdapterAvailable = async (): Promise<boolean> => {
   const gpu = (globalThis.navigator as (Navigator & { gpu?: GpuAdapterProbe }) | undefined)?.gpu;
@@ -20,13 +13,9 @@ const automaticAdapterAvailable = async (): Promise<boolean> => {
     return false;
   }
   try {
-    const adapter = ((await gpu.requestAdapter()) ?? undefined) as AutomaticAdapter | undefined;
-    if (!adapter || adapter.isFallbackAdapter === true) {
-      return false;
-    }
-    const { info } = adapter;
-    const identity = [info?.vendor, info?.architecture, info?.device, info?.description].join(' ').trim().toLowerCase();
-    return identity.length > 0 && !/swiftshader|llvmpipe|software|cpu/u.test(identity);
+    const adapter = ((await gpu.requestAdapter()) ?? undefined) as GpuAdapterIdentity | undefined;
+    // An adapter that reports no identity cannot be shown to be hardware.
+    return adapter !== undefined && !isSoftwareGpuAdapter(adapter) && gpuAdapterIdentity(adapter).length > 0;
   } catch {
     return false;
   }

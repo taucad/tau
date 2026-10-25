@@ -96,8 +96,8 @@ const daemonClosureResolver = (): NativeClosureResolver => {
  * @param message - The `start` message.
  * @returns The frame names.
  */
-const nativeWorkerFramesOf = (message: object): string[] => {
-  const frames: unknown = Reflect.get(message, 'nativeWorkerFrames');
+const nativeWorkerFramesOf = (message: Readonly<{ type: unknown; nativeWorkerFrames?: unknown }>): string[] => {
+  const frames = message.nativeWorkerFrames;
   return Array.isArray(frames) ? frames.filter((frame) => typeof frame === 'string') : [];
 };
 

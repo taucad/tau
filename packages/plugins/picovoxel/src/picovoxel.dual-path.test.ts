@@ -294,7 +294,9 @@ describe('PicoVoxel dual path through the runtime', () => {
     const document = documentFor(client);
     try {
       const updated = await document.update({ evaluateOptions: { lane: 'fast', meshAdaptivity: 0 } });
-      expect(updated.superseded || updated.evaluation.success).toBe(true);
+      // A superseded update would leave the export to build alone, so it must evaluate here.
+      expect(updated.superseded).toBe(false);
+      expect(!updated.superseded && updated.evaluation.success).toBe(true);
       const fast = await exportStl(client, { lane: 'fast' });
 
       expect(sessions.lanes).toEqual(['fast']);

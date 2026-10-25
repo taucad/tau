@@ -1,6 +1,6 @@
 # picovoxel — Interfaces
 
-43 top-level symbols. Signatures are verbatim typescript.
+34 top-level symbols. Signatures are verbatim typescript.
 
 AddBeamOptions: interface AddBeamOptions
 
@@ -437,6 +437,9 @@ ShellOptions: interface ShellOptions
   // See `offset({ fastRenorm })`
   fastRenorm?: boolean
 
+  // See `offset({ fastSweeping })`
+  fastSweeping?: boolean
+
 SurfaceNormalFieldOptions: interface SurfaceNormalFieldOptions
 
   // Active values with |sd| above this (voxel units) are skipped (C# `fSurfaceThresholdVx`, default 0.5)
@@ -450,6 +453,15 @@ SurfaceNormalFieldOptions: interface SurfaceNormalFieldOptions
 
   // Component-wise scale applied to stored normals (C# `vecScaleBy`)
   scaleBy?: Vec3
+
+// Options for {@link Voxels.toMesh}
+ToMeshOptions: interface ToMeshOptions
+
+  // OpenVDB mesh adaptivity in `[0, 1)`
+  adaptivity?: number
+
+  // Run OpenVDB's `relaxDisorientedTriangles` pass after adaptive merging
+  relax?: boolean
 
 ToStlOptions: interface ToStlOptions
 
@@ -560,11 +572,12 @@ Voxels: interface Voxels
   readonly isEmpty: boolean
 
   // Pure surface offset
-  // Remarks: `fastRenorm` (opt-in) runs the renormalization upstream performs after every half-voxel CFL step with a first-order upwind gradient instead of 5th-order HJ-WENO — 3.5–3.9x on the offset family, since renormalization is 94–97% of the offset wall. It CHANGES THE OUTPUT (measured at ≤2.2% volume, ≤0.36 mm peak narrow-band displacement, level set still clean; the measurements are recorded in the repository's bench/results/webgpu-v2/sk-0.8-ab.json), so it is never the library default — a session may default it on (see `CreatePicoOptions.fastRenorm`), and an explicit per-op value always wins.
+  // Remarks: `fastRenorm` (opt-in) runs the renormalization upstream performs after every half-voxel CFL step with a first-order upwind gradient instead of 5th-order HJ-WENO — 3.5–3.9x on the offset family, since renormalization is 94–97% of the offset wall. It CHANGES THE OUTPUT (measured at ≤2.2% volume, ≤0.36 mm peak narrow-band displacement, level set still clean; the measurements are recorded in the repository's bench/results/webgpu-v2/sk-0.8-ab.json), so it is never the library default — a session may default it on (see `CreatePicoOptions.fastRenorm`), and an explicit per-op value always wins. `fastSweeping`: opt-in sweep engine, `fast` (docs/lanes.md).
   // Voxels.offset (method)
   offset(options: {
       distance: number;
       fastRenorm?: boolean;
+      fastSweeping?: boolean;
     }): Voxels;
 
   // Two offsets in sequence (closing/opening when signs differ)
@@ -573,6 +586,7 @@ Voxels: interface Voxels
       first: number;
       second: number;
       fastRenorm?: boolean;
+      fastSweeping?: boolean;
     }): Voxels;
 
   // In, 2× out, in again
@@ -580,6 +594,7 @@ Voxels: interface Voxels
   smoothen(options: {
       distance: number;
       fastRenorm?: boolean;
+      fastSweeping?: boolean;
     }): Voxels;
 
   // Over-offset composition
@@ -588,6 +603,7 @@ Voxels: interface Voxels
       rounding: number;
       finalSurfaceDistance?: number;
       fastRenorm?: boolean;
+      fastSweeping?: boolean;
     }): Voxels;
 
   // Shell
@@ -673,10 +689,12 @@ Voxels: interface Voxels
   raycastToSurface(position: Vec3, direction: Vec3): Vec3 | null;
 
   // N rays over ONE cached intersector and one ABI crossing
+  // Remarks: `subVoxel: true` (opt-in) keeps each hit's fractional position instead of truncating it to a whole voxel, which can put an upstream hit up to one voxel inside the surface on each positive axis. Hit and miss are the same rays either way; only the hit positions move onto the surface.
   // Voxels.raycastBatch (method)
   raycastBatch(options: {
       origins: ArrayLike<number>;
       directions: ArrayLike<number>;
+      subVoxel?: boolean;
     }): {
       hits: Float32Array;
       hit: Uint8Array;
@@ -709,8 +727,9 @@ Voxels: interface Voxels
   // Voxels.getSlice (method)
   getSlice(options: GetSliceOptions): VoxelSlice;
 
+  // Triangle mesh of the zero level set
   // Voxels.toMesh (method)
-  toMesh(): Mesh;
+  toMesh(options?: ToMeshOptions): Mesh;
 
   // Voxels.toScalarField (method)
   toScalarField(): ScalarField;
@@ -816,93 +835,3 @@ Polar: interface Polar
   readonly r: number
 
   readonly phi: Rad
-
-// A spherical coordinate (C# `Spherical`)
-Spherical: interface Spherical
-
-  readonly r: number
-
-  readonly phi: Rad
-
-  readonly theta: Rad
-
-Implicit: interface Implicit
-
-  // C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
-  readonly sdf: SdfFunction
-
-  // The same field as a tape expression for the parallel fill
-  readonly expression: SdfExpression
-
-// C# `ILatticeBaseShape`
-LatticeBaseShape: interface LatticeBaseShape
-
-  // LatticeBaseShape.latConstruct (method)
-  latConstruct(pk: Pico): Lattice;
-
-LatticeManifoldOptions: interface LatticeManifoldOptions
-
-  // Required for the Frame form
-  length?: number
-
-  radius?: number
-
-  // Degrees
-  maxOverhangAngle?: number
-
-  // Extend the teardrop in -Z as well (C# `bExtendBothSides = false`)
-  extendBothSides?: boolean
-
-  // C# `fMinPrintableRadius = 0.1`
-  minPrintableRadius?: number
-
-// C# `IMeshBaseShape`
-MeshBaseShape: interface MeshBaseShape
-
-  // MeshBaseShape.mshConstruct (method)
-  mshConstruct(pk: Pico): Mesh;
-
-PipeSegmentOptions: interface PipeSegmentOptions
-
-  // Required for the Frame form
-  length?: number
-
-  innerRadius: number
-
-  outerRadius: number
-
-  // START_END
-  startOrMid: LineModulation
-
-  // START_END
-  endOrRange: LineModulation
-
-  method: PipeSegmentMethod
-
-// C# `ISpineBaseShape`
-SpineBaseShape: interface SpineBaseShape
-
-  // SpineBaseShape.spinePoint (method)
-  spinePoint(ratio1: number): Vec3;
-
-// ShapeKernel `ISpline`
-Spline: interface Spline
-
-  // Spline.points (method)
-  points(samples?: number): Vec3[];
-
-// C# `ISurfaceBaseShape`
-SurfaceBaseShape: interface SurfaceBaseShape
-
-  // SurfaceBaseShape.surfacePoint (method)
-  surfacePoint(ratio1: number, ratio2: number, ratio3: number): Vec3;
-
-TangentOptions: interface TangentOptions
-
-  startTangentStrength?: number
-
-  endTangentStrength?: number
-
-  relativeStartStrength?: boolean
-
-  relativeEndStrength?: boolean

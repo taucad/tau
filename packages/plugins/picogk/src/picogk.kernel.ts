@@ -369,6 +369,10 @@ const picogkKernelDefinition = defineKernel({
     };
   },
 
+  // Observation only: the resident set of the worker's process tree; `heapBytes` stays unimplemented, so recycling
+  // and `rendering.heapBytes` are unchanged.
+  observedChildResidentBytes: async (context) => context.session.sampleResident(),
+
   async onDispose(context) {
     try {
       context.computeTransport.dispose();

@@ -104,6 +104,11 @@ export type DotnetSession = {
   readonly recycle: () => Promise<void>;
   /** Stop the worker and release its process resources. */
   readonly cleanup: () => Promise<void>;
+  /**
+   * One resident sample of the live worker's process tree, for observation only: a sum of resident sets, not a heap.
+   * Resolves `undefined` with no live worker, after a recycle or where the platform has no reader.
+   */
+  readonly sampleResident: () => Promise<number | undefined>;
 };
 
 /**
@@ -175,5 +180,6 @@ export const createDotnetSession = <Issue>(
     readArtifact: async (result) => session.readArtifact(result),
     recycle: async () => session.recycle(),
     cleanup: async () => session.cleanup(),
+    sampleResident: async () => session.sampleResident(),
   };
 };

@@ -3,7 +3,7 @@ title: 'Kernel Telemetry Policy'
 description: 'Kernel worker telemetry: span naming, hierarchy rules, attribute conventions, and performance contracts. Covers RuntimeTracer, OC API tracing, and WorkerTelemetryCollector.'
 status: active
 created: '2026-02-20'
-updated: '2026-10-24'
+updated: '2026-10-25'
 related:
   - docs/policy/runtime-api-policy.md
   - docs/research/realtime-cad-performance-charter.md
@@ -216,7 +216,7 @@ Spans describe how an operation ran; an observation says what happened to it. Ev
 - **Worker facts are opt-in and computed after the reply.** `observe('facts')` asks a worker that advertised `observation: ['facts']` in its `initialize` result; the mode is decided per operation at admission, so a change never splits one. With observation `off` the worker takes no mark, slices nothing, walks nothing, reads no heap and counts no parameters. With `facts`, the operation records a collector mark at dequeue and a stamped-facts thunk at settle; after the dispatcher posts the terminal reply it walks that operation's slice once, posts one trailing `operationFacts` notify, and only then flushes that operation's spans — so the next operation's spans stay pending.
 - **Phases come from an explicit span map.** `phaseOfSpan` names a `RuntimePhase` for every non-root `kernel.*` span the framework starts, and a test fails when a new framework span has no entry. A middleware wrap's self-time is subtracted only from a mapped ancestor phase; a wrap directly under the root counts in `middleware` alone. Third-party middleware names close to `_OTHER`.
 - **Parameter facts are counts.** The lockstep walk compares defaults with resolved values without building pointer strings, stops at 1,000 leaves or 0.1 ms (`truncated`), counts a structured leaf too large to compare canonically as `unknown`, and retains the resolved values only while observing.
-- **Heap facts name their source.** The kernel's `observedHeapBytes` hook wins, then its `heapBytes`, then a native child sample bounded at 50 ms, then the resident set of a realm that owns its process. A `worker_threads` or in-process realm without a hook reports `none`, never the process.
+- **Heap facts name their source.** The kernel's `observedHeapBytes` hook wins, then its `heapBytes`, then a native kernel's `observedChildResidentBytes` sample of its worker's process tree (`child`; Linux only until a macOS runner verifies a reader, none on Windows), bounded at 50 ms, then the resident set of a realm that owns its process. A `worker_threads` or in-process realm without a hook reports `none`, never the process.
 - **The client joins for one second.** The status is `joined`, `none` (no reply to join), `not-observed`, `missing-timeout`, or `missing-worker-gone`, which is emitted synchronously when the worker goes away. A worker that predates observation yields `not-observed` and is never sent `observe`. A terminal reply landing after its attempt timed out, was cancelled or was abandoned is emitted once as `operation-late`, within ten minutes.
 - **Costs** (advisory until calibrated, `operation-facts.bench.test.ts`): the walk ≤ 1,500 ns p95 per span, `parameterFacts` ≤ 15 µs p95 at 50 leaves and ≤ 100 µs on the truncated sweep, ≤ 2 µs per observation including the join.
 

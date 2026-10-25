@@ -19,13 +19,13 @@ function NavigationProbe(): React.JSX.Element {
   );
 }
 
-function renderNavChat(): void {
+function renderNavChat({ isTouchSized }: { readonly isTouchSized?: boolean } = {}): void {
   render(
     <MemoryRouter initialEntries={['/projects']}>
       <KeyboardProvider>
         <TooltipProvider>
           <SidebarProvider>
-            <NavChat />
+            <NavChat isTouchSized={isTouchSized} />
             <NavigationProbe />
             <Routes>
               <Route path='/' element={<p>Home Composer</p>} />
@@ -71,5 +71,19 @@ describe('NavChat', () => {
 
     expect(await screen.findByText('Home Composer')).toBeInTheDocument();
     expect(screen.getByTestId('navigation-type')).toHaveTextContent('REPLACE');
+  });
+
+  it('should give the phone sheet a 44px New Project', () => {
+    renderNavChat({ isTouchSized: true });
+    const button = screen.getByRole('link', { name: /New Project/ }).querySelector('[data-slot=sidebar-menu-button]');
+    expect(button).toHaveAttribute('data-size', 'lg');
+    expect(button).toHaveClass('h-11');
+  });
+
+  it('should keep the desktop New Project at the compact row height', () => {
+    renderNavChat();
+    const button = screen.getByRole('link', { name: /New Project/ }).querySelector('[data-slot=sidebar-menu-button]');
+    expect(button).toHaveAttribute('data-size', 'default');
+    expect(button).toHaveClass('h-7');
   });
 });

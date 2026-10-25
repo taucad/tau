@@ -20,23 +20,18 @@ import { searchParameterName } from '#constants/search-parameter.constants.js';
 import { flagParameter } from '#utils/search-parameter.codecs.js';
 
 /**
- * The chat menu: rename, export, then the chat's activity, model and credits as
- * a read-only block.
+ * The active chat's transcript export, shared by the chat menu and the phone chat switcher.
  *
- * @param props - `onRename` opens the header's inline editor.
- * @returns The ⋯ trigger and its menu.
+ * @returns Whether there is a transcript to export, and the action that downloads it as Markdown.
  */
-export function ChatHistorySettings({ onRename }: { readonly onRename: () => void }): React.ReactNode {
+export function useExportTranscript(): { readonly canExport: boolean; readonly exportTranscript: () => void } {
   const { chat, activeChatId } = useChatContext();
   const messages = useChatSelector((state) => state.messages);
   const { projectId } = useProject();
-  const [, setArchivedChats] = useSearchParameter(searchParameterName.archivedChats, flagParameter, {
-    history: 'push',
-  });
   const { chats } = useChatRecords(projectId);
   const chatName = chats.find((c) => c.id === activeChatId)?.name ?? 'Chat Transcript';
 
-  const handleExport = useCallback(() => {
+  const exportTranscript = useCallback(() => {
     if (!chat) {
       return;
     }
@@ -48,6 +43,22 @@ export function ChatHistorySettings({ onRename }: { readonly onRename: () => voi
     const snakeName = toSnakeCase(chatName) || 'chat_transcript';
     downloadBlob(blob, `${snakeName}_${timestamp}.md`);
   }, [messages, chat, chatName]);
+
+  return { canExport: Boolean(chat) && messages.length > 0, exportTranscript };
+}
+
+/**
+ * The chat menu: rename, export, then the chat's activity, model and credits as
+ * a read-only block.
+ *
+ * @param props - `onRename` opens the header's inline editor.
+ * @returns The ⋯ trigger and its menu.
+ */
+export function ChatHistorySettings({ onRename }: { readonly onRename: () => void }): React.ReactNode {
+  const { canExport, exportTranscript } = useExportTranscript();
+  const [, setArchivedChats] = useSearchParameter(searchParameterName.archivedChats, flagParameter, {
+    history: 'push',
+  });
 
   return (
     <DropdownMenu modal={false}>
@@ -68,7 +79,7 @@ export function ChatHistorySettings({ onRename }: { readonly onRename: () => voi
           <Pencil />
           Rename
         </DropdownMenuItem>
-        <DropdownMenuItem disabled={!chat || messages.length === 0} onSelect={handleExport}>
+        <DropdownMenuItem disabled={!canExport} onSelect={exportTranscript}>
           <Download />
           Export transcript
         </DropdownMenuItem>

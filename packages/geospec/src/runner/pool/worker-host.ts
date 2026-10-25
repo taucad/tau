@@ -31,6 +31,8 @@ export type GeoSpecPoolWorkerHostOptions = {
   nativeModelLoader: ManagedGeoSpecNativeModelLoader;
   /** Additional in-memory modules made available to the VM. */
   builtinModules?: GeoSpecRunnerOptions['builtinModules'];
+  /** Module VM factory for every shard; defaults to GeoSpec's plain VM. */
+  createModuleVm?: GeoSpecRunnerOptions['createModuleVm'];
   /** Post a message to the pool host. */
   postMessage: (message: GeoSpecPoolWorkerMessage) => void;
   /** Subscribe to pool-host messages. */
@@ -59,6 +61,7 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
     nativeAssertions: options.nativeAssertions,
     nativeModelLoader: options.nativeModelLoader,
     ...(options.builtinModules ? { builtinModules: options.builtinModules } : {}),
+    ...(options.createModuleVm ? { createModuleVm: options.createModuleVm } : {}),
   };
   const bundleCache: GeoSpecModuleBundleCache = new Map();
   const releaseNativeSubjects = async (): Promise<void> => {

@@ -1,5 +1,5 @@
 /**
- * Inlined from Tau's `@taucad/runtime/kernel` (`isNotFoundError`) so that `geospec` depends on no Tau package.
+ * Inlined from Tau's runtime kernel helpers (`isNotFoundError`) so that `geospec` depends on no Tau package.
  */
 
 /**

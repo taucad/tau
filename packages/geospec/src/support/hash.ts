@@ -1,7 +1,7 @@
 /**
  * SHA-256 digests for GeoSpec lineage and artifact evidence.
  *
- * Inlined from Tau's `@taucad/utils/hash` (`sha256Bytes`) so that `geospec` depends on no Tau package; the digest is
+ * Inlined from Tau's hash utilities (`sha256Bytes`) so that `geospec` depends on no Tau package; the digest is
  * byte-identical.
  */
 

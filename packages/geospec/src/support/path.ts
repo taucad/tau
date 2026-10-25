@@ -1,7 +1,7 @@
 /**
  * Rooted virtual-path helpers.
  *
- * Inlined from Tau's `@taucad/utils/path` (`assertRootedPath`, `joinRelativePath`) so that `geospec` depends on no
+ * Inlined from Tau's path utilities (`assertRootedPath`, `joinRelativePath`) so that `geospec` depends on no
  * Tau package; behaviour, error name, codes, messages and metadata are identical.
  */
 

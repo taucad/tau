@@ -85,6 +85,15 @@ geospec run . --config ci.geospec.config.ts
 geospec run . --json
 ```
 
+**Spec imports.** The CLI bundles each spec with native esbuild over the
+project: a spec may import project files and the GeoSpec builtins (`geospec`,
+`geospec/model`, `geospec/config`). An npm package or URL import refuses with
+`BUNDLER_FAILED` and a message naming the specifier; nothing is fetched or
+installed. A host that resolves packages passes its own module VM as
+`createModuleVm` (`CreateModuleVm` in `geospec/runner`; for a Node pool,
+`moduleVmModule`). Tau's hosts inject Tau's esbuild VM this way. A browser host
+has no default VM and must inject one.
+
 | Flag                                    | Meaning                                                                                                   |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `--file <path>`                         | GeoSpec file or directory root; repeatable. Empty input discovers from the project root.                  |

@@ -67,6 +67,19 @@ describe('startGeoSpecNodePoolWorker', () => {
     expect(owner.engine).toHaveBeenCalledWith({});
   });
 
+  it("should give the worker host the module VM module's factory, and none without one", async () => {
+    const { projectPath } = await project();
+    const moduleVmModule = join(projectPath, 'module-vm.mjs');
+    await writeFile(moduleVmModule, 'export default async () => ({ injected: true });');
+
+    await start({ projectPath, moduleVmModule: pathToFileURL(moduleVmModule).href });
+    const [hostOptions] = (owner.host.mock.calls.at(-1) ?? []) as [{ createModuleVm?: () => Promise<unknown> }?];
+    await expect(hostOptions?.createModuleVm?.()).resolves.toStrictEqual({ injected: true });
+
+    await start({ projectPath });
+    expect(owner.host.mock.calls.at(-1)?.[0]).not.toHaveProperty('createModuleVm');
+  });
+
   it('should close the engine when the config cannot load', async () => {
     const { projectPath } = await project();
 

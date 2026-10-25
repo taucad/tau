@@ -16,7 +16,7 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, open, readFile, realpath, rename, unlink } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import type { VmFileSystem } from '@taucad/esbuild/vm';
+import type { VmFileSystem } from '#vm/types.js';
 import { assertRootedPath } from '#support/path.js';
 
 /**

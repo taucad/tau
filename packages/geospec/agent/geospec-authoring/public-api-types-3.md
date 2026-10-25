@@ -1,6 +1,219 @@
 # geospec — Types (3)
 
-33 top-level symbols. Signatures are verbatim typescript.
+42 top-level symbols. Signatures are verbatim typescript.
+
+// Everything the pool needs that differs between Node and the browser
+GeoSpecPoolOptions: {
+    /** Spawn one worker running `startGeoSpecPoolWorkerHost`. */
+    createWorker: () => GeoSpecPoolWorkerHandle | Promise<GeoSpecPoolWorkerHandle>;
+    /** Optional one-time worker initialization performed after its ready signal. */
+    initializeWorker?: (worker: GeoSpecPoolWorkerHandle) => Promise<void> | void;
+    /** Wait for each native worker's cleanup acknowledgement before terminating it. */
+    gracefulShutdown?: boolean;
+    /** Worker count. Omit to let the caller's host auto-size before calling. */
+    workers: number;
+    /** Optional scheduling telemetry. Absent = declared order, no memory class. */
+    timings?: ShardTimings;
+    /** Per-shard non-verdict watchdog, milliseconds (R11). */
+    shardTimeout?: number;
+    /** Split files whose recorded duration exceeds this. Milliseconds. */
+    splitThreshold?: number;
+}
+
+  // Spawn one worker running `startGeoSpecPoolWorkerHost`
+  createWorker: () => GeoSpecPoolWorkerHandle | Promise<GeoSpecPoolWorkerHandle>
+
+  // Optional one-time worker initialization performed after its ready signal
+  initializeWorker?: (worker: GeoSpecPoolWorkerHandle) => Promise<void> | void
+
+  // Wait for each native worker's cleanup acknowledgement before terminating it
+  gracefulShutdown?: boolean
+
+  // Worker count
+  workers: number
+
+  // Optional scheduling telemetry
+  timings?: ShardTimings
+
+  // Per-shard non-verdict watchdog, milliseconds (R11)
+  shardTimeout?: number
+
+  // Split files whose recorded duration exceeds this
+  splitThreshold?: number
+
+// One shard's recorded cost
+ShardTiming: {
+    /** Wall duration of the last recorded run, in milliseconds. */
+    durationMs: number;
+    /** Highest RSS observed for this shard, in bytes. Monotonic. */
+    peakRssBytes: number;
+}
+
+  // Wall duration of the last recorded run, in milliseconds
+  durationMs: number
+
+  // Highest RSS observed for this shard, in bytes
+  peakRssBytes: number
+
+// A mutable timings table
+ShardTimings: {
+    /** Merge one observation. Peak RSS only ever grows. */
+    record(shard: string, timing: ShardTiming): void;
+    /** The hint for one shard, or `undefined` when unknown. */
+    read(shard: string): ShardTiming | undefined;
+    /** Every recorded shard, sorted by descending duration (longest-first). */
+    longestFirst(): string[];
+    /** Persist the table. Failure is silent: telemetry never fails a run. */
+    save(): void;
+}
+
+  // Merge one observation
+  // ShardTimings.record (method)
+  record(shard: string, timing: ShardTiming): void;
+
+  // The hint for one shard, or `undefined` when unknown
+  // ShardTimings.read (method)
+  read(shard: string): ShardTiming | undefined;
+
+  // Every recorded shard, sorted by descending duration (longest-first)
+  // ShardTimings.longestFirst (method)
+  longestFirst(): string[];
+
+  // Persist the table
+  // ShardTimings.save (method)
+  save(): void;
+
+// Options accepted by {@link startGeoSpecPoolWorkerHost}
+GeoSpecPoolWorkerHostOptions: {
+    /** Filesystem containing the project and test modules. */
+    filesystem: GeoSpecRunnerOptions['filesystem'];
+    /** Native assertion client shared with this worker's model admissions. */
+    nativeAssertions: GeoSpecRunnerOptions['nativeAssertions'];
+    /** Managed native admissions, released after every shard and collection pass and before shutdown. */
+    nativeModelLoader: ManagedGeoSpecNativeModelLoader;
+    /** Additional in-memory modules made available to the VM. */
+    builtinModules?: GeoSpecRunnerOptions['builtinModules'];
+    /** Module VM factory for every shard; defaults to GeoSpec's plain VM. */
+    createModuleVm?: GeoSpecRunnerOptions['createModuleVm'];
+    /** Post a message to the pool host. */
+    postMessage: (message: GeoSpecPoolWorkerMessage) => void;
+    /** Subscribe to pool-host messages. */
+    onHostMessage: (listener: (message: GeoSpecPoolHostMessage) => void) => void;
+    /** Sample this worker's resident memory in bytes (R15 telemetry); optional. */
+    measureMemoryBytes?: () => number | undefined;
+    /** Release platform resources on shutdown, after the native subjects are released. */
+    onShutdown?: () => Promise<void> | void;
+}
+
+  // Filesystem containing the project and test modules
+  filesystem: GeoSpecRunnerOptions['filesystem']
+
+  // Native assertion client shared with this worker's model admissions
+  nativeAssertions: GeoSpecRunnerOptions['nativeAssertions']
+
+  // Managed native admissions, released after every shard and collection pass and before shutdown
+  nativeModelLoader: ManagedGeoSpecNativeModelLoader
+
+  // Additional in-memory modules made available to the VM
+  builtinModules?: GeoSpecRunnerOptions['builtinModules']
+
+  // Module VM factory for every shard
+  createModuleVm?: GeoSpecRunnerOptions['createModuleVm']
+
+  // Post a message to the pool host
+  postMessage: (message: GeoSpecPoolWorkerMessage) => void
+
+  // Subscribe to pool-host messages
+  onHostMessage: (listener: (message: GeoSpecPoolHostMessage) => void) => void
+
+  // Sample this worker's resident memory in bytes (R15 telemetry)
+  measureMemoryBytes?: () => number | undefined
+
+  // Release platform resources on shutdown, after the native subjects are released
+  onShutdown?: () => Promise<void> | void
+
+// Runner-independent native assertion client
+GeoSpecAssertionClient: {
+    /**
+     * Start a chain; `options.workUnitLimit` overrides the client budget for its claims.
+     * Without one, a loaded subject's `loadModel` budget applies, then the client's.
+     */
+    expectGeo(subject: GeoSpecNativeSubject | GeoSpecSubject, options?: GeoSpecExpectOptions): GeoSpecAssertionMatchers;
+    query(options: MinimumDistanceQuery): Promise<MinimumDistanceResult>;
+    query(options: GeoSpecQueryOptions): Promise<GeoSpecCanonicalClaimReport>;
+}
+
+  // Start a chain
+  // GeoSpecAssertionClient.expectGeo (method)
+  expectGeo(subject: GeoSpecNativeSubject | GeoSpecSubject, options?: GeoSpecExpectOptions): GeoSpecAssertionMatchers;
+
+  // GeoSpecAssertionClient.query (method)
+  query(options: MinimumDistanceQuery): Promise<MinimumDistanceResult>;
+  query(options: GeoSpecQueryOptions): Promise<GeoSpecCanonicalClaimReport>;
+
+// Flat construction options for a runner-independent native assertion client
+GeoSpecAssertionClientOptions: {
+    readonly claimId?: (matcher: GeoSpecMatcherName, sequence: number) => string;
+    readonly engine: GeoSpecNativeEngine;
+    /** Success-evidence profile of every claim and query; omitted means `complete`. */
+    readonly evidenceProfile?: GeoSpecNativeEvidenceProfile;
+    readonly subjectSlot?: string;
+    readonly workUnitLimit?: number;
+    /**
+     * The largest `workUnitLimit` a spec may author in `loadModel` or `expectGeo` options. Host
+     * policy: omitted uses `geoSpecMaximumWorkUnitLimit`, and a host provisioned for larger claims
+     * raises it. Must be a positive safe integer.
+     */
+    readonly maximumWorkUnitLimit?: number;
+}
+
+  readonly claimId?: (matcher: GeoSpecMatcherName, sequence: number) => string
+
+  readonly engine: GeoSpecNativeEngine
+
+  // Success-evidence profile of every claim and query
+  readonly evidenceProfile?: GeoSpecNativeEvidenceProfile
+
+  readonly subjectSlot?: string
+
+  readonly workUnitLimit?: number
+
+  // The largest `workUnitLimit` a spec may author in `loadModel` or `expectGeo` options
+  readonly maximumWorkUnitLimit?: number
+
+// Standalone native matcher chain, including core-owned negation
+GeoSpecAssertionMatchers: GeoSpecMatcherMethods<GeoSpecCanonicalClaimReport> & {
+    readonly not: GeoSpecMatcherMethods<GeoSpecCanonicalClaimReport>;
+}
+
+  readonly not: GeoSpecMatcherMethods<GeoSpecCanonicalClaimReport>
+
+// One authored call shared by the collector and native assertion client
+GeoSpecAuthoringInvocation: {
+    readonly arguments: readonly unknown[];
+    readonly expected: unknown;
+    readonly kind: GeoSpecAssertion['kind'];
+    readonly matcher: GeoSpecMatcherName;
+    readonly polarity: GeoSpecClaimPolarity;
+    readonly subject: unknown;
+}
+
+  readonly arguments: readonly unknown[]
+
+  readonly expected: unknown
+
+  readonly kind: GeoSpecAssertion['kind']
+
+  readonly matcher: GeoSpecMatcherName
+
+  readonly polarity: GeoSpecClaimPolarity
+
+  readonly subject: unknown
+
+// Matcher methods derived mechanically from the existing GeoSpec registry
+GeoSpecMatcherMethods: {
+    [Name in GeoSpecMatcherName]: (...arguments_: Parameters<GeoSpecMatcher[Name]>) => Result;
+}
 
 // One positive-only ancillary query
 // Remarks: An explicit claimId leaves the automatic sequence unchanged. Queries return full reports without assertion errors. A query asserts nothing, so it never fails: one whose evidence is missing or cannot decide returns a refused report whose diagnostic names the reason, such as `GEOSPEC_UNSUPPORTED_EVIDENCE`.
@@ -448,6 +661,8 @@ NodeGeoSpecCliHostOptions: {
      * can run a project with no `geospec.config.*` (see `GeoSpecExporterModule` in `geospec/runner/node`).
      */
     readonly exporterModules?: readonly string[];
+    /** URL of a module each pool worker imports for its module VM (see `GeoSpecModuleVmModule` in `geospec/runner`). */
+    readonly moduleVmModule?: string;
 }
 
   // Report sink used by embedding hosts and tests
@@ -455,6 +670,9 @@ NodeGeoSpecCliHostOptions: {
 
   // URLs of modules each pool worker imports for exporters that precede the config's, so a host such as `tau test` can run a project with no `geospec.config.*` (see `GeoSpecExporterModule` in `geospec/runner/node`)
   readonly exporterModules?: readonly string[]
+
+  // URL of a module each pool worker imports for its module VM (see `GeoSpecModuleVmModule` in `geospec/runner`)
+  readonly moduleVmModule?: string
 
 // Installed Vitest matcher map and lifecycle settlement hook
 GeoSpecVitestAdapter: {
@@ -533,6 +751,11 @@ ReadGeoSpecConfigOptions: {
     readonly filesystem: VmFileSystem;
     /** Rooted directory holding the config, in the filesystem's spelling: `''` for its root, else `'sub/dir'`. */
     readonly projectPath: string;
+    /**
+     * Module VM factory; defaults to GeoSpec's plain VM (native esbuild on Node, refused elsewhere). A host that bundles
+     * in a browser injects its own; Tau injects `createEsbuildModuleVm`.
+     */
+    readonly createModuleVm?: CreateModuleVm;
 }
 
   // The project filesystem
@@ -540,6 +763,9 @@ ReadGeoSpecConfigOptions: {
 
   // Rooted directory holding the config, in the filesystem's spelling
   readonly projectPath: string
+
+  // Module VM factory
+  readonly createModuleVm?: CreateModuleVm
 
 // Outcome of {@link readGeoSpecConfig}
 ReadGeoSpecConfigResult: {

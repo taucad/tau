@@ -398,13 +398,16 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       }),
     );
     {
-      const [native, { createNativeGeoSpecRunner }, { readGeoSpecConfig }, exporter] = await Promise.all([
-        import('geospec-engine'),
-        import('geospec/runner/native'),
-        import('geospec/config'),
-        // The session owns the client and terminates it on close; the exporter only borrows it.
-        tauClientExporter({ client: runtimeClient }),
-      ]);
+      const [native, { createNativeGeoSpecRunner }, { readGeoSpecConfig }, { createEsbuildModuleVm }, exporter] =
+        await Promise.all([
+          import('geospec-engine'),
+          import('geospec/runner/native'),
+          import('geospec/config'),
+          // GeoSpec has no browser VM of its own: Tau's esbuild VM bundles specs and configs, npm packages included.
+          import('@taucad/esbuild/vm'),
+          // The session owns the client and terminates it on close; the exporter only borrows it.
+          tauClientExporter({ client: runtimeClient }),
+        ]);
       await native.initialize();
       const engine = new native.Engine();
       closeEngine = () => {
@@ -435,10 +438,14 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       const vmFileSystem = createBridgeVmFileSystem(fileSystem);
       const configSession = createGeoSpecConfigSession();
       // The browser never runs the config's exporters: it applies the data fields and says once when it cannot.
-      readConfig = async () => configSession(await readGeoSpecConfig({ filesystem: vmFileSystem, projectPath: '' }));
+      readConfig = async () =>
+        configSession(
+          await readGeoSpecConfig({ filesystem: vmFileSystem, projectPath: '', createModuleVm: createEsbuildModuleVm }),
+        );
 
       runner = createNativeGeoSpecRunner({
         filesystem: vmFileSystem,
+        createModuleVm: createEsbuildModuleVm,
         // PERF-OUTPUT-01: the product selects the bounded success evidence (ruling 13).
         nativeAssertions: {
           engine: candidateEngine,

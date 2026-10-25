@@ -12,7 +12,7 @@
     "limit": "38 kB"
   },
   {
-    "name": "Node-only subpaths (cli, config/node, model/node, runner/node, vitest/node) — measured 9.82 kB brotli on 2026-10-23 (adds the CLI, the Node pool, the engine selector and the Vitest project setup)",
+    "name": "Node-only subpaths (cli, config/node, model/node, runner/node, vitest/node) — measured 10.02 kB brotli on 2026-10-25 (the pool and CLI host take a module VM module)",
     "path": [
       "dist/cli/**/*.mjs",
       "dist/config/node/**/*.mjs",
@@ -20,6 +20,6 @@
       "dist/runner/node/**/*.mjs",
       "dist/vitest/node/**/*.mjs"
     ],
-    "limit": "10 kB"
+    "limit": "10.5 kB"
   }
 ]

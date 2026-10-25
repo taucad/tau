@@ -1,5 +1,5 @@
 /**
- * Structural types GeoSpec owns in place of Tau's `@taucad/runtime/types`, so that `geospec` depends on no Tau
+ * Structural types GeoSpec owns in place of Tau's runtime types, so that `geospec` depends on no Tau
  * package. Each one is structurally identical to (or wider than) Tau's, so Tau values stay assignable.
  */
 
@@ -11,13 +11,13 @@
 // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- JSON value type uses null
 export type JSONValue = null | string | number | boolean | JSONObject | JSONArray; // eslint-disable-line @typescript-eslint/naming-convention -- JSON acronym is conventionally all-caps
 
-/** @public */
+/** A JSON object: string keys to JSON values. @public */
 // eslint-disable-next-line @typescript-eslint/naming-convention -- JSON object type
 export type JSONObject = {
   [key: string]: JSONValue;
 };
 
-/** @public */
+/** A JSON array of JSON values. @public */
 // eslint-disable-next-line @typescript-eslint/naming-convention -- JSON array type
 export type JSONArray = JSONValue[];
 

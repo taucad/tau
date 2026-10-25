@@ -1,4 +1,4 @@
-import type { VmFileSystem } from '@taucad/esbuild/vm';
+import type { VmFileSystem } from '#vm/types.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GeoSpecAssertionClientOptions } from '#assertion-client/index.js';
 import { createGeoSpecNativeModelLoader } from '#model/native-model-loader.js';

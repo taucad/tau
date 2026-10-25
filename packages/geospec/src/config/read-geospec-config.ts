@@ -1,5 +1,5 @@
-import { createEsbuildModuleVm } from '@taucad/esbuild/vm';
-import type { VmFileSystem } from '@taucad/esbuild/vm';
+import { createPlainModuleVm } from '#vm/plain-module-vm.js';
+import type { CreateModuleVm, VmFileSystem } from '#vm/types.js';
 import { defineConfigBuiltinCode } from '#config/define-config.js';
 import type { GeoSpecConfigData } from '#config/types.js';
 import { resolveGeoSpecConfig } from '#config/validate.js';
@@ -30,6 +30,11 @@ export type ReadGeoSpecConfigOptions = {
   readonly filesystem: VmFileSystem;
   /** Rooted directory holding the config, in the filesystem's spelling: `''` for its root, else `'sub/dir'`. */
   readonly projectPath: string;
+  /**
+   * Module VM factory; defaults to GeoSpec's plain VM (native esbuild on Node, refused elsewhere). A host that bundles
+   * in a browser injects its own; Tau injects `createEsbuildModuleVm`.
+   */
+  readonly createModuleVm?: CreateModuleVm;
 };
 
 const names = ['geospec.config.ts', 'geospec.config.mts', 'geospec.config.js', 'geospec.config.mjs'] as const;
@@ -66,7 +71,7 @@ export const readGeoSpecConfig = async (options: ReadGeoSpecConfigOptions): Prom
   if (candidates.length > 1) {
     return notApplied('invalid', `Multiple GeoSpec configs found: ${candidates.join(', ')}. Keep one.`);
   }
-  const vm = await createEsbuildModuleVm({ filesystem });
+  const vm = await (options.createModuleVm ?? createPlainModuleVm)({ filesystem });
   try {
     vm.registerModule('geospec/config', { version: '0.0.0', code: defineConfigBuiltinCode });
     let detectedModules: readonly string[];

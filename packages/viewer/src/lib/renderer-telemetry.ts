@@ -17,6 +17,20 @@
 
 import { randomUuid } from '@taucad/utils/id';
 import type { TelemetryOrigin, TelemetrySpanRecord } from '@taucad/runtime';
+import { subscribeViewerEvents, viewerGeometryDownloaded, viewerLongFrameBurst } from '#lib/viewer-events.js';
+import type { ViewerTelemetryEvent } from '#lib/viewer-events.js';
+
+/**
+ * Subscribe to the viewer's closed events (context loss and restore, first frame, long-frame bursts, geometry
+ * downloads). The viewer only emits; the host decides whether anything is reported. Nothing about the scene is in an
+ * event.
+ *
+ * @param handler - Called once per event; a throw is contained.
+ * @returns The unsubscribe.
+ * @public
+ */
+export const onViewerEvent = (handler: (event: ViewerTelemetryEvent) => void): (() => void) =>
+  subscribeViewerEvents(handler);
 
 // Geometry objects and their immutable content remain weakly owned by the CAD/viewer lifecycle.
 const geometryReceipts = new WeakMap<Uint8Array<ArrayBuffer>, number>();
@@ -28,6 +42,7 @@ const geometryReceipts = new WeakMap<Uint8Array<ArrayBuffer>, number>();
  */
 export const markGeometryReceipt = (content: Uint8Array<ArrayBuffer>): void => {
   geometryReceipts.set(content, performance.now());
+  viewerGeometryDownloaded('glb');
 };
 
 /**
@@ -124,7 +139,10 @@ export const observeLongAnimationFrames = (): (() => void) => {
     return () => undefined;
   }
   const observer = new PerformanceObserver((list) => {
-    for (const entry of list.getEntries() as LongAnimationFrameEntry[]) {
+    const entries = list.getEntries() as LongAnimationFrameEntry[];
+    /* One viewer event per delivered batch (a burst), never per frame. */
+    viewerLongFrameBurst(entries.reduce((total, entry) => total + entry.duration, 0));
+    for (const entry of entries) {
       recordRendererSpan('renderer.long-animation-frame', {
         startTime: entry.startTime,
         duration: entry.duration,

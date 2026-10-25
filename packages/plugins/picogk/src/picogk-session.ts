@@ -75,6 +75,14 @@ export class PicogkSession {
     await this.session.recycle();
   }
 
+  /**
+   * One resident sample of the worker's process tree, for observation only.
+   * @returns The summed resident bytes, or `undefined` with no live worker, after a recycle or without a reader.
+   */
+  public async sampleResident(): Promise<number | undefined> {
+    return this.session.sampleResident();
+  }
+
   /** Stop the worker and release its process resources. */
   public async cleanup(): Promise<void> {
     await this.session.cleanup();

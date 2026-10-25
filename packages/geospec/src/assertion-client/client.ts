@@ -1,6 +1,6 @@
 /** Runner-independent GeoSpec assertions over the native byte protocol. @module */
 
-import type { JSONValue } from '@taucad/runtime/types';
+import type { JSONValue } from '#support/types.js';
 import {
   assertGeoSpecAuthoredWorkUnitLimit,
   resolveGeoSpecMaximumWorkUnitLimit,

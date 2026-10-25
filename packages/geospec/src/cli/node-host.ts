@@ -27,6 +27,8 @@ export type NodeGeoSpecCliHostOptions = {
    * can run a project with no `geospec.config.*` (see `GeoSpecExporterModule` in `geospec/runner/node`).
    */
   readonly exporterModules?: readonly string[];
+  /** URL of a module each pool worker imports for its module VM (see `GeoSpecModuleVmModule` in `geospec/runner`). */
+  readonly moduleVmModule?: string;
 };
 
 /**
@@ -62,6 +64,7 @@ export const createNodeGeoSpecCliHost = (options: NodeGeoSpecCliHostOptions = {}
         ...(configPath === undefined ? {} : { configPath }),
         ...(sources === undefined ? {} : { sources }),
         ...(options.exporterModules === undefined ? {} : { exporterModules: options.exporterModules }),
+        ...(options.moduleVmModule === undefined ? {} : { moduleVmModule: options.moduleVmModule }),
         // `--workers` with no count parses as 0 and auto-sizes to the host's
         // parallelism; an absent `workers` runs one worker.
         workers: workers === 0 ? availableParallelism() : (workers ?? 1),

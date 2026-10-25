@@ -1,6 +1,6 @@
 # geospec public API index
 
-geospec 0.1.0-beta.9 · 777 symbols · extracted by TypeScript 5.9.3.
+geospec 0.1.0-beta.9 · 823 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature, and each top-level symbol names the lines of that file which hold its declaration and members: read only that range.
 
@@ -32,30 +32,31 @@ discoverGeoSpecFiles (function) [lines 111-115] — Discover GeoSpec test files 
 isGeoSpecTestFile (function) [lines 117-120] — Return true when a project-relative path names a GeoSpec test…
 runGeoSpecModule (function) [lines 122-125] — Execute an ESM GeoSpec module using the shared Tau VM…
 isGeoSpecTimeoutCode (function) [lines 127-130] — Whether a diagnostic or issue code belongs to the GeoSpec…
-createNativeGeoSpecRunner (function) [lines 132-135] — Compose compiled assertion and model bindings with the SDK's serial…
-allocateNativePoolGrants (function) [lines 137-144] — Assign a bounded CPU budget across already-selected worker isolates
-createGeoSpecNativeModelLoader (function) [lines 146-149] — Create a native model loader that admits actual STEP/GLB bytes…
-createNodeVmFileSystem (function) [lines 151-154] — Create a Node `VmFileSystem` rooted at `root`
-resolveUnderRoot (function) [lines 156-161] — Resolve one VM path to a real path under the…
-createNodeGeoSpecEngine (function) [lines 163-167] — Create a GeoSpec engine for this process
-createGeoSpecNodePoolRunner (function) [lines 169-174] — Create a pool with one engine and one set of…
-createNodeWorkerHandle (function) [lines 176-179] — Adapt a Node worker thread to the pool's host-agnostic handle
-createNoMatchingGeoSpecTestsIssue (function) [lines 181-183] — Create a run-level issue when filters select no tests
-createGeoSpecPoolRunner (function) [lines 185-188] — Create the host-agnostic pool runner
-startGeoSpecPoolWorkerHost (function) [lines 190-193] — Serve shards until the host says shutdown
-createGeoSpecAssertionClient (function) [lines 195-198] — Create a standalone native GeoSpec assertion client
-createGeoSpecMatcherMethods (function) [lines 200-207] — Create the one registry-derived matcher surface used by every JavaScript…
-evaluateGeoSpecNativeQuery (function) [lines 209-213] — Submit an ancillary query with positive polarity through the native…
-resolveGeoSpecMaximumWorkUnitLimit (function) [lines 215-219] — Resolve a host's largest authored work-unit budget
-runGeoSpecCli (function) [lines 221-225] — Run the CLI
-createNodeGeoSpecCliHost (function) [lines 227-230] — Build the Node CLI host
-createGeoSpecVitestAdapter (function) [lines 232-235] — Create Vitest matchers over an existing runner-independent client
-installGeoSpecVitest (function) [lines 237-240] — Register GeoSpec matchers and their settlement hook in the active…
-setupGeoSpecVitest (function) [lines 242-245] — Create a native client and register it with the active…
-setupGeoSpecVitestProject (function) [lines 247-260] — Configure GeoSpec for the active Vitest file from the project's…
-defineConfig (function) [lines 262-266] — Type a `geospec.config.*` default export
-readGeoSpecConfig (function) [lines 268-272] — Read a project's `geospec.config.*` data fields through the spec VM,…
-loadGeoSpecConfig (function) [lines 274-278] — Load one trusted project config using Node's native module loader
+createPlainModuleVm (function) [lines 132-135] — Create GeoSpec's default module VM
+createNativeGeoSpecRunner (function) [lines 137-140] — Compose compiled assertion and model bindings with the SDK's serial…
+allocateNativePoolGrants (function) [lines 142-149] — Assign a bounded CPU budget across already-selected worker isolates
+createGeoSpecNativeModelLoader (function) [lines 151-154] — Create a native model loader that admits actual STEP/GLB bytes…
+createNodeVmFileSystem (function) [lines 156-159] — Create a Node `VmFileSystem` rooted at `root`
+resolveUnderRoot (function) [lines 161-166] — Resolve one VM path to a real path under the…
+createNodeGeoSpecEngine (function) [lines 168-172] — Create a GeoSpec engine for this process
+createGeoSpecNodePoolRunner (function) [lines 174-179] — Create a pool with one engine and one set of…
+createNodeWorkerHandle (function) [lines 181-184] — Adapt a Node worker thread to the pool's host-agnostic handle
+createNoMatchingGeoSpecTestsIssue (function) [lines 186-188] — Create a run-level issue when filters select no tests
+createGeoSpecPoolRunner (function) [lines 190-193] — Create the host-agnostic pool runner
+startGeoSpecPoolWorkerHost (function) [lines 195-198] — Serve shards until the host says shutdown
+createGeoSpecAssertionClient (function) [lines 200-203] — Create a standalone native GeoSpec assertion client
+createGeoSpecMatcherMethods (function) [lines 205-212] — Create the one registry-derived matcher surface used by every JavaScript…
+evaluateGeoSpecNativeQuery (function) [lines 214-218] — Submit an ancillary query with positive polarity through the native…
+resolveGeoSpecMaximumWorkUnitLimit (function) [lines 220-224] — Resolve a host's largest authored work-unit budget
+runGeoSpecCli (function) [lines 226-230] — Run the CLI
+createNodeGeoSpecCliHost (function) [lines 232-235] — Build the Node CLI host
+createGeoSpecVitestAdapter (function) [lines 237-240] — Create Vitest matchers over an existing runner-independent client
+installGeoSpecVitest (function) [lines 242-245] — Register GeoSpec matchers and their settlement hook in the active…
+setupGeoSpecVitest (function) [lines 247-250] — Create a native client and register it with the active…
+setupGeoSpecVitestProject (function) [lines 252-265] — Configure GeoSpec for the active Vitest file from the project's…
+defineConfig (function) [lines 267-271] — Type a `geospec.config.*` default export
+readGeoSpecConfig (function) [lines 273-277] — Read a project's `geospec.config.*` data fields through the spec VM,…
+loadGeoSpecConfig (function) [lines 279-283] — Load one trusted project config using Node's native module loader
 
 ## Constants — `public-api-constants.md`
 
@@ -449,7 +450,7 @@ GeoSpecTestEvent (type) [lines 200-208] [2 members] — A selected test starting
   GeoSpecTestEvent.type (property)
   GeoSpecTestEvent.test (property)
 GeoSpecTestStatus (type) [lines 210-211] — Test case status after runner collection
-RunGeoSpecModuleOptions (type) [lines 213-278] [10 members] — Options for executing a GeoSpec ESM test module
+RunGeoSpecModuleOptions (type) [lines 213-286] [11 members] — Options for executing a GeoSpec ESM test module
   RunGeoSpecModuleOptions.filesystem (property) — Filesystem containing the test module and its project imports
   RunGeoSpecModuleOptions.entryPath (property) — Filesystem-root-relative ESM test entry path
   RunGeoSpecModuleOptions.testNamePattern (property) — JavaScript regular expression matched against full `suite > test` names
@@ -458,22 +459,62 @@ RunGeoSpecModuleOptions (type) [lines 213-278] [10 members] — Options for exec
   RunGeoSpecModuleOptions.nativeAssertions (property) — Host-provided protocol-3 compiled assertion client
   RunGeoSpecModuleOptions.nativeModelLoader (property) — Host-composed identity loader
   RunGeoSpecModuleOptions.builtinModules (property) — Additional in-memory modules made available to the VM
+  RunGeoSpecModuleOptions.createModuleVm (property) — Module VM factory
   RunGeoSpecModuleOptions.bundleCache (property) — Successful bundle cache owned by a serial runner worker
   RunGeoSpecModuleOptions.collectOnly (property) — List-only collection pass (R3 shard splitting)
-GeoSpecNativeRunnerAssertions (type) [lines 280-297] [6 members] — Native assertion options whose engine can also admit and release…
+BuiltinModule (type) [lines 288-321] [5 members] — A pre-bundled module served from memory under its import specifier
+  BuiltinModule.code (property) — ESM source of the module
+  BuiltinModule.version (property) — Version reported for the module
+  BuiltinModule.globalName (property) — Script global that bundles bind to this module
+  BuiltinModule.package (property) — The npm package this module stands for, as a project…
+  BuiltinModule.registryExpression (property) — JavaScript expression evaluating to the module's exports, which a bundle…
+BundleResult (type) [lines 323-343] [6 members] — Outcome of bundling an entry point
+  BundleResult.code (property)
+  BundleResult.sourceMap (property)
+  BundleResult.issues (property)
+  BundleResult.success (property)
+  BundleResult.dependencies (property)
+  BundleResult.unresolvedPaths (property)
+CreateModuleVm (type) [lines 345-346] — Create a module VM
+GeoSpecModuleVmModule (type) [lines 348-353] [1 members] — A module a Node pool worker imports by URL for…
+  GeoSpecModuleVmModule.default (property)
+ModuleVm (type) [lines 355-393] [5 members] — The ESM module VM GeoSpec bundles and executes specs and…
+  ModuleVm.detectImports (method) — Detect bare specifiers and project dependencies without fetching anything
+  ModuleVm.bundle (method) — Bundle an ESM entry point and its transitive dependency graph
+  ModuleVm.execute (method) — Execute bundled ESM code in the current JavaScript environment
+  ModuleVm.registerModule (method) — Register an in-memory builtin module
+  ModuleVm.dispose (method) — Release VM-owned resources
+ModuleVmOptions (type) [lines 395-402] [1 members] — Options GeoSpec passes when it creates a module VM
+  ModuleVmOptions.filesystem (property) — Filesystem the VM reads project files from
+VmExecuteResult (type) [lines 404-414] [1 members] — Result of executing bundled ESM code
+  VmExecuteResult.success (property)
+VmFileSystem (type) [lines 416-445] [4 members] — Minimal filesystem contract required by the VM bundler
+  VmFileSystem.exists (method) — Return true when a path exists
+  VmFileSystem.readFile (method) — Read a file as binary bytes
+  VmFileSystem.writeFile (method) — Write a UTF-8 text file
+  VmFileSystem.ensureDir (method) — Ensure a directory exists, creating parents as needed
+VmIssue (type) [lines 447-491] [6 members] — A diagnostic emitted while bundling or executing a VM module
+  VmIssue.message (property) — Human-readable diagnostic message
+  VmIssue.code (property) — Stable machine-readable code
+  VmIssue.type (property) — Diagnostic category
+  VmIssue.severity (property) — Diagnostic severity
+  VmIssue.location (property) — Optional source location
+  VmIssue.details (property) — Optional original error object or metadata
+GeoSpecNativeRunnerAssertions (type) [lines 493-510] [6 members] — Native assertion options whose engine can also admit and release…
   GeoSpecNativeRunnerAssertions.claimId (property)
   GeoSpecNativeRunnerAssertions.evidenceProfile (property) — Success-evidence profile of every claim and query
   GeoSpecNativeRunnerAssertions.subjectSlot (property)
   GeoSpecNativeRunnerAssertions.workUnitLimit (property)
   GeoSpecNativeRunnerAssertions.maximumWorkUnitLimit (property) — The largest `workUnitLimit` a spec may author in `loadModel` or…
   GeoSpecNativeRunnerAssertions.engine (property)
-GeoSpecNativeRunnerOptions (type) [lines 299-322] [5 members] — Options for the native serial runner
+GeoSpecNativeRunnerOptions (type) [lines 512-538] [6 members] — Options for the native serial runner
   GeoSpecNativeRunnerOptions.filesystem (property) — Filesystem containing the project and test modules
   GeoSpecNativeRunnerOptions.builtinModules (property) — Additional in-memory modules made available to the VM
+  GeoSpecNativeRunnerOptions.createModuleVm (property) — Module VM factory for every file
   GeoSpecNativeRunnerOptions.nativeAssertions (property) — Actual protocol-3 engine used by authored assertions
   GeoSpecNativeRunnerOptions.nativeModelLoader (property) — Optional managed loader
   GeoSpecNativeRunnerOptions.model (property) — Defaults used when the runner constructs its own native loader
-CreateGeoSpecNativeModelLoaderOptions (type) [lines 324-362] [7 members] — Defaults and host dependencies for a managed native model loader
+CreateGeoSpecNativeModelLoaderOptions (type) [lines 540-578] [7 members] — Defaults and host dependencies for a managed native model loader
   CreateGeoSpecNativeModelLoaderOptions.engine (property)
   CreateGeoSpecNativeModelLoaderOptions.format (property)
   CreateGeoSpecNativeModelLoaderOptions.projectPath (property)
@@ -481,7 +522,7 @@ CreateGeoSpecNativeModelLoaderOptions (type) [lines 324-362] [7 members] — Def
   CreateGeoSpecNativeModelLoaderOptions.exporters (property) — Model exporters for source-kind files
   CreateGeoSpecNativeModelLoaderOptions.carried (property) — Subject handles carried between the release scopes of loaders that…
   CreateGeoSpecNativeModelLoaderOptions.maximumWorkUnitLimit (property) — The largest `loadModel` `workUnitLimit` a spec may author
-GeoSpecNativeLoadModelOptions (type) [lines 364-400] [10 members] — Native additions accepted by the injected `geospec/runner/native` loader
+GeoSpecNativeLoadModelOptions (type) [lines 580-616] [10 members] — Native additions accepted by the injected `geospec/runner/native` loader
   GeoSpecNativeLoadModelOptions.rootDir (property) — Project-relative folder `file` resolves in, for a suite that loads…
   GeoSpecNativeLoadModelOptions.format (property) — Geometry format to export
   GeoSpecNativeLoadModelOptions.parameters (property) — Explicit parameters passed to the exporter
@@ -492,75 +533,77 @@ GeoSpecNativeLoadModelOptions (type) [lines 364-400] [10 members] — Native add
   GeoSpecNativeLoadModelOptions.workUnitLimit (property) — Default work-unit budget for every claim on this subject
   GeoSpecNativeLoadModelOptions.resources (property) — Ordered external resource payloads declared to the native admission request
   GeoSpecNativeLoadModelOptions.ingestOptions (property) — Format-specific native ingest options
-GeoSpecNativeModelEngine (type) [lines 402-422] [5 members] — Native engine operations required for model admission and run-level cleanup
+GeoSpecNativeModelEngine (type) [lines 618-638] [5 members] — Native engine operations required for model admission and run-level cleanup
   GeoSpecNativeModelEngine.evaluateClaim (method)
   GeoSpecNativeModelEngine.processRequest (method)
   GeoSpecNativeModelEngine.ingestSubject (method)
   GeoSpecNativeModelEngine.subjectHandle (method)
   GeoSpecNativeModelEngine.releaseSubject (method)
-GeoSpecNativeModelLoader (type) [lines 424-426] — Model loader injected into native VM runs
-GeoSpecNativeModelSubject (type) [lines 428-440] [3 members] — Subject identity returned by native STEP/GLB admission
+GeoSpecNativeModelLoader (type) [lines 640-642] — Model loader injected into native VM runs
+GeoSpecNativeModelSubject (type) [lines 644-656] [3 members] — Subject identity returned by native STEP/GLB admission
   GeoSpecNativeModelSubject.contentHash (property)
   GeoSpecNativeModelSubject.subjectHash (property)
   GeoSpecNativeModelSubject.load (property) — Exact successful-load evidence retained by the admitting host, when available
-GeoSpecNativeModelResource (type) [lines 442-450] [2 members] — One named external resource referenced by a direct glTF-family source
+GeoSpecNativeModelResource (type) [lines 658-666] [2 members] — One named external resource referenced by a direct glTF-family source
   GeoSpecNativeModelResource.name (property)
   GeoSpecNativeModelResource.source (property)
-GeoSpecNativeSourceReader (type) [lines 452-454] — Resolve a non-memory source into ordinary ArrayBuffer-backed bytes
-ManagedGeoSpecNativeModelLoader (type) [lines 456-476] [1 members] — Reusable native model loader whose admitted subjects can be released…
+GeoSpecNativeSourceReader (type) [lines 668-670] — Resolve a non-memory source into ordinary ArrayBuffer-backed bytes
+ManagedGeoSpecNativeModelLoader (type) [lines 672-692] [1 members] — Reusable native model loader whose admitted subjects can be released…
   ManagedGeoSpecNativeModelLoader.releaseAll (method) — Drain registered admissions, including additions while drainage awaits, then release…
-CreateNodeGeoSpecEngineOptions (type) [lines 478-485] [1 members] — Options for {@link createNodeGeoSpecEngine}
+CreateNodeGeoSpecEngineOptions (type) [lines 694-701] [1 members] — Options for {@link createNodeGeoSpecEngine}
   CreateNodeGeoSpecEngineOptions.executionPermits (property) — Caller-inclusive CPU permits for the native addon
-GeoSpecEngineBinding (type) [lines 487-488] — Which build of `geospec-engine` a Node engine runs on
-NodeGeoSpecEngine (type) [lines 490-502] [2 members] — An engine and the build it runs on
+GeoSpecEngineBinding (type) [lines 703-704] — Which build of `geospec-engine` a Node engine runs on
+NodeGeoSpecEngine (type) [lines 706-718] [2 members] — An engine and the build it runs on
   NodeGeoSpecEngine.engine (property)
   NodeGeoSpecEngine.binding (property)
-GeoSpecNodePoolOptions (type) [lines 504-552] [7 members] — Options for the Node pool
+GeoSpecNodePoolOptions (type) [lines 720-776] [8 members] — Options for the Node pool
   GeoSpecNodePoolOptions.projectPath (property) — Absolute project root
   GeoSpecNodePoolOptions.configPath (property) — The `geospec.config.*` each worker imports for its exporters
   GeoSpecNodePoolOptions.exporterModules (property) — URLs of modules each worker imports whose default export creates…
+  GeoSpecNodePoolOptions.moduleVmModule (property) — URL of a module each worker imports whose default export…
   GeoSpecNodePoolOptions.workers (property) — Number of outer worker isolates
   GeoSpecNodePoolOptions.budget (property) — Caller-inclusive total CPU budget
   GeoSpecNodePoolOptions.shardTimeout (property) — Non-verdict shard watchdog in milliseconds
   GeoSpecNodePoolOptions.sources (property) — Spec sources each worker serves from memory, keyed by project-rooted…
-NodeWorkerLike (type) [lines 554-573] [3 members] — The slice of `node:worker_threads`' `Worker` the pool drives
+NodeWorkerLike (type) [lines 778-797] [3 members] — The slice of `node:worker_threads`' `Worker` the pool drives
   NodeWorkerLike.postMessage (method)
   NodeWorkerLike.on (method)
   NodeWorkerLike.terminate (method)
-GeoSpecExporterModule (type) [lines 575-584] [1 members] — A module whose default export creates exporters for one worker
+GeoSpecExporterModule (type) [lines 799-808] [1 members] — A module whose default export creates exporters for one worker
   GeoSpecExporterModule.default (property)
-GeoSpecPoolHostMessage (type) [lines 586-603] [1 members]
+GeoSpecPoolHostMessage (type) [lines 810-827] [1 members]
   GeoSpecPoolHostMessage.type (property)
-GeoSpecPoolShard (type) [lines 605-622] [3 members] — One schedulable work unit
+GeoSpecPoolShard (type) [lines 829-846] [3 members] — One schedulable work unit
   GeoSpecPoolShard.id (property) — Stable shard id, unique within one pool run
   GeoSpecPoolShard.file (property) — GeoSpec file this shard executes
   GeoSpecPoolShard.testNamePattern (property) — Exact-test pattern for split shards (R3
-GeoSpecPoolWorkerHandle (type) [lines 624-649] [4 members]
+GeoSpecPoolWorkerHandle (type) [lines 848-873] [4 members]
   GeoSpecPoolWorkerHandle.postMessage (method)
   GeoSpecPoolWorkerHandle.onMessage (method)
   GeoSpecPoolWorkerHandle.onExit (method)
   GeoSpecPoolWorkerHandle.terminate (method) — Hard-stop the worker thread (R11 watchdog primitive)
-GeoSpecPoolWorkerMessage (type) [lines 651-690] [1 members]
+GeoSpecPoolWorkerMessage (type) [lines 875-914] [1 members]
   GeoSpecPoolWorkerMessage.type (property)
-GeoSpecRunner (type) [lines 692-722] [4 members] — Public GeoSpec runner lifecycle surface
+GeoSpecRunner (type) [lines 916-946] [4 members] — Public GeoSpec runner lifecycle surface
   GeoSpecRunner.run (method) — Execute GeoSpec files and return a compact aggregate result
   GeoSpecRunner.on (method) — Subscribe to one lifecycle event type
   GeoSpecRunner.abort (method) — Request cooperative abort before the next file starts
   GeoSpecRunner.close (method) — Close the runner and release owned resources
-GeoSpecRunnerEvent (type) [lines 724-756] [1 members] — Lifecycle event emitted by GeoSpec worker-style runners
+GeoSpecRunnerEvent (type) [lines 948-980] [1 members] — Lifecycle event emitted by GeoSpec worker-style runners
   GeoSpecRunnerEvent.type (property)
-GeoSpecRunnerFileResult (type) [lines 758-785] [5 members] — One GeoSpec test file executed by a worker-style runner
+GeoSpecRunnerFileResult (type) [lines 982-1009] [5 members] — One GeoSpec test file executed by a worker-style runner
   GeoSpecRunnerFileResult.file (property) — Absolute or project-relative GeoSpec test file path supplied to the…
   GeoSpecRunnerFileResult.result (property) — Low-level module execution result for this file
   GeoSpecRunnerFileResult.durationMs (property) — Wall-clock cost of executing this file, in milliseconds (R1)
   GeoSpecRunnerFileResult.primaryLoadKey (property) — First deterministic model-load cache key observed in this file (R9…
   GeoSpecRunnerFileResult.workerMemoryBytes (property) — Executing worker's isolate-resident memory at file completion, in bytes (R15…
-GeoSpecRunnerOptions (type) [lines 787-809] [4 members] — Shared options for GeoSpec runner factories
+GeoSpecRunnerOptions (type) [lines 1011-1038] [5 members] — Shared options for GeoSpec runner factories
   GeoSpecRunnerOptions.filesystem (property) — Filesystem containing the project and test modules
   GeoSpecRunnerOptions.nativeAssertions (property) — Protocol-3 assertion client shared by every authored assertion and model…
   GeoSpecRunnerOptions.nativeModelLoader (property) — Managed native model loader released after each settled run
   GeoSpecRunnerOptions.builtinModules (property) — Additional in-memory modules made available to the VM
-GeoSpecRunnerResult (type) [lines 811-858] [9 members] — Aggregate result returned by GeoSpec worker-style runners
+  GeoSpecRunnerOptions.createModuleVm (property) — Module VM factory for every file
+GeoSpecRunnerResult (type) [lines 1040-1087] [9 members] — Aggregate result returned by GeoSpec worker-style runners
   GeoSpecRunnerResult.success (property) — True when no files or tests failed and at least…
   GeoSpecRunnerResult.passed (property) — Number of non-skipped tests that passed
   GeoSpecRunnerResult.failed (property) — Number of file-level or test-level failures
@@ -570,13 +613,13 @@ GeoSpecRunnerResult (type) [lines 811-858] [9 members] — Aggregate result retu
   GeoSpecRunnerResult.durationMs (property) — Wall-clock cost of the whole run, in milliseconds (R1)
   GeoSpecRunnerResult.accounting (property) — Complete requested-file accounting
   GeoSpecRunnerResult.lineageStatus (property) — Coherence of the consumed source graphs, not a geometry verdict
-GeoSpecRunnerRunOptions (type) [lines 860-894] [5 members] — Options accepted by a GeoSpec worker-style runner run
+GeoSpecRunnerRunOptions (type) [lines 1089-1123] [5 members] — Options accepted by a GeoSpec worker-style runner run
   GeoSpecRunnerRunOptions.files (property) — GeoSpec test files to execute
   GeoSpecRunnerRunOptions.testNamePattern (property) — JavaScript regular expression matched against full `suite > test` names
   GeoSpecRunnerRunOptions.testTimeout (property) — Timeout for each async test callback, in milliseconds
   GeoSpecRunnerRunOptions.workUnitLimit (property) — Engine work-unit budget for this run's claims, replacing the runner's…
   GeoSpecRunnerRunOptions.bail (property) — Stop after the first failing file (R1)
-GeoSpecPoolOptions (type) [lines 896-933] [7 members] — Everything the pool needs that differs between Node and the…
+GeoSpecPoolOptions (type) [lines 1125-1162] [7 members] — Everything the pool needs that differs between Node and the…
   GeoSpecPoolOptions.createWorker (property) — Spawn one worker running `startGeoSpecPoolWorkerHost`
   GeoSpecPoolOptions.initializeWorker (property) — Optional one-time worker initialization performed after its ready signal
   GeoSpecPoolOptions.gracefulShutdown (property) — Wait for each native worker's cleanup acknowledgement before terminating it
@@ -584,49 +627,50 @@ GeoSpecPoolOptions (type) [lines 896-933] [7 members] — Everything the pool ne
   GeoSpecPoolOptions.timings (property) — Optional scheduling telemetry
   GeoSpecPoolOptions.shardTimeout (property) — Per-shard non-verdict watchdog, milliseconds (R11)
   GeoSpecPoolOptions.splitThreshold (property) — Split files whose recorded duration exceeds this
-ShardTiming (type) [lines 935-947] [2 members] — One shard's recorded cost
+ShardTiming (type) [lines 1164-1176] [2 members] — One shard's recorded cost
   ShardTiming.durationMs (property) — Wall duration of the last recorded run, in milliseconds
   ShardTiming.peakRssBytes (property) — Highest RSS observed for this shard, in bytes
-ShardTimings (type) [lines 949-975] [4 members] — A mutable timings table
+ShardTimings (type) [lines 1178-1204] [4 members] — A mutable timings table
   ShardTimings.record (method) — Merge one observation
   ShardTimings.read (method) — The hint for one shard, or `undefined` when unknown
   ShardTimings.longestFirst (method) — Every recorded shard, sorted by descending duration (longest-first)
   ShardTimings.save (method) — Persist the table
-GeoSpecPoolWorkerHostOptions (type) [lines 977-1019] [8 members] — Options accepted by {@link startGeoSpecPoolWorkerHost}
+GeoSpecPoolWorkerHostOptions (type) [lines 1206-1253] [9 members] — Options accepted by {@link startGeoSpecPoolWorkerHost}
   GeoSpecPoolWorkerHostOptions.filesystem (property) — Filesystem containing the project and test modules
   GeoSpecPoolWorkerHostOptions.nativeAssertions (property) — Native assertion client shared with this worker's model admissions
   GeoSpecPoolWorkerHostOptions.nativeModelLoader (property) — Managed native admissions, released after every shard and collection pass…
   GeoSpecPoolWorkerHostOptions.builtinModules (property) — Additional in-memory modules made available to the VM
+  GeoSpecPoolWorkerHostOptions.createModuleVm (property) — Module VM factory for every shard
   GeoSpecPoolWorkerHostOptions.postMessage (property) — Post a message to the pool host
   GeoSpecPoolWorkerHostOptions.onHostMessage (property) — Subscribe to pool-host messages
   GeoSpecPoolWorkerHostOptions.measureMemoryBytes (property) — Sample this worker's resident memory in bytes (R15 telemetry)
   GeoSpecPoolWorkerHostOptions.onShutdown (property) — Release platform resources on shutdown, after the native subjects are…
-GeoSpecAssertionClient (type) [lines 1021-1038] [2 members] — Runner-independent native assertion client
+GeoSpecAssertionClient (type) [lines 1255-1272] [2 members] — Runner-independent native assertion client
   GeoSpecAssertionClient.expectGeo (method) — Start a chain
   GeoSpecAssertionClient.query (method)
-GeoSpecAssertionClientOptions (type) [lines 1040-1068] [6 members] — Flat construction options for a runner-independent native assertion client
+GeoSpecAssertionClientOptions (type) [lines 1274-1302] [6 members] — Flat construction options for a runner-independent native assertion client
   GeoSpecAssertionClientOptions.claimId (property)
   GeoSpecAssertionClientOptions.engine (property)
   GeoSpecAssertionClientOptions.evidenceProfile (property) — Success-evidence profile of every claim and query
   GeoSpecAssertionClientOptions.subjectSlot (property)
   GeoSpecAssertionClientOptions.workUnitLimit (property)
   GeoSpecAssertionClientOptions.maximumWorkUnitLimit (property) — The largest `workUnitLimit` a spec may author in `loadModel` or…
-GeoSpecAssertionMatchers (type) [lines 1070-1075] [1 members] — Standalone native matcher chain, including core-owned negation
+GeoSpecAssertionMatchers (type) [lines 1304-1309] [1 members] — Standalone native matcher chain, including core-owned negation
   GeoSpecAssertionMatchers.not (property)
-GeoSpecAuthoringInvocation (type) [lines 1077-1097] [6 members] — One authored call shared by the collector and native assertion…
+GeoSpecAuthoringInvocation (type) [lines 1311-1331] [6 members] — One authored call shared by the collector and native assertion…
   GeoSpecAuthoringInvocation.arguments (property)
   GeoSpecAuthoringInvocation.expected (property)
   GeoSpecAuthoringInvocation.kind (property)
   GeoSpecAuthoringInvocation.matcher (property)
   GeoSpecAuthoringInvocation.polarity (property)
   GeoSpecAuthoringInvocation.subject (property)
-GeoSpecMatcherMethods (type) [lines 1099-1102] — Matcher methods derived mechanically from the existing GeoSpec registry
-GeoSpecQueryOptions (type) [lines 1104-1119] [4 members] — One positive-only ancillary query
+GeoSpecMatcherMethods (type) [lines 1333-1336] — Matcher methods derived mechanically from the existing GeoSpec registry
+GeoSpecQueryOptions (type) [lines 1338-1353] [4 members] — One positive-only ancillary query
   GeoSpecQueryOptions.capability (property)
   GeoSpecQueryOptions.claimId (property)
   GeoSpecQueryOptions.payload (property)
   GeoSpecQueryOptions.subject (property)
-MinimumDistanceFact (type) [lines 1121-1150] [9 members] — Complete native minimum and ordered finite witnesses in canonical millimetres/Z-up
+MinimumDistanceFact (type) [lines 1355-1384] [9 members] — Complete native minimum and ordered finite witnesses in canonical millimetres/Z-up
   MinimumDistanceFact.source (property)
   MinimumDistanceFact.assurance (property)
   MinimumDistanceFact.unit (property)
@@ -636,13 +680,13 @@ MinimumDistanceFact (type) [lines 1121-1150] [9 members] — Complete native min
   MinimumDistanceFact.occurrences (property)
   MinimumDistanceFact.distance (property)
   MinimumDistanceFact.points (property)
-MinimumDistanceQuery (type) [lines 1152-1175] [3 members] — Complete AP242 minimum over two subject-bound occurrence paths
+MinimumDistanceQuery (type) [lines 1386-1409] [3 members] — Complete AP242 minimum over two subject-bound occurrence paths
   MinimumDistanceQuery.capability (property)
   MinimumDistanceQuery.subject (property)
   MinimumDistanceQuery.payload (property)
-MinimumDistanceResult (type) [lines 1177-1191] [1 members] — Geometry refusal and infrastructure interruption never masquerade as facts
+MinimumDistanceResult (type) [lines 1411-1425] [1 members] — Geometry refusal and infrastructure interruption never masquerade as facts
   MinimumDistanceResult.status (property)
-GeoSpecNativeQueryOptions (type) [lines 1193-1216] [9 members] — Flat native query transport options
+GeoSpecNativeQueryOptions (type) [lines 1427-1450] [9 members] — Flat native query transport options
   GeoSpecNativeQueryOptions.engine (property)
   GeoSpecNativeQueryOptions.claimId (property)
   GeoSpecNativeQueryOptions.evidenceProfile (property)
@@ -652,38 +696,41 @@ GeoSpecNativeQueryOptions (type) [lines 1193-1216] [9 members] — Flat native q
   GeoSpecNativeQueryOptions.subject (property)
   GeoSpecNativeQueryOptions.capability (property)
   GeoSpecNativeQueryOptions.payload (property)
-GeoSpecQueryCapability (type) [lines 1218-1219] — Existing positive-only ancillary operations owned by the native core
-GeoSpecPmiField (type) [lines 1221-1232] [3 members] — Explicit support state for one source-attributed inventory field
+GeoSpecQueryCapability (type) [lines 1452-1453] — Existing positive-only ancillary operations owned by the native core
+GeoSpecPmiField (type) [lines 1455-1466] [3 members] — Explicit support state for one source-attributed inventory field
   GeoSpecPmiField.status (property)
   GeoSpecPmiField.value (property)
   GeoSpecPmiField.reason (property)
-GeoSpecPmiRawEntity (type) [lines 1234-1245] [3 members] — Original Part21 entity ID and exact source argument tokens
+GeoSpecPmiRawEntity (type) [lines 1468-1479] [3 members] — Original Part21 entity ID and exact source argument tokens
   GeoSpecPmiRawEntity.sourceId (property)
   GeoSpecPmiRawEntity.kind (property)
   GeoSpecPmiRawEntity.arguments (property)
-GeoSpecPmiNumber (type) [lines 1247-1267] [6 members] — Source-authored scalar and Rust-normalized reduced rational millimetres
+GeoSpecPmiNumber (type) [lines 1481-1501] [6 members] — Source-authored scalar and Rust-normalized reduced rational millimetres
   GeoSpecPmiNumber.sourceId (property)
   GeoSpecPmiNumber.authoredText (property)
   GeoSpecPmiNumber.unitId (property)
   GeoSpecPmiNumber.unitRecords (property)
   GeoSpecPmiNumber.millimetres (property)
   GeoSpecPmiNumber.name (property)
-GeoSpecPmiFaceAssociation (type) [lines 1269-1283] [4 members] — A uniquely forward-transferred face
+GeoSpecPmiFaceAssociation (type) [lines 1503-1517] [4 members] — A uniquely forward-transferred face
   GeoSpecPmiFaceAssociation.sourceFaceId (property)
   GeoSpecPmiFaceAssociation.occurrenceRoute (property)
   GeoSpecPmiFaceAssociation.occurrence (property)
   GeoSpecPmiFaceAssociation.publicFaceOrdinal (property)
-GeoSpecPmiShapeReference (type) [lines 1285-1302] [5 members] — One ordered role reference, including incomplete source/transfer evidence
+GeoSpecPmiShapeReference (type) [lines 1519-1536] [5 members] — One ordered role reference, including incomplete source/transfer evidence
   GeoSpecPmiShapeReference.sourceAspectId (property)
   GeoSpecPmiShapeReference.sourceUsageIds (property)
   GeoSpecPmiShapeReference.sourceItemIds (property)
   GeoSpecPmiShapeReference.requestedRoute (property)
   GeoSpecPmiShapeReference.associations (property)
-GeoSpecPmiLimits (type) [lines 1304-1315] [3 members] — Normalized authored limits
+GeoSpecPmiLimits (type) [lines 1538-1549] [3 members] — Normalized authored limits
   GeoSpecPmiLimits.lowerMillimetres (property)
   GeoSpecPmiLimits.upperMillimetres (property)
   GeoSpecPmiLimits.basis (property)
-GeoSpecPmiRecord (type) [lines 1317-1352] [11 members] — Source record preserving semantic/presentation separation and ordered roles
+
+## Types (3) — `public-api-types-3.md`
+
+GeoSpecPmiRecord (type) [lines 5-40] [11 members] — Source record preserving semantic/presentation separation and ordered roles
   GeoSpecPmiRecord.sourceId (property)
   GeoSpecPmiRecord.family (property)
   GeoSpecPmiRecord.channel (property)
@@ -695,20 +742,20 @@ GeoSpecPmiRecord (type) [lines 1317-1352] [11 members] — Source record preserv
   GeoSpecPmiRecord.limits (property)
   GeoSpecPmiRecord.interpretation (property)
   GeoSpecPmiRecord.raw (property)
-GeoSpecPmiInventory (type) [lines 1354-1371] [5 members] — Positive-only inventory value inside the ordinary canonical query report
+GeoSpecPmiInventory (type) [lines 42-59] [5 members] — Positive-only inventory value inside the ordinary canonical query report
   GeoSpecPmiInventory.contract (property)
   GeoSpecPmiInventory.status (property)
   GeoSpecPmiInventory.fileSchema (property)
   GeoSpecPmiInventory.editionValidation (property)
   GeoSpecPmiInventory.records (property)
-GeoSpecPmiQueryPayload (type) [lines 1373-1381] [2 members] — Strict inventory output limits
+GeoSpecPmiQueryPayload (type) [lines 61-69] [2 members] — Strict inventory output limits
   GeoSpecPmiQueryPayload.maxRecords (property)
   GeoSpecPmiQueryPayload.maxOutputBytes (property)
-GeoSpecPmiQueryValue (type) [lines 1383-1394] [3 members] — Complete inventory value
+GeoSpecPmiQueryValue (type) [lines 71-82] [3 members] — Complete inventory value
   GeoSpecPmiQueryValue.inventory (property)
   GeoSpecPmiQueryValue.subjectHash (property)
   GeoSpecPmiQueryValue.provenance (property)
-GeoSpecCanonicalClaimReport (type) [lines 1396-1430] [10 members] — Full native assertion result with the exact core-owned bytes retained
+GeoSpecCanonicalClaimReport (type) [lines 84-118] [10 members] — Full native assertion result with the exact core-owned bytes retained
   GeoSpecCanonicalClaimReport.canonicalClaim (property)
   GeoSpecCanonicalClaimReport.canonicalPlan (property)
   GeoSpecCanonicalClaimReport.canonicalResult (property)
@@ -719,43 +766,41 @@ GeoSpecCanonicalClaimReport (type) [lines 1396-1430] [10 members] — Full nativ
   GeoSpecCanonicalClaimReport.polarity (property)
   GeoSpecCanonicalClaimReport.result (property)
   GeoSpecCanonicalClaimReport.status (property)
-GeoSpecNativeClaimEvaluation (type) [lines 1432-1443] [3 members] — Exact core bytes of one claim evaluated in one engine…
+GeoSpecNativeClaimEvaluation (type) [lines 120-131] [3 members] — Exact core bytes of one claim evaluated in one engine…
   GeoSpecNativeClaimEvaluation.canonicalClaim (property)
   GeoSpecNativeClaimEvaluation.canonicalPlan (property)
   GeoSpecNativeClaimEvaluation.canonicalResult (property)
-GeoSpecNativeEngine (type) [lines 1445-1455] [2 members] — Byte-only engine surface consumed by the runner-independent assertion client
+GeoSpecNativeEngine (type) [lines 133-143] [2 members] — Byte-only engine surface consumed by the runner-independent assertion client
   GeoSpecNativeEngine.evaluateClaim (method)
   GeoSpecNativeEngine.processRequest (method)
-GeoSpecNativeEvidenceProfile (type) [lines 1457-1458] — Success-evidence profile a product selects for its plans (PERF-OUTPUT-01)
-GeoSpecNativeSubject (type) [lines 1460-1468] [2 members] — Content-addressed subject accepted by a protocol-3 assertion plan
+GeoSpecNativeEvidenceProfile (type) [lines 145-146] — Success-evidence profile a product selects for its plans (PERF-OUTPUT-01)
+GeoSpecNativeSubject (type) [lines 148-156] [2 members] — Content-addressed subject accepted by a protocol-3 assertion plan
   GeoSpecNativeSubject.contentHash (property)
   GeoSpecNativeSubject.subjectHash (property)
-GeoSpecFixedMatcherDescriptor (type) [lines 1470-1481] [3 members] — A canonical fixed-contract matcher
+GeoSpecFixedMatcherDescriptor (type) [lines 158-169] [3 members] — A canonical fixed-contract matcher
   GeoSpecFixedMatcherDescriptor.contract (property)
   GeoSpecFixedMatcherDescriptor.expected (property)
   GeoSpecFixedMatcherDescriptor.mode (property)
-GeoSpecCliHost (type) [lines 1483-1543] [5 members] — The platform the CLI runs against
+GeoSpecCliHost (type) [lines 171-231] [5 members] — The platform the CLI runs against
   GeoSpecCliHost.cwd (method) — Absolute project root for a relative `projectPath`
   GeoSpecCliHost.write (method)
   GeoSpecCliHost.discoveryFileSystem (method) — Recursive discovery filesystem
   GeoSpecCliHost.loadConfig (method) — Import the project's `geospec.config.*`, or the explicit one, for its…
   GeoSpecCliHost.createRunner (method) — Build the runner the selected files execute on
-NodeGeoSpecCliHostOptions (type) [lines 1545-1560] [2 members] — Options for {@link createNodeGeoSpecCliHost}
+NodeGeoSpecCliHostOptions (type) [lines 233-253] [3 members] — Options for {@link createNodeGeoSpecCliHost}
   NodeGeoSpecCliHostOptions.reportStream (property) — Report sink used by embedding hosts and tests
   NodeGeoSpecCliHostOptions.exporterModules (property) — URLs of modules each pool worker imports for exporters that…
-
-## Types (3) — `public-api-types-3.md`
-
-GeoSpecVitestAdapter (type) [lines 5-14] [2 members] — Installed Vitest matcher map and lifecycle settlement hook
+  NodeGeoSpecCliHostOptions.moduleVmModule (property) — URL of a module each pool worker imports for its…
+GeoSpecVitestAdapter (type) [lines 255-264] [2 members] — Installed Vitest matcher map and lifecycle settlement hook
   GeoSpecVitestAdapter.matchers (property)
   GeoSpecVitestAdapter.flush (method)
-GeoSpecVitestProject (type) [lines 16-38] [5 members] — The installed matchers plus the project's model loader
+GeoSpecVitestProject (type) [lines 266-288] [5 members] — The installed matchers plus the project's model loader
   GeoSpecVitestProject.matchers (property)
   GeoSpecVitestProject.flush (method)
   GeoSpecVitestProject.loadModel (property) — Load a model through the config's exporters
   GeoSpecVitestProject.configPath (property) — The config file that was read, when the project has…
   GeoSpecVitestProject.binding (property) — The build the created engine runs on
-SetupGeoSpecVitestProjectOptions (type) [lines 40-74] [8 members] — Options for {@link setupGeoSpecVitestProject}
+SetupGeoSpecVitestProjectOptions (type) [lines 290-324] [8 members] — Options for {@link setupGeoSpecVitestProject}
   SetupGeoSpecVitestProjectOptions.claimId (property)
   SetupGeoSpecVitestProjectOptions.evidenceProfile (property) — Success-evidence profile of every claim and query
   SetupGeoSpecVitestProjectOptions.subjectSlot (property)
@@ -764,28 +809,29 @@ SetupGeoSpecVitestProjectOptions (type) [lines 40-74] [8 members] — Options fo
   SetupGeoSpecVitestProjectOptions.configPath (property) — Explicit config file, resolved relative to the project unless absolute
   SetupGeoSpecVitestProjectOptions.overrides (property) — Fields that replace the config's whole, as a CLI flag…
   SetupGeoSpecVitestProjectOptions.engine (property) — A caller-owned engine, kept open after the file
-ReadGeoSpecConfigOptions (type) [lines 76-88] [2 members] — Options for {@link readGeoSpecConfig}
+ReadGeoSpecConfigOptions (type) [lines 326-346] [3 members] — Options for {@link readGeoSpecConfig}
   ReadGeoSpecConfigOptions.filesystem (property) — The project filesystem
   ReadGeoSpecConfigOptions.projectPath (property) — Rooted directory holding the config, in the filesystem's spelling
-ReadGeoSpecConfigResult (type) [lines 90-108] [1 members] — Outcome of {@link readGeoSpecConfig}
+  ReadGeoSpecConfigOptions.createModuleVm (property) — Module VM factory
+ReadGeoSpecConfigResult (type) [lines 348-366] [1 members] — Outcome of {@link readGeoSpecConfig}
   ReadGeoSpecConfigResult.status (property)
-GeoSpecConfig (type) [lines 110-139] [6 members] — Trusted project configuration using existing discovery and runner options
+GeoSpecConfig (type) [lines 368-397] [6 members] — Trusted project configuration using existing discovery and runner options
   GeoSpecConfig.include (property)
   GeoSpecConfig.exclude (property)
   GeoSpecConfig.testNamePattern (property)
   GeoSpecConfig.testTimeout (property) — Positive finite milliseconds
   GeoSpecConfig.bail (property)
   GeoSpecConfig.exporters (property) — Model exporters for `loadModel({ file })`
-GeoSpecConfigData (type) [lines 141-153] [5 members] — The config's data fields
+GeoSpecConfigData (type) [lines 399-411] [5 members] — The config's data fields
   GeoSpecConfigData.include (property)
   GeoSpecConfigData.exclude (property)
   GeoSpecConfigData.testNamePattern (property)
   GeoSpecConfigData.testTimeout (property) — Positive finite milliseconds
   GeoSpecConfigData.bail (property)
-LoadedGeoSpecConfig (type) [lines 155-163] [2 members] — Resolved file identity and validated configuration data
+LoadedGeoSpecConfig (type) [lines 413-421] [2 members] — Resolved file identity and validated configuration data
   LoadedGeoSpecConfig.configPath (property)
   LoadedGeoSpecConfig.options (property)
-LoadGeoSpecConfigOptions (type) [lines 165-180] [3 members] — Options for one trusted Node configuration load
+LoadGeoSpecConfigOptions (type) [lines 423-438] [3 members] — Options for one trusted Node configuration load
   LoadGeoSpecConfigOptions.projectPath (property)
   LoadGeoSpecConfigOptions.configPath (property) — Explicit file, resolved relative to the project unless absolute
   LoadGeoSpecConfigOptions.overrides (property) — Own defined fields override configuration without deep merging

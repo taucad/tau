@@ -65,6 +65,9 @@
           "env": "TAU_CLOUD_ENABLED"
         },
         {
+          "env": "TAU_TELEMETRY_HOST"
+        },
+        {
           "env": "POSTHOG_CLIENT_KEY"
         },
         {

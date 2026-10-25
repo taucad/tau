@@ -23,6 +23,7 @@ describe('editor device defaults', () => {
       'jobs',
       'kernel',
       'console',
+      'terminal',
     ]);
     expect(defaultPanelState.desktopLayout).toMatchObject({
       chatOpen: true,

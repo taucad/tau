@@ -54,6 +54,8 @@ import { createResidentPlacement } from '#workers/agent-host-placement.js';
 import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { createIdleRuntimeClient } from '#workers/idle-runtime-client.js';
+import { forwardOperations } from '#telemetry/worker-forwarding.js';
+import type { ForwardEntry, WorkerTelemetry } from '#telemetry/worker-forwarding.js';
 import type { IdleRuntimeClient } from '#workers/idle-runtime-client.js';
 import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 
@@ -83,6 +85,8 @@ export type ResidentWorkerContext = Readonly<{
   /** This tab's id among the origin's tabs (RH-R5). */
   tabId: string;
   requestRebridge?: (projectId: string, hostId: string) => void;
+  /** Runtime telemetry: one finished entry back to the page reporter (FR-14), fire-and-forget. */
+  forwardTelemetry?: ForwardEntry;
   visibility: NonNullable<BrowserChatStoreOptions['visibility']>;
   /** M1's timers; the worker leaves the defaults, and the browser tier shortens idle eviction (RH-A15). */
   delays?: AgentLauncherOptions['delays'];
@@ -554,14 +558,25 @@ const composeProjectHost = async (
   );
   /* One runtime client per project host, shared by every turn and chat of the project (RH-A6). */
   // Agent tools select offered IDs at runtime; this host deliberately constructs the public dynamic client.
-  const createAgentRuntime = (): AppRuntimeClient =>
-    createRuntimeClient<AnyRuntimeDefinition>(
+  /* Runtime telemetry (FR-14): only when the page handed a context, i.e. only where the page would record. */
+  const telemetry: WorkerTelemetry | undefined =
+    provide.telemetry === undefined || worker.forwardTelemetry === undefined
+      ? undefined
+      : { context: provide.telemetry, forward: worker.forwardTelemetry };
+  const createAgentRuntime = (): AppRuntimeClient => {
+    const created = createRuntimeClient<AnyRuntimeDefinition>(
       createDefaultKernelOptions({
         fileSystem: fromFsLike(createRuntimeFsLike(agentView)),
         runtimeConfig,
         compute,
       }),
     );
+    /* The idle client re-creates the runtime, so each new client is attached here; it dies with its client. */
+    if (telemetry !== undefined) {
+      forwardOperations(created, 'agent', telemetry);
+    }
+    return created;
+  };
   /* A machine connection is a stateful session, so a machines-enabled host keeps its runtime resident. Otherwise
    * the runtime, a second full copy of the editor's kernels, lives only while agent tools use it (B-07). */
   const residentRuntime = provide.machinesEnabled === true ? createAgentRuntime() : undefined;
@@ -587,6 +602,7 @@ const composeProjectHost = async (
     runtimeConfig,
     // No outer RPC budget bounds a browser-placed test_model call; this host budget is the bound.
     runnerTimeout: geoSpecDefaultRunBudget,
+    ...(telemetry === undefined ? {} : { telemetry }),
     ...(revisions === undefined
       ? {}
       : {

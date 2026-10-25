@@ -23,6 +23,24 @@ export const readBuildId = (): number => {
   return Number.isFinite(published) ? published : 0;
 };
 
+/** The release a build without one reports: a valid label the API records as `_OTHER`. */
+export const unknownBuildRelease = '0000000';
+const releaseLabel = /^[\da-f]{7,12}$|^\d+\.\d+\.\d+$/u;
+
+/**
+ * This build's release label for runtime telemetry: the desktop app's semver (compiled in), else the web build's short
+ * commit the server published as `window.ENV.TAU_RELEASE`, else {@link unknownBuildRelease}.
+ *
+ * @returns The release label.
+ */
+export const readBuildRelease = (): string => {
+  const compiled = typeof tauBuildRelease === 'string' ? tauBuildRelease : '';
+  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- globalThis.window is absent in a worker.
+  const published = compiled === '' && globalThis.window ? globalThis.window.ENV?.TAU_RELEASE : undefined;
+  const release = compiled === '' ? published : compiled;
+  return typeof release === 'string' && releaseLabel.test(release) ? release : unknownBuildRelease;
+};
+
 /**
  * This bundle's build identity as a string, for equality checks and records.
  *

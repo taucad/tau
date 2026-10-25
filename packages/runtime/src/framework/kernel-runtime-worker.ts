@@ -920,15 +920,13 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     }
     const { definition, ctx } = kernel;
     /* The native child sample hook belongs to the native kernels; it is read where a definition declares it. */
-    const childHook: unknown = (definition as { readonly observedChildResidentBytes?: unknown })
-      .observedChildResidentBytes;
     const sampleChild =
-      typeof childHook === 'function'
-        ? async (): Promise<number | undefined> => {
-            const bytes: unknown = await (childHook as (context: unknown) => unknown).call(definition, ctx);
+      definition.observedChildResidentBytes === undefined
+        ? undefined
+        : async (): Promise<number | undefined> => {
+            const bytes: unknown = await definition.observedChildResidentBytes?.(ctx);
             return typeof bytes === 'number' ? bytes : undefined;
-          }
-        : undefined;
+          };
     return {
       ...(definition.observedHeapBytes === undefined
         ? {}

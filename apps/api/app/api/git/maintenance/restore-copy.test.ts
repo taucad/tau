@@ -434,6 +434,50 @@ describe('restore v2 from the second copy (DR1)', () => {
     expect(keys).toStrictEqual([]);
   }, 120_000);
 
+  it('should record the restored generation in project_git, so the copy picks up a dormant repository', async () => {
+    const locator = await newRepository();
+    const manifest = await fakePush(locator);
+    await copy(locator);
+    await losePrimary(locator);
+    // Dormant past the active reconcile's 48 h window.
+    const dormant = new Date(Date.now() - 72 * 60 * 60 * 1000);
+    await database().update(projectGit).set({ updatedAt: dormant }).where(eq(projectGit.projectId, locator.projectId));
+    const rowOf = async () => {
+      const [row] = await database()
+        .select({
+          generation: projectGit.generation,
+          copiedGeneration: projectGit.copiedGeneration,
+          copyPendingSince: projectGit.copyPendingSince,
+          updatedAt: projectGit.updatedAt,
+        })
+        .from(projectGit)
+        .where(eq(projectGit.projectId, locator.projectId));
+      return row!;
+    };
+    const before = await rowOf();
+    expect(before).toMatchObject({
+      generation: manifest.generation,
+      copiedGeneration: manifest.generation,
+      copyPendingSince: null,
+      updatedAt: dormant,
+    });
+
+    await restore(locator, { dryRun: true });
+    expect(await rowOf()).toStrictEqual(before);
+
+    const result = await restore(locator);
+
+    const after = await rowOf();
+    expect(after.generation).toBe(manifest.generation + 1);
+    expect(result.manifest?.generation).toBe(after.generation);
+    expect(after.copiedGeneration).toBe(manifest.generation);
+    expect(after.copyPendingSince).toBeInstanceOf(Date);
+    expect(after.updatedAt.getTime()).toBeGreaterThan(dormant.getTime());
+    // The copier now sees the restored generation, and copies it.
+    await copy(locator);
+    expect(await rowOf()).toMatchObject({ copiedGeneration: after.generation, copyPendingSince: null });
+  }, 120_000);
+
   it('should roll a live primary forward under new keys, deleting nothing, and fsck clean', async () => {
     const locator = await newRepository();
     const client = newClient(scratch);

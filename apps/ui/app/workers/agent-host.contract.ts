@@ -19,6 +19,7 @@ import type { AgentWireHello } from '@taucad/agent-host/wire';
 import type { AgentLauncher } from '@taucad/agent-host/launcher';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
+import type { PageTelemetryContext } from '#telemetry/page-telemetry.js';
 import { z } from 'zod';
 import { skillMetadataSchema } from '@taucad/chat/schemas';
 import { readBuildIdentity } from '#lib/build-identity.js';
@@ -126,6 +127,11 @@ export type AgentHostProjectProvide = {
   readonly testingEnabled?: boolean | undefined;
   /** The signed-in account the session cookie funds, which the host checks an attempt against (W11 GI-Q6). */
   readonly principal?: string | undefined;
+  /**
+   * Runtime telemetry (FR-14, `host-agent.ts`): the page's context, present only when the page would record. The host
+   * maps its runtime client's and the GeoSpec runner's attempts with it and sends each entry back on `telemetry`.
+   */
+  readonly telemetry?: PageTelemetryContext | undefined;
 };
 
 /**
@@ -249,6 +255,8 @@ export type AgentHostWorkerProtocol = {
   };
   readonly notifies: {
     readonly rebridgeRequested: { readonly args: { readonly projectId: string; readonly hostId: string } };
+    /** One finished runtime telemetry entry for the page reporter, fire-and-forget; the page validates it. */
+    readonly telemetry: { readonly args: { readonly entry: unknown } };
   };
   readonly listens: Record<never, never>;
 };
@@ -396,6 +404,15 @@ const provideSchema = z.strictObject({
   }),
   testingEnabled: z.boolean().optional(),
   principal: nonEmptyString.optional(),
+  telemetry: z
+    .strictObject({
+      route: z.enum(['browser', 'desktop']),
+      release: z.string(),
+      device: z.string().optional(),
+      platform: z.string().optional(),
+      os: z.string().optional(),
+    })
+    .optional(),
 });
 const durabilitySchema = z.enum(['exclusive-append', 'stream-append', 'transactional-rewrite', 'ephemeral']);
 
@@ -437,7 +454,10 @@ export const agentHostWorkerProtocolSchemas = {
     },
     visibility: { args: z.strictObject({ visible: z.boolean() }), result: z.unknown() },
   },
-  notifies: { rebridgeRequested: z.strictObject({ projectId: nonEmptyString, hostId: nonEmptyString }) },
+  notifies: {
+    rebridgeRequested: z.strictObject({ projectId: nonEmptyString, hostId: nonEmptyString }),
+    telemetry: z.strictObject({ entry: z.unknown() }),
+  },
   listens: {},
 } satisfies WireProtocolSchemas<AgentHostWorkerProtocol>;
 

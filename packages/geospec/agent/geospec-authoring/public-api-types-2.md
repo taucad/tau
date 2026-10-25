@@ -1,6 +1,6 @@
 # geospec — Types (2)
 
-75 top-level symbols. Signatures are verbatim typescript.
+72 top-level symbols. Signatures are verbatim typescript.
 
 // Per-module collector configuration
 GeoSpecCollectorOptions: {
@@ -234,6 +234,11 @@ RunGeoSpecModuleOptions: {
     }>;
     /** Additional in-memory modules made available to the VM. */
     builtinModules?: Record<string, BuiltinModule>;
+    /**
+     * Module VM factory; defaults to {@link import('../vm/plain-module-vm.js').createPlainModuleVm}, which resolves
+     * project files and builtins only. Inject one to resolve npm packages; Tau injects `createEsbuildModuleVm`.
+     */
+    createModuleVm?: CreateModuleVm;
     /** Successful bundle cache owned by a serial runner worker. @internal */
     bundleCache?: GeoSpecModuleBundleCache;
     /**
@@ -271,11 +276,219 @@ RunGeoSpecModuleOptions: {
   // Additional in-memory modules made available to the VM
   builtinModules?: Record<string, BuiltinModule>
 
+  // Module VM factory
+  createModuleVm?: CreateModuleVm
+
   // Successful bundle cache owned by a serial runner worker
   bundleCache?: GeoSpecModuleBundleCache
 
   // List-only collection pass (R3 shard splitting)
   collectOnly?: boolean
+
+// A pre-bundled module served from memory under its import specifier
+BuiltinModule: {
+    /** ESM source of the module. */
+    code: string;
+    /** Version reported for the module. */
+    version: string;
+    /** Script global that bundles bind to this module; bound only when `registryExpression` is set. */
+    globalName?: string;
+    /** The npm package this module stands for, as a project declares it in `package.json`. */
+    package?: {
+        readonly name: string;
+        readonly spec: string;
+    };
+    /** JavaScript expression evaluating to the module's exports, which a bundle binds to `globalName`. */
+    registryExpression?: string;
+}
+
+  // ESM source of the module
+  code: string
+
+  // Version reported for the module
+  version: string
+
+  // Script global that bundles bind to this module
+  globalName?: string
+
+  // The npm package this module stands for, as a project declares it in `package.json`
+  package?: {
+          readonly name: string;
+          readonly spec: string;
+      }
+
+  // JavaScript expression evaluating to the module's exports, which a bundle binds to `globalName`
+  registryExpression?: string
+
+// Outcome of bundling an entry point
+BundleResult: {
+    code: string;
+    sourceMap?: string;
+    issues: VmIssue[];
+    success: boolean;
+    dependencies: string[];
+    unresolvedPaths: string[];
+}
+
+  code: string
+
+  sourceMap?: string
+
+  issues: VmIssue[]
+
+  success: boolean
+
+  dependencies: string[]
+
+  unresolvedPaths: string[]
+
+// Create a module VM
+CreateModuleVm: (options: ModuleVmOptions) => Promise<ModuleVm>
+
+// A module a Node pool worker imports by URL for its module VM
+GeoSpecModuleVmModule: {
+    default: CreateModuleVm;
+}
+
+  default: CreateModuleVm
+
+// The ESM module VM GeoSpec bundles and executes specs and configs with
+ModuleVm: {
+    /** Detect bare specifiers and project dependencies without fetching anything. */
+    detectImports(entryPath: string, signal?: AbortSignal): Promise<{
+        detectedModules: string[];
+        dependencies: string[];
+    }>;
+    /** Bundle an ESM entry point and its transitive dependency graph. */
+    bundle(entryPath: string, signal?: AbortSignal): Promise<BundleResult>;
+    /** Execute bundled ESM code in the current JavaScript environment. */
+    execute<T = unknown>(code: string, signal?: AbortSignal): Promise<VmExecuteResult<T>>;
+    /** Register an in-memory builtin module. */
+    registerModule(name: string, module: BuiltinModule): void;
+    /** Release VM-owned resources. */
+    dispose(): void;
+}
+
+  // Detect bare specifiers and project dependencies without fetching anything
+  // ModuleVm.detectImports (method)
+  detectImports(entryPath: string, signal?: AbortSignal): Promise<{
+          detectedModules: string[];
+          dependencies: string[];
+      }>;
+
+  // Bundle an ESM entry point and its transitive dependency graph
+  // ModuleVm.bundle (method)
+  bundle(entryPath: string, signal?: AbortSignal): Promise<BundleResult>;
+
+  // Execute bundled ESM code in the current JavaScript environment
+  // ModuleVm.execute (method)
+  execute<T = unknown>(code: string, signal?: AbortSignal): Promise<VmExecuteResult<T>>;
+
+  // Register an in-memory builtin module
+  // ModuleVm.registerModule (method)
+  registerModule(name: string, module: BuiltinModule): void;
+
+  // Release VM-owned resources
+  // ModuleVm.dispose (method)
+  dispose(): void;
+
+// Options GeoSpec passes when it creates a module VM
+ModuleVmOptions: {
+    /** Filesystem the VM reads project files from. */
+    filesystem: VmFileSystem;
+}
+
+  // Filesystem the VM reads project files from
+  filesystem: VmFileSystem
+
+// Result of executing bundled ESM code
+VmExecuteResult: {
+    success: true;
+    value: T;
+    entryUrl?: string;
+} | {
+    success: false;
+    issues: VmIssue[];
+}
+
+  success: true
+
+// Minimal filesystem contract required by the VM bundler
+VmFileSystem: {
+    /** Return true when a path exists. */
+    exists(path: string): Promise<boolean>;
+    /** Read a file as binary bytes. */
+    readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
+    /** Read a file as UTF-8 text. */
+    readFile(path: string, encoding: 'utf8'): Promise<string>;
+    /** Write a UTF-8 text file. */
+    writeFile(path: string, content: string): Promise<void>;
+    /** Ensure a directory exists, creating parents as needed. */
+    ensureDir(path: string): Promise<void>;
+}
+
+  // Return true when a path exists
+  // VmFileSystem.exists (method)
+  exists(path: string): Promise<boolean>;
+
+  // Read a file as binary bytes
+  // VmFileSystem.readFile (method)
+  readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
+  readFile(path: string, encoding: 'utf8'): Promise<string>;
+
+  // Write a UTF-8 text file
+  // VmFileSystem.writeFile (method)
+  writeFile(path: string, content: string): Promise<void>;
+
+  // Ensure a directory exists, creating parents as needed
+  // VmFileSystem.ensureDir (method)
+  ensureDir(path: string): Promise<void>;
+
+// A diagnostic emitted while bundling or executing a VM module
+VmIssue: {
+    /** Human-readable diagnostic message. */
+    message: string;
+    /** Stable machine-readable code. */
+    code: string;
+    /** Diagnostic category. */
+    type: string;
+    /** Diagnostic severity. */
+    severity: 'error' | 'warning' | 'info';
+    /** Optional source location. */
+    location?: {
+        fileName?: string;
+        startLineNumber?: number;
+        startColumn?: number;
+        endLineNumber?: number;
+        endColumn?: number;
+    };
+    /** Optional original error object or metadata. */
+    details?: unknown;
+}
+
+  // Human-readable diagnostic message
+  message: string
+
+  // Stable machine-readable code
+  code: string
+
+  // Diagnostic category
+  type: string
+
+  // Diagnostic severity
+  severity: 'error' | 'warning' | 'info'
+
+  // Optional source location
+  location?: {
+          fileName?: string;
+          startLineNumber?: number;
+          startColumn?: number;
+          endLineNumber?: number;
+          endColumn?: number;
+      }
+
+  // Optional original error object or metadata
+  details?: unknown
 
 // Native assertion options whose engine can also admit and release subjects
 GeoSpecNativeRunnerAssertions: Omit<GeoSpecAssertionClientOptions, 'engine'> & {
@@ -311,6 +524,9 @@ GeoSpecNativeRunnerOptions: Omit<GeoSpecRunnerOptions, 'nativeAssertions' | 'nat
 
   // Additional in-memory modules made available to the VM
   builtinModules?: RunGeoSpecModuleOptions['builtinModules']
+
+  // Module VM factory for every file
+  createModuleVm?: RunGeoSpecModuleOptions['createModuleVm']
 
   // Actual protocol-3 engine used by authored assertions
   readonly nativeAssertions: GeoSpecNativeRunnerAssertions
@@ -512,6 +728,11 @@ GeoSpecNodePoolOptions: {
      * `GeoSpecExporterModule`). A host that composes its own exporters, such as `tau test`, passes them here.
      */
     exporterModules?: readonly string[];
+    /**
+     * URL of a module each worker imports whose default export creates its module VM (see `GeoSpecModuleVmModule`);
+     * absent for GeoSpec's plain VM. A host that resolves npm packages in specs, such as `tau test`, passes it here.
+     */
+    moduleVmModule?: string;
     /** Number of outer worker isolates; defaults to one. */
     workers?: number;
     /**
@@ -538,6 +759,9 @@ GeoSpecNodePoolOptions: {
 
   // URLs of modules each worker imports whose default export creates exporters that precede the config's (see `GeoSpecExporterModule`)
   exporterModules?: readonly string[]
+
+  // URL of a module each worker imports whose default export creates its module VM (see `GeoSpecModuleVmModule`)
+  moduleVmModule?: string
 
   // Number of outer worker isolates
   workers?: number
@@ -794,6 +1018,8 @@ GeoSpecRunnerOptions: {
     nativeModelLoader?: ManagedGeoSpecNativeModelLoader;
     /** Additional in-memory modules made available to the VM. */
     builtinModules?: RunGeoSpecModuleOptions['builtinModules'];
+    /** Module VM factory for every file; defaults to GeoSpec's plain VM (see `RunGeoSpecModuleOptions`). */
+    createModuleVm?: RunGeoSpecModuleOptions['createModuleVm'];
 }
 
   // Filesystem containing the project and test modules
@@ -807,6 +1033,9 @@ GeoSpecRunnerOptions: {
 
   // Additional in-memory modules made available to the VM
   builtinModules?: RunGeoSpecModuleOptions['builtinModules']
+
+  // Module VM factory for every file
+  createModuleVm?: RunGeoSpecModuleOptions['createModuleVm']
 
 // Aggregate result returned by GeoSpec worker-style runners
 GeoSpecRunnerResult: {
@@ -984,6 +1213,8 @@ GeoSpecPoolWorkerHostOptions: {
     nativeModelLoader: ManagedGeoSpecNativeModelLoader;
     /** Additional in-memory modules made available to the VM. */
     builtinModules?: GeoSpecRunnerOptions['builtinModules'];
+    /** Module VM factory for every shard; defaults to GeoSpec's plain VM. */
+    createModuleVm?: GeoSpecRunnerOptions['createModuleVm'];
     /** Post a message to the pool host. */
     postMessage: (message: GeoSpecPoolWorkerMessage) => void;
     /** Subscribe to pool-host messages. */
@@ -1005,6 +1236,9 @@ GeoSpecPoolWorkerHostOptions: {
 
   // Additional in-memory modules made available to the VM
   builtinModules?: GeoSpecRunnerOptions['builtinModules']
+
+  // Module VM factory for every shard
+  createModuleVm?: GeoSpecRunnerOptions['createModuleVm']
 
   // Post a message to the pool host
   postMessage: (message: GeoSpecPoolWorkerMessage) => void
@@ -1313,248 +1547,3 @@ GeoSpecPmiLimits: {
   readonly upperMillimetres: string
 
   readonly basis: 'authored-limits' | 'nominal-plus-minus'
-
-// Source record preserving semantic/presentation separation and ordered roles
-GeoSpecPmiRecord: {
-    readonly sourceId: number;
-    readonly family: 'dimension' | 'datum' | 'tolerance' | 'presentation';
-    readonly channel: 'semantic' | 'presentation';
-    readonly kind: string;
-    readonly name: GeoSpecPmiField<string>;
-    readonly first: readonly GeoSpecPmiShapeReference[];
-    readonly second: readonly GeoSpecPmiShapeReference[];
-    readonly numbers: GeoSpecPmiField<readonly GeoSpecPmiNumber[]>;
-    readonly limits: GeoSpecPmiField<GeoSpecPmiLimits>;
-    readonly interpretation: GeoSpecPmiField<string>;
-    readonly raw: readonly GeoSpecPmiRawEntity[];
-}
-
-  readonly sourceId: number
-
-  readonly family: 'dimension' | 'datum' | 'tolerance' | 'presentation'
-
-  readonly channel: 'semantic' | 'presentation'
-
-  readonly kind: string
-
-  readonly name: GeoSpecPmiField<string>
-
-  readonly first: readonly GeoSpecPmiShapeReference[]
-
-  readonly second: readonly GeoSpecPmiShapeReference[]
-
-  readonly numbers: GeoSpecPmiField<readonly GeoSpecPmiNumber[]>
-
-  readonly limits: GeoSpecPmiField<GeoSpecPmiLimits>
-
-  readonly interpretation: GeoSpecPmiField<string>
-
-  readonly raw: readonly GeoSpecPmiRawEntity[]
-
-// Positive-only inventory value inside the ordinary canonical query report
-GeoSpecPmiInventory: {
-    readonly contract: 'geospec.pmi.inventory/v1';
-    readonly status: 'semantic' | 'graphical-only' | 'empty';
-    readonly fileSchema: string;
-    readonly editionValidation: 'not-validated';
-    readonly records: readonly GeoSpecPmiRecord[];
-}
-
-  readonly contract: 'geospec.pmi.inventory/v1'
-
-  readonly status: 'semantic' | 'graphical-only' | 'empty'
-
-  readonly fileSchema: string
-
-  readonly editionValidation: 'not-validated'
-
-  readonly records: readonly GeoSpecPmiRecord[]
-
-// Strict inventory output limits
-GeoSpecPmiQueryPayload: {
-    readonly maxRecords?: number;
-    readonly maxOutputBytes?: number;
-}
-
-  readonly maxRecords?: number
-
-  readonly maxOutputBytes?: number
-
-// Complete inventory value
-GeoSpecPmiQueryValue: {
-    readonly inventory: GeoSpecPmiInventory;
-    readonly subjectHash: string;
-    readonly provenance: Readonly<Record<string, unknown>>;
-}
-
-  readonly inventory: GeoSpecPmiInventory
-
-  readonly subjectHash: string
-
-  readonly provenance: Readonly<Record<string, unknown>>
-
-// Full native assertion result with the exact core-owned bytes retained
-GeoSpecCanonicalClaimReport: {
-    readonly canonicalClaim: Uint8Array<ArrayBuffer>;
-    readonly canonicalPlan: Uint8Array<ArrayBuffer>;
-    readonly canonicalResult: Uint8Array<ArrayBuffer>;
-    readonly claim: Readonly<Record<string, JSONValue>>;
-    readonly claimId: string;
-    /** Engine diagnostics; a `MATCHER_TIMEOUT` row also carries `details.limit`, `details.used` and `details.maximumLimit`. */
-    readonly diagnostics: readonly JSONValue[];
-    readonly evidence?: JSONValue;
-    readonly polarity: GeoSpecClaimPolarity;
-    readonly result: Readonly<Record<string, JSONValue>>;
-    readonly status: GeoSpecCanonicalClaimStatus;
-}
-
-  readonly canonicalClaim: Uint8Array<ArrayBuffer>
-
-  readonly canonicalPlan: Uint8Array<ArrayBuffer>
-
-  readonly canonicalResult: Uint8Array<ArrayBuffer>
-
-  readonly claim: Readonly<Record<string, JSONValue>>
-
-  readonly claimId: string
-
-  // Engine diagnostics
-  readonly diagnostics: readonly JSONValue[]
-
-  readonly evidence?: JSONValue
-
-  readonly polarity: GeoSpecClaimPolarity
-
-  readonly result: Readonly<Record<string, JSONValue>>
-
-  readonly status: GeoSpecCanonicalClaimStatus
-
-// Exact core bytes of one claim evaluated in one engine call
-GeoSpecNativeClaimEvaluation: {
-    readonly canonicalClaim: Uint8Array<ArrayBuffer>;
-    readonly canonicalPlan: Uint8Array<ArrayBuffer>;
-    readonly canonicalResult: Uint8Array<ArrayBuffer>;
-}
-
-  readonly canonicalClaim: Uint8Array<ArrayBuffer>
-
-  readonly canonicalPlan: Uint8Array<ArrayBuffer>
-
-  readonly canonicalResult: Uint8Array<ArrayBuffer>
-
-// Byte-only engine surface consumed by the runner-independent assertion client
-GeoSpecNativeEngine: {
-    evaluateClaim(request: Uint8Array<ArrayBuffer>): GeoSpecNativeClaimEvaluation;
-    processRequest(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
-}
-
-  // GeoSpecNativeEngine.evaluateClaim (method)
-  evaluateClaim(request: Uint8Array<ArrayBuffer>): GeoSpecNativeClaimEvaluation;
-
-  // GeoSpecNativeEngine.processRequest (method)
-  processRequest(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
-
-// Success-evidence profile a product selects for its plans (PERF-OUTPUT-01)
-GeoSpecNativeEvidenceProfile: 'bounded' | 'complete'
-
-// Content-addressed subject accepted by a protocol-3 assertion plan
-GeoSpecNativeSubject: {
-    readonly contentHash?: string;
-    readonly subjectHash?: string;
-}
-
-  readonly contentHash?: string
-
-  readonly subjectHash?: string
-
-// A canonical fixed-contract matcher
-GeoSpecFixedMatcherDescriptor: {
-    readonly contract: 'geospec.plate-two-windows/v1' | 'geospec.pmi.parallel-plane-distance/v1';
-    readonly expected: 'true';
-    readonly mode: 'sync';
-}
-
-  readonly contract: 'geospec.plate-two-windows/v1' | 'geospec.pmi.parallel-plane-distance/v1'
-
-  readonly expected: 'true'
-
-  readonly mode: 'sync'
-
-// The platform the CLI runs against
-GeoSpecCliHost: {
-    /** Absolute project root for a relative `projectPath`. */
-    cwd(): string;
-    write(line: string): void;
-    /** Recursive discovery filesystem. */
-    discoveryFileSystem(projectPath: string): Parameters<typeof discoverGeoSpecFiles>[0]['filesystem'];
-    /**
-     * Import the project's `geospec.config.*`, or the explicit one, for its data fields.
-     * @throws Error when the config is ambiguous, invalid or fails to import.
-     */
-    loadConfig(options: {
-        projectPath: string;
-        configPath: string | undefined;
-    }): Promise<{
-        readonly configPath?: string;
-        readonly options: GeoSpecConfigData;
-    }>;
-    /** Build the runner the selected files execute on; its workers import the same config for its exporters. */
-    createRunner(options: {
-        projectPath: string;
-        configPath: string | undefined;
-        workers: number | undefined;
-        shardTimeout: number | undefined;
-        /** In-memory spec sources keyed by project-rooted path, served in place of the disk (`geospec check`). */
-        sources?: Readonly<Record<string, string>>;
-    }): GeoSpecRunner;
-}
-
-  // Absolute project root for a relative `projectPath`
-  // GeoSpecCliHost.cwd (method)
-  cwd(): string;
-
-  // GeoSpecCliHost.write (method)
-  write(line: string): void;
-
-  // Recursive discovery filesystem
-  // GeoSpecCliHost.discoveryFileSystem (method)
-  discoveryFileSystem(projectPath: string): Parameters<typeof discoverGeoSpecFiles>[0]['filesystem'];
-
-  // Import the project's `geospec.config.*`, or the explicit one, for its data fields
-  // Throws: Error when the config is ambiguous, invalid or fails to import.
-  // GeoSpecCliHost.loadConfig (method)
-  loadConfig(options: {
-          projectPath: string;
-          configPath: string | undefined;
-      }): Promise<{
-          readonly configPath?: string;
-          readonly options: GeoSpecConfigData;
-      }>;
-
-  // Build the runner the selected files execute on
-  // GeoSpecCliHost.createRunner (method)
-  createRunner(options: {
-          projectPath: string;
-          configPath: string | undefined;
-          workers: number | undefined;
-          shardTimeout: number | undefined;
-          /** In-memory spec sources keyed by project-rooted path, served in place of the disk (`geospec check`). */
-          sources?: Readonly<Record<string, string>>;
-      }): GeoSpecRunner;
-
-// Options for {@link createNodeGeoSpecCliHost}
-NodeGeoSpecCliHostOptions: {
-    /** Report sink used by embedding hosts and tests; defaults to stdout. */
-    readonly reportStream?: (text: string) => void;
-    /**
-     * URLs of modules each pool worker imports for exporters that precede the config's, so a host such as `tau test`
-     * can run a project with no `geospec.config.*` (see `GeoSpecExporterModule` in `geospec/runner/node`).
-     */
-    readonly exporterModules?: readonly string[];
-}
-
-  // Report sink used by embedding hosts and tests
-  readonly reportStream?: (text: string) => void
-
-  // URLs of modules each pool worker imports for exporters that precede the config's, so a host such as `tau test` can run a project with no `geospec.config.*` (see `GeoSpecExporterModule` in `geospec/runner/node`)
-  readonly exporterModules?: readonly string[]

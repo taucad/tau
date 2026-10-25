@@ -14,8 +14,13 @@ import { defineConfig } from 'vite';
 import type { Plugin, UserConfig } from 'vite';
 import { tauRuntime } from '@taucad/runtime/vite';
 import { base64Loader } from '@taucad/vite/base64-loader';
-// oxlint-disable-next-line eslint/no-restricted-imports -- Vite configuration lives outside the app alias root.
-import { resolveTauCloudBuildEnabled } from './build-environment.js';
+/* oxlint-disable eslint/no-restricted-imports -- Vite configuration lives outside the app alias root. */
+import {
+  resolveTauBuildRelease,
+  resolveTauCloudBuildEnabled,
+  resolveTauTelemetryHostCloud,
+} from './build-environment.js';
+/* oxlint-enable eslint/no-restricted-imports */
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createGeoSpecMtAssets } from './geospec-mt-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
@@ -401,6 +406,21 @@ export const createUiReactCompilerPlugin = (): Plugin => {
   };
 };
 
+/**
+ * Publish `/tau-release.json` (`{ release }`) beside the client assets, which the API polls to admit this release.
+ *
+ * @param release - The short commit.
+ * @returns The plugin.
+ */
+const createReleaseManifestPlugin = (release: string): Plugin => ({
+  name: 'tau-release-manifest',
+  apply: 'build',
+  applyToEnvironment: (environment) => environment.config.consumer === 'client',
+  generateBundle() {
+    this.emitFile({ type: 'asset', fileName: 'tau-release.json', source: `${JSON.stringify({ release })}\n` });
+  },
+});
+
 export default defineConfig(({ command, mode }) => {
   const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
   const isTest = mode === 'test';
@@ -417,6 +437,13 @@ export default defineConfig(({ command, mode }) => {
    */
   const buildIdDefine = { tauBuildId: JSON.stringify(Date.now()) };
   const isProductionBuild = command === 'build' && !isTest;
+  /*
+   * The release label runtime telemetry stamps (short commit). Server graph only, like `tauBuildId`: the page reads
+   * `window.ENV.TAU_RELEASE`, so client chunk hashes do not change per commit. The same value is published as
+   * `/tau-release.json`, the only place the API learns UI releases from.
+   */
+  const buildRelease = isProductionBuild ? resolveTauBuildRelease(process.env) : undefined;
+  const serverDefine = { ...buildIdDefine, tauBuildRelease: JSON.stringify(buildRelease ?? '') };
   // Netlify's own CI sets NETLIFY=true; `netlify deploy` from GitHub Actions
   // (deploy-ui.yml) builds with NETLIFY_LOCAL=true instead. Both need the SSR function.
   const isNetlify = process.env['NETLIFY'] === 'true' || process.env['NETLIFY_LOCAL'] === 'true';
@@ -430,6 +457,10 @@ export default defineConfig(({ command, mode }) => {
       tauBuildFrontendUrl: JSON.stringify(buildFrontendUrl ?? ''),
       ...(isProductionBuild ? {} : buildIdDefine),
       tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
+      /* Telemetry's own Cloud-host signal, beside the billing gate and never derived from it; tests stub the module. */
+      tauTelemetryHostCloudBuild: JSON.stringify(
+        !isTest && resolveTauTelemetryHostCloud(process.env['TAU_TELEMETRY_HOST']),
+      ),
       tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
       /*
        * Compile-time host seam (charter D2). `desktop/vite.config.ts` sets
@@ -474,6 +505,7 @@ export default defineConfig(({ command, mode }) => {
       createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
       // WASM `fetch` integrity and the asset receipt (charter D26): build only.
       createAssetIntegrity({ receipt: true }),
+      ...(buildRelease === undefined ? [] : [createReleaseManifestPlugin(buildRelease)]),
 
       /*
        * @taucad/runtime contract: COOP/COEP for SharedArrayBuffer, keep .wasm
@@ -517,7 +549,7 @@ export default defineConfig(({ command, mode }) => {
       ],
     },
     // Merged over the shared `define` for the server graph only (see `buildIdDefine`).
-    ...(isProductionBuild ? { environments: { ssr: { define: buildIdDefine } } } : {}),
+    ...(isProductionBuild ? { environments: { ssr: { define: serverDefine } } } : {}),
     resolve: {
       alias: [
         ...uiResolveAlias,

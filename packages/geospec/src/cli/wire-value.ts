@@ -1,6 +1,6 @@
 /** Lossless JSON conversion of engine values for the CLI report. @module */
 
-import type { JSONValue } from '@taucad/runtime/types';
+import type { JSONValue } from '#support/types.js';
 
 type NumberTypedArray =
   | Int8Array<ArrayBuffer>

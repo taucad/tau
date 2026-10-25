@@ -1,5 +1,5 @@
 import type { GeoSpecAssertionClientOptions, GeoSpecCanonicalClaimReport } from '#assertion-client/index.js';
-import type { BuiltinModule, BundleResult, VmFileSystem, VmIssue } from '@taucad/esbuild/vm';
+import type { BuiltinModule, BundleResult, CreateModuleVm, VmFileSystem, VmIssue } from '#vm/types.js';
 import type { GeometryDiagnostic, Vec3 } from '#mesh/types.js';
 import type { GeometrySelector } from '#selector/types.js';
 import type { GeoSpecNativeModelLoader, GeoSpecModelLoadEvidence } from '#model/native-model-loader.js';
@@ -798,6 +798,11 @@ export type RunGeoSpecModuleOptions = {
   ) => Promise<GeoSpecNativeSubject & { readonly load?: GeoSpecModelLoadEvidence }>;
   /** Additional in-memory modules made available to the VM. */
   builtinModules?: Record<string, BuiltinModule>;
+  /**
+   * Module VM factory; defaults to {@link import('../vm/plain-module-vm.js').createPlainModuleVm}, which resolves
+   * project files and builtins only. Inject one to resolve npm packages; Tau injects `createEsbuildModuleVm`.
+   */
+  createModuleVm?: CreateModuleVm;
   /** Successful bundle cache owned by a serial runner worker. @internal */
   bundleCache?: GeoSpecModuleBundleCache;
   /**

@@ -59,6 +59,15 @@ export const storagePath = (project: string, operation: StorageOperation): strin
 /** Where tau-storage answers the dialect of its git (DB1), with no grant. */
 export const dialectPath = '/v1/dialect';
 
+/** Where tau-storage lists the deployed members tau-api ranks over (DC2), with no grant: ids are not secrets. */
+export const membersPath = '/v1/members';
+
+/** The response header naming the tau-storage Machine that answered (DC2): how tau-api sees a spill or a cold member. */
+export const memberHeader = 'tau-storage-member';
+
+/** The Fly Proxy request header that prefers one Machine and falls back to any other when it is unavailable. */
+export const preferInstanceHeader = 'fly-prefer-instance-id';
+
 const identifier = z.string().min(1).max(256);
 const bytes = z.number().int().nonnegative();
 

@@ -213,6 +213,16 @@ export const terminationCodes = [
   'TIMEOUT_RECOVERY',
 ] as const;
 
+/**
+ * Run-level GeoSpec `verify` codes (FR-16, AR-W15-11): some selected tests failed, discovery found no test file (not a
+ * failed test), or the project's `geospec.config.*` was not applied (nothing ran). @public
+ */
+export const geoSpecVerifyCodes = [
+  'GEOSPEC_CONFIG_NOT_APPLIED',
+  'GEOSPEC_NO_TEST_FILES',
+  'GEOSPEC_TESTS_FAILED',
+] as const;
+
 /** Every code `error.type` records as itself. @public */
 export const errorTypes = [
   ...kernelIssueCodes,
@@ -222,6 +232,7 @@ export const errorTypes = [
   ...admissionCodes,
   ...jobCodes,
   ...machineFailureCodes,
+  ...geoSpecVerifyCodes,
 ] as const;
 /** One recorded failure code. @public */
 export type ErrorType = (typeof errorTypes)[number];
@@ -328,6 +339,9 @@ export const codeClassOf: Readonly<Record<ErrorType, CodeClass>> = {
   'missing-system-library': 'environment',
   'offline-miss': 'environment',
   'unsupported-target': 'policy',
+  GEOSPEC_CONFIG_NOT_APPLIED: 'input',
+  GEOSPEC_NO_TEST_FILES: 'input',
+  GEOSPEC_TESTS_FAILED: 'input',
   AUTHORITY_MISMATCH: 'policy',
   INVALID_SESSION: 'policy',
   ROUTE_DENIED: 'policy',

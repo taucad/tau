@@ -15,6 +15,7 @@ import {
   Rotate3d,
   Share2,
   SlidersHorizontal,
+  SquareTerminal,
   Terminal,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
@@ -47,6 +48,7 @@ export const chatTabs = [
   { id: 'share', label: paneTitle('share'), icon: <Share2 /> },
   { id: 'kernel', label: paneTitle('kernel'), icon: <Activity /> },
   { id: 'console', label: paneTitle('console'), icon: <Terminal /> },
+  { id: 'terminal', label: paneTitle('terminal'), icon: <SquareTerminal /> },
 ] as const satisfies Array<{
   id: MobilePanelId;
   label: string;
@@ -66,7 +68,7 @@ export const secondarySurfaceGroups: readonly SurfaceGroup[] = [
   { label: 'Design', surfaces: ['model-tree', 'kinematics', 'print'] },
   { label: 'Activity', surfaces: ['browser', 'revisions', 'agents', 'jobs'] },
   { label: 'Project', surfaces: ['files', 'editor', 'converter', 'share', 'details'] },
-  { label: 'Diagnostics', surfaces: ['kernel', 'console'] },
+  { label: 'Diagnostics', surfaces: ['kernel', 'console', 'terminal'] },
 ];
 
 /** Every surface All can list, whatever the flags. */

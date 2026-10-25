@@ -31,6 +31,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { useCameraRig, useGraphics } from '#hooks/use-graphics.jsx';
 import { useViewerEnvironment, useViewerFeature } from '#environment/viewer-environment.jsx';
 import { resolveViewerPixelRatio } from '#graphics/three/utils/device-tier.js';
+import { viewerContextLost, viewerRendererCreated } from '#lib/viewer-events.js';
 
 /**
  * Props for {@link ThreeCanvasInstance}: the Three.js context properties plus a retry callback for context loss.
@@ -306,6 +307,7 @@ export function ThreeCanvasInstance({
             return;
           }
           previousOnDeviceLost.call(webGpuRenderer, info);
+          viewerContextLost('webgpu');
           setIsContextLost(true);
         };
       } else {
@@ -314,14 +316,14 @@ export function ThreeCanvasInstance({
             return;
           }
           event.preventDefault();
+          viewerContextLost('webgl');
           setIsContextLost(true);
         });
       }
 
-      setInitializedRenderer({
-        factory: glProperty,
-        backend: renderer.coordinateSystem === WebGPUCoordinateSystem ? 'webgpu' : 'webgl',
-      });
+      const backend = renderer.coordinateSystem === WebGPUCoordinateSystem ? 'webgpu' : 'webgl';
+      viewerRendererCreated(backend);
+      setInitializedRenderer({ factory: glProperty, backend });
     },
     [glProperty],
   );

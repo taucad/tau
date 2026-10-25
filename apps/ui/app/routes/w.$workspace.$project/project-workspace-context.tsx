@@ -37,7 +37,8 @@ export type WorkbenchPanelId =
   | 'share'
   | 'details'
   | 'kernel'
-  | 'console';
+  | 'console'
+  | 'terminal';
 export type WorkbenchUtilityPanelId = Exclude<WorkbenchPanelId, 'files'>;
 
 type ProjectWorkspaceContextValue = {
@@ -164,6 +165,7 @@ export const mobilePanelByWorkbenchPanel = {
   details: 'details',
   kernel: 'kernel',
   console: 'console',
+  terminal: 'terminal',
 } as const satisfies Record<WorkbenchPanelId, MobilePanelId>;
 
 export function ProjectWorkspaceProvider({

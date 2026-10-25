@@ -62,7 +62,9 @@ are not a canonical Rust run plan.
 
 A host that holds its own exporters reads only the config's data fields, with
 `await readGeoSpecConfig({ filesystem, projectPath })`. It evaluates the file
-through the spec VM, so the browser and Node hosts get the same object.
+through the spec VM, so the browser and Node hosts get the same object. The VM
+is GeoSpec's plain one on Node; a browser host passes its own as
+`createModuleVm`.
 Discovery is the same as `loadGeoSpecConfig`. The result is one of:
 
 - `absent`: the project has no config;

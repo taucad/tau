@@ -47,6 +47,16 @@ export const exporterModuleUrl = (
   return url.href;
 };
 
+/**
+ * The URL of the module VM module each pool worker imports, so specs bundle with Tau's esbuild VM.
+ *
+ * @internal
+ * @returns The module URL.
+ */
+export const moduleVmModuleUrl = (): string =>
+  new URL(import.meta.url.endsWith('.ts') ? '../geospec/module-vm.ts' : './geospec-module-vm.mjs', import.meta.url)
+    .href;
+
 /** One test as the `test` record carries it. */
 export type TestCaseRecord = Readonly<{
   file: string;
@@ -295,6 +305,7 @@ export const testCommand = defineCommand({
     const { createGeoSpecNodePoolRunner } = await import('geospec/runner/node');
     const runner: GeoSpecRunner = createGeoSpecNodePoolRunner({
       projectPath: projectRoot,
+      moduleVmModule: moduleVmModuleUrl(),
       exporterModules: [
         exporterModuleUrl({
           pluginRoot: process.cwd(),

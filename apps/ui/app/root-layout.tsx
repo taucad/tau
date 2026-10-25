@@ -25,6 +25,7 @@ import { HomeFileManagerProvider } from '#hooks/use-file-manager.js';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import { RevisionActorIdentity } from '#components/revision-actor-identity.js';
+import { RuntimeTelemetryIdentity } from '#components/runtime-telemetry-identity.js';
 import { ChatSessionStoreProvider } from '#hooks/chat-session-store-provider.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import { ProjectSessionsHost, projectRoutePath } from '#routes/w.$workspace.$project/project-route.js';
@@ -143,6 +144,7 @@ export function RootLayout({
                   <GlobalChatFlushGuard />
                   <DocumentMemoryKillReporter />
                   <RevisionActorIdentity />
+                  <RuntimeTelemetryIdentity />
                   {children}
                 </SessionsProvider>
               </ChatSessionStoreProvider>

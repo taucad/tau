@@ -162,6 +162,28 @@ describe('createPythonSession', () => {
     expect(session.isHandleGenerationValid(session.generation)).toBe(false);
   });
 
+  it('samples no resident set before its worker starts', async () => {
+    const { options } = fixture();
+    const session = createPythonSession(options);
+    await expect(session.sampleResident?.()).resolves.toBeUndefined();
+    await session.cleanup();
+  });
+
+  it.runIf(sandboxAvailable && process.platform === 'linux')(
+    "samples its live worker tree's resident set, and nothing once cleaned up",
+    async () => {
+      const { options } = fixture(
+        respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{resolved:['main.py']}}`),
+      );
+      const session = createPythonSession(options);
+      await session.request({ method: 'analyze', params: {}, schema: analysisSchema, signal });
+      const bytes = await session.sampleResident?.();
+      expect(bytes).toBeGreaterThan(0);
+      await session.cleanup();
+      await expect(session.sampleResident?.()).resolves.toBeUndefined();
+    },
+  );
+
   it.skipIf(!sandboxAvailable)('maps worker issues to PythonWorkerError and releases handles', async () => {
     const { options } = fixture(
       respondingWorker(`request.method==='fail'

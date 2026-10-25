@@ -27,6 +27,9 @@ catalogs:
     '@arethetypeswrong/cli':
       specifier: ^0.18.3
       version: 0.18.5
+    '@aurigax-ai/ghostty-web':
+      specifier: 0.3.6
+      version: 0.3.6
     '@aws-sdk/client-s3':
       specifier: ^3.1073.0
       version: 3.1150.0
@@ -1843,6 +1846,9 @@ importers:
       '@taucad/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@taucad/esbuild':
+        specifier: workspace:*
+        version: link:../../packages/plugins/esbuild
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
@@ -2586,6 +2592,9 @@ importers:
 
   apps/ui:
     dependencies:
+      '@aurigax-ai/ghostty-web':
+        specifier: 'catalog:'
+        version: 0.3.6
       '@base-ui/react':
         specifier: 'catalog:'
         version: 1.9.0(@date-fns/tz@1.5.0)(@types/react@19.2.17)(date-fns@4.4.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -4014,12 +4023,9 @@ importers:
 
   packages/geospec:
     dependencies:
-      '@taucad/esbuild':
-        specifier: workspace:*
-        version: link:../plugins/esbuild
-      '@taucad/runtime':
-        specifier: workspace:*
-        version: link:../runtime
+      esbuild:
+        specifier: 'catalog:'
+        version: 0.28.2
       geospec-engine:
         specifier: 'catalog:'
         version: 0.4.0
@@ -4054,6 +4060,9 @@ importers:
       '@taucad/carvera':
         specifier: workspace:*
         version: link:../plugins/carvera
+      '@taucad/esbuild':
+        specifier: workspace:*
+        version: link:../plugins/esbuild
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../filesystem
@@ -6149,6 +6158,9 @@ packages:
 
   '@asamuzakjp/css-color@3.2.0':
     resolution: {integrity: sha512-K1A6z8tS3XsmCMM86xoWdn7Fkdn9m6RSVtocUrJYIwZnFVkng/PvkEoWtOWmP+Scc6saYWHWZYbndEEXxl24jw==}
+
+  '@aurigax-ai/ghostty-web@0.3.6':
+    resolution: {integrity: sha512-F2CwHx9F6hS58YKvi3uBCKEScHtQE6zDEuzV+uaggpuc0bk3oF+bxygnlbfip/LMKJZDgvDX/Eqjzh/sCo/uHg==}
 
   '@aws-crypto/sha256-browser@5.2.0':
     resolution: {integrity: sha512-AXfN/lGotSQwu6HNcEsIASo7kWXZ5HYWvfOmSNKDsEqC4OashTp8alTmaz+F7TC2L083SFv5RdB+qU3Vs1kZqw==}
@@ -26300,6 +26312,8 @@ snapshots:
       '@csstools/css-parser-algorithms': 3.0.5(@csstools/css-tokenizer@3.0.4)
       '@csstools/css-tokenizer': 3.0.4
       lru-cache: 10.4.3
+
+  '@aurigax-ai/ghostty-web@0.3.6': {}
 
   '@aws-crypto/sha256-browser@5.2.0':
     dependencies:

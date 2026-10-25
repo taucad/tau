@@ -18,6 +18,7 @@ import {
 } from 'node:fs';
 import type { readFile, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { PassThrough } from 'node:stream';
 import { dirname, join } from 'node:path';
 
 import type { getDefaultWritePaths } from '@anthropic-ai/sandbox-runtime';
@@ -1138,6 +1139,162 @@ ${keepAlive}`);
     await withPlatform('win32', async () => {
       expect(processEnvironment('/artifacts')).not.toHaveProperty('PATH');
     });
+  });
+});
+
+const mebibyte = 1024 * 1024;
+
+/** A worker that touches `bytes` more memory on each `touch` request and answers every request at once. */
+const touchingWorker = `${ready}
+const kept=[];
+const readline=require('node:readline').createInterface({input:process.stdin});
+readline.on('line',(line)=>{
+ const request=JSON.parse(line);
+ if(request.method==='touch'){kept.push(Buffer.alloc(request.params.bytes,1));}
+ process.stdout.write(JSON.stringify({protocolVersion:1,requestId:request.requestId,result:request.method==='shutdown'?{shutdown:true}:{}})+'\\n');
+ if(request.method==='shutdown')setTimeout(()=>process.exit(0),5);
+});
+${keepAlive}`;
+
+/** A brokered worker whose pipes this test drives and whose sample it controls. */
+const brokeredWorker = (sampleResident?: () => Promise<number | undefined>) => {
+  const stdin = new PassThrough();
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  const ended = Promise.withResolvers<{ readonly exitCode?: number }>();
+  stdin.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
+    for (const line of Buffer.from(chunk)
+      .toString('utf8')
+      .split('\n')
+      .filter((part) => part.length > 0)) {
+      const frame = JSON.parse(line) as { readonly requestId: string; readonly method: string };
+      stdout.write(
+        `${JSON.stringify({ protocolVersion: 1, requestId: frame.requestId, result: frame.method === 'shutdown' ? { shutdown: true } : {} })}\n`,
+      );
+    }
+  });
+  const worker = {
+    stdin,
+    stdout,
+    stderr,
+    ended: ended.promise,
+    terminate: async () => {
+      ended.resolve({ exitCode: 0 });
+      await ended.promise;
+    },
+    ...(sampleResident === undefined ? {} : { sampleResident }),
+  };
+  return {
+    worker,
+    launch: async () => {
+      queueMicrotask(() => {
+        stdout.write('{"protocolVersion":1,"type":"ready"}\n');
+      });
+      return worker;
+    },
+  };
+};
+
+describe('NativeProcessSession.sampleResident', () => {
+  afterEach(() => {
+    installNativeWorkerLauncher(undefined);
+  });
+
+  it.runIf(process.platform === 'linux')(
+    "should sample the worker tree's resident set after every request, the first included",
+    async () => {
+      const value = fixture(touchingWorker, 10_000);
+      const touched = 96 * mebibyte;
+      try {
+        await expect(value.session.sampleResident()).resolves.toBeUndefined();
+        await value.session.request({
+          method: 'idle',
+          params: {},
+          parseResult: (result) => result,
+          signal: new AbortController().signal,
+        });
+        const baseline = await value.session.sampleResident();
+        expect(baseline).toBeGreaterThan(0);
+        await value.session.request({
+          method: 'touch',
+          params: { bytes: touched },
+          parseResult: (result) => result,
+          signal: new AbortController().signal,
+        });
+        const sample = await value.session.sampleResident();
+        const expected = baseline! + touched;
+        expect(Math.abs(sample! - expected)).toBeLessThanOrEqual(expected * 0.25);
+      } finally {
+        await value.session.cleanup();
+      }
+      await expect(value.session.sampleResident()).resolves.toBeUndefined();
+    },
+    20_000,
+  );
+
+  it('should resolve undefined for a sample that crosses a recycle', async () => {
+    const read = Promise.withResolvers<number | undefined>();
+    const broker = brokeredWorker(async () => read.promise);
+    installNativeWorkerLauncher(broker.launch);
+    const value = fixture();
+    try {
+      await request(value.session);
+      const sample = value.session.sampleResident();
+      await value.session.recycle();
+      read.resolve(64 * mebibyte);
+      await expect(sample).resolves.toBeUndefined();
+    } finally {
+      await value.session.cleanup();
+    }
+  });
+
+  it('should answer the live generation, and undefined for a worker without a reader, a failed or invalid read', async () => {
+    const reads = vi.fn<() => Promise<number | undefined>>();
+    const broker = brokeredWorker(reads);
+    installNativeWorkerLauncher(broker.launch);
+    const value = fixture();
+    try {
+      await request(value.session);
+      reads.mockResolvedValueOnce(64 * mebibyte);
+      await expect(value.session.sampleResident()).resolves.toBe(64 * mebibyte);
+      reads.mockRejectedValueOnce(new Error('EACCES'));
+      await expect(value.session.sampleResident()).resolves.toBeUndefined();
+      for (const invalid of [-1, 1.5, Number.NaN, undefined]) {
+        reads.mockResolvedValueOnce(invalid);
+        await expect(value.session.sampleResident()).resolves.toBeUndefined();
+      }
+    } finally {
+      await value.session.cleanup();
+    }
+    expect(reads).toHaveBeenCalledTimes(6);
+    await expect(value.session.sampleResident()).resolves.toBeUndefined();
+
+    installNativeWorkerLauncher(brokeredWorker().launch);
+    const unread = fixture();
+    try {
+      await request(unread.session);
+      await expect(unread.session.sampleResident()).resolves.toBeUndefined();
+    } finally {
+      await unread.session.cleanup();
+    }
+  });
+
+  it('should give no reader to a worker spawned off Linux, and none once the worker has exited', async () => {
+    const value = fixture();
+    const launch = { ...value.options, commandId: 'platform#1' } satisfies NativeWorkerLaunch;
+    for (const platform of ['darwin', 'win32'] as const) {
+      await withPlatform(platform, async () => {
+        const worker = await startNativeWorker(launch).catch(() => undefined);
+        expect(worker?.sampleResident).toBeUndefined();
+        await worker?.terminate();
+      });
+    }
+    if (process.platform === 'linux') {
+      const worker = await startNativeWorker(launch);
+      await worker.terminate();
+      await worker.ended;
+      await expect(worker.sampleResident?.()).resolves.toBeUndefined();
+    }
   });
 });
 

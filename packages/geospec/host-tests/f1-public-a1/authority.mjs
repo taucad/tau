@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 // oxlint-disable-next-line no-restricted-imports -- The standalone authority harness shares the local immutable fixture closure.
 import { readFixture } from '../fixtures/read-fixture.mjs';
 
-/** @typedef {import('@taucad/runtime/types').JSONValue} JSONValue */
+/** @typedef {null | string | number | boolean | JSONValue[] | { [key: string]: JSONValue }} JSONValue */
 /** @typedef {import('geospec/assertion-client').GeoSpecCanonicalClaimReport} GeoSpecCanonicalClaimReport */
 /** @typedef {import('geospec/assertion-client').GeoSpecNativeEngine} GeoSpecNativeEngine */
 /** @typedef {import('geospec/assertion-client').GeoSpecNativeClaimEvaluation} GeoSpecNativeClaimEvaluation */

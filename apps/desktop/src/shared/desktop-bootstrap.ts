@@ -36,6 +36,9 @@ export const directoryGrantChannels = {
 /** Theme notification shared by main and preload for the native app icon. */
 export const appIconThemeChannel = 'tau:app-icon-theme';
 
+/** The renderer's resolved runtime-telemetry consent, sent to main on every change (AR-W4-03c). */
+export const telemetryConsentChannel = 'telemetry:consent';
+
 /** Main's native window fullscreen state, sent on transitions and renderer loads. */
 export const windowFullscreenChannel = 'tau:window-fullscreen';
 

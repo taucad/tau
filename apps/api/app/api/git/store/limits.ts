@@ -72,6 +72,9 @@ export const livePackBound = 8;
  */
 export const commitDeadlineMilliseconds = 5 * 60 * 1000;
 
+/** A clone of a large repository is slow; an abandoned smart-HTTP git child is forever. */
+export const gitRpcTimeoutMilliseconds = 10 * 60 * 1000;
+
 /**
  * How old an object no manifest has ever listed must be before the sweeping
  * lease holder deletes it (NI4, second rule). Far above the commit deadline

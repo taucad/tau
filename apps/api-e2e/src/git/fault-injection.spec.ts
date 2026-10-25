@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
-import { startApi } from '#git/api-process.js';
+import { startApi, startStorage } from '#git/api-process.js';
 import { gitE2EApiUrl, gitE2EFrontendUrl } from '#git/config.js';
 import { startFaultProxy } from '#git/fault-proxy.js';
 import type { FaultProxy } from '#git/fault-proxy.js';
@@ -45,6 +45,12 @@ const local = process.env['TAU_E2E_GIT_LOCAL'] === 'true';
 
 /** The proxied API this suite owns, kills and reboots. `:4018` is free in both e2e tiers. */
 const victimUrl = 'http://localhost:4018';
+/**
+ * The victim API's own tau-storage worker (DC1): since DC1 the worker, not the
+ * API, holds the lease and writes the store, so it is the one behind the fault
+ * proxy and the one a fault kills. `:4023` is free in both e2e tiers.
+ */
+const victimWorkerUrl = 'http://localhost:4023';
 const proxyPort = 9100;
 const minioOrigin = process.env['TAU_S3_ENDPOINT'] ?? 'http://localhost:9000';
 
@@ -56,7 +62,7 @@ const leaseRoot = join(tmpdir(), 'tau-git-leases');
  * API on the machine, so a dev API elsewhere holding a lease in flight is not
  * a leak of this suite's.
  */
-const suitePids = new Set(inject('gitE2EApiPids').map(String));
+const suitePids = new Set([...inject('gitE2EApiPids'), ...inject('gitE2EStoragePids')].map(String));
 
 /**
  * Lease directories present now, so a case can prove it left none behind.
@@ -195,22 +201,39 @@ const killedAt: string[] = [];
 
 let proxy: FaultProxy;
 let victim: { child: ChildProcess; log: WriteStream } | undefined;
+let victimWorker: { child: ChildProcess; log: WriteStream } | undefined;
 let owner: TauCloudOwner;
 
 /** Boot (or reboot) the proxied API this suite is allowed to kill. */
 const bootVictim = async (label: string): Promise<void> => {
+  victimWorker = await startStorage({
+    url: victimWorkerUrl,
+    label: `w10-${label}`,
+    overrides: {
+      TAU_S3_ENDPOINT: `http://localhost:${proxyPort.toString()}`,
+      TAU_STORAGE_RECEIPT_URL: new URL('/v1/internal/storage/receipts', victimUrl).href,
+    },
+  });
   victim = await startApi({
     url: victimUrl,
     label: `w10-${label}`,
     frontendUrl: gitE2EFrontendUrl,
-    overrides: { TAU_S3_ENDPOINT: `http://localhost:${proxyPort.toString()}` },
+    overrides: { TAU_S3_ENDPOINT: `http://localhost:${proxyPort.toString()}`, TAU_STORAGE_URL: victimWorkerUrl },
   });
-  if (victim.child.pid !== undefined) {
-    suitePids.add(String(victim.child.pid));
+  for (const child of [victim.child, victimWorker.child]) {
+    if (child.pid !== undefined) {
+      suitePids.add(String(child.pid));
+    }
   }
 };
 
+/** Kills the worker mid-write, and its API with it so the next case boots both fresh. */
 const killVictim = async (): Promise<void> => {
+  if (victimWorker !== undefined) {
+    victimWorker.child.kill('SIGKILL');
+    victimWorker.log.end();
+    victimWorker = undefined;
+  }
   if (victim !== undefined) {
     victim.child.kill('SIGKILL');
     victim.log.end();

@@ -54,6 +54,10 @@ billing-operations = 'node /app/dist/billing-command.js billing-operations-worke
 # app is deployed and healthy (`app/maintenance-app.test.ts` enforces the pairing).
 revisions-maintenance = "node /app/dist/maintenance-command.js worker"
 
+# No TAU_STORAGE_URL (DC1): there is no production tau-storage yet, so git runs
+# inside this app (`git_execution=in_process` in the boot log), as before DC1.
+# Setting it to the production Flycast address, with the two storage secrets,
+# is the flip to forwarding.
 [env]
 NODE_ENV = 'production'
 WEB_CONCURRENCY = '1'
@@ -90,6 +94,9 @@ ADDITIONAL_CORS_ORIGINS = '["https://taucad-prod-us.netlify.app"]'
 TAU_S3_PUBLIC_BASE_URL = 'https://cdn.tau.new'
 TAU_S3_REGION = 'auto'
 TAU_S3_FORCE_PATH_STYLE = 'false'
+# Runtime Observability PR-2: production records no runtime telemetry entries until the operator's
+# activation release (PR-9). Explicit, so the policy probe answers `off` and clients send nothing.
+TAU_RUNTIME_TELEMETRY = 'off'
 
 # No `[[mounts]]`. Charter S3/D1: the durable state of the Hosted Remote is the
 # object store, leases are ephemeral working copies under the Machine's own
@@ -111,6 +118,13 @@ auto_start_machines = true
 # needs to keep one Machine serving; the count itself is `fly scale count app=2`.
 min_machines_running = 2
 processes = ['app']
+
+# FR11 (DC1): a push is silent between its last body byte and tau-storage's
+# compare-and-swap for up to the 5-minute commit deadline, and the client's
+# connection to this proxy is idle for all of it. 600 s is the deadline plus
+# margin, the same value as tau-storage's Flycast service; DB2 measures it.
+[http_service.http_options]
+idle_timeout = 600
 
 [[http_service.checks]]
 interval = "10s"

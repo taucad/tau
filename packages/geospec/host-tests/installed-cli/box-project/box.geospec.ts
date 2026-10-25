@@ -17,6 +17,18 @@ describe('a box from a non-Tau exporter', () => {
     expectGeo(box).toHaveBoundingBox({ size: { x: 12, y: 12, z: 12 }, tolerance: 1e-6 });
   });
 
+  it('refuses alone: a malformed expectation beside a passing claim', async () => {
+    const box = await loadModel({ file: 'part.box', format: 'step' });
+    // `sizes` is no bounding-box field: the engine refuses this claim alone and still decides the next one.
+    const malformed = { sizes: { x: 10, y: 10, z: 10 }, tolerance: 1e-6 };
+    try {
+      expectGeo(box).toHaveBoundingBox(malformed);
+    } catch {
+      // The refused claim stays recorded on the test.
+    }
+    expectGeo(box).toHaveBoundingBox({ size: { x: 10, y: 10, z: 10 }, tolerance: 1e-6 });
+  });
+
   it('refuses: the exporter writes no GLB', async () => {
     const box = await loadModel({ file: 'part.box', format: 'glb' });
     expectGeo(box).toHaveBoundingBox({ size: { x: 10, y: 10, z: 10 }, tolerance: 1e-6 });

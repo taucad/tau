@@ -33,13 +33,11 @@ import {
 } from '@taucad/runtime-testing/browser/three-renderer-output';
 
 import { defaultViewerEnvironment, ViewerEnvironmentProvider } from '#environment/viewer-environment.jsx';
-import { createTauR3fGlProp } from '#graphics/three/canvas-three-gl.js';
+import { createRenderer } from '#graphics/three/renderer.js';
 
 it('should release a cube environment after its canvas renderer has retired', async () => {
   const canvas = document.createElement('canvas');
-  const factory = createTauR3fGlProp('webgl');
-  factory.bindCanvas(canvas);
-  const renderer = await factory({ canvas });
+  const renderer = await createRenderer('viewport', 'webgl', canvas);
   if (!(renderer instanceof WebGLRenderer)) {
     throw new TypeError('The WebGL canvas must own a WebGL renderer.');
   }
@@ -49,9 +47,7 @@ it('should release a cube environment after its canvas renderer has retired', as
   const disposeDepth = vi.fn();
   target.depthTexture = new DepthTexture(16, 16);
   target.depthTexture.addEventListener('dispose', disposeDepth);
-  factory.bindCanvas(undefined);
-  await Promise.resolve();
-  expect(factory.isRetired()).toBe(true);
+  renderer.dispose();
   expect(() => {
     target.dispose();
     target.dispose();
@@ -144,7 +140,11 @@ it.each([
   await page.viewport(900, 650);
   const actor = createActor(
     graphicsMachine.provide({
-      actors: { probeWebGpu: createAsyncLogic({ run: async () => backend === 'webgpu' }) },
+      actors: {
+        probeWebGpu: createAsyncLogic({
+          run: async () => backend === 'webgpu',
+        }),
+      },
     }),
     { input: {} },
   ).start();
@@ -159,13 +159,22 @@ it.each([
   if (!(binary instanceof ArrayBuffer)) {
     throw new Error('Expected a binary GLB');
   }
-  const artifact: Artifact = { mimeType: 'model/gltf-binary', content: new Uint8Array(binary) };
+  const artifact: Artifact = {
+    mimeType: 'model/gltf-binary',
+    content: new Uint8Array(binary),
+  };
   const fixture = (
     model?: Artifact,
     { grid = true, axes = true, gizmo = true }: { grid?: boolean; axes?: boolean; gizmo?: boolean } = {},
   ): React.JSX.Element => (
     <div role='application' aria-label='CAD canvas' className='relative h-144 w-208 bg-background'>
-      <ViewerEnvironmentProvider value={{ ...defaultViewerEnvironment, colorScheme: theme, graphicsBackend: backend }}>
+      <ViewerEnvironmentProvider
+        value={{
+          ...defaultViewerEnvironment,
+          colorScheme: theme,
+          graphicsBackend: backend,
+        }}
+      >
         <KeyboardProvider>
           <GraphicsProvider graphicsRef={actor}>
             <CadViewer
@@ -193,11 +202,11 @@ it.each([
     );
     const renderer = state!.gl;
     const canvas = renderer.domElement;
-    expect(isViewportWebGpu(renderer)).toBe(backend === 'webgpu');
+    expect(isViewportWebGpu(renderer)).toBe(true);
     if (isViewportWebGpu(renderer)) {
-      expect('isWebGPUBackend' in renderer.backend && renderer.backend.isWebGPUBackend).toBe(true);
-      expect(renderer.samples).toBe(4);
-      expect(renderer.reversedDepthBuffer).toBe(true);
+      expect('isWebGPUBackend' in renderer.backend && renderer.backend.isWebGPUBackend).toBe(backend === 'webgpu');
+      expect(renderer.samples).toBe(0);
+      expect(renderer.reversedDepthBuffer).toBe(backend === 'webgpu');
     }
     const capture = async (): Promise<Uint8ClampedArray> => {
       let pixels: Uint8ClampedArray = new Uint8ClampedArray();
@@ -233,14 +242,18 @@ it.each([
     };
     const empty = await capture();
     if (isViewportWebGpu(renderer)) {
-      expect(sceneSamples, 'the actual scene pass remains multisampled').toBe(4);
+      expect(sceneSamples, 'the lean scene pass remains single-sample').toBe(0);
     }
     const origin = new Vector3().project(state!.camera);
     expect(Math.abs(origin.x), 'default camera centres the origin horizontally').toBeLessThan(0.001);
     expect(Math.abs(origin.y), 'default camera centres the origin vertically').toBeLessThan(0.001);
     expect(
       origin.z,
-      JSON.stringify({ position: state!.camera.position.toArray(), near: state!.camera.near, far: state!.camera.far }),
+      JSON.stringify({
+        position: state!.camera.position.toArray(),
+        near: state!.camera.near,
+        far: state!.camera.far,
+      }),
     ).toBeGreaterThan(-1);
     expect(origin.z).toBeLessThan(1);
     await screenshot(empty, 'empty');
@@ -274,7 +287,12 @@ it.each([
     view.rerender(fixture(undefined, { grid: false, axes: false, gizmo: false }));
     const noGizmo = await capture();
     expect(difference(noAxes, noGizmo), 'gizmo contributes visible pixels').toBeGreaterThan(100);
-    const gizmoBounds = { left: canvas.width, top: canvas.height, right: 0, bottom: 0 };
+    const gizmoBounds = {
+      left: canvas.width,
+      top: canvas.height,
+      right: 0,
+      bottom: 0,
+    };
     let gizmoEdgePixels = 0;
     for (let index = 0; index < noAxes.length; index += 4) {
       if (difference(noAxes.subarray(index, index + 4), noGizmo.subarray(index, index + 4)) === 0) {
@@ -301,7 +319,10 @@ it.each([
 
     actor.send({
       type: 'updateArtifact',
-      artifact: { mimeType: 'model/gltf-binary', content: new Uint8Array(binary) },
+      artifact: {
+        mimeType: 'model/gltf-binary',
+        content: new Uint8Array(binary),
+      },
       hash: 'box',
       sourceFile: 'main.ts',
     });

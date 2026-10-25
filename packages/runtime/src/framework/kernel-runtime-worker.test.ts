@@ -480,7 +480,7 @@ describe('KernelRuntimeWorker direct transcode', () => {
       readonly name: string;
       readonly detail?: Record<string, unknown>;
     }> = [];
-    worker.setTelemetrySend((entries) => telemetry.push(...entries));
+    worker.setTelemetrySend(({ entries }) => telemetry.push(...entries));
 
     try {
       const result = await worker.transcode({
@@ -641,7 +641,7 @@ describe('KernelRuntimeWorker direct transcode', () => {
       readonly name: string;
       readonly detail?: Record<string, unknown>;
     }> = [];
-    worker.setTelemetrySend((entries) => telemetry.push(...entries));
+    worker.setTelemetrySend(({ entries }) => telemetry.push(...entries));
     const controller = new AbortController();
 
     try {
@@ -850,7 +850,7 @@ describe('KernelRuntimeWorker direct transcode', () => {
       readonly name: string;
       readonly detail?: Record<string, unknown>;
     }> = [];
-    worker.setTelemetrySend((entries) => telemetry.push(...entries));
+    worker.setTelemetrySend(({ entries }) => telemetry.push(...entries));
 
     try {
       await expect(
@@ -1697,7 +1697,7 @@ describe('KernelRuntimeWorker kernel selection', () => {
       const worker = await createMultiKernelWorker([
         { id: 'openrscad', extensions: ['scad'], definition: scadDefinition },
       ]);
-      worker.setTelemetrySend((batch) => entries.push(...batch));
+      worker.setTelemetrySend(({ entries: batch }) => entries.push(...batch));
 
       await openWorkerDocument(worker, 'selection-span-document', 'model.scad');
       worker.flushTelemetry();

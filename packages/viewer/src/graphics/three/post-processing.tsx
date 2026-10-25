@@ -1,8 +1,10 @@
-import { useFrame, useThree } from '@react-three/fiber';
-import { useLayoutEffect } from 'react';
+import { useThree } from '@react-three/fiber';
+import { useLayoutEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
+import type { WebGPURenderer } from 'three/webgpu';
 import { ACESFilmicToneMapping, LinearToneMapping, NeutralToneMapping, NoToneMapping } from 'three';
-import { useGraphicsSelector } from '#hooks/use-graphics.jsx';
+import { isSoftwareGpuAdapter } from '#graphics/graphics-backend.js';
+import type { GpuAdapterIdentity } from '#graphics/graphics-backend.js';
 import { useThreeGraphicsBackend } from '#graphics/three/three-graphics-backend-context.jsx';
 import { PostProcessingWebGPU } from '#graphics/three/post-processing-webgpu.jsx';
 import { PostProcessingWebGL } from '#graphics/three/post-processing-webgl.jsx';
@@ -17,45 +19,36 @@ const rendererToneMappingModes = {
 } as const;
 
 /**
- * When ambient occlusion / GTAO post-processing is off, R3F still needs a terminal
- * positive-priority `useFrame` that calls `gl.render(scene, camera)` once any other
- * `priority > 0` subscriber exists (gizmo at priority **3**, `SceneOverlay` at **2**, …).
- * This component owns that priority-**1** main-scene colour pass whenever PP is disabled.
+ * Whether a WebGPU renderer's device runs on a software adapter (the browser's fallback adapter, SwiftShader,
+ * llvmpipe). Three requests the adapter itself and keeps only the device, whose `adapterInfo` describes it.
+ *
+ * @param renderer - The initialized node renderer.
+ * @returns True on a software adapter; false on hardware or when the device reports nothing.
  */
-function MainSceneFallback(): undefined {
-  const { invalidate } = useThree();
-  useLayoutEffect(() => {
-    invalidate();
-  }, [invalidate]);
-  useFrame((state) => {
-    state.gl.render(state.scene, state.camera);
-  }, 1);
-  return undefined;
-}
+const rendererUsesSoftwareGpuAdapter = (renderer: WebGPURenderer): boolean => {
+  // Three owns `backend.device`; the published Backend declaration omits it, and the WebGL 2 backend has none.
+  const backend = renderer.backend as
+    | (WebGPURenderer['backend'] & { readonly device?: Readonly<{ adapterInfo?: GpuAdapterIdentity['info'] }> })
+    | undefined;
+  const info = backend?.device?.adapterInfo;
+  return info !== undefined && isSoftwareGpuAdapter({ info });
+};
 
 /**
- * Conditionally mounts the post-processing subtree for the active graphics backend.
- *
- * **Disabling** `enablePostProcessing` on WebGL **unmounts** the AO stack but **mounts**
- * `MainSceneFallback` priority-**1** so the main scene is still shaded every frame when other
- * positive-priority owners exist (`SceneOverlay`, gizmo). WebGPU keeps its scene pass mounted
- * and only drops AO: that pass is where its scene tone mapping happens.
- *
- * WebGL `N8AO` path (when mounted) is configured with `screenSpaceRadius={true}`, which means `aoRadius`
- * is measured in **CSS pixels**, converted to the drawing-buffer pixels used by N8AO. This makes ambient occlusion
- * effect scale-independent -- models of any size receive visually consistent AO
- * without needing access to `sceneRadius`. If `screenSpaceRadius` were `false`,
- * `aoRadius` would need to be proportional to the scene bounding sphere radius
- * (typically 1-2 orders of magnitude smaller than the scene scale).
- *
- * N8AO's screen-space `distanceFalloff` is a fraction of the AO radius. Its recommended
- * `0.2` retains contact shading; zero suppresses the sample contribution entirely.
+ * Always-on composition; explicit diagnostic settings can still isolate AO and output transforms. A software WebGPU
+ * adapter rasterizes every pass on the CPU, where the AO graph (normal attachment, GTAO, denoise) and the speculative
+ * alternate-camera render saturate the GPU process and starve the page's compositor. There the composition stays
+ * beauty-only: the tone-mapped scene pass and its anti-aliased output, which also own the canvas's depth.
  */
 export function PostProcessing({ settings }: { readonly settings?: Partial<PostProcessingSettings> }): ReactNode {
-  const enablePostProcessing = useGraphicsSelector((state) => state.context.enablePostProcessing);
   const backend = useThreeGraphicsBackend();
   const { gl, invalidate } = useThree();
   const toneMapping = settings?.toneMapping ?? defaultPostProcessingSettings.toneMapping;
+  const softwareAdapter = useMemo(
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- R3F types `gl` as the classic renderer; the WebGPU backend context guarantees the node renderer.
+    () => backend === 'webgpu' && rendererUsesSoftwareGpuAdapter(gl as unknown as WebGPURenderer),
+    [backend, gl],
+  );
 
   useLayoutEffect(() => {
     // WebGPU tone-maps the scene inside its own pass, so the renderer's output pass only
@@ -69,14 +62,11 @@ export function PostProcessing({ settings }: { readonly settings?: Partial<PostP
     return (
       <PostProcessingWebGPU
         settings={settings}
-        aoAllowed={enablePostProcessing}
+        aoAllowed={!softwareAdapter}
+        speculativePreparation={!softwareAdapter}
         toneMapping={rendererToneMappingModes[toneMapping]}
       />
     );
-  }
-
-  if (!enablePostProcessing) {
-    return <MainSceneFallback />;
   }
 
   return <PostProcessingWebGL settings={settings} />;

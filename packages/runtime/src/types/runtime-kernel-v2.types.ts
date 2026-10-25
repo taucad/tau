@@ -44,6 +44,13 @@ export type TessellationReport = Readonly<{
   activeVoxels?: number;
   /** Native bytes held by the fields the mesh came from; voxel kernels only. */
   memoryBytes?: number;
+  /**
+   * OpenVDB mesh adaptivity in (0, 1) the mesh was produced with; voxel kernels only, and only when above 0.
+   * Absent means the uniform mesh.
+   */
+  adaptivity?: number;
+  /** Whether the adaptive mesh relaxed disoriented triangles; voxel kernels only, present only with `adaptivity`. */
+  relax?: boolean;
   /** The requested tessellation form: a quality preset name, or `'explicit'` for explicit tolerances. */
   requested?: 'low' | 'medium' | 'high' | 'extra-high' | 'explicit';
   /** Absolute chordal deviation in millimetres the mesh was produced at, after any downgrade. */
@@ -271,11 +278,31 @@ export type KernelDefinitionV2<
   ): boolean | Promise<boolean>;
   releaseHandle?(input: Readonly<{ handle: Handle }>, services: KernelServices, context: Context): void;
   /**
+   * Evaluate options under which a fresh build would give exactly this handle's geometry, when they differ from the
+   * `options` it was built with: the kernel fell back to other output than was asked. The runtime then serves an
+   * export whose admitted evaluate options equal the returned ones from this handle instead of building again.
+   * Return `undefined` when the handle reflects `options` as asked, or when the kernel cannot tell. It must be
+   * synchronous and free of side effects.
+   */
+  effectiveOptions?(
+    input: Readonly<{ handle: Handle; options: ParsedOptions<EvaluateSchema> }>,
+    services: KernelServices,
+    context: Context,
+  ): Readonly<Record<string, unknown>> | undefined;
+  /**
    * Bytes of WebAssembly linear memory the kernel's instance has committed, read when a rendering is delivered and
    * reported on it as `heapBytes`. Linear memory never shrinks, so a host may recycle the worker above its device's
    * threshold. Omit it for a kernel without a WebAssembly heap.
    */
   heapBytes?(context: Context): number | undefined;
+  /**
+   * Bytes of WebAssembly linear memory the kernel's instance has committed, read for observation only. Unlike
+   * {@link KernelDefinitionV2.heapBytes}, it never reaches a rendering and never feeds a host's recycling decision, so
+   * a kernel can report its heap here without changing when its worker is recycled. Implement it as one property read
+   * (`memory.buffer.byteLength`) with no allocation, and return `undefined` while the kernel holds no WebAssembly heap.
+   * Omit it for a kernel without one.
+   */
+  observedHeapBytes?(context: Context): number | undefined;
   onDispose?(context: Context): Promise<void>;
 } & SnapshotHooks<Context, Handle, Serialized> &
   RenderRequirement<Views> &

@@ -13,6 +13,7 @@ import type {
 } from '#plugins/plugin-types.js';
 import type {
   RuntimeTransportClient,
+  RuntimeTransportCloseResult,
   RuntimeTransportFacet,
   TransportPlugin,
 } from '#transport/runtime-transport.types.js';
@@ -41,6 +42,13 @@ import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
 import type { RuntimeTranscodeArgs, TelemetryBatch } from '#types/runtime-wire.types.js';
 import { OperationAbortedError, OperationTimeoutError } from '#framework/runtime-operation-errors.js';
+import { ClientOperationObserver, entryFormatOf, runtimeTransportOf } from '#client/runtime-operation-observer.js';
+import type { ObservedAttempt, SettleReason } from '#client/runtime-operation-observer.js';
+import type {
+  RuntimeLateTerminal,
+  RuntimeObservationMode,
+  RuntimeOperationObservation,
+} from '#types/runtime-observation.types.js';
 import { operationTimeoutRecoveryGrace } from '#framework/runtime-framework.constants.js';
 
 // oxlint-disable @typescript-eslint/no-explicit-any -- Transport and plugin existential carriers retain concrete tuples at the public overload.
@@ -107,6 +115,10 @@ type ClientEventHandlers<
   log: (entry: LogEntry) => void;
   telemetry: (batch: TelemetryBatch) => void;
   error: (issues: readonly KernelIssue[]) => void;
+  /** One observation per settled attempt (initialize, describe, evaluate, render, export, transcode). */
+  operation: (observation: RuntimeOperationObservation) => void;
+  /** A worker reply that arrived after its attempt had already settled as timed out, cancelled or abandoned. */
+  'operation-late': (late: RuntimeLateTerminal) => void;
 };
 
 /** Options for one document client. @public */
@@ -159,6 +171,8 @@ export type RuntimeClient<
     | RuntimeCapabilities<ClientKernels<Runtime>, ClientMiddleware<Runtime>, ClientTranscoders<Runtime>>
     | undefined;
   lifecycleState: RuntimeLifecycleState;
+  /** The observation modes the worker advertised; empty before `initialize` and for an older worker. */
+  readonly workerObservation: readonly RuntimeObservationMode[];
   connect(): Promise<void>;
   open<const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(
     input: OpenInput<Files, ClientKernels<Runtime>>,
@@ -208,6 +222,11 @@ export type RuntimeClient<
     handler: ClientEventHandlers<ClientKernels<Runtime>, ClientMiddleware<Runtime>, ClientTranscoders<Runtime>>[Event],
     options?: { signal?: AbortSignal },
   ): () => void;
+  /**
+   * Ask the worker to compute operation facts (`facts`) or stop (`off`). Sent only to a worker that advertised support
+   * in its `initialize` result; otherwise the wish is recorded and every observation is `not-observed`.
+   */
+  observe(mode: RuntimeObservationMode): void;
   terminate(): void;
   shutdown(): Promise<void>;
 }>;
@@ -261,6 +280,35 @@ export function createRuntimeClient(options: {
   let terminalError: RuntimeTerminatedError | undefined;
   const terminationFailure = (): RuntimeTerminatedError => terminalError ?? new RuntimeTerminatedError();
   let session: RuntimeDocumentSessionClient | undefined;
+  const observer = new ClientOperationObserver(runtimeTransportOf(transport.describe().wire));
+  let closeResult: RuntimeTransportCloseResult | undefined;
+  const terminationReason = (): SettleReason =>
+    closeResult === undefined || closeResult.cause === 'requested'
+      ? { type: 'terminated-by-caller' }
+      : { type: 'transport-closed', close: closeResult };
+  const kernelExtensions = (): string[] =>
+    capabilities?.registrations.flatMap((registration) =>
+      registration.kind === 'kernel' ? [...registration.extensions] : [],
+    ) ?? [];
+  /**
+   * Settle an attempt that rejected: a deadline the client armed, a termination, or any other rejection.
+   *
+   * @param attempt - The attempt.
+   * @param error - The rejection.
+   * @param deadline - The deadline error this call armed, if it fired.
+   */
+  const settleRejected = (attempt: ObservedAttempt | undefined, error: unknown, deadline: unknown): void => {
+    if (attempt === undefined) {
+      return;
+    }
+    if (deadline !== undefined && error === deadline) {
+      observer.settle(attempt, { type: 'deadline', phase: attempt.operation });
+    } else if (lifecycleState === 'terminated') {
+      observer.settle(attempt, terminationReason());
+    } else {
+      observer.settle(attempt, { type: 'rejected', error });
+    }
+  };
   let activeTimeout = options.operationTimeout ?? 0;
   let transcodeTimeout = 60_000;
   const recoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -330,7 +378,39 @@ export function createRuntimeClient(options: {
       if (currentLifecycle() === 'terminated') {
         throw terminationFailure();
       }
-      const initialized = await transport.initialize(config === undefined ? {} : { config });
+      const initializeOperationId = `initialize:${randomUuid()}`;
+      const requestedObservation = observer.initializeMode;
+      // Trailing facts follow the reply on the same channel, so the listener is in place before the call.
+      channel.onNotify('operationFacts', ({ operationId, facts }) => {
+        observer.receiveFacts(operationId, facts);
+      });
+      const initializeAttempt = observer.begin({
+        operation: 'initialize',
+        operationId: initializeOperationId,
+        observing: requestedObservation === 'facts',
+      });
+      let initialized: Awaited<ReturnType<typeof transport.initialize>>;
+      try {
+        initialized = await transport.initialize({
+          operationId: initializeOperationId,
+          ...(config === undefined ? {} : { config }),
+          ...(requestedObservation === 'off' ? {} : { observation: requestedObservation }),
+        });
+      } catch (error) {
+        settleRejected(initializeAttempt, error, undefined);
+        throw error;
+      }
+      observer.connected({
+        observation: initialized.observation,
+        sent: requestedObservation,
+        send: (mode) => {
+          channel.notify('observe', { mode });
+        },
+      });
+      if (initializeAttempt) {
+        initializeAttempt.observing &&= observer.workerObservation.includes('facts');
+        observer.settle(initializeAttempt, { type: 'result', result: { success: true, issues: [] } });
+      }
       if (currentLifecycle() === 'terminated') {
         throw terminationFailure();
       }
@@ -356,8 +436,14 @@ export function createRuntimeClient(options: {
           topics.log.emit(entry);
         }
       });
-      channel.onNotify('telemetry', ({ entries, origin, epoch }) => {
-        topics.telemetry.emit({ entries, origin, epoch });
+      channel.onNotify('telemetry', ({ entries, origin, epoch, dropped, droppedRoots }) => {
+        topics.telemetry.emit({
+          entries,
+          origin,
+          epoch,
+          ...(dropped === undefined ? {} : { dropped }),
+          ...(droppedRoots === undefined ? {} : { droppedRoots }),
+        });
       });
       channel.onNotify('errorEvent', (event) => {
         if (event.scope === 'connection') {
@@ -367,9 +453,19 @@ export function createRuntimeClient(options: {
       session = new RuntimeDocumentSessionClient(channel, transport.resolveBinary, {
         operationTimeout: () => activeTimeout,
         onTimeout,
-        onTerminal: clearRecovery,
+        onTerminal: (operationId) => {
+          clearRecovery(operationId);
+          observer.terminal(operationId);
+        },
         signalAbort: (evaluationId, generation, reason) =>
           transport.signalDocumentAbort(evaluationId, generation, reason),
+        observer,
+        terminationReason,
+        entryFormat: (filename) => entryFormatOf(filename, kernelExtensions()),
+        exportRoute: (kernelId, target) =>
+          capabilities?.routes.find(
+            (route) => route.targetFormat === target && (kernelId === undefined || route.kernelId === kernelId),
+          ),
       });
       lifecycleState = 'connected';
     })();
@@ -396,11 +492,14 @@ export function createRuntimeClient(options: {
       return;
     }
     lifecycleState = 'terminated';
+    closeResult = close;
     const failure = new RuntimeTerminatedError(close);
     terminalError = failure;
     terminated.reject(failure);
     clearRecovery();
     session?.terminate(failure);
+    observer.workerGone();
+    observer.dispose();
     for (const topic of Object.values(topics)) {
       topic.dispose();
     }
@@ -416,6 +515,9 @@ export function createRuntimeClient(options: {
     terminated.reject(failure);
     clearRecovery();
     session?.terminate(failure);
+    // Attempts waiting for their facts are emitted before `terminate()` returns, so an unload flush carries them.
+    observer.workerGone();
+    observer.dispose();
     for (const topic of Object.values(topics)) {
       topic.dispose();
     }
@@ -470,16 +572,20 @@ export function createRuntimeClient(options: {
         controller.abort();
       };
       input.signal?.addEventListener('abort', onAbort, { once: true });
+      let describeDeadline: OperationTimeoutError | undefined;
       const timer =
         activeTimeout > 0
           ? setTimeout(() => {
-              timed.reject(new OperationTimeoutError('describe', 'Document description timed out.'));
+              describeDeadline = new OperationTimeoutError('describe', 'Document description timed out.');
+              timed.reject(describeDeadline);
               onTimeout(operationId);
             }, activeTimeout)
           : undefined;
+      const describeAttempt = observer.begin({ operation: 'describe', operationId });
       const request = channel.call(
         'describe',
         {
+          operationId,
           file: normalized.file,
           ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
           ...(normalized.stage === undefined ? {} : { stage: normalized.stage }),
@@ -488,7 +594,23 @@ export function createRuntimeClient(options: {
       );
       void clearRecoveryWhenSettled(request, operationId);
       try {
-        return await waitWithAbort(Promise.race([request, timed.promise, terminated.promise]), input.signal);
+        const description = await waitWithAbort(
+          Promise.race([request, timed.promise, terminated.promise]),
+          input.signal,
+        );
+        if (describeAttempt) {
+          if (description.kernelId !== undefined) {
+            describeAttempt.kernel = description.kernelId;
+          }
+          observer.settle(describeAttempt, {
+            type: 'result',
+            result: { success: description.success, issues: description.issues },
+          });
+        }
+        return description;
+      } catch (error) {
+        settleRejected(describeAttempt, error, describeDeadline);
+        throw error;
       } finally {
         if (timer !== undefined) {
           clearTimeout(timer);
@@ -558,6 +680,18 @@ export function createRuntimeClient(options: {
       const timed = Promise.withResolvers<never>();
       const operationId = `transcode:${randomUuid()}`;
       let workerReplied = false;
+      const edge = capabilities?.routes.find(
+        (route) =>
+          route.transcoderId !== undefined && route.sourceFormat === request.from && route.targetFormat === request.to,
+      );
+      const transcodeAttempt = observer.begin({
+        operation: 'transcode',
+        operationId,
+        format: request.to,
+        sourceFormat: request.from,
+        ...(edge?.transcoderId === undefined ? {} : { plugin: edge.transcoderId }),
+      });
+      let transcodeDeadline: OperationTimeoutError | undefined;
       const onAbort = (): void => {
         controller.abort();
       };
@@ -565,7 +699,8 @@ export function createRuntimeClient(options: {
       const timer =
         transcodeTimeout > 0
           ? setTimeout(() => {
-              timed.reject(new OperationTimeoutError('transcode', 'Transcode timed out.'));
+              transcodeDeadline = new OperationTimeoutError('transcode', 'Transcode timed out.');
+              timed.reject(transcodeDeadline);
               if (!workerReplied) {
                 onTimeout(operationId);
               }
@@ -573,11 +708,16 @@ export function createRuntimeClient(options: {
           : undefined;
       try {
         // The public route projection validates concrete options; wire admission validates the object again.
-        const call = channel.call('transcode', request as RuntimeTranscodeArgs, controller.signal);
+        const call = channel.call(
+          'transcode',
+          { ...(request as RuntimeTranscodeArgs), operationId },
+          controller.signal,
+        );
         void clearRecoveryWhenSettled(call, operationId);
         const wire = await waitWithAbort(Promise.race([call, timed.promise, terminated.promise]), signal);
         workerReplied = true;
         if (!wire.success) {
+          observer.settle(transcodeAttempt, { type: 'result', result: { success: false, issues: wire.issues } });
           return wire;
         }
         const materialized = Promise.all(
@@ -587,8 +727,20 @@ export function createRuntimeClient(options: {
           })),
         );
         void clearRecoveryWhenSettled(materialized, operationId);
-        const data = await waitWithAbort(Promise.race([materialized, timed.promise, terminated.promise]), signal);
+        let data: Awaited<typeof materialized>;
+        try {
+          data = await waitWithAbort(Promise.race([materialized, timed.promise, terminated.promise]), signal);
+        } catch (error) {
+          if (transcodeAttempt && error !== transcodeDeadline && lifecycleState !== 'terminated' && !signal?.aborted) {
+            observer.settle(transcodeAttempt, { type: 'materialise-failed', error });
+          }
+          throw error;
+        }
+        observer.settle(transcodeAttempt, { type: 'result', result: { success: true, issues: wire.issues } });
         return { ...wire, data };
+      } catch (error) {
+        settleRejected(transcodeAttempt, error, transcodeDeadline);
+        throw error;
       } finally {
         if (timer !== undefined) {
           clearTimeout(timer);
@@ -633,7 +785,25 @@ export function createRuntimeClient(options: {
             settings,
           );
         }
+        case 'operation': {
+          return observer.onOperation(
+            handler as ClientEventHandlers<KernelPlugin[], MiddlewarePlugin[], TranscoderPlugin[]>['operation'],
+            settings,
+          );
+        }
+        case 'operation-late': {
+          return observer.onLate(
+            handler as ClientEventHandlers<KernelPlugin[], MiddlewarePlugin[], TranscoderPlugin[]>['operation-late'],
+            settings,
+          );
+        }
       }
+    },
+    observe(mode): void {
+      observer.observe(mode);
+    },
+    get workerObservation() {
+      return observer.workerObservation;
     },
     terminate(): void {
       void shutdown();

@@ -13,6 +13,8 @@ export { connectSqliteComputeStoreWorker } from '#cache/sqlite-compute-worker-cl
 export type { SqliteComputeWorker } from '#cache/sqlite-compute-worker-client.js';
 export { serveSqliteComputeStoreWorker, sqliteComputeWorkerConnectType } from '#cache/sqlite-compute-worker-host.js';
 export type { SqliteComputeWorkerConnect } from '#cache/sqlite-compute-worker-host.js';
+export { openTelemetryFileSink, telemetryDirectory, telemetryFormat } from '#framework/telemetry-file-sink.js';
+export type { TelemetryExporter, TelemetryFileFormat } from '#framework/telemetry-file-sink.js';
 
 type InProcessTransportFor<Runtime extends AnyRuntimeDefinition> = ReturnType<typeof inProcessTransport<Runtime>>;
 

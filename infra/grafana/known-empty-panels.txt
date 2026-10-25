@@ -8,3 +8,110 @@
 
 Agents & Codex Usage › Agent & LLM Warnings and Errors
 Billing & Credit Ledger › Funded LLM Admission Denials (1h)
+
+# Runtime observability (PR-4). Nothing records runtime telemetry until the API's TAU_RUNTIME_TELEMETRY
+# resolves on and the hosts report (PR-2, PR-3), so every runtime panel is empty on a local stack until
+# then. Keep the four panels that stay empty even on staging until the activation release (FR-30):
+# Redis fail-open, viewer context losses, jobs in attention and GeoSpec runs. Delete the rest as they fill.
+Runtime operations › Viewer Context Losses by Backend (1h)
+Runtime operations › Jobs in Attention (1h)
+Runtime operations › GeoSpec Runs by Outcome (1h)
+Runtime operations › Redis Fail-Open (1h)
+Runtime operations › Telemetry Enabled
+Runtime operations › Attempts / min
+Runtime operations › Completed Success Rate
+Runtime operations › Implementation-Failure Rate
+Runtime operations › Render p95
+Runtime operations › Signed-In Users Today
+Runtime operations › Outcome Mix by Operation
+Runtime operations › Failures by Cause
+Runtime operations › Top Error Types (1h)
+Runtime operations › Refused Before Dispatch by Code (1h)
+Runtime operations › Duration p50 / p95 / p99 by Operation
+Runtime operations › Queue Wait p95 by Route
+Runtime operations › Cold vs Warm p95
+Runtime operations › Stalls (abandoned > 120 s) and Late Terminals (1h)
+Runtime operations › Terminations by Error Type (1h)
+Runtime operations › Terminations by Route (1h)
+Runtime operations › Initialize Failures (1h)
+Runtime operations › Capacity Refusals by Limit (1h)
+Runtime operations › Demand Ratio
+Runtime operations › Phase p95 by Operation
+Runtime operations › Middleware Share of Operation Time
+Runtime operations › Slowest Middleware (5m)
+Runtime operations › Terminations by Transport (1h)
+Runtime operations › Adaptations by Code (1h)
+Runtime operations › Viewer First-Frame p95
+Runtime operations › Plugin Failures by Capability (1h)
+Runtime operations › Plugin Uses / min by Capability
+Runtime operations › Ingest Dispositions by Population
+Runtime operations › Client Drops by Reason and Route (1h)
+Runtime operations › Spans Dropped by Route (1h)
+Runtime operations › Worker Facts Missing (1h)
+Runtime operations › Partial Batches (1h)
+Runtime operations › Delivery Delay p95
+Runtime operations › Rate-Limit Rejections by Population (1h)
+Runtime operations › Metric Overflow Series
+Runtime operations › Policy Probes by Answer (1h)
+Runtime operations › runtime.operation Events
+Runtime product insights › $kernel
+Runtime product insights › Attempts by Kernel (daily)
+Runtime product insights › Kernel Share
+Runtime product insights › Estimated Users per Kernel, Today
+Runtime product insights › Users Who Met a Failure, per Kernel
+Runtime product insights › Kernel Heap p50 / p95 by Kernel and Source
+Runtime product insights › Heap Coverage per Kernel
+Runtime product insights › Heap of Failed Attempts
+Runtime product insights › Heap by Device Class
+Runtime product insights › Heap Distribution, Selected Kernel
+Runtime product insights › Parameters Declared per Model
+Runtime product insights › Models with Any Parameters, by Kernel
+Runtime product insights › Share of Parameterised Evaluates with Modified Defaults
+Runtime product insights › Evaluates by Parameter Class (daily)
+Runtime product insights › Parameter Features by Kernel
+Runtime product insights › Exports by Format (daily)
+Runtime product insights › Export Failure Rate by Format
+Runtime product insights › Conversions: Source → Target
+Runtime product insights › Entry Formats by Kernel
+Runtime product insights › Viewer Downloads by Format (daily)
+Runtime product insights › Render p95 by Size Class
+Runtime product insights › Renders by Size Class (daily)
+Runtime product insights › Cold vs Warm Share
+Runtime product insights › Cache Hit Ratio by Kernel
+Runtime product insights › Operation Mix (daily)
+Runtime product insights › Population Share (signed-out)
+Runtime product insights › Route Mix
+Runtime product insights › Caller Mix
+Runtime product insights › Platform Mix — sample: non-success attempts only
+Runtime product insights › OS Mix — sample: non-success attempts only
+Runtime product insights › Hosts
+Runtime product insights › Platforms
+Runtime product insights › Operating Systems
+Runtime product insights › Kernels by Host
+Runtime product insights › Kernels by Caller
+Runtime product insights › Attempts by Transport (daily)
+Runtime product insights › Terminations by Transport (daily)
+Runtime product insights › Top Failure Codes by Kernel
+Runtime product insights › Refusals by Limit and Kernel
+Runtime product insights › Release Cohorts: Render p95 by Kernel and Release
+Runtime product insights › Success Rate by Release
+Runtime product insights › Stage Breakdown: Render p95 per Phase
+Runtime product insights › Middleware Share of Operation Time
+Runtime product insights › Slowest Middleware
+Runtime product insights › Adaptation Rate by Kernel and Code
+Runtime product insights › Viewer Context Loss per 1,000 First Frames
+Runtime product insights › Viewer First-Frame p95 by Size Class
+Runtime product insights › Jobs by Outcome (daily)
+Runtime product insights › GeoSpec Pass Rate
+Runtime product insights › Transcoder Usage (daily)
+Runtime product insights › Transcoder Failure Rate
+Runtime product insights › Job Usage by Provider (daily)
+Runtime product insights › Jobs Entering Attention by Provider (daily)
+Runtime product insights › Middleware Usage
+Runtime product insights › Middleware Share of Joined Attempts
+Runtime product insights › Bundler Usage (daily)
+Runtime product insights › Machine Operations by Provider and Kind
+Runtime product insights › Machine Actions by Family
+Runtime product insights › Machine Outcomes by Provider
+Runtime product insights › Machine Operations: Person vs Agent
+Runtime product insights › Plugin Reach, Today

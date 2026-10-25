@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import { lfsKey, ownerMarkerKey } from '#api/git/mirror/keys.js';
 import { harness, last, total } from '#api/git/mirror/mirror.fixture.js';
-import { backoffMilliseconds, pollOnce, runMirrorWorker } from '#api/git/mirror/worker.js';
+import { backoffMilliseconds, pollOnce, probeTtlMilliseconds, runMirrorWorker } from '#api/git/mirror/worker.js';
+import type { ProbeState } from '#api/git/mirror/worker.js';
 
 const alice = repositoryLocator({
   ownerId: 'user_alice',
@@ -64,6 +65,60 @@ describe('pollOnce', () => {
     expect(last(h.recorded, 'tau.mirror.destination_up')).toBe(0);
     expect(h.destination.calls).toStrictEqual(['probe']);
     expect(last(h.recorded, 'tau.mirror.copy_lag_generations')).toBe(1);
+  });
+
+  /*
+   * The staging finding (2026-10-24): the probe, a B2 version listing (a Class C
+   * transaction), ran on every 10-second poll, about 8,600 a day while idle. At
+   * 19:43Z it began failing; the worker backed off and logged only
+   * `tau_mirror.lagging`, never why.
+   */
+  it('should not probe the copy on every idle poll while a successful probe stands', async () => {
+    const h = harness();
+    const probe: ProbeState = { up: false, checkedAt: undefined };
+    const probes = (): number => h.destination.calls.filter((call) => call === 'probe').length;
+
+    await pollOnce({ context: h.context, ...options }, undefined, undefined, probe);
+    h.time.advance(10_000);
+    await pollOnce({ context: h.context, ...options }, undefined, undefined, probe);
+
+    expect(probes()).toBe(1);
+    expect(last(h.recorded, 'tau.mirror.destination_up')).toBe(1);
+    expect(total(h.recorded, 'tau.mirror.rounds', { outcome: 'noop', destination: 'b2' })).toBe(2);
+
+    h.time.advance(probeTtlMilliseconds);
+    await pollOnce({ context: h.context, ...options }, undefined, undefined, probe);
+
+    expect(probes()).toBe(2);
+  });
+
+  it('should probe again on the next poll after the copy refuses a write', async () => {
+    const h = harness();
+    const probe: ProbeState = { up: false, checkedAt: undefined };
+    const probes = (): number => h.destination.calls.filter((call) => call === 'probe').length;
+    h.ledger.recordGeneration(alice, h.source.push(alice, h.time.now()).generation);
+    h.destination.failPutAt = 1;
+
+    await pollOnce({ context: h.context, ...options }, undefined, undefined, probe);
+    h.time.advance(10_000);
+    await pollOnce({ context: h.context, ...options }, undefined, undefined, probe);
+
+    expect(total(h.recorded, 'tau.mirror.copy_failures', { stage: 'dest_write' })).toBe(1);
+    expect(probes()).toBe(2);
+  });
+
+  it('should say why the copy did not answer', async () => {
+    const h = harness();
+    h.destination.reachable = false;
+
+    expect(await pollOnce({ context: h.context, ...options })).toBe(false);
+
+    expect(h.events).toContainEqual({
+      event: 'tau_mirror.destination_down',
+      status: 403,
+      code: 'AccessDenied',
+      message: 'Transaction cap exceeded',
+    });
   });
 
   it('should back a failing repository off without holding up the rest', async () => {

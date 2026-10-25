@@ -141,16 +141,33 @@ function useKinematicsPlaybackClock(unitId: string): void {
     invalidate();
   });
 
-  // `play` changes the pose, which invalidates; a tab returning to view needs one frame to resume the clock.
+  // Playback is a demand-frame source even when its first pose equals the current pose.
   useEffect(() => {
+    let wasPlaying = false;
+    const changed = (): void => {
+      const playing = getKinematicsUnitState(kinematicsRef.getSnapshot().context, unitId).playback.status === 'playing';
+      if (playing !== wasPlaying) {
+        lastFrameAtRef.current = undefined;
+        wasPlaying = playing;
+        if (playing && document.visibilityState !== 'hidden') {
+          invalidate();
+        }
+      }
+    };
+    const subscription = kinematicsRef.subscribe(changed);
+    changed();
     const resume = (): void => {
-      invalidate();
+      lastFrameAtRef.current = undefined;
+      if (wasPlaying && document.visibilityState !== 'hidden') {
+        invalidate();
+      }
     };
     document.addEventListener('visibilitychange', resume);
     return () => {
+      subscription.unsubscribe();
       document.removeEventListener('visibilitychange', resume);
     };
-  }, [invalidate]);
+  }, [invalidate, kinematicsRef, unitId]);
 }
 
 type KinematicsViewerOptions = Readonly<{

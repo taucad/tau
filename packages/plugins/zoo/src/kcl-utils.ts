@@ -145,17 +145,19 @@ type KclUtilitiesOptions = {
 const splitErrors = (input: CompilationError[]): { errors: CompilationError[]; warnings: CompilationError[] } =>
   partitionExecutionIssues(input);
 
-// Dynamic import function to load WASM module
-async function loadWasmModule(tracer?: RuntimeSpanTracer): Promise<WasmModule> {
+// Dynamic import function to load WASM module, with the linear memory wasm-bindgen's initializer returns
+async function loadWasmModule(
+  tracer?: RuntimeSpanTracer,
+): Promise<{ wasmModule: WasmModule; memory: WebAssembly.Memory }> {
   try {
     const wasmModule = await import('@taucad/kcl-wasm-lib');
 
     const compiledModule = await compileWasmStreaming(kclWasmUrl, tracer);
 
     // eslint-disable-next-line @typescript-eslint/naming-convention -- WASM Bindgen API
-    await wasmModule.default({ module_or_path: compiledModule });
+    const { memory } = await wasmModule.default({ module_or_path: compiledModule });
 
-    return wasmModule;
+    return { wasmModule, memory };
   } catch (error) {
     throw KclError.simple({
       kind: 'engine',
@@ -273,6 +275,7 @@ export class KclUtilities {
   }
 
   private wasmModule: WasmModule | undefined;
+  private wasmMemory: WebAssembly.Memory | undefined;
   private isWasmInitialized = false;
   private isEngineInitialized = false;
   private engineManager: EngineConnection | undefined;
@@ -304,6 +307,15 @@ export class KclUtilities {
    */
   public get isWasmReady(): boolean {
     return this.isWasmInitialized;
+  }
+
+  /**
+   * Bytes of WebAssembly linear memory the KCL module has committed: one property read, no allocation.
+   *
+   * @returns the memory's size, or undefined before {@link initializeWasm} has loaded the module
+   */
+  public get wasmHeapBytes(): number | undefined {
+    return this.wasmMemory?.buffer.byteLength;
   }
 
   /**
@@ -357,7 +369,7 @@ export class KclUtilities {
     }
 
     // Initialize WASM module for parsing
-    this.wasmModule = await loadWasmModule(tracer);
+    ({ wasmModule: this.wasmModule, memory: this.wasmMemory } = await loadWasmModule(tracer));
 
     // Create mock context for local operations
     const mockEngine = new MockEngineConnection();

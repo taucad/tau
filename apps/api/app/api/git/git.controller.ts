@@ -32,10 +32,8 @@ import {
   gitRequestsPerUserPerWindow,
   gitRequestsPerWindow,
   isGitService,
-  negotiationInputLimitBytes,
   noCacheHeaders,
   projectIdFromRepository,
-  quotaOverrunSlackBytes,
   quotaRefusalMarker,
   serviceAdvertisementPrefix,
 } from '#api/git/git.constants.js';
@@ -43,7 +41,8 @@ import { LfsBatchDto, LfsVerifyDto } from '#api/git/git.dto.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
 import type { LfsBatchResponse, LfsQuotaRefusal } from '#api/git/git-lfs.service.js';
 import { GitProtocolExceptionFilter } from '#api/git/git-protocol-exception.filter.js';
-import { GitRepositoryService, gitRetryAfterSeconds } from '#api/git/git.service.js';
+import { GitRepositoryService } from '#api/git/git.service.js';
+import { gitRetryAfterSeconds } from '#api/git/git-refusals.js';
 import type { AffectedPublication } from '#api/git/git.service.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { TauMetrics } from '@taucad/telemetry';
@@ -270,12 +269,9 @@ export class GitController {
         this.repositories.uploadPack({
           access,
           body: request.raw,
+          /* The tau-storage worker bounds a fetch's negotiation body (review C32) and a
+             push's quarantine (DA3); the API streams both through unread. */
           gzipped: request.headers['content-encoding'] === 'gzip',
-          /* A fetch's body is `want`/`have` negotiation rather than a pack, so it
-             gets the flat negotiation ceiling — but it gets one: neither
-             Fastify's `bodyLimit` (the git parser streams past it) nor git itself
-             bounded `upload-pack`'s stdin (review C32). */
-          maximumInputBytes: negotiationInputLimitBytes,
           abort: this.abortWhenClientLeaves(reply),
         }),
       );
@@ -334,7 +330,6 @@ export class GitController {
           committedBy: userId,
           body: request.raw,
           gzipped: request.headers['content-encoding'] === 'gzip',
-          maximumInputBytes: access.remainingBytes + quotaOverrunSlackBytes,
           abort: this.abortWhenClientLeaves(reply),
         }),
       );

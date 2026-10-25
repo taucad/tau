@@ -149,9 +149,14 @@ export function TagsTrigger({
         {tags.map((tag) => (
           <TagsValue
             key={tag}
-            onRemove={() => {
-              handleRemoveTag(tag);
-            }}
+            /* A disabled field shows its tags without Remove buttons that look usable but do nothing. */
+            onRemove={
+              disabled
+                ? undefined
+                : () => {
+                    handleRemoveTag(tag);
+                  }
+            }
           >
             {tag}
           </TagsValue>
@@ -209,7 +214,8 @@ export function TagsValue({
           type='button'
           data-tag-remove
           aria-label={`Remove ${children}`}
-          className='size-auto rounded-full outline-none hover:bg-primary-foreground/30 focus-visible:focus-outline'
+          /* 16px for a mouse; the 24px floor under a coarse pointer, icon centred (I3). */
+          className='size-auto rounded-full outline-none hover:bg-primary-foreground/30 focus-visible:focus-outline pointer-coarse:flex pointer-coarse:size-6 pointer-coarse:items-center pointer-coarse:justify-center'
           onClick={handleRemove}
           onPointerDown={handlePointerDown}
         >

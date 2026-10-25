@@ -3,6 +3,7 @@ import { and, asc, eq, isNull, lte, sql } from 'drizzle-orm';
 import type { Database } from '#database/owner-lock.js';
 import { projectDeletion } from '#database/schema.js';
 import { completeProjectDeletion } from '#api/projects/project-deletion.js';
+import { storeTombstoneFence } from '#api/git/store/tombstone-fence.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
 import { assertSingletonProcessGroup } from '#api/git/maintenance/singleton.js';
 
@@ -59,7 +60,7 @@ export const recoverProjectDeletions = async (args: {
       // oxlint-disable-next-line no-await-in-loop -- one five-second fencing attempt at a time; the core persists retry backoff.
       const result = await completeProjectDeletion({
         database: args.database,
-        store,
+        fence: storeTombstoneFence(store),
         projectId: row.projectId,
         at: args.at ?? new Date(),
       });

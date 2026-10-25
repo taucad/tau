@@ -9,7 +9,7 @@ import { hydrateLease } from '#api/git/store/lease.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
 import { lfsObjectLocations } from '#api/git/lfs-keys.js';
-import { referencedLfsOids } from '#api/git/lfs-reachability.js';
+import { referencedLfsOids } from '#api/git/lfs-references.js';
 
 /**
  * How long an object stays after the last tree that reached it (charter D16,

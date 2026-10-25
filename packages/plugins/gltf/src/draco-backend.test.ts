@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const codec = vi.hoisted(() => ({
-  decoder: { kind: 'decoder' },
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Emscripten's heap view name
+  decoder: { kind: 'decoder', HEAPU8: new Uint8Array(new ArrayBuffer(131_072)) },
   encoder: { kind: 'encoder' },
   createDecoderModule: vi.fn(),
   createEncoderModule: vi.fn(),
@@ -61,5 +62,15 @@ describe('Draco backend', () => {
     await expect(backend[loaderName]()).rejects.toThrow('initialization failed');
     await expect(backend[loaderName]()).resolves.toBe(codec[name]);
     expect(codec[factoryName]).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports the decoder heap only once the decoder has loaded', async () => {
+    const { dracoDecoderHeapBytes, loadDracoDecoder, loadDracoEncoder } = await import('#draco-backend.js');
+
+    expect(dracoDecoderHeapBytes()).toBeUndefined();
+    await loadDracoEncoder();
+    expect(dracoDecoderHeapBytes()).toBeUndefined();
+    await loadDracoDecoder();
+    expect(dracoDecoderHeapBytes()).toBe(131_072);
   });
 });

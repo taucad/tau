@@ -111,7 +111,7 @@ function useModelUnitId(entryPath: string, graphicsRef: GraphicsRef): string {
  */
 export function ModelPaneviewPanel({ params }: { readonly params: ModelPaneviewPanelParams }): React.JSX.Element {
   if (!params.graphicsRef) {
-    return <ModelPaneviewPanelSurface />;
+    return <ModelPaneviewPanelSurface entryPath={params.entryPath} />;
   }
 
   return <LiveModelPaneviewPanel params={params} graphicsRef={params.graphicsRef} />;
@@ -130,7 +130,7 @@ function LiveModelPaneviewPanel({
   );
 
   if (!modelRef) {
-    return <ModelPaneviewPanelSurface />;
+    return <ModelPaneviewPanelSurface entryPath={params.entryPath} />;
   }
 
   return <LiveComponentTree params={params} graphicsRef={graphicsRef} modelRef={modelRef} />;
@@ -321,11 +321,12 @@ function LiveComponentTree({
   }, [currentSelection, failDecode, markDecoded, params.onPreviewChange, retryPreview, selectedPreview, unitId]);
 
   if (!manifest || !root || childCount === 0) {
-    return <ModelPaneviewPanelSurface />;
+    return <ModelPaneviewPanelSurface entryPath={params.entryPath} />;
   }
 
   return (
     <ModelPaneviewPanelSurface
+      entryPath={params.entryPath}
       contentRef={attachScroller}
       footer={
         <Collapsible>
@@ -333,7 +334,7 @@ function LiveComponentTree({
             <span className='truncate'>Weight · 0 of {leafPartIds.length} parts known</span>
             <span className='shrink-0 font-mono'>Unknown</span>
             {leafPartIds.length > 0 ? (
-              <CollapsibleTrigger className='shrink-0 rounded-sm underline-offset-2 hover:underline focus-visible:focus-outline'>
+              <CollapsibleTrigger className='shrink-0 rounded-sm underline-offset-2 hover:underline focus-visible:focus-outline pointer-coarse:min-h-6'>
                 Missing
               </CollapsibleTrigger>
             ) : undefined}
@@ -380,21 +381,28 @@ function LiveComponentTree({
 }
 
 function ModelPaneviewPanelSurface({
+  entryPath,
   children,
   footer,
   contentRef,
 }: {
+  /** The unit's entry, which names its region as its header names the unit. */
+  readonly entryPath: string;
   readonly children?: React.ReactNode;
   readonly footer?: React.ReactNode;
   readonly contentRef?: React.Ref<HTMLDivElement>;
 }): React.JSX.Element {
   return (
-    <div data-slot='model-unit-surface' className={cn('flex h-full flex-col', paneviewAttachedBodyClassName)}>
+    <section
+      aria-label={`Model unit ${entryPath}`}
+      data-slot='model-unit-surface'
+      className={cn('flex h-full flex-col', paneviewAttachedBodyClassName)}
+    >
       <div ref={contentRef} data-slot='model-unit-scroller' className='min-h-0 flex-1 overflow-hidden p-2'>
         {children ?? <ExplorerUnavailableState />}
       </div>
       {footer}
-    </div>
+    </section>
   );
 }
 
@@ -691,7 +699,13 @@ function ComponentRows({
 export function ExplorerEmptyState(): React.JSX.Element {
   return (
     <div className='size-full p-2'>
-      <PanelEmptyState icon={Box} title='No model components available' className='rounded-xl border bg-card' />
+      {/* Explains when parts appear (PN-TREE-3). */}
+      <PanelEmptyState
+        icon={Box}
+        title='No model components available'
+        description='Parts appear here after the model renders.'
+        className='rounded-xl border bg-card'
+      />
     </div>
   );
 }

@@ -45,6 +45,10 @@ import { GitLfsService } from '#api/git/git-lfs.service.js';
 import { tenantLfsObjectKey } from '#api/git/lfs-keys.js';
 import { GitProxyController } from '#api/git/git-proxy.controller.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
+import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';
+import type { StorageGitService } from '#api/git/worker/storage-git.service.js';
+import { startStorageHop } from '#testing/storage-hop.js';
+import type { StorageHop } from '#testing/storage-hop.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
@@ -206,6 +210,9 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
   let remoteUrl: string;
   let workspace: string;
   let repositories: GitRepositoryService;
+  /** DC1: tau-storage, behind the real hop; the git knobs live on it now. */
+  let hop: StorageHop;
+  let worker: StorageGitService;
   let storage: ObjectStorageService;
 
   const remoteFor = (token: string): string =>
@@ -324,6 +331,15 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
           useFactory: (inner: S3RepositoryStore) => wrapStore(inner),
           inject: [S3RepositoryStore],
         },
+        {
+          provide: gitExecutorKey,
+          useFactory: async (store: RepositoryStore) => {
+            hop = await startStorageHop({ store, post: async (receipt) => repositories.applyReceipt(receipt) });
+            worker = hop.worker;
+            return hop.forwarder;
+          },
+          inject: [repositoryStoreKey],
+        },
         { provide: DatabaseService, useValue: databaseStub },
         {
           provide: RedisService,
@@ -435,6 +451,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
 
   afterAll(async () => {
     await app.close();
+    await hop.close();
     await storage.deleteEntirePrefixForPurgeJob({
       namespace: 'tenants',
       keyPrefix: `${ownerId}/`,
@@ -598,13 +615,13 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     await writeFile(path.join(clone, 'part.ts'), 'export const width = 14;\n', 'utf8');
     await gitOk(['commit', '-am', 'raced revision'], clone);
 
-    repositories.faults = (point) => {
+    worker.faults = (point) => {
       if (point === 'before-manifest-commit') {
         throw new RepositoryStoreError('lost', 'another writer committed first');
       }
     };
     const raced = await runGit(['push', 'origin', 'HEAD:refs/heads/main'], clone);
-    repositories.faults = undefined;
+    worker.faults = undefined;
 
     expect(raced.code, `the lost race was accepted: ${raced.stderr}`).not.toBe(0);
     expect(raced.stderr).toMatch(/503|committed first/u);
@@ -695,13 +712,14 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     await gitOk(['commit', '-am', 'the revision that outlived its worker'], clone);
 
     const before = { generation: state.generation, derivedGeneration: state.derivedGeneration };
-    repositories.faults = (point) => {
+    worker.faults = (point) => {
       if (point === 'after-manifest-commit') {
         throw new Error('the worker died here');
       }
     };
     const killed = await runGit(['push', 'origin', 'HEAD:refs/heads/outlived'], clone);
-    repositories.faults = undefined;
+    worker.faults = undefined;
+    await worker.settled();
     await repositories.settled();
 
     expect(killed.code, 'the client must not be told a push succeeded when its worker died').not.toBe(0);
@@ -732,10 +750,10 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     await gitOk(['add', '.'], clone);
     await gitOk(['commit', '-m', 'over the ceiling'], clone);
 
-    const ceiling = repositories.repositoryByteCeiling;
-    repositories.repositoryByteCeiling = 1024;
+    const ceiling = worker.repositoryByteCeiling;
+    worker.repositoryByteCeiling = 1024;
     const refused = await runGit(['push', 'origin', 'HEAD:refs/heads/ceiling-probe'], clone);
-    repositories.repositoryByteCeiling = ceiling;
+    worker.repositoryByteCeiling = ceiling;
 
     expect(refused.code, refused.stderr).not.toBe(0);
     expect(refused.stderr).toContain('Tau: repository size limit exceeded');
@@ -780,10 +798,10 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
    * `Retry-After` rather than filling its own disk and failing halfway.
    */
   it('answers 503 with Retry-After when this worker has no room for another lease', async () => {
-    const reservation = repositories.leaseReservationFloorBytes;
-    repositories.leaseReservationFloorBytes = Number.MAX_SAFE_INTEGER;
-    const wait = repositories.admissionWaitMilliseconds;
-    repositories.admissionWaitMilliseconds = 0;
+    const reservation = worker.leaseReservationFloorBytes;
+    worker.leaseReservationFloorBytes = Number.MAX_SAFE_INTEGER;
+    const wait = worker.admissionWaitMilliseconds;
+    worker.admissionWaitMilliseconds = 0;
     /* DB1: the advertisement takes no lease, so a full disk never refuses it (TAU-API-5). */
     const advertisement = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
       headers: { Authorization: `Bearer ${callers.owner.token}` },
@@ -796,8 +814,8 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
       },
       body: '0000',
     });
-    repositories.leaseReservationFloorBytes = reservation;
-    repositories.admissionWaitMilliseconds = wait;
+    worker.leaseReservationFloorBytes = reservation;
+    worker.admissionWaitMilliseconds = wait;
 
     expect(advertisement.status).toBe(200);
     expect(await advertisement.text()).toContain('refs/heads/main');
@@ -1128,6 +1146,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
       expect(listings, 'no push compacted, so no sweep ran').toBeGreaterThan(0);
     } finally {
       parked.resolve();
+      await worker.settled();
       await repositories.settled();
       storeControl.listObjects = undefined;
     }

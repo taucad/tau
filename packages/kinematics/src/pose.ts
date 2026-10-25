@@ -267,11 +267,37 @@ const loopTime = ({ duration, loop }: Animation, time: number): number => {
   }
 };
 
+type AnimationTrack = ReadonlyArray<Readonly<{ time: number; value: number }>>;
+
+// Like admitted mechanisms, animations are immutable and cached by identity. Weak keys release
+// the prepared tracks with the source clip; seeking never depends on the previous sample time.
+const animationTracks = new WeakMap<Animation, ReadonlyMap<string, AnimationTrack>>();
+
+const prepareAnimationTracks = (animation: Animation): ReadonlyMap<string, AnimationTrack> => {
+  const cached = animationTracks.get(animation);
+  if (cached) {
+    return cached;
+  }
+  const tracks = new Map<string, Array<{ time: number; value: number }>>();
+  for (const frame of animation.keyframes) {
+    for (const [id, value] of Object.entries(frame.coordinates)) {
+      let track = tracks.get(id);
+      if (!track) {
+        track = [];
+        tracks.set(id, track);
+      }
+      track.push({ time: frame.time, value });
+    }
+  }
+  animationTracks.set(animation, tracks);
+  return tracks;
+};
+
 /**
  * Sample an animation's driver coordinates at a time, honouring its loop mode. Each
  * coordinate interpolates linearly between the keyframes that set it and holds outside them.
  * Take the animation from an admitted mechanism, which guarantees sorted keyframes, a
- * positive duration and known driver ids.
+ * positive duration and known driver ids. Treat the animation as immutable, like its admitted mechanism.
  *
  * @param input - Animation and time in seconds.
  * @returns Driver coordinates in mechanism units for every coordinate the keyframes set.
@@ -308,15 +334,20 @@ const loopTime = ({ duration, loop }: Animation, time: number): number => {
 export const sampleAnimation = ({ animation, time }: SampleAnimationInput): Readonly<Record<string, number>> => {
   const local = loopTime(animation, time);
   const coordinates: Record<string, number> = {};
-  const ids = new Set(animation.keyframes.flatMap((keyframe) => Object.keys(keyframe.coordinates)));
-  for (const id of ids) {
-    const track = animation.keyframes.flatMap((keyframe) => {
-      const value = keyframe.coordinates[id];
-      return value === undefined ? [] : [{ time: keyframe.time, value }];
-    });
-    const next = track.findIndex((keyframe) => keyframe.time > local);
-    const after = track[next];
-    const before = track[next - 1];
+  for (const [id, track] of prepareAnimationTracks(animation)) {
+    // First keyframe strictly after this time: duplicate times retain the last authored value.
+    let low = 0;
+    let high = track.length;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (track[middle]!.time > local) {
+        high = middle;
+      } else {
+        low = middle + 1;
+      }
+    }
+    const after = track[low];
+    const before = track[low - 1];
     coordinates[id] =
       after === undefined || before === undefined
         ? (after ?? track.at(-1)!).value

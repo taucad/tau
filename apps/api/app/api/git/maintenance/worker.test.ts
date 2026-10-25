@@ -58,9 +58,12 @@ describe('bounded maintenance recovery', () => {
         return undefined;
       },
     });
-    vi.mocked(completeProjectDeletion).mockImplementation(async ({ store: scoped, projectId }) => {
+    vi.mocked(completeProjectDeletion).mockImplementation(async ({ fence, projectId }) => {
       try {
-        await scoped.readManifest({ ownerId: 'owner', projectId }, AbortSignal.timeout(5000));
+        await fence(
+          { locator: { ownerId: 'owner', projectId }, committedBy: 'owner', at: new Date() },
+          AbortSignal.timeout(5000),
+        );
       } catch (error) {
         expect(error).toMatchObject({ name: 'AbortError' });
         aborted = true;

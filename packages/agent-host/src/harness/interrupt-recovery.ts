@@ -72,6 +72,37 @@ decide whether to repeat, adjust, or skip the cancelled work. Do NOT assume
 the cancelled tools left the system unchanged.`;
 };
 
+/**
+ * The output a resume records for a call whose host stopped before it returned (D23, I6, I13).
+ *
+ * The call's durable `tool-input` row is its start marker: with no output row after it, the effect may have started,
+ * finished or neither. The call is recorded `interrupted` and never run again, whether or not it recalled an approval,
+ * and an approval it recalled stays spent. `errorCode` keeps the reminder's cause tally; `status` is the outcome a
+ * tool with its own result vocabulary, such as `shell`, reads.
+ *
+ * @param input - The unanswered call, the new message id and the time it is recorded.
+ * @returns The `tool-output` message that answers the call.
+ */
+export const interruptedToolOutput = (input: {
+  readonly id: string;
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly timestamp: number;
+}): Extract<ProviderMessage, { readonly role: 'tool-output' }> => ({
+  id: input.id,
+  role: 'tool-output',
+  toolCallId: input.toolCallId,
+  toolName: input.toolName,
+  content: {
+    status: 'interrupted',
+    errorCode: 'CLIENT_DISCONNECTED',
+    message:
+      'The prior host stopped before this tool returned. It may have changed files and was not run again. Verify state before retrying.',
+  },
+  isError: true,
+  metadata: { timestamp: input.timestamp },
+});
+
 /** Build the canonical API-compatible reminder for the trailing interrupted tool block. */
 export const createInterruptRecoveryMessage = async (input: {
   readonly messages: readonly ProviderMessage[];

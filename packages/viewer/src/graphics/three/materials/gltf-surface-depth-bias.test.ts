@@ -6,6 +6,8 @@ import {
   applyGltfSurfaceDepthBias,
   applyGltfSurfaceDepthBiasToScene,
   isGltfSurfaceDepthBiasRenderHook,
+  getGltfSurfaceDepthBiasCohort,
+  syncGltfSurfaceDepthBias,
   refreshGltfSurfaceDepthBias,
 } from '#graphics/three/materials/gltf-surface-depth-bias.js';
 import {
@@ -106,6 +108,23 @@ describe('GLTF surface depth bias', () => {
       render({ getPixelRatio: () => pixelRatio });
       expect(scale.value).toBe(margin);
     }
+  });
+
+  it.each([true, false])('sizes node surface separation to actual DPR and reversed depth %s', (reversedDepthBuffer) => {
+    const material = new MeshStandardMaterial();
+    applyGltfSurfaceDepthBias(material, 'webgpu');
+    const cohort = getGltfSurfaceDepthBiasCohort(material, material.customProgramCacheKey());
+    const { version } = material;
+    for (const pixelRatio of [1, 1.5, 2, 3]) {
+      syncGltfSurfaceDepthBias.call(material, { getPixelRatio: () => pixelRatio, reversedDepthBuffer });
+      const sign = reversedDepthBuffer ? -1 : 1;
+      expect(material.polygonOffsetFactor).toBe(sign * (0.5 * pixelRatio + 0.5));
+      expect(material.polygonOffsetUnits).toBe(sign * 2);
+      expect(getGltfSurfaceDepthBiasCohort(material, material.customProgramCacheKey())).toEqual(cohort);
+      expect(material.version).toBe(version);
+    }
+    material.polygonOffsetFactor = 77;
+    expect(getGltfSurfaceDepthBiasCohort(material, material.customProgramCacheKey())).toBeUndefined();
   });
 
   it('shares one render hook across biased materials so they stay batchable', () => {

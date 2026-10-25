@@ -92,6 +92,7 @@ import {
   kernelForkEnvAllowlist,
   sanitizeServicesContext,
 } from '#main/project-roots.js';
+import { registerPermissionBridge } from '#main/permission-bridge.js';
 import { createServicesBroker, rendererServicesConcerns, ServicesQuiescingError } from '#main/services-broker.js';
 import type { ServicesConcern } from '#main/services-broker.js';
 import { createGeometryBroker } from '#main/geometry-broker.js';
@@ -938,6 +939,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
       ...(machinesEnabled ? { TAU_DESKTOP_MACHINES_DIR: machinesDirectory } : {}),
       ...legacyMachinesEnvironment,
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+      TAU_DESKTOP_PERMISSIONS_DIR: join(app.getPath('userData'), 'permissions'),
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
     createChannel: () => new MessageChannelMain(),
@@ -953,6 +956,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     log: (level, event, detail) => {
       log.log(level, event, detail);
     },
+    onUtilityFrame: (frame) => permissionBridge.accept(frame),
   });
   /* Q-streamed-host: a streamed program needs this computer awake for its whole run. */
   const stopKeepingAwake = machinesEnabled
@@ -1239,6 +1243,21 @@ const bootstrapElectronApp = async (): Promise<void> => {
     log.log('error', 'ipc.untrusted-sender', { url: senderFrame?.url });
     return false;
   };
+
+  /* W9: the permission selector's store lives in the services host; main validates and forwards. */
+  const permissionBridge = registerPermissionBridge({
+    handle: (channel, listener) => {
+      ipcMain.handle(channel, listener);
+    },
+    trusted,
+    roots,
+    send: (frame) => {
+      services.send(frame);
+    },
+    log: (level, event, detail) => {
+      log.log(level, event, detail);
+    },
+  });
 
   const updaterReady = Promise.withResolvers<DesktopUpdater>();
   ipcMain.handle(desktopUpdateChannels.snapshot, async (event) => {

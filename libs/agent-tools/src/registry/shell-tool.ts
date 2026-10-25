@@ -7,14 +7,10 @@
  *
  * @module
  */
-import type {
-  ShellInput,
-  ShellNotStartedCode,
-  ShellOutput,
-  ShellToolIdentity,
-  ToolInputValidationError,
-} from '@taucad/chat';
-import { isShellError, shellHostDescription, shellInputSchema } from '@taucad/chat';
+import type { ToolInputValidationError } from '@taucad/chat';
+import type { ShellInput, ShellNotStartedCode, ShellOutput, ShellToolIdentity } from '@taucad/chat/schemas/tools/shell';
+/* The schema's own subpath: the `@taucad/chat` barrel would pull the whole chat library into `@taucad/host`. */
+import { isShellError, shellHostDescription, shellInputSchema } from '@taucad/chat/schemas/tools/shell';
 import { toolDescriptions, toolName } from '@taucad/chat/constants';
 import { toProviderToolJsonSchema } from '@taucad/chat/schemas/provider-tool-schemas';
 import { z } from 'zod';

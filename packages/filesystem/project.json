@@ -5,6 +5,14 @@
   "projectType": "library",
   "tags": ["scope:shared", "type:package"],
   "targets": {
+    "test:authority-writer": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "vitest run --config vitest.config.ts src/backend/node/authority-writer-lock.test.ts src/backend/node/authority-writer-host.test.ts --typecheck.enabled=false"
+      }
+    },
     "build": {
       "executor": "nx:run-commands",
       "dependsOn": ["^build"],

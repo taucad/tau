@@ -708,6 +708,14 @@
         "command": "node --import @oxc-node/core/register --test apps/desktop/scripts/desktop-sourcemaps.test.mts"
       }
     },
+    "test:authority-writer": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "vitest run --config vitest.config.ts src/tau/services-host.impl.test.ts src/tau/authority-writer-electron.test.ts --testNamePattern=\"filesystem authority lifetime|native Electron authority ownership\""
+      }
+    },
     "test": {
       "dependsOn": ["test-sourcemaps", "test-first-use-download"]
     },

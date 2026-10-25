@@ -18,17 +18,24 @@ const treeItem = (path: string): Locator =>
  * lives in the gallery"), so the row's description and the menu's Retry preview item are where a deferred preview
  * shows.
  */
-const expectDeferredPreviewStatus = async (list: Locator): Promise<void> => {
-  // The first part row, named by its actions button ("Actions for <part>").
+const expectDeferredPreviewStatus = async (list: Locator, name: string): Promise<void> => {
+  // The part's own row, by its accessible name; its status passes through "Preview loading" while the deferral is
+  // decided, so the description is polled until it settles on the deferred status.
+  await target.expectAccessibleDescription(
+    list.getByRole('button', { name, exact: true }),
+    'Preview unavailable',
+    30_000,
+  );
+};
+
+/** The first part row's name, read from its actions button ("Actions for <part>"). */
+const firstPartName = async (list: Locator): Promise<string> => {
   const actions = await target.getAttribute(list.getByRole('button', { name: /^Actions for /u }).first(), 'aria-label');
   const name = actions?.replace(/^Actions for /u, '');
   if (!name) {
     throw new Error('The Model list has no part row.');
   }
-  await target.expectAccessibleDescription(
-    list.getByRole('button', { name, exact: true }).first(),
-    'Preview unavailable',
-  );
+  return name;
 };
 
 /**
@@ -408,8 +415,9 @@ test('shows decoded part previews in the real Model rows and selected Properties
   /** Milliseconds. */
   let automaticDeferDuration: number | undefined;
   if (target.currentWebGpuProfile() === 'software') {
-    await target.click(list.getByRole('button', { name: /^Actions for /u }).first());
-    await expectDeferredPreviewStatus(list);
+    const deferredPart = await firstPartName(list);
+    await target.click(list.getByRole('button', { name: `Actions for ${deferredPart}`, exact: true }));
+    await expectDeferredPreviewStatus(list, deferredPart);
     await target.expectVisible(selectors.getByRole('menuitem', { name: 'Retry preview' }));
     automaticDeferDuration = await target.evaluate(() => {
       const state = (globalThis as typeof globalThis & { __TAU_PART_PREVIEW_PROBE__?: { startedAt: number } })
@@ -783,8 +791,9 @@ test('defers a cold part preview worker and resumes automatic previews after exp
       2,
     ),
   );
-  await target.click(list.getByRole('button', { name: /^Actions for /u }).first());
-  await expectDeferredPreviewStatus(list);
+  const deferredPart = await firstPartName(list);
+  await target.click(list.getByRole('button', { name: `Actions for ${deferredPart}`, exact: true }));
+  await expectDeferredPreviewStatus(list, deferredPart);
   await target.expectVisible(selectors.getByRole('menuitem', { name: 'Retry preview' }));
   await target.keyboardPress('Escape');
   await dragViewport();
@@ -810,8 +819,8 @@ test('defers a cold part preview worker and resumes automatic previews after exp
   // Limit explicit startup to one part, then measure new automatic demand on a warm worker.
   const filter = selectors.getByRole('searchbox', { name: 'Filter parts' });
   await target.fill(filter, 'Preview part 7');
-  await target.click(list.getByRole('button', { name: /^Actions for /u }).first());
-  await expectDeferredPreviewStatus(list);
+  await target.click(list.getByRole('button', { name: 'Actions for Preview part 7', exact: true }));
+  await expectDeferredPreviewStatus(list, 'Preview part 7');
   await target.click(selectors.getByRole('menuitem', { name: 'Retry preview' }));
   await target.waitFor(
     () =>

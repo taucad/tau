@@ -293,19 +293,57 @@ for (const backend of ['webgl', 'webgpu'] as const) {
       await target.delay(150);
       const changed = await measureState();
       expect(changed.activeCandidateId).not.toBe(firstTarget);
-      // Exercise disposal in the real renderer; eight repeated back-and-forth sweeps must plateau.
-      for (let sweep = 0; sweep < 8; sweep++) {
-        // oxlint-disable-next-line no-await-in-loop -- Sequential real pointer gestures exercise resource replacement.
+      // Exercise disposal in the real renderer; repeated back-and-forth sweeps must plateau.
+      const sweep = async (): Promise<void> => {
         await target.mouseMove(first.x, first.y);
-        // oxlint-disable-next-line no-await-in-loop -- Wait for each renderer update before replacing its geometry.
+        // Wait for each renderer update before replacing its geometry.
         await target.delay(40);
-        // oxlint-disable-next-line no-await-in-loop -- Sequential real pointer gestures exercise resource replacement.
         await target.mouseMove(second.x, second.y);
-        // oxlint-disable-next-line no-await-in-loop -- Wait for each renderer update before replacing its geometry.
         await target.delay(40);
+      };
+      /** The renderer's geometry count once it holds still: the scene's late resources (environment, grid) settled. */
+      const settledGeometryCount = async (): Promise<number> => {
+        let previous = -1;
+        let settled = -1;
+        await expect
+          .poll(
+            async () => {
+              const { rendererGeometryCount } = await measureState();
+              settled = rendererGeometryCount === previous ? rendererGeometryCount : -1;
+              previous = rendererGeometryCount;
+              return settled >= 0;
+            },
+            { timeout: 20_000, interval: 250 },
+          )
+          .toBe(true);
+        return settled;
+      };
+      const counts: Array<{ sweeps: number; immediate: number; settled: number }> = [
+        {
+          sweeps: 0,
+          immediate: changed.rendererGeometryCount,
+          settled: await settledGeometryCount(),
+        },
+      ];
+      for (let sweeps = 1; sweeps <= 8; sweeps++) {
+        // oxlint-disable-next-line no-await-in-loop -- Sequential real pointer gestures exercise resource replacement.
+        await sweep();
+        if (sweeps % 4 === 0) {
+          // oxlint-disable-next-line no-await-in-loop -- Each sample follows its sweeps.
+          const { rendererGeometryCount: immediate } = await measureState();
+          // oxlint-disable-next-line no-await-in-loop -- Each sample follows its sweeps.
+          counts.push({ sweeps, immediate, settled: await settledGeometryCount() });
+        }
       }
+      await target.writeArtifact(
+        `measure-hover-geometry-${backend}.json`,
+        JSON.stringify({ backend, profile: target.currentWebGpuProfile(), counts }, undefined, 2),
+      );
+      const [baseline, afterFour, afterEight] = counts.map(({ settled }) => settled);
+      // Hover geometry is replaced, not accumulated: the count holds across sweeps once the scene has settled.
+      expect(afterFour, JSON.stringify(counts)).toBeLessThanOrEqual(baseline! + 2);
+      expect(afterEight, JSON.stringify(counts)).toBeLessThanOrEqual(afterFour! + 2);
       const after = await measureState();
-      expect(after.rendererGeometryCount).toBeLessThanOrEqual(changed.rendererGeometryCount + 2);
       expect(after.measurementUiMeshCount).toBeLessThanOrEqual(12);
     });
 

@@ -111,6 +111,10 @@ export function WorkbenchRecordHost(): React.JSX.Element {
   const appliedWorkbenchRef = useRef<WorkbenchLaneNode | undefined>(undefined);
   const personViewerRef = useRef<ViewerNode | undefined>(undefined);
   const personWorkbenchRef = useRef<WorkbenchLaneNode | undefined>(undefined);
+  /** Pane requests made before the record's first read, applied on top of each read until they are written. */
+  const preReadChangesRef = useRef<Array<(current: WorkbenchLaneNode) => WorkbenchLaneNode>>([]);
+  /** The arrangement last handed to the workbench adapter. */
+  const shownWorkbenchRef = useRef<WorkbenchLaneNode | undefined>(undefined);
   const acknowledge = useCallback(
     (epoch: number): void => {
       const application = applicationRef.current;
@@ -232,17 +236,28 @@ export function WorkbenchRecordHost(): React.JSX.Element {
           const staleWorkbench =
             personWorkbenchRef.current &&
             (Boolean(locallyAuthored?.workbench) || (previous && sameNode(previous.workbench, next.workbench)));
+          // Pane requests made before this read are shown with it, in the same application, so a later application
+          // of the read cannot replace them; the record holds them once their edit is written.
+          let shown = next.workbench;
+          if (source === 'read') {
+            for (const change of preReadChangesRef.current) {
+              shown = change(shown);
+            }
+          }
           if (workbench && !staleWorkbench) {
-            if (appliedWorkbenchRef.current && sameNode(appliedWorkbenchRef.current, next.workbench)) {
-              applicationRef.current.workbench = true;
+            if (appliedWorkbenchRef.current && sameNode(appliedWorkbenchRef.current, shown)) {
+              applicationRef.current.workbench = sameNode(shown, next.workbench);
             } else {
-              workbench(next.workbench, () => {
+              shownWorkbenchRef.current = shown;
+              workbench(shown, () => {
                 if (applicationRef.current.epoch !== epoch || workbenchRef.current !== workbench) {
                   return;
                 }
-                appliedWorkbenchRef.current = next.workbench;
-                applicationRef.current.workbench = true;
-                acknowledge(epoch);
+                appliedWorkbenchRef.current = shown;
+                if (sameNode(shown, next.workbench)) {
+                  applicationRef.current.workbench = true;
+                  acknowledge(epoch);
+                }
               });
             }
           }
@@ -511,6 +526,7 @@ export function WorkbenchRecordHost(): React.JSX.Element {
         const current = store.snapshot().refusal ? store.snapshot().layout : store.intendedLayout();
         if (current) {
           const { epoch } = applicationRef.current;
+          shownWorkbenchRef.current = current.workbench;
           apply(current.workbench, () => {
             if (applicationRef.current.epoch !== epoch || workbenchRef.current !== apply) {
               return;
@@ -546,8 +562,11 @@ export function WorkbenchRecordHost(): React.JSX.Element {
         if (!store.ready()) {
           if (typeof node === 'function') {
             const change = node;
+            preReadChangesRef.current = [...preReadChangesRef.current, change];
             const applyAfterFirstRead = async (): Promise<void> => {
-              if (!(await firstRead()) || store.snapshot().refusal) {
+              const read = await firstRead();
+              preReadChangesRef.current = preReadChangesRef.current.filter((queued) => queued !== change);
+              if (!read || store.snapshot().refusal) {
                 unapplied?.();
                 return;
               }
@@ -555,10 +574,11 @@ export function WorkbenchRecordHost(): React.JSX.Element {
               const workbench = change(current.workbench);
               personWorkbenchRef.current = workbench;
               void store.edit({ ...current, workbench });
-              // The read has just shown the saved arrangement on a mounted workbench, and the edit's echo is locally
-              // authored, so it is not shown again when it lands: show the change now.
+              // The read showed the change on a workbench mounted before it; one that mounted since was seeded with the
+              // read alone, and the edit's echo is locally authored, so it is not shown when it lands: show it now.
               const apply = workbenchRef.current;
-              if (apply) {
+              if (apply && JSON.stringify(shownWorkbenchRef.current) !== JSON.stringify(workbench)) {
+                shownWorkbenchRef.current = workbench;
                 apply(workbench, () => {
                   if (workbenchRef.current === apply) {
                     appliedWorkbenchRef.current = workbench;

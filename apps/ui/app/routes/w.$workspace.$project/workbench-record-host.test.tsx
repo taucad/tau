@@ -634,7 +634,7 @@ describe('live workbench record host', () => {
     });
     gate.resolve();
     await waitFor(() => {
-      expect(shown).toContainEqual(first().workbench);
+      expect(shown).not.toHaveLength(0);
     });
     await act(async () => undefined);
     // The mounted workbench reports what it shows on its next change (here a file opening) before the debounced pane
@@ -658,6 +658,40 @@ describe('live workbench record host', () => {
       },
       { timeout: 1600 },
     );
+    host.unmount();
+  });
+
+  it('shows a pane requested before the read together with the read, so the read cannot replace it', async () => {
+    const gate = Promise.withResolvers<void>();
+    const host = mount({ initialRead: gate.promise });
+    const shown: unknown[] = [];
+    const apply = vi.fn((node: unknown, applied: () => void) => {
+      shown.push(node);
+      applied();
+    });
+    act(() => {
+      host.controller.registerWorkbench(apply);
+      host.controller.personWorkbenchChanged((node) =>
+        node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane: 'share' }] } : node,
+      );
+    });
+    gate.resolve();
+    const requested = {
+      kind: 'group',
+      tabs: [
+        { kind: 'pane', pane: 'parameters' },
+        { kind: 'pane', pane: 'share' },
+      ],
+    };
+    await waitFor(
+      () => {
+        expect(workbenchRecords.layout.read(host.bytes!)).toMatchObject({ record: { workbench: requested } });
+      },
+      { timeout: 1600 },
+    );
+    // The mounted workbench is never handed the saved arrangement without the pane, so nothing applied late can
+    // leave it showing that.
+    expect(shown).toEqual([requested]);
     host.unmount();
   });
 

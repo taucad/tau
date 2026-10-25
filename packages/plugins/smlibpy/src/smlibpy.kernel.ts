@@ -549,6 +549,10 @@ const smlibpyKernelDefinition = defineKernel({
     context.session.release(handle.handleId, handle.sessionGeneration);
   },
 
+  // Observation only: the resident set of the worker's process tree; `heapBytes` stays unimplemented, so recycling
+  // and `rendering.heapBytes` are unchanged.
+  observedChildResidentBytes: async (context) => context.session.sampleResident?.(),
+
   async onDispose(context) {
     try {
       await context.session.cleanup();

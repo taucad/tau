@@ -4,7 +4,7 @@ native-process-core: minor
 python-kernel-core: minor
 dotnet-kernel-core: minor
 host: minor
-cli: patch
+cli: minor
 build123d: minor
 smlibpy: minor
 picogk: minor

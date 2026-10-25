@@ -91,6 +91,65 @@ export const runtimeInitializeMemoryHandleSchema = z
   })
   .catchall(z.unknown());
 
+// ---------- Operation observation ----------
+
+export const runtimeObservationModeSchema = z.enum(['off', 'facts']);
+
+// Zod 4 numbers refuse NaN and the infinities.
+const finiteNonnegative = z.number().nonnegative();
+const boundedName = z.string().min(1).max(128);
+
+/** The trailing facts a worker posts after a terminal reply; bounded counts and durations only. */
+export const workerOperationFactsSchema = z
+  .object({
+    queue: finiteNonnegative,
+    execution: finiteNonnegative,
+    cold: z.boolean(),
+    reuse: z.enum(['cache', 'computed', 'off', 'none']),
+    heapBytes: finiteNonnegative.optional(),
+    heapSource: z.enum(['kernel', 'child', 'resident', 'none']).optional(),
+    realm: z.enum(['web-worker', 'node-worker', 'utility', 'process', 'in-process']).optional(),
+    plugin: boundedName.optional(),
+    triangles: finiteNonnegative.optional(),
+    parameters: z
+      .object({
+        declared: z.number().int().nonnegative(),
+        modified: z.number().int().nonnegative(),
+        unknown: z.number().int().nonnegative().optional(),
+        truncated: z.literal(true).optional(),
+        features: z
+          .array(z.enum(['units', 'array', 'decimal', 'structured']))
+          .max(4)
+          .readonly()
+          .optional(),
+      })
+      .strip()
+      .optional(),
+    phases: z
+      .object({
+        prepare: finiteNonnegative.optional(),
+        resolve: finiteNonnegative.optional(),
+        compute: finiteNonnegative.optional(),
+        mesh: finiteNonnegative.optional(),
+        export: finiteNonnegative.optional(),
+        reuse: finiteNonnegative.optional(),
+        other: finiteNonnegative.optional(),
+      })
+      .strip()
+      .optional(),
+    middleware: z
+      .object({
+        total: z.number(),
+        slowestId: z.string().max(128),
+        slowest: z.number(),
+        ran: z.array(boundedName).max(8).readonly().optional(),
+      })
+      .strip()
+      .optional(),
+    bundler: boundedName.optional(),
+  })
+  .strip();
+
 // ---------- Initialize call ----------
 
 export const runtimeInitializeArgsSchema = z
@@ -100,12 +159,14 @@ export const runtimeInitializeArgsSchema = z
     sessionId: z.string().optional(),
     resumeToken: z.string().optional(),
     operationId: z.string().min(1).optional(),
+    observation: runtimeObservationModeSchema.optional(),
   })
   .catchall(z.unknown());
 
 export const runtimeInitializeResultSchema = z
   .object({
     capabilities: capabilitiesManifestSchema,
+    observation: z.array(runtimeObservationModeSchema).max(4).readonly().optional(),
   })
   .catchall(z.unknown());
 

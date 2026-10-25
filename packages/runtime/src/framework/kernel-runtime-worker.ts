@@ -56,6 +56,7 @@ import type { RenderRequest } from '#types/runtime-middleware-v2.types.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 import { resolveRuntimeDefinition } from '#worker/runtime-definition.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
+import type { ObservedKernelHeap } from '#framework/worker-operation-observer.js';
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 import { RuntimeAlreadyInitializedError } from '#transport/runtime-transport.types.js';
 import { sourcePathMatchesExtensions } from '@taucad/utils/file';
@@ -146,6 +147,8 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   private readonly runtime: AnyRuntimeDefinition;
   private readonly loadedKernels = new Map<string, LoadedKernel>();
   private activeKernelId: string | undefined;
+  /** The kernel the latest owner-bound call ran on; operations bind kernels per owner, not through the active id. */
+  private lastOwnerKernel: LoadedKernel | undefined;
   private readonly selectionCache = new Map<string, { id: string; method: SelectionMethod }>();
   private readonly selectionErrors = new Map<string, unknown>();
   private kernelPlugins: readonly KernelPluginEntry[] = [];
@@ -182,6 +185,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       this.kernelInitOptionsMap.clear();
       this.kernelImplementationAssetsMap.clear();
       this.activeKernelId = undefined;
+      this.lastOwnerKernel = undefined;
       this.selectionCache.clear();
       this.selectionErrors.clear();
       this.configureRuntimePlugins({
@@ -222,6 +226,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     }
     this.loadedKernels.clear();
     this.activeKernelId = undefined;
+    this.lastOwnerKernel = undefined;
     this.selectionCache.clear();
     this.selectionErrors.clear();
     this.cachedDetectionDeps = undefined;
@@ -906,6 +911,33 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     }
   }
 
+  protected override observedKernelHeap(): ObservedKernelHeap | undefined {
+    const kernel =
+      this.lastOwnerKernel ??
+      (this.activeKernelId === undefined ? undefined : this.loadedKernels.get(this.activeKernelId));
+    if (!kernel?.initialized) {
+      return undefined;
+    }
+    const { definition, ctx } = kernel;
+    /* The native child sample hook belongs to the native kernels; it is read where a definition declares it. */
+    const childHook: unknown = (definition as { readonly observedChildResidentBytes?: unknown })
+      .observedChildResidentBytes;
+    const sampleChild =
+      typeof childHook === 'function'
+        ? async (): Promise<number | undefined> => {
+            const bytes: unknown = await (childHook as (context: unknown) => unknown).call(definition, ctx);
+            return typeof bytes === 'number' ? bytes : undefined;
+          }
+        : undefined;
+    return {
+      ...(definition.observedHeapBytes === undefined
+        ? {}
+        : { observedHeapBytes: () => definition.observedHeapBytes?.(ctx) }),
+      ...(definition.heapBytes === undefined ? {} : { heapBytes: () => definition.heapBytes?.(ctx) }),
+      ...(sampleChild === undefined ? {} : { childResident: sampleChild }),
+    };
+  }
+
   protected override kernelHeapBytesForOwner(owner: OperationOwner): number | undefined {
     const kernel = this.getKernelForOwner(owner);
     const bytes = kernel?.initialized ? kernel.definition.heapBytes?.(kernel.ctx) : undefined;
@@ -1099,6 +1131,15 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   }
 
   private getKernelForOwner(owner: OperationOwner): LoadedKernel | undefined {
+    const kernel = this.lookupKernelForOwner(owner);
+    if (kernel) {
+      // The kernel an operation last ran on is the one whose heap its observation reports.
+      this.lastOwnerKernel = kernel;
+    }
+    return kernel;
+  }
+
+  private lookupKernelForOwner(owner: OperationOwner): LoadedKernel | undefined {
     const binding = owner.binding as RuntimeKernelBinding | undefined;
     if (binding?.kernel) {
       return binding.kernel;

@@ -1843,6 +1843,9 @@ importers:
       '@taucad/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@taucad/esbuild':
+        specifier: workspace:*
+        version: link:../../packages/plugins/esbuild
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
@@ -4014,12 +4017,9 @@ importers:
 
   packages/geospec:
     dependencies:
-      '@taucad/esbuild':
-        specifier: workspace:*
-        version: link:../plugins/esbuild
-      '@taucad/runtime':
-        specifier: workspace:*
-        version: link:../runtime
+      esbuild:
+        specifier: 'catalog:'
+        version: 0.28.2
       geospec-engine:
         specifier: 'catalog:'
         version: 0.4.0
@@ -4054,6 +4054,9 @@ importers:
       '@taucad/carvera':
         specifier: workspace:*
         version: link:../plugins/carvera
+      '@taucad/esbuild':
+        specifier: workspace:*
+        version: link:../plugins/esbuild
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../filesystem

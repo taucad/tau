@@ -79,6 +79,11 @@ export type GeoSpecNodePoolOptions = {
    * `GeoSpecExporterModule`). A host that composes its own exporters, such as `tau test`, passes them here.
    */
   exporterModules?: readonly string[];
+  /**
+   * URL of a module each worker imports whose default export creates its module VM (see `GeoSpecModuleVmModule`);
+   * absent for GeoSpec's plain VM. A host that resolves npm packages in specs, such as `tau test`, passes it here.
+   */
+  moduleVmModule?: string;
   /** Number of outer worker isolates; defaults to one. */
   workers?: number;
   /**
@@ -140,6 +145,7 @@ export const createGeoSpecNodePoolRunner = (options: GeoSpecNodePoolOptions): Ge
               projectPath: options.projectPath,
               ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
               ...(options.exporterModules === undefined ? {} : { exporterModules: [...options.exporterModules] }),
+              ...(options.moduleVmModule === undefined ? {} : { moduleVmModule: options.moduleVmModule }),
               ...(options.sources === undefined ? {} : { sources: { ...options.sources } }),
               grant: grants[index++],
             },

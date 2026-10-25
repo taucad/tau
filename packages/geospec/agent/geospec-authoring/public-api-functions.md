@@ -1,6 +1,6 @@
 # geospec — Functions
 
-47 top-level symbols. Signatures are verbatim typescript.
+48 top-level symbols. Signatures are verbatim typescript.
 
 // GeoSpec suite helper used inside VM-executed test modules
 // describe (function)
@@ -128,6 +128,11 @@ export declare function runGeoSpecModule(options: RunGeoSpecModuleOptions): Prom
 // isGeoSpecTimeoutCode (function)
 export declare function isGeoSpecTimeoutCode(code: string): code is GeoSpecTimeoutCode;
 //   code: Any diagnostic or issue code
+
+// Create GeoSpec's default module VM
+// createPlainModuleVm (function)
+export declare function createPlainModuleVm(options: ModuleVmOptions): Promise<ModuleVm>;
+//   options: The project filesystem
 
 // Compose compiled assertion and model bindings with the SDK's serial lifecycle
 // createNativeGeoSpecRunner (function)

@@ -3,10 +3,9 @@ import type { BinaryLike } from 'node:crypto';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import type { VmFileSystem } from '@taucad/esbuild/vm';
 import { describe, expect, it } from 'vitest';
 import { createCollector, runGeoSpecModule } from 'geospec/runner';
-import type { GeoSpecAssertion, GeoSpecBoundingBoxExpectation } from 'geospec/runner';
+import type { GeoSpecAssertion, GeoSpecBoundingBoxExpectation, VmFileSystem } from 'geospec/runner';
 import type {
   GeoSpecAssertionClient,
   GeoSpecCanonicalClaimReport,

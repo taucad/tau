@@ -592,12 +592,19 @@ const disposePipelineResources = (
 
 type PostProcessingWebGpuProperties = Readonly<{
   settings?: Partial<PostProcessingSettings>;
-  /** The viewer's post-processing toggle: off keeps the tone-mapped scene pass and drops AO. */
+  /** Off keeps the tone-mapped scene pass and drops AO (a software adapter cannot afford it). */
   aoAllowed: boolean;
+  /** Render the alternate projection once after a quiet frame, so the first camera switch is warm. Default on. */
+  speculativePreparation?: boolean;
   toneMapping: ToneMapping;
 }>;
 
-function PostProcessingWebGpuActive({ settings, aoAllowed, toneMapping }: PostProcessingWebGpuProperties): ReactNode {
+function PostProcessingWebGpuActive({
+  settings,
+  aoAllowed,
+  speculativePreparation = true,
+  toneMapping,
+}: PostProcessingWebGpuProperties): ReactNode {
   const { gl, scene, invalidate, size, viewport } = useThree();
   const { aoEnabled, aoCompositeStage, radiusCssPixels, gtaoIntensity, gtaoDistanceFalloff, displayMode } = {
     ...defaultPostProcessingSettings,
@@ -688,7 +695,7 @@ function PostProcessingWebGpuActive({ settings, aoAllowed, toneMapping }: PostPr
 
   useLayoutEffect(() => {
     const renderer = gl as unknown as WebGPURenderer;
-    if (!(renderer.domElement instanceof HTMLCanvasElement)) {
+    if (!speculativePreparation || !(renderer.domElement instanceof HTMLCanvasElement)) {
       return;
     }
     const preparation = scheduleCameraPreparation(renderer.domElement, () => {
@@ -744,7 +751,7 @@ function PostProcessingWebGpuActive({ settings, aoAllowed, toneMapping }: PostPr
       preparation.dispose();
       preparationRef.current = undefined;
     };
-  }, [cameraRig, gl, invalidate, scene, toneMapping, withAo]);
+  }, [cameraRig, gl, invalidate, scene, speculativePreparation, toneMapping, withAo]);
 
   const retarget = useCallback(
     (camera: ThreeCamera, snapshot: CameraDriverSnapshot): void => {

@@ -61,7 +61,7 @@ export const documentProtocolCallNames = [
   'transcode',
   'dispose',
 ] as const;
-/** Eight client commands. @public */
+/** Nine client commands. @public */
 export const documentProtocolClientNotifyNames = [
   'open',
   'update',
@@ -71,8 +71,9 @@ export const documentProtocolClientNotifyNames = [
   'closeView',
   'abort',
   'binaryMaterialised',
+  'observe',
 ] as const;
-/** Twelve host notifications. @public */
+/** Thirteen host notifications. @public */
 export const documentProtocolWorkerNotifyNames = [
   'described',
   'evaluating',
@@ -86,6 +87,7 @@ export const documentProtocolWorkerNotifyNames = [
   'logBatch',
   'telemetry',
   'capabilitiesUpdated',
+  'operationFacts',
 ] as const;
 /** Every notify in the document protocol. @public */
 export const documentProtocolNotifyNames = [

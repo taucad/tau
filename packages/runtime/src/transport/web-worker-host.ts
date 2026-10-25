@@ -73,6 +73,7 @@ export const webWorkerHost = (
       }
       port = acquireWebWorkerSelfPort();
       serverHandle = createDocumentWorkerDispatcher(options.worker, port, {
+        realm: 'web-worker',
         bindingsFactory: (handle) => createWorkerHostBindings(handle),
       });
       crashTrapDispose = installWorkerCrashTrap(serverHandle);

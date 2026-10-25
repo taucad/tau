@@ -46,3 +46,29 @@ describe('probeWebGpuSupport', () => {
     expect(requestAdapter).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('isSoftwareGpuAdapter', () => {
+  it('should treat the fallback adapter and named CPU rasterizers as software', async () => {
+    const { isSoftwareGpuAdapter } = await importBackend();
+
+    expect(isSoftwareGpuAdapter({ isFallbackAdapter: true })).toBe(true);
+    expect(isSoftwareGpuAdapter({ info: { isFallbackAdapter: true } })).toBe(true);
+    expect(isSoftwareGpuAdapter({ info: { vendor: 'google', architecture: 'swiftshader' } })).toBe(true);
+    expect(isSoftwareGpuAdapter({ info: { vendor: 'mesa', device: 'llvmpipe (LLVM 17.0.6, 256 bits)' } })).toBe(true);
+    expect(isSoftwareGpuAdapter({ info: { vendor: 'mesa', device: 'lavapipe' } })).toBe(true);
+  });
+
+  it('should treat a hardware adapter, or one that reports nothing, as hardware', async () => {
+    const { isSoftwareGpuAdapter } = await importBackend();
+
+    expect(isSoftwareGpuAdapter({ isFallbackAdapter: false, info: { vendor: 'apple', architecture: 'metal-3' } })).toBe(
+      false,
+    );
+    expect(isSoftwareGpuAdapter({ info: { vendor: 'nvidia', architecture: 'ampere', isFallbackAdapter: false } })).toBe(
+      false,
+    );
+    expect(isSoftwareGpuAdapter({})).toBe(false);
+    // Whole words only: a hardware name that merely contains "cpu" or "software" is not a software rasterizer.
+    expect(isSoftwareGpuAdapter({ info: { vendor: 'acme', description: 'gpucpu-bridge softwareless' } })).toBe(false);
+  });
+});

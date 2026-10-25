@@ -183,6 +183,10 @@ describe('Replicad — GeoSpec STEP export', () => {
       if (!result.success) {
         throw new Error(result.issues.map((issue) => issue.message).join('\n'));
       }
+      // An operation's spans leave after its terminal reply, so wait for the export's own batch.
+      await vi.waitFor(() => {
+        expect(labels).toContain('kernel.export');
+      });
     } finally {
       unsubscribe();
       await client.shutdown();

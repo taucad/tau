@@ -25,14 +25,17 @@ internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
     private readonly string artifactRoot;
     private readonly CancellationToken cancellation;
     private readonly ComputeWorkerSession? compute;
+    private readonly MeshingOptions? meshing;
     private ModelExecutionResult? result;
     private bool disposed;
 
-    internal HostedLibraryHost(string artifactRoot, CancellationToken cancellation = default, ComputeWorkerSession? compute = null)
+    internal HostedLibraryHost(string artifactRoot, CancellationToken cancellation = default, ComputeWorkerSession? compute = null,
+        MeshingOptions? meshing = null)
     {
         this.artifactRoot = Path.GetFullPath(artifactRoot);
         this.cancellation = cancellation;
         this.compute = compute;
+        this.meshing = meshing;
         Directory.CreateDirectory(this.artifactRoot);
     }
 
@@ -67,6 +70,8 @@ internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
         try
         {
             library = new Library(fVoxelSizeMM);
+            // Before the author's task: every Voxels the model shows is captured with these settings.
+            if (meshing is not null) library.TauSetMeshing(meshing.Adaptivity, meshing.Relax);
             viewer = new Viewer(backend, log);
             Library.RegisterGlobalLibrary(library);
             Library.RegisterGlobalLog(log);
@@ -114,7 +119,7 @@ internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
                     0),
                 captured.Mechanism,
                 captured.Warnings,
-                captured.Resources, captured.WorkCounters) with { ComputeRecords = computeRecords, VoxelSize = library.fVoxelSize };
+                captured.Resources, captured.WorkCounters) with { ComputeRecords = computeRecords, VoxelSize = library.fVoxelSize, Meshing = meshing };
         }
         catch (Exception error)
         {

@@ -84,6 +84,30 @@ describe('Electron utility transport close classification', () => {
     });
   });
 
+  it('should name the limit a supervisor killed the host for on the close result', async () => {
+    vi.useFakeTimers();
+    const { client, killPort, relay } = utilityClientHarness();
+    const exceeded = {
+      limit: 'host.utility.resident',
+      unit: 'By',
+      maximum: 1000,
+      demand: { kind: 'measured', value: 1500 },
+      origin: 'host-option',
+    } as const;
+
+    killPort();
+    await flushPortEvents();
+    relay({ exitCode: 1, released: false, exceeded });
+
+    await expect(client.closed).resolves.toEqual({
+      cause: 'host-exit',
+      exitCode: 1,
+      phase: 'boot',
+      released: false,
+      exceeded,
+    });
+  });
+
   it('reports an unsignalled exit once the relay window elapses', async () => {
     vi.useFakeTimers();
     const { client, killPort, relay } = utilityClientHarness();

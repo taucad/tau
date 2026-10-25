@@ -405,6 +405,8 @@ export const webSocketHost = (options: WebSocketHostOptions): WebSocketHostHandl
 
       const worker = options.worker();
       const dispatcher = createDocumentWorkerDispatcher(worker, port, {
+        // The kernel runs on this host's own thread beside other sessions, so the process's memory is not this kernel's.
+        realm: 'in-process',
         inlineFileSystem,
         ...(computeStorePort ? { computeStorePort } : {}),
       });

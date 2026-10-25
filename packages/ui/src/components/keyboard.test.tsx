@@ -107,3 +107,37 @@ it('listens in an embedded surface document and releases its listener on unmount
   expect(onKey).toHaveBeenCalledOnce();
   frame.remove();
 });
+
+function AllowedBinding({ onKey }: { readonly onKey: () => void }) {
+  useKeybinding({ key: 'b' }, onKey, { allowedScopes: ['sidebar'] });
+  return null;
+}
+
+it('suppresses app shortcuts inside a dialog, except those a sidebar dialog allows', () => {
+  const onK = vi.fn();
+  const onB = vi.fn();
+  render(
+    <KeyboardProvider>
+      <Binding enabled={() => true} onKey={onK} />
+      <AllowedBinding onKey={onB} />
+      <div role='dialog' aria-label='Settings'>
+        <button type='button'>In a dialog</button>
+      </div>
+      <div role='dialog' aria-label='Sidebar' data-shortcut-scope='sidebar'>
+        <button type='button'>In the sidebar sheet</button>
+      </div>
+    </KeyboardProvider>,
+  );
+
+  const inDialog = screen.getByRole('button', { name: 'In a dialog' });
+  const inSidebar = screen.getByRole('button', { name: 'In the sidebar sheet' });
+  fireEvent.keyDown(inDialog, { key: 'k' });
+  fireEvent.keyDown(inDialog, { key: 'b' });
+  expect(onK).not.toHaveBeenCalled();
+  expect(onB).not.toHaveBeenCalled();
+  // The sidebar dialog allows only the bindings that name it.
+  fireEvent.keyDown(inSidebar, { key: 'k' });
+  expect(onK).not.toHaveBeenCalled();
+  fireEvent.keyDown(inSidebar, { key: 'b' });
+  expect(onB).toHaveBeenCalledOnce();
+});

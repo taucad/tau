@@ -16,6 +16,8 @@ import {
   runtimeTelemetryArgsSchema,
   runtimeCapabilitiesUpdatedArgsSchema,
   runtimeContentDigestSchema,
+  runtimeObservationModeSchema,
+  workerOperationFactsSchema,
   runtimeIssueSchema,
   runtimeSourceRevisionSchema,
   transportHelloPayloadSchema,
@@ -367,6 +369,7 @@ export const runtimeDocumentProtocolSchemas = {
     closeView: z.object(subscription).strip(),
     abort: z.object({ operationId: id, reason: z.number().int() }).strip(),
     binaryMaterialised: z.object({ key: id }).strip(),
+    observe: z.object({ mode: runtimeObservationModeSchema }).strip(),
     described: discriminatedWireUnion('success', [
       description.options[0].extend({ ...withIntent, ...evaluationId }),
       description.options[1].extend({ ...withIntent, ...evaluationId }),
@@ -412,6 +415,7 @@ export const runtimeDocumentProtocolSchemas = {
     logBatch: runtimeLogBatchArgsSchema,
     telemetry: runtimeTelemetryArgsSchema,
     capabilitiesUpdated: runtimeCapabilitiesUpdatedArgsSchema,
+    operationFacts: z.object({ operationId: id, facts: workerOperationFactsSchema }).strip(),
   },
   listens: {},
 } as const satisfies WireProtocolSchemas;

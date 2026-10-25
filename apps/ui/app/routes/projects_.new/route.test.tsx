@@ -87,6 +87,20 @@ describe('/projects/new creation location', () => {
     expect(mockCreateProject.mock.calls[0]?.[0]?.location).toEqual({ kind: 'home' });
   });
 
+  it('opens the new project in the desktop Workbench and on the phone chat, never the phone Editor (WB-10, T8)', async () => {
+    renderRoute();
+
+    await userEvent.type(screen.getByLabelText('Project Name *'), 'Bracket');
+    await userEvent.click(screen.getByRole('button', { name: /Create Project/ }));
+
+    expect(mockCreateProject.mock.calls[0]?.[0]?.editorState).toEqual({
+      panelState: {
+        desktopLayout: { workbenchOpen: true, compactAuxiliary: 'workbench' },
+        mobileActiveTab: 'chat',
+      },
+    });
+  });
+
   it('uses the same controlled workspace selection and refreshes it after a typed failure', async () => {
     const error = new Error('disconnected');
     locationState = workspaceState();

@@ -52,7 +52,7 @@ const spawnUtility = (): Spawned => {
   };
 };
 
-const brokerHarness = () => {
+const brokerHarness = (extra: Partial<ServicesBrokerOptions> = {}) => {
   const spawns: Spawned[] = [];
   const log = vi.fn();
   const runtimeExits: Array<() => void> = [];
@@ -109,6 +109,7 @@ const brokerHarness = () => {
     revokeGeometry,
     prepareNativeKernel,
     log,
+    ...extra,
   } as unknown as ServicesBrokerOptions;
   return {
     broker: createServicesBroker(options),
@@ -383,6 +384,24 @@ describe('createServicesBroker', () => {
       message: 'Enter the access code shown on the machine.',
       code: 'MACHINE_CREDENTIAL_REQUIRED',
     });
+  });
+
+  it('should send a permission request once, never replay it, and hand its answer to onUtilityFrame (W9)', () => {
+    const frames: Array<Readonly<Record<string, unknown>>> = [];
+    const onUtilityFrame = vi.fn((frame: Readonly<Record<string, unknown>>) => {
+      frames.push(frame);
+      return frame['type'] === 'permissions-answered';
+    });
+    const { broker, spawns } = brokerHarness({ onUtilityFrame });
+    broker.send({ type: 'permissions-request', requestId: 'permissions-1' });
+    expect(spawns).toHaveLength(1);
+    expect(spawns[0]?.posted).toContainEqual({ type: 'permissions-request', requestId: 'permissions-1' });
+    spawns[0]?.message({ type: 'permissions-answered', requestId: 'permissions-1', mode: 'ask' });
+    expect(frames).toEqual([{ type: 'permissions-answered', requestId: 'permissions-1', mode: 'ask' }]);
+    spawns[0]?.exit();
+    broker.connect('nodeFs');
+    expect(spawns).toHaveLength(2);
+    expect(spawns[1]?.posted).not.toContainEqual(expect.objectContaining({ type: 'permissions-request' }));
   });
 
   it('should ask a running utility which machines a program streams to, and answer none without one', async () => {

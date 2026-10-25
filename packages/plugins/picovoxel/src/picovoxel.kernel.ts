@@ -52,7 +52,14 @@ import {
 } from '@taucad/geometry-core';
 import type { GlbMaterial, GlbResources } from '@taucad/geometry-core';
 
-import { dropZeroAreaTriangles, picovoxelToGlb, picovoxelToGltf } from '#picovoxel.geometry.js';
+import { dropZeroAreaTriangles, hasArea, picovoxelToGlb, picovoxelToGltf } from '#picovoxel.geometry.js';
+import {
+  meshPicovoxelField,
+  picovoxelMeshingReport,
+  resolvePicovoxelMeshing,
+  snapshotPicovoxelMeshingReport,
+} from '#picovoxel-meshing.js';
+import type { PicovoxelMeshing } from '#picovoxel-meshing.js';
 import type { PicovoxelNativeHandle, PicovoxelShapeSnapshot } from '#picovoxel.geometry.js';
 import {
   multiUnavailableReason,
@@ -61,27 +68,12 @@ import {
   picovoxelRegionSchema,
   picovoxelRenderSchema,
 } from '#picovoxel.schemas.js';
+import { picovoxelBuild } from '#picovoxel-build.js';
 import type { PicovoxelArtifact, PicovoxelLane, PicovoxelRegion } from '#picovoxel.schemas.js';
 
 // =============================================================================
 // Identity
 // =============================================================================
-
-/**
- * The installed `picovoxel` package: its version, the SHA-256 of its two WebAssembly artifacts, and
- * one SHA-256 over every JavaScript file it ships (the facade and both glues).
- *
- * The digest of a shipped file is a build-time constant; `picovoxel.asset-ownership.test.ts`
- * recomputes all four from the installed package and fails when the dependency moves, so geometry
- * cached under one PicoVoxel build is never reused under another. The script digest catches a
- * facade-only change (lane semantics, defaults) that keeps the version and both binaries.
- */
-const picovoxelBuild = {
-  version: '0.1.0',
-  serial: 'eb7b254f50a2c7d37e46fb0169fd9890c1a366eeed78272c2ced10cbd1c26b01',
-  multi: '8da3345c22f2d0945aef294151520da5df004ac4dd67114bf1ce07a503f0f444',
-  scripts: 'e19aa9a77efb2c44cb0aa359ba7e3b64d2a022dbf98b2a4abf0126122aac9d7c',
-} as const;
 
 /** Kernel version: mechanism/name-evidence/region handle semantics plus the PicoVoxel build it runs. */
 const kernelVersion = `1.5.0+picovoxel.${picovoxelBuild.version}.serial-${picovoxelBuild.serial.slice(0, 12)}.multi-${picovoxelBuild.multi.slice(0, 12)}.scripts-${picovoxelBuild.scripts.slice(0, 12)}`;
@@ -558,35 +550,40 @@ const restoredWords = (value: Uint8Array, index: number, field: 'vertices' | 'tr
  *
  * The facade's `vertices`/`triangles` are fresh JS-owned copies read out of wasm once, so the kernel
  * adds no second copy; it only checks the trust boundary in indexed passes. Exactly-zero-area
- * triangles are dropped here, once, so the viewer and every export see the same mesh (D36).
+ * triangles are dropped here, once, so the viewer and every export see the same mesh; an adaptive
+ * build keeps the in-line seam triangles that stitch its merged cells (D36).
  *
  * @param mesh - A mesh `main()` returned, or one derived from returned voxels.
  * @param part - Resolved display name and zero-based output index.
- * @param sessionLane - The session's resolved lane, used when a mesh carries no lane.
+ * @param session - The session the mesh was built in.
+ * @param session.lane - The session's resolved lane, used when a mesh carries no lane.
+ * @param session.adaptive - Whether the build meshes adaptively, which keeps in-line triangles.
  * @returns The durable snapshot.
  */
 const snapshotMesh = (
   mesh: Mesh,
   part: Readonly<{ index: number; name: string }>,
-  sessionLane: PicovoxelLane,
+  session: Readonly<{ lane: PicovoxelLane; adaptive: boolean }>,
 ): PicovoxelShapeSnapshot => {
   const { name, index } = part;
   const label = `${name} (output ${index + 1})`;
   const vertices = ownedFloat32(mesh.vertices);
   const triangles = ownedUint32(mesh.triangles);
-  const kept = validateMeshArrays({ vertices, triangles, label });
+  const kept = validateMeshArrays({ vertices, triangles, label, keepInLine: session.adaptive });
   const meshLane: unknown = mesh.lane;
-  return { name, vertices, triangles: kept, lane: isLane(meshLane) ? meshLane : sessionLane };
+  return { name, vertices, triangles: kept, lane: isLane(meshLane) ? meshLane : session.lane };
 };
 
 const validateMeshArrays = ({
   vertices,
   triangles,
   label,
+  keepInLine,
 }: {
   vertices: Float32Array<ArrayBuffer>;
   triangles: Uint32Array<ArrayBuffer>;
   label: string;
+  keepInLine: boolean;
 }): Uint32Array<ArrayBuffer> => {
   if (vertices.length === 0 || triangles.length === 0) {
     throw new TypeError(`PicoVoxel ${label} is empty. Return [] for an empty scene.`);
@@ -609,8 +606,8 @@ const validateMeshArrays = ({
       );
     }
   }
-  const kept = dropZeroAreaTriangles(vertices, triangles);
-  if (kept.length === 0) {
+  const kept = dropZeroAreaTriangles(vertices, triangles, keepInLine);
+  if (!hasArea(vertices, kept)) {
     // Checked after the D36 filter: a shape of zero-area triangles only is empty, not an index-less mesh.
     throw new TypeError(`PicoVoxel ${label} is empty: every triangle has zero area. Return [] for an empty scene.`);
   }
@@ -712,9 +709,14 @@ type MeasuredShape = Readonly<{
  *
  * @param measured - Delivered shapes with their meshing cost.
  * @param voxelSize - The session's voxel edge length in millimetres.
+ * @param meshing - The adaptive meshing the Voxels fields were meshed with, when the view asked for one.
  * @returns The handle's tessellation report.
  */
-const tessellationOf = (measured: readonly MeasuredShape[], voxelSize: number): TessellationReport => {
+const tessellationOf = (
+  measured: readonly MeasuredShape[],
+  voxelSize: number,
+  meshing: PicovoxelMeshing | undefined,
+): TessellationReport => {
   let triangles = 0;
   let vertices = 0;
   let elapsed = 0;
@@ -739,6 +741,7 @@ const tessellationOf = (measured: readonly MeasuredShape[], voxelSize: number): 
     elapsed,
     voxelSize,
     ...(memoryBytes === undefined ? {} : { memoryBytes, ...(activeVoxels === undefined ? {} : { activeVoxels }) }),
+    ...picovoxelMeshingReport(meshing),
   };
 };
 
@@ -775,6 +778,7 @@ const snapshotTessellation = (value: unknown): TessellationReport | undefined =>
     ...(voxelSize === undefined ? {} : { voxelSize }),
     ...(activeVoxels === undefined ? {} : { activeVoxels }),
     ...(memoryBytes === undefined ? {} : { memoryBytes }),
+    ...snapshotPicovoxelMeshingReport(value),
   };
 };
 
@@ -790,13 +794,19 @@ const snapshotTessellation = (value: unknown): TessellationReport | undefined =>
  * @param session - The session's voxel size and the build's crop box.
  * @param session.voxelSize - The session's voxel edge length in millimetres.
  * @param session.region - The crop box, when the build asked for one.
+ * @param session.meshing - Adaptive meshing for Voxels parts, when the view asked for one.
  * @returns The durable native handle.
  */
 const normalizeResult = (
   result: unknown,
   sessionLane: PicovoxelLane,
-  { voxelSize, region }: { readonly voxelSize: number; readonly region?: PicovoxelRegion },
+  {
+    voxelSize,
+    region,
+    meshing,
+  }: { readonly voxelSize: number; readonly region?: PicovoxelRegion; readonly meshing?: PicovoxelMeshing },
 ): PicovoxelNativeHandle => {
+  const session = { lane: sessionLane, adaptive: meshing !== undefined };
   const model = isRecordObject(result) && 'shapes' in result ? result : undefined;
   const modelShapes = model?.['shapes'];
   if (model && !Array.isArray(modelShapes)) {
@@ -845,7 +855,7 @@ const normalizeResult = (
         );
       }
       const started = performance.now();
-      const snapshot = { ...snapshotMesh(shape, part, sessionLane), ...appearance };
+      const snapshot = { ...snapshotMesh(shape, part, session), ...appearance };
       return { shape: snapshot, elapsed: performance.now() - started };
     }
     if (isVoxels(shape)) {
@@ -860,7 +870,7 @@ const normalizeResult = (
       if (field.isEmpty) {
         return undefined;
       }
-      const snapshot = { ...snapshotMesh(field.toMesh(), part, sessionLane), ...appearance };
+      const snapshot = { ...snapshotMesh(meshPicovoxelField(field, meshing), part, session), ...appearance };
       const elapsed = performance.now() - started;
       // Read after meshing so the grid query never counts toward the reported meshing time.
       const memoryBytes = field.memUsage;
@@ -878,7 +888,7 @@ const normalizeResult = (
   return {
     shapes: delivered.map(({ shape }) => shape),
     ...resources,
-    tessellation: tessellationOf(delivered, voxelSize),
+    tessellation: tessellationOf(delivered, voxelSize, meshing),
     ...(region === undefined ? {} : { region: { min: [...region.min], max: [...region.max] } }),
   };
 };
@@ -1261,6 +1271,11 @@ export const picovoxelKernel = defineKernel({
     const module = resolveModule(executeResult.value);
 
     const { lane } = options;
+    const meshingDecision = resolvePicovoxelMeshing(options, lane, picovoxelBuild.version);
+    if ('refusal' in meshingDecision) {
+      throw new PicovoxelBuildError([meshingDecision.refusal]);
+    }
+    const meshingOptions = meshingDecision;
     const artifact = artifactFor(lane, context.wasm);
     if (artifact === 'multi') {
       // An explicit multi request that cannot be honoured fails visibly; it never falls back.
@@ -1282,7 +1297,7 @@ export const picovoxelKernel = defineKernel({
           `PicoVoxel session variant=${sessionArtifact} pthreads=${pico.module.PThread?.runningWorkers.length ?? 0} lane=${pico.lane}`,
         );
         const result = await runMain(module, withAbortChecks(pico), parameters);
-        const nativeHandle = normalizeResult(result, lane, { voxelSize, region: options.region });
+        const nativeHandle = normalizeResult(result, lane, { voxelSize, region: options.region, ...meshingOptions });
         const { mechanism, issues } = await readMechanismExport({
           module,
           parameters,
@@ -1461,7 +1476,13 @@ export const picovoxelKernel = defineKernel({
             `Invalid PicoVoxel serialized shape ${index}: vertex/triangle bytes must contain scalar triples.`,
           );
         }
-        const kept = validateMeshArrays({ vertices, triangles, label: `${name} (output ${index + 1})` });
+        const kept = validateMeshArrays({
+          vertices,
+          triangles,
+          label: `${name} (output ${index + 1})`,
+          // A snapshot restores as it was built: an adaptive handle kept its in-line seam triangles.
+          keepInLine: tessellation?.adaptivity !== undefined,
+        });
         const material = snapshotMaterial(
           value['material'],
           `${name} (output ${index + 1})`,

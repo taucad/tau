@@ -123,8 +123,30 @@ const computeVertexNormals = (
   return normals;
 };
 
+/** The cross product of the triangle at `offset` is exactly zero: it adds nothing to area, volume or normals. */
+const hasZeroArea = (
+  vertices: Float32Array<ArrayBuffer>,
+  triangles: Uint32Array<ArrayBuffer>,
+  offset: number,
+): boolean => {
+  const a = triangles[offset]! * 3;
+  const b = triangles[offset + 1]! * 3;
+  const c = triangles[offset + 2]! * 3;
+  const abX = vertices[b]! - vertices[a]!;
+  const abY = vertices[b + 1]! - vertices[a + 1]!;
+  const abZ = vertices[b + 2]! - vertices[a + 2]!;
+  const acX = vertices[c]! - vertices[a]!;
+  const acY = vertices[c + 1]! - vertices[a + 1]!;
+  const acZ = vertices[c + 2]! - vertices[a + 2]!;
+  return abY * acZ - abZ * acY === 0 && abZ * acX - abX * acZ === 0 && abX * acY - abY * acX === 0;
+};
+
+/** Two vertex offsets name one position: every coordinate is equal. */
+const samePosition = (vertices: Float32Array<ArrayBuffer>, a: number, b: number): boolean =>
+  vertices[a] === vertices[b] && vertices[a + 1] === vertices[b + 1] && vertices[a + 2] === vertices[b + 2];
+
 /**
- * Drop the triangles whose area is exactly zero (D36).
+ * Drop the zero-area triangles a mesh does not need (D36).
  *
  * PicoVoxel's exact lane stays byte-identical to C# PicoGK, whose mesher emits a zero-area pair
  * wherever it places two vertices at one position; the Tau snapshot removes them instead. The test
@@ -132,14 +154,21 @@ const computeVertexNormals = (
  * triangle contributed exactly nothing to any normal and zero to area and volume; a repeated index
  * always yields a zero cross product. Survivors keep their order and their bytes.
  *
+ * An adaptive mesh (`keepInLine`) also emits zero-area triangles whose three corners are distinct and
+ * in line: seams that stitch a large merged cell to smaller neighbours, so dropping one opens a crack.
+ * It keeps those and drops only the collapsed ones, which repeat an index or place two corners at one
+ * position. The uniform mesh drops every zero-area triangle, as before, so its bytes do not change.
+ *
  * @param vertices - Welded vertex positions.
  * @param triangles - Triangle indices, already range-checked.
+ * @param keepInLine - Keep zero-area triangles with three distinct corners: true for an adaptive mesh.
  * @returns `triangles` itself when nothing is dropped, otherwise the surviving triangles.
  * @public
  */
 export const dropZeroAreaTriangles = (
   vertices: Float32Array<ArrayBuffer>,
   triangles: Uint32Array<ArrayBuffer>,
+  keepInLine = false,
 ): Uint32Array<ArrayBuffer> => {
   const kept = new Uint32Array(triangles.length);
   let length = 0;
@@ -147,19 +176,34 @@ export const dropZeroAreaTriangles = (
     const a = triangles[offset]! * 3;
     const b = triangles[offset + 1]! * 3;
     const c = triangles[offset + 2]! * 3;
-    const abX = vertices[b]! - vertices[a]!;
-    const abY = vertices[b + 1]! - vertices[a + 1]!;
-    const abZ = vertices[b + 2]! - vertices[a + 2]!;
-    const acX = vertices[c]! - vertices[a]!;
-    const acY = vertices[c + 1]! - vertices[a + 1]!;
-    const acZ = vertices[c + 2]! - vertices[a + 2]!;
-    if (abY * acZ - abZ * acY !== 0 || abZ * acX - abX * acZ !== 0 || abX * acY - abY * acX !== 0) {
+    const dropped =
+      hasZeroArea(vertices, triangles, offset) &&
+      (!keepInLine || samePosition(vertices, a, b) || samePosition(vertices, b, c) || samePosition(vertices, a, c));
+    if (!dropped) {
       kept[length++] = triangles[offset]!;
       kept[length++] = triangles[offset + 1]!;
       kept[length++] = triangles[offset + 2]!;
     }
   }
   return length === triangles.length ? triangles : kept.slice(0, length);
+};
+
+/**
+ * Whether any triangle has a nonzero area: a mesh of zero-area triangles only, collapsed or in line,
+ * draws nothing.
+ *
+ * @param vertices - Vertex positions.
+ * @param triangles - Triangle indices, already range-checked.
+ * @returns `true` when some triangle's cross product is not exactly zero.
+ * @public
+ */
+export const hasArea = (vertices: Float32Array<ArrayBuffer>, triangles: Uint32Array<ArrayBuffer>): boolean => {
+  for (let offset = 0; offset < triangles.length; offset += 3) {
+    if (!hasZeroArea(vertices, triangles, offset)) {
+      return true;
+    }
+  }
+  return false;
 };
 
 /**

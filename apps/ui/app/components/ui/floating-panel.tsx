@@ -385,10 +385,11 @@ function FloatingPanelContentHeader({ children, className }: FloatingPanelConten
       className={cn('relative', floatingPanelContentHeaderVariants({ side }), isMobile && 'h-10 pr-2', className)}
       data-slot='floating-panel-content-header'
       onClickCapture={(event) => {
-        // A nested drawer's portaled overlay must not activate any ancestor surface.
+        // A nested drawer's portaled overlay must not activate any ancestor surface. Its content (a sheet a header
+        // control opened, such as the chat switcher) and a popper's content keep their own clicks.
         if (isMobile && isInsideDrawer && !headerRef.current?.contains(event.target as Node)) {
           const target = event.target as Element;
-          if (!target.closest('[data-radix-popper-content-wrapper]')) {
+          if (!target.closest('[data-radix-popper-content-wrapper], [data-vaul-drawer]')) {
             event.stopPropagation();
           }
         }

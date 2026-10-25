@@ -3,7 +3,7 @@ import { transformNormalArray, transformVertexArray } from '@taucad/geometry-cor
 import type { GeometryOutputTransformOptions, TauCadTopologyRoot } from '@taucad/geometry-core';
 import { glbToDocument, readGltfNamingSummary } from '@taucad/runtime-testing';
 
-import { dropZeroAreaTriangles, picovoxelToGlb } from '#picovoxel.geometry.js';
+import { dropZeroAreaTriangles, hasArea, picovoxelToGlb } from '#picovoxel.geometry.js';
 import type { PicovoxelNativeHandle, PicovoxelShapeSnapshot } from '#picovoxel.geometry.js';
 
 /**
@@ -223,22 +223,46 @@ describe('picovoxelToGlb', () => {
 describe('dropZeroAreaTriangles (D36)', () => {
   // A unit square (two triangles) plus the three shapes of a zero-area triangle PicoVoxel's mesher
   // and author meshes produce: a vertex duplicated at one position (the mesher's pair), a repeated
-  // index, and three distinct collinear points.
+  // index, and three distinct collinear points (an adaptive mesh's seam).
   const vertices = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0.5, 0, 0]);
   const square = [0, 1, 2, 0, 2, 3];
-  const zeroArea = [1, 4, 2, 0, 0, 3, 0, 5, 1];
+  const collapsed = [1, 4, 2, 0, 0, 3];
+  const inLine = [0, 5, 1];
+  const triangles = new Uint32Array([
+    ...collapsed.slice(0, 3),
+    ...square.slice(0, 3),
+    ...inLine,
+    ...collapsed.slice(3),
+    ...square.slice(3),
+  ]);
 
-  it('should drop exactly the zero-area triangles and keep the survivors in order', () => {
-    const triangles = new Uint32Array([
-      zeroArea[0]!,
-      zeroArea[1]!,
-      zeroArea[2]!,
+  it('should drop exactly the zero-area triangles of a uniform mesh and keep the survivors in order', () => {
+    expect([...dropZeroAreaTriangles(vertices, triangles)]).toEqual(square);
+  });
+
+  it('should keep the in-line triangles of an adaptive mesh and drop only the collapsed ones', () => {
+    expect([...dropZeroAreaTriangles(vertices, triangles, true)]).toEqual([
       ...square.slice(0, 3),
-      ...zeroArea.slice(3),
+      ...inLine,
       ...square.slice(3),
     ]);
+  });
 
-    expect([...dropZeroAreaTriangles(vertices, triangles)]).toEqual(square);
+  it('should keep the in-line seam triangle an adaptive base-box mesh stitches merged cells with', () => {
+    // From PicoVoxel's adaptive base-box mesh at 0.25: three distinct points on one line, area exactly zero.
+    const seam = new Float32Array([46, -2.5, 20, 46, -3.5, 20, 46, -3, 20]);
+    const one = new Uint32Array([0, 1, 2]);
+
+    expect(dropZeroAreaTriangles(seam, one, true)).toBe(one);
+    expect([...dropZeroAreaTriangles(seam, one)]).toEqual([]);
+    expect(hasArea(seam, one)).toBe(false);
+    expect(hasArea(vertices, new Uint32Array(square))).toBe(true);
+  });
+
+  it('should drop an adaptive triangle with two corners at one position, whatever the sign of zero', () => {
+    const signed = new Float32Array([0, 0, 0, -0, 0, 0, 1, 1, 0, 1, 1, 0]);
+
+    expect([...dropZeroAreaTriangles(signed, new Uint32Array([0, 1, 2, 0, 2, 3, 2, 0, 3]), true)]).toEqual([]);
   });
 
   it('should keep a sliver whose area is tiny but not zero', () => {
@@ -255,7 +279,7 @@ describe('dropZeroAreaTriangles (D36)', () => {
     expect(dropZeroAreaTriangles(vertices, triangles)).toBe(triangles);
   });
 
-  it('should leave every normal byte-identical, since a dropped triangle contributes nothing', async () => {
+  it('should leave every normal byte-identical, since a collapsed or in-line triangle contributes nothing', async () => {
     const shape = (triangles: number[]): PicovoxelShapeSnapshot => ({
       name: 'Shape 1',
       vertices,
@@ -267,7 +291,7 @@ describe('dropZeroAreaTriangles (D36)', () => {
       return document.getRoot().listMeshes()[0]!.listPrimitives()[0]!.getAttribute('NORMAL')!.getArray();
     };
 
-    expect(await normalsOf([...square, ...zeroArea])).toEqual(await normalsOf(square));
+    expect(await normalsOf([...square, ...collapsed, ...inLine])).toEqual(await normalsOf(square));
   });
 });
 

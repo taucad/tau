@@ -465,5 +465,28 @@
     "test": "src/host/tau-agent-host.test.ts",
     "find": "        const applied = appliedDurably(ordered, command);\n",
     "replace": "        const applied = storeOf(ordered).ledger?.applied[command.commandId] !== undefined;\n"
+  },
+  {
+    "id": "refresh-checks-term-starts",
+    "drift": "round 26: a refresh goes on with the merged fold it held when only each term's first row and the last row held are unchanged, so a later segment's smaller copy of a row mid-term is never replayed and the history differs from a fresh fold (T14: t14_refresh_is_merge, t14_refresh_mid_term)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  if merged.isPrefixOf rows then merged ++ rows.drop merged.length else rows",
+    "replace": "  if merged.length ≤ rows.length && (List.range merged.length).all (fun i =>\n      !(i == 0 || i + 1 == merged.length || merged[i - 1]?.map Row.term != merged[i]?.map Row.term) ||\n        rows[i]? == merged[i]?) then merged ++ rows.drop merged.length else rows"
+  },
+  {
+    "id": "refresh-checks-term-starts-host",
+    "drift": "round 26: the appender reuses its merged fold when only each term's first row and the last row held keep their identity, so a later segment's smaller copy of a row mid-term is never replayed and the history differs from a fresh fold",
+    "file": "src/log/event-log-appender.ts",
+    "test": "src/log/event-log-appender.segments.test.ts",
+    "find": "    rows.length >= mergedRows.length && mergedRows.every((row, index) => rows[index] === row);",
+    "replace": "    rows.length >= mergedRows.length &&\n    mergedRows.every(\n      (row, index) =>\n        !(index === 0 || index === mergedRows.length - 1 || mergedRows[index - 1]!.leaderEpoch !== row.leaderEpoch) ||\n        rows[index] === row,\n    );"
+  },
+  {
+    "id": "admission-read-unbounded",
+    "drift": "round 26: only an approval's segment read is bounded, so a start whose read never returns holds the chat's dispatch turn, and the approval and every send behind it never reach their own bound",
+    "file": "src/host/tau-agent-host.ts",
+    "test": "src/launchers/agent-launcher.segments.test.ts",
+    "find": "      await refreshFor(log, command.commandId);\n",
+    "replace": "      await (command.verb === 'approve' ? boundedRefresh(log) : log.refresh?.());\n"
   }
 ]

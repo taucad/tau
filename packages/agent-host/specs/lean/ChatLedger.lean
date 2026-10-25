@@ -1344,4 +1344,11 @@ def appendMerged (segs : List (Nat × List Row)) (dev : Nat) (merged : List Row)
   if merged.getLast?.map Row.term = some e.term then merged ++ [e]
   else merge (segs.map fun s => if s.1 = dev then (s.1, s.2 ++ [e]) else s)
 
+/-- The merged rows the appender folds after a refresh merges `rows`, having folded `merged` (`extendsMerged`, round
+26): it goes on from what it replayed only while those rows are, row by row, the first rows of the new merge, and
+otherwise folds the whole merge again. The merge keeps the smallest canonical copy of a key from any segment, so a
+later segment can replace a row anywhere in a term, not only at a term's first row or the last row held. -/
+def refreshMerged (merged rows : List Row) : List Row :=
+  if merged.isPrefixOf rows then merged ++ rows.drop merged.length else rows
+
 end ChatLedger

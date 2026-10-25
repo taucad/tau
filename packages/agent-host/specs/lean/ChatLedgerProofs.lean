@@ -4733,6 +4733,25 @@ theorem t14_refold_is_merge (segs : List (Nat × List Row)) (dev : Nat) (merged 
     appendMerged segs dev merged e = merge (segs.map fun s => if s.1 = dev then (s.1, s.2 ++ [e]) else s) := by
   simp [appendMerged, h]
 
+/-- **T14** (refreshed, it is the merge; round 26): the fold a refresh goes on with is the whole merge it read,
+whatever the merge it held before. -/
+theorem t14_refresh_is_merge (merged rows : List Row) : refreshMerged merged rows = rows := by
+  unfold refreshMerged
+  split
+  · rename_i h
+    exact (List.prefix_iff_eq_append.mp (List.isPrefixOf_iff_prefix.mp h))
+  · rfl
+
+/-- **T14** (a copy replaces a row mid-term; round 26): a later segment's smaller copy of a row neither a term's first
+row nor the last one held replaces it in the merge, so a fold that checked only those places would keep the stale
+row; the refreshed fold is the merge. -/
+theorem t14_refresh_mid_term :
+    let segs := [(0, [mr 1 0 10, mr 1 1 11 5]), (1, [mr 2 0 20])]
+    let next := segs ++ [(2, [mr 1 1 11 0])]
+    (merge segs).map Row.key = (merge next).map Row.key ∧ merge segs ≠ merge next ∧
+      refreshMerged (merge segs) (merge next) = merge next := by
+  decide
+
 /-! ## T15: a replay changes nothing, a settled run carries nothing, an unread approval is refused (round 22) -/
 
 /-- **T15** (a replay changes nothing): a command this host already sent on, in flight or applied, is never admitted

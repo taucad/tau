@@ -185,6 +185,30 @@ describe('an event log with other devices’ segments (XD1)', () => {
     expect(after[0]).toBe(before[0]);
   });
 
+  /*
+   * Round 26: the merge keeps the smallest canonical copy of a key from any segment, so a later segment can replace a
+   * row in the middle of a term, neither a term's first row nor the last one held. The fold reads it as a fresh fold
+   * of the same rows does (`t14_incremental_is_merge`).
+   */
+  it('should serve a fresh fold’s history when a later segment replaces a row in the middle of a term', async () => {
+    const desktop = segment('device-desktop', desktopTurn);
+    const segments: { current: readonly ChatLogSegment[] } = { current: [desktop] };
+    const log = await openLog(phoneTurn, segments);
+    await log.messages();
+
+    const copy = said({ leaderEpoch: 'epoch-desktop', sequence: 1, at: '2026-10-23T08:00:01.000Z', text: 'A copy' });
+    segments.current = [desktop, segment('device-laptop', [copy])];
+    await log.refresh?.();
+    const fresh = await openLog(phoneTurn, segments);
+
+    expect((await fresh.messages()).map((message) => message.content)).toEqual([
+      'desktop asks',
+      'A copy',
+      'phone asks',
+    ]);
+    expect(await log.messages()).toEqual(await fresh.messages());
+  });
+
   it('should count this device’s rows once when a segment repeats them', async () => {
     const log = await openLog(phoneTurn, {
       current: [segment('device-desktop', desktopTurn), segment('device-phone-former-actor', phoneTurn)],

@@ -428,23 +428,15 @@ export const createEventLogAppender = async (
   };
   /** The rows the merged fold replayed, in order: a fold whose rows extend them replays only the rest. */
   let mergedRows: AgentLogEvent[] = [];
-  /** Where each term's rows begin in {@link mergedRows}: terms merge whole, so these places decide an extension. */
-  let mergedTermStarts: number[] = [];
-  const termStartsOf = (rows: readonly AgentLogEvent[]): number[] =>
-    rows.flatMap((row, index) => (index === 0 || rows[index - 1]!.leaderEpoch !== row.leaderEpoch ? [index] : []));
   /*
-   * Whether `rows` are `mergedRows` with more after them, checked at each term's first row and at the last row
-   * rather than row by row: terms merge whole and rows only ever append, so an old row moved anywhere moves one of
-   * those places.
+   * Whether `rows` are `mergedRows` with more after them, checked row by row by identity (round 26; `refreshMerged` in
+   * ChatLedger.lean, T14). The merge keeps the smallest canonical copy of each key from any segment, so a later
+   * segment can replace a row anywhere in a term, not only at a term's first row or the last row held; a parsed row
+   * keeps its identity while its segment only grows, so the check costs a pointer comparison a row, within the merge's
+   * own cost, and only the rows past them are replayed.
    */
-  const extendsMerged = (rows: readonly AgentLogEvent[]): boolean => {
-    const { length } = mergedRows;
-    return (
-      rows.length >= length &&
-      (length === 0 || rows[length - 1] === mergedRows[length - 1]) &&
-      mergedTermStarts.every((index) => rows[index] === mergedRows[index])
-    );
-  };
+  const extendsMerged = (rows: readonly AgentLogEvent[]): boolean =>
+    rows.length >= mergedRows.length && mergedRows.every((row, index) => rows[index] === row);
   let mergedReplayAnomalies: EventLogAnomaly[] = [];
   /*
    * Round 17: what is gone is one rule for every history this log folds, however many segments remain. A message is
@@ -511,7 +503,6 @@ export const createEventLogAppender = async (
       foreignUnsettled = [];
       merged = undefined;
       mergedRows = [];
-      mergedTermStarts = [];
       mergedReplayAnomalies = [];
       mergedAnomalies = [];
       return;
@@ -596,18 +587,6 @@ export const createEventLogAppender = async (
         const cursor = cursorOf.get(row);
         replayAnomalies.push({ ...replayed.anomaly, ...(cursor === undefined ? {} : { cursor }) });
       }
-    }
-    if (extends_) {
-      for (let index = Math.max(mergedRows.length, 1); index < rows.length; index++) {
-        if (rows[index - 1]!.leaderEpoch !== rows[index]!.leaderEpoch) {
-          mergedTermStarts.push(index);
-        }
-      }
-      if (mergedRows.length === 0 && rows.length > 0) {
-        mergedTermStarts.unshift(0);
-      }
-    } else {
-      mergedTermStarts = termStartsOf(rows);
     }
     merged = next;
     mergedRows = rows as AgentLogEvent[];

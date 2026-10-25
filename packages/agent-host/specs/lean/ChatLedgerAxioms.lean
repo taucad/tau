@@ -349,6 +349,8 @@ import ChatLedgerProofs
 #print axioms ChatLedger.t14_approval_waits
 #print axioms ChatLedger.t14_no_late_output
 #print axioms ChatLedger.t14_incremental_is_merge
+#print axioms ChatLedger.t14_refresh_is_merge
+#print axioms ChatLedger.t14_refresh_mid_term
 #print axioms ChatLedger.t14_refold_is_merge
 #print axioms ChatLedger.t15_replay_no_change
 #print axioms ChatLedger.t15_answer_own_only

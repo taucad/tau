@@ -48,6 +48,9 @@ A row is `<term> <seq> <run> <kind> <arg> <ms> <epoch> <attempt>` (`epoch`/`atte
                                → `QZ <calls it closes|-> <well formed after>`
   APPENDM <device> <row>       the merged rows after this device appends the row to its segment (round 21)
                                → `MA <keys>`
+  REFRESHM <device> <row>      the merged rows the appender folds after a refresh reads the row appended to that
+                               device's segments, or in a new segment of it (round 26)
+                                                                           → `MR <rows, as M prints them>`
   STAND <bound> <ask> <changed> <now> <quiet|-> <takenOver>   where another device's run stands
                                                                            → `QF <standing> [changesAt]`
   PULL <cap> <throttle> <clock:size:quiet|-> <now> <size>   a pull's record of one segment (chat-ref.ts `notePull`)
@@ -339,6 +342,14 @@ def runLine (st : St) (line : String) : St × List String :=
   | "APPENDM" :: d :: rest =>
     let e := rowOf rest
     (st, [s!"MA {listText ((appendMerged st.segs (num d) (merge st.segs) e).map fun r => s!"{r.term}:{r.seq}")}"])
+  | "REFRESHM" :: d :: rest =>
+    let e := rowOf rest
+    let dev := num d
+    let next := if st.segs.any (fun s => decide (s.1 = dev)) then
+        st.segs.map fun s => if s.1 = dev then (s.1, s.2 ++ [e]) else s
+      else st.segs ++ [(dev, [e])]
+    (st, [s!"MR {",".intercalate ((refreshMerged (merge st.segs) (merge next)).map fun e =>
+      s!"{e.term}:{e.seq}:{e.run}:O{e.arg}:{e.ms}")}"])
   | ["PULL", cap, th, prior, n, sz] =>
     let rec_ := if prior == "-" then none else
       match (prior.splitOn ":").map num with

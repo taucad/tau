@@ -17,7 +17,7 @@
  *   retains nothing (`C` and `K` in merge traces only).
  * - Commands: `E` append through the appender, `W` another writer's row, `WJ` a junk line, `TEAR` a torn tail,
  *   `RELOAD`, `LEDGER`, `SETTLE`, `LIFE`, `RESOLVE`, `PREP`, `BATCH`, `READER`, `READ`, `DELIVER`, `DELIVER1`, `RLEDGER`, `SEG`,
- *   `ROW`, `MERGE`, `MERGEB`, `MH`, `TABLES`, `ADMIT`, `TERMOF`, `TERMS`, `XADMIT`, `CARRY`, `PLAN`, `PLANT`, `RESUMEB`, `APPENDM`, `STAND` (and `PULL`, which the
+ *   `ROW`, `MERGE`, `MERGEB`, `MH`, `TABLES`, `ADMIT`, `TERMOF`, `TERMS`, `XADMIT`, `CARRY`, `PLAN`, `PLANT`, `RESUMEB`, `APPENDM`, `REFRESHM`, `STAND` (and `PULL`, which the
  *   revisions package's `notePull` answers from `corpus/pull-records.trace`).
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -1437,6 +1437,54 @@ const appendMergeTrace = (): Trace[] => {
 };
 
 /**
+ * The merged rows the appender folds after a refresh reads a row another segment brought (T14, round 26; the
+ * appender's `extendsMerged`): a later segment's smaller copy of a row in the middle of a term replaces it, so the
+ * fold is the whole new merge, as it is when the row extends the merge's last term or merges before a later term.
+ */
+const refreshMergeTrace = (): Trace[] => {
+  const row = (term: number, seq: number, ms: number, argument = 0): MergeRow => ({
+    term,
+    seq,
+    run: 1,
+    kind: 'O',
+    argument,
+    ms,
+    epoch: term + 1,
+    attempt: 0,
+  });
+  const held = [
+    { device: 0, rows: [row(1, 0, 10), row(1, 1, 11, 5), row(1, 2, 12)] },
+    { device: 1, rows: [row(2, 0, 20)] },
+  ];
+  const cases: ReadonlyArray<{ segments: Array<{ device: number; rows: MergeRow[] }>; device: number; row: MergeRow }> =
+    [
+      /* A new device's smaller copy of a row mid-term: neither the term's first row nor the last one held. */
+      { segments: held, device: 2, row: row(1, 1, 11, 0) },
+      /* A larger copy: the held row stays. */
+      { segments: held, device: 2, row: row(1, 1, 11, 9) },
+      /* A row that extends the merge's last term. */
+      { segments: held, device: 1, row: row(2, 1, 21) },
+      /* A row under an older term, which merges before the later term. */
+      { segments: held, device: 0, row: row(1, 3, 30) },
+    ];
+  return cases.map(({ segments, device, row: brought }, index) => {
+    const name = `refresh-merge-${String(index)}`;
+    const text = [`T ${name}`];
+    for (const segment of segments) {
+      text.push(`SEG ${segment.device}`, ...segment.rows.map((each) => `ROW ${rowLine(each)}`));
+    }
+    text.push(`REFRESHM ${device} ${rowLine(brought)}`, 'X');
+    const next = segments.some((segment) => segment.device === device)
+      ? segments.map((segment) => (segment.device === device ? { device, rows: [...segment.rows, brought] } : segment))
+      : [...segments, { device, rows: [brought] }];
+    const merged = mergeLogSegments(
+      next.map((segment) => ({ deviceId: `d${segment.device}`, bytes: segmentBytes(segment.rows) })),
+    );
+    return { text, expected: [`T ${name}`, `MR ${merged.map((event) => mergedText(event)).join(',')}`, 'X'] };
+  });
+};
+
+/**
  * Where another device's run stands on this device, over every case of the evidence rule (T11, rounds 18 and 19): when
  * its segment last changed here, this device's clock (behind that included), the quiet its pulls found (or none) and
  * a takeover.
@@ -1529,6 +1577,7 @@ const generate = async (corpus: Corpus, seed = corpus.seed): Promise<Trace[]> =>
       planTrace(),
       resumeBatchTrace(),
       ...appendMergeTrace(),
+      ...refreshMergeTrace(),
       standingTrace(),
     );
   }

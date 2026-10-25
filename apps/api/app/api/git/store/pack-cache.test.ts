@@ -356,11 +356,8 @@ describe('PackCache (DC2)', () => {
         }),
       );
       expect(answers).toEqual(Array.from({ length: 4 }, () => expected));
-      if (round % 2 === 1) {
-        rmSync(cache.root, { recursive: true, force: true });
-      }
     }
-    /* Each wipe shows as misses, and the round after it hits again. */
+    /* Each wipe shows as misses, and the round after it, which no wipe precedes, hits again. */
     expect(events.lookups).toContain('miss');
     expect(events.lookups).toContain('hit');
   });

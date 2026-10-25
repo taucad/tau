@@ -14,6 +14,9 @@ import { authorizeCliZooProxy, cliZooProxyUrl } from '#zoo-proxy.js';
 import { buildExportProfile, createPhaseLedger } from '#commands/export-profile.js';
 import type { CliProfilePhase } from '#commands/export-profile.js';
 import { cliError, createOutput, emit, exitCodes, sanitize, writeStdout } from '#output.js';
+import { cliRuntimeTelemetry } from '#runtime-telemetry.js';
+// oxlint-disable-next-line no-restricted-imports -- relative import is the only portable way to load the CLI's own package.json (matches `packages/runtime/src/utils/package-info.ts`).
+import packageJson from '../../package.json' with { type: 'json' };
 
 /** How long a profiled export waits for its trailing telemetry batch, in milliseconds. */
 const exportTelemetryWait = 2000;
@@ -216,6 +219,9 @@ export const exportCommand = defineCommand({
       projectPath: projectRoot,
     });
     profileLedger?.checkpoint('runtime.create-client');
+    /* Runtime telemetry: its reporter composes only when this CLI is a Tau Cloud host (signed in, or `tau telemetry on`). */
+    const runtimeTelemetry = cliRuntimeTelemetry('cli', packageJson.version);
+    runtimeTelemetry?.observe(client, 'host');
     const telemetryEntries: TelemetryEntry[] = [];
     /* An operation's spans leave after its terminal reply and shutdown stops listening, so the
      * profile waits, briefly, for the batch that carries the export's own root. */
@@ -384,6 +390,8 @@ export const exportCommand = defineCommand({
         document?.close();
       } finally {
         await client.shutdown();
+        /* Bounded at two seconds; the export never waits longer for telemetry. */
+        await runtimeTelemetry?.shutdown();
       }
       profileLedger?.checkpoint('runtime.shutdown');
     }

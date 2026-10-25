@@ -34,6 +34,7 @@
     ".": "./src/index.ts",
     "./agent-tools": "./src/agent-tools.ts",
     "./runtime-host": "./src/runtime-host.ts",
+    "./telemetry": "./src/telemetry.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -53,6 +54,11 @@
         "types": "./dist/runtime-host.d.mts",
         "import": "./dist/runtime-host.mjs",
         "default": "./dist/runtime-host.mjs"
+      },
+      "./telemetry": {
+        "types": "./dist/telemetry.d.mts",
+        "import": "./dist/telemetry.mjs",
+        "default": "./dist/telemetry.mjs"
       },
       "./package.json": "./package.json"
     },
@@ -113,6 +119,7 @@
     "@taucad/formal": "workspace:*",
     "@taucad/revisions": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "@taucad/telemetry": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
     "@taucad/xstate-testing": "workspace:*",

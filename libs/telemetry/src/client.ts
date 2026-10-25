@@ -595,6 +595,309 @@ export const verifyEntry = (run: GeoSpecRunInput, context: RuntimeEntryContext):
 };
 
 /* ------------------------------------------------------------------------------------------------ *
+ * Pre-dispatch, job and machine entries: work that settles outside a kernel attempt (pre-dispatch.ts). *
+ * Structural inputs, so no host imports a runtime type here; no path, message, id or value leaves.  *
+ * ------------------------------------------------------------------------------------------------ */
+
+/** A host context's fields with a closed caller and OS. */
+const hostFields = (context: RuntimeEntryContext) => ({
+  caller: closedValue(v.caller, context.caller),
+  ...contextFields(context),
+  ...optional('os', context.os === undefined ? undefined : closedValue(v.os, context.os)),
+});
+const closedCode = (code: string | undefined): Partial<Record<'code', z.output<typeof v.errorType>>> =>
+  optional('code', code === undefined ? undefined : closedValue(v.errorType, code));
+
+/** A native preparation's settled state (`PreparationState` in `@taucad/runtime` is assignable). @public */
+export type PreparationStateInput =
+  | Readonly<{ status: 'blocked'; reason: string }>
+  | Readonly<{ status: 'failed'; code: string }>
+  | Readonly<{ status: 'cancelled' | 'ready' | 'idle' | 'preparing' }>;
+
+/**
+ * T19: one `prepare` entry per settled preparation: offline miss, missing library, store exhaustion or extraction
+ * failure as `refused` with its code. `undefined` for a state that is not terminal.
+ *
+ * @param state - The preparation's state.
+ * @param duration - Milliseconds the attempt took.
+ * @param context - The host context.
+ * @returns The entry, or `undefined`.
+ * @public
+ */
+export const preparationEntry = (
+  state: PreparationStateInput,
+  duration: number,
+  context: RuntimeEntryContext,
+): RuntimeOperationEntry | undefined => {
+  const base = { operation: 'prepare', ...hostFields(context) } as const;
+  const timed = { name: RuntimeEntryName.OPERATION, duration: clampMilliseconds(duration) } as const;
+  switch (state.status) {
+    case 'blocked': {
+      return { ...timed, detail: { ...base, outcome: 'refused', ...closedCode(state.reason) } };
+    }
+    case 'failed': {
+      return { ...timed, detail: { ...base, outcome: 'refused', ...closedCode(state.code) } };
+    }
+    case 'cancelled': {
+      return { ...timed, detail: { ...base, outcome: 'cancelled' } };
+    }
+    case 'ready': {
+      return { ...timed, detail: { ...base, outcome: 'succeeded' } };
+    }
+    default: {
+      return undefined;
+    }
+  }
+};
+
+/**
+ * T19: a host refused an attempt before dispatch (revoked session, authority or workspace mismatch, denied route).
+ *
+ * @param refusal - The refusal's code.
+ * @param context - The host context.
+ * @returns The entry.
+ * @public
+ */
+export const admissionEntry = (
+  refusal: Readonly<{ code: string }>,
+  context: RuntimeEntryContext,
+): RuntimeOperationEntry => ({
+  name: RuntimeEntryName.OPERATION,
+  duration: 0,
+  detail: { operation: 'admit', outcome: 'refused', ...closedCode(refusal.code), ...hostFields(context) },
+});
+
+/** A durable job submit's outcome (`JobSubmitOutcome` in `@taucad/runtime` is assignable). @public */
+export type JobSubmitOutcomeInput =
+  | Readonly<{ type: 'accepted'; deduplicated: boolean }>
+  | Readonly<{ type: 'refused'; code: string }>
+  | Readonly<{ type: 'unknown' }>;
+
+/**
+ * T20: one durable submit. A deduplicated submit is a success with `deduplicated: true`, never an error; `unknown`
+ * (the reply was lost) is neither a failure nor a fresh job.
+ *
+ * @param outcome - The submit's outcome.
+ * @param duration - Milliseconds.
+ * @param context - The host context.
+ * @returns The entry.
+ * @public
+ */
+export const submitEntry = (
+  outcome: JobSubmitOutcomeInput,
+  duration: number,
+  context: RuntimeEntryContext,
+): RuntimeOperationEntry => {
+  const timed = { name: RuntimeEntryName.OPERATION, duration: clampMilliseconds(duration) } as const;
+  const base = { operation: 'submit', ...hostFields(context) } as const;
+  switch (outcome.type) {
+    case 'accepted': {
+      return {
+        ...timed,
+        detail: { ...base, outcome: 'succeeded', ...(outcome.deduplicated ? { deduplicated: true } : {}) },
+      };
+    }
+    case 'refused': {
+      return { ...timed, detail: { ...base, outcome: 'refused', ...closedCode(outcome.code) } };
+    }
+    default: {
+      return { ...timed, detail: { ...base, outcome: 'unknown' } };
+    }
+  }
+};
+
+/**
+ * The reconciliation of an `unknown` submit: the same mapping under `reconcile`.
+ *
+ * @param outcome - The re-submit's outcome.
+ * @param duration - Milliseconds.
+ * @param context - The host context.
+ * @returns The entry.
+ * @public
+ */
+export const reconcileEntry = (
+  outcome: JobSubmitOutcomeInput,
+  duration: number,
+  context: RuntimeEntryContext,
+): RuntimeOperationEntry => {
+  const entry = submitEntry(outcome, duration, context);
+  return { ...entry, detail: { ...entry.detail, operation: 'reconcile' } };
+};
+
+/** A job's lifecycle transition into a terminal or attention state. @public */
+export type JobTransitionInput = Readonly<{
+  to: 'completed' | 'failed' | 'cancelled' | 'attention_required';
+  /** The job provider id (`JobProviderIdentity.id`). */
+  plugin: string;
+  /** The job's stable failure code. */
+  code?: string;
+  kernel?: string;
+}>;
+
+/**
+ * FR-15: one `job` entry per terminal state (`completed` → succeeded, `failed`, `cancelled`) and one `attention`
+ * per job id. `duration` is queued-to-state on the host's clock.
+ *
+ * @param transition - The transition.
+ * @param duration - Milliseconds since the job was queued.
+ * @param context - The host context.
+ * @returns The entry.
+ * @public
+ */
+export const jobEntry = (
+  transition: JobTransitionInput,
+  duration: number,
+  context: RuntimeEntryContext,
+): RuntimeOperationEntry => {
+  const outcome =
+    transition.to === 'completed' ? 'succeeded' : transition.to === 'attention_required' ? 'attention' : transition.to;
+  return {
+    name: RuntimeEntryName.OPERATION,
+    duration: clampMilliseconds(duration),
+    detail: {
+      operation: 'job',
+      outcome,
+      plugin: closedValue(v.plugin, transition.plugin),
+      ...(outcome === 'succeeded' ? {} : closedCode(transition.code)),
+      ...optional('kernel', transition.kernel === undefined ? undefined : closedValue(v.kernel, transition.kernel)),
+      ...hostFields(context),
+    },
+  };
+};
+
+/** One job projection as its owner applies it (`reduceJobSnapshot`). @public */
+export type JobSnapshotInput = Readonly<{
+  jobId: string;
+  state: string;
+  providerId: string;
+  /** Milliseconds since the epoch the job was queued at. */
+  queuedAt: number;
+  code?: string;
+  kernel?: string;
+}>;
+
+/** The attention seen-set's bounds (AR-W15-10). @public */
+export const jobAttentionBounds = { ids: 1024, maxAge: 24 * 3_600_000 } as const;
+
+/**
+ * FR-15 / AR-W15-10: a job owner's snapshot observer. Feed it every projection `reduceJobSnapshot` applies; it records
+ * one entry per terminal state reached and `attention` once per job id, through a bounded seen-set (1,024 ids, oldest
+ * first, 24 h), so a job that re-enters `attention_required` is counted once and the set cannot grow with the store.
+ *
+ * @param input - Where entries go and the host context.
+ * @returns The observer.
+ * @public
+ */
+export const createJobSnapshotObserver = (
+  input: Readonly<{ record: (entry: RuntimeOperationEntry) => void; context: RuntimeEntryContext; now?: () => number }>,
+): ((previous: Readonly<{ state: string }> | undefined, next: JobSnapshotInput) => void) => {
+  const now = input.now ?? Date.now;
+  const attentionSeen = new Map<string, number>();
+  const evict = (at: number): void => {
+    for (const [jobId, seenAt] of attentionSeen) {
+      if (attentionSeen.size <= jobAttentionBounds.ids && at - seenAt <= jobAttentionBounds.maxAge) {
+        return;
+      }
+      attentionSeen.delete(jobId);
+    }
+  };
+  return (previous, next) => {
+    if (previous?.state === next.state) {
+      return;
+    }
+    const at = now();
+    if (next.state === 'attention_required') {
+      evict(at);
+      if (attentionSeen.has(next.jobId)) {
+        return;
+      }
+      attentionSeen.set(next.jobId, at);
+      evict(at);
+    }
+    if (
+      next.state !== 'completed' &&
+      next.state !== 'failed' &&
+      next.state !== 'cancelled' &&
+      next.state !== 'attention_required'
+    ) {
+      return;
+    }
+    try {
+      input.record(
+        jobEntry(
+          {
+            to: next.state,
+            plugin: next.providerId,
+            ...optional('code', next.code),
+            ...optional('kernel', next.kernel),
+          },
+          at - next.queuedAt,
+          input.context,
+        ),
+      );
+    } catch {
+      /* Telemetry never throws into the job owner. */
+    }
+  };
+};
+
+/** One new machine operation's receipt (AR-W22-04). @public */
+export type MachineOperationInput = Readonly<{
+  /** The binding's provider id (`MachineProvider.id`). */
+  provider: string;
+  kind: 'action' | 'stop' | 'hold' | 'transfer' | 'start';
+  /** The standard action family, for an `action`. */
+  action?: string;
+  status: 'accepted' | 'rejected' | 'refused' | 'unknown';
+  code?: string;
+  requester: 'person' | 'agent';
+}>;
+
+/**
+ * One `machine` entry per new machine operation of every kind: `accepted` → succeeded, `rejected` → issue with its
+ * code, a pre-plan refusal → refused, `unknown` → unknown. The caller is `agent` for an agent's request, else
+ * `editor`. The machine's id, name, serial, address, parameters and job file never leave.
+ *
+ * @param ran - The operation's receipt.
+ * @param duration - Milliseconds.
+ * @param context - The host context; its caller is replaced.
+ * @returns The entry.
+ * @public
+ */
+export const machineEntry = (
+  ran: MachineOperationInput,
+  duration: number,
+  context: Omit<RuntimeEntryContext, 'caller'>,
+): RuntimeOperationEntry => {
+  const outcome = ran.status === 'accepted' ? 'succeeded' : ran.status === 'rejected' ? 'issue' : ran.status;
+  return {
+    name: RuntimeEntryName.OPERATION,
+    duration: clampMilliseconds(duration),
+    detail: {
+      operation: 'machine',
+      outcome,
+      plugin: closedValue(v.plugin, ran.provider),
+      machineKind: closedValue(v.machineKind, ran.kind),
+      ...(ran.kind === 'action' && ran.action !== undefined
+        ? { machineAction: closedValue(v.machineAction, ran.action) }
+        : {}),
+      ...(outcome === 'issue' || outcome === 'refused' ? closedCode(ran.code) : {}),
+      ...hostFields({ ...context, caller: ran.requester === 'person' ? 'editor' : 'agent' }),
+    },
+  };
+};
+
+/**
+ * The OS class of a Node host from `process.platform`; nothing finer.
+ *
+ * @param platform - `process.platform`.
+ * @returns The class.
+ * @public
+ */
+export const nodeOsClass = (platform: string): 'windows' | 'macos' | 'linux' | 'other' =>
+  platform === 'win32' ? 'windows' : platform === 'darwin' ? 'macos' : platform === 'linux' ? 'linux' : 'other';
+
+/* ------------------------------------------------------------------------------------------------ *
  * The reporter.                                                                                    *
  * ------------------------------------------------------------------------------------------------ */
 

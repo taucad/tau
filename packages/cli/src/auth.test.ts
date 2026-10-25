@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Environment and RFC 8628 field names. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { authApiOrigin, authRequest, deviceLogin, inspectSession, resolveAuthToken } from '#auth.js';
+import { authApiOrigin, authRequest, authTokenReader, deviceLogin, inspectSession, resolveAuthToken } from '#auth.js';
 const keys = vi.hoisted(() => ({ getPassword: vi.fn(), constructor: vi.fn() }));
 vi.mock('@napi-rs/keyring', () => ({
   AsyncEntry: class {
@@ -88,5 +88,25 @@ describe('CLI session custody', () => {
     await vi.advanceTimersByTimeAsync(5001);
     expect(await result).toBe('secret-session');
     expect(present).toHaveBeenCalledWith('https://app.example.test/auth/cli?user_code=ABCD-EFGH', 'ABCD-EFGH');
+  });
+});
+
+describe('authTokenReader', () => {
+  it('should read the environment token first without opening the OS store', async () => {
+    await expect(authTokenReader('https://api.example.test', { TAU_AUTH_TOKEN: 'injected' })()).resolves.toEqual({
+      kind: 'token',
+      token: 'injected',
+    });
+    expect(keys.constructor).not.toHaveBeenCalled();
+  });
+  it('should read the saved session, or none when there is no saved session', async () => {
+    keys.getPassword.mockResolvedValueOnce('saved').mockResolvedValueOnce(null);
+    const read = authTokenReader('https://api.example.test', {});
+    await expect(read()).resolves.toEqual({ kind: 'token', token: 'saved' });
+    await expect(read()).resolves.toEqual({ kind: 'none' });
+  });
+  it('should never reject: a locked credential store is unavailable', async () => {
+    keys.getPassword.mockRejectedValue(new Error('locked'));
+    await expect(authTokenReader('https://api.example.test', {})()).resolves.toEqual({ kind: 'unavailable' });
   });
 });

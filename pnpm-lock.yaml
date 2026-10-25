@@ -4133,6 +4133,9 @@ importers:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../runtime
+      '@taucad/telemetry':
+        specifier: workspace:*
+        version: link:../../libs/telemetry
       '@taucad/types':
         specifier: workspace:*
         version: link:../../libs/types

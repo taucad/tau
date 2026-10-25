@@ -37,6 +37,9 @@ import { stageUiEnvironment } from '#ui-environment.js';
 import { resolveZooAuthToken, cliZooProxyUrl } from '#zoo-proxy.js';
 import { requireGitToolchain } from '#commands/revisions.js';
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
+import { cliRuntimeTelemetry } from '#runtime-telemetry.js';
+// oxlint-disable-next-line no-restricted-imports -- relative import is the only portable way to load the CLI's own package.json (matches `packages/runtime/src/utils/package-info.ts`).
+import packageJson from '../../package.json' with { type: 'json' };
 import { createComputeStoreHost } from '#compute-store.js';
 import type { ComputeStoreConnection } from '#compute-store.js';
 import type * as NativeKernels from '#native-kernels.js';
@@ -1105,6 +1108,12 @@ export const serveCommand = defineCommand({
       }
       reportEvent(event);
     };
+    /* Runtime telemetry: a self-hosted `tau serve` and its runtime children never report, so the role marks this process
+     * (inherited by its children). The one `tau serve` that does is the cloud host container, which the provisioner
+     * marks with `TAU_CLOUD_HOST=1`; it reports to its own `TAU_API_URL` with route `cloud`. */
+    process.env['TAU_SERVE_ROLE'] ??= 'serve';
+    const runtimeTelemetry =
+      process.env['TAU_CLOUD_HOST'] === '1' ? cliRuntimeTelemetry('cloud', packageJson.version) : undefined;
     const daemon = startHostDaemon({
       relayUrl: new URL(apiUrl),
       relay: relay !== undefined,
@@ -1123,6 +1132,9 @@ export const serveCommand = defineCommand({
       systemSkillBundles: skillBundles,
       pair: args.pair,
       ...(configuredAgent ? { agent: configuredAgent } : {}),
+      ...(runtimeTelemetry === undefined
+        ? {}
+        : { observeRuntimeClient: (client, caller) => runtimeTelemetry.observe(client, caller) }),
       onEvent,
     });
     try {
@@ -1218,6 +1230,7 @@ export const serveCommand = defineCommand({
         await computeStore.close();
         await kernels.dispose().catch(() => undefined);
         await stagedUi?.dispose();
+        await runtimeTelemetry?.shutdown();
       }
     }
   },

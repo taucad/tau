@@ -413,6 +413,13 @@ export type RevisionActors = Readonly<{
   recordEditorConflict: (input: EditorConflictInput) => Promise<EditorConflictOutcome>;
   /** Read one conflicted revision's files as text; see {@link RevisionConflictRead}. */
   readConflict: (revision: string) => Promise<RevisionConflictRead>;
+  /**
+   * The record device this host's chat segments sync under (EQ10(a)), or `undefined` on a host that records no chats.
+   *
+   * A random id from the record set, never the host's own `deviceId`: a host stamps it where a synced row has to say
+   * which device wrote it, so a renamed machine keeps its id and two machines that share a name do not.
+   */
+  chatDevice: () => Promise<string | undefined>;
 }>;
 
 /**
@@ -2957,6 +2964,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     release: releaseMark,
     recordEditorConflict,
     readConflict,
+    chatDevice: async () => {
+      const context = await chatContext();
+      return context?.deviceId;
+    },
     checkout: {
       cut: fromAuthorityPromise<CheckoutCutActorOutput, CheckoutCutActorInput>(async ({ input }) => {
         /* A comparison running when this cut was asked, over the same write
@@ -5031,6 +5042,8 @@ export type ProjectRevisions = Readonly<{
   recordEditorConflict: (input: EditorConflictInput) => Promise<EditorConflictOutcome>;
   /** Read one conflicted revision's files as text, for the agent's `revisions` tool. */
   readConflict: (revision: string) => Promise<RevisionConflictRead>;
+  /** The record device this host's chat segments sync under; see {@link RevisionActors.chatDevice}. */
+  chatDevice: () => Promise<string | undefined>;
 }>;
 
 /** Options for one project's running revision actor tree. @public */
@@ -5153,6 +5166,7 @@ export const createProjectRevisionsActor = (options: ProjectRevisionActorOptions
     turns: actors.turns,
     recordEditorConflict,
     readConflict: actors.readConflict,
+    chatDevice: actors.chatDevice,
   };
 };
 

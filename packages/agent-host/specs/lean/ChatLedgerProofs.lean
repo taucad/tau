@@ -4340,12 +4340,18 @@ theorem t13_held_refuses (v : Verb) (t w : Bool) (foreign : List Passed) (f : Pa
   split <;> simp [hany]
 
 /-- **T13** (kept until its batch): what a command carries stays until its run writes a batch that is no lone
-heartbeat, or the command is answered other than applied; other runs' batches and other answers leave it. -/
+heartbeat, its run settles, or its admission is answered other than applied; other runs' batches and settlements and
+other admissions' answers leave it. -/
 theorem t13_carry_kept (c : Carried) (e : Nat × Nat × List Nat) (he : e ∈ c) (op : CarryOp)
-    (hw : ∀ hb, op = .write e.2.1 hb → hb = true) (ha : op ≠ .answer e.1 false) : e ∈ (carryStep c op).1 := by
+    (hw : ∀ hb, op = .write e.2.1 hb → hb = true) (hs : op ≠ .settle e.2.1) (ha : op ≠ .answer e.1 false) :
+    e ∈ (carryStep c op).1 := by
   cases op with
   | carry k r says => simp [carryStep, he]
   | hold r => simpa [carryStep] using he
+  | settle r =>
+    have hr : e.2.1 ≠ r := fun h => hs (by rw [h])
+    simp only [carryStep]
+    exact List.mem_filter.mpr ⟨he, by simp [hr]⟩
   | write r hb =>
     cases ht : carriedTaken c r hb with
     | none => simpa [carryStep, ht] using he
@@ -4632,5 +4638,60 @@ theorem t14_refold_is_merge (segs : List (Nat × List Row)) (dev : Nat) (merged 
     (h : merged.getLast?.map Row.term ≠ some e.term) :
     appendMerged segs dev merged e = merge (segs.map fun s => if s.1 = dev then (s.1, s.2 ++ [e]) else s) := by
   simp [appendMerged, h]
+
+/-! ## T15: a replay changes nothing, a settled run carries nothing, an unread approval is refused (round 22) -/
+
+/-- **T15** (a replay changes nothing): a command this host already sent on, in flight or applied, is never admitted
+again: it adds no entry, and since it holds no admission its answer, whatever it is, withdraws none, its original's
+included. -/
+theorem t15_replay_no_change (c : Carried) (seen : List Nat) (next command run : Nat) (says : List Nat)
+    (h : seen.contains command = true) :
+    admitCarry c seen next command run says = (none, c) ∧
+      ∀ applied, answerCarry (admitCarry c seen next command run says).2
+        (admitCarry c seen next command run says).1 applied = c := by
+  have hm : command ∈ seen := by simpa using h
+  refine ⟨by simp [admitCarry, hm], fun applied => ?_⟩
+  simp [admitCarry, hm, answerCarry]
+
+/-- **T15** (an answer withdraws its own): an admission's answer leaves every other admission's entry, so a copy of a
+command admitted again (after its original was refused) never withdraws what another admission carries. -/
+theorem t15_answer_own_only (c : Carried) (k : Nat) (applied : Bool) (e : Nat × Nat × List Nat) (he : e ∈ c)
+    (hk : e.1 ≠ k) : e ∈ answerCarry c (some k) applied := by
+  simp only [answerCarry]
+  exact t13_carry_kept c e he (.answer k applied) (by simp) (by simp)
+    (by intro h; injection h with h1 _; exact hk h1.symm)
+
+/-- **T15** (admissions are distinct): an entry an admission adds is keyed apart from every entry before it, while the
+next admission is past them all. -/
+theorem t15_admissions_distinct (c : Carried) (seen : List Nat) (next command run : Nat) (says : List Nat)
+    (hc : ∀ p ∈ c, p.1 < next) (h : seen.contains command = false) :
+    admitCarry c seen next command run says = (some next, c ++ [(next, run, says)]) ∧ ∀ p ∈ c, p.1 ≠ next := by
+  have hm : command ∉ seen := by simpa using h
+  refine ⟨by simp [admitCarry, hm, carryStep], fun p hp => Nat.ne_of_lt (hc p hp)⟩
+
+/-- **T15** (a settled run carries nothing): once a row settles a run, no entry for that run is left, even one whose
+batch had no place for it (a Stop while the approved call is open); every other run's stays. -/
+theorem t15_settle_drops (c : Carried) (r : Nat) :
+    (∀ p ∈ (carryStep c (.settle r)).1, p.2.1 ≠ r) ∧ (carryStep c (.settle r)).2 = [] ∧
+      ∀ p ∈ c, p.2.1 ≠ r → p ∈ (carryStep c (.settle r)).1 := by
+  refine ⟨fun p hp => ?_, rfl, fun p hp hr => List.mem_filter.mpr ⟨hp, by simp [hr]⟩⟩
+  have := (List.mem_filter.mp hp).2
+  simpa using this
+
+/-- **T15** (the bug round 22 fixed): keyed by the command, a replay's answer withdrew its original's entry, held for
+the run's next batch, and that batch said nothing; keyed by the admission, it still says the turn. -/
+theorem t15_replay_keeps_held :
+    let held := (carryStep (carryStep [] (.carry 0 1 [5])).1 (.hold 1)).1
+    (carryStep (answerCarry held none false) (.write 1 false)).2 = [5] ∧
+      (carryStep (held.filter (fun p => p.1 != 0)) (.write 1 false)).2 = [] := by
+  decide
+
+/-- **T15** (no approval unchecked once another device could have judged the run abandoned): an approval whose check
+could not read another device's segment is refused, inside the pause's hold too. That device's standing of this
+device's run rests on its own pulls alone, which can pass the bound inside any hold whose rows never reached the remote,
+so the hold is no evidence the run still holds the chat there. -/
+theorem t15_unread_refused (held : Bool) (bound ask changed now : Nat) :
+    approveUnread held = .refused ∧ standing bound ask changed now (some (bound + 1)) false = .abandoned := by
+  simp [approveUnread, standing]
 
 end ChatLedger

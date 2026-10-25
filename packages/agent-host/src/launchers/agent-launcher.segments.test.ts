@@ -1673,19 +1673,33 @@ describe('a chat continued on a second device', () => {
       expect(approved, JSON.stringify(approved)).toMatchObject({ status: 'refused', code: 'COMMAND_SUPERSEDED' });
     });
 
-    /* Inside its own hold the paused run still holds the chat: a segment it cannot read does not block its approval. */
-    it('should apply an approval inside the paused run’s hold while another device’s segment cannot be read', async () => {
+    /*
+     * Round 22, finding 3: inside its own hold the paused run was approved without the takeover check while another
+     * device's segment could not be read. That device judges this run abandoned on its own pulls, after the bound with
+     * no new row on the remote, and this device cannot know its heartbeats reached it: the hold outlives that bound, so
+     * the takeover the unread segment may hold went unchecked. The approval is refused retryably, and applied once the
+     * segment reads.
+     */
+    it('should refuse an approval, retryably, while another device’s segment cannot be read, even inside the paused run’s hold', async () => {
       const { root, launcher } = await pausedRunOn({ runHeartbeat: 10, pausedRunHold: 60_000 });
       await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'paused'));
-      await mkdir(join(root, '.tau', 'chats', chatId, 'events', 'device-phone.jsonl'), { recursive: true });
-
-      const answer = await launcher.execute({
+      const unreadable = join(root, '.tau', 'chats', chatId, 'events', 'device-phone.jsonl');
+      await mkdir(unreadable, { recursive: true });
+      const before = rowsOf(await readFile(ownLog(root), 'utf8')).length;
+      const approve = {
         type: 'resolve-interrupt',
         commandId: key(),
         payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
-      });
+      } as const;
 
-      expect(answer).toMatchObject({ status: 'applied' });
+      const refused = await launcher.execute(approve);
+
+      expect(refused).toMatchObject({ status: 'refused', code: 'SEGMENTS_UNREADABLE', effect: 'not-applied' });
+      expect(refusalOf('SEGMENTS_UNREADABLE').retry).toBe('wait');
+      const after = rowsOf(await readFile(ownLog(root), 'utf8')).slice(before);
+      expect(after.filter((row) => row.type !== 'run.heartbeat')).toEqual([]);
+      await rm(unreadable, { recursive: true });
+      await expect(launcher.execute(approve)).resolves.toMatchObject({ status: 'applied' });
     });
 
     /*

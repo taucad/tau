@@ -358,6 +358,13 @@
     "replace": "  if True then merged ++ [e]"
   },
   {
+    "id": "M51",
+    "drift": "a row that settles a run keeps what a command carried for it, so an entry its batch had no place for is never cleared (round 22, finding 4, T15: t15_settle_drops)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | .settle r => (c.filter (fun p => p.2.1 != r), [])",
+    "replace": "  | .settle _ => (c, [])"
+  },
+  {
     "id": "carried-head-placement",
     "drift": "round 21, finding 1: carriedPlace puts carried turns at the head of their batch again, between a call a Resume closes and its output (T14: t14_plan_well_formed)",
     "file": "src/host/run-history.ts",
@@ -388,5 +395,45 @@
     "test": "src/log/history-invariant.test.ts",
     "find": "export const openToolCalls = (messages: readonly ProviderMessage[]): ToolCall[] => {\n  let open: readonly ToolCall[] = [];",
     "replace": "export const openToolCalls = (messages: readonly ProviderMessage[]): ToolCall[] => {\n  if (messages.length >= 0) {\n    return messages.flatMap(callsOf).filter((call) => !messages.some((m) => m.role === 'tool-output' && m.toolCallId === call.toolCallId));\n  }\n  let open: readonly ToolCall[] = [];"
+  },
+  {
+    "id": "replay-admitted",
+    "drift": "round 22, finding 1: a copy of a command this host already applied is admitted again, so it reads the other devices' segments and proposes and carries for its run again (T15: t15_replay_no_change)",
+    "file": "src/host/tau-agent-host.ts",
+    "test": "src/host/tau-agent-host.test.ts",
+    "find": "        if (storeOf(ordered).ledger?.applied[command.commandId] !== undefined) {",
+    "replace": "        if (storeOf(ordered).ledger?.applied[command.commandId] === null) {"
+  },
+  {
+    "id": "replay-withdraws-original",
+    "drift": "round 22, finding 1: a dispatch this host never admitted (a replay) withdraws the newest admission's entries on its answer, its original's, so the turn held for the run's next batch is never said (T15: t15_replay_keeps_held)",
+    "file": "src/host/tau-agent-host.ts",
+    "test": "src/host/tau-agent-host.test.ts",
+    "find": "      store.carried = carriedAfterAnswer(store.carried, dispatch.admission, applied);",
+    "replace": "      store.carried = carriedAfterAnswer(store.carried, dispatch.admission ?? admissionCount, applied);"
+  },
+  {
+    "id": "settled-keeps-carried",
+    "drift": "round 22, finding 4: a row that settles a run keeps what was carried for it, so an entry its batch had no place for is never cleared (T15: t15_settle_drops)",
+    "file": "src/host/tau-agent-host.ts",
+    "test": "src/log/chat-ledger.differential.test.ts",
+    "find": "    : carried.filter((entry) => entry !== spent && !(settles && entry.runId === row.runId));",
+    "replace": "    : carried.filter((entry) => entry !== spent);"
+  },
+  {
+    "id": "unread-approval-in-hold",
+    "drift": "round 22, finding 3: an approval inside its paused run's hold is admitted without the takeover check while another device's segment cannot be read (T15: t15_unread_refused)",
+    "file": "src/host/tau-agent-host.ts",
+    "test": "src/launchers/agent-launcher.segments.test.ts",
+    "find": "      const { code, message, details } = codedFailureDetail(error);\n      /* Fail closed (round 20)",
+    "replace": "      const { code, message, details } = codedFailureDetail(error);\n      if (code === 'SEGMENTS_UNREADABLE' && details?.['unchecked'] === undefined && pauseHeld(store)) {\n        return undefined;\n      }\n      /* Fail closed (round 20)"
+  },
+  {
+    "id": "grown-rows-chain",
+    "drift": "round 22, finding 2: a grown segment's rows keep the rows they grew from, which keep theirs, so every earlier copy of a heartbeat-grown segment stays alive",
+    "file": "src/log/foreign-runs.ts",
+    "test": "src/log/foreign-runs.incremental.test.ts",
+    "find": "  grownFrom.set(grown, { length: prior.length, folds: foldsOf(prior) });",
+    "replace": "  grownFrom.set(grown, Object.assign({ length: prior.length, folds: foldsOf(prior) }, { prior }));"
   }
 ]

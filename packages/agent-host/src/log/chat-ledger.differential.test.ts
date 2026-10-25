@@ -25,6 +25,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   appendChatRows,
+  carriedAfterAnswer,
+  carriedAfterRow,
   carriedBy,
   chatTermOf,
   commandAdmission,
@@ -1072,14 +1074,14 @@ const termsTrace = (): Trace => {
             ...terms,
             proposed: [
               ...(terms.proposed ?? []),
-              { replaces: 't1', leaderEpoch: `t${c!}`, commandId: `c${a!}`, runId: `r${b!}` },
+              { replaces: 't1', leaderEpoch: `t${c!}`, admission: Number(a), runId: `r${b!}` },
             ],
           };
         } else if (step.startsWith('w') || step.startsWith('b')) {
           writing = termWriteOf(terms, 't1', batchOf(a!, b!));
           written.push(writing.leaderEpoch.slice(1));
         } else if (step !== 'e') {
-          terms = termsAfterAnswer(terms, `c${a!}`, b === '1');
+          terms = termsAfterAnswer(terms, Number(a), b === '1');
         }
         /* A `w` ends at once; a `b` ends at its `e`. */
         if (writing !== undefined && !step.startsWith('b') && (step === 'e' || step.startsWith('w'))) {
@@ -1135,14 +1137,14 @@ const crossAdmissionTrace = (): Trace => {
 };
 
 /**
- * What admitted commands' runs' first batches carry over every sequence of up to three steps (T13, round 20): a command
- * carrying turns for its run, a batch of a run's rows or a heartbeat written, a command answered applied or not. Each
- * trace says the turns each write said.
+ * What admitted commands' runs' first batches carry over every sequence of up to three steps (T13, rounds 20 and 22):
+ * an admission carrying turns for its run, a batch of a run's rows or a heartbeat written, a row settling a run, an
+ * admission answered applied or not. Each trace says the turns each write said.
  */
 const carryTrace = (): Trace => {
   const text = ['T carried'];
   const expected = ['T carried'];
-  const steps = ['c1.1.5+6', 'c2.1.7', 'c3.2.-', 'w1.0', 'w1.1', 'w2.0', 'h1', 'a1.0', 'a1.1', 'a2.0'];
+  const steps = ['c1.1.5+6', 'c2.1.7', 'c3.2.-', 'w1.0', 'w1.1', 'w2.0', 'h1', 's1', 's2', 'a1.0', 'a1.1', 'a2.0'];
   const sequences: string[][] = [[]];
   for (let length = 1; length <= 3; length++) {
     for (const prefix of sequences.filter((sequence) => sequence.length === length - 1)) {
@@ -1160,7 +1162,7 @@ const carryTrace = (): Trace => {
         carried = [
           ...carried,
           {
-            commandId: `c${a!}`,
+            admission: Number(a),
             runId: `r${b!}`,
             says: says.map((run): ChatRunRow => ({ runId: run, body: { type: 'run.heartbeat' } })),
           },
@@ -1177,14 +1179,20 @@ const carryTrace = (): Trace => {
                 held ? [planMessage('c1', 0)] : [],
                 batch.map((row) => row.body),
               );
-        if (place !== undefined) {
-          carried = carried.filter((other) => other !== entry);
+        for (const row of batch) {
+          carried = carriedAfterRow(carried, place === undefined ? undefined : entry, {
+            runId: row.runId,
+            ...row.body,
+          });
         }
         said.push(
           place === undefined || entry!.says.length === 0 ? '-' : entry!.says.map((row) => row.runId).join('+'),
         );
-      } else if (b !== '1') {
-        carried = carried.filter((entry) => entry.commandId !== `c${a!}`);
+      } else if (step.startsWith('s')) {
+        /* Round 22: a row settles the run, as a Stop's does while the approved call is open. */
+        carried = carriedAfterRow(carried, undefined, { runId: `r${a!}`, type: 'run.lifecycle', state: 'cancelled' });
+      } else {
+        carried = carriedAfterAnswer(carried, Number(a), b === '1');
       }
     }
     expected.push(`QC ${said.length === 0 ? '-' : said.join(',')}`);

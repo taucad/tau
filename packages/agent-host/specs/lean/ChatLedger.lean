@@ -848,7 +848,8 @@ def rowsTerm (a : Admission) (_slotHeld : Bool) (held fresh : Nat) : Nat :=
 
 /-- A chat's terms while its incarnation stays open (`ChatTerms`): `held` is the incarnation's own term; `opened` a term
 this host opened in its place, which a row written under it committed; `proposed` the terms admitted commands opened
-for their runs' rows, each `(command, run, term)`, which only that run's first row (never a heartbeat) commits;
+for their runs' rows, each `(admission, run, term)` (round 22: keyed by the admission that proposed it, never by the
+command's id, which a re-sent copy shares), which only that run's first row (never a heartbeat) commits;
 `wrote` the term this host last wrote the chat under. -/
 structure Terms where
   held : Nat
@@ -871,12 +872,12 @@ def Terms.rowsTerm (s : Terms) (run : Nat) (heartbeat : Bool) : Nat :=
   | none => s.term
 
 inductive TermOp where
-  /-- An admitted command opens `fresh` for its `run`'s rows (`rehome`). -/
-  | propose (command run fresh : Nat)
+  /-- An admission opens `fresh` for its `run`'s rows (`rehome`). -/
+  | propose (admission run fresh : Nat)
   /-- A batch of `run`'s rows is written. -/
   | write (run : Nat) (heartbeat : Bool)
-  /-- The command is answered: `applied`, or refused or superseded. -/
-  | answer (command : Nat) (applied : Bool)
+  /-- The admitted command is answered: `applied`, or refused or superseded. -/
+  | answer (admission : Nat) (applied : Bool)
   deriving DecidableEq, Repr
 
 /-- `termsAfterWrite` (round 20): a batch of `run`'s rows written from `begun`, the terms as its write began
@@ -930,7 +931,8 @@ def admit (v : Verb) (takenOver wrote : Bool) (foreign : List Passed) : Admit :=
     if foreign.any (fun f => !f.abandoned) then .held
     else .admitted a ((foreign.filter (fun f => f.words && !f.said)).map Passed.run)
 
-/-- What admitted commands' runs' first batches carry (`ChatStore.carried`): each `(command, run, says)`. -/
+/-- What admitted commands' runs' first batches carry (`ChatStore.carried`): each `(admission, run, says)`, keyed by the
+admission that derived it (round 22), never by the command's id, which a re-sent copy of the command shares. -/
 abbrev Carried := List (Nat × Nat × List Nat)
 
 /-- The entry a batch of `run`'s rows carries: the first for its run, never for a lone heartbeat. -/
@@ -938,19 +940,23 @@ def carriedTaken (c : Carried) (run : Nat) (heartbeat : Bool) : Option (Nat × N
   if heartbeat then none else c.find? (fun p => p.2.1 == run)
 
 inductive CarryOp where
-  /-- An admitted command's run's first batch is to say `says` (`rehome`). -/
-  | carry (command run : Nat) (says : List Nat)
+  /-- An admission's run's first batch is to say `says` (`rehome`). -/
+  | carry (admission run : Nat) (says : List Nat)
   /-- A batch of `run`'s rows is written, with a place for what it carries (`carriedPlace`, round 21). -/
   | write (run : Nat) (heartbeat : Bool)
   /-- A batch of `run`'s rows is written that has no place for what it carries: every place in it leaves a tool call
   open (an approval's rows before its tool returns), so its turns wait for the run's next batch (round 21). -/
   | hold (run : Nat)
-  /-- The command is answered. -/
-  | answer (command : Nat) (applied : Bool)
+  /-- A row settles `run` (round 22): nothing writes its rows again. -/
+  | settle (run : Nat)
+  /-- The admitted command is answered. -/
+  | answer (admission : Nat) (applied : Bool)
   deriving DecidableEq, Repr
 
-/-- One step (`carriedAfter…`), and the runs whose turns its batch says: a write with a place says what its run's
-entry carries and spends it; a batch with none keeps it; a command answered other than applied withdraws its entry. -/
+/-- One step (`carriedAfterRow`, `carriedAfterAnswer`), and the runs whose turns its batch says: a write with a place
+says what its run's entry carries and spends it; a batch with none keeps it; a row that settles a run drops every entry
+for it, which the chat's next admission derives afresh (round 22); a command answered other than applied withdraws its
+own admission's entry. -/
 def carryStep (c : Carried) : CarryOp → Carried × List Nat
   | .carry k r says => (c ++ [(k, r, says)], [])
   | .write r hb =>
@@ -958,7 +964,33 @@ def carryStep (c : Carried) : CarryOp → Carried × List Nat
     | some p => (c.erase p, p.2.2)
     | none => (c, [])
   | .hold _ => (c, [])
+  | .settle r => (c.filter (fun p => p.2.1 != r), [])
   | .answer k applied => (if applied then c else c.filter (fun p => p.1 != k), [])
+
+/-- A command as it reaches this host's admission (`execute`, round 22). `seen`: the commands this host sent on that
+are in flight or applied. A command among them is a replay: it is never admitted, so it carries nothing and holds no
+admission its answer could withdraw, and it shares its original's answer. Any other is admitted as the fresh admission
+`next`. Answers the admission, if any, and what admitted commands carry then. -/
+def admitCarry (c : Carried) (seen : List Nat) (next command run : Nat) (says : List Nat) : Option Nat × Carried :=
+  if seen.contains command then (none, c) else (some next, (carryStep c (.carry next run says)).1)
+
+/-- A dispatch's answer (`withdrawAdmission`): by its own admission, and nothing for a dispatch this host never
+admitted (a replay). -/
+def answerCarry (c : Carried) (admission : Option Nat) (applied : Bool) : Carried :=
+  match admission with
+  | none => c
+  | some k => (carryStep c (.answer k applied)).1
+
+/-- What an approval's check answers when another device's segment could not be read (round 22): refused
+`SEGMENTS_UNREADABLE` (`wait`), whatever the pause's hold. Another device judges this device's paused run abandoned on
+its own pulls of the remote's copy of this device's segment, and this device cannot know when its rows last reached
+that copy (a publish is answered once queued), so the hold is no evidence that no device has. -/
+inductive Unread where
+  | refused
+  | admitted
+  deriving DecidableEq, Repr
+
+def approveUnread (_pauseHeld : Bool) : Unread := .refused
 
 /-! ## run-history.ts and tau-agent-host.ts: the history is well formed (round 21)
 

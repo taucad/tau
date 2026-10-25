@@ -10,6 +10,8 @@ import { appendChatRows, createTauAgentHost } from '#host/tau-agent-host.js';
 import { chatRunState, emptyChatLedger, foldChatLedger } from '#log/chat-ledger.js';
 import type { LogRowBody } from '#log/chat-ledger.js';
 import { isResumableRunFailure } from '#log/resumable.js';
+import type { ForeignRun } from '#log/foreign-runs.js';
+import { foreignRunStaleMilliseconds } from '#log/foreign-runs.js';
 import lifecycleTable from '#log/run-lifecycle.legality.json' with { type: 'json' };
 import type { ExternalAgentTurn, ExternalAgentPort } from '#host/external-agent.js';
 import type { TauAgentHost } from '#host/tau-agent-host.js';
@@ -1257,7 +1259,11 @@ the cancelled tools left the system unchanged.
    */
   const crossDevicePause = async (
     name: string,
-    reads: { foreignWrote: boolean; runTakenOver: () => Promise<boolean> },
+    reads: {
+      foreignWrote: boolean;
+      runTakenOver: () => Promise<boolean>;
+      foreignRuns?: () => readonly ForeignRun[];
+    },
     hold?: (row: AgentLogEvent) => boolean,
   ) => {
     const file = createMemoryLogFile();
@@ -1270,7 +1276,7 @@ the cancelled tools left the system unchanged.
         return {
           ...log,
           refresh: async () => undefined,
-          foreignRuns: async () => [],
+          foreignRuns: async () => reads.foreignRuns?.() ?? [],
           foreignWroteSinceTermBegan: async () => reads.foreignWrote,
           runTakenOver: async () => reads.runTakenOver(),
           append: async (row) => {
@@ -1399,6 +1405,107 @@ the cancelled tools left the system unchanged.
         payload: { chatId, runId, interruptId, outcome: 'approved' },
       }),
     ).resolves.toMatchObject({ status: 'applied' });
+    await host.close();
+  });
+
+  /** Another device's run, never settled, whose pulls found its segment quiet past the bound. */
+  const abandonedDesktopRun: ForeignRun = {
+    deviceId: 'device-desktop',
+    runId: 'run-desktop',
+    state: 'paused',
+    lastRecordedAt: Date.UTC(2026, 8, 1),
+    tip: { leaderEpoch: 'desktop', sequence: 1 },
+    observedAt: 0,
+    pulledQuiet: foreignRunStaleMilliseconds + 1,
+    words: { id: 'desktop-user', role: 'user', content: 'from the desktop' },
+  };
+
+  /*
+   * Round 22, finding 1: an approval admitted past another device's abandoned run carries that run's turn to its run's
+   * next batch while its approved call is open (`t14_approval_waits`). A re-sent copy of the same approval (the same
+   * command, answered `replayed`) withdrew every entry under that command id, the original's too, so the run's next
+   * batch said nothing, and the other device could still approve its own stale paused run. A replay changes nothing.
+   */
+  /**
+   * A paused run whose approved call is still open in the history, on a host that reads one abandoned run on another
+   * device until `reads.foreignRuns` says otherwise, and counts those reads.
+   */
+  const pausedPastAbandonedRun = async (name: string) => {
+    const file = createMemoryLogFile();
+    await seedLog(file, [
+      { type: 'message.appended', runId: 'run-1', message: { id: 'turn-1', role: 'user', content: 'Read it.' } },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
+      {
+        type: 'message.appended',
+        runId: 'run-1',
+        message: {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 'call-read', name: 'read_file', arguments: { targetFile: 'main.ts' } }],
+          metadata: { stopReason: 'toolUse' },
+        },
+      },
+      { type: 'interrupt.recorded', runId: 'run-1', interruptId: 'int-1', phase: 'requested', reason: 'Read?' },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'paused' },
+    ]);
+    const reads = { count: 0, foreignRuns: (): readonly ForeignRun[] => [abandonedDesktopRun] };
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: async () => {
+          const log = await file.open();
+          return {
+            ...log,
+            refresh: async () => undefined,
+            foreignRuns: async () => {
+              reads.count += 1;
+              return reads.foreignRuns();
+            },
+            foreignWroteSinceTermBegan: async () => false,
+            runTakenOver: async () => false,
+          };
+        },
+        transport: new ScriptedParityModelTransport([
+          { id: 'reply', text: 'Read.', usage: { inputTokens: 10, outputTokens: 2 } },
+        ]),
+        toolRegistry: tools(async () => ({ content: 'main', isError: false })),
+        idPrefix: name,
+      }),
+    );
+    const chatId = `chat-${name}`;
+    const said = async (): Promise<boolean> => {
+      const events = await readLog(file);
+      return events.some((event) => event.type === 'message.appended' && event.message.id === 'desktop-user');
+    };
+    return { host, file, reads, chatId, said };
+  };
+
+  /*
+   * Round 22, finding 1: an approval admitted past another device's abandoned run carries that run's turn to its run's
+   * next batch while its approved call is open (`t14_approval_waits`). A re-sent copy of the same approval (the same
+   * command, answered `replayed`) withdrew every entry under that command id, the original's too, so the run's next
+   * batch said nothing, and the other device could still approve its own stale paused run. A replay is never admitted:
+   * it reads nothing, carries nothing and withdraws nothing (`t15_replay_no_change`).
+   */
+  it('should still say an abandoned run’s turn a replayed approval’s original carries', async () => {
+    const { host, reads, chatId, said } = await pausedPastAbandonedRun('replayed-approval');
+    const approve = {
+      type: 'resolve-interrupt',
+      commandId: 'approve-once',
+      payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
+    } as const;
+
+    await expect(host.command(approve)).resolves.toMatchObject({ status: 'applied' });
+    /* The approved call is still open: the turn waits for the run's next batch. */
+    expect(await said()).toBe(false);
+    const { count } = reads;
+    await expect(host.command(approve)).resolves.toMatchObject({ status: 'replayed' });
+    expect(reads.count).toBe(count);
+    /* The run's next batch comes from an admission that no longer reads the abandoned run. */
+    reads.foreignRuns = () => [];
+    await vi.waitFor(async () => host.resume(chatId));
+
+    expect(await said()).toBe(true);
     await host.close();
   });
 

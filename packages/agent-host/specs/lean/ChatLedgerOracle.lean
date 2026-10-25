@@ -307,6 +307,7 @@ def runLine (st : St) (line : String) : St × List String :=
           .carry a (num b) (if says == "-" then [] else (says.splitOn "+").map num)
         | "w" => .write a (b == "1")
         | "h" => .hold a
+        | "s" => .settle a
         | _ => .answer a (b == "1")
       let (next, out) := carryStep acc.1 op
       match op with

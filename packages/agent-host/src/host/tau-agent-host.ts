@@ -301,6 +301,12 @@ export type TauAgentHost = {
 };
 
 /** A chat's log, its ledger, its one append chain, and the attempts whose drivers may still write (RA-R6). */
+/**
+ * One dispatch of a command (rounds 17 and 22): the log it refreshed, so it is not refreshed again within it; whether it
+ * was admitted before reaching the registry; and the admission it was given, which keys what it proposed and carried.
+ */
+type Dispatch = { refreshed?: DurableEventLog; admitted?: true; admission?: number };
+
 type ChatStore = {
   log?: Promise<DurableEventLog> | undefined;
   ledger?: ChatLedger | undefined;
@@ -460,8 +466,11 @@ export const commandAdmission = (
 /** A term this host opened in place of its incarnation's own (`replaces`). @internal */
 export type TermOpening = Readonly<{ replaces: string; leaderEpoch: string }>;
 
-/** A term an admitted command proposed for its run's rows (round 19). @internal */
-export type TermProposal = TermOpening & Readonly<{ commandId: string; runId: string }>;
+/**
+ * A term an admitted command proposed for its run's rows (round 19), keyed by the admission that proposed it (round 22):
+ * never by the command's id, which a re-sent copy of the command shares. @internal
+ */
+export type TermProposal = TermOpening & Readonly<{ admission: number; runId: string }>;
 
 /**
  * A chat's terms on this host while its incarnation stays open (round 19; `Terms` in ChatLedger.lean, T12). `opened`:
@@ -539,8 +548,11 @@ export const termsAfterWrite = (terms: ChatTerms, { held, taken }: TermWrite): C
         proposed: terms.proposed?.filter((proposal) => proposal !== taken),
       };
 
-/** The rows an admitted command's run's first batch carries (round 20; `Carried` in ChatLedger.lean, T13). @internal */
-export type CarriedTurns = Readonly<{ commandId: string; runId: string; says: readonly ChatRunRow[] }>;
+/**
+ * The rows an admitted command's run's first batch carries (round 20; `Carried` in ChatLedger.lean, T13), keyed by the
+ * admission that derived them (round 22), never by the command's id. @internal
+ */
+export type CarriedTurns = Readonly<{ admission: number; runId: string; says: readonly ChatRunRow[] }>;
 
 /**
  * What a batch carries (`carriedTaken`): the first entry for a run the batch writes a row of that is no heartbeat. The
@@ -559,20 +571,62 @@ export const carriedBy = (
 
 /**
  * The chat's terms once a command is answered (`Terms.step`, `answer`): one answered other than applied withdraws the
- * terms it proposed that none of its rows were written under, and no other command's.
+ * terms its admission proposed that none of its rows were written under, and no other admission's (round 22). A
+ * replayed command was never admitted here, so its answer withdraws nothing.
  *
  * @internal
  * @param terms - The chat's terms.
- * @param commandId - The command.
+ * @param admission - The command's admission, none for a command this host did not admit.
  * @param applied - Whether it was applied.
  * @returns The terms.
  */
-export const termsAfterAnswer = (terms: ChatTerms, commandId: string, applied: boolean): ChatTerms =>
-  applied || terms.proposed === undefined
+export const termsAfterAnswer = (terms: ChatTerms, admission: number | undefined, applied: boolean): ChatTerms =>
+  applied || admission === undefined || terms.proposed === undefined
     ? terms
-    : { ...terms, proposed: terms.proposed.filter((proposal) => proposal.commandId !== commandId) };
+    : { ...terms, proposed: terms.proposed.filter((proposal) => proposal.admission !== admission) };
+
+/**
+ * What admitted commands carry once a command is answered (`carryStep`, `answer`): one answered other than applied
+ * withdraws its own admission's entry, and no other admission's (round 22). A replayed command was never admitted
+ * here, so its answer withdraws nothing (`t15_replay_no_change` in ChatLedgerProofs.lean).
+ *
+ * @internal
+ * @param carried - What admitted commands carry.
+ * @param admission - The command's admission, none for a command this host did not admit.
+ * @param applied - Whether it was applied.
+ * @returns What they carry now.
+ */
+export const carriedAfterAnswer = (
+  carried: readonly CarriedTurns[],
+  admission: number | undefined,
+  applied: boolean,
+): readonly CarriedTurns[] =>
+  applied || admission === undefined ? carried : carried.filter((entry) => entry.admission !== admission);
 
 const liveRunStates: ReadonlySet<string> = new Set(['admitted', 'running', 'paused']);
+
+/**
+ * What admitted commands carry once one row of a batch lands (`carryStep`, `write` and `settle`): the entry the batch
+ * spends is gone, and a row that settles its run drops every entry for that run (round 22), even one the batch had no
+ * place for (a Stop while the approved call is open): nothing writes that run's rows again, and the chat's next
+ * admission derives the turns it goes on past afresh (`t15_settle_drops`).
+ *
+ * @internal
+ * @param carried - What admitted commands carry.
+ * @param spent - The entry the batch spends, if it had a place for it.
+ * @param row - The row that landed.
+ * @returns What they carry now.
+ */
+export const carriedAfterRow = (
+  carried: readonly CarriedTurns[],
+  spent: CarriedTurns | undefined,
+  row: Readonly<{ runId: string; type: string; state?: string }>,
+): readonly CarriedTurns[] => {
+  const settles = row.type === 'run.lifecycle' && row.state !== undefined && !liveRunStates.has(row.state);
+  return spent === undefined && !settles
+    ? carried
+    : carried.filter((entry) => entry !== spent && !(settles && entry.runId === row.runId));
+};
 
 type AdmissionRecord = Readonly<{
   kind: ChatRunKind;
@@ -1474,14 +1528,27 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    * share one refresh. A re-send of the same command (a `wait` refusal asks for exactly that) is a new dispatch and
    * reads again. Entries live only while their dispatch does.
    */
-  const dispatches = new Map<string, { refreshed?: DurableEventLog; admitted?: true }>();
+  const dispatches = new Map<string, Dispatch>();
+  /** Each command a dispatch sent on to the registry, until its answer settles: a copy of it is a replay (round 22). */
+  const reachedCommands = new Map<string, Promise<CommandAnswer>>();
+  const releaseReached = async (commandId: string, sent: Promise<CommandAnswer>): Promise<void> => {
+    await absorbed(sent);
+    if (reachedCommands.get(commandId) === sent) {
+      reachedCommands.delete(commandId);
+    }
+  };
+  /** A replay's answer (SC-R8, as the registry gives it): its original's, marked replayed where that applied durably. */
+  const replayOf = async (original: Promise<CommandAnswer>): Promise<CommandAnswer> => {
+    const settled = await original;
+    return settled.status === 'applied' && settled.effect === 'durable' ? { ...settled, status: 'replayed' } : settled;
+  };
   /**
    * End one dispatch's entry once its command is answered: when the registry's answer settles, or at once for a
    * command answered before it reached the registry (superseded by a Stop, refused by a check).
    */
   const releaseDispatch = async (
     commandId: string,
-    dispatch: { refreshed?: DurableEventLog; admitted?: true },
+    dispatch: Dispatch,
     answer: Promise<CommandAnswer> | undefined,
   ): Promise<void> => {
     if (answer !== undefined) {
@@ -1526,11 +1593,11 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const rehome = (
     chatId: string,
     admitted: TermAdmission,
-    { commandId, runId, says = [] }: Pick<TermProposal, 'commandId' | 'runId'> & { says?: readonly ChatRunRow[] },
+    { admission, runId, says = [] }: Pick<TermProposal, 'admission' | 'runId'> & { says?: readonly ChatRunRow[] },
   ): void => {
     const store = storeOf(chatId);
     if (says.length > 0) {
-      store.carried = [...(store.carried ?? []), { commandId, runId, says }];
+      store.carried = [...(store.carried ?? []), { admission, runId, says }];
     }
     const held = registry.termOf(chatId);
     if (held === undefined) {
@@ -1540,14 +1607,18 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     if (leaderEpoch !== held) {
       store.terms = {
         ...store.terms,
-        proposed: [...(store.terms?.proposed ?? []), { replaces: held, leaderEpoch, commandId, runId }],
+        proposed: [...(store.terms?.proposed ?? []), { replaces: held, leaderEpoch, admission, runId }],
       };
     }
   };
-  /** A command's answer: one other than applied withdraws the term it proposed ({@link termsAfterAnswer}). */
-  const withdrawTerm = async (
+  /**
+   * A command's answer: one other than applied withdraws what its own admission proposed and carried
+   * ({@link termsAfterAnswer}, {@link carriedAfterAnswer}; round 22), and nothing of another admission's, a replayed
+   * command's original included. A dispatch this host did not admit (a replay) withdraws nothing.
+   */
+  const withdrawAdmission = async (
     chatId: string,
-    commandId: string,
+    dispatch: Dispatch,
     answer: Promise<CommandAnswer> | undefined,
   ): Promise<void> => {
     const applied = await (answer ?? Promise.resolve(undefined)).then(
@@ -1556,12 +1627,14 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     );
     const store = stores.get(chatId);
     if (store?.terms !== undefined) {
-      store.terms = termsAfterAnswer(store.terms, commandId, applied);
+      store.terms = termsAfterAnswer(store.terms, dispatch.admission, applied);
     }
-    if (store?.carried !== undefined && !applied) {
-      store.carried = store.carried.filter((entry) => entry.commandId !== commandId);
+    if (store?.carried !== undefined) {
+      store.carried = carriedAfterAnswer(store.carried, dispatch.admission, applied);
     }
   };
+  /** Each admission's own key (round 22): a re-sent command shares its original's id, never its admission. */
+  let admissionCount = 0;
   /**
    * The one cross-device admission of every command that starts or continues a run (round 20, {@link commandAdmission};
    * `admit` in ChatLedger.lean, T13): a start, a Resume and an approval. After this dispatch's read of what sync brought
@@ -1587,13 +1660,14 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    *
    * @param chatId - The chat.
    * @param log - Its log.
-   * @param command - The command, its run and verb.
+   * @param command - The command, its run and verb, and its dispatch, which keeps the admission it is given.
    */
   const admitAcross = async (
     chatId: string,
     log: DurableEventLog,
-    command: Pick<TermProposal, 'commandId' | 'runId'> & Readonly<{ verb: AdmissionVerb }>,
+    command: Readonly<{ commandId: string; runId: string; verb: AdmissionVerb; dispatch: Dispatch }>,
   ): Promise<void> => {
+    const { dispatch } = command;
     let runs: readonly ForeignRun[] = [];
     let admitted: CommandAdmission;
     let at = 0;
@@ -1652,8 +1726,11 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       );
     }
     const passed = new Set(admitted.says);
+    admissionCount += 1;
+    dispatch.admission = admissionCount;
     rehome(chatId, admitted.admitted, {
-      ...command,
+      admission: admissionCount,
+      runId: command.runId,
       says: runs.flatMap((run): ChatRunRow[] =>
         passed.has(run.runId) && run.words !== undefined
           ? [{ runId: run.runId, body: { type: 'message.appended', message: abandonedTurnOf(run.words) } }]
@@ -1671,10 +1748,11 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const admitOnce = async (
     chatId: string,
     log: DurableEventLog,
-    command: Pick<TermProposal, 'commandId' | 'runId'> & Readonly<{ verb: AdmissionVerb }>,
+    command: Readonly<{ commandId: string; runId: string; verb: AdmissionVerb }>,
   ): Promise<void> => {
-    if (dispatches.get(command.commandId)?.admitted !== true) {
-      await admitAcross(chatId, log, command);
+    const dispatch = dispatches.get(command.commandId) ?? {};
+    if (dispatch.admitted !== true) {
+      await admitAcross(chatId, log, { ...command, dispatch });
     }
   };
   const admitBeforeRegistry = (
@@ -1683,7 +1761,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       type: 'start' | 'resume';
       payload: Readonly<{ chatId: string; runId: string }>;
     }>,
-    dispatch: { admitted?: true },
+    dispatch: Dispatch,
   ): Promise<CommandAnswer | undefined> | undefined => {
     const opened = stores.get(command.payload.chatId)?.log;
     return opened === undefined || !wroteUnderTerm(command.payload.chatId)
@@ -1692,12 +1770,12 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   };
   const admitOpened = async (
     command: Parameters<typeof admitBeforeRegistry>[0],
-    dispatch: { admitted?: true },
+    dispatch: Dispatch,
     opened: Promise<DurableEventLog>,
   ): Promise<CommandAnswer | undefined> => {
     const { chatId, runId } = command.payload;
     try {
-      await admitAcross(chatId, await opened, { commandId: command.commandId, runId, verb: command.type });
+      await admitAcross(chatId, await opened, { commandId: command.commandId, runId, verb: command.type, dispatch });
       dispatch.admitted = true;
       return undefined;
     } catch (error) {
@@ -1715,16 +1793,6 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         message,
         ...(details === undefined ? {} : { details }),
       };
-    }
-  };
-
-  /** Whether the chat's open log reads its history as unknown (XD1): segments unread and own rows not folding alone. */
-  const historyUnknownOf = async (opened: Promise<DurableEventLog>): Promise<boolean> => {
-    try {
-      const log = await opened;
-      return (await log.historyUnknown?.()) === true;
-    } catch {
-      return true;
     }
   };
 
@@ -1761,15 +1829,19 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    * since its incarnation's term began, it is written under a new term that starts after them. A denial or a
    * cancellation ends the paused run and is never refused.
    *
-   * @param commandId - The approval's command, whose dispatch shares one refresh.
-   * @param chatId - The chat the paused run belongs to.
-   * @param runId - The paused run the approval would continue.
+   * Round 22: a segment that cannot be read refuses it `SEGMENTS_UNREADABLE` (`wait`) inside the pause's own hold too.
+   * Another device judges this run abandoned on its own pulls of the remote's copy of this segment, and this host
+   * cannot know when its heartbeats last reached that copy (a publish is answered once queued, not once pushed), so no
+   * part of the hold is one in which no other device could have found it abandoned and gone on past it in that very
+   * segment (`t15_unread_refused` in ChatLedgerProofs.lean).
+   *
+   * @param approval - The approval's command, the chat its paused run belongs to, and that run.
+   * @param dispatch - The approval's dispatch, which keeps its admission.
    * @returns The refusal, or `undefined` to apply it.
    */
   const admitApproval = async (
-    commandId: string,
-    chatId: string,
-    runId: string,
+    { commandId, chatId, runId }: Readonly<{ commandId: string; chatId: string; runId: string }>,
+    dispatch: Dispatch,
   ): Promise<CommandAnswer | undefined> => {
     const store = storeOf(chatId);
     const refused = (code: string, message: string, details: Record<string, unknown> | undefined): CommandAnswer => ({
@@ -1781,27 +1853,13 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       message,
       ...(details === undefined ? {} : { details }),
     });
-    let log: DurableEventLog | undefined;
     try {
       /* Open or not, the log is read: a takeover is in the segments, whether or not a driver waits here. */
-      log = await logOf(chatId);
-      await admitAcross(chatId, log, { commandId, runId, verb: 'approve' });
+      const log = await logOf(chatId);
+      await admitAcross(chatId, log, { commandId, runId, verb: 'approve', dispatch });
       return undefined;
     } catch (error) {
       const { code, message, details } = codedFailureDetail(error);
-      /* Inside its own hold the paused run still holds the chat for every device: an unreadable segment cannot be
-       * another device's run on it, since that device's fence refuses while this run's heartbeats are fresh. Only
-       * while this device's own rows fold alone, though: an unknown history refuses the approval inside the hold too.
-       * A check that failed some other way is no such decision, and refuses (round 20). */
-      if (
-        code === 'SEGMENTS_UNREADABLE' &&
-        details?.['unchecked'] === undefined &&
-        log !== undefined &&
-        pauseHeld(store) &&
-        !(await historyUnknownOf(Promise.resolve(log)))
-      ) {
-        return undefined;
-      }
       /* Fail closed (round 20): a log that does not open, or any failure that is not a decision, refuses retryably. */
       if (code === undefined || (code !== 'RUN_TAKEN_OVER' && refusalOf(code).retry !== 'wait')) {
         return refused('SEGMENTS_UNREADABLE' satisfies RefusalCode, message, { unchecked: code ?? 'uncoded' });
@@ -1979,8 +2037,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           store.ledger = ledger;
           /* The batch's first row commits what its write decided (rounds 19 and 20). */
           store.terms = termsAfterWrite(store.terms ?? {}, decided);
-          if (place !== undefined) {
-            store.carried = store.carried?.filter((entry) => entry !== carried);
+          if (store.carried !== undefined) {
+            store.carried = carriedAfterRow(store.carried, place === undefined ? undefined : carried, row);
           }
           store.wrote = { leaderEpoch, at: now().getTime() };
           if (row.type === 'run.lifecycle' && row.state === 'paused') {
@@ -2771,7 +2829,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       runChats.set(command.payload.runId, command.payload.chatId);
     }
     /* One dispatch of this command: what it refreshes is not refreshed again within it, and only within it. */
-    const dispatch: { refreshed?: DurableEventLog; admitted?: true } = {};
+    const dispatch: Dispatch = {};
     const ordered = command.payload.chatId;
     let answer: Promise<CommandAnswer>;
     if (command.type === 'cancel') {
@@ -2795,15 +2853,39 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       const turn = Promise.withResolvers<void>();
       dispatchOrder.set(ordered, turn.promise);
       const admits = command.type === 'start' || command.type === 'resume';
-      /* The dispatch's entry is registered, and its release set up, before anything can answer the command early. */
-      if (admits) {
-        dispatches.set(command.commandId, dispatch);
-      }
+      /*
+       * The dispatch's entry is registered, and its release set up, before anything can answer the command early; a
+       * copy of a command another dispatch registered leaves that dispatch's entry alone until it is known to be no
+       * replay, when the other's entry is stale (round 22).
+       */
+      const register = (replaces: boolean): boolean => {
+        if (admits && (replaces || !dispatches.has(command.commandId))) {
+          dispatches.set(command.commandId, dispatch);
+          return true;
+        }
+        return false;
+      };
+      let registered = register(false);
       let reached: Promise<CommandAnswer> | undefined;
       try {
         if (ahead !== undefined) {
           await ahead;
         }
+        /*
+         * Round 22: a copy of a command this host already sent on (in flight, or applied durably) is a replay. It is
+         * never admitted: it reads nothing, proposes and carries nothing, and its answer withdraws nothing, so the
+         * original's term and the turns it carries stand (`t15_replay_no_change`). It shares the original's answer.
+         */
+        const original = reachedCommands.get(command.commandId);
+        if (original !== undefined) {
+          answer = replayOf(original);
+          return await answer;
+        }
+        if (storeOf(ordered).ledger?.applied[command.commandId] !== undefined) {
+          answer = registry.execute(command);
+          return await answer;
+        }
+        registered = register(true) || registered;
         const admitting = admits ? admitBeforeRegistry(command, dispatch) : undefined;
         if (admitting !== undefined) {
           const held = await admitting;
@@ -2813,7 +2895,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           }
         }
         if (command.type === 'resolve-interrupt' && command.payload.outcome === 'approved') {
-          const held = await admitApproval(command.commandId, command.payload.chatId, command.payload.runId);
+          const held = await admitApproval({ commandId: command.commandId, ...command.payload }, dispatch);
           const stopped = superseded();
           if (stopped !== undefined || held !== undefined) {
             return stopped ?? held!;
@@ -2825,16 +2907,18 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         }
         reached = registry.execute(command);
         answer = reached;
+        reachedCommands.set(command.commandId, reached);
+        void releaseReached(command.commandId, reached);
       } finally {
         turn.resolve();
         if (dispatchOrder.get(ordered) === turn.promise) {
           dispatchOrder.delete(ordered);
         }
-        if (admits) {
+        if (registered) {
           void releaseDispatch(command.commandId, dispatch, reached);
         }
-        /* A command refused or superseded, here or by the registry, leaves no term behind (round 19). */
-        void withdrawTerm(ordered, command.commandId, reached);
+        /* A command refused or superseded, here or by the registry, leaves no term behind (rounds 19 and 22). */
+        void withdrawAdmission(ordered, dispatch, reached);
       }
     }
     if (command.type === 'resolve-interrupt' || command.type === 'cancel' || command.type === 'resume') {

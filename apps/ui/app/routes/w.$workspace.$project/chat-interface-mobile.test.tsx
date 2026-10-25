@@ -234,15 +234,33 @@ afterAll(async () => {
 
 describe('ChatInterfaceMobile', () => {
   it('should preserve the Terminal across sheet hiding and surface switches until named Close', async () => {
+    const viewport = Object.assign(new EventTarget(), {
+      height: globalThis.innerHeight,
+      offsetTop: 0,
+      scale: 1,
+    });
+    vi.stubGlobal('visualViewport', viewport);
     const { unmount } = renderShell();
     expect(terminal.mounted).not.toHaveBeenCalled();
     act(() => {
       selectSurface('terminal');
     });
     const input = await screen.findByRole('textbox', { name: 'Shell session' });
+    input.scrollIntoView = vi.fn();
+    act(() => {
+      input.focus();
+      viewport.height = globalThis.innerHeight - 300;
+      viewport.dispatchEvent(new Event('resize'));
+    });
+    expect(screen.getByRole('dialog')).toHaveAttribute('data-keyboard', 'open');
+    expect(screen.getByRole('dialog').style.getPropertyValue('--keyboard-frame-height')).toBe(`${viewport.height}px`);
     fireEvent.change(input, { target: { value: 'running shell state' } });
     expect(terminal.mounted).toHaveBeenCalledTimes(1);
 
+    act(() => {
+      screen.getByRole('region', { name: 'Terminal' }).focus();
+    });
+    expect(screen.getByRole('dialog')).not.toHaveAttribute('data-keyboard');
     fireEvent.keyDown(screen.getByRole('region', { name: 'Terminal' }), { key: 'Escape' });
     expect(state.drawerOpen).toBe(false);
     expect(screen.queryByRole('textbox', { name: 'Shell session' })).not.toBeInTheDocument();
@@ -252,6 +270,10 @@ describe('ChatInterfaceMobile', () => {
     });
     expect(await screen.findByRole('textbox', { name: 'Shell session' })).toBe(input);
     expect(input).toHaveValue('running shell state');
+    act(() => {
+      input.focus();
+    });
+    expect(screen.getByRole('dialog')).toHaveAttribute('data-keyboard', 'open');
 
     act(() => {
       selectSurface('chat');

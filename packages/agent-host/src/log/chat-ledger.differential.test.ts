@@ -17,7 +17,7 @@
  *   retains nothing (`C` and `K` in merge traces only).
  * - Commands: `E` append through the appender, `W` another writer's row, `WJ` a junk line, `TEAR` a torn tail,
  *   `RELOAD`, `LEDGER`, `SETTLE`, `LIFE`, `RESOLVE`, `PREP`, `BATCH`, `READER`, `READ`, `DELIVER`, `DELIVER1`, `RLEDGER`, `SEG`,
- *   `ROW`, `MERGE`, `MERGEB`, `MH`, `TABLES`, `ADMIT`, `TERMOF`, `TERMS`, `XADMIT`, `CARRY`, `PLAN`, `RESUMEB`, `APPENDM`, `STAND` (and `PULL`, which the
+ *   `ROW`, `MERGE`, `MERGEB`, `MH`, `TABLES`, `ADMIT`, `TERMOF`, `TERMS`, `XADMIT`, `CARRY`, `PLAN`, `PLANT`, `RESUMEB`, `APPENDM`, `STAND` (and `PULL`, which the
  *   revisions package's `notePull` answers from `corpus/pull-records.trace`).
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -1236,7 +1236,8 @@ const planMessage = (token: string, at: number): ProviderMessage => {
 /**
  * Where a batch's carried turns go and the history it leaves (T14, round 21; `carriedPlace`, `openToolCalls`,
  * `historyWellFormed`): histories with calls open, answered, or followed by another message, and batches of outputs,
- * rewinds and other rows, each with no, one or two carried turns.
+ * rewinds and other rows, each with no, one or two carried turns, and each with its run's person's turn still ahead
+ * past it or not (round 23).
  */
 const planTrace = (): Trace => {
   const text = ['T plans'];
@@ -1259,8 +1260,12 @@ const planTrace = (): Trace => {
   ];
   for (const history of histories) {
     for (const batch of batches) {
-      for (const says of ['-', '9', '8+9']) {
-        text.push(`PLAN ${history} ${says} ${batch}`);
+      for (const [says, ahead] of ['-', '9', '8+9'].flatMap((said) => [
+        [said, false] as const,
+        [said, true] as const,
+      ])) {
+        /* `PLANT` (round 23): the batch's run says its person's turn next, past the batch. */
+        text.push(`${ahead ? 'PLANT' : 'PLAN'} ${history} ${says} ${batch}`);
         const before = history === '-' ? [] : history.split(',').map((token, at) => planMessage(token, at));
         /* The batch as it is built: a rewind names the messages it keeps then, before anything is carried. */
         let building: readonly ProviderMessage[] = before;
@@ -1283,7 +1288,7 @@ const planTrace = (): Trace => {
             message: { id: `s${id}`, role: 'user', content: 'carried' },
           }),
         );
-        const place = carriedPlace(before, bodies);
+        const place = carriedPlace(before, bodies, ahead);
         const planned = place === undefined ? bodies : [...bodies.slice(0, place), ...carried, ...bodies.slice(place)];
         let after: readonly ProviderMessage[] = before;
         for (const body of planned) {

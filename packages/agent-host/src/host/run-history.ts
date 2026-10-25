@@ -340,27 +340,66 @@ export const historyAfter = (messages: readonly ProviderMessage[], body: LogRowB
 };
 
 /**
- * Where a batch's carried turns go (`placeAt` in ChatLedger.lean, T14; round 21): the first place after every rewind
- * the batch holds at which the history leaves no tool call open. So the words of another device's abandoned run a
- * command goes on past follow the outputs that close the calls a Resume found open, never parting a call from its
- * output (`t14_plan_well_formed`), and the batch's own rewind, which names what it keeps before anything is carried,
- * never cuts them (`t14_carried_survive_rewind`). A start's, a Retry's and a Resume's batch always has a place
- * (`t14_turns_place`); a batch at which every place leaves a call open, an approval's before its tool returns, has none,
- * and the turns wait for the run's next batch (`t14_approval_waits`).
+ * The message a row appends, if any.
+ *
+ * @param body - The row.
+ * @returns The message it appends.
+ */
+const appendedBy = (body: LogRowBody): ProviderMessage | undefined =>
+  body.type === 'message.appended' || (body.type === 'safeguard.recorded' && body.action !== 'terminate')
+    ? body.message
+    : undefined;
+
+/**
+ * Whether the next message after the batch's rows from `index` on is a say (`nextSays` in ChatLedger.lean, T16): a
+ * person's words, a reminder, anything but an assistant turn or a tool's output. A say leaves every open call to the
+ * provider's adapter, so turns carried just before it leave the same calls to the adapter it did, and no output is ever
+ * written for them. A `tool-input` row, which the provider never reads, is passed over. Past the batch, the next message
+ * is the run's person's turn when it is still ahead.
+ *
+ * @param bodies - The batch's rows.
+ * @param index - The place in them.
+ * @param turnAhead - Whether the run's person's turn comes next past the batch.
+ * @returns Whether a say comes next.
+ */
+const saysNext = (bodies: readonly LogRowBody[], index: number, turnAhead: boolean): boolean => {
+  for (const body of bodies.slice(index)) {
+    const message = appendedBy(body);
+    if (message !== undefined && message.role !== 'tool-input') {
+      return message.role !== 'assistant' && message.role !== 'tool-output';
+    }
+  }
+  return turnAhead;
+};
+
+/**
+ * Where a batch's carried turns go (`placeAt` in ChatLedger.lean, T14 and T16; rounds 21 and 23): the first place after
+ * every rewind the batch holds at which the history leaves no tool call open, or at which the next message is a say
+ * ({@link saysNext}), which leaves every open call to the provider's adapter anyway. So the words of another device's
+ * abandoned run a command goes on past follow the outputs that close the calls a Resume found open, never parting a call
+ * from its output (`t14_plan_well_formed`); the batch's own rewind, which names what it keeps before anything is
+ * carried, never cuts them (`t14_carried_survive_rewind`); and a person's turn stays the history's last message, after
+ * them, even when the history ends in a call no output will answer (`t16_turn_last`). A start's, a Retry's and a
+ * Resume's batch always has a place (`t14_turns_place`); a batch at which every place leaves a call open that its run
+ * still answers, an approval's before its tool returns, has none, and the turns wait for the run's next batch
+ * (`t14_approval_waits`).
  *
  * @param history - The history the batch lands after.
  * @param bodies - The batch's rows, as built before anything is carried.
+ * @param turnAhead - Whether the batch's run has its person's turn still to say (its turn is not committed), so the
+ *   run's next message past the batch is a say: a turn's admission and commit are separate batches.
  * @returns The index to insert the carried rows at, or `undefined` when the batch has no place for them.
  */
 export const carriedPlace = (
   history: readonly ProviderMessage[],
   bodies: readonly LogRowBody[],
+  turnAhead = false,
 ): number | undefined => {
   const lastDrop = bodies.findLastIndex((body) => dropsMessages(body));
   let messages = history;
   let open: readonly ToolCall[] = openToolCalls(history);
   for (let index = 0; index <= bodies.length; index++) {
-    if (index > lastDrop && open.length === 0) {
+    if (index > lastDrop && (open.length === 0 || saysNext(bodies, index, turnAhead))) {
       return index;
     }
     const body = bodies[index];

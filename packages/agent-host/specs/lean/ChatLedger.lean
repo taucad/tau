@@ -1052,17 +1052,36 @@ def Op.isRewind : Op → Bool
 
 def applyAll (h : List Msg) (ops : List Op) : List Msg := ops.foldl Op.apply h
 
+/-- `saysNext` (round 23): whether the next message the rows append is a say. A say leaves every open call to the
+adapter, so turns carried just before it leave the same calls to the adapter it did, and no output follows them. -/
+def nextSays : List Op → Bool
+  | [] => false
+  | .msg (.say _) :: _ => true
+  | .msg _ :: _ => false
+  | _ :: rest => nextSays rest
+
 /-- `carriedPlace`: where a batch's carried turns go. The first place after every rewind the batch holds at which the
 history leaves no call open, so they follow the outputs that close the calls a Resume found open and are never cut by
-the batch's own rewind; none when every place in the batch leaves a call open, and they wait for the run's next batch
-(`CarryOp.hold`). -/
+the batch's own rewind, or at which a say comes next (round 23), so a person's turn the batch says stays last, after
+them, even past a call no output answers; none when every place in the batch leaves a call open that the batch's run
+still answers, and they wait for the run's next batch (`CarryOp.hold`). The host splits a turn into its admission's
+batch and its commit's: a run whose turn is not committed has a say next past its batch (`turnAhead`), which is this
+over the batch followed by that say (`placeAhead`). -/
 def placeAt (h : List Msg) (ops : List Op) : Option Nat :=
   (List.range (ops.length + 1)).find? fun i =>
-    (ops.drop i).all (fun op => !op.isRewind) && (openCalls (applyAll h (ops.take i))).isEmpty
+    (ops.drop i).all (fun op => !op.isRewind) &&
+      ((openCalls (applyAll h (ops.take i))).isEmpty || nextSays (ops.drop i))
+
+/-- `carriedPlace(history, bodies, true)`: the place in a batch whose run says its person's turn `t` next. -/
+def placeAhead (h : List Msg) (ops : List Op) (t : Nat) : Option Nat := placeAt h (ops ++ [.msg (.say t)])
 
 /-- The batch written with its carried turns `says` at their place. -/
 def plan (h : List Msg) (says : List Nat) (ops : List Op) : Option (List Op) :=
   (placeAt h ops).map fun i => ops.take i ++ says.map (fun s => Op.msg (.say s)) ++ ops.drop i
+
+/-- The batch of a run whose turn `t` is still ahead, written with its carried turns at their place (`placeAhead`). -/
+def planAhead (h : List Msg) (says : List Nat) (ops : List Op) (t : Nat) : Option (List Op) :=
+  (placeAhead h ops t).map fun i => ops.take i ++ says.map (fun s => Op.msg (.say s)) ++ ops.drop i
 
 /-- A batch the host writes, by the kinds of its rows: a person's turn (a start, or a run settling before it committed
 its turn); a Retry, which rewinds to `keep` messages first; the model's reply calling `calls`; a tool's output; a

@@ -333,6 +333,8 @@ import ChatLedgerProofs
 #print axioms ChatLedger.opMsgs_map
 #print axioms ChatLedger.map_msg_noRewind
 #print axioms ChatLedger.placeAt_spec
+#print axioms ChatLedger.nextSays_msgs
+#print axioms ChatLedger.wfFrom_say
 #print axioms ChatLedger.plan_after
 #print axioms ChatLedger.t14_plan_well_formed
 #print axioms ChatLedger.t14_carried_survive_rewind
@@ -354,3 +356,5 @@ import ChatLedgerProofs
 #print axioms ChatLedger.t15_settle_drops
 #print axioms ChatLedger.t15_replay_keeps_held
 #print axioms ChatLedger.t15_unread_refused
+#print axioms ChatLedger.t16_turn_last
+#print axioms ChatLedger.t16_stale_prompt

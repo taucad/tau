@@ -7,7 +7,7 @@
  */
 import type { Api, Message, Model } from '@earendil-works/pi-ai';
 import { transformMessages } from '@earendil-works/pi-ai/api/transform-messages';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { MessageIdentities, providerMessageToPi } from '#harness/session-record.js';
 import { createTauAgentHost } from '#host/tau-agent-host.js';
@@ -16,6 +16,7 @@ import type { SeededLogEvent } from '#host/tau-agent-host.fixture.js';
 import type { ForeignRun } from '#log/foreign-runs.js';
 import { foreignRunStaleMilliseconds } from '#log/foreign-runs.js';
 import type { ProviderMessage } from '#log/event-types.js';
+import { reduceEventLog } from '#log/reducer.js';
 import type { ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
 
 /** Another device's run, admitted and never settled, whose pulls found its segment quiet past the bound. */
@@ -180,6 +181,37 @@ describe('the history past another device’s abandoned run', () => {
     const said = rows.findIndex((row) => row.type === 'message.appended' && row.message.id === 'desktop-user');
     expect(rewound).toBeGreaterThan(-1);
     expect(said).toBeGreaterThan(rewound);
+    await host.close();
+  });
+});
+
+describe('a person’s turn past another device’s abandoned run', () => {
+  /*
+   * Round 23: this device's last run went away mid-tool, so its history ends in a call no output answers. A new turn's
+   * admission batch leaves that call open, so the abandoned run's words waited for the run's next batch, its turn's
+   * commit, and were said after the person's new message: the model answered the stale prompt.
+   */
+  it('should say the abandoned run’s words before the person’s new turn when the history ends in an open call', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, abandonedAfter(callingReply));
+    const { host, requests } = hostPastAbandonedRun(file, 'turn-open-call');
+
+    await host.admit({
+      chatId: 'chat-turn-open-call',
+      runId: 'run-2',
+      trigger: 'submit',
+      message: { id: 'turn-2', role: 'user', content: 'Now this.' },
+    });
+    await vi.waitFor(async () => {
+      expect(await host.snapshot('chat-turn-open-call')).toMatchObject({ runId: 'run-2', state: 'completed' });
+    });
+
+    const ids = reduceEventLog(await readLog(file)).map((message) => message.id);
+    expect(ids).toContain('desktop-user');
+    expect(ids.indexOf('desktop-user')).toBeLessThan(ids.indexOf('turn-2'));
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.messages.at(-1)).toMatchObject({ id: 'turn-2', role: 'user' });
+    expect(strayResults(requests[0]!.messages)).toEqual([]);
     await host.close();
   });
 });

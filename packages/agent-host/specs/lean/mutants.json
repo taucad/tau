@@ -312,15 +312,15 @@
     "id": "M44",
     "drift": "a batch's carried turns go at the first place after its rewinds, open calls or not, so a Resume's carried words part a call from its output (round 21, T14: t14_plan_well_formed, t14_head_parts_call)",
     "file": "specs/lean/ChatLedger.lean",
-    "find": "    (ops.drop i).all (fun op => !op.isRewind) && (openCalls (applyAll h (ops.take i))).isEmpty",
+    "find": "    (ops.drop i).all (fun op => !op.isRewind) &&\n      ((openCalls (applyAll h (ops.take i))).isEmpty || nextSays (ops.drop i))",
     "replace": "    (ops.drop i).all (fun op => !op.isRewind)"
   },
   {
     "id": "M45",
     "drift": "a batch's carried turns may go before its own rewind, which names what it keeps without them, so the rewind cuts them (round 21, T14: t14_carried_survive_rewind, t14_head_cut_by_rewind)",
     "file": "specs/lean/ChatLedger.lean",
-    "find": "    (ops.drop i).all (fun op => !op.isRewind) && (openCalls (applyAll h (ops.take i))).isEmpty",
-    "replace": "    (openCalls (applyAll h (ops.take i))).isEmpty"
+    "find": "    (ops.drop i).all (fun op => !op.isRewind) &&\n      ((openCalls (applyAll h (ops.take i))).isEmpty || nextSays (ops.drop i))",
+    "replace": "      ((openCalls (applyAll h (ops.take i))).isEmpty || nextSays (ops.drop i))"
   },
   {
     "id": "M46",
@@ -369,7 +369,7 @@
     "drift": "round 21, finding 1: carriedPlace puts carried turns at the head of their batch again, between a call a Resume closes and its output (T14: t14_plan_well_formed)",
     "file": "src/host/run-history.ts",
     "test": "src/log/history-invariant.test.ts",
-    "find": "    if (index > lastDrop && open.length === 0) {",
+    "find": "    if (index > lastDrop && (open.length === 0 || saysNext(bodies, index, turnAhead))) {",
     "replace": "    if (index >= 0) {"
   },
   {
@@ -435,5 +435,20 @@
     "test": "src/log/foreign-runs.incremental.test.ts",
     "find": "  grownFrom.set(grown, { length: prior.length, folds: foldsOf(prior) });",
     "replace": "  grownFrom.set(grown, Object.assign({ length: prior.length, folds: foldsOf(prior) }, { prior }));"
+  },
+  {
+    "id": "turn-not-last",
+    "drift": "round 23: a place where a call is open is no place even when a say comes next, so over a history ending in a call no output answers a turn's carried turns wait past its admission and are said after the person's new turn, which is no longer last (T16: t16_turn_last, t16_stale_prompt)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "      ((openCalls (applyAll h (ops.take i))).isEmpty || nextSays (ops.drop i))",
+    "replace": "      (openCalls (applyAll h (ops.take i))).isEmpty"
+  },
+  {
+    "id": "turn-ahead-ignored",
+    "drift": "round 23: the host never tells carriedPlace that a run's turn is still ahead, so a turn's admission batch over a call no output answers has no place, and the abandoned run's words are said after the person's new turn",
+    "file": "src/host/tau-agent-host.ts",
+    "test": "src/host/history-well-formed.test.ts",
+    "find": "              turnAheadOf(prior, carried.runId, history),\n",
+    "replace": "              false,\n"
   }
 ]

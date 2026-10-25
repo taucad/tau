@@ -4476,15 +4476,38 @@ theorem map_msg_noRewind (l : List Nat) (f : Nat → Msg) : (l.map fun x => Op.m
   simp [Op.isRewind]
 
 theorem placeAt_spec {h : List Msg} {ops : List Op} {i : Nat} (hp : placeAt h ops = some i) :
-    (ops.drop i).all (fun op => !op.isRewind) = true ∧ (openCalls (applyAll h (ops.take i))).isEmpty = true := by
+    (ops.drop i).all (fun op => !op.isRewind) = true ∧
+      ((openCalls (applyAll h (ops.take i))).isEmpty || nextSays (ops.drop i)) = true := by
   unfold placeAt at hp
   have := List.find?_some hp
   simpa only [Bool.and_eq_true] using this
 
+/-- Rows whose next message is a say append a say first. -/
+theorem nextSays_msgs {ops : List Op} (hs : nextSays ops = true) : ∃ x rest, opMsgs ops = Msg.say x :: rest := by
+  induction ops with
+  | nil => simp [nextSays] at hs
+  | cons op tail ih =>
+    cases op with
+    | msg m =>
+      cases m with
+      | say x => exact ⟨x, opMsgs tail, rfl⟩
+      | call cs => simp [nextSays] at hs
+      | out c => simp [nextSays] at hs
+    | rewind k =>
+      obtain ⟨x, rest, he⟩ := ih (by simpa [nextSays] using hs)
+      exact ⟨x, rest, by simpa [opMsgs] using he⟩
+    | other =>
+      obtain ⟨x, rest, he⟩ := ih (by simpa [nextSays] using hs)
+      exact ⟨x, rest, by simpa [opMsgs] using he⟩
+
+/-- A say fits whatever is open and leaves nothing open. -/
+theorem wfFrom_say (o : List Nat) (x : Nat) (rest : List Msg) : wfFrom o (Msg.say x :: rest) = wfFrom [] rest := by
+  simp [wfFrom, Msg.fits, openAfter]
+
 /-- The batch with its carried turns, as the history it leaves: what the batch leaves up to their place, then the
-turns, then what the rest of the batch appends. -/
+turns, then what the rest of the batch appends. At their place no call is open, or a say follows them. -/
 theorem plan_after {h : List Msg} {says : List Nat} {ops ops' : List Op} (hp : plan h says ops = some ops') :
-    ∃ i, (openCalls (applyAll h (ops.take i))).isEmpty = true ∧
+    ∃ i, ((openCalls (applyAll h (ops.take i))).isEmpty || nextSays (ops.drop i)) = true ∧
       applyAll h ops = applyAll h (ops.take i) ++ opMsgs (ops.drop i) ∧
       applyAll h ops' = applyAll h (ops.take i) ++ says.map Msg.say ++ opMsgs (ops.drop i) := by
   unfold plan at hp
@@ -4506,10 +4529,15 @@ theorem t14_plan_well_formed (h : List Msg) (says : List Nat) (ops ops' : List O
   obtain ⟨i, ho, h1, h2⟩ := plan_after hp
   rw [h1, wf_append] at hw
   rw [h2, wf_append, wf_append]
-  have hc : openCalls (applyAll h (ops.take i)) = [] := List.isEmpty_iff.mp ho
-  rw [openCalls_append, hc, says_open, says_wf]
-  rw [hc] at hw
-  simpa using hw
+  rcases Bool.or_eq_true_iff.mp ho with ho | ho
+  · have hc : openCalls (applyAll h (ops.take i)) = [] := List.isEmpty_iff.mp ho
+    rw [openCalls_append, hc, says_open, says_wf]
+    rw [hc] at hw
+    simpa using hw
+  · obtain ⟨x, rest, he⟩ := nextSays_msgs ho
+    rw [he, wfFrom_say] at hw ⊢
+    rw [says_wf]
+    simpa using hw
 
 /-- **T14** (a carried turn survives its batch's rewind): the turns a command carries are in the history its batch
 leaves, whatever rewinds the batch holds; they go after every one of them. -/
@@ -4589,6 +4617,34 @@ theorem t14_turns_place (h : List Msg) (id k r : Nat) (cut : Bool) :
   refine ⟨placeAt_end _ _ ?_, placeAt_end _ _ ?_, placeAt_end _ _ (resume_closes _ _ _)⟩
   · simp [Batch.ops, applyAll, Op.apply, openCalls_append, openAfter]
   · simp [Batch.ops, applyAll, Op.apply, openCalls_append, openAfter]
+
+/-! ## T16: a person's turn stays last past the turns its run carries (round 23) -/
+
+/-- **T16** (a person's turn stays last): whatever history a turn or a Retry is written over, a call left open at its
+tail included, the turns its run carries go before the person's turn, which is the history's last message; and a run
+whose turn is still ahead past its batch has a place in it (`placeAhead`), so its carried turns never wait for the
+turn's commit, where its own rewind would cut them. -/
+theorem t16_turn_last (h : List Msg) (says : List Nat) (id k : Nat) (ops : List Op) :
+    (applyAll h ((plan h says ((Batch.turn id).ops h)).getD ((Batch.turn id).ops h))).getLast? = some (.say id) ∧
+      (applyAll h ((plan h says ((Batch.retry k id).ops h)).getD ((Batch.retry k id).ops h))).getLast? =
+        some (.say id) ∧
+      (placeAhead h ops id).isSome = true := by
+  refine ⟨?_, ?_, ?_⟩
+  · simp [plan, placeAt, Batch.ops, List.range, List.range.loop, nextSays, Op.isRewind, applyAll,
+      List.foldl_append, Op.apply]
+  · simp [plan, placeAt, Batch.ops, List.range, List.range.loop, nextSays, Op.isRewind, applyAll,
+      List.foldl_append, Op.apply]
+  · unfold placeAhead placeAt
+    rw [List.find?_isSome]
+    refine ⟨ops.length, List.mem_range.mpr (by simp; omega), ?_⟩
+    simp [List.drop_left', nextSays, Op.isRewind]
+
+/-- **T16** (the bug round 23 fixed): over a history ending in a call no output answers, a turn's carried turns had no
+place before its say, and went after it: the model answered the stale prompt. -/
+theorem t16_stale_prompt :
+    plan [Msg.say 0, .call [1]] [9] ((Batch.turn 5).ops []) = some [.msg (.say 9), .other, .msg (.say 5)] ∧
+      placeAhead [Msg.say 0, .call [1]] [.other] 5 = some 0 ∧ placeAt [Msg.say 0, .call [1]] [.other] = none := by
+  decide
 
 /-- **T14** (round 21's finding 1): the turns a Resume carried at the head of its batch, before the outputs that close
 the calls the history left open, part a call from its output, and the provider rejects the stray result; at their

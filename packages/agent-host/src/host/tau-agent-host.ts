@@ -555,6 +555,21 @@ export const termsAfterWrite = (terms: ChatTerms, { held, taken }: TermWrite): C
 export type CarriedTurns = Readonly<{ admission: number; runId: string; says: readonly ChatRunRow[] }>;
 
 /**
+ * Whether a run has its person's turn still to say (round 23, `placeAhead` in ChatLedger.lean, T16): the ledger holds no
+ * commit of it and the history no message of it. A turn's admission and the commit that says it are separate batches, so
+ * the run's next message past any batch before that commit is the person's turn, a say ({@link carriedPlace}).
+ *
+ * @param ledger - The chat's ledger before the batch.
+ * @param runId - The run that writes the batch.
+ * @param history - The history the batch lands after.
+ * @returns Whether the run's turn is still ahead.
+ */
+export const turnAheadOf = (ledger: ChatLedger, runId: string, history: readonly ProviderMessage[]): boolean => {
+  const entry = ledger.runs[runId];
+  return entry?.committed !== true && !history.some((message) => message.id === entry?.turnId);
+};
+
+/**
  * What a batch carries (`carriedTaken`): the first entry for a run the batch writes a row of that is no heartbeat. The
  * batch spends it only where it has a place for it ({@link carriedPlace}, round 21); one with none keeps it for the
  * run's next batch (`CarryOp.hold` in ChatLedger.lean).
@@ -2017,14 +2032,18 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       /*
        * Round 21: the carried turns go where the history leaves no tool call open, after every rewind the batch holds
        * ({@link carriedPlace}), so they never part a call from its output and the batch's own rewind never cuts them.
-       * A batch with no such place carries them to the run's next one.
+       * Round 23: or where a say comes next, which leaves the open calls to the adapter anyway; a run whose person's
+       * turn is not yet said says it next ({@link turnAheadOf}), so that turn stays last, after them. A batch with no
+       * such place carries them to the run's next one.
        */
+      const history = carried === undefined ? undefined : await log.messages();
       const place =
-        carried === undefined
+        carried === undefined || history === undefined
           ? undefined
           : carriedPlace(
-              await log.messages(),
+              history,
               own.map((row) => row.body),
+              turnAheadOf(prior, carried.runId, history),
             );
       const ledger = await appendChatRows({
         chatId,

@@ -41,6 +41,8 @@ A row is `<term> <seq> <run> <kind> <arg> <ms> <epoch> <attempt>` (`epoch`/`atte
   PLAN <history|-> <says|-> <rows|->   where a batch's carried turns go (round 21): history messages `c<calls|->`,
                                `o<call>`, `s<id>`; rows those, `k<keep>` a rewind, `l` no message
                                → `QW <open calls|-> <place|-> <well formed after> <carried survive>`
+  PLANT <history|-> <says|-> <rows|->   the same for a batch whose run says its person's turn next, past the batch
+                               (round 23, `placeAhead`) → `QW …`
   RESUMEB <history|-> <cut>    a Resume's batch over that history, its last message rewound or not (round 21)
                                → `QZ <calls it closes|-> <well formed after>`
   APPENDM <device> <row>       the merged rows after this device appends the row to its segment (round 21)
@@ -314,12 +316,14 @@ def runLine (st : St) (line : String) : St × List String :=
       | .write _ _ | .hold _ => (next, acc.2 ++ [if out.isEmpty then "-" else "+".intercalate (out.map toString)])
       | _ => (next, acc.2)) ([], [])
     (st, [s!"QC {listText said}"])
-  | ["PLAN", hs, ss, os] =>
+  | ["PLAN", hs, ss, os] | ["PLANT", hs, ss, os] =>
     let h := (if hs == "-" then [] else hs.splitOn ",").map msgOf
     let says := (if ss == "-" then [] else ss.splitOn "+").map num
     let ops := (if os == "-" then [] else os.splitOn ",").map opOf
-    let place := placeAt h ops
-    let after := applyAll h ((plan h says ops).getD ops)
+    /- `PLANT` (round 23): the batch's run says its person's turn next, past the batch (`turnAhead`). -/
+    let ahead := line.startsWith "PLANT "
+    let place := if ahead then placeAhead h ops 1000 else placeAt h ops
+    let after := applyAll h ((if ahead then planAhead h says ops 1000 else plan h says ops).getD ops)
     let survive := place.isSome && says.all (fun s => after.contains (.say s))
     let at_ := match place with | some i => toString i | none => "-"
     (st, [s!"QW {listText ((openCalls h).map toString)} {at_} {bit (wf after)} {bit survive}"])

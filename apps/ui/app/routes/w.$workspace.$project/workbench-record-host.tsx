@@ -531,9 +531,12 @@ export function WorkbenchRecordHost(): React.JSX.Element {
             if (applicationRef.current.epoch !== epoch || workbenchRef.current !== apply) {
               return;
             }
-            applicationRef.current.workbench = true;
             appliedWorkbenchRef.current = current.workbench;
-            acknowledge(epoch);
+            // An intended arrangement that is not yet written is not the stored record; its write's echo acknowledges.
+            if (JSON.stringify(current.workbench) === JSON.stringify(store.snapshot().layout?.workbench)) {
+              applicationRef.current.workbench = true;
+              acknowledge(epoch);
+            }
           });
         }
         return () => {

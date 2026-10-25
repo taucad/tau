@@ -598,8 +598,13 @@ describe('live workbench record host', () => {
       applied();
     });
     act(() => {
+      host.controller.registerViewer((_node, applied) => {
+        applied();
+      });
       host.controller.registerWorkbench(apply);
     });
+    // The shown arrangement is not the stored record yet, so the stored digest is not reported as applied.
+    expect(host.applied.has(workbenchPaths.layout)).toBe(false);
     const requested = {
       kind: 'group',
       tabs: [
@@ -615,6 +620,9 @@ describe('live workbench record host', () => {
       },
       { timeout: 1500 },
     );
+    await waitFor(() => {
+      expect(host.applied.get(workbenchPaths.layout)).toBe(host.controller.snapshot()?.layoutDigest);
+    });
     host.unmount();
   });
 

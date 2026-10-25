@@ -372,6 +372,10 @@ export function ProjectWorkspaceProvider({
         layoutController.personWorkbenchChanged(
           (node) => addPane(node, panelId),
           () => {
+            // The record answers after its first read; the route may have changed since.
+            if (!providerActiveRef.current || committedRouteKeyRef.current !== routeKey) {
+              return;
+            }
             if (openerRef.current) {
               openerRef.current(panelId);
             } else {

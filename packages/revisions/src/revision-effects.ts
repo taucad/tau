@@ -420,6 +420,12 @@ export type RevisionActors = Readonly<{
    * which device wrote it, so a renamed machine keeps its id and two machines that share a name do not.
    */
   chatDevice: () => Promise<string | undefined>;
+  /**
+   * Whether this host pulls the project's chats from a remote at all (round 27): the project syncs its chats
+   * (`tau.json` `syncChats`, read each time) and this host has a record identity to read them under. Without either, no
+   * pull ever brings another device's segment, or a record of its quiet.
+   */
+  pullsChats: () => Promise<boolean>;
 }>;
 
 /**
@@ -2968,6 +2974,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       const context = await chatContext();
       return context?.deviceId;
     },
+    pullsChats: async () => (await projectSyncPreferences()).syncChats && (await chatContext()) !== undefined,
     checkout: {
       cut: fromAuthorityPromise<CheckoutCutActorOutput, CheckoutCutActorInput>(async ({ input }) => {
         /* A comparison running when this cut was asked, over the same write
@@ -5044,6 +5051,8 @@ export type ProjectRevisions = Readonly<{
   readConflict: (revision: string) => Promise<RevisionConflictRead>;
   /** The record device this host's chat segments sync under; see {@link RevisionActors.chatDevice}. */
   chatDevice: () => Promise<string | undefined>;
+  /** Whether this host pulls the project's chats at all; see {@link RevisionActors.pullsChats}. */
+  pullsChats: () => Promise<boolean>;
 }>;
 
 /** Options for one project's running revision actor tree. @public */
@@ -5167,6 +5176,7 @@ export const createProjectRevisionsActor = (options: ProjectRevisionActorOptions
     recordEditorConflict,
     readConflict: actors.readConflict,
     chatDevice: actors.chatDevice,
+    pullsChats: actors.pullsChats,
   };
 };
 

@@ -101,9 +101,12 @@ export type TurnPlacementAdapter<Tools> = Readonly<{
   ) => Promise<Answer<Nothing, Fenced | 'CHAT_NOT_SHARED'>>;
   /**
    * Pull the project's remote now (XD3): another device's run on a chat has been quiet here a while, and only pulls can
-   * show whether it stayed quiet there for the staleness bound. Answered once asked, not once pulled.
+   * show whether it stayed quiet there for the staleness bound. Answered once asked, not once pulled. Refused
+   * `CHAT_NOT_SHARED` where this device cannot pull the chat (round 27): no remote, chat sync off, or no record identity.
    */
-  pull: (input: Readonly<{ requestId: string; chatId: string }>) => Promise<Answer<Nothing, Fenced>>;
+  pull: (
+    input: Readonly<{ requestId: string; chatId: string }>,
+  ) => Promise<Answer<Nothing, Fenced | 'CHAT_NOT_SHARED'>>;
   /**
    * End this session (TS-R6): its later requests are refused `SESSION_FENCED`, its tools are revoked once their
    * accepted writes land, and its `settlements` listens end. The root keeps every turn actor.
@@ -118,7 +121,7 @@ export type TurnPlacementAdapter<Tools> = Readonly<{
  */
 export type TurnPlacementPortOptions<Tools> = Readonly<{
   /** The project's revisions from `createProjectRevisionsActor`: its root, and the store reads beside it. */
-  revisions: Pick<ProjectRevisions, 'actor' | 'turns'>;
+  revisions: Pick<ProjectRevisions, 'actor' | 'turns'> & Partial<Pick<ProjectRevisions, 'pullsChats'>>;
   /**
    * Turn the attempt's view of its checkout into what this binding hands its host: a tool registry on Node, a
    * transferable bridge port in the file-manager worker. The adapter owns the view and revokes it.
@@ -731,6 +734,17 @@ export const createTurnPlacementPort = <Tools>(
     const kind = actor.getSnapshot().children.remote?.getSnapshot().context.kind;
     return kind !== undefined && kind !== 'none';
   };
+  /*
+   * Round 27: whether a pull can bring this project's chats here, as its root answers it. A root without the answer, or
+   * one whose answer fails, is taken to pull them: only a definite "no" lets a host pass another device's quiet run.
+   */
+  const chatsMayArrive = async (): Promise<boolean> => {
+    try {
+      return (await options.revisions.pullsChats?.()) ?? true;
+    } catch {
+      return true;
+    }
+  };
 
   /*
    * XD4: where the placement intent is on this device. A checkout id derives from its branch, so the branch is the
@@ -1118,9 +1132,18 @@ export const createTurnPlacementPort = <Tools>(
       return { requestId, status: 'applied' };
     },
 
+    /* Round 27: a device that cannot pull the chat says so, so its host stops waiting for pulls that cannot come. */
     pull: async ({ requestId }) => {
       if (fenced) {
         return fencedAnswer(requestId);
+      }
+      if (!branchMayArrive() || !(await chatsMayArrive())) {
+        return refused({
+          requestId,
+          code: 'CHAT_NOT_SHARED',
+          message:
+            'This device does not pull this project’s chats (no remote, chat sync off, or no record identity), so no pull can bring another device’s copy of this chat.',
+        });
       }
       actor.send({ type: 'sync', event: { type: 'remoteMoved', generation: 0, refs: [] } });
       return { requestId, status: 'applied' };

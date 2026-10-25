@@ -99,10 +99,13 @@ const createProject = async (withAuthority = false): Promise<Project> => {
   return {
     filesystem,
     port,
-    open: () => {
+    /** `deviceId`: the host's id, which gives it a record identity to sync chats under; none by default. */
+    open: (options: Readonly<{ deviceId?: string }> = {}) => {
+      const { deviceId } = options;
       const revisions = createProjectRevisionsActor({
         port,
         projectId: 'project-1',
+        ...(deviceId === undefined ? {} : { deviceId: () => deviceId }),
         filesystem: async (checkout: Checkout) =>
           checkout.kind === 'live' ? filesystem : linkedFilesystem(checkout.id),
       });
@@ -953,7 +956,7 @@ describe('createTurnPlacementPort (TS-S3)', () => {
   /* XD3: a foreign run's quiet is evidenced only by a pull, so a host that holds a chat for one asks for it. */
   it('should ask the root to pull the remote when the host asks, and nothing once fenced', async () => {
     const project = await createProject();
-    const { revisions, syncs } = observeSyncs(withRemote(project.open().revisions));
+    const { revisions, syncs } = observeSyncs(withRemote(project.open({ deviceId: 'device-1' }).revisions));
     const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
 
     expect(await placement.pull({ requestId: 'pull:1', chatId: key.chatId })).toEqual({
@@ -965,6 +968,43 @@ describe('createTurnPlacementPort (TS-S3)', () => {
     await placement.fence();
     expect(await placement.pull({ requestId: 'pull:2', chatId: key.chatId })).toMatchObject({ status: 'refused' });
     expect(syncs).toHaveLength(1);
+  });
+
+  /*
+   * Round 27: a device that cannot pull the chat never records the pulls that would show another device's quiet run
+   * abandoned, so the placement says so (`CHAT_NOT_SHARED`) and the host stops waiting for them: a project with no
+   * remote, one whose chats do not sync, and a device with no record identity to read chats under.
+   */
+  describe('where this device cannot pull the chat', () => {
+    const notShared = { requestId: 'pull:1', status: 'refused', code: 'CHAT_NOT_SHARED' } as const;
+
+    it('should refuse a pull CHAT_NOT_SHARED, and pull nothing, where the project syncs with no remote', async () => {
+      const project = await createProject();
+      const { revisions, syncs } = observeSyncs(project.open({ deviceId: 'device-1' }).revisions);
+      const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
+
+      expect(await placement.pull({ requestId: 'pull:1', chatId: key.chatId })).toMatchObject(notShared);
+      expect(syncs).toEqual([]);
+    });
+
+    it('should refuse a pull CHAT_NOT_SHARED, and pull nothing, where the project does not sync its chats', async () => {
+      const project = await createProject();
+      await project.filesystem.writeFile('tau.json', JSON.stringify({ syncChats: false }));
+      const { revisions, syncs } = observeSyncs(withRemote(project.open({ deviceId: 'device-1' }).revisions));
+      const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
+
+      expect(await placement.pull({ requestId: 'pull:1', chatId: key.chatId })).toMatchObject(notShared);
+      expect(syncs).toEqual([]);
+    });
+
+    it('should refuse a pull CHAT_NOT_SHARED, and pull nothing, on a device with no record identity', async () => {
+      const project = await createProject();
+      const { revisions, syncs } = observeSyncs(withRemote(project.open().revisions));
+      const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
+
+      expect(await placement.pull({ requestId: 'pull:1', chatId: key.chatId })).toMatchObject(notShared);
+      expect(syncs).toEqual([]);
+    });
   });
 
   it('should record nothing for an attempt the root refused', async () => {

@@ -75,6 +75,7 @@
     "@taucad/bambu": "workspace:*",
     "@taucad/bundler-core": "workspace:*",
     "@taucad/carvera": "workspace:*",
+    "@taucad/esbuild": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/grbl": "workspace:*",
     "@taucad/jobs": "workspace:*",

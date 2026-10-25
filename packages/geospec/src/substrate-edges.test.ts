@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { VmFileSystem } from '@taucad/esbuild/vm';
+import type { VmFileSystem } from '#vm/types.js';
 import type { GeoSpecAssertionClientOptions } from '#assertion-client/index.js';
 import { GeoSpecModelLoadError } from '#model/errors.js';
 import { GeoSpecAssertionError } from '#runner/collector.js';

@@ -93,6 +93,12 @@ Timeouts:
   GEOSPEC_RUN_TIMEOUT    a browser run outlived its host run budget; completed
                          requirements are still reported
   The engine's work-unit budget (MATCHER_TIMEOUT) is deterministic, not a clock.
+
+Imports:
+  A spec may import project files and the geospec builtins (geospec,
+  geospec/model, geospec/config). An npm package or URL import is refused with
+  BUNDLER_FAILED naming the specifier; nothing is fetched. A host that resolves
+  packages injects its own module VM (createModuleVm in geospec/runner).
 `;
 
 const numericFlag = (raw: string | undefined, flag: string): number | { error: string } => {
@@ -339,7 +345,7 @@ export const formatRunReport = (result: GeoSpecRunnerResult): string[] => {
 
 /**
  * The run's headline: its status, passed and failed, then each non-zero undecided or skipped count. It is the line
- * `test_model` prints over MCP (`formatTestModelHeadline` in `@taucad/chat`, which this published CLI cannot import),
+ * `test_model` prints over MCP (`formatTestModelHeadline` in Tau's chat library, which this published CLI cannot import),
  * and both test suites pin the same text.
  *
  * @param result - The aggregate result.

@@ -14,7 +14,7 @@ import type {
   GeoSpecRunResult,
   RunGeoSpecModuleOptions,
 } from '#runner/types.js';
-import type { VmIssue } from '@taucad/esbuild/vm';
+import type { VmIssue } from '#vm/types.js';
 
 const createRunnerClosedIssue = (): VmIssue => ({
   code: 'GEOSPEC_RUNNER_CLOSED',
@@ -138,6 +138,7 @@ export const executeGeoSpecFile = async (options: ExecuteGeoSpecFileOptions): Pr
         : { ...runner.nativeAssertions, workUnitLimit: options.workUnitLimit },
     ...(runner.nativeModelLoader ? { nativeModelLoader: runner.nativeModelLoader } : {}),
     ...(runner.builtinModules ? { builtinModules: runner.builtinModules } : {}),
+    ...(runner.createModuleVm ? { createModuleVm: runner.createModuleVm } : {}),
     ...(options.bundleCache ? { bundleCache: options.bundleCache } : {}),
     ...(options.collectOnly === true ? { collectOnly: true } : {}),
   });

@@ -8,6 +8,10 @@
     "benchmark-brep-surfaces": {
       "command": "tsx --require ../../../tools/cjs-wasm-compat.cjs scripts/benchmark-brep-surfaces.mts",
       "options": { "cwd": "{projectRoot}" }
+    },
+    "benchmark-native-edges": {
+      "command": "tsx --require ../../../tools/cjs-wasm-compat.cjs scripts/benchmark-native-edges.mts",
+      "options": { "cwd": "{projectRoot}" }
     }
   }
 }

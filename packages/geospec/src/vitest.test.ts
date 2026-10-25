@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { JSONValue } from '@taucad/runtime/types';
+import type { JSONValue } from '#support/types.js';
 import { createGeoSpecAssertionClient, GeoSpecAssertionError } from '#assertion-client/index.js';
 import type { GeoSpecNativeClaimEvaluation, GeoSpecNativeEngine } from '#assertion-client/index.js';
 import { geoSpecMatcherDescriptors } from '#engine/matchers.js';

@@ -33,7 +33,7 @@ import type {
 import type { GeoSpecRunner, GeoSpecRunnerResult, GeoSpecRunnerRunOptions } from '#runner/worker/runner-types.js';
 import { geoSpecTimeoutCode } from '#runner/timeout-codes.js';
 import { createNoMatchingGeoSpecTestsIssue } from '#runner/worker/no-matching-tests-issue.js';
-import { assertRootedPath } from '@taucad/runtime/kernel';
+import { assertRootedPath } from '#support/path.js';
 import type { ShardTimings } from '#runner/pool/shard-timings.js';
 import type { GeoSpecRunResult } from '#runner/types.js';
 import { accumulateFileResult } from '#runner/worker/serial-runner.js';

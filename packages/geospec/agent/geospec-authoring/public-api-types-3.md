@@ -1,6 +1,256 @@
 # geospec — Types (3)
 
-9 top-level symbols. Signatures are verbatim typescript.
+21 top-level symbols. Signatures are verbatim typescript.
+
+// Source record preserving semantic/presentation separation and ordered roles
+GeoSpecPmiRecord: {
+    readonly sourceId: number;
+    readonly family: 'dimension' | 'datum' | 'tolerance' | 'presentation';
+    readonly channel: 'semantic' | 'presentation';
+    readonly kind: string;
+    readonly name: GeoSpecPmiField<string>;
+    readonly first: readonly GeoSpecPmiShapeReference[];
+    readonly second: readonly GeoSpecPmiShapeReference[];
+    readonly numbers: GeoSpecPmiField<readonly GeoSpecPmiNumber[]>;
+    readonly limits: GeoSpecPmiField<GeoSpecPmiLimits>;
+    readonly interpretation: GeoSpecPmiField<string>;
+    readonly raw: readonly GeoSpecPmiRawEntity[];
+}
+
+  readonly sourceId: number
+
+  readonly family: 'dimension' | 'datum' | 'tolerance' | 'presentation'
+
+  readonly channel: 'semantic' | 'presentation'
+
+  readonly kind: string
+
+  readonly name: GeoSpecPmiField<string>
+
+  readonly first: readonly GeoSpecPmiShapeReference[]
+
+  readonly second: readonly GeoSpecPmiShapeReference[]
+
+  readonly numbers: GeoSpecPmiField<readonly GeoSpecPmiNumber[]>
+
+  readonly limits: GeoSpecPmiField<GeoSpecPmiLimits>
+
+  readonly interpretation: GeoSpecPmiField<string>
+
+  readonly raw: readonly GeoSpecPmiRawEntity[]
+
+// Positive-only inventory value inside the ordinary canonical query report
+GeoSpecPmiInventory: {
+    readonly contract: 'geospec.pmi.inventory/v1';
+    readonly status: 'semantic' | 'graphical-only' | 'empty';
+    readonly fileSchema: string;
+    readonly editionValidation: 'not-validated';
+    readonly records: readonly GeoSpecPmiRecord[];
+}
+
+  readonly contract: 'geospec.pmi.inventory/v1'
+
+  readonly status: 'semantic' | 'graphical-only' | 'empty'
+
+  readonly fileSchema: string
+
+  readonly editionValidation: 'not-validated'
+
+  readonly records: readonly GeoSpecPmiRecord[]
+
+// Strict inventory output limits
+GeoSpecPmiQueryPayload: {
+    readonly maxRecords?: number;
+    readonly maxOutputBytes?: number;
+}
+
+  readonly maxRecords?: number
+
+  readonly maxOutputBytes?: number
+
+// Complete inventory value
+GeoSpecPmiQueryValue: {
+    readonly inventory: GeoSpecPmiInventory;
+    readonly subjectHash: string;
+    readonly provenance: Readonly<Record<string, unknown>>;
+}
+
+  readonly inventory: GeoSpecPmiInventory
+
+  readonly subjectHash: string
+
+  readonly provenance: Readonly<Record<string, unknown>>
+
+// Full native assertion result with the exact core-owned bytes retained
+GeoSpecCanonicalClaimReport: {
+    readonly canonicalClaim: Uint8Array<ArrayBuffer>;
+    readonly canonicalPlan: Uint8Array<ArrayBuffer>;
+    readonly canonicalResult: Uint8Array<ArrayBuffer>;
+    readonly claim: Readonly<Record<string, JSONValue>>;
+    readonly claimId: string;
+    /** Engine diagnostics; a `MATCHER_TIMEOUT` row also carries `details.limit`, `details.used` and `details.maximumLimit`. */
+    readonly diagnostics: readonly JSONValue[];
+    readonly evidence?: JSONValue;
+    readonly polarity: GeoSpecClaimPolarity;
+    readonly result: Readonly<Record<string, JSONValue>>;
+    readonly status: GeoSpecCanonicalClaimStatus;
+}
+
+  readonly canonicalClaim: Uint8Array<ArrayBuffer>
+
+  readonly canonicalPlan: Uint8Array<ArrayBuffer>
+
+  readonly canonicalResult: Uint8Array<ArrayBuffer>
+
+  readonly claim: Readonly<Record<string, JSONValue>>
+
+  readonly claimId: string
+
+  // Engine diagnostics
+  readonly diagnostics: readonly JSONValue[]
+
+  readonly evidence?: JSONValue
+
+  readonly polarity: GeoSpecClaimPolarity
+
+  readonly result: Readonly<Record<string, JSONValue>>
+
+  readonly status: GeoSpecCanonicalClaimStatus
+
+// Exact core bytes of one claim evaluated in one engine call
+GeoSpecNativeClaimEvaluation: {
+    readonly canonicalClaim: Uint8Array<ArrayBuffer>;
+    readonly canonicalPlan: Uint8Array<ArrayBuffer>;
+    readonly canonicalResult: Uint8Array<ArrayBuffer>;
+}
+
+  readonly canonicalClaim: Uint8Array<ArrayBuffer>
+
+  readonly canonicalPlan: Uint8Array<ArrayBuffer>
+
+  readonly canonicalResult: Uint8Array<ArrayBuffer>
+
+// Byte-only engine surface consumed by the runner-independent assertion client
+GeoSpecNativeEngine: {
+    evaluateClaim(request: Uint8Array<ArrayBuffer>): GeoSpecNativeClaimEvaluation;
+    processRequest(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
+}
+
+  // GeoSpecNativeEngine.evaluateClaim (method)
+  evaluateClaim(request: Uint8Array<ArrayBuffer>): GeoSpecNativeClaimEvaluation;
+
+  // GeoSpecNativeEngine.processRequest (method)
+  processRequest(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
+
+// Success-evidence profile a product selects for its plans (PERF-OUTPUT-01)
+GeoSpecNativeEvidenceProfile: 'bounded' | 'complete'
+
+// Content-addressed subject accepted by a protocol-3 assertion plan
+GeoSpecNativeSubject: {
+    readonly contentHash?: string;
+    readonly subjectHash?: string;
+}
+
+  readonly contentHash?: string
+
+  readonly subjectHash?: string
+
+// A canonical fixed-contract matcher
+GeoSpecFixedMatcherDescriptor: {
+    readonly contract: 'geospec.plate-two-windows/v1' | 'geospec.pmi.parallel-plane-distance/v1';
+    readonly expected: 'true';
+    readonly mode: 'sync';
+}
+
+  readonly contract: 'geospec.plate-two-windows/v1' | 'geospec.pmi.parallel-plane-distance/v1'
+
+  readonly expected: 'true'
+
+  readonly mode: 'sync'
+
+// The platform the CLI runs against
+GeoSpecCliHost: {
+    /** Absolute project root for a relative `projectPath`. */
+    cwd(): string;
+    write(line: string): void;
+    /** Recursive discovery filesystem. */
+    discoveryFileSystem(projectPath: string): Parameters<typeof discoverGeoSpecFiles>[0]['filesystem'];
+    /**
+     * Import the project's `geospec.config.*`, or the explicit one, for its data fields.
+     * @throws Error when the config is ambiguous, invalid or fails to import.
+     */
+    loadConfig(options: {
+        projectPath: string;
+        configPath: string | undefined;
+    }): Promise<{
+        readonly configPath?: string;
+        readonly options: GeoSpecConfigData;
+    }>;
+    /** Build the runner the selected files execute on; its workers import the same config for its exporters. */
+    createRunner(options: {
+        projectPath: string;
+        configPath: string | undefined;
+        workers: number | undefined;
+        shardTimeout: number | undefined;
+        /** In-memory spec sources keyed by project-rooted path, served in place of the disk (`geospec check`). */
+        sources?: Readonly<Record<string, string>>;
+    }): GeoSpecRunner;
+}
+
+  // Absolute project root for a relative `projectPath`
+  // GeoSpecCliHost.cwd (method)
+  cwd(): string;
+
+  // GeoSpecCliHost.write (method)
+  write(line: string): void;
+
+  // Recursive discovery filesystem
+  // GeoSpecCliHost.discoveryFileSystem (method)
+  discoveryFileSystem(projectPath: string): Parameters<typeof discoverGeoSpecFiles>[0]['filesystem'];
+
+  // Import the project's `geospec.config.*`, or the explicit one, for its data fields
+  // Throws: Error when the config is ambiguous, invalid or fails to import.
+  // GeoSpecCliHost.loadConfig (method)
+  loadConfig(options: {
+          projectPath: string;
+          configPath: string | undefined;
+      }): Promise<{
+          readonly configPath?: string;
+          readonly options: GeoSpecConfigData;
+      }>;
+
+  // Build the runner the selected files execute on
+  // GeoSpecCliHost.createRunner (method)
+  createRunner(options: {
+          projectPath: string;
+          configPath: string | undefined;
+          workers: number | undefined;
+          shardTimeout: number | undefined;
+          /** In-memory spec sources keyed by project-rooted path, served in place of the disk (`geospec check`). */
+          sources?: Readonly<Record<string, string>>;
+      }): GeoSpecRunner;
+
+// Options for {@link createNodeGeoSpecCliHost}
+NodeGeoSpecCliHostOptions: {
+    /** Report sink used by embedding hosts and tests; defaults to stdout. */
+    readonly reportStream?: (text: string) => void;
+    /**
+     * URLs of modules each pool worker imports for exporters that precede the config's, so a host such as `tau test`
+     * can run a project with no `geospec.config.*` (see `GeoSpecExporterModule` in `geospec/runner/node`).
+     */
+    readonly exporterModules?: readonly string[];
+    /** URL of a module each pool worker imports for its module VM (see `GeoSpecModuleVmModule` in `geospec/runner`). */
+    readonly moduleVmModule?: string;
+}
+
+  // Report sink used by embedding hosts and tests
+  readonly reportStream?: (text: string) => void
+
+  // URLs of modules each pool worker imports for exporters that precede the config's, so a host such as `tau test` can run a project with no `geospec.config.*` (see `GeoSpecExporterModule` in `geospec/runner/node`)
+  readonly exporterModules?: readonly string[]
+
+  // URL of a module each pool worker imports for its module VM (see `GeoSpecModuleVmModule` in `geospec/runner`)
+  readonly moduleVmModule?: string
 
 // Installed Vitest matcher map and lifecycle settlement hook
 GeoSpecVitestAdapter: {
@@ -79,6 +329,11 @@ ReadGeoSpecConfigOptions: {
     readonly filesystem: VmFileSystem;
     /** Rooted directory holding the config, in the filesystem's spelling: `''` for its root, else `'sub/dir'`. */
     readonly projectPath: string;
+    /**
+     * Module VM factory; defaults to GeoSpec's plain VM (native esbuild on Node, refused elsewhere). A host that bundles
+     * in a browser injects its own; Tau injects `createEsbuildModuleVm`.
+     */
+    readonly createModuleVm?: CreateModuleVm;
 }
 
   // The project filesystem
@@ -86,6 +341,9 @@ ReadGeoSpecConfigOptions: {
 
   // Rooted directory holding the config, in the filesystem's spelling
   readonly projectPath: string
+
+  // Module VM factory
+  readonly createModuleVm?: CreateModuleVm
 
 // Outcome of {@link readGeoSpecConfig}
 ReadGeoSpecConfigResult: {

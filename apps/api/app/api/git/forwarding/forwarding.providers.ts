@@ -51,6 +51,7 @@ export const gitExecutionProvider: Provider = {
       nodeEnvironment: config.get('NODE_ENV', { infer: true }),
       storageUrl: config.get('TAU_STORAGE_URL', { infer: true }),
       grantSigningKey: config.get('TAU_STORAGE_GRANT_SIGNING_KEY', { infer: true }),
+      affinity: config.get('TAU_STORAGE_AFFINITY', { infer: true }),
       metrics,
       store,
       shutdown,

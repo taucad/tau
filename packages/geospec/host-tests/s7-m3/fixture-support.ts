@@ -1,10 +1,12 @@
-import type { JSONValue } from '@taucad/runtime/types';
 import { createGeoSpecAssertionClient } from '#assertion-client/index.js';
 import type {
   GeoSpecAssertionClient,
   GeoSpecNativeClaimEvaluation,
   GeoSpecNativeEngine,
 } from '#assertion-client/index.js';
+
+// oxlint-disable-next-line @typescript-eslint/no-restricted-types -- JSON value type uses null
+type JSONValue = null | string | number | boolean | JSONValue[] | { [key: string]: JSONValue }; // eslint-disable-line @typescript-eslint/naming-convention -- JSON acronym
 
 export const subject = { subjectHash: 'b'.repeat(64) };
 

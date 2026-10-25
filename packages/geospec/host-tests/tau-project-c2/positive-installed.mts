@@ -7,7 +7,9 @@ import { pathToFileURL } from 'node:url';
 import type { GeoSpecCanonicalClaimReport } from 'geospec/assertion-client';
 import type * as AssertionModule from 'geospec/assertion-client';
 import type * as NativeModule from 'geospec-engine/node';
-import type { JSONValue } from '@taucad/runtime/types';
+
+// oxlint-disable-next-line @typescript-eslint/no-restricted-types -- JSON value type uses null
+type JSONValue = null | string | number | boolean | JSONValue[] | { [key: string]: JSONValue }; // eslint-disable-line @typescript-eslint/naming-convention -- JSON acronym
 
 type ArtifactRecord = {
   id: string;

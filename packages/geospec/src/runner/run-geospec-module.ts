@@ -1,7 +1,7 @@
-import { createEsbuildModuleVm } from '@taucad/esbuild/vm';
 import { defineConfigBuiltinCode } from '#config/define-config.js';
-import type { VmFileSystem } from '@taucad/esbuild/vm';
-import { sha256Bytes } from '@taucad/runtime/kernel';
+import type { VmFileSystem } from '#vm/types.js';
+import { createPlainModuleVm } from '#vm/plain-module-vm.js';
+import { sha256Bytes } from '#support/hash.js';
 import { createCollector } from '#runner/collector.js';
 import { createGeoSpecAssertionClient } from '#assertion-client/client.js';
 import { compileGeoSpecTestNamePattern, filterGeoSpecTests } from '#runner/filter.js';
@@ -209,7 +209,7 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
   }
 
   const recorder = recordBundlerReads(options.filesystem);
-  const vm = await createEsbuildModuleVm({
+  const vm = await (options.createModuleVm ?? createPlainModuleVm)({
     filesystem: recorder.filesystem,
   });
   const collector = createCollector({

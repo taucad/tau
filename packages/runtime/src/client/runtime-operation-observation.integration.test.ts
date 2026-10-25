@@ -35,6 +35,8 @@ const parameters = {
 
 type Faults = Readonly<{
   heap?: number;
+  /** A native kernel's child-tree sample. */
+  childResident?: () => Promise<number | undefined>;
   evaluate?: Error;
   render?: Error;
   export?: Error;
@@ -70,6 +72,7 @@ const createClient = (faults: Faults = {}) => {
       return createKernelSuccess({ parameters });
     },
     ...(faults.heap === undefined ? {} : { observedHeapBytes: () => faults.heap }),
+    ...(faults.childResident === undefined ? {} : { observedChildResidentBytes: faults.childResident }),
     async evaluate() {
       if (faults.evaluate !== undefined) {
         throw faults.evaluate;
@@ -322,6 +325,47 @@ describe('operation observation over the in-process transport', () => {
     } finally {
       await failing.shutdown();
       await throwing.shutdown();
+    }
+  });
+
+  it("should report a native kernel's child tree at settle on every operation, and sample nothing unobserved", async () => {
+    const bytes = 96 * 1024 * 1024;
+    const childResident = vi.fn(async () => bytes);
+    const unobserved = createClient({ childResident });
+    try {
+      await runOperations(unobserved);
+    } finally {
+      await unobserved.shutdown();
+    }
+    expect(childResident).not.toHaveBeenCalled();
+
+    const client = createClient({ childResident });
+    const seen: RuntimeOperationObservation[] = [];
+    client.on('operation', (observation) => seen.push(observation));
+    client.observe('facts');
+    try {
+      const document = client.open({ source, parameters: { width: 12 }, watch: false });
+      await document.evaluation();
+      const view = document.view('primary');
+      const outcome = await view.rendering();
+      // Observation only: the rendering the recycle policy reads carries no heap from this hook.
+      expect(outcome).toMatchObject({ superseded: false, rendering: { success: true } });
+      expect(outcome.superseded ? undefined : outcome.rendering).not.toHaveProperty('heapBytes');
+      await document.export('bom');
+      view.close();
+      document.close();
+      await vi.waitFor(() => {
+        expect(
+          ['evaluate', 'render', 'export'].every((operation) => byOperation(seen, operation)[0]?.facts === 'joined'),
+        ).toBe(true);
+      });
+      for (const operation of ['evaluate', 'render', 'export']) {
+        expect(byOperation(seen, operation)[0], operation).toMatchObject({
+          worker: { heapBytes: bytes, heapSource: 'child' },
+        });
+      }
+    } finally {
+      await client.shutdown();
     }
   });
 });

@@ -1,4 +1,4 @@
-import type { KernelIssueCode } from '@taucad/runtime/types';
+import type { KernelIssueCode } from '#support/types.js';
 import type { GeoSpecUnit } from '#geometry-unit.js';
 
 /**

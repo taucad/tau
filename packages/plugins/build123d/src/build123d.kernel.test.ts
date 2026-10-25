@@ -56,6 +56,7 @@ const createContextData = () => ({
     isHandleGenerationValid: vi.fn().mockReturnValue(true),
     release: vi.fn(),
     cleanup: vi.fn().mockResolvedValue(undefined),
+    sampleResident: vi.fn().mockResolvedValue(64 * 1024 * 1024),
   },
   resident: {
     contains: vi.fn().mockReturnValue(false),
@@ -676,6 +677,15 @@ describe('Build123d kernel lifecycle errors', () => {
       ],
     });
     expect(project.filesystem.mocks.readFile).toHaveBeenCalledWith('pyproject.toml', 'utf8');
+  });
+
+  it("reports its worker tree's resident set through the observation hook and never through heapBytes", async () => {
+    const context = createContext();
+    await expect(definition.observedChildResidentBytes?.(context)).resolves.toBe(64 * 1024 * 1024);
+    expect(context.session.sampleResident).toHaveBeenCalledOnce();
+    // The recycling input stays unimplemented, so `rendering.heapBytes` and the recycle policy are unchanged.
+    expect(definition.heapBytes).toBeUndefined();
+    expect(definition.observedHeapBytes).toBeUndefined();
   });
 
   it('delegates handle validity/disposal and always removes the mirror', async () => {

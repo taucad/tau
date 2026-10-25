@@ -10,6 +10,7 @@ import type { CommitToken, RepositoryLocator, RepositoryStore } from '#api/git/s
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { decodeManifest, indexKeyFor, isTombstoned } from '#api/git/store/manifest.js';
 import type { Manifest } from '#api/git/store/manifest.js';
+import type { PackCache, PackCacheHold } from '#api/git/store/pack-cache.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -116,6 +117,8 @@ export type RepositoryLease = {
   readonly token: CommitToken | 'absent';
   /** Pack files present when hydration finished; everything else is this push's. */
   readonly hydratedPackFiles: ReadonlySet<string>;
+  /** The manifest's pack bytes by where the hydrate drew them from (DC2). */
+  readonly drawnBytes: { readonly cache: number; readonly objectStore: number };
   dispose(): Promise<void>;
 };
 
@@ -132,6 +135,12 @@ export type HydrateLeaseArguments = {
    * for. Absent, the hydrate reads the manifest itself.
    */
   preread?: PrereadManifest;
+  /**
+   * The worker's pack cache (DC2): packs and stored indexes are hard-linked
+   * from it rather than read from the store. Absent, every hydrate reads the
+   * store, which is what the API's in-process fallback and maintenance do.
+   */
+  cache?: PackCache;
 };
 
 /** A manifest read and decoded ahead of the hydrate: `undefined` and `'absent'` are generation 0. */
@@ -181,13 +190,21 @@ export const hydrateLease = async (args: HydrateLeaseArguments): Promise<Reposit
   }
 
   const directory = await mkdtemp(path.join(args.parentDirectory ?? tmpdir(), 'tau-lease-'));
+  const holds = new LeaseHolds();
   try {
     // `--template=` keeps git's sample hooks out: the only hook in a lease is Tau's.
     await runGit(directory, ['init', '--bare', '--quiet', '--template=', '--initial-branch=main', '.']);
     await appendFile(path.join(directory, 'config'), leaseConfigText({ ...leaseConfiguration, ...args.config }));
     await installPreReceiveHook(directory);
 
-    const hydratedPackFiles = await fetchPacks({ store: args.store, locator: args.locator, manifest, directory });
+    const fetched = await fetchPacks({
+      store: args.store,
+      locator: args.locator,
+      manifest,
+      directory,
+      cache: args.cache,
+      holds,
+    });
     await writePackedReferences(directory, manifest);
 
     return {
@@ -195,14 +212,61 @@ export const hydrateLease = async (args: HydrateLeaseArguments): Promise<Reposit
       locator: args.locator,
       manifest,
       token,
-      hydratedPackFiles,
-      dispose: async () => rm(directory, { recursive: true, force: true }),
+      hydratedPackFiles: fetched.files,
+      drawnBytes: fetched.drawnBytes,
+      dispose: async () => {
+        /* Released only once the links are gone: a directory that could not be
+           removed still holds the bytes, so they stay pinned rather than
+           counted as space eviction could give admission. */
+        await rm(directory, { recursive: true, force: true });
+        holds.release();
+      },
     };
   } catch (error) {
-    await rm(directory, { recursive: true, force: true });
+    /* A failed hydrate forgets what it linked: a cached object may be what
+       failed it (a corrupt pack `index-pack` refused), so the next lease reads
+       it again. A forgotten entry is never counted again, whether or not the
+       directory could be removed. */
+    try {
+      await rm(directory, { recursive: true, force: true });
+    } finally {
+      await holds.discard();
+    }
     throw error;
   }
 };
+
+/**
+ * The cache entries one lease linked. Once it has released or discarded them,
+ * a hold that arrives later (a fill still running when a sibling read failed
+ * the hydrate) gets the same answer at once, so no pin outlives the lease.
+ */
+class LeaseHolds {
+  readonly #holds: PackCacheHold[] = [];
+  #closed: 'release' | 'discard' | undefined;
+
+  public async add(hold: PackCacheHold): Promise<void> {
+    if (this.#closed === undefined) {
+      this.#holds.push(hold);
+    } else if (this.#closed === 'release') {
+      hold.release();
+    } else {
+      await hold.discard();
+    }
+  }
+
+  public release(): void {
+    this.#closed = 'release';
+    for (const hold of this.#holds.splice(0)) {
+      hold.release();
+    }
+  }
+
+  public async discard(): Promise<void> {
+    this.#closed = 'discard';
+    await Promise.allSettled(this.#holds.splice(0).map(async (hold) => hold.discard()));
+  }
+}
 
 /**
  * The hook `git.service.ts` installs today, unchanged: the ref allow-list, the
@@ -216,21 +280,69 @@ const installPreReceiveHook = async (directory: string): Promise<void> => {
   await writeFile(path.join(hooks, 'pre-receive'), preReceiveHookScript, { encoding: 'utf8', mode: 0o755 });
 };
 
+/** What a hydrate put in the lease, and where its pack bytes came from. */
+type FetchedPacks = {
+  readonly files: ReadonlySet<string>;
+  readonly drawnBytes: { readonly cache: number; readonly objectStore: number };
+};
+
 const fetchPacks = async (args: {
   store: RepositoryStore;
   locator: RepositoryLocator;
   manifest: Manifest | undefined;
   directory: string;
-}): Promise<ReadonlySet<string>> => {
+  cache: PackCache | undefined;
+  /** Filled with every cache entry this lease linked, for its disposal to release. */
+  holds: LeaseHolds;
+}): Promise<FetchedPacks> => {
   const { store, locator, manifest, directory } = args;
   const packDirectory = path.join(directory, 'objects/pack');
   await mkdir(packDirectory, { recursive: true });
   if (manifest === undefined || manifest.packs.length === 0) {
-    return new Set();
+    return { files: new Set(), drawnBytes: { cache: 0, objectStore: 0 } };
   }
 
   const download = async (key: string, file: string): Promise<void> => {
     await pipeline(await store.getObject(locator, key), createWriteStream(path.join(packDirectory, file)));
+  };
+
+  /* The full-hydrate fallback (DC2): a repository larger than the cache's
+     budget is read straight into the lease and never cached, so one large
+     repository cannot evict every other tenant's packs. */
+  const totalBytes = manifest.packs.reduce((total, pack) => total + pack.bytes, 0);
+  let { cache } = args;
+  if (cache !== undefined && totalBytes > (await cache.budget())) {
+    cache.recordFallback('over_budget');
+    cache = undefined;
+  }
+
+  /** One stored object into the lease: linked from the cache, or read from the store if the cache fails it. */
+  const place = async (key: string, file: string, expectedBytes?: number): Promise<boolean> => {
+    if (cache === undefined) {
+      await download(key, file);
+      return false;
+    }
+    try {
+      const hold = await cache.acquire({
+        store,
+        locator,
+        key,
+        destination: path.join(packDirectory, file),
+        ...(expectedBytes === undefined ? {} : { expectedBytes }),
+      });
+      await args.holds.add(hold);
+      return hold.hit;
+    } catch (error) {
+      if (error instanceof RepositoryStoreError) {
+        throw error;
+      }
+      /* The cache is disposable: a wipe or a full disk mid-fill costs this
+         lease one direct read, never the request. */
+      cache.recordFallback('cache_error');
+      await rm(path.join(packDirectory, file), { force: true });
+      await download(key, file);
+      return false;
+    }
   };
 
   /*
@@ -241,20 +353,38 @@ const fetchPacks = async (args: {
    * can ever list more. Settled rather than raced, so the caller never removes
    * the directory while a read is still writing into it.
    */
+  let cachedBytes = 0;
   const settled = await Promise.allSettled(
     manifest.packs.map(async (pack) => {
       const name = packFileName(pack.key);
       if (!pack.indexStored) {
-        await download(pack.key, name);
+        if (await place(pack.key, name, pack.bytes)) {
+          cachedBytes += pack.bytes;
+        }
+        /* The derived index is written beside the link, in the lease, and never
+           cached: `index-pack` only reads the pack. */
         await runGit(directory, ['index-pack', path.join('objects/pack', name)]);
         return;
       }
-      await Promise.all([download(pack.key, name), download(indexKeyFor(pack.key), indexFileName(pack.key))]);
+      /* Settled, as the outer round is: a pack fill still running when its
+         index's read fails must land before the hydrate gives its holds back. */
+      const [packPlaced, indexPlaced] = await Promise.allSettled([
+        place(pack.key, name, pack.bytes),
+        place(indexKeyFor(pack.key), indexFileName(pack.key)),
+      ]);
+      const packHit = placedOrThrow(packPlaced);
+      placedOrThrow(indexPlaced);
+      if (packHit) {
+        cachedBytes += pack.bytes;
+      }
     }),
   );
   const failure = settled.find((outcome) => outcome.status === 'rejected');
   if (failure === undefined) {
-    return new Set(manifest.packs.map((pack) => packFileName(pack.key)));
+    return {
+      files: new Set(manifest.packs.map((pack) => packFileName(pack.key))),
+      drawnBytes: { cache: cachedBytes, objectStore: totalBytes - cachedBytes },
+    };
   }
   const reason: unknown = failure.reason;
   if (reason instanceof RepositoryStoreError && reason.code === 'missing-pack') {
@@ -265,6 +395,15 @@ const fetchPacks = async (args: {
     );
   }
   throw reason instanceof Error ? reason : new Error(String(reason));
+};
+
+/** A settled placement's answer, or its failure rethrown for the outer round to report. */
+const placedOrThrow = (outcome: PromiseSettledResult<boolean>): boolean => {
+  if (outcome.status === 'rejected') {
+    const reason: unknown = outcome.reason;
+    throw reason instanceof Error ? reason : new Error(String(reason));
+  }
+  return outcome.value;
 };
 
 /**

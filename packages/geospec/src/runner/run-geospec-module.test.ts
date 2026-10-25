@@ -1,9 +1,9 @@
-import type { VmFileSystem } from '@taucad/esbuild/vm';
+import type { VmFileSystem } from '#vm/types.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GeoSpecAssertionClientOptions } from '#assertion-client/index.js';
 import { createGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
 import type { GeoSpecModelLoadEvidence, GeoSpecNativeModelEngine } from '#model/native-model-loader.js';
-import type { SourceRevision } from '@taucad/runtime/types';
+import type { SourceRevision } from '#support/types.js';
 import { runGeoSpecModule } from '#runner/index.js';
 import type { GeoSpecRunnerEvent } from '#runner/worker/index.js';
 import { createSerialGeoSpecRunner } from '#runner/worker/serial-runner.js';

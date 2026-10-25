@@ -1,4 +1,4 @@
-import type { VmFileSystem } from '@taucad/esbuild/vm';
+import type { VmFileSystem } from '#vm/types.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { describe as geoDescribe, expectGeo, geoSpecMatcherNames, it as geoIt, test } from '#index.js';
 import { geoSpecMatcherDescriptors } from '#engine/matchers.js';

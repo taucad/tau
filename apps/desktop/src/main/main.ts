@@ -94,6 +94,7 @@ import {
 } from '#main/project-roots.js';
 import { registerPermissionBridge } from '#main/permission-bridge.js';
 import { createServicesBroker, rendererServicesConcerns, ServicesQuiescingError } from '#main/services-broker.js';
+import { registerTerminalRelay } from '#main/terminal-relay.js';
 import type { ServicesConcern } from '#main/services-broker.js';
 import { createGeometryBroker } from '#main/geometry-broker.js';
 import {
@@ -1599,6 +1600,18 @@ const bootstrapElectronApp = async (): Promise<void> => {
       log.log('error', 'services.connect-failed', error);
       refuse('services.connect-failed');
     }
+  });
+
+  registerTerminalRelay({
+    ipcMain,
+    trusted,
+    isTrustedRoot: (root) => roots.isTrusted(root),
+    windowIdOf: (sender) => BrowserWindow.fromWebContents(sender)?.id,
+    connect: (context) => services.connect('terminal', context),
+    isQuiescing: (error) => error instanceof ServicesQuiescingError,
+    log: (level, event, detail) => {
+      log.log(level, event, detail);
+    },
   });
 
   /**

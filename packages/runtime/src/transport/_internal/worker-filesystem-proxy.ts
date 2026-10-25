@@ -62,5 +62,9 @@ export const createWorkerFileSystemProxy = async (
     fileSystem.watch = bridge.watch;
     fileSystem.watchReady = bridge.watchReady;
   }
+  /* A host that predates `hashFiles` does not advertise it; revalidation then reads bodies. */
+  if (hello.hashable === true) {
+    fileSystem.hashFiles = bridge.hashFiles.bind(bridge);
+  }
   return fileSystem;
 };

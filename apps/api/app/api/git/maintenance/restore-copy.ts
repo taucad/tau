@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Readable } from 'node:stream';
-import { eq } from 'drizzle-orm';
+import { eq, lt } from 'drizzle-orm';
 import type { Database } from '#database/owner-lock.js';
 import { assertActiveProjectLocked, assertProjectActive } from '#database/project-lifecycle.js';
 import { projectGit, storageTombstone } from '#database/schema.js';
@@ -22,6 +22,7 @@ import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js'
 import { markRetired } from '#api/git/store/sweep.js';
 import type { CopyReader, DestinationVersion } from '#api/git/mirror/destination.js';
 import { lfsPrefix, ownerMarkerPrefix, repositoryKey, repositoryPrefix } from '#api/git/mirror/keys.js';
+import { copyPendingOnAdvance } from '#api/git/mirror/watermark.js';
 import {
   digestStream,
   findSnapshot,
@@ -63,7 +64,8 @@ import { assertSingletonProcessGroup } from '#api/git/maintenance/singleton.js';
  *   its tenant key, verified against its oid, unless the primary holds it.
  * - **The generation floor.** The restored generation is above the one Postgres
  *   remembers (`project_git.generation`) and any `--generation-floor`, so the
- *   API's derived-state repair sees progress rather than regression.
+ *   API's derived-state repair sees progress rather than regression. The commit
+ *   records it there as a push does, so the copy picks the restore up.
  * - **Erasure.** An owner with a `storage_tombstone` row, or with a `tombstone-*`
  *   marker in the copy (from B2 alone), is refused before anything is read.
  *
@@ -601,6 +603,23 @@ export const restoreFromCopy = async (args: CopyRestoreArguments): Promise<CopyR
         `${args.locator.projectId} changed in the primary while it was being restored; nothing was removed, run the restore again`,
       );
     }
+    /*
+     * Postgres learns the restored generation as a push's `recordGeneration`
+     * writes it: the copy's lag clock starts in the same statement (W13 B4), and
+     * `updated_at` puts a dormant repository back in the active reconcile.
+     */
+    await transaction
+      .insert(projectGit)
+      .values({ projectId: args.locator.projectId, generation: next.generation, copyPendingSince: new Date() })
+      .onConflictDoUpdate({
+        target: projectGit.projectId,
+        set: {
+          generation: next.generation,
+          copyPendingSince: copyPendingOnAdvance(next.generation),
+          updatedAt: new Date(),
+        },
+        setWhere: lt(projectGit.generation, next.generation),
+      });
   });
 
   args.report?.(`committed generation ${String(next.generation)} under incarnation ${next.incarnation}`);

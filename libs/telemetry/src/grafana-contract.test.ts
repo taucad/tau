@@ -371,6 +371,15 @@ const awaitingPanel: Readonly<Record<string, string>> = {
   tau_git_forward_errors_total: 'OB4',
   tau_git_receipts_total: 'OB4',
   tau_git_slow_body_aborts_total: 'OB4',
+  // DC2 ships the pack cache and router series; OB4's cache and hop rows read them.
+  tau_git_cache_lookups_total: 'OB4',
+  tau_git_cache_bytes: 'OB4',
+  tau_git_cache_budget_bytes: 'OB4',
+  tau_git_cache_evictions_total: 'OB4',
+  tau_git_cache_evicted_bytes_total: 'OB4',
+  tau_git_cache_fallbacks_total: 'OB4',
+  tau_git_spills_total: 'OB4',
+  tau_git_members: 'OB4',
 };
 
 /**

@@ -8,7 +8,7 @@
  * @module
  */
 
-import type { VmFileSystem } from '@taucad/esbuild/vm';
+import type { VmFileSystem } from '#vm/types.js';
 
 /**
  * Build a filesystem over a path → source map.

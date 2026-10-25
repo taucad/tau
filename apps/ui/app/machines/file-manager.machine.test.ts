@@ -644,6 +644,31 @@ describe('fileManagerMachine', () => {
     actor.stop();
   });
 
+  it('should open no page-side compute channel when it binds the durable store', async () => {
+    const actor = createActor(fileManagerMachine, {
+      input: {
+        rootDirectory: '/projects/project-a',
+        projectId: 'project-a',
+        shouldInitializeOnStart: true,
+      },
+    });
+    actor.start();
+
+    await vi.waitFor(() => {
+      expect(actor.getSnapshot().value).toBe('ready');
+    });
+
+    const postMessage = vi.mocked(workerTestState.instances[0]!.postMessage);
+    const connects = () =>
+      postMessage.mock.calls.filter(([message]) => (message as { type?: string }).type === 'computeStoreConnect');
+    const binding = actor.getSnapshot().context.openComputeBinding?.('project-a');
+    expect(binding?.compute.mode).toBe('durable');
+    /* The runtime transport opens the authority port when it binds a client; binding alone relays nothing. */
+    expect(connects()).toHaveLength(0);
+    binding?.dispose();
+    actor.stop();
+  });
+
   it('should clean up on stop', async () => {
     const actor = createActor(fileManagerMachine, {
       input: {

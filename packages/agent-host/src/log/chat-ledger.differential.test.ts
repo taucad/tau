@@ -1442,26 +1442,26 @@ const appendMergeTrace = (): Trace[] => {
  * fold is the whole new merge, as it is when the row extends the merge's last term or merges before a later term.
  */
 const refreshMergeTrace = (): Trace[] => {
-  const row = (term: number, seq: number, ms: number, argument = 0): MergeRow => ({
+  const row = (term: number, seq: number, ms: number): MergeRow => ({
     term,
     seq,
     run: 1,
     kind: 'O',
-    argument,
+    argument: 0,
     ms,
     epoch: term + 1,
     attempt: 0,
   });
   const held = [
-    { device: 0, rows: [row(1, 0, 10), row(1, 1, 11, 5), row(1, 2, 12)] },
+    { device: 0, rows: [row(1, 0, 10), { ...row(1, 1, 11), argument: 5 }, row(1, 2, 12)] },
     { device: 1, rows: [row(2, 0, 20)] },
   ];
   const cases: ReadonlyArray<{ segments: Array<{ device: number; rows: MergeRow[] }>; device: number; row: MergeRow }> =
     [
       /* A new device's smaller copy of a row mid-term: neither the term's first row nor the last one held. */
-      { segments: held, device: 2, row: row(1, 1, 11, 0) },
+      { segments: held, device: 2, row: row(1, 1, 11) },
       /* A larger copy: the held row stays. */
-      { segments: held, device: 2, row: row(1, 1, 11, 9) },
+      { segments: held, device: 2, row: { ...row(1, 1, 11), argument: 9 } },
       /* A row that extends the merge's last term. */
       { segments: held, device: 1, row: row(2, 1, 21) },
       /* A row under an older term, which merges before the later term. */

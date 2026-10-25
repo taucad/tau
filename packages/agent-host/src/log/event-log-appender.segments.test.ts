@@ -201,12 +201,9 @@ describe('an event log with other devices’ segments (XD1)', () => {
     await log.refresh?.();
     const fresh = await openLog(phoneTurn, segments);
 
-    expect((await fresh.messages()).map((message) => message.content)).toEqual([
-      'desktop asks',
-      'A copy',
-      'phone asks',
-    ]);
-    expect(await log.messages()).toEqual(await fresh.messages());
+    const folded = await fresh.messages();
+    expect(folded.map((message) => message.content)).toEqual(['desktop asks', 'A copy', 'phone asks']);
+    expect(await log.messages()).toEqual(folded);
   });
 
   it('should count this device’s rows once when a segment repeats them', async () => {

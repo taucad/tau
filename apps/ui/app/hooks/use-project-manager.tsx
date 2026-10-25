@@ -67,6 +67,7 @@ import { WorkspaceDirectoryRequiredError } from '#filesystem/workspace-errors.js
 import { directoryPicker } from '#constants/browser.constants.js';
 import type { DirectoryPick } from '#constants/browser.constants.js';
 import { nodeHomeRoot } from '#filesystem/desktop-bridge.js';
+import { removeChatPermission, seedChatPermission } from '#hooks/use-permission-mode.js';
 import { createInitialProject } from '#constants/project.constants.js';
 import { attachmentKind, attachmentReferenceOf } from '#utils/attachment.utils.js';
 import { buildUserMessage } from '#utils/chat.utils.js';
@@ -2932,6 +2933,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       },
     ): Promise<Chat> => {
       const chat = await chatStore.createChat(resourceId, chatData);
+      /* W9: the new chat copies the Settings default; one never seeded reads Ask. */
+      await seedChatPermission(resourceId, chat.id);
       await touchProject(resourceId);
       invalidateProjectsList();
       return chat;
@@ -3051,6 +3054,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       const chat = await chatStore.getChat(chatId);
       await chatStore.deleteChat(chatId);
       if (chat) {
+        await removeChatPermission(chat.resourceId, chatId);
         await touchProject(chat.resourceId);
       }
       invalidateProjectsList();
@@ -3063,6 +3067,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       const chat = await chatStore.getChat(chatId);
       await chatStore.purgeChat(chatId);
       if (chat) {
+        await removeChatPermission(chat.resourceId, chatId);
         await touchProject(chat.resourceId);
       }
       invalidateProjectsList();

@@ -13,9 +13,10 @@ describe('document worker dispatcher', () => {
     let emitLog: OnWorkerLog | undefined;
     const worker = {
       setTelemetrySend: vi.fn(),
+      setObservation: vi.fn(),
       setDevtoolsTelemetryEnabled: vi.fn(),
       setCompiledWasmModules: vi.fn(),
-      flushTelemetry: vi.fn(),
+      afterTerminalReply: vi.fn(),
       capabilitiesManifest: { registrations: [], routes: [], renderCapabilities: {} },
       async initialize(input: Parameters<KernelWorker['initialize']>[0]) {
         emitLog = input.callbacks.onLog;
@@ -99,7 +100,7 @@ describe('document worker dispatcher', () => {
       exportId: 'bom',
       files: [{ bytes: { delivery: 'inline', bytes: new Uint8Array([1, 2]) } }],
     });
-    expect(worker.flushTelemetry).toHaveBeenCalledTimes(4);
+    expect(worker.afterTerminalReply).toHaveBeenCalledTimes(4);
     client.close();
     server.dispose();
   });
@@ -109,9 +110,10 @@ describe('document worker dispatcher', () => {
     const order: string[] = [];
     const worker = {
       setTelemetrySend: vi.fn(),
+      setObservation: vi.fn(),
       setDevtoolsTelemetryEnabled: vi.fn(),
       setCompiledWasmModules: vi.fn(),
-      flushTelemetry: vi.fn(() => order.push('flush')),
+      afterTerminalReply: vi.fn(() => order.push('flush')),
       capabilitiesManifest: { registrations: [], routes: [], renderCapabilities: {} },
       initialize: vi.fn(async () => undefined),
       async describe() {
@@ -175,6 +177,7 @@ describe('document worker dispatcher', () => {
     const acknowledgeBinary = vi.fn();
     const worker = {
       setTelemetrySend: vi.fn(),
+      setObservation: vi.fn(),
       setDevtoolsTelemetryEnabled: vi.fn(),
       setCompiledWasmModules: vi.fn(),
       initialize,
@@ -211,6 +214,7 @@ describe('document worker dispatcher', () => {
     const setComputeBinding = vi.fn();
     const worker = {
       setTelemetrySend: vi.fn(),
+      setObservation: vi.fn(),
       setDevtoolsTelemetryEnabled: vi.fn(),
       setCompiledWasmModules: vi.fn(),
       setComputeBinding,
@@ -246,6 +250,7 @@ describe('document worker dispatcher', () => {
     }));
     const worker = {
       setTelemetrySend: vi.fn(),
+      setObservation: vi.fn(),
       transcode,
       permitComputePublication: vi.fn(),
     } as unknown as KernelWorker;

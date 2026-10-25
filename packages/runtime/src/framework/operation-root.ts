@@ -9,6 +9,7 @@
  * accidental root. Worker initialization keeps its `kernel.bootstrap` root.
  */
 
+import type { ObservedOperation } from '#framework/worker-operation-observer.js';
 import type { KernelIssue } from '#types/runtime.types.js';
 import { abortReason } from '#types/runtime-wire.types.js';
 
@@ -38,6 +39,8 @@ export type OperationRecord = {
   result?: Readonly<{ success: boolean; issues: readonly KernelIssue[] }>;
   /** Scalar attributes the root ends with, set by the operation once it knows them. */
   endAttributes?: SpanAttributes;
+  /** What the operation stamps for its facts; present only while a client observes. */
+  observed?: ObservedOperation;
 };
 
 /** A settled operation, handed to the dispatcher so it can flush after the terminal reply. @internal */
@@ -128,3 +131,17 @@ export const settleOperation = (
   const first = result.issues.find((issue) => issue.severity === 'error') ?? result.issues[0];
   return first === undefined ? { ...base, outcome: 'issue' } : { ...base, outcome: 'issue', errorType: first.code };
 };
+
+/**
+ * Whether a settled operation answered its caller with a reply, so its facts are due after that reply. A cancelled or
+ * timed-out operation sends none; a thrown describe, export or transcode is answered by the channel's error reply,
+ * which carries no facts, while a thrown evaluation or render still publishes its failure notify.
+ *
+ * @param settled - The settled operation.
+ * @returns Whether facts are due.
+ * @internal
+ */
+export const settledWithReply = (settled: SettledOperation): boolean =>
+  settled.outcome === 'succeeded' ||
+  settled.outcome === 'issue' ||
+  (settled.outcome === 'failed' && (settled.operation === 'evaluate' || settled.operation === 'render'));

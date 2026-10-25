@@ -9,10 +9,35 @@ runs:
     # user namespaces, which Ubuntu 24.04 restricts through AppArmor by default.
     # desktop:prepare-build123d-python resolves its wheels with uv (as release-build.yml
     # installs it). A cache hit never needs it; a full-graph miss does.
+    #
+    # Ubuntu 26.04 (`ubuntu-latest` since 2026-10) also loads the `*-userns-restrict`
+    # profiles, which attach to /usr/bin/bwrap and move its children to `unpriv_bwrap`
+    # with every capability denied. The sysctl alone then leaves apply-seccomp unable to
+    # write /proc/self/setgroups in its nested user namespace, so those profiles are
+    # unloaded too. The probe runs the sandbox's own shape (bwrap with a new user and PID
+    # namespace and no capabilities, then a nested user namespace mapping its uid) and
+    # fails here, with the host's AppArmor facts, rather than in every native suite.
     - name: Install Linux sandbox prerequisites
       shell: bash
       run: |
         sudo apt-get update -qq && sudo apt-get install -y bubblewrap socat ripgrep
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        for profile in /etc/apparmor.d/*-userns-restrict; do
+          [ -f "$profile" ] || continue
+          echo "Unloading AppArmor profile $profile"
+          sudo apparmor_parser -R "$profile" || true
+        done
+        if ! bwrap --unshare-user --cap-drop ALL --ro-bind / / --dev /dev --unshare-pid --proc /proc -- \
+          unshare --user --map-root-user --pid --fork --mount-proc true; then
+          echo '::error::A nested user namespace is blocked inside bwrap, so native sandbox suites cannot run'
+          grep -E 'ID=|VERSION_ID' /etc/os-release || true
+          uname -r
+          sysctl kernel.apparmor_restrict_unprivileged_userns kernel.unprivileged_userns_clone user.max_user_namespaces 2>&1 || true
+          ls /etc/apparmor.d || true
+          sudo grep -Ei 'bwrap|unshare|userns' /sys/kernel/security/apparmor/profiles || true
+          sudo dmesg 2>/dev/null | grep -i apparmor | tail -20 || true
+          exit 1
+        fi
+        echo 'nested user namespace inside bwrap: ok'
         command -v uv || pipx install uv
         uv --version

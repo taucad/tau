@@ -1,3 +1,4 @@
+import type { RuntimeRealm } from '#types/runtime-observation.types.js';
 import type { MessagePortLike, Port } from '@taucad/rpc';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 import type {
@@ -20,4 +21,6 @@ export type DocumentWorkerDispatcherOptions = {
   readonly encodeBinary?: BinaryEncoder;
   readonly acknowledgeBinary?: (key: string) => void;
   readonly bindingsFactory?: (handle: RuntimeInitializeMemoryHandle) => HostInitializeBindings;
+  /** The realm the host runs this worker in; operation facts read resident memory only where the worker owns its process. */
+  readonly realm?: RuntimeRealm;
 };

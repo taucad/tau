@@ -183,17 +183,23 @@ describe('S3MirrorDestination on B2 (DT0)', () => {
     });
   });
 
-  it('should probe by version listing: up on 200 whatever it lists, down on 403', async () => {
+  it('should probe by version listing: up on 200 whatever it lists, down on 403 with the status, code and message', async () => {
     const up = fakeClient(() => ({ status: 200, body: listing('') }));
     const down = fakeClient(() => forbidden);
 
-    expect(await up.destination.probe()).toBe(true);
+    expect(await up.destination.probe()).toStrictEqual({ up: true });
     expect(up.requests[0]?.method).toBe('GET');
     expect(up.requests[0]?.query).toMatchObject({
       versions: '',
       'max-keys': '1',
     });
-    expect(await down.destination.probe()).toBe(false);
+    // A refusal says why (a revoked key, a transaction cap), so a down copy is not silent.
+    expect(await down.destination.probe()).toStrictEqual({
+      up: false,
+      status: 403,
+      code: 'AccessDenied',
+      message: 'not entitled',
+    });
   });
 
   it('should discover by ListObjectVersions and report hide markers beside the versions they hide (DT0 3, 5)', async () => {

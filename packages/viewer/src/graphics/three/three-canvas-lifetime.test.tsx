@@ -437,7 +437,8 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
       expect.soft(disposeCalls[0]).toHaveBeenCalledOnce();
       expect.soft(perspectiveCamera.coordinateSystem).toBe(WebGLCoordinateSystem);
       expect(root.store.getState().internal.active).toBe(false);
-      expect(graphicsRef.send).not.toHaveBeenCalled();
+      // No renderer status from the retired canvas: only its mount declaration, withdrawn at removal.
+      expect(graphicsRef.send.mock.calls.map(([event]) => event.type)).toEqual(['canvasMounted', 'canvasUnmounted']);
     },
   );
 });

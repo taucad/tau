@@ -103,7 +103,10 @@ import { RuntimeTracer } from '#framework/runtime-tracer.js';
 import type { SpanHandle } from '#types/runtime-tracer.types.js';
 import { WorkerTelemetryCollector } from '#framework/worker-telemetry.js';
 import type { WorkerTelemetryFlush } from '#framework/worker-telemetry.js';
-import { operationRootName, settleOperation } from '#framework/operation-root.js';
+import { WorkerOperationObserver } from '#framework/worker-operation-observer.js';
+import type { ObservedKernelHeap, OperationFactsNotify } from '#framework/worker-operation-observer.js';
+import type { RuntimeObservationMode, RuntimeRealm } from '#types/runtime-observation.types.js';
+import { operationRootName, settledWithReply, settleOperation } from '#framework/operation-root.js';
 import type { OperationRecord, OperationRootRequest, SettledOperation } from '#framework/operation-root.js';
 import { createMiddlewareRuntime } from '#middleware/runtime-middleware.js';
 import type {
@@ -597,6 +600,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * flushes the operation's spans once the terminal reply has been posted.
    */
   public onOperationSettled?: (settled: SettledOperation) => void;
+  /** Posts one operation's facts after its terminal reply, while a client observes. */
+  public onOperationFacts?: (notify: OperationFactsNotify) => void;
 
   /** Raw Zod schemas for runtime validation, keyed by kernel ID → format. Populated from kernel definitions. */
   protected readonly kernelExportZodSchemasMap = new Map<string, Partial<Record<string, z.ZodType>>>();
@@ -649,7 +654,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private readonly ownedNativeHandles = new Map<number, { slot: EvaluationSlot; handle: unknown }>();
 
   /** Fully initialized bundlers keyed by file extension. Shared context across extensions of the same bundler. */
-  protected loadedBundlers = new Map<string, { definition: BundlerDefinition; ctx: unknown }>();
+  protected loadedBundlers = new Map<string, { definition: BundlerDefinition; ctx: unknown; id?: string }>();
 
   /** Worker-owned runtime middleware plugins. */
   protected middlewarePlugins: readonly MiddlewarePlugin[];
@@ -680,6 +685,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       definition: BundlerDefinition;
       extensions: readonly string[];
       options?: Record<string, unknown>;
+      /** The registration's `BundlerPlugin.id`, carried to the `kernel.bundle` span as `bundler.id`. */
+      id?: string;
     }
   >();
 
@@ -791,6 +798,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private readonly tracer = new RuntimeTracer();
   /** The client operation the serialized lane is running, if any. */
   private activeOperation: OperationRecord | undefined;
+  /** Operation facts: off until a client asks, then computed only after each terminal reply. */
+  private readonly observer = new WorkerOperationObserver(
+    () => this.telemetryCollector,
+    () => this.observedKernelHeap(),
+  );
 
   /** Progress callback set during render, used by entry methods to emit phase transitions */
   private onProgress?: (phase: string, detail?: Readonly<Record<string, unknown>>) => void;
@@ -871,7 +883,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private readonly registryScope = randomUuid();
 
   /** In-flight bundler initializations to coalesce concurrent callers for the same extension */
-  private readonly bundlerInitInProgress = new Map<string, Promise<{ definition: BundlerDefinition; ctx: unknown }>>();
+  private readonly bundlerInitInProgress = new Map<
+    string,
+    Promise<{ definition: BundlerDefinition; ctx: unknown; id?: string }>
+  >();
 
   public constructor(options: KernelWorkerOptions = {}) {
     this.manifestKernelPlugins = options.kernels ?? [];
@@ -958,10 +973,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       this._filesystem = this.createFileSystem();
     }
 
+    const admitted = performance.now();
+    const observed =
+      input.operationId === undefined
+        ? undefined
+        : this.observer.begin({
+            operation: 'initialize',
+            operationId: input.operationId,
+            admitted,
+            observed: this.observer.observing,
+          });
     const bootstrapSpan = this.tracer.startSpan(
       'kernel.bootstrap',
       input.operationId === undefined ? undefined : { 'operation.id': input.operationId },
     );
+    let booted = false;
     try {
       await this.loadBundlers(this.bundlerPlugins);
       await this.loadMiddleware(this.middlewarePlugins);
@@ -977,9 +1003,63 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
 
       this._capabilitiesManifest = this.buildCapabilitiesManifest();
+      booted = true;
     } finally {
       bootstrapSpan.end();
+      if (observed && booted) {
+        this.observer.settle(observed);
+      }
+      if (this.admittedOperations === 0) {
+        this.observer.idle();
+      }
     }
+  }
+
+  /**
+   * Set whether this worker computes operation facts. `facts` takes effect for operations admitted after it; `off`
+   * stops them from the next operation.
+   *
+   * @param mode - The mode a client asked for.
+   */
+  public setObservation(mode: RuntimeObservationMode): void {
+    this.observer.setMode(mode);
+  }
+
+  /**
+   * Set the realm this worker runs in. Called by the worker host that started it, never inferred.
+   *
+   * @param realm - The realm.
+   */
+  public setRealm(realm: RuntimeRealm): void {
+    this.observer.setRealm(realm);
+  }
+
+  /**
+   * The after-reply step: post the operation's facts when it was observed, then flush its spans.
+   *
+   * Called once an operation's terminal reply has been posted, so the reply never waits for either.
+   *
+   * @param operationId - The operation whose reply was posted, when the caller knows it.
+   */
+  public afterTerminalReply(operationId?: string): void {
+    let end: number | undefined;
+    try {
+      end = this.observer.afterTerminalReply(operationId, (notify) => {
+        this.onOperationFacts?.(notify);
+      });
+    } catch {
+      end = undefined; // Observation must not change runtime outcomes.
+    }
+    this.telemetryCollector?.flush(end);
+  }
+
+  /**
+   * The heap sources of the kernel the current operation ran on, for observation only.
+   *
+   * @returns The kernel's hooks, or `undefined` when no kernel is selected.
+   */
+  protected observedKernelHeap(): ObservedKernelHeap | undefined {
+    return undefined;
   }
 
   /**
@@ -2207,6 +2287,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const next = Promise.withResolvers<void>();
     this.operationTail = next.promise;
     this.admittedOperations += 1;
+    // Observation is decided at admission, so a mode change never splits one operation.
+    const admitted = root === undefined ? 0 : performance.now();
+    const observedAtAdmission = root !== undefined && this.observer.observing;
     // Background publication yields to every admitted operation at its next await.
     this.computeHost?.interruptPublication();
     let record: OperationRecord | undefined;
@@ -2226,6 +2309,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
          * the operation starts — including one started after an earlier sibling ended — nests
          * under it. */
         record = { operation: root.operation, operationId: root.operationId };
+        const observed = this.observer.begin({
+          operation: root.operation,
+          operationId: root.operationId,
+          admitted,
+          observed: observedAtAdmission,
+        });
+        if (observed) {
+          record.observed = observed;
+        }
         rootSpan = this.tracer.startSpan(operationRootName(root.operation), {
           ...root.attributes,
           'operation.id': root.operationId,
@@ -2247,6 +2339,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           'operation.outcome': settled.outcome,
           ...(settled.errorType === undefined ? {} : { 'error.type': settled.errorType }),
         });
+        if (record.observed && settledWithReply(settled)) {
+          this.observer.settle(record.observed);
+        }
         try {
           this.onOperationSettled?.(settled);
         } catch {
@@ -2264,6 +2359,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       next.resolve();
       if (this.admittedOperations === 0) {
         this.computeHost?.notifyIdle();
+        this.observer.idle();
       }
     }
   }
@@ -3184,6 +3280,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    *
    * @param attributes - Attributes the root ends with; later keys win.
    */
+  /**
+   * Record the transcoder the running operation selected, for its facts.
+   *
+   * @param plugin - The transcoder's id.
+   */
+  private noteObservedPlugin(plugin: string): void {
+    const observed = this.activeOperation?.observed;
+    if (observed) {
+      observed.plugin = plugin;
+    }
+  }
+
   private noteOperationAttributes(attributes: Record<string, string | number | boolean>): void {
     const record = this.activeOperation;
     if (record) {
@@ -3221,6 +3329,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     /* The operation root is this transcode's `kernel.transcode` span; it says which transcoder ran. */
     this.noteOperationAttributes({ transcoder: transcoder.id });
+    this.noteObservedPlugin(transcoder.id);
 
     const admittedOptions = admitKernelOptions(
       edge.optionsSchema,
@@ -3453,6 +3562,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             definition,
             extensions,
             options: bundlerEntry.options,
+            id: bundlerEntry.id,
           });
         }
       }
@@ -3639,6 +3749,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         let resolvedParameters: Readonly<Record<string, unknown>>;
         try {
           resolvedParameters = resolveParameterInputValues(entry.parameterManifest, chainParameters);
+          const observed = this.activeOperation?.observed;
+          if (observed) {
+            // Retained only while a client observes; counted after the reply.
+            observed.parameters = { manifest: entry.parameterManifest, resolved: resolvedParameters };
+          }
         } catch (error) {
           computeSpan.end();
           const diagnostic = error instanceof ParameterAdmissionError ? error.diagnostics[0] : undefined;
@@ -4209,7 +4324,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   protected async ensureBundlerForExtension(
     extension: string,
-  ): Promise<{ definition: BundlerDefinition; ctx: unknown }> {
+  ): Promise<{ definition: BundlerDefinition; ctx: unknown; id?: string }> {
     const existing = this.loadedBundlers.get(extension);
     if (existing) {
       return existing;
@@ -4463,6 +4578,26 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     _nativeHandle: unknown,
     _runtime: KernelRuntime,
   ): Promise<boolean | undefined> {
+    return undefined;
+  }
+
+  /**
+   * Evaluate options under which a fresh build would give exactly this handle's geometry, when the kernel built other
+   * than `options` asked for.
+   *
+   * @param _owner - Owner whose kernel built the handle.
+   * @param _nativeHandle - The handle.
+   * @param _options - The evaluate options the kernel built it with.
+   * @param _runtime - Runtime services for the kernel hook.
+   * @returns The options, or `undefined` when the handle reflects `options` or the kernel cannot tell.
+   */
+  // oxlint-disable-next-line max-params -- Owner-bound hook carries the handle, its options and the runtime.
+  protected effectiveNativeOptionsForOwner(
+    _owner: OperationOwner,
+    _nativeHandle: unknown,
+    _options: Record<string, unknown>,
+    _runtime: KernelRuntime,
+  ): Readonly<Record<string, unknown>> | undefined {
     return undefined;
   }
 
@@ -4785,6 +4920,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         return meshResult;
       }
       meshSpanAttributes = tessellationSpanAttributes(meshResult.data.tessellation, meshResult.issues);
+      const observed = this.activeOperation?.observed;
+      const triangles = meshResult.data.tessellation?.triangles;
+      if (observed && typeof triangles === 'number' && Number.isFinite(triangles) && triangles >= 0) {
+        observed.triangles = triangles;
+      }
 
       // Compose the display result: mesh-phase artifact plus create-phase warnings.
       // The durable handle snapshot stays in `serializedNativeHandleSlot`, which the
@@ -5063,6 +5203,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       ? selectedDeclaration.schema
       : zodSchemas?.[transcoderRoute.sourceFormat];
     const transcoder = this.loadedTranscoders.get(transcoderRoute.transcoderId!);
+    this.noteObservedPlugin(transcoderRoute.transcoderId!);
     const matchingEdge = transcoder?.edges.find(
       (edge) => edge.from === transcoderRoute.sourceFormat && edge.to === format,
     );
@@ -5174,6 +5315,39 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     pinnedSourceRevision?: SourceRevision;
   }): Promise<{ success: true; handle: unknown } | { success: false; result: ExportGeometryResult }> {
     const { owner, runtime, renderArtifact } = options;
+    const retained = await this.retainedNativeHandleForOwner({ owner, runtime, renderArtifact });
+    if (retained.success) {
+      return retained;
+    }
+
+    if (options.pinnedSourceRevision && !(await this.pinnedSourceStillMatches(options.pinnedSourceRevision))) {
+      return { success: false, result: this.sourceSnapshotChangedResult() };
+    }
+    const reheatedSlot = await this.reheatNativeHandleForOwner(owner, renderArtifact, runtime);
+    if (this.isLiveNativeHandleSlotUsableForOwner(reheatedSlot, owner)) {
+      return { success: true, handle: reheatedSlot.handle };
+    }
+
+    return {
+      success: false,
+      result: createKernelError([
+        {
+          message: 'Export could not materialize the kernel-native geometry handle for the requested render identity.',
+          code: 'HANDLE_MISSING',
+          type: 'runtime',
+          severity: 'error',
+        },
+      ]),
+    };
+  }
+
+  /** The artifact's handle from its live or serialized slot, never built again. */
+  private async retainedNativeHandleForOwner(options: {
+    owner: OperationOwner;
+    runtime: KernelRuntime;
+    renderArtifact: MaterializedRender;
+  }): Promise<{ success: true; handle: unknown } | { success: false }> {
+    const { owner, runtime, renderArtifact } = options;
     const { identity } = renderArtifact;
 
     const liveSlot = this.getNativeHandleSlotForIdentity(identity, renderArtifact);
@@ -5202,26 +5376,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         return { success: true, handle: restored.handle };
       }
     }
-
-    if (options.pinnedSourceRevision && !(await this.pinnedSourceStillMatches(options.pinnedSourceRevision))) {
-      return { success: false, result: this.sourceSnapshotChangedResult() };
-    }
-    const reheatedSlot = await this.reheatNativeHandleForOwner(owner, renderArtifact, runtime);
-    if (this.isLiveNativeHandleSlotUsableForOwner(reheatedSlot, owner)) {
-      return { success: true, handle: reheatedSlot.handle };
-    }
-
-    return {
-      success: false,
-      result: createKernelError([
-        {
-          message: 'Export could not materialize the kernel-native geometry handle for the requested render identity.',
-          code: 'HANDLE_MISSING',
-          type: 'runtime',
-          severity: 'error',
-        },
-      ]),
-    };
+    return { success: false };
   }
 
   private liveSlotMatchesOwner(slot: NativeHandleSlot, owner: OperationOwner): boolean {
@@ -5583,7 +5738,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     if (!desiredNativeHandleKey.success) {
       return createKernelError(desiredNativeHandleKey.issues);
     }
-    if (!this.artifactMatchesNativeBuild(renderArtifact, plan.owner, desiredNativeHandleKey.key)) {
+    const sameBuild = this.artifactMatchesNativeBuild(renderArtifact, plan.owner, desiredNativeHandleKey.key);
+    // A view built with other options can still serve the export when the kernel says its build is the export's.
+    const servedHandle = sameBuild
+      ? undefined
+      : await this.retainedBuildServingExport({
+          plan,
+          renderArtifact,
+          exportOptions: exportMaterialization.options,
+          runtime: this.createRuntime(),
+          pinned: pinnedSourceRevision !== undefined,
+        });
+    if (!sameBuild && servedHandle === undefined) {
       if (pinnedSourceRevision && !(await this.pinnedSourceStillMatches(pinnedSourceRevision))) {
         return this.sourceSnapshotChangedResult();
       }
@@ -5623,12 +5789,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
 
     const runtime = this.createRuntime();
-    const nativeInput = await this.prepareNativeExportInput({
-      plan,
-      runtime,
-      renderArtifact,
-      pinnedSourceRevision,
-    });
+    const nativeInput: Awaited<ReturnType<typeof this.prepareNativeExportInput>> = servedHandle
+      ? { success: true, input: { ...plan.input, nativeHandle: servedHandle.handle } }
+      : await this.prepareNativeExportInput({
+          plan,
+          runtime,
+          renderArtifact,
+          pinnedSourceRevision,
+        });
     if (!nativeInput.success) {
       return nativeInput.result;
     }
@@ -5642,6 +5810,80 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     });
     computeSpan.end();
     return result;
+  }
+
+  /**
+   * The artifact's retained handle when the kernel reports that its build is exactly what the export's construction
+   * options would build, for example a fallback to the export's mesh. Only a live or serialized handle qualifies, and
+   * every other native-handle dependency must still match, so a miss builds for the export as before.
+   */
+  private async retainedBuildServingExport(input: {
+    plan: Extract<OwnerBoundExportPlan, { success: true }>;
+    renderArtifact: MaterializedRender;
+    exportOptions: Record<string, unknown>;
+    runtime: KernelRuntime;
+    pinned: boolean;
+  }): Promise<{ handle: unknown } | undefined> {
+    const { plan, renderArtifact, runtime } = input;
+    const { identity } = renderArtifact;
+    const { owner } = plan;
+    const builtWith = identity.nativeBuildInput?.options;
+    const createSchema = owner.binding?.kernelId
+      ? this.kernelCreateOptionsZodSchemaMap.get(owner.binding.kernelId)
+      : undefined;
+    if (!builtWith || !createSchema) {
+      return undefined;
+    }
+    const viewOptions = this.resolveCreateOptions(identity.renderOptions, undefined, owner);
+    const exportOptions = this.resolveCreateOptions(identity.renderOptions, input.exportOptions, owner);
+    if (
+      !viewOptions.success ||
+      !exportOptions.success ||
+      !('options' in viewOptions.input) ||
+      !('options' in exportOptions.input)
+    ) {
+      return undefined;
+    }
+    // The view's own key, recomputed with the export's dependencies: only the construction options may differ.
+    const viewKey = await this.computeNativeHandleKey({
+      owner,
+      parameters: identity.parameters,
+      renderOptions: identity.renderOptions,
+      exportOptions: input.exportOptions,
+      content: plan.route.content,
+      createOptions: viewOptions.input.options,
+      ...(input.pinned ? { pinnedIdentity: identity } : {}),
+    });
+    if (!viewKey.success || !this.artifactMatchesNativeBuild(renderArtifact, owner, viewKey.key)) {
+      return undefined;
+    }
+    const retained = await this.retainedNativeHandleForOwner({ owner, runtime, renderArtifact });
+    if (!retained.success) {
+      return undefined;
+    }
+    let effective: Readonly<Record<string, unknown>> | undefined;
+    try {
+      effective = this.effectiveNativeOptionsForOwner(owner, retained.handle, builtWith, runtime);
+    } catch (error) {
+      this.logger.warn('Effective-options hook failed; export will build', {
+        data: { error: error instanceof Error ? error.message : String(error) },
+      });
+      return undefined;
+    }
+    if (effective === undefined) {
+      return undefined;
+    }
+    const admitted = admitKernelOptions(
+      createSchema,
+      effective,
+      'Kernel effective options',
+      'EVALUATE_OPTIONS_INVALID',
+    );
+    if (!admitted.success || canonicalJson(admitted.options) !== canonicalJson(exportOptions.input.options)) {
+      return undefined;
+    }
+    this.logger.debug('Export reuses the retained build: the kernel reports it as the export build');
+    return { handle: retained.handle };
   }
 
   private async prepareNativeExportInput(options: {
@@ -5992,7 +6234,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     definition: BundlerDefinition;
     extensions: readonly string[];
     options?: Record<string, unknown>;
-  }): Promise<{ definition: BundlerDefinition; ctx: unknown }> {
+    id?: string;
+  }): Promise<{ definition: BundlerDefinition; ctx: unknown; id?: string }> {
     const { definition, extensions, options: bundlerOptions } = pending;
     const initSpan = this.tracer.startSpan('kernel.bundler-context-init');
 
@@ -6003,7 +6246,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const context = await definition.initialize(validatedOptions, {
         filesystem: this.bundlerFilesystem,
       });
-      const loaded = { definition, ctx: context };
+      const loaded = { definition, ctx: context, ...(pending.id === undefined ? {} : { id: pending.id }) };
 
       for (const extension of extensions) {
         this.loadedBundlers.set(extension, loaded);
@@ -7202,7 +7445,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
         const bundleResult = await bundler.definition.bundle({ entryPath }, { signal }, bundler.ctx);
         signal.throwIfAborted();
-        bundleSpan.end();
+        bundleSpan.end(bundler.id === undefined ? undefined : { 'bundler.id': bundler.id });
         this.bundleResultCache.set(entryPath, bundleResult);
         return bundleResult;
       },
@@ -7269,7 +7512,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         });
       },
     });
-    const capability = this.computeHost.capability(signal, operationId);
+    const capability = this.observeComputeReuse(this.computeHost.capability(signal, operationId));
     const release = this.projectionReleases.get(operationId);
     if (capability.status === 'off' || !release) {
       return capability;
@@ -7299,6 +7542,32 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
     };
     return { ...capability, evaluate };
+  }
+
+  /**
+   * Record the active operation's reuse outcome on its observed facts.
+   * @param capability - The compute capability for the operation.
+   * @returns The capability, its evaluate wrapped when an operation is observed.
+   */
+  private observeComputeReuse(capability: KernelComputeCapability): KernelComputeCapability {
+    const observed = this.activeOperation?.observed;
+    if (observed === undefined) {
+      return capability;
+    }
+    if (capability.status === 'off') {
+      observed.reuse = 'off';
+      return capability;
+    }
+    const { evaluate } = capability;
+    return {
+      ...capability,
+      evaluate: async (evaluation) => {
+        const result = await evaluate(evaluation);
+        // Any computation in the operation makes it `computed`; only an operation served wholly from cache is `cache`.
+        observed.reuse = result.source === 'computed' || observed.reuse === 'computed' ? 'computed' : 'cache';
+        return result;
+      },
+    };
   }
 
   /**
@@ -7557,6 +7826,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     exportOptions?: Record<string, unknown>;
     content: RuntimeContentInput;
     pinnedIdentity?: RenderIdentity;
+    /** Hash these construction options in place of the parsed ones, keeping every other dependency. */
+    createOptions?: Record<string, unknown>;
   }): Promise<{ success: true; key: string } | { success: false; issues: KernelIssue[] }> {
     const createOptions = this.resolveCreateOptions(input.renderOptions, input.exportOptions, input.owner);
     if (!createOptions.success) {
@@ -7582,7 +7853,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       dependencies.push({
         type: 'option',
         key: 'native-build-options',
-        value: createOptions.input.options,
+        value: input.createOptions ?? createOptions.input.options,
       });
     }
     return {

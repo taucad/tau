@@ -483,6 +483,7 @@ const endpointProperties = { aoAllowed: true, toneMapping: NeutralToneMapping } 
 const mount = async (
   properties: {
     aoAllowed?: boolean;
+    speculativePreparation?: boolean;
     settings?: Partial<PostProcessingSettings>;
     toneMapping?: ToneMapping;
   } = {},
@@ -620,6 +621,38 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
       }
     },
   );
+
+  it('should build no AO graph and render nothing speculatively within a software adapter budget', async () => {
+    vi.useFakeTimers();
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    mocks.gl.domElement = document.createElement('canvas');
+    const surface = new Mesh();
+    mocks.scene.traverseVisible.mockImplementation((visit) => {
+      visit(surface);
+    });
+    const mounted = await mount({ aoAllowed: false, speculativePreparation: false });
+    try {
+      expect(mocks.ao).not.toHaveBeenCalled();
+      expect(mocks.denoise).not.toHaveBeenCalled();
+      expect(mocks.scenePasses[0]!.setMRT).toHaveBeenCalledWith({ output: { kind: 'output' } });
+      mocks.getFrame()?.(mocks.state, 0);
+      mocks.getFinalFrame()?.(mocks.state, 0);
+      const rendered = mocks.glRender.mock.calls.length;
+      const requested = mocks.invalidate.mock.calls.length;
+      // A quiet stage stays quiet: no alternate-camera render and no further frame requests.
+      await act(() => vi.advanceTimersByTime(2000));
+      expect(mocks.glRender.mock.calls.length).toBe(rendered);
+      expect(mocks.invalidate.mock.calls.length).toBe(requested);
+      expect(mocks.scenePasses[0]!.camera).toBe(mocks.perspectiveCamera);
+      expect(mocks.scene.traverseVisible).not.toHaveBeenCalled();
+    } finally {
+      mounted.unmount();
+      mocks.gl.domElement = undefined;
+      mocks.scene.traverseVisible.mockReset();
+      visibility.mockRestore();
+      vi.useRealTimers();
+    }
+  });
 
   it.each([false, true])('should isolate CAD draws and restore renderer state after failure=%s', async (fails) => {
     const ownerDraw = vi.fn<NonNullable<ReturnType<WebGPURenderer['getRenderObjectFunction']>>>();

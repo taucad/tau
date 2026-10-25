@@ -282,6 +282,76 @@ describe('ChatError', () => {
     projection.stop();
   });
 
+  /** A failed run's projection, rebuilt from its log as a reload or a fresh attachment would. */
+  const failedRunState = (runId: string, attempt = 1): CombinedChatState => {
+    const projection = createActor(chatProjectionLogic).start();
+    projection.send({
+      type: 'batch',
+      answer: {
+        status: 'batch',
+        cursor: 0,
+        nextCursor: 3,
+        endCursor: 3,
+        events: [
+          lifecycleRow(0, 'admitted', runId),
+          lifecycleRow(1, 'running', runId),
+          logRow(2, { runId, type: 'run.lifecycle', state: 'failed', attempt, detail: { message: 'Refused once.' } }),
+        ],
+      },
+    });
+    const state = {
+      error: undefined,
+      persistedError: undefined,
+      projection: projection.getSnapshot().context,
+      attachmentStatus: 'attached',
+    } as unknown as CombinedChatState;
+    projection.stop();
+    return state;
+  };
+  const decisionIdOf = (container: HTMLElement): string | undefined =>
+    container.querySelector<HTMLElement>('[data-decision=run-error]')?.dataset['decisionId'];
+
+  it('should keep a failure one identity across a rerender, a remount and a rebuilt projection, and give Try again a new one (I5)', () => {
+    let state = failedRunState('req_1');
+    vi.mocked(useChatSelector).mockImplementation((selector) => selector(state));
+    const first = render(<ChatErrorBanner />);
+    const id = decisionIdOf(first.container);
+    expect(id).toBe('run:req_1:1');
+    first.rerender(<ChatErrorBanner className='again' />);
+    expect(decisionIdOf(first.container)).toBe(id);
+    first.unmount();
+
+    // A reload rebuilds the projection from the log: new objects, the same failure.
+    state = failedRunState('req_1');
+    const remounted = render(<ChatErrorBanner />);
+    expect(decisionIdOf(remounted.container)).toBe(id);
+    remounted.unmount();
+
+    // Try again starts a new run, whose failure is a new decision even in the same words.
+    state = failedRunState('req_2');
+    const retried = render(<ChatErrorBanner />);
+    expect(decisionIdOf(retried.container)).toBe('run:req_2:1');
+  });
+
+  it('should identify a refused command by its request (I5)', () => {
+    const projection = createActor(chatProjectionLogic).start();
+    projection.send({
+      type: 'batch',
+      answer: { status: 'batch', cursor: 0, nextCursor: 0, endCursor: 0, events: [] },
+    });
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({
+        error: undefined,
+        persistedError: { category: errorCategory.generic, title: 'Start refused', message: 'No.', requestId: 'req_9' },
+        projection: projection.getSnapshot().context,
+        attachmentStatus: 'attached',
+      } as CombinedChatState),
+    );
+    const { container } = render(<ChatErrorBanner />);
+    expect(decisionIdOf(container)).toBe('refusal:req_9');
+    projection.stop();
+  });
+
   it('keeps a refused Resume only while its identified run is paused', () => {
     const projection = createActor(chatProjectionLogic).start();
     projection.send({

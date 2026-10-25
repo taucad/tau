@@ -247,6 +247,10 @@ function PermissionRequest({
   return (
     <section
       aria-label={isSettled ? status : 'Approval required'}
+      // A waiting approval is a decision the phone sheet never folds away (I5); settling it retires its identity.
+      data-decision={isSettled ? undefined : 'approval'}
+      data-decision-id={`approval:${approval.interruptId}`}
+      data-decision-state={isSettled ? 'settled' : 'open'}
       className='mb-2 flex min-w-0 flex-col gap-2 rounded-lg border bg-background p-2'
     >
       <div className='flex min-w-0 items-center gap-2 text-xs/5 text-muted-foreground'>

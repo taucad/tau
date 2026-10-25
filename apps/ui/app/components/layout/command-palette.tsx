@@ -546,9 +546,14 @@ export function Commands(): React.JSX.Element {
   const { isMobile } = useSidebar();
   const [open, setOpen] = useState(false);
 
-  const { formattedKeyCombination } = useKeybinding(commandKeyCombination, () => {
-    setOpen((previous) => !previous);
-  });
+  const { formattedKeyCombination } = useKeybinding(
+    commandKeyCombination,
+    () => {
+      setOpen((previous) => !previous);
+    },
+    // Search is the phone sidebar sheet's own control, so its shortcut works inside that dialog.
+    { allowedScopes: ['sidebar'] },
+  );
 
   return (
     <>

@@ -146,7 +146,7 @@ test('user project thumbnails follow settled sources, persist, and match the liv
   const widthInput = selectors.getByLabelText('Input for Width');
   await target.expectCount(widthInput, 1, 60_000);
   await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first(), 60_000);
-  await target.expectGraphicsBackend('webgpu');
+  await target.expectPresentedGraphicsBackend('webgpu');
 
   await target.openSecondary('/projects');
   try {
@@ -226,7 +226,7 @@ test('curved user project thumbnail matches the live AABB-framed card preview', 
   await target.navigate('/__e2e/user-project-thumbnail-generation?fixture=curved');
   await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?graphicsBackend=webgpu(?:&[^#]*)?$/u, 60_000);
   await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first(), 60_000);
-  await target.expectGraphicsBackend('webgpu');
+  await target.expectPresentedGraphicsBackend('webgpu');
   await target.openSecondary('/projects');
   try {
     await expectProjectCardParity(curvedProjectName);

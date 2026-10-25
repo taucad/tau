@@ -1,6 +1,96 @@
 # picovoxel — Interfaces (2)
 
-8 top-level symbols. Signatures are verbatim typescript.
+18 top-level symbols. Signatures are verbatim typescript.
+
+// A spherical coordinate (C# `Spherical`)
+Spherical: interface Spherical
+
+  readonly r: number
+
+  readonly phi: Rad
+
+  readonly theta: Rad
+
+Implicit: interface Implicit
+
+  // C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
+  readonly sdf: SdfFunction
+
+  // The same field as a tape expression for the parallel fill
+  readonly expression: SdfExpression
+
+// C# `ILatticeBaseShape`
+LatticeBaseShape: interface LatticeBaseShape
+
+  // LatticeBaseShape.latConstruct (method)
+  latConstruct(pk: Pico): Lattice;
+
+LatticeManifoldOptions: interface LatticeManifoldOptions
+
+  // Required for the Frame form
+  length?: number
+
+  radius?: number
+
+  // Degrees
+  maxOverhangAngle?: number
+
+  // Extend the teardrop in -Z as well (C# `bExtendBothSides = false`)
+  extendBothSides?: boolean
+
+  // C# `fMinPrintableRadius = 0.1`
+  minPrintableRadius?: number
+
+// C# `IMeshBaseShape`
+MeshBaseShape: interface MeshBaseShape
+
+  // MeshBaseShape.mshConstruct (method)
+  mshConstruct(pk: Pico): Mesh;
+
+PipeSegmentOptions: interface PipeSegmentOptions
+
+  // Required for the Frame form
+  length?: number
+
+  innerRadius: number
+
+  outerRadius: number
+
+  // START_END
+  startOrMid: LineModulation
+
+  // START_END
+  endOrRange: LineModulation
+
+  method: PipeSegmentMethod
+
+// C# `ISpineBaseShape`
+SpineBaseShape: interface SpineBaseShape
+
+  // SpineBaseShape.spinePoint (method)
+  spinePoint(ratio1: number): Vec3;
+
+// ShapeKernel `ISpline`
+Spline: interface Spline
+
+  // Spline.points (method)
+  points(samples?: number): Vec3[];
+
+// C# `ISurfaceBaseShape`
+SurfaceBaseShape: interface SurfaceBaseShape
+
+  // SurfaceBaseShape.surfacePoint (method)
+  surfacePoint(ratio1: number, ratio2: number, ratio3: number): Vec3;
+
+TangentOptions: interface TangentOptions
+
+  startTangentStrength?: number
+
+  endTangentStrength?: number
+
+  relativeStartStrength?: boolean
+
+  relativeEndStrength?: boolean
 
 FromCliResult: interface FromCliResult extends SliceStack
 

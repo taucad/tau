@@ -116,6 +116,22 @@ describe('createSandboxShellProvider admission', () => {
     expect(outcome).toMatchObject({ status: 'unsupported', requirement: 'filesystem-mask' });
   });
 
+  it('should refuse a writable root inside a read-only path', async () => {
+    const outcome = await createSandboxShellProvider({ supervisor }).launch(
+      launchOf({
+        arguments: ['-c', 'true'],
+        filesystem: {
+          readable: [],
+          writable: ['/srv/project/exports/scratch'],
+          readOnly: ['/srv/project/exports'],
+          denied: [],
+        },
+      }),
+    );
+
+    expect(outcome).toMatchObject({ status: 'unsupported', requirement: 'filesystem-mask' });
+  });
+
   it('should refuse a network grant that is not an exact lowercase host name', async () => {
     const outcome = await createSandboxShellProvider({ supervisor }).launch(
       launchOf({ arguments: ['-c', 'true'], network: { domains: ['*.example.com'] } }),
@@ -319,6 +335,33 @@ describe('shellSandboxProfile', () => {
         expect.arrayContaining(['/srv/project/.git', '/home/person/.ssh']),
       );
     }
+  });
+});
+
+describe('shellSandboxProfile read-only roots', () => {
+  it('should allow reads but deny writes of read-only paths inside a writable root', () => {
+    const profile = shellSandboxProfile(
+      {
+        filesystem: {
+          readable: [],
+          writable: ['/srv/project'],
+          readOnly: ['/srv/project/.tau/chats', '/srv/project/exports'],
+          denied: ['/srv/project/.git'],
+        },
+        network: { domains: [] },
+      },
+      { home: '/home/person' },
+    ) as { filesystem: Record<string, string[]> };
+
+    expect(profile.filesystem['allowRead']).toStrictEqual(
+      expect.arrayContaining(['/srv/project', '/srv/project/.tau/chats', '/srv/project/exports']),
+    );
+    expect(profile.filesystem['allowWrite']).toStrictEqual(['/srv/project']);
+    expect(profile.filesystem['denyWrite']).toStrictEqual(
+      expect.arrayContaining(['/srv/project/.tau/chats', '/srv/project/exports', '/srv/project/.git']),
+    );
+    expect(profile.filesystem['denyRead']).not.toContain('/srv/project/.tau/chats');
+    expect(profile.filesystem['denyRead']).not.toContain('/srv/project/exports');
   });
 });
 

@@ -41,6 +41,7 @@ import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { EmitterPort } from '@taucad/filesystem/backend/node';
 import { serveAgentChannel } from '@taucad/agent-host/launcher';
+import type { DesktopShell } from '#tau/services-host-shell.js';
 import { createGatewayModelTransport, createTauCloudGatewayModelTransport } from '@taucad/agent-host';
 import {
   acpModelProbeTimeout,
@@ -89,7 +90,7 @@ import type { createDesktopRuntime } from '#tau/desktop-runtime.factory.js';
 import { createTerminalConcern } from '#tau/services-host.terminal.js';
 import type { TerminalConcernOptions } from '#tau/services-host.terminal.js';
 import { createPermissionHost } from '#tau/permission-host.js';
-import { createPermissionStore } from '#tau/permission-store.js';
+import { createPermissionStore, permissionModeOfRun, recordShellCall } from '#tau/permission-store.js';
 import type { PermissionStore } from '#tau/permission-store.js';
 import type { PermissionAnswerFrame } from '#shared/permission-channels.js';
 
@@ -312,6 +313,8 @@ export type ServicesHostOptions = {
   ) => void;
   /** Reply to main with the machines a streamed run is feeding now, by name, so quit can refuse (Q-streamed-host). */
   readonly machinesStreaming?: (requestId: string, machines: readonly StreamingMachine[]) => void;
+  /** The contained shell the agent's `shell` tool runs on (`services-host-shell.ts`); absent, no project offers it. */
+  readonly shell?: DesktopShell | undefined;
   /** The desktop shell probe the `terminal` concern opens human sessions through; absent, each is refused. */
   readonly terminalShell?: TerminalConcernOptions['shell'];
   /** Tell main this project can record nothing, so a person is told (W5). */
@@ -402,6 +405,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     requestRuntimePort,
     requestGeometryPort,
     runtimeContext,
+    shell,
     turnPlacement,
   } = options;
   const serve = options.serve ?? serveNodeFsProvider;
@@ -1012,6 +1016,29 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         return principal === undefined ? { mode: 'session' } : { mode: 'session', principal };
       },
       ...(turnPlacement === undefined ? {} : { turnPlacement }),
+      ...(shell === undefined
+        ? {}
+        : {
+            shell: (checkouts, chatOfRun) =>
+              shell.forProject(
+                workspaceRoot,
+                checkouts,
+                permissions === undefined
+                  ? undefined
+                  : {
+                      permissionModeOf: permissionModeOfRun(permissions, workspaceRoot, chatOfRun),
+                      recordCall: async ({ request, output }) =>
+                        recordShellCall(permissions, {
+                          projectRoot: workspaceRoot,
+                          chatId: chatOfRun(request.runId),
+                          runId: request.runId,
+                          toolCallId: request.toolCallId,
+                          widened: request.input.access !== undefined,
+                          output,
+                        }),
+                    },
+              ),
+          }),
       /* The adapters main resolved, with the `tau` MCP server on this utility's
        * own loopback listener (V7); the port is known once the socket binds. */
       ...(config.externalAgents?.length
@@ -1109,6 +1136,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     const retire = (): void => {
       if (projectHosts.get(workspaceRoot) === actor) {
         projectHosts.delete(workspaceRoot);
+        shell?.release(workspaceRoot);
       }
       retiredProjectHosts.add(actor);
       const settleRetired = async (): Promise<void> => {

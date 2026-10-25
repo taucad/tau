@@ -265,7 +265,9 @@ export function ProjectWorkspaceProvider({
       registerViewer: (apply) => layoutControllerRef.current?.registerViewer(apply) ?? (() => undefined),
       registerWorkbench: (apply) => layoutControllerRef.current?.registerWorkbench(apply) ?? (() => undefined),
       personViewerChanged: (node) => layoutControllerRef.current?.personViewerChanged(node),
-      personWorkbenchChanged: (node) => layoutControllerRef.current?.personWorkbenchChanged(node),
+      personWorkbenchChanged: (node, unapplied) => layoutControllerRef.current?.personWorkbenchChanged(node, unapplied),
+      // Without a record host there is no record to wait for.
+      ready: () => layoutControllerRef.current?.ready() ?? true,
     }),
     [],
   );
@@ -358,12 +360,29 @@ export function ProjectWorkspaceProvider({
         return;
       }
       setWorkbenchOpen(true);
-      if (openerRef.current) {
+      // Before the layout record's first read, a pane opened straight into the workbench is replaced by the record's
+      // arrangement when the read lands (a Share deep link would show Share, then lose it). It is asked for as a change
+      // instead, applied on top of the saved arrangement once that is read, whatever the saved arrangement holds.
+      if (openerRef.current && (panelId === 'files' || layoutController.ready())) {
         openerRef.current(panelId);
       } else if (panelId === 'files') {
         pendingFilesRef.current = routeKey;
       } else {
-        layoutController.personWorkbenchChanged((node) => addPane(node, panelId));
+        // When the record cannot take the change, the pane opens straight into the workbench, or once it connects.
+        layoutController.personWorkbenchChanged(
+          (node) => addPane(node, panelId),
+          () => {
+            // The record answers after its first read; the route may have changed since.
+            if (!providerActiveRef.current || committedRouteKeyRef.current !== routeKey) {
+              return;
+            }
+            if (openerRef.current) {
+              openerRef.current(panelId);
+            } else {
+              pendingPreviewPanel.current = { route: routeKey, panel: panelId };
+            }
+          },
+        );
       }
     },
     [editorRef, isMobile, layoutController, setWorkbenchOpen, routeKey, workbenchMode, onWorkbenchOpen],

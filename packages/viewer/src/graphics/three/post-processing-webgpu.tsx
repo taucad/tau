@@ -256,12 +256,15 @@ const createPipelineResources = ({
   scene,
   toneMapping,
   withAo,
+  antialias,
 }: {
   readonly camera: ThreeCamera;
   readonly gpuRenderer: WebGPURenderer;
   readonly scene: Scene;
   readonly toneMapping: ToneMapping;
   readonly withAo: boolean;
+  /** Filter the beauty-only output with FXAA; off draws the tone-mapped scene pass as it is. */
+  readonly antialias: boolean;
 }): PostProcessingPipelineResources => {
   // Four decoded normal taps save memory on native GPU, but cost more than
   // hardware filtering on node WebGL2 in the matched 5K comparison.
@@ -418,11 +421,10 @@ const createPipelineResources = ({
     const displayMode = uniform(0);
     const compositeStage = uniform(0);
     if (!withAo) {
+      const toneMapped = (uv: Node<'vec2'>): Node<'vec4'> =>
+        renderOutput(scenePassColor.sample(uv), toneMapping, LinearSRGBColorSpace) as Node<'vec4'>;
       outputQuad = createOutputQuad(
-        createViewportFxaa(
-          scenePassColor,
-          (uv) => renderOutput(scenePassColor.sample(uv), toneMapping, LinearSRGBColorSpace) as Node<'vec4'>,
-        ),
+        antialias ? createViewportFxaa(scenePassColor, toneMapped) : toneMapped(screenUV),
         frame.sharedDepth ? undefined : depthRestoreMaterial,
       );
       updatePerComposition(outputQuad, [scenePass]);
@@ -596,6 +598,11 @@ type PostProcessingWebGpuProperties = Readonly<{
   aoAllowed: boolean;
   /** Render the alternate projection once after a quiet frame, so the first camera switch is warm. Default on. */
   speculativePreparation?: boolean;
+  /**
+   * Filter the beauty-only output with FXAA. Default on. Off for a software rasterizer: the filter's unrolled taps,
+   * each tone-mapping its sample, take a software adapter tens of seconds to compile before the first frame shows.
+   */
+  antialiasAllowed?: boolean;
   toneMapping: ToneMapping;
 }>;
 
@@ -603,6 +610,7 @@ function PostProcessingWebGpuActive({
   settings,
   aoAllowed,
   speculativePreparation = true,
+  antialiasAllowed = true,
   toneMapping,
 }: PostProcessingWebGpuProperties): ReactNode {
   const { gl, scene, invalidate, size, viewport } = useThree();
@@ -633,6 +641,7 @@ function PostProcessingWebGpuActive({
           scene,
           toneMapping,
           withAo,
+          antialias: antialiasAllowed,
         }),
       );
       invalidate();
@@ -644,7 +653,7 @@ function PostProcessingWebGpuActive({
       frameRef.current = undefined;
       resources.clear();
     };
-  }, [gl, invalidate, scene, toneMapping, withAo]);
+  }, [antialiasAllowed, gl, invalidate, scene, toneMapping, withAo]);
 
   const updateAoSettings = useCallback(
     (selected: PostProcessingPipelineResources): void => {
@@ -814,6 +823,7 @@ function PostProcessingWebGpuActive({
         scene,
         toneMapping,
         withAo,
+        antialias: antialiasAllowed,
       });
       resourcesRef.current.set(camera, selected);
     }

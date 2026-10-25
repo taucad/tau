@@ -26,7 +26,9 @@ describe('telemetry release partition', () => {
     }
   });
 
-  it('limits production imports to the API and UI applications', () => {
+  // The Node host's telemetry module is the one package consumer: `@taucad/host` mirrors the library into its own
+  // dist (a devDependency only, as the test above enforces), so no release owns it.
+  it('limits production imports to the API and UI applications and the Node host telemetry module', () => {
     const sourcePaths = globSync(['apps/**/*.{ts,tsx}', 'libs/**/*.{ts,tsx}', 'packages/**/*.{ts,tsx}'], {
       cwd: repositoryRoot,
       exclude: ['**/dist/**', '**/node_modules/**', '**/*.test.ts', '**/*.test.tsx', '**/*.spec.ts', '**/*.spec.tsx'],
@@ -37,6 +39,11 @@ describe('telemetry release partition', () => {
       .map((path) => relative(repositoryRoot, join(repositoryRoot, path)));
 
     expect(consumers.length).toBeGreaterThan(0);
-    expect(consumers.every((path) => path.startsWith('apps/api/') || path.startsWith('apps/ui/'))).toBe(true);
+    expect(
+      consumers.filter(
+        (path) =>
+          !path.startsWith('apps/api/') && !path.startsWith('apps/ui/') && path !== 'packages/host/src/telemetry.ts',
+      ),
+    ).toEqual([]);
   });
 });

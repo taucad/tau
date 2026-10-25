@@ -3,6 +3,7 @@
   "version": "0.1.0-beta.0",
   "description": "Private telemetry metric registry, reporter, and ingest contracts for Tau applications",
   "type": "module",
+  "sideEffects": false,
   "private": true,
   "repository": {
     "type": "git",
@@ -14,14 +15,17 @@
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/client.ts",
-    "./node": "./src/node.ts"
+    "./node": "./src/node.ts",
+    "./node-host": "./src/node-host.ts"
   },
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
+  "dependencies": {
+    "@taucad/events": "workspace:*"
+  },
   "devDependencies": {
-    "@taucad/events": "workspace:*",
     "@taucad/types": "workspace:*",
     "zod": "catalog:"
   }

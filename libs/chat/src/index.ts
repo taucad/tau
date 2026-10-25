@@ -21,6 +21,7 @@ export * from '#schemas/tools/revisions.tool.schema.js';
 export * from '#schemas/tools/update-todos.tool.schema.js';
 export * from '#schemas/tools/install-packages.tool.schema.js';
 export * from '#schemas/tools/machine.tool.schema.js';
+export * from '#schemas/tools/shell.tool.schema.js';
 export * from '#schemas/todo-list.schema.js';
 export * from '#schemas/tools/ask-questions.tool.schema.js';
 export * from '#schemas/questions.schema.js';

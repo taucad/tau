@@ -71,6 +71,11 @@
       "import": "./src/schemas/tools/export-model.tool.schema.ts",
       "default": "./src/schemas/tools/export-model.tool.schema.ts"
     },
+    "./schemas/tools/shell": {
+      "types": "./src/schemas/tools/shell.tool.schema.ts",
+      "import": "./src/schemas/tools/shell.tool.schema.ts",
+      "default": "./src/schemas/tools/shell.tool.schema.ts"
+    },
     "./schemas/rpc": {
       "types": "./src/schemas/rpc.schema.ts",
       "import": "./src/schemas/rpc.schema.ts",

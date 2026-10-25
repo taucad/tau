@@ -28,6 +28,7 @@ import {
 } from '#graphics/three/utils/lights.utils.js';
 import type { StudioLightingSettings } from '#graphics/three/utils/lights.utils.js';
 import { isViewportWebGpu } from '#graphics/three/viewport-cad-renderer.js';
+import { rendererUsesSoftwareRasterizer } from '#graphics/three/utils/software-rasterizer.js';
 import { isCoarsePointerDevice } from '#graphics/three/utils/device-tier.js';
 import { useViewerEnvironment } from '#environment/viewer-environment.jsx';
 
@@ -41,6 +42,11 @@ type UpDirection = 'x' | 'y' | 'z';
  */
 const envResolution = 512;
 const coarsePointerEnvResolution = 256;
+/**
+ * A software rasterizer filters the environment on the CPU: at 512 its blur passes hold every core for about thirty
+ * seconds before the first frame shows, and at 256 still for several. Reflections there are soft; the stage is usable.
+ */
+const softwareRasterizerEnvResolution = 64;
 
 /** Broad, low-energy panels keep metallic and back-facing surfaces readable. */
 const studioLeftFillIntensity = 1.2;
@@ -120,7 +126,12 @@ export function Lights({
   });
 
   const showEnvironment = useDeferredValue(!enableMatcap);
-  const resolution = useMemo(() => (isCoarsePointerDevice() ? coarsePointerEnvResolution : envResolution), []);
+  const resolution = useMemo(() => {
+    if (rendererUsesSoftwareRasterizer(gl)) {
+      return softwareRasterizerEnvResolution;
+    }
+    return isCoarsePointerDevice() ? coarsePointerEnvResolution : envResolution;
+  }, [gl]);
 
   // Drei recaptures whenever its children change, so each environment is memoised on exactly
   // what it draws. The studio is also keyed on those values: new radiance remounts the capture

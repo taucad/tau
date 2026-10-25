@@ -78,12 +78,6 @@ export {
   admittedReleaseLimit,
   RuntimeEntryName,
   runtimeEntryNames,
-  runtimeOperationEntrySchema,
-  runtimeLateEntrySchema,
-  runtimeViewerEntrySchema,
-  deliveryHealthEntrySchema,
-  parseRuntimeEntry,
-  runtimeEntryEnvelopeSchema,
   ingestBodyBounds,
   flushReasons,
   sizeClassOf,
@@ -104,13 +98,23 @@ export type {
   RuntimeCause,
   ErrorType,
   RuntimeOutcome,
+  RuntimeTelemetryMode,
+  TelemetryPolicyAnswer,
+  IngestReceipt,
+} from '#runtime-ingest.js';
+export {
+  runtimeOperationEntrySchema,
+  runtimeLateEntrySchema,
+  runtimeViewerEntrySchema,
+  deliveryHealthEntrySchema,
+  parseRuntimeEntry,
+  runtimeEntryEnvelopeSchema,
+} from '#runtime-entry.js';
+export type {
   RuntimeOperationRecord,
   RuntimeLateRecord,
   RuntimeViewerRecord,
   DeliveryHealthRecord,
   RuntimeEntryRecord,
-  RuntimeTelemetryMode,
-  TelemetryPolicyAnswer,
-  IngestReceipt,
-} from '#runtime-ingest.js';
+} from '#runtime-entry.js';
 export { absentLabel, runtimeMetrics } from '#runtime-metrics.js';

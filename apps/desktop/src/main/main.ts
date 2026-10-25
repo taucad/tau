@@ -886,6 +886,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
       ...esbuildEnvironment,
       ...compileCacheEnvironment(app.getPath('userData')),
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      /* The shell's never-grantable app data, and on Linux the Tau-owned bubblewrap it runs (desktop shell W4). */
+      TAU_DESKTOP_USER_DATA_DIR: app.getPath('userData'), // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+      TAU_DESKTOP_SHELL_BWRAP: linuxInstallation(desktopChannel, process.env['APPIMAGE'] !== undefined).bwrap,
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
     createChannel: () => new MessageChannelMain(),

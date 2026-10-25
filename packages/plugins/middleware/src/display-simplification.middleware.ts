@@ -20,10 +20,13 @@ import { defineMiddleware } from '@taucad/runtime/middleware';
 export const displaySimplificationMaxTriangles = 2_000_000;
 
 /**
- * Largest surface deviation of a simplified display mesh, as a fraction of the voxel size.
+ * Target for the largest surface deviation of a simplified display mesh, as a fraction of the voxel
+ * size.
  *
- * Half a voxel is below the resolution of the voxel grid the mesh came from, so the picture
- * changes and the part does not.
+ * Half a voxel is below the resolution of the voxel grid the mesh came from, so at that deviation
+ * the picture changes and the part does not. It is a measured target, not a guarantee: on a helix
+ * at 0.5 mm voxels the deviation reached 0.41 mm (0.83 voxel) on about 66 of 29 M samples. It is
+ * measured against the delivered mesh, which may itself be adaptive, not against the part.
  * @internal
  */
 export const displaySimplificationVoxelErrorRatio = 0.5;
@@ -34,7 +37,9 @@ export const displaySimplificationVoxelErrorRatio = 0.5;
  * meshoptimizer's error is a quadric estimate, not a distance to the simplified surface. On a
  * 4.5 M-triangle gyroid lamp at 0.5 mm voxels, the measured deviation of every removed vertex from
  * the simplified surface stayed within the bound at a quarter of it (0.247 mm for a 0.25 mm bound)
- * and exceeded it at a third or more, so a quarter is used. The bound is measured, not proven.
+ * and exceeded it at a third or more, so a quarter is used. The bound is measured, not proven: on a
+ * 10 M-triangle helix at 0.5 mm voxels the same quarter let the deviation reach 0.41 mm on about 66 of
+ * 29 M samples.
  *
  * The error is a cap, not a goal: simplification stops as soon as the mesh fits the triangle
  * budget, or earlier if the next collapse would pass the cap. Driving the lamp all the way to the
@@ -255,7 +260,8 @@ async function simplifyGlb(
 /**
  * The warning a voxel render reports after its display mesh was simplified.
  *
- * @param options - Triangle counts, the bound used, the voxel size, the budget and the time taken.
+ * @param options - Triangle counts, the deviation target, the voxel size, the budget, the time taken
+ * and, when the delivered mesh was adaptive, its adaptivity.
  * @returns A `DISPLAY_SIMPLIFIED` warning.
  */
 const createDisplaySimplifiedIssue = (options: {
@@ -265,15 +271,19 @@ const createDisplaySimplifiedIssue = (options: {
   voxelSize: number;
   budget: number;
   elapsed: number;
+  adaptivity?: number;
 }): KernelIssue => {
-  const { from, to, maxErrorMm, voxelSize, budget } = options;
+  const { from, to, maxErrorMm, voxelSize, budget, adaptivity } = options;
+  const delivered =
+    adaptivity === undefined ? 'the delivered mesh' : `the delivered adaptive mesh (adaptivity ${String(adaptivity)})`;
   const overBudget =
     to > budget ? ` It is still over the budget; a larger voxelSize lightens the preview and changes the part.` : '';
   return {
     message:
       `The display mesh had ${String(from)} triangles, over the ${String(budget)}-triangle preview budget, ` +
-      `so preview and capture show it simplified to ${String(to)} triangles within ${String(maxErrorMm)} mm ` +
-      `(half the ${String(voxelSize)} mm voxel size). voxelSize is unchanged, and exports and GeoSpec checks ` +
+      `so preview and capture show it simplified to ${String(to)} triangles, targeting at most ` +
+      `${String(maxErrorMm)} mm (half the ${String(voxelSize)} mm voxel size) of deviation from ${delivered}. ` +
+      `The target is measured, not guaranteed. voxelSize is unchanged, and exports and GeoSpec checks ` +
       `use the full mesh.${overBudget}`,
     code: 'DISPLAY_SIMPLIFIED',
     type: 'kernel',
@@ -367,6 +377,7 @@ async function simplifyDisplayResult(
         voxelSize: report.voxelSize,
         budget,
         elapsed,
+        ...(report.adaptivity === undefined ? {} : { adaptivity: report.adaptivity }),
       }),
     ],
   };
@@ -377,12 +388,14 @@ async function simplifyDisplayResult(
  *
  * Voxel kernels keep the author's voxel size, so a dense model can render millions of triangles.
  * When a render's tessellation report names a voxel mesh above `maxTriangles`, this middleware
- * collapses edges within half a voxel (meshoptimizer through gltf-transform, topology kept, borders
- * and creases locked) until the mesh fits `maxTriangles`. It stops at the budget rather than going
- * as far as half a voxel allows, because every further collapse delays the first preview. It updates
- * the report's counts to the delivered mesh and adds a `DISPLAY_SIMPLIFIED` warning carrying
- * `{ from, to, maxErrorMm }`. It wraps render only: exports, and so GeoSpec subjects, keep the full
- * mesh byte for byte.
+ * collapses edges (meshoptimizer through gltf-transform, topology kept, borders and creases locked)
+ * until the mesh fits `maxTriangles`, targeting a deviation of at most half a voxel. The target is
+ * measured, not guaranteed (see {@link displaySimplificationVoxelErrorRatio}), and it is relative to
+ * the mesh the kernel delivered, which may itself be adaptive, not to the part. It stops at the
+ * budget rather than going as far as the target allows, because every further collapse delays the
+ * first preview. It updates the report's counts to the delivered mesh and adds a `DISPLAY_SIMPLIFIED`
+ * warning carrying `{ from, to, maxErrorMm }`, plus `adaptivity` when the report carries one. It
+ * wraps render only: exports, and so GeoSpec subjects, keep the full mesh byte for byte.
  *
  * Register it after `gltfEdgeDetection` so it sits closer to the kernel and any fallback edge pass
  * runs on the smaller mesh.
@@ -391,7 +404,7 @@ async function simplifyDisplayResult(
 export const displaySimplification = defineMiddleware({
   id: 'displaySimplification',
   name: 'DisplaySimplification',
-  version: '1.1.0',
+  version: '1.2.0',
 
   optionsSchema: z.object({
     maxTriangles: z.number().int().positive().default(displaySimplificationMaxTriangles),

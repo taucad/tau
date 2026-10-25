@@ -649,7 +649,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [path-key](https://github.com/sindresorhus/path-key) | 3.1.1 | MIT |
 | [path-to-regexp](https://github.com/pillarjs/path-to-regexp) | 8.4.2 | MIT |
 | [picomatch](https://github.com/micromatch/picomatch) | 4.0.7 | MIT |
-| [picovoxel](https://github.com/taucad/picovoxel) | 0.1.0 | Apache-2.0 |
+| [picovoxel](https://github.com/taucad/picovoxel) | 0.2.0 | Apache-2.0 |
 | [pify](https://github.com/sindresorhus/pify) | 4.0.1 | MIT |
 | [pino-abstract-transport](https://github.com/pinojs/pino-abstract-transport) | 3.0.0 | MIT |
 | [pino-pretty](https://github.com/pinojs/pino-pretty) | 13.2.0 | MIT |

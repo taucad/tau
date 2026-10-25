@@ -14,7 +14,7 @@ import { createNodeMachineEventLog } from '#host/node-machine-event-log.js';
 import { parseJournalEvent } from '#host/node-machine-operations.js';
 import { openNodeMachineStore } from '#host/node-machine-store.js';
 import { createNodeMachineHost, MachineHostStartInFlightError } from '#host/node.js';
-import type { NodeMachineHost, NodeMachineRuntime } from '#host/node.js';
+import type { MachineOperationTelemetry, NodeMachineHost, NodeMachineRuntime } from '#host/node.js';
 import { connectMachineChannel } from '#machines/machine-channel.js';
 import type { MachineChannelClient, MachineChannelHostOperations } from '#machines/machine-channel.js';
 import { machineCredentialReference } from '#machines/machine-credential.js';
@@ -302,7 +302,12 @@ const bindingProvider = (
 type Provider = ReturnType<typeof bindingProvider>;
 
 /** A host on `root` with one operator channel and, on request, more channels for other actors. */
-const openServedHost = async (root: string, provider: Provider, runtime: NodeMachineRuntime) => {
+const openServedHost = async (
+  root: string,
+  provider: Provider,
+  runtime: NodeMachineRuntime & Readonly<{ onOperation?: (operation: MachineOperationTelemetry) => void }>,
+) => {
+  const { onOperation } = runtime;
   const admission = createHostAdmissionAuthority({ hostId: 'host-1' });
   const onError = vi.fn();
   const host = await createNodeMachineHost({
@@ -312,6 +317,7 @@ const openServedHost = async (root: string, provider: Provider, runtime: NodeMac
     admission,
     providers: [provider],
     runtime,
+    ...(onOperation === undefined ? {} : { onOperation }),
     onError,
   });
   hosts.push(host);
@@ -582,10 +588,18 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('a
   });
 
   /** Bind one printer whose session behaves as `behavior` says. */
-  const boundPrinter = async (behavior: FixtureSessionBehavior = {}, root?: string) => {
+  const boundPrinter = async (
+    behavior: FixtureSessionBehavior = {},
+    root?: string,
+    onOperation?: (operation: MachineOperationTelemetry) => void,
+  ) => {
     const directory = root ?? (await storeRoot());
     const provider = bindingProvider(() => fixtureSession(behavior));
-    const fixture = await openServedHost(directory, provider, runtimeAt(currentTimestamp));
+    const fixture = await openServedHost(
+      directory,
+      provider,
+      Object.assign(runtimeAt(currentTimestamp), onOperation === undefined ? {} : { onOperation }),
+    );
     await bindAs(fixture, { candidateId: 'candidate-a', name: machineId, secretRef: 'vault:x1c' });
     return { ...fixture, root: directory, provider, revision: await revisionOf(fixture.client) };
   };
@@ -639,6 +653,35 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('a
     expect(journal.indexOf('machine-operation-sending')).toBeLessThan(journal.indexOf('machine-operation-result'));
     // One confirmation per operation (light-1, light-2).
     expect(journal.match(/"source":"confirmation"/gu)).toHaveLength(2);
+  });
+
+  it('should tell runtime telemetry once per new operation, never on a replay, with no machine identity', async () => {
+    const told: MachineOperationTelemetry[] = [];
+    const apply = vi.fn(async (): Promise<MachineCommandReceipt> => ({ status: 'accepted', observedAt }));
+    const fixture = await boundPrinter(
+      { actions: { type: 'supported', apply, confirm: () => ({ status: 'confirmed' }) } },
+      undefined,
+      (operation) => told.push(operation),
+    );
+    const agentClient = await fixture.serveAs(agentActor);
+
+    await agentClient.applyAction(lightOn(fixture.revision, 'light-1'));
+    await agentClient.applyAction(lightOn(fixture.revision, 'light-1'));
+    await agentClient.applyAction(lightOn(fixture.revision, 'light-1', { parameters: { on: false } }));
+    await agentClient.applyAction(lightOn('sha256:stale', 'light-2'));
+
+    expect(told.map(({ duration: _duration, ...rest }) => rest)).toEqual([
+      { provider: 'binding-provider', kind: 'action', action: 'switch.set', status: 'accepted', requester: 'agent' },
+      {
+        provider: 'binding-provider',
+        kind: 'action',
+        status: 'refused',
+        code: 'MACHINE_OPERATION_ID_CONFLICT',
+        requester: 'agent',
+      },
+      expect.objectContaining({ kind: 'action', code: 'MACHINE_ACTION_CAPABILITIES_CHANGED', requester: 'agent' }),
+    ]);
+    expect(JSON.stringify(told)).not.toContain(machineId);
   });
 
   it('should refuse a changed revision, an unknown version, invalid values and an agent at the machine, sending nothing', async () => {

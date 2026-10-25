@@ -108,6 +108,11 @@ export default defineConfig(
             'services-host': resolve(import.meta.dirname, 'src/tau/services-host.entry.ts'),
             'geometry-host': resolve(import.meta.dirname, 'src/tau/geometry-host.entry.ts'),
             'compute-store.worker': resolve(import.meta.dirname, 'src/main/compute-store.worker.ts'),
+            /* One per shell launch, started by the shell provider beside `services-host.js` (desktop shell W4). */
+            'shell-supervisor': resolve(
+              import.meta.dirname,
+              '../../packages/core/native-process/src/shell/srt-supervisor.ts',
+            ),
           },
         },
       },

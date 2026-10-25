@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { PaneviewPanel } from 'dockview-react';
 import type { PaneviewApi } from 'dockview-react';
 import type { GeometryComponentNode } from '@taucad/types';
 import { SearchInput } from '@taucad/ui/components/search-input';
@@ -29,6 +30,55 @@ const defaultLayout: ModelPanelLayout = {
   },
 };
 const useDefaultLayout = (): ModelPanelLayout => defaultLayout;
+
+/**
+ * The root font size in px; 16 where there is no document (SSR).
+ *
+ * @returns The root font size, in px.
+ */
+function readRootFontSize(): number {
+  if (typeof document === 'undefined') {
+    return 16;
+  }
+  const rootFontSize = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+  return Number.isFinite(rootFontSize) && rootFontSize > 0 ? rootFontSize : 16;
+}
+
+/**
+ * The smallest body of an entry section, in px: one part row whole, with the weight footer under it.
+ *
+ * The row is its 80 px preview plus `py-1` (0.5rem), inside the scroller's `p-2` (1rem); the footer is one `text-xs`
+ * line (1rem) with `py-1` (0.5rem) and a 1 px border. Only the preview is fixed in px, so the floor follows the root
+ * font size: at 200% text a 144 px body clips the row.
+ *
+ * @param rootFontSize - The root font size, in px.
+ * @returns The floor, in px.
+ */
+function unitMinimumBodySize(rootFontSize: number): number {
+  return Math.max(144, Math.ceil(81 + 3 * rootFontSize));
+}
+
+/**
+ * Raise or lower each entry section's floor to {@link unitMinimumBodySize} for the current root font size. Setting a
+ * section's size makes the Paneview clamp it again, so a section now under its floor grows and the others give way.
+ *
+ * @param api - The Paneview, once it is ready.
+ * @param entryPaths - The entry sections to fit.
+ */
+function fitUnitMinimumBodySizes(api: PaneviewApi | undefined, entryPaths: readonly string[]): void {
+  if (!api) {
+    return;
+  }
+  const minimumBodySize = unitMinimumBodySize(readRootFontSize());
+  for (const entryPath of entryPaths) {
+    const panel = api.getPanel(entryPath);
+    if (!(panel instanceof PaneviewPanel) || panel.minimumBodySize === minimumBodySize) {
+      continue;
+    }
+    panel.minimumBodySize = minimumBodySize;
+    panel.api.setSize({ size: panel.size });
+  }
+}
 
 function getInitialPanelOptions(
   saved: ModelPanelLayout['savedState'],
@@ -70,10 +120,28 @@ export function ModelPane({ onRequestOpen }: { readonly onRequestOpen?: () => vo
     [onRequestOpen],
   );
   useEffect(() => reveal?.subscribe(revealComponent), [reveal, revealComponent]);
+  const filterRef = useRef<HTMLDivElement>(null);
+  const paneviewApiRef = useRef<PaneviewApi | undefined>(undefined);
+  // The filter's height is in rem, so it resizes exactly when the root font size does (browser text size, zoom
+  // settings): the entry sections' floors follow it in the same frame, before the enlarged rows paint clipped.
+  useEffect(() => {
+    const filter = filterRef.current;
+    if (!filter || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+    const entryPaths = units.map(({ entryPath }) => entryPath);
+    const observer = new ResizeObserver(() => {
+      fitUnitMinimumBodySizes(paneviewApiRef.current, entryPaths);
+    });
+    observer.observe(filter);
+    return () => {
+      observer.disconnect();
+    };
+  }, [units]);
 
   return (
     <div data-slot='model-panel-body' className='flex size-full min-h-0 flex-col overflow-hidden bg-sidebar text-sm'>
-      <div data-slot='model-filter' className='shrink-0 bg-sidebar px-2 pt-2'>
+      <div ref={filterRef} data-slot='model-filter' className='shrink-0 bg-sidebar px-2 pt-2'>
         <SearchInput
           aria-label='Filter parts'
           placeholder='Filter parts…'
@@ -92,6 +160,7 @@ export function ModelPane({ onRequestOpen }: { readonly onRequestOpen?: () => vo
           <ExplorerEmptyState />
         ) : (
           <ModelPaneview
+            paneviewApiRef={paneviewApiRef}
             units={units}
             query={query}
             revealTarget={revealTarget}
@@ -104,11 +173,14 @@ export function ModelPane({ onRequestOpen }: { readonly onRequestOpen?: () => vo
 }
 
 function ModelPaneview({
+  paneviewApiRef,
   units,
   query,
   revealTarget,
   onReveal,
 }: {
+  /** Filled with the Paneview's api once it is ready, for the text-size floors the pane keeps. */
+  readonly paneviewApiRef: React.RefObject<PaneviewApi | undefined>;
   readonly units: readonly WorkbenchUnit[];
   readonly query: string;
   readonly revealTarget: ModelComponentRevealTarget | undefined;
@@ -117,7 +189,6 @@ function ModelPaneview({
   const source = useWorkbenchPanesHost().model;
   const usePanelLayout = source?.usePanelLayout ?? useDefaultLayout;
   const { savedState, connectApi } = usePanelLayout();
-  const paneviewApiRef = useRef<PaneviewApi | undefined>(undefined);
   const paneviewKey = useMemo(() => units.map(({ entryPath }) => entryPath).join('\0'), [units]);
   const [selected, setSelected] = useState<ModelPropertiesPanelParams['selected'] & { readonly unitId: string }>();
   const [preview, setPreview] = useState<{
@@ -193,7 +264,7 @@ function ModelPaneview({
           headerComponent: 'modelHeader',
           headerSize: paneviewHeaderSize,
           isExpanded: initial.isExpanded,
-          minimumBodySize: 144,
+          minimumBodySize: unitMinimumBodySize(readRootFontSize()),
           size: initial.size,
           params: {
             entryPath,

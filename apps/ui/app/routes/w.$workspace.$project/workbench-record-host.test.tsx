@@ -5,7 +5,7 @@ import type { WatchEvent } from '@taucad/filesystem';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { workbenchRecords, workbenchPaths } from '@taucad/workbench';
-import type { WorkbenchLayout, WorkbenchView } from '@taucad/workbench';
+import type { WorkbenchLaneNode, WorkbenchLayout, WorkbenchView } from '@taucad/workbench';
 import type { PreviousWorkbenchLayout } from '#types/editor.types.js';
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import { WorkbenchRecordHost } from '#routes/w.$workspace.$project/workbench-record-host.js';
@@ -581,6 +581,168 @@ describe('live workbench record host', () => {
       host.controller.registerWorkbench(apply);
     });
     expect(apply).toHaveBeenCalledExactlyOnceWith(host.controller.snapshot()?.layout.workbench, expect.any(Function));
+    host.unmount();
+  });
+
+  it('seeds a workbench adapter that mounts before a pending pane request is written with that request', async () => {
+    const host = mount();
+    await waitFor(() => {
+      expect(host.controller.snapshot()?.layout).toEqual(first());
+    });
+    act(() => {
+      host.controller.personWorkbenchChanged((node) =>
+        node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane: 'share' }] } : node,
+      );
+    });
+    const apply = vi.fn((_node, applied: () => void) => {
+      applied();
+    });
+    act(() => {
+      host.controller.registerViewer((_node, applied) => {
+        applied();
+      });
+      host.controller.registerWorkbench(apply);
+    });
+    // The shown arrangement is not the stored record yet, so the stored digest is not reported as applied.
+    expect(host.applied.has(workbenchPaths.layout)).toBe(false);
+    const requested = {
+      kind: 'group',
+      tabs: [
+        { kind: 'pane', pane: 'parameters' },
+        { kind: 'pane', pane: 'share' },
+      ],
+    };
+    expect(host.writes).not.toHaveBeenCalled();
+    expect(apply).toHaveBeenCalledExactlyOnceWith(requested, expect.any(Function));
+    await waitFor(
+      () => {
+        expect(host.controller.snapshot()?.layout.workbench).toEqual(requested);
+      },
+      { timeout: 1500 },
+    );
+    await waitFor(() => {
+      expect(host.applied.get(workbenchPaths.layout)).toBe(host.controller.snapshot()?.layoutDigest);
+    });
+    host.unmount();
+  });
+
+  it('shows a pane asked for before the first read on a workbench that mounted before the read', async () => {
+    const gate = Promise.withResolvers<void>();
+    const host = mount({ initialRead: gate.promise });
+    const shown: unknown[] = [];
+    const apply = vi.fn((node: unknown, applied: () => void) => {
+      shown.push(node);
+      applied();
+    });
+    act(() => {
+      host.controller.registerWorkbench(apply);
+      host.controller.personWorkbenchChanged((node) =>
+        node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane: 'share' }] } : node,
+      );
+    });
+    gate.resolve();
+    await waitFor(() => {
+      expect(shown).not.toHaveLength(0);
+    });
+    await act(async () => undefined);
+    // The mounted workbench reports what it shows on its next change (here a file opening) before the debounced pane
+    // request is written: what it shows must already hold the pane, or that report replaces the request.
+    const showing = shown.at(-1) as WorkbenchLaneNode;
+    act(() => {
+      host.controller.personWorkbenchChanged(
+        showing.kind === 'group' ? { ...showing, tabs: [...showing.tabs, { kind: 'pane', pane: 'details' }] } : showing,
+      );
+    });
+    await waitFor(
+      () => {
+        expect(host.controller.snapshot()?.layout.workbench).toEqual({
+          kind: 'group',
+          tabs: [
+            { kind: 'pane', pane: 'parameters' },
+            { kind: 'pane', pane: 'share' },
+            { kind: 'pane', pane: 'details' },
+          ],
+        });
+      },
+      { timeout: 1600 },
+    );
+    host.unmount();
+  });
+
+  it('shows a pane requested before the read together with the read, so the read cannot replace it', async () => {
+    const gate = Promise.withResolvers<void>();
+    const host = mount({ initialRead: gate.promise });
+    const shown: unknown[] = [];
+    const apply = vi.fn((node: unknown, applied: () => void) => {
+      shown.push(node);
+      applied();
+    });
+    act(() => {
+      host.controller.registerWorkbench(apply);
+      host.controller.personWorkbenchChanged((node) =>
+        node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane: 'share' }] } : node,
+      );
+    });
+    gate.resolve();
+    const requested = {
+      kind: 'group',
+      tabs: [
+        { kind: 'pane', pane: 'parameters' },
+        { kind: 'pane', pane: 'share' },
+      ],
+    };
+    await waitFor(
+      () => {
+        expect(workbenchRecords.layout.read(host.bytes!)).toMatchObject({ record: { workbench: requested } });
+      },
+      { timeout: 1600 },
+    );
+    // The mounted workbench is never handed the saved arrangement without the pane, so nothing applied late can
+    // leave it showing that.
+    expect(shown).toEqual([requested]);
+    host.unmount();
+  });
+
+  it('hands a pane request back when the first read fails', async () => {
+    const host = mount({ failInitialRead: true });
+    const unapplied = vi.fn();
+    act(() => {
+      host.controller.personWorkbenchChanged(
+        (node) => (node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane: 'share' }] } : node),
+        unapplied,
+      );
+    });
+    await waitFor(() => {
+      expect(unapplied).toHaveBeenCalledOnce();
+    });
+    host.unmount();
+  });
+
+  it('hands a pane request back and shows only the stored arrangement while the record is refused', async () => {
+    const host = mount();
+    await waitFor(() => {
+      expect(host.controller.snapshot()?.layout).toEqual(first());
+    });
+    await host.set(encoder.encode('{"version":2}'));
+    await waitFor(() => {
+      expect(host.controller.snapshot()).toBeUndefined();
+    });
+    const unapplied = vi.fn();
+    act(() => {
+      host.controller.personWorkbenchChanged({ kind: 'group', tabs: [{ kind: 'pane', pane: 'details' }] });
+      host.controller.personWorkbenchChanged(
+        (node) => (node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane: 'share' }] } : node),
+        unapplied,
+      );
+    });
+    expect(unapplied).toHaveBeenCalledOnce();
+    const apply = vi.fn((_node, applied: () => void) => {
+      applied();
+    });
+    act(() => {
+      host.controller.registerWorkbench(apply);
+    });
+    expect(apply).toHaveBeenCalledExactlyOnceWith(first().workbench, expect.any(Function));
     host.unmount();
   });
 

@@ -13,12 +13,30 @@ const treeItem = (path: string): Locator =>
   selectors.getByCss(`[data-testid="file-tree-item"][data-file-tree-path="${path}"]`);
 
 /**
- * A deferred automatic preview, as the Model row names it: the row's accessible name carries the status. The part menu
- * no longer repeats the preview or its status (its header names the part; "the part's image lives in the gallery"), so
- * the row's name and the menu's Retry preview item are where a deferred preview shows.
+ * A deferred automatic preview, as the Model row reports it: the row's selection button is described by its preview
+ * status. The part menu no longer repeats the preview or its status (its header names the part; "the part's image
+ * lives in the gallery"), so the row's description and the menu's Retry preview item are where a deferred preview
+ * shows.
  */
-const deferredPreviewStatus = (list: Locator): Locator =>
-  list.getByRole('button', { name: /, preview unavailable$/u }).first();
+const expectDeferredPreviewStatus = async (list: Locator, name: string): Promise<void> => {
+  // The part's own row, by its accessible name; its status passes through "Preview loading" while the deferral is
+  // decided, so the description is polled until it settles on the deferred status.
+  await target.expectAccessibleDescription(
+    list.getByRole('button', { name, exact: true }),
+    'Preview unavailable',
+    30_000,
+  );
+};
+
+/** The first part row's name, read from its actions button ("Actions for <part>"). */
+const firstPartName = async (list: Locator): Promise<string> => {
+  const actions = await target.getAttribute(list.getByRole('button', { name: /^Actions for /u }).first(), 'aria-label');
+  const name = actions?.replace(/^Actions for /u, '');
+  if (!name) {
+    throw new Error('The Model list has no part row.');
+  }
+  return name;
+};
 
 /**
  * The part menu names the part in its header and carries no image of it: the 80px preview lives on the row, in
@@ -30,9 +48,15 @@ const expectMenuNamesPartWithoutImage = async (partName: string): Promise<void> 
   await target.expectCount(menu.getByCss('img'), 0);
 };
 
-/** A part's Model row, whose accessible name is the part's name followed by any status ("hidden", "preview loading"). */
-const partRow = (list: Locator, name: string): Locator =>
-  list.getByRole('button', { name: new RegExp(`^${name}(?:, [a-z ]+)*$`, 'u') });
+/** A shown part's Model row, whose accessible name is the part's name whatever its preview is doing. */
+const partRow = (list: Locator, name: string): Locator => list.getByRole('button', { name, exact: true });
+
+/**
+ * A part row's rendered preview. The 80px preview frame is the selection button's sibling, never inside it, and is a
+ * button named for the part once the preview has bytes; its image is the decoded blob.
+ */
+const partPreviewImage = (list: Locator, name: string): Locator =>
+  list.getByRole('button', { name: `Preview ${name}`, exact: true }).getByCss('img[src^="blob:"]');
 
 const disclosure = (path: string): Locator => selectors.getByRole('button', { name: path, exact: true });
 /** A unit's body, the region its header discloses. */
@@ -391,8 +415,9 @@ test('shows decoded part previews in the real Model rows and selected Properties
   /** Milliseconds. */
   let automaticDeferDuration: number | undefined;
   if (target.currentWebGpuProfile() === 'software') {
-    await target.click(list.getByRole('button', { name: /^Actions for /u }).first());
-    await target.expectVisible(deferredPreviewStatus(list));
+    const deferredPart = await firstPartName(list);
+    await target.click(list.getByRole('button', { name: `Actions for ${deferredPart}`, exact: true }));
+    await expectDeferredPreviewStatus(list, deferredPart);
     await target.expectVisible(selectors.getByRole('menuitem', { name: 'Retry preview' }));
     automaticDeferDuration = await target.evaluate(() => {
       const state = (globalThis as typeof globalThis & { __TAU_PART_PREVIEW_PROBE__?: { startedAt: number } })
@@ -766,8 +791,9 @@ test('defers a cold part preview worker and resumes automatic previews after exp
       2,
     ),
   );
-  await target.click(list.getByRole('button', { name: /^Actions for /u }).first());
-  await target.expectVisible(deferredPreviewStatus(list));
+  const deferredPart = await firstPartName(list);
+  await target.click(list.getByRole('button', { name: `Actions for ${deferredPart}`, exact: true }));
+  await expectDeferredPreviewStatus(list, deferredPart);
   await target.expectVisible(selectors.getByRole('menuitem', { name: 'Retry preview' }));
   await target.keyboardPress('Escape');
   await dragViewport();
@@ -793,8 +819,8 @@ test('defers a cold part preview worker and resumes automatic previews after exp
   // Limit explicit startup to one part, then measure new automatic demand on a warm worker.
   const filter = selectors.getByRole('searchbox', { name: 'Filter parts' });
   await target.fill(filter, 'Preview part 7');
-  await target.click(list.getByRole('button', { name: /^Actions for /u }).first());
-  await target.expectVisible(deferredPreviewStatus(list));
+  await target.click(list.getByRole('button', { name: 'Actions for Preview part 7', exact: true }));
+  await expectDeferredPreviewStatus(list, 'Preview part 7');
   await target.click(selectors.getByRole('menuitem', { name: 'Retry preview' }));
   await target.waitFor(
     () =>
@@ -933,7 +959,7 @@ test('admits previews for newly mounted virtual Model rows after scrolling', asy
   await target.click(list.getByRole('button', { name: 'Actions for Preview part 1', exact: true }));
   await target.click(selectors.getByRole('menuitem', { name: /Retry preview/iu }));
   await target.keyboardPress('Escape');
-  await target.expectVisible(first.getByCss('img[src^="blob:"]'), 60_000);
+  await target.expectVisible(partPreviewImage(list, 'Preview part 1'), 60_000);
   await target.fill(filter, '');
   await target.expectVisible(list.getByCss('[data-virtuoso-scroller]'));
   await target.evaluateLocator(list, (element) => {
@@ -945,7 +971,17 @@ test('admits previews for newly mounted virtual Model rows after scrolling', asy
   });
   const last = partRow(list, 'Preview part 48');
   await target.expectVisible(last, 60_000);
-  const lastImage = last.getByCss('img[src^="blob:"]');
+  const lastImage = partPreviewImage(list, 'Preview part 48');
+  if (target.currentWebGpuProfile() === 'software') {
+    // A software adapter makes no automatic previews, by policy (each costs about 20 s of CPU and would stall the
+    // page): the newly mounted row shows its deferred status and no image, and asking for its preview still renders it.
+    await target.expectAccessibleDescription(last, 'Preview unavailable');
+    await target.expectCount(lastImage, 0);
+    await target.hover(last);
+    await target.click(list.getByRole('button', { name: 'Actions for Preview part 48', exact: true }));
+    await target.click(selectors.getByRole('menuitem', { name: /Retry preview/iu }));
+    await target.keyboardPress('Escape');
+  }
   await target.expectVisible(lastImage, 60_000);
   await target.click(last);
   const propertiesImage = selectors.getByCss('[data-slot="part-properties"] img[src^="blob:"]').first();

@@ -111,6 +111,10 @@ export function WorkbenchRecordHost(): React.JSX.Element {
   const appliedWorkbenchRef = useRef<WorkbenchLaneNode | undefined>(undefined);
   const personViewerRef = useRef<ViewerNode | undefined>(undefined);
   const personWorkbenchRef = useRef<WorkbenchLaneNode | undefined>(undefined);
+  /** Pane requests made before the record's first read, applied on top of each read until they are written. */
+  const preReadChangesRef = useRef<Array<(current: WorkbenchLaneNode) => WorkbenchLaneNode>>([]);
+  /** The arrangement last handed to the workbench adapter. */
+  const shownWorkbenchRef = useRef<WorkbenchLaneNode | undefined>(undefined);
   const acknowledge = useCallback(
     (epoch: number): void => {
       const application = applicationRef.current;
@@ -232,17 +236,28 @@ export function WorkbenchRecordHost(): React.JSX.Element {
           const staleWorkbench =
             personWorkbenchRef.current &&
             (Boolean(locallyAuthored?.workbench) || (previous && sameNode(previous.workbench, next.workbench)));
+          // Pane requests made before this read are shown with it, in the same application, so a later application
+          // of the read cannot replace them; the record holds them once their edit is written.
+          let shown = next.workbench;
+          if (source === 'read') {
+            for (const change of preReadChangesRef.current) {
+              shown = change(shown);
+            }
+          }
           if (workbench && !staleWorkbench) {
-            if (appliedWorkbenchRef.current && sameNode(appliedWorkbenchRef.current, next.workbench)) {
-              applicationRef.current.workbench = true;
+            if (appliedWorkbenchRef.current && sameNode(appliedWorkbenchRef.current, shown)) {
+              applicationRef.current.workbench = sameNode(shown, next.workbench);
             } else {
-              workbench(next.workbench, () => {
+              shownWorkbenchRef.current = shown;
+              workbench(shown, () => {
                 if (applicationRef.current.epoch !== epoch || workbenchRef.current !== workbench) {
                   return;
                 }
-                appliedWorkbenchRef.current = next.workbench;
-                applicationRef.current.workbench = true;
-                acknowledge(epoch);
+                appliedWorkbenchRef.current = shown;
+                if (sameNode(shown, next.workbench)) {
+                  applicationRef.current.workbench = true;
+                  acknowledge(epoch);
+                }
               });
             }
           }
@@ -504,16 +519,24 @@ export function WorkbenchRecordHost(): React.JSX.Element {
         workbenchRef.current = apply;
         applicationRef.current.workbench = false;
         setAppliedWorkbenchRevision(workbenchPaths.layout, undefined);
-        const current = store.snapshot().layout;
+        // The intended arrangement, not the last one on disk: a pane asked for while no workbench was mounted (a Share
+        // deep link) waits in the debounced edit, and an adapter seeded from the stored record would drop it and then
+        // report that arrangement as the person's, replacing the edit before it is written. A refused record takes no
+        // edits, so then only what is on disk is shown.
+        const current = store.snapshot().refusal ? store.snapshot().layout : store.intendedLayout();
         if (current) {
           const { epoch } = applicationRef.current;
+          shownWorkbenchRef.current = current.workbench;
           apply(current.workbench, () => {
             if (applicationRef.current.epoch !== epoch || workbenchRef.current !== apply) {
               return;
             }
-            applicationRef.current.workbench = true;
             appliedWorkbenchRef.current = current.workbench;
-            acknowledge(epoch);
+            // An intended arrangement that is not yet written is not the stored record; its write's echo acknowledges.
+            if (JSON.stringify(current.workbench) === JSON.stringify(store.snapshot().layout?.workbench)) {
+              applicationRef.current.workbench = true;
+              acknowledge(epoch);
+            }
           });
         }
         return () => {
@@ -537,21 +560,41 @@ export function WorkbenchRecordHost(): React.JSX.Element {
         };
         void store.edit(next);
       },
-      personWorkbenchChanged: (node) => {
+      ready: () => store.ready(),
+      personWorkbenchChanged: (node, unapplied) => {
         if (!store.ready()) {
           if (typeof node === 'function') {
             const change = node;
+            preReadChangesRef.current = [...preReadChangesRef.current, change];
             const applyAfterFirstRead = async (): Promise<void> => {
-              if (!(await firstRead())) {
+              const read = await firstRead();
+              preReadChangesRef.current = preReadChangesRef.current.filter((queued) => queued !== change);
+              if (!read || store.snapshot().refusal) {
+                unapplied?.();
                 return;
               }
               const current = store.intendedLayout() ?? fallbackLayout();
               const workbench = change(current.workbench);
               personWorkbenchRef.current = workbench;
-              await store.edit({ ...current, workbench });
+              void store.edit({ ...current, workbench });
+              // The read showed the change on a workbench mounted before it; one that mounted since was seeded with the
+              // read alone, and the edit's echo is locally authored, so it is not shown when it lands: show it now.
+              const apply = workbenchRef.current;
+              if (apply && JSON.stringify(shownWorkbenchRef.current) !== JSON.stringify(workbench)) {
+                shownWorkbenchRef.current = workbench;
+                apply(workbench, () => {
+                  if (workbenchRef.current === apply) {
+                    appliedWorkbenchRef.current = workbench;
+                  }
+                });
+              }
             };
             void applyAfterFirstRead();
           }
+          return;
+        }
+        if (typeof node === 'function' && store.snapshot().refusal) {
+          unapplied?.();
           return;
         }
         const current = store.intendedLayout() ?? fallbackLayout();

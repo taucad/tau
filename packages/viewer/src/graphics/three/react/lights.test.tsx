@@ -357,6 +357,22 @@ describe('Lights', () => {
     }
   });
 
+  it('should capture a small environment on a software rasterizer, whose CPU filter would hold the first frame', () => {
+    renderer = mock<WebGPURenderer>({
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Match Three's discriminator or constructor name.
+      isWebGPURenderer: true,
+      toneMappingExposure: 1,
+      xr: mock<WebGPURenderer['xr']>({ enabled: false }),
+    });
+    // Three's backend keeps the device it requested; its adapter info names the software rasterizer.
+    Object.assign(renderer, {
+      backend: { device: { adapterInfo: { vendor: 'google', architecture: 'swiftshader' } } },
+    });
+    render(<Lights settings={{ environment: 'studio' }} />);
+    expect(targets[0]).toMatchObject({ width: 3 * 64, height: 4 * 64, depthBuffer: false });
+    expect(mocks.environmentResolution).toHaveBeenLastCalledWith(64);
+  });
+
   it('should restore the previous environment when switching to none', () => {
     const previous = new Texture();
     scene.environment = previous;

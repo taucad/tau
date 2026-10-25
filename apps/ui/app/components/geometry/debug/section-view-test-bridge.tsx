@@ -1,6 +1,7 @@
 import { downloadBlob } from '@taucad/utils/file';
 import type { WorkspaceRendererIdentity } from '#components/geometry/debug/workspace-renderer-diagnostics.js';
 import { getWorkspaceRendererIdentity } from '#components/geometry/debug/workspace-renderer-diagnostics.js';
+import { webGpuFallbackReason } from '@taucad/viewer/graphics/graphics-backend';
 import React, { useEffect } from 'react';
 import * as THREE from 'three';
 import { renderLoopObservers } from '@taucad/viewer/graphics/three/render-loop-observer';
@@ -207,8 +208,16 @@ export type SectionViewTestMeasureState = Readonly<{
   >;
 }>;
 
+/** Renderers this page's bridges have seen, numbered in the order they were first asked about. */
+const rendererGenerations = new WeakMap<RendererInstance, number>();
+let lastRendererGeneration = 0;
+
 export type SectionViewTestBridgeApi = Readonly<{
   getGraphicsBackend(): 'webgl' | 'webgpu';
+  /** Why this page draws on WebGL where WebGPU was asked for (`canvas-loss`), or `undefined` when it has not fallen back. */
+  getWebGpuFallbackReason(): 'canvas-loss' | undefined;
+  /** A number that changes whenever this viewport's renderer is replaced, as by a remount. */
+  getRendererGeneration(): number;
   /** Identity from this viewport's renderer, never a separately created probe context. */
   getRendererIdentity(): WorkspaceRendererIdentity;
   /** Warmed full R3F frame submission and completion latency, in milliseconds; excludes RAF/vsync. */
@@ -687,6 +696,18 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
       },
       getRendererIdentity() {
         return getWorkspaceRendererIdentity(get().gl as RendererInstance);
+      },
+      getWebGpuFallbackReason() {
+        return webGpuFallbackReason();
+      },
+      getRendererGeneration() {
+        const renderer = get().gl as RendererInstance;
+        let generation = rendererGenerations.get(renderer);
+        if (generation === undefined) {
+          generation = ++lastRendererGeneration;
+          rendererGenerations.set(renderer, generation);
+        }
+        return generation;
       },
       async measureRenderFrames(options = {}) {
         const state = get();

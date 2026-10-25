@@ -1790,8 +1790,45 @@ describe('Workbench file reconciliation', () => {
       'files',
       'kernel',
       'console',
+      'terminal',
     ]);
     expect(workbenchSurfaces.find(({ id }) => id === 'share')?.shortcut).toBeUndefined();
+  });
+
+  it('offers Terminal after Console in the desktop editor only, with debug mode off (A13)', () => {
+    const terminal = workbenchSurfaces.find(({ id }) => id === 'terminal');
+    expect(terminal?.debugOnly).toBeUndefined();
+    expect(terminal?.panel).toEqual({ id: 'workbench:terminal', component: 'terminal', title: 'Terminal' });
+    const dockview = createTestDockview();
+    expect(isWorkbenchSurfaceAllowed('terminal', 'editor')).toBe(false);
+    openWorkbenchUtility(dockview.api, 'terminal');
+    expect(dockview.addPanel).not.toHaveBeenCalled();
+
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    onTestFinished(() => {
+      vi.unstubAllEnvs();
+    });
+    expect(isWorkbenchSurfaceAllowed('terminal', 'editor')).toBe(true);
+    expect(isWorkbenchSurfaceAllowed('terminal', 'shared')).toBe(false);
+    openWorkbenchUtility(dockview.api, 'terminal');
+    expect(dockview.addPanel).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ id: 'workbench:terminal', component: 'terminal' }),
+    );
+  });
+
+  it('drops a restored Terminal tab from a build that does not offer it, and keeps it on desktop (A13)', () => {
+    const terminal = panel(workbenchPanels.terminal.id);
+    const web = createTestDockview([terminal]);
+    restoreWorkbenchLayout({ api: web.api, layout: {} as SerializedDockview, isTauDebugEnabled: false });
+    expect(web.removePanel).toHaveBeenCalledWith(terminal);
+
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    onTestFinished(() => {
+      vi.unstubAllEnvs();
+    });
+    const desktop = createTestDockview([terminal]);
+    restoreWorkbenchLayout({ api: desktop.api, layout: {} as SerializedDockview, isTauDebugEnabled: false });
+    expect(desktop.removePanel).not.toHaveBeenCalledWith(terminal);
   });
 
   it('hides Print and refuses a direct utility open when machines are disabled', () => {

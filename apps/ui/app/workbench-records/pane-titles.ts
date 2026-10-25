@@ -16,6 +16,7 @@ const titles = {
   details: 'Details',
   kernel: 'Telemetry',
   console: 'Console',
+  terminal: 'Terminal',
 } as const satisfies Record<PaneId, string>;
 
 /** Display title for a built-in workbench pane; record IDs remain lowercase. */

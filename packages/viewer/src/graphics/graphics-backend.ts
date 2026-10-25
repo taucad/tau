@@ -94,6 +94,8 @@ export type GpuAdapterIdentity = Readonly<{
 /**
  * The adapter's self-reported vendor, architecture, device and description, lowercased; empty when it reports none.
  *
+ * @param adapter - The adapter, or a device's `adapterInfo` wrapped as `{ info }`.
+ * @returns The identity string.
  * @public
  */
 export function gpuAdapterIdentity(adapter: GpuAdapterIdentity): string {
@@ -103,9 +105,11 @@ export function gpuAdapterIdentity(adapter: GpuAdapterIdentity): string {
 
 /**
  * Whether the adapter rasterizes on the CPU: the browser's fallback adapter, or one that names a software
- * implementation (SwiftShader, llvmpipe). Work that is cheap on a GPU, such as full-resolution composition and
- * ambient occlusion, can saturate such an adapter and stall the page.
+ * implementation (SwiftShader, llvmpipe, lavapipe). Work that is cheap on a GPU, such as ambient occlusion, can
+ * saturate such an adapter and stall the page.
  *
+ * @param adapter - The adapter, or a device's `adapterInfo` wrapped as `{ info }`.
+ * @returns True for a software adapter; false for hardware or an adapter that reports nothing.
  * @public
  */
 export function isSoftwareGpuAdapter(adapter: GpuAdapterIdentity): boolean {
@@ -113,5 +117,5 @@ export function isSoftwareGpuAdapter(adapter: GpuAdapterIdentity): boolean {
     return true;
   }
 
-  return /swiftshader|llvmpipe|software|cpu/u.test(gpuAdapterIdentity(adapter));
+  return /\b(?:swiftshader|llvmpipe|lavapipe|software|cpu)\b/u.test(gpuAdapterIdentity(adapter));
 }

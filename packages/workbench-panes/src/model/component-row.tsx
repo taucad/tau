@@ -269,7 +269,14 @@ export const ComponentRow = memo(function ComponentRow({
         data-model-component-id={node.id}
         tabIndex={activeRowId === undefined || activeRowId === node.id ? 0 : -1}
         className='flex h-full min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none focus-visible:focus-outline'
-        aria-label={isHidden ? `${node.name}, hidden` : node.name}
+        aria-label={[
+          node.name,
+          isHidden ? 'hidden' : undefined,
+          preview?.status === 'pending' ? 'preview loading' : undefined,
+          preview?.status === 'failed' ? 'preview unavailable' : undefined,
+        ]
+          .filter(Boolean)
+          .join(', ')}
         aria-pressed={isSelected}
         aria-busy={preview?.status === 'pending' || undefined}
         onClick={toggleSelection}
@@ -298,9 +305,6 @@ export const ComponentRow = memo(function ComponentRow({
         <span className='truncate'>
           <HighlightText text={node.name} searchTerm={query} />
         </span>
-        {preview?.status === 'pending' || preview?.status === 'failed' ? (
-          <span className='sr-only'>Preview {preview.status === 'pending' ? 'loading' : 'unavailable'}</span>
-        ) : undefined}
         {materialMatchName ? (
           <span className='truncate text-xs text-muted-foreground'>· {materialMatchName}</span>
         ) : undefined}

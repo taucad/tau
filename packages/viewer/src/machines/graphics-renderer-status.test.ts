@@ -27,4 +27,34 @@ describe('initialized renderer status', () => {
       actor.stop();
     }
   });
+
+  it('should mark only the active canvas presented, and keep it across a repeated report', async () => {
+    const guard = guardActors();
+    const actor = createActor(
+      graphicsMachine.provide({
+        actors: { probeWebGpu: createAsyncLogic({ run: async () => true }) },
+      }),
+      { input: { graphicsBackend: 'webgpu' }, inspect: guard.inspect },
+    );
+    actor.start();
+    try {
+      actor.send({ type: 'rendererPresented', canvasId: 'early' });
+      expect(actor.getSnapshot().context.activeRenderer).toBeUndefined();
+      actor.send({ type: 'rendererInitialized', payload: { canvasId: 'stage', backend: 'webgpu' } });
+      actor.send({ type: 'rendererPresented', canvasId: 'retired' });
+      expect(actor.getSnapshot().context.activeRenderer?.presented).toBeUndefined();
+      actor.send({ type: 'rendererPresented', canvasId: 'stage' });
+      expect(actor.getSnapshot().context.activeRenderer).toEqual({
+        canvasId: 'stage',
+        backend: 'webgpu',
+        presented: true,
+      });
+      actor.send({ type: 'rendererInitialized', payload: { canvasId: 'stage', backend: 'webgpu' } });
+      expect(actor.getSnapshot().context.activeRenderer?.presented).toBe(true);
+      actor.send({ type: 'rendererInitialized', payload: { canvasId: 'replacement', backend: 'webgl' } });
+      expect(actor.getSnapshot().context.activeRenderer).toEqual({ canvasId: 'replacement', backend: 'webgl' });
+    } finally {
+      actor.stop();
+    }
+  });
 });

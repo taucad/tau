@@ -48,24 +48,34 @@ export type ThreeCanvasInstanceProps = ThreeContextProperties & {
  * Reports once that the stage's first frame has reached the screen. The frame's GPU work is submitted when its
  * callbacks run, but the page only paints it once the compositor produces frames again: on a software adapter the
  * browser first compiles every pipeline, which can hold the compositor for seconds. A second animation frame after
- * that submission is the earliest point the page can show, and answer input over, the drawn stage.
+ * that submission is the earliest point the page can show, and answer input over, the drawn stage. A canvas with no
+ * area draws nothing, so observation starts only once it has one.
+ * @param props - The callback to run once the first frame is on screen.
+ * @param props.onPresented - Called once, two animation frames after the first frame with area was submitted.
+ * @returns Nothing; the component only observes.
  */
 function FirstFramePresented({ onPresented }: Readonly<{ onPresented: () => void }>): undefined {
   const invalidate = useThree((state) => state.invalidate);
+  const hasArea = useThree((state) => state.size.width > 0 && state.size.height > 0);
   const submittedRef = useRef(false);
   const requestRef = useRef<number | undefined>(undefined);
   useEffect(() => {
-    // The canvas may have drawn before this observer subscribed; on demand, ask for the one frame it observes.
-    invalidate();
-    return () => {
+    if (hasArea) {
+      // The canvas may have drawn before this observer subscribed; on demand, ask for the one frame it observes.
+      invalidate();
+    }
+  }, [hasArea, invalidate]);
+  useEffect(
+    () => () => {
       if (requestRef.current !== undefined) {
         cancelAnimationFrame(requestRef.current);
       }
-    };
-  }, [invalidate]);
+    },
+    [],
+  );
   // After the final encoding (3.5) and the render-loop observer (5); requests no frame beyond the one above.
-  useFrame(() => {
-    if (submittedRef.current) {
+  useFrame((state) => {
+    if (submittedRef.current || state.size.width === 0 || state.size.height === 0) {
       return;
     }
     submittedRef.current = true;
@@ -224,7 +234,9 @@ export function ThreeCanvasInstance({
   const markPresented = useCallback(() => {
     // The factory is a function: pass it through an updater so React stores it rather than calling it.
     setPresentedFactory(() => glProperty);
-  }, [glProperty]);
+    // The stage reads this to stop being busy (`ViewerStage` sets `aria-busy` on its canvas region).
+    graphicsRef.send({ type: 'rendererPresented', canvasId });
+  }, [canvasId, glProperty, graphicsRef]);
   useEffect(() => {
     if (!initializedRenderer || initializedRenderer.factory !== glProperty || isContextLost || glProperty.isRetired()) {
       return;
@@ -323,9 +335,6 @@ export function ThreeCanvasInstance({
       frameloop='demand'
       resize={resize}
       className={cn('bg-background', className)}
-      // Busy until the first frame is on screen, so assistive technology and automation wait for a drawn stage.
-      aria-busy={!isFirstFramePresented || undefined}
-      data-slot='viewer-canvas'
       onCreated={onCanvasCreated}
     >
       <CanvasRendererLifetime factory={glProperty} />

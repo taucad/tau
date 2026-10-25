@@ -13,14 +13,45 @@ const treeItem = (path: string): Locator =>
   selectors.getByCss(`[data-testid="file-tree-item"][data-file-tree-path="${path}"]`);
 
 /**
- * A deferred automatic preview, as the Model row reports it. The part menu no longer repeats the preview or its status
- * (its header names the part; "the part's image lives in the gallery"), so the row's status and the menu's Retry
- * preview item are where a deferred preview shows.
+ * A deferred automatic preview, as the Model row names it: the row's accessible name carries the status. The part menu
+ * no longer repeats the preview or its status (its header names the part; "the part's image lives in the gallery"), so
+ * the row's name and the menu's Retry preview item are where a deferred preview shows.
  */
 const deferredPreviewStatus = (list: Locator): Locator =>
-  list.getByCss('[data-model-component-row]').getByText('Preview unavailable', { exact: true }).first();
+  list.getByRole('button', { name: /, preview unavailable$/u }).first();
+
+/**
+ * The part menu names the part in its header and carries no image of it: the 80px preview lives on the row, in
+ * Properties and in the gallery.
+ */
+const expectMenuNamesPartWithoutImage = async (partName: string): Promise<void> => {
+  const menu = selectors.getByRole('menu');
+  await target.expectVisible(menu.getByText(partName, { exact: true }).first());
+  await target.expectCount(menu.getByCss('img'), 0);
+};
+
+/** A part's Model row, whose accessible name is the part's name followed by any status ("hidden", "preview loading"). */
+const partRow = (list: Locator, name: string): Locator =>
+  list.getByRole('button', { name: new RegExp(`^${name}(?:, [a-z ]+)*$`, 'u') });
 
 const disclosure = (path: string): Locator => selectors.getByRole('button', { name: path, exact: true });
+/** A unit's body, the region its header discloses. */
+const unitRegion = (path: string): Locator =>
+  selectors.getByRole('region', { name: `Model unit ${path}`, exact: true });
+
+/**
+ * The distance from a unit's body to the disclosure of the unit below it. The 8px unit gap sits above the next header,
+ * not inside the unit's own pane, and the disclosure sits inside the header's 1px border (transparent while closed), so
+ * the expected distance is 8 + 1. The header root deliberately carries no role, so the disclosure is its named edge.
+ */
+const unitGapAbove = async (path: string, nextPath: string): Promise<number> => {
+  const body = await target.boundingBox(unitRegion(path));
+  const next = await target.boundingBox(disclosure(nextPath));
+  if (!body || !next) {
+    throw new Error('The unit body or the next unit header has no geometry.');
+  }
+  return next.y - (body.y + body.height);
+};
 
 const openCommand = async (name: string): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
@@ -70,7 +101,6 @@ const openSecondGeometryUnit = async (path = secondaryPath): Promise<void> => {
 type ModelSurfaceState = {
   readonly bodyBackground: string;
   readonly bodyBottomPadding: number;
-  readonly bodyToNextEdgeGap: number;
   readonly bottomRadius: number;
   readonly filterBackground: string;
   readonly filterHeight: number;
@@ -92,17 +122,11 @@ const readModelSurfaceState = async (header: Locator): Promise<ModelSurfaceState
     const pane = element.closest<HTMLElement>('.dv-pane');
     const body = pane?.querySelector<HTMLElement>('[data-slot="model-unit-surface"]');
     const scroller = body?.querySelector<HTMLElement>('[data-slot="model-unit-scroller"]');
-    const paneBody = body?.closest<HTMLElement>('.dv-pane-body');
-    /* The unit gap sits above the next unit's header, or under the last unit at the foot of the Paneview. */
-    const nextHeader = pane
-      ?.closest('.dv-view')
-      ?.nextElementSibling?.querySelector<HTMLElement>('[data-slot="paneview-header"]');
-    const paneviewRoot = pane?.closest<HTMLElement>('.dv-pane-container')?.parentElement;
     const panel = document.querySelector<HTMLElement>('[data-slot="model-panel-body"]');
     const toolbar = document.querySelector<HTMLElement>('[data-slot="model-filter"]');
     const filter = document.querySelector<HTMLInputElement>('[aria-label="Filter parts"]');
     const row = body?.querySelector<HTMLElement>('[data-model-component-row]');
-    if (!headerRoot || !body || !scroller || !paneBody || !paneviewRoot || !panel || !toolbar || !filter || !row) {
+    if (!headerRoot || !body || !scroller || !panel || !toolbar || !filter || !row) {
       throw new Error('Model attached surface was incomplete.');
     }
 
@@ -114,8 +138,6 @@ const readModelSurfaceState = async (header: Locator): Promise<ModelSurfaceState
     return {
       bodyBackground: getComputedStyle(body).backgroundColor,
       bodyBottomPadding: Number.parseFloat(scrollerStyle.paddingBottom),
-      bodyToNextEdgeGap:
-        (nextHeader ?? paneviewRoot).getBoundingClientRect()[nextHeader ? 'top' : 'bottom'] - bodyBounds.bottom,
       bottomRadius: Number.parseFloat(getComputedStyle(body).borderBottomLeftRadius),
       filterBackground: getComputedStyle(filter).backgroundColor,
       filterHeight: filterBounds.height,
@@ -181,7 +203,8 @@ test('keeps the Model hierarchy filterable, accessible, and reorderable through 
   const lightSurface = await readModelSurfaceState(main);
   expect(lightSurface.seamDelta).toBeLessThanOrEqual(1);
   expect(lightSurface.horizontalEdgeDelta).toBeLessThanOrEqual(1);
-  expect(lightSurface.bodyToNextEdgeGap).toBeCloseTo(8, 0);
+  /* The 8px unit gap, plus the next header's 1px border around its disclosure. */
+  expect(await unitGapAbove(mainPath, secondaryPath)).toBeCloseTo(8 + 1, 0);
   expect(lightSurface.bodyBottomPadding).toBe(8);
   expect(lightSurface.bottomRadius).toBeGreaterThan(0);
   expect(lightSurface.rowRadius).toBeGreaterThan(0);
@@ -410,7 +433,7 @@ test('shows decoded part previews in the real Model rows and selected Properties
       decoded: element.naturalWidth > 0,
     };
   });
-  expect(rowImageState).toEqual({ width: 20, height: 20, decoded: true });
+  expect(rowImageState).toEqual({ width: 80, height: 80, decoded: true });
   const cold = await target.evaluate(() => {
     const state = (
       globalThis as typeof globalThis & {
@@ -464,20 +487,18 @@ test('shows decoded part previews in the real Model rows and selected Properties
       decoded: element.naturalWidth > 0,
     };
   });
-  expect(propertiesImageState).toEqual({ width: 40, height: 40, decoded: true });
+  expect(propertiesImageState).toEqual({ width: 80, height: 80, decoded: true });
   expect(await target.evaluateLocator(propertiesImage, (image) => (image as HTMLImageElement).alt)).toMatch(
     /^Rendered /u,
   );
 
   await target.hover(part);
   const action = list.getByRole('button', { name: /^Actions for /u }).first();
+  const partName = ((await target.getAttribute(action, 'aria-label')) ?? '').replace(/^Actions for /u, '');
+  expect(partName).not.toBe('');
   await target.click(action);
   await target.expectVisible(selectors.getByRole('menuitem', { name: /add to chat/iu }));
-  const menuPreview = selectors.getByRole('menu').getByCss('img[src^="blob:"]').first();
-  await target.expectVisible(menuPreview);
-  expect(
-    await target.evaluateLocator(menuPreview, (image) => (image as HTMLImageElement).getBoundingClientRect().width),
-  ).toBe(24);
+  await expectMenuNamesPartWithoutImage(partName);
   await target.writeArtifact(`c2-part-preview-${coldMetrics.profile}.json`, JSON.stringify(coldMetrics, undefined, 2));
   await target.screenshot(selectors.getByCss('body'), 'model-pane-part-previews.png');
   const adapter = await target.qualifyWebGpu(coldMetrics.profile);
@@ -905,7 +926,7 @@ test('admits previews for newly mounted virtual Model rows after scrolling', asy
   ).toBe(true);
   const filter = selectors.getByRole('searchbox', { name: 'Filter parts' });
   await target.fill(filter, 'Preview part 1');
-  const first = list.getByRole('button', { name: 'Preview part 1', exact: true });
+  const first = partRow(list, 'Preview part 1');
   await target.expectVisible(first);
   await target.click(first);
   await target.hover(first);
@@ -922,7 +943,7 @@ test('admits previews for newly mounted virtual Model rows after scrolling', asy
     }
     scroller.scrollTop = scroller.scrollHeight;
   });
-  const last = list.getByRole('button', { name: 'Preview part 48', exact: true });
+  const last = partRow(list, 'Preview part 48');
   await target.expectVisible(last, 60_000);
   const lastImage = last.getByCss('img[src^="blob:"]');
   await target.expectVisible(lastImage, 60_000);
@@ -931,12 +952,10 @@ test('admits previews for newly mounted virtual Model rows after scrolling', asy
   await target.expectVisible(propertiesImage, 60_000);
   expect(
     await target.evaluateLocator(propertiesImage, (image) => (image as HTMLImageElement).getBoundingClientRect().width),
-  ).toBe(40);
+  ).toBe(80);
   await target.hover(last);
   await target.click(list.getByRole('button', { name: 'Actions for Preview part 48', exact: true }));
-  const menuImage = selectors.getByRole('menu').getByCss('img[src^="blob:"]').first();
-  await target.expectVisible(menuImage);
-  expect(await target.evaluateLocator(menuImage, (image) => image.getBoundingClientRect().width)).toBe(24);
+  await expectMenuNamesPartWithoutImage('Preview part 48');
   await target.writeArtifact(
     'c2-virtual-model-preview-smoke.json',
     JSON.stringify(

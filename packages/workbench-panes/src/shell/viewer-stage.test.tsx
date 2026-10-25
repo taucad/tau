@@ -103,6 +103,43 @@ describe('ViewerStage', () => {
     });
   });
 
+  describe('readiness', () => {
+    it('should keep the canvas region busy until the active canvas reports its first frame on screen', () => {
+      const { region, graphicsRef } = renderStage();
+      expect(region).toHaveAttribute('aria-busy', 'true');
+
+      act(() => {
+        graphicsRef.send({ type: 'rendererInitialized', payload: { canvasId: 'stage', backend: 'webgpu' } });
+      });
+      expect(region).toHaveAttribute('aria-busy', 'true');
+      act(() => {
+        graphicsRef.send({ type: 'rendererPresented', canvasId: 'stage' });
+      });
+      expect(region).not.toHaveAttribute('aria-busy');
+
+      // A replacement canvas (a backend switch or context loss) is busy again until it presents.
+      act(() => {
+        graphicsRef.send({ type: 'rendererInitialized', payload: { canvasId: 'replacement', backend: 'webgl' } });
+      });
+      expect(region).toHaveAttribute('aria-busy', 'true');
+    });
+
+    it('should not report busy when the host draws no canvas', () => {
+      graphics = createViewerGraphics();
+      const graphicsRef = graphics;
+      render(
+        <KeyboardProvider>
+          <TooltipProvider>
+            <GraphicsProvider graphicsRef={graphicsRef}>
+              <ViewerStage graphicsRef={graphicsRef} regionId='viewer-canvas-none' renderCanvas={() => null} />
+            </GraphicsProvider>
+          </TooltipProvider>
+        </KeyboardProvider>,
+      );
+      expect(screen.getByRole('application', { name: 'CAD canvas' })).not.toHaveAttribute('aria-busy');
+    });
+  });
+
   describe('hover label', () => {
     it('should name the hovered part beside the pointer and hide it when the pointer leaves', () => {
       const { region, layout } = renderStage();

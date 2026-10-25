@@ -231,8 +231,11 @@ export interface GraphicsContext {
   webGpuAvailable: boolean;
   /** Capability-derived candidate; initialization can still fall back to WebGL. */
   resolvedGraphicsBackend: ResolvedGraphicsBackend;
-  /** Successfully initialized canvas; cleared on matching loss or teardown, never persisted. */
-  activeRenderer: Readonly<{ canvasId: string; backend: ResolvedGraphicsBackend }> | undefined;
+  /**
+   * Successfully initialized canvas; cleared on matching loss or teardown, never persisted. `presented` turns true once
+   * its first frame is on screen: the stage is busy until then.
+   */
+  activeRenderer: Readonly<{ canvasId: string; backend: ResolvedGraphicsBackend; presented?: boolean }> | undefined;
 
   // Section view state
   isSectionViewActive: boolean;
@@ -321,6 +324,8 @@ export type GraphicsEvent =
   | { type: 'setGraphicsBackendPreference'; payload: GraphicsBackendPreference }
   | { type: 'rendererInitialized'; payload: NonNullable<GraphicsContext['activeRenderer']> }
   | { type: 'rendererRemoved'; canvasId: string }
+  /** The canvas's first frame is on screen. */
+  | { type: 'rendererPresented'; canvasId: string }
   // Section view events
   /** Turning the section on with no cuts adds the default plane, removing the side `viewDirection` faces. */
   | { type: 'setSectionViewActive'; payload: boolean; viewDirection?: SectionVector }
@@ -992,7 +997,23 @@ const graphicsMachineDefinition = setup({
           }),
         },
 
-        rendererInitialized: { context: ({ event }) => ({ activeRenderer: event.payload }) },
+        rendererInitialized: {
+          context: ({ context, event }) => ({
+            // A repeated report from the same canvas keeps what it has already presented.
+            activeRenderer:
+              context.activeRenderer?.canvasId === event.payload.canvasId && context.activeRenderer.presented
+                ? { ...event.payload, presented: true }
+                : event.payload,
+          }),
+        },
+        rendererPresented: {
+          context: ({ context, event }) => ({
+            activeRenderer:
+              context.activeRenderer?.canvasId === event.canvasId
+                ? { ...context.activeRenderer, presented: true }
+                : context.activeRenderer,
+          }),
+        },
         rendererRemoved: {
           context: ({ context, event }) => ({
             activeRenderer: context.activeRenderer?.canvasId === event.canvasId ? undefined : context.activeRenderer,

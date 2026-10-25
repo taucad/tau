@@ -88,6 +88,21 @@ it('composes with AO and camera preparation on a hardware WebGPU adapter', async
   }
 });
 
+it('composes with AO and camera preparation when the device reports no adapter identity', async () => {
+  const { PostProcessing } = await import('#graphics/three/post-processing.jsx');
+  mocks.backend = 'webgpu';
+  mocks.webGpuProperties.mockClear();
+  mocks.gl.backend.device.adapterInfo = undefined;
+  try {
+    render(<PostProcessing />);
+    expect(mocks.webGpuProperties).toHaveBeenLastCalledWith(
+      expect.objectContaining({ aoAllowed: true, speculativePreparation: true }),
+    );
+  } finally {
+    mocks.backend = 'webgl';
+  }
+});
+
 it.each([
   { adapter: 'the fallback adapter', adapterInfo: { vendor: 'google', architecture: '', isFallbackAdapter: true } },
   { adapter: 'SwiftShader', adapterInfo: { vendor: 'google', architecture: 'swiftshader' } },

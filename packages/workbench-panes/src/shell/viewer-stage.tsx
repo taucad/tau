@@ -186,6 +186,9 @@ export function ViewerStage({
   const hasArtifact = useSelector(graphicsRef, (state) => state.context.artifact !== undefined);
   const hasModel = isModelShown ?? hasArtifact;
   const unitId = useSelector(graphicsRef, (state) => state.context.modelInteractionUnitId);
+  // The canvas reports its first frame on screen; until then the region is busy, so assistive technology and
+  // automation wait for a drawn stage. On a software adapter that first frame can take seconds of pipeline compiling.
+  const isCanvasPresented = useSelector(graphicsRef, (state) => state.context.activeRenderer?.presented === true);
 
   const handlePointerMove = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
@@ -207,6 +210,13 @@ export function ViewerStage({
   }, []);
 
   const failure = status?.kind === 'failed' ? status : undefined;
+  const canvas = renderCanvas({
+    gizmoContainer: `#${regionId}`,
+    eventSource: regionRef as React.RefObject<HTMLElement>,
+    onComponentSecondaryPointerCandidate: partMenu?.onComponentSecondaryPointerCandidate,
+  });
+  // A host that draws no canvas here has no frame to wait for.
+  const isBusy = canvas !== null && canvas !== undefined && !isCanvasPresented;
 
   return (
     <div
@@ -225,17 +235,14 @@ export function ViewerStage({
         data-testid='cad-viewer-canvas-region'
         role='application'
         aria-label={regionLabel}
+        aria-busy={isBusy || undefined}
         tabIndex={partMenu === undefined ? undefined : 0}
         className='relative min-h-0 flex-1 overflow-hidden focus-visible:focus-outline'
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
         onPointerCancel={handlePointerLeave}
       >
-        {renderCanvas({
-          gizmoContainer: `#${regionId}`,
-          eventSource: regionRef as React.RefObject<HTMLElement>,
-          onComponentSecondaryPointerCandidate: partMenu?.onComponentSecondaryPointerCandidate,
-        })}
+        {canvas}
         {failure === undefined ? null : (
           <RuntimeErrorOverlay
             message={failure.message}

@@ -58,7 +58,12 @@ const orthographicCamera = new OrthographicCamera();
 const setClipPlanes = vi.fn();
 const cameraRig = { activeCamera: rigCamera, perspectiveCamera: rigCamera, orthographicCamera, setClipPlanes };
 /** Frame callbacks registered inside the stub root, run by a test as R3F's loop would. */
-const frameCallbacks = vi.hoisted((): Array<{ callback: () => void; priority: number | undefined }> => []);
+type StubFrameState = { size: { width: number; height: number } };
+const frameCallbacks = vi.hoisted(
+  (): Array<{ callback: (state: StubFrameState) => void; priority: number | undefined }> => [],
+);
+/** The stub root's size as R3F reports it; a test sets it to zero. */
+const stubSize = vi.hoisted(() => ({ width: 800, height: 600 }));
 /** Frame requests made inside the stub root. */
 const stubInvalidate = vi.hoisted(() => vi.fn());
 const reportRenderer = vi.hoisted(() => vi.fn<(event: GraphicsEvent) => void>());
@@ -102,9 +107,6 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
     readonly eventPrefix?: ReactThreeFiber.CanvasProps['eventPrefix'];
     readonly eventSource?: ReactThreeFiber.CanvasProps['eventSource'];
     readonly onCreated?: (state: StubRootState) => void;
-    // oxlint-disable-next-line react-js/boolean-prop-naming -- R3F forwards the ARIA attribute's own name.
-    readonly 'aria-busy'?: boolean;
-    readonly 'data-slot'?: string;
   };
 
   function StubCanvas({
@@ -115,8 +117,6 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
     eventSource,
     gl: glFactory,
     onCreated,
-    'aria-busy': ariaBusy,
-    'data-slot': dataSlot,
   }: StubCanvasProps): JSX.Element {
     latestCanvasCamera = camera;
     latestCanvasGl = glFactory;
@@ -183,14 +183,10 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
       queueMicrotask(microtaskHandle);
     }, [eventPrefix, onCreated]);
 
-    return (
-      <div data-testid='stub-canvas' aria-busy={ariaBusy} data-slot={dataSlot}>
-        {children}
-      </div>
-    );
+    return <div data-testid='stub-canvas'>{children}</div>;
   }
 
-  function useStubFrame(callback: () => void, priority?: number): void {
+  function useStubFrame(callback: (state: StubFrameState) => void, priority?: number): void {
     useEffect(() => {
       const entry = { callback, priority };
       frameCallbacks.push(entry);
@@ -200,8 +196,9 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
     }, [callback, priority]);
   }
 
-  const useStubThree = <Selected,>(select: (state: { invalidate: typeof stubInvalidate }) => Selected): Selected =>
-    select({ invalidate: stubInvalidate });
+  const useStubThree = <Selected,>(
+    select: (state: { invalidate: typeof stubInvalidate; size: typeof stubSize }) => Selected,
+  ): Selected => select({ invalidate: stubInvalidate, size: { ...stubSize } });
 
   return { ...actual, Canvas: StubCanvas, useFrame: useStubFrame, useThree: useStubThree };
 });
@@ -281,6 +278,8 @@ describe('ThreeCanvasInstance', () => {
     rendererFailure.error = undefined;
     frameCallbacks.length = 0;
     stubInvalidate.mockClear();
+    stubSize.width = 800;
+    stubSize.height = 600;
   });
 
   afterEach(() => {
@@ -553,27 +552,69 @@ describe('ThreeCanvasInstance', () => {
     expect(screen.getByTestId('actor-bridge')).toBeInTheDocument();
   });
 
-  it('marks the stage busy until its first frame has reached the screen, then observes no further frames', async () => {
+  it('reports the first frame only once it has reached the screen, then observes no further frames', async () => {
     render(<KeyedThreeCanvas canvasKey='first-frame' />);
     await screen.findByTestId('actor-bridge');
-    const stage = screen.getByTestId('stub-canvas');
-    expect(stage).toHaveAttribute('data-slot', 'viewer-canvas');
-    expect(stage).toHaveAttribute('aria-busy', 'true');
     const observer = frameCallbacks.find(({ priority }) => priority === 6);
     expect(observer).toBeDefined();
     // The canvas may have drawn before the observer subscribed: it asks for exactly one frame to observe.
     expect(stubInvalidate).toHaveBeenCalledTimes(1);
+    const presented = (): GraphicsEvent[] =>
+      reportRenderer.mock.calls.map(([event]) => event).filter((event) => event.type === 'rendererPresented');
 
-    // Submitting the frame is not presenting it: the stage stays busy until two animation frames later.
+    // Submitting the frame is not presenting it: nothing is reported until two animation frames later.
     act(() => {
-      observer?.callback();
+      observer?.callback({ size: stubSize });
     });
-    expect(stage).toHaveAttribute('aria-busy', 'true');
+    expect(presented()).toEqual([]);
     await waitFor(() => {
-      expect(stage).not.toHaveAttribute('aria-busy');
+      expect(presented()).toHaveLength(1);
+    });
+    const initialized = reportRenderer.mock.calls.find(([event]) => event.type === 'rendererInitialized')?.[0];
+    expect(presented()[0]).toEqual({
+      type: 'rendererPresented',
+      canvasId: initialized?.type === 'rendererInitialized' ? initialized.payload.canvasId : undefined,
     });
     expect(frameCallbacks.some(({ priority }) => priority === 6)).toBe(false);
     expect(stubInvalidate).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for the canvas to have area before it observes a frame', async () => {
+    stubSize.width = 0;
+    render(<KeyedThreeCanvas canvasKey='no-area' />);
+    await screen.findByTestId('actor-bridge');
+    const observer = frameCallbacks.find(({ priority }) => priority === 6);
+    expect(stubInvalidate).not.toHaveBeenCalled();
+    const frame = vi.spyOn(globalThis, 'requestAnimationFrame');
+    act(() => {
+      observer?.callback({ size: { width: 0, height: 600 } });
+    });
+    expect(frame).not.toHaveBeenCalled();
+    act(() => {
+      observer?.callback({ size: { width: 800, height: 600 } });
+    });
+    expect(frame).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels the pending animation frame when it unmounts between the two frames', async () => {
+    const view = render(<KeyedThreeCanvas canvasKey='unmount-between' />);
+    await screen.findByTestId('actor-bridge');
+    const observer = frameCallbacks.find(({ priority }) => priority === 6);
+    const callbacks: FrameRequestCallback[] = [];
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      callbacks.push(callback);
+      return callbacks.length;
+    });
+    const cancel = vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => undefined);
+    act(() => {
+      observer?.callback({ size: stubSize });
+    });
+    // The first animation frame arrives and requests the second; the canvas unmounts before it.
+    callbacks[0]?.(0);
+    expect(callbacks).toHaveLength(2);
+    view.unmount();
+    expect(cancel).toHaveBeenCalledWith(2);
+    expect(reportRenderer.mock.calls.some(([event]) => event.type === 'rendererPresented')).toBe(false);
   });
 
   it('forwards explicit Canvas event routing props to R3F', async () => {

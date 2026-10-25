@@ -124,6 +124,11 @@ test('restores a GitHub authorization return and routes sidebar Share to the sel
     );
   });
 
+  /* The project route writes its resolved chat back to the URL; read project A only once that has landed. */
+  await target.waitFor(() => {
+    const chat = new URL(location.href).searchParams.get('chat');
+    return chat !== null && chat !== 'missing';
+  });
   const projectA = new URL(await target.currentUrl());
   expect(projectA.searchParams.get('chat')).not.toBeNull();
 

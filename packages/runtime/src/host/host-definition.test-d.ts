@@ -1,7 +1,8 @@
 import { expectTypeOf, test } from 'vitest';
-import { connectComputeStoreChannel, defineRuntime } from '@taucad/runtime/host';
+import { connectComputeStoreChannel, defineRuntime, fromComputeStoreChannel } from '@taucad/runtime/host';
 import { definePlugin } from '@taucad/runtime/plugin';
 import type { ComputeStore, KernelPlugin } from '@taucad/runtime';
+import type { ComputeBinding } from '@taucad/runtime/types';
 
 test('host composition retains exact CAD tuples without a false dynamic witness', () => {
   const toolkit = definePlugin({
@@ -27,4 +28,10 @@ test('host composition can consume a private cross-realm compute capability', ()
   const client = connectComputeStoreChannel(channel.port1);
   expectTypeOf(client.store).toEqualTypeOf<ComputeStore>();
   client.dispose();
+});
+
+test('host composition can bind a cross-realm authority the runtime reaches directly', () => {
+  const store = fromComputeStoreChannel(() => new MessageChannel().port1);
+  expectTypeOf(store).toEqualTypeOf<ComputeStore>();
+  expectTypeOf<{ readonly mode: 'durable'; readonly store: typeof store }>().toMatchTypeOf<ComputeBinding>();
 });

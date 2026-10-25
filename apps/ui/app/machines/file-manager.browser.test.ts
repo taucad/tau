@@ -8,6 +8,7 @@ import {
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
 import { connectComputeStoreChannel } from '@taucad/runtime/host';
 import { createRuntimeClient } from '@taucad/runtime';
+import type { ComputeBinding } from '@taucad/runtime/types';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { defineKernel } from '@taucad/runtime/kernel';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
@@ -20,9 +21,11 @@ const verifyPublicReuse = async (
     existingStore?: ReturnType<typeof connectComputeStoreChannel>['store'];
     expectedSolves?: number;
     expectRevoked?: boolean;
+    /** Bind the store the way the editor does, from the file-manager machine's `openComputeBinding`. */
+    openBinding?: () => { readonly compute: ComputeBinding; readonly dispose: () => void };
   } = {},
 ): Promise<void> => {
-  const { existingStore, expectedSolves = 1, expectRevoked = false } = options;
+  const { existingStore, expectedSolves = 1, expectRevoked = false, openBinding } = options;
   let solves = 0;
   let publication: unknown;
   const kernel = defineKernel({
@@ -96,17 +99,30 @@ const verifyPublicReuse = async (
     },
   })();
   const createClient = (store = existingStore) => {
-    const connection = store ? undefined : connectComputeStoreChannel(openPort());
+    const connection = store ? undefined : (openBinding?.() ?? connectComputeStoreChannel(openPort()));
+    const compute: ComputeBinding =
+      connection && 'compute' in connection
+        ? connection.compute
+        : { mode: 'durable', store: store ?? connection!.store };
     const client = createRuntimeClient({
       transport: inProcessTransport({
         runtime: defineRuntime({ kernels: [kernel] }),
         fileSystem: fromMemoryFs(),
-        compute: { mode: 'durable', store: store ?? connection!.store },
+        compute,
       }),
     });
     return { client, connection };
   };
   const producer = createClient();
+  /* A best-effort miss publishes once the worker is idle after delivery (#1009). */
+  let stored = 0;
+  producer.client.on('telemetry', ({ entries }) => {
+    for (const entry of entries) {
+      if (entry.name === 'kernel.compute.publication' && entry.detail?.['status'] === 'stored') {
+        stored += 1;
+      }
+    }
+  });
   const producerDocument = producer.client.open({ source: { files: { 'main.compute': 'producer' } } });
   const evaluated = await producerDocument.evaluation();
   const rendered = await producerDocument.view('model').rendering();
@@ -118,7 +134,8 @@ const verifyPublicReuse = async (
     expect(evaluated.superseded || !evaluated.evaluation.success).toBe(true);
     expect(publication).toBeUndefined();
   } else if (expectedSolves === 1) {
-    expect(publication).toMatchObject({ status: 'stored' });
+    expect(publication).toMatchObject({ status: 'deferred' });
+    await expect.poll(() => stored, { timeout: 10_000 }).toBe(1);
   } else {
     expect(publication).toBeUndefined();
   }
@@ -422,11 +439,18 @@ it('owns durable compute by admitted project and preserves generation across aut
     leader.dispose();
     follower.dispose();
     await verifyPublicReuse(() => first.ready.context.openComputeStorePort!(projectId));
+    /* The editor's binding: the runtime receives the file-manager worker's own port, and a reload still hits. */
+    await verifyPublicReuse(() => first.ready.context.openComputeStorePort!(projectId), 'editor-binding', {
+      openBinding: () => first.ready.context.openComputeBinding!(projectId),
+    });
     const before = await first.ready.context.computeControl!(projectId, 'inspect', {});
     const cleared = await first.ready.context.computeControl!(projectId, 'clear', {});
     expect(Number(cleared.generation)).toBe(Number(before.generation) + 1);
     clearedGeneration = Number(cleared.generation);
     await verifyPublicReuse(() => first.ready.context.openComputeStorePort!(projectId), 'after-clear');
+    await verifyPublicReuse(() => first.ready.context.openComputeStorePort!(projectId), 'editor-binding-after-clear', {
+      openBinding: () => first.ready.context.openComputeBinding!(projectId),
+    });
 
     const projectB = `proj_${crypto.randomUUID().replaceAll('-', '').slice(0, 21)}`;
     const oldA = connectComputeStoreChannel(first.ready.context.openComputeStorePort!(projectId));

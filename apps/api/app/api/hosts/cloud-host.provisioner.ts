@@ -160,6 +160,8 @@ export const createDockerCloudHostProvisioner = (options: DockerCloudHostProvisi
             `TAU_HOST_PROJECT_ID=${spec.projectId}`,
             `TAU_API_URL=${options.apiUrl ?? spec.apiUrl}`,
             `TAU_HOST_OWNER_ID=${environmentValue(spec.ownerId)}`,
+            /* The cloud host container is a Tau Cloud host for runtime telemetry (route `cloud`); no build value says so. */
+            'TAU_CLOUD_HOST=1',
             ...(spec.ownerName === undefined ? [] : [`TAU_HOST_OWNER_NAME=${environmentValue(spec.ownerName)}`]),
             '',
           ].join('\n'),

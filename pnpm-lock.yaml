@@ -3458,10 +3458,11 @@ importers:
         version: 0.35.5(@types/node@24.0.15)
 
   libs/telemetry:
-    devDependencies:
+    dependencies:
       '@taucad/events':
         specifier: workspace:*
         version: link:../events
+    devDependencies:
       '@taucad/types':
         specifier: workspace:*
         version: link:../types
@@ -4142,6 +4143,9 @@ importers:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../runtime
+      '@taucad/telemetry':
+        specifier: workspace:*
+        version: link:../../libs/telemetry
       '@taucad/types':
         specifier: workspace:*
         version: link:../../libs/types

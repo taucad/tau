@@ -55,6 +55,8 @@ export type OpenSharedMachineHostOptions = Readonly<{
   actorId: string;
   /** The store; `<config>/machines` unless a test names another. */
   storeRoot?: string | undefined;
+  /** Told once per new machine operation, for runtime telemetry; counts and closed codes only. */
+  onOperation?: CreateNodeMachineHostInput['onOperation'];
 }>;
 
 /**
@@ -96,6 +98,7 @@ export const openSharedMachineHost = async (
       onError: (error) => {
         options.onWarning({ code: 'MACHINE_HOST', message: error instanceof Error ? error.message : String(error) });
       },
+      ...(options.onOperation === undefined ? {} : { onOperation: options.onOperation }),
     });
   } catch (error) {
     if ((error as { readonly code?: unknown }).code !== 'AUTHORITY_ALREADY_OWNED') {

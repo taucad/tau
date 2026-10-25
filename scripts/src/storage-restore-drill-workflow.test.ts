@@ -74,7 +74,8 @@ describe('storage restore drill workflow', () => {
     expect(stop.run).toContain('flyctl machine stop "$MACHINE_ID"');
   });
 
-  const owner = 'user_A1b2C3';
+  // Staging owner ids are the auth library's 32-character ids, with no prefix.
+  const owner = 'ac6oGRsoG7rNJf0YZ5jWz79teN5yITPm';
   const project = 'proj_Z9y8X7';
   const sha = 'a'.repeat(64);
   const node = 'node /app/dist/maintenance-command.js';
@@ -103,9 +104,9 @@ describe('storage restore drill workflow', () => {
     ['a ref other than main', { REF: 'refs/heads/feature' }],
     ['a shell metacharacter in the project', { PROJECT_ID: 'proj_abc;id' }],
     ['a command substitution in the owner', { OWNER_ID: 'user_$(id)' }],
+    ['a flag in the owner', { OWNER_ID: '--list' }],
     ['a newline in the owner', { OWNER_ID: `${owner}\nINJECTED=1` }],
     ['a project without its prefix', { PROJECT_ID: 'abc123' }],
-    ['an owner without its prefix', { OWNER_ID: 'org_abc123' }],
     ['a negative generation floor', { MODE: 'dry-run', GENERATION_FLOOR: '-1' }],
     ['a flag smuggled in a generation', { MODE: 'restore', GENERATION: '3 --list' }],
     ['a confirmation without a generation', { MODE: 'restore', CONFIRM_SNAPSHOT: sha }],

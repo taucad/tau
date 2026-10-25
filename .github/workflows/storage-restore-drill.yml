@@ -45,7 +45,7 @@ on:
           - owner-dry-run
           - owner-restore
       owner_id:
-        description: 'Owner (user) id, user_<alphanumerics>'
+        description: 'Owner id (project.owner_id, letters, digits and underscores)'
         required: true
         type: string
       project_id:
@@ -120,7 +120,7 @@ jobs:
           case "$MODE" in
             restore | owner-restore) [ "$RUN_ATTEMPT" = 1 ] || fail 'A real restore is never re-run; read the failed run, then dispatch again.' ;;
           esac
-          [[ "$OWNER_ID" =~ ^user_[A-Za-z0-9]{1,59}$ ]] || fail 'owner_id must be user_ followed by letters and digits.'
+          [[ "$OWNER_ID" =~ ^[A-Za-z0-9_]{1,64}$ ]] || fail 'owner_id must be letters, digits and underscores, as in project.owner_id.'
           [[ "$ACTOR" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]] || fail 'The dispatching actor is not a plain GitHub login.'
           case "$TRANSPORT" in ssh | exec) ;; *) fail 'transport must be ssh or exec.' ;; esac
           if [ -n "$GENERATION_FLOOR" ]; then

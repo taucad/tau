@@ -12,6 +12,7 @@ import type { SigningKey } from '#api/git/forwarding/contract/keys.js';
 import { ReplayGuard } from '#api/git/forwarding/contract/replay-guard.js';
 import type { StorageGitService } from '#api/git/worker/storage-git.service.js';
 import { createStorageRequestHandler } from '#api/git/worker/storage-server.js';
+import type { StorageServerOptions } from '#api/git/worker/storage-server.js';
 
 /**
  * DC1 acceptance, over HTTP: tau-storage refuses a bad grant **before it reads
@@ -157,7 +158,10 @@ const sendUnfinished = async (
   });
 
 /** A second tau-storage whose verifier is at contract version `version`. */
-const serve = async (version: number): Promise<{ url: string; close: () => Promise<void> }> => {
+const serve = async (
+  version: number,
+  extra?: Partial<StorageServerOptions>,
+): Promise<{ url: string; close: () => Promise<void> }> => {
   const mixed = createServer(
     createStorageRequestHandler({
       service: service as unknown as StorageGitService,
@@ -166,6 +170,7 @@ const serve = async (version: number): Promise<{ url: string; close: () => Promi
       logger,
       stopping: () => false,
       grantVersion: version,
+      ...extra,
     }),
   );
   await new Promise<void>((resolve) => {
@@ -333,5 +338,59 @@ describe('git-read sessions on the wire (DC1 review S1)', () => {
     expect(await post({ session: 'tau-storage-lease:s1', end: true })).toBe(200);
     expect(service.endReadSession).toHaveBeenCalledWith(expect.objectContaining({ project }), 'tau-storage-lease:s1');
     expect(service.gitRead).not.toHaveBeenCalled();
+  });
+});
+
+describe('tau-storage readiness owns the git probe (DC3)', () => {
+  it('should refuse readiness on a Machine with no git, and pass on one with it', async () => {
+    const missing = await serve(grantContractVersion, { gitVersion: async () => undefined });
+    const present = await serve(grantContractVersion, { gitVersion: async () => 'git version 2.39.5' });
+    try {
+      const refused = await fetch(new URL('/health/ready', missing.url));
+      expect(refused.status).toBe(503);
+      expect(await refused.text()).toBe('git is not installed');
+      const ready = await fetch(new URL('/health/ready', present.url));
+      expect(ready.status).toBe(200);
+      /* Liveness stays process-local: a missing binary drains, it does not restart. */
+      const live = await fetch(new URL('/health/live', missing.url));
+      expect(live.status).toBe(200);
+    } finally {
+      await missing.close();
+      await present.close();
+    }
+  });
+});
+
+describe('tau-storage names itself and its members for the router (DC2)', () => {
+  it('should answer the deployed members and name the answering Machine on every response', async () => {
+    const fleet = await serve(grantContractVersion, {
+      member: '5683d5e1b46e18',
+      members: async () => ['5683d5e1b46e18', 'e2865123a62986'],
+    });
+    try {
+      const listed = await fetch(new URL('/v1/members', fleet.url));
+      expect(listed.status).toBe(200);
+      expect(await listed.json()).toEqual({ members: ['5683d5e1b46e18', 'e2865123a62986'] });
+      expect(listed.headers.get('tau-storage-member')).toBe('5683d5e1b46e18');
+      const ready = await fetch(new URL('/health/ready', fleet.url));
+      await ready.arrayBuffer();
+      expect(ready.headers.get('tau-storage-member')).toBe('5683d5e1b46e18');
+      /* A refused grant names the Machine too, so a spill is visible from the API. */
+      const refused = await fetch(new URL(storagePath(project, 'derive'), fleet.url), { method: 'POST' });
+      expect(refused.status).toBe(401);
+      expect(refused.headers.get('tau-storage-member')).toBe('5683d5e1b46e18');
+    } finally {
+      await fleet.close();
+    }
+  });
+
+  it('should answer no members when none are configured', async () => {
+    const lone = await serve(grantContractVersion);
+    try {
+      const listed = await fetch(new URL('/v1/members', lone.url));
+      expect(await listed.json()).toEqual({ members: [] });
+    } finally {
+      await lone.close();
+    }
   });
 });

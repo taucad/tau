@@ -199,7 +199,7 @@ describe('the chat handoff an ACP prompt carries', () => {
   const marked = (
     id: string,
     content: string,
-    session: Readonly<{ acpSessionId?: string; hostId?: string }> = {},
+    session: Readonly<{ acpSessionId?: string; hostId?: string; deviceId?: string }> = {},
   ): ProviderMessage => ({
     id,
     role: 'user',
@@ -261,6 +261,41 @@ describe('the chat handoff an ACP prompt carries', () => {
     expect(text).toContain('b continues');
     expect(text).toContain('b two');
     expect(text).not.toContain('a opens');
+  });
+
+  /*
+   * Two desktops share the host id `desktop`: a bare marker continues the session its own device named, never the one
+   * another device named last under the same host id.
+   */
+  it.each([
+    { session: 'session-2', carried: ['d1 again', 'one again'], seen: ['d2 opens'] },
+    /* Its third turn's handoff carried the second: it has seen everything up to there. */
+    { session: 'session-1', carried: [], seen: ['d2 opens', 'd1 again'] },
+  ])('should credit a bare marker to its own device when two desktops share a host id ($session)', (expected) => {
+    const desktop = (deviceId: string, acpSessionId?: string) => ({
+      hostId: 'desktop',
+      deviceId,
+      ...(acpSessionId === undefined ? {} : { acpSessionId }),
+    });
+    const current = marked('turn-4', 'next', desktop('device-2'));
+    const transcript = [
+      marked('turn-1', 'd1 opens', desktop('device-1', 'session-1')),
+      said('answer-1', 'assistant', 'one'),
+      marked('turn-2', 'd2 opens', desktop('device-2', 'session-2')),
+      said('answer-2', 'assistant', 'two'),
+      marked('turn-3', 'd1 again', desktop('device-1')),
+      said('answer-3', 'assistant', 'one again'),
+      current,
+    ];
+
+    const text = textOf(handoffBlocks(turnOf(transcript, current), expected.session));
+
+    for (const words of expected.carried) {
+      expect(text).toContain(words);
+    }
+    for (const words of expected.seen) {
+      expect(text).not.toContain(words);
+    }
   });
 
   /* Only the person's words are carried as theirs: user messages Tau makes for itself never read as "**user**". */

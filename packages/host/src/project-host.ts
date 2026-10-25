@@ -30,7 +30,7 @@ import { createHostMcpEndpoint } from '#mcp-server.js';
 import { createParameterActors, parameterKey, parameterRoot } from '#parameter-actors.js';
 import type { HostMcpEndpoint } from '#mcp-server.js';
 import { hostRevisionActor } from '#revision-actor.js';
-import { createProjectRevisions } from '#revisions.js';
+import { createProjectRevisions, hostDeviceId } from '#revisions.js';
 import type { HostRevisionEvent, ProjectRevisions, ProjectRevisionsOptions, TurnCheckout } from '#revisions.js';
 
 /**
@@ -288,6 +288,8 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
 
   const launcher = createAgentLauncher({
     chats: createNodeChatStore({ workspaceRoot }),
+    /* The id this host's chat segments sync under: an external turn's session is this device's, whatever its host id. */
+    deviceId: hostDeviceId,
     modelTransport: options.modelTransport,
     credential: options.credential,
     systemPrompt: options.systemPrompt,

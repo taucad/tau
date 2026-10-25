@@ -413,7 +413,7 @@ const revisionJson = (value: unknown): JsonValue =>
  * browser's equivalent is `apps/ui/app/lib/device-id.ts` and neither mints the
  * other's.
  */
-const hostDeviceId = `${hostname()}:${userInfo().username}`;
+export const hostDeviceId = `${hostname()}:${userInfo().username}`;
 
 /**
  * The store a disk host's project is recorded in (S12, OQ-B8).

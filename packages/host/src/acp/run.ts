@@ -359,10 +359,11 @@ const messageText = (message: ProviderMessage): string | undefined => {
 /**
  * Where the vendor session `sessionId` ran its last turn in a transcript: the index of that turn's user message, or -1.
  * A session's opening turn names it on its marker; a later turn's marker may carry no id, and then continues the
- * session its own host (`hostId`) most recently named.
+ * session its own device and host (`deviceId`, `hostId`) most recently named. A host id alone is not a session's
+ * owner: every desktop places its own agents as `desktop`.
  */
 const lastTurnOfSession = (transcript: readonly ProviderMessage[], agentId: string, sessionId: string): number => {
-  /* Each host's most recently named session: two devices' sessions of one agent interleave in a merged chat. */
+  /* Each owner's most recently named session: two devices' sessions of one agent interleave in a merged chat. */
   const named = new Map<string, string>();
   let last = -1;
   for (const [index, message] of transcript.entries()) {
@@ -375,12 +376,12 @@ const lastTurnOfSession = (transcript: readonly ProviderMessage[], agentId: stri
     ) {
       continue;
     }
-    const host = typeof marker['hostId'] === 'string' ? marker['hostId'] : '';
+    const owner = JSON.stringify([marker['deviceId'] ?? null, marker['hostId'] ?? null]);
     const opened = marker['acpSessionId'];
     if (typeof opened === 'string' && opened !== '') {
-      named.set(host, opened);
+      named.set(owner, opened);
     }
-    if (named.get(host) === sessionId) {
+    if (named.get(owner) === sessionId) {
       last = index;
     }
   }

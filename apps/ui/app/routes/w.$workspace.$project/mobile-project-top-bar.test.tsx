@@ -324,6 +324,7 @@ describe('MobileProjectTopBar', () => {
     expect(line).toHaveClass('text-muted-foreground');
     const glyph = line.querySelector('[data-slot=status-line-icon]');
     expect(glyph?.getAttribute('class')).not.toMatch(/text-(feature|warning|destructive)/u);
+    expect(within(titleButton()).queryByRole('img')).not.toBeInTheDocument();
   });
 
   it('reads Saving… with a turning glyph that stops for reduced motion (HDR-04)', () => {
@@ -349,6 +350,8 @@ describe('MobileProjectTopBar', () => {
     expect(line).toHaveTextContent('Save not confirmed · 1 issue');
     expect(line.querySelector('[data-slot=status-line-icon]')).toHaveClass('text-feature');
     expect(line.lastElementChild).not.toHaveClass('text-feature');
+    // The colour says something; the glyph says it too, for a person who does not see it.
+    expect(within(titleButton()).getByRole('img', { name: 'Needs attention' })).toBeInTheDocument();
     /* The bar announces the records as the desktop trigger does; no second trigger draws them. */
     expect(screen.getByRole('status')).toHaveTextContent('Save not confirmed · 1 record');
     expect(within(topBar()).getAllByRole('button')).toHaveLength(3);

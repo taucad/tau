@@ -268,18 +268,35 @@ const clippingOverflow = new Set(['auto', 'scroll', 'hidden', 'clip']);
  */
 const decisionSelector = '[data-decision], [data-ask-state=open]';
 
+/** A decision that settled (an answered question, a resolved approval): its identity can retire. */
+const settledSelector = '[data-ask-state=settled][data-ask-id], [data-decision-state=settled][data-decision-id]';
+
 /** The fixed rows' overflow at the peek, as an acknowledgement key. */
 const fixedRowsKey = 'fixed-rows';
 
-/** A decision's identity across a remount: the same ask in either home, the same failure or approval. */
-function decisionKey(decision: HTMLElement): string {
-  const { askId, decision: kind } = decision.dataset;
-  return askId === undefined ? `${kind ?? ''}:${decision.textContent}` : `ask:${askId}`;
+/** How often a scroll re-checks at most, while a list is still catching up with its content. Milliseconds. */
+const scrollCheckInterval = 100;
+
+/**
+ * A decision's identity across a remount and a surface switch: the same ask in either home, the same failure or
+ * approval. Never its text, which a countdown changes and a retry repeats; a decision without an identity is ignored.
+ */
+function decisionKey(decision: HTMLElement): string | undefined {
+  const { askId, decisionId } = decision.dataset;
+  return askId === undefined ? decisionId : `ask:${askId}`;
 }
 
-/** Whether a scroller sits where it rests with nothing scrolled by hand: the tray at its top, a transcript at its end. */
+function hasBox(element: HTMLElement): boolean {
+  const box = element.getBoundingClientRect();
+  return box.width > 0 && box.height > 0;
+}
+
+/**
+ * Whether a scroller sits where it rests with nothing scrolled by hand: a list that says it rests at its start
+ * (`data-scroll-rest=start`, the question tray) at its top, any other (a transcript) at its end.
+ */
 function isAtRest(scroller: HTMLElement): boolean {
-  if (scroller.matches('ul[aria-label=Questions]')) {
+  if (scroller.dataset['scrollRest'] === 'start') {
     return scroller.scrollTop <= 1;
   }
   return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 1;
@@ -291,10 +308,10 @@ function isAtRest(scroller: HTMLElement): boolean {
  * the detent, and neither is one that is not displayed.
  */
 function isCutOffByDetent(decision: HTMLElement, section: HTMLElement): boolean {
-  const box = decision.getBoundingClientRect();
-  if (box.width === 0 || box.height === 0) {
+  if (!hasBox(decision)) {
     return false;
   }
+  const box = decision.getBoundingClientRect();
   for (let parent = decision.parentElement; parent && parent !== section; parent = parent.parentElement) {
     if (!clippingOverflow.has(getComputedStyle(parent).overflowY)) {
       continue;
@@ -310,11 +327,24 @@ function isCutOffByDetent(decision: HTMLElement, section: HTMLElement): boolean 
   return false;
 }
 
+/** The identified decisions on screen, each with its identity. */
+function decisionsIn(section: HTMLElement): Array<[string, HTMLElement]> {
+  const found: Array<[string, HTMLElement]> = [];
+  for (const decision of section.querySelectorAll<HTMLElement>(decisionSelector)) {
+    const key = decisionKey(decision);
+    if (key !== undefined) {
+      found.push([key, decision]);
+    }
+  }
+  return found;
+}
+
 /**
- * Never fold away a decision (I5). When a decision arrives or changes and the detent cuts it off, the sheet rises one
- * detent, and again from half if half still cuts it off; at the peek the same holds for fixed rows (a title, a composer
- * with an approval or a question above it) that no longer fit. A detent the person chooses is theirs: the decisions on
- * screen when they move the sheet are acknowledged, and only a decision that arrives after can raise it again.
+ * Never fold away a decision (I5). When a decision arrives and the detent cuts it off, the sheet rises one detent, and
+ * again from half if half still cuts it off; at the peek the same holds for fixed rows (a title, a composer with an
+ * approval or a question above it) that no longer fit. A detent the person chooses is theirs: the decisions on screen
+ * when they move the sheet are acknowledged, on any surface and for as long as they wait, and only a decision that
+ * arrives after can raise it again.
  *
  * @returns The acknowledgement to call when the person moves the sheet.
  */
@@ -325,19 +355,26 @@ function useRaiseWhenClipped(
 ): () => void {
   const acknowledged = useRef(new Set<string>());
   const acknowledge = useCallback(() => {
-    const keys = new Set<string>([fixedRowsKey]);
-    for (const decision of section?.querySelectorAll<HTMLElement>(decisionSelector) ?? []) {
-      keys.add(decisionKey(decision));
+    // Added to, never replaced: a move on another surface keeps what the person already saw on Chat.
+    acknowledged.current.add(fixedRowsKey);
+    for (const [key] of section ? decisionsIn(section) : []) {
+      acknowledged.current.add(key);
     }
-    acknowledged.current = keys;
   }, [section]);
   useEffect(() => {
     if (!section || detent === undefined || typeof ResizeObserver === 'undefined') {
       return;
     }
     const check = (): void => {
-      const decisions = [...section.querySelectorAll<HTMLElement>(decisionSelector)];
-      const fresh = decisions.filter((decision) => !acknowledged.current.has(decisionKey(decision)));
+      for (const settled of section.querySelectorAll<HTMLElement>(settledSelector)) {
+        const key = decisionKey(settled);
+        if (key !== undefined) {
+          acknowledged.current.delete(key);
+        }
+      }
+      const fresh = decisionsIn(section).filter(
+        ([key, decision]) => !acknowledged.current.has(key) && hasBox(decision),
+      );
       if (fresh.length > 0) {
         // Something new arrived: the person has not chosen a detent for it.
         acknowledged.current.delete(fixedRowsKey);
@@ -354,8 +391,8 @@ function useRaiseWhenClipped(
       }
       // One decision may show in two homes (a question's transcript card and its tray row): it is folded away only
       // when every copy is cut off.
-      const copies = Map.groupBy(fresh, decisionKey);
-      if ([...copies.values()].some((group) => group.every((copy) => isCutOffByDetent(copy, section)))) {
+      const copies = Map.groupBy(fresh, ([key]) => key);
+      if ([...copies.values()].some((group) => group.every(([, copy]) => isCutOffByDetent(copy, section)))) {
         raise();
       }
     };
@@ -375,9 +412,20 @@ function useRaiseWhenClipped(
       frame = requestAnimationFrame(observe);
     });
     mutations.observe(section, { childList: true, subtree: true });
+    // A virtualized transcript settles at its end over a few scrolls after its rows mount; re-check as it goes.
+    let scrollTimer: ReturnType<typeof setTimeout> | undefined;
+    const scrolled = (): void => {
+      scrollTimer ??= setTimeout(() => {
+        scrollTimer = undefined;
+        check();
+      }, scrollCheckInterval);
+    };
+    section.addEventListener('scroll', scrolled, { capture: true, passive: true });
     observe();
     return () => {
       cancelAnimationFrame(frame);
+      clearTimeout(scrollTimer);
+      section.removeEventListener('scroll', scrolled, { capture: true });
       resize.disconnect();
       mutations.disconnect();
     };
@@ -452,11 +500,14 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
   const chooseSnapPoint = useCallback(
     // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
     (value: number | string | null): void => {
-      // The person moved the sheet (a drag or the grabber's keys): their detent holds over what is on screen now.
-      acknowledgeDecisions();
+      // The person moved the sheet (a drag or the grabber's keys): their detent holds over what is on screen now. Vaul's
+      // reset after the sheet closes is not a move.
+      if (drawerOpen) {
+        acknowledgeDecisions();
+      }
       handleSnapChange(value);
     },
-    [acknowledgeDecisions, handleSnapChange],
+    [acknowledgeDecisions, drawerOpen, handleSnapChange],
   );
 
   const isViewerTab = activeTab === 'viewer';

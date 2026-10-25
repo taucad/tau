@@ -65,15 +65,13 @@ const TurnGroup = memo(function ({
           footer={index === 0 ? <ChatRevisionMarker userMessageId={id} isLatestTurn={isLast} /> : undefined}
         />
       ))}
-      {/* The run's failure is a decision the phone sheet never folds away (I5, `chat-interface-mobile.tsx`). */}
-      {isLast ? (
-        <div data-decision='run-error'>
-          <ChatError className='mx-4' />
-        </div>
-      ) : null}
+      {isLast ? <ChatError className='mx-4' /> : null}
     </div>
   );
 });
+
+/** How far past the transcript's foot Virtuoso renders, so an appended turn is measured and followed. Pixels. */
+const appendedTurnOverscan = { top: 0, bottom: 120 } as const;
 
 // Custom Virtuoso scroller. Single responsibility:
 // `[scrollbar-gutter:stable]` permanently reserves a `--scrollbar-thickness`
@@ -293,6 +291,11 @@ const ExpandedChatHistory = memo(function ({
                 computeItemKey={computeItemKey}
                 scrollerRef={followLatestOutput.scrollerRef}
                 followOutput={followLatestOutput.followOutput}
+                /* A turn appended at the end starts at the viewport's foot, outside the rendered range: Virtuoso
+                 * follows it only once it is measured, so render a little past the foot. Without this a turn sent
+                 * from a short viewport (the phone sheet's peek) is never followed, and its reply or failure stays
+                 * folded away below (I5). */
+                increaseViewportBy={appendedTurnOverscan}
                 totalListHeightChanged={followLatestOutput.totalListHeightChanged}
                 className='mt-1 min-h-0 min-w-0 flex-1'
                 atBottomStateChange={handleAtBottomStateChange}
@@ -308,11 +311,7 @@ const ExpandedChatHistory = memo(function ({
           all: their text still in the composer, no row, no banner. One banner
           at a time: while there are turns, the group above owns it.
         */}
-            {groups.length === 0 ? (
-              <div data-decision='run-error' className='shrink-0'>
-                <ChatError className='mx-4 mb-1' />
-              </div>
-            ) : null}
+            {groups.length === 0 ? <ChatError className='mx-4 mb-1 shrink-0' /> : null}
             {/* Chat input area. The agent's task list and its questions share one
               tray directly above the composer; the task list is keyed by chat so
               its fold never carries across chats (D8, agent questions D8). */}

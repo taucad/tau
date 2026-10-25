@@ -26,9 +26,17 @@ export const grabber = (): Locator => selectors.getByRole('slider', { name: 'Dra
 export const allSheet = (): Locator => selectors.getByRole('dialog', { name: 'All surfaces' });
 /** The open sheet surface, named by its title. */
 export const surface = (title: string): Locator => selectors.getByRole('region', { name: title, exact: true });
-/** Every open sheet surface, whatever its title. */
-export const anySurface = (): Locator => selectors.getByCss('[data-slot="mobile-surface"]');
-export const projectTitle = (): Locator => selectors.getByCss('[data-slot="project-title-button"]');
+/** The open sheet, whatever surface it holds: the dialog the grabber moves. */
+export const openSheet = (): Locator => selectors.getByRole('dialog').filter({ has: grabber() });
+/**
+ * The top bar's title button for a project: its name is the project's, then the status line.
+ *
+ * @param name - The project's name.
+ */
+export const projectTitle = (name: string): Locator =>
+  selectors.getByRole('button', {
+    name: new RegExp(`^${name.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`)}(?:\\s|$)`, 'u'),
+  });
 
 /**
  * Open a touch phone at `viewport` on a seed route and wait for the project route it navigates to.
@@ -64,7 +72,7 @@ export const sheetSettled = async (): Promise<void> =>
         });
       });
     });
-    const sheet = handle.closest('[data-slot=drawer-content]');
+    const sheet = handle.closest('[role="dialog"]');
     if (!sheet) {
       throw new Error('The grabber is not inside the sheet.');
     }
@@ -160,31 +168,36 @@ export const currentPath = async (): Promise<string> => new URL(await target.cur
  * @param locator - The element.
  * @returns The reason it is not, or `undefined` when it is wholly shown.
  */
-export const unshownReason = async (locator: Locator): Promise<string | undefined> =>
-  target.evaluateLocator(locator, (element) => {
-    const box = element.getBoundingClientRect();
-    if (box.width === 0 || box.height === 0) {
-      return 'has no box';
-    }
-    const nav = document.querySelector('nav[aria-label="Workbench"]')?.getBoundingClientRect();
-    if (nav && box.bottom > nav.top + 0.5) {
-      return `ends at ${String(box.bottom)}, under the nav at ${String(nav.top)}`;
-    }
-    if (box.top < -0.5 || box.bottom > window.innerHeight + 0.5) {
-      return 'is outside the viewport';
-    }
-    for (let parent = element.parentElement; parent; parent = parent.parentElement) {
-      const style = getComputedStyle(parent);
-      if (style.overflowY === 'visible' && style.overflowX === 'visible') {
-        continue;
+export const unshownReason = async (locator: Locator): Promise<string | undefined> => {
+  const navTop = await target.evaluateLocator(navigation(), (nav) => nav.getBoundingClientRect().top);
+  return target.evaluateLocator(
+    locator,
+    (element, navigationTop) => {
+      const box = element.getBoundingClientRect();
+      if (box.width === 0 || box.height === 0) {
+        return 'has no box';
       }
-      const clip = parent.getBoundingClientRect();
-      if (box.top < clip.top - 0.5 || box.bottom > clip.bottom + 0.5) {
-        return `is clipped by ${parent.tagName.toLowerCase()}[${parent.dataset['slot'] ?? parent.className.slice(0, 40)}]`;
+      if (box.bottom > navigationTop + 0.5) {
+        return `ends at ${String(box.bottom)}, under the nav at ${String(navigationTop)}`;
       }
-    }
-    return undefined;
-  });
+      if (box.top < -0.5 || box.bottom > window.innerHeight + 0.5) {
+        return 'is outside the viewport';
+      }
+      for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+        const style = getComputedStyle(parent);
+        if (style.overflowY === 'visible' && style.overflowX === 'visible') {
+          continue;
+        }
+        const clip = parent.getBoundingClientRect();
+        if (box.top < clip.top - 0.5 || box.bottom > clip.bottom + 0.5) {
+          return `is clipped by ${parent.tagName.toLowerCase()}[${parent.dataset['slot'] ?? parent.className.slice(0, 40)}]`;
+        }
+      }
+      return undefined;
+    },
+    navTop,
+  );
+};
 
 /**
  * The detent once the sheet has stopped moving and stayed put for half a second: a raise lands within a frame or two of

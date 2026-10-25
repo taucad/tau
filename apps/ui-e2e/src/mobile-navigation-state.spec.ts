@@ -4,26 +4,18 @@ import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import type { GatewayScriptTurn } from '#support/agent-host-gateway-script.js';
 import type { RecordFile } from '#support/chat-attachments.js';
+import { countOf, readHomeJson, recordDraftText, recordPaths, seededChatIds } from '#support/chat-attachments.js';
 import {
-  composerSelector,
-  countOf,
-  readHomeJson,
-  recordDraftText,
-  recordPaths,
-  seededChatIds,
-} from '#support/chat-attachments.js';
-import {
-  anySurface,
   currentPath,
   detent,
   detents,
   expectDetentHeld,
   followSidebarLink,
-  grabber,
   moveSheet,
   navButton,
   openFromAll,
   openPhone,
+  openSheet,
   phoneViewports,
   projectTitle,
   stableDetent,
@@ -48,16 +40,11 @@ import {
  *   surface, the chat reopening at its latest turn.
  */
 
-const composer = (): Locator => selectors.getByCss(composerSelector).first();
+const composer = (): Locator =>
+  selectors.getByRole('textbox', { name: 'Ask Tau to build anything...', exact: true }).first();
 const composerText = async (): Promise<string> => {
   const text = await target.textContent(composer());
   return text?.trim() ?? '';
-};
-
-/** The project the top bar names. */
-const projectName = async (): Promise<string> => {
-  const name = await target.textContent(projectTitle().getByCss(':scope > span').first());
-  return name?.trim() ?? '';
 };
 
 const usage = { inputTokens: 12, outputTokens: 6 };
@@ -66,10 +53,10 @@ test.each(phoneViewports)(
   'reopens the surface each project had after a reload and across Back and Forward at $width×$height',
   async (viewport) => {
     await openPhone(viewport, '/__e2e/project-navigation');
-    await expect.poll(projectName, { timeout: 60_000 }).toBe('Project Navigation A');
+    await target.expectVisible(projectTitle('Project Navigation A'), 60_000);
     const projectA = await currentPath();
     // A fresh project rests on its model.
-    await target.expectCount(anySurface(), 0);
+    await target.expectCount(openSheet(), 0);
     expect(await target.getAttribute(navButton('Model'), 'aria-current')).toBe('page');
 
     await tapDestination('Parameters');
@@ -87,32 +74,32 @@ test.each(phoneViewports)(
     await followSidebarLink('Project Navigation B');
     await expect.poll(currentPath, { timeout: 60_000 }).not.toBe(projectA);
     const projectB = await currentPath();
-    await expect.poll(projectName, { timeout: 60_000 }).toBe('Project Navigation B');
+    await target.expectVisible(projectTitle('Project Navigation B'), 60_000);
     await expect.poll(async () => target.getAttribute(navButton('Model'), 'aria-current')).toBe('page');
-    await target.expectCount(anySurface(), 0);
+    await target.expectCount(openSheet(), 0);
     await openFromAll('Files');
 
     // Back returns to A with A's surface; Forward to B with B's.
     expect(await traverseHistory('back')).toBe(projectA);
-    await expect.poll(projectName, { timeout: 60_000 }).toBe('Project Navigation A');
+    await target.expectVisible(projectTitle('Project Navigation A'), 60_000);
     await target.expectVisible(surface('Parameters'), 60_000);
     await target.expectCount(surface('Files'), 0);
     await expect.poll(detent).toBe(detents.half);
 
     expect(await traverseHistory('forward')).toBe(projectB);
-    await expect.poll(projectName, { timeout: 60_000 }).toBe('Project Navigation B');
+    await target.expectVisible(projectTitle('Project Navigation B'), 60_000);
     await target.expectVisible(surface('Files'), 60_000);
     await target.expectCount(surface('Parameters'), 0);
 
     // The Model restores the stage, and that too is the project's state across a step back and forward.
     await tapDestination('Model');
-    await target.expectCount(anySurface(), 0);
+    await target.expectCount(openSheet(), 0);
     expect(await traverseHistory('back')).toBe(projectA);
     await target.expectVisible(surface('Parameters'), 60_000);
     expect(await traverseHistory('forward')).toBe(projectB);
-    await expect.poll(projectName, { timeout: 60_000 }).toBe('Project Navigation B');
+    await target.expectVisible(projectTitle('Project Navigation B'), 60_000);
     await expect.poll(async () => target.getAttribute(navButton('Model'), 'aria-current')).toBe('page');
-    await target.expectCount(anySurface(), 0);
+    await target.expectCount(openSheet(), 0);
   },
 );
 
@@ -134,7 +121,7 @@ test.each(phoneViewports)(
 
     // The sheet's own Close, then Chat again.
     await target.click(surface('Chat').getByRole('button', { name: 'Close Chat', exact: true }), { touch: true });
-    await target.expectCount(anySurface(), 0);
+    await target.expectCount(openSheet(), 0);
     await tapDestination('Chat');
     await expect.poll(composerText, { timeout: 30_000 }).toBe(draft);
 
@@ -143,7 +130,7 @@ test.each(phoneViewports)(
     await target.expectVisible(surface('Parameters'), 60_000);
     await openFromAll('Details');
     await tapDestination('Model');
-    await target.expectCount(anySurface(), 0);
+    await target.expectCount(openSheet(), 0);
     await tapDestination('Chat');
     await expect.poll(composerText, { timeout: 30_000 }).toBe(draft);
 
@@ -185,7 +172,7 @@ test.each(phoneViewports)(
 
     await openFromAll('Files');
     await tapDestination('Model');
-    await target.expectCount(anySurface(), 0);
+    await target.expectCount(openSheet(), 0);
     await tapDestination('Parameters');
     await target.expectValue(surface('Parameters').getByLabelText('Input for Width').first(), '31', 30_000);
   },
@@ -314,12 +301,20 @@ test.each(phoneViewports)(
   },
 );
 
-/** The chat transcript's scroller, moved as a person's swipe would. */
+/**
+ * The chat transcript, moved as a person's swipe would. It is found by its geometry, the Chat surface's tallest
+ * scrolling box: the transcript has no accessible handle of its own (its rows are the record, not its scroller).
+ */
 const scrollTranscript = async (to: 'top' | 'end'): Promise<void> =>
   target.evaluateLocator(
     surface('Chat'),
     (region, where) => {
-      const scroller = region.querySelector<HTMLElement>('[data-virtuoso-scroller]');
+      const scrollers = [...region.querySelectorAll<HTMLElement>('*')].filter(
+        (element) =>
+          ['auto', 'scroll'].includes(getComputedStyle(element).overflowY) &&
+          element.scrollHeight > element.clientHeight + 1,
+      );
+      const scroller = scrollers.toSorted((a, b) => b.scrollHeight - a.scrollHeight)[0];
       if (!scroller) {
         throw new Error('The chat transcript has no scroller.');
       }
@@ -352,7 +347,7 @@ test.each(phoneViewports)(
     await target.setAgentHostGatewayFailure({ status: 400, message: 'Refused once.', type: 'INVALID_REQUEST' });
     await send('Model a bracket');
     const recovery = selectors.getByRole('button', { name: /^(?:Resume|Try again)$/u });
-    const failure = selectors.getByCss('[data-decision="run-error"]').filter({ has: recovery });
+    const failure = selectors.getByRole('alert').filter({ has: recovery });
     await expect.poll(async () => countOf(recovery), { timeout: 120_000 }).toBeGreaterThan(0);
     await target.setAgentHostGatewayFailure();
     // The failure raises the sheet to half, where the resting transcript shows it whole.

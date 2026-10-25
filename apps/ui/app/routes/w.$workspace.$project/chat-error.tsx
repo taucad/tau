@@ -424,9 +424,48 @@ const rateLimitAutoResume = (
 ): Readonly<{ runId: string; attempt: number }> | undefined =>
   code === autoResumableRateLimitCode && runId !== undefined && attempt !== undefined ? { runId, attempt } : undefined;
 
+const chatErrorIds = new WeakMap<NormalizedChatError, string>();
+let lastChatErrorId = 0;
+
+/**
+ * One failure's identity for as long as it shows. `selectVisibleChatError` returns one object per failure (a run's
+ * failure, a refused command, a caught error), so a card whose text changes (a countdown) keeps its identity, and the
+ * same words after Try again are a new failure.
+ */
+function chatErrorId(error: NormalizedChatError): string {
+  let id = chatErrorIds.get(error);
+  if (id === undefined) {
+    lastChatErrorId += 1;
+    id = `run-error-${lastChatErrorId}`;
+    chatErrorIds.set(error, id);
+  }
+  return id;
+}
+
+/**
+ * The run's failure, a decision the phone sheet never folds away (I5, `chat-interface-mobile.tsx`): the marker renders
+ * only while a card does.
+ */
 export const ChatError = memo(function ({ className }: { readonly className?: string }): React.ReactNode {
   // Derive parsed error inside selector - prefer runtime error, fallback to persisted
   const parsedError = useChatSelector(selectVisibleChatError);
+  if (!parsedError) {
+    return null;
+  }
+  return (
+    <div data-decision='run-error' data-decision-id={chatErrorId(parsedError)} className='shrink-0'>
+      <ChatErrorBody parsedError={parsedError} className={className} />
+    </div>
+  );
+});
+
+function ChatErrorBody({
+  parsedError,
+  className,
+}: {
+  readonly parsedError: NormalizedChatError;
+  readonly className: string | undefined;
+}): React.ReactNode {
   /* One decision, the turn host's own: a card may promise the turn and say Resume only where `continue` will be
    * admitted, which reads the caught-up log's current run — never the error text, which can outlive the run it names
    * or describe a refusal that left no run. Every other card keeps *Try again* and makes no promise. */
@@ -444,10 +483,6 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
   );
   const { regenerate } = useChatActions();
   const { openNewChat, isReady: canOpenNewChat } = useOpenNewChat();
-
-  if (!parsedError) {
-    return null;
-  }
 
   // Try again is an explicit replay. Specialized components own auth,
   // credits, rate-limit, and tool-error actions. Credits remain the
@@ -581,4 +616,4 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
       return renderGenericError();
     }
   }
-});
+}

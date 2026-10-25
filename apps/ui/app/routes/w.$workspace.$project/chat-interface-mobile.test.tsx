@@ -532,24 +532,27 @@ describe('ChatInterfaceMobile', () => {
 
   /** Stub the ResizeObserver and hand back a driver that runs every registered callback, as a content change would. */
   const driveableObservers = (): (() => void) => {
-    const observers: Array<() => void> = [];
+    const observing = new Set<() => void>();
     vi.stubGlobal(
       'ResizeObserver',
       class {
+        readonly #callback: () => void;
         public constructor(callback: () => void) {
-          observers.push(callback);
+          this.#callback = callback;
         }
         public observe(): void {
-          // The test drives the callback itself.
+          // The test drives the callback itself, for observers still observing.
+          observing.add(this.#callback);
         }
         public disconnect(): void {
-          // Re-observing disconnects first; the callbacks stay registered for the test to drive.
+          observing.delete(this.#callback);
         }
       },
     );
     return () => {
       act(() => {
-        for (const observer of observers) {
+        // oxlint-disable-next-line unicorn/no-useless-spread -- a callback re-observes, which re-adds it to the set mid-loop.
+        for (const observer of [...observing]) {
           observer();
         }
       });
@@ -567,7 +570,7 @@ describe('ChatInterfaceMobile', () => {
     Object.defineProperty(content, 'scrollHeight', { configurable: true, value: 300 });
     const scroller = document.createElement(options.tray ? 'ul' : 'div');
     if (options.tray) {
-      scroller.setAttribute('aria-label', 'Questions');
+      scroller.dataset['scrollRest'] = 'start';
     }
     scroller.style.overflowY = 'auto';
     Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: options.box.height });
@@ -602,7 +605,7 @@ describe('ChatInterfaceMobile', () => {
     renderShell();
     const transcript = await scrollerInSurface({ box: rect(40, 140) });
     // At the peek the failure runs past the transcript's foot; at half the transcript holds it.
-    decision(transcript, { 'data-decision': 'run-error' }, (point) =>
+    decision(transcript, { 'data-decision': 'run-error', 'data-decision-id': 'run-error-1' }, (point) =>
       point === mobileDrawerPeekSnapPoint ? rect(100, 180) : rect(60, 120),
     );
 
@@ -610,23 +613,112 @@ describe('ChatInterfaceMobile', () => {
     expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
   });
 
-  it('should hold the detent for a failure the person scrolled past, a hidden one, and an alert that is no decision', async () => {
+  it('should keep a detent chosen on Chat after the person moves the sheet on another surface (I5)', async () => {
     const drive = driveableObservers();
     state.drawerOpen = true;
     state.activeTab = 'jobs';
     state.activeSnapPoint = mobileDrawerOpenSnapPoint;
     renderShell();
-    // Scrolled up past the failure: it sits below the transcript's foot, but the person put it there.
-    const scrolled = await scrollerInSurface({ box: rect(40, 140), scrolled: true });
-    decision(scrolled, { 'data-decision': 'run-error' }, () => rect(150, 210));
-    // At rest, but not displayed: a zero box is not cut off.
-    const resting = await scrollerInSurface({ box: rect(150, 250) });
-    decision(resting, { 'data-decision': 'run-error', 'data-key': 'hidden' }, () => rect(0, 0));
-    // A job's outcome or a form error is a record a person scrolls through, never a reason to move the sheet.
-    decision(resting, { role: 'alert' }, () => rect(230, 330));
+    const grabber = screen.getByRole('slider', { name: 'Drawer height' });
+    const tray = await scrollerInSurface({ tray: true, box: rect(200, 260) });
+    const atPeek = (point: number | string): DOMRect =>
+      point === mobileDrawerPeekSnapPoint ? rect(210, 330) : rect(205, 255);
+    const question = decision(tray, { 'data-ask-id': 'ask-1', 'data-ask-state': 'open' }, atPeek);
+    drive();
+    fireEvent.keyDown(grabber, { key: 'Home' });
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+
+    // Another surface, without the question: the person moves the sheet up and back down there.
+    question.remove();
+    fireEvent.keyDown(grabber, { key: 'End' });
+    expect(state.activeSnapPoint).toBe(1);
+    fireEvent.keyDown(grabber, { key: 'Home' });
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+
+    // Back on Chat, the same question is still the one they moved the sheet below.
+    decision(tray, { 'data-ask-id': 'ask-1', 'data-ask-state': 'open' }, atPeek);
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+  });
+
+  it.each<Readonly<{ name: string; scrolled: boolean; attributes: Readonly<Record<string, string>>; box: DOMRect }>>([
+    {
+      // Scrolled up past the failure: it sits below the transcript's foot, but the person put it there.
+      name: 'a failure the person scrolled past',
+      scrolled: true,
+      attributes: { 'data-decision': 'run-error', 'data-decision-id': 'run-error-1' },
+      box: rect(150, 210),
+    },
+    {
+      // At rest, but not displayed: a zero box is not cut off.
+      name: 'a failure with no box',
+      scrolled: false,
+      attributes: { 'data-decision': 'run-error', 'data-decision-id': 'run-error-1' },
+      box: rect(0, 0),
+    },
+    {
+      // A job's outcome or a form error is a record a person scrolls through, never a reason to move the sheet.
+      name: 'an alert that is no decision',
+      scrolled: false,
+      attributes: { role: 'alert' },
+      box: rect(100, 200),
+    },
+  ])('should hold the detent for $name (I5)', async ({ scrolled, attributes, box }) => {
+    const drive = driveableObservers();
+    state.drawerOpen = true;
+    state.activeTab = 'jobs';
+    state.activeSnapPoint = mobileDrawerOpenSnapPoint;
+    renderShell();
+    const transcript = await scrollerInSurface({ box: rect(40, 140), scrolled });
+    decision(transcript, attributes, () => box);
 
     drive();
     expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+  });
+
+  it('should keep a failure acknowledged while its text changes, and raise for the same words as a new failure (I5)', async () => {
+    const drive = driveableObservers();
+    state.drawerOpen = true;
+    state.activeTab = 'jobs';
+    state.activeSnapPoint = mobileDrawerOpenSnapPoint;
+    renderShell();
+    const transcript = await scrollerInSurface({ box: rect(40, 140) });
+    const atPeek = (point: number | string): DOMRect =>
+      point === mobileDrawerPeekSnapPoint ? rect(100, 180) : rect(60, 120);
+    const failure = decision(transcript, { 'data-decision': 'run-error', 'data-decision-id': 'run-error-1' }, atPeek);
+    failure.textContent = 'Rate limited. Retrying in 30s.';
+    drive();
+    fireEvent.keyDown(screen.getByRole('slider', { name: 'Drawer height' }), { key: 'Home' });
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+
+    // A countdown rewrites the card every second: still the failure the person moved the sheet below.
+    failure.textContent = 'Rate limited. Retrying in 29s.';
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+
+    // Try again fails the same way: the same words, a new failure.
+    failure.remove();
+    const again = decision(transcript, { 'data-decision': 'run-error', 'data-decision-id': 'run-error-2' }, atPeek);
+    again.textContent = 'Rate limited. Retrying in 29s.';
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+  });
+
+  it('should keep the fixed rows acknowledged when an empty failure marker has no box (I5)', async () => {
+    const drive = driveableObservers();
+    state.drawerOpen = true;
+    state.activeTab = 'jobs';
+    state.activeSnapPoint = mobileDrawerOpenSnapPoint;
+    renderShell();
+    const transcript = await scrollerInSurface({ box: rect(40, 140) });
+    const content = transcript.parentElement!;
+    Object.defineProperty(content, 'scrollHeight', { configurable: true, value: 360 });
+    fireEvent.keyDown(screen.getByRole('slider', { name: 'Drawer height' }), { key: 'Home' });
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+
+    decision(transcript, { 'data-decision': 'run-error', 'data-decision-id': 'run-error-1' }, () => rect(0, 0));
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
   });
 
   it('should raise the sheet from half to full when the resting tray cuts off a waiting question (I5, WB-09)', async () => {
@@ -657,8 +749,9 @@ describe('ChatInterfaceMobile', () => {
     renderShell();
     // The transcript, resting at its end, cuts off the question's card; the tray shows the same question whole.
     const transcript = await scrollerInSurface({ box: rect(40, 140) });
-    decision(transcript, { 'data-ask-id': 'ask-1', 'data-ask-state': 'open' }, () => rect(100, 200));
     const tray = await scrollerInSurface({ tray: true, box: rect(150, 300) });
+    // Both copies land together, as one render puts them on screen.
+    decision(transcript, { 'data-ask-id': 'ask-1', 'data-ask-state': 'open' }, () => rect(100, 200));
     const trayCopy = decision(tray, { 'data-ask-id': 'ask-1', 'data-ask-state': 'open' }, () => rect(160, 280));
     drive();
     expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);

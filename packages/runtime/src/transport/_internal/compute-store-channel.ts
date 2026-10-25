@@ -327,3 +327,30 @@ export const connectComputeStoreChannel = (
   const client = createComputeStoreChannelClient(port);
   return { store: client.store, rebind: client.rebind, dispose: client.dispose };
 };
+
+/** Authority port openers behind port-backed opaque stores, keyed by the spec. */
+const portOpeners = new WeakMap<ComputeStore, () => MessagePortLike>();
+
+/**
+ * Create an opaque durable store whose authority runs in another realm, such as a worker that owns the
+ * browser's IndexedDB. A transport that binds this store calls `openPort` once for each runtime binding or
+ * initialize retry and hands that port to the runtime itself, so store calls go straight to the authority
+ * instead of being relayed through this realm.
+ * @param openPort - Opens a fresh private port served by the authority with `exposeComputeStoreChannel`.
+ * @returns The opaque store, for a `durable` compute binding.
+ * @public
+ */
+export const fromComputeStoreChannel = (openPort: () => MessagePortLike): ComputeStore => {
+  const spec = Object.freeze({}) as ComputeStore;
+  portOpeners.set(spec, openPort);
+  return spec;
+};
+
+/**
+ * Resolve the authority port opener of a store made by {@link fromComputeStoreChannel}.
+ * @internal
+ * @param spec - The opaque store from a compute binding.
+ * @returns The opener, or `undefined` for any other store.
+ */
+export const _resolveComputeStorePort = (spec: ComputeStore): (() => MessagePortLike) | undefined =>
+  portOpeners.get(spec);

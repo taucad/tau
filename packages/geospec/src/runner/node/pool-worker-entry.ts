@@ -8,7 +8,7 @@ import type { GeoSpecModelExporter } from '#model/types.js';
 import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerMessage } from '#runner/pool/pool-messages.js';
 import { startGeoSpecPoolWorkerHost } from '#runner/pool/worker-host.js';
 import { createNodeGeoSpecEngine } from '#runner/node/engine.js';
-import { createNodeVmFileSystem } from '#runner/node/node-vm-filesystem.js';
+import { createNodeVmFileSystem, withInMemorySources } from '#runner/node/node-vm-filesystem.js';
 
 /**
  * A module whose default export creates exporters for one worker. The pool imports it inside each worker, because
@@ -34,6 +34,8 @@ export type GeoSpecNodePoolWorkerOptions = {
   readonly exporterModules?: readonly string[];
   /** This worker's caller-inclusive CPU grant for the native addon; absent for one permit. */
   readonly grant?: number;
+  /** Spec sources served from memory, keyed by project-rooted path (see `GeoSpecNodePoolOptions.sources`). */
+  readonly sources?: Readonly<Record<string, string>>;
 };
 
 /** Parent-owned message boundary for the worker. @public */
@@ -73,7 +75,9 @@ export const startGeoSpecNodePoolWorker = async (
     options.grant === undefined ? {} : { executionPermits: options.grant },
   );
   try {
-    const filesystem = createNodeVmFileSystem(options.projectPath);
+    const disk = createNodeVmFileSystem(options.projectPath);
+    const filesystem =
+      options.sources === undefined ? disk : withInMemorySources(options.projectPath, disk, options.sources);
     const nativeModelLoader = createGeoSpecNativeModelLoader({
       engine,
       projectPath: options.projectPath,

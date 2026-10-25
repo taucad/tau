@@ -1,6 +1,6 @@
 # geospec — Types
 
-66 top-level symbols. Signatures are verbatim typescript.
+55 top-level symbols. Signatures are verbatim typescript.
 
 // A model admitted by one live GeoSpec host scope
 GeoSpecSubject: {
@@ -830,256 +830,6 @@ GeoSpecVolumeExpectation: {
 
   tolerance?: number
 
-// Basic exact or topology-derived BRep evidence consumed by early feature matchers
-BrepEvidence: {
-    validity?: {
-        valid: boolean;
-        checks?: Array<{
-            shape: string;
-            status: string;
-        }>;
-        maxTolerance?: number;
-        freeBounds?: {
-            count: number;
-        };
-        smallEdges?: Array<{
-            length: number;
-            shape?: string;
-            location?: Vec3;
-        }>;
-        sameParameter?: boolean;
-        closedShells?: boolean;
-        closedSolids?: boolean;
-        solidCount?: number;
-        invalidSolidCount?: number;
-        openEdgeCount?: number;
-        reason?: string;
-        closedWires?: boolean;
-    };
-    topologyCounts?: {
-        vertices?: number;
-        edges?: number;
-        wires?: number;
-        faces?: number;
-        shells?: number;
-        solids?: number;
-        compounds?: number;
-    };
-    boundingBox?: {
-        min: Vec3;
-        max: Vec3;
-        size: Vec3;
-        center: Vec3;
-    };
-    massProperties?: {
-        surfaceArea?: number;
-        volume?: number;
-        centerOfMass?: Vec3;
-        mass?: number;
-    };
-    planarFaces?: Array<{
-        normal: Vec3;
-        offset: number;
-        area?: number;
-        center?: Vec3;
-    }>;
-    cylindricalFaces?: Array<{
-        radius: number;
-        axis: 'x' | 'y' | 'z';
-        center?: Vec3;
-        axisRange?: {
-            min: number;
-            max: number;
-        };
-    }>;
-    circularHoles?: Array<{
-        diameter: number;
-        through: boolean;
-        axis: 'x' | 'y' | 'z';
-        center?: Vec3;
-        axisRange?: {
-            min: number;
-            max: number;
-        };
-    }>;
-    circularHolePatterns?: Array<{
-        count: number;
-        holeDiameter: number;
-        boltCircleDiameter: number;
-        axis: 'x' | 'y' | 'z';
-        center?: Vec3;
-    }>;
-    chamferFeatures?: Array<{
-        distance: number;
-        selection?: string;
-    }>;
-    filletFeatures?: Array<{
-        radius: number;
-        selection?: string;
-    }>;
-    minimumWallThickness?: {
-        value: number;
-        location?: Vec3;
-        pointA?: Vec3;
-        pointB?: Vec3;
-        solidIndex?: number;
-        tieCount?: number;
-        algorithm?: string;
-        tolerance?: number;
-        supportA?: {
-            faceIndex?: number;
-            surfaceType?: string;
-            supportType?: string;
-        };
-        supportB?: {
-            faceIndex?: number;
-            surfaceType?: string;
-            supportType?: string;
-        };
-        rejections?: Record<string, number>;
-    };
-}
-
-  validity?: {
-          valid: boolean;
-          checks?: Array<{
-              shape: string;
-              status: string;
-          }>;
-          maxTolerance?: number;
-          freeBounds?: {
-              count: number;
-          };
-          smallEdges?: Array<{
-              length: number;
-              shape?: string;
-              location?: Vec3;
-          }>;
-          sameParameter?: boolean;
-          closedShells?: boolean;
-          closedSolids?: boolean;
-          solidCount?: number;
-          invalidSolidCount?: number;
-          openEdgeCount?: number;
-          reason?: string;
-          closedWires?: boolean;
-      }
-
-  topologyCounts?: {
-          vertices?: number;
-          edges?: number;
-          wires?: number;
-          faces?: number;
-          shells?: number;
-          solids?: number;
-          compounds?: number;
-      }
-
-  boundingBox?: {
-          min: Vec3;
-          max: Vec3;
-          size: Vec3;
-          center: Vec3;
-      }
-
-  massProperties?: {
-          surfaceArea?: number;
-          volume?: number;
-          centerOfMass?: Vec3;
-          mass?: number;
-      }
-
-  planarFaces?: Array<{
-          normal: Vec3;
-          offset: number;
-          area?: number;
-          center?: Vec3;
-      }>
-
-  cylindricalFaces?: Array<{
-          radius: number;
-          axis: 'x' | 'y' | 'z';
-          center?: Vec3;
-          axisRange?: {
-              min: number;
-              max: number;
-          };
-      }>
-
-  circularHoles?: Array<{
-          diameter: number;
-          through: boolean;
-          axis: 'x' | 'y' | 'z';
-          center?: Vec3;
-          axisRange?: {
-              min: number;
-              max: number;
-          };
-      }>
-
-  circularHolePatterns?: Array<{
-          count: number;
-          holeDiameter: number;
-          boltCircleDiameter: number;
-          axis: 'x' | 'y' | 'z';
-          center?: Vec3;
-      }>
-
-  chamferFeatures?: Array<{
-          distance: number;
-          selection?: string;
-      }>
-
-  filletFeatures?: Array<{
-          radius: number;
-          selection?: string;
-      }>
-
-  minimumWallThickness?: {
-          value: number;
-          location?: Vec3;
-          pointA?: Vec3;
-          pointB?: Vec3;
-          solidIndex?: number;
-          tieCount?: number;
-          algorithm?: string;
-          tolerance?: number;
-          supportA?: {
-              faceIndex?: number;
-              surfaceType?: string;
-              supportType?: string;
-          };
-          supportB?: {
-              faceIndex?: number;
-              surfaceType?: string;
-              supportType?: string;
-          };
-          rejections?: Record<string, number>;
-      }
-
-// Geometry file formats understood by GeoSpec provenance
-GeometryFileFormat: MeshFileFormat | 'step' | 'stp'
-
-// Capability exposed by a loaded subject
-GeometryCapability: {
-    kind: 'mesh';
-    feature: 'triangles' | 'bounding-box' | 'connected-components' | 'watertightness' | 'surface-area' | 'volume' | 'center-of-mass' | 'distance' | 'component-overlap';
-} | {
-    kind: 'brep';
-    feature: 'validity' | 'topology-counts' | 'bounding-box' | 'mass-properties' | 'planar-faces' | 'cylindrical-faces' | 'circular-holes' | 'circular-hole-patterns' | 'chamfer-features' | 'fillet-features' | 'wall-thickness';
-} | {
-    kind: 'step';
-    feature: 'schema' | 'units' | 'product-structure' | 'reader-provenance';
-} | {
-    kind: 'unsupported';
-    feature: string;
-    reason: string;
-}
-
-  kind: 'mesh'
-
-  feature: 'triangles' | 'bounding-box' | 'connected-components' | 'watertightness' | 'surface-area' | 'volume' | 'center-of-mass' | 'distance' | 'component-overlap'
-
 // Diagnostic emitted by GeoSpec loaders, analyzers, and matchers
 GeometryDiagnostic: {
     code: KernelIssueCode | (string & {});
@@ -1109,233 +859,6 @@ GeometryDiagnostic: {
       }
 
   details?: unknown
-
-// Provenance recorded by GeoSpec loaders
-GeometryProvenance: {
-    source: GeometrySource;
-    unit: GeoSpecUnit;
-    loader: 'gltf-transform' | 'in-memory' | 'opencascade-step';
-    contentHash?: string;
-    parameters?: Record<string, JSONValue>;
-    exportIntent?: GeometryExportIntent;
-}
-
-  source: GeometrySource
-
-  unit: GeoSpecUnit
-
-  loader: 'gltf-transform' | 'in-memory' | 'opencascade-step'
-
-  contentHash?: string
-
-  parameters?: Record<string, JSONValue>
-
-  exportIntent?: GeometryExportIntent
-
-// Source metadata for a loaded geometry subject
-GeometrySource: {
-    kind: 'bytes' | 'array-buffer' | 'blob' | 'file' | 'path' | 'url' | 'mesh-buffer' | 'readable-stream' | 'async-iterable';
-    format: GeometryFileFormat;
-    path?: string;
-    name?: string;
-    byteLength?: number;
-}
-
-  kind: 'bytes' | 'array-buffer' | 'blob' | 'file' | 'path' | 'url' | 'mesh-buffer' | 'readable-stream' | 'async-iterable'
-
-  format: GeometryFileFormat
-
-  path?: string
-
-  name?: string
-
-  byteLength?: number
-
-// Canonical P0 object under test for GeoSpec
-// Remarks: This is intentionally a GeoSpec-loaded subject rather than a Tau runtime contract. Runtime integrations pass GLB/glTF bytes or files into loaders.
-GeometrySubject: {
-    kind: 'geometry-subject';
-    /** Opaque engine-owned identifier used by every protocol claim. */
-    subjectId: string;
-    mesh: GeometrySubjectMeshEvidence;
-    brep?: BrepEvidence;
-    step?: StepEvidence;
-    provenance: GeometryProvenance;
-    capabilities: GeometryCapability[];
-    diagnostics: GeometryEvidenceDiagnostic[];
-}
-
-  kind: 'geometry-subject'
-
-  // Opaque engine-owned identifier used by every protocol claim
-  subjectId: string
-
-  mesh: GeometrySubjectMeshEvidence
-
-  brep?: BrepEvidence
-
-  step?: StepEvidence
-
-  provenance: GeometryProvenance
-
-  capabilities: GeometryCapability[]
-
-  diagnostics: GeometryEvidenceDiagnostic[]
-
-// Wire-safe mesh summary carried by an opaque geometry subject
-GeometrySubjectMeshEvidence: {
-    format: MeshFileFormat;
-    stats: Pick<GeometryStats, 'vertexCount' | 'meshCount' | 'triangleCount'>;
-}
-
-  format: MeshFileFormat
-
-  stats: Pick<GeometryStats, 'vertexCount' | 'meshCount' | 'triangleCount'>
-
-// Mesh evidence loaded from geometry bytes or buffers
-MeshEvidence: {
-    format: MeshFileFormat;
-    stats: GeometryStats;
-}
-
-  format: MeshFileFormat
-
-  stats: GeometryStats
-
-// Geometry file formats supported by the P0 mesh loader
-MeshFileFormat: 'glb' | 'gltf' | 'mesh-buffer'
-
-// Triangle quality and scalar mesh metrics used by P0 GeoSpec matchers
-// Remarks: Values are reported in the glTF document coordinate units.
-MeshQualityStats: {
-    triangleCount: number;
-    nonFiniteVertices: Array<{
-        primitive: string;
-        vertexIndex: number;
-        position: [number, number, number];
-    }>;
-    degenerateTriangles: Array<{
-        primitive: string;
-        triangleIndex: number;
-        area: number;
-        center: [number, number, number];
-    }>;
-    duplicateFaces: Array<{
-        primitive: string;
-        triangleIndex: number;
-        firstTriangleIndex: number;
-    }>;
-    triangles: MeshTriangle[];
-    surfaceArea: number;
-    signedVolume: number;
-    centerOfMass?: Vec3;
-}
-
-  triangleCount: number
-
-  nonFiniteVertices: Array<{
-          primitive: string;
-          vertexIndex: number;
-          position: [number, number, number];
-      }>
-
-  degenerateTriangles: Array<{
-          primitive: string;
-          triangleIndex: number;
-          area: number;
-          center: [number, number, number];
-      }>
-
-  duplicateFaces: Array<{
-          primitive: string;
-          triangleIndex: number;
-          firstTriangleIndex: number;
-      }>
-
-  triangles: MeshTriangle[]
-
-  surfaceArea: number
-
-  signedVolume: number
-
-  centerOfMass?: Vec3
-
-// One triangle from mesh evidence, in geometry document coordinates
-MeshTriangle: {
-    primitive: string;
-    triangleIndex: number;
-    a: [number, number, number];
-    b: [number, number, number];
-    c: [number, number, number];
-    center: [number, number, number];
-    area: number;
-}
-
-  primitive: string
-
-  triangleIndex: number
-
-  a: [number, number, number]
-
-  b: [number, number, number]
-
-  c: [number, number, number]
-
-  center: [number, number, number]
-
-  area: number
-
-// STEP/XDE evidence extracted while loading a STEP subject
-StepEvidence: {
-    schema?: string;
-    unit?: GeoSpecUnit;
-    productStructure?: Array<{
-        name: string;
-        path: string;
-        transform?: number[];
-    }>;
-    readStrategy: {
-        strategy: 'native-stream' | 'filesystem';
-        inputKind: GeometrySource['kind'];
-        bytesRead: number;
-        nativeReadStream: boolean;
-        copiedToEmscriptenFs: boolean;
-    };
-    capabilities: Array<{
-        feature: string;
-        supported: boolean;
-        reason?: string;
-    }>;
-    /** Structured AP242 XDE read result (occurrences, subshape names, datum placements). */
-    xde?: XdeReadResult;
-}
-
-  schema?: string
-
-  unit?: GeoSpecUnit
-
-  productStructure?: Array<{
-          name: string;
-          path: string;
-          transform?: number[];
-      }>
-
-  readStrategy: {
-          strategy: 'native-stream' | 'filesystem';
-          inputKind: GeometrySource['kind'];
-          bytesRead: number;
-          nativeReadStream: boolean;
-          copiedToEmscriptenFs: boolean;
-      }
-
-  capabilities: Array<{
-          feature: string;
-          supported: boolean;
-          reason?: string;
-      }>
-
-  // Structured AP242 XDE read result (occurrences, subshape names, datum placements)
-  xde?: XdeReadResult
 
 // Numeric 3D vector
 Vec3: readonly [number, number, number]
@@ -1739,6 +1262,88 @@ LoadModelOptions: LoadModelSourceOptions | LoadModelCodeOptions<Code> | LoadMode
   parameters?: Record<string, unknown>
 
   // STEP reader strategy used for STEP exports
+  stepStreaming?: StepStreamingMode
+
+  // Whether STEP loading should also produce mesh evidence
+  mesh?: boolean
+
+  // Linear tolerance used while meshing exact BRep evidence
+  meshLinearTolerance?: number
+
+  // Angular tolerance in degrees used while meshing exact BRep evidence
+  meshAngularToleranceDegrees?: number
+
+  // Default work-unit budget for every claim on this subject
+  workUnitLimit?: number
+
+// Direct geometry-source model load options
+LoadModelSourceOptions: {
+    /** Geometry bytes, path, browser file/blob, or in-memory mesh buffer. */
+    source: MeshSource | StepSource;
+    /** Named external resources consumed alongside the direct geometry bytes. */
+    resources?: ReadonlyArray<{
+        readonly name: string;
+        readonly source: MeshSource | StepSource;
+    }>;
+    /**
+     * Project-relative folder a path `source` and each resource path resolve in. Omitted, they resolve against the
+     * project root. Recorded in the load evidence.
+     */
+    rootDir?: string;
+    /** Source geometry format. Defaults to `glb`. */
+    format?: GeoSpecModelFormat;
+    /** Source path recorded in provenance. */
+    path?: string;
+    /** Human-readable source name recorded in provenance. */
+    name?: string;
+    /** Coordinate unit of raw GLB/glTF or mesh-buffer data before canonical millimetre normalization. */
+    sourceUnit?: GeoSpecUnit;
+    /** Explicit parameters recorded in provenance. */
+    parameters?: Record<string, unknown>;
+    /** STEP reader strategy used for STEP sources. */
+    stepStreaming?: StepStreamingMode;
+    /** Whether STEP loading should also produce mesh evidence. Defaults to true. */
+    mesh?: boolean;
+    /** Linear tolerance used while meshing exact BRep evidence. */
+    meshLinearTolerance?: number;
+    /** Angular tolerance in degrees used while meshing exact BRep evidence. */
+    meshAngularToleranceDegrees?: number;
+    /**
+     * Default work-unit budget for every claim on this subject: a positive integer no greater than
+     * the host's maximum (default `geoSpecMaximumWorkUnitLimit`, 512 000 000). `expectGeo(subject, { workUnitLimit })` overrides
+     * it per chain. Recorded in the load evidence; it never changes the exported or admitted bytes.
+     */
+    workUnitLimit?: number;
+}
+
+  // Geometry bytes, path, browser file/blob, or in-memory mesh buffer
+  source: MeshSource | StepSource
+
+  // Named external resources consumed alongside the direct geometry bytes
+  resources?: ReadonlyArray<{
+          readonly name: string;
+          readonly source: MeshSource | StepSource;
+      }>
+
+  // Project-relative folder a path `source` and each resource path resolve in
+  rootDir?: string
+
+  // Source geometry format
+  format?: GeoSpecModelFormat
+
+  // Source path recorded in provenance
+  path?: string
+
+  // Human-readable source name recorded in provenance
+  name?: string
+
+  // Coordinate unit of raw GLB/glTF or mesh-buffer data before canonical millimetre normalization
+  sourceUnit?: GeoSpecUnit
+
+  // Explicit parameters recorded in provenance
+  parameters?: Record<string, unknown>
+
+  // STEP reader strategy used for STEP sources
   stepStreaming?: StepStreamingMode
 
   // Whether STEP loading should also produce mesh evidence

@@ -50,6 +50,8 @@
 \* time the page and the agent host both measure a foreign run from; queue paths unchanged.
 \* A foreign run goes stale only once this device's last pull, read beside the segments, came past
 \* the bound after that time with nothing newer, and the page asks for that pull; queue paths unchanged.
+\* That pull answers whether this device can pull the chat at all; where it cannot, a run quiet past the
+\* ask interval no longer disables submit, as the host's fence reads it; queue paths unchanged.
 \* QueuePlacement.tla separately checks host-local lost-ACK recovery and scoped
 \* legacy receipt rebasing; this module retains its single-host FIFO scope.
 EXTENDS Naturals, Sequences, FiniteSets, TLC

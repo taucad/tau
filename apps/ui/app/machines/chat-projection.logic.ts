@@ -197,6 +197,12 @@ export type ChatProjection = Readonly<{
   attentionRow?: RowKey;
   /** Why the log could not be read (`unreadable`); the chat reads and runs nothing. */
   fault?: string;
+  /**
+   * Whether this device can pull the chat from a remote, as the last pull the page asked for answered (round 27):
+   * `false` once it was refused `CHAT_NOT_SHARED`. This device's fact, not the log's, so no read or reset replaces it;
+   * absent until a pull answers, and read as `true` then.
+   */
+  pulls?: boolean;
 }>;
 
 /** @public */
@@ -215,7 +221,9 @@ export type ChatProjectionEvent =
    * Other devices' projected segment files; no own-log cursor applies to them. `at` is when this device read them, on
    * its own clock: a foreign run's staleness counts from when this device first saw its rows change.
    */
-  | Readonly<{ type: 'remote'; segments: readonly ChatLogSegment[]; at: number }>;
+  | Readonly<{ type: 'remote'; segments: readonly ChatLogSegment[]; at: number }>
+  /** What the pull this page asked for answered (round 27): `false` where it was refused `CHAT_NOT_SHARED`. */
+  | Readonly<{ type: 'pulls'; pulls: boolean }>;
 
 /** What the projection tells its reader. @public */
 export type ChatProjectionEmitted =
@@ -1057,6 +1065,10 @@ const reconcileCapturedLive = (previous: ChatProjection, captured: ChatProjectio
     : { runId, chunks: appendChunks(view.chunks, extra), blocks: Object.fromEntries(blocks) };
 };
 
+/** This device's pull answer, which no read of the log replaces (`ChatProjection.pulls`, round 27). */
+const pullsOf = ({ pulls }: ChatProjection): Partial<Pick<ChatProjection, 'pulls'>> =>
+  pulls === undefined ? {} : { pulls };
+
 /**
  * The projection's reducer: total, and it never throws (RB1).
  *
@@ -1070,7 +1082,7 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
     if (state.ledger !== event.base.ledger || state.resetVersion !== event.base.resetVersion) {
       return { state, emit: { type: 'stale' } };
     }
-    const { remote: _remote, live: _live, ...captured } = event.projection;
+    const { remote: _remote, live: _live, pulls: _pulls, ...captured } = event.projection;
     const live = reconcileCapturedLive(state, event.projection);
     const runId = state.live?.runId;
     const view = runId === undefined ? undefined : captured.views[runId];
@@ -1088,11 +1100,21 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
         resetVersion: state.resetVersion,
         ...(state.remote === undefined ? {} : { remote: state.remote }),
         ...(live === undefined ? {} : { live }),
+        ...pullsOf(state),
       },
     };
   }
   if (event.type === 'reset') {
-    return { state: { ...initialChatProjection, resetVersion: state.resetVersion + 1 } };
+    return {
+      state: {
+        ...initialChatProjection,
+        resetVersion: state.resetVersion + 1,
+        ...pullsOf(state),
+      },
+    };
+  }
+  if (event.type === 'pulls') {
+    return { state: (state.pulls ?? true) === event.pulls ? state : { ...state, pulls: event.pulls } };
   }
   if (event.type === 'remote') {
     const sorted = event.segments.toSorted(compareSegmentDeviceIds);
@@ -1274,6 +1296,7 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
           ...(failure === undefined ? {} : { failure }),
           ...(attentionRow === undefined ? {} : { attentionRow }),
           ...(state.fault === undefined ? {} : { fault: state.fault }),
+          ...pullsOf(state),
         },
       };
     }
@@ -1281,7 +1304,14 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
       return { state: held, emit: { type: 'stale' } };
     }
     case 'reset': {
-      return { state: { ...initialChatProjection, resetVersion: state.resetVersion + 1 }, emit: { type: 'reread' } };
+      return {
+        state: {
+          ...initialChatProjection,
+          resetVersion: state.resetVersion + 1,
+          ...pullsOf(state),
+        },
+        emit: { type: 'reread' },
+      };
     }
     case 'refused': {
       /* `owner-fenced` keeps the state: the reader reconnects to the newer owner (§5.5). */
@@ -1311,6 +1341,7 @@ export const chatProjectionLogic = createLogic<
       event.type !== 'catch-up' &&
       event.type !== 'reset' &&
       event.type !== 'remote' &&
+      event.type !== 'pulls' &&
       event.type !== 'live' &&
       event.type !== 'clear-live'
     ) {
@@ -1343,9 +1374,10 @@ const foreignUnsettledRuns = (projection: ChatProjection): readonly ForeignRun[]
 
 /**
  * The run another device is running on this chat now, if any (XD3): unsettled in that device's synced segment, not
- * this device's own run, and not abandoned at `now` (`foreignRunStanding`). The host refuses a new run while it holds;
- * it is gone once sync brings its settlement, or once pulls found its segment as it is for more than the staleness
- * bound.
+ * this device's own run, and not abandoned at `now` (`foreignRunStanding`), read with whether this device can pull the
+ * chat as its last pull answered (`projection.pulls`, round 27), as the host's fence reads it. The host refuses a new
+ * run while it holds; it is gone once sync brings its settlement, once pulls found its segment as it is for more than
+ * the staleness bound, or once it awaits pulls this device was refused.
  *
  * @param projection - The chat's projection.
  * @param now - This device's time, in epoch milliseconds.
@@ -1353,12 +1385,14 @@ const foreignUnsettledRuns = (projection: ChatProjection): readonly ForeignRun[]
  * @public
  */
 export const selectRunElsewhere = (projection: ChatProjection, now: number): ForeignRun | undefined =>
-  liveForeignRun(foreignUnsettledRuns(projection), now);
+  liveForeignRun(foreignUnsettledRuns(projection), now, { pulls: projection.pulls ?? true });
 
 /**
- * Whether another device's run that holds this chat awaits pulls of the remote (XD3, rounds 18 and 19): quiet here a
- * while (`foreignRunAskPullMilliseconds`), with no pulls yet that show it stayed quiet there for the staleness bound
- * (`foreignRunStanding`). Only pulls change that, so a reader asks for them.
+ * Whether another device's run on this chat awaits pulls of the remote (XD3, rounds 18 and 19): quiet here a while
+ * (`foreignRunAskPullMilliseconds`), with no pulls yet that show it stayed quiet there for the staleness bound
+ * (`foreignRunStanding`). Only pulls change that, so a reader asks for them. Read as though this device can pull, as the
+ * host decides when to ask (round 27): a refused ask is asked again, and its answer (`projection.pulls`) decides
+ * whether the run still holds the chat.
  *
  * @param projection - The chat's projection.
  * @param now - This device's time, in epoch milliseconds.

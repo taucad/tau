@@ -451,6 +451,25 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(afterSecond).toBe(afterFirst);
   });
 
+  /*
+   * Round 27: the page asks for pulls while another device's run awaits them, and hears what the placement's own pull
+   * answers, so it reads the run by the rule the agent host's fence reads it by. A project with no remote cannot pull
+   * its chats; before any session no refusal is evidenced.
+   */
+  it('should answer the page’s pull with whether the placement session can pull the chat', async () => {
+    const fixture = harness(['alpha']);
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+
+    await expect(root.pullRemote('chat-1')).resolves.toBe(true);
+
+    await root.placementSession();
+    alpha.send({ command: 'pullRemote', chatId: 'chat-1', id: 7 });
+    await vi.waitFor(() => {
+      expect(alpha.frames).toContainEqual({ type: 'result', id: 7, result: { kind: 'pulled', pulls: false } });
+    });
+  });
+
   it('should place two chats on one checkout with no branch created (AC9)', async () => {
     const fixture = harness(['alpha']);
     const project = fixture.service.createRootedFileSystem('/projects/alpha');

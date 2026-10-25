@@ -70,9 +70,8 @@ export function ChatSessionStoreProvider({ children }: ChatSessionStoreProviderP
     client: recordFiles,
     watchRecordFile,
     /* The project's revision client, wherever its revisions run: this tab's worker or the desktop host. */
-    pullRemote: (projectId) => {
-      peekRevisionClient(projectId)?.send({ command: 'pullRemote' });
-    },
+    /* Round 27: and it answers whether this device can pull the chat, as its placement's pull does. */
+    pullRemote: async (projectId, chatId) => (await peekRevisionClient(projectId)?.pullRemote(chatId)) ?? true,
   });
 
   return <ChatSessionStoreContext.Provider value={store}>{children}</ChatSessionStoreContext.Provider>;

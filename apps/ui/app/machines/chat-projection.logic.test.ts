@@ -595,6 +595,53 @@ describe('chatProjectionLogic (PV-S7)', () => {
       expect(selectRunElsewhereAwaitsPull(pulled, at + foreignRunStaleMilliseconds + 1)).toBe(false);
     });
 
+    /*
+     * Round 27: a device whose pull was refused CHAT_NOT_SHARED (chat sync off, no remote, no record identity) can never
+     * get the pulls a quiet run awaits, so that run no longer holds the chat here, as the host's fence reads it.
+     */
+    it('names none once a run quiet past the ask interval awaits pulls this device was refused', () => {
+      const running = reduceChatProjection(initialChatProjection, {
+        type: 'remote',
+        at,
+        segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other'), lifecycleRow(1, 'running', 'run_other')]),
+      }).state;
+      const refused = reduceChatProjection(running, { type: 'pulls', pulls: false }).state;
+      const quiet = at + foreignRunAskPullMilliseconds + 1;
+
+      expect(selectRunElsewhere(running, quiet)).toBeDefined();
+      expect(selectRunElsewhere(refused, quiet)).toBeUndefined();
+      /* The page still asks, so an answer that changes (chat sync turned back on) brings the run back. */
+      expect(selectRunElsewhereAwaitsPull(refused, quiet)).toBe(true);
+      expect(
+        selectRunElsewhere(reduceChatProjection(refused, { type: 'pulls', pulls: true }).state, quiet),
+      ).toBeDefined();
+      /* The answer is this device's, not the segments': a later read of them keeps it, and so does a catch-up. */
+      const reread = reduceChatProjection(refused, {
+        type: 'remote',
+        at,
+        segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other'), lifecycleRow(1, 'paused', 'run_other')]),
+      }).state;
+      expect(selectRunElsewhere(reread, quiet)).toBeUndefined();
+      const caughtUp = reduceChatProjection(refused, {
+        type: 'catch-up',
+        base: refused,
+        projection: initialChatProjection,
+      }).state;
+      expect(selectRunElsewhere(caughtUp, quiet)).toBeUndefined();
+    });
+
+    it('still names a run quiet here for less than the ask interval on a device whose pulls are refused', () => {
+      const running = reduceChatProjection(initialChatProjection, {
+        type: 'remote',
+        at,
+        segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other'), lifecycleRow(1, 'running', 'run_other')]),
+      }).state;
+      const refused = reduceChatProjection(running, { type: 'pulls', pulls: false }).state;
+
+      expect(selectRunElsewhere(refused, at + foreignRunAskPullMilliseconds)).toMatchObject({ runId: 'run_other' });
+      expect(selectRunElsewhereChangesAt(refused, at + 60_000)).toBe(at + foreignRunAskPullMilliseconds + 1);
+    });
+
     it('names the moment the answer next changes with the clock, and none once nothing is unsettled', () => {
       const running = reduceChatProjection(initialChatProjection, {
         type: 'remote',

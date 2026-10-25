@@ -6939,7 +6939,13 @@ describe('ChatSessionStore — a run on another device (XD3)', () => {
     await client.writeFile(`${events}/pulled-at`, record(60_000));
     const pulls: string[] = [];
     const store = new ChatSessionStore({ chatSession });
-    store.setDependencies({ ...createStubDeps(client), pullRemote: (id) => pulls.push(id) });
+    store.setDependencies({
+      ...createStubDeps(client),
+      pullRemote: async (id) => {
+        pulls.push(id);
+        return true;
+      },
+    });
     const unobserve = store.observe(chatId, projectId);
     store.acquire(chatId, projectId);
 
@@ -6952,7 +6958,7 @@ describe('ChatSessionStore — a run on another device (XD3)', () => {
     const projection = store.getProjection(chatId)!;
     expect(selectRunElsewhere(projection, Date.now())).toMatchObject({ runId: 'run-pulled' });
     expect(selectRunElsewhereAwaitsPull(projection, Date.now())).toBe(true);
-    store.requestRemotePull(chatId);
+    await store.requestRemotePull(chatId);
     expect(pulls).toEqual([projectId]);
 
     /* Pulls found nothing newer for more than the bound: the run no longer holds. */
@@ -6964,6 +6970,60 @@ describe('ChatSessionStore — a run on another device (XD3)', () => {
     store.release(chatId);
     unobserve();
   });
+
+  /*
+   * Round 27: where this device cannot pull the chat (chat sync off, no remote, no record identity), the pull the page
+   * asks for is refused CHAT_NOT_SHARED. The pulls a quiet run awaits can then never come, so it no longer holds the
+   * chat and the composer sends, as the host's fence carries its turn; a run quiet here for less than the ask interval
+   * still holds it.
+   */
+  it.each([
+    { quietFor: 20 * 60 * 1000, holds: false },
+    { quietFor: 60 * 1000, holds: true },
+  ])(
+    'should pass a run quiet for $quietFor ms only past the ask interval where this device’s pulls are refused',
+    async ({ quietFor, holds }) => {
+      const projectId = 'project_run_unpullable';
+      const chatId = `chat_run_unpullable_${String(quietFor)}`;
+      const receivedAt = Date.now() - quietFor;
+      const client = Object.assign(createMemoryClient(), {
+        stat: vi.fn(async (path: string) => ({ size: 0, mtimeMs: path.endsWith('.jsonl') ? receivedAt : 0 })),
+      });
+      const row = (sequence: number, state: string) =>
+        `${JSON.stringify({ version: 1, leaderEpoch: 'desk', sequence, recordedAt: new Date(receivedAt).toISOString(), runId: 'run-unpullable', type: 'run.lifecycle', state })}\n`;
+      await client.writeFile(
+        `/projects/${projectId}/.tau/chats/${chatId}/events/device-desktop.jsonl`,
+        new TextEncoder().encode(row(0, 'admitted') + row(1, 'running')),
+      );
+      const asked: Array<readonly [string, string]> = [];
+      const store = new ChatSessionStore({ chatSession });
+      store.setDependencies({
+        ...createStubDeps(client),
+        pullRemote: async (id, chat) => {
+          asked.push([id, chat]);
+          return false;
+        },
+      });
+      const unobserve = store.observe(chatId, projectId);
+      store.acquire(chatId, projectId);
+      await store.refreshRemoteSegments(chatId, projectId);
+      await vi.waitFor(() => {
+        expect(selectRunElsewhere(store.getProjection(chatId)!, Date.now())).toMatchObject({ runId: 'run-unpullable' });
+      });
+
+      await store.requestRemotePull(chatId);
+
+      expect(asked).toEqual([[projectId, chatId]]);
+      const elsewhere = selectRunElsewhere(store.getProjection(chatId)!, Date.now());
+      if (holds) {
+        expect(elsewhere).toMatchObject({ runId: 'run-unpullable' });
+      } else {
+        expect(elsewhere).toBeUndefined();
+      }
+      store.release(chatId);
+      unobserve();
+    },
+  );
 
   it('should name the device a foreign run is on without the segment file’s extension', async () => {
     const projectId = 'project_run_elsewhere';

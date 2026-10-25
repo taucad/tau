@@ -859,6 +859,8 @@ function useSessionRunElsewhere(chatId: string): ForeignRun | undefined {
  * quiet here a while, it holds the chat until pulls show it stayed quiet there for the staleness bound, and the
  * composer holds its send meanwhile, so nothing else would ask. Asked once it starts awaiting them, then once a
  * heartbeat's interval while it still does (a pull that failed offline is asked again); sync records each of them.
+ * Each answer says whether this device can pull the chat at all (round 27): where it cannot, the run no longer holds
+ * the chat and the composer sends, as the host's fence carries its turn.
  */
 function useRunElsewherePull(chatId: string): void {
   const store = useChatSessionStore();
@@ -875,9 +877,9 @@ function useRunElsewherePull(chatId: string): void {
     if (!awaitsPull) {
       return undefined;
     }
-    store.requestRemotePull(chatId);
+    void store.requestRemotePull(chatId);
     const timer = setInterval(() => {
-      store.requestRemotePull(chatId);
+      void store.requestRemotePull(chatId);
     }, runHeartbeatMilliseconds);
     return () => {
       clearInterval(timer);

@@ -214,9 +214,11 @@ export type ChatSessionDeps = {
   queueLock?: QueueLock;
   /**
    * Ask a project's revisions to pull its remote now (XD3, round 18): another device's run on one of its chats awaits
-   * a pull to show whether it stayed quiet. Absent: nothing is asked, and the run holds until a pull happens anyway.
+   * a pull to show whether it stayed quiet. Answers whether this device can pull the chat at all, as the placement's
+   * pull answers it (round 27): `false` where it was refused `CHAT_NOT_SHARED`. Absent: nothing is asked, and the run
+   * holds until a pull happens anyway.
    */
-  pullRemote?: ((projectId: string) => void) | undefined;
+  pullRemote?: ((projectId: string, chatId: string) => Promise<boolean>) | undefined;
   /** Acknowledged observation through the root owning the chat records. */
   watchRecordFile?: (
     path: string,
@@ -868,15 +870,22 @@ export class ChatSessionStore {
    */
   /**
    * Ask the chat's project to pull its remote now (XD3, round 18), for another device's run on the chat that awaits a
-   * pull (`selectRunElsewhereAwaitsPull`). What the pull brings reaches the projection as any sync does.
+   * pull (`selectRunElsewhereAwaitsPull`). What the pull brings reaches the projection as any sync does, and so does
+   * its answer (round 27): where this device cannot pull the chat, no pull can show the run abandoned, so it no longer
+   * holds the chat (`selectRunElsewhere`), as the host's fence reads the same answer. A pull that fails is no evidence
+   * that this device cannot pull.
    *
    * @param chatId - The chat.
+   * @returns Once the pull has answered.
    */
-  public requestRemotePull(chatId: string): void {
+  public async requestRemotePull(chatId: string): Promise<void> {
     const projectId = this.#sessions.get(chatId)?.projectId ?? this.#observed.get(chatId)?.projectId;
-    if (projectId !== undefined) {
-      this.#deps.pullRemote?.(projectId);
+    const pull = this.#deps.pullRemote;
+    if (projectId === undefined || pull === undefined) {
+      return;
     }
+    const pulls = await pull(projectId, chatId).catch(() => true);
+    this.#projections.get(chatId)?.send({ type: 'pulls', pulls });
   }
 
   public setDependencies(deps: ChatSessionDeps): void {

@@ -177,7 +177,6 @@ function ChatSwitcherSheet({
         </button>
       </DrawerTrigger>
       <DrawerContent
-        data-testid='chat-switcher'
         onCloseAutoFocus={(event) => {
           const next = handOff.current;
           handOff.current = undefined;

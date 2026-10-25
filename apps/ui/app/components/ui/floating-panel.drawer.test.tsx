@@ -86,7 +86,7 @@ describe('FloatingPanel docked in a detented drawer', () => {
       <DockedPanel
         headerExtra={
           <Drawer open>
-            <DrawerContent data-testid='chat-switcher'>
+            <DrawerContent>
               <DrawerTitle>Chats</DrawerTitle>
               <DrawerDescription className='sr-only'>Pick a chat</DrawerDescription>
               <button type='button' onClick={onPick}>

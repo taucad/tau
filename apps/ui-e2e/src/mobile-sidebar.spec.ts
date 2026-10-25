@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import { composerSelector, prepareComposerPage } from '#support/chat-attachments.js';
+import { prepareComposerPage } from '#support/chat-attachments.js';
 
 /**
  * The phone sidebar sheet and the phone chat switcher on a real project route (canvas SB-02, SB-04, SB-05, SB-07,
@@ -23,8 +23,15 @@ const sheetWidth = 288;
 
 const sidebarSheet = (): Locator => selectors.getByRole('dialog', { name: 'Sidebar' });
 const navigation = (): Locator => selectors.getByRole('navigation', { name: 'Workbench' });
-const chatTitle = (): Locator => selectors.getByCss('[data-slot="chat-title-button"]');
-const chatSwitcher = (): Locator => selectors.getByTestId('chat-switcher');
+/** The phone chat title: named by the chat, then the switcher it opens. */
+const chatTitle = (): Locator =>
+  selectors.getByRole('button', { name: new RegExp(`, Chats in ${projectNames.a}$`, 'u') });
+const chatSwitcher = (): Locator => selectors.getByRole('dialog', { name: `Chats in ${projectNames.a}` });
+const switcherChats = (): Locator => chatSwitcher().getByRole('list', { name: 'Chats' });
+const composer = (): Locator => selectors.getByRole('textbox', { name: 'Ask Tau to build anything...', exact: true });
+/** Whether a located element holds focus. */
+const hasFocus = async (locator: Locator): Promise<boolean> =>
+  target.evaluateLocator(locator, (element) => element.contains(document.activeElement));
 
 const openSeededProject = async (viewport: { readonly width: number; readonly height: number }): Promise<void> => {
   await target.commands.uiOpenTarget({ hasTouch: true, isMobile: true });
@@ -45,25 +52,16 @@ const openSidebarSheet = async (): Promise<void> => {
   });
 };
 
-/** The visible menu's item names and variants, in order. */
+const openMenu = (): Locator => selectors.getByRole('menu');
+
+/** The open menu's items, by their names and variants, in order. */
 const readOpenMenu = async (): Promise<ReadonlyArray<{ readonly name: string; readonly variant: string }>> =>
-  target.evaluate(() => {
-    const menu = document.querySelector<HTMLElement>('[role="menu"][data-state="open"]');
-    if (!menu) {
-      throw new Error('No menu is open.');
-    }
-    return [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].map((item) => ({
+  target.evaluateLocator(openMenu(), (menu) =>
+    [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].map((item) => ({
       name: item.textContent.trim(),
       variant: item.dataset['variant'] ?? 'default',
-    }));
-  });
-
-const openMenuSize = async (): Promise<number> => {
-  const menu = await target.evaluate(
-    () => document.querySelectorAll('[role="menu"][data-state="open"] [role="menuitem"]').length,
+    })),
   );
-  return menu;
-};
 
 test.each([
   { width: 320, height: 640 },
@@ -120,16 +118,14 @@ test('opens a project row’s actions from ⋯ and from a long press, with Move 
   await target.click(sidebarSheet().getByRole('button', { name: `More actions for ${projectNames.b}`, exact: true }), {
     touch: true,
   });
-  await expect.poll(openMenuSize).toBeGreaterThan(0);
+  await target.expectVisible(openMenu());
   const fromActions = await readOpenMenu();
   expect(fromActions.map(({ name }) => name)).toContain('Rename');
   expect(fromActions.find(({ name }) => name === 'Move to Trash')?.variant).toBe('destructive');
   // Every item but Trash is plain: the destructive styling is Trash's alone.
   expect(fromActions.filter(({ variant }) => variant === 'destructive')).toHaveLength(1);
   await target.keyboardPress('Escape');
-  await expect
-    .poll(async () => target.evaluate(() => document.querySelector('[role="menu"][data-state="open"]') === null))
-    .toBe(true);
+  await target.expectHidden(openMenu());
   // Escape closes only the menu, not the sheet under it.
   await target.expectVisible(sidebarSheet());
 
@@ -156,7 +152,7 @@ test('opens a project row’s actions from ⋯ and from a long press, with Move 
       link.dispatchEvent(new PointerEvent('pointerup', { ...init, buttons: 0 }));
     },
   );
-  await expect.poll(openMenuSize).toBeGreaterThan(0);
+  await target.expectVisible(openMenu());
   expect(await readOpenMenu()).toEqual(fromActions);
 });
 
@@ -166,8 +162,8 @@ test('lists local projects signed out, with sign-in reachable from the footer', 
 
   await target.expectVisible(sidebarSheet().getByRole('link', { name: projectNames.a, exact: true }));
   await target.expectVisible(sidebarSheet().getByRole('link', { name: projectNames.b, exact: true }));
-  const footer = sidebarSheet().getByCss('[data-slot="sidebar-footer"]');
-  await target.click(footer.getByRole('button', { name: 'Account' }), { touch: true });
+  // The footer's account control; signed out, it carries the way in.
+  await target.click(sidebarSheet().getByRole('button', { name: 'Account', exact: true }), { touch: true });
   const signIn = selectors.getByRole('menuitem', { name: 'Log in' });
   await target.expectVisible(signIn);
   expect(await target.getAttribute(signIn, 'href')).toMatch(/sign-in/u);
@@ -177,59 +173,54 @@ test('opens this project’s chats from the chat title, switches chat, and start
   await openSeededProject({ width: 390, height: 844 });
   await target.click(navigation().getByRole('button', { name: 'Chat', exact: true }), { touch: true });
   await target.expectVisible(chatTitle(), 60_000);
-  await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
+  await target.expectVisible(composer(), 60_000);
 
   await target.click(chatTitle(), { touch: true });
   await target.expectVisible(chatSwitcher());
-  await target.expectVisible(chatSwitcher().getByText(`Chats in ${projectNames.a}`, { exact: true }));
-  const rows = async (): Promise<ReadonlyArray<{ readonly name: string; readonly isCurrent: boolean }>> =>
-    target.evaluateLocator(chatSwitcher(), (sheet) =>
-      [...sheet.querySelectorAll<HTMLElement>('ul[aria-label="Chats"] [data-slot="chat-switcher-row"]')].map((row) => ({
-        name: row.textContent.trim(),
-        isCurrent: row.getAttribute('aria-current') === 'true',
-      })),
-    );
-  const rowNames = async (): Promise<readonly string[]> => {
-    const listedRows = await rows();
-    return listedRows.map(({ name }) => name);
+  // New chat leads, then this project's chats, most recent first: each row is found by its name, in that order.
+  const rowNames = ['New chat', ...chatNames];
+  const rowTop = async (name: string): Promise<number> => {
+    const box = await target.boundingBox(switcherChats().getByRole('button', { name, exact: true }));
+    if (!box) {
+      throw new Error(`The ${name} row has no layout box.`);
+    }
+    return box.y;
   };
-  await expect.poll(rowNames).toEqual(['New chat', ...chatNames]);
-  const listed = await rows();
-  const current = listed.find(({ isCurrent }) => isCurrent)?.name;
+  await target.expectVisible(switcherChats().getByRole('button', { name: chatNames[1], exact: true }));
+  const tops = await Promise.all(rowNames.map(async (name) => rowTop(name)));
+  expect(tops).toEqual([...tops].sort((left, right) => left - right));
+  expect(new Set(tops).size).toBe(rowNames.length);
+  const currentFlags = await Promise.all(
+    chatNames.map(async (name) =>
+      target.getAttribute(switcherChats().getByRole('button', { name, exact: true }), 'aria-current'),
+    ),
+  );
+  // Exactly one chat is the open one.
+  expect(currentFlags.filter((flag) => flag === 'true')).toHaveLength(1);
+  const current = chatNames[currentFlags.indexOf('true')];
   const other = chatNames.find((name) => name !== current);
   if (!other) {
     throw new Error('The seed has no second chat to switch to.');
   }
   const urlBefore = await target.currentUrl();
 
-  await target.click(chatSwitcher().getByRole('button', { name: other, exact: true }), { touch: true });
+  await target.click(switcherChats().getByRole('button', { name: other, exact: true }), { touch: true });
   await target.expectHidden(chatSwitcher());
   await expect.poll(async () => target.textContent(chatTitle())).toContain(other);
   await expect.poll(async () => target.currentUrl()).not.toBe(urlBefore);
   expect(new URL(await target.currentUrl()).searchParams.get('chat')).toBeTruthy();
   // The switcher hands focus back to the title it opened from.
-  await expect
-    .poll(async () =>
-      target.evaluate(() => {
-        const active = document.activeElement;
-        return active instanceof HTMLElement ? (active.dataset['slot'] ?? null) : null;
-      }),
-    )
-    .toBe('chat-title-button');
+  await expect.poll(async () => hasFocus(chatTitle())).toBe(true);
 
   await target.click(chatTitle(), { touch: true });
   await target.expectVisible(chatSwitcher());
   const switchedUrl = await target.currentUrl();
-  await target.click(chatSwitcher().getByRole('button', { name: 'New chat', exact: true }), { touch: true });
+  await target.click(switcherChats().getByRole('button', { name: 'New chat', exact: true }), { touch: true });
   await target.expectHidden(chatSwitcher());
   await expect.poll(async () => target.textContent(chatTitle())).toContain('New chat');
   await expect.poll(async () => target.currentUrl()).not.toBe(switchedUrl);
   // PN-CHAT-3: the new chat's composer takes focus.
-  await expect
-    .poll(async () =>
-      target.evaluate((selector) => Boolean(document.activeElement?.closest(selector)), composerSelector),
-    )
-    .toBe(true);
+  await expect.poll(async () => hasFocus(composer())).toBe(true);
 
   // Rename from the switcher: the editor starts once the sheet has gone, and the page is left scrollable.
   await target.click(chatTitle(), { touch: true });
@@ -238,9 +229,7 @@ test('opens this project’s chats from the chat title, switches chat, and start
   const field = selectors.getByRole('textbox', { name: 'Chat name' });
   await target.expectVisible(field);
   await target.expectHidden(chatSwitcher());
-  await expect
-    .poll(async () => target.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? null))
-    .toBe('Chat name');
+  await expect.poll(async () => hasFocus(field)).toBe(true);
   await target.fill(field, 'Renamed on a phone');
   await target.press(field, 'Enter');
   await expect.poll(async () => target.textContent(chatTitle())).toContain('Renamed on a phone');

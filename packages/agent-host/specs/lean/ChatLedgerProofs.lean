@@ -4192,7 +4192,7 @@ theorem t12_step_keeps_heartbeat (s : Terms) (op : TermOp) (h : s.wrote = some s
   cases op with
   | propose c r f => simpa [Terms.step, Terms.term] using h
   | write r hb =>
-    unfold Terms.step
+    unfold Terms.step Terms.finish
     cases ht : s.taken r hb with
     | none => simp [ht, Terms.term]
     | some p => simp [ht, Terms.term]
@@ -4225,7 +4225,7 @@ theorem t12_writes_keep (u : Terms) (c r f : Nat) (hu : u.proposed = [(c, r, f)]
         simp [hu, hne]
       · simp
     have hstep : u.step (.write w.1 w.2) = { u with wrote := some u.term } := by
-      simp only [Terms.step, hnone]
+      simp only [Terms.step, Terms.finish, hnone]
     have hrest := ih { u with wrote := some u.term } hu (fun x hx => hw x (List.mem_cons_of_mem _ hx))
     have hrun : u.run ((w :: rest).map fun w => .write w.1 w.2) =
         ({ u with wrote := some u.term } : Terms).run (rest.map fun w => .write w.1 w.2) := by
@@ -4268,6 +4268,124 @@ proposed, which is the chat's from then on. -/
 theorem t12_command_commits (s : Terms) (hp : s.proposed = []) (c r f : Nat) :
     (s.step (.propose c r f)).rowsTerm r false = f ∧
       ((s.step (.propose c r f)).step (.write r false)).heartbeat = some f := by
-  simp [Terms.step, Terms.rowsTerm, Terms.taken, Terms.heartbeat, Terms.term, hp]
+  simp [Terms.step, Terms.finish, Terms.rowsTerm, Terms.taken, Terms.heartbeat, Terms.term, hp]
+
+/-- Proposals and answers: what may run beside a batch's write (`rehome`, `withdrawTerm`), off the chat's chain. -/
+def TermOp.beside : TermOp → Bool
+  | .write _ _ => false
+  | _ => true
+
+theorem beside_keeps (s : Terms) (ops : List TermOp) (h : ∀ op ∈ ops, op.beside = true) :
+    (s.run ops).opened = s.opened ∧ (s.run ops).held = s.held := by
+  induction ops generalizing s with
+  | nil => simp [Terms.run]
+  | cons op rest ih =>
+    have hop := h op (List.mem_cons_self ..)
+    have hr := ih (s.step op) (fun x hx => h x (List.mem_cons_of_mem _ hx))
+    have hs : (s.step op).opened = s.opened ∧ (s.step op).held = s.held := by
+      cases op with
+      | propose c r f => simp [Terms.step]
+      | write r hb => simp [TermOp.beside] at hop
+      | answer c applied => cases applied <;> simp [Terms.step]
+    have hrun : s.run (op :: rest) = (s.step op).run rest := by simp [Terms.run]
+    rw [hrun]
+    exact ⟨hr.1.trans hs.1, hr.2.trans hs.2⟩
+
+/-- **T12** (one decision, round 20): a batch's write commits what it decided as it began, whatever proposals were made
+or withdrawn while it was written: the term it was written under is the chat's term after it and the one this host
+last wrote under, so its heartbeats go on under it. -/
+theorem t12_write_decided_once (s : Terms) (r : Nat) (hb : Bool) (mid : List TermOp)
+    (h : ∀ op ∈ mid, op.beside = true) :
+    ((s.run mid).finish s r hb).term = s.rowsTerm r hb ∧
+      ((s.run mid).finish s r hb).heartbeat = some (s.rowsTerm r hb) := by
+  have ⟨ho, hh⟩ := beside_keeps s mid h
+  unfold Terms.finish Terms.rowsTerm
+  cases ht : s.taken r hb with
+  | some p => simp [Terms.term, Terms.heartbeat]
+  | none => simp [Terms.term, Terms.heartbeat, ho, hh]
+
+/-! ## T13: one admission for every command that starts or continues a run (round 20)
+
+A start, a Resume and an approval are admitted by one rule: where the run and the other devices' runs stand, the term,
+and the abandoned foreign runs the command goes on past. Its run's first batch says each one's turn, whatever the
+command, so every device then reads that run taken over: it holds the chat nowhere, and its own approval is refused. -/
+
+/-- **T13** (one admission): an approval nobody took over, a Resume and a start are admitted by the same rule, over the
+same foreign runs. -/
+theorem t13_one_admission (t w : Bool) (foreign : List Passed) :
+    admit .approve false w foreign = admit .resume t w foreign ∧ admit .resume t w foreign = admit .start t w foreign := by
+  have h := t10_approval_admitted_as_resume t w
+  unfold admit
+  rw [h.1, h.2]
+  exact ⟨rfl, rfl⟩
+
+/-- **T13** (it names every run it passes): any command admitted past another device's abandoned run whose words are
+known and whose turn no device said names that run. -/
+theorem t13_says_every_passed (v : Verb) (t w : Bool) (foreign : List Passed) (a : Admission) (says : List Nat)
+    (h : admit v t w foreign = .admitted a says) (f : Passed) (hf : f ∈ foreign) (hw : f.words = true)
+    (hs : f.said = false) : f.run ∈ says := by
+  unfold admit at h
+  split at h
+  · cases h
+  · split at h
+    · cases h
+    · obtain ⟨-, rfl⟩ := Admit.admitted.inj h
+      exact List.mem_map.mpr ⟨f, List.mem_filter.mpr ⟨hf, by simp [hw, hs]⟩, rfl⟩
+
+/-- **T13** (never past a live run): no command is admitted while another device's run holds the chat. -/
+theorem t13_held_refuses (v : Verb) (t w : Bool) (foreign : List Passed) (f : Passed) (hf : f ∈ foreign)
+    (hl : f.abandoned = false) (a : Admission) (says : List Nat) : admit v t w foreign ≠ .admitted a says := by
+  unfold admit
+  have hany : foreign.any (fun f => !f.abandoned) = true := List.any_eq_true.mpr ⟨f, hf, by simp [hl]⟩
+  split <;> simp [hany]
+
+/-- **T13** (kept until its batch): what a command carries stays until its run writes a batch that is no lone
+heartbeat, or the command is answered other than applied; other runs' batches and other answers leave it. -/
+theorem t13_carry_kept (c : Carried) (e : Nat × Nat × List Nat) (he : e ∈ c) (op : CarryOp)
+    (hw : ∀ hb, op = .write e.2.1 hb → hb = true) (ha : op ≠ .answer e.1 false) : e ∈ (carryStep c op).1 := by
+  cases op with
+  | carry k r says => simp [carryStep, he]
+  | write r hb =>
+    cases ht : carriedTaken c r hb with
+    | none => simpa [carryStep, ht] using he
+    | some p =>
+      simp only [carryStep, ht]
+      refine (List.mem_erase_of_ne ?_).mpr he
+      intro hep
+      subst hep
+      unfold carriedTaken at ht
+      cases hb with
+      | true => simp at ht
+      | false =>
+        have hr := List.find?_some ht
+        have : e.2.1 = r := by simpa using hr
+        exact absurd (hw false (by rw [this])) (by simp)
+  | answer k applied =>
+    cases applied with
+    | true => simpa [carryStep] using he
+    | false =>
+      have hk : k ≠ e.1 := fun hk => ha (by rw [hk])
+      simp only [carryStep, Bool.false_eq_true, ite_false]
+      exact List.mem_filter.mpr ⟨he, by simp [Ne.symm hk]⟩
+
+/-- **T13** (in the first batch): the command's run's first batch says what its admission named. -/
+theorem t13_first_batch (c : Carried) (k r : Nat) (says : List Nat) (hc : ∀ p ∈ c, p.2.1 ≠ r) :
+    (carryStep (carryStep c (.carry k r says)).1 (.write r false)).2 = says := by
+  have hnone : c.find? (fun p => p.2.1 == r) = none :=
+    List.find?_eq_none.mpr (fun p hp => by simpa using hc p hp)
+  simp [carryStep, carriedTaken, List.find?_append, hnone]
+
+/-- **T13** (a passed run is taken over): any command admitted past another device's abandoned run, whose words are
+known and whose turn no device said, says its turn in the command's run's first batch; from then on that run stands
+abandoned on every device, and its own device's approval of it is refused. -/
+theorem t13_passed_taken_over (v : Verb) (t w : Bool) (foreign : List Passed) (a : Admission) (says : List Nat)
+    (h : admit v t w foreign = .admitted a says) (c : Carried) (k r : Nat) (hc : ∀ p ∈ c, p.2.1 ≠ r)
+    (f : Passed) (hf : f ∈ foreign) (hw : f.words = true) (hs : f.said = false)
+    (bound ask changed now : Nat) (quiet : Option Nat) (wrote : Bool) :
+    f.run ∈ (carryStep (carryStep c (.carry k r says)).1 (.write r false)).2 ∧
+      standing bound ask changed now quiet true = .abandoned ∧ admission .approve true wrote = .takenOver := by
+  refine ⟨?_, by simp [standing], t10_approval_refused_after_takeover wrote⟩
+  rw [t13_first_batch c k r says hc]
+  exact t13_says_every_passed v t w foreign a says h f hf hw hs
 
 end ChatLedger

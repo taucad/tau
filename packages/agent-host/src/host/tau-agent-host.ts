@@ -336,6 +336,12 @@ type ChatStore = {
    * first row makes it the chat's term, and a command answered otherwise withdraws it.
    */
   terms?: ChatTerms | undefined;
+  /**
+   * The rows admitted commands' runs' first batches carry (round 20, {@link commandAdmission}): the turns of the
+   * abandoned foreign runs each command goes on past. The run's first batch that is no lone heartbeat spends its entry;
+   * a command answered otherwise withdraws its own.
+   */
+  carried?: readonly CarriedTurns[] | undefined;
   /** When this host last asked the placement to pull, for another device's run that awaits one (XD3, round 18). */
   pullAskedAt?: number | undefined;
 };
@@ -417,6 +423,39 @@ export const termAdmission = (
 export const rowsTermOf = (admitted: TermAdmission, held: string, open: () => string): string =>
   admitted === 'new-term' ? open() : held;
 
+/** Another device's unsettled run as an admission reads it (`Passed` in ChatLedger.lean, T13). @internal */
+export type PassedRun = Readonly<{ runId: string; abandoned: boolean; said: boolean; words: boolean }>;
+
+/** What {@link commandAdmission} answers. @internal */
+export type CommandAdmission =
+  | Readonly<{ refused: 'RUN_TAKEN_OVER' | 'RUN_ACTIVE_ON_ANOTHER_DEVICE' }>
+  | Readonly<{ admitted: Exclude<TermAdmission, 'taken-over'>; says: readonly string[] }>;
+
+/**
+ * The one admission of every command that starts or continues a run (round 20; `admit` in ChatLedger.lean, T13): a
+ * start, a Resume and an approval alike. It checks where the run and the other devices' runs stand, decides the term
+ * ({@link termAdmission}), and names each abandoned foreign run the command goes on past whose turn no device said yet:
+ * the command's run's first batch says each one's turn, so every device then reads that run taken over.
+ *
+ * @internal
+ * @param verb - The command.
+ * @param facts - `takenOver` and `foreignWrote` as for {@link termAdmission}; `foreign`: the other devices' unsettled
+ *   runs.
+ * @returns Refused, or admitted with its term and the runs whose turns it says.
+ */
+export const commandAdmission = (
+  verb: AdmissionVerb,
+  facts: Readonly<{ takenOver: boolean; foreignWrote: boolean; foreign: readonly PassedRun[] }>,
+): CommandAdmission => {
+  const admitted = termAdmission(verb, facts);
+  if (admitted === 'taken-over') {
+    return { refused: 'RUN_TAKEN_OVER' };
+  }
+  return facts.foreign.some((run) => !run.abandoned)
+    ? { refused: 'RUN_ACTIVE_ON_ANOTHER_DEVICE' }
+    : { admitted, says: facts.foreign.filter((run) => run.words && !run.said).map((run) => run.runId) };
+};
+
 /** A term this host opened in place of its incarnation's own (`replaces`). @internal */
 export type TermOpening = Readonly<{ replaces: string; leaderEpoch: string }>;
 
@@ -450,44 +489,70 @@ export type ChatTerms = Readonly<{
 export const chatTermOf = (terms: ChatTerms, held: string): string =>
   terms.opened?.replaces === held ? terms.opened.leaderEpoch : held;
 
-/** The proposal a batch commits (`Terms.taken`): the first for a run the batch writes a row of that is no heartbeat. */
-const takenProposal = (terms: ChatTerms, held: string, rows: readonly ChatRunRow[]): TermProposal | undefined =>
-  terms.proposed?.find(
-    (proposal) =>
-      proposal.replaces === held &&
-      rows.some((row) => row.runId === proposal.runId && row.body.type !== 'run.heartbeat'),
-  );
-
 /**
- * The term a batch is written under (`Terms.rowsTerm`): the term proposed for its run, else the chat's term.
- *
- * @internal
- * @param terms - The chat's terms.
- * @param held - The incarnation's term.
- * @param rows - The batch.
- * @returns The term.
+ * The entry a batch takes (`Terms.taken`, `carriedTaken`): the first for a run the batch writes a row of that is no
+ * heartbeat.
  */
-export const writtenTermOf = (terms: ChatTerms, held: string, rows: readonly ChatRunRow[]): string =>
-  takenProposal(terms, held, rows)?.leaderEpoch ?? chatTermOf(terms, held);
+const takenBy = <Entry extends Readonly<{ runId: string }>>(
+  entries: readonly Entry[] | undefined,
+  rows: readonly ChatRunRow[],
+): Entry | undefined =>
+  entries?.find((entry) => rows.some((row) => row.runId === entry.runId && row.body.type !== 'run.heartbeat'));
+
+/** What a batch's write decided as it began (round 20; `Terms.finish`'s `begun`): its term, and the proposal it commits. @internal */
+export type TermWrite = Readonly<{ held: string; leaderEpoch: string; taken?: TermProposal | undefined }>;
 
 /**
- * The chat's terms once a batch is written (`Terms.step`, `write`): the proposal it was written under is the chat's term.
+ * The term a batch is written under (`Terms.rowsTerm`), decided once as its write begins: the term proposed for its
+ * run, else the chat's term.
  *
  * @internal
  * @param terms - The chat's terms.
  * @param held - The incarnation's term.
  * @param rows - The batch.
+ * @returns The decision, which {@link termsAfterWrite} commits.
+ */
+export const termWriteOf = (terms: ChatTerms, held: string, rows: readonly ChatRunRow[]): TermWrite => {
+  const taken = takenBy(
+    terms.proposed?.filter((proposal) => proposal.replaces === held),
+    rows,
+  );
+  return { held, leaderEpoch: taken?.leaderEpoch ?? chatTermOf(terms, held), taken };
+};
+
+/**
+ * The chat's terms once a batch is written (`Terms.finish`): exactly what its write decided as it began
+ * ({@link termWriteOf}), whatever was proposed or withdrawn while it was written. The proposal it was written under is
+ * the chat's term; nothing else changes.
+ *
+ * @internal
+ * @param terms - The chat's terms now.
+ * @param write - The decision.
  * @returns The terms.
  */
-export const termsAfterWrite = (terms: ChatTerms, held: string, rows: readonly ChatRunRow[]): ChatTerms => {
-  const taken = takenProposal(terms, held, rows);
-  return taken === undefined
+export const termsAfterWrite = (terms: ChatTerms, { held, taken }: TermWrite): ChatTerms =>
+  taken === undefined
     ? terms
     : {
         opened: { replaces: held, leaderEpoch: taken.leaderEpoch },
         proposed: terms.proposed?.filter((proposal) => proposal !== taken),
       };
-};
+
+/** The rows an admitted command's run's first batch carries (round 20; `Carried` in ChatLedger.lean, T13). @internal */
+export type CarriedTurns = Readonly<{ commandId: string; runId: string; says: readonly ChatRunRow[] }>;
+
+/**
+ * What a batch carries (`carriedTaken`): the first entry for a run the batch writes a row of that is no heartbeat.
+ *
+ * @internal
+ * @param carried - What admitted commands carry.
+ * @param rows - The batch.
+ * @returns The entry the batch spends.
+ */
+export const carriedBy = (
+  carried: readonly CarriedTurns[] | undefined,
+  rows: readonly ChatRunRow[],
+): CarriedTurns | undefined => takenBy(carried, rows);
 
 /**
  * The chat's terms once a command is answered (`Terms.step`, `answer`): one answered other than applied withdraws the
@@ -1401,57 +1466,19 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     void settleQuietly(pull({ requestId: `pull:${chatId}:${String(at)}`, chatId }));
   };
 
-  /**
-   * The cross-device run fence (XD3): another device's synced segment holds a run it has not settled, and that run is
-   * not abandoned, so this host runs nothing on the chat until it settles. A run is never moved between devices while
-   * it is in flight (OQ-N21: refuse or interrupt-and-seal; this host refuses). The refusal is a `wait`: the same
-   * command is admitted once sync brings that run's settlement, or once pulls found its segment as it is for more than
-   * {@link foreignRunStaleMilliseconds}. A run quiet here a while awaits such pulls, so the refusal asks the placement
-   * for one ({@link askPull}).
-   *
-   * @param chatId - The chat.
-   * @param log - Its log, refreshed from sync.
-   */
-  const refuseForeignRun = async (chatId: string, log: DurableEventLog): Promise<void> => {
-    /* An unread segment may hold a live run: `foreignRuns` rejects `SEGMENTS_UNREADABLE` (`wait`), never answers none. */
-    const runs = (await log.foreignRuns?.()) ?? [];
-    const at = now().getTime();
-    const held = liveForeignRun(runs, at);
-    if (held === undefined) {
-      return;
-    }
-    if (runs.some((run) => foreignRunStanding(run, at).awaitsPull)) {
-      askPull(chatId, at);
-    }
-    throw coded(
-      'RUN_ACTIVE_ON_ANOTHER_DEVICE' satisfies RefusalCode,
-      `Chat ${chatId} is running on another device; send this again once that run finishes.`,
-      {
-        details: {
-          deviceId: held.deviceId,
-          runId: held.runId,
-          state: held.state,
-          lastRecordedAt: new Date(held.lastRecordedAt).toISOString(),
-          /* The earliest a pull can show it abandoned: one that finds nothing newer after this. */
-          staleAt: new Date(held.observedAt + foreignRunStaleMilliseconds).toISOString(),
-        },
-      },
-    );
-  };
-
   /*
    * Read what sync brought once per dispatch of a command: the term check and the admission that follow one `execute`
    * share one refresh. A re-send of the same command (a `wait` refusal asks for exactly that) is a new dispatch and
    * reads again. Entries live only while their dispatch does.
    */
-  const dispatches = new Map<string, { refreshed?: DurableEventLog }>();
+  const dispatches = new Map<string, { refreshed?: DurableEventLog; admitted?: true }>();
   /**
    * End one dispatch's entry once its command is answered: when the registry's answer settles, or at once for a
    * command answered before it reached the registry (superseded by a Stop, refused by a check).
    */
   const releaseDispatch = async (
     commandId: string,
-    dispatch: { refreshed?: DurableEventLog },
+    dispatch: { refreshed?: DurableEventLog; admitted?: true },
     answer: Promise<CommandAnswer> | undefined,
   ): Promise<void> => {
     if (answer !== undefined) {
@@ -1496,15 +1523,18 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const rehome = (
     chatId: string,
     admitted: TermAdmission,
-    { commandId, runId }: Pick<TermProposal, 'commandId' | 'runId'>,
+    { commandId, runId, says = [] }: Pick<TermProposal, 'commandId' | 'runId'> & { says?: readonly ChatRunRow[] },
   ): void => {
+    const store = storeOf(chatId);
+    if (says.length > 0) {
+      store.carried = [...(store.carried ?? []), { commandId, runId, says }];
+    }
     const held = registry.termOf(chatId);
     if (held === undefined) {
       return;
     }
     const leaderEpoch = rowsTermOf(admitted, held, createTerm);
     if (leaderEpoch !== held) {
-      const store = storeOf(chatId);
       store.terms = {
         ...store.terms,
         proposed: [...(store.terms?.proposed ?? []), { replaces: held, leaderEpoch, commandId, runId }],
@@ -1525,40 +1555,163 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     if (store?.terms !== undefined) {
       store.terms = termsAfterAnswer(store.terms, commandId, applied);
     }
+    if (store?.carried !== undefined && !applied) {
+      store.carried = store.carried.filter((entry) => entry.commandId !== commandId);
+    }
   };
   /**
-   * A new term for a turn another device's turn came between (XD1). An incarnation keeps one term while it stays
-   * open, and a term's rows merge together, ordered by the term's start (CL-R14): a turn written under a term that
-   * began before another device's rows would merge ahead of them in every device's history. So when the chat's open
-   * incarnation already wrote under its term and its log has read rows from another device since it first wrote under
-   * that term, a new term is opened before the turn is admitted ({@link rehome}), and the turn is written under it,
-   * starting now. What "since" means is what this host read, not when the other device's clock says it wrote.
+   * The one cross-device admission of every command that starts or continues a run (round 20, {@link commandAdmission};
+   * `admit` in ChatLedger.lean, T13): a start, a Resume and an approval. After this dispatch's read of what sync brought
+   * (an approval's bounded), it checks the run's and the other devices' runs' standing, decides the term and proposes
+   * a new one ({@link rehome}), and hands the command's run's first batch the turn of every abandoned foreign run it goes
+   * on past, so every device reads that run taken over whichever command passed it.
    *
-   * @param chatId - The chat whose incarnation may be closed.
-   * @param command - The command the check runs for (it shares that dispatch's refresh), the run it starts or resumes
-   * (its rows are the ones a new term is opened for), and whether it is a start or a Resume ({@link termAdmission}).
-   * @returns The check in flight, or `undefined` when there is nothing to check.
+   * The cross-device run fence (XD3): another device's synced segment holds a run it has not settled, and that run is
+   * not abandoned, so nothing runs on the chat until it settles. A run is never moved between devices while it is in
+   * flight (OQ-N21: refuse or interrupt-and-seal; this host refuses). The refusal is a `wait`: the same command is
+   * admitted once sync brings that run's settlement, or once pulls found its segment as it is for more than
+   * {@link foreignRunStaleMilliseconds}. A run quiet here a while awaits such pulls, so the refusal asks the placement
+   * for one ({@link askPull}). An approval of a run another device took over is refused `RUN_TAKEN_OVER`.
+   *
+   * A new term for a turn another device's turn came between (XD1): an incarnation keeps one term while it stays open,
+   * and a term's rows merge together, ordered by the term's start (CL-R14), so a command admitted after this
+   * incarnation wrote under its term and read another device's rows since is written under a new term that starts
+   * after them. What "since" means is what this host read, not when the other device's clock says it wrote.
+   *
+   * It fails closed: a check that fails with anything but a decision refuses the command with a `wait` code, the read's
+   * own when it has one, else `SEGMENTS_UNREADABLE`. Nothing is forwarded unchecked.
+   *
+   * @param chatId - The chat.
+   * @param log - Its log.
+   * @param command - The command, its run and verb.
    */
-  const rehomeStaleTerm = (
+  const admitAcross = async (
     chatId: string,
+    log: DurableEventLog,
     command: Pick<TermProposal, 'commandId' | 'runId'> & Readonly<{ verb: AdmissionVerb }>,
-  ): Promise<void> | undefined => {
-    const store = stores.get(chatId);
-    const opened = store?.log;
-    if (opened === undefined || !wroteUnderTerm(chatId)) {
-      return undefined;
-    }
-    const check = async (): Promise<void> => {
-      try {
-        const log = await opened;
-        await refreshFor(log, command.commandId);
-        const foreignWrote = (await log.foreignWroteSinceTermBegan?.()) === true;
-        rehome(chatId, termAdmission(command.verb, { takenOver: false, foreignWrote }), command);
-      } catch {
-        /* A live run, a closed log or an unread segment: the command is answered as it would be without this. */
+  ): Promise<void> => {
+    let runs: readonly ForeignRun[] = [];
+    let admitted: CommandAdmission;
+    let at = 0;
+    try {
+      await (command.verb === 'approve' ? boundedRefresh(log) : refreshFor(log, command.commandId));
+      const takenOver = command.verb === 'approve' && (await log.runTakenOver?.(command.runId)) === true;
+      /* An unread segment may hold a live run: `foreignRuns` rejects `SEGMENTS_UNREADABLE` (`wait`), never answers none. */
+      runs = takenOver ? [] : ((await log.foreignRuns?.()) ?? []);
+      const foreignWrote = wroteUnderTerm(chatId) && (await log.foreignWroteSinceTermBegan?.()) === true;
+      at = now().getTime();
+      admitted = commandAdmission(command.verb, {
+        takenOver,
+        foreignWrote,
+        foreign: runs.map((run) => ({
+          runId: run.runId,
+          abandoned: isAbandonedForeignRun(run, at),
+          said: run.takenOver === true,
+          words: run.words !== undefined,
+        })),
+      });
+    } catch (error) {
+      const { code, message } = codedFailureDetail(error);
+      if (code !== undefined && refusalOf(code).retry === 'wait') {
+        throw error;
       }
-    };
-    return check();
+      throw coded(
+        'SEGMENTS_UNREADABLE' satisfies RefusalCode,
+        `Whether another device is running this chat could not be checked, so nothing was run: ${message}`,
+        { details: { unchecked: code ?? 'uncoded' } },
+      );
+    }
+    if ('refused' in admitted) {
+      if (admitted.refused === 'RUN_TAKEN_OVER') {
+        throw coded(
+          'RUN_TAKEN_OVER' satisfies RefusalCode,
+          'Another device found this paused turn abandoned and went on with the chat, so its request can no longer be approved here. Deny it, then send what you want next.',
+        );
+      }
+      const held = liveForeignRun(runs, at)!;
+      if (runs.some((run) => foreignRunStanding(run, at).awaitsPull)) {
+        askPull(chatId, at);
+      }
+      throw coded(
+        'RUN_ACTIVE_ON_ANOTHER_DEVICE' satisfies RefusalCode,
+        `Chat ${chatId} is running on another device; send this again once that run finishes.`,
+        {
+          details: {
+            deviceId: held.deviceId,
+            runId: held.runId,
+            state: held.state,
+            lastRecordedAt: new Date(held.lastRecordedAt).toISOString(),
+            /* The earliest a pull can show it abandoned: one that finds nothing newer after this. */
+            staleAt: new Date(held.observedAt + foreignRunStaleMilliseconds).toISOString(),
+          },
+        },
+      );
+    }
+    const passed = new Set(admitted.says);
+    rehome(chatId, admitted.admitted, {
+      ...command,
+      says: runs.flatMap((run): ChatRunRow[] =>
+        passed.has(run.runId) && run.words !== undefined
+          ? [{ runId: run.runId, body: { type: 'message.appended', message: abandonedTurnOf(run.words) } }]
+          : [],
+      ),
+    });
+  };
+
+  /**
+   * A start's or a Resume's admission ({@link admitAcross}), once per dispatch. Where the chat's incarnation already
+   * wrote under its term, it runs before the command reaches the registry ({@link admitBeforeRegistry}): the commands
+   * behind it wait for it, and a Stop supersedes it. A first command is reserved synchronously and admitted here, as the
+   * registry prepares it.
+   */
+  const admitOnce = async (
+    chatId: string,
+    log: DurableEventLog,
+    command: Pick<TermProposal, 'commandId' | 'runId'> & Readonly<{ verb: AdmissionVerb }>,
+  ): Promise<void> => {
+    if (dispatches.get(command.commandId)?.admitted !== true) {
+      await admitAcross(chatId, log, command);
+    }
+  };
+  const admitBeforeRegistry = (
+    command: Readonly<{
+      commandId: string;
+      type: 'start' | 'resume';
+      payload: Readonly<{ chatId: string; runId: string }>;
+    }>,
+    dispatch: { admitted?: true },
+  ): Promise<CommandAnswer | undefined> | undefined => {
+    const opened = stores.get(command.payload.chatId)?.log;
+    return opened === undefined || !wroteUnderTerm(command.payload.chatId)
+      ? undefined
+      : admitOpened(command, dispatch, opened);
+  };
+  const admitOpened = async (
+    command: Parameters<typeof admitBeforeRegistry>[0],
+    dispatch: { admitted?: true },
+    opened: Promise<DurableEventLog>,
+  ): Promise<CommandAnswer | undefined> => {
+    const { chatId, runId } = command.payload;
+    try {
+      await admitAcross(chatId, await opened, { commandId: command.commandId, runId, verb: command.type });
+      dispatch.admitted = true;
+      return undefined;
+    } catch (error) {
+      if (opened !== stores.get(chatId)?.log) {
+        /* The log closed meanwhile: the registry opens the chat again and admits the command as it prepares it. */
+        return undefined;
+      }
+      const { code, message, details } = codedFailureDetail(error);
+      return {
+        commandId: command.commandId,
+        generation: storeOf(chatId).ledger?.maxEpoch ?? 0,
+        status: 'refused',
+        effect: 'not-applied',
+        code: code ?? ('SEGMENTS_UNREADABLE' satisfies RefusalCode),
+        message,
+        ...(details === undefined ? {} : { details }),
+      };
+    }
   };
 
   /** Whether the chat's open log reads its history as unknown (XD1): segments unread and own rows not folding alone. */
@@ -1624,41 +1777,30 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       message,
       ...(details === undefined ? {} : { details }),
     });
-    let log: DurableEventLog;
+    let log: DurableEventLog | undefined;
     try {
       /* Open or not, the log is read: a takeover is in the segments, whether or not a driver waits here. */
       log = await logOf(chatId);
-    } catch {
-      /* A log that does not open is the registry's to answer. */
-      return undefined;
-    }
-    try {
-      await boundedRefresh(log);
-      const takenOver = (await log.runTakenOver?.(runId)) === true;
-      if (!takenOver) {
-        await refuseForeignRun(chatId, log);
-      }
-      const foreignWrote = wroteUnderTerm(chatId) && (await log.foreignWroteSinceTermBegan?.()) === true;
-      const admitted = termAdmission('approve', { takenOver, foreignWrote });
-      if (admitted === 'taken-over') {
-        return refused(
-          'RUN_TAKEN_OVER' satisfies RefusalCode,
-          'Another device found this paused turn abandoned and went on with the chat, so its request can no longer be approved here. Deny it, then send what you want next.',
-          undefined,
-        );
-      }
-      rehome(chatId, admitted, { commandId, runId });
+      await admitAcross(chatId, log, { commandId, runId, verb: 'approve' });
       return undefined;
     } catch (error) {
       const { code, message, details } = codedFailureDetail(error);
-      if (code !== 'RUN_ACTIVE_ON_ANOTHER_DEVICE' && code !== 'SEGMENTS_UNREADABLE') {
-        return undefined;
-      }
       /* Inside its own hold the paused run still holds the chat for every device: an unreadable segment cannot be
        * another device's run on it, since that device's fence refuses while this run's heartbeats are fresh. Only
-       * while this device's own rows fold alone, though: an unknown history refuses the approval inside the hold too. */
-      if (code === 'SEGMENTS_UNREADABLE' && pauseHeld(store) && !(await historyUnknownOf(Promise.resolve(log)))) {
+       * while this device's own rows fold alone, though: an unknown history refuses the approval inside the hold too.
+       * A check that failed some other way is no such decision, and refuses (round 20). */
+      if (
+        code === 'SEGMENTS_UNREADABLE' &&
+        details?.['unchecked'] === undefined &&
+        log !== undefined &&
+        pauseHeld(store) &&
+        !(await historyUnknownOf(Promise.resolve(log)))
+      ) {
         return undefined;
+      }
+      /* Fail closed (round 20): a log that does not open, or any failure that is not a decision, refuses retryably. */
+      if (code === undefined || (code !== 'RUN_TAKEN_OVER' && refusalOf(code).retry !== 'wait')) {
+        return refused('SEGMENTS_UNREADABLE' satisfies RefusalCode, message, { unchecked: code ?? 'uncoded' });
       }
       return refused(
         code,
@@ -1748,12 +1890,12 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   /**
    * The person's turns a batch says as data (XD3). A run that settles `failed` before it committed its turn appends
    * the message it was admitted with in the same batch, just before its `failed` row, whichever incarnation settles it:
-   * its own driver, or the next one abandoning it as an orphan. A batch that admits a run here first appends the turn
-   * of each other device's run it goes on past as abandoned. The ledger then reads that turn as committed, so a Resume
-   * does not commit it again, and every copy of it merges as one in the history (`abandonedTurnOf`). A run another
-   * device already said the turn of holds the chat nowhere, and its turn is not said again.
+   * its own driver, or the next one abandoning it as an orphan. The ledger then reads that turn as committed, so a
+   * Resume does not commit it again, and every copy of it merges as one in the history (`abandonedTurnOf`). The turns
+   * of other devices' runs a command goes on past are its admission's ({@link admitAcross}), carried by its run's first
+   * batch.
    */
-  const withPersonsTurns = async (
+  const withFailedTurns = async (
     log: DurableEventLog,
     ledger: ChatLedger,
     rows: readonly ChatRunRow[],
@@ -1770,38 +1912,26 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       ledger.runs[row.runId]?.kind === 'tau' &&
       ledger.runs[row.runId]?.committed === false &&
       !said.has(row.runId);
-    const admits = rows.some((row) => row.body.type === 'run.lifecycle' && row.body.state === 'admitted');
-    const failing = rows.some((row) => unsaid(row));
-    if (!admits && !failing) {
+    if (!rows.some((row) => unsaid(row))) {
       return rows;
     }
-    const events = failing ? await log.read() : [];
-    const at = now().getTime();
-    const abandoned = admits
-      ? ((await log.foreignRuns?.().catch((): readonly ForeignRun[] => [])) ?? []).filter(
-          (run) => run.words !== undefined && run.takenOver !== true && isAbandonedForeignRun(run, at),
-        )
-      : [];
-    const saying = (runId: string, message: UserProviderMessage): ChatRunRow => ({
-      runId,
-      body: { type: 'message.appended', message: abandonedTurnOf(message) },
-    });
+    const events = await log.read();
     return rows.flatMap((row): ChatRunRow[] => {
-      if (row.body.type === 'run.lifecycle' && row.body.state === 'admitted') {
-        return [...abandoned.map((run) => saying(run.runId, run.words!)), row];
-      }
       const message = unsaid(row) ? admittedRowOf(events, row.runId)?.admission?.message : undefined;
       if (message === undefined) {
         return [row];
       }
       said.add(row.runId);
-      return [saying(row.runId, message), row];
+      return [{ runId: row.runId, body: { type: 'message.appended', message: abandonedTurnOf(message) } }, row];
     });
   };
 
   /**
    * Write one batch, inside the chat's chain ({@link appendChatRows}): under the incarnation's term, or under the term
-   * this host opened in its place ({@link rehome}).
+   * this host opened in its place ({@link rehome}). What the batch's term and carried rows are is decided once, as the
+   * write begins ({@link termWriteOf}, {@link carriedBy}), and its first landed row commits exactly that decision
+   * ({@link termsAfterWrite}; round 20, `Terms.finish` in ChatLedger.lean, T12): a term proposed or withdrawn off the
+   * chain while the batch is written changes neither the term it is written under nor what it commits.
    */
   const write = async (
     chatId: string,
@@ -1810,8 +1940,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   ): Promise<Readonly<{ ledger: ChatLedger; messageIds: readonly string[] }>> => {
     const store = storeOf(chatId);
     const messageIds: string[] = [];
-    const terms = store.terms ?? {};
-    const leaderEpoch = writtenTermOf(terms, incarnationTerm, rows);
+    const decided = termWriteOf(store.terms ?? {}, incarnationTerm, rows);
+    const { leaderEpoch } = decided;
+    const carried = carriedBy(store.carried, rows);
     try {
       const log = await logOf(chatId);
       /* The hybrid clock (XD1): after every term start the history read, never past its bound ahead of this clock. */
@@ -1824,11 +1955,12 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         ledger: prior,
         leaderEpoch,
         recordedAt: new Date(stamped).toISOString(),
-        rows: await withPersonsTurns(log, prior, rows),
+        rows: [...(carried?.says ?? []), ...(await withFailedTurns(log, prior, rows))],
         onAppended: (row, ledger) => {
           store.ledger = ledger;
-          /* The batch's first row makes the term it was written under the chat's (round 19). */
-          store.terms = termsAfterWrite(store.terms ?? {}, incarnationTerm, rows);
+          /* The batch's first row commits what its write decided (rounds 19 and 20). */
+          store.terms = termsAfterWrite(store.terms ?? {}, decided);
+          store.carried = store.carried?.filter((entry) => entry !== carried);
           store.wrote = { leaderEpoch, at: now().getTime() };
           if (row.type === 'run.lifecycle' && row.state === 'paused') {
             store.pausedAt = now().getTime();
@@ -2035,8 +2167,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       legacyConfigs.delete(commandId);
       const log = await logOf(chatId);
       /* Whatever sync brought since the log opened joins the history this turn is given (XD1). */
-      await refreshFor(log, commandId);
-      await refuseForeignRun(chatId, log);
+      await admitOnce(chatId, log, { commandId, runId: start.runId, verb: 'start' });
       const events = await log.read();
       const { agent } = config;
       if (agent !== undefined) {
@@ -2177,8 +2308,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       refuseUnplaced();
       const resume = payload as unknown as CommandPayload<'resume'>;
       const log = await logOf(chatId);
-      await refreshFor(log, commandId);
-      await refuseForeignRun(chatId, log);
+      await admitOnce(chatId, log, { commandId, runId, verb: 'resume' });
       const ledger = await ledgerOf(chatId);
       const entry = ledger.runs[runId];
       const events = await log.read();
@@ -2620,7 +2750,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       runChats.set(command.payload.runId, command.payload.chatId);
     }
     /* One dispatch of this command: what it refreshes is not refreshed again within it, and only within it. */
-    const dispatch: { refreshed?: DurableEventLog } = {};
+    const dispatch: { refreshed?: DurableEventLog; admitted?: true } = {};
     const ordered = command.payload.chatId;
     let answer: Promise<CommandAnswer>;
     if (command.type === 'cancel') {
@@ -2653,15 +2783,12 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         if (ahead !== undefined) {
           await ahead;
         }
-        if (admits) {
-          /* Only an incarnation that already wrote under its term is checked: a first command is reserved synchronously. */
-          const rehoming = rehomeStaleTerm(command.payload.chatId, {
-            commandId: command.commandId,
-            runId: command.payload.runId,
-            verb: command.type,
-          });
-          if (rehoming !== undefined) {
-            await rehoming;
+        const admitting = admits ? admitBeforeRegistry(command, dispatch) : undefined;
+        if (admitting !== undefined) {
+          const held = await admitting;
+          const stopped = superseded();
+          if (stopped !== undefined || held !== undefined) {
+            return stopped ?? held!;
           }
         }
         if (command.type === 'resolve-interrupt' && command.payload.outcome === 'approved') {

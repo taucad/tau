@@ -17,7 +17,7 @@
  *   retains nothing (`C` and `K` in merge traces only).
  * - Commands: `E` append through the appender, `W` another writer's row, `WJ` a junk line, `TEAR` a torn tail,
  *   `RELOAD`, `LEDGER`, `SETTLE`, `LIFE`, `RESOLVE`, `PREP`, `BATCH`, `READER`, `READ`, `DELIVER`, `DELIVER1`, `RLEDGER`, `SEG`,
- *   `ROW`, `MERGE`, `MERGEB`, `MH`, `TABLES`, `ADMIT`, `TERMOF`, `TERMS`, `STAND` (and `PULL`, which the
+ *   `ROW`, `MERGE`, `MERGEB`, `MH`, `TABLES`, `ADMIT`, `TERMOF`, `TERMS`, `XADMIT`, `CARRY`, `STAND` (and `PULL`, which the
  *   revisions package's `notePull` answers from `corpus/pull-records.trace`).
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -25,14 +25,17 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   appendChatRows,
+  carriedBy,
   chatTermOf,
+  commandAdmission,
   rowsTermOf,
   termAdmission,
   termsAfterAnswer,
   termsAfterWrite,
-  writtenTermOf,
+  termWriteOf,
 } from '#host/tau-agent-host.js';
-import type { ChatTerms } from '#host/tau-agent-host.js';
+import type { CarriedTurns, ChatTerms, PassedRun, TermWrite } from '#host/tau-agent-host.js';
+import type { ChatRunRow } from '#host/chat-run-events.js';
 import {
   chatRunState,
   emptyChatLedger,
@@ -1014,10 +1017,20 @@ const admissionTrace = (): Trace => {
   return { text, expected };
 };
 
+/** One batch of a run's rows for the term and carry traces: a lone heartbeat, or a row that is none. */
+const batchOf = (run: string, heartbeat: string): ChatRunRow[] => [
+  {
+    runId: `r${run}`,
+    body: (heartbeat === '1' ? { type: 'run.heartbeat' } : { type: 'run.lifecycle', state: 'running' }) as LogRowBody,
+  },
+];
+
 /**
- * A chat's terms on this host over every sequence of up to four steps (T12, round 19): an admitted command proposing a
- * term for its run's rows, a batch of a run's rows or a heartbeat written, a command answered applied or not. Each
- * trace says the terms the writes went under, the chat's term after, and the term a heartbeat would write under.
+ * A chat's terms on this host over every sequence of up to four steps (T12, rounds 19 and 20): an admitted command
+ * proposing a term for its run's rows, a batch of a run's rows or a heartbeat written, a command answered applied or
+ * not, and a batch's write split around the steps that run off the chat's chain while it is written (`b` begins it,
+ * `e` ends it). Each trace says the terms the writes went under, the chat's term after, and the term a heartbeat would
+ * write under.
  */
 const termsTrace = (): Trace => {
   const text = ['T terms'];
@@ -1032,11 +1045,24 @@ const termsTrace = (): Trace => {
       }
     }
   }
+  /* Round 20: a write begun with or without a proposal for its run, while proposals are made and withdrawn. */
+  const beside = ['p1.1.2', 'p2.1.3', 'a1.0', 'a2.0', 'a1.1'];
+  for (const opening of [[], ['p1.1.2'], ['p2.2.3'], ['p1.1.2', 'p2.1.3']]) {
+    for (const begin of ['b1.0', 'b1.1', 'b2.0']) {
+      for (const first of [undefined, ...beside]) {
+        for (const second of first === undefined ? [undefined] : [undefined, ...beside]) {
+          const middle = [first, second].filter((step) => step !== undefined);
+          sequences.push([...opening, begin, ...middle, 'e', 'w1.0']);
+        }
+      }
+    }
+  }
   for (const wroteFirst of [0, 1]) {
     for (const sequence of sequences) {
       text.push(`TERMS ${String(wroteFirst)} ${sequence.length === 0 ? '-' : sequence.join(',')}`);
       let terms: ChatTerms = {};
       let wrote = wroteFirst === 1 ? 't1' : undefined;
+      let writing: TermWrite | undefined;
       const written: string[] = [];
       for (const step of sequence) {
         const [a, b, c] = step.slice(1).split('.');
@@ -1048,18 +1074,17 @@ const termsTrace = (): Trace => {
               { replaces: 't1', leaderEpoch: `t${c!}`, commandId: `c${a!}`, runId: `r${b!}` },
             ],
           };
-        } else if (step.startsWith('w')) {
-          const rows = [
-            {
-              runId: `r${a!}`,
-              body: (b === '1' ? { type: 'run.heartbeat' } : { type: 'run.lifecycle', state: 'running' }) as LogRowBody,
-            },
-          ];
-          wrote = writtenTermOf(terms, 't1', rows);
-          terms = termsAfterWrite(terms, 't1', rows);
-          written.push(wrote.slice(1));
-        } else {
+        } else if (step.startsWith('w') || step.startsWith('b')) {
+          writing = termWriteOf(terms, 't1', batchOf(a!, b!));
+          written.push(writing.leaderEpoch.slice(1));
+        } else if (step !== 'e') {
           terms = termsAfterAnswer(terms, `c${a!}`, b === '1');
+        }
+        /* A `w` ends at once; a `b` ends at its `e`. */
+        if (writing !== undefined && !step.startsWith('b') && (step === 'e' || step.startsWith('w'))) {
+          terms = termsAfterWrite(terms, writing);
+          wrote = writing.leaderEpoch;
+          writing = undefined;
         }
       }
       const term = chatTermOf(terms, 't1');
@@ -1067,6 +1092,87 @@ const termsTrace = (): Trace => {
         `QM ${written.length === 0 ? '-' : written.join(',')} ${term.slice(1)} ${wrote === term ? term.slice(1) : '-'}`,
       );
     }
+  }
+  text.push('X');
+  expected.push('X');
+  return { text, expected };
+};
+
+/**
+ * The one admission of a start, a Resume and an approval past other devices' runs (T13, round 20): every verb and fact,
+ * over foreign runs live or abandoned, said or not, with or without known words.
+ */
+const crossAdmissionTrace = (): Trace => {
+  const text = ['T cross-admissions'];
+  const expected = ['T cross-admissions'];
+  const runs = ['1:0:0:1', '1:1:0:1', '1:1:1:1', '1:1:0:0'];
+  const lists: string[][] = [[], ...runs.map((run) => [run]), ['1:1:0:1', '2:1:0:1'], ['1:1:0:1', '2:0:0:1']];
+  for (const verb of ['start', 'resume', 'approve'] as const) {
+    for (const takenOver of [false, true]) {
+      for (const foreignWrote of [false, true]) {
+        for (const list of lists) {
+          text.push(
+            `XADMIT ${verb} ${takenOver ? 1 : 0} ${foreignWrote ? 1 : 0} ${list.length === 0 ? '-' : list.join(',')}`,
+          );
+          const foreign = list.map((run): PassedRun => {
+            const [runId, abandoned, said, words] = run.split(':');
+            return { runId: runId!, abandoned: abandoned === '1', said: said === '1', words: words === '1' };
+          });
+          const admitted = commandAdmission(verb, { takenOver, foreignWrote, foreign });
+          expected.push(
+            'refused' in admitted
+              ? `QX ${admitted.refused === 'RUN_TAKEN_OVER' ? 'taken-over' : 'held'}`
+              : `QX ${admitted.admitted} ${admitted.says.length === 0 ? '-' : admitted.says.join(',')}`,
+          );
+        }
+      }
+    }
+  }
+  text.push('X');
+  expected.push('X');
+  return { text, expected };
+};
+
+/**
+ * What admitted commands' runs' first batches carry over every sequence of up to three steps (T13, round 20): a command
+ * carrying turns for its run, a batch of a run's rows or a heartbeat written, a command answered applied or not. Each
+ * trace says the turns each write said.
+ */
+const carryTrace = (): Trace => {
+  const text = ['T carried'];
+  const expected = ['T carried'];
+  const steps = ['c1.1.5+6', 'c2.1.7', 'c3.2.-', 'w1.0', 'w1.1', 'w2.0', 'a1.0', 'a1.1', 'a2.0'];
+  const sequences: string[][] = [[]];
+  for (let length = 1; length <= 3; length++) {
+    for (const prefix of sequences.filter((sequence) => sequence.length === length - 1)) {
+      sequences.push(...steps.map((step) => [...prefix, step]));
+    }
+  }
+  for (const sequence of sequences) {
+    text.push(`CARRY ${sequence.length === 0 ? '-' : sequence.join(',')}`);
+    let carried: readonly CarriedTurns[] = [];
+    const said: string[] = [];
+    for (const step of sequence) {
+      const [a, b, c] = step.slice(1).split('.');
+      if (step.startsWith('c')) {
+        const says = c === '-' ? [] : c!.split('+');
+        carried = [
+          ...carried,
+          {
+            commandId: `c${a!}`,
+            runId: `r${b!}`,
+            says: says.map((run): ChatRunRow => ({ runId: run, body: { type: 'run.heartbeat' } })),
+          },
+        ];
+      } else if (step.startsWith('w')) {
+        const entry = carriedBy(carried, batchOf(a!, b!));
+        carried = carried.filter((other) => other !== entry);
+        said.push(entry === undefined || entry.says.length === 0 ? '-' : entry.says.map((row) => row.runId).join('+'));
+      } else if (b !== '1') {
+        carried = carried.filter((entry) => entry.commandId !== `c${a!}`);
+      }
+    }
+    expected.push(`QC ${said.length === 0 ? '-' : said.join(',')}`);
   }
   text.push('X');
   expected.push('X');
@@ -1158,7 +1264,7 @@ const generate = async (corpus: Corpus, seed = corpus.seed): Promise<Trace[]> =>
     traces.push(interruptResolutionTrace());
   }
   if (corpus.name === 'base') {
-    traces.push(admissionTrace(), termsTrace(), standingTrace());
+    traces.push(admissionTrace(), termsTrace(), crossAdmissionTrace(), carryTrace(), standingTrace());
   }
   return traces;
 };

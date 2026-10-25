@@ -272,5 +272,40 @@
     "file": "specs/lean/ChatLedger.lean",
     "find": "{ s with proposed := s.proposed.filter (fun p => p.1 != c) }",
     "replace": "{ s with proposed := [] }"
+  },
+  {
+    "id": "M39",
+    "drift": "a batch's write commits what the terms say as it ends, not what it decided as it began, so a term proposed while it was written becomes the chat's with no row under it, and one withdrawn meanwhile leaves the batch's term behind (round 20, T12: t12_write_decided_once)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  match begun.taken run heartbeat with\n  | some p => { s with opened := some p.2.2, proposed := s.proposed.erase p, wrote := some p.2.2 }\n  | none => { s with wrote := some begun.term }",
+    "replace": "  match s.taken run heartbeat with\n  | some p => { s with opened := some p.2.2, proposed := s.proposed.erase p, wrote := some p.2.2 }\n  | none => { s with wrote := some s.term }"
+  },
+  {
+    "id": "M40",
+    "drift": "only a start says the turns of the abandoned foreign runs it goes past, so a Resume or an approval past one never marks it taken over (round 20, T13: t13_says_every_passed)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "    else .admitted a ((foreign.filter (fun f => f.words && !f.said)).map Passed.run)",
+    "replace": "    else .admitted a (if v = .start then (foreign.filter (fun f => f.words && !f.said)).map Passed.run else [])"
+  },
+  {
+    "id": "M41",
+    "drift": "an admission goes on past another device's run that still holds the chat (round 20, T13: t13_held_refuses)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "    if foreign.any (fun f => !f.abandoned) then .held",
+    "replace": "    if foreign.any (fun _ => false) then .held"
+  },
+  {
+    "id": "M42",
+    "drift": "a lone heartbeat spends what a command's run's first batch is to carry, so the turns it names are never said (round 20, T13: t13_carry_kept)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  if heartbeat then none else c.find? (fun p => p.2.1 == run)",
+    "replace": "  c.find? (fun p => p.2.1 == run)"
+  },
+  {
+    "id": "M43",
+    "drift": "a refused command's carried turns are kept, so a later batch of its run says turns no admitted command went past (round 20, T13: t13_carry_kept)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | .answer k applied => (if applied then c else c.filter (fun p => p.1 != k), [])",
+    "replace": "  | .answer _ _ => (c, [])"
   }
 ]

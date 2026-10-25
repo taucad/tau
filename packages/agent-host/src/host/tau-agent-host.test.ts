@@ -18,6 +18,7 @@ import { ScriptedParityModelTransport, scriptedParityResponses } from '#host/scr
 import type { ScriptedParityResponse } from '#host/scripted-model.fixture.js';
 import type { AgentLogEvent, JsonObject, ProviderMessage } from '#log/event-types.js';
 import { GatewayModelTransportError } from '#transport/gateway-model-transport.js';
+import { refusalOf } from '#wire/refusals.js';
 import type { GatewayModelErrorCode } from '#transport/gateway-model-transport.js';
 import type { HostCompactionError } from '#harness/compaction.js';
 import * as sessionModule from '#harness/session.js';
@@ -1246,6 +1247,158 @@ the cancelled tools left the system unchanged.
     const recorded = events.filter((event) => event.type === 'interrupt.recorded');
     expect(recorded.map((event) => event.phase)).toEqual(['requested', 'resolved']);
     expect(recorded[1]?.payload).toEqual({ outcome: 'approved' });
+    await host.close();
+  });
+
+  /**
+   * A paused print run on a log that reads other devices' segments (XD3): its cross-device reads answer as `reads`
+   * says at each call, and the append of the first row `hold` names lands, then waits to return until the test
+   * releases it. `onEpoch` runs as each new term is opened.
+   */
+  const crossDevicePause = async (
+    name: string,
+    reads: { foreignWrote: boolean; runTakenOver: () => Promise<boolean> },
+    hold?: (row: AgentLogEvent) => boolean,
+  ) => {
+    const file = createMemoryLogFile();
+    const held = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let holding = hold;
+    const options = hostOptions({
+      openEventLog: async () => {
+        const log = await file.open();
+        return {
+          ...log,
+          refresh: async () => undefined,
+          foreignRuns: async () => [],
+          foreignWroteSinceTermBegan: async () => reads.foreignWrote,
+          runTakenOver: async () => reads.runTakenOver(),
+          append: async (row) => {
+            const appended = await log.append(row);
+            if (holding?.(row) === true) {
+              holding = undefined;
+              held.resolve();
+              await release.promise;
+            }
+            return appended;
+          },
+        };
+      },
+      transport: new ScriptedParityModelTransport(printResponses),
+      toolRegistry: printTool([]),
+      idPrefix: name,
+    });
+    const epochs: string[] = [];
+    const hooks: { onEpoch?: () => void } = {};
+    const host = createTauAgentHost({
+      ...options,
+      createLeaderEpoch: () => {
+        const epoch = options.createLeaderEpoch!();
+        epochs.push(epoch);
+        hooks.onEpoch?.();
+        return epoch;
+      },
+    });
+    const chatId = `chat-${name}`;
+    const runId = `run-${name}`;
+    const started = await host.command({
+      type: 'start',
+      commandId: `start-${name}`,
+      payload: {
+        chatId,
+        runId,
+        trigger: 'submit',
+        message: { id: `turn-${name}`, role: 'user', content: 'Print it.' },
+      },
+    });
+    expect(started).toMatchObject({ status: 'applied' });
+    await vi.waitFor(async () => {
+      await expect(host.snapshot(chatId)).resolves.toMatchObject({ state: 'paused' });
+    });
+    const [pending] = await host.pendingInterrupts(runId);
+    return { host, file, chatId, runId, interruptId: pending!.interruptId, epochs, hooks, held: held.promise, release };
+  };
+
+  /*
+   * Round 20: a batch's term and the chat's terms after it are one decision, taken as the write begins. An approval
+   * proposed a new term while the paused run's settlement was being written under the old one (its row landed, its
+   * write not yet returned), and was then refused: that settlement does not commit the approval's term, so the chat's
+   * next row still goes under the run's own term.
+   */
+  it('should not commit a term proposed while a batch of its run was being written', async () => {
+    const reads = { foreignWrote: false, runTakenOver: async () => false };
+    const paused = await crossDevicePause('mid-write', reads, (row) => row.type === 'turn.finalized');
+    const { host, chatId, runId, interruptId, epochs } = paused;
+    await paused.held;
+    reads.foreignWrote = true;
+    const opened = epochs.length;
+    paused.hooks.onEpoch = () => {
+      paused.release.resolve();
+    };
+
+    const approval = host.command({
+      type: 'resolve-interrupt',
+      commandId: 'approve-unknown',
+      payload: { chatId, runId, interruptId: 'interrupt-unknown', outcome: 'approved' },
+    });
+    await expect(approval).resolves.toMatchObject({ status: 'refused' });
+    expect(epochs.length).toBe(opened + 1);
+    reads.foreignWrote = false;
+    /* Re-sent while the pause's settlement still lands (`CHAT_RUN_LIVE`, a wait). */
+    let denials = 0;
+    await vi.waitFor(async () => {
+      denials += 1;
+      const denied = await host.command({
+        type: 'resolve-interrupt',
+        commandId: `deny-${String(denials)}`,
+        payload: { chatId, runId, interruptId, outcome: 'denied' },
+      });
+      expect(denied, JSON.stringify(denied)).toMatchObject({ status: 'applied' });
+    });
+
+    const events = await readLog(paused.file);
+    const pausedRow = events.find((event) => event.type === 'run.lifecycle' && event.state === 'paused');
+    const resolved = events.find((event) => event.type === 'interrupt.recorded' && event.phase === 'resolved');
+    expect(resolved?.leaderEpoch).toBe(pausedRow?.leaderEpoch);
+    await host.close();
+  });
+
+  /*
+   * Round 20: the approval's cross-device check fails closed. A read that fails with anything but a decision refuses it
+   * with a code the page re-sends on, and writes nothing; the same approval is applied once the read succeeds.
+   */
+  it('should refuse an approval, retryably and with no row, when its cross-device check fails', async () => {
+    let failing = true;
+    const reads = {
+      foreignWrote: false,
+      runTakenOver: async () => {
+        if (failing) {
+          throw new Error('The storage could not be read.');
+        }
+        return false;
+      },
+    };
+    const { host, file, chatId, runId, interruptId } = await crossDevicePause('fail-closed', reads);
+    const { length: before } = await readLog(file);
+
+    const refused = await host.command({
+      type: 'resolve-interrupt',
+      commandId: 'approve-1',
+      payload: { chatId, runId, interruptId, outcome: 'approved' },
+    });
+
+    expect(refused).toMatchObject({ status: 'refused', effect: 'not-applied' });
+    expect(refusalOf((refused as { code: string }).code).retry).toBe('wait');
+    const after = await readLog(file);
+    expect(after.slice(before).filter((event) => event.type !== 'run.heartbeat')).toEqual([]);
+    failing = false;
+    await expect(
+      host.command({
+        type: 'resolve-interrupt',
+        commandId: 'approve-2',
+        payload: { chatId, runId, interruptId, outcome: 'approved' },
+      }),
+    ).resolves.toMatchObject({ status: 'applied' });
     await host.close();
   });
 

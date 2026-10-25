@@ -879,14 +879,20 @@ inductive TermOp where
   | answer (command : Nat) (applied : Bool)
   deriving DecidableEq, Repr
 
+/-- `termsAfterWrite` (round 20): a batch of `run`'s rows written from `begun`, the terms as its write began
+(`termWriteOf`), ends on `s`, the terms now. It commits exactly what it decided as it began: the proposal it was written
+under, which is the chat's term from then on, and the term it was written under as the one this host last wrote, however
+many proposals were made or withdrawn while it was written. -/
+def Terms.finish (s begun : Terms) (run : Nat) (heartbeat : Bool) : Terms :=
+  match begun.taken run heartbeat with
+  | some p => { s with opened := some p.2.2, proposed := s.proposed.erase p, wrote := some p.2.2 }
+  | none => { s with wrote := some begun.term }
+
 /-- `termsAfter…`: one step. A batch's write commits the proposal it is written under; a command answered other than
 applied withdraws its proposal, so nothing of it is left, and nothing of any other command's. -/
 def Terms.step (s : Terms) : TermOp → Terms
   | .propose c r f => { s with proposed := s.proposed ++ [(c, r, f)] }
-  | .write r hb =>
-    match s.taken r hb with
-    | some p => { s with opened := some p.2.2, proposed := s.proposed.erase p, wrote := some p.2.2 }
-    | none => { s with wrote := some s.term }
+  | .write r hb => s.finish s r hb
   | .answer c applied => if applied then s else { s with proposed := s.proposed.filter (fun p => p.1 != c) }
 
 def Terms.run (s : Terms) (ops : List TermOp) : Terms := ops.foldl Terms.step s
@@ -894,6 +900,61 @@ def Terms.run (s : Terms) (ops : List TermOp) : Terms := ops.foldl Terms.step s
 /-- `heartbeatTarget`'s term: a heartbeat is written only under the chat's term, and only once this host wrote under it
 (a heartbeat never opens a term). -/
 def Terms.heartbeat (s : Terms) : Option Nat := if s.wrote = some s.term then some s.term else none
+
+/-! ## tau-agent-host.ts: one admission for every command that starts or continues a run (round 20) -/
+
+/-- Another device's unsettled run as an admission reads it (`PassedRun`): abandoned or not (`standing`), whether a
+device already said its turn (`takenOver`), and whether its person's words are known. -/
+structure Passed where
+  run : Nat
+  abandoned : Bool
+  said : Bool
+  words : Bool
+  deriving DecidableEq, Repr
+
+/-- What the one admission answers (`CommandAdmission`): refused `RUN_TAKEN_OVER`; refused while another device's run
+holds the chat (`RUN_ACTIVE_ON_ANOTHER_DEVICE`); or admitted, with the runs whose turns its first batch says. -/
+inductive Admit where
+  | takenOver
+  | held
+  | admitted (a : Admission) (says : List Nat)
+  deriving DecidableEq, Repr
+
+/-- `commandAdmission`: the one admission of a start, a Resume and an approval. It checks where the run and the other
+devices' runs stand, decides the term (`admission`), and names the abandoned foreign runs it goes on past whose turns
+no device said yet: the command's first batch says each, so every device then reads that run taken over. -/
+def admit (v : Verb) (takenOver wrote : Bool) (foreign : List Passed) : Admit :=
+  match admission v takenOver wrote with
+  | .takenOver => .takenOver
+  | a =>
+    if foreign.any (fun f => !f.abandoned) then .held
+    else .admitted a ((foreign.filter (fun f => f.words && !f.said)).map Passed.run)
+
+/-- What admitted commands' runs' first batches carry (`ChatStore.carried`): each `(command, run, says)`. -/
+abbrev Carried := List (Nat × Nat × List Nat)
+
+/-- The entry a batch of `run`'s rows carries: the first for its run, never for a lone heartbeat. -/
+def carriedTaken (c : Carried) (run : Nat) (heartbeat : Bool) : Option (Nat × Nat × List Nat) :=
+  if heartbeat then none else c.find? (fun p => p.2.1 == run)
+
+inductive CarryOp where
+  /-- An admitted command's run's first batch is to say `says` (`rehome`). -/
+  | carry (command run : Nat) (says : List Nat)
+  /-- A batch of `run`'s rows is written. -/
+  | write (run : Nat) (heartbeat : Bool)
+  /-- The command is answered. -/
+  | answer (command : Nat) (applied : Bool)
+  deriving DecidableEq, Repr
+
+/-- One step (`carriedAfter…`), and the runs whose turns its batch says: a write says what its run's entry carries and
+spends it; a command answered other than applied withdraws its entry. -/
+def carryStep (c : Carried) : CarryOp → Carried × List Nat
+  | .carry k r says => (c ++ [(k, r, says)], [])
+  | .write r hb =>
+    match carriedTaken c r hb with
+    | some p => (c.erase p, p.2.2)
+    | none => (c, [])
+  | .answer k applied => (if applied then c else c.filter (fun p => p.1 != k), [])
 
 /-! ## foreign-runs.ts and chat-ref.ts: where another device's run stands (XD3, rounds 18 and 19) -/
 

@@ -1848,6 +1848,109 @@ describe('a chat continued on a second device', () => {
       expect(Date.parse(resolved!.recordedAt)).toBeGreaterThan(Date.parse(at));
     });
 
+    /** The desktop's run, admitted and running and never settled, with pulls that found its segment quiet past the bound. */
+    const abandonedDesktopRun = async (root: string): Promise<void> => {
+      const at = new Date().toISOString();
+      const desktop = (sequence: number, body: Record<string, unknown>): string =>
+        `${JSON.stringify({ version: 1, leaderEpoch: 'desktop', sequence, recordedAt: at, runId: 'run-desktop', ...body })}\n`;
+      const segments = join(root, '.tau', 'chats', chatId, 'events');
+      await mkdir(segments, { recursive: true });
+      const bytes =
+        desktop(0, {
+          type: 'run.lifecycle',
+          state: 'admitted',
+          admission: {
+            kind: 'tau',
+            trigger: 'submit',
+            turnId: 'desktop-user',
+            message: { id: 'desktop-user', role: 'user', content: 'from the desktop' },
+          },
+        }) + desktop(1, { type: 'run.lifecycle', state: 'running' });
+      await writeFile(join(segments, 'device-desktop.jsonl'), bytes);
+      await writeFile(
+        join(segments, 'pulled-at'),
+        `${String(Date.now())}\ndevice-desktop.jsonl ${String(Buffer.byteLength(bytes))} ${String(foreignRunStaleMilliseconds + 1)}`,
+      );
+    };
+    /** The person's turn of the desktop's run, said in this device's log, and the row right after it. */
+    const saidDesktopTurn = (
+      rows: readonly AgentLogEvent[],
+    ): Readonly<{ said?: AgentLogEvent; next?: AgentLogEvent }> => {
+      const index = rows.findIndex((row) => row.type === 'message.appended' && row.runId === 'run-desktop');
+      return index === -1 ? {} : { said: rows[index], next: rows[index + 1] };
+    };
+
+    /*
+     * Round 20: every command that goes on past another device's abandoned run says that run's turn in its first batch,
+     * not only a start. An approval that continues a paused run past it marks it taken over, so that device's own
+     * approval of it is refused and its person's words stay in every history.
+     */
+    it('should say an abandoned foreign run’s turn in the first batch of an approval that goes on past it', async () => {
+      const { root, launcher } = await pausedRunOn({ runHeartbeat: 10, pausedRunHold: 30 });
+      await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'paused'));
+      await sleep(100);
+      await abandonedDesktopRun(root);
+
+      const approval = await launcher.execute({
+        type: 'resolve-interrupt',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
+      });
+
+      expect(approval, JSON.stringify(approval)).toMatchObject({ status: 'applied' });
+      const { said, next } = saidDesktopTurn(rowsOf(await readFile(ownLog(root), 'utf8')));
+      expect(said).toMatchObject({
+        message: { id: 'desktop-user', metadata: { tauInternal: { kind: 'abandoned-turn' } } },
+      });
+      expect(next).toMatchObject({
+        type: 'interrupt.recorded',
+        phase: 'resolved',
+        runId: 'run-1',
+        leaderEpoch: said!.leaderEpoch,
+      });
+    });
+
+    it('should say an abandoned foreign run’s turn in the first batch of a Resume that goes on past it', async () => {
+      const { root, launcher } = await pausedRunOn({ runHeartbeat: 10, pausedRunHold: 30 });
+      await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'paused'));
+      const approval = await launcher.execute({
+        type: 'resolve-interrupt',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
+      });
+      expect(approval, JSON.stringify(approval)).toMatchObject({ status: 'applied' });
+      await abandonedDesktopRun(root);
+      const before = rowsOf(await readFile(ownLog(root), 'utf8')).length;
+
+      const resumed = await vi.waitFor(
+        async () => {
+          const answer = await launcher.execute({
+            type: 'resume',
+            commandId: key(),
+            payload: { chatId, runId: 'run-1' },
+          });
+          expect(answer, JSON.stringify(answer)).toMatchObject({ status: 'applied' });
+          return answer;
+        },
+        { timeout: 3000, interval: 20 },
+      );
+
+      expect(resumed).toMatchObject({ status: 'applied' });
+      const rows = await rowsUntil(root, (found) =>
+        found.slice(before).some((row) => row.type === 'run.lifecycle' && row.state === 'running'),
+      );
+      const { said, next } = saidDesktopTurn(rows.slice(before));
+      expect(said).toMatchObject({
+        message: { id: 'desktop-user', metadata: { tauInternal: { kind: 'abandoned-turn' } } },
+      });
+      expect(next).toMatchObject({
+        type: 'run.lifecycle',
+        state: 'running',
+        runId: 'run-1',
+        leaderEpoch: said!.leaderEpoch,
+      });
+    });
+
     /*
      * Round 19: a command refused after its term check leaves no trace. A new term opens with the first row written
      * under it, so a Send refused while the run is live, or an approval of no pending request, never moves the chat's

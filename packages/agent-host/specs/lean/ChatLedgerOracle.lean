@@ -30,8 +30,13 @@ A row is `<term> <seq> <run> <kind> <arg> <ms> <epoch> <attempt>` (`epoch`/`atte
                                                                            → `QA <admission>`
   TERMOF <admission> <slotHeld>   the term an admitted command's rows go under → `QT held|fresh`
   TERMS <wrote> <steps|->       a chat's terms on this host: from the incarnation's term `1`, written under or not,
-                               steps `p<command>.<run>.<term>`, `w<run>.<heartbeat>`, `a<command>.<applied>`
+                               steps `p<command>.<run>.<term>`, `w<run>.<heartbeat>`, `a<command>.<applied>`, and a
+                               write split in two: `b<run>.<heartbeat>` begins it, `e` ends it (round 20)
                                                                            → `QM <written|-> <term> <heartbeat|->`
+  XADMIT <verb> <takenOver> <wrote> <runs|->   the one admission of a start, resume or approval past other devices'
+                               runs, each `<run>:<abandoned>:<said>:<words>` → `QX taken-over|held|<admission> <says|->`
+  CARRY <steps|->              what admitted commands' first batches carry: steps `c<command>.<run>.<says, + apart|->`,
+                               `w<run>.<heartbeat>`, `a<command>.<applied>`   → `QC <each write's says, + apart|->,…>`
   STAND <bound> <ask> <changed> <now> <quiet|-> <takenOver>   where another device's run stands
                                                                            → `QF <standing> [changesAt]`
   PULL <cap> <throttle> <clock:size:quiet|-> <now> <size>   a pull's record of one segment (chat-ref.ts `notePull`)
@@ -239,16 +244,51 @@ def runLine (st : St) (line : String) : St × List String :=
   | ["TERMS", w, ops] =>
     let start : Terms := { held := 1, wrote := if w == "1" then some 1 else none }
     let steps := if ops == "-" then [] else ops.splitOn ","
-    let (fin, written) := steps.foldl (fun (acc : Terms × List Nat) step =>
+    let (fin, written, _) := steps.foldl (fun (acc : Terms × List Nat × Option (Terms × Nat × Bool)) step =>
       let args := ((step.drop 1).toString.splitOn ".").map num
       let a := args.getD 0 0
       let b := args.getD 1 0
       match (step.take 1).toString with
-      | "p" => (acc.1.step (.propose a b (args.getD 2 0)), acc.2)
-      | "w" => (acc.1.step (.write a (b == 1)), acc.2 ++ [acc.1.rowsTerm a (b == 1)])
-      | _ => (acc.1.step (.answer a (b == 1)), acc.2)) (start, [])
+      | "p" => (acc.1.step (.propose a b (args.getD 2 0)), acc.2.1, acc.2.2)
+      | "w" => (acc.1.step (.write a (b == 1)), acc.2.1 ++ [acc.1.rowsTerm a (b == 1)], acc.2.2)
+      | "b" => (acc.1, acc.2.1 ++ [acc.1.rowsTerm a (b == 1)], some (acc.1, a, b == 1))
+      | "e" =>
+        match acc.2.2 with
+        | some (begun, r, hb) => (acc.1.finish begun r hb, acc.2.1, none)
+        | none => acc
+      | _ => (acc.1.step (.answer a (b == 1)), acc.2.1, acc.2.2)) (start, [], none)
     let hb := match fin.heartbeat with | some t => toString t | none => "-"
     (st, [s!"QM {if written.isEmpty then "-" else ",".intercalate (written.map toString)} {fin.term} {hb}"])
+  | ["XADMIT", v, t, w, fs] =>
+    let verb : Verb := match v with | "resume" => .resume | "approve" => .approve | _ => .start
+    let foreign := (if fs == "-" then [] else fs.splitOn ",").map fun f =>
+      match (f.splitOn ":").map num with
+      | [r, a, s_, w_] => ({ run := r, abandoned := a == 1, said := s_ == 1, words := w_ == 1 } : Passed)
+      | _ => { run := 0, abandoned := false, said := false, words := false }
+    let text := match admit verb (t == "1") (w == "1") foreign with
+      | .takenOver => "taken-over"
+      | .held => "held"
+      | .admitted a says =>
+        let name := match a with | .takenOver => "taken-over" | .newTerm => "new-term" | .sameTerm => "same-term"
+        s!"{name} {listText (says.map toString)}"
+    (st, [s!"QX {text}"])
+  | ["CARRY", ops] =>
+    let steps := if ops == "-" then [] else ops.splitOn ","
+    let (_, said) := steps.foldl (fun (acc : Carried × List String) step =>
+      let args := (step.drop 1).toString.splitOn "."
+      let a := num (args.getD 0 "")
+      let b := args.getD 1 ""
+      let op : CarryOp := match (step.take 1).toString with
+        | "c" =>
+          let says := args.getD 2 "-"
+          .carry a (num b) (if says == "-" then [] else (says.splitOn "+").map num)
+        | "w" => .write a (b == "1")
+        | _ => .answer a (b == "1")
+      let (next, out) := carryStep acc.1 op
+      match op with
+      | .write _ _ => (next, acc.2 ++ [if out.isEmpty then "-" else "+".intercalate (out.map toString)])
+      | _ => (next, acc.2)) ([], [])
+    (st, [s!"QC {listText said}"])
   | ["PULL", cap, th, prior, n, sz] =>
     let rec_ := if prior == "-" then none else
       match (prior.splitOn ":").map num with

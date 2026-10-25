@@ -312,3 +312,11 @@ import ChatLedgerProofs
 #print axioms ChatLedger.t12_refused_no_trace
 #print axioms ChatLedger.t12_refusal_spares_others
 #print axioms ChatLedger.t12_command_commits
+#print axioms ChatLedger.beside_keeps
+#print axioms ChatLedger.t12_write_decided_once
+#print axioms ChatLedger.t13_one_admission
+#print axioms ChatLedger.t13_says_every_passed
+#print axioms ChatLedger.t13_held_refuses
+#print axioms ChatLedger.t13_carry_kept
+#print axioms ChatLedger.t13_first_batch
+#print axioms ChatLedger.t13_passed_taken_over

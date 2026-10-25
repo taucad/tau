@@ -476,26 +476,35 @@ describe.runIf(enabled)('shell conformance', () => {
     expect(Date.now() - startedAt).toBeLessThan(10_000);
   });
 
-  conformance('C11', "a protected path's ancestors cannot be renamed or removed, so the path never moves (E04)", async () => {
-    const project = join(work, 'c11');
-    const chats = join(project, '.tau', 'chats');
-    mkdirSync(chats, { recursive: true });
-    mkdirSync(join(project, '.tau', 'parameters'), { recursive: true });
-    writeFileSync(join(chats, 'chat-1.json'), 'RECORD\n');
-    const before = digestOf(join(chats, 'chat-1.json'));
-    const filesystem = { readable: [], writable: [work], readOnly: [chats], denied: [] };
-    const positive = await run("printf '{}' > c11/.tau/parameters/main.json", { filesystem });
+  conformance(
+    'C11',
+    "a protected path's ancestors cannot be renamed or removed, so the path never moves (E04)",
+    async () => {
+      const project = join(work, 'c11');
+      const chats = join(project, '.tau', 'chats');
+      mkdirSync(chats, { recursive: true });
+      mkdirSync(join(project, '.tau', 'parameters'), { recursive: true });
+      writeFileSync(join(chats, 'chat-1.json'), 'RECORD\n');
+      const before = digestOf(join(chats, 'chat-1.json'));
+      const filesystem = { readable: [], writable: [work], readOnly: [chats], denied: [] };
+      const positive = await run("printf '{}' > c11/.tau/parameters/main.json", { filesystem });
 
-    expect(positive.exitCode, positive.stderr).toBe(0);
-    expect(readFileSync(join(project, '.tau', 'parameters', 'main.json'), 'utf8')).toBe('{}');
-    for (const command of ['mv c11/.tau c11/.tau-moved', 'mv c11 c11-moved', 'rm -rf c11/.tau', 'mv c11/.tau/chats c11/stolen']) {
-      // oxlint-disable-next-line no-await-in-loop -- one escape at a time, each judged outside.
-      await run(command, { filesystem });
+      expect(positive.exitCode, positive.stderr).toBe(0);
+      expect(readFileSync(join(project, '.tau', 'parameters', 'main.json'), 'utf8')).toBe('{}');
+      for (const command of [
+        'mv c11/.tau c11/.tau-moved',
+        'mv c11 c11-moved',
+        'rm -rf c11/.tau',
+        'mv c11/.tau/chats c11/stolen',
+      ]) {
+        // oxlint-disable-next-line no-await-in-loop -- one escape at a time, each judged outside.
+        await run(command, { filesystem });
 
-      expect(digestOf(join(chats, 'chat-1.json')), command).toBe(before);
-    }
-    expect(existsSync(join(project, '.tau-moved')) || existsSync(join(work, 'c11-moved'))).toBe(false);
-  });
+        expect(digestOf(join(chats, 'chat-1.json')), command).toBe(before);
+      }
+      expect(existsSync(join(project, '.tau-moved')) || existsSync(join(work, 'c11-moved'))).toBe(false);
+    },
+  );
 
   conformance('C12', 'a host killed mid-command takes its whole sandbox with it (E11)', async () => {
     const marker = `tau-c12-${String(process.pid)}`;
@@ -503,7 +512,12 @@ describe.runIf(enabled)('shell conformance', () => {
     mkdirSync(folder, { recursive: true });
     const host = spawn(process.execPath, [fileURLToPath(new URL('host-death.fixture.ts', import.meta.url))], {
       cwd: dirname(fileURLToPath(import.meta.url)),
-      env: { ...process.env, TAU_HOST_DEATH_BWRAP: bwrapPath, TAU_HOST_DEATH_WORK: folder, TAU_HOST_DEATH_MARKER: marker },
+      env: {
+        ...process.env,
+        TAU_HOST_DEATH_BWRAP: bwrapPath,
+        TAU_HOST_DEATH_WORK: folder,
+        TAU_HOST_DEATH_MARKER: marker,
+      },
       stdio: ['ignore', 'pipe', 'inherit'],
     });
     let output = '';
@@ -535,7 +549,7 @@ describe.runIf(enabled)('shell conformance', () => {
     }
 
     expect(survivors()).toStrictEqual([]);
-    const size = statSync(beat).size;
+    const { size } = statSync(beat);
     await delay(1000);
 
     expect(statSync(beat).size).toBe(size);

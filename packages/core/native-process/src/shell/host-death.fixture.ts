@@ -12,7 +12,12 @@ const marker = process.env['TAU_HOST_DEATH_MARKER'] ?? '';
 const provider = createSandboxShellProvider({ bwrapPath: process.env['TAU_HOST_DEATH_BWRAP'] ?? '/usr/bin/bwrap' });
 const outcome = await provider.launch({
   executablePath: '/bin/bash',
-  arguments: ['--noprofile', '--norc', '-c', `(while :; do date >> beat.txt; sleep 0.1; done # ${marker}\n) & sleep 600 # ${marker}`],
+  arguments: [
+    '--noprofile',
+    '--norc',
+    '-c',
+    `(while :; do date >> beat.txt; sleep 0.1; done # ${marker}\n) & sleep 600 # ${marker}`,
+  ],
   workingDirectory: work,
   commandId: 'host-death',
   filesystem: { readable: [], writable: [work], denied: [] },

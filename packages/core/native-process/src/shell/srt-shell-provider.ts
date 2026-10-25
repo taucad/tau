@@ -620,14 +620,8 @@ const hostBound = (argv: readonly string[], bwrapPath: string): readonly string[
     ? [argv[0]!, '-c', `exec ${argv[2]!}`]
     : argv;
 
-const startPipes = (
-  argv: readonly string[],
-  launch: ShellLaunch,
-  supervisor: Supervisor,
-  bwrapPath: string,
-): ShellProcess => {
-  const vector = hostBound(argv, bwrapPath);
-  const child = spawn(vector[0]!, vector.slice(1), {
+const startPipes = (argv: readonly string[], launch: ShellLaunch, supervisor: Supervisor): ShellProcess => {
+  const child = spawn(argv[0]!, argv.slice(1), {
     cwd: launch.workingDirectory,
     env: wrapperEnvironment(launch),
     detached: true,
@@ -667,12 +661,10 @@ type TerminalStart = Readonly<{
 const startLinuxTerminal = (
   { argv, launch, size, supervisor }: TerminalStart,
   native: NonNullable<PtyBinding['native']>,
-  bwrapPath: string,
 ): ShellProcess => {
   /* Opened here, so no process outside the sandbox takes it as its controlling terminal; `setsid --ctty` inside does. */
   const pty = native.open(size.columns, size.rows);
-  const vector = hostBound(argv, bwrapPath);
-  const child = spawn(vector[0]!, vector.slice(1), {
+  const child = spawn(argv[0]!, argv.slice(1), {
     cwd: launch.workingDirectory,
     env: wrapperEnvironment(launch),
     detached: true,
@@ -844,15 +836,14 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
       await supervisor.close();
       launch.signal.throwIfAborted();
     }
-    const { argv } = supervisor.reply;
-    const bwrapPath = options.bwrapPath ?? '/usr/bin/bwrap';
+    const argv = hostBound(supervisor.reply.argv, options.bwrapPath ?? '/usr/bin/bwrap');
     if (launch.stdio.kind === 'pipes') {
-      return { status: 'started', process: startPipes(argv, launch, supervisor, bwrapPath) };
+      return { status: 'started', process: startPipes(argv, launch, supervisor) };
     }
     if (process.platform === 'linux') {
       return {
         status: 'started',
-        process: startLinuxTerminal({ argv, launch, size: launch.stdio.size, supervisor }, binding!.native!, bwrapPath),
+        process: startLinuxTerminal({ argv, launch, size: launch.stdio.size, supervisor }, binding!.native!),
       };
     }
     const bound = bindOwnPty(argv);

@@ -1,6 +1,7 @@
 import type { RunGeoSpecTestsRpcInput, RunGeoSpecTestsRpcResult } from '@taucad/chat';
 import type { GeoSpecRunProgressEvent } from '@taucad/agent-tools/geospec';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
+import type { PageTelemetryContext } from '#telemetry/page-telemetry.js';
 
 export type GeoSpecRunnerWorkerInitializeRequest = {
   type: 'initialize';
@@ -12,6 +13,8 @@ export type GeoSpecRunnerWorkerInitializeRequest = {
   maxWorkUnitLimit?: number;
   /** Host policy: the longest `testTimeout` a run may use, the input's or the project config's. Milliseconds. */
   maxRunBudget?: number;
+  /** Runtime telemetry (FR-16): the page's context, present only when the page would record. */
+  telemetry?: PageTelemetryContext;
 };
 
 export type GeoSpecRunnerWorkerRunRequest = {
@@ -74,6 +77,12 @@ export type GeoSpecRunnerWorkerErrorResponse = {
   message: string;
 };
 
+/** One finished runtime telemetry entry, which the agent host forwards to the page unchanged (FR-16). */
+export type GeoSpecRunnerWorkerTelemetryResponse = {
+  type: 'telemetry';
+  entry: unknown;
+};
+
 export type GeoSpecRunnerWorkerClosedResponse = {
   type: 'closed';
   requestId?: string;
@@ -85,4 +94,5 @@ export type GeoSpecRunnerWorkerResponse =
   | GeoSpecRunnerWorkerResultResponse
   | GeoSpecRunnerWorkerProgressResponse
   | GeoSpecRunnerWorkerErrorResponse
-  | GeoSpecRunnerWorkerClosedResponse;
+  | GeoSpecRunnerWorkerClosedResponse
+  | GeoSpecRunnerWorkerTelemetryResponse;

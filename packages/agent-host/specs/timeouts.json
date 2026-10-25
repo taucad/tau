@@ -465,6 +465,14 @@
       "owner": "W10"
     },
     {
+      "id": "RUNTIME-OBS-CHILD-RESIDENT",
+      "bound": "Native worker resident-memory sample answer: 1 s, then the sample reports none",
+      "site": "packages/host/src/runtime-child-workers.ts",
+      "token": "sampleAnswerTimeout",
+      "class": "External edge",
+      "owner": "Runtime Observability PR-1c"
+    },
+    {
       "id": "E24",
       "bound": "ACP CLI version probe",
       "site": "packages/host/src/acp/registry.ts",
@@ -1004,6 +1012,14 @@
       "token": "AbortSignal.timeout(30_000)",
       "class": "External edge",
       "owner": "desktop-bash-terminal W3"
+    },
+    {
+      "id": "TERMINAL-OPEN-TIMEOUT",
+      "bound": "30-second bound on a fresh desktop terminal port's open frame; a port that never opens is closed before any shell starts",
+      "site": "apps/desktop/src/tau/services-host.terminal.ts",
+      "token": "setTimeout(abandonUnopened, openMilliseconds)",
+      "class": "External edge",
+      "owner": "desktop-bash-terminal W5"
     }
   ]
 }

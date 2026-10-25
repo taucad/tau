@@ -7,6 +7,8 @@ import {
   resolveTelemetryConsent,
   toLateEntry,
   toRuntimeEntry,
+  toViewerEntry,
+  verifyEntry,
 } from '#client.js';
 import type {
   CachedTelemetryPolicy,
@@ -330,6 +332,90 @@ describe('toLateEntry', () => {
       detail: { operation: 'render', settledAs: 'cancelled', route: 'browser', caller: '_OTHER' },
     });
     expect(parseRuntimeEntry(entry)).toBeDefined();
+  });
+});
+
+describe('toViewerEntry', () => {
+  it('should map a viewer event to an admissible entry with closed values and no caller', () => {
+    const entry = toViewerEntry(
+      { event: 'first-frame', backend: 'webgpu', duration: 7_200_000, triangles: 12 },
+      { ...context, device: 'standard', platform: 'chromium' },
+    );
+
+    expect(entry).toEqual({
+      name: 'runtime.viewer',
+      duration: 3_600_000,
+      detail: {
+        event: 'first-frame',
+        backend: 'webgpu',
+        route: 'browser',
+        release: '0123abc',
+        device: 'standard',
+        platform: 'chromium',
+        triangles: 12,
+      },
+    });
+    expect(() => parseRuntimeEntry(entry)).not.toThrow();
+  });
+
+  it('should carry a format only on a download, closed to the export vocabulary', () => {
+    expect(toViewerEntry({ event: 'download', backend: 'webgl', format: 'glb' }, context).detail.format).toBe('glb');
+    expect(toViewerEntry({ event: 'download', backend: 'webgl', format: 'secret' }, context).detail.format).toBe(
+      '_OTHER',
+    );
+    expect(
+      toViewerEntry({ event: 'context-lost', backend: 'webgl', format: 'glb' }, context).detail,
+    ).not.toHaveProperty('format');
+  });
+});
+
+describe('verifyEntry', () => {
+  const run = { kernel: 'replicad', selected: 4, passed: 4, failed: 0, duration: 900 } as const;
+
+  it('should record a passing run as succeeded under the geospec caller', () => {
+    const entry = verifyEntry({ status: 'completed', ...run }, { ...context, caller: 'agent' });
+    expect(entry.detail).toEqual({
+      operation: 'verify',
+      outcome: 'succeeded',
+      kernel: 'replicad',
+      verify: { selected: 4, passed: 4, failed: 0 },
+      caller: 'geospec',
+      route: 'browser',
+      release: '0123abc',
+    });
+    expect(parseRuntimeEntry(entry)).toBeDefined();
+  });
+
+  it('should record failed tests, an empty discovery, a refused config and a work-unit limit by their codes', () => {
+    const failed = verifyEntry({ status: 'completed', ...run, passed: 3, failed: 1 }, context);
+    const empty = verifyEntry({ status: 'no-files', duration: 3 }, context);
+    const refused = verifyEntry({ status: 'refused', code: 'GEOSPEC_CONFIG_NOT_APPLIED', duration: 1 }, context);
+    const limited = verifyEntry(
+      { status: 'limit', ...run, passed: 3, failed: 1, maximum: 1000, demand: 1500, origin: 'host-option' },
+      context,
+    );
+    expect(failed.detail).toMatchObject({ outcome: 'issue', code: 'GEOSPEC_TESTS_FAILED' });
+    expect(empty.detail).toMatchObject({
+      outcome: 'refused',
+      code: 'GEOSPEC_NO_TEST_FILES',
+      verify: { selected: 0, passed: 0, failed: 0 },
+    });
+    expect(refused.detail).toMatchObject({ outcome: 'refused', code: 'GEOSPEC_CONFIG_NOT_APPLIED' });
+    expect(refused.detail).not.toHaveProperty('verify');
+    expect(limited.detail).toMatchObject({
+      outcome: 'issue',
+      code: 'RESOURCE_LIMIT',
+      limit: {
+        id: 'geospec.work.units',
+        unit: '{unit}',
+        maximum: 1000,
+        demand: { kind: 'measured', value: 1500 },
+        origin: 'host-option',
+      },
+    });
+    for (const entry of [failed, empty, refused, limited]) {
+      expect(parseRuntimeEntry(entry)).toMatchObject({ detail: { code: entry.detail.code } });
+    }
   });
 });
 
@@ -720,6 +806,8 @@ describe('createIngestReporter', () => {
       const heldDropped = vi.fn(() => 4);
       const { reporter, posts, delivery } = await ready([], { heldDropped });
       reporter.noteHeldDropped(2);
+      reporter.noteDropped('held-at-unload', 3);
+      reporter.noteDropped('renderer-gone', Number.NaN);
       const huge = settled() as RuntimeOperationEntry;
       reporter.record({ ...huge, detail: { ...huge.detail, release: 'x'.repeat(70_000) } });
       reporter.record({ ...huge, detail: { ...huge.detail, release: 'y'.repeat(40_000) } });
@@ -729,7 +817,7 @@ describe('createIngestReporter', () => {
       expect(heldDropped).toHaveBeenCalledTimes(1);
       expect(posts().map((post) => post.entries.length)).toEqual([3, 2]);
       expect(posts()[0]?.entries.at(-1)?.detail).toMatchObject({
-        dropped: { 'queue-full': 6, 'payload-too-large': 1 },
+        dropped: { 'queue-full': 6, 'held-at-unload': 3, 'payload-too-large': 1 },
       });
       expect(delivery()?.dropped).toEqual({});
     });

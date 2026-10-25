@@ -15,6 +15,7 @@ import {
   releaseNativeSandbox,
   spawnInNativeSandbox,
 } from '#native-sandbox.js';
+import { sampleLinuxResident } from '#child-resident.js';
 
 const maxProtocolLineBytes = 1_048_576;
 const maxStderrBytes = 65_536;
@@ -298,6 +299,12 @@ export type NativeWorkerProcess = {
   readonly ended: Promise<NativeWorkerEnd>;
   /** Stop the worker's process tree, gracefully and then by force; settles once it has ended. */
   terminate(): Promise<void>;
+  /**
+   * Bytes resident in the worker's process tree now, read for observation only: a sum of per-process resident sets,
+   * not a heap. Absent where no reader exists for the platform or the broker that started the worker; resolves
+   * `undefined` when the tree has exited or the read failed. Never feeds a recycling decision.
+   */
+  sampleResident?(): Promise<number | undefined>;
 };
 
 /** Starts one native worker for a session. @public */
@@ -485,12 +492,23 @@ const spawnContained = async (launch: NativeWorkerLaunch): Promise<NativeWorkerP
       resolve({ ...(code === null ? {} : { exitCode: code }), ...(signal === null ? {} : { signal }) });
     });
   });
+  const { pid } = child;
   return {
     stdin: child.stdin,
     stdout: child.stdout,
     stderr: child.stderr,
     ended,
     terminate: async () => terminateProcessTree(child),
+    /* Linux only. macOS has no reader until it is verified on a macOS runner; no native runtime starts on Windows. The
+     * wrapper leads its own process group (`detached`), so the tree's root and group are both its pid. */
+    ...(process.platform === 'linux' && pid !== undefined
+      ? {
+          sampleResident: async (): Promise<number | undefined> =>
+            child.exitCode === null && child.signalCode === null
+              ? sampleLinuxResident({ root: pid, group: pid })
+              : undefined,
+        }
+      : {}),
   };
 };
 
@@ -598,6 +616,28 @@ export class NativeProcessSession<Issue> {
   /** Whether a retained handle belongs to the currently live worker generation. */
   public isGenerationValid(generation: number): boolean {
     return this.child !== undefined && generation === this.generation;
+  }
+
+  /**
+   * One resident sample of the live worker's process tree, for observation only. Nothing samples unless asked: there
+   * is no timer and no cache. Requests are serialized, so a sample taken after a reply is of the tree that served it.
+   *
+   * @returns The tree's summed resident bytes; `undefined` when no worker is live, its launch has no reader, the
+   *   generation changed while it read (a recycle), or the read failed.
+   */
+  public async sampleResident(): Promise<number | undefined> {
+    const { child, generation } = this;
+    if (this.closed || child?.sampleResident === undefined) {
+      return undefined;
+    }
+    let bytes: number | undefined;
+    try {
+      bytes = await child.sampleResident();
+    } catch {
+      return undefined;
+    }
+    const current = this.child === child && this.generation === generation;
+    return current && bytes !== undefined && Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : undefined;
   }
 
   /** Read and delete one private artifact after physical confinement and size checks. */

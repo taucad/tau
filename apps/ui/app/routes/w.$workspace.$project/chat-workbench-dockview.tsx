@@ -35,6 +35,7 @@ import {
   Rotate3d,
   Share2,
   SlidersHorizontal,
+  SquareTerminal,
   Terminal,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -108,6 +109,9 @@ import { ConverterPanelBody } from '#routes/w.$workspace.$project/chat-converter
 import { DetailsPanelBody } from '#routes/w.$workspace.$project/chat-details.js';
 import { TelemetryPanelContent } from '#routes/w.$workspace.$project/chat-kernel.js';
 import { ChatConsole } from '#routes/w.$workspace.$project/chat-console.js';
+import { ProjectTerminalPane } from '#components/terminal/terminal-pane.js';
+import { isTerminalSurfaceOffered } from '#components/terminal/terminal-availability.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 import { ProjectShareWorkbenchPanel } from '#routes/w.$workspace.$project/project-share-action.js';
 import { WorkbenchToggleSlot } from '#routes/w.$workspace.$project/project-workspace-actions.js';
 import {
@@ -360,6 +364,10 @@ function ConsoleWorkbenchPanel(): React.JSX.Element {
   return enabled ? <ChatConsole /> : <p className='p-4 text-muted-foreground'>Console requires debug mode.</p>;
 }
 
+function TerminalWorkbenchPanel(): React.JSX.Element {
+  return <ProjectTerminalPane profile={useContext(WorkbenchProfileContext)} />;
+}
+
 type WorkbenchSurface = {
   readonly id: WorkbenchPanelId;
   readonly label: string;
@@ -489,6 +497,12 @@ const workbenchSurfaceGroups: readonly WorkbenchSurfaceGroup[] = [
         debugOnly: true,
         panel: { id: 'workbench:console', component: 'console', title: paneTitle('console') },
       },
+      {
+        id: 'terminal',
+        label: paneTitle('terminal'),
+        icon: SquareTerminal,
+        panel: { id: 'workbench:terminal', component: 'terminal', title: paneTitle('terminal') },
+      },
     ],
   },
 ];
@@ -512,6 +526,7 @@ const sharedWorkbenchSurfaceIds = new Set<WorkbenchPanelId>([
 export const isWorkbenchSurfaceAllowed = (id: WorkbenchPanelId, profile: WorkbenchProfile): boolean =>
   isSurfaceShipped(id) &&
   (id !== 'print' || isFeatureEnabled('machines')) &&
+  (id !== 'terminal' || isTerminalSurfaceOffered({ desktop: isDesktopTarget(), profile })) &&
   (profile === 'editor' || sharedWorkbenchSurfaceIds.has(id));
 
 const visibleWorkbenchSurfaceGroups = (
@@ -834,6 +849,7 @@ const components = {
   details: DetailsWorkbenchPanel,
   kernel: TelemetryWorkbenchPanel,
   console: ConsoleWorkbenchPanel,
+  terminal: TerminalWorkbenchPanel,
 };
 
 export const workbenchPanels = {
@@ -850,6 +866,7 @@ export const workbenchPanels = {
   details: getWorkbenchSurface('details').panel!,
   kernel: getWorkbenchSurface('kernel').panel!,
   console: getWorkbenchSurface('console').panel!,
+  terminal: getWorkbenchSurface('terminal').panel!,
 } as const satisfies Record<WorkbenchUtilityPanelId, { id: string; component: string; title: string }>;
 
 /**
@@ -957,6 +974,12 @@ export function restoreWorkbenchLayout({
           api.removePanel(debugPanel);
         }
       }
+    }
+    const terminalPanel = isSurfaceShipped('terminal')
+      ? undefined
+      : api.panels.find((panel) => panel.id === workbenchPanels.terminal.id);
+    if (terminalPanel) {
+      api.removePanel(terminalPanel);
     }
 
     const launchers = api.panels.filter((panel) => getPlaceholderParameters(panel)?.mode === 'launcher');
@@ -2086,6 +2109,13 @@ export const WorkbenchDockview = memo(function ({
         if (debugPanel) {
           api.removePanel(debugPanel);
         }
+      }
+    }
+    /* A view that does not offer the Terminal never keeps its tab, however it arrived. */
+    if (!isWorkbenchSurfaceAllowed('terminal', profile)) {
+      const terminalPanel = api.panels.find((panel) => panel.id === workbenchPanels.terminal.id);
+      if (terminalPanel) {
+        api.removePanel(terminalPanel);
       }
     }
   }, [api, isTauDebugEnabled, profile]);

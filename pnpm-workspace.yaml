@@ -321,6 +321,8 @@ catalog:
   '@anthropic-ai/sandbox-runtime': 0.0.75
   # Terminal PTYs for the desktop shell (W2); N-API, so one build serves Node and Electron.
   node-pty: 1.1.0
+  # The desktop Terminal pane's renderer (W6, D18 as amended 2026-10-24T05:39Z): exact pin, no Tau patch.
+  '@aurigax-ai/ghostty-web': 0.3.6
   '@lhncbc/ucum-lhc': 7.1.10
   '@json-structure/sdk': 0.7.0
   mqtt: 5.15.2

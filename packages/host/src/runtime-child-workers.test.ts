@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { createRuntimeChildRuntimeVerifier } from '#runtime-child-workers.js';
+import { createRuntimeChildRuntimeVerifier, createRuntimeChildWorkerLauncher } from '#runtime-child-workers.js';
 import type { RuntimeChildChannel } from '#runtime-child-workers.js';
 
 /** A child's IPC channel whose parent is this test: every frame sent is recorded and answered by hand. */
@@ -83,5 +83,90 @@ describe('createRuntimeChildRuntimeVerifier', () => {
     await expect(verify('/c', new AbortController().signal)).resolves.toBeUndefined();
     /* Neither the pre-aborted nor the disconnected ask was sent. */
     expect(channel.sent.map((frame) => frame['runtimePath'])).toEqual(['/a', '/b']);
+  });
+});
+
+const launch = {
+  executablePath: '/store/closures/a/bin/python3',
+  executableSha256: 'a'.repeat(64),
+  executableName: 'Bundled Python',
+  arguments: [],
+  runtimePath: '/store/closures/a',
+  resources: [],
+  workspacePath: '/private/workspace',
+  artifactPath: '/private/artifacts',
+  commandId: 'Example#1',
+} as const;
+
+/**
+ * Start one worker through `launcher` and let the daemon say it started.
+ *
+ * @param channel - The fake channel.
+ * @param launcher - The launcher under test.
+ * @returns The started worker.
+ */
+const started = async (
+  channel: ReturnType<typeof fakeChannel>,
+  launcher: ReturnType<typeof createRuntimeChildWorkerLauncher>,
+) => {
+  const worker = launcher(launch);
+  channel.answer({ type: 'native-worker:started', id: '1' });
+  return worker;
+};
+
+describe('createRuntimeChildWorkerLauncher resident samples', () => {
+  it('sends no sample frame and gives the worker no reader when the daemon did not name the frame', async () => {
+    const channel = fakeChannel();
+    const worker = await started(channel, createRuntimeChildWorkerLauncher(channel));
+    expect(worker.sampleResident).toBeUndefined();
+    const older = await started(
+      channel,
+      createRuntimeChildWorkerLauncher(channel, { nativeWorkerFrames: ['native-worker:other'] }),
+    );
+    expect(older.sampleResident).toBeUndefined();
+    expect(channel.sent.map(({ type }) => type)).toEqual(['native-worker:launch', 'native-worker:launch']);
+  });
+
+  it('asks the daemon for each sample and answers with the bytes it names, or nothing for a malformed answer', async () => {
+    const channel = fakeChannel();
+    const launcher = createRuntimeChildWorkerLauncher(channel, { nativeWorkerFrames: ['native-worker:sample'] });
+    const worker = await started(channel, launcher);
+
+    const first = worker.sampleResident!();
+    const second = worker.sampleResident!();
+    expect(channel.sent.slice(1)).toEqual([
+      { type: 'native-worker:sample', id: '1', sample: '1' },
+      { type: 'native-worker:sample', id: '1', sample: '2' },
+    ]);
+    channel.answer({ type: 'native-worker:resident', id: '1', sample: '9', bytes: 1 });
+    channel.answer({ type: 'native-worker:resident', id: '1', sample: '2', bytes: -1 });
+    channel.answer({ type: 'native-worker:resident', id: '1', sample: '1', bytes: 96 * 1024 * 1024 });
+    await expect(Promise.all([first, second])).resolves.toEqual([96 * 1024 * 1024, undefined]);
+  });
+
+  it('answers nothing when the daemon is silent past its bound, the worker exited or the daemon is gone', async () => {
+    vi.useFakeTimers();
+    try {
+      const channel = fakeChannel();
+      const launcher = createRuntimeChildWorkerLauncher(channel, { nativeWorkerFrames: ['native-worker:sample'] });
+      const worker = await started(channel, launcher);
+      const silent = worker.sampleResident!();
+      await vi.advanceTimersByTimeAsync(1000);
+      await expect(silent).resolves.toBeUndefined();
+
+      const exiting = worker.sampleResident!();
+      channel.answer({ type: 'native-worker:exit', id: '1', exitCode: 0 });
+      await expect(exiting).resolves.toBeUndefined();
+      await expect(worker.sampleResident!()).resolves.toBeUndefined();
+
+      const next = launcher(launch);
+      channel.answer({ type: 'native-worker:started', id: '2' });
+      const orphan = await next;
+      channel.disconnect();
+      await expect(orphan.sampleResident!()).resolves.toBeUndefined();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

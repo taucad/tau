@@ -61,6 +61,13 @@ TAU_S3_FORCE_PATH_STYLE = 'false'
 # its slot released (FR9). The schema defaults are these values.
 TAU_STORAGE_SLOW_BODY_MINIMUM_BYTES = '8192'
 TAU_STORAGE_SLOW_BODY_WINDOW_SECONDS = '30'
+# DC2: the hard-linked pack cache may hold half the lease filesystem (free bytes
+# plus what it holds); 0 turns it off. The cache fills `tau.git.disk.free_bytes`,
+# so that gauge reads low by design while the cache is warm.
+TAU_STORAGE_PACK_CACHE_FRACTION = '0.5'
+# DC2 affinity: Fly's TXT record of every Machine in this app, answered to tau-api
+# on /v1/members. Only this app's 6PN resolves its own `.internal` names.
+TAU_STORAGE_MEMBERS_DNS = 'vms.tau-storage-staging.internal'
 
 [http_service]
 internal_port = 3100

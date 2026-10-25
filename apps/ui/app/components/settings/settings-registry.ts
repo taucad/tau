@@ -68,8 +68,8 @@ const settingsCatalog = [
       {
         id: 'privacy',
         label: 'Privacy',
-        description: 'Choose how your data and usage metrics are used to improve Tau',
-        keywords: ['training', 'sharing', 'no train', 'telemetry', 'usage', 'metrics', 'anonymous'],
+        description: 'Choose how your data, usage metrics and diagnostics are used to improve Tau',
+        keywords: ['training', 'sharing', 'no train', 'telemetry', 'usage', 'metrics', 'anonymous', 'diagnostics'],
       },
     ],
   },

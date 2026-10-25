@@ -146,8 +146,7 @@
     "#*": "./src/*"
   },
   "dependencies": {
-    "@taucad/esbuild": "workspace:*",
-    "@taucad/runtime": "workspace:*",
+    "esbuild": "catalog:",
     "geospec-engine": "catalog:",
     "zod": "catalog:"
   },

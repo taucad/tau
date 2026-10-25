@@ -32,6 +32,7 @@ import { useCameraRig, useGraphics } from '#hooks/use-graphics.jsx';
 import { useViewerEnvironment, useViewerFeature } from '#environment/viewer-environment.jsx';
 import { resolveViewerPixelRatio } from '#graphics/three/utils/device-tier.js';
 import { reportWebGpuCanvasLoss } from '#graphics/graphics-backend.js';
+import { viewerContextLost, viewerRendererCreated } from '#lib/viewer-events.js';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
 
 /** The part of a `GPUDevice` that reports its loss; `lib.dom` baselines may predate the WebGPU types. */
@@ -311,6 +312,7 @@ export function ThreeCanvasInstance({
             return;
           }
           previousOnDeviceLost.call(webGpuRenderer, info);
+          viewerContextLost('webgpu');
           setIsContextLost(true);
         };
         // Three ignores a loss whose reason is "destroyed", taking it for its own `dispose()`. Only this factory disposes
@@ -339,14 +341,14 @@ export function ThreeCanvasInstance({
             return;
           }
           event.preventDefault();
+          viewerContextLost('webgl');
           setIsContextLost(true);
         });
       }
 
-      setInitializedRenderer({
-        factory: glProperty,
-        backend: renderer.coordinateSystem === WebGPUCoordinateSystem ? 'webgpu' : 'webgl',
-      });
+      const backend = renderer.coordinateSystem === WebGPUCoordinateSystem ? 'webgpu' : 'webgl';
+      viewerRendererCreated(backend);
+      setInitializedRenderer({ factory: glProperty, backend });
     },
     [glProperty],
   );

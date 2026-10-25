@@ -3,7 +3,6 @@ import type { BinaryLike } from 'node:crypto';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import type { VmFileSystem } from '@taucad/esbuild/vm';
 import { describe, expect, it } from 'vitest';
 import type {
   GeoSpecAssertionClient,
@@ -11,7 +10,7 @@ import type {
   GeoSpecNativeSubject,
 } from 'geospec/assertion-client';
 import { runGeoSpecModule } from 'geospec/runner';
-import type { GeoSpecAssertion } from 'geospec/runner';
+import type { GeoSpecAssertion, VmFileSystem } from 'geospec/runner';
 import { createNativeGeoSpecRunner } from 'geospec/runner/native';
 import type { GeoSpecNativeModelEngine } from 'geospec/runner/native';
 import type { GeoSpecRunnerEvent } from 'geospec/runner/worker';

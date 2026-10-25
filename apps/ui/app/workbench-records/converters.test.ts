@@ -121,7 +121,7 @@ describe('workbench Dockview converters', () => {
     if (!only || Array.isArray(only.data)) {
       throw new TypeError('Expected group');
     }
-    expect(only.data.activeView).toBe('workbench:console');
+    expect(only.data.activeView).toBe('workbench:terminal');
   });
 
   it.each([

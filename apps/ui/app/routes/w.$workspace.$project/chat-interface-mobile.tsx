@@ -94,6 +94,10 @@ const ChatConsole = lazy(async () => {
   const module = await import('#routes/w.$workspace.$project/chat-console.js');
   return { default: module.ChatConsole };
 });
+const ProjectTerminalPane = lazy(async () => {
+  const module = await import('#components/terminal/terminal-pane.js');
+  return { default: module.ProjectTerminalPane };
+});
 
 /** A Workbench pane in the sheet: its title, a named Close, then the body the desktop pane renders (D4). */
 function MobilePane({
@@ -230,6 +234,13 @@ function MobileSurface({ id }: { readonly id: MobilePanelId }): React.ReactNode 
           <DebugGate refusal='Console requires debug mode.'>
             <ChatConsole />
           </DebugGate>
+        </MobilePane>
+      );
+    }
+    case 'terminal': {
+      return (
+        <MobilePane id={id}>
+          <ProjectTerminalPane />
         </MobilePane>
       );
     }

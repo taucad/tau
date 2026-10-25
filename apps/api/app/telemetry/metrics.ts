@@ -569,6 +569,48 @@ export class MetricsService {
     advice: { explicitBucketBoundaries: [...TauMetrics.gitRouteLookupDuration.buckets] },
   });
 
+  // --- Pack cache and rendezvous affinity (DC2) ---
+
+  public readonly gitCacheLookups = this.apiMeter.createCounter(TauMetrics.gitCacheLookups.name, {
+    description: TauMetrics.gitCacheLookups.description,
+    unit: TauMetrics.gitCacheLookups.unit,
+  });
+
+  public readonly gitCacheBytes = this.apiMeter.createGauge(TauMetrics.gitCacheBytes.name, {
+    description: TauMetrics.gitCacheBytes.description,
+    unit: TauMetrics.gitCacheBytes.unit,
+  });
+
+  public readonly gitCacheBudgetBytes = this.apiMeter.createGauge(TauMetrics.gitCacheBudgetBytes.name, {
+    description: TauMetrics.gitCacheBudgetBytes.description,
+    unit: TauMetrics.gitCacheBudgetBytes.unit,
+  });
+
+  public readonly gitCacheEvictions = this.apiMeter.createCounter(TauMetrics.gitCacheEvictions.name, {
+    description: TauMetrics.gitCacheEvictions.description,
+    unit: TauMetrics.gitCacheEvictions.unit,
+  });
+
+  public readonly gitCacheEvictedBytes = this.apiMeter.createCounter(TauMetrics.gitCacheEvictedBytes.name, {
+    description: TauMetrics.gitCacheEvictedBytes.description,
+    unit: TauMetrics.gitCacheEvictedBytes.unit,
+  });
+
+  public readonly gitCacheFallbacks = this.apiMeter.createCounter(TauMetrics.gitCacheFallbacks.name, {
+    description: TauMetrics.gitCacheFallbacks.description,
+    unit: TauMetrics.gitCacheFallbacks.unit,
+  });
+
+  public readonly gitSpills = this.apiMeter.createCounter(TauMetrics.gitSpills.name, {
+    description: TauMetrics.gitSpills.description,
+    unit: TauMetrics.gitSpills.unit,
+  });
+
+  public readonly gitMembers = this.apiMeter.createGauge(TauMetrics.gitMembers.name, {
+    description: TauMetrics.gitMembers.description,
+    unit: TauMetrics.gitMembers.unit,
+  });
+
   // --- tau-api to tau-storage (DC1) ---
 
   public readonly gitGrantsRejected = this.apiMeter.createCounter(TauMetrics.gitGrantsRejected.name, {
@@ -641,6 +683,9 @@ export type GitAdmissionAttributes = z.infer<typeof TauMetrics.gitAdmissions.att
 
 /** `reason` on `tau.git.grants.rejected`. */
 export type GitGrantRejectionReason = z.infer<typeof TauMetrics.gitGrantsRejected.attributes>['reason'];
+
+/** `reason` on `tau.git.spills`. */
+export type GitSpillReason = z.infer<typeof TauMetrics.gitSpills.attributes>['reason'];
 
 /** `reason` on `tau.git.forward.errors`. */
 export type GitForwardErrorReason = z.infer<typeof TauMetrics.gitForwardErrors.attributes>['reason'];

@@ -1,5 +1,7 @@
 import { isFeatureEnabled } from '#flags/feature-flags.js';
 import { recordChannelDiagnostic } from '#db/channel-diagnostics.js';
+import { pageTelemetry } from '#telemetry/runtime-telemetry.js';
+import type { PageTelemetryContext } from '#telemetry/page-telemetry.js';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import type { SourceLiveEvent, AgentLogEvent, Channel, StorageDurabilityClass } from '@taucad/agent-host';
 import { isGatewayProviderKind } from '@taucad/agent-host';
@@ -33,6 +35,11 @@ import {
 import type { AgentHostTransport } from '#services/agent-host-transport.js';
 import { createDaemonAgentHostTransport } from '#services/daemon-agent-host-client.js';
 import { createBrowserAgentWorker } from '#services/browser-agent-worker.js';
+
+/** The page's telemetry context for a provided host, only when the page would record its entries. */
+const telemetryContextOf = (
+  context: PageTelemetryContext | undefined,
+): Readonly<{ telemetry?: PageTelemetryContext }> => (context === undefined ? {} : { telemetry: context });
 
 export type BrowserAgentHostCapability = AgentHostCapabilityReport;
 
@@ -601,6 +608,10 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       retiring: new Map(),
       dead: false,
     };
+    /* Runtime telemetry (FR-14): the host's and the GeoSpec runner's entries, recorded by this page's one reporter. */
+    channel.onNotify('telemetry', ({ entry }) => {
+      pageTelemetry()?.recordForwarded(entry);
+    });
     channel.onNotify('rebridgeRequested', ({ projectId, hostId }) => {
       if (current !== live || live.dead) {
         return;
@@ -810,6 +821,7 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
           runtimeConfig: options.runtimeConfig,
           testingEnabled: options.testingEnabled,
           ...(principal === undefined ? {} : { principal }),
+          ...telemetryContextOf(pageTelemetry()?.workerContext()),
         },
         transferables,
       });

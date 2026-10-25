@@ -10,7 +10,7 @@ const emulationSessions = new WeakMap<Page, CDPSession>();
 /** Real-browser pane resize acceptance with the shipped styles. */
 export default defineConfig({
   root: fileURLToPath(new URL('../../..', import.meta.url)),
-  define: { tauCloudBuildEnabled: 'false' },
+  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
   plugins: [tailwindcss(), tauRuntime()],
   server: {
     host: '127.0.0.1',

@@ -1,6 +1,6 @@
-import type { VmFileSystem } from '@taucad/esbuild/vm';
+import type { VmFileSystem } from '#vm/types.js';
 import { describe, expect, it, vi } from 'vitest';
-import type { SourceRevision } from '@taucad/runtime/types';
+import type { SourceRevision } from '#support/types.js';
 import { createGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
 import type { GeoSpecNativeLoadModelOptions, GeoSpecNativeModelEngine } from '#model/native-model-loader.js';
 import { GeoSpecModelLoadError } from '#model/errors.js';
@@ -20,9 +20,7 @@ const encode = (value: unknown): Uint8Array<ArrayBuffer> => new TextEncoder().en
 const decodeRequest = (bytes: Uint8Array<ArrayBuffer>): Record<string, unknown> =>
   JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
 
-// SAFETY: the fixture constructs an exact 64-hex SHA-256 digest for source revision identity.
-const digest = (fill: string): Exclude<SourceRevision['files'][string], 'missing'> =>
-  `sha256:${fill.repeat(64)}` as Exclude<SourceRevision['files'][string], 'missing'>;
+const digest = (fill: string): Exclude<SourceRevision['files'][string], 'missing'> => `sha256:${fill.repeat(64)}`;
 
 /** One engine whose subject identity is the first primary byte, with release accounting. */
 const fixtureEngine = () => {

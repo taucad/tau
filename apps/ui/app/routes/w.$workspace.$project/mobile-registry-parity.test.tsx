@@ -209,7 +209,7 @@ describe('mobile registry parity (I1)', { timeout: 30_000 }, () => {
 
   it.each([
     ['desktop', ['Jobs']],
-    ['web', ['Browser', 'Jobs']],
+    ['web', ['Browser', 'Jobs', 'Terminal']],
   ] as const)('should neither list nor open an unshipped surface (%s)', (buildTarget, unshipped) => {
     vi.stubEnv('TAU_TARGET', buildTarget);
     renderWorkbench();
@@ -237,7 +237,9 @@ describe('mobile registry parity (I1)', { timeout: 30_000 }, () => {
     for (const gated of ['Print', 'Telemetry', 'Console']) {
       expect(within(all).queryByRole('button', { name: gated })).not.toBeInTheDocument();
     }
-    expect(within(all).queryByRole('heading', { name: 'Diagnostics' })).not.toBeInTheDocument();
+    // Terminal is gated by the desktop editor, not by Tau debug, so Diagnostics keeps it alone.
+    expect(within(all).getByRole('heading', { name: 'Diagnostics' })).toBeInTheDocument();
+    expect(within(all).getByRole('button', { name: 'Terminal' })).toBeInTheDocument();
     fireEvent.keyDown(all, { key: 'Escape' });
 
     // An app action that asks for Print still lands on Print, whose body explains the refusal.

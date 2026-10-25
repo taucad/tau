@@ -185,6 +185,14 @@ export type FileSystemProvider = {
   dispose(): void;
   /** Optional streaming read. When present, service routes through this instead of buffered readFile. */
   readFileStream?(path: string, options?: FileReadStreamOptions): ReadableStream<Uint8Array<ArrayBuffer>>;
+  /**
+   * Optional batched digest, computed where the bytes live: each path's
+   * lowercase hexadecimal SHA-256, or `'missing'` when nothing is there. Every
+   * requested path is a key of the result; a failure other than absence
+   * rejects. A remote provider answers it in one round trip without shipping
+   * bodies; without it, callers read and digest the bodies themselves.
+   */
+  hashFiles?(paths: readonly string[]): Promise<Record<string, string>>;
   /** Optional readdir carrying entry kinds. When present, tree walks skip the stat-per-child. */
   readdirEntries?(path: string): Promise<DirectoryEntry[]>;
   /**

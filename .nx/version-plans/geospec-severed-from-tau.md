@@ -1,0 +1,5 @@
+---
+geospec: minor
+---
+
+`geospec` depends on no Tau package (D11): it drops `@taucad/runtime` and `@taucad/esbuild` and bundles specs with plain `esbuild`. `runGeoSpecModule`, `readGeoSpecConfig` and the runner options (`GeoSpecRunnerOptions`, the native runner, the pool worker host) take an optional `createModuleVm`; the Node pool runner and `createNodeGeoSpecCliHost` take `moduleVmModule`, the URL of a module whose default export is that factory. `geospec/runner` exports the `ModuleVm`, `CreateModuleVm`, `GeoSpecModuleVmModule`, `VmFileSystem`, `VmIssue`, `BundleResult` and `BuiltinModule` types and `createPlainModuleVm`, the default: native esbuild on Node over project files and the GeoSpec builtins. A spec or config that imports an npm package or URL on the default refuses with `BUNDLER_FAILED` naming the specifier, and nothing is fetched; outside Node every bundle refuses until a host injects a VM. Tau's hosts inject Tau's esbuild VM, so a spec run through Tau resolves packages as before.

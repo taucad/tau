@@ -103,6 +103,7 @@ const contextData = () => ({
     readArtifact: vi.fn().mockResolvedValue(triangle),
     recycle: vi.fn(),
     cleanup: vi.fn(),
+    sampleResident: vi.fn().mockResolvedValue(64 * 1024 * 1024),
   },
 });
 
@@ -683,6 +684,15 @@ describe('PicoGK kernel', () => {
     await expect(definition.onDispose?.(value)).rejects.toThrow('compute disposal failed');
     expect(value.session.cleanup).toHaveBeenCalledOnce();
     expect(value.mirror.cleanup).toHaveBeenCalledOnce();
+  });
+
+  it("reports its worker tree's resident set through the observation hook and never through heapBytes", async () => {
+    const value = context();
+    await expect(definition.observedChildResidentBytes?.(value)).resolves.toBe(64 * 1024 * 1024);
+    expect(value.session.sampleResident).toHaveBeenCalledOnce();
+    // The recycling input stays unimplemented, so `rendering.heapBytes` and the recycle policy are unchanged.
+    expect(definition.heapBytes).toBeUndefined();
+    expect(definition.observedHeapBytes).toBeUndefined();
   });
 
   it('always removes the mirror when session cleanup fails', async () => {

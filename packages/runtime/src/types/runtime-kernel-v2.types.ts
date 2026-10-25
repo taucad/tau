@@ -303,6 +303,15 @@ export type KernelDefinitionV2<
    * Omit it for a kernel without one.
    */
   observedHeapBytes?(context: Context): number | undefined;
+  /**
+   * Bytes resident in the process tree of the native child the kernel runs in, read for observation only, like
+   * {@link KernelDefinitionV2.observedHeapBytes}: it never reaches a rendering and never feeds recycling. The runtime
+   * asks once per observed operation, after its reply, and waits at most 50 ms; nothing asks while no client
+   * observes. Implement it as one call to the kernel's native session, and resolve `undefined` when there is no live
+   * child or the platform has no reader. The figure is a sum of per-process resident sets, not a heap. Omit it for a
+   * kernel that runs in its worker's own process.
+   */
+  observedChildResidentBytes?(context: Context): Promise<number | undefined>;
   onDispose?(context: Context): Promise<void>;
 } & SnapshotHooks<Context, Handle, Serialized> &
   RenderRequirement<Views> &

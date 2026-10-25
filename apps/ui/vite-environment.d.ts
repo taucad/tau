@@ -3,6 +3,10 @@
 declare const tauBuildFrontendUrl: string;
 declare const tauBuildId: number;
 declare const tauCloudBuildEnabled: boolean;
+/** Runtime telemetry's Cloud-host build signal (`TAU_TELEMETRY_HOST=cloud`); read only through `#cloud/telemetry-host`. */
+declare const tauTelemetryHostCloudBuild: boolean;
+/** The build's release label (short commit or semver); `''` when the build had none. Read through `#lib/build-identity`. */
+declare const tauBuildRelease: string;
 
 /*
  * Declaration merging into `vite/client`'s own `ImportMetaEnv` only works with

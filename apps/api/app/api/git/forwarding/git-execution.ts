@@ -6,6 +6,7 @@ import type { VerificationKeys } from '#api/git/forwarding/contract/keys.js';
 import type { GitExecutor } from '#api/git/forwarding/git-executor.js';
 import { startInProcessStorage } from '#api/git/forwarding/in-process-executor.js';
 import { StorageForwarder } from '#api/git/forwarding/storage-forwarder.js';
+import { StorageRouter } from '#api/git/forwarding/storage-router.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
 import type { PreviewWriter } from '#api/projects/project-preview-store.js';
 
@@ -53,6 +54,8 @@ export const createGitExecution = (args: {
   readonly nodeEnvironment: string;
   readonly storageUrl: string | undefined;
   readonly grantSigningKey: string | undefined;
+  /** DC2 affinity; absent or `off` forwards as DC1 did. */
+  readonly affinity?: 'off' | 'rendezvous';
   readonly metrics: MetricsService;
   readonly store: RepositoryStore;
   readonly shutdown: ShutdownService;
@@ -85,13 +88,23 @@ export const createGitExecution = (args: {
     'TAU_STORAGE_GRANT_SIGNING_KEY',
   );
   refuseDevelopmentKid(args.nodeEnvironment, [key.kid], 'TAU_STORAGE_GRANT_SIGNING_KEY');
+  const affinity = args.affinity ?? 'off';
   args.logger.log(
-    { gitExecution: 'forwarded', storageTargets: urls.length },
+    { gitExecution: 'forwarded', storageTargets: urls.length, affinity },
     'git_execution=forwarded: every git RPC goes to tau-storage',
   );
+  const router =
+    affinity === 'rendezvous'
+      ? new StorageRouter({
+          urls,
+          recordMembers: (count) => {
+            args.metrics.gitMembers.record(count);
+          },
+        })
+      : undefined;
   return {
     mode: 'forwarded',
-    executor: new StorageForwarder({ urls, key, metrics: args.metrics }),
+    executor: new StorageForwarder({ urls, key, metrics: args.metrics, ...(router === undefined ? {} : { router }) }),
     receiptKeys: undefined,
   };
 };

@@ -93,6 +93,12 @@ export type FileSystemBridgeHello =
       readonly state: 'ready';
       readonly capabilities: ProviderCapabilities;
       readonly watchable: boolean;
+      /**
+       * Whether the host answers `hashFiles`. Absent from a host that predates
+       * the call, so a client falls back to reading bodies (capability presence,
+       * not a protocol bump, decides).
+       */
+      readonly hashable?: boolean;
     }
   | {
       readonly v: typeof fileSystemBridgeProtocolVersion;
@@ -177,6 +183,11 @@ export type FileSystemBridgeRuntimeService = FileSystemProvider &
     search?: (query: string, options?: SearchOptions) => Promise<FileStatEntry[]>;
     statTree?: (path: string) => Promise<FileStatEntry[]>;
     /*
+     * A host whose provider can digest without buffering supplies its own; the
+     * bridge otherwise derives one from `readFile` on the host's side of the wire.
+     */
+    hashFiles?: FileSystemBridgeHashFiles;
+    /*
      * The mutating porcelain is the rooted surface's too (charter D4): one batch
      * in the mutation pipeline, mask-checked by the composed view above it. A
      * host that hands over a bare provider serves none of it, so every row is
@@ -206,6 +217,20 @@ export type ArchiveOptions = ContentExportFilter;
  * @public
  */
 export type SearchOptions = { readonly maxResults?: number; readonly includeDirectories?: boolean };
+
+/**
+ * Digest each named file where its bytes live: one round trip, no bodies.
+ *
+ * Each value is the lowercase hexadecimal SHA-256 of the file's current bytes
+ * (`sha256Bytes` from `@taucad/utils/hash`), or `'missing'` when nothing is at
+ * that path — the runtime's own word for absence, which no digest can spell.
+ * Every requested path is a key of the result. Bytes are the evidence,
+ * never a size or mtime stamp, so a same-length rewrite inside one mtime tick
+ * still yields a different digest.
+ *
+ * @public
+ */
+export type FileSystemBridgeHashFiles = (paths: readonly string[]) => Promise<Record<string, string>>;
 
 type FileSystemBridgeReadFile = {
   (path: string, options: 'utf8' | { readonly encoding: 'utf8' }): Promise<string>;
@@ -275,6 +300,7 @@ export type FileSystemBridgeRootedCalls = MachineSettingsService &
     statTree(path: string): Promise<FileStatEntry[]>;
     copyTree(source: string, target: string): Promise<void>;
     duplicate(source: string, target: string): Promise<void>;
+    hashFiles(paths: readonly string[]): Promise<Record<string, string>>;
   };
 
 /**
@@ -680,6 +706,12 @@ const directoryContentsSchema: z.ZodType<Record<string, Uint8Array<ArrayBuffer>>
   });
 });
 
+const sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/u);
+const fileDigestsSchema: z.ZodType<Record<string, string>> = z.record(
+  z.string(),
+  z.union([sha256HexSchema, z.literal('missing')]),
+);
+
 type NoArguments = Parameters<() => void>;
 const noArgs: z.ZodType<NoArguments> = z.tuple([]);
 const oneStringArgument = z.tuple([z.string()]);
@@ -709,6 +741,7 @@ const fileSystemBridgeHelloValidator: z.ZodType<FileSystemBridgeHello> = z.prepr
       state: z.literal('ready'),
       capabilities: providerCapabilitiesSchema,
       watchable: z.boolean(),
+      hashable: z.boolean().optional(),
     }),
     z.looseObject({
       v: z.literal(fileSystemBridgeProtocolVersion),
@@ -956,6 +989,7 @@ const callSchemas = {
   statTree: { args: oneStringArgument, result: fileStatEntriesSchema },
   copyTree: { args: twoStringArgs, result: voidResult },
   duplicate: { args: twoStringArgs, result: voidResult },
+  hashFiles: { args: z.tuple([z.array(rootedPathSchema)]), result: fileDigestsSchema },
 } satisfies FileSystemBridgeCallSchemas;
 
 const broadcastValidator = z.looseObject({ event: z.literal('fileChanged'), data: changeEventSchema });
@@ -974,7 +1008,12 @@ export const fileSystemBridgeSchemas = {
 } satisfies BridgeProtocolSchemas<FileSystemBridgeHello, WatchRequest, WatchEvent>;
 
 type HelloInput =
-  | { readonly state: 'ready'; readonly capabilities: ProviderCapabilities; readonly watchable: boolean }
+  | {
+      readonly state: 'ready';
+      readonly capabilities: ProviderCapabilities;
+      readonly watchable: boolean;
+      readonly hashable?: boolean;
+    }
   | { readonly state: 'workspace'; readonly watchable: boolean }
   | { readonly state: 'unavailable'; readonly error: { readonly code: 'ROOT_UNAVAILABLE'; readonly message: string } };
 

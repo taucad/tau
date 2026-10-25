@@ -85,6 +85,15 @@ geospec run . --config ci.geospec.config.ts
 geospec run . --json
 ```
 
+**Spec imports.** The CLI bundles each spec with native esbuild over the
+project: a spec may import project files and the GeoSpec builtins (`geospec`,
+`geospec/model`, `geospec/config`). An npm package or URL import refuses with
+`BUNDLER_FAILED` and a message naming the specifier; nothing is fetched or
+installed. A host that resolves packages passes its own module VM as
+`createModuleVm` (`CreateModuleVm` in `geospec/runner`; for a Node pool,
+`moduleVmModule`). Tau's hosts inject Tau's esbuild VM this way. A browser host
+has no default VM and must inject one.
+
 | Flag                                    | Meaning                                                                                                   |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `--file <path>`                         | GeoSpec file or directory root; repeatable. Empty input discovers from the project root.                  |
@@ -100,6 +109,24 @@ geospec run . --json
 A flag replaces the config field of the same name. **The exit code is the
 verdict.** `0` only when the run succeeded; any failure, any run-level issue,
 and an empty selection are all `1`.
+
+### Checking a file with no spec
+
+`geospec check` runs one bundled validity spec on a STEP or GLB file, so a
+first use needs no `*.geospec.ts`. It takes the same runner, engine and report
+as `geospec run`; the file's folder is the project root.
+
+```bash
+geospec check bracket.step
+geospec check assembly.glb --components 3 --json
+```
+
+Each claim is its own test: no error diagnostics, closed edge incidence
+(`toBeWatertight`) and a bounding box with positive size on every axis, plus
+mesh integrity for a GLB or a valid BRep with closed shells for a STEP file.
+`--components <n>` adds an exact connected-component count. A claim the engine
+cannot decide is reported as inconclusive, never as a pass, and the exit code is
+the verdict.
 
 To embed the pool, use `createGeoSpecNodePoolRunner` from `geospec/runner/node`;
 each worker owns one engine and its own exporters, and live subjects never
@@ -241,9 +268,7 @@ report unavailable evidence instead of replacing the requirement with a proxy.
 The [canonical API index](agent/geospec-authoring/api-index.md) describes
 ordinary authoring. The separate
 [complete public API index](agent/geospec-authoring/public-api-index.md)
-retains host and framework contracts. A low-level
-`GeometrySubject` input is not interchangeable with the opaque subject returned
-by canonical `loadModel`.
+retains host and framework contracts.
 
 When a geometry assertion needs a parameter variant, pass that variant directly to `loadModel`. Omitting `parameters` exercises the defaults authored by the model:
 

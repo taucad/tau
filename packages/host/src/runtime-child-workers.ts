@@ -26,20 +26,49 @@ export type RuntimeChildChannel = {
   once(event: 'disconnect', listener: () => void): unknown;
 };
 
+/** What the daemon named in this child's `start` message. @public */
+export type RuntimeChildWorkerLauncherOptions = Readonly<{
+  /**
+   * The further native worker frames the daemon serves (`start`'s `nativeWorkerFrames`). With `native-worker:sample`
+   * among them, each worker answers `sampleResident` through the daemon; without it, a worker has no
+   * `sampleResident` and no sample frame is ever sent.
+   */
+  nativeWorkerFrames?: readonly string[];
+}>;
+
+/** How long a resident sample may wait for the daemon's answer before it resolves `undefined`. Milliseconds. */
+const sampleAnswerTimeout = 1000;
+
 type Pending = {
   readonly started: PromiseWithResolvers<void>;
   readonly ended: PromiseWithResolvers<Awaited<RuntimeChildWorker['ended']>>;
   readonly stdout: PassThrough;
   readonly stderr: PassThrough;
+  /** Resident samples awaiting the daemon's answer, by sample id. */
+  readonly samples: Map<string, (bytes: number | undefined) => void>;
 };
 
 const field = (message: unknown, name: string): unknown =>
   typeof message === 'object' && message !== null ? Reflect.get(message, name) : undefined;
 
 /**
+ * Answer the resident sample a `native-worker:resident` frame names with its bytes, or `undefined` when it holds none.
+ *
+ * @param pending - The worker the frame is for.
+ * @param message - The frame.
+ */
+const answerSample = (pending: Pending, message: unknown): void => {
+  const sample = field(message, 'sample');
+  const answer = typeof sample === 'string' ? pending.samples.get(sample) : undefined;
+  const bytes = field(message, 'bytes');
+  answer?.(typeof bytes === 'number' && Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : undefined);
+};
+
+/**
  * A native worker launcher that asks the daemon to start each worker on this child's behalf.
  *
  * @param channel - The child's IPC channel; defaults to `process`.
+ * @param options - What the daemon named in this child's `start` message.
  * @returns The launcher: it resolves once the daemon started the worker, and rejects with the daemon's refusal
  *   (a closure that is not sealed, a failed digest, a sandbox that could not start) when it did not.
  * @public
@@ -54,9 +83,12 @@ const field = (message: unknown, name: string): unknown =>
  */
 export const createRuntimeChildWorkerLauncher = (
   channel: RuntimeChildChannel = process as RuntimeChildChannel,
+  options: RuntimeChildWorkerLauncherOptions = {},
 ): ((launch: RuntimeChildWorkerLaunch) => Promise<RuntimeChildWorker>) => {
   const workers = new Map<string, Pending>();
+  const samples = options.nativeWorkerFrames?.includes('native-worker:sample') === true;
   let launches = 0;
+  let sampleRequests = 0;
   const send = (frame: Readonly<Record<string, unknown>>): void => {
     if (channel.connected) {
       channel.send?.(frame);
@@ -66,6 +98,10 @@ export const createRuntimeChildWorkerLauncher = (
     workers.delete(id);
     pending.stdout.end();
     pending.stderr.end();
+    for (const answer of pending.samples.values()) {
+      answer(undefined);
+    }
+    pending.samples.clear();
     pending.started.reject(new Error('The native worker ended before it started.'));
     pending.ended.resolve(end);
   };
@@ -74,6 +110,10 @@ export const createRuntimeChildWorkerLauncher = (
     const id = field(message, 'id');
     const pending = typeof id === 'string' ? workers.get(id) : undefined;
     if (pending === undefined || typeof type !== 'string' || !type.startsWith('native-worker:')) {
+      return;
+    }
+    if (type === 'native-worker:resident') {
+      answerSample(pending, message);
       return;
     }
     const data = field(message, 'data');
@@ -117,6 +157,7 @@ export const createRuntimeChildWorkerLauncher = (
       ended: Promise.withResolvers(),
       stdout: new PassThrough(),
       stderr: new PassThrough(),
+      samples: new Map(),
     };
     workers.set(id, pending);
     send({ type: 'native-worker:launch', id, launch });
@@ -140,6 +181,30 @@ export const createRuntimeChildWorkerLauncher = (
         send({ type: 'native-worker:terminate', id });
         await pending.ended.promise;
       },
+      ...(samples
+        ? {
+            sampleResident: async (): Promise<number | undefined> => {
+              if (!workers.has(id) || !channel.connected) {
+                return undefined;
+              }
+              sampleRequests += 1;
+              const sample = String(sampleRequests);
+              const answered = Promise.withResolvers<number | undefined>();
+              const timer = setTimeout(() => {
+                answered.resolve(undefined);
+              }, sampleAnswerTimeout);
+              timer.unref();
+              pending.samples.set(sample, answered.resolve);
+              send({ type: 'native-worker:sample', id, sample });
+              try {
+                return await answered.promise;
+              } finally {
+                clearTimeout(timer);
+                pending.samples.delete(sample);
+              }
+            },
+          }
+        : {}),
     };
   };
 };

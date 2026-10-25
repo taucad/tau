@@ -459,6 +459,141 @@ export const toLateEntry = (late: RuntimeLateInput, context: RuntimeEntryContext
   },
 });
 
+/** One closed viewer event as the viewer emits it (FR-17). @public */
+export type ViewerEventInput = Readonly<{
+  event: RuntimeViewerEntry['detail']['event'];
+  backend: string;
+  duration?: number;
+  triangles?: number;
+  format?: string;
+}>;
+
+/**
+ * Map one viewer event to its `runtime.viewer` entry: closed backend and format, clamped duration and triangle count,
+ * and the format only on `download`. Nothing about the scene leaves.
+ *
+ * @param input - The event.
+ * @param context - The host context; its caller is not sent.
+ * @returns The entry.
+ * @public
+ */
+export const toViewerEntry = (input: ViewerEventInput, context: RuntimeEntryContext): RuntimeViewerEntry => ({
+  name: RuntimeEntryName.VIEWER,
+  duration: clampMilliseconds(input.duration ?? 0),
+  detail: {
+    event: input.event,
+    backend: closedValue(v.viewerBackend, input.backend),
+    ...contextFields(context),
+    ...optional('triangles', input.triangles === undefined ? undefined : clampCount(input.triangles, 1e9)),
+    ...optional(
+      'format',
+      input.event === 'download' && input.format !== undefined ? closedValue(v.format, input.format) : undefined,
+    ),
+  },
+});
+
+/** One GeoSpec run, as the runner settled it (FR-16). Counts only: test names, specs and values have no field. @public */
+export type GeoSpecRunInput =
+  | Readonly<{
+      status: 'completed';
+      kernel?: string;
+      selected: number;
+      passed: number;
+      failed: number;
+      duration: number;
+    }>
+  | Readonly<{ status: 'no-files'; duration: number }>
+  | Readonly<{
+      status: 'limit';
+      kernel?: string;
+      selected: number;
+      passed: number;
+      failed: number;
+      duration: number;
+      maximum: number;
+      demand: number;
+      origin: ResourceLimitInput['origin'];
+    }>
+  | Readonly<{ status: 'refused'; code: 'GEOSPEC_CONFIG_NOT_APPLIED'; duration: number }>;
+
+/**
+ * The run-level `verify` entry of one GeoSpec run (FR-16): `succeeded` when every selected test passed, `issue` with
+ * `GEOSPEC_TESTS_FAILED` when some failed, `refused` with `GEOSPEC_NO_TEST_FILES` when discovery found nothing (not a
+ * failed test), `refused` with the config code when nothing ran, or `issue` with `RESOURCE_LIMIT` and the limit
+ * `geospec.work.units` when the work-unit budget stopped it. The caller is always `geospec`.
+ *
+ * @param run - The settled run.
+ * @param context - The host context; its caller is replaced.
+ * @returns The entry.
+ * @public
+ */
+export const verifyEntry = (run: GeoSpecRunInput, context: RuntimeEntryContext): RuntimeOperationEntry => {
+  const base = {
+    caller: closedValue(v.caller, 'geospec'),
+    ...contextFields(context),
+    ...optional('os', context.os === undefined ? undefined : closedValue(v.os, context.os)),
+  };
+  const duration = clampMilliseconds(run.duration);
+  if (run.status === 'refused') {
+    return {
+      name: RuntimeEntryName.OPERATION,
+      duration,
+      detail: { operation: 'verify', outcome: 'refused', code: run.code, ...base },
+    };
+  }
+  if (run.status === 'no-files') {
+    return {
+      name: RuntimeEntryName.OPERATION,
+      duration,
+      detail: {
+        operation: 'verify',
+        outcome: 'refused',
+        code: 'GEOSPEC_NO_TEST_FILES',
+        verify: { selected: 0, passed: 0, failed: 0 },
+        ...base,
+      },
+    };
+  }
+  const verify = {
+    selected: clampCount(run.selected, 10_000) ?? 0,
+    passed: clampCount(run.passed, 10_000) ?? 0,
+    failed: clampCount(run.failed, 10_000) ?? 0,
+  };
+  const kernel = optional('kernel', run.kernel === undefined ? undefined : closedValue(v.kernel, run.kernel));
+  if (run.status === 'limit') {
+    return {
+      name: RuntimeEntryName.OPERATION,
+      duration,
+      detail: {
+        operation: 'verify',
+        outcome: 'issue',
+        code: 'RESOURCE_LIMIT',
+        ...kernel,
+        verify,
+        ...base,
+        limit: limitEntry({
+          limit: 'geospec.work.units',
+          unit: '{unit}',
+          maximum: run.maximum,
+          demand: { kind: 'measured', value: run.demand },
+          origin: run.origin,
+        }),
+      },
+    };
+  }
+  return verify.failed === 0
+    ? {
+        name: RuntimeEntryName.OPERATION,
+        duration,
+        detail: { operation: 'verify', outcome: 'succeeded', ...kernel, verify, ...base },
+      }
+    : {
+        name: RuntimeEntryName.OPERATION,
+        duration,
+        detail: { operation: 'verify', outcome: 'issue', code: 'GEOSPEC_TESTS_FAILED', ...kernel, verify, ...base },
+      };
+};
+
 /* ------------------------------------------------------------------------------------------------ *
  * The reporter.                                                                                    *
  * ------------------------------------------------------------------------------------------------ */
@@ -507,6 +642,11 @@ export type IngestReporterInput = Readonly<{
 export type IngestReporter = Readonly<{
   /** A host's bounded pre-resolution hold dropped `count` entries; counted as `queue-full`. */
   noteHeldDropped: (count: number) => void;
+  /**
+   * A host counted `count` entries it lost before they reached this reporter for `reason` (`held-at-unload` carried
+   * from the previous page, `renderer-gone`); reported in the next delivery-health entry.
+   */
+  noteDropped: (reason: DropReason, count: number) => void;
   /** Spans the worker collectors reported dropping since the last delivery (D-T5). */
   noteSpansDropped: (count: number) => void;
   /** Called once per policy change; immediately when the policy is already known. Returns the unsubscribe. */
@@ -1088,6 +1228,9 @@ export const createIngestReporter = (input: IngestReporterInput): IngestReporter
   return {
     noteHeldDropped: (amount) => {
       count('queue-full', Math.max(0, Math.trunc(amount)));
+    },
+    noteDropped: (reason, amount) => {
+      count(reason, Number.isFinite(amount) ? Math.max(0, Math.trunc(amount)) : 0);
     },
     noteSpansDropped: (amount) => {
       spansDropped += Math.max(0, Math.trunc(amount));

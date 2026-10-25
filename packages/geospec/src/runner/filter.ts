@@ -1,5 +1,5 @@
 import type { GeoSpecTestCase } from '#runner/types.js';
-import type { VmIssue } from '@taucad/esbuild/vm';
+import type { VmIssue } from '#vm/types.js';
 
 const fullTestName = (test: Pick<GeoSpecTestCase, 'suite' | 'name'>): string => [...test.suite, test.name].join(' > ');
 

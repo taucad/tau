@@ -68,3 +68,16 @@ export type {
   GeoSpecVolumeExpectation,
   RunGeoSpecModuleOptions,
 } from '#runner/types.js';
+/** GeoSpec's default module VM: native esbuild over project files and builtins, on Node only. @public */
+export { createPlainModuleVm } from '#vm/plain-module-vm.js';
+export type {
+  BuiltinModule,
+  BundleResult,
+  CreateModuleVm,
+  GeoSpecModuleVmModule,
+  ModuleVm,
+  ModuleVmOptions,
+  VmExecuteResult,
+  VmFileSystem,
+  VmIssue,
+} from '#vm/types.js';

@@ -37,6 +37,7 @@ import {
 } from '#graphics/section-cuts.js';
 import type { SectionAxis, SectionCut, SectionCutPatch, SectionPlane, SectionVector } from '#graphics/section-cuts.js';
 import { recordRendererSpan } from '#lib/renderer-telemetry.js';
+import { viewerFirstFrame } from '#lib/viewer-events.js';
 import { deriveModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionSource, ViewerHoverSuppressionReason } from '#machines/model-interaction.machine.js';
 import { kinematicsMachine } from '#machines/kinematics.machine.js';
@@ -1270,6 +1271,13 @@ const graphicsMachineDefinition = setup({
               duration,
               attributes: { ...attributes, ...durations },
             });
+            if (attributes.outcome === 'presented' && durations.receiptToFirstFrame !== undefined) {
+              viewerFirstFrame({
+                backend: attributes.backend,
+                duration: durations.receiptToFirstFrame,
+                triangles: attributes.triangleCount,
+              });
+            }
           });
           return {};
         },

@@ -2,6 +2,7 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
+import { waitForStageReady } from '#support/viewer-stage.js';
 
 const seedRoute = '/__e2e/project-file-tree';
 const seedProjectName = 'sgenoud/models file-tree e2e';
@@ -10,6 +11,14 @@ const secondaryPath = 'public/models/box-corner.js';
 
 const treeItem = (path: string): Locator =>
   selectors.getByCss(`[data-testid="file-tree-item"][data-file-tree-path="${path}"]`);
+
+/**
+ * A deferred automatic preview, as the Model row reports it. The part menu no longer repeats the preview or its status
+ * (its header names the part; "the part's image lives in the gallery"), so the row's status and the menu's Retry
+ * preview item are where a deferred preview shows.
+ */
+const deferredPreviewStatus = (list: Locator): Locator =>
+  list.getByCss('[data-model-component-row]').getByText('Preview unavailable', { exact: true }).first();
 
 const disclosure = (path: string): Locator => selectors.getByRole('button', { name: path, exact: true });
 
@@ -32,6 +41,7 @@ const openSeededProject = async (): Promise<void> => {
   }
 
   await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first(), 60_000);
+  await waitForStageReady();
   await target.click(selectors.getByRole('button', { name: /^decline$/iu }), { timeout: 5000 }).catch(() => undefined);
 };
 
@@ -54,12 +64,13 @@ const openSecondGeometryUnit = async (path = secondaryPath): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: `More actions for ${fileName}`, exact: true }));
   await target.click(selectors.getByRole('menuitem', { name: 'Open in Viewer' }));
   await target.expectVisible(selectors.getByCss('.dv-tab').filter({ hasText: fileName }), 60_000);
+  await waitForStageReady();
 };
 
 type ModelSurfaceState = {
   readonly bodyBackground: string;
   readonly bodyBottomPadding: number;
-  readonly bodyToPaneBottomGap: number;
+  readonly bodyToNextEdgeGap: number;
   readonly bottomRadius: number;
   readonly filterBackground: string;
   readonly filterHeight: number;
@@ -82,11 +93,16 @@ const readModelSurfaceState = async (header: Locator): Promise<ModelSurfaceState
     const body = pane?.querySelector<HTMLElement>('[data-slot="model-unit-surface"]');
     const scroller = body?.querySelector<HTMLElement>('[data-slot="model-unit-scroller"]');
     const paneBody = body?.closest<HTMLElement>('.dv-pane-body');
+    /* The unit gap sits above the next unit's header, or under the last unit at the foot of the Paneview. */
+    const nextHeader = pane
+      ?.closest('.dv-view')
+      ?.nextElementSibling?.querySelector<HTMLElement>('[data-slot="paneview-header"]');
+    const paneviewRoot = pane?.closest<HTMLElement>('.dv-pane-container')?.parentElement;
     const panel = document.querySelector<HTMLElement>('[data-slot="model-panel-body"]');
     const toolbar = document.querySelector<HTMLElement>('[data-slot="model-filter"]');
     const filter = document.querySelector<HTMLInputElement>('[aria-label="Filter parts"]');
     const row = body?.querySelector<HTMLElement>('[data-model-component-row]');
-    if (!headerRoot || !body || !scroller || !paneBody || !panel || !toolbar || !filter || !row) {
+    if (!headerRoot || !body || !scroller || !paneBody || !paneviewRoot || !panel || !toolbar || !filter || !row) {
       throw new Error('Model attached surface was incomplete.');
     }
 
@@ -98,7 +114,8 @@ const readModelSurfaceState = async (header: Locator): Promise<ModelSurfaceState
     return {
       bodyBackground: getComputedStyle(body).backgroundColor,
       bodyBottomPadding: Number.parseFloat(scrollerStyle.paddingBottom),
-      bodyToPaneBottomGap: paneBody.getBoundingClientRect().bottom - bodyBounds.bottom,
+      bodyToNextEdgeGap:
+        (nextHeader ?? paneviewRoot).getBoundingClientRect()[nextHeader ? 'top' : 'bottom'] - bodyBounds.bottom,
       bottomRadius: Number.parseFloat(getComputedStyle(body).borderBottomLeftRadius),
       filterBackground: getComputedStyle(filter).backgroundColor,
       filterHeight: filterBounds.height,
@@ -164,7 +181,7 @@ test('keeps the Model hierarchy filterable, accessible, and reorderable through 
   const lightSurface = await readModelSurfaceState(main);
   expect(lightSurface.seamDelta).toBeLessThanOrEqual(1);
   expect(lightSurface.horizontalEdgeDelta).toBeLessThanOrEqual(1);
-  expect(lightSurface.bodyToPaneBottomGap).toBeCloseTo(8, 0);
+  expect(lightSurface.bodyToNextEdgeGap).toBeCloseTo(8, 0);
   expect(lightSurface.bodyBottomPadding).toBe(8);
   expect(lightSurface.bottomRadius).toBeGreaterThan(0);
   expect(lightSurface.rowRadius).toBeGreaterThan(0);
@@ -352,7 +369,7 @@ test('shows decoded part previews in the real Model rows and selected Properties
   let automaticDeferDuration: number | undefined;
   if (target.currentWebGpuProfile() === 'software') {
     await target.click(list.getByRole('button', { name: /^Actions for /u }).first());
-    await target.expectVisible(selectors.getByRole('alert', { name: 'Preview status' }));
+    await target.expectVisible(deferredPreviewStatus(list));
     await target.expectVisible(selectors.getByRole('menuitem', { name: 'Retry preview' }));
     automaticDeferDuration = await target.evaluate(() => {
       const state = (globalThis as typeof globalThis & { __TAU_PART_PREVIEW_PROBE__?: { startedAt: number } })
@@ -729,7 +746,8 @@ test('defers a cold part preview worker and resumes automatic previews after exp
     ),
   );
   await target.click(list.getByRole('button', { name: /^Actions for /u }).first());
-  await target.expectVisible(selectors.getByRole('alert', { name: 'Preview status' }));
+  await target.expectVisible(deferredPreviewStatus(list));
+  await target.expectVisible(selectors.getByRole('menuitem', { name: 'Retry preview' }));
   await target.keyboardPress('Escape');
   await dragViewport();
   await beginProbe();
@@ -755,7 +773,7 @@ test('defers a cold part preview worker and resumes automatic previews after exp
   const filter = selectors.getByRole('searchbox', { name: 'Filter parts' });
   await target.fill(filter, 'Preview part 7');
   await target.click(list.getByRole('button', { name: /^Actions for /u }).first());
-  await target.expectVisible(selectors.getByRole('alert', { name: 'Preview status' }));
+  await target.expectVisible(deferredPreviewStatus(list));
   await target.click(selectors.getByRole('menuitem', { name: 'Retry preview' }));
   await target.waitFor(
     () =>

@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createIngestReporter,
-  ingestBatchSchema,
   isCloudHost,
   reporterBounds,
   resolveTelemetryConsent,
@@ -20,7 +19,7 @@ import type {
   TauIdentity,
   TelemetryPolicyStore,
 } from '#client.js';
-import { parseRuntimeEntry } from '#runtime-ingest.js';
+import { ingestBatchSchema, parseRuntimeEntry } from '#runtime-entry.js';
 
 const context = { route: 'browser', caller: 'editor', release: '0123abc' } as const;
 const observation = (overrides: Partial<RuntimeObservationInput> = {}): RuntimeObservationInput => ({

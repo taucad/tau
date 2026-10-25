@@ -535,6 +535,14 @@ describe.runIf(enabled)('shell conformance', () => {
     }
 
     expect(output).toBe('started\n');
+    if (!linux) {
+      const shellPid = Number(readFileSync(join(folder, 'shell.pid'), 'utf8').trim());
+      const writerPid = Number(readFileSync(join(folder, 'writer.pid'), 'utf8').trim());
+      const groupOf = (pid: number): number =>
+        Number(execFileSync('/bin/ps', ['-o', 'pgid=', '-p', String(pid)], { encoding: 'utf8' }).trim());
+
+      expect(groupOf(writerPid)).not.toBe(groupOf(shellPid));
+    }
     host.kill('SIGKILL');
     await new Promise((resolve) => {
       host.once('exit', resolve);

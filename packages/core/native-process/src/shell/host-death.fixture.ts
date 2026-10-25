@@ -16,7 +16,7 @@ const outcome = await provider.launch({
     '--noprofile',
     '--norc',
     '-c',
-    `(while :; do date >> beat.txt; sleep 0.1; done # ${marker}\n) & sleep 600 # ${marker}`,
+    `set -m; echo $$ > shell.pid; /bin/bash --noprofile --norc -c 'echo $$ > writer.pid; while :; do date >> beat.txt; sleep 0.1; done # ${marker}' & wait`,
   ],
   workingDirectory: work,
   commandId: 'host-death',

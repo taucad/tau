@@ -16,8 +16,7 @@ import { ReadStream } from 'node:tty';
 import { fileURLToPath } from 'node:url';
 
 import { deniedReadRoots, deniedWriteRoots, physicalVariants, sandboxRuntimeReadRoots } from '#native-sandbox.js';
-import { processTable, terminateOwnedProcesses } from '#shell/process-tree.js';
-import type { ProcessRow } from '#shell/process-tree.js';
+import { terminateOwnedProcesses, trackDescendants } from '#shell/process-tree.js';
 import { shellBaselineDenied } from '#shell/shell-baseline.js';
 import { refusedShellEnvironment } from '#shell/shell-environment.js';
 import type {
@@ -110,9 +109,6 @@ const quote = (value: string): string => `'${value.replaceAll("'", String.raw`'\
 
 /** How long termination may take before survivors are reported. */
 const terminationMilliseconds = 5000;
-
-/** How often the macOS provider records the process tree, so a job that leaves the group is still owned. */
-const trackingMilliseconds = 250;
 
 /** The util-linux `setsid`, which makes the session's own PTY the controlling terminal that `bwrap --new-session` dropped. */
 const linuxSetsid = '/usr/bin/setsid';
@@ -483,50 +479,6 @@ const queueStream = (stream: NodeJS.ReadableStream & { destroy: () => void }): B
   /* EIO is how a PTY master reports that every slave descriptor has closed. */
   stream.on('error', queue.end);
   return queue;
-};
-
-/**
- * Descendant tracking on macOS: every process ever seen in the tree is remembered with its group, so a job that moves
- * to its own process group (interactive job control) and is reparented when the shell exits is still terminated.
- */
-const trackDescendants = (root: number): { stop: () => Promise<void>; table: () => Promise<readonly ProcessRow[]> } => {
-  const seen = new Map<number, number>();
-  const remember = async (): Promise<readonly ProcessRow[]> => {
-    const rows = await processTable();
-    const tree = new Set([root, ...seen.keys()]);
-    let grew = true;
-    while (grew) {
-      grew = false;
-      for (const row of rows) {
-        if (!tree.has(row.pid) && tree.has(row.ppid)) {
-          tree.add(row.pid);
-          seen.set(row.pid, row.pgid);
-          grew = true;
-        }
-      }
-    }
-    /* A remembered process still owned shows up as a child of the root, whatever its parent is now. */
-    return rows.map((row) => (seen.get(row.pid) === row.pgid ? { ...row, ppid: root } : row));
-  };
-  const poll = async (): Promise<void> => {
-    try {
-      await remember();
-    } catch {
-      /* A failed poll is retried on the next tick; termination takes a fresh table of its own. */
-    }
-  };
-  let latest: Promise<void> = Promise.resolve();
-  const timer = setInterval(() => {
-    latest = poll();
-  }, trackingMilliseconds);
-  timer.unref();
-  return {
-    stop: async () => {
-      clearInterval(timer);
-      await latest;
-    },
-    table: remember,
-  };
 };
 
 type Started = Readonly<{

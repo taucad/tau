@@ -109,11 +109,17 @@ jobs:
           CONFIRM_SNAPSHOT: ${{ inputs.confirm_snapshot }}
           TRANSPORT: ${{ inputs.transport }}
           ACTOR: ${{ github.triggering_actor }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
           REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           fail() { echo "::error::$1"; exit 1; }
           [ "$REF" = 'refs/heads/main' ] || fail 'Dispatch the restore drill from main.'
+          # A re-run of a failed real restore would commit another generation:
+          # dispatch a fresh run after reading the failed one instead.
+          case "$MODE" in
+            restore | owner-restore) [ "$RUN_ATTEMPT" = 1 ] || fail 'A real restore is never re-run; read the failed run, then dispatch again.' ;;
+          esac
           [[ "$OWNER_ID" =~ ^user_[A-Za-z0-9]{1,59}$ ]] || fail 'owner_id must be user_ followed by letters and digits.'
           [[ "$ACTOR" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]] || fail 'The dispatching actor is not a plain GitHub login.'
           case "$TRANSPORT" in ssh | exec) ;; *) fail 'transport must be ssh or exec.' ;; esac
@@ -248,7 +254,7 @@ jobs:
           if [ "$TRANSPORT" = exec ]; then
             # The Machines API answers when the command ends: one JSON document
             # with exit_code, stdout and stderr. `flyctl machine exec` exits 0 either way.
-            if flyctl machine exec "$MACHINE_ID" "$COMMAND" --app "$FLY_APP" --timeout 5400 --json > "$RUNNER_TEMP/exec.json"; then
+            if flyctl machine exec "$MACHINE_ID" "$COMMAND" --app "$FLY_APP" --timeout 5100 --json > "$RUNNER_TEMP/exec.json"; then
               jq -r '(.stdout // ""), (.stderr // "")' "$RUNNER_TEMP/exec.json" > "$raw"
               status=$(jq -r '.exit_code // 0' "$RUNNER_TEMP/exec.json")
             else
@@ -257,8 +263,11 @@ jobs:
             fi
             rm -f "$RUNNER_TEMP/exec.json"
           else
-            flyctl ssh console --app "$FLY_APP" --machine "$MACHINE_ID" --quiet --command "$COMMAND" > "$raw" 2>&1
-            status=$?
+            # Streamed through the same filter below, so a long restore shows its
+            # progress live and a timeout or cancel keeps what was printed.
+            mkfifo "$raw"
+            flyctl ssh console --app "$FLY_APP" --machine "$MACHINE_ID" --quiet --command "$COMMAND" > "$raw" 2>&1 &
+            remote=$!
           fi
           # A connection URL, userinfo in a URL, a credential-named field or
           # assignment (`secretAccessKey":`, `..._SECRET_ACCESS_KEY=`), or an
@@ -270,11 +279,14 @@ jobs:
             if grep -Eiq "$credential" <<< "$line"; then
               withheld=$((withheld + 1))
             else
-              printf '%s\n' "$line" >> "$shown"
+              printf '%s\n' "$line" | tee -a "$shown"
             fi
           done < "$raw"
+          if [ "$TRANSPORT" != exec ]; then
+            wait "$remote"
+            status=$?
+          fi
           rm -f "$raw"
-          cat "$shown"
           {
             echo "## Restore drill: ${MODE} on ${FLY_APP}"
             echo

@@ -153,6 +153,18 @@ describe('storage restore drill workflow', () => {
     expect(result.calls).toContain('machine exec m1');
   });
 
+  it.each(['restore', 'owner-restore'])('should refuse a re-run of a real %s', (mode) => {
+    const result = runValidation({ MODE: mode, RUN_ATTEMPT: '2' });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('::error::A real restore is never re-run');
+    expect(result.output).toBe('');
+  });
+
+  it('should allow a re-run of a dry run', () => {
+    const result = runValidation({ MODE: 'dry-run', RUN_ATTEMPT: '2' });
+    expect(result.status).toBe(0);
+  });
+
   function runValidation(overrides: Record<string, string>): {
     status: number | undefined;
     stdout: string;
@@ -175,6 +187,7 @@ describe('storage restore drill workflow', () => {
           TRANSPORT: 'ssh',
           ACTOR: 'octo-cat',
           REF: 'refs/heads/main',
+          RUN_ATTEMPT: '1',
           GITHUB_OUTPUT: output,
           ...overrides,
         },

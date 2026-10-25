@@ -519,5 +519,13 @@
     "test": "src/launchers/agent-launcher.segments.test.ts",
     "find": "    const first = await Promise.race([result, expired.promise]);\n",
     "replace": "    const first: SegmentRead | 'expired' = await result;\n"
+  },
+  {
+    "id": "standing-ignores-pulls",
+    "drift": "round 27: the standing the host's fence and the page both read keeps a run that awaits pulls holding the chat on a device that cannot pull it, so the page shows it running on another device and holds its send for ever (T11: t11_unpullable_released)",
+    "file": "src/log/foreign-runs.ts",
+    "test": "src/log/chat-ledger.differential.test.ts",
+    "find": "    return pulls\n      ? { abandoned: false, awaitsPull: true, changesAt: undefined }\n      : { abandoned: true, awaitsPull: false, changesAt: undefined };\n",
+    "replace": "    return { abandoned: false, awaitsPull: true, changesAt: undefined };\n"
   }
 ]

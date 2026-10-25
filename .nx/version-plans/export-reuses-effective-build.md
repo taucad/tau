@@ -1,6 +1,6 @@
 ---
 runtime: minor
-picogk: patch
+picogk: minor
 ---
 
 An export reuses the view's build when the kernel reports that build as exactly what the export's options would build.

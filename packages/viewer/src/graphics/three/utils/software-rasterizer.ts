@@ -43,9 +43,10 @@ const webGlRendererIdentity = (context: RendererIdentityContext): GpuAdapterIden
  * @returns True on a software rasterizer; false on hardware or when nothing is reported.
  * @internal
  */
-export const rendererUsesSoftwareRasterizer = (renderer: WebGPURenderer): boolean => {
-  // Three owns `backend.device` and `backend.gl`; the published Backend declaration omits both.
-  const backend = renderer.backend as
+export const rendererUsesSoftwareRasterizer = (renderer: object): boolean => {
+  // Three owns `backend.device` and `backend.gl`; the published Backend declaration omits both. R3F types its `gl` as a
+  // WebGL renderer whatever it created, so any renderer is accepted and only a WebGPU renderer's backend is read.
+  const backend = ('backend' in renderer ? renderer.backend : undefined) as
     | (WebGPURenderer['backend'] & {
         readonly device?: Readonly<{ adapterInfo?: GpuAdapterIdentity['info'] }>;
         readonly gl?: RendererIdentityContext;

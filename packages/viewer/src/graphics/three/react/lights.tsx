@@ -14,7 +14,6 @@ import {
   RGBAFormat,
 } from 'three';
 import { CubeRenderTarget, PMREMGenerator as WebGpuPmremGenerator } from 'three/webgpu';
-import type { WebGPURenderer } from 'three/webgpu';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { createPortal, useThree, useFrame } from '@react-three/fiber';
 import { Environment, Lightformer } from '@react-three/drei';
@@ -128,7 +127,7 @@ export function Lights({
 
   const showEnvironment = useDeferredValue(!enableMatcap);
   const resolution = useMemo(() => {
-    if (rendererUsesSoftwareRasterizer(gl as unknown as WebGPURenderer)) {
+    if (rendererUsesSoftwareRasterizer(gl)) {
       return softwareRasterizerEnvResolution;
     }
     return isCoarsePointerDevice() ? coarsePointerEnvResolution : envResolution;

@@ -1,7 +1,6 @@
 import { useThree } from '@react-three/fiber';
 import { useLayoutEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
-import type { WebGPURenderer } from 'three/webgpu';
 import { ACESFilmicToneMapping, LinearToneMapping, NeutralToneMapping, NoToneMapping } from 'three';
 import { rendererUsesSoftwareRasterizer } from '#graphics/three/utils/software-rasterizer.js';
 import { useThreeGraphicsBackend } from '#graphics/three/three-graphics-backend-context.jsx';
@@ -30,7 +29,7 @@ export function PostProcessing({ settings }: { readonly settings?: Partial<PostP
   const toneMapping = settings?.toneMapping ?? defaultPostProcessingSettings.toneMapping;
   const softwareAdapter = useMemo(
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- R3F types `gl` as the classic renderer; the WebGPU backend context guarantees the node renderer.
-    () => backend === 'webgpu' && rendererUsesSoftwareRasterizer(gl as unknown as WebGPURenderer),
+    () => backend === 'webgpu' && rendererUsesSoftwareRasterizer(gl),
     [backend, gl],
   );
 

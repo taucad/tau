@@ -128,6 +128,7 @@ export const createNativeGeoSpecRunner = (options: GeoSpecNativeRunnerOptions): 
     nativeAssertions: { ...options.nativeAssertions, engine: assertionEngine },
     nativeModelLoader: scopedLoader,
     ...(options.builtinModules === undefined ? {} : { builtinModules: options.builtinModules }),
+    ...(options.createModuleVm === undefined ? {} : { createModuleVm: options.createModuleVm }),
   });
   return {
     ...runner,

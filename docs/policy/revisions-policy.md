@@ -3,7 +3,7 @@ title: 'Revisions Policy'
 description: 'Rules for revision identity, checkouts, RevisionPort parity, actor composition, sync, records, remotes, refusal classification, latency budgets, conflicts, publication, and project liveness.'
 status: active
 created: '2026-09-14'
-updated: '2026-10-23'
+updated: '2026-10-24'
 related:
   - docs/research/revisions-always-on-sync-charter.md
   - docs/research/git-storage-substrate-charter.md
@@ -390,7 +390,7 @@ Enforce the lease invariant server-side as well as in the client. Refuse every r
 
 ### 20. Hold revision work to a latency budget
 
-Revision interactions are interactive UI, not batch work. Every operation below has a budget and a fixture; a change that regresses one is a defect whether or not it is correct. Budgets tighten and never loosen. A budget with no reading at its fixture is owed, never assumed met.
+Revision interactions are interactive UI, not batch work. Every operation below has a budget and a fixture; a change that regresses one is a defect whether or not it is correct. These interaction budgets tighten and never loosen (bundle-size limits follow `npm-policy.md` instead). A budget with no reading at its fixture is owed, never assumed met.
 
 | ID  | Operation                                              | Fixture                                                                                        | Budget                                                                                                                     | Reading (2026-09-25 run)                                                                                                     |
 | --- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |

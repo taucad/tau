@@ -86,6 +86,12 @@ import { canonicalPath } from '#main/project-roots.js';
 import { createGeometryRunnerClient } from '#tau/geometry-runner-client.js';
 import { agentRuntimeIdleMilliseconds, retireIdleClients } from '#tau/idle-runtime-clients.js';
 import type { createDesktopRuntime } from '#tau/desktop-runtime.factory.js';
+import { createTerminalConcern } from '#tau/services-host.terminal.js';
+import type { TerminalConcernOptions } from '#tau/services-host.terminal.js';
+import { createPermissionHost } from '#tau/permission-host.js';
+import { createPermissionStore } from '#tau/permission-store.js';
+import type { PermissionStore } from '#tau/permission-store.js';
+import type { PermissionAnswerFrame } from '#shared/permission-channels.js';
 
 /**
  * Context label every dispatch on the channel carries.
@@ -238,6 +244,10 @@ export type ServicesHostOptions = {
   readonly machinesDirectory?: string;
   /** The app's old machine directory, imported once into the store when it is another directory. */
   readonly legacyMachinesDirectory?: string;
+  /** `<userData>/permissions`, the permission store's home (W9). Absent, permission requests are refused. */
+  readonly permissionsDirectory?: string;
+  /** Reply to main with one permission request's answer (W9). */
+  readonly permissionsAnswered?: (frame: PermissionAnswerFrame) => void;
   /**
    * Diagnostics sink; defaults to stdout, which main forwards to
    * `userData/logs`. `level` is omitted for the ordinary informational trace
@@ -302,6 +312,8 @@ export type ServicesHostOptions = {
   ) => void;
   /** Reply to main with the machines a streamed run is feeding now, by name, so quit can refuse (Q-streamed-host). */
   readonly machinesStreaming?: (requestId: string, machines: readonly StreamingMachine[]) => void;
+  /** The desktop shell probe the `terminal` concern opens human sessions through; absent, each is refused. */
+  readonly terminalShell?: TerminalConcernOptions['shell'];
   /** Tell main this project can record nothing, so a person is told (W5). */
   readonly onRevisionsUnavailable?: (
     workspaceRoot: string,
@@ -336,6 +348,8 @@ export class ServicesQuiesceRefusedError extends Error {
 
 /** The services host, seen by its entry and by tests. */
 export type ServicesHost = {
+  /** The permission store, the one reader and writer of chat modes (W9); its `permissionModeOfRun` feeds the shell. */
+  readonly permissions: PermissionStore | undefined;
   /** Handle one `process.parentPort` message. */
   handleMessage(message: UtilityMessage): void;
   /** Whether a renderer-named root may be served. */
@@ -508,6 +522,13 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     return [...trustedRoots].some((trusted) => candidate === trusted || candidate.startsWith(trusted + sep));
   };
 
+  const terminals = createTerminalConcern({
+    shell: options.terminalShell,
+    isTrustedRoot,
+    canonicalRoot: canonicalPath,
+    log,
+  });
+
   const isInternalRoot = (root: string): boolean => {
     if (isTrustedRoot(root)) {
       return true;
@@ -520,6 +541,25 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       return candidate === trusted || candidate.startsWith(trusted + sep);
     });
   };
+
+  const permissions =
+    options.permissionsDirectory === undefined
+      ? undefined
+      : createPermissionStore({
+          directory: options.permissionsDirectory,
+          onError: (event, message) => {
+            log(event, message, 'warn');
+          },
+        });
+  const permissionHost =
+    permissions === undefined
+      ? undefined
+      : createPermissionHost({
+          store: permissions,
+          isTrustedRoot,
+          answer: (frame) => options.permissionsAnswered?.(frame),
+          log,
+        });
 
   const internalPorts = authority === undefined ? undefined : new MessageChannel();
   const stopInternalAuthority =
@@ -1122,6 +1162,23 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
           trustedRoots.add(canonicalPath(root));
         }
         log('roots-updated', { count: trustedRoots.size });
+        terminals.revokeUntrusted();
+        return;
+      }
+      case 'permissions-request': {
+        const { requestId } = frame;
+        if (permissionHost === undefined) {
+          if (typeof requestId === 'string') {
+            options.permissionsAnswered?.({
+              type: 'permissions-failed',
+              requestId,
+              message: 'This build keeps no permissions.',
+            });
+          }
+          return;
+        }
+        // async-iife: bootstrap -- the host answers through `permissionsAnswered`; a control frame has no caller.
+        void permissionHost.handle(frame);
         return;
       }
       case 'authToken': {
@@ -1470,6 +1527,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       refuse({ type: 'quiesce-refused', reason: 'streaming', machines: streaming });
     }
     const failures: unknown[] = [];
+    await settleAll([terminals.closeAll()], failures);
     const fileSystemDisposers = [...nodeFileSystemDisposers];
     const runtimeDisposers = [...runtimeFileSystemDisposers];
     const owned = [...projectHosts.values()];
@@ -1530,6 +1588,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   return {
     isTrustedRoot,
     agentHostConfig: () => agentHostConfig,
+    permissions,
     quiesce,
     dispose() {
       disposed = true;
@@ -1550,6 +1609,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
        * Tracked rather than fire-and-forget: the internal authority has to stay
        * up until these closes finish. */
       const closingLaunchers = [...projectHosts.values()].map(async (actor) => closeForDispose(actor));
+      closingLaunchers.push(terminals.closeAll());
       for (const port of connections.values()) {
         port.close();
       }
@@ -1704,6 +1764,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         case 'machines': {
           // async-iife: bootstrap -- the host opens on first use; a control frame has no caller to return to.
           void serveMachines(port, 'person');
+          return;
+        }
+        case 'terminal': {
+          terminals.serve(port, context);
           return;
         }
         default: {

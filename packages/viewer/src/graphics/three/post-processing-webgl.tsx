@@ -35,7 +35,7 @@ type ComposerResources = Readonly<{
   beforeAoToneMappingEffect: ToneMappingEffect;
   beforeAoToneMappingPass: EffectPass;
   toneMappingEffect: ToneMappingEffect;
-  toneMappingPass: EffectPass;
+  toneMappingPass: OutputAntialiasPass;
 }>;
 
 type WebGlPostProcessingSettings = Omit<PostProcessingSettings, 'gtaoDistanceFalloff' | 'gtaoIntensity'>;
@@ -72,6 +72,7 @@ const selectComposerCamera = (resource: ComposerResources, camera: ThreeCamera, 
     // N8AO bakes camera projection into three materials. Keep those cameras fixed.
     aoPass.enabled = aoEnabled && endpoint === camera;
   }
+  resource.toneMappingPass.aoPass = aoEnabled ? resource.aoPasses.get(camera) : undefined;
   return created;
 };
 
@@ -97,12 +98,11 @@ const configureComposer = (
     });
   }
   const rawAo = settings.aoEnabled && settings.displayMode === 'ao';
-  const displayAo = settings.aoCompositeStage === 'display';
+  const displayAo = settings.aoEnabled && settings.displayMode !== 'no-ao' && settings.aoCompositeStage === 'display';
   resource.beforeAoToneMappingPass.enabled = displayAo && !rawAo;
   for (const aoPass of resource.aoPasses.values()) {
-    // Pre-tone already moved beauty to the single-sample post target. N8AO's
-    // internal composite can be copied back there without returning to MSAA.
-    aoPass.needsSwap = !resource.beforeAoToneMappingPass.enabled;
+    // AO publishes its own composite target directly to the terminal pass.
+    aoPass.needsSwap = false;
   }
   for (const effect of [resource.beforeAoToneMappingEffect, resource.toneMappingEffect]) {
     effect.mode = toneMappingModes[settings.toneMapping];
@@ -188,13 +188,63 @@ class CanvasDepthRestorePass extends Pass {
   /** Stamp this frame's depth into `target`, or the canvas when it is omitted. */
   public restore(renderer: WebGLRenderer, target?: WebGLRenderTarget): void {
     const previousTarget = renderer.getRenderTarget();
+    const previousAutoClear = renderer.autoClear;
+    renderer.autoClear = false;
     renderer.setRenderTarget(target ?? null);
     try {
       // AlwaysDepth replaces every depth texel; clearing first repeats the same work.
       renderer.render(this.scene, this.camera);
     } finally {
       renderer.setRenderTarget(previousTarget);
+      renderer.autoClear = previousAutoClear;
     }
+  }
+}
+
+/** Encodes into the borrowed single-sample post target before the final FXAA draw. */
+class OutputAntialiasPass extends Pass {
+  public aoPass: ManagedN8AoPass | undefined;
+  private readonly colorTarget: WebGLRenderTarget;
+  private readonly toneMappingPass: EffectPass;
+  private readonly antialiasPass: EffectPass;
+
+  public constructor(camera: ThreeCamera, toneMappingEffect: ToneMappingEffect, colorTarget: WebGLRenderTarget) {
+    super('TauOutputAntialiasPass');
+    this.needsSwap = false;
+    this.colorTarget = colorTarget;
+    this.toneMappingPass = new EffectPass(camera, toneMappingEffect);
+    this.antialiasPass = new EffectPass(camera, new FXAAEffect());
+  }
+
+  public override initialize(...parameters: Parameters<EffectPass['initialize']>): void {
+    this.toneMappingPass.initialize(...parameters);
+    this.antialiasPass.initialize(...parameters);
+  }
+
+  public override setSize(width: number, height: number): void {
+    this.toneMappingPass.setSize(width, height);
+    this.antialiasPass.setSize(width, height);
+  }
+
+  // oxlint-disable-next-line eslint/max-params -- Preserve postprocessing Pass.render's upstream signature.
+  public override render(
+    renderer: WebGLRenderer,
+    inputBuffer: WebGLRenderTarget,
+    outputBuffer: WebGLRenderTarget,
+    deltaTime?: number,
+    stencilTest?: boolean,
+  ): void {
+    // AO has finished reading pre-tone color before this target is reused for encoding.
+    // With AO disabled, inputBuffer is geometry color and pre-tone is skipped.
+    const source = this.aoPass?.enabled ? this.aoPass.outputTargetInternal : inputBuffer;
+    this.toneMappingPass.render(renderer, source, this.colorTarget, deltaTime, stencilTest);
+    this.antialiasPass.renderToScreen = this.renderToScreen;
+    this.antialiasPass.render(renderer, this.colorTarget, outputBuffer, deltaTime, stencilTest);
+  }
+
+  public override dispose(): void {
+    this.toneMappingPass.dispose();
+    this.antialiasPass.dispose();
   }
 }
 
@@ -217,6 +267,8 @@ const createComposer = ({
   // EffectComposer starts each frame at inputBuffer. Only geometry needs MSAA;
   // fullscreen post passes consume its resolved color and use this target.
   composer.outputBuffer.samples = 0;
+  composer.outputBuffer.depthBuffer = false;
+  composer.outputBuffer.stencilBuffer = false;
   const renderPass = new RenderPass(scene, camera);
   const depthRestore = new CanvasDepthRestorePass();
   // SRC ignores opacity; NORMAL keeps a genuine uniform-controlled bypass.
@@ -229,18 +281,16 @@ const createComposer = ({
     mode: ToneMappingMode.ACES_FILMIC,
     blendFunction: BlendFunction.NORMAL,
   });
-  // Tone mapping consumes color only; retargeting EffectPass would unnecessarily
+  // Tone mapping consumes color only; retargeting its EffectPass would unnecessarily
   // change its camera-dependent shader defines on each projection switch.
-  const toneMappingPass = new EffectPass(camera, toneMappingEffect);
-  // MSAA precedes AO; spatial AA also covers the edges introduced by its composite.
-  const antialiasPass = new EffectPass(camera, new FXAAEffect());
+  // MSAA precedes AO; final FXAA also covers edges introduced by its composite.
+  const toneMappingPass = new OutputAntialiasPass(camera, toneMappingEffect, composer.outputBuffer);
   const aoPasses = new Map<ThreeCamera, ManagedN8AoPass>();
   try {
     composer.addPass(renderPass);
     composer.addPass(depthRestore);
     composer.addPass(beforeAoToneMappingPass);
     composer.addPass(toneMappingPass);
-    composer.addPass(antialiasPass);
     return {
       scene,
       state: {},
@@ -255,14 +305,7 @@ const createComposer = ({
       toneMappingPass,
     };
   } catch (error) {
-    for (const pass of [
-      renderPass,
-      depthRestore,
-      beforeAoToneMappingPass,
-      ...aoPasses.values(),
-      toneMappingPass,
-      antialiasPass,
-    ]) {
+    for (const pass of [renderPass, depthRestore, beforeAoToneMappingPass, ...aoPasses.values(), toneMappingPass]) {
       if (!composer.passes.includes(pass)) {
         pass.dispose();
       }

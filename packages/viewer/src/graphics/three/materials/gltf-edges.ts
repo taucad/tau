@@ -1,5 +1,5 @@
 import type { Group, LineSegments, Object3D, Vector2 } from 'three';
-import { InterleavedBufferAttribute } from 'three';
+import { DoubleSide, InterleavedBufferAttribute } from 'three';
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
@@ -20,12 +20,10 @@ import { viewportRenderTiers } from '#graphics/three/utils/render-order.utils.js
  */
 export const gltfEdgeLineWidth = 1;
 
-/**
- * Expanded WebGPU edge quad width in CSS pixels. The material shades only the central
- * {@link gltfEdgeLineWidth} stroke as fully covered and uses the extra width as an analytic
- * AA fringe, avoiding the inconsistent opaque-MSAA thickness of near-1px lines.
- */
-const webGpuEdgePresentationGeometryLineWidth = 2;
+// Node edges do not write depth. Draw them after opaque surfaces so a later
+// surface cannot overwrite their color; depth testing still rejects hidden edges.
+// This is before section caps and emphasis tiers. Classic ordering is unchanged.
+const nodeEdgeRenderOrder = 1;
 
 /**
  * Disable raycast on edge meshes. Pointer events traverse the scene every move; the default
@@ -191,6 +189,9 @@ export function createWebGlGltfFatLineMaterial(
     color: edgeColor,
     linewidth: gltfEdgeLineWidth,
     worldUnits: false,
+    // Screen-expanded winding does not inherit a mirrored source transform.
+    side: DoubleSide,
+    forceSinglePass: true,
     resolution: resolution.clone(),
   });
 }
@@ -199,29 +200,28 @@ export function createWebGlGltfFatLineMaterial(
  * WebGPU fat-line material paired with {@link LineSegmentsGeometry} via
  * `three/addons/lines/webgpu/LineSegments2`.
  *
- * **`alphaToCoverage = false`** — opts the WebGPU material out of upstream
- * `Line2NodeMaterial`'s default `_useAlphaToCoverage = true` so the screen-space rounded
- * endcap branch falls through to the deterministic `discard` path. Upstream WebGL
- * `LineMaterial` already takes that path by default (`USE_ALPHA_TO_COVERAGE` define
- * absent) and produces the crisp 5-level MSAA coverage Tau ships today; mirroring the
- * WebGPU side closes the screenshot crispness gap because the WebGPU spec leaves the
- * alpha→sample-mask conversion vendor-defined (e.g. Qualcomm's documented 4×4
- * area-dither LUT, gpuweb/gpuweb#4867) which surfaces as visible graininess on
- * dithered drivers. See `docs/research/webgpu-edge-line-crispness-gap.md`.
+ * Single-sample node frames use analytic transverse coverage and omit overlapping
+ * round caps at CAD tessellation joins. Preserve geometric depth; do not convert
+ * alpha into a vendor-dependent sample mask. Both quad faces are equivalent,
+ * including under mirrored canonical parents, so render them in a single pass.
  *
  * @param edgeColor - sRGB hex edge tint (defaults to {@link gltfEdgeColorLightMode}).
  */
 export function createWebGpuGltfFatLineMaterial(edgeColor: number = gltfEdgeColorLightMode): Line2NodeMaterial {
   const material = new Line2NodeMaterial({
     color: edgeColor,
-    linewidth: webGpuEdgePresentationGeometryLineWidth,
+    linewidth: gltfEdgeLineWidth,
     worldUnits: false,
+    // Screen-expanded winding does not inherit a mirrored source transform.
+    side: DoubleSide,
+    forceSinglePass: true,
   });
 
   material.alphaToCoverage = false;
   material.depthWrite = false;
-  material.transparent = false;
-  material.edgePresentationCoverage = true;
+  material.transparent = true;
+  material.analyticButtCaps = true;
+  material.edgePresentationCoverage = false;
   material.edgePresentationLineWidth = gltfEdgeLineWidth;
   material.useViewportSrgbBlend = false;
 
@@ -259,6 +259,9 @@ export function createGltfFatLineSegmentsFromPositions(
   // R5: edge meshes are render-only overlays; skip the expensive per-segment screen-space
   // raycast that R3F's pointermove handler would otherwise invoke on every mouse move.
   fatLine.raycast = disableRaycast;
+  if (backend === 'webgpu') {
+    fatLine.renderOrder = nodeEdgeRenderOrder;
+  }
 
   return fatLine;
 }
@@ -314,8 +317,10 @@ function wrapAsFatLineSegments(
   fatLine.name = lineSegments.name;
   fatLine.userData = { ...lineSegments.userData };
 
-  // Keep surfaces and owner-local edges adjacent in the ordinary render order. Surface
-  // materials provide the bounded coplanar separation; edges retain geometric depth.
+  // Reused prototypes bypass the allocating factory but have the same ordering contract.
+  if (backend === 'webgpu') {
+    fatLine.renderOrder = nodeEdgeRenderOrder;
+  }
 
   return fatLine;
 }
@@ -415,7 +420,7 @@ export function setGltfFatLineEmphasis(object: Object3D, emphasis: ModelComponen
   const line = object as LineSegments2;
   if (emphasis === 'none') {
     line.material = base as LineMaterial;
-    line.renderOrder = viewportRenderTiers.model;
+    line.renderOrder = base instanceof Line2NodeMaterial ? nodeEdgeRenderOrder : viewportRenderTiers.model;
     return;
   }
   const materials = getOrCreateEdgeEmphasisMaterials(base);

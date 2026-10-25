@@ -113,6 +113,35 @@ describe('All surfaces', () => {
     expect(within(sheet).queryByRole('heading', { name: 'Diagnostics' })).not.toBeInTheDocument();
   });
 
+  it('should move focus into All as it opens, so a keyboard user is inside the modal sheet', async () => {
+    render(<ControlledNav />);
+    const all = within(screen.getByRole('navigation', { name: 'Workbench' })).getByRole('button', { name: 'All' });
+    all.focus();
+    fireEvent.click(all);
+
+    const sheet = await screen.findByRole('dialog', { name: 'All surfaces' });
+    await waitFor(() => {
+      expect(sheet).toContainElement(document.activeElement as HTMLElement);
+    });
+  });
+
+  it('should return focus to All when All is dismissed with Escape', async () => {
+    render(<ControlledNav />);
+    const all = within(screen.getByRole('navigation', { name: 'Workbench' })).getByRole('button', { name: 'All' });
+    all.focus();
+    fireEvent.click(all);
+    const sheet = await screen.findByRole('dialog', { name: 'All surfaces' });
+
+    fireEvent.keyDown(sheet, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'All surfaces' })).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(all);
+    });
+  });
+
   it('should mark the selected surface in the nav and in All, and close All once a surface is chosen', async () => {
     render(<ControlledNav />);
     const navigation = screen.getByRole('navigation', { name: 'Workbench' });

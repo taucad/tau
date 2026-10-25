@@ -13,6 +13,7 @@ const sessionMock = vi.hoisted(() => ({
   readArtifact: vi.fn(),
   recycle: vi.fn(),
   request: vi.fn(),
+  sampleResident: vi.fn(),
   options: undefined as unknown,
 }));
 
@@ -26,6 +27,7 @@ vi.mock('@taucad/native-process-core', async (importOriginal) => {
       public readArtifact = sessionMock.readArtifact;
       public recycle = sessionMock.recycle;
       public request = sessionMock.request;
+      public sampleResident = sessionMock.sampleResident;
 
       public constructor(options: unknown) {
         sessionMock.options = options;
@@ -179,6 +181,8 @@ describe('PicogkSession', () => {
 
     await session.readArtifact({ artifactPath: '/artifacts/a', byteLength: 1 });
     await session.recycle();
+    sessionMock.sampleResident.mockResolvedValueOnce(96 * 1024 * 1024);
+    await expect(session.sampleResident()).resolves.toBe(96 * 1024 * 1024);
     await session.cleanup();
     expect(sessionMock.readArtifact).toHaveBeenCalledWith({
       artifactPath: '/artifacts/a',

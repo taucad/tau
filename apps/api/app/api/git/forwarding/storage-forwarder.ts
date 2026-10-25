@@ -1,8 +1,8 @@
 import { Agent, request as httpRequest } from 'node:http';
 import type { IncomingMessage } from 'node:http';
-import type { Readable } from 'node:stream';
+import { Readable } from 'node:stream';
 import { HttpException, Logger, ServiceUnavailableException } from '@nestjs/common';
-import type { GitForwardErrorReason, MetricsService } from '#telemetry/metrics.js';
+import type { GitForwardErrorReason, GitSpillReason, MetricsService } from '#telemetry/metrics.js';
 import {
   framingHeader,
   outcomeHeader,
@@ -14,7 +14,14 @@ import {
   forwardFreeSocketTimeoutMilliseconds,
   forwardIdleTimeoutMilliseconds,
 } from '#api/git/forwarding/contract/hop.js';
-import { dialectPath, grantHeader, mintGrant, storagePath } from '#api/git/forwarding/contract/grant.js';
+import {
+  dialectPath,
+  grantHeader,
+  memberHeader,
+  mintGrant,
+  preferInstanceHeader,
+  storagePath,
+} from '#api/git/forwarding/contract/grant.js';
 import type { StorageOperation } from '#api/git/forwarding/contract/grant.js';
 import type { SigningKey } from '#api/git/forwarding/contract/keys.js';
 import type { AdvertisementDialect } from '#api/git/advertisement.js';
@@ -25,6 +32,8 @@ import type {
   RpcBody,
   StorageTombstone,
 } from '#api/git/forwarding/git-executor.js';
+import { ReplayableBody } from '#api/git/forwarding/replay-body.js';
+import type { StorageRouter, StorageTarget } from '#api/git/forwarding/storage-router.js';
 import { commitDeadlineMilliseconds, gitRpcTimeoutMilliseconds } from '#api/git/store/limits.js';
 
 /**
@@ -65,6 +74,24 @@ const jsonResponseLimitBytes = 1024 * 1024;
 
 /** Room for `cat-file --batch` of a 50 MB publication. */
 const gitReadResponseLimitBytes = 72 * 1024 * 1024;
+
+/**
+ * How long a request waits for a preferred member that has not answered
+ * lately, which Fly may have stopped, before it spills to the next-ranked one
+ * (DC2, FR18). Fly Proxy starts a stopped Machine in well under this.
+ */
+export const startWaitMilliseconds = 5000;
+
+/** The refusals tau-storage answers from admission, before it reads the body: a spill sends the request on. */
+const admissionRefusalCodes: ReadonlySet<string> = new Set(['GIT_LEASE_DISK_FULL', 'GIT_LEASE_OWNER_BUSY']);
+
+const isAdmissionRefusal = (error: unknown): boolean => {
+  if (!(error instanceof HttpException) || error.getStatus() !== 503) {
+    return false;
+  }
+  const body = error.getResponse();
+  return typeof body === 'object' && admissionRefusalCodes.has(String((body as { code?: unknown }).code));
+};
 
 const restarting = (): ServiceUnavailableException =>
   new ServiceUnavailableException({
@@ -117,6 +144,8 @@ type WholeBody = {
 /** What one attempt sends: where, which operation, under which facts, with which body. */
 type Attempt = {
   readonly base: string;
+  /** The member Fly Proxy is asked to prefer (DC2). */
+  readonly instance?: string;
   readonly path: string;
   readonly operation: StorageOperation;
   readonly facts: GrantFacts;
@@ -133,6 +162,14 @@ export type StorageForwarderOptions = {
   /** The grant contract version this build signs; defaults to the current one. */
   readonly grantVersion?: number;
   readonly timeoutMilliseconds?: number;
+  /**
+   * Rendezvous affinity (DC2): ranks each project's members, so its requests
+   * meet one worker's pack cache, and spills once to the next-ranked member.
+   * Absent, the first address is preferred, as before DC2.
+   */
+  readonly router?: StorageRouter;
+  /** How long a cold preferred member gets to answer before the spill; tests shorten it. */
+  readonly startWaitMilliseconds?: number;
 };
 
 export class StorageForwarder implements GitExecutor {
@@ -295,22 +332,116 @@ export class StorageForwarder implements GitExecutor {
   }
 
   /**
-   * Sends one request to the first address that accepts the connection, and
-   * returns a `200` response with its body unread. A grant the worker refused
-   * (`401`) is this side's fault and answers `503`; a refusal the worker
-   * decided is relayed as the exception it was.
+   * Sends one request where the router ranks it (DC2), or to the first address
+   * that accepts the connection when there is no ranking.
+   *
+   * The preferred member is asked first. If it has not answered lately (Fly
+   * may have stopped it) and does not answer within the start wait, the
+   * request spills to the next-ranked member. If it refuses admission, which it
+   * decides before reading the body, the request is sent once more to the
+   * next-ranked member when its body is still whole. Each spill is one
+   * `tau.git.spills` increment, and there is never a second.
    */
   async #forward(
     operation: StorageOperation,
     facts: GrantFacts,
     request: RpcBody | WholeBody,
   ): Promise<IncomingMessage> {
+    const { router } = this.#options;
+    const targets = router === undefined ? [] : await router.targets(facts.project);
+    const [preferred, next] = targets;
+    if (router === undefined || preferred === undefined || next === undefined) {
+      return this.#forwardTo({
+        operation,
+        facts,
+        request,
+        targets: targets.length === 0 ? this.#options.urls.map((base) => ({ base })) : targets,
+      });
+    }
+    /* A member that is itself an address refuses the connection when it is down, and the loop moves on. */
+    const first = preferred.instance === undefined ? targets : [preferred];
+    if (
+      preferred.instance !== undefined &&
+      !router.warm(preferred.instance) &&
+      !(await this.#answersWithin(preferred, this.#options.startWaitMilliseconds ?? startWaitMilliseconds))
+    ) {
+      this.#spilled('start_wait');
+      return this.#forwardTo({ operation, facts, request, targets: [next] });
+    }
+    const replayable = 'body' in request ? new ReplayableBody(request.body) : undefined;
+    try {
+      return await this.#forwardTo({
+        operation,
+        facts,
+        request: replayable === undefined ? request : { ...request, body: replayable.stream },
+        targets: first,
+      });
+    } catch (error) {
+      if (!isAdmissionRefusal(error)) {
+        throw error;
+      }
+      const again = replayable === undefined ? request : replayable.replay();
+      if (again === undefined) {
+        throw error;
+      }
+      this.#spilled('admission');
+      return this.#forwardTo({
+        operation,
+        facts,
+        request: again instanceof Readable ? { ...request, body: again } : again,
+        targets: [next],
+      });
+    }
+  }
+
+  /**
+   * Whether a member answers readiness itself within `milliseconds`. Fly Proxy
+   * starts a stopped Machine it is asked to prefer, or answers from another.
+   */
+  async #answersWithin(target: StorageTarget, milliseconds: number): Promise<boolean> {
+    try {
+      const response = await fetch(new URL('/health/ready', target.base), {
+        headers: target.instance === undefined ? {} : { [preferInstanceHeader]: target.instance },
+        signal: AbortSignal.timeout(milliseconds),
+      });
+      await response.arrayBuffer();
+      const member = response.headers.get(memberHeader);
+      if (member !== null) {
+        this.#options.router?.answered(member);
+      }
+      return response.ok && member === target.instance;
+    } catch {
+      return false;
+    }
+  }
+
+  #spilled(reason: GitSpillReason): void {
+    this.#options.metrics.gitSpills.add(1, { reason });
+  }
+
+  /**
+   * Sends one request to the first address that accepts the connection, and
+   * returns a `200` response with its body unread. A grant the worker refused
+   * (`401`) is this side's fault and answers `503`; a refusal the worker
+   * decided is relayed as the exception it was.
+   */
+  async #forwardTo({
+    operation,
+    facts,
+    request,
+    targets,
+  }: {
+    readonly operation: StorageOperation;
+    readonly facts: GrantFacts;
+    readonly request: RpcBody | WholeBody;
+    readonly targets: readonly StorageTarget[];
+  }): Promise<IncomingMessage> {
     const path = storagePath(facts.project, operation);
     let response: IncomingMessage | undefined;
-    for (const url of this.#options.urls) {
+    for (const target of targets) {
       try {
         // oxlint-disable-next-line no-await-in-loop -- the next address is tried only once this one refused the connection
-        response = await this.#attempt({ base: url, path, operation, facts, body: request });
+        response = await this.#attempt({ ...target, path, operation, facts, body: request });
         break;
       } catch (error) {
         if (error instanceof RefusedConnection) {
@@ -378,7 +509,7 @@ export class StorageForwarder implements GitExecutor {
     }
   }
 
-  async #send({ base, path, operation, facts, body }: Attempt, retryable: boolean): Promise<IncomingMessage> {
+  async #send({ base, instance, path, operation, facts, body }: Attempt, retryable: boolean): Promise<IncomingMessage> {
     const { token } = mintGrant(
       { ...facts, method: 'POST', path },
       {
@@ -401,6 +532,7 @@ export class StorageForwarder implements GitExecutor {
           timeout: forwardIdleTimeoutMilliseconds,
           headers: {
             [grantHeader]: token,
+            ...(instance === undefined ? {} : { [preferInstanceHeader]: instance }),
             'content-type': streamed ? `application/x-${operation}-request` : body.contentType,
             ...(streamed && body.gzipped ? { 'content-encoding': 'gzip' } : {}),
             ...(streamed ? { 'transfer-encoding': 'chunked' } : { 'content-length': String(body.bytes.byteLength) }),
@@ -409,6 +541,10 @@ export class StorageForwarder implements GitExecutor {
         },
         (response) => {
           responded = true;
+          const member = response.headers[memberHeader];
+          if (typeof member === 'string') {
+            this.#options.router?.answered(member);
+          }
           if (streamed && response.statusCode !== 200) {
             /* A refusal: stop sending the client's body to a worker that will not
                read it, and close the half-sent request once the refusal is read (review S7). */

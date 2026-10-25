@@ -56,6 +56,10 @@ set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(PICOGK_UPDATE_SUBMODULES OFF CACHE BOOL "" FORCE)
+# RC3: no fused multiply-add contraction in the engine, OpenVDB or the readback companion. Clang contracts
+# by default on arm64, so the same source rounded differently on Darwin and Linux; every product and sum
+# now rounds as written, on both platforms.
+add_compile_options(-ffp-contract=off)
 add_subdirectory("${PICOGK_SOURCE}" upstream)
 if(TAU_PICOGK_DARWIN)
     set_target_properties(picogk PROPERTIES VERSION 26.2 SOVERSION 26.2

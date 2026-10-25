@@ -313,6 +313,7 @@ function SettledCard({
       role='group'
       aria-labelledby={titleId}
       data-ask-id={ask.id}
+      data-ask-state='settled'
       tabIndex={-1}
       className={cn('flex flex-col gap-2 outline-none', cardClassName(isFlat), className)}
     >
@@ -511,6 +512,7 @@ export function QuestionCard({
       role='group'
       aria-labelledby={titleId}
       data-ask-id={ask.id}
+      data-ask-state='open'
       className={cn('flex flex-col gap-2', cardClassName(isFlat), className)}
       onKeyDown={pressLetter}
     >

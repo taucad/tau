@@ -13,6 +13,8 @@ import {
 import {
   dialectPath,
   grantHeader,
+  memberHeader,
+  membersPath,
   storageOperations,
   storagePath,
   verifyGrant,
@@ -103,6 +105,16 @@ export type StorageServerOptions = {
   };
   /** Whether the process is stopping; readiness fails first so the proxy stops routing here. */
   readonly stopping: () => boolean;
+  /**
+   * The installed git's version, or `undefined` when this Machine has none
+   * (DC3: the git probe lives here, not on tau-api). Readiness refuses
+   * without it. Absent, readiness does not probe.
+   */
+  readonly gitVersion?: () => Promise<string | undefined>;
+  /** This Machine's id (`FLY_MACHINE_ID`), sent on every response so tau-api knows who answered (DC2). */
+  readonly member?: string;
+  /** The deployed members tau-api ranks over (DC2), answered on `GET /v1/members`. */
+  readonly members?: () => Promise<readonly string[]>;
   /** The grant contract version this build verifies; defaults to the current one. Tests set the mixed-fleet cases. */
   readonly grantVersion?: number;
   readonly replay?: ReplayGuard;
@@ -232,6 +244,25 @@ export const createStorageRequestHandler = (
     }
   };
 
+  /* A stopping process fails readiness first, so the proxy stops routing here;
+     a Machine without git is drained by name rather than failing every RPC. */
+  const serveReadiness = async (response: ServerResponse): Promise<void> => {
+    const plain = { 'content-type': 'text/plain' };
+    if (options.stopping()) {
+      response.writeHead(503, plain).end('stopping');
+      return;
+    }
+    if (options.gitVersion !== undefined) {
+      /* A probe that threw is no evidence of git: not ready, never unanswered. */
+      const git = await options.gitVersion().catch(() => undefined);
+      if (git === undefined) {
+        response.writeHead(503, plain).end('git is not installed');
+        return;
+      }
+    }
+    response.writeHead(200, plain).end('ok');
+  };
+
   /* No grant: the dialect is what any git client reads from info/refs anyway. */
   const serveDialect = async (response: ServerResponse): Promise<void> => {
     try {
@@ -250,15 +281,30 @@ export const createStorageRequestHandler = (
     }
   };
 
+  const serveMembers = async (response: ServerResponse): Promise<void> => {
+    try {
+      const members = (await options.members?.()) ?? [];
+      response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ members }));
+    } catch (error) {
+      refuse(response, error, options.logger);
+    }
+  };
+
   return (request, response) => {
+    if (options.member !== undefined) {
+      response.setHeader(memberHeader, options.member);
+    }
     const { pathname } = new URL(request.url ?? '/', 'http://storage.internal');
     if (request.method === 'GET' && pathname === '/health/live') {
       response.writeHead(200, { 'content-type': 'text/plain' }).end('ok');
       return;
     }
     if (request.method === 'GET' && pathname === '/health/ready') {
-      const stopping = options.stopping();
-      response.writeHead(stopping ? 503 : 200, { 'content-type': 'text/plain' }).end(stopping ? 'stopping' : 'ok');
+      void serveReadiness(response);
+      return;
+    }
+    if (request.method === 'GET' && pathname === membersPath) {
+      void serveMembers(response);
       return;
     }
     if (request.method === 'GET' && pathname === dialectPath) {

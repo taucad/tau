@@ -181,7 +181,7 @@ def main(params):
     const corners = [-6, 6].flatMap((x) =>
       [-9, 9].flatMap((y) => [-12, 12].map((z) => [(z + 22) / 1000, (x + 9) / 1000, (y - 5) / 1000])),
     );
-    const assertCorners = async (bytes: Uint8Array<ArrayBuffer>) => {
+    const assertCorners = async (bytes: Uint8Array<ArrayBuffer>, modes: ReadonlySet<number> = new Set([4, 1])) => {
       const reopened = await glbToDocument(bytes);
       const seenModes = new Set<number>();
       for (const node of reopened.getRoot().listNodes()) {
@@ -199,12 +199,16 @@ def main(params):
           expect(seenCorners.size).toBe(8);
         }
       }
-      expect(seenModes).toEqual(new Set([4, 1]));
+      expect(seenModes).toEqual(modes);
     };
     try {
-      const exported = await document.export('glb');
+      // Edge lines ride on a GLB export only when the caller asks for them (E1).
+      const exported = await document.export('glb', { content: { includeEdges: true } });
       assert.ok(exported.success);
       await assertCorners(Uint8Array.from(exported.files[0].bytes));
+      const surfaceOnly = await document.export('glb');
+      assert.ok(surfaceOnly.success);
+      await assertCorners(Uint8Array.from(surfaceOnly.files[0].bytes), new Set([4]));
       const step = await document.export('step');
       assert.ok(step.success);
       const restored = client.open({
@@ -229,7 +233,7 @@ def main(params):
         },
       });
       try {
-        const restoredGlb = await restored.export('glb');
+        const restoredGlb = await restored.export('glb', { content: { includeEdges: true } });
         assert.ok(restoredGlb.success);
         await assertCorners(Uint8Array.from(restoredGlb.files[0].bytes));
       } finally {
@@ -528,7 +532,7 @@ def textured_part(size):
       assert.ok(baselineDescription.success);
       const baselineManifest = baselineDescription.parameters;
       const baselineDocument = client.open({ source: { path: 'main.py' }, parameters: { width: 50, angle: 15 } });
-      const baselineOutcome = await baselineDocument.view('model').rendering();
+      const baselineOutcome = await baselineDocument.view('model', { content: { includeEdges: true } }).rendering();
       expect(baselineOutcome.superseded).toBe(false);
       if (baselineOutcome.superseded) {
         throw new Error('Native Build123d baseline render was unexpectedly superseded.');
@@ -545,7 +549,7 @@ def textured_part(size):
       assert.ok(declaredDescription.success);
       const declared = declaredDescription.parameters;
       const declaredDocument = client.open({ source: declaredSourceInput, parameters: { width: 50, angle: 15 } });
-      const renderedOutcome = await declaredDocument.view('model').rendering();
+      const renderedOutcome = await declaredDocument.view('model', { content: { includeEdges: true } }).rendering();
       expect(renderedOutcome.superseded).toBe(false);
       if (renderedOutcome.superseded) {
         throw new Error('Native Build123d render was unexpectedly superseded.');
@@ -842,7 +846,7 @@ def textured_part(size):
     const render = async (nextFiles: typeof files): Promise<Uint8Array<ArrayBuffer>> => {
       const document = client.open({ source: { files: nextFiles, entry: 'main.py' } });
       try {
-        const outcome = await document.view('model').rendering();
+        const outcome = await document.view('model', { content: { includeEdges: true } }).rendering();
         expect(outcome.superseded).toBe(false);
         if (outcome.superseded) {
           throw new Error('Native Build123d render was unexpectedly superseded.');

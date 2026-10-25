@@ -11,6 +11,7 @@
  */
 
 import { Engine } from 'geospec-engine/node';
+import { createEsbuildModuleVm } from '@taucad/esbuild/vm';
 import { runnerResultToTestModelOutput } from '@taucad/agent-tools/geospec';
 import { createGeoSpecNativeModelLoader, createNativeGeoSpecRunner } from 'geospec/runner/native';
 import type { GeoSpecNativeLoadModelOptions, ManagedGeoSpecNativeModelLoader } from 'geospec/runner/native';
@@ -98,6 +99,8 @@ export async function runTauGeoSpecTests(options: RunTauGeoSpecTestsOptions): Pr
     );
     const runner = createNativeGeoSpecRunner({
       filesystem: options.filesystem,
+      // Tau's esbuild VM, as the product hosts inject it, so specs resolve npm packages here too.
+      createModuleVm: createEsbuildModuleVm,
       nativeAssertions: { engine },
       nativeModelLoader,
     });

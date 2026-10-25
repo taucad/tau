@@ -297,6 +297,7 @@ export const createEventLogReducer = (
         break;
       }
       case 'interrupt.recorded':
+      case 'approval.spent':
       case 'turn.changed':
       case 'turn.finalized':
       case 'turn.conflicted':

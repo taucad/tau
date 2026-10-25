@@ -8,6 +8,7 @@ import type { Manifest, ManifestPack } from '#api/git/store/manifest.js';
 import type { ObjectSource, RepositoryLocator, StoredObject } from '#api/git/store/port.js';
 import type {
   DestinationHead,
+  DestinationProbe,
   DestinationPutOptions,
   DestinationVersion,
   MirrorDestination,
@@ -98,9 +99,11 @@ export class FakeDestination implements MirrorDestination {
 
   public constructor(private readonly now: () => Date) {}
 
-  public async probe(): Promise<boolean> {
+  public async probe(): Promise<DestinationProbe> {
     this.calls.push('probe');
-    return this.reachable;
+    return this.reachable
+      ? { up: true }
+      : { up: false, status: 403, code: 'AccessDenied', message: 'Transaction cap exceeded' };
   }
 
   public async *listVersions(prefix: string): AsyncIterable<DestinationVersion> {

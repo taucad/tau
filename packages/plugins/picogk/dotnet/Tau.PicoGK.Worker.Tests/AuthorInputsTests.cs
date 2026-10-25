@@ -272,5 +272,7 @@ public sealed class ForbiddenConverter:JsonConverter<string>{
         File.WriteAllText(Path.Combine(target,"build.json"),JsonSerializer.Serialize(artifact,new JsonSerializerOptions{PropertyNamingPolicy=JsonNamingPolicy.CamelCase}));
         Write("main.cs","using PicoGK; Library.Go(1f,()=>{});");
         var next=ModelRunner.Execute(CompilationService.Compile(root,"main.cs"),Path.Combine(root,"unloaded-artifact"));Assert.False(next.RecycleAfterResponse);
+        // The edit released the typed model before its build; collecting it after the response proves it unloadable.
+        Assert.False(ModelRunner.CollectReleased());Assert.False(ModelRunner.CollectReleased());
     }
 }

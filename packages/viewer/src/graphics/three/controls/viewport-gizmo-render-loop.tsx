@@ -1,7 +1,8 @@
 import { useFrame } from '@react-three/fiber';
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useRef } from 'react';
 import type { RefObject } from 'react';
 import * as THREE from 'three';
+import { isViewportWebGpu } from '#graphics/three/viewport-cad-renderer.js';
 import type { ControlEventListener } from '#graphics/three/utils/camera-controls-adapter.js';
 import type { ViewportGizmoControlsBinding } from '#graphics/three/controls/viewport-gizmo-controls-adapter.js';
 import type { SectionPlanePicker, SectionPlanePickerRenderer } from '#graphics/three/controls/section-plane-picker.js';
@@ -125,18 +126,35 @@ export function useViewportGizmoRenderLoop({
   readonly invalidate: () => void;
 }): void {
   const planePicker = useContext(SectionPlanePickerContext);
+  const savedViewport = useRef(new THREE.Vector4());
+  const savedScissor = useRef(new THREE.Vector4());
   useFrame((state) => {
     const gizmo = gizmoRef.current;
     if (!gizmo) {
       return;
     }
 
-    renderViewportGizmoFrame({
-      gizmo,
-      renderer,
-      controlsBinding: controlsBindingRef.current,
-      invalidate,
-      planePicker: planePicker ? { picker: planePicker, renderer: state.gl, camera: state.camera } : undefined,
-    });
+    const target = isViewportWebGpu(state.gl) ? state.gl.getRenderTarget() : null;
+    const viewport = readGizmoViewport(gizmo);
+    if (target && viewport) {
+      savedViewport.current.copy(target.viewport);
+      savedScissor.current.copy(target.scissor);
+      target.viewport.set(...viewport).multiplyScalar(state.gl.getPixelRatio());
+      target.scissor.copy(target.viewport);
+    }
+    try {
+      renderViewportGizmoFrame({
+        gizmo,
+        renderer,
+        controlsBinding: controlsBindingRef.current,
+        invalidate,
+        planePicker: planePicker ? { picker: planePicker, renderer: state.gl, camera: state.camera } : undefined,
+      });
+    } finally {
+      if (target && viewport) {
+        target.viewport.copy(savedViewport.current);
+        target.scissor.copy(savedScissor.current);
+      }
+    }
   }, 3);
 }

@@ -1,9 +1,21 @@
 import { useDeferredValue, useLayoutEffect, useMemo, useRef } from 'react';
 import type * as THREE from 'three';
-import { BackSide, CubeTexture, PMREMGenerator } from 'three';
-import { PMREMGenerator as WebGpuPmremGenerator } from 'three/webgpu';
+import {
+  BackSide,
+  CubeTexture,
+  CubeCamera,
+  Scene,
+  CubeUVReflectionMapping,
+  HalfFloatType,
+  LinearFilter,
+  LinearSRGBColorSpace,
+  PMREMGenerator,
+  RenderTarget,
+  RGBAFormat,
+} from 'three';
+import { CubeRenderTarget, PMREMGenerator as WebGpuPmremGenerator } from 'three/webgpu';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { useThree, useFrame } from '@react-three/fiber';
+import { createPortal, useThree, useFrame } from '@react-three/fiber';
 import { Environment, Lightformer } from '@react-three/drei';
 import {
   applyLightingForCamera,
@@ -25,7 +37,7 @@ type UpDirection = 'x' | 'y' | 'z';
  * Environment cubemap resolution (px). Higher = sharper specular reflections.
  *
  * The filtered output is `3·r × 4·r` RGBA16F (24 MiB at 512, 6 MiB at 256) and the source cube
- * adds 18 MiB at 512, so a coarse-pointer device captures at 256: studio reflections are soft.
+ * adds 12 MiB at 512, so a coarse-pointer device captures at 256: studio reflections are soft.
  */
 const envResolution = 512;
 const coarsePointerEnvResolution = 256;
@@ -230,7 +242,57 @@ function RoomLightingEnvironment({ resolution }: { readonly resolution: number }
   );
 }
 
-/** Own the filtered target while Drei owns the unchanged source cubemap capture. */
+/** Capture node environments with the target recognized by both node backends. */
+function NodeLightingEnvironment({
+  children,
+  resolution,
+  near,
+  far,
+}: {
+  readonly children: React.ReactNode;
+  readonly resolution: number;
+  readonly near: number;
+  readonly far: number;
+}): React.JSX.Element {
+  const { scene, gl, invalidate } = useThree();
+  const captureScene = useMemo(() => new Scene(), []);
+  const target = useMemo(() => new CubeRenderTarget(resolution, { type: HalfFloatType }), [resolution]);
+  const camera = useMemo(() => new CubeCamera(near, far, target), [near, far, target]);
+  useLayoutEffect(
+    () => () => {
+      target.dispose();
+    },
+    [target],
+  );
+  useLayoutEffect(() => {
+    if (!isViewportWebGpu(gl)) {
+      return undefined;
+    }
+    const previous = scene.environment;
+    const previousMrt = gl.getMRT();
+    const previousTarget = gl.getRenderTarget();
+    const previousFace = gl.getActiveCubeFace();
+    const previousMip = gl.getActiveMipmapLevel();
+    const previousXr = gl.xr.enabled;
+    try {
+      gl.setMRT(null);
+      camera.update(gl, captureScene);
+    } finally {
+      gl.setMRT(previousMrt);
+      gl.setRenderTarget(previousTarget, previousFace, previousMip);
+      gl.xr.enabled = previousXr;
+    }
+    // oxlint-disable-next-line react/immutability -- Own this captured scene environment until replacement.
+    scene.environment = target.texture;
+    invalidate();
+    return () => {
+      scene.environment = previous;
+    };
+  }, [camera, captureScene, children, gl, invalidate, scene, target]);
+  return <>{createPortal(children, captureScene)}</>;
+}
+
+/** Own the filtered target and use the appropriate source capture for each renderer family. */
 function OwnedLightingEnvironment({
   children,
   resolution,
@@ -253,9 +315,37 @@ function OwnedLightingEnvironment({
     // A generator keeps a ping-pong target as large as its output until disposed, and is only
     // needed while filtering: each capture gets its own and releases it immediately.
     const generator = isViewportWebGpu(gl) ? new WebGpuPmremGenerator(gl) : new PMREMGenerator(gl);
+    // Three r184's node PMREM defaults to a depth attachment although filtering only draws
+    // fullscreen quads. Supply its public output target with the same CubeUV layout/format.
+    const nodeTarget =
+      generator instanceof WebGpuPmremGenerator
+        ? new RenderTarget(3 * resolution, 4 * resolution, {
+            magFilter: LinearFilter,
+            minFilter: LinearFilter,
+            generateMipmaps: false,
+            type: HalfFloatType,
+            format: RGBAFormat,
+            colorSpace: LinearSRGBColorSpace,
+            depthBuffer: false,
+            stencilBuffer: false,
+          })
+        : undefined;
+    if (nodeTarget) {
+      nodeTarget.texture.mapping = CubeUVReflectionMapping;
+      nodeTarget.texture.name = 'PMREM.cubeUv';
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Match Three's PMREM discriminator.
+      Object.assign(nodeTarget.texture, { isPMREMTexture: true });
+      nodeTarget.scissorTest = true;
+    }
     let filtered: ReturnType<typeof generator.fromCubemap>;
     try {
-      filtered = generator.fromCubemap(source);
+      filtered =
+        generator instanceof WebGpuPmremGenerator
+          ? generator.fromCubemap(source, nodeTarget)
+          : generator.fromCubemap(source);
+    } catch (error) {
+      nodeTarget?.dispose();
+      throw error;
     } finally {
       generator.dispose();
     }
@@ -268,8 +358,15 @@ function OwnedLightingEnvironment({
       }
       filtered.dispose();
     };
-  }, [gl, invalidate, scene]);
+  }, [gl, invalidate, scene, resolution]);
 
+  if (isViewportWebGpu(gl)) {
+    return (
+      <NodeLightingEnvironment resolution={resolution} near={near} far={far}>
+        {children}
+      </NodeLightingEnvironment>
+    );
+  }
   return (
     <Environment resolution={resolution} near={near} far={far}>
       {children}

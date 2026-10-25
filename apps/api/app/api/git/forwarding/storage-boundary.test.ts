@@ -99,6 +99,21 @@ describe('tau-api writes nothing under repos/ on its forwarded path (DC1)', () =
   });
 });
 
+/** A `git` child spawned by name, through any `node:child_process` entry. */
+const gitSpawn = /\b(?:spawn|spawnSync|execFile|execFileSync|exec|execSync|fork)\w*\(\s*['"`]git['"`]/u;
+
+describe('tau-api runs no git on its forwarded path (DC3)', () => {
+  it('should spawn no git child from any module main.ts reaches', () => {
+    const spawners = [...apiGraph.modules].filter((module) => gitSpawn.test(code(module)));
+    expect(spawners.map((module) => importChain(apiGraph, module))).toEqual([]);
+  });
+
+  it('should still find the git children tau-storage spawns, so the pattern is not blind', () => {
+    const spawners = [...storageGraph.modules].filter((module) => gitSpawn.test(code(module)));
+    expect(spawners).toContain('app/api/git/store/lease.ts');
+  });
+});
+
 describe('the in-process fallback (DC1, until production has tau-storage)', () => {
   it('should be the only module through which main.ts reaches the storage worker', () => {
     expect(fullApiGraph.modules.has(inProcessFallback)).toBe(true);

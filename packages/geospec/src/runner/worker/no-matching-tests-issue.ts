@@ -1,4 +1,4 @@
-import type { VmIssue } from '@taucad/esbuild/vm';
+import type { VmIssue } from '#vm/types.js';
 
 /**
  * Create a run-level issue when filters select no tests.

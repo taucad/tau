@@ -1,6 +1,6 @@
 import { Topic } from '@taucad/events';
 import { OperationAbortedError, OperationTimeoutError } from '#framework/runtime-operation-errors.js';
-import { RuntimeTerminatedError } from '#client/runtime-terminated-error.js';
+import { isRuntimeTerminatedError, RuntimeTerminatedError } from '#client/runtime-terminated-error.js';
 import { randomUuid } from '@taucad/utils/id';
 import type { Channel } from '@taucad/rpc';
 import type {
@@ -19,6 +19,7 @@ import type {
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import { materialiseDocumentExport, materialiseRendering } from '#transport/_internal/document-materialiser.js';
 import type { BinaryContentDelivery } from '#types/runtime-wire.types.js';
+import type { ClientOperationObserver, ObservedAttempt, SettleReason } from '#client/runtime-operation-observer.js';
 import { abortReason } from '#types/runtime-wire.types.js';
 
 type OpenArgs = RuntimeDocumentProtocol['notifies']['open']['args'];
@@ -66,6 +67,13 @@ export class RuntimeDocumentSessionClient {
   readonly #onTimeout: (operationId: string) => void;
   readonly #onTerminal: (operationId: string) => void;
   readonly #signalAbort: (evaluationId: string, generation: number | undefined, reason: 1 | 2) => boolean;
+  readonly #observer: ClientOperationObserver | undefined;
+  readonly #terminationReason: () => SettleReason;
+  readonly #entryFormat: (filename: string) => string | undefined;
+  readonly #exportRoute: (
+    kernelId: string | undefined,
+    target: string,
+  ) => Readonly<{ transcoderId?: string; sourceFormat: string }> | undefined;
   readonly #documents = new Map<string, ReturnType<RuntimeDocumentSessionClient['open']>>();
   readonly #terminators = new Map<string, (error: RuntimeTerminatedError) => void>();
   readonly #disposers: Array<() => void> = [];
@@ -79,6 +87,17 @@ export class RuntimeDocumentSessionClient {
       onTimeout?: (operationId: string) => void;
       onTerminal?: (operationId: string) => void;
       signalAbort?: (evaluationId: string, generation: number | undefined, reason: 1 | 2) => boolean;
+      /** Builds one observation per attempt; absent when the client observes nothing. */
+      observer?: ClientOperationObserver;
+      /** Why pending attempts end when the session terminates. */
+      terminationReason?: () => SettleReason;
+      /** The entry file's registered format, for an evaluation's observation. */
+      entryFormat?: (filename: string) => string | undefined;
+      /** The route an export target selects, for its observation's transcoder. */
+      exportRoute?: (
+        kernelId: string | undefined,
+        target: string,
+      ) => Readonly<{ transcoderId?: string; sourceFormat: string }> | undefined;
     } = {},
   ) {
     this.#channel = channel;
@@ -87,6 +106,10 @@ export class RuntimeDocumentSessionClient {
     this.#onTimeout = settings.onTimeout ?? (() => undefined);
     this.#onTerminal = settings.onTerminal ?? (() => undefined);
     this.#signalAbort = settings.signalAbort ?? (() => false);
+    this.#observer = settings.observer;
+    this.#terminationReason = settings.terminationReason ?? (() => ({ type: 'terminated-by-caller' }));
+    this.#entryFormat = settings.entryFormat ?? (() => undefined);
+    this.#exportRoute = settings.exportRoute ?? (() => undefined);
     this.#disposers.push(
       channel.onClose(() => {
         this.terminate(new RuntimeTerminatedError());
@@ -130,6 +153,9 @@ export class RuntimeDocumentSessionClient {
     const documents = this.#documents;
     const terminators = this.#terminators;
     const onTerminal = this.#onTerminal;
+    const observer = this.#observer;
+    const terminationReason = this.#terminationReason;
+    const entryFormat = this.#entryFormat(args.file.filename);
     const armDeadline = (settings: {
       operationId: () => string | undefined;
       signalTarget?: () => { evaluationId: string; generation?: number } | undefined;
@@ -206,6 +232,24 @@ export class RuntimeDocumentSessionClient {
     let evaluationGeneration: number | undefined;
     let evaluationTransient = false;
     let committedEvaluationId: string | undefined;
+    /* The evaluation attempt in flight. Its id is a placeholder until the worker names the evaluation. */
+    let evaluationAttempt: ObservedAttempt | undefined;
+    const evaluationPlaceholder = (forIntent: number): string => `evaluate:${documentId}:intent-${String(forIntent)}`;
+    const beginEvaluation = (operationId: string): void => {
+      evaluationAttempt = observer?.begin({
+        operation: 'evaluate',
+        operationId,
+        ...(entryFormat === undefined ? {} : { entryFormat }),
+      });
+    };
+    const settleEvaluation = (reason: SettleReason): void => {
+      const attempt = evaluationAttempt;
+      evaluationAttempt = undefined;
+      if (attempt) {
+        attempt.kernel ??= latestDescription?.kernelId;
+        observer?.settle(attempt, reason);
+      }
+    };
     const settleReads = (outcome: UpdateOutcome): void => {
       for (const read of reads) {
         read.resolve(outcome);
@@ -266,6 +310,7 @@ export class RuntimeDocumentSessionClient {
       clearEvaluationDeadline?.();
       documents.delete(documentId);
       terminators.delete(documentId);
+      settleEvaluation({ type: 'closed' });
       pending.resolve({ superseded: true });
       for (const read of reads) {
         read.reject(new OperationAbortedError());
@@ -310,6 +355,7 @@ export class RuntimeDocumentSessionClient {
       clearEvaluationDeadline?.();
       documents.delete(documentId);
       terminators.delete(documentId);
+      settleEvaluation(terminationReason());
       if (!hasUpdateWaiter) {
         void consumeRejection(pending.promise);
       }
@@ -353,12 +399,14 @@ export class RuntimeDocumentSessionClient {
           timedOutEvaluationId = value.evaluationId;
           evaluationId = value.evaluationId;
           evaluationOperationId = `evaluate:${documentId}:${value.evaluationId}`;
+          observer?.rekey(evaluationPlaceholder(intent), evaluationOperationId);
           channel.notify('abort', { operationId: evaluationOperationId, reason: abortReason.timeout });
           return;
         }
         const newEvaluation = pendingSettled || (evaluationId !== undefined && evaluationId !== value.evaluationId);
         if (newEvaluation) {
           clearEvaluationDeadline?.();
+          settleEvaluation({ type: 'superseded' });
           pending.resolve({ superseded: true });
           settleReads({ superseded: true });
           pending = Promise.withResolvers<UpdateOutcome>();
@@ -367,6 +415,11 @@ export class RuntimeDocumentSessionClient {
         }
         evaluationId = value.evaluationId;
         evaluationOperationId = `evaluate:${documentId}:${value.evaluationId}`;
+        if (evaluationAttempt) {
+          evaluationAttempt.operationId = evaluationOperationId;
+        } else if (newEvaluation) {
+          beginEvaluation(evaluationOperationId);
+        }
         evaluationGeneration = undefined;
         evaluationTransient = value.transient;
         timedOutEvaluationId = undefined;
@@ -385,6 +438,7 @@ export class RuntimeDocumentSessionClient {
             callback: () => {
               timedOutEvaluationId = admittedEvaluationId;
               operationError = new OperationTimeoutError(evaluationPhase, 'Document evaluation timed out.');
+              settleEvaluation({ type: 'deadline', phase: evaluationPhase });
               pending.resolve({ superseded: true });
               for (const read of reads) {
                 read.reject(operationError);
@@ -414,6 +468,7 @@ export class RuntimeDocumentSessionClient {
         clearEvaluationDeadline?.();
         latestCurrent = value;
         operationError = undefined;
+        settleEvaluation({ type: 'result', result: { success: value.success, issues: value.issues } });
         pending.resolve({ superseded: false, evaluation: value });
         hasUpdateWaiter = false;
         settleReads({ superseded: false, evaluation: value });
@@ -454,6 +509,7 @@ export class RuntimeDocumentSessionClient {
               ? new OperationTimeoutError(value.phase, value.message)
               : new OperationAbortedError(value.phase, value.message);
           clearEvaluationDeadline?.();
+          settleEvaluation({ type: 'abort-notice', code: value.code, phase: value.phase });
           if (hasUpdateWaiter) {
             pending.reject(operationError);
           } else {
@@ -506,6 +562,7 @@ export class RuntimeDocumentSessionClient {
       for (const currentView of views.values()) {
         currentView.supersede();
       }
+      settleEvaluation({ type: 'superseded' });
       pending.resolve({ superseded: true });
       clearEvaluationDeadline?.();
       settleReads({ superseded: true });
@@ -519,6 +576,7 @@ export class RuntimeDocumentSessionClient {
       timedOutEvaluationId = undefined;
       timedOutUnknownIntent = false;
       operationError = undefined;
+      beginEvaluation(evaluationPlaceholder(intent));
       setStatus('evaluating');
       const encodedStage =
         change.stage &&
@@ -550,6 +608,7 @@ export class RuntimeDocumentSessionClient {
           timedOutEvaluationId = evaluationId;
           timedOutUnknownIntent = evaluationId === undefined;
           operationError = new OperationTimeoutError(evaluationPhase, 'Document evaluation timed out.');
+          settleEvaluation({ type: 'deadline', phase: evaluationPhase });
           pending.reject(operationError);
           for (const read of reads) {
             read.reject(operationError);
@@ -587,6 +646,22 @@ export class RuntimeDocumentSessionClient {
       let viewPending = Promise.withResolvers<ViewUpdateOutcome>();
       let hasViewUpdateWaiter = false;
       let clearViewDeadline: (() => void) | undefined;
+      /* The render attempt in flight; its id is a placeholder until the worker starts rendering it. */
+      let viewAttempt: ObservedAttempt | undefined;
+      const beginView = (operationId?: string): void => {
+        viewAttempt = observer?.begin({
+          operation: 'render',
+          operationId: operationId ?? `render:${subscriptionId}:${viewEvaluationId ?? ''}:${requestId}`,
+        });
+      };
+      const settleView = (reason: SettleReason): void => {
+        const attempt = viewAttempt;
+        viewAttempt = undefined;
+        if (attempt) {
+          attempt.kernel ??= latestDescription?.kernelId;
+          observer?.settle(attempt, reason);
+        }
+      };
       const viewReads = new Set<Waiter<ViewUpdateOutcome>>();
       const settleViewReads = (outcome: ViewUpdateOutcome): void => {
         for (const read of viewReads) {
@@ -616,6 +691,7 @@ export class RuntimeDocumentSessionClient {
               timedOutViewToken = `${dispatchedEvaluationId}:${dispatchedRequestId}`;
             }
             viewOperationError = new OperationTimeoutError(viewPhase, 'View rendering timed out.');
+            settleView({ type: 'deadline', phase: viewPhase });
             if (hasViewUpdateWaiter) {
               viewPending.reject(viewOperationError);
             } else {
@@ -638,6 +714,7 @@ export class RuntimeDocumentSessionClient {
         viewClosed = true;
         clearViewDeadline?.();
         views.delete(subscriptionId);
+        settleView({ type: 'closed' });
         viewPending.resolve({ superseded: true });
         for (const read of viewReads) {
           read.reject(new OperationAbortedError());
@@ -663,6 +740,7 @@ export class RuntimeDocumentSessionClient {
         viewOperationError = error;
         clearViewDeadline?.();
         views.delete(subscriptionId);
+        settleView(terminationReason());
         if (!hasViewUpdateWaiter) {
           void consumeRejection(viewPending.promise);
         }
@@ -702,6 +780,7 @@ export class RuntimeDocumentSessionClient {
           rendered = result;
           clearViewDeadline?.();
           viewOperationError = undefined;
+          settleView({ type: 'result', result: { success: result.success, issues: result.issues } });
           viewPending.resolve({ superseded: false, rendering: result });
           hasViewUpdateWaiter = false;
           settleViewReads({ superseded: false, rendering: result });
@@ -713,6 +792,7 @@ export class RuntimeDocumentSessionClient {
           }
           viewOperationError = error instanceof Error ? error : new Error(String(error));
           clearViewDeadline?.();
+          settleView({ type: 'materialise-failed', error });
           if (hasViewUpdateWaiter) {
             viewPending.reject(error);
           } else {
@@ -741,6 +821,7 @@ export class RuntimeDocumentSessionClient {
           }
           const newViewEvaluation = viewEvaluationId !== undefined && viewEvaluationId !== value.evaluationId;
           if (viewEvaluationId && viewEvaluationId !== value.evaluationId) {
+            settleView({ type: 'superseded' });
             viewPending.resolve({ superseded: true });
             settleViewReads({ superseded: true });
             viewPending = Promise.withResolvers<ViewUpdateOutcome>();
@@ -779,6 +860,7 @@ export class RuntimeDocumentSessionClient {
           timedOutViewRequestId = value.requestId;
           timedOutViewToken = `${value.evaluationId}:${value.requestId}`;
           clearViewDeadline?.();
+          settleView({ type: 'abort-notice', code: value.code, phase: value.phase });
           if (hasViewUpdateWaiter) {
             viewPending.reject(viewOperationError);
           } else {
@@ -800,6 +882,11 @@ export class RuntimeDocumentSessionClient {
             timedOutViewRequestId !== value.requestId
           ) {
             viewOperationId = `render:${subscriptionId}:${value.evaluationId}:${requestId}`;
+            if (viewAttempt) {
+              viewAttempt.operationId = viewOperationId;
+            } else {
+              beginView(viewOperationId);
+            }
             viewPhase = 'render';
             setViewStatus('rendering');
           }
@@ -888,6 +975,7 @@ export class RuntimeDocumentSessionClient {
           throw viewOperationError ?? new OperationAbortedError();
         }
         signalViewAbort(abortReason.superseded);
+        settleView({ type: 'superseded' });
         viewPending.resolve({ superseded: true });
         clearViewDeadline?.();
         settleViewReads({ superseded: true });
@@ -901,12 +989,14 @@ export class RuntimeDocumentSessionClient {
         request = { ...request, ...change };
         rendered = undefined;
         viewOperationError = undefined;
+        beginView();
         setViewStatus('rendering');
         channel.notify('updateView', { subscriptionId, requestId, ...change });
         const dispatchedRequestId = requestId;
         startViewDeadline(dispatchedRequestId, viewEvaluationId);
         return viewPending.promise;
       };
+      beginView();
       channel.notify('openView', { documentId, subscriptionId, requestId, ...(id ? { view: id } : {}), ...initial });
       const initialRequestId = requestId;
       startViewDeadline(initialRequestId, viewEvaluationId);
@@ -936,10 +1026,20 @@ export class RuntimeDocumentSessionClient {
         throw operationError ?? new OperationAbortedError();
       }
       const operationId = randomUuid();
+      const exportKernel = latestDescription?.kernelId;
+      const route = this.#exportRoute(exportKernel, target);
+      const exportAttempt = observer?.begin({
+        operation: 'export',
+        operationId,
+        format: target,
+        ...(exportKernel === undefined ? {} : { kernel: exportKernel }),
+        ...(route?.transcoderId === undefined ? {} : { plugin: route.transcoderId, sourceFormat: route.sourceFormat }),
+      });
       const closedExport = Promise.withResolvers<never>();
       const timedExport = Promise.withResolvers<never>();
       let exportTimeoutError: OperationTimeoutError | undefined;
       let workerReplied = false;
+      let materialiseError: { readonly error: unknown } | undefined;
       exportsInFlight.set(operationId, closedExport);
       const pinnedEvaluationId = evaluationTransient ? committedEvaluationId : (evaluationId ?? committedEvaluationId);
       if (pinnedEvaluationId) {
@@ -959,6 +1059,21 @@ export class RuntimeDocumentSessionClient {
           }
         }
       });
+      const exportSettleReason = (error: unknown): SettleReason => {
+        if (error === exportTimeoutError) {
+          return { type: 'deadline', phase: exportPhase };
+        }
+        if (materialiseError?.error === error) {
+          return { type: 'materialise-failed', error };
+        }
+        if (isRuntimeTerminatedError(error)) {
+          return terminationReason();
+        }
+        if (closed && operationError === undefined) {
+          return { type: 'closed' };
+        }
+        return { type: 'rejected', error };
+      };
       const clearExportDeadline = armDeadline({
         operationId: () => operationId,
         fallbackRecoveryId: `pending-export:${operationId}`,
@@ -1000,11 +1115,17 @@ export class RuntimeDocumentSessionClient {
           workerReplied = true;
           exportAbortTargets.delete(operationId);
           onTerminal(operationId);
-          const result = await materialiseDocumentExport(
-            wire,
-            this.#resolveBinary,
-            () => !closed && !request.signal?.aborted && !exportTimeoutError,
-          );
+          let result: ExportResult | undefined;
+          try {
+            result = await materialiseDocumentExport(
+              wire,
+              this.#resolveBinary,
+              () => !closed && !request.signal?.aborted && !exportTimeoutError,
+            );
+          } catch (error) {
+            materialiseError = { error };
+            throw error;
+          }
           if (!result) {
             throw exportTimeoutError ?? new OperationAbortedError();
           }
@@ -1017,7 +1138,12 @@ export class RuntimeDocumentSessionClient {
             onTerminal(operationId);
           }
         })();
-        return await Promise.race([running, closedExport.promise, timedExport.promise]);
+        const result = await Promise.race([running, closedExport.promise, timedExport.promise]);
+        observer?.settle(exportAttempt, { type: 'result', result: { success: result.success, issues: result.issues } });
+        return result;
+      } catch (error) {
+        observer?.settle(exportAttempt, exportSettleReason(error));
+        throw error;
       } finally {
         clearExportDeadline();
         disposeProgress();
@@ -1030,6 +1156,7 @@ export class RuntimeDocumentSessionClient {
     const handle = { id: documentId, evaluation, update, view, export: exportDocument, on, close };
     documents.set(documentId, handle);
     terminators.set(documentId, terminate);
+    beginEvaluation(evaluationPlaceholder(intent));
     channel.notify('open', { ...args, intent });
     clearEvaluationDeadline = armDeadline({
       operationId: () => evaluationOperationId,
@@ -1043,6 +1170,7 @@ export class RuntimeDocumentSessionClient {
         timedOutEvaluationId = evaluationId;
         timedOutUnknownIntent = evaluationId === undefined;
         operationError = new OperationTimeoutError(evaluationPhase, 'Document evaluation timed out.');
+        settleEvaluation({ type: 'deadline', phase: evaluationPhase });
         pending.resolve({ superseded: true });
         for (const read of reads) {
           read.reject(operationError);

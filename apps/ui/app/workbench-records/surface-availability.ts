@@ -3,12 +3,14 @@ import { isDesktopTarget } from '#lib/build-target.js';
 
 /**
  * Whether this build offers a Workbench surface at all, before flags and profile. Browser drives the desktop app's
- * guest view, so only the desktop app offers it. Jobs is unfinished and offered nowhere.
+ * guest view and Terminal runs a native shell, so only the desktop app offers them. Jobs is unfinished and offered
+ * nowhere.
  *
  * @param id - A desktop Workbench pane or a phone surface; they share the ids this checks.
  * @returns Whether launchers may list the surface and `openPanel` may open it.
  */
-export const isSurfaceShipped = (id: string): boolean => id !== 'jobs' && (id !== 'browser' || isDesktopTarget());
+export const isSurfaceShipped = (id: string): boolean =>
+  id !== 'jobs' && ((id !== 'browser' && id !== 'terminal') || isDesktopTarget());
 
 /**
  * A stored Workbench lane without the pane tabs this build does not ship, for a layout saved by another build or

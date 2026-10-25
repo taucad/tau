@@ -9,7 +9,20 @@ import { cn } from '@taucad/ui/utils/cn';
 /** Starts a project from the Home chat composer; "Build from code" there opens `/projects/new`. */
 const newProjectState = { focusChatComposer: true } as const;
 
-export function NavChat({ isCompact = false }: { readonly isCompact?: boolean }): React.JSX.Element {
+/**
+ * The sidebar's New Project button.
+ *
+ * @param props - `isCompact` tightens the desktop app's row; `isTouchSized` gives the phone sheet its 44px target
+ * (canvas SB-02, I3), where the keyboard chip already stays hidden.
+ * @returns The button.
+ */
+export function NavChat({
+  isCompact = false,
+  isTouchSized = false,
+}: {
+  readonly isCompact?: boolean;
+  readonly isTouchSized?: boolean;
+}): React.JSX.Element {
   const navigate = useNavigate();
   const isMatch = useMatch('/');
   const { formattedKeyCombination } = useKeybinding(
@@ -41,6 +54,7 @@ export function NavChat({ isCompact = false }: { readonly isCompact?: boolean })
               ),
             }}
             variant='outline'
+            size={isTouchSized ? 'lg' : 'default'}
           >
             <span>
               {isPending ? <Loader /> : <PackagePlus className='size-4 shrink-0' />}

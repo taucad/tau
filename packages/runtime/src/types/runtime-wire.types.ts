@@ -1,6 +1,7 @@
 import type { MessagePortLike } from '@taucad/rpc';
 import type { ExportFile } from '@taucad/types';
 import type { CapabilitiesManifest } from '#types/runtime.types.js';
+import type { RuntimeObservationMode } from '#types/runtime-observation.types.js';
 
 /** Binary bytes travel inline or through transport-owned shared memory. @public */
 export type BinaryContentDelivery =
@@ -52,6 +53,16 @@ export type TelemetryBatch = {
   readonly entries: readonly TelemetryEntry[];
   readonly origin: TelemetryOrigin;
   readonly epoch: number;
+  /**
+   * Spans the producer lost since its previous batch: its bounded queue was full, or a span ended
+   * after the producer was recycled. Absent from an older producer, which means unknown, not zero.
+   */
+  readonly dropped?: number;
+  /**
+   * Operation roots among the lost spans, as span id → `operation.id`, so the surviving children of a
+   * lost root can still be placed in the trace of their operation.
+   */
+  readonly droppedRoots?: Readonly<Record<string, string>>;
 };
 
 /** One retained span with its producer and clock anchor. @public */
@@ -73,10 +84,18 @@ export type RuntimeInitializeArgs = {
   memoryHandle?: InitializeMemoryHandle;
   sessionId?: string;
   resumeToken?: string;
+  /** The client's id for this attempt; the worker's `kernel.bootstrap` root carries it as `operation.id`. */
+  operationId?: string;
+  /** Whether the worker computes operation facts after each terminal reply. Defaults to `off`. */
+  observation?: RuntimeObservationMode;
 };
 
 /** Runtime worker initialize result. @public */
-export type RuntimeInitializeResult = { capabilities: CapabilitiesManifest };
+export type RuntimeInitializeResult = {
+  capabilities: CapabilitiesManifest;
+  /** The observation modes this worker supports; absent from a worker that predates observation. */
+  observation?: readonly RuntimeObservationMode[];
+};
 
 /** Versioned runtime server hello. @public */
 export type RuntimeHelloPayload = {
@@ -93,6 +112,8 @@ export type RuntimeTranscodeArgs = {
   readonly to: string;
   readonly files: ExportFile[];
   readonly options: Record<string, unknown>;
+  /** The client's id for this attempt; the worker's operation root carries it as `operation.id`. */
+  readonly operationId?: string;
 };
 
 /** Request-scoped source-closure collection without evaluation. @public */

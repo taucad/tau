@@ -8,7 +8,8 @@ import type { GeoSpecModelExporter } from '#model/types.js';
 import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerMessage } from '#runner/pool/pool-messages.js';
 import { startGeoSpecPoolWorkerHost } from '#runner/pool/worker-host.js';
 import { createNodeGeoSpecEngine } from '#runner/node/engine.js';
-import { createNodeVmFileSystem } from '#runner/node/node-vm-filesystem.js';
+import { createNodeVmFileSystem, withInMemorySources } from '#runner/node/node-vm-filesystem.js';
+import type { GeoSpecModuleVmModule } from '#vm/types.js';
 
 /**
  * A module whose default export creates exporters for one worker. The pool imports it inside each worker, because
@@ -32,8 +33,12 @@ export type GeoSpecNodePoolWorkerOptions = {
   readonly configPath?: string;
   /** URLs of {@link GeoSpecExporterModule}s whose exporters precede the config's. */
   readonly exporterModules?: readonly string[];
+  /** URL of a {@link GeoSpecModuleVmModule} whose default export creates this worker's module VM; absent for the plain VM. */
+  readonly moduleVmModule?: string;
   /** This worker's caller-inclusive CPU grant for the native addon; absent for one permit. */
   readonly grant?: number;
+  /** Spec sources served from memory, keyed by project-rooted path (see `GeoSpecNodePoolOptions.sources`). */
+  readonly sources?: Readonly<Record<string, string>>;
 };
 
 /** Parent-owned message boundary for the worker. @public */
@@ -73,7 +78,18 @@ export const startGeoSpecNodePoolWorker = async (
     options.grant === undefined ? {} : { executionPermits: options.grant },
   );
   try {
-    const filesystem = createNodeVmFileSystem(options.projectPath);
+    const disk = createNodeVmFileSystem(options.projectPath);
+    const filesystem =
+      options.sources === undefined ? disk : withInMemorySources(options.projectPath, disk, options.sources);
+    let createModuleVm: GeoSpecModuleVmModule['default'] | undefined;
+    if (options.moduleVmModule !== undefined) {
+      const loaded = (await import(options.moduleVmModule)) as Partial<GeoSpecModuleVmModule>;
+      // A configured module without a factory would silently fall back to the plain VM and hide the cause.
+      if (typeof loaded.default !== 'function') {
+        throw new TypeError(`The module VM module '${options.moduleVmModule}' must default-export a CreateModuleVm.`);
+      }
+      createModuleVm = loaded.default;
+    }
     const nativeModelLoader = createGeoSpecNativeModelLoader({
       engine,
       projectPath: options.projectPath,
@@ -89,6 +105,7 @@ export const startGeoSpecNodePoolWorker = async (
       filesystem,
       nativeAssertions: { engine },
       nativeModelLoader,
+      ...(createModuleVm === undefined ? {} : { createModuleVm }),
       postMessage: (message) => {
         port.postMessage(message);
       },

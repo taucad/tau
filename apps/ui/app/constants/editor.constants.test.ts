@@ -23,6 +23,7 @@ describe('editor device defaults', () => {
       'jobs',
       'kernel',
       'console',
+      'terminal',
     ]);
     expect(defaultPanelState.desktopLayout).toMatchObject({
       chatOpen: true,
@@ -34,7 +35,8 @@ describe('editor device defaults', () => {
     // A phone opens on the model alone, with the drawer collapsed, until the person picks a panel.
     expect(defaultPanelState.mobileActiveTab).toBe('viewer');
     expect(defaultOperationTimeout).toBe(180_000);
-    expect(defaultGraphicsSettings.graphicsBackend).toBe('webgl');
+    expect(defaultGraphicsSettings.graphicsBackend).toBe('webgpu');
+    expect(defaultGraphicsSettings.enablePostProcessing).toBe(true);
   });
 
   it('omits empty transient component display while retaining a hidden component', () => {

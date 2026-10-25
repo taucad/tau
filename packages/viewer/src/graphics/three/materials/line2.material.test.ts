@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { NoBlending, REVISION } from 'three';
+import { NoBlending, NormalBlending, REVISION } from 'three';
 import {
   cameraFar,
   cameraNear,
@@ -43,6 +43,14 @@ const upstreamSetupBody = (): string => {
 };
 
 describe('Line2NodeMaterial upstream contract', () => {
+  it('should require review when the upstream DPR singleton ownership changes', () => {
+    const moduleDirectory = dirname(fileURLToPath(import.meta.resolve('three')));
+    const source = readFileSync(join(moduleDirectory, '..', 'src', 'nodes', 'display', 'ScreenNode.js'), 'utf8');
+    expect(createHash('sha256').update(source).digest('hex')).toBe(
+      '350ff3e72871d50fccb4d66e4b287287ac7501e49025ea02d18b631a1d4f94a6',
+    );
+  });
+
   it('fails deterministically when the exact Three revision or copied setup body drifts', () => {
     const setup = upstreamSetupBody();
     expect(REVISION).toBe('184');
@@ -192,6 +200,7 @@ describe('Line2NodeMaterial.outputNode (gamma-space blend regression guard)', ()
       worldUnits: false,
     });
 
+    material.useViewportSrgbBlend = true;
     runSetupWithStubbedAncestors(material);
 
     const view = material as unknown as ColorNodeBearing;
@@ -244,6 +253,35 @@ describe('Line2NodeMaterial.outputNode (gamma-space blend regression guard)', ()
    * and the upstream `NodeMaterial.setupOutput` chain. The smoking-gun guard ensures the
    * transparent-only branch never leaks into opaque consumers.
    */
+  it('should establish hardware blending before a cached shader can bypass setup', () => {
+    const transparent = new Line2NodeMaterial({ transparent: true });
+    const deferred = new Line2NodeMaterial();
+    try {
+      deferred.transparent = true;
+      expect(transparent.blending).toBe(NormalBlending);
+      expect(deferred.blending).toBe(NormalBlending);
+      transparent.useViewportSrgbBlend = true;
+      expect(transparent.blending).toBe(NoBlending);
+      transparent.useViewportSrgbBlend = false;
+      expect(transparent.blending).toBe(NormalBlending);
+    } finally {
+      transparent.dispose();
+      deferred.dispose();
+    }
+  });
+
+  it('should leave transparent overlays on hardware blending without a viewport copy by default', () => {
+    const material = new Line2NodeMaterial({ transparent: true, opacity: 0.6 });
+    try {
+      runSetupWithStubbedAncestors(material);
+      expect(material.useViewportSrgbBlend).toBe(false);
+      expect(material.outputNode).toBeNull();
+      expect(material.blending).not.toBe(NoBlending);
+    } finally {
+      material.dispose();
+    }
+  });
+
   it('leaves outputNode unset when the material is opaque', () => {
     const material = new Line2NodeMaterial({
       color: 0xff_00_ff,

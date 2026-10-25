@@ -1,6 +1,6 @@
 /** Host-side helpers for issuing one protocol-3 claim to the native core. @module */
 
-import type { JSONValue } from '@taucad/runtime/types';
+import type { JSONValue } from '#support/types.js';
 import { assertGeoSpecJsonValue, toGeoSpecProtocolJson } from '#engine/protocol.js';
 import { geoSpecMatcherDescriptors } from '#engine/matchers.js';
 import type { GeoSpecFixedMatcherName } from '#engine/matchers.js';

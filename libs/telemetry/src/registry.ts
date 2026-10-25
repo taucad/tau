@@ -11,6 +11,7 @@ import {
   lookupOutcomes,
   tauToolNames,
 } from '#ingest.js';
+import { runtimeMetrics } from '#runtime-metrics.js';
 
 /**
  * `tau.sync.operation`: the client-facing request a sync series counts. `advertise` is a served
@@ -563,6 +564,10 @@ export const TauMetrics = {
 
   wsReconnectionDuration: defineHistogram({
     name: 'ws.reconnection.duration',
+    deprecated: {
+      removal: 'the Runtime Observability follow-up after PR-4 (Tau has no versioned releases; UI releases are SHAs)',
+      reason: 'D-T18: no producer in apps/ui or anywhere else; a follow-up deletes it and the panels that query it',
+    },
     unit: 's',
     description: 'WebSocket reconnection latency (reported by client)',
     buckets: [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
@@ -573,6 +578,10 @@ export const TauMetrics = {
 
   editorLoadDuration: defineHistogram({
     name: 'editor.load.duration',
+    deprecated: {
+      removal: 'the Runtime Observability follow-up after PR-4 (Tau has no versioned releases; UI releases are SHAs)',
+      reason: 'D-T18: no producer in apps/ui or anywhere else; a follow-up deletes it and the panels that query it',
+    },
     unit: 's',
     description: 'Editor initialization time (reported by client)',
     buckets: [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
@@ -583,6 +592,10 @@ export const TauMetrics = {
 
   wasmModuleLoadDuration: defineHistogram({
     name: 'wasm.module.load.duration',
+    deprecated: {
+      removal: 'the Runtime Observability follow-up after PR-4 (Tau has no versioned releases; UI releases are SHAs)',
+      reason: 'D-T18: no producer in apps/ui or anywhere else; a follow-up deletes it and the panels that query it',
+    },
     unit: 's',
     description: 'WASM module download + instantiation time (reported by client)',
     buckets: [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60],
@@ -593,6 +606,10 @@ export const TauMetrics = {
 
   indexeddbOperationDuration: defineHistogram({
     name: 'indexeddb.operation.duration',
+    deprecated: {
+      removal: 'the Runtime Observability follow-up after PR-4 (Tau has no versioned releases; UI releases are SHAs)',
+      reason: 'D-T18: no producer in apps/ui or anywhere else; a follow-up deletes it and the panels that query it',
+    },
     unit: 's',
     description: 'IndexedDB operation latency (reported by client)',
     buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 5],
@@ -1242,6 +1259,74 @@ export const TauMetrics = {
     }),
   }),
 
+  // --- Pack cache and rendezvous affinity (Hosted Remote Storage DC2, W14 OB4) ---
+
+  gitCacheLookups: defineCounter({
+    name: 'tau.git.cache.lookups',
+    unit: '{lookup}',
+    description: 'Pack and index lookups a tau-storage lease made in the pack cache, by result',
+    attributes: z.object({
+      result: z.enum(['hit', 'miss']),
+    }),
+  }),
+
+  gitCacheBytes: defineGauge({
+    name: 'tau.git.cache.bytes',
+    unit: 'By',
+    description: 'Bytes the pack cache holds now: pinned by an open lease, or idle and evictable',
+    attributes: z.object({
+      state: z.enum(['pinned', 'idle']),
+    }),
+  }),
+
+  gitCacheBudgetBytes: defineGauge({
+    name: 'tau.git.cache.budget_bytes',
+    unit: 'By',
+    description: 'The pack cache budget last read: a fraction of the lease filesystem, from statfs',
+    attributes: z.object({}),
+  }),
+
+  gitCacheEvictions: defineCounter({
+    name: 'tau.git.cache.evictions',
+    unit: '{entry}',
+    description: 'Pack cache entries evicted, least recently used and never one an open lease holds',
+    attributes: z.object({}),
+  }),
+
+  gitCacheEvictedBytes: defineCounter({
+    name: 'tau.git.cache.evicted_bytes',
+    unit: 'By',
+    description: 'Bytes the pack cache evicted',
+    attributes: z.object({}),
+  }),
+
+  gitCacheFallbacks: defineCounter({
+    name: 'tau.git.cache.fallbacks',
+    unit: '{lease}',
+    description:
+      'Leases hydrated straight from the object store: larger than the cache budget, or the cache failed while linking',
+    attributes: z.object({
+      reason: z.enum(['over_budget', 'cache_error']),
+    }),
+  }),
+
+  gitSpills: defineCounter({
+    name: 'tau.git.spills',
+    unit: '{request}',
+    description:
+      'Git requests tau-api sent past the rendezvous-preferred tau-storage member, by reason (admission refused, or no answer within the start wait)',
+    attributes: z.object({
+      reason: z.enum(['admission', 'start_wait']),
+    }),
+  }),
+
+  gitMembers: defineGauge({
+    name: 'tau.git.members',
+    unit: '{member}',
+    description: 'Deployed tau-storage members the router ranks over, as last read',
+    attributes: z.object({}),
+  }),
+
   syncClientAttempts: defineCounter({
     name: 'tau.sync.client.attempts',
     unit: '{attempt}',
@@ -1488,4 +1573,8 @@ export const TauMetrics = {
       outcome: z.enum(['ok', 'error']),
     }),
   }),
+
+  // --- Runtime observation (Runtime Observability PR-2; recorded by the API at ingest) ---
+
+  ...runtimeMetrics,
 } as const;

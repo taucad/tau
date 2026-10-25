@@ -49,7 +49,11 @@ export default defineConfig({
     // No Netlify deploy-preview origin exists for a daemon-served bundle.
     tauBuildFrontendUrl: JSON.stringify(''),
     tauBuildId: JSON.stringify(Date.now()),
+    /* Never reported: a `tau serve` bundle composes no runtime telemetry reporter. */
+    tauBuildRelease: JSON.stringify(''),
     tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
+    /* A `tau serve` bundle is never a Tau Cloud host, whatever `TAU_TELEMETRY_HOST` says. */
+    tauTelemetryHostCloudBuild: 'false',
     tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
     /* Not `desktop`: `isDesktopTarget()` must fold to `false` here, or the
      * bundle takes the Electron preload's ENV and IPC paths in a plain tab. */

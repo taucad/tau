@@ -33,6 +33,7 @@ import {
 } from '#graphics/section-cuts.js';
 import type { SectionAxis, SectionCut, SectionCutPatch, SectionPlane, SectionVector } from '#graphics/section-cuts.js';
 import { recordRendererSpan } from '#lib/renderer-telemetry.js';
+import { viewerFirstFrame } from '#lib/viewer-events.js';
 import { deriveModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionSource, ViewerHoverSuppressionReason } from '#machines/model-interaction.machine.js';
 import { kinematicsMachine } from '#machines/kinematics.machine.js';
@@ -172,7 +173,7 @@ const removeSuppressionReason = <T extends string>(reasons: readonly T[], reason
  *   `currentMeasurementStart`, `modelInteractionUnitId` and `selectedSectionCutId`.
  * - **ephemeral** -- derived from geometry, the canvas or a pointer on every mount, never seeded:
  *   `gridSizes`, `gridSizesComputed`, `cadUnits`, `cameraVisibleSpan`, `geometryRadius`,
- *   `geometryCenter`, `resolvedGraphicsBackend`, `webGpuAvailable`, `hoveredSectionCutId`,
+ *   `geometryCenter`, `resolvedGraphicsBackend`, `activeRenderer`, `webGpuAvailable`, `hoveredSectionCutId`,
  *   `committedSectionCuts` (what the caps last committed),
  *   `hoveredMeasurementId`, `measureSnapDistance`, every
  *   suppression and interaction flag, `pickableMeshesVersion`, `geometry`, `geometryKey` and
@@ -229,8 +230,15 @@ export interface GraphicsContext {
   graphicsBackendPreference: GraphicsBackendPreference;
   /** Probe result cached after startup (invoked probe). */
   webGpuAvailable: boolean;
-  /** Active rendering backend consumed by `@react-three/fiber`. */
+  /** Capability-derived candidate; initialization can still fall back to WebGL. */
   resolvedGraphicsBackend: ResolvedGraphicsBackend;
+  /** Successfully initialized canvas; cleared on matching loss or teardown, never persisted. */
+  activeRenderer: Readonly<{ canvasId: string; backend: ResolvedGraphicsBackend }> | undefined;
+  /**
+   * The mounted canvas that draws frames, and whether its first frame is on screen. Only a Three canvas sets it, so a
+   * stage showing other content (an SVG, a placeholder) is never waiting. The stage is busy while `presented` is false.
+   */
+  canvasPresentation: Readonly<{ canvasId: string; presented: boolean }> | undefined;
 
   // Section view state
   isSectionViewActive: boolean;
@@ -317,6 +325,14 @@ export type GraphicsEvent =
   | { type: 'setPostProcessingVisibility'; payload: boolean }
   | { type: 'setUpDirection'; payload: 'x' | 'y' | 'z' }
   | { type: 'setGraphicsBackendPreference'; payload: GraphicsBackendPreference }
+  | { type: 'rendererInitialized'; payload: NonNullable<GraphicsContext['activeRenderer']> }
+  | { type: 'rendererRemoved'; canvasId: string }
+  /** A canvas that draws frames has mounted; the stage waits for its first frame. */
+  | { type: 'canvasMounted'; canvasId: string }
+  /** The canvas's first frame is on screen. */
+  | { type: 'rendererPresented'; canvasId: string }
+  /** The canvas no longer draws frames (unmounted, or replaced by its context-lost fallback). */
+  | { type: 'canvasUnmounted'; canvasId: string }
   // Section view events
   /** Turning the section on with no cuts adds the default plane, removing the side `viewDirection` faces. */
   | { type: 'setSectionViewActive'; payload: boolean; viewDirection?: SectionVector }
@@ -782,7 +798,7 @@ const graphicsMachineDefinition = setup({
   ],
 
   context: ({ input, spawn, actors }) => {
-    const preference = input.graphicsBackend ?? 'webgl';
+    const preference = input.graphicsBackend ?? 'webgpu';
     const ownsModelInteractionRef = input.modelInteractionRef === undefined;
     const modelInteractionRef =
       input.modelInteractionRef ??
@@ -821,11 +837,13 @@ const graphicsMachineDefinition = setup({
       enableGrid: input.enableGrid ?? true,
       enableAxes: input.enableAxes ?? true,
       enableMatcap: input.enableMatcap ?? false,
-      enablePostProcessing: input.enablePostProcessing ?? false,
+      enablePostProcessing: input.enablePostProcessing ?? true,
       upDirection: input.upDirection ?? 'z',
       graphicsBackendPreference: preference,
       webGpuAvailable: false,
       resolvedGraphicsBackend: resolveGraphicsBackendPreference(preference, false),
+      activeRenderer: undefined,
+      canvasPresentation: undefined,
 
       // Section view state (the cuts are durable and entry-scoped)
       ...createSectionViewSeed(input.sectionView),
@@ -984,6 +1002,30 @@ const graphicsMachineDefinition = setup({
           context: ({ context, event }) => ({
             graphicsBackendPreference: event.payload,
             resolvedGraphicsBackend: resolveGraphicsBackendPreference(event.payload, context.webGpuAvailable),
+          }),
+        },
+
+        rendererInitialized: { context: ({ event }) => ({ activeRenderer: event.payload }) },
+        canvasMounted: {
+          context: ({ event }) => ({ canvasPresentation: { canvasId: event.canvasId, presented: false } }),
+        },
+        rendererPresented: {
+          context: ({ context, event }) => ({
+            canvasPresentation:
+              context.canvasPresentation?.canvasId === event.canvasId
+                ? { canvasId: event.canvasId, presented: true }
+                : context.canvasPresentation,
+          }),
+        },
+        canvasUnmounted: {
+          context: ({ context, event }) => ({
+            canvasPresentation:
+              context.canvasPresentation?.canvasId === event.canvasId ? undefined : context.canvasPresentation,
+          }),
+        },
+        rendererRemoved: {
+          context: ({ context, event }) => ({
+            activeRenderer: context.activeRenderer?.canvasId === event.canvasId ? undefined : context.activeRenderer,
           }),
         },
 
@@ -1197,6 +1239,13 @@ const graphicsMachineDefinition = setup({
               duration,
               attributes: { ...attributes, ...durations },
             });
+            if (attributes.outcome === 'presented' && durations.receiptToFirstFrame !== undefined) {
+              viewerFirstFrame({
+                backend: attributes.backend,
+                duration: durations.receiptToFirstFrame,
+                triangles: attributes.triangleCount,
+              });
+            }
           });
           return {};
         },

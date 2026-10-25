@@ -25,10 +25,10 @@ import type { RepositoryLease } from '#api/git/store/lease.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import {
   isPublishableTreePath,
-  leaseGitRunner,
   parseLfsPointer,
   readPublishedTree,
 } from '#api/publications/publication-materializer.js';
+import { leaseGitRunner } from '#testing/lease-git-runner.fixture.js';
 import type { MaterializerDependencies } from '#api/publications/publication-materializer.js';
 import { resolveLfsObjectLocation, tenantLfsObjectKey } from '#api/git/lfs-keys.js';
 import type { ObjectStorageServiceContract, PutBlobResult } from '#storage/object-storage.service.js';

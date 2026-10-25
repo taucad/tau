@@ -305,6 +305,7 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
     import('@taucad/runtime/client'),
     import('@taucad/runtime/filesystem'),
     lazyKernelOptionsFactory(),
+    import('#telemetry/runtime-telemetry.js'),
   ]);
   // oxlint-disable-next-line promise/prefer-await-to-then -- an abort can skip the await below, and an unhandled rejection would take the page with it
   modules.catch(() => undefined);
@@ -357,7 +358,8 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
 
   signal.throwIfAborted();
 
-  const [{ createRuntimeClient }, { fromFileSystemBridge }, resolveKernelOptions] = await modules;
+  const [{ createRuntimeClient }, { fromFileSystemBridge }, resolveKernelOptions, { observeRuntimeClient }] =
+    await modules;
   signal.throwIfAborted();
 
   const computeConnection =
@@ -377,6 +379,8 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
   client = createRuntimeClient(kernelOptions);
 
   cleanups.push(
+    /* Runtime observability (FR-14): attached before `connect()` so `initialize` is observed. */
+    observeRuntimeClient(client, 'editor'),
     client.on('state', (state) => {
       machineRef.send({ type: 'stateChanged', state });
     }),

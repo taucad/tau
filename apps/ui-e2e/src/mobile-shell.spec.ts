@@ -3,6 +3,7 @@ import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import { composerSelector, prepareComposerPage } from '#support/chat-attachments.js';
+import { waitForStageReady } from '#support/viewer-stage.js';
 
 /**
  * The phone shell's geometry: at every detent the open surface, its composer and Send end above the fixed
@@ -54,6 +55,8 @@ test.each([
   await target.setViewport(viewport);
   await target.navigate('/__e2e/chat-attachments');
   await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?/u, 60_000);
+  /* A tap needs a stable target, which needs compositor frames: wait until the stage has presented its first frame. */
+  await waitForStageReady();
   await target.click(navButton('Chat'), { touch: true });
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
 
@@ -133,6 +136,7 @@ test.each([
     await target.setViewport(viewport);
     await target.navigate('/__e2e/chat-attachments');
     await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?/u, 60_000);
+    await waitForStageReady();
     await target.click(navButton('Parameters'), { touch: true });
     const surface = selectors.getByRole('region', { name: 'Parameters', exact: true });
     await target.expectVisible(surface, 60_000);

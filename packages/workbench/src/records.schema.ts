@@ -19,10 +19,11 @@ export const workbenchIdSchema = z
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, 'Use a lowercase slug such as "front" or "review-iso".');
 
 /**
- * The panes a record may name in this cut: the twelve `workbench:<id>` singletons that exist today
- * (`WorkbenchPanelId` minus `files`, which is a sidecar expressed as `filesOpen` on a file tab; V2 §3).
- * `kernel` and `console` render as a placeholder when debug mode is off. Widens to a namespaced slug
- * (`fea.checks`) when the pane registry lands (charter D11); that change is additive (blueprint B4).
+ * The panes a record may name in this cut: the `workbench:<id>` singletons that exist today (`WorkbenchPanelId`
+ * minus `files`, which is a sidecar expressed as `filesOpen` on a file tab; V2 §3). `kernel` and `console` render as
+ * a placeholder when debug mode is off; `terminal` is desktop-only, and a build or view without it drops the tab.
+ * Widens to a namespaced slug (`fea.checks`) when the pane registry lands (charter D11); that change is additive
+ * (blueprint B4).
  */
 /** @public */
 export const paneIds = [
@@ -39,6 +40,7 @@ export const paneIds = [
   'details',
   'kernel',
   'console',
+  'terminal',
 ] as const;
 /** @public */
 export const paneIdSchema = z.enum(paneIds);

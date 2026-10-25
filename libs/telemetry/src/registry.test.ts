@@ -7,7 +7,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(119);
+    expect(metrics).toHaveLength(169);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -127,6 +127,36 @@ describe('TauMetrics', () => {
     /* A hold is at most about 5 s, so its buckets end there; a lookup is a cache hit or one indexed read. */
     expect(TauMetrics.gitRouteHoldDuration.buckets.at(-1)).toBeGreaterThanOrEqual(5);
     expect(TauMetrics.gitRouteLookupDuration.buckets.at(0)).toBeLessThanOrEqual(0.0001);
+  });
+
+  /* Hosted Remote Storage DC2: the pack cache and the router's spill and membership series (W14 OB4 names). */
+  it('should declare the pack cache and router instruments under the W14 catalogue names', () => {
+    const exported = Object.fromEntries(
+      [
+        TauMetrics.gitCacheLookups,
+        TauMetrics.gitCacheBytes,
+        TauMetrics.gitCacheBudgetBytes,
+        TauMetrics.gitCacheEvictions,
+        TauMetrics.gitCacheEvictedBytes,
+        TauMetrics.gitCacheFallbacks,
+        TauMetrics.gitSpills,
+        TauMetrics.gitMembers,
+      ].map((metric) => [toPrometheusName(metric.name, metric.type), { type: metric.type, unit: metric.unit }]),
+    );
+    expect(exported).toEqual({
+      tau_git_cache_lookups_total: { type: 'counter', unit: '{lookup}' },
+      tau_git_cache_bytes: { type: 'gauge', unit: 'By' },
+      tau_git_cache_budget_bytes: { type: 'gauge', unit: 'By' },
+      tau_git_cache_evictions_total: { type: 'counter', unit: '{entry}' },
+      tau_git_cache_evicted_bytes_total: { type: 'counter', unit: 'By' },
+      tau_git_cache_fallbacks_total: { type: 'counter', unit: '{lease}' },
+      tau_git_spills_total: { type: 'counter', unit: '{request}' },
+      tau_git_members: { type: 'gauge', unit: '{member}' },
+    });
+    expect(TauMetrics.gitCacheLookups.attributes.safeParse({ result: 'proj_1' }).success).toBe(false);
+    expect(TauMetrics.gitSpills.attributes.safeParse({ reason: 'admission' }).success).toBe(true);
+    expect(TauMetrics.gitSpills.attributes.safeParse({ reason: 'start_wait' }).success).toBe(true);
+    expect(TauMetrics.gitCacheFallbacks.attributes.safeParse({ reason: 'over_budget' }).success).toBe(true);
   });
 
   /* Hosted Remote Storage DC1: the grant, forward and receipt series between tau-api and tau-storage. */
@@ -451,9 +481,14 @@ describe('TauMetrics', () => {
     const counters = metrics.filter((m) => m.type === 'counter');
     // `copied`: W13's catalogue fixes `tau_mirror_{objects,bytes}_copied_total` (W14 OB6).
     // `rejected`: the W14 catalogue's `tau_git_grants_rejected_total` (Hosted Remote Storage DC1, OB4).
-    const validSuffixes = /s$|cost$|microusd$|picousd$|flagged$|copied$|rejected$/;
+    // `usage`, `missing`, `attention`, `reuse`, `dropped`, `unavailable`, `partial`: Runtime Observability package §1
+    // fixes `tau.runtime.{kernel_usage,facts_missing,job_attention,reuse}` and `tau.telemetry.{client.dropped,
+    // spans.dropped,ingest.unavailable,ingest.partial}`; dashboards and named views use those names.
+    const validSuffixes =
+      /s$|cost$|microusd$|picousd$|flagged$|copied$|rejected$|usage$|missing$|attention$|reuse$|dropped$|unavailable$|partial$/;
     for (const counter of counters) {
-      const lastSegment = counter.name.split('.').at(-1) ?? '';
+      // A `_by_<dimension>` tail names the breakdown, not the counted thing: `operations_by_release`.
+      const lastSegment = (counter.name.split('.').at(-1) ?? '').replace(/_by_\w+$/u, '');
       expect(lastSegment).toMatch(validSuffixes);
     }
   });

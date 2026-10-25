@@ -1,7 +1,21 @@
 import '#test/browser.css';
 import { afterEach, expect, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
-import { Color, NoToneMapping, PerspectiveCamera, Raycaster, RenderTarget, Scene, Vector3, WebGLRenderer } from 'three';
+import {
+  Color,
+  NoToneMapping,
+  PerspectiveCamera,
+  Raycaster,
+  RenderTarget,
+  Scene,
+  Vector3,
+  Vector4,
+  WebGLRenderer,
+  WebGLRenderTarget,
+} from 'three';
+import { WebGLBackend, WebGPUBackend, WebGPURenderer } from 'three/webgpu';
+import { createViewportGizmoCubeAxes } from '#graphics/three/controls/viewport-gizmo-cube-axes.js';
+import { createSectionPlanePicker } from '#graphics/three/controls/section-plane-picker.js';
 import { ViewportGizmo } from 'three-viewport-gizmo';
 import { createRenderer } from '#graphics/three/renderer.js';
 import { applyViewportGizmoSurface } from '#graphics/three/controls/viewport-gizmo-cube-surface.js';
@@ -9,7 +23,11 @@ import { readViewportGizmoStyle, viewportGizmoMetrics } from '#graphics/three/co
 
 const measureCoverage = (
   data: ArrayLike<number>,
-): { opaquePixels: number; interiorGaps: number; antialiasedPixels: number } => {
+): {
+  opaquePixels: number;
+  interiorGaps: number;
+  antialiasedPixels: number;
+} => {
   let interiorGaps = 0;
   let antialiasedPixels = 0;
   let opaquePixels = 0;
@@ -92,7 +110,10 @@ it.each(['webgl', 'webgpu'] as const)(
     await page.viewport(500, 500);
     const canvas = document.createElement('canvas');
     document.body.append(canvas);
-    const renderer = await createRenderer('viewport', backend, { canvas, preserveDrawingBuffer: true });
+    const renderer = await createRenderer('viewport', backend, {
+      canvas,
+      preserveDrawingBuffer: true,
+    });
     renderer.setSize(384, 384);
     renderer.setClearColor(0, 0);
     renderer.toneMapping = NoToneMapping;
@@ -128,7 +149,7 @@ it.each(['webgl', 'webgpu'] as const)(
           isHighContrast: false,
           accentColor: '#008c7d',
         });
-        applyViewportGizmoSurface(gizmo, style);
+        applyViewportGizmoSurface(gizmo, style, backend);
         gizmo.updateMatrixWorld(true);
         const raycaster = new Raycaster();
         for (const region of gizmo.children) {
@@ -176,6 +197,161 @@ it.each(['webgl', 'webgpu'] as const)(
     } finally {
       gizmo.dispose();
       target?.dispose();
+      renderer.dispose();
+      canvas.remove();
+    }
+  },
+);
+
+it.each(['webgpu', 'node-webgl2', 'webgl'] as const)(
+  'should return the 5K section picker to identical pixels and picks after camera round trips: %s',
+  async (execution) => {
+    const canvas = document.createElement('canvas');
+    document.body.append(canvas);
+    const renderer =
+      execution === 'node-webgl2'
+        ? new WebGPURenderer({
+            canvas,
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- Three constructor option.
+            forceWebGL: true,
+            antialias: false,
+          })
+        : await createRenderer('viewport', execution, { canvas });
+    if (!(renderer instanceof WebGLRenderer)) {
+      await renderer.init();
+      expect(renderer.backend).toBeInstanceOf(execution === 'node-webgl2' ? WebGLBackend : WebGPUBackend);
+    }
+    renderer.setPixelRatio(2);
+    renderer.setSize(2560, 1440);
+    const target = new WebGLRenderTarget(5120, 2880, {
+      samples: 0,
+      stencilBuffer: true,
+    });
+    let picker = createSectionPlanePicker(execution === 'webgl' ? 'webgl' : 'webgpu');
+    picker.paint({ current: 'xz' });
+    const camera = new PerspectiveCamera(35, 16 / 9, 0.1, 100);
+    camera.up.set(0, 0, 1);
+    const scene = new Scene();
+    const gizmo = new ViewportGizmo(camera, renderer, {
+      type: 'rounded-cube',
+      up: 'z',
+      size: 96,
+      container: document.body,
+      placement: 'top-right',
+      background: { enabled: false },
+    });
+    const style = readViewportGizmoStyle({
+      container: document.body,
+      colorScheme: 'light',
+      isHighContrast: false,
+      accentColor: '#008c7d',
+    });
+    picker.setStyle(style);
+    applyViewportGizmoSurface(gizmo, style, execution === 'webgl' ? 'webgl' : 'webgpu');
+    gizmo.scale.multiplyScalar(0.7);
+    gizmo.add(
+      createViewportGizmoCubeAxes({
+        renderingBackend: execution === 'webgl' ? 'webgl' : 'webgpu',
+      }),
+    );
+    const viewport = new Vector4();
+    const draw = async (side: number, x = 1, z = 1): Promise<Uint8Array<ArrayBuffer>> => {
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          resolve();
+        });
+      });
+      camera.position.set(x * 0.2167, side * 0.2167, z * 0.2167 + 0.006);
+      camera.lookAt(0, 0, 0.006);
+      // Preserve the packaged planetary camera's exact quaternion. Recomputing
+      // an almost identical lookAt hides the transparent-sort/cache regression.
+      if (x === 1 && z === 1 && side === 1) {
+        camera.quaternion.set(0.1759198966061612, 0.4247082002778668, 0.8204732385702833, 0.33985114297998736);
+      }
+      if (x === 1 && z === 1 && side === -1) {
+        camera.quaternion.set(0.424708200277867, 0.17591989660616122, 0.3398511429799874, 0.8204732385702832);
+      }
+      renderer.setRenderTarget(target);
+      target.viewport.set(0, 0, 5120, 2880);
+      renderer.setViewport(0, 0, 2560, 1440);
+      renderer.autoClear = true;
+      renderer.render(scene, camera);
+      gizmo.cameraUpdate();
+      target.viewport.set(0, 0, 5120, 2880);
+      picker.render({
+        renderer,
+        camera,
+        cubeViewport: [2400, execution === 'webgl' ? 1440 - 20 - 96 : 20, 96, 96],
+      });
+      gizmo.render();
+      expect(renderer.getViewport(viewport).toArray()).toEqual([0, 0, 2560, 1440]);
+      expect(target.viewport.toArray()).toEqual([0, 0, 5120, 2880]);
+      expect(renderer.autoClear).toBe(true);
+      if (renderer instanceof WebGLRenderer) {
+        const pixels = new Uint8Array(5120 * 2880 * 4);
+        await renderer.readRenderTargetPixelsAsync(target, 0, 0, 5120, 2880, pixels);
+        return pixels;
+      }
+      return new Uint8Array(await renderer.readRenderTargetPixelsAsync(target, 0, 0, 5120, 2880));
+    };
+    const picks = (): Array<string | undefined> => {
+      const result: Array<string | undefined> = [];
+      const rect = picker.rect!;
+      for (let y = 4; y < rect.size; y += 8) {
+        for (let x = 4; x < rect.size; x += 8) {
+          result.push(picker.pick(rect.left + x, rect.top + y));
+        }
+      }
+      return result;
+    };
+    const differences = (before: Uint8Array<ArrayBuffer>, after: Uint8Array<ArrayBuffer>): number => {
+      let changed = 0;
+      for (const [index, value] of before.entries()) {
+        changed += Number(value !== after[index]);
+      }
+      return changed;
+    };
+    try {
+      await draw(-1);
+      const first = await draw(-1);
+      const firstPicks = picks();
+      expect(new Set(firstPicks)).toEqual(new Set(['xy', 'xz', 'yz', undefined]));
+      const transforms = picker.scene.children.map((child) => [...child.matrixWorld.elements]);
+      expect(differences(first, await draw(-1)), 'Unchanged pose must be stable before the round trip').toBe(0);
+      expect(first.some((value) => value !== 0)).toBe(true);
+      await draw(-0.3);
+      await draw(0.7);
+      await draw(1);
+      // A single intervening frame can leave an old matrix in the observer;
+      // do not settle each new pose twice before returning to the oracle.
+      for (const [x, y, z] of [
+        [1, 1, 3],
+        [-1, 1, 1],
+        [3, 1, 1],
+        [1, -1, -1],
+        [1, 1, 1],
+        [1, -3, 1],
+      ] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- Retain exact camera history on one live picker.
+        await draw(y, x, z);
+        // oxlint-disable-next-line no-await-in-loop -- Check the first return frame, without a settling draw.
+        expect(differences(first, await draw(-1)), `Return from ${x},${y},${z}`).toBe(0);
+      }
+      const returned = await draw(-1);
+      expect(picker.scene.children.map((child) => [...child.matrixWorld.elements])).toEqual(transforms);
+      expect(picks()).toEqual(firstPicks);
+      expect(differences(first, returned)).toBe(0);
+      const historicalBack = await draw(1);
+      picker.dispose();
+      picker = createSectionPlanePicker(execution === 'webgl' ? 'webgl' : 'webgpu');
+      picker.setStyle(style);
+      picker.paint({ current: 'xz' });
+      await draw(1);
+      expect(differences(historicalBack, await draw(1)), 'History must match a fresh picker').toBe(0);
+    } finally {
+      picker.dispose();
+      gizmo.dispose();
+      target.dispose();
       renderer.dispose();
       canvas.remove();
     }

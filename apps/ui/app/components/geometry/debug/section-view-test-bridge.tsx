@@ -1,3 +1,6 @@
+import { downloadBlob } from '@taucad/utils/file';
+import type { WorkspaceRendererIdentity } from '#components/geometry/debug/workspace-renderer-diagnostics.js';
+import { getWorkspaceRendererIdentity } from '#components/geometry/debug/workspace-renderer-diagnostics.js';
 import React, { useEffect } from 'react';
 import * as THREE from 'three';
 import { renderLoopObservers } from '@taucad/viewer/graphics/three/render-loop-observer';
@@ -207,11 +210,7 @@ export type SectionViewTestMeasureState = Readonly<{
 export type SectionViewTestBridgeApi = Readonly<{
   getGraphicsBackend(): 'webgl' | 'webgpu';
   /** Identity from this viewport's renderer, never a separately created probe context. */
-  getRendererIdentity(): Readonly<{
-    api: 'webgl' | 'webgpu';
-    name: string;
-    frame: number;
-  }>;
+  getRendererIdentity(): WorkspaceRendererIdentity;
   /** Warmed full R3F frame submission and completion latency, in milliseconds; excludes RAF/vsync. */
   measureRenderFrames(options?: Readonly<{ gpuTiming?: boolean; orbit?: boolean }>): Promise<
     Readonly<{
@@ -560,6 +559,8 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
   const modelInteractionRef = useModelInteractionRef();
   const get = useThree((state) => state.get);
   const interactionLock = useViewportGizmoInteractionLock();
+  const bridgeRef = React.useRef<SectionViewTestBridgeApi | undefined>(undefined);
+  const pendingCaptureRef = React.useRef(false);
   const pendingCameraTransitionRef = React.useRef<
     { readonly camera: THREE.Camera; readonly requestedAt: number } | undefined
   >(undefined);
@@ -574,6 +575,22 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
   });
 
   useFrame((state) => {
+    if (pendingCaptureRef.current) {
+      const { context } = graphicsActor.getSnapshot();
+      if (
+        context.gltfPresentation.requestedRevision !== context.gltfPresentation.presentedRevision ||
+        (context.isSectionViewActive && !areSectionCutsEqual(context.sectionCuts, context.committedSectionCuts))
+      ) {
+        state.invalidate();
+      } else {
+        pendingCaptureRef.current = false;
+        state.gl.domElement.toBlob((blob) => {
+          if (blob) {
+            downloadBlob(blob, 'workspace-viewport.png');
+          }
+        });
+      }
+    }
     const pending = pendingCameraTransitionRef.current;
     if (!pending) {
       return;
@@ -669,16 +686,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         return renderer.backend?.isWebGPUBackend === true ? 'webgpu' : 'webgl';
       },
       getRendererIdentity() {
-        const { gl } = get();
-        const renderer = gl as RendererInstance;
-        const api = 'isWebGPURenderer' in gl && gl.isWebGPURenderer ? 'webgpu' : 'webgl';
-        const context = api === 'webgl' ? gl.getContext() : undefined;
-        const debug = context?.getExtension('WEBGL_debug_renderer_info');
-        return {
-          api,
-          name: debug ? String(context?.getParameter(debug.UNMASKED_RENDERER_WEBGL) ?? '') : '',
-          frame: 'drawCalls' in renderer.info.render ? renderer.info.render.calls : renderer.info.render.frame,
-        };
+        return getWorkspaceRendererIdentity(get().gl as RendererInstance);
       },
       async measureRenderFrames(options = {}) {
         const state = get();
@@ -1149,12 +1157,16 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
       },
     };
 
+    bridgeRef.current = bridge;
     const bridges = bridgeGlobal.__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
     bridges.push(bridge);
     bridgeGlobal.__TAU_SECTION_VIEW_TEST_BRIDGES__ = bridges;
     bridgeGlobal.__TAU_SECTION_VIEW_TEST__ = bridge;
 
     return () => {
+      if (bridgeRef.current === bridge) {
+        bridgeRef.current = undefined;
+      }
       const index = bridges.indexOf(bridge);
       if (index !== -1) {
         bridges.splice(index, 1);
@@ -1179,6 +1191,116 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
     project,
     setRenderFrame,
   ]);
+
+  useEffect(() => {
+    if (!isTauDebugEnabled) {
+      return undefined;
+    }
+    const readBridge = (): SectionViewTestBridgeApi => {
+      const bridge = bridgeRef.current;
+      if (!bridge) {
+        throw new Error('Workspace renderer diagnostics are not ready');
+      }
+      return bridge;
+    };
+    const { gl } = get();
+    const container = gl.domElement.parentElement;
+    const originalWidth = container?.style.width;
+    const originalHeight = container?.style.height;
+    const originalDpr = get().viewport.dpr;
+    let hasBufferOverride = false;
+    const restoreViewport = (): void => {
+      if (container && hasBufferOverride) {
+        container.style.width = originalWidth ?? '';
+        container.style.height = originalHeight ?? '';
+        get().setDpr(originalDpr);
+        hasBufferOverride = false;
+        get().invalidate();
+      }
+    };
+    const report = (): Record<string, unknown> => ({
+      capturedAt: new Date().toISOString(),
+      renderer: readBridge().getRendererIdentity(),
+      camera: readBridge().getCamera(),
+      section: readBridge().getSectionState(),
+      caps: readBridge().getSectionCapCompleteness(),
+      capStencil: readBridge().getSectionCapStencilDiagnostics(),
+      hover: readBridge().getModelHoverState(),
+      settings: readBridge().getViewSettings(),
+      geometryFramed: readBridge().isGeometryFramed(),
+      threeRevision: THREE.REVISION,
+    });
+    const panel = document.createElement('details');
+    panel.className =
+      'pointer-events-auto absolute top-2 left-2 z-10 max-w-sm rounded-sm bg-background p-2 text-xs text-foreground';
+    const heading = document.createElement('summary');
+    heading.textContent = 'Renderer diagnostics';
+    const output = document.createElement('output');
+    output.className = 'block break-words font-mono';
+    output.setAttribute('aria-label', 'Workspace renderer snapshot');
+    const refresh = (): void => {
+      output.textContent = JSON.stringify(readBridge().getRendererIdentity());
+    };
+    panel.append(heading, output);
+    for (const [label, action] of [
+      ['Refresh renderer snapshot', refresh],
+      [
+        'Use 5K drawing buffer',
+        () => {
+          if (!container) {
+            return;
+          }
+          // Set the R3F measured container, not only gl.setSize: camera and pointer mapping must agree.
+          container.style.width = '2560px';
+          container.style.height = '1440px';
+          hasBufferOverride = true;
+          get().setDpr(2);
+          get().invalidate();
+          output.textContent = 'Requested 5120×2880; refresh to verify the actual buffer.';
+        },
+      ],
+      ['Restore viewport size', restoreViewport],
+      [
+        'Download workspace report',
+        () => {
+          refresh();
+          downloadBlob(
+            new Blob([JSON.stringify(report(), null, 2)], { type: 'application/json' }),
+            'workspace-renderer-report.json',
+          );
+        },
+      ],
+      [
+        'Capture workspace viewport',
+        () => {
+          pendingCaptureRef.current = true;
+          get().invalidate();
+        },
+      ],
+    ] as const) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label;
+      button.className = 'm-1 rounded-sm border px-2 py-1';
+      button.addEventListener('click', action);
+      panel.append(button);
+    }
+    // Events belong to these controls, not the canvas pointer/selection handler.
+    panel.addEventListener('pointerdown', (event) => {
+      event.stopPropagation();
+    });
+    panel.addEventListener('click', (event) => {
+      event.stopPropagation();
+    });
+    panel.addEventListener('toggle', refresh);
+    container?.append(panel);
+
+    return () => {
+      restoreViewport();
+      panel.remove();
+      pendingCaptureRef.current = false;
+    };
+  }, [get, isTauDebugEnabled]);
 
   return undefined;
 }

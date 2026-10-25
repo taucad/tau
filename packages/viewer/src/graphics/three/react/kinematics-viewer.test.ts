@@ -192,6 +192,38 @@ describe('useKinematicsViewer', () => {
   });
 
   describe('playback clock', () => {
+    it('should request the first demand frame when play leaves the initial pose unchanged', () => {
+      const animated: Mechanism = {
+        ...mechanism,
+        animations: [
+          {
+            id: 'turn',
+            duration: 2,
+            loop: 'repeat',
+            keyframes: [
+              { time: 0, coordinates: { hinge: 0 } },
+              { time: 2, coordinates: { hinge: 1 } },
+            ],
+          },
+        ],
+      };
+      renderViewer(createManifest(animated));
+      hooks.invalidate.mockClear();
+      const before = arm.matrix.clone();
+      send({ type: 'play', unitId });
+      expect(arm.matrix.equals(before)).toBe(true);
+      expect(hooks.invalidate).toHaveBeenCalled();
+      renderFrame(1000);
+      renderFrame(1016);
+      expect(unit().playback.time).toBeCloseTo(0.016);
+      send({ type: 'pause', unitId });
+      hooks.invalidate.mockClear();
+      send({ type: 'play', unitId });
+      expect(hooks.invalidate).toHaveBeenCalled();
+      renderFrame(9000);
+      expect(unit().playback.time).toBeCloseTo(0.016);
+    });
+
     it('should neither tick nor request frames while the unit is not playing', () => {
       renderViewer();
       hooks.invalidate.mockClear();

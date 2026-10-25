@@ -6,8 +6,9 @@
 /* oxlint-disable unicorn-js/no-zero-fractions -- numeric literals match upstream Line2NodeMaterial.js */
 /* oxlint-disable unicorn-js/prevent-abbreviations -- identifiers match upstream Line2NodeMaterial.js */
 
+import { squarePixelStripCoverage } from '#graphics/three/materials/line-coverage.js';
 import type { Node, Line2NodeMaterialParameters as ThreeLine2NodeMaterialParameters } from 'three/webgpu';
-import { NoBlending } from 'three';
+import { NoBlending, NormalBlending } from 'three';
 import { Line2NodeMaterial as ThreeLine2NodeMaterial } from 'three/webgpu';
 import {
   attribute,
@@ -29,11 +30,11 @@ import {
   modelViewMatrix,
   positionGeometry,
   screenCoordinate,
-  screenDPR,
   screenUV,
   smoothstep,
   sRGBTransferEOTF,
   sRGBTransferOETF,
+  uniform,
   uv,
   vec2,
   vec3,
@@ -124,7 +125,7 @@ export const compositeOverViewportSrgb = (rgb: unknown, alpha: unknown, viewport
  * CB-3 entry quotes. We close the seam for line materials by transferring both operands
  * into sRGB space via `sRGBTransferOETF`, mixing, and converting the result back to
  * working color space with `sRGBTransferEOTF` before assigning `outputNode.rgb`. The
- * infinite grid uses the same {@link compositeOverViewportSrgb} over its own viewport copy.
+ * lean viewport leaves this appearance-reference path disabled.
  *
  * The viewport sample uses {@link tauOpaqueViewportTexture} (a non-mip singleton over
  * `viewportTexture()`) rather than upstream `viewportOpaqueMipTexture` because the
@@ -167,29 +168,41 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
   public edgePresentationCoverageGamma = 2.2;
 
   /**
-   * Transparent overlay lines normally use Tau's explicit sRGB viewport blend. GLTF edge
-   * presentation coverage intentionally keeps normal GPU blending to avoid a framebuffer
-   * copy on the main model path.
+   * Explicit appearance-reference opt-in. Ordinary overlays use hardware linear blending
+   * without copying the framebuffer; gamma-space matching is not part of the lean path.
    */
-  public useViewportSrgbBlend = true;
+  public get useViewportSrgbBlend(): boolean {
+    return this.viewportSrgbBlendEnabled;
+  }
+
+  public set useViewportSrgbBlend(enabled: boolean) {
+    this.viewportSrgbBlendEnabled = enabled;
+    // Reference composition already includes its destination. A cached builder
+    // must receive this state without relying on setup, just like normal blending.
+    this.blending = enabled ? NoBlending : NormalBlending;
+  }
+
+  /** CAD tessellation joins omit overlapping round caps; standalone overlays retain them. */
+  public analyticButtCaps = false;
+
+  private viewportSrgbBlendEnabled = false;
 
   public constructor(parameters?: ThreeLine2NodeMaterialParameters) {
     super(parameters);
+    // A node-builder cache hit skips setup on equivalent material instances.
+    // Establish fixed-function state here, before any shader lookup: upstream
+    // Line2NodeMaterial defaults to NoBlending even for transparent materials.
+    this.blending = NormalBlending;
   }
 
   /**
-   * Screen-space overlays composited in sRGB space carry their own analytic coverage in alpha.
+   * Screen-space overlays carry analytic coverage in alpha independently of blend color space.
    * Hardware alpha-to-coverage would turn that composited alpha into dropped samples, and WebGPU
    * resolves samples in the linear frame target, which lightens every partly covered pixel of a
    * thin line (about half the ink of WebGL's sRGB-space resolve for the 1.25 px viewport axes).
    */
   public get usesAnalyticCoverage(): boolean {
-    return (
-      this.transparent &&
-      this.useViewportSrgbBlend &&
-      !this.edgePresentationCoverage &&
-      (this as any).worldUnits !== true
-    );
+    return this.transparent && !this.edgePresentationCoverage && (this as any).worldUnits !== true;
   }
 
   /** @inheritdoc */
@@ -216,6 +229,7 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
       this.alphaToCoverage,
       this.edgePresentationCoverage,
       this.usesAnalyticCoverage,
+      this.analyticButtCaps,
       this.edgePresentationCoverage ? this.edgePresentationLineWidth : undefined,
       this.useViewportSrgbBlend,
       inputs,
@@ -235,6 +249,11 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
     const useWorldUnits = self._useWorldUnits as boolean;
     const useEdgePresentationCoverage = self.edgePresentationCoverage === true;
     const useAnalyticCoverage = self.usesAnalyticCoverage === true;
+    // Three r184 ScreenNode(DPR).setup replaces its singleton _output for every
+    // builder. Preparing another graph before rendering leaves earlier uniforms
+    // at their initial DPR=1. Own the scalar in this graph; cached builders share
+    // it safely and update it for the renderer actually executing each draw.
+    const lineDpr = uniform(1).onRenderUpdate(({ renderer }) => renderer.getPixelRatio());
 
     const trimSegment = Fn(({ start, end }: { readonly start: any; readonly end: any }) => {
       const nearEstimate = cameraNear.negate();
@@ -320,6 +339,10 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
 
       dir.x.assign(dir.x.mul(aspect));
       dir.assign(dir.normalize());
+      // The square pixel projects to |nx| + |ny| along a line's normal. Capture it
+      // before dir.x is changed from device-pixel direction back to clip space.
+      const coverageDiameter =
+        useAnalyticCoverage && self.analyticButtCaps ? dir.x.abs().add(dir.y.abs()).toVar() : float(1.0);
 
       const clip = vec4().toVar();
 
@@ -368,12 +391,12 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
           offset.assign(offset.add(dir));
         });
 
-        // Analytic coverage needs the quad half a device pixel wider on each side to fade into.
+        // Conservatively cover the square pixel footprint, including diagonal strokes.
         offset.assign(
-          offset.mul(useAnalyticCoverage ? materialLineWidth.add(screenDPR.reciprocal()) : materialLineWidth),
+          offset.mul(useAnalyticCoverage ? materialLineWidth.add(coverageDiameter.div(lineDpr)) : materialLineWidth),
         );
 
-        offset.assign(offset.div(viewport.w.div(screenDPR)));
+        offset.assign(offset.div(viewport.w.div(lineDpr)));
 
         clip.assign(positionGeometry.y.lessThan(0.5).select(clipStart, clipEnd));
 
@@ -468,17 +491,24 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
         // comes from the fragment position, not the interpolated across-line `uv`: a segment
         // clipped far off screen has vertices so distant that its interpolants lose precision.
         // Distance to the segment (round caps included) from the fragment position alone.
-        const halfWidthPx = materialLineWidth.mul(screenDPR).mul(0.5);
+        const halfWidthPx = materialLineWidth.mul(lineDpr).mul(0.5);
         const screenLine = varyingProperty('vec4', 'tauLineScreenPx');
         const extent = varyingProperty('vec2', 'tauLineExtentPx');
         const relative = screenCoordinate.sub(screenLine.xy);
         const across = relative.x.mul(screenLine.w).sub(relative.y.mul(screenLine.z));
         const along = relative.dot(screenLine.zw);
         const beyond = extent.x.sub(along).max(along.sub(extent.y)).max(0.0);
-        const distancePx = vec2(across, beyond).length();
-        alpha.assign(halfWidthPx.add(0.5).sub(distancePx).clamp(0.0, 1.0));
-        // The composite replaces the target (`NoBlending`) from a viewport copy shared by every
-        // overlay line and taken before the first draws, so an uncovered fragment would paint
+        const distancePx = self.analyticButtCaps ? across.abs() : vec2(across, beyond).length();
+        if (self.analyticButtCaps) {
+          beyond.greaterThan(0).discard();
+        }
+        if (self.analyticButtCaps) {
+          alpha.assign(squarePixelStripCoverage(screenLine.zw, across, halfWidthPx));
+        } else {
+          alpha.assign(halfWidthPx.add(0.5).sub(distancePx).clamp(0.0, 1.0));
+        }
+        // The optional appearance-reference composite replaces the target (`NoBlending`) from a
+        // viewport copy shared by the lines. An uncovered fragment would paint
         // that stale copy over any line drawn earlier — it erased most of the x axis.
         alpha.lessThanEqual(0.0).discard();
       } else if (useAlphaToCoverage && renderer.currentSamples > 0) {
@@ -535,7 +565,6 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
       // alpha. Blending it again forced opaque alpha over the transparent canvas, turning the
       // tint × opacity mix against transparent black into a dark opaque line.
       self.outputNode = compositeOverViewportSrgb(self.colorNode.rgb, opacityNode, viewportColor);
-      self.blending = NoBlending;
     }
 
     generatedLineNodes.set(

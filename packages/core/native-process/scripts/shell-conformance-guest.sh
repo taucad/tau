@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Inside a stock guest: install the real APT selector's profiled bwrap, then run the shell conformance target as an
+# Inside a stock guest: install the real APT selector's profiled bwrap, then run the shell conformance targets as an
 # unprivileged user against it. Called over SSH by shell-conformance-vm.sh with the distro as its argument.
 # Required files: ~/bwrap-fixture/*.deb, ~/node, ~/tau (tracked sources). Exit: the conformance target's status.
 set -euo pipefail
@@ -27,6 +27,14 @@ status=0
 NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
   TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/shell-conformance-receipt.json" \
   pnpm nx run native-process-core:test:shell-conformance --skip-nx-cache || status=$?
+# The host shell service's rows over the same provider and bwrap (H01-H06), with their own receipt.
+NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
+  TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/shell-service-conformance-receipt.json" \
+  pnpm nx run host:test:shell-conformance --skip-nx-cache || status=$?
+# The desktop Terminal's rows through the services host's terminal concern (W5), with their own receipt.
+NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
+  TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/terminal-conformance-receipt.json" \
+  pnpm nx run desktop:test:terminal-conformance --skip-nx-cache || status=$?
 # The run never relaxed the stock policy.
 [[ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || printf 'absent')" == "$before" ]]
 exit "$status"

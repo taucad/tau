@@ -92,7 +92,9 @@ import {
   kernelForkEnvAllowlist,
   sanitizeServicesContext,
 } from '#main/project-roots.js';
+import { registerPermissionBridge } from '#main/permission-bridge.js';
 import { createServicesBroker, rendererServicesConcerns, ServicesQuiescingError } from '#main/services-broker.js';
+import { registerTerminalRelay } from '#main/terminal-relay.js';
 import type { ServicesConcern } from '#main/services-broker.js';
 import { createGeometryBroker } from '#main/geometry-broker.js';
 import {
@@ -109,6 +111,7 @@ import { createOpenFileQueue } from '#main/open-files.js';
 import { readGeneratedImage } from '#main/generated-image.js';
 import { createBambuStudioService } from '#main/bambu-studio-service.js';
 import { readWindowState, writeWindowState } from '#main/window-state.js';
+import { isRendererTelemetryConsent, writeRendererTelemetryConsent } from '#main/telemetry-consent.js';
 import { prepareOtaProbe } from '#main/ota-probe.js';
 import { initializeDesktopErrorReporting } from '#main/error-reporting.js';
 import { prepareRouteQualificationProbe } from '#main/route-qualification-probe.js';
@@ -122,6 +125,7 @@ import { createDesktopKernelPreparer } from '#tau/native-preparation.js';
 import { desktopNativeKernelIds, startNativeStore } from '#tau/native-store.js';
 import {
   appIconThemeChannel,
+  telemetryConsentChannel,
   openDirectoryChannel,
   directoryGrantChannels,
   revealPathChannel,
@@ -938,6 +942,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
       ...(machinesEnabled ? { TAU_DESKTOP_MACHINES_DIR: machinesDirectory } : {}),
       ...legacyMachinesEnvironment,
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+      TAU_DESKTOP_PERMISSIONS_DIR: join(app.getPath('userData'), 'permissions'),
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
     createChannel: () => new MessageChannelMain(),
@@ -953,6 +959,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     log: (level, event, detail) => {
       log.log(level, event, detail);
     },
+    onUtilityFrame: (frame) => permissionBridge.accept(frame),
   });
   /* Q-streamed-host: a streamed program needs this computer awake for its whole run. */
   const stopKeepingAwake = machinesEnabled
@@ -1240,6 +1247,21 @@ const bootstrapElectronApp = async (): Promise<void> => {
     return false;
   };
 
+  /* W9: the permission selector's store lives in the services host; main validates and forwards. */
+  const permissionBridge = registerPermissionBridge({
+    handle: (channel, listener) => {
+      ipcMain.handle(channel, listener);
+    },
+    trusted,
+    roots,
+    send: (frame) => {
+      services.send(frame);
+    },
+    log: (level, event, detail) => {
+      log.log(level, event, detail);
+    },
+  });
+
   const updaterReady = Promise.withResolvers<DesktopUpdater>();
   ipcMain.handle(desktopUpdateChannels.snapshot, async (event) => {
     if (!trusted(event.senderFrame)) {
@@ -1313,6 +1335,18 @@ const bootstrapElectronApp = async (): Promise<void> => {
   ipcMain.handle('tau:auth:sign-out', async (event) => {
     if (trusted(event.senderFrame)) {
       await auth.signOut();
+    }
+  });
+  /* AR-W4-03c: main follows the renderer's resolved consent; persisted for the next launch's main producers. */
+  const telemetryConsentPath = join(app.getPath('userData'), 'telemetry-consent.json');
+  ipcMain.on(telemetryConsentChannel, (event, consent: unknown) => {
+    if (!trusted(event.senderFrame) || !isRendererTelemetryConsent(consent)) {
+      return;
+    }
+    try {
+      writeRendererTelemetryConsent(telemetryConsentPath, consent);
+    } catch (error) {
+      log.log('warn', 'telemetry-consent.write-failed', { message: String(error) });
     }
   });
   ipcMain.on(appIconThemeChannel, (event, theme: unknown) => {
@@ -1566,6 +1600,18 @@ const bootstrapElectronApp = async (): Promise<void> => {
       log.log('error', 'services.connect-failed', error);
       refuse('services.connect-failed');
     }
+  });
+
+  registerTerminalRelay({
+    ipcMain,
+    trusted,
+    isTrustedRoot: (root) => roots.isTrusted(root),
+    windowIdOf: (sender) => BrowserWindow.fromWebContents(sender)?.id,
+    connect: (context) => services.connect('terminal', context),
+    isQuiescing: (error) => error instanceof ServicesQuiescingError,
+    log: (level, event, detail) => {
+      log.log(level, event, detail);
+    },
   });
 
   /**

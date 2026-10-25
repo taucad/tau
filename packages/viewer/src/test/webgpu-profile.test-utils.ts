@@ -4,5 +4,6 @@ declare module 'vitest' {
   // oxlint-disable-next-line typescript/consistent-type-definitions -- Vitest's ProvidedContext is augmented through interface merging.
   interface ProvidedContext {
     webGpuProfile: RendererOutputProfile;
+    surfaceAa: 'on' | 'off';
   }
 }

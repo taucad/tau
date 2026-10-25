@@ -389,13 +389,12 @@ describe('geospec-runner.worker', () => {
     mockProjectTree('', ['main.geospec.ts', 'geospec.config.ts']);
     const runner = { close: vi.fn(async () => undefined), on: vi.fn(() => () => undefined), run: vi.fn() };
     nativeMocks.createNativeGeoSpecRunner.mockReturnValue(runner);
-    vi.doMock('geospec/config', () => ({
-      readGeoSpecConfig: vi.fn(async () => ({
-        status: 'applied',
-        configPath: 'geospec.config.ts',
-        options: { testTimeout: 900_000 },
-      })),
+    const readGeoSpecConfig = vi.fn(async (_options: { readonly createModuleVm?: unknown }) => ({
+      status: 'applied',
+      configPath: 'geospec.config.ts',
+      options: { testTimeout: 900_000 },
     }));
+    vi.doMock('geospec/config', () => ({ readGeoSpecConfig }));
 
     try {
       await import('#workers/geospec-runner.worker.js');
@@ -424,6 +423,13 @@ describe('geospec-runner.worker', () => {
         'testTimeout 900000 exceeds',
       );
       expect(runner.run).not.toHaveBeenCalled();
+      // GeoSpec has no browser VM: the worker injects Tau's esbuild VM into the config read and the runner (D11).
+      // Matched by name, because `vi.resetModules()` gives the worker its own module instance.
+      const esbuildModuleVm: unknown = expect.objectContaining({ name: 'createEsbuildModuleVm' });
+      expect(readGeoSpecConfig).toHaveBeenCalledWith(expect.objectContaining({ createModuleVm: esbuildModuleVm }));
+      expect(nativeMocks.createNativeGeoSpecRunner).toHaveBeenCalledWith(
+        expect.objectContaining({ createModuleVm: esbuildModuleVm }),
+      );
     } finally {
       vi.doUnmock('geospec/config');
     }

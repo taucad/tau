@@ -1,0 +1,30 @@
+{
+  "title": "seeded-runtime",
+  "interval": 60,
+  "rules": [
+    {
+      "uid": "seeded-absent-unconditioned",
+      "data": [
+        {
+          "refId": "A",
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "absent_over_time(tau_telemetry_ingest_entries_total{app=~\".*\",disposition=\"recorded\"}[30m])"
+          }
+        }
+      ]
+    },
+    {
+      "uid": "seeded-loki-dashboard-selector",
+      "data": [
+        {
+          "refId": "A",
+          "datasourceUid": "loki",
+          "model": {
+            "expr": "sum(count_over_time({service_name=~\"$service\"} | json | event=\"runtime.operation\" [5m]))"
+          }
+        }
+      ]
+    }
+  ]
+}

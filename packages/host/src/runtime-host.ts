@@ -8,7 +8,7 @@ import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
 /* The supervised child's other half: its native workers start in the daemon (D37). */
 /* oxlint-disable no-barrel-files/no-barrel-files -- this module is the `./runtime-host` package entry */
 export { createRuntimeChildRuntimeVerifier, createRuntimeChildWorkerLauncher } from '#runtime-child-workers.js';
-export type { RuntimeChildChannel } from '#runtime-child-workers.js';
+export type { RuntimeChildChannel, RuntimeChildWorkerLauncherOptions } from '#runtime-child-workers.js';
 export type {
   RuntimeChildRuntimeDamage,
   RuntimeChildWorker,

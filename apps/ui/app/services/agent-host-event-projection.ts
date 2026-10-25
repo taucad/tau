@@ -1351,6 +1351,7 @@ export const projectAgentHostEvent = (
     case 'model.invocation-prepared':
     case 'model.invocation-bound':
     case 'model.invocation-settled':
+    case 'approval.spent':
     case 'turn.changed':
     case 'turn.finalized':
     case 'turn.conflicted':

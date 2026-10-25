@@ -2,7 +2,9 @@ import type { CanvasProps, Renderer as FiberCompatibleGl } from '@react-three/fi
 import type { ThreeCamera } from '@taucad/three/camera';
 import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
 import type { RendererInstance } from '#graphics/three/renderer.js';
+import { isViewportWebGpu } from '#graphics/three/viewport-cad-renderer.js';
 import { createRenderer } from '#graphics/three/renderer.js';
+import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
 
 type TauR3fGlDefaults = Parameters<Extract<CanvasProps['gl'], (defaults: never) => unknown>>[0];
 
@@ -14,6 +16,8 @@ type TauR3fGlDefaults = Parameters<Extract<CanvasProps['gl'], (defaults: never) 
 export type TauR3fGlFactory = ((defaults: TauR3fGlDefaults) => Promise<FiberCompatibleGl>) & {
   /** Bind the Canvas ref; StrictMode ref replay keeps a reattached canvas alive. */
   readonly bindCanvas: (canvas: HTMLCanvasElement | undefined) => void;
+  /** Keep renderer bookkeeping alive until the mounted scene's passive cleanups finish. Returns its release callback. */
+  readonly retainScene: () => () => void;
   /** Whether this factory's mounted canvas has been removed. */
   readonly isRetired: () => boolean;
 };
@@ -23,7 +27,8 @@ export type TauR3fGlFactory = ((defaults: TauR3fGlDefaults) => Promise<FiberComp
  * R3F `gl` factory / props for {@link ResolvedGraphicsBackend}.
  *
  * Builds renderers via {@link createRenderer} with the **`viewport`** use case (MSAA,
- * WebGL log-depth / WebGPU reversed-Z — see `tau-renderer.ts`).
+ * WebGL log-depth / WebGPU reversed-Z — see `renderer.ts`). Node canvases use
+ * the viewer's composed post frame for depth/stencil; the canvas only encodes final color.
  *
  * R3F awaits this factory inside a `configure()` call that nothing awaits, so a renderer that cannot be created
  * (no WebGL context, or a context Safari hands back already lost) would surface as an unhandled rejection that no
@@ -43,7 +48,10 @@ export function createTauR3fGlProp(
   {
     onCreateError,
     preserveDrawingBuffer = false,
-  }: Readonly<{ onCreateError?: (error: Error) => void; preserveDrawingBuffer?: boolean }> = {},
+  }: Readonly<{
+    onCreateError?: (error: Error) => void;
+    preserveDrawingBuffer?: boolean;
+  }> = {},
 ): TauR3fGlFactory {
   let initialization: Promise<FiberCompatibleGl> | undefined;
   let ownedRenderer: RendererInstance | undefined;
@@ -51,6 +59,7 @@ export function createTauR3fGlProp(
   let hasCanvasBinding = false;
   let retired = false;
   let disposed = false;
+  let sceneOwners = 0;
   const pending = async (): Promise<never> =>
     new Promise<never>(() => {
       // Never settles while R3F waits for a retired or failed canvas.
@@ -59,18 +68,30 @@ export function createTauR3fGlProp(
   const isRetired = (): boolean => retired || (hasCanvasBinding && mountedCanvas === undefined);
   const retire = (): void => {
     retired = true;
-    if (ownedRenderer && !disposed) {
+    if (ownedRenderer && !disposed && sceneOwners === 0) {
       disposed = true;
       ownedRenderer.dispose();
-      // R3F loses the context only 500 ms after unmount, so a quick remount would hold two drawing buffers.
-      // `dispose()` frees what three tracks; losing the context now frees the drawing buffer too, and R3F's
-      // deferred call then finds nothing left to lose.
+      // Release after scene effects, before R3F's 500 ms deferred context loss. Disposing at DOM ref
+      // removal is too early: later cube-target cleanup still needs Three's renderer bookkeeping.
       if ('forceContextLoss' in ownedRenderer) {
         const loseContext = ownedRenderer.forceContextLoss.bind(ownedRenderer);
         ownedRenderer.forceContextLoss = (): void => undefined;
         loseContext();
       }
     }
+  };
+  const retainScene = (): (() => void) => {
+    sceneOwners += 1;
+    return () => {
+      // Passive effect replay can acquire a replacement before this release. The microtask also
+      // lets descendant passive cleanups finish even when this owner's cleanup ran first.
+      queueMicrotask(() => {
+        sceneOwners -= 1;
+        if (retired) {
+          retire();
+        }
+      });
+    };
   };
   const bindCanvas = (canvas: HTMLCanvasElement | undefined): void => {
     hasCanvasBinding = true;
@@ -88,16 +109,20 @@ export function createTauR3fGlProp(
   const initialize = async (canvas: HTMLCanvasElement): Promise<FiberCompatibleGl> => {
     let renderer: RendererInstance;
     try {
-      renderer = await createRenderer(
-        'viewport',
-        graphicsBackend,
-        preserveDrawingBuffer ? { canvas, preserveDrawingBuffer } : canvas,
-      );
+      renderer = await createRenderer('viewport', graphicsBackend, {
+        canvas,
+        preserveDrawingBuffer,
+        nodePipeline: true,
+      });
     } catch (error) {
       if (isRetired()) {
         return pending();
       }
-      const failure = error instanceof Error ? error : new Error(String(error));
+      const cause = error instanceof Error ? error : new Error(String(error));
+      const failure =
+        graphicsBackend === 'webgpu' && !(cause instanceof WebGpuInitializationError)
+          ? new WebGpuInitializationError(cause.message, { cause })
+          : cause;
       console.warn('[createTauR3fGlProp] Renderer creation failed:', failure);
       onCreateError?.(failure);
       return pending();
@@ -106,6 +131,13 @@ export function createTauR3fGlProp(
     if (isRetired()) {
       retire();
       return pending();
+    }
+    if (isViewportWebGpu(renderer)) {
+      // This canvas always uses the node post owner's explicit depth/stencil frame,
+      // including with AO off. Its only canvas draw is a depth-free final encoding.
+      // Set this before the first draw; leave standalone/offscreen factory users intact.
+      renderer.depth = false;
+      renderer.stencil = false;
     }
     // R3F reapplies DPR on every resize. WebGLRenderer.setPixelRatio also calls
     // setSize, clearing/reallocating the old buffer before R3F sizes the new one.
@@ -140,6 +172,6 @@ export function createTauR3fGlProp(
     }
     return renderer;
   };
-  return Object.assign(factory, { bindCanvas, isRetired });
+  return Object.assign(factory, { bindCanvas, retainScene, isRetired });
 }
 /* oxlint-enable unicorn-js/prevent-abbreviations */

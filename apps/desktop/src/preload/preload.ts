@@ -35,6 +35,7 @@ import { exposeElectronRuntime, relayElectronPorts } from '@taucad/runtime/elect
 
 import {
   appIconThemeChannel,
+  telemetryConsentChannel,
   openDirectoryChannel,
   directoryGrantChannels,
   revealPathChannel,
@@ -63,6 +64,8 @@ import type {
   QuickLookUsdzRequest,
 } from '#shared/quick-look.js';
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
+import { createTerminalBridge } from '#preload/terminal-bridge.js';
+import { permissionBridge } from '#preload/permission-bridge.js';
 
 const bootstrap = readBootstrap(process.argv);
 
@@ -188,6 +191,8 @@ contextBridge.exposeInMainWorld('tau', {
   requestServicesPort: (requestId: string, concern: string, context?: Readonly<Record<string, string>>): void => {
     ipcRenderer.send(servicesPortRelayTag, { requestId, concern, context });
   },
+  /* The Terminal's own seam: preload holds the session port and validates both directions (W5). */
+  terminal: createTerminalBridge(ipcRenderer),
   agentHost: {
     retain: async (workspaceRoot: string, projectId: string, attachmentId: string): Promise<void> => {
       await ipcRenderer.invoke(agentHostSessionChannels.retain, { workspaceRoot, projectId, attachmentId });
@@ -196,6 +201,7 @@ contextBridge.exposeInMainWorld('tau', {
       await ipcRenderer.invoke(agentHostSessionChannels.release, { workspaceRoot, projectId, attachmentId });
     },
   },
+  permissions: permissionBridge(ipcRenderer),
   machines: {
     /* The one route a secret takes: invoke → main → the utility's ceremony,
      * which saves it once the printer accepts it. Omit `accessCode` to reuse
@@ -268,6 +274,12 @@ contextBridge.exposeInMainWorld('tau', {
   appIcon: {
     setTheme: (theme: AppIconTheme): void => {
       ipcRenderer.send(appIconThemeChannel, theme);
+    },
+  },
+  telemetry: {
+    /* The renderer's resolved consent on every change; main persists it for its own producers (AR-W4-03c). */
+    setConsent: (consent: 'granted' | 'denied' | 'unknown'): void => {
+      ipcRenderer.send(telemetryConsentChannel, consent);
     },
   },
   window: {

@@ -67,18 +67,12 @@
     },
     {
       "inputNodes": {
-        "aNode": "<nodeRef>",
-        "bNode": "<nodeRef>"
+        "shaderNode": "<nodeRef>"
       },
-      "op": ">",
-      "type": "OperatorNode"
+      "type": "Node"
     },
     {
-      "nodeType": null,
-      "precision": null,
-      "type": "ConstNode",
-      "value": 0,
-      "valueType": "float"
+      "type": "Node"
     },
     {
       "inputNodes": {

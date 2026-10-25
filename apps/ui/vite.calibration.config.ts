@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import process from 'node:process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { defineConfig } from 'vite';
@@ -5,6 +7,10 @@ import react from '@vitejs/plugin-react';
 import { z } from 'zod';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite configuration lives outside the app alias root.
 import uiConfig from './vite.config.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Calibration-only experiment; never enters product configuration.
+import { transformRenderingAblation } from './app/routes/[__e2e].onshape-render-profile/ablation-transform.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Config shares the existing dev TLS identity; no implicit trust installation.
+import { httpsCertPemPath, httpsKeyPemPath } from './app/lib/certificates/https-certs-path.js';
 
 const output = path.resolve(import.meta.dirname, '../../out/render-calibration');
 const captureSchema = z.object({
@@ -13,13 +19,24 @@ const captureSchema = z.object({
   metadata: z.record(z.string(), z.unknown()),
 });
 
-/** Local-only diagnostic server. Neither fixture bytes nor capture endpoints enter the product build. */
+/**
+ * Diagnostics default to loopback; opt-in LAN HTTPS reuses the existing dev TLS identity.
+ * Neither fixture bytes nor capture endpoints enter the product build.
+ */
 export default defineConfig(() => {
   const config = uiConfig({ mode: 'test', command: 'serve' });
+  const isHttps = process.env['TAU_CALIBRATION_HTTPS'] === 'true';
   return {
     ...config,
     cacheDir: '../../node_modules/.vite/render-calibration',
     plugins: [
+      {
+        name: 'tau-render-ablation',
+        enforce: 'pre',
+        transform(source, id) {
+          return transformRenderingAblation(source, id);
+        },
+      },
       ...(config.plugins ?? []),
       react(),
       {
@@ -47,7 +64,13 @@ export default defineConfig(() => {
             void serveFixture();
           });
           server.middlewares.use('/calibration-capture', (request, response) => {
-            if (request.method !== 'POST' || request.headers.origin !== `http://${request.headers.host}`) {
+            // HTTP/2 carries the request authority in a pseudo-header instead of Host.
+            const authority = request.headers[':authority'] ?? request.headers.host;
+            if (
+              request.method !== 'POST' ||
+              typeof authority !== 'string' ||
+              request.headers.origin !== `${isHttps ? 'https' : 'http'}://${authority}`
+            ) {
               response.statusCode = 403;
               response.end('Same-origin POST required.');
               return;
@@ -91,6 +114,7 @@ export default defineConfig(() => {
     server: {
       ...config.server,
       host: '127.0.0.1',
+      ...(isHttps ? { https: { cert: readFileSync(httpsCertPemPath), key: readFileSync(httpsKeyPemPath) } } : {}),
       port: 3005,
       strictPort: true,
       allowedHosts: ['localhost'],

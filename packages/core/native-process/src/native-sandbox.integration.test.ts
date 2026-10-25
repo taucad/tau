@@ -14,12 +14,15 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -35,6 +38,7 @@ import {
   runInNativeSandbox,
   startNativeWorker,
 } from '#index.js';
+import { linuxChildrenTree } from '#child-resident.js';
 
 const writeRuleBlocks = /\((allow|deny) file-write\*\n((?:\s+\((?:subpath|literal) "[^"]*"\)\n)+)/g;
 
@@ -123,6 +127,20 @@ process.stdin.once('data', async (line) => {
 setInterval(() => {}, 1000);
 `;
 
+/** A worker that keeps `params.bytes` more touched memory on each `touch` request and answers every request. */
+const residentWorker = `
+const kept = [];
+process.stdout.write('{"protocolVersion":1,"type":"ready"}\\n');
+require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+  const request = JSON.parse(line);
+  if (request.method === 'touch') {
+    kept.push(Buffer.alloc(request.params.bytes, 1));
+  }
+  process.stdout.write(JSON.stringify({ protocolVersion: 1, requestId: request.requestId, result: {} }) + '\\n');
+});
+setInterval(() => {}, 1000);
+`;
+
 // A runner that claims to be CI must actually have the sandbox; skipping there would hide a broken boundary.
 describe.skipIf(!sandboxAvailable && process.env['CI'] === undefined)('native sandbox seam', () => {
   /* The daemon brokers its runtime children's launches through `startNativeWorker` (D37, North Star S2): a worker it
@@ -203,6 +221,100 @@ describe.skipIf(!sandboxAvailable && process.env['CI'] === undefined)('native sa
           rmSync(path, { force: true });
         }
       }
+    },
+    60_000,
+  );
+
+  /* PR-1c (T35): the observation-only resident sample reaches the worker through the real launch, about six levels below
+   * the wrapper, and measures what it touched. Linux only: macOS has no reader until it is verified on a macOS runner. */
+  it.runIf(process.platform === 'linux').each([
+    { path: 'spawned by its own session', launcher: undefined },
+    { path: 'started through an installed launcher (the daemon broker)', launcher: startNativeWorker },
+  ])(
+    "should sample the resident set of a contained worker $path, the worker's own process included",
+    async ({ launcher }) => {
+      installNativeWorkerLauncher(launcher);
+      const root = realpathSync(mkdtempSync(join(tmpdir(), 'tau-native-resident-')));
+      const workspacePath = join(root, 'workspace');
+      const artifactPath = join(root, 'artifacts');
+      mkdirSync(workspacePath);
+      mkdirSync(artifactPath);
+      const workerPath = join(workspacePath, 'resident-worker.cjs');
+      const touched = 96 * 1024 * 1024;
+      writeFileSync(workerPath, residentWorker);
+      const session = new NativeProcessSession<{ readonly message: string }>({
+        executablePath: process.execPath,
+        executableSha256: createHash('sha256').update(readFileSync(process.execPath)).digest('hex'),
+        arguments: [workerPath],
+        runtimePath: dirname(process.execPath),
+        workspacePath,
+        artifactPath,
+        resources: [],
+        protocolVersion: 1,
+        parseReady: () => undefined,
+        parseResponse: (value) => value as { readonly requestId: string; readonly result: unknown },
+        requestTimeout: 30_000,
+        maxArtifactBytes: 1024,
+        logger: createMockLogger(),
+        sessionName: 'Resident probe',
+        executableName: 'node',
+      });
+      const ask = async (method: string, params: Record<string, unknown> = {}): Promise<unknown> =>
+        session.request({ method, params, parseResult: (value) => value, signal: new AbortController().signal });
+      try {
+        await ask('idle');
+        const baseline = await session.sampleResident();
+        expect(baseline).toBeGreaterThan(0);
+
+        /* The worker's host pid: the process running this worker script, whose executable is the launch's. */
+        const worker = readdirSync('/proc')
+          .filter((name) => /^\d+$/u.test(name))
+          .map(Number)
+          .find((pid) => {
+            try {
+              return readFileSync(`/proc/${String(pid)}/cmdline`, 'utf8')
+                .split('\0')
+                .includes(workerPath);
+            } catch {
+              return false;
+            }
+          });
+        expect(worker, 'no host process runs the worker script').toBeDefined();
+        /* The same file, by inode: the link's spelling depends on the sandbox's mount namespace. */
+        const exe = statSync(`/proc/${String(worker)}/exe`);
+        const executable = statSync(process.execPath);
+        expect([exe.dev, exe.ino]).toEqual([executable.dev, executable.ino]);
+        /* Its ancestor that this process spawned is the wrapper the sample walks from. */
+        const parentOf = (pid: number): number => {
+          const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+          return Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
+        };
+        let wrapper = worker!;
+        const ancestry = [wrapper];
+        while (parentOf(wrapper) !== process.pid && parentOf(wrapper) > 1) {
+          wrapper = parentOf(wrapper);
+          ancestry.push(wrapper);
+        }
+        expect(parentOf(wrapper)).toBe(process.pid);
+        const tree = await linuxChildrenTree(wrapper, {
+          readFile: async (path) => readFile(path, 'utf8'),
+          table: async () => [],
+        });
+        expect(tree, `ancestry ${ancestry.join(' < ')}`).toContain(worker);
+
+        await ask('touch', { bytes: touched });
+        const sample = await session.sampleResident();
+        const expected = baseline! + touched;
+        expect(
+          Math.abs(sample! - expected),
+          `sample ${String(sample)}, expected ${String(expected)}`,
+        ).toBeLessThanOrEqual(expected * 0.25);
+      } finally {
+        installNativeWorkerLauncher(undefined);
+        await session.cleanup();
+        rmSync(root, { recursive: true, force: true });
+      }
+      await expect(session.sampleResident()).resolves.toBeUndefined();
     },
     60_000,
   );

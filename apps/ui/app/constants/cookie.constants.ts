@@ -18,6 +18,8 @@ export const cookieName = {
   codeInlayHints: 'code-inlay-hints',
   // Whether actions use pointer cursors instead of the platform default.
   pointerCursors: 'pointer-cursors',
+  // Whether the Terminal pane keeps its screen mirror and output live region (on unless the person turns it off).
+  terminalScreenReader: 'terminal-screen-reader',
 
   /* Layout */
   // Whether the sidebar is open.
@@ -91,6 +93,10 @@ export const cookieName = {
   converterOutputFormats: 'converter-output-formats',
   // Whether to download multiple files as ZIP.
   converterMultifileZip: 'converter-multifile-zip',
+
+  /* Privacy */
+  // The device's runtime telemetry preference: `on`, `off` (sticky) or unset (`on`).
+  telemetry: 'telemetry',
 
   /* Docs */
   // Whether the docs sidebar is open.

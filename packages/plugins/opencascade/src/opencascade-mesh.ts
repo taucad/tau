@@ -7,11 +7,21 @@
  */
 
 import { Accessor, WebIO, Primitive } from '@gltf-transform/core';
-import { compactTriangleIndices, normalizeGltfGeometryNames, srgbHexToLinearTuple } from '@taucad/geometry-core';
-import { cadMaterialDefaults } from '@taucad/runtime/types';
+import type { Document, Material } from '@gltf-transform/core';
+import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
+import {
+  compactTriangleIndices,
+  formatPrimitiveSelector,
+  normalizeGltfGeometryNames,
+  srgbHexToLinearTuple,
+  transformVertexArray,
+} from '@taucad/geometry-core';
+import { cadEdgeOverlayMaterialDefaults, cadMaterialDefaults } from '@taucad/runtime/types';
 import type { KernelIssue, TessellationReport } from '@taucad/runtime/types';
 import type { OpenCascadeInstance } from 'libcascade/init';
 import type { ShapeEntry } from '#opencascade.types.js';
+import { extractShapeEdges } from '#opencascade-edges.js';
+import type { ShapeEdges } from '#opencascade-edges.js';
 import {
   createOcScope,
   createTessellationDowngradedIssue,
@@ -30,6 +40,92 @@ type MeshOptions = {
   };
 };
 
+/** Edge lines to append to a written GLB, one per shape entry, in the GLB's output frame. */
+export type FinishShapesGlbOptions = Pick<MeshOptions, 'coordinateSystem' | 'unit'> & {
+  /** Each entry's B-rep edges from `extractShapeEdges`, aligned with the shape entries; omit for no lines. */
+  edges?: ReadonlyArray<ShapeEdges | undefined>;
+};
+
+const createEdgeMaterial = (document: Document): Material => {
+  const unlit = document.createExtension(KHRMaterialsUnlit);
+  return document
+    .createMaterial()
+    .setBaseColorFactor([...cadEdgeOverlayMaterialDefaults.baseColorFactor])
+    .setMetallicFactor(cadEdgeOverlayMaterialDefaults.metallicFactor)
+    .setRoughnessFactor(cadEdgeOverlayMaterialDefaults.roughnessFactor)
+    .setDoubleSided(cadEdgeOverlayMaterialDefaults.doubleSided)
+    .setExtension(KHRMaterialsUnlit.EXTENSION_NAME, unlit.createUnlit());
+};
+
+/**
+ * Append each entry's B-rep edges as one `LINES` primitive on the entry's mesh, in replicad's layout:
+ * de-indexed segments, `tauComponentKind: 'line'`, `node/<n>/edges` and `edgeGroups` counted in XYZ
+ * scalars. Without any edges the document is left as written. The writer names each node after its
+ * shape label, so nodes are matched by name, and an entry the writer drew no mesh for is skipped. The
+ * writer's own `LINES` for free edges are replaced, since the edge set samples those edges too.
+ *
+ * @param document - The written GLB, already named after its entries.
+ * @param entries - The shape entries the GLB was written from.
+ * @param options - Edges per entry and the GLB's output frame.
+ */
+const appendEdgeLines = (document: Document, entries: ShapeEntry[], options: FinishShapesGlbOptions): void => {
+  // Without lines the document stays exactly as written.
+  if (!options.edges?.some((edges) => edges?.edgeGroups.length)) {
+    return;
+  }
+  const root = document.getRoot();
+  const nodes = new Map(
+    root
+      .listNodes()
+      .filter((node) => node.getMesh())
+      .map((node) => [node.getName(), node]),
+  );
+  // The writer stores every mesh in its one GLB buffer.
+  const buffer = root.listBuffers()[0]!;
+  let material: Material | undefined;
+  for (const [index, entry] of entries.entries()) {
+    const edges = options.edges[index];
+    if (!edges?.edgeGroups.length) {
+      continue;
+    }
+    const node = nodes.get(requireShapeEntryName(entry));
+    if (!node) {
+      continue;
+    }
+    const mesh = node.getMesh()!;
+    for (const primitive of mesh.listPrimitives()) {
+      if (primitive.getMode() === Primitive.Mode['LINES']) {
+        primitive.dispose();
+      }
+    }
+    material ??= createEdgeMaterial(document);
+    const positions = document
+      .createAccessor()
+      .setType(Accessor.Type['VEC3']!)
+      .setBuffer(buffer)
+      .setArray(transformVertexArray(edges.lines, options));
+    mesh.addPrimitive(
+      document
+        .createPrimitive()
+        .setMode(Primitive.Mode['LINES']!)
+        .setAttribute('POSITION', positions)
+        .setMaterial(material)
+        .setExtras({
+          tauComponentKind: 'line',
+          tauComponentSelector: formatPrimitiveSelector(root.listNodes().indexOf(node), 'edges'),
+          edgeGroups: edges.edgeGroups,
+          tauEdgeGroupUnit: 'xyz-scalars-v1',
+        }),
+    );
+  }
+  // The replaced writer lines leave their accessors behind; drop every accessor nothing reads.
+  for (const accessor of root.listAccessors()) {
+    if (accessor.listParents().every((parent) => parent === root)) {
+      accessor.dispose();
+    }
+  }
+};
+
 /**
  * RWGltf_CafWriter may merge or reorder meshes relative to `ShapeEntry` order.
  * Assign `ShapeConfig.name` onto the first `min(meshes, entries)` glTF meshes,
@@ -38,13 +134,15 @@ type MeshOptions = {
  *
  * @param glb - Source GLB bytes emitted by OpenCascade.
  * @param entries - Shape entries whose names should be projected onto meshes.
+ * @param options - Edge lines to append, and the GLB's output frame.
  * @returns The tagged GLB.
  */
 const tagGlbMeshAndNodesFromShapeEntries = async (
   glb: Uint8Array<ArrayBuffer>,
   entries: ShapeEntry[],
+  options: FinishShapesGlbOptions,
 ): Promise<Uint8Array<ArrayBuffer>> => {
-  const io = new WebIO();
+  const io = new WebIO().registerExtensions([KHRMaterialsUnlit]);
   const document = await io.readBinary(glb);
   const meshes = document.getRoot().listMeshes();
   for (const mesh of meshes) {
@@ -84,6 +182,7 @@ const tagGlbMeshAndNodesFromShapeEntries = async (
       node.setName(meshName);
     }
   }
+  appendEdgeLines(document, entries, options);
   return io.writeBinary(document);
 };
 
@@ -250,18 +349,21 @@ export function writeShapesGlb(
 }
 
 /**
- * Name meshes and nodes after their shape entries and normalize geometry names, turning
- * {@link writeShapesGlb} output into the delivered GLB.
+ * Name meshes and nodes after their shape entries, append any edge lines and normalize geometry names,
+ * turning {@link writeShapesGlb} output into the delivered GLB.
  *
  * @param glb - Raw GLB bytes from {@link writeShapesGlb}.
  * @param shapes - The shape entries the GLB was written from.
+ * @param options - Edge lines per entry and the output frame the GLB was written in; without edges the
+ *   GLB carries no edge overlay.
  * @returns The delivered GLB.
  */
 export async function finishShapesGlb(
   glb: Uint8Array<ArrayBuffer>,
   shapes: ShapeEntry[],
+  options: FinishShapesGlbOptions = {},
 ): Promise<Uint8Array<ArrayBuffer>> {
-  const tagged = await tagGlbMeshAndNodesFromShapeEntries(glb, shapes);
+  const tagged = await tagGlbMeshAndNodesFromShapeEntries(glb, shapes, options);
   return normalizeGltfGeometryNames(tagged, {
     format: 'glb',
     materialNamePolicy: 'clear-all',
@@ -413,19 +515,20 @@ export type BudgetedGlb = {
 /**
  * Render a preview GLB within a triangle budget. The request resolves to absolute tolerances;
  * while the mesh exceeds the budget it is re-meshed one step coarser, at most three times, and
- * a `TESSELLATION_DOWNGRADED` warning names the requested and effective tolerances.
+ * a `TESSELLATION_DOWNGRADED` warning names the requested and effective tolerances. With
+ * `includeEdges`, the B-rep edges of the admitted mesh are appended as lines, outside the budget.
  *
  * @param oc - OpenCASCADE WASM instance
  * @param shapes - The shape entries to render.
- * @param options - Request, triangle budget and parallel meshing.
+ * @param options - Request, triangle budget, parallel meshing and whether to draw B-rep edges.
  * @returns The delivered GLB, its tessellation report and the downgrade warning when one was taken.
  */
 export async function renderShapesWithinBudget(
   oc: OpenCascadeInstance,
   shapes: ShapeEntry[],
-  options: { request: OpencascadeTessellationRequest; budget: number; inParallel?: boolean },
+  options: { request: OpencascadeTessellationRequest; budget: number; inParallel?: boolean; includeEdges?: boolean },
 ): Promise<BudgetedGlb> {
-  const { request, budget, inParallel } = options;
+  const { request, budget, inParallel, includeEdges } = options;
   const started = performance.now();
   const requested = resolveOpencascadeTessellation(oc, shapes, request);
   const { result, effective, downgraded } = tessellateWithinOcctBudget({
@@ -436,7 +539,11 @@ export async function renderShapesWithinBudget(
       return { glb, ...countGlbMesh(glb) };
     },
   });
-  const content = await finishShapesGlb(result.glb, shapes);
+  // The shapes still hold the admitted mesh, so edges sample the effective tolerances; lines are not triangles.
+  const edges = includeEdges
+    ? shapes.map((entry) => extractShapeEdges(oc, entry.shape, toMeshTolerances(effective)))
+    : undefined;
+  const content = await finishShapesGlb(result.glb, shapes, { edges });
   const delivered = countGlbMesh(content);
   return {
     content,

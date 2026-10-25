@@ -1,5 +1,6 @@
 import process from 'node:process';
 import { ensureWorktreeDatabase } from '@taucad/utils/worktree-database';
+import { parseRuntimeTelemetryMode, policyMaxAgeBounds, releasePattern } from '@taucad/telemetry';
 import { z } from 'zod';
 import { jsonCodec } from '#lib/zod.lib.js';
 
@@ -18,6 +19,40 @@ export const environmentSchemaBase = z.object({
   TAU_CLOUD_ENABLED: strictEnvironmentBoolean(false).describe(
     'Start Tau Cloud billing and funded-admission services. Defaults false for self-hosted deployments.',
   ),
+  /*
+   * Runtime Observability (AR-W4-01): the deployment's OWN runtime-telemetry switch, never derived from
+   * TAU_CLOUD_ENABLED. Unset is off, so a self-hosted API records nothing; Tau Cloud sets it per Fly config.
+   */
+  TAU_RUNTIME_TELEMETRY: unsetWhenEmpty(
+    z
+      .string()
+      .optional()
+      .refine(
+        (value) => {
+          try {
+            parseRuntimeTelemetryMode(value);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        { message: 'TAU_RUNTIME_TELEMETRY must be "on", "off" or "paused-until:<ISO 8601>"' },
+      ),
+  ).describe('Record runtime telemetry entries: on, off or paused-until:<ISO 8601>. Unset is off.'),
+  TAU_RUNTIME_TELEMETRY_MAX_AGE: unsetWhenEmpty(
+    z.coerce.number().int().min(policyMaxAgeBounds.minimum).max(policyMaxAgeBounds.maximum).optional(),
+  ).describe('Seconds clients may cache the telemetry policy answer; defaults to 900 when on and 86400 when off.'),
+  TAU_RUNTIME_RELEASES: unsetWhenEmpty(
+    z
+      .string()
+      .optional()
+      .refine(
+        (value) => value === undefined || value.split(',').every((release) => releasePattern.test(release.trim())),
+        {
+          message: 'TAU_RUNTIME_RELEASES must be a comma-separated list of semver or short-SHA releases, newest first',
+        },
+      ),
+  ).describe('Desktop, CLI and daemon releases admitted as runtime telemetry labels, newest first.'),
   /*
    * Charter D23: sync opens to the free tier only after the deployment gate
    * (DG1–DG4) closes. Off, a free account projects `canSyncFiles: false`
@@ -293,6 +328,12 @@ export const environmentSchemaBase = z.object({
   TAU_STORAGE_RECEIPT_PUBLIC_KEYS: unsetWhenEmpty(z.string().optional()).describe(
     'JSON array of one or two {kid, alg: "Ed25519", publicKeyPem}: tau-storage receipt verification keys',
   ),
+  TAU_STORAGE_AFFINITY: z
+    .enum(['off', 'rendezvous'])
+    .default('off')
+    .describe(
+      'DC2: rendezvous-rank each project over the tau-storage members (Flycast: the list tau-storage answers on /v1/members) and spill once',
+    ),
 
   // OpenTelemetry
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional().describe('OTLP endpoint for traces and logs'),

@@ -20,6 +20,7 @@ import {
   Matrix4,
   Object3D,
   Plane,
+  Sphere,
   Vector2,
   Vector3,
   Vector4,
@@ -260,8 +261,11 @@ export function createGltfSurfaceBatches(
   group.raycast = () => undefined;
   root.add(group);
   const batches = new Map<string, Batch>();
-  const slots = new Map<Mesh, { batch: Batch; slot: number }>();
+  // A canonical occurrence is known membership, not a missing structural cache entry.
+  const slots = new Map<Mesh, { batch: Batch; slot: number } | 'canonical' | 'unsupported-transform'>();
   const descendants = new Map<Object3D, Set<Mesh>>();
+  const affected = new Set<Mesh>();
+  const dirty = new Set<Batch>();
   const inverseRoot = new Matrix4();
   const local = new Matrix4();
   const originalLayers = new Map<Mesh, Layers>();
@@ -314,7 +318,9 @@ export function createGltfSurfaceBatches(
   const bounds = (batch: Batch): void => {
     batch.mesh.instanceMatrix.needsUpdate = true;
     batch.mesh.computeBoundingBox();
-    batch.mesh.computeBoundingSphere();
+    // The aggregate box already visits every instance. Its circumsphere is conservative
+    // for culling and avoids a second full instance walk.
+    batch.mesh.boundingBox!.getBoundingSphere((batch.mesh.boundingSphere ??= new Sphere()));
   };
   const sync = (): void => {
     if (disposed) {
@@ -325,7 +331,9 @@ export function createGltfSurfaceBatches(
     const memberships = new Map<string, Mesh[]>();
     const retainedKeys = new Set<string>();
     const compatibleCounts = new Map<string, number>();
+    slots.clear();
     for (const source of sources) {
+      slots.set(source, 'canonical');
       restore(source);
       const material = Array.isArray(source.material) ? undefined : source.material;
       const shading = material ? materialKey(material, true) : undefined;
@@ -336,9 +344,12 @@ export function createGltfSurfaceBatches(
         Boolean(source.customDepthMaterial) ||
         Boolean(source.customDistanceMaterial) ||
         source.onBeforeRender !== Object3D.prototype.onBeforeRender ||
-        source.onAfterRender !== Object3D.prototype.onAfterRender ||
-        !supportedMatrix(placement(source))
+        source.onAfterRender !== Object3D.prototype.onAfterRender
       ) {
+        continue;
+      }
+      if (!supportedMatrix(placement(source))) {
+        slots.set(source, 'unsupported-transform');
         continue;
       }
       const key = JSON.stringify([
@@ -359,7 +370,6 @@ export function createGltfSurfaceBatches(
       members.push(source);
       memberships.set(key, members);
     }
-    slots.clear();
     for (const [key, members] of memberships) {
       let batch = batches.get(key);
       const source = members[0]!;
@@ -427,21 +437,41 @@ export function createGltfSurfaceBatches(
     group,
     sync,
     syncMatrices(changed) {
-      if (disposed) {
+      if (disposed || changed.length === 0) {
         return;
       }
-      root.updateWorldMatrix(true, false);
+      if (edgeBatches) {
+        // The edge owner propagates the shared canonical subtrees before either presentation consumes them.
+        edgeBatches.syncMatrices(changed);
+      } else {
+        root.updateWorldMatrix(true, false);
+        for (const object of changed) {
+          object.updateWorldMatrix(true, true);
+        }
+      }
       inverseRoot.copy(root.matrixWorld).invert();
-      const affected = new Set(changed.flatMap((object) => [...(descendants.get(object) ?? [])]));
-      const dirty = new Set<Batch>();
+      affected.clear();
+      dirty.clear();
+      for (const object of changed) {
+        for (const source of descendants.get(object) ?? []) {
+          affected.add(source);
+        }
+      }
       for (const source of affected) {
         const entry = slots.get(source);
         if (!entry) {
           sync();
           return;
         }
-        const matrix = placement(source);
-        if (!supportedMatrix(matrix)) {
+        if (entry === 'canonical') {
+          continue;
+        }
+        const matrix = local.multiplyMatrices(inverseRoot, source.matrixWorld);
+        const supported = supportedMatrix(matrix);
+        if (entry === 'unsupported-transform' && !supported) {
+          continue;
+        }
+        if (entry === 'unsupported-transform' || !supported) {
           sync();
           return;
         }
@@ -457,7 +487,6 @@ export function createGltfSurfaceBatches(
       for (const batch of dirty) {
         bounds(batch);
       }
-      edgeBatches?.syncMatrices(changed);
     },
     dispose() {
       if (disposed) {
@@ -475,6 +504,8 @@ export function createGltfSurfaceBatches(
       batches.clear();
       slots.clear();
       descendants.clear();
+      affected.clear();
+      dirty.clear();
       group.removeFromParent();
       sceneBatches.delete(root);
     },
@@ -483,9 +514,22 @@ export function createGltfSurfaceBatches(
   return owner;
 }
 
-/** Pose-owner seam: synchronizes only occurrences below the changed canonical objects. */
+/**
+ * Propagates changed canonical placements and synchronizes their presentation occurrences when batching is active.
+ *
+ * @internal
+ * @param root - The canonical scene root owning the optional presentation batches.
+ * @param changed - Canonical objects whose local placement changed, with their descendants following that placement.
+ */
 export function syncGltfSurfaceBatchMatrices(root: Object3D, changed: readonly Object3D[]): void {
-  sceneBatches.get(root)?.syncMatrices(changed);
+  const batches = sceneBatches.get(root);
+  if (batches) {
+    batches.syncMatrices(changed);
+  } else {
+    for (const object of changed) {
+      object.updateWorldMatrix(true, true);
+    }
+  }
 }
 
 /** Disposes the current scene owner across in-place presentation revisions. */

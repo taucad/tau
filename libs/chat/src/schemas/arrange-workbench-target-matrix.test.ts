@@ -126,7 +126,7 @@ describe('approved workbench Target matrix', () => {
     ).toBe(false);
   });
 
-  it('should cover viewer views, thirteen panes, files, activation, closing, splits and lane intent', () => {
+  it('should cover viewer views, fourteen panes, files, activation, closing, splits and lane intent', () => {
     const viewer = {
       kind: 'split',
       direction: 'row',
@@ -147,7 +147,7 @@ describe('approved workbench Target matrix', () => {
     for (const pane of paneIds) {
       expect(arrangeWorkbenchInputSchema.safeParse({ open: [{ kind: 'pane', pane }] }).success, pane).toBe(true);
     }
-    expect(paneIds).toHaveLength(13);
+    expect(paneIds).toHaveLength(14);
     expect(
       arrangeWorkbenchInputSchema.safeParse({
         open: [

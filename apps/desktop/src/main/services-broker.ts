@@ -18,7 +18,7 @@ import type { MachineBindingOutcome } from '@taucad/runtime/machine';
 import type { DesktopKernelPreparation, DesktopKernelProgress } from '@taucad/types/desktop-native-kernels';
 
 /** Concerns the services utility serves, one dedicated port each. */
-export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem', 'machines'] as const;
+export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem', 'machines', 'terminal'] as const;
 
 /**
  * A concern the renderer may ask for a port to.
@@ -115,6 +115,8 @@ export type ServicesBrokerOptions = {
   readonly onSpawn?: (utility: UtilityProcess) => void;
   /** Diagnostics sink. */
   readonly log?: (level: 'info' | 'warn' | 'error', event: string, detail?: unknown) => void;
+  /** A utility frame the broker does not own, such as a permission answer (W9); true when it was consumed. */
+  readonly onUtilityFrame?: (frame: Readonly<Record<string, unknown>>) => boolean;
 };
 
 /** The singleton services utility, seen from main. */
@@ -164,6 +166,8 @@ export type ServicesBroker = {
   peekStreamingMachines(boundMilliseconds: number): Promise<readonly string[]>;
   /** Send a control frame (root admission, credential updates) to the utility. */
   post(message: unknown): void;
+  /** Send one request frame to the utility, forking it if needed; never replayed onto a later fork (W9). */
+  send(message: Readonly<Record<string, unknown> & { type: string }>): void;
   /** Whether a directory contains a retained, running or closing project host. */
   hasActiveDirectory(directory: string): boolean;
   /** Original project identity retained for an admitted execution root. */
@@ -358,6 +362,9 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
 
   const handleUtilityMessage = (spawned: UtilityProcess, frame: unknown): void => {
     if (!frame || typeof frame !== 'object') {
+      return;
+    }
+    if (options.onUtilityFrame?.(frame as Record<string, unknown>) === true) {
       return;
     }
     const { requestId, type, workspaceRoot } = frame as Record<string, unknown>;
@@ -878,6 +885,12 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       utilityInFlight = false;
       utilityTeardown = false;
       acceptingConnections = true;
+    },
+    send(message) {
+      if (!acceptingConnections) {
+        throw new Error('The services broker is quiescing and sends no requests.');
+      }
+      ensure().postMessage(message);
     },
     post(message) {
       const { type } = message as { type?: unknown };

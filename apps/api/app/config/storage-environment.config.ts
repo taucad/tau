@@ -51,6 +51,21 @@ export const storageEnvironmentSchema = environmentSchemaBase
       'A request body moving fewer bytes than this in one window is aborted',
     ),
     TAU_STORAGE_SLOW_BODY_WINDOW_SECONDS: positiveInteger(30).describe('The slow-body window'),
+    TAU_STORAGE_PACK_CACHE_FRACTION: z.coerce
+      .number()
+      .min(0)
+      .max(0.9)
+      .default(0)
+      .describe(
+        'Share of the lease filesystem the pack cache may hold (DC2), of free bytes plus what it holds; 0 runs without a cache',
+      ),
+    FLY_MACHINE_ID: z.string().optional().describe('Set by Fly: this Machine’s id, sent on every response (DC2)'),
+    TAU_STORAGE_MEMBERS_DNS: z
+      .string()
+      .optional()
+      .describe(
+        'TXT name listing every deployed tau-storage Machine (DC2 affinity), answered on /v1/members; unset answers none',
+      ),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
     /* eslint-enable @typescript-eslint/naming-convention -- end of environment variables */
   })

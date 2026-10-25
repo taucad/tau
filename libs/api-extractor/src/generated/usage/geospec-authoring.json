@@ -343,14 +343,6 @@
       "lookups": 1
     },
     {
-      "id": "typescript:GeometryProvenance.parameters",
-      "name": "parameters",
-      "score": 9,
-      "workspace": 4,
-      "examples": 4,
-      "lookups": 1
-    },
-    {
       "id": "typescript:describe.skip",
       "name": "skip",
       "score": 8,
@@ -663,30 +655,6 @@
       "lookups": 3
     },
     {
-      "id": "typescript:GeometrySource.format",
-      "name": "format",
-      "score": 3,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 3
-    },
-    {
-      "id": "typescript:GeometrySubject.brep",
-      "name": "brep",
-      "score": 3,
-      "workspace": 3,
-      "examples": 0,
-      "lookups": 0
-    },
-    {
-      "id": "typescript:GeometrySubjectMeshEvidence.format",
-      "name": "format",
-      "score": 3,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 3
-    },
-    {
       "id": "typescript:LoadModelCodeOptions.format",
       "name": "format",
       "score": 3,
@@ -727,44 +695,12 @@
       "lookups": 3
     },
     {
-      "id": "typescript:MeshEvidence.format",
-      "name": "format",
-      "score": 3,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 3
-    },
-    {
       "id": "typescript:Vec3",
       "name": "Vec3",
       "score": 3,
       "workspace": 1,
       "examples": 1,
       "lookups": 1
-    },
-    {
-      "id": "typescript:AabbMeters.max",
-      "name": "max",
-      "score": 2,
-      "workspace": 2,
-      "examples": 0,
-      "lookups": 0
-    },
-    {
-      "id": "typescript:AabbMeters.min",
-      "name": "min",
-      "score": 2,
-      "workspace": 2,
-      "examples": 0,
-      "lookups": 0
-    },
-    {
-      "id": "typescript:BoundingBoxStats.primitives",
-      "name": "primitives",
-      "score": 2,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 2
     },
     {
       "id": "typescript:CreateGeoSpecNativeModelLoaderOptions.engine",
@@ -943,32 +879,8 @@
       "lookups": 2
     },
     {
-      "id": "typescript:GeometryEvidenceDiagnostic.spatial",
-      "name": "spatial",
-      "score": 2,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 2
-    },
-    {
       "id": "typescript:LoadModelCodeOptions.code",
       "name": "code",
-      "score": 2,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 2
-    },
-    {
-      "id": "typescript:PrimitiveRecord.color",
-      "name": "color",
-      "score": 2,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 2
-    },
-    {
-      "id": "typescript:WatertightIrregularEdgeSample.color",
-      "name": "color",
       "score": 2,
       "workspace": 0,
       "examples": 0,
@@ -981,78 +893,6 @@
       "workspace": 0,
       "examples": 0,
       "lookups": 2
-    },
-    {
-      "id": "typescript:AabbMeters",
-      "name": "AabbMeters",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:BoundingBoxAxisExtremum.aabb",
-      "name": "aabb",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:BoundingBoxStats.center",
-      "name": "center",
-      "score": 1,
-      "workspace": 1,
-      "examples": 0,
-      "lookups": 0
-    },
-    {
-      "id": "typescript:BrepEvidence.boundingBox",
-      "name": "boundingBox",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:ClusterReport.aabb",
-      "name": "aabb",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:ClusterReport.primitives",
-      "name": "primitives",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:ConnectedComponentsFailure.clusters",
-      "name": "clusters",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:ConnectedComponentsResult.clusters",
-      "name": "clusters",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:ConnectedComponentsResult.count",
-      "name": "count",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
     },
     {
       "id": "typescript:CreateModelLoaderOptions.mesh",
@@ -1279,38 +1119,6 @@
       "lookups": 1
     },
     {
-      "id": "typescript:GeometryEvidenceDiagnostic.details",
-      "name": "details",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:GeometryStats.boundingBox",
-      "name": "boundingBox",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:GeometrySubject.diagnostics",
-      "name": "diagnostics",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:GeometrySubject.mesh",
-      "name": "mesh",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
       "id": "typescript:LoadModelCodeOptions.mesh",
       "name": "mesh",
       "score": 1,
@@ -1351,46 +1159,6 @@
       "lookups": 1
     },
     {
-      "id": "typescript:MeshQualityStats",
-      "name": "MeshQualityStats",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:MeshQualityStats.centerOfMass",
-      "name": "centerOfMass",
-      "score": 1,
-      "workspace": 1,
-      "examples": 0,
-      "lookups": 0
-    },
-    {
-      "id": "typescript:MeshTriangle.a",
-      "name": "a",
-      "score": 1,
-      "workspace": 1,
-      "examples": 0,
-      "lookups": 0
-    },
-    {
-      "id": "typescript:MeshTriangle.b",
-      "name": "b",
-      "score": 1,
-      "workspace": 1,
-      "examples": 0,
-      "lookups": 0
-    },
-    {
-      "id": "typescript:MeshTriangle.center",
-      "name": "center",
-      "score": 1,
-      "workspace": 1,
-      "examples": 0,
-      "lookups": 0
-    },
-    {
       "id": "typescript:MinimumDistanceFact.distance",
       "name": "distance",
       "score": 1,
@@ -1401,70 +1169,6 @@
     {
       "id": "typescript:MinimumDistanceQuery.subject",
       "name": "subject",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:PrimitiveRecord.aabb",
-      "name": "aabb",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:WatertightFailure.irregularEdgeClusters",
-      "name": "irregularEdgeClusters",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:WatertightIrregularEdgeCluster.aabb",
-      "name": "aabb",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:WatertightIrregularEdgeCluster.edgeCount",
-      "name": "edgeCount",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:WatertightIrregularEdgeCluster.samples",
-      "name": "samples",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:WatertightIrregularEdgeSample.center",
-      "name": "center",
-      "score": 1,
-      "workspace": 1,
-      "examples": 0,
-      "lookups": 0
-    },
-    {
-      "id": "typescript:WatertightIrregularEdgeSample.primitives",
-      "name": "primitives",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:WatertightResult.irregularEdgeClusters",
-      "name": "irregularEdgeClusters",
       "score": 1,
       "workspace": 0,
       "examples": 0,

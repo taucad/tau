@@ -112,6 +112,16 @@ describe('OTEL Prometheus exporter', () => {
   });
 });
 
+describe('OTEL metric views', () => {
+  it('should pass the named cardinality views to the SDK', async () => {
+    vi.resetModules();
+    await import('#telemetry/otel.js');
+    const { cardinalityViews } = await import('#telemetry/cardinality-views.js');
+
+    expect(sdkConfigs.at(-1)?.views).toStrictEqual(cardinalityViews);
+  });
+});
+
 describe('OTEL log export configuration', () => {
   it('should connect the configured OTLP exporter to the SDK log processor', async () => {
     vi.resetModules();

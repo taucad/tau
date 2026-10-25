@@ -128,6 +128,8 @@ type MainModule = Record<string, unknown>;
 
 type ExportInput = Parameters<NonNullable<typeof definition.export>>[0];
 
+// A view's default meshing: the uniform mesh.
+const uniformMesh = { meshAdaptivity: 0, meshRelax: false } as const;
 const definition = await resolveRuntimePluginDefinition('kernel', picovoxelKernel());
 
 /**
@@ -175,7 +177,11 @@ const evaluate = async (input: {
     {
       entryPath: 'main.ts',
       parameters: input.parameters ?? {},
-      options: { lane: input.lane ?? 'fast', ...(input.region === undefined ? {} : { region: input.region }) },
+      options: {
+        ...uniformMesh,
+        lane: input.lane ?? 'fast',
+        ...(input.region === undefined ? {} : { region: input.region }),
+      },
     },
     runtime,
     context,
@@ -337,7 +343,11 @@ describe('picovoxel kernel', () => {
       isolation.status = { crossOriginIsolated: false, sharedArrayBuffer: false, reason: 'no-secure-context' };
 
       const issues = await buildIssues(
-        definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context),
+        definition.evaluate(
+          { entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane: 'fast' } },
+          runtime,
+          context,
+        ),
       );
       expect(issues).toEqual([
         expect.objectContaining({
@@ -348,7 +358,7 @@ describe('picovoxel kernel', () => {
       expect(sessions.created).toHaveLength(0);
 
       const exact = await definition.evaluate(
-        { entryPath: 'main.ts', parameters: {}, options: { lane: 'exact' } },
+        { entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane: 'exact' } },
         runtime,
         context,
       );
@@ -361,7 +371,11 @@ describe('picovoxel kernel', () => {
       const runtime = createRuntime(sphere());
       const context = await initialize({ wasm: 'multi' }, runtime);
       const render = async (lane: 'fast' | 'exact') =>
-        definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane } }, runtime, context);
+        definition.evaluate(
+          { entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane } },
+          runtime,
+          context,
+        );
 
       await render('exact');
       expect(context.runtimes.size).toBe(0);
@@ -912,7 +926,11 @@ describe('picovoxel kernel', () => {
       const runtime = createRuntime({}, overrides);
       const context = await initialize({ wasm: 'serial' }, runtime);
       const issues = await buildIssues(
-        definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context),
+        definition.evaluate(
+          { entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane: 'fast' } },
+          runtime,
+          context,
+        ),
       );
 
       expect(issues[0]).toMatchObject({ message: 'syntax', code: 'BUNDLER_FAILED' });
@@ -945,7 +963,11 @@ describe('picovoxel kernel', () => {
       const runtime = createRuntime(module);
       const context = await initialize({ wasm: 'serial' }, runtime);
       const render = async () =>
-        definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'exact' } }, runtime, context);
+        definition.evaluate(
+          { entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane: 'exact' } },
+          runtime,
+          context,
+        );
       return { runtime, context, render };
     };
 
@@ -985,7 +1007,11 @@ describe('picovoxel kernel', () => {
       const runtime = createRuntime(sphere());
       const context = await initialize({ wasm: 'multi' }, runtime);
       const render = async (lane: 'exact' | 'fast') =>
-        definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane } }, runtime, context);
+        definition.evaluate(
+          { entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane } },
+          runtime,
+          context,
+        );
       await render('exact');
       await render('fast');
 
@@ -1149,7 +1175,11 @@ describe('picovoxel kernel', () => {
     it('should dispose every runtime on onDispose and skip one that never started', async () => {
       const runtime = createRuntime(sphere());
       const context = await initialize({ wasm: 'multi' }, runtime);
-      await definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'exact' } }, runtime, context);
+      await definition.evaluate(
+        { entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane: 'exact' } },
+        runtime,
+        context,
+      );
       const failed = Promise.reject(new Error('never started'));
       // Observed here so the rejection is handled; onDispose must still skip it.
       await expect(failed).rejects.toThrow('never started');
@@ -1223,7 +1253,7 @@ describe('picovoxel kernel', () => {
       abort.after = 2;
 
       const aborted = await definition
-        .evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context)
+        .evaluate({ entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane: 'fast' } }, runtime, context)
         .catch((error: unknown) => error);
 
       expect(aborted).toMatchObject({ name: 'RenderAbortedError' });
@@ -1260,7 +1290,7 @@ describe('picovoxel kernel', () => {
       });
       const context = await initialize({ wasm: 'multi' }, runtime);
       const result = await definition.evaluate(
-        { entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } },
+        { entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane: 'fast' } },
         runtime,
         context,
       );
@@ -1333,7 +1363,11 @@ describe('picovoxel kernel', () => {
       const runtime = createRuntime(sphereMinusBeam);
       const context = await initialize({ wasm: 'serial' }, runtime);
       const render = async () =>
-        definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context);
+        definition.evaluate(
+          { entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane: 'fast' } },
+          runtime,
+          context,
+        );
       abort.after = 1;
 
       const aborted = await render().catch((error: unknown) => error);
@@ -1371,7 +1405,7 @@ describe('picovoxel kernel', () => {
       });
 
       const result = await definition.evaluate(
-        { entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } },
+        { entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane: 'fast' } },
         runtime,
         context,
       );
@@ -1400,7 +1434,11 @@ describe('picovoxel kernel', () => {
         },
       });
 
-      await definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context);
+      await definition.evaluate(
+        { entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane: 'fast' } },
+        runtime,
+        context,
+      );
 
       // One createVoxels call, then the kernel's toMesh and its active-voxel count.
       expect(abort.checks).toBe(3);
@@ -1433,7 +1471,7 @@ describe('picovoxel kernel', () => {
       const runtime = createRuntime(module);
       const context = await initialize({ wasm: 'serial' }, runtime);
       await definition
-        .evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context)
+        .evaluate({ entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane: 'fast' } }, runtime, context)
         .catch(() => undefined);
 
       // The session is gone, so everything it allocated is freed with its Library instance.
@@ -1704,6 +1742,75 @@ describe('picovoxel kernel', () => {
             context,
           ),
         ).toThrow('tessellation: triangles must be a nonnegative number');
+        const adaptive = { ...snapshot, tessellation: { ...snapshot.tessellation!, adaptivity: 0.5, relax: true } };
+        expect(definition.deserializeHandle!({ serialized: adaptive }, runtime, context).tessellation).toEqual(
+          adaptive.tessellation,
+        );
+        for (const meshing of [
+          { adaptivity: 0.5 },
+          { relax: false },
+          { adaptivity: 0, relax: false },
+          { adaptivity: 1, relax: false },
+          { adaptivity: 0.5, relax: 'yes' },
+        ]) {
+          expect(() =>
+            definition.deserializeHandle!(
+              {
+                // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- Deliberately malformed cache bytes exercise restoration's trust boundary.
+                serialized: { ...snapshot, tessellation: { ...snapshot.tessellation!, ...meshing } } as Parameters<
+                  NonNullable<typeof definition.deserializeHandle>
+                >[0]['serialized'],
+              },
+              runtime,
+              context,
+            ),
+          ).toThrow('adaptivity in (0, 1) and a boolean relax must appear together');
+        }
+      } finally {
+        await definition.onDispose!(context);
+      }
+    });
+
+    it('refuses an adaptive view on the exact lane and under a PicoVoxel without adaptive meshing', async () => {
+      const runtime = createRuntime(sphere());
+      const context = await initialize({ wasm: 'serial' }, runtime);
+      try {
+        const render = async (lane: 'fast' | 'exact') =>
+          buildIssues(
+            definition.evaluate(
+              { entryPath: 'main.ts', parameters: {}, options: { lane, meshAdaptivity: 0.5, meshRelax: true } },
+              runtime,
+              context,
+            ),
+          );
+        expect(await render('exact')).toEqual([
+          expect.objectContaining({
+            code: 'REPRESENTATION_UNSUPPORTED',
+            details: expect.objectContaining({ refusal: 'PICOVOXEL_MESHING_EXACT_LANE', meshAdaptivity: 0.5 }),
+          }),
+        ]);
+        expect(await render('fast')).toEqual([
+          expect.objectContaining({
+            code: 'KERNEL_CAPABILITY_MISSING',
+            details: expect.objectContaining({ capability: 'PICOVOXEL_ADAPTIVE_MESHING', version: '0.1.0' }),
+          }),
+        ]);
+      } finally {
+        await definition.onDispose!(context);
+      }
+    });
+
+    it.each(['fast', 'exact'] as const)('meshes an unset adaptivity uniformly on the %s lane', async (lane) => {
+      const runtime = createRuntime(sphere());
+      const context = await initialize({ wasm: 'serial' }, runtime);
+      try {
+        const result = await definition.evaluate(
+          { entryPath: 'main.ts', parameters: { voxelSize: 1 }, options: { lane, meshRelax: false } },
+          runtime,
+          context,
+        );
+        expect(result.handle.tessellation).not.toHaveProperty('adaptivity');
+        expect(result.handle.tessellation).not.toHaveProperty('relax');
       } finally {
         await definition.onDispose!(context);
       }
@@ -2012,7 +2119,7 @@ it('should recycle a mechanism trap and propagate mechanism cancellation after f
   const context = await initialize({ wasm: 'serial' }, runtime);
   try {
     const result = await definition.evaluate(
-      { entryPath: 'main.ts', parameters: {}, options: { lane: 'exact' } },
+      { entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane: 'exact' } },
       runtime,
       context,
     );
@@ -2026,7 +2133,11 @@ it('should recycle a mechanism trap and propagate mechanism cancellation after f
       },
     });
     await expect(
-      definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'exact' } }, aborted, context),
+      definition.evaluate(
+        { entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane: 'exact' } },
+        aborted,
+        context,
+      ),
     ).rejects.toMatchObject({ name: 'RenderAbortedError' });
     expect(() => sessions.created[1]!.pico.memory).toThrow(/already been disposed/);
   } finally {
@@ -2178,12 +2289,64 @@ describe('picovoxel host recycle threshold', () => {
     const runtime = createRuntime(sphere());
     const context = await initialize({ wasm: 'serial', recycleHeapBytes: 512 * mebibyte }, runtime);
     sessions.heapBytes = 600 * mebibyte;
-    await definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context);
+    await definition.evaluate(
+      { entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane: 'fast' } },
+      runtime,
+      context,
+    );
 
     expect(context.runtimes.size).toBe(0);
     expect(runtime.logger.debug).toHaveBeenCalledWith(
       `PicoVoxel recycled the serial runtime: its heap reached ${String(600 * mebibyte)} bytes`,
     );
+    sessions.heapBytes = undefined;
+    await definition.onDispose!(context);
+  });
+});
+
+// T26 (PR-1b, AR-W15-01): the observation-only heap hook reads each warm runtime's linear memory and leaves the
+// recycle threshold, which reads the session's own heap, exactly as it was.
+describe('picovoxel observed heap', () => {
+  const mebibyte = 2 ** 20;
+
+  it('should observe no heap before the first render starts a runtime', async () => {
+    const context = await initialize({ wasm: 'serial' });
+
+    expect(definition.observedHeapBytes!(context)).toBeUndefined();
+    expect(definition.heapBytes).toBeUndefined();
+    await definition.onDispose!(context);
+  });
+
+  it("should observe the warm runtime's WebAssembly memory after a render, until disposal", async () => {
+    const runtime = createRuntime(sphere());
+    const context = await initialize({ wasm: 'serial' }, runtime);
+    await definition.evaluate(
+      { entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane: 'fast' } },
+      runtime,
+      context,
+    );
+    const observed = definition.observedHeapBytes!(context);
+
+    expect(context.runtimes.size).toBe(1);
+    expect(Number.isSafeInteger(observed)).toBe(true);
+    expect(observed).toBeGreaterThan(0);
+    expect(observed).toBe(sessions.created.at(-1)!.pico.module.HEAPU8.buffer.byteLength);
+    await definition.onDispose!(context);
+    expect(definition.observedHeapBytes!(context)).toBeUndefined();
+  });
+
+  it('should drop the heap of a recycled runtime', async () => {
+    const runtime = createRuntime(sphere());
+    const context = await initialize({ wasm: 'serial', recycleHeapBytes: 512 * mebibyte }, runtime);
+    sessions.heapBytes = 600 * mebibyte;
+    await definition.evaluate(
+      { entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane: 'fast' } },
+      runtime,
+      context,
+    );
+
+    expect(context.runtimes.size).toBe(0);
+    expect(definition.observedHeapBytes!(context)).toBeUndefined();
     sessions.heapBytes = undefined;
     await definition.onDispose!(context);
   });

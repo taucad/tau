@@ -1,5 +1,5 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- package entry point */
-export type { InstrumentType, MetricDefinition } from '#define-metric.js';
+export type { InstrumentType, MetricDefinition, MetricDeprecation } from '#define-metric.js';
 export { defineCounter, defineHistogram, defineGauge, defineUpDownCounter } from '#define-metric.js';
 export { TauMetrics } from '#registry.js';
 export {
@@ -36,3 +36,81 @@ export type { AgentTurnContext, ClientMetricEntry, IngestPayload } from '#ingest
 export { toPrometheusName, PrometheusNames, prometheusNameOf } from '#prometheus.js';
 export type { TelemetryBackend } from '#reporter.js';
 export { createReporter } from '#reporter.js';
+export * from '#runtime-vocabulary.js';
+export {
+  otherValue,
+  runtimeOperations,
+  runtimeOutcomes,
+  runtimeRoutes,
+  runtimeCallers,
+  runtimeTransports,
+  runtimeRealms,
+  heapSources,
+  deviceClasses,
+  runtimePlatforms,
+  runtimeOsClasses,
+  reuseResults,
+  runtimePhases,
+  factsMissingReasons,
+  parameterFeatures,
+  viewerEvents,
+  viewerBackends,
+  runtimeLimitIds,
+  runtimeLimitUnits,
+  dropReasons,
+  ingestDispositions,
+  runtimePopulations,
+  sizeClasses,
+  parameterClasses,
+  pluginCapabilities,
+  runtimePluginIds,
+  pluginUsageIds,
+  capabilityOf,
+  codeClasses,
+  runtimeCauses,
+  terminationCodes,
+  geoSpecVerifyCodes,
+  errorTypes,
+  codeClassOf,
+  causeOf,
+  runtimeVocabulary,
+  releasePattern,
+  admittedReleaseLimit,
+  RuntimeEntryName,
+  runtimeEntryNames,
+  runtimeOperationEntrySchema,
+  runtimeLateEntrySchema,
+  runtimeViewerEntrySchema,
+  deliveryHealthEntrySchema,
+  parseRuntimeEntry,
+  runtimeEntryEnvelopeSchema,
+  ingestBodyBounds,
+  flushReasons,
+  sizeClassOf,
+  parameterClassOf,
+  conversionPairOf,
+  fileFormatOf,
+  parseRuntimeTelemetryMode,
+  resolveRuntimeTelemetry,
+  policyMaxAgeBounds,
+  telemetryPolicyAnswerSchema,
+  ingestReceiptSchema,
+  usageCoverage,
+} from '#runtime-ingest.js';
+export type {
+  PluginUsageId,
+  PluginCapability,
+  CodeClass,
+  RuntimeCause,
+  ErrorType,
+  RuntimeOutcome,
+  RuntimeOperationRecord,
+  RuntimeLateRecord,
+  RuntimeViewerRecord,
+  DeliveryHealthRecord,
+  RuntimeEntryRecord,
+  RuntimeTelemetryMode,
+  TelemetryPolicyAnswer,
+  IngestReceipt,
+} from '#runtime-ingest.js';
+export { absentLabel, runtimeMetrics } from '#runtime-metrics.js';

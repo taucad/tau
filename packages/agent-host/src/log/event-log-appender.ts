@@ -499,6 +499,9 @@ export const createEventLogAppender = async (
    * fold, never per write.
    */
   let stampFloor = Number.NEGATIVE_INFINITY;
+  /** The bound the last fold kept terms up to, and the clamped start of the newest term it kept (round 21). */
+  let mergedBound = Number.NEGATIVE_INFINITY;
+  let mergedNewestStart = Number.NEGATIVE_INFINITY;
   const fold = (): void => {
     refoldAt = undefined;
     if (segments.length === 0) {
@@ -569,6 +572,8 @@ export const createEventLogAppender = async (
       },
     });
     const { rows } = bounded;
+    mergedBound = notAfter;
+    mergedNewestStart = bounded.newestStart ?? Number.NEGATIVE_INFINITY;
     /* Negative infinity stays itself: with nothing read, the wall clock alone stamps. */
     stampFloor = Math.max(bounded.newestStart ?? Number.NEGATIVE_INFINITY, newestHeldRow(foreign, held, notAfter)) + 1;
     for (const later of bounded.later) {
@@ -636,6 +641,31 @@ export const createEventLogAppender = async (
     }
   };
   await readSegments();
+  /**
+   * Whether this device's row, appended now, lands at the tail of a whole merge of the same rows (round 21;
+   * `appendMerged` in ChatLedger.lean, T14), so the merged fold may take it there: it extends the merge's last term at
+   * or after that term's start, within the bound the merge kept terms up to, names no message the merge left out as
+   * gone, and starts no run here that another device's segment holds. A row under an older term merges before every
+   * later term, so anything else folds the merge again whole, and the incremental history always equals a fresh fold
+   * (`t14_incremental_is_merge`).
+   *
+   * @param event - The row, before this log notes it.
+   * @returns Whether it extends the merged fold at its tail.
+   */
+  const extendsMergedTail = (event: AgentLogEvent): boolean => {
+    const at = Date.parse(event.recordedAt);
+    return (
+      mergedRows.at(-1)?.leaderEpoch === event.leaderEpoch &&
+      at >= mergedNewestStart &&
+      at <= mergedBound &&
+      !introducedBy(event).some((messageId) => mergedGone.has(messageId)) &&
+      !(
+        event.type === 'run.lifecycle' &&
+        !ranHere.has(event.runId) &&
+        foreignUnsettled.some((run) => run.runId === event.runId)
+      )
+    );
+  };
   /**
    * The history the model reads: the merge, unless it does not fold while this device's rows alone still do — two
    * devices that each ran the chat without the other's turns, written before a run fence existed.
@@ -796,16 +826,16 @@ export const createEventLogAppender = async (
         transition.commit();
         /* Rebuilt from the log when next needed, with this row. */
         lenient = undefined;
+        /* Round 21: the merged fold takes the row at its tail only where a whole merge puts it; else it folds again. */
+        const atTail = merged === undefined || extendsMergedTail(transition.event);
         /* The other fold follows tolerantly: a row naming another device's message does not apply to `own`. */
         if (folding !== own) {
           own.replay(transition.event);
-        } else if (merged !== undefined) {
+        } else if (merged !== undefined && atTail) {
           merged.replay(transition.event);
         }
-        if (merged !== undefined) {
-          if (mergedRows.at(-1)?.leaderEpoch !== transition.event.leaderEpoch) {
-            mergedTermStarts.push(mergedRows.length);
-          }
+        /* At the tail, the row extends the merge's last term, so no term starts here. */
+        if (merged !== undefined && atTail) {
           mergedRows.push(transition.event);
         }
         if (termFrontier?.leaderEpoch !== transition.event.leaderEpoch) {
@@ -818,6 +848,10 @@ export const createEventLogAppender = async (
         cursorOf.set(transition.event, events.length - 1);
         byteLength += bytes.byteLength;
         needsSeparator = false;
+        if (!atTail) {
+          merged = undefined;
+          fold();
+        }
         return { appended: true, endCursor: events.length };
       }),
     read: async () =>

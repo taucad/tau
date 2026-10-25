@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { pendingToolCalls } from '#host/run-history.js';
+import { openToolCalls } from '#host/run-history.js';
 import { createEventLogAppender } from '#log/event-log-appender.js';
 import { foreignRunStaleMilliseconds } from '#log/foreign-runs.js';
 import { abandonedTurnOf } from '#log/event-types.js';
@@ -364,7 +364,7 @@ describe('an event log with other devices’ segments (XD1)', () => {
       const held = await log.messages();
       expect(ids(held)).toEqual(['epoch-desktop-0', 'epoch-desktop-1', 'epoch-phone-0']);
       /* Its open call is not this device's to close as disconnected. */
-      expect(pendingToolCalls(held)).toEqual([]);
+      expect(openToolCalls(held)).toEqual([]);
 
       segments.current = [segment('device-desktop', [...desktopTurn, ...settled])];
       await log.refresh?.();
@@ -429,7 +429,7 @@ describe('an event log with other devices’ segments (XD1)', () => {
       const history = await log.messages();
 
       expect(ids(history)).toEqual(['epoch-desktop-0', 'epoch-desktop-1', 'epoch-phone-0', 'desktop-2-user']);
-      expect(pendingToolCalls(history)).toEqual([]);
+      expect(openToolCalls(history)).toEqual([]);
       expect(await log.foreignRuns?.()).toEqual([]);
       expect(await log.historyIntact()).toBe(true);
       clock.now = Date.parse('2026-10-23T10:05:00.000Z');
@@ -540,6 +540,61 @@ describe('an event log with other devices’ segments (XD1)', () => {
 
       expect(log.foreignRuns).toBeUndefined();
       expect(ids(await log.messages())).toEqual(['epoch-phone-0']);
+    });
+  });
+
+  /*
+   * Round 21, finding 3: the merge orders terms by their start, so a row this device appends under a term that began
+   * before another device's later term merges before that term, not at the merge's tail. The appender kept the merged
+   * fold incrementally by putting every own row at the tail, so `messages()` served a tool output after the other
+   * device's turn, a stray result, until the segments next changed.
+   */
+  describe('a row appended under a term older than another device’s', () => {
+    const ownTurn: readonly AgentLogEvent[] = [
+      said({ leaderEpoch: 'epoch-own', sequence: 0, at: '2026-10-23T09:00:00.000Z', text: 'own asks' }),
+      {
+        ...base('epoch-own', 1, '2026-10-23T09:00:01.000Z'),
+        type: 'message.appended',
+        message: {
+          id: 'own-call',
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 'call-read', name: 'read_file', arguments: {} }],
+          metadata: { stopReason: 'toolUse' },
+        },
+      },
+    ];
+    const laterPhoneTurn = [
+      said({ leaderEpoch: 'epoch-phone', sequence: 0, at: '2026-10-23T09:30:00.000Z', text: 'phone asks' }),
+    ];
+    const output: AgentLogEvent = {
+      ...base('epoch-own', 2, '2026-10-23T10:00:00.000Z'),
+      type: 'message.appended',
+      message: {
+        id: 'own-output',
+        role: 'tool-output',
+        toolCallId: 'call-read',
+        toolName: 'read_file',
+        content: 'ok',
+        isError: false,
+      },
+    };
+
+    it('should serve the history a fresh fold of the same rows serves', async () => {
+      const segments = { current: [segment('device-phone', laterPhoneTurn)] };
+      const { storage, bytes } = memoryEventLogStorage(bytesOf(ownTurn));
+      const log = await createEventLogAppender(
+        { ...storage, segments: async () => segments.current },
+        { now: () => clock.now },
+      );
+
+      await log.append(output);
+
+      const fresh = await createEventLogAppender(
+        { ...memoryEventLogStorage(bytes()).storage, segments: async () => segments.current },
+        { now: () => clock.now },
+      );
+      expect(ids(await fresh.messages())).toEqual(['epoch-own-0', 'own-call', 'own-output', 'epoch-phone-0']);
+      expect(ids(await log.messages())).toEqual(ids(await fresh.messages()));
     });
   });
 });

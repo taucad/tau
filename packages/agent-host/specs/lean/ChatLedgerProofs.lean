@@ -4345,6 +4345,7 @@ theorem t13_carry_kept (c : Carried) (e : Nat × Nat × List Nat) (he : e ∈ c)
     (hw : ∀ hb, op = .write e.2.1 hb → hb = true) (ha : op ≠ .answer e.1 false) : e ∈ (carryStep c op).1 := by
   cases op with
   | carry k r says => simp [carryStep, he]
+  | hold r => simpa [carryStep] using he
   | write r hb =>
     cases ht : carriedTaken c r hb with
     | none => simpa [carryStep, ht] using he
@@ -4387,5 +4388,249 @@ theorem t13_passed_taken_over (v : Verb) (t w : Bool) (foreign : List Passed) (a
   refine ⟨?_, by simp [standing], t10_approval_refused_after_takeover wrote⟩
   rw [t13_first_batch c k r says hc]
   exact t13_says_every_passed v t w foreign a says h f hf hw hs
+
+/-- **T13** (a batch with no place keeps it, round 21): a batch of the run's rows at which every place leaves a tool call
+open says nothing and keeps what the command carries for the run's next batch. -/
+theorem t13_hold_keeps (c : Carried) (r : Nat) : carryStep c (.hold r) = (c, []) := rfl
+
+/-! ## T14: the history is well formed (round 21)
+
+Every tool output the history holds follows its call directly, before any other message: the host's batches keep that
+by their kinds, and the turns a command carries go where no call is open, after every rewind of their batch, so they
+never part a call from its output and their own batch's rewind never cuts them. -/
+
+/-- The messages a batch's rows append. -/
+def opMsgs : List Op → List Msg
+  | [] => []
+  | .msg m :: rest => m :: opMsgs rest
+  | _ :: rest => opMsgs rest
+
+theorem wfFrom_append (o : List Nat) (a b : List Msg) :
+    wfFrom o (a ++ b) = (wfFrom o a && wfFrom (a.foldl openAfter o) b) := by
+  induction a generalizing o with
+  | nil => simp [wfFrom]
+  | cons m rest ih => simp [wfFrom, ih, Bool.and_assoc]
+
+theorem openCalls_append (a b : List Msg) : openCalls (a ++ b) = b.foldl openAfter (openCalls a) := by
+  simp [openCalls, List.foldl_append]
+
+theorem wf_append (a b : List Msg) : wf (a ++ b) = (wf a && wfFrom (openCalls a) b) := wfFrom_append [] a b
+
+theorem wf_take {h : List Msg} (k : Nat) (hw : wf h = true) : wf (h.take k) = true := by
+  have := wf_append (h.take k) (h.drop k)
+  rw [List.take_append_drop, hw] at this
+  exact (Bool.and_eq_true_iff.mp this.symm).1
+
+theorem says_wf (o : List Nat) (ss : List Nat) : wfFrom o (ss.map Msg.say) = true := by
+  induction ss generalizing o with
+  | nil => rfl
+  | cons s rest ih => simp [wfFrom, Msg.fits, ih]
+
+theorem says_open (ss : List Nat) : (ss.map Msg.say).foldl openAfter [] = [] := by
+  induction ss with
+  | nil => rfl
+  | cons s rest ih => simpa [openAfter] using ih
+
+/-- Outputs for every open call, in order, are well formed and close them all. -/
+theorem outs_wf (o : List Nat) : wfFrom o (o.map Msg.out) = true ∧ (o.map Msg.out).foldl openAfter o = [] := by
+  induction o with
+  | nil => exact ⟨rfl, rfl⟩
+  | cons c cs ih =>
+    have he : (c :: cs).erase c = cs := List.erase_cons_head c cs
+    simp only [List.map_cons, wfFrom, Msg.fits, openAfter, List.foldl_cons, he, List.contains_cons, BEq.rfl,
+      Bool.true_or, Bool.true_and]
+    exact ih
+
+theorem applyAll_append (h : List Msg) (a b : List Op) : applyAll h (a ++ b) = applyAll (applyAll h a) b :=
+  List.foldl_append
+
+theorem applyAll_noRewind (h : List Msg) (ops : List Op) (hn : ops.all (fun op => !op.isRewind) = true) :
+    applyAll h ops = h ++ opMsgs ops := by
+  induction ops generalizing h with
+  | nil => simp [applyAll, opMsgs]
+  | cons op rest ih =>
+    simp only [List.all_cons, Bool.and_eq_true] at hn
+    cases op with
+    | msg m =>
+      have := ih (h ++ [m]) hn.2
+      simp only [applyAll, List.foldl_cons, Op.apply] at this ⊢
+      rw [this]; simp [opMsgs]
+    | rewind k => simp [Op.isRewind] at hn
+    | other =>
+      have := ih h hn.2
+      simp only [applyAll, List.foldl_cons, Op.apply] at this ⊢
+      rw [this]; simp [opMsgs]
+
+theorem opMsgs_map (l : List Nat) (f : Nat → Msg) : opMsgs (l.map fun x => Op.msg (f x)) = l.map f := by
+  induction l with
+  | nil => rfl
+  | cons x rest ih => simp [opMsgs, ih]
+
+theorem map_msg_noRewind (l : List Nat) (f : Nat → Msg) : (l.map fun x => Op.msg (f x)).all (fun op => !op.isRewind) = true := by
+  simp [Op.isRewind]
+
+theorem placeAt_spec {h : List Msg} {ops : List Op} {i : Nat} (hp : placeAt h ops = some i) :
+    (ops.drop i).all (fun op => !op.isRewind) = true ∧ (openCalls (applyAll h (ops.take i))).isEmpty = true := by
+  unfold placeAt at hp
+  have := List.find?_some hp
+  simpa only [Bool.and_eq_true] using this
+
+/-- The batch with its carried turns, as the history it leaves: what the batch leaves up to their place, then the
+turns, then what the rest of the batch appends. -/
+theorem plan_after {h : List Msg} {says : List Nat} {ops ops' : List Op} (hp : plan h says ops = some ops') :
+    ∃ i, (openCalls (applyAll h (ops.take i))).isEmpty = true ∧
+      applyAll h ops = applyAll h (ops.take i) ++ opMsgs (ops.drop i) ∧
+      applyAll h ops' = applyAll h (ops.take i) ++ says.map Msg.say ++ opMsgs (ops.drop i) := by
+  unfold plan at hp
+  cases hi : placeAt h ops with
+  | none => simp [hi] at hp
+  | some i =>
+    simp only [hi, Option.map_some, Option.some.injEq] at hp
+    subst hp
+    have ⟨hn, ho⟩ := placeAt_spec hi
+    refine ⟨i, ho, ?_, ?_⟩
+    · rw [← applyAll_noRewind _ _ hn, ← applyAll_append, List.take_append_drop]
+    · rw [applyAll_append, applyAll_append, applyAll_noRewind _ _ (map_msg_noRewind says Msg.say),
+        applyAll_noRewind _ _ hn, opMsgs_map]
+
+/-- **T14** (carried turns keep the history well formed): a batch that leaves the history well formed still does
+with the turns its command carries at their place. -/
+theorem t14_plan_well_formed (h : List Msg) (says : List Nat) (ops ops' : List Op)
+    (hw : wf (applyAll h ops) = true) (hp : plan h says ops = some ops') : wf (applyAll h ops') = true := by
+  obtain ⟨i, ho, h1, h2⟩ := plan_after hp
+  rw [h1, wf_append] at hw
+  rw [h2, wf_append, wf_append]
+  have hc : openCalls (applyAll h (ops.take i)) = [] := List.isEmpty_iff.mp ho
+  rw [openCalls_append, hc, says_open, says_wf]
+  rw [hc] at hw
+  simpa using hw
+
+/-- **T14** (a carried turn survives its batch's rewind): the turns a command carries are in the history its batch
+leaves, whatever rewinds the batch holds; they go after every one of them. -/
+theorem t14_carried_survive_rewind (h : List Msg) (says : List Nat) (ops ops' : List Op)
+    (hp : plan h says ops = some ops') (s : Nat) (hs : s ∈ says) : Msg.say s ∈ applyAll h ops' := by
+  obtain ⟨i, -, -, h2⟩ := plan_after hp
+  rw [h2]
+  exact List.mem_append_left _ (List.mem_append_right _ (List.mem_map_of_mem hs))
+
+/-- A Resume's rows, as the history they leave: what it keeps, an output for each call that leaves open, and the
+reminder when there are any. -/
+theorem resume_after (h : List Msg) (cut : Bool) (r : Nat) :
+    let kept := if cut then h.take (h.length - 1) else h
+    applyAll h ((Batch.resume cut r).ops h) =
+      kept ++ (openCalls kept).map Msg.out ++ (if (openCalls kept).isEmpty then [] else [Msg.say r]) := by
+  intro kept
+  have hk : applyAll h ([Op.other] ++ (if cut then [Op.rewind (h.length - 1)] else [])) = kept := by
+    cases cut <;> simp [applyAll, Op.apply, kept]
+  simp only [Batch.ops, List.isEmpty_map]
+  rw [applyAll_append, applyAll_append, hk, applyAll_noRewind _ _ (map_msg_noRewind _ Msg.out), opMsgs_map]
+  cases (openCalls kept).isEmpty <;> simp [applyAll, Op.apply, kept]
+
+theorem resume_closes (h : List Msg) (cut : Bool) (r : Nat) :
+    openCalls (applyAll h ((Batch.resume cut r).ops h)) = [] := by
+  rw [resume_after]
+  generalize hk : (if cut then h.take (h.length - 1) else h) = kept
+  rw [openCalls_append, openCalls_append, (outs_wf (openCalls kept)).2]
+  cases (openCalls kept).isEmpty <;> simp [openAfter]
+
+/-- Every batch the host writes by its kinds keeps a well-formed history well formed. -/
+theorem batch_wf (h : List Msg) (b : Batch) (hw : wf h = true) (hl : b.legal h = true) :
+    wf (applyAll h (b.ops h)) = true := by
+  cases b with
+  | turn id => simp [Batch.ops, applyAll, Op.apply, wf_append, hw, wfFrom, Msg.fits]
+  | retry k id => simp [Batch.ops, applyAll, Op.apply, wf_append, wf_take k hw, wfFrom, Msg.fits]
+  | reply cs => simp [Batch.ops, applyAll, Op.apply, wf_append, hw, wfFrom, Msg.fits]
+  | output c =>
+    simp only [Batch.legal] at hl
+    simp only [Batch.ops, applyAll, List.foldl_cons, List.foldl_nil, Op.apply, wf_append, hw, wfFrom, Msg.fits, hl,
+      Bool.and_self]
+  | resume cut r =>
+    rw [resume_after]
+    generalize hk : (if cut then h.take (h.length - 1) else h) = kept
+    have hwk : wf kept = true := by
+      rw [← hk]; cases cut
+      · exact hw
+      · exact wf_take _ hw
+    rw [wf_append, wf_append, hwk, (outs_wf _).1, openCalls_append, (outs_wf _).2]
+    cases (openCalls kept).isEmpty <;> simp [wfFrom, Msg.fits]
+  | other => simpa [Batch.ops, applyAll, Op.apply] using hw
+
+/-- **T14** (every reachable history is well formed): whatever batches the host writes by their kinds, each with the
+turns its command carries at their place or waiting for the next, every tool output in the history follows its call
+directly, before any other message, so the provider is never sent a stray tool result. -/
+theorem t14_reachable_well_formed {h : List Msg} (hr : Reached h) : wf h = true := by
+  induction hr with
+  | nil => rfl
+  | step b says _ hl ih =>
+    have hb := batch_wf _ b ih hl
+    cases hp : plan _ says (b.ops _) with
+    | none => simpa using hb
+    | some ops' =>
+      simp only [Option.getD_some]
+      exact t14_plan_well_formed _ _ _ _ hb hp
+
+theorem placeAt_end (h : List Msg) (ops : List Op) (he : openCalls (applyAll h ops) = []) :
+    (placeAt h ops).isSome = true := by
+  unfold placeAt
+  rw [List.find?_isSome]
+  exact ⟨ops.length, List.mem_range.mpr (Nat.lt_succ_self _), by simp [he]⟩
+
+/-- **T14** (a turn, a Retry and a Resume say what they carry at once): their first batch always has a place, so only a
+batch that leaves a call open everywhere (an approval's, before its tool returns) makes carried turns wait. -/
+theorem t14_turns_place (h : List Msg) (id k r : Nat) (cut : Bool) :
+    (placeAt h ((Batch.turn id).ops h)).isSome = true ∧ (placeAt h ((Batch.retry k id).ops h)).isSome = true ∧
+      (placeAt h ((Batch.resume cut r).ops h)).isSome = true := by
+  refine ⟨placeAt_end _ _ ?_, placeAt_end _ _ ?_, placeAt_end _ _ (resume_closes _ _ _)⟩
+  · simp [Batch.ops, applyAll, Op.apply, openCalls_append, openAfter]
+  · simp [Batch.ops, applyAll, Op.apply, openCalls_append, openAfter]
+
+/-- **T14** (round 21's finding 1): the turns a Resume carried at the head of its batch, before the outputs that close
+the calls the history left open, part a call from its output, and the provider rejects the stray result; at their
+place they follow the outputs. -/
+theorem t14_head_parts_call :
+    let h := [Msg.say 0, .call [1]]
+    let ops := (Batch.resume false 7).ops h
+    wf (applyAll h ([Op.msg (.say 9)] ++ ops)) = false ∧ (plan h [9] ops).map (fun o => wf (applyAll h o)) = some true ∧
+      plan h [9] ops = some [.other, .msg (.out 1), .msg (.say 9), .msg (.say 7)] := by
+  decide
+
+/-- **T14** (round 21's finding 2): a Resume that rewinds a transport failure's marker names what it keeps before
+anything is carried, so turns carried at the head of its batch are cut by its own rewind; at their place, after the
+rewind, they stay. -/
+theorem t14_head_cut_by_rewind :
+    let h := [Msg.say 0, .call []]
+    let ops := (Batch.resume true 7).ops h
+    Msg.say 9 ∉ applyAll h ([Op.msg (.say 9)] ++ ops) ∧
+      (plan h [9] ops).map (fun o => decide (Msg.say 9 ∈ applyAll h o)) = some true := by
+  decide
+
+/-- **T14** (an approval's turns wait): while the paused call is open, an approval's rows have no place for what it
+carries; the tool's output does, right after it. -/
+theorem t14_approval_waits :
+    placeAt [Msg.say 0, .call [1]] [.other] = none ∧ placeAt [Msg.say 0, .call [1]] [.msg (.out 1)] = some 1 := by
+  decide
+
+/-- **T14** (only the tail's calls are open): a call another message already followed is the adapter's to answer; an
+output written for it now, as a Resume that closed every unanswered call did, is a stray result. -/
+theorem t14_no_late_output :
+    openCalls [Msg.say 0, .call [1], .say 5, .call []] = [] ∧
+      wf [Msg.say 0, .call [1], .say 5, .call [], .out 1] = false := by
+  decide
+
+/-- **T14** (the appended row's place, round 21's finding 3): a row this device appends under an older term merges
+before every later term, so the appender folds the whole merge again rather than append it at the tail; under the
+merge's last term it appends. -/
+theorem t14_incremental_is_merge :
+    let segs := [(0, [mr 1 0 10]), (1, [mr 2 0 20])]
+    (appendMerged segs 0 (merge segs) (mr 1 1 30)).map Row.key = [(1, 0), (1, 1), (2, 0)] ∧
+      (merge segs ++ [mr 1 1 30]).map Row.key = [(1, 0), (2, 0), (1, 1)] ∧
+      appendMerged segs 1 (merge segs) (mr 2 1 30) = merge [(0, [mr 1 0 10]), (1, [mr 2 0 20, mr 2 1 30])] := by
+  decide
+
+/-- **T14** (refolded, it is the merge): a row whose term does not end the merge folds the whole merge again. -/
+theorem t14_refold_is_merge (segs : List (Nat × List Row)) (dev : Nat) (merged : List Row) (e : Row)
+    (h : merged.getLast?.map Row.term ≠ some e.term) :
+    appendMerged segs dev merged e = merge (segs.map fun s => if s.1 = dev then (s.1, s.2 ++ [e]) else s) := by
+  simp [appendMerged, h]
 
 end ChatLedger

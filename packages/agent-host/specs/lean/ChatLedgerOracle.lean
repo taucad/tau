@@ -36,7 +36,15 @@ A row is `<term> <seq> <run> <kind> <arg> <ms> <epoch> <attempt>` (`epoch`/`atte
   XADMIT <verb> <takenOver> <wrote> <runs|->   the one admission of a start, resume or approval past other devices'
                                runs, each `<run>:<abandoned>:<said>:<words>` → `QX taken-over|held|<admission> <says|->`
   CARRY <steps|->              what admitted commands' first batches carry: steps `c<command>.<run>.<says, + apart|->`,
-                               `w<run>.<heartbeat>`, `a<command>.<applied>`   → `QC <each write's says, + apart|->,…>`
+                               `w<run>.<heartbeat>`, `h<run>` (a batch with no place for them, round 21),
+                               `a<command>.<applied>`   → `QC <each write's says, + apart|->,…>`
+  PLAN <history|-> <says|-> <rows|->   where a batch's carried turns go (round 21): history messages `c<calls|->`,
+                               `o<call>`, `s<id>`; rows those, `k<keep>` a rewind, `l` no message
+                               → `QW <open calls|-> <place|-> <well formed after> <carried survive>`
+  RESUMEB <history|-> <cut>    a Resume's batch over that history, its last message rewound or not (round 21)
+                               → `QZ <calls it closes|-> <well formed after>`
+  APPENDM <device> <row>       the merged rows after this device appends the row to its segment (round 21)
+                               → `MA <keys>`
   STAND <bound> <ask> <changed> <now> <quiet|-> <takenOver>   where another device's run stands
                                                                            → `QF <standing> [changesAt]`
   PULL <cap> <throttle> <clock:size:quiet|-> <now> <size>   a pull's record of one segment (chat-ref.ts `notePull`)
@@ -150,6 +158,21 @@ def foldName : ReadFold → String
   | .reset .cursorAhead => "reset:cursor-ahead"
   | .reset .identityMismatch => "reset:identity-mismatch"
   | .reset .clamped => "reset:clamped"
+
+/-- A history message of a `PLAN` line: `c<calls, + apart|->`, `o<call>`, `s<id>`. -/
+def msgOf (t : String) : Msg :=
+  let rest := (t.drop 1).toString
+  match (t.take 1).toString with
+  | "c" => .call (if rest == "-" then [] else (rest.splitOn "+").map num)
+  | "o" => .out (num rest)
+  | _ => .say (num rest)
+
+/-- A batch row of a `PLAN` line: a message, `k<keep>` a rewind, `l` a row that is no message. -/
+def opOf (t : String) : Op :=
+  match (t.take 1).toString with
+  | "k" => .rewind (num (t.drop 1).toString)
+  | "l" => .other
+  | _ => .msg (msgOf t)
 
 structure St where
   file : File := {}
@@ -283,12 +306,30 @@ def runLine (st : St) (line : String) : St × List String :=
           let says := args.getD 2 "-"
           .carry a (num b) (if says == "-" then [] else (says.splitOn "+").map num)
         | "w" => .write a (b == "1")
+        | "h" => .hold a
         | _ => .answer a (b == "1")
       let (next, out) := carryStep acc.1 op
       match op with
-      | .write _ _ => (next, acc.2 ++ [if out.isEmpty then "-" else "+".intercalate (out.map toString)])
+      | .write _ _ | .hold _ => (next, acc.2 ++ [if out.isEmpty then "-" else "+".intercalate (out.map toString)])
       | _ => (next, acc.2)) ([], [])
     (st, [s!"QC {listText said}"])
+  | ["PLAN", hs, ss, os] =>
+    let h := (if hs == "-" then [] else hs.splitOn ",").map msgOf
+    let says := (if ss == "-" then [] else ss.splitOn "+").map num
+    let ops := (if os == "-" then [] else os.splitOn ",").map opOf
+    let place := placeAt h ops
+    let after := applyAll h ((plan h says ops).getD ops)
+    let survive := place.isSome && says.all (fun s => after.contains (.say s))
+    let at_ := match place with | some i => toString i | none => "-"
+    (st, [s!"QW {listText ((openCalls h).map toString)} {at_} {bit (wf after)} {bit survive}"])
+  | ["RESUMEB", hs, cut] =>
+    let h := (if hs == "-" then [] else hs.splitOn ",").map msgOf
+    let ops := (Batch.resume (cut == "1") 7).ops h
+    let closed := ops.filterMap fun op => match op with | .msg (.out c) => some (toString c) | _ => none
+    (st, [s!"QZ {listText closed} {bit (wf (applyAll h ops))}"])
+  | "APPENDM" :: d :: rest =>
+    let e := rowOf rest
+    (st, [s!"MA {listText ((appendMerged st.segs (num d) (merge st.segs) e).map fun r => s!"{r.term}:{r.seq}")}"])
   | ["PULL", cap, th, prior, n, sz] =>
     let rec_ := if prior == "-" then none else
       match (prior.splitOn ":").map num with

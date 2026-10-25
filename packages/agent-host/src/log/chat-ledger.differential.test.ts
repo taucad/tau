@@ -17,7 +17,7 @@
  *   retains nothing (`C` and `K` in merge traces only).
  * - Commands: `E` append through the appender, `W` another writer's row, `WJ` a junk line, `TEAR` a torn tail,
  *   `RELOAD`, `LEDGER`, `SETTLE`, `LIFE`, `RESOLVE`, `PREP`, `BATCH`, `READER`, `READ`, `DELIVER`, `DELIVER1`, `RLEDGER`, `SEG`,
- *   `ROW`, `MERGE`, `MERGEB`, `MH`, `TABLES`, `ADMIT`, `TERMOF`, `TERMS`, `XADMIT`, `CARRY`, `STAND` (and `PULL`, which the
+ *   `ROW`, `MERGE`, `MERGEB`, `MH`, `TABLES`, `ADMIT`, `TERMOF`, `TERMS`, `XADMIT`, `CARRY`, `PLAN`, `RESUMEB`, `APPENDM`, `STAND` (and `PULL`, which the
  *   revisions package's `notePull` answers from `corpus/pull-records.trace`).
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -36,6 +36,7 @@ import {
 } from '#host/tau-agent-host.js';
 import type { CarriedTurns, ChatTerms, PassedRun, TermWrite } from '#host/tau-agent-host.js';
 import type { ChatRunRow } from '#host/chat-run-events.js';
+import { carriedPlace, historyAfter, historyWellFormed, openToolCalls } from '#host/run-history.js';
 import {
   chatRunState,
   emptyChatLedger,
@@ -52,7 +53,7 @@ import type { EventLogAppender } from '#log/event-log-appender.js';
 import { memoryEventLogStorage } from '#log/event-log-storage.fixture.js';
 import { classifyLogRow } from '#log/event-schema.js';
 import { abandonedTurnOf } from '#log/event-types.js';
-import type { AgentLogEvent, RowKey } from '#log/event-types.js';
+import type { AgentLogEvent, ProviderMessage, RowKey } from '#log/event-types.js';
 import lifecycleTable from '#log/run-lifecycle.legality.json' with { type: 'json' };
 import operationTable from '#log/run-operation.legality.json' with { type: 'json' };
 import settlementTable from '#log/run-settlement.legality.json' with { type: 'json' };
@@ -1141,7 +1142,7 @@ const crossAdmissionTrace = (): Trace => {
 const carryTrace = (): Trace => {
   const text = ['T carried'];
   const expected = ['T carried'];
-  const steps = ['c1.1.5+6', 'c2.1.7', 'c3.2.-', 'w1.0', 'w1.1', 'w2.0', 'a1.0', 'a1.1', 'a2.0'];
+  const steps = ['c1.1.5+6', 'c2.1.7', 'c3.2.-', 'w1.0', 'w1.1', 'w2.0', 'h1', 'a1.0', 'a1.1', 'a2.0'];
   const sequences: string[][] = [[]];
   for (let length = 1; length <= 3; length++) {
     for (const prefix of sequences.filter((sequence) => sequence.length === length - 1)) {
@@ -1164,10 +1165,24 @@ const carryTrace = (): Trace => {
             says: says.map((run): ChatRunRow => ({ runId: run, body: { type: 'run.heartbeat' } })),
           },
         ];
-      } else if (step.startsWith('w')) {
-        const entry = carriedBy(carried, batchOf(a!, b!));
-        carried = carried.filter((other) => other !== entry);
-        said.push(entry === undefined || entry.says.length === 0 ? '-' : entry.says.map((row) => row.runId).join('+'));
+      } else if (step.startsWith('w') || step.startsWith('h')) {
+        /* `h`: a batch written while the history leaves a call open everywhere in it (round 21): no place. */
+        const held = step.startsWith('h');
+        const batch = batchOf(a!, held ? '0' : b!);
+        const entry = carriedBy(carried, batch);
+        const place =
+          entry === undefined
+            ? undefined
+            : carriedPlace(
+                held ? [planMessage('c1', 0)] : [],
+                batch.map((row) => row.body),
+              );
+        if (place !== undefined) {
+          carried = carried.filter((other) => other !== entry);
+        }
+        said.push(
+          place === undefined || entry!.says.length === 0 ? '-' : entry!.says.map((row) => row.runId).join('+'),
+        );
       } else if (b !== '1') {
         carried = carried.filter((entry) => entry.commandId !== `c${a!}`);
       }
@@ -1177,6 +1192,226 @@ const carryTrace = (): Trace => {
   text.push('X');
   expected.push('X');
   return { text, expected };
+};
+
+/**
+ * One history message of a `PLAN` line (round 21): `c<calls, + apart|->` an assistant turn calling those tools, `o<call>`
+ * a tool's output, `s<id>` a person's words; `at` keeps the ids of calls and outputs apart.
+ */
+const planMessage = (token: string, at: number): ProviderMessage => {
+  const rest = token.slice(1);
+  if (token.startsWith('c')) {
+    const calls = rest === '-' ? [] : rest.split('+');
+    return {
+      id: `m${String(at)}`,
+      role: 'assistant',
+      content:
+        calls.length === 0
+          ? [{ type: 'text', text: 'reply' }]
+          : calls.map((call) => ({ type: 'toolCall', id: `x${call}`, name: 'read_file', arguments: {} })),
+      metadata: { stopReason: calls.length === 0 ? 'stop' : 'toolUse' },
+    };
+  }
+  if (token.startsWith('o')) {
+    return {
+      id: `o${String(at)}`,
+      role: 'tool-output',
+      toolCallId: `x${rest}`,
+      toolName: 'read_file',
+      content: 'ok',
+      isError: false,
+    };
+  }
+  return { id: `s${rest}`, role: 'user', content: 'words' };
+};
+
+/**
+ * Where a batch's carried turns go and the history it leaves (T14, round 21; `carriedPlace`, `openToolCalls`,
+ * `historyWellFormed`): histories with calls open, answered, or followed by another message, and batches of outputs,
+ * rewinds and other rows, each with no, one or two carried turns.
+ */
+const planTrace = (): Trace => {
+  const text = ['T plans'];
+  const expected = ['T plans'];
+  const histories = ['-', 's0', 's0,c1', 's0,c1+2', 's0,c1+2,o1', 's0,c1,o1', 's0,c1,s5,c-', 's0,c-', 's0,c1,o2'];
+  const batches = [
+    '-',
+    'l',
+    'l,s7',
+    'o1',
+    'o1,o2',
+    'l,o1,s7',
+    'l,k1',
+    'l,k1,s7',
+    'l,k1,o1',
+    'c3',
+    'c3,o3',
+    'l,o2,o1',
+    's7,k0',
+  ];
+  for (const history of histories) {
+    for (const batch of batches) {
+      for (const says of ['-', '9', '8+9']) {
+        text.push(`PLAN ${history} ${says} ${batch}`);
+        const before = history === '-' ? [] : history.split(',').map((token, at) => planMessage(token, at));
+        /* The batch as it is built: a rewind names the messages it keeps then, before anything is carried. */
+        let building: readonly ProviderMessage[] = before;
+        const bodies = (batch === '-' ? [] : batch.split(',')).map((token, at): LogRowBody => {
+          const body: LogRowBody = token.startsWith('k')
+            ? {
+                type: 'history.rewound',
+                trigger: 'retry',
+                retainedMessageIds: building.slice(0, Number(token.slice(1))).map((message) => message.id),
+              }
+            : token === 'l'
+              ? { type: 'run.lifecycle', state: 'running' }
+              : { type: 'message.appended', message: planMessage(token, 100 + at) };
+          building = historyAfter(building, body);
+          return body;
+        });
+        const carried = (says === '-' ? [] : says.split('+')).map(
+          (id): LogRowBody => ({
+            type: 'message.appended',
+            message: { id: `s${id}`, role: 'user', content: 'carried' },
+          }),
+        );
+        const place = carriedPlace(before, bodies);
+        const planned = place === undefined ? bodies : [...bodies.slice(0, place), ...carried, ...bodies.slice(place)];
+        let after: readonly ProviderMessage[] = before;
+        for (const body of planned) {
+          after = historyAfter(after, body);
+        }
+        const open = openToolCalls(before).map((call) => call.toolCallId.slice(1));
+        const survive =
+          place !== undefined &&
+          carried.every((body) => body.type === 'message.appended' && after.some((m) => m.id === body.message.id));
+        expected.push(
+          `QW ${open.length === 0 ? '-' : open.join(',')} ${place === undefined ? '-' : String(place)} ${
+            historyWellFormed(after) ? 1 : 0
+          } ${survive ? 1 : 0}`,
+        );
+      }
+    }
+  }
+  text.push('X');
+  expected.push('X');
+  return { text, expected };
+};
+
+/**
+ * A Resume's batch over a history whose last message it rewinds or keeps (T14, round 21; `openToolCalls`): it closes the
+ * calls the history it keeps leaves open, and only those, then says a reminder, and the history after is well formed.
+ */
+const resumeBatchTrace = (): Trace => {
+  const text = ['T resume-batches'];
+  const expected = ['T resume-batches'];
+  const histories = ['-', 's0', 's0,c1', 's0,c1+2', 's0,c1+2,o1', 's0,c1,o1', 's0,c1,s5,c-', 's0,c-', 's0,c1,c2'];
+  for (const history of histories) {
+    for (const cut of [false, true]) {
+      text.push(`RESUMEB ${history} ${cut ? 1 : 0}`);
+      const before = history === '-' ? [] : history.split(',').map((token, at) => planMessage(token, at));
+      const kept = cut ? before.slice(0, -1) : before;
+      const closed = openToolCalls(kept);
+      const after = [
+        ...kept,
+        ...closed.map(
+          (call, at): ProviderMessage => ({
+            id: `r${String(at)}`,
+            role: 'tool-output',
+            toolCallId: call.toolCallId,
+            toolName: call.toolName,
+            content: 'disconnected',
+            isError: true,
+          }),
+        ),
+        ...(closed.length === 0 ? [] : [{ id: 's7', role: 'user', content: 'reminder' } satisfies ProviderMessage]),
+      ];
+      expected.push(
+        `QZ ${listText(closed.map((call) => call.toolCallId.slice(1)))} ${historyWellFormed(after) ? 1 : 0}`,
+      );
+    }
+  }
+  text.push('X');
+  expected.push('X');
+  return { text, expected };
+};
+
+/**
+ * The merged rows after one device appends a row (T14, round 21; the appender's incremental append): a row under the
+ * merge's latest term extends it, and one under an older term, or a newer term written earlier, lands where a fresh
+ * merge of the segments puts it.
+ */
+const appendMergeTrace = (): Trace[] => {
+  const row = (term: number, seq: number, ms: number): MergeRow => ({
+    term,
+    seq,
+    run: 1,
+    kind: 'O',
+    argument: 0,
+    ms,
+    epoch: term + 1,
+    attempt: 0,
+  });
+  const cases: ReadonlyArray<{ segments: Array<{ device: number; rows: MergeRow[] }>; device: number; row: MergeRow }> =
+    [
+      {
+        segments: [
+          { device: 0, rows: [row(1, 0, 10)] },
+          { device: 1, rows: [row(2, 0, 20)] },
+        ],
+        device: 0,
+        row: row(1, 1, 30),
+      },
+      {
+        segments: [
+          { device: 0, rows: [row(1, 0, 10)] },
+          { device: 1, rows: [row(2, 0, 20)] },
+        ],
+        device: 1,
+        row: row(2, 1, 30),
+      },
+      {
+        segments: [
+          { device: 0, rows: [row(1, 0, 10)] },
+          { device: 1, rows: [row(2, 0, 20)] },
+        ],
+        device: 0,
+        row: row(3, 0, 40),
+      },
+      {
+        segments: [
+          { device: 0, rows: [row(1, 0, 10)] },
+          { device: 1, rows: [row(3, 0, 20)] },
+        ],
+        device: 0,
+        row: row(2, 0, 15),
+      },
+      {
+        segments: [
+          { device: 0, rows: [row(1, 0, 10), row(4, 0, 40)] },
+          { device: 1, rows: [row(2, 0, 20)] },
+          { device: 2, rows: [row(3, 0, 30)] },
+        ],
+        device: 1,
+        row: row(2, 1, 50),
+      },
+      { segments: [{ device: 0, rows: [row(1, 0, 10)] }], device: 0, row: row(1, 1, 11) },
+    ];
+  return cases.map(({ segments, device, row: appended }, index) => {
+    const name = `append-merge-${String(index)}`;
+    const text = [`T ${name}`];
+    for (const segment of segments) {
+      text.push(`SEG ${segment.device}`, ...segment.rows.map((each) => `ROW ${rowLine(each)}`));
+    }
+    text.push(`APPENDM ${device} ${rowLine(appended)}`, 'X');
+    const merged = mergeLogSegments(
+      segments.map((segment) => ({
+        deviceId: `d${segment.device}`,
+        bytes: segmentBytes(segment.device === device ? [...segment.rows, appended] : segment.rows),
+      })),
+    );
+    return { text, expected: [`T ${name}`, `MA ${listText(merged.map((event) => keyText(event)))}`, 'X'] };
+  });
 };
 
 /**
@@ -1264,7 +1499,16 @@ const generate = async (corpus: Corpus, seed = corpus.seed): Promise<Trace[]> =>
     traces.push(interruptResolutionTrace());
   }
   if (corpus.name === 'base') {
-    traces.push(admissionTrace(), termsTrace(), crossAdmissionTrace(), carryTrace(), standingTrace());
+    traces.push(
+      admissionTrace(),
+      termsTrace(),
+      crossAdmissionTrace(),
+      carryTrace(),
+      planTrace(),
+      resumeBatchTrace(),
+      ...appendMergeTrace(),
+      standingTrace(),
+    );
   }
   return traces;
 };

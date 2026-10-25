@@ -28,6 +28,7 @@ import { createChatRunRegistry } from '#host/chat-run-registry.js';
 import type { ExternalAgentPort, ExternalRunKind, TauAgentAdmissionConfig } from '#host/external-agent.js';
 import { startExternalTurn } from '#host/external-turn.driver.js';
 import {
+  carriedPlace,
   externalMarker,
   externalSessionOf,
   externalTurnKind,
@@ -36,7 +37,7 @@ import {
   isInterruptPayload,
   isJsonObject,
   latestTurnId,
-  pendingToolCalls,
+  openToolCalls,
 } from '#host/run-history.js';
 import {
   chatRunState,
@@ -338,8 +339,8 @@ type ChatStore = {
   terms?: ChatTerms | undefined;
   /**
    * The rows admitted commands' runs' first batches carry (round 20, {@link commandAdmission}): the turns of the
-   * abandoned foreign runs each command goes on past. The run's first batch that is no lone heartbeat spends its entry;
-   * a command answered otherwise withdraws its own.
+   * abandoned foreign runs each command goes on past. The run's first batch that is no lone heartbeat and has a place
+   * for them ({@link carriedPlace}, round 21) spends its entry; a command answered otherwise withdraws its own.
    */
   carried?: readonly CarriedTurns[] | undefined;
   /** When this host last asked the placement to pull, for another device's run that awaits one (XD3, round 18). */
@@ -542,7 +543,9 @@ export const termsAfterWrite = (terms: ChatTerms, { held, taken }: TermWrite): C
 export type CarriedTurns = Readonly<{ commandId: string; runId: string; says: readonly ChatRunRow[] }>;
 
 /**
- * What a batch carries (`carriedTaken`): the first entry for a run the batch writes a row of that is no heartbeat.
+ * What a batch carries (`carriedTaken`): the first entry for a run the batch writes a row of that is no heartbeat. The
+ * batch spends it only where it has a place for it ({@link carriedPlace}, round 21); one with none keeps it for the
+ * run's next batch (`CarryOp.hold` in ChatLedger.lean).
  *
  * @internal
  * @param carried - What admitted commands carry.
@@ -1563,8 +1566,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    * The one cross-device admission of every command that starts or continues a run (round 20, {@link commandAdmission};
    * `admit` in ChatLedger.lean, T13): a start, a Resume and an approval. After this dispatch's read of what sync brought
    * (an approval's bounded), it checks the run's and the other devices' runs' standing, decides the term and proposes
-   * a new one ({@link rehome}), and hands the command's run's first batch the turn of every abandoned foreign run it goes
-   * on past, so every device reads that run taken over whichever command passed it.
+   * a new one ({@link rehome}), and hands the command's run's first batch with a place for them ({@link carriedPlace})
+   * the turn of every abandoned foreign run it goes on past, so every device reads that run taken over whichever command
+   * passed it.
    *
    * The cross-device run fence (XD3): another device's synced segment holds a run it has not settled, and that run is
    * not abandoned, so nothing runs on the chat until it settles. A run is never moved between devices while it is in
@@ -1893,7 +1897,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    * its own driver, or the next one abandoning it as an orphan. The ledger then reads that turn as committed, so a
    * Resume does not commit it again, and every copy of it merges as one in the history (`abandonedTurnOf`). The turns
    * of other devices' runs a command goes on past are its admission's ({@link admitAcross}), carried by its run's first
-   * batch.
+   * batch with a place for them ({@link carriedPlace}).
    */
   const withFailedTurns = async (
     log: DurableEventLog,
@@ -1931,7 +1935,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    * this host opened in its place ({@link rehome}). What the batch's term and carried rows are is decided once, as the
    * write begins ({@link termWriteOf}, {@link carriedBy}), and its first landed row commits exactly that decision
    * ({@link termsAfterWrite}; round 20, `Terms.finish` in ChatLedger.lean, T12): a term proposed or withdrawn off the
-   * chain while the batch is written changes neither the term it is written under nor what it commits.
+   * chain while the batch is written changes neither the term it is written under nor what it commits. The carried rows
+   * go at their place in the batch ({@link carriedPlace}; round 21, T14), never between a call and its output nor before
+   * the batch's own rewind.
    */
   const write = async (
     chatId: string,
@@ -1949,18 +1955,33 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       const at = now().getTime();
       const stamped = (await log.stampAfterRead?.(at)) ?? at;
       const prior = await ledgerOf(chatId);
+      const own = await withFailedTurns(log, prior, rows);
+      /*
+       * Round 21: the carried turns go where the history leaves no tool call open, after every rewind the batch holds
+       * ({@link carriedPlace}), so they never part a call from its output and the batch's own rewind never cuts them.
+       * A batch with no such place carries them to the run's next one.
+       */
+      const place =
+        carried === undefined
+          ? undefined
+          : carriedPlace(
+              await log.messages(),
+              own.map((row) => row.body),
+            );
       const ledger = await appendChatRows({
         chatId,
         log,
         ledger: prior,
         leaderEpoch,
         recordedAt: new Date(stamped).toISOString(),
-        rows: [...(carried?.says ?? []), ...(await withFailedTurns(log, prior, rows))],
+        rows: place === undefined ? own : [...own.slice(0, place), ...carried!.says, ...own.slice(place)],
         onAppended: (row, ledger) => {
           store.ledger = ledger;
           /* The batch's first row commits what its write decided (rounds 19 and 20). */
           store.terms = termsAfterWrite(store.terms ?? {}, decided);
-          store.carried = store.carried?.filter((entry) => entry !== carried);
+          if (place !== undefined) {
+            store.carried = store.carried?.filter((entry) => entry !== carried);
+          }
           store.wrote = { leaderEpoch, at: now().getTime() };
           if (row.type === 'run.lifecycle' && row.state === 'paused') {
             store.pausedAt = now().getTime();
@@ -2336,7 +2357,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           recovery.push(cleared);
         }
       }
-      const missing = pendingToolCalls(history);
+      const missing = openToolCalls(history);
       const disconnected = missing.map(
         (call): ProviderMessage => ({
           id: createId(),

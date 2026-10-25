@@ -1,6 +1,7 @@
 /**
  * Pure readers over a chat's durable history that the host's services share: the external marker, the chat's vendor
- * session, the calls a history left unanswered, and the record that clears a resumable failure's marker.
+ * session, the calls a history leaves open, whether it is well formed and where a batch's carried turns go, and the
+ * record that clears a resumable failure's marker.
  */
 
 import { transportFailureDiagnosticType } from '#harness/session-record.js';
@@ -209,45 +210,168 @@ export const latestTurnId = (messages: readonly ProviderMessage[], fallback: str
   messages.findLast((message) => message.role === 'user' && internalKind(message) !== 'interrupt-recovery')?.id ??
   fallback;
 
+/** A tool call an assistant turn made. */
+type ToolCall = Readonly<{ toolCallId: string; toolName: string }>;
+
+const callsOf = (message: ProviderMessage): ToolCall[] => {
+  const blocks: readonly JsonValue[] =
+    message.role === 'assistant' && Array.isArray(message.content) ? message.content : [];
+  return blocks.flatMap((block) =>
+    isJsonObject(block) &&
+    block['type'] === 'toolCall' &&
+    typeof block['id'] === 'string' &&
+    typeof block['name'] === 'string'
+      ? [{ toolCallId: block['id'], toolName: block['name'] }]
+      : [],
+  );
+};
+
 /**
- * Every call this history left without a result, however it was recorded.
+ * The calls open after one more message (`openAfter` in ChatLedger.lean, T14). An assistant turn opens its own calls
+ * and leaves any before it open to the provider's adapter; a tool output closes its call; a `tool-input` row, which the
+ * provider never reads, changes nothing; any other message leaves every open call to the adapter. pi-ai's
+ * `transformMessages` answers a call so left with a synthetic "no result", and drops an assistant turn that errored or
+ * was aborted, calls and all, so such a turn opens none.
  *
- * A dispatched call is durable twice — the `toolCall` block the model wrote and
- * the `tool-input` row the dispatch adds — and a host that died between the two
- * leaves only the block. A provider refuses an unanswered call, so a resume has
- * to answer each pending id once, whichever row still carries it.
- *
- * @param messages - The reduced history the resume starts from.
- * @returns One entry per unanswered call, in the order the history holds them.
+ * @param open - The calls open before it.
+ * @param message - The message.
+ * @returns The calls open after it.
  */
-export const pendingToolCalls = (
-  messages: readonly ProviderMessage[],
-): Array<{ readonly toolCallId: string; readonly toolName: string }> => {
-  const outputs = new Set(messages.flatMap((message) => (message.role === 'tool-output' ? [message.toolCallId] : [])));
-  const pending = new Map<string, { readonly toolCallId: string; readonly toolName: string }>();
-  const callsOf = (message: ProviderMessage): Array<{ readonly toolCallId: string; readonly toolName: string }> => {
-    if (message.role === 'tool-input') {
-      return [{ toolCallId: message.toolCallId, toolName: message.toolName }];
+const openAfter = (open: readonly ToolCall[], message: ProviderMessage): readonly ToolCall[] => {
+  switch (message.role) {
+    case 'assistant': {
+      const stop = message.metadata?.stopReason;
+      return stop === 'error' || stop === 'aborted' ? [] : callsOf(message);
     }
-    const blocks: readonly JsonValue[] =
-      message.role === 'assistant' && Array.isArray(message.content) ? message.content : [];
-    return blocks.flatMap((block) =>
-      isJsonObject(block) &&
-      block['type'] === 'toolCall' &&
-      typeof block['id'] === 'string' &&
-      typeof block['name'] === 'string'
-        ? [{ toolCallId: block['id'], toolName: block['name'] }]
-        : [],
-    );
-  };
-  for (const message of messages) {
-    for (const call of callsOf(message)) {
-      if (!outputs.has(call.toolCallId)) {
-        pending.set(call.toolCallId, call);
-      }
+    case 'tool-output': {
+      const index = open.findIndex((call) => call.toolCallId === message.toolCallId);
+      return index === -1 ? open : open.toSpliced(index, 1);
+    }
+    case 'tool-input': {
+      return open;
+    }
+    default: {
+      return [];
     }
   }
-  return [...pending.values()];
+};
+
+/**
+ * The calls this history leaves open at its tail: those of its last assistant turn that only tool outputs follow and
+ * that none of them answered (`openCalls` in ChatLedger.lean, T14). A Resume answers each of these once
+ * (`CLIENT_DISCONNECTED`). A call another message already followed is not open: the provider's adapter answered it as
+ * having no result, and an output written for it now would follow that message, a stray result every provider rejects
+ * (`t14_no_late_output`).
+ *
+ * @param messages - The reduced history the resume starts from.
+ * @returns One entry per open call, in the order the turn made them.
+ */
+export const openToolCalls = (messages: readonly ProviderMessage[]): ToolCall[] => {
+  let open: readonly ToolCall[] = [];
+  for (const message of messages) {
+    open = openAfter(open, message);
+  }
+  return [...open];
+};
+
+/**
+ * Whether the history is well formed (`wf` in ChatLedger.lean, T14): every tool output follows its call directly,
+ * answering a call of the assistant turn that only outputs follow, before any other message. A call left open when
+ * another message follows is the provider adapter's to answer; an output after that message is a stray result.
+ *
+ * @param messages - The history.
+ * @returns Whether every tool output follows its call.
+ */
+export const historyWellFormed = (messages: readonly ProviderMessage[]): boolean => {
+  let open: readonly ToolCall[] = [];
+  for (const message of messages) {
+    if (message.role === 'tool-output' && !open.some((call) => call.toolCallId === message.toolCallId)) {
+      return false;
+    }
+    open = openAfter(open, message);
+  }
+  return true;
+};
+
+/** A row that drops messages it does not keep, which it names as its batch is built: a rewind of any kind (`Op.rewind`). */
+const dropsMessages = (body: LogRowBody): boolean =>
+  body.type === 'history.rewound' ||
+  body.type === 'turn.history-projection-committed' ||
+  body.type === 'history.compacted';
+
+/**
+ * The history after one more row, as the reducer folds it (`Op.apply` in ChatLedger.lean, T14), for the rows a batch
+ * holds. A message already held is a turn said again and changes nothing.
+ *
+ * @param messages - The history before it.
+ * @param body - The row.
+ * @returns The history after it.
+ */
+export const historyAfter = (messages: readonly ProviderMessage[], body: LogRowBody): readonly ProviderMessage[] => {
+  switch (body.type) {
+    case 'message.appended': {
+      return messages.some((message) => message.id === body.message.id) ? messages : [...messages, body.message];
+    }
+    case 'safeguard.recorded': {
+      return body.action === 'terminate' ? messages : [...messages, body.message];
+    }
+    case 'message.envelope-replaced': {
+      return messages.map((message) => (message.id === body.messageId ? body.replacement : message));
+    }
+    case 'history.rewound': {
+      const kept = new Set(body.retainedMessageIds);
+      return messages.filter((message) => kept.has(message.id));
+    }
+    case 'turn.history-projection-committed': {
+      const kept = new Set(body.retainedMessageIds);
+      return [...messages.filter((message) => kept.has(message.id)), body.message];
+    }
+    case 'history.compacted': {
+      const evicted = new Set(body.evictedMessageIds);
+      const first = messages.findIndex((message) => evicted.has(message.id));
+      const rest = messages.filter((message) => !evicted.has(message.id));
+      const at = first === -1 ? rest.length : first;
+      return [...rest.slice(0, at), body.summary, ...rest.slice(at)];
+    }
+    default: {
+      return messages;
+    }
+  }
+};
+
+/**
+ * Where a batch's carried turns go (`placeAt` in ChatLedger.lean, T14; round 21): the first place after every rewind
+ * the batch holds at which the history leaves no tool call open. So the words of another device's abandoned run a
+ * command goes on past follow the outputs that close the calls a Resume found open, never parting a call from its
+ * output (`t14_plan_well_formed`), and the batch's own rewind, which names what it keeps before anything is carried,
+ * never cuts them (`t14_carried_survive_rewind`). A start's, a Retry's and a Resume's batch always has a place
+ * (`t14_turns_place`); a batch at which every place leaves a call open, an approval's before its tool returns, has none,
+ * and the turns wait for the run's next batch (`t14_approval_waits`).
+ *
+ * @param history - The history the batch lands after.
+ * @param bodies - The batch's rows, as built before anything is carried.
+ * @returns The index to insert the carried rows at, or `undefined` when the batch has no place for them.
+ */
+export const carriedPlace = (
+  history: readonly ProviderMessage[],
+  bodies: readonly LogRowBody[],
+): number | undefined => {
+  const lastDrop = bodies.findLastIndex((body) => dropsMessages(body));
+  let messages = history;
+  let open: readonly ToolCall[] = openToolCalls(history);
+  for (let index = 0; index <= bodies.length; index++) {
+    if (index > lastDrop && open.length === 0) {
+      return index;
+    }
+    const body = bodies[index];
+    if (body !== undefined) {
+      const next = historyAfter(messages, body);
+      const appended = body.type === 'message.appended' || body.type === 'safeguard.recorded';
+      open = next === messages ? open : appended ? openAfter(open, next.at(-1)!) : openToolCalls(next);
+      messages = next;
+    }
+  }
+  return undefined;
 };
 
 /**

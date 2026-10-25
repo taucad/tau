@@ -9878,6 +9878,7 @@ CARRY c3.2.-
 CARRY w1.0
 CARRY w1.1
 CARRY w2.0
+CARRY h1
 CARRY a1.0
 CARRY a1.1
 CARRY a2.0
@@ -9887,6 +9888,7 @@ CARRY c1.1.5+6,c3.2.-
 CARRY c1.1.5+6,w1.0
 CARRY c1.1.5+6,w1.1
 CARRY c1.1.5+6,w2.0
+CARRY c1.1.5+6,h1
 CARRY c1.1.5+6,a1.0
 CARRY c1.1.5+6,a1.1
 CARRY c1.1.5+6,a2.0
@@ -9896,6 +9898,7 @@ CARRY c2.1.7,c3.2.-
 CARRY c2.1.7,w1.0
 CARRY c2.1.7,w1.1
 CARRY c2.1.7,w2.0
+CARRY c2.1.7,h1
 CARRY c2.1.7,a1.0
 CARRY c2.1.7,a1.1
 CARRY c2.1.7,a2.0
@@ -9905,6 +9908,7 @@ CARRY c3.2.-,c3.2.-
 CARRY c3.2.-,w1.0
 CARRY c3.2.-,w1.1
 CARRY c3.2.-,w2.0
+CARRY c3.2.-,h1
 CARRY c3.2.-,a1.0
 CARRY c3.2.-,a1.1
 CARRY c3.2.-,a2.0
@@ -9914,6 +9918,7 @@ CARRY w1.0,c3.2.-
 CARRY w1.0,w1.0
 CARRY w1.0,w1.1
 CARRY w1.0,w2.0
+CARRY w1.0,h1
 CARRY w1.0,a1.0
 CARRY w1.0,a1.1
 CARRY w1.0,a2.0
@@ -9923,6 +9928,7 @@ CARRY w1.1,c3.2.-
 CARRY w1.1,w1.0
 CARRY w1.1,w1.1
 CARRY w1.1,w2.0
+CARRY w1.1,h1
 CARRY w1.1,a1.0
 CARRY w1.1,a1.1
 CARRY w1.1,a2.0
@@ -9932,15 +9938,27 @@ CARRY w2.0,c3.2.-
 CARRY w2.0,w1.0
 CARRY w2.0,w1.1
 CARRY w2.0,w2.0
+CARRY w2.0,h1
 CARRY w2.0,a1.0
 CARRY w2.0,a1.1
 CARRY w2.0,a2.0
+CARRY h1,c1.1.5+6
+CARRY h1,c2.1.7
+CARRY h1,c3.2.-
+CARRY h1,w1.0
+CARRY h1,w1.1
+CARRY h1,w2.0
+CARRY h1,h1
+CARRY h1,a1.0
+CARRY h1,a1.1
+CARRY h1,a2.0
 CARRY a1.0,c1.1.5+6
 CARRY a1.0,c2.1.7
 CARRY a1.0,c3.2.-
 CARRY a1.0,w1.0
 CARRY a1.0,w1.1
 CARRY a1.0,w2.0
+CARRY a1.0,h1
 CARRY a1.0,a1.0
 CARRY a1.0,a1.1
 CARRY a1.0,a2.0
@@ -9950,6 +9968,7 @@ CARRY a1.1,c3.2.-
 CARRY a1.1,w1.0
 CARRY a1.1,w1.1
 CARRY a1.1,w2.0
+CARRY a1.1,h1
 CARRY a1.1,a1.0
 CARRY a1.1,a1.1
 CARRY a1.1,a2.0
@@ -9959,6 +9978,7 @@ CARRY a2.0,c3.2.-
 CARRY a2.0,w1.0
 CARRY a2.0,w1.1
 CARRY a2.0,w2.0
+CARRY a2.0,h1
 CARRY a2.0,a1.0
 CARRY a2.0,a1.1
 CARRY a2.0,a2.0
@@ -9968,6 +9988,7 @@ CARRY c1.1.5+6,c1.1.5+6,c3.2.-
 CARRY c1.1.5+6,c1.1.5+6,w1.0
 CARRY c1.1.5+6,c1.1.5+6,w1.1
 CARRY c1.1.5+6,c1.1.5+6,w2.0
+CARRY c1.1.5+6,c1.1.5+6,h1
 CARRY c1.1.5+6,c1.1.5+6,a1.0
 CARRY c1.1.5+6,c1.1.5+6,a1.1
 CARRY c1.1.5+6,c1.1.5+6,a2.0
@@ -9977,6 +9998,7 @@ CARRY c1.1.5+6,c2.1.7,c3.2.-
 CARRY c1.1.5+6,c2.1.7,w1.0
 CARRY c1.1.5+6,c2.1.7,w1.1
 CARRY c1.1.5+6,c2.1.7,w2.0
+CARRY c1.1.5+6,c2.1.7,h1
 CARRY c1.1.5+6,c2.1.7,a1.0
 CARRY c1.1.5+6,c2.1.7,a1.1
 CARRY c1.1.5+6,c2.1.7,a2.0
@@ -9986,6 +10008,7 @@ CARRY c1.1.5+6,c3.2.-,c3.2.-
 CARRY c1.1.5+6,c3.2.-,w1.0
 CARRY c1.1.5+6,c3.2.-,w1.1
 CARRY c1.1.5+6,c3.2.-,w2.0
+CARRY c1.1.5+6,c3.2.-,h1
 CARRY c1.1.5+6,c3.2.-,a1.0
 CARRY c1.1.5+6,c3.2.-,a1.1
 CARRY c1.1.5+6,c3.2.-,a2.0
@@ -9995,6 +10018,7 @@ CARRY c1.1.5+6,w1.0,c3.2.-
 CARRY c1.1.5+6,w1.0,w1.0
 CARRY c1.1.5+6,w1.0,w1.1
 CARRY c1.1.5+6,w1.0,w2.0
+CARRY c1.1.5+6,w1.0,h1
 CARRY c1.1.5+6,w1.0,a1.0
 CARRY c1.1.5+6,w1.0,a1.1
 CARRY c1.1.5+6,w1.0,a2.0
@@ -10004,6 +10028,7 @@ CARRY c1.1.5+6,w1.1,c3.2.-
 CARRY c1.1.5+6,w1.1,w1.0
 CARRY c1.1.5+6,w1.1,w1.1
 CARRY c1.1.5+6,w1.1,w2.0
+CARRY c1.1.5+6,w1.1,h1
 CARRY c1.1.5+6,w1.1,a1.0
 CARRY c1.1.5+6,w1.1,a1.1
 CARRY c1.1.5+6,w1.1,a2.0
@@ -10013,15 +10038,27 @@ CARRY c1.1.5+6,w2.0,c3.2.-
 CARRY c1.1.5+6,w2.0,w1.0
 CARRY c1.1.5+6,w2.0,w1.1
 CARRY c1.1.5+6,w2.0,w2.0
+CARRY c1.1.5+6,w2.0,h1
 CARRY c1.1.5+6,w2.0,a1.0
 CARRY c1.1.5+6,w2.0,a1.1
 CARRY c1.1.5+6,w2.0,a2.0
+CARRY c1.1.5+6,h1,c1.1.5+6
+CARRY c1.1.5+6,h1,c2.1.7
+CARRY c1.1.5+6,h1,c3.2.-
+CARRY c1.1.5+6,h1,w1.0
+CARRY c1.1.5+6,h1,w1.1
+CARRY c1.1.5+6,h1,w2.0
+CARRY c1.1.5+6,h1,h1
+CARRY c1.1.5+6,h1,a1.0
+CARRY c1.1.5+6,h1,a1.1
+CARRY c1.1.5+6,h1,a2.0
 CARRY c1.1.5+6,a1.0,c1.1.5+6
 CARRY c1.1.5+6,a1.0,c2.1.7
 CARRY c1.1.5+6,a1.0,c3.2.-
 CARRY c1.1.5+6,a1.0,w1.0
 CARRY c1.1.5+6,a1.0,w1.1
 CARRY c1.1.5+6,a1.0,w2.0
+CARRY c1.1.5+6,a1.0,h1
 CARRY c1.1.5+6,a1.0,a1.0
 CARRY c1.1.5+6,a1.0,a1.1
 CARRY c1.1.5+6,a1.0,a2.0
@@ -10031,6 +10068,7 @@ CARRY c1.1.5+6,a1.1,c3.2.-
 CARRY c1.1.5+6,a1.1,w1.0
 CARRY c1.1.5+6,a1.1,w1.1
 CARRY c1.1.5+6,a1.1,w2.0
+CARRY c1.1.5+6,a1.1,h1
 CARRY c1.1.5+6,a1.1,a1.0
 CARRY c1.1.5+6,a1.1,a1.1
 CARRY c1.1.5+6,a1.1,a2.0
@@ -10040,6 +10078,7 @@ CARRY c1.1.5+6,a2.0,c3.2.-
 CARRY c1.1.5+6,a2.0,w1.0
 CARRY c1.1.5+6,a2.0,w1.1
 CARRY c1.1.5+6,a2.0,w2.0
+CARRY c1.1.5+6,a2.0,h1
 CARRY c1.1.5+6,a2.0,a1.0
 CARRY c1.1.5+6,a2.0,a1.1
 CARRY c1.1.5+6,a2.0,a2.0
@@ -10049,6 +10088,7 @@ CARRY c2.1.7,c1.1.5+6,c3.2.-
 CARRY c2.1.7,c1.1.5+6,w1.0
 CARRY c2.1.7,c1.1.5+6,w1.1
 CARRY c2.1.7,c1.1.5+6,w2.0
+CARRY c2.1.7,c1.1.5+6,h1
 CARRY c2.1.7,c1.1.5+6,a1.0
 CARRY c2.1.7,c1.1.5+6,a1.1
 CARRY c2.1.7,c1.1.5+6,a2.0
@@ -10058,6 +10098,7 @@ CARRY c2.1.7,c2.1.7,c3.2.-
 CARRY c2.1.7,c2.1.7,w1.0
 CARRY c2.1.7,c2.1.7,w1.1
 CARRY c2.1.7,c2.1.7,w2.0
+CARRY c2.1.7,c2.1.7,h1
 CARRY c2.1.7,c2.1.7,a1.0
 CARRY c2.1.7,c2.1.7,a1.1
 CARRY c2.1.7,c2.1.7,a2.0
@@ -10067,6 +10108,7 @@ CARRY c2.1.7,c3.2.-,c3.2.-
 CARRY c2.1.7,c3.2.-,w1.0
 CARRY c2.1.7,c3.2.-,w1.1
 CARRY c2.1.7,c3.2.-,w2.0
+CARRY c2.1.7,c3.2.-,h1
 CARRY c2.1.7,c3.2.-,a1.0
 CARRY c2.1.7,c3.2.-,a1.1
 CARRY c2.1.7,c3.2.-,a2.0
@@ -10076,6 +10118,7 @@ CARRY c2.1.7,w1.0,c3.2.-
 CARRY c2.1.7,w1.0,w1.0
 CARRY c2.1.7,w1.0,w1.1
 CARRY c2.1.7,w1.0,w2.0
+CARRY c2.1.7,w1.0,h1
 CARRY c2.1.7,w1.0,a1.0
 CARRY c2.1.7,w1.0,a1.1
 CARRY c2.1.7,w1.0,a2.0
@@ -10085,6 +10128,7 @@ CARRY c2.1.7,w1.1,c3.2.-
 CARRY c2.1.7,w1.1,w1.0
 CARRY c2.1.7,w1.1,w1.1
 CARRY c2.1.7,w1.1,w2.0
+CARRY c2.1.7,w1.1,h1
 CARRY c2.1.7,w1.1,a1.0
 CARRY c2.1.7,w1.1,a1.1
 CARRY c2.1.7,w1.1,a2.0
@@ -10094,15 +10138,27 @@ CARRY c2.1.7,w2.0,c3.2.-
 CARRY c2.1.7,w2.0,w1.0
 CARRY c2.1.7,w2.0,w1.1
 CARRY c2.1.7,w2.0,w2.0
+CARRY c2.1.7,w2.0,h1
 CARRY c2.1.7,w2.0,a1.0
 CARRY c2.1.7,w2.0,a1.1
 CARRY c2.1.7,w2.0,a2.0
+CARRY c2.1.7,h1,c1.1.5+6
+CARRY c2.1.7,h1,c2.1.7
+CARRY c2.1.7,h1,c3.2.-
+CARRY c2.1.7,h1,w1.0
+CARRY c2.1.7,h1,w1.1
+CARRY c2.1.7,h1,w2.0
+CARRY c2.1.7,h1,h1
+CARRY c2.1.7,h1,a1.0
+CARRY c2.1.7,h1,a1.1
+CARRY c2.1.7,h1,a2.0
 CARRY c2.1.7,a1.0,c1.1.5+6
 CARRY c2.1.7,a1.0,c2.1.7
 CARRY c2.1.7,a1.0,c3.2.-
 CARRY c2.1.7,a1.0,w1.0
 CARRY c2.1.7,a1.0,w1.1
 CARRY c2.1.7,a1.0,w2.0
+CARRY c2.1.7,a1.0,h1
 CARRY c2.1.7,a1.0,a1.0
 CARRY c2.1.7,a1.0,a1.1
 CARRY c2.1.7,a1.0,a2.0
@@ -10112,6 +10168,7 @@ CARRY c2.1.7,a1.1,c3.2.-
 CARRY c2.1.7,a1.1,w1.0
 CARRY c2.1.7,a1.1,w1.1
 CARRY c2.1.7,a1.1,w2.0
+CARRY c2.1.7,a1.1,h1
 CARRY c2.1.7,a1.1,a1.0
 CARRY c2.1.7,a1.1,a1.1
 CARRY c2.1.7,a1.1,a2.0
@@ -10121,6 +10178,7 @@ CARRY c2.1.7,a2.0,c3.2.-
 CARRY c2.1.7,a2.0,w1.0
 CARRY c2.1.7,a2.0,w1.1
 CARRY c2.1.7,a2.0,w2.0
+CARRY c2.1.7,a2.0,h1
 CARRY c2.1.7,a2.0,a1.0
 CARRY c2.1.7,a2.0,a1.1
 CARRY c2.1.7,a2.0,a2.0
@@ -10130,6 +10188,7 @@ CARRY c3.2.-,c1.1.5+6,c3.2.-
 CARRY c3.2.-,c1.1.5+6,w1.0
 CARRY c3.2.-,c1.1.5+6,w1.1
 CARRY c3.2.-,c1.1.5+6,w2.0
+CARRY c3.2.-,c1.1.5+6,h1
 CARRY c3.2.-,c1.1.5+6,a1.0
 CARRY c3.2.-,c1.1.5+6,a1.1
 CARRY c3.2.-,c1.1.5+6,a2.0
@@ -10139,6 +10198,7 @@ CARRY c3.2.-,c2.1.7,c3.2.-
 CARRY c3.2.-,c2.1.7,w1.0
 CARRY c3.2.-,c2.1.7,w1.1
 CARRY c3.2.-,c2.1.7,w2.0
+CARRY c3.2.-,c2.1.7,h1
 CARRY c3.2.-,c2.1.7,a1.0
 CARRY c3.2.-,c2.1.7,a1.1
 CARRY c3.2.-,c2.1.7,a2.0
@@ -10148,6 +10208,7 @@ CARRY c3.2.-,c3.2.-,c3.2.-
 CARRY c3.2.-,c3.2.-,w1.0
 CARRY c3.2.-,c3.2.-,w1.1
 CARRY c3.2.-,c3.2.-,w2.0
+CARRY c3.2.-,c3.2.-,h1
 CARRY c3.2.-,c3.2.-,a1.0
 CARRY c3.2.-,c3.2.-,a1.1
 CARRY c3.2.-,c3.2.-,a2.0
@@ -10157,6 +10218,7 @@ CARRY c3.2.-,w1.0,c3.2.-
 CARRY c3.2.-,w1.0,w1.0
 CARRY c3.2.-,w1.0,w1.1
 CARRY c3.2.-,w1.0,w2.0
+CARRY c3.2.-,w1.0,h1
 CARRY c3.2.-,w1.0,a1.0
 CARRY c3.2.-,w1.0,a1.1
 CARRY c3.2.-,w1.0,a2.0
@@ -10166,6 +10228,7 @@ CARRY c3.2.-,w1.1,c3.2.-
 CARRY c3.2.-,w1.1,w1.0
 CARRY c3.2.-,w1.1,w1.1
 CARRY c3.2.-,w1.1,w2.0
+CARRY c3.2.-,w1.1,h1
 CARRY c3.2.-,w1.1,a1.0
 CARRY c3.2.-,w1.1,a1.1
 CARRY c3.2.-,w1.1,a2.0
@@ -10175,15 +10238,27 @@ CARRY c3.2.-,w2.0,c3.2.-
 CARRY c3.2.-,w2.0,w1.0
 CARRY c3.2.-,w2.0,w1.1
 CARRY c3.2.-,w2.0,w2.0
+CARRY c3.2.-,w2.0,h1
 CARRY c3.2.-,w2.0,a1.0
 CARRY c3.2.-,w2.0,a1.1
 CARRY c3.2.-,w2.0,a2.0
+CARRY c3.2.-,h1,c1.1.5+6
+CARRY c3.2.-,h1,c2.1.7
+CARRY c3.2.-,h1,c3.2.-
+CARRY c3.2.-,h1,w1.0
+CARRY c3.2.-,h1,w1.1
+CARRY c3.2.-,h1,w2.0
+CARRY c3.2.-,h1,h1
+CARRY c3.2.-,h1,a1.0
+CARRY c3.2.-,h1,a1.1
+CARRY c3.2.-,h1,a2.0
 CARRY c3.2.-,a1.0,c1.1.5+6
 CARRY c3.2.-,a1.0,c2.1.7
 CARRY c3.2.-,a1.0,c3.2.-
 CARRY c3.2.-,a1.0,w1.0
 CARRY c3.2.-,a1.0,w1.1
 CARRY c3.2.-,a1.0,w2.0
+CARRY c3.2.-,a1.0,h1
 CARRY c3.2.-,a1.0,a1.0
 CARRY c3.2.-,a1.0,a1.1
 CARRY c3.2.-,a1.0,a2.0
@@ -10193,6 +10268,7 @@ CARRY c3.2.-,a1.1,c3.2.-
 CARRY c3.2.-,a1.1,w1.0
 CARRY c3.2.-,a1.1,w1.1
 CARRY c3.2.-,a1.1,w2.0
+CARRY c3.2.-,a1.1,h1
 CARRY c3.2.-,a1.1,a1.0
 CARRY c3.2.-,a1.1,a1.1
 CARRY c3.2.-,a1.1,a2.0
@@ -10202,6 +10278,7 @@ CARRY c3.2.-,a2.0,c3.2.-
 CARRY c3.2.-,a2.0,w1.0
 CARRY c3.2.-,a2.0,w1.1
 CARRY c3.2.-,a2.0,w2.0
+CARRY c3.2.-,a2.0,h1
 CARRY c3.2.-,a2.0,a1.0
 CARRY c3.2.-,a2.0,a1.1
 CARRY c3.2.-,a2.0,a2.0
@@ -10211,6 +10288,7 @@ CARRY w1.0,c1.1.5+6,c3.2.-
 CARRY w1.0,c1.1.5+6,w1.0
 CARRY w1.0,c1.1.5+6,w1.1
 CARRY w1.0,c1.1.5+6,w2.0
+CARRY w1.0,c1.1.5+6,h1
 CARRY w1.0,c1.1.5+6,a1.0
 CARRY w1.0,c1.1.5+6,a1.1
 CARRY w1.0,c1.1.5+6,a2.0
@@ -10220,6 +10298,7 @@ CARRY w1.0,c2.1.7,c3.2.-
 CARRY w1.0,c2.1.7,w1.0
 CARRY w1.0,c2.1.7,w1.1
 CARRY w1.0,c2.1.7,w2.0
+CARRY w1.0,c2.1.7,h1
 CARRY w1.0,c2.1.7,a1.0
 CARRY w1.0,c2.1.7,a1.1
 CARRY w1.0,c2.1.7,a2.0
@@ -10229,6 +10308,7 @@ CARRY w1.0,c3.2.-,c3.2.-
 CARRY w1.0,c3.2.-,w1.0
 CARRY w1.0,c3.2.-,w1.1
 CARRY w1.0,c3.2.-,w2.0
+CARRY w1.0,c3.2.-,h1
 CARRY w1.0,c3.2.-,a1.0
 CARRY w1.0,c3.2.-,a1.1
 CARRY w1.0,c3.2.-,a2.0
@@ -10238,6 +10318,7 @@ CARRY w1.0,w1.0,c3.2.-
 CARRY w1.0,w1.0,w1.0
 CARRY w1.0,w1.0,w1.1
 CARRY w1.0,w1.0,w2.0
+CARRY w1.0,w1.0,h1
 CARRY w1.0,w1.0,a1.0
 CARRY w1.0,w1.0,a1.1
 CARRY w1.0,w1.0,a2.0
@@ -10247,6 +10328,7 @@ CARRY w1.0,w1.1,c3.2.-
 CARRY w1.0,w1.1,w1.0
 CARRY w1.0,w1.1,w1.1
 CARRY w1.0,w1.1,w2.0
+CARRY w1.0,w1.1,h1
 CARRY w1.0,w1.1,a1.0
 CARRY w1.0,w1.1,a1.1
 CARRY w1.0,w1.1,a2.0
@@ -10256,15 +10338,27 @@ CARRY w1.0,w2.0,c3.2.-
 CARRY w1.0,w2.0,w1.0
 CARRY w1.0,w2.0,w1.1
 CARRY w1.0,w2.0,w2.0
+CARRY w1.0,w2.0,h1
 CARRY w1.0,w2.0,a1.0
 CARRY w1.0,w2.0,a1.1
 CARRY w1.0,w2.0,a2.0
+CARRY w1.0,h1,c1.1.5+6
+CARRY w1.0,h1,c2.1.7
+CARRY w1.0,h1,c3.2.-
+CARRY w1.0,h1,w1.0
+CARRY w1.0,h1,w1.1
+CARRY w1.0,h1,w2.0
+CARRY w1.0,h1,h1
+CARRY w1.0,h1,a1.0
+CARRY w1.0,h1,a1.1
+CARRY w1.0,h1,a2.0
 CARRY w1.0,a1.0,c1.1.5+6
 CARRY w1.0,a1.0,c2.1.7
 CARRY w1.0,a1.0,c3.2.-
 CARRY w1.0,a1.0,w1.0
 CARRY w1.0,a1.0,w1.1
 CARRY w1.0,a1.0,w2.0
+CARRY w1.0,a1.0,h1
 CARRY w1.0,a1.0,a1.0
 CARRY w1.0,a1.0,a1.1
 CARRY w1.0,a1.0,a2.0
@@ -10274,6 +10368,7 @@ CARRY w1.0,a1.1,c3.2.-
 CARRY w1.0,a1.1,w1.0
 CARRY w1.0,a1.1,w1.1
 CARRY w1.0,a1.1,w2.0
+CARRY w1.0,a1.1,h1
 CARRY w1.0,a1.1,a1.0
 CARRY w1.0,a1.1,a1.1
 CARRY w1.0,a1.1,a2.0
@@ -10283,6 +10378,7 @@ CARRY w1.0,a2.0,c3.2.-
 CARRY w1.0,a2.0,w1.0
 CARRY w1.0,a2.0,w1.1
 CARRY w1.0,a2.0,w2.0
+CARRY w1.0,a2.0,h1
 CARRY w1.0,a2.0,a1.0
 CARRY w1.0,a2.0,a1.1
 CARRY w1.0,a2.0,a2.0
@@ -10292,6 +10388,7 @@ CARRY w1.1,c1.1.5+6,c3.2.-
 CARRY w1.1,c1.1.5+6,w1.0
 CARRY w1.1,c1.1.5+6,w1.1
 CARRY w1.1,c1.1.5+6,w2.0
+CARRY w1.1,c1.1.5+6,h1
 CARRY w1.1,c1.1.5+6,a1.0
 CARRY w1.1,c1.1.5+6,a1.1
 CARRY w1.1,c1.1.5+6,a2.0
@@ -10301,6 +10398,7 @@ CARRY w1.1,c2.1.7,c3.2.-
 CARRY w1.1,c2.1.7,w1.0
 CARRY w1.1,c2.1.7,w1.1
 CARRY w1.1,c2.1.7,w2.0
+CARRY w1.1,c2.1.7,h1
 CARRY w1.1,c2.1.7,a1.0
 CARRY w1.1,c2.1.7,a1.1
 CARRY w1.1,c2.1.7,a2.0
@@ -10310,6 +10408,7 @@ CARRY w1.1,c3.2.-,c3.2.-
 CARRY w1.1,c3.2.-,w1.0
 CARRY w1.1,c3.2.-,w1.1
 CARRY w1.1,c3.2.-,w2.0
+CARRY w1.1,c3.2.-,h1
 CARRY w1.1,c3.2.-,a1.0
 CARRY w1.1,c3.2.-,a1.1
 CARRY w1.1,c3.2.-,a2.0
@@ -10319,6 +10418,7 @@ CARRY w1.1,w1.0,c3.2.-
 CARRY w1.1,w1.0,w1.0
 CARRY w1.1,w1.0,w1.1
 CARRY w1.1,w1.0,w2.0
+CARRY w1.1,w1.0,h1
 CARRY w1.1,w1.0,a1.0
 CARRY w1.1,w1.0,a1.1
 CARRY w1.1,w1.0,a2.0
@@ -10328,6 +10428,7 @@ CARRY w1.1,w1.1,c3.2.-
 CARRY w1.1,w1.1,w1.0
 CARRY w1.1,w1.1,w1.1
 CARRY w1.1,w1.1,w2.0
+CARRY w1.1,w1.1,h1
 CARRY w1.1,w1.1,a1.0
 CARRY w1.1,w1.1,a1.1
 CARRY w1.1,w1.1,a2.0
@@ -10337,15 +10438,27 @@ CARRY w1.1,w2.0,c3.2.-
 CARRY w1.1,w2.0,w1.0
 CARRY w1.1,w2.0,w1.1
 CARRY w1.1,w2.0,w2.0
+CARRY w1.1,w2.0,h1
 CARRY w1.1,w2.0,a1.0
 CARRY w1.1,w2.0,a1.1
 CARRY w1.1,w2.0,a2.0
+CARRY w1.1,h1,c1.1.5+6
+CARRY w1.1,h1,c2.1.7
+CARRY w1.1,h1,c3.2.-
+CARRY w1.1,h1,w1.0
+CARRY w1.1,h1,w1.1
+CARRY w1.1,h1,w2.0
+CARRY w1.1,h1,h1
+CARRY w1.1,h1,a1.0
+CARRY w1.1,h1,a1.1
+CARRY w1.1,h1,a2.0
 CARRY w1.1,a1.0,c1.1.5+6
 CARRY w1.1,a1.0,c2.1.7
 CARRY w1.1,a1.0,c3.2.-
 CARRY w1.1,a1.0,w1.0
 CARRY w1.1,a1.0,w1.1
 CARRY w1.1,a1.0,w2.0
+CARRY w1.1,a1.0,h1
 CARRY w1.1,a1.0,a1.0
 CARRY w1.1,a1.0,a1.1
 CARRY w1.1,a1.0,a2.0
@@ -10355,6 +10468,7 @@ CARRY w1.1,a1.1,c3.2.-
 CARRY w1.1,a1.1,w1.0
 CARRY w1.1,a1.1,w1.1
 CARRY w1.1,a1.1,w2.0
+CARRY w1.1,a1.1,h1
 CARRY w1.1,a1.1,a1.0
 CARRY w1.1,a1.1,a1.1
 CARRY w1.1,a1.1,a2.0
@@ -10364,6 +10478,7 @@ CARRY w1.1,a2.0,c3.2.-
 CARRY w1.1,a2.0,w1.0
 CARRY w1.1,a2.0,w1.1
 CARRY w1.1,a2.0,w2.0
+CARRY w1.1,a2.0,h1
 CARRY w1.1,a2.0,a1.0
 CARRY w1.1,a2.0,a1.1
 CARRY w1.1,a2.0,a2.0
@@ -10373,6 +10488,7 @@ CARRY w2.0,c1.1.5+6,c3.2.-
 CARRY w2.0,c1.1.5+6,w1.0
 CARRY w2.0,c1.1.5+6,w1.1
 CARRY w2.0,c1.1.5+6,w2.0
+CARRY w2.0,c1.1.5+6,h1
 CARRY w2.0,c1.1.5+6,a1.0
 CARRY w2.0,c1.1.5+6,a1.1
 CARRY w2.0,c1.1.5+6,a2.0
@@ -10382,6 +10498,7 @@ CARRY w2.0,c2.1.7,c3.2.-
 CARRY w2.0,c2.1.7,w1.0
 CARRY w2.0,c2.1.7,w1.1
 CARRY w2.0,c2.1.7,w2.0
+CARRY w2.0,c2.1.7,h1
 CARRY w2.0,c2.1.7,a1.0
 CARRY w2.0,c2.1.7,a1.1
 CARRY w2.0,c2.1.7,a2.0
@@ -10391,6 +10508,7 @@ CARRY w2.0,c3.2.-,c3.2.-
 CARRY w2.0,c3.2.-,w1.0
 CARRY w2.0,c3.2.-,w1.1
 CARRY w2.0,c3.2.-,w2.0
+CARRY w2.0,c3.2.-,h1
 CARRY w2.0,c3.2.-,a1.0
 CARRY w2.0,c3.2.-,a1.1
 CARRY w2.0,c3.2.-,a2.0
@@ -10400,6 +10518,7 @@ CARRY w2.0,w1.0,c3.2.-
 CARRY w2.0,w1.0,w1.0
 CARRY w2.0,w1.0,w1.1
 CARRY w2.0,w1.0,w2.0
+CARRY w2.0,w1.0,h1
 CARRY w2.0,w1.0,a1.0
 CARRY w2.0,w1.0,a1.1
 CARRY w2.0,w1.0,a2.0
@@ -10409,6 +10528,7 @@ CARRY w2.0,w1.1,c3.2.-
 CARRY w2.0,w1.1,w1.0
 CARRY w2.0,w1.1,w1.1
 CARRY w2.0,w1.1,w2.0
+CARRY w2.0,w1.1,h1
 CARRY w2.0,w1.1,a1.0
 CARRY w2.0,w1.1,a1.1
 CARRY w2.0,w1.1,a2.0
@@ -10418,15 +10538,27 @@ CARRY w2.0,w2.0,c3.2.-
 CARRY w2.0,w2.0,w1.0
 CARRY w2.0,w2.0,w1.1
 CARRY w2.0,w2.0,w2.0
+CARRY w2.0,w2.0,h1
 CARRY w2.0,w2.0,a1.0
 CARRY w2.0,w2.0,a1.1
 CARRY w2.0,w2.0,a2.0
+CARRY w2.0,h1,c1.1.5+6
+CARRY w2.0,h1,c2.1.7
+CARRY w2.0,h1,c3.2.-
+CARRY w2.0,h1,w1.0
+CARRY w2.0,h1,w1.1
+CARRY w2.0,h1,w2.0
+CARRY w2.0,h1,h1
+CARRY w2.0,h1,a1.0
+CARRY w2.0,h1,a1.1
+CARRY w2.0,h1,a2.0
 CARRY w2.0,a1.0,c1.1.5+6
 CARRY w2.0,a1.0,c2.1.7
 CARRY w2.0,a1.0,c3.2.-
 CARRY w2.0,a1.0,w1.0
 CARRY w2.0,a1.0,w1.1
 CARRY w2.0,a1.0,w2.0
+CARRY w2.0,a1.0,h1
 CARRY w2.0,a1.0,a1.0
 CARRY w2.0,a1.0,a1.1
 CARRY w2.0,a1.0,a2.0
@@ -10436,6 +10568,7 @@ CARRY w2.0,a1.1,c3.2.-
 CARRY w2.0,a1.1,w1.0
 CARRY w2.0,a1.1,w1.1
 CARRY w2.0,a1.1,w2.0
+CARRY w2.0,a1.1,h1
 CARRY w2.0,a1.1,a1.0
 CARRY w2.0,a1.1,a1.1
 CARRY w2.0,a1.1,a2.0
@@ -10445,15 +10578,117 @@ CARRY w2.0,a2.0,c3.2.-
 CARRY w2.0,a2.0,w1.0
 CARRY w2.0,a2.0,w1.1
 CARRY w2.0,a2.0,w2.0
+CARRY w2.0,a2.0,h1
 CARRY w2.0,a2.0,a1.0
 CARRY w2.0,a2.0,a1.1
 CARRY w2.0,a2.0,a2.0
+CARRY h1,c1.1.5+6,c1.1.5+6
+CARRY h1,c1.1.5+6,c2.1.7
+CARRY h1,c1.1.5+6,c3.2.-
+CARRY h1,c1.1.5+6,w1.0
+CARRY h1,c1.1.5+6,w1.1
+CARRY h1,c1.1.5+6,w2.0
+CARRY h1,c1.1.5+6,h1
+CARRY h1,c1.1.5+6,a1.0
+CARRY h1,c1.1.5+6,a1.1
+CARRY h1,c1.1.5+6,a2.0
+CARRY h1,c2.1.7,c1.1.5+6
+CARRY h1,c2.1.7,c2.1.7
+CARRY h1,c2.1.7,c3.2.-
+CARRY h1,c2.1.7,w1.0
+CARRY h1,c2.1.7,w1.1
+CARRY h1,c2.1.7,w2.0
+CARRY h1,c2.1.7,h1
+CARRY h1,c2.1.7,a1.0
+CARRY h1,c2.1.7,a1.1
+CARRY h1,c2.1.7,a2.0
+CARRY h1,c3.2.-,c1.1.5+6
+CARRY h1,c3.2.-,c2.1.7
+CARRY h1,c3.2.-,c3.2.-
+CARRY h1,c3.2.-,w1.0
+CARRY h1,c3.2.-,w1.1
+CARRY h1,c3.2.-,w2.0
+CARRY h1,c3.2.-,h1
+CARRY h1,c3.2.-,a1.0
+CARRY h1,c3.2.-,a1.1
+CARRY h1,c3.2.-,a2.0
+CARRY h1,w1.0,c1.1.5+6
+CARRY h1,w1.0,c2.1.7
+CARRY h1,w1.0,c3.2.-
+CARRY h1,w1.0,w1.0
+CARRY h1,w1.0,w1.1
+CARRY h1,w1.0,w2.0
+CARRY h1,w1.0,h1
+CARRY h1,w1.0,a1.0
+CARRY h1,w1.0,a1.1
+CARRY h1,w1.0,a2.0
+CARRY h1,w1.1,c1.1.5+6
+CARRY h1,w1.1,c2.1.7
+CARRY h1,w1.1,c3.2.-
+CARRY h1,w1.1,w1.0
+CARRY h1,w1.1,w1.1
+CARRY h1,w1.1,w2.0
+CARRY h1,w1.1,h1
+CARRY h1,w1.1,a1.0
+CARRY h1,w1.1,a1.1
+CARRY h1,w1.1,a2.0
+CARRY h1,w2.0,c1.1.5+6
+CARRY h1,w2.0,c2.1.7
+CARRY h1,w2.0,c3.2.-
+CARRY h1,w2.0,w1.0
+CARRY h1,w2.0,w1.1
+CARRY h1,w2.0,w2.0
+CARRY h1,w2.0,h1
+CARRY h1,w2.0,a1.0
+CARRY h1,w2.0,a1.1
+CARRY h1,w2.0,a2.0
+CARRY h1,h1,c1.1.5+6
+CARRY h1,h1,c2.1.7
+CARRY h1,h1,c3.2.-
+CARRY h1,h1,w1.0
+CARRY h1,h1,w1.1
+CARRY h1,h1,w2.0
+CARRY h1,h1,h1
+CARRY h1,h1,a1.0
+CARRY h1,h1,a1.1
+CARRY h1,h1,a2.0
+CARRY h1,a1.0,c1.1.5+6
+CARRY h1,a1.0,c2.1.7
+CARRY h1,a1.0,c3.2.-
+CARRY h1,a1.0,w1.0
+CARRY h1,a1.0,w1.1
+CARRY h1,a1.0,w2.0
+CARRY h1,a1.0,h1
+CARRY h1,a1.0,a1.0
+CARRY h1,a1.0,a1.1
+CARRY h1,a1.0,a2.0
+CARRY h1,a1.1,c1.1.5+6
+CARRY h1,a1.1,c2.1.7
+CARRY h1,a1.1,c3.2.-
+CARRY h1,a1.1,w1.0
+CARRY h1,a1.1,w1.1
+CARRY h1,a1.1,w2.0
+CARRY h1,a1.1,h1
+CARRY h1,a1.1,a1.0
+CARRY h1,a1.1,a1.1
+CARRY h1,a1.1,a2.0
+CARRY h1,a2.0,c1.1.5+6
+CARRY h1,a2.0,c2.1.7
+CARRY h1,a2.0,c3.2.-
+CARRY h1,a2.0,w1.0
+CARRY h1,a2.0,w1.1
+CARRY h1,a2.0,w2.0
+CARRY h1,a2.0,h1
+CARRY h1,a2.0,a1.0
+CARRY h1,a2.0,a1.1
+CARRY h1,a2.0,a2.0
 CARRY a1.0,c1.1.5+6,c1.1.5+6
 CARRY a1.0,c1.1.5+6,c2.1.7
 CARRY a1.0,c1.1.5+6,c3.2.-
 CARRY a1.0,c1.1.5+6,w1.0
 CARRY a1.0,c1.1.5+6,w1.1
 CARRY a1.0,c1.1.5+6,w2.0
+CARRY a1.0,c1.1.5+6,h1
 CARRY a1.0,c1.1.5+6,a1.0
 CARRY a1.0,c1.1.5+6,a1.1
 CARRY a1.0,c1.1.5+6,a2.0
@@ -10463,6 +10698,7 @@ CARRY a1.0,c2.1.7,c3.2.-
 CARRY a1.0,c2.1.7,w1.0
 CARRY a1.0,c2.1.7,w1.1
 CARRY a1.0,c2.1.7,w2.0
+CARRY a1.0,c2.1.7,h1
 CARRY a1.0,c2.1.7,a1.0
 CARRY a1.0,c2.1.7,a1.1
 CARRY a1.0,c2.1.7,a2.0
@@ -10472,6 +10708,7 @@ CARRY a1.0,c3.2.-,c3.2.-
 CARRY a1.0,c3.2.-,w1.0
 CARRY a1.0,c3.2.-,w1.1
 CARRY a1.0,c3.2.-,w2.0
+CARRY a1.0,c3.2.-,h1
 CARRY a1.0,c3.2.-,a1.0
 CARRY a1.0,c3.2.-,a1.1
 CARRY a1.0,c3.2.-,a2.0
@@ -10481,6 +10718,7 @@ CARRY a1.0,w1.0,c3.2.-
 CARRY a1.0,w1.0,w1.0
 CARRY a1.0,w1.0,w1.1
 CARRY a1.0,w1.0,w2.0
+CARRY a1.0,w1.0,h1
 CARRY a1.0,w1.0,a1.0
 CARRY a1.0,w1.0,a1.1
 CARRY a1.0,w1.0,a2.0
@@ -10490,6 +10728,7 @@ CARRY a1.0,w1.1,c3.2.-
 CARRY a1.0,w1.1,w1.0
 CARRY a1.0,w1.1,w1.1
 CARRY a1.0,w1.1,w2.0
+CARRY a1.0,w1.1,h1
 CARRY a1.0,w1.1,a1.0
 CARRY a1.0,w1.1,a1.1
 CARRY a1.0,w1.1,a2.0
@@ -10499,15 +10738,27 @@ CARRY a1.0,w2.0,c3.2.-
 CARRY a1.0,w2.0,w1.0
 CARRY a1.0,w2.0,w1.1
 CARRY a1.0,w2.0,w2.0
+CARRY a1.0,w2.0,h1
 CARRY a1.0,w2.0,a1.0
 CARRY a1.0,w2.0,a1.1
 CARRY a1.0,w2.0,a2.0
+CARRY a1.0,h1,c1.1.5+6
+CARRY a1.0,h1,c2.1.7
+CARRY a1.0,h1,c3.2.-
+CARRY a1.0,h1,w1.0
+CARRY a1.0,h1,w1.1
+CARRY a1.0,h1,w2.0
+CARRY a1.0,h1,h1
+CARRY a1.0,h1,a1.0
+CARRY a1.0,h1,a1.1
+CARRY a1.0,h1,a2.0
 CARRY a1.0,a1.0,c1.1.5+6
 CARRY a1.0,a1.0,c2.1.7
 CARRY a1.0,a1.0,c3.2.-
 CARRY a1.0,a1.0,w1.0
 CARRY a1.0,a1.0,w1.1
 CARRY a1.0,a1.0,w2.0
+CARRY a1.0,a1.0,h1
 CARRY a1.0,a1.0,a1.0
 CARRY a1.0,a1.0,a1.1
 CARRY a1.0,a1.0,a2.0
@@ -10517,6 +10768,7 @@ CARRY a1.0,a1.1,c3.2.-
 CARRY a1.0,a1.1,w1.0
 CARRY a1.0,a1.1,w1.1
 CARRY a1.0,a1.1,w2.0
+CARRY a1.0,a1.1,h1
 CARRY a1.0,a1.1,a1.0
 CARRY a1.0,a1.1,a1.1
 CARRY a1.0,a1.1,a2.0
@@ -10526,6 +10778,7 @@ CARRY a1.0,a2.0,c3.2.-
 CARRY a1.0,a2.0,w1.0
 CARRY a1.0,a2.0,w1.1
 CARRY a1.0,a2.0,w2.0
+CARRY a1.0,a2.0,h1
 CARRY a1.0,a2.0,a1.0
 CARRY a1.0,a2.0,a1.1
 CARRY a1.0,a2.0,a2.0
@@ -10535,6 +10788,7 @@ CARRY a1.1,c1.1.5+6,c3.2.-
 CARRY a1.1,c1.1.5+6,w1.0
 CARRY a1.1,c1.1.5+6,w1.1
 CARRY a1.1,c1.1.5+6,w2.0
+CARRY a1.1,c1.1.5+6,h1
 CARRY a1.1,c1.1.5+6,a1.0
 CARRY a1.1,c1.1.5+6,a1.1
 CARRY a1.1,c1.1.5+6,a2.0
@@ -10544,6 +10798,7 @@ CARRY a1.1,c2.1.7,c3.2.-
 CARRY a1.1,c2.1.7,w1.0
 CARRY a1.1,c2.1.7,w1.1
 CARRY a1.1,c2.1.7,w2.0
+CARRY a1.1,c2.1.7,h1
 CARRY a1.1,c2.1.7,a1.0
 CARRY a1.1,c2.1.7,a1.1
 CARRY a1.1,c2.1.7,a2.0
@@ -10553,6 +10808,7 @@ CARRY a1.1,c3.2.-,c3.2.-
 CARRY a1.1,c3.2.-,w1.0
 CARRY a1.1,c3.2.-,w1.1
 CARRY a1.1,c3.2.-,w2.0
+CARRY a1.1,c3.2.-,h1
 CARRY a1.1,c3.2.-,a1.0
 CARRY a1.1,c3.2.-,a1.1
 CARRY a1.1,c3.2.-,a2.0
@@ -10562,6 +10818,7 @@ CARRY a1.1,w1.0,c3.2.-
 CARRY a1.1,w1.0,w1.0
 CARRY a1.1,w1.0,w1.1
 CARRY a1.1,w1.0,w2.0
+CARRY a1.1,w1.0,h1
 CARRY a1.1,w1.0,a1.0
 CARRY a1.1,w1.0,a1.1
 CARRY a1.1,w1.0,a2.0
@@ -10571,6 +10828,7 @@ CARRY a1.1,w1.1,c3.2.-
 CARRY a1.1,w1.1,w1.0
 CARRY a1.1,w1.1,w1.1
 CARRY a1.1,w1.1,w2.0
+CARRY a1.1,w1.1,h1
 CARRY a1.1,w1.1,a1.0
 CARRY a1.1,w1.1,a1.1
 CARRY a1.1,w1.1,a2.0
@@ -10580,15 +10838,27 @@ CARRY a1.1,w2.0,c3.2.-
 CARRY a1.1,w2.0,w1.0
 CARRY a1.1,w2.0,w1.1
 CARRY a1.1,w2.0,w2.0
+CARRY a1.1,w2.0,h1
 CARRY a1.1,w2.0,a1.0
 CARRY a1.1,w2.0,a1.1
 CARRY a1.1,w2.0,a2.0
+CARRY a1.1,h1,c1.1.5+6
+CARRY a1.1,h1,c2.1.7
+CARRY a1.1,h1,c3.2.-
+CARRY a1.1,h1,w1.0
+CARRY a1.1,h1,w1.1
+CARRY a1.1,h1,w2.0
+CARRY a1.1,h1,h1
+CARRY a1.1,h1,a1.0
+CARRY a1.1,h1,a1.1
+CARRY a1.1,h1,a2.0
 CARRY a1.1,a1.0,c1.1.5+6
 CARRY a1.1,a1.0,c2.1.7
 CARRY a1.1,a1.0,c3.2.-
 CARRY a1.1,a1.0,w1.0
 CARRY a1.1,a1.0,w1.1
 CARRY a1.1,a1.0,w2.0
+CARRY a1.1,a1.0,h1
 CARRY a1.1,a1.0,a1.0
 CARRY a1.1,a1.0,a1.1
 CARRY a1.1,a1.0,a2.0
@@ -10598,6 +10868,7 @@ CARRY a1.1,a1.1,c3.2.-
 CARRY a1.1,a1.1,w1.0
 CARRY a1.1,a1.1,w1.1
 CARRY a1.1,a1.1,w2.0
+CARRY a1.1,a1.1,h1
 CARRY a1.1,a1.1,a1.0
 CARRY a1.1,a1.1,a1.1
 CARRY a1.1,a1.1,a2.0
@@ -10607,6 +10878,7 @@ CARRY a1.1,a2.0,c3.2.-
 CARRY a1.1,a2.0,w1.0
 CARRY a1.1,a2.0,w1.1
 CARRY a1.1,a2.0,w2.0
+CARRY a1.1,a2.0,h1
 CARRY a1.1,a2.0,a1.0
 CARRY a1.1,a2.0,a1.1
 CARRY a1.1,a2.0,a2.0
@@ -10616,6 +10888,7 @@ CARRY a2.0,c1.1.5+6,c3.2.-
 CARRY a2.0,c1.1.5+6,w1.0
 CARRY a2.0,c1.1.5+6,w1.1
 CARRY a2.0,c1.1.5+6,w2.0
+CARRY a2.0,c1.1.5+6,h1
 CARRY a2.0,c1.1.5+6,a1.0
 CARRY a2.0,c1.1.5+6,a1.1
 CARRY a2.0,c1.1.5+6,a2.0
@@ -10625,6 +10898,7 @@ CARRY a2.0,c2.1.7,c3.2.-
 CARRY a2.0,c2.1.7,w1.0
 CARRY a2.0,c2.1.7,w1.1
 CARRY a2.0,c2.1.7,w2.0
+CARRY a2.0,c2.1.7,h1
 CARRY a2.0,c2.1.7,a1.0
 CARRY a2.0,c2.1.7,a1.1
 CARRY a2.0,c2.1.7,a2.0
@@ -10634,6 +10908,7 @@ CARRY a2.0,c3.2.-,c3.2.-
 CARRY a2.0,c3.2.-,w1.0
 CARRY a2.0,c3.2.-,w1.1
 CARRY a2.0,c3.2.-,w2.0
+CARRY a2.0,c3.2.-,h1
 CARRY a2.0,c3.2.-,a1.0
 CARRY a2.0,c3.2.-,a1.1
 CARRY a2.0,c3.2.-,a2.0
@@ -10643,6 +10918,7 @@ CARRY a2.0,w1.0,c3.2.-
 CARRY a2.0,w1.0,w1.0
 CARRY a2.0,w1.0,w1.1
 CARRY a2.0,w1.0,w2.0
+CARRY a2.0,w1.0,h1
 CARRY a2.0,w1.0,a1.0
 CARRY a2.0,w1.0,a1.1
 CARRY a2.0,w1.0,a2.0
@@ -10652,6 +10928,7 @@ CARRY a2.0,w1.1,c3.2.-
 CARRY a2.0,w1.1,w1.0
 CARRY a2.0,w1.1,w1.1
 CARRY a2.0,w1.1,w2.0
+CARRY a2.0,w1.1,h1
 CARRY a2.0,w1.1,a1.0
 CARRY a2.0,w1.1,a1.1
 CARRY a2.0,w1.1,a2.0
@@ -10661,15 +10938,27 @@ CARRY a2.0,w2.0,c3.2.-
 CARRY a2.0,w2.0,w1.0
 CARRY a2.0,w2.0,w1.1
 CARRY a2.0,w2.0,w2.0
+CARRY a2.0,w2.0,h1
 CARRY a2.0,w2.0,a1.0
 CARRY a2.0,w2.0,a1.1
 CARRY a2.0,w2.0,a2.0
+CARRY a2.0,h1,c1.1.5+6
+CARRY a2.0,h1,c2.1.7
+CARRY a2.0,h1,c3.2.-
+CARRY a2.0,h1,w1.0
+CARRY a2.0,h1,w1.1
+CARRY a2.0,h1,w2.0
+CARRY a2.0,h1,h1
+CARRY a2.0,h1,a1.0
+CARRY a2.0,h1,a1.1
+CARRY a2.0,h1,a2.0
 CARRY a2.0,a1.0,c1.1.5+6
 CARRY a2.0,a1.0,c2.1.7
 CARRY a2.0,a1.0,c3.2.-
 CARRY a2.0,a1.0,w1.0
 CARRY a2.0,a1.0,w1.1
 CARRY a2.0,a1.0,w2.0
+CARRY a2.0,a1.0,h1
 CARRY a2.0,a1.0,a1.0
 CARRY a2.0,a1.0,a1.1
 CARRY a2.0,a1.0,a2.0
@@ -10679,6 +10968,7 @@ CARRY a2.0,a1.1,c3.2.-
 CARRY a2.0,a1.1,w1.0
 CARRY a2.0,a1.1,w1.1
 CARRY a2.0,a1.1,w2.0
+CARRY a2.0,a1.1,h1
 CARRY a2.0,a1.1,a1.0
 CARRY a2.0,a1.1,a1.1
 CARRY a2.0,a1.1,a2.0
@@ -10688,9 +10978,426 @@ CARRY a2.0,a2.0,c3.2.-
 CARRY a2.0,a2.0,w1.0
 CARRY a2.0,a2.0,w1.1
 CARRY a2.0,a2.0,w2.0
+CARRY a2.0,a2.0,h1
 CARRY a2.0,a2.0,a1.0
 CARRY a2.0,a2.0,a1.1
 CARRY a2.0,a2.0,a2.0
+X
+T plans
+PLAN - - -
+PLAN - 9 -
+PLAN - 8+9 -
+PLAN - - l
+PLAN - 9 l
+PLAN - 8+9 l
+PLAN - - l,s7
+PLAN - 9 l,s7
+PLAN - 8+9 l,s7
+PLAN - - o1
+PLAN - 9 o1
+PLAN - 8+9 o1
+PLAN - - o1,o2
+PLAN - 9 o1,o2
+PLAN - 8+9 o1,o2
+PLAN - - l,o1,s7
+PLAN - 9 l,o1,s7
+PLAN - 8+9 l,o1,s7
+PLAN - - l,k1
+PLAN - 9 l,k1
+PLAN - 8+9 l,k1
+PLAN - - l,k1,s7
+PLAN - 9 l,k1,s7
+PLAN - 8+9 l,k1,s7
+PLAN - - l,k1,o1
+PLAN - 9 l,k1,o1
+PLAN - 8+9 l,k1,o1
+PLAN - - c3
+PLAN - 9 c3
+PLAN - 8+9 c3
+PLAN - - c3,o3
+PLAN - 9 c3,o3
+PLAN - 8+9 c3,o3
+PLAN - - l,o2,o1
+PLAN - 9 l,o2,o1
+PLAN - 8+9 l,o2,o1
+PLAN - - s7,k0
+PLAN - 9 s7,k0
+PLAN - 8+9 s7,k0
+PLAN s0 - -
+PLAN s0 9 -
+PLAN s0 8+9 -
+PLAN s0 - l
+PLAN s0 9 l
+PLAN s0 8+9 l
+PLAN s0 - l,s7
+PLAN s0 9 l,s7
+PLAN s0 8+9 l,s7
+PLAN s0 - o1
+PLAN s0 9 o1
+PLAN s0 8+9 o1
+PLAN s0 - o1,o2
+PLAN s0 9 o1,o2
+PLAN s0 8+9 o1,o2
+PLAN s0 - l,o1,s7
+PLAN s0 9 l,o1,s7
+PLAN s0 8+9 l,o1,s7
+PLAN s0 - l,k1
+PLAN s0 9 l,k1
+PLAN s0 8+9 l,k1
+PLAN s0 - l,k1,s7
+PLAN s0 9 l,k1,s7
+PLAN s0 8+9 l,k1,s7
+PLAN s0 - l,k1,o1
+PLAN s0 9 l,k1,o1
+PLAN s0 8+9 l,k1,o1
+PLAN s0 - c3
+PLAN s0 9 c3
+PLAN s0 8+9 c3
+PLAN s0 - c3,o3
+PLAN s0 9 c3,o3
+PLAN s0 8+9 c3,o3
+PLAN s0 - l,o2,o1
+PLAN s0 9 l,o2,o1
+PLAN s0 8+9 l,o2,o1
+PLAN s0 - s7,k0
+PLAN s0 9 s7,k0
+PLAN s0 8+9 s7,k0
+PLAN s0,c1 - -
+PLAN s0,c1 9 -
+PLAN s0,c1 8+9 -
+PLAN s0,c1 - l
+PLAN s0,c1 9 l
+PLAN s0,c1 8+9 l
+PLAN s0,c1 - l,s7
+PLAN s0,c1 9 l,s7
+PLAN s0,c1 8+9 l,s7
+PLAN s0,c1 - o1
+PLAN s0,c1 9 o1
+PLAN s0,c1 8+9 o1
+PLAN s0,c1 - o1,o2
+PLAN s0,c1 9 o1,o2
+PLAN s0,c1 8+9 o1,o2
+PLAN s0,c1 - l,o1,s7
+PLAN s0,c1 9 l,o1,s7
+PLAN s0,c1 8+9 l,o1,s7
+PLAN s0,c1 - l,k1
+PLAN s0,c1 9 l,k1
+PLAN s0,c1 8+9 l,k1
+PLAN s0,c1 - l,k1,s7
+PLAN s0,c1 9 l,k1,s7
+PLAN s0,c1 8+9 l,k1,s7
+PLAN s0,c1 - l,k1,o1
+PLAN s0,c1 9 l,k1,o1
+PLAN s0,c1 8+9 l,k1,o1
+PLAN s0,c1 - c3
+PLAN s0,c1 9 c3
+PLAN s0,c1 8+9 c3
+PLAN s0,c1 - c3,o3
+PLAN s0,c1 9 c3,o3
+PLAN s0,c1 8+9 c3,o3
+PLAN s0,c1 - l,o2,o1
+PLAN s0,c1 9 l,o2,o1
+PLAN s0,c1 8+9 l,o2,o1
+PLAN s0,c1 - s7,k0
+PLAN s0,c1 9 s7,k0
+PLAN s0,c1 8+9 s7,k0
+PLAN s0,c1+2 - -
+PLAN s0,c1+2 9 -
+PLAN s0,c1+2 8+9 -
+PLAN s0,c1+2 - l
+PLAN s0,c1+2 9 l
+PLAN s0,c1+2 8+9 l
+PLAN s0,c1+2 - l,s7
+PLAN s0,c1+2 9 l,s7
+PLAN s0,c1+2 8+9 l,s7
+PLAN s0,c1+2 - o1
+PLAN s0,c1+2 9 o1
+PLAN s0,c1+2 8+9 o1
+PLAN s0,c1+2 - o1,o2
+PLAN s0,c1+2 9 o1,o2
+PLAN s0,c1+2 8+9 o1,o2
+PLAN s0,c1+2 - l,o1,s7
+PLAN s0,c1+2 9 l,o1,s7
+PLAN s0,c1+2 8+9 l,o1,s7
+PLAN s0,c1+2 - l,k1
+PLAN s0,c1+2 9 l,k1
+PLAN s0,c1+2 8+9 l,k1
+PLAN s0,c1+2 - l,k1,s7
+PLAN s0,c1+2 9 l,k1,s7
+PLAN s0,c1+2 8+9 l,k1,s7
+PLAN s0,c1+2 - l,k1,o1
+PLAN s0,c1+2 9 l,k1,o1
+PLAN s0,c1+2 8+9 l,k1,o1
+PLAN s0,c1+2 - c3
+PLAN s0,c1+2 9 c3
+PLAN s0,c1+2 8+9 c3
+PLAN s0,c1+2 - c3,o3
+PLAN s0,c1+2 9 c3,o3
+PLAN s0,c1+2 8+9 c3,o3
+PLAN s0,c1+2 - l,o2,o1
+PLAN s0,c1+2 9 l,o2,o1
+PLAN s0,c1+2 8+9 l,o2,o1
+PLAN s0,c1+2 - s7,k0
+PLAN s0,c1+2 9 s7,k0
+PLAN s0,c1+2 8+9 s7,k0
+PLAN s0,c1+2,o1 - -
+PLAN s0,c1+2,o1 9 -
+PLAN s0,c1+2,o1 8+9 -
+PLAN s0,c1+2,o1 - l
+PLAN s0,c1+2,o1 9 l
+PLAN s0,c1+2,o1 8+9 l
+PLAN s0,c1+2,o1 - l,s7
+PLAN s0,c1+2,o1 9 l,s7
+PLAN s0,c1+2,o1 8+9 l,s7
+PLAN s0,c1+2,o1 - o1
+PLAN s0,c1+2,o1 9 o1
+PLAN s0,c1+2,o1 8+9 o1
+PLAN s0,c1+2,o1 - o1,o2
+PLAN s0,c1+2,o1 9 o1,o2
+PLAN s0,c1+2,o1 8+9 o1,o2
+PLAN s0,c1+2,o1 - l,o1,s7
+PLAN s0,c1+2,o1 9 l,o1,s7
+PLAN s0,c1+2,o1 8+9 l,o1,s7
+PLAN s0,c1+2,o1 - l,k1
+PLAN s0,c1+2,o1 9 l,k1
+PLAN s0,c1+2,o1 8+9 l,k1
+PLAN s0,c1+2,o1 - l,k1,s7
+PLAN s0,c1+2,o1 9 l,k1,s7
+PLAN s0,c1+2,o1 8+9 l,k1,s7
+PLAN s0,c1+2,o1 - l,k1,o1
+PLAN s0,c1+2,o1 9 l,k1,o1
+PLAN s0,c1+2,o1 8+9 l,k1,o1
+PLAN s0,c1+2,o1 - c3
+PLAN s0,c1+2,o1 9 c3
+PLAN s0,c1+2,o1 8+9 c3
+PLAN s0,c1+2,o1 - c3,o3
+PLAN s0,c1+2,o1 9 c3,o3
+PLAN s0,c1+2,o1 8+9 c3,o3
+PLAN s0,c1+2,o1 - l,o2,o1
+PLAN s0,c1+2,o1 9 l,o2,o1
+PLAN s0,c1+2,o1 8+9 l,o2,o1
+PLAN s0,c1+2,o1 - s7,k0
+PLAN s0,c1+2,o1 9 s7,k0
+PLAN s0,c1+2,o1 8+9 s7,k0
+PLAN s0,c1,o1 - -
+PLAN s0,c1,o1 9 -
+PLAN s0,c1,o1 8+9 -
+PLAN s0,c1,o1 - l
+PLAN s0,c1,o1 9 l
+PLAN s0,c1,o1 8+9 l
+PLAN s0,c1,o1 - l,s7
+PLAN s0,c1,o1 9 l,s7
+PLAN s0,c1,o1 8+9 l,s7
+PLAN s0,c1,o1 - o1
+PLAN s0,c1,o1 9 o1
+PLAN s0,c1,o1 8+9 o1
+PLAN s0,c1,o1 - o1,o2
+PLAN s0,c1,o1 9 o1,o2
+PLAN s0,c1,o1 8+9 o1,o2
+PLAN s0,c1,o1 - l,o1,s7
+PLAN s0,c1,o1 9 l,o1,s7
+PLAN s0,c1,o1 8+9 l,o1,s7
+PLAN s0,c1,o1 - l,k1
+PLAN s0,c1,o1 9 l,k1
+PLAN s0,c1,o1 8+9 l,k1
+PLAN s0,c1,o1 - l,k1,s7
+PLAN s0,c1,o1 9 l,k1,s7
+PLAN s0,c1,o1 8+9 l,k1,s7
+PLAN s0,c1,o1 - l,k1,o1
+PLAN s0,c1,o1 9 l,k1,o1
+PLAN s0,c1,o1 8+9 l,k1,o1
+PLAN s0,c1,o1 - c3
+PLAN s0,c1,o1 9 c3
+PLAN s0,c1,o1 8+9 c3
+PLAN s0,c1,o1 - c3,o3
+PLAN s0,c1,o1 9 c3,o3
+PLAN s0,c1,o1 8+9 c3,o3
+PLAN s0,c1,o1 - l,o2,o1
+PLAN s0,c1,o1 9 l,o2,o1
+PLAN s0,c1,o1 8+9 l,o2,o1
+PLAN s0,c1,o1 - s7,k0
+PLAN s0,c1,o1 9 s7,k0
+PLAN s0,c1,o1 8+9 s7,k0
+PLAN s0,c1,s5,c- - -
+PLAN s0,c1,s5,c- 9 -
+PLAN s0,c1,s5,c- 8+9 -
+PLAN s0,c1,s5,c- - l
+PLAN s0,c1,s5,c- 9 l
+PLAN s0,c1,s5,c- 8+9 l
+PLAN s0,c1,s5,c- - l,s7
+PLAN s0,c1,s5,c- 9 l,s7
+PLAN s0,c1,s5,c- 8+9 l,s7
+PLAN s0,c1,s5,c- - o1
+PLAN s0,c1,s5,c- 9 o1
+PLAN s0,c1,s5,c- 8+9 o1
+PLAN s0,c1,s5,c- - o1,o2
+PLAN s0,c1,s5,c- 9 o1,o2
+PLAN s0,c1,s5,c- 8+9 o1,o2
+PLAN s0,c1,s5,c- - l,o1,s7
+PLAN s0,c1,s5,c- 9 l,o1,s7
+PLAN s0,c1,s5,c- 8+9 l,o1,s7
+PLAN s0,c1,s5,c- - l,k1
+PLAN s0,c1,s5,c- 9 l,k1
+PLAN s0,c1,s5,c- 8+9 l,k1
+PLAN s0,c1,s5,c- - l,k1,s7
+PLAN s0,c1,s5,c- 9 l,k1,s7
+PLAN s0,c1,s5,c- 8+9 l,k1,s7
+PLAN s0,c1,s5,c- - l,k1,o1
+PLAN s0,c1,s5,c- 9 l,k1,o1
+PLAN s0,c1,s5,c- 8+9 l,k1,o1
+PLAN s0,c1,s5,c- - c3
+PLAN s0,c1,s5,c- 9 c3
+PLAN s0,c1,s5,c- 8+9 c3
+PLAN s0,c1,s5,c- - c3,o3
+PLAN s0,c1,s5,c- 9 c3,o3
+PLAN s0,c1,s5,c- 8+9 c3,o3
+PLAN s0,c1,s5,c- - l,o2,o1
+PLAN s0,c1,s5,c- 9 l,o2,o1
+PLAN s0,c1,s5,c- 8+9 l,o2,o1
+PLAN s0,c1,s5,c- - s7,k0
+PLAN s0,c1,s5,c- 9 s7,k0
+PLAN s0,c1,s5,c- 8+9 s7,k0
+PLAN s0,c- - -
+PLAN s0,c- 9 -
+PLAN s0,c- 8+9 -
+PLAN s0,c- - l
+PLAN s0,c- 9 l
+PLAN s0,c- 8+9 l
+PLAN s0,c- - l,s7
+PLAN s0,c- 9 l,s7
+PLAN s0,c- 8+9 l,s7
+PLAN s0,c- - o1
+PLAN s0,c- 9 o1
+PLAN s0,c- 8+9 o1
+PLAN s0,c- - o1,o2
+PLAN s0,c- 9 o1,o2
+PLAN s0,c- 8+9 o1,o2
+PLAN s0,c- - l,o1,s7
+PLAN s0,c- 9 l,o1,s7
+PLAN s0,c- 8+9 l,o1,s7
+PLAN s0,c- - l,k1
+PLAN s0,c- 9 l,k1
+PLAN s0,c- 8+9 l,k1
+PLAN s0,c- - l,k1,s7
+PLAN s0,c- 9 l,k1,s7
+PLAN s0,c- 8+9 l,k1,s7
+PLAN s0,c- - l,k1,o1
+PLAN s0,c- 9 l,k1,o1
+PLAN s0,c- 8+9 l,k1,o1
+PLAN s0,c- - c3
+PLAN s0,c- 9 c3
+PLAN s0,c- 8+9 c3
+PLAN s0,c- - c3,o3
+PLAN s0,c- 9 c3,o3
+PLAN s0,c- 8+9 c3,o3
+PLAN s0,c- - l,o2,o1
+PLAN s0,c- 9 l,o2,o1
+PLAN s0,c- 8+9 l,o2,o1
+PLAN s0,c- - s7,k0
+PLAN s0,c- 9 s7,k0
+PLAN s0,c- 8+9 s7,k0
+PLAN s0,c1,o2 - -
+PLAN s0,c1,o2 9 -
+PLAN s0,c1,o2 8+9 -
+PLAN s0,c1,o2 - l
+PLAN s0,c1,o2 9 l
+PLAN s0,c1,o2 8+9 l
+PLAN s0,c1,o2 - l,s7
+PLAN s0,c1,o2 9 l,s7
+PLAN s0,c1,o2 8+9 l,s7
+PLAN s0,c1,o2 - o1
+PLAN s0,c1,o2 9 o1
+PLAN s0,c1,o2 8+9 o1
+PLAN s0,c1,o2 - o1,o2
+PLAN s0,c1,o2 9 o1,o2
+PLAN s0,c1,o2 8+9 o1,o2
+PLAN s0,c1,o2 - l,o1,s7
+PLAN s0,c1,o2 9 l,o1,s7
+PLAN s0,c1,o2 8+9 l,o1,s7
+PLAN s0,c1,o2 - l,k1
+PLAN s0,c1,o2 9 l,k1
+PLAN s0,c1,o2 8+9 l,k1
+PLAN s0,c1,o2 - l,k1,s7
+PLAN s0,c1,o2 9 l,k1,s7
+PLAN s0,c1,o2 8+9 l,k1,s7
+PLAN s0,c1,o2 - l,k1,o1
+PLAN s0,c1,o2 9 l,k1,o1
+PLAN s0,c1,o2 8+9 l,k1,o1
+PLAN s0,c1,o2 - c3
+PLAN s0,c1,o2 9 c3
+PLAN s0,c1,o2 8+9 c3
+PLAN s0,c1,o2 - c3,o3
+PLAN s0,c1,o2 9 c3,o3
+PLAN s0,c1,o2 8+9 c3,o3
+PLAN s0,c1,o2 - l,o2,o1
+PLAN s0,c1,o2 9 l,o2,o1
+PLAN s0,c1,o2 8+9 l,o2,o1
+PLAN s0,c1,o2 - s7,k0
+PLAN s0,c1,o2 9 s7,k0
+PLAN s0,c1,o2 8+9 s7,k0
+X
+T resume-batches
+RESUMEB - 0
+RESUMEB - 1
+RESUMEB s0 0
+RESUMEB s0 1
+RESUMEB s0,c1 0
+RESUMEB s0,c1 1
+RESUMEB s0,c1+2 0
+RESUMEB s0,c1+2 1
+RESUMEB s0,c1+2,o1 0
+RESUMEB s0,c1+2,o1 1
+RESUMEB s0,c1,o1 0
+RESUMEB s0,c1,o1 1
+RESUMEB s0,c1,s5,c- 0
+RESUMEB s0,c1,s5,c- 1
+RESUMEB s0,c- 0
+RESUMEB s0,c- 1
+RESUMEB s0,c1,c2 0
+RESUMEB s0,c1,c2 1
+X
+T append-merge-0
+SEG 0
+ROW 1 0 1 O 0 10 2 0
+SEG 1
+ROW 2 0 1 O 0 20 3 0
+APPENDM 0 1 1 1 O 0 30 2 0
+X
+T append-merge-1
+SEG 0
+ROW 1 0 1 O 0 10 2 0
+SEG 1
+ROW 2 0 1 O 0 20 3 0
+APPENDM 1 2 1 1 O 0 30 3 0
+X
+T append-merge-2
+SEG 0
+ROW 1 0 1 O 0 10 2 0
+SEG 1
+ROW 2 0 1 O 0 20 3 0
+APPENDM 0 3 0 1 O 0 40 4 0
+X
+T append-merge-3
+SEG 0
+ROW 1 0 1 O 0 10 2 0
+SEG 1
+ROW 3 0 1 O 0 20 4 0
+APPENDM 0 2 0 1 O 0 15 3 0
+X
+T append-merge-4
+SEG 0
+ROW 1 0 1 O 0 10 2 0
+ROW 4 0 1 O 0 40 5 0
+SEG 1
+ROW 2 0 1 O 0 20 3 0
+SEG 2
+ROW 3 0 1 O 0 30 4 0
+APPENDM 1 2 1 1 O 0 50 3 0
+X
+T append-merge-5
+SEG 0
+ROW 1 0 1 O 0 10 2 0
+APPENDM 0 1 1 1 O 0 11 2 0
 X
 T standings
 STAND 600 120 0 0 - 0

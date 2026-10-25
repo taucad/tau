@@ -940,21 +940,138 @@ def carriedTaken (c : Carried) (run : Nat) (heartbeat : Bool) : Option (Nat × N
 inductive CarryOp where
   /-- An admitted command's run's first batch is to say `says` (`rehome`). -/
   | carry (command run : Nat) (says : List Nat)
-  /-- A batch of `run`'s rows is written. -/
+  /-- A batch of `run`'s rows is written, with a place for what it carries (`carriedPlace`, round 21). -/
   | write (run : Nat) (heartbeat : Bool)
+  /-- A batch of `run`'s rows is written that has no place for what it carries: every place in it leaves a tool call
+  open (an approval's rows before its tool returns), so its turns wait for the run's next batch (round 21). -/
+  | hold (run : Nat)
   /-- The command is answered. -/
   | answer (command : Nat) (applied : Bool)
   deriving DecidableEq, Repr
 
-/-- One step (`carriedAfter…`), and the runs whose turns its batch says: a write says what its run's entry carries and
-spends it; a command answered other than applied withdraws its entry. -/
+/-- One step (`carriedAfter…`), and the runs whose turns its batch says: a write with a place says what its run's
+entry carries and spends it; a batch with none keeps it; a command answered other than applied withdraws its entry. -/
 def carryStep (c : Carried) : CarryOp → Carried × List Nat
   | .carry k r says => (c ++ [(k, r, says)], [])
   | .write r hb =>
     match carriedTaken c r hb with
     | some p => (c.erase p, p.2.2)
     | none => (c, [])
+  | .hold _ => (c, [])
   | .answer k applied => (if applied then c else c.filter (fun p => p.1 != k), [])
+
+/-! ## run-history.ts and tau-agent-host.ts: the history is well formed (round 21)
+
+The model's history is a list of messages the provider reads in order. It is well formed when every tool output
+follows its call directly: it answers a call of the assistant turn that only outputs follow, before any other message.
+A call left open when another message follows is answered by the provider's adapter as having no result
+(`transformMessages`), but an output written after that message is a stray result every provider rejects. A batch's
+own rows keep the history well formed by their kinds; the turns a command carries go where no call is open, after
+every rewind of the batch. -/
+
+/-- A history message as the provider reads it (`ProviderMessage`): an assistant turn calling the tools `calls` (none:
+a reply), a tool's output for call `c`, or any other message `id` (a person's words, a reminder). -/
+inductive Msg where
+  | call (calls : List Nat)
+  | out (c : Nat)
+  | say (id : Nat)
+  deriving DecidableEq, Repr
+
+/-- The calls open after one more message (`openToolCalls`): an assistant turn opens its own and leaves any before it
+to the adapter; an output closes its call; any other message leaves every open call to the adapter. -/
+def openAfter (o : List Nat) : Msg → List Nat
+  | .call cs => cs
+  | .out c => o.erase c
+  | .say _ => []
+
+/-- `openToolCalls`: the calls the history leaves open at its tail. -/
+def openCalls (h : List Msg) : List Nat := h.foldl openAfter []
+
+/-- Whether a message may follow a history whose open calls are `o`: an output only for an open call. -/
+def Msg.fits (o : List Nat) : Msg → Bool
+  | .out c => o.contains c
+  | _ => true
+
+/-- `historyWellFormed`, from the open calls `o`. -/
+def wfFrom : List Nat → List Msg → Bool
+  | _, [] => true
+  | o, m :: rest => m.fits o && wfFrom (openAfter o m) rest
+
+def wf (h : List Msg) : Bool := wfFrom [] h
+
+/-- A batch's row as it changes the history: a message appended; a rewind that keeps the first `keep` messages it
+names (`history.rewound`, and a turn's projection commit or a compaction, which drop what they do not keep); or a row
+that is no message (a lifecycle or interrupt row). A rewind names the messages it keeps when its batch is built, before
+anything is carried into it. -/
+inductive Op where
+  | msg (m : Msg)
+  | rewind (keep : Nat)
+  | other
+  deriving DecidableEq, Repr
+
+def Op.apply (h : List Msg) : Op → List Msg
+  | .msg m => h ++ [m]
+  | .rewind k => h.take k
+  | .other => h
+
+def Op.isRewind : Op → Bool
+  | .rewind _ => true
+  | _ => false
+
+def applyAll (h : List Msg) (ops : List Op) : List Msg := ops.foldl Op.apply h
+
+/-- `carriedPlace`: where a batch's carried turns go. The first place after every rewind the batch holds at which the
+history leaves no call open, so they follow the outputs that close the calls a Resume found open and are never cut by
+the batch's own rewind; none when every place in the batch leaves a call open, and they wait for the run's next batch
+(`CarryOp.hold`). -/
+def placeAt (h : List Msg) (ops : List Op) : Option Nat :=
+  (List.range (ops.length + 1)).find? fun i =>
+    (ops.drop i).all (fun op => !op.isRewind) && (openCalls (applyAll h (ops.take i))).isEmpty
+
+/-- The batch written with its carried turns `says` at their place. -/
+def plan (h : List Msg) (says : List Nat) (ops : List Op) : Option (List Op) :=
+  (placeAt h ops).map fun i => ops.take i ++ says.map (fun s => Op.msg (.say s)) ++ ops.drop i
+
+/-- A batch the host writes, by the kinds of its rows: a person's turn (a start, or a run settling before it committed
+its turn); a Retry, which rewinds to `keep` messages first; the model's reply calling `calls`; a tool's output; a
+Resume, which rewinds a transport failure's marker (`cut`, the history's last message), then writes an output for each
+call the history leaves open (`CLIENT_DISCONNECTED`) and a reminder `r` when there are any; any other rows. -/
+inductive Batch where
+  | turn (id : Nat)
+  | retry (keep id : Nat)
+  | reply (calls : List Nat)
+  | output (c : Nat)
+  | resume (cut : Bool) (r : Nat)
+  | other
+  deriving DecidableEq, Repr
+
+/-- The rows of a batch written over `h`, before anything is carried into it. -/
+def Batch.ops (h : List Msg) : Batch → List Op
+  | .turn id => [.other, .msg (.say id)]
+  | .retry k id => [.other, .rewind k, .msg (.say id)]
+  | .reply cs => [.msg (.call cs)]
+  | .output c => [.msg (.out c)]
+  | .resume cut r =>
+    let kept := if cut then h.take (h.length - 1) else h
+    let outs := (openCalls kept).map fun c => Op.msg (.out c)
+    [.other] ++ (if cut then [.rewind (h.length - 1)] else []) ++ outs ++
+      (if outs.isEmpty then [] else [.msg (.say r)])
+  | .other => [.other]
+
+/-- What the host writes only where it may: a tool's output only for a call the history leaves open (its driver runs
+the calls of the reply it just wrote). -/
+def Batch.legal (h : List Msg) : Batch → Bool
+  | .output c => (openCalls h).contains c
+  | _ => true
+
+/-- The histories the host's batches reach: each batch is written over the history it lands after, with the turns its
+run's command carries at their place, or without them when it has none (they wait). That the history a batch is planned
+over is the one it lands after is the merge's (`t7_projection_after_visible`) and the appender's (`appendMerged`). -/
+inductive Reached : List Msg → Prop
+  | nil : Reached []
+  | step {h : List Msg} (b : Batch) (says : List Nat) :
+      Reached h → b.legal h = true → Reached (applyAll h ((plan h says (b.ops h)).getD (b.ops h)))
+
 
 /-! ## foreign-runs.ts and chat-ref.ts: where another device's run stands (XD3, rounds 18 and 19) -/
 
@@ -1134,5 +1251,12 @@ def mergeUpTo (B : Nat) (segs : List (Nat × List Row)) : List Row :=
 
 /-- The history a fold of `rows` reaches from nothing (`createEventLogReducer('history')`), `none` once invalid. -/
 def histOf (rows : List Row) : Option Hist := rows.foldlM Hist.transition {}
+
+/-- The merged rows the appender holds after this device appends `e` to its own segment `dev`
+(`EventLogAppender.append`, round 21): at the merge's tail when the merge ends in `e`'s term, which the new row
+extends, and otherwise the whole merge again, since a row under an older term merges before every later term. -/
+def appendMerged (segs : List (Nat × List Row)) (dev : Nat) (merged : List Row) (e : Row) : List Row :=
+  if merged.getLast?.map Row.term = some e.term then merged ++ [e]
+  else merge (segs.map fun s => if s.1 = dev then (s.1, s.2 ++ [e]) else s)
 
 end ChatLedger

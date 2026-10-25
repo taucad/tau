@@ -328,6 +328,12 @@ export const environmentSchemaBase = z.object({
   TAU_STORAGE_RECEIPT_PUBLIC_KEYS: unsetWhenEmpty(z.string().optional()).describe(
     'JSON array of one or two {kid, alg: "Ed25519", publicKeyPem}: tau-storage receipt verification keys',
   ),
+  TAU_STORAGE_AFFINITY: z
+    .enum(['off', 'rendezvous'])
+    .default('off')
+    .describe(
+      'DC2: rendezvous-rank each project over the tau-storage members (Flycast: the list tau-storage answers on /v1/members) and spill once',
+    ),
 
   // OpenTelemetry
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional().describe('OTLP endpoint for traces and logs'),

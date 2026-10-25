@@ -473,6 +473,9 @@ function adaptInlineFileSystem(fs: RuntimeFileSystemBase): FileSystemProxy {
     exists: fs.exists.bind(fs),
     dispose: noop,
   };
+  if (fs.hashFiles) {
+    fileSystem.hashFiles = fs.hashFiles.bind(fs);
+  }
   if (fs.watch) {
     fileSystem.watch = fs.watch.bind(fs);
     /* A bridged inline filesystem registers its watch over a round trip and
@@ -2452,21 +2455,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    *
    * Absence counts: a path retained as `'missing'` diverges by appearing.
    *
-   * ponytail: re-reads the whole retained closure once per request-scoped operation
-   * instead of stat-and-rehash, and the cost is not one call. `readFiles` is
-   * `Promise.all(readFile)` (`packages/runtime/src/filesystem/create-runtime-filesystem.ts`),
-   * so over the daemon bridge a 300-file closure is 300 concurrent round trips carrying
-   * every body, per operation — and `test_model` pays it once per model it loads. Nothing
-   * caps the size of a retained entry either: `node_modules/` is excluded below, but a
-   * middleware-declared binary asset enters `fileHashCache` at whatever size it is and is
-   * re-read here every time.
+   * Bytes stay the evidence. Stamping `(size, mtimeMs)` beside each hash would let mtime
+   * granularity decide correctness — a rewrite of equal length inside one filesystem tick
+   * would read as unchanged, and answering for replaced bytes is the exact defect this
+   * method exists to close. What changed is where the bytes are digested: a filesystem
+   * that answers `hashFiles` digests them where they live and returns every digest, absent
+   * paths included, in one call with no bodies. Every first-party bridge host does
+   * (`withHostHashFiles` in `@taucad/fs-bridge`), so over the daemon bridge a 300-file
+   * closure is one round trip instead of 300 carrying every body.
    *
-   * Residual, deliberately: the cheap version stamps `(size, mtimeMs)` beside each hash and
-   * stats before reading, which lets mtime granularity decide correctness — a rewrite of
-   * equal length inside one filesystem tick would read as unchanged, and answering for
-   * replaced bytes is the exact defect this method exists to close. Bytes stay the
-   * evidence. Bound the cost instead if it bites: batch the reads, or teach the filesystem
-   * a real `hashFiles` the bridge can answer without shipping bodies.
+   * A filesystem without it (an older or third-party host, or an inline filesystem that
+   * offers none) keeps the body path: `readFiles` plus a digest here, and `exists` for
+   * paths retained as absent.
    */
   private async revalidateRetainedFiles(): Promise<void> {
     /* CDN package artifacts are content-addressed and can be megabytes; `fileContentCache`
@@ -2495,10 +2495,47 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         revisions.set(path, revision);
       }
     };
+    const { hashFiles } = this.filesystem;
+    if (hashFiles === undefined) {
+      await this.revalidateRetainedBodies(expectedPresent, expectedMissing, noteIfMoved);
+    } else {
+      const checked = [...expectedPresent, ...expectedMissing];
+      const digests = checked.length > 0 ? await hashFiles(checked) : {};
+      for (const path of checked) {
+        const digest = digests[path];
+        if (digest === undefined) {
+          throw new Error(`hashFiles answered without a digest for '${path}'`);
+        }
+        /* No body crossed, so none is retained: a moved path drops its cached content
+         * and the next read fetches the bytes this digest names. */
+        noteIfMoved(path, { hash: digest });
+      }
+    }
+    if (revisions.size === 0) {
+      return;
+    }
+    /* Record the new hash so a watch echo for the same edit is deduplicated.
+     * Explicit document operations and watched documents share this observer. */
+    const divergent = [...revisions.keys()];
+    this._applyObservedRevisions(divergent, revisions);
+  }
+
+  /**
+   * The body path of {@link revalidateRetainedFiles}, for a filesystem without `hashFiles`.
+   *
+   * @param expectedPresent - Retained paths last observed with content.
+   * @param expectedMissing - Retained paths last observed as absent.
+   * @param noteIfMoved - Records a path whose current revision differs from the retained one.
+   */
+  private async revalidateRetainedBodies(
+    expectedPresent: readonly string[],
+    expectedMissing: readonly string[],
+    noteIfMoved: (path: string, revision: ObservedFileRevision) => void,
+  ): Promise<void> {
     if (expectedPresent.length > 0) {
       let contents: Record<string, Uint8Array<ArrayBuffer>> | undefined;
       try {
-        contents = await this.filesystem.readFiles(expectedPresent);
+        contents = await this.filesystem.readFiles([...expectedPresent]);
       } catch (error) {
         if (!isNotFoundError(error)) {
           throw error;
@@ -2526,13 +2563,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         noteIfMoved(path, observed[index]!);
       }
     }
-    if (revisions.size === 0) {
-      return;
-    }
-    /* Record the new hash so a watch echo for the same edit is deduplicated.
-     * Explicit document operations and watched documents share this observer. */
-    const divergent = [...revisions.keys()];
-    this._applyObservedRevisions(divergent, revisions);
   }
 
   /**
@@ -6863,7 +6893,23 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
     }
 
+    const { hashFiles } = fileSystem;
     return createRuntimeFileSystem({
+      ...(hashFiles === undefined
+        ? {}
+        : {
+            async hashFiles(paths: readonly string[]): Promise<Record<string, string>> {
+              checkOperationAbort();
+              const span = tracer.startSpan('fs.hashFiles', { count: paths.length });
+              try {
+                const digests = await hashFiles.call(fileSystem, paths);
+                checkOperationAbort();
+                return digests;
+              } finally {
+                span.end();
+              }
+            },
+          }),
       id: 'runtime:kernel-worker-bridge',
       capabilities: fileSystem.capabilities,
       // oxlint-disable-next-line eslint/no-empty-function -- Underlying FS owns its lifecycle; the bridge is a stateless decorator with nothing to release.

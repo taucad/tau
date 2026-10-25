@@ -407,6 +407,9 @@ const runOperation = async (
         throw error;
       }
     }
+    case 'hashFiles': {
+      return provider.hashFiles(request.paths);
+    }
     case 'readdir': {
       return provider.readdir(request.path);
     }

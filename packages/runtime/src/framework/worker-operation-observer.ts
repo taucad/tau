@@ -125,6 +125,8 @@ export class WorkerOperationObserver {
   private realm: RuntimeRealm = 'in-process';
   private served = 0;
   private sampler: ResidentSampler | undefined;
+  /** Whether an operation admitted under `facts` has begun since the worker last went idle. */
+  private observedInFlight = false;
   private readonly settled = new Map<string, SettledFacts>();
   // oxlint-disable-next-line @typescript-eslint/parameter-properties -- erasableSyntaxOnly forbids parameter properties
   private readonly collector: () => WorkerTelemetryCollector | undefined;
@@ -150,11 +152,12 @@ export class WorkerOperationObserver {
 
   /**
    * @param mode - The mode a client asked for; `off` stops facts from the next admitted operation. An operation
-   *   admitted under `facts` keeps its facts, so a mode change never splits one.
+   *   admitted under `facts` keeps its facts, resident samples included, so a mode change never splits one: the
+   *   sampler stops when the worker next goes idle, or now when nothing observed is in flight.
    */
   public setMode(mode: RuntimeObservationMode): void {
     this.mode = mode;
-    if (mode === 'off') {
+    if (mode === 'off' && !this.observedInFlight) {
       this.sampler?.stop();
     }
   }
@@ -183,6 +186,7 @@ export class WorkerOperationObserver {
     if (!input.observed || collector === undefined) {
       return undefined;
     }
+    this.observedInFlight = true;
     if (this.realm === 'utility' || this.realm === 'process') {
       this.sampler ??= new ResidentSampler();
       this.sampler.start();
@@ -242,9 +246,14 @@ export class WorkerOperationObserver {
     }
   }
 
-  /** The worker went idle: let the resident sampler linger, then stop. */
+  /** The worker went idle: let the resident sampler linger, then stop; with observation off, stop now. */
   public idle(): void {
-    this.sampler?.idle();
+    this.observedInFlight = false;
+    if (this.observing) {
+      this.sampler?.idle();
+    } else {
+      this.sampler?.stop();
+    }
   }
 
   /**

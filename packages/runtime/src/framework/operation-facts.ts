@@ -217,6 +217,7 @@ export class ResidentSampler {
   private latestBytes: number | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
   private lingerTimer: ReturnType<typeof setTimeout> | undefined;
+  private firstTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly read: (() => number) | undefined;
 
   /** @param read - The resident-set reader; defaults to `process.memoryUsage.rss` where it exists. */
@@ -241,10 +242,11 @@ export class ResidentSampler {
     if (this.timer !== undefined) {
       return;
     }
-    const first = setTimeout(() => {
+    this.firstTimer = setTimeout(() => {
+      this.firstTimer = undefined;
       this.sample();
     }, 0);
-    unref(first);
+    unref(this.firstTimer);
     this.timer = setInterval(() => {
       this.sample();
     }, 5000);
@@ -264,6 +266,10 @@ export class ResidentSampler {
 
   /** Stop sampling now. */
   public stop(): void {
+    if (this.firstTimer !== undefined) {
+      clearTimeout(this.firstTimer);
+      this.firstTimer = undefined;
+    }
     if (this.timer !== undefined) {
       clearInterval(this.timer);
       this.timer = undefined;

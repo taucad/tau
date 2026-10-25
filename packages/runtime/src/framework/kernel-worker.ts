@@ -989,6 +989,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       if (observed && booted) {
         this.observer.settle(observed);
       }
+      if (this.admittedOperations === 0) {
+        this.observer.idle();
+      }
     }
   }
 

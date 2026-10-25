@@ -4438,6 +4438,26 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return undefined;
   }
 
+  /**
+   * Evaluate options under which a fresh build would give exactly this handle's geometry, when the kernel built other
+   * than `options` asked for.
+   *
+   * @param _owner - Owner whose kernel built the handle.
+   * @param _nativeHandle - The handle.
+   * @param _options - The evaluate options the kernel built it with.
+   * @param _runtime - Runtime services for the kernel hook.
+   * @returns The options, or `undefined` when the handle reflects `options` or the kernel cannot tell.
+   */
+  // oxlint-disable-next-line max-params -- Owner-bound hook carries the handle, its options and the runtime.
+  protected effectiveNativeOptionsForOwner(
+    _owner: OperationOwner,
+    _nativeHandle: unknown,
+    _options: Record<string, unknown>,
+    _runtime: KernelRuntime,
+  ): Readonly<Record<string, unknown>> | undefined {
+    return undefined;
+  }
+
   // oxlint-disable-next-line max-params -- Owner-bound hook also carries the evaluation slot.
   protected async deserializeNativeHandleForOwner(
     _owner: OperationOwner,
@@ -5143,6 +5163,39 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     pinnedSourceRevision?: SourceRevision;
   }): Promise<{ success: true; handle: unknown } | { success: false; result: ExportGeometryResult }> {
     const { owner, runtime, renderArtifact } = options;
+    const retained = await this.retainedNativeHandleForOwner({ owner, runtime, renderArtifact });
+    if (retained.success) {
+      return retained;
+    }
+
+    if (options.pinnedSourceRevision && !(await this.pinnedSourceStillMatches(options.pinnedSourceRevision))) {
+      return { success: false, result: this.sourceSnapshotChangedResult() };
+    }
+    const reheatedSlot = await this.reheatNativeHandleForOwner(owner, renderArtifact, runtime);
+    if (this.isLiveNativeHandleSlotUsableForOwner(reheatedSlot, owner)) {
+      return { success: true, handle: reheatedSlot.handle };
+    }
+
+    return {
+      success: false,
+      result: createKernelError([
+        {
+          message: 'Export could not materialize the kernel-native geometry handle for the requested render identity.',
+          code: 'HANDLE_MISSING',
+          type: 'runtime',
+          severity: 'error',
+        },
+      ]),
+    };
+  }
+
+  /** The artifact's handle from its live or serialized slot, never built again. */
+  private async retainedNativeHandleForOwner(options: {
+    owner: OperationOwner;
+    runtime: KernelRuntime;
+    renderArtifact: MaterializedRender;
+  }): Promise<{ success: true; handle: unknown } | { success: false }> {
+    const { owner, runtime, renderArtifact } = options;
     const { identity } = renderArtifact;
 
     const liveSlot = this.getNativeHandleSlotForIdentity(identity, renderArtifact);
@@ -5171,26 +5224,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         return { success: true, handle: restored.handle };
       }
     }
-
-    if (options.pinnedSourceRevision && !(await this.pinnedSourceStillMatches(options.pinnedSourceRevision))) {
-      return { success: false, result: this.sourceSnapshotChangedResult() };
-    }
-    const reheatedSlot = await this.reheatNativeHandleForOwner(owner, renderArtifact, runtime);
-    if (this.isLiveNativeHandleSlotUsableForOwner(reheatedSlot, owner)) {
-      return { success: true, handle: reheatedSlot.handle };
-    }
-
-    return {
-      success: false,
-      result: createKernelError([
-        {
-          message: 'Export could not materialize the kernel-native geometry handle for the requested render identity.',
-          code: 'HANDLE_MISSING',
-          type: 'runtime',
-          severity: 'error',
-        },
-      ]),
-    };
+    return { success: false };
   }
 
   private liveSlotMatchesOwner(slot: NativeHandleSlot, owner: OperationOwner): boolean {
@@ -5552,7 +5586,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     if (!desiredNativeHandleKey.success) {
       return createKernelError(desiredNativeHandleKey.issues);
     }
-    if (!this.artifactMatchesNativeBuild(renderArtifact, plan.owner, desiredNativeHandleKey.key)) {
+    const sameBuild = this.artifactMatchesNativeBuild(renderArtifact, plan.owner, desiredNativeHandleKey.key);
+    // A view built with other options can still serve the export when the kernel says its build is the export's.
+    const servedHandle = sameBuild
+      ? undefined
+      : await this.retainedBuildServingExport({
+          plan,
+          renderArtifact,
+          exportOptions: exportMaterialization.options,
+          runtime: this.createRuntime(),
+          pinned: pinnedSourceRevision !== undefined,
+        });
+    if (!sameBuild && servedHandle === undefined) {
       if (pinnedSourceRevision && !(await this.pinnedSourceStillMatches(pinnedSourceRevision))) {
         return this.sourceSnapshotChangedResult();
       }
@@ -5592,12 +5637,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
 
     const runtime = this.createRuntime();
-    const nativeInput = await this.prepareNativeExportInput({
-      plan,
-      runtime,
-      renderArtifact,
-      pinnedSourceRevision,
-    });
+    const nativeInput: Awaited<ReturnType<typeof this.prepareNativeExportInput>> = servedHandle
+      ? { success: true, input: { ...plan.input, nativeHandle: servedHandle.handle } }
+      : await this.prepareNativeExportInput({
+          plan,
+          runtime,
+          renderArtifact,
+          pinnedSourceRevision,
+        });
     if (!nativeInput.success) {
       return nativeInput.result;
     }
@@ -5611,6 +5658,80 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     });
     computeSpan.end();
     return result;
+  }
+
+  /**
+   * The artifact's retained handle when the kernel reports that its build is exactly what the export's construction
+   * options would build, for example a fallback to the export's mesh. Only a live or serialized handle qualifies, and
+   * every other native-handle dependency must still match, so a miss builds for the export as before.
+   */
+  private async retainedBuildServingExport(input: {
+    plan: Extract<OwnerBoundExportPlan, { success: true }>;
+    renderArtifact: MaterializedRender;
+    exportOptions: Record<string, unknown>;
+    runtime: KernelRuntime;
+    pinned: boolean;
+  }): Promise<{ handle: unknown } | undefined> {
+    const { plan, renderArtifact, runtime } = input;
+    const { identity } = renderArtifact;
+    const { owner } = plan;
+    const builtWith = identity.nativeBuildInput?.options;
+    const createSchema = owner.binding?.kernelId
+      ? this.kernelCreateOptionsZodSchemaMap.get(owner.binding.kernelId)
+      : undefined;
+    if (!builtWith || !createSchema) {
+      return undefined;
+    }
+    const viewOptions = this.resolveCreateOptions(identity.renderOptions, undefined, owner);
+    const exportOptions = this.resolveCreateOptions(identity.renderOptions, input.exportOptions, owner);
+    if (
+      !viewOptions.success ||
+      !exportOptions.success ||
+      !('options' in viewOptions.input) ||
+      !('options' in exportOptions.input)
+    ) {
+      return undefined;
+    }
+    // The view's own key, recomputed with the export's dependencies: only the construction options may differ.
+    const viewKey = await this.computeNativeHandleKey({
+      owner,
+      parameters: identity.parameters,
+      renderOptions: identity.renderOptions,
+      exportOptions: input.exportOptions,
+      content: plan.route.content,
+      createOptions: viewOptions.input.options,
+      ...(input.pinned ? { pinnedIdentity: identity } : {}),
+    });
+    if (!viewKey.success || !this.artifactMatchesNativeBuild(renderArtifact, owner, viewKey.key)) {
+      return undefined;
+    }
+    const retained = await this.retainedNativeHandleForOwner({ owner, runtime, renderArtifact });
+    if (!retained.success) {
+      return undefined;
+    }
+    let effective: Readonly<Record<string, unknown>> | undefined;
+    try {
+      effective = this.effectiveNativeOptionsForOwner(owner, retained.handle, builtWith, runtime);
+    } catch (error) {
+      this.logger.warn('Effective-options hook failed; export will build', {
+        data: { error: error instanceof Error ? error.message : String(error) },
+      });
+      return undefined;
+    }
+    if (effective === undefined) {
+      return undefined;
+    }
+    const admitted = admitKernelOptions(
+      createSchema,
+      effective,
+      'Kernel effective options',
+      'EVALUATE_OPTIONS_INVALID',
+    );
+    if (!admitted.success || canonicalJson(admitted.options) !== canonicalJson(exportOptions.input.options)) {
+      return undefined;
+    }
+    this.logger.debug('Export reuses the retained build: the kernel reports it as the export build');
+    return { handle: retained.handle };
   }
 
   private async prepareNativeExportInput(options: {
@@ -7440,6 +7561,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     exportOptions?: Record<string, unknown>;
     content: RuntimeContentInput;
     pinnedIdentity?: RenderIdentity;
+    /** Hash these construction options in place of the parsed ones, keeping every other dependency. */
+    createOptions?: Record<string, unknown>;
   }): Promise<{ success: true; key: string } | { success: false; issues: KernelIssue[] }> {
     const createOptions = this.resolveCreateOptions(input.renderOptions, input.exportOptions, input.owner);
     if (!createOptions.success) {
@@ -7465,7 +7588,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       dependencies.push({
         type: 'option',
         key: 'native-build-options',
-        value: createOptions.input.options,
+        value: input.createOptions ?? createOptions.input.options,
       });
     }
     return {

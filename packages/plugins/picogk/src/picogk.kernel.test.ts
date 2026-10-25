@@ -407,6 +407,21 @@ describe('PicoGK kernel', () => {
     expect(built.handle.tessellation).not.toHaveProperty('relax');
   });
 
+  it('reports a uniform mesh as the export build, and an adaptive mesh or a report-less snapshot as nothing', () => {
+    const glb = new Uint8Array(4);
+    const tessellation = { triangles: 1, vertices: 3, elapsed: 1 };
+    const options = picogkRenderSchema.parse({ meshRelax: true });
+    const effective = (handle: Parameters<NonNullable<typeof definition.effectiveOptions>>[0]['handle']) =>
+      definition.effectiveOptions!({ handle, options }, runtime, context());
+    expect(effective({ glb, tessellation })).toEqual({ meshAdaptivity: 0, meshRelax: false });
+    expect(effective({ glb, tessellation: { ...tessellation, adaptivity: 0.25, relax: false } })).toBeUndefined();
+    expect(effective({ glb })).toBeUndefined();
+    // The export's construction options are exactly the reported ones.
+    expect(picogkExportSchemas.glb.pick({ meshAdaptivity: true, meshRelax: true }).parse({})).toEqual(
+      effective({ glb, tessellation }),
+    );
+  });
+
   it('refuses a defaulted view from a worker that echoes other meshing than it was asked for', async () => {
     const value = context();
     value.session.request.mockResolvedValueOnce({ ...buildResult(), meshing: { adaptivity: 0.5, relax: false } });

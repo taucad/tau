@@ -866,6 +866,17 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     return kernel.definition.isHandleValid({ handle: nativeHandle }, runtime, kernel.ctx);
   }
 
+  // oxlint-disable-next-line max-params -- Implements the base owner-bound hook with the handle's build options.
+  protected override effectiveNativeOptionsForOwner(
+    owner: OperationOwner,
+    nativeHandle: unknown,
+    options: Record<string, unknown>,
+    runtime: KernelRuntime,
+  ): Readonly<Record<string, unknown>> | undefined {
+    const kernel = this.getKernelForOwner(owner);
+    return kernel?.definition.effectiveOptions?.({ handle: nativeHandle, options }, runtime, kernel.ctx);
+  }
+
   // oxlint-disable-next-line max-params -- Implements the base owner-bound hook including its evaluation slot.
   protected override async deserializeNativeHandleForOwner(
     owner: OperationOwner,

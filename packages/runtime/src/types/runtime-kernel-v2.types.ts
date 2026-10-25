@@ -278,6 +278,18 @@ export type KernelDefinitionV2<
   ): boolean | Promise<boolean>;
   releaseHandle?(input: Readonly<{ handle: Handle }>, services: KernelServices, context: Context): void;
   /**
+   * Evaluate options under which a fresh build would give exactly this handle's geometry, when they differ from the
+   * `options` it was built with: the kernel fell back to other output than was asked. The runtime then serves an
+   * export whose admitted evaluate options equal the returned ones from this handle instead of building again.
+   * Return `undefined` when the handle reflects `options` as asked, or when the kernel cannot tell. It must be
+   * synchronous and free of side effects.
+   */
+  effectiveOptions?(
+    input: Readonly<{ handle: Handle; options: ParsedOptions<EvaluateSchema> }>,
+    services: KernelServices,
+    context: Context,
+  ): Readonly<Record<string, unknown>> | undefined;
+  /**
    * Bytes of WebAssembly linear memory the kernel's instance has committed, read when a rendering is delivered and
    * reported on it as `heapBytes`. Linear memory never shrinks, so a host may recycle the worker above its device's
    * threshold. Omit it for a kernel without a WebAssembly heap.

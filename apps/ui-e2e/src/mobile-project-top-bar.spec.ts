@@ -3,6 +3,7 @@ import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import { prepareComposerPage, readHomeJson } from '#support/chat-attachments.js';
+import { waitForStageReady } from '#support/viewer-stage.js';
 
 /**
  * W2 on a real phone route (D2, D3, EQ2 = H1; canvas HDR-03, HDR-07, HDR-08): the project's top bar is one 48px row of
@@ -65,15 +66,21 @@ const readBar = async (): Promise<BarGeometry> =>
     };
   });
 
-test.each([
-  { width: 320, height: 640 },
-  { width: 390, height: 844 },
-])('fits three 40px controls in one 48px project bar at $width×$height', async (viewport) => {
+/** Open the seeded project on a touch phone and wait for its stage to draw before the first tap or screenshot. */
+const openPhoneProject = async (viewport: { readonly width: number; readonly height: number }): Promise<void> => {
   await target.commands.uiOpenTarget({ hasTouch: true, isMobile: true });
   await prepareComposerPage();
   await target.setViewport(viewport);
   await target.navigate('/__e2e/chat-attachments');
   await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?/u, 60_000);
+  await waitForStageReady();
+};
+
+test.each([
+  { width: 320, height: 640 },
+  { width: 390, height: 844 },
+])('fits three 40px controls in one 48px project bar at $width×$height', async (viewport) => {
+  await openPhoneProject(viewport);
   await target.expectVisible(topBar(), 60_000);
   // The status line answers once the revision root has; before that it says History is loading, never empty.
   await expect
@@ -125,11 +132,7 @@ test.each([
   { width: 320, height: 640 },
   { width: 390, height: 844 },
 ])('opens the project sheet from the title and each destination once at $width×$height', async (viewport) => {
-  await target.commands.uiOpenTarget({ hasTouch: true, isMobile: true });
-  await prepareComposerPage();
-  await target.setViewport(viewport);
-  await target.navigate('/__e2e/chat-attachments');
-  await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?/u, 60_000);
+  await openPhoneProject(viewport);
   await target.expectVisible(titleButton(), 60_000);
 
   await target.click(titleButton(), { touch: true });

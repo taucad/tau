@@ -2,6 +2,7 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
+import { waitForStageReady } from '#support/viewer-stage.js';
 
 const projectFixtureRoute = '/__e2e/project-file-tree';
 const navigationFixtureRoute = '/__e2e/project-navigation';
@@ -27,6 +28,7 @@ const openSeededProject = async (): Promise<void> => {
     await target.navigate(href);
   }
   await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first(), 60_000);
+  await waitForStageReady();
 };
 
 const openShare = async (): Promise<void> => {
@@ -107,6 +109,7 @@ test('restores a GitHub authorization return and routes sidebar Share to the sel
   await target.navigate(`${current.pathname}${current.search}`);
 
   await target.expectVisible(shareRegion(), 60_000);
+  await waitForStageReady();
   await target.expectVisible(shareRegion().getByText('GitHub Gist access was not granted.', { exact: true }));
   await target.expectVisible(shareMethodPicker('GitHub Gist'));
   await target.waitFor(() => {

@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
+import { waitForStageReady } from '#support/viewer-stage.js';
 
 /**
  * D13 / T8: a phone paints the phone layout first. A recorder installed before
@@ -92,9 +93,9 @@ const readLayout = async (): Promise<LayoutRecord> =>
     () => (globalThis as typeof globalThis & { __TAU_LAYOUT_RECORD__: LayoutRecord }).__TAU_LAYOUT_RECORD__,
   );
 
-/** The phone layout is live: its chunk arrived and no gate is still showing the skeleton. */
-const waitForPhoneLayout = async (): Promise<void> =>
-  target.waitFor(
+/** The phone layout is live: its chunk arrived, no gate is still showing the skeleton, and its stage has drawn. */
+const waitForPhoneLayout = async (): Promise<void> => {
+  await target.waitFor(
     () => {
       const { __TAU_LAYOUT_RECORD__: record } = globalThis as typeof globalThis & {
         __TAU_LAYOUT_RECORD__: LayoutRecord;
@@ -104,6 +105,8 @@ const waitForPhoneLayout = async (): Promise<void> =>
     undefined,
     { timeout: 120_000 },
   );
+  await waitForStageReady();
+};
 
 /** Long enough for a discarded or late desktop mount to have shown up in the record. */
 const settle = async (): Promise<void> =>
@@ -128,6 +131,7 @@ test('a phone never mounts or requests the desktop workbench on SSR, hydration o
 
   await target.navigate(projectUrl);
   await target.expectVisible(desktopWorkspace, 60_000);
+  await waitForStageReady();
   const desktop = await readLayout();
   expect(desktop.desktopShellMounted).toBe(true);
   expect(desktop.desktopShellChunks.length).toBeGreaterThan(0);

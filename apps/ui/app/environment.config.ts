@@ -57,6 +57,8 @@ const environmentSchema = z.preprocess(
       /* A build product, not deployment configuration: the web build defines it for the server graph
        * only, so client chunks keep stable hashes across rebuilds (`#lib/build-identity`). */
       TAU_BUILD_ID: typeof tauBuildId === 'number' ? String(tauBuildId) : undefined,
+      /* The release label runtime telemetry stamps; a build product like `TAU_BUILD_ID`, server graph only. */
+      TAU_RELEASE: typeof tauBuildRelease === 'string' && tauBuildRelease !== '' ? tauBuildRelease : undefined,
       /* eslint-enable @typescript-eslint/naming-convention -- environment variable names */
     };
   },
@@ -68,6 +70,8 @@ const environmentSchema = z.preprocess(
     TAU_FRONTEND_URL: z.url(),
     /** Ordered build identity for the stale-tab skew guard (blueprint DF20); set by the build, never the host. */
     TAU_BUILD_ID: z.string().optional(),
+    /** The build's release label (short commit) for runtime telemetry; set by the build, never the host. */
+    TAU_RELEASE: z.string().optional(),
     /** Deployment opt-in while machine qualification is incomplete. Never a localStorage override. */
     TAU_MACHINES_ENABLED: z.string().optional().transform(isMachinesFeatureEnabled),
     /**
@@ -156,6 +160,7 @@ const baseClientEnvironmentKeys = [
   'TAU_WEBSOCKET_URL',
   'TAU_FRONTEND_URL',
   'TAU_BUILD_ID',
+  'TAU_RELEASE',
   'TAU_DEBUG',
   'TAU_MACHINES_ENABLED',
   'TAU_GIT_REMOTE_ALLOW_PRIVATE',

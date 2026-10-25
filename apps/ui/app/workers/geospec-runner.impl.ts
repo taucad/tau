@@ -24,6 +24,8 @@ import { tauClientExporter } from '@taucad/agent-tools/geospec/exporter';
 // GeoSpec has no browser VM of its own: Tau's esbuild VM bundles specs and configs, npm packages included.
 import { createEsbuildModuleVm } from '@taucad/esbuild/vm';
 import { createRuntimeClient } from '@taucad/runtime/client';
+import { forwardOperations, geoSpecVerifyEntry } from '#telemetry/worker-forwarding.js';
+import type { WorkerTelemetry } from '#telemetry/worker-forwarding.js';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
 import { fromFsLike } from '@taucad/runtime/filesystem';
 import type { FsLike } from '@taucad/runtime/filesystem';
@@ -327,6 +329,8 @@ type WorkerSession = {
   readConfig: () => Promise<GeoSpecTestModelConfig>;
   /** Host policy: the longest effective `testTimeout`; a longer one is refused, never clamped. Milliseconds. */
   maxRunBudget?: number | undefined;
+  /** Runtime telemetry (FR-16): the page's context; absent where the page would not record. */
+  telemetry?: WorkerTelemetry | undefined;
 };
 
 type QueuedRun = {
@@ -383,6 +387,15 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
   let runner: GeoSpecRunner | undefined;
   let closeEngine: (() => void) | undefined;
   let readConfig: WorkerSession['readConfig'] | undefined;
+  const telemetry: WorkerTelemetry | undefined =
+    request.telemetry === undefined
+      ? undefined
+      : {
+          context: request.telemetry,
+          forward: (entry) => {
+            workerScope.postMessage({ type: 'telemetry', entry });
+          },
+        };
   try {
     const runtimeConfigResult = uiRuntimeConfigSchema.safeParse(request.runtimeConfig);
     if (!runtimeConfigResult.success) {
@@ -399,6 +412,10 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
         compute: { mode: 'off' },
       }),
     );
+    if (telemetry !== undefined) {
+      // The session terminates the client on close, which ends these subscriptions with it.
+      forwardOperations(runtimeClient, 'geospec', telemetry);
+    }
     {
       const [native, { createNativeGeoSpecRunner }, { readGeoSpecConfig }, exporter] = await Promise.all([
         import('geospec-engine'),
@@ -470,6 +487,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       closeEngine,
       readConfig,
       maxRunBudget: request.maxRunBudget,
+      telemetry,
     };
     session = activeSession;
     workerScope.postMessage({ type: 'initialized', requestId: request.requestId, sessionId: request.sessionId });
@@ -520,6 +538,29 @@ export const describeKernelEvidence = async (
   }
 };
 
+/**
+ * FR-16: one run-level `verify` entry per settled run, after its result. Test names, specs and values never leave, and
+ * telemetry never changes a run's answer.
+ *
+ * @param activeSession - The run's session.
+ * @param output - The run's output.
+ * @param input - The run's wall time and whether it named its own work-unit limit.
+ */
+const forwardVerifyEntry = (
+  activeSession: WorkerSession,
+  output: Parameters<typeof geoSpecVerifyEntry>[0],
+  input: Parameters<typeof geoSpecVerifyEntry>[1],
+): void => {
+  if (activeSession.telemetry === undefined) {
+    return;
+  }
+  try {
+    activeSession.telemetry.forward(geoSpecVerifyEntry(output, input, activeSession.telemetry.context));
+  } catch {
+    /* Fire-and-forget. */
+  }
+};
+
 const runGeoSpecInWorker = async (request: GeoSpecRunnerWorkerRunRequest): Promise<void> => {
   const activeSession = session;
   if (!activeSession || activeSession.sessionId !== request.sessionId) {
@@ -550,6 +591,7 @@ const runGeoSpecInWorker = async (request: GeoSpecRunnerWorkerRunRequest): Promi
       });
       return;
     }
+    const startedAt = performance.now();
     const output = await runGeoSpecTests({
       discovery: createDiscoveryFileSystem(activeSession.fileSystem),
       runner: activeSession.runner,
@@ -570,6 +612,10 @@ const runGeoSpecInWorker = async (request: GeoSpecRunnerWorkerRunRequest): Promi
       requestId: request.requestId,
       result: { success: true, ...output },
       candidates: locallyEstablishedCandidates,
+    });
+    forwardVerifyEntry(activeSession, output, {
+      duration: performance.now() - startedAt,
+      workUnitLimitArgument: request.args.workUnitLimit !== undefined,
     });
   } catch (error) {
     postError(request.requestId, error instanceof Error ? error.message : 'GeoSpec worker failed to run tests.');

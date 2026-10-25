@@ -66,6 +66,15 @@
           "env": "TAU_CLOUD_ENABLED"
         },
         {
+          "env": "TAU_TELEMETRY_HOST"
+        },
+        {
+          "env": "COMMIT_REF"
+        },
+        {
+          "env": "GITHUB_SHA"
+        },
+        {
           "env": "TAU_DESKTOP_RELEASED"
         },
         {
@@ -126,8 +135,12 @@
       "inputs": [
         "production",
         "^production",
+        "{workspaceRoot}/apps/desktop/package.json",
         {
           "env": "TAU_CLOUD_ENABLED"
+        },
+        {
+          "env": "TAU_TELEMETRY_HOST"
         },
         {
           "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
@@ -154,6 +167,9 @@
         "^production",
         {
           "env": "TAU_CLOUD_ENABLED"
+        },
+        {
+          "env": "TAU_TELEMETRY_HOST"
         },
         {
           "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"

@@ -1,6 +1,7 @@
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { createElectronClientOptions } from '@taucad/runtime/electron/renderer';
 import { ENV } from '#environment.config.js';
+import { observeRuntimeClient } from '#telemetry/runtime-telemetry.js';
 import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
 import type { HeadlessImageBackend } from '#services/headless-image.service.js';
@@ -13,10 +14,13 @@ export const headlessImageBackend: HeadlessImageBackend = {
       context: { purpose: 'ephemeral', definition: 'default' },
     })();
     const client = createRuntimeClient(options);
+    /* Runtime observability (FR-14): capture attempts, attached before `connect()`. */
+    const stopObserving = observeRuntimeClient(client, 'capture');
     const adapter: Awaited<ReturnType<HeadlessImageBackend['createImageClient']>> = {
       connect: async () => client.connect(),
       terminate: () => {
         client.terminate();
+        stopObserving();
       },
       on: (event, handler) => client.on(event, handler),
       transcode: async (input) => client.transcode(input),

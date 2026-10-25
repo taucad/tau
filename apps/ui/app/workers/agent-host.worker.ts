@@ -103,6 +103,7 @@ const visibility: ResidentWorkerContext['visibility'] = {
 
 let tabId: string | undefined;
 let requestRebridge: ResidentWorkerContext['requestRebridge'];
+let forwardTelemetry: ResidentWorkerContext['forwardTelemetry'];
 
 const requireTab = (): string => {
   if (tabId === undefined) {
@@ -116,7 +117,12 @@ const requireTab = (): string => {
 /** One project host per project; a newer `provide` replaces the incarnation, and `release` closes it (RH-R4). */
 const hosts = createProjectHosts<BrowserProjectHost>(async (args) => {
   const loaded = await loadImplementation();
-  return loaded.openBrowserProjectHost(args, { tabId: requireTab(), visibility, requestRebridge });
+  return loaded.openBrowserProjectHost(args, {
+    tabId: requireTab(),
+    visibility,
+    requestRebridge,
+    forwardTelemetry: (entry) => forwardTelemetry?.(entry),
+  });
 });
 
 let connected = false;
@@ -194,5 +200,8 @@ workerScope.addEventListener('message', (event) => {
   });
   requestRebridge = (projectId, hostId) => {
     served.notify('rebridgeRequested', { projectId, hostId });
+  };
+  forwardTelemetry = (entry) => {
+    served.notify('telemetry', { entry });
   };
 });

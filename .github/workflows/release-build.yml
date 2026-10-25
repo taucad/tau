@@ -314,6 +314,9 @@ jobs:
       # Baked into the desktop main bundle (`tauPostHogClientKey`) from POSTHOG_CLIENT_KEY_PRODUCTION or _STAGING; unset leaves desktop analytics inert.
       POSTHOG_CLIENT_KEY: ${{ vars[format('POSTHOG_CLIENT_KEY_{0}', needs.resolve.outputs.channel)] }}
       TAU_DESKTOP_CHANNEL: ${{ needs.resolve.outputs.channel }}
+      # Runtime telemetry's own build signal (`tauTelemetryHostCloudBuild`), never the billing gate. A literal, so every
+      # official desktop artifact on both channels reports, and only to the API its own `TAU_API_URL` default names.
+      TAU_TELEMETRY_HOST: cloud
       TAU_DESKTOP_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
       TAU_DESKTOP_NOTARIZE: ${{ needs.resolve.outputs.notarize }}
       TAU_MACOS_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/macos-${{ matrix.arch }}
@@ -995,6 +998,8 @@ jobs:
       # Baked into the desktop main bundle (`tauPostHogClientKey`) from POSTHOG_CLIENT_KEY_PRODUCTION or _STAGING; unset leaves desktop analytics inert.
       POSTHOG_CLIENT_KEY: ${{ vars[format('POSTHOG_CLIENT_KEY_{0}', needs.resolve.outputs.channel)] }}
       TAU_DESKTOP_CHANNEL: ${{ needs.resolve.outputs.channel }}
+      # Runtime telemetry's own build signal, as in `desktop-macos`; this matrix has no `environment:`, hence a literal.
+      TAU_TELEMETRY_HOST: cloud
       TAU_DESKTOP_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
       TAU_DESKTOP_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/${{ matrix.platform }}
     steps:

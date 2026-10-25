@@ -39,6 +39,12 @@ const saveNotConfirmed = 'Save not confirmed';
 /** The shared vocabulary's clause for a viewer who may not write. */
 const viewOnly = 'View only';
 
+/** What the glyph's colour says, for a person who does not see it (its name): only an unconfirmed write and a warning say anything. */
+const toneDescriptions: Readonly<Record<string, string>> = {
+  'text-feature': 'Needs attention',
+  'text-warning': 'Warning',
+};
+
 /** What the status line draws: one glyph in one tone (colour lives on the glyph only) and one line of words. @public */
 export type ProjectStatusLine = Readonly<{
   icon: LucideIcon;
@@ -160,10 +166,11 @@ function useProjectStatus(): Readonly<{
  * @public
  */
 export function ProjectStatusLineView({ line }: { readonly line: ProjectStatusLine }): React.JSX.Element {
+  const description = Object.hasOwn(toneDescriptions, line.tone) ? toneDescriptions[line.tone] : undefined;
   return (
     <span data-slot='status-line' className='flex w-full min-w-0 items-center gap-1 text-xs text-muted-foreground'>
       <line.icon
-        aria-hidden
+        {...(description === undefined ? { 'aria-hidden': true } : { role: 'img', 'aria-label': description })}
         data-slot='status-line-icon'
         className={cn('size-3 shrink-0', line.tone, line.isBusy && 'animate-spin motion-reduce:animate-none')}
       />

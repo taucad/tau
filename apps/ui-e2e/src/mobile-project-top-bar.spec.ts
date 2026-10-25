@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import { prepareComposerPage } from '#support/chat-attachments.js';
+import { prepareComposerPage, readHomeJson } from '#support/chat-attachments.js';
 
 /**
  * W2 on a real phone route (D2, D3, EQ2 = H1; canvas HDR-03, HDR-07, HDR-08): the project's top bar is one 48px row of
@@ -162,3 +162,228 @@ test.each([
   await target.expectVisible(selectors.getByRole('region', { name: 'Export', exact: true }), 60_000);
   await target.expectCount(projectSheet(), 0);
 });
+
+/*
+ * HDR-05 and HDR-06 on the real route: each state is reached through the real stores — a write the store refuses, a
+ * chat placed on a branch — never by painting the DOM. The refusal is S19's fault (`routes/[__e2e].project-file-tree`):
+ * another holder takes a project file's exclusive handle, as a second tab or a full disk would.
+ */
+
+/**
+ * The status line's words, as text in the title button under the project's name.
+ *
+ * @param words - The line, whole.
+ */
+const statusLine = (words: string): Locator => titleButton().getByText(words, { exact: true });
+/** Wait for the status line to read `words`, whole. */
+const expectStatus = async (words: string, timeout = 60_000): Promise<void> =>
+  target.expectVisible(statusLine(words), timeout);
+/** Wait for the status line to stop mentioning `words`. */
+const expectStatusWithout = async (words: string): Promise<void> =>
+  target.expectCount(titleButton().getByText(words), 0, 60_000);
+/** The status glyph, named for what its colour says to a person who does not see it. */
+const attentionGlyph = (): Locator => titleButton().getByRole('img', { name: 'Needs attention', exact: true });
+
+const holdProjectFile = async (path: string): Promise<void> =>
+  target.evaluate(async (held) => {
+    const hold = (globalThis as typeof globalThis & { __tauE2eHoldProjectFile?: (path: string) => Promise<void> })
+      .__tauE2eHoldProjectFile;
+    if (!hold) {
+      throw new Error('The project-file-tree fixture did not install its hold.');
+    }
+    await hold(held);
+  }, path);
+
+const releaseProjectFile = async (path: string): Promise<void> =>
+  target.evaluate(async (held) => {
+    const release = (globalThis as typeof globalThis & { __tauE2eReleaseProjectFile?: (path: string) => Promise<void> })
+      .__tauE2eReleaseProjectFile;
+    if (!release) {
+      throw new Error('The project-file-tree fixture did not install its release.');
+    }
+    await release(held);
+  }, path);
+
+const openTouchPhone = async (viewport: { width: number; height: number }, route: string): Promise<void> => {
+  await target.commands.uiOpenTarget({ hasTouch: true, isMobile: true });
+  await prepareComposerPage();
+  await target.setViewport(viewport);
+  await target.navigate(route);
+  await target.expectUrl(/\/w\/[^/]+\/[^/?]+/u, 120_000);
+  await target.expectVisible(titleButton(), 60_000);
+};
+
+/** The project's directory in Home, which the fixture names after the URL's last segment. */
+const projectDirectory = async (): Promise<string> => target.evaluate(() => location.pathname.split('/').pop() ?? '');
+
+const navButton = (name: string): Locator =>
+  selectors.getByRole('navigation', { name: 'Workbench' }).getByRole('button', { name, exact: true });
+
+/** Open a destination from the project sheet, as the person does from the title. */
+const openFromProjectSheet = async (name: 'Revisions' | 'Export' | 'Details'): Promise<void> => {
+  await target.click(titleButton(), { touch: true });
+  await target.expectVisible(projectSheet());
+  await target.click(projectSheet().getByRole('button', { name, exact: true }), { touch: true });
+  await target.expectVisible(selectors.getByRole('region', { name, exact: true }), 60_000);
+  await target.expectCount(projectSheet(), 0);
+};
+
+const revisionsStrip = (): Locator =>
+  selectors
+    .getByRole('region', { name: 'Revisions', exact: true })
+    .getByRole('region', { name: 'Where you are', exact: true });
+
+/** Change the seed's Width parameter, which lives in versioned `.tau/parameters`, so the files differ from the head. */
+const editWidth = async (value: string): Promise<void> => {
+  await target.click(navButton('Parameters'), { touch: true });
+  const width = selectors.getByRole('region', { name: 'Parameters', exact: true }).getByLabelText('Input for Width');
+  await target.expectVisible(width.first(), 60_000);
+  await target.fill(width.first(), value);
+  await target.press(width.first(), 'Enter');
+  await target.expectValue(width.first(), value, 30_000);
+};
+
+/** Save a revision from the Revisions strip, reached through the project sheet. */
+const saveRevisionFromSheet = async (): Promise<void> => {
+  await openFromProjectSheet('Revisions');
+  const save = revisionsStrip().getByRole('button', { name: 'Save revision', exact: true });
+  await target.expectVisible(save, 60_000);
+  await target.click(save, { touch: true });
+};
+
+test.each([
+  { width: 320, height: 640 },
+  { width: 390, height: 844 },
+])(
+  'says Save not confirmed when the store refuses a settings save, and Retry save in the sheet recovers at $width×$height (HDR-05)',
+  async (viewport) => {
+    await openTouchPhone(viewport, '/__e2e/project-file-tree');
+    await expectStatusWithout('Save not confirmed');
+    const directory = await projectDirectory();
+    let viewId: string | undefined;
+    await expect
+      .poll(
+        async () => {
+          const layout = await readHomeJson<{ viewer?: { tabs?: ReadonlyArray<{ view?: string }> } }>(
+            `/${directory}/.tau/workbench/layout.json`,
+          );
+          viewId = layout?.viewer?.tabs?.[0]?.view;
+          return viewId;
+        },
+        { timeout: 60_000 },
+      )
+      .toBeTruthy();
+    const viewRecord = `.tau/workbench/views/${viewId!}.json`;
+    const sectionActive = async (): Promise<boolean | undefined> => {
+      const view = await readHomeJson<{ section?: { active?: boolean } }>(`/${directory}/${viewRecord}`);
+      return view?.section?.active;
+    };
+    expect(await sectionActive()).not.toBe(true);
+
+    // The view record's write is refused: turning the section on is a change the store cannot confirm.
+    await holdProjectFile(viewRecord);
+    await target.click(
+      selectors
+        .getByRole('group', { name: 'Viewer controls' })
+        .getByRole('button', { name: 'Section view', exact: true }),
+      { touch: true },
+    );
+    await expectStatus('Save not confirmed · 1 issue', 60_000);
+    await target.expectVisible(attentionGlyph());
+    // Still three controls: the record issues have no trigger of their own on a phone (I4).
+    await target.expectCount(topBar().getByRole('button'), 3);
+    await target.screenshot(undefined, `mobile-status-save-not-confirmed-${String(viewport.width)}.png`);
+
+    // The title opens the project sheet, which carries the recovery.
+    await target.click(titleButton(), { touch: true });
+    await target.expectVisible(projectSheet());
+    const retry = projectSheet().getByRole('button', { name: 'Retry save', exact: true });
+    await target.expectVisible(retry, 30_000);
+    await target.screenshot(undefined, `mobile-project-sheet-retry-save-${String(viewport.width)}.png`);
+
+    await releaseProjectFile(viewRecord);
+    await target.click(retry, { touch: true });
+    await expectStatusWithout('Save not confirmed');
+    await expectStatusWithout('issue');
+    await target.expectCount(projectSheet().getByRole('button', { name: 'Retry save', exact: true }), 0);
+    await expect.poll(sectionActive, { timeout: 30_000 }).toBe(true);
+  },
+);
+
+test.each([
+  { width: 320, height: 640 },
+  { width: 390, height: 844 },
+])(
+  'says Save not confirmed when the store refuses a revision, and keeps where you are at $width×$height (HDR-05, S19)',
+  async (viewport) => {
+    await openTouchPhone(viewport, '/__e2e/project-file-tree?main=touch-parameters');
+    await editWidth('31');
+    await saveRevisionFromSheet();
+    await expectStatus('Saved', 120_000);
+
+    // The branch ref's update is refused by the store itself.
+    await holdProjectFile('.git/refs/heads/main');
+    await editWidth('32');
+    await saveRevisionFromSheet();
+    await expectStatus('Save not confirmed', 120_000);
+    await target.expectVisible(attentionGlyph());
+    // The project sheet names the head it still holds: main at Rev 1, never *Setting up*.
+    await target.click(titleButton(), { touch: true });
+    await target.expectVisible(projectSheet());
+    await target.expectContainingText(
+      projectSheet().getByRole('button', { name: 'Revisions', exact: true }),
+      'Rev 1 · main',
+      30_000,
+    );
+    await target.screenshot(undefined, `mobile-status-revision-not-confirmed-${String(viewport.width)}.png`);
+    await target.keyboardPress('Escape');
+    await target.expectCount(projectSheet(), 0);
+
+    // Released, the next save lands and the line rests on Saved again.
+    await releaseProjectFile('.git/refs/heads/main');
+    await saveRevisionFromSheet();
+    await expectStatus('Saved', 120_000);
+  },
+);
+
+test.each([
+  { width: 320, height: 640 },
+  { width: 390, height: 844 },
+])(
+  'names the branch only off main and says Follow chat as a fact, with the verb in the sheet at $width×$height (HDR-06)',
+  async (viewport) => {
+    const branch = 'fillet-exploration';
+    await openTouchPhone(viewport, '/__e2e/project-file-tree?main=touch-parameters&chat=1');
+    await editWidth('31');
+    await saveRevisionFromSheet();
+    await expectStatus('Saved', 120_000);
+
+    await openFromProjectSheet('Revisions');
+    await target.click(revisionsStrip().getByRole('button', { name: 'New branch' }), { touch: true });
+    await target.fill(selectors.getByRole('textbox', { name: 'Name for the new branch' }), branch);
+    await target.click(selectors.getByRole('button', { name: 'Create branch' }), { touch: true });
+    const row = selectors
+      .getByRole('region', { name: 'Revisions', exact: true })
+      .getByRole('list', { name: 'Branches', exact: true })
+      .getByRole('listitem')
+      .filter({ has: selectors.getByRole('button', { name: `Actions for ${branch}`, exact: true }) });
+    await target.expectVisible(row, 60_000);
+    // On main the line names no branch.
+    await expectStatus('Saved');
+
+    // The chat in focus is placed on the branch: the line says so as a fact, and the bar gains no control.
+    await target.click(row.getByRole('button', { name: `Actions for ${branch}`, exact: true }), { touch: true });
+    await target.click(selectors.getByRole('menuitem', { name: `Use ${branch} in this chat`, exact: true }), {
+      touch: true,
+    });
+    await expectStatus('Saved · Follow chat', 60_000);
+    await target.expectCount(topBar().getByRole('button'), 3);
+
+    // Following is the sheet's verb; the workbench then works on the branch, which the line names.
+    await target.click(titleButton(), { touch: true });
+    await target.expectVisible(projectSheet());
+    await target.click(projectSheet().getByRole('button', { name: 'Follow chat', exact: true }), { touch: true });
+    await expectStatus(`Saved · on ${branch}`, 60_000);
+    await target.screenshot(undefined, `mobile-status-on-branch-${String(viewport.width)}.png`);
+  },
+);

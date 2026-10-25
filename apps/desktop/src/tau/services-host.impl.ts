@@ -88,7 +88,7 @@ import { createGeometryRunnerClient } from '#tau/geometry-runner-client.js';
 import { agentRuntimeIdleMilliseconds, retireIdleClients } from '#tau/idle-runtime-clients.js';
 import type { createDesktopRuntime } from '#tau/desktop-runtime.factory.js';
 import { createPermissionHost } from '#tau/permission-host.js';
-import { createPermissionStore } from '#tau/permission-store.js';
+import { createPermissionStore, permissionModeOfRun, recordShellCall } from '#tau/permission-store.js';
 import type { PermissionStore } from '#tau/permission-store.js';
 import type { PermissionAnswerFrame } from '#shared/permission-channels.js';
 
@@ -1005,7 +1005,29 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         return principal === undefined ? { mode: 'session' } : { mode: 'session', principal };
       },
       ...(turnPlacement === undefined ? {} : { turnPlacement }),
-      ...(shell === undefined ? {} : { shell: (checkouts) => shell.forProject(workspaceRoot, checkouts) }),
+      ...(shell === undefined
+        ? {}
+        : {
+            shell: (checkouts, chatOfRun) =>
+              shell.forProject(
+                workspaceRoot,
+                checkouts,
+                permissions === undefined
+                  ? undefined
+                  : {
+                      permissionModeOf: permissionModeOfRun(permissions, workspaceRoot, chatOfRun),
+                      recordCall: async ({ request, output }) =>
+                        recordShellCall(permissions, {
+                          projectRoot: workspaceRoot,
+                          chatId: chatOfRun(request.runId),
+                          runId: request.runId,
+                          toolCallId: request.toolCallId,
+                          widened: request.input.access !== undefined,
+                          output,
+                        }),
+                    },
+              ),
+          }),
       /* The adapters main resolved, with the `tau` MCP server on this utility's
        * own loopback listener (V7); the port is known once the socket binds. */
       ...(config.externalAgents?.length

@@ -44,7 +44,7 @@ describe.runIf(process.platform === 'linux' || process.platform === 'darwin')('c
     expect(current()).toBeUndefined();
     const probe = await shell.probe();
     expect(probe.status).toBe('available');
-    expect(current()).toBe(probe.status === 'available' ? probe.shell : undefined);
+    expect(current()?.identity).toEqual(probe.status === 'available' ? probe.shell.identity : undefined);
     expect(await shell.probe()).toBe(probe);
     expect(shell.forProject(other, new Map())()).toBe(current());
     expect(provider.launches).toHaveLength(1);
@@ -76,6 +76,45 @@ describe.runIf(process.platform === 'linux' || process.platform === 'darwin')('c
 
     shell.release(other);
     await expect(run('run-other')).resolves.toMatchObject({ status: 'not-started', code: 'checkout-unavailable' });
+  });
+
+  it("answers each run's mode from the project that admitted it and records every finished call there (W9)", async () => {
+    const provider = versionThenOk();
+    const shell = createDesktopShell({ appDataRoots: [appData], provider, home: base });
+    const recorded: Array<[string, string, string]> = [];
+    const hooksFor = (name: string, mode: 'ask' | 'bypass') => ({
+      permissionModeOf: async () => mode,
+      recordCall: async ({ request, output }: { request: { runId: string }; output: { status: string } }) => {
+        recorded.push([name, request.runId, output.status]);
+      },
+    });
+    const current = shell.forProject(
+      project,
+      new Map([['run-bracket', { cwd: project }]]),
+      hooksFor('bracket', 'bypass'),
+    );
+    shell.forProject(other, new Map([['run-other', { cwd: other }]]), hooksFor('other', 'ask'));
+    await shell.probe();
+    const run = async (runId: string) =>
+      current()!.run({
+        runId,
+        toolCallId: `call-${runId}`,
+        signal: new AbortController().signal,
+        input: { command: 'npm ping', access: { reason: 'Reach the registry', domains: ['registry.npmjs.org'] } },
+      });
+
+    /* Bypass in one project approves the widening; Ask in the other, with no approval channel, refuses it. */
+    await expect(run('run-bracket')).resolves.toMatchObject({
+      status: 'completed',
+      approval: { approvedBy: 'bypass', mode: 'bypass' },
+    });
+    await expect(run('run-other')).resolves.toMatchObject({ status: 'not-started', code: 'approval-unavailable' });
+    /* A run no project admitted reads Ask and is refused before any hook runs. */
+    await expect(run('run-unknown')).resolves.toMatchObject({ status: 'not-started' });
+    expect(recorded).toEqual([
+      ['bracket', 'run-bracket', 'completed'],
+      ['other', 'run-other', 'not-started'],
+    ]);
   });
 
   it('reports a broken sandbox as unavailable and never offers the shell', async () => {

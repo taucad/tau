@@ -2,7 +2,7 @@
 // @vitest-environment node
 /*
  * The shell service's conformance rows (testing contract, `host:test:shell-conformance`; A03–A05, A08, A09 at the
- * service layer, and H08–H09 end to end: a scripted model drives a real Tau agent host, its tool registry and admission,
+ * service layer, A20 in H10, and H08–H09 end to end: a scripted model drives a real Tau agent host, its tool registry and admission,
  * the service and the native shell). They extend the provider rows C01–C09 in `native-process-core`, never repeat them: each row drives
  * the real service over the real sandbox provider and the machine's own Bash, starts with a positive control, and
  * judges every negative by the bytes outside the sandbox, not by the command's own report.
@@ -420,6 +420,30 @@ describe.runIf(enabled)('shell service conformance', () => {
       expect(spends.some((line) => line.includes('"call-h09-run"') && line.includes('"phase":"spent"'))).toBe(true);
     } finally {
       await driven.host.close();
+    }
+  });
+
+  conformance('H10', 'the same widening under Ask then Bypass then Ask: the mode is read per call (A20)', async () => {
+    const widening = {
+      command: `cat ${join(supplier, 'part.step')}`,
+      access: { reason: 'Read the part', read: [supplier] },
+    };
+    try {
+      /* Ask with no approval channel: nothing widened runs. */
+      const asked = await run(widening);
+      expect(asked).toMatchObject({ status: 'not-started', code: 'approval-unavailable' });
+      /* The mode changes between calls; the next call reads it, and Bypass approves the same widening. */
+      mode = 'bypass';
+      const bypassed = completed(await run(widening));
+      expect(bypassed.exitCode, bypassed.stderr.text).toBe(0);
+      expect(bypassed.stdout.text).toBe('SUPPLIER\n');
+      expect(bypassed.approval).toEqual({ approvedBy: 'bypass', mode: 'bypass' });
+      /* Back to Ask: Bypass leaves nothing behind to recall. */
+      mode = 'ask';
+      const again = await run(widening);
+      expect(again).toMatchObject({ status: 'not-started', code: 'approval-unavailable' });
+    } finally {
+      mode = 'ask';
     }
   });
 });

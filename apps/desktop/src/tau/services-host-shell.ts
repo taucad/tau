@@ -4,6 +4,7 @@
  * One probe per services utility, run lazily and memoized: it proves the platform's provider and the machine's own shell
  * before anything is offered. Every project host hands in its own run→checkout map, and the one shell service reads a
  * call's checkout from whichever project owns that run, so an unknown run is refused and never defaults to a project.
+ * The same project answers the run's permission mode and records each finished call (W9).
  * The agent registry reads the probe at every listing, so `shell` appears once the probe is ready and never before; the
  * Terminal (W5) reads the same memoized probe through {@link DesktopShell.probe}.
  *
@@ -13,7 +14,15 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { probeHostShell } from '@taucad/host';
-import type { HostShell, PermissionMode, ShellCheckout, ShellProbe, ShellUnavailable } from '@taucad/host';
+import type {
+  HostShell,
+  PermissionMode,
+  ShellCheckout,
+  ShellOutput,
+  ShellProbe,
+  ShellRunRequest,
+  ShellUnavailable,
+} from '@taucad/host';
 import { createSandboxShellProvider } from '@taucad/native-process-core/shell';
 import type { SandboxShellProviderOptions, ShellProvider } from '@taucad/native-process-core/shell';
 
@@ -28,8 +37,6 @@ export type DesktopShellOptions = Readonly<{
   projectRoots?: (() => readonly string[]) | undefined;
   /** On Linux, the Tau-owned bubblewrap (`linuxInstallation(...).bwrap`); a portable AppImage has none. */
   bwrapPath?: string | undefined;
-  /** The chat's permission mode for a run (W9); absent reads Ask. */
-  permissionModeOf?: ((runId: string) => Promise<PermissionMode>) | undefined;
   platform?: NodeJS.Platform | undefined;
   home?: string | undefined;
   /** Injected for tests; otherwise {@link desktopShellProvider}. */
@@ -37,15 +44,27 @@ export type DesktopShellOptions = Readonly<{
   log?: ((event: string, detail?: unknown, level?: 'info' | 'warn') => void) | undefined;
 }>;
 
+/** One project's permission hooks (W9): the store's `permissionModeOfRun` and `recordShellCall` for that project. */
+export type DesktopShellProjectHooks = Readonly<{
+  /** The run's chat mode, read per call after recall; a project without one reads Ask. */
+  permissionModeOf?: ((runId: string) => Promise<PermissionMode>) | undefined;
+  /** Record one finished call; reporting only, never fatal. */
+  recordCall?: ((call: Readonly<{ request: ShellRunRequest; output: ShellOutput }>) => Promise<void>) | undefined;
+}>;
+
 /** @public */
 export type DesktopShell = Readonly<{
   /** The memoized probe; the first call starts it. */
   probe: () => Promise<ShellProbe>;
   /**
-   * The shell one project's registry offers: register the project's run→checkout map, and read the probe at every
-   * listing and call.
+   * The shell one project's registry offers: register the project's run→checkout map and permission hooks, and read
+   * the probe at every listing and call.
    */
-  forProject: (projectRoot: string, checkouts: ReadonlyMap<string, ShellCheckout>) => () => HostShell | undefined;
+  forProject: (
+    projectRoot: string,
+    checkouts: ReadonlyMap<string, ShellCheckout>,
+    hooks?: DesktopShellProjectHooks,
+  ) => () => HostShell | undefined;
   /** Forget a project's runs once its host is gone. */
   release: (projectRoot: string) => void;
 }>;
@@ -169,14 +188,26 @@ class ProjectCheckouts implements ReadonlyMap<string, ShellCheckout> {
 /**
  * Compose the desktop's shell.
  *
- * @param options - App data, admitted roots, the platform's prerequisites and the mode reader.
+ * @param options - App data, admitted roots and the platform's prerequisites.
  * @returns The memoized probe and the per-project shell getter.
  */
 export const createDesktopShell = (options: DesktopShellOptions): DesktopShell => {
   const platform = options.platform ?? process.platform;
   const checkouts = new ProjectCheckouts();
+  const hooks = new Map<string, DesktopShellProjectHooks>();
+  /* A run belongs to the one project whose host admitted it; a run no project knows reads Ask. */
+  const hooksOfRun = (runId: string): DesktopShellProjectHooks | undefined => {
+    for (const [projectRoot, projectCheckouts] of checkouts.projects) {
+      if (projectCheckouts.has(runId)) {
+        return hooks.get(projectRoot);
+      }
+    }
+    return undefined;
+  };
+  const permissionModeOf = async (runId: string): Promise<PermissionMode> =>
+    (await hooksOfRun(runId)?.permissionModeOf?.(runId)) ?? 'ask';
   let probing: Promise<ShellProbe> | undefined;
-  let settled: ShellProbe | undefined;
+  let recording: HostShell | undefined;
 
   const probe = async (): Promise<ShellProbe> => {
     probing ??= (async (): Promise<ShellProbe> => {
@@ -192,7 +223,7 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
               projectRoots: () => [...new Set([...checkouts.projects.keys(), ...(options.projectRoots?.() ?? [])])],
               platform,
               ...(options.home === undefined ? {} : { home: options.home }),
-              ...(options.permissionModeOf === undefined ? {} : { permissionModeOf: options.permissionModeOf }),
+              permissionModeOf,
             }).catch(
               (error: unknown): ShellUnavailable => ({
                 status: 'unavailable',
@@ -201,7 +232,20 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
                 recovery: 'Restart Tau. If it happens again, reinstall Tau to restore its sandbox components.',
               }),
             );
-      settled = outcome;
+      recording =
+        outcome.status === 'available'
+          ? {
+              ...outcome.shell,
+              run: async (request) => {
+                const recordCall = hooksOfRun(request.runId)?.recordCall;
+                const output = await outcome.shell.run(request);
+                await recordCall?.({ request, output }).catch((error: unknown) => {
+                  options.log?.('shell.record-failed', error instanceof Error ? error.message : String(error), 'warn');
+                });
+                return output;
+              },
+            }
+          : undefined;
       options.log?.(
         'shell.probe',
         outcome.status === 'available'
@@ -216,13 +260,19 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
 
   return {
     probe,
-    forProject: (projectRoot, projectCheckouts) => {
+    forProject: (projectRoot, projectCheckouts, projectHooks) => {
       checkouts.projects.set(projectRoot, projectCheckouts);
+      if (projectHooks === undefined) {
+        hooks.delete(projectRoot);
+      } else {
+        hooks.set(projectRoot, projectHooks);
+      }
       void probe();
-      return () => (settled?.status === 'available' ? settled.shell : undefined);
+      return () => recording;
     },
     release: (projectRoot) => {
       checkouts.projects.delete(projectRoot);
+      hooks.delete(projectRoot);
     },
   };
 };

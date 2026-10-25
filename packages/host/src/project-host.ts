@@ -95,10 +95,16 @@ export type ProjectHostOptions = Pick<
     /** Each revision fact; reporting only, never fatal. */
     onRevisionEvent: (event: HostRevisionEvent) => void;
     /**
-     * The contained shell `shell` runs on, given this host's run→checkout map (D1, F5). Only the desktop composition
-     * passes it; the MCP endpoint never lists `shell`, so external agents cannot reach it.
+     * The contained shell `shell` runs on, given this host's run→checkout map (D1, F5) and its run→chat map (D19; a run
+     * this host did not admit has none). Only the desktop composition passes it; the MCP endpoint never lists `shell`,
+     * so external agents cannot reach it.
      */
-    shell?: ((checkouts: ReadonlyMap<string, TurnCheckout>) => HostToolRegistryOptions['shell']) | undefined;
+    shell?:
+      | ((
+          checkouts: ReadonlyMap<string, TurnCheckout>,
+          chatOfRun: (runId: string) => string | undefined,
+        ) => HostToolRegistryOptions['shell'])
+      | undefined;
     /**
      * W8 TS-S4: build this project's placement port. Every attempt is placed and settled through it and runs on its
      * grant's tools; the launcher reconciles the chats whose leases it holds (RH-R16). Absent: the in-process session
@@ -154,6 +160,18 @@ const settled =
       const entry = ledger.runs[runId];
       return entry !== undefined && !liveStates.has(entry.lifecycle) && !unsettled.has(runId);
     });
+  };
+
+/* The chat a client started a run under here, from the host's own count of entered runs; undefined for any other run. */
+const chatOfEntered =
+  (entered: ReadonlyMap<string, ReadonlySet<string>>) =>
+  (runId: string): string | undefined => {
+    for (const [chatId, runIds] of entered) {
+      if (runIds.has(runId)) {
+        return chatId;
+      }
+    }
+    return undefined;
   };
 
 /**
@@ -250,8 +268,9 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
   });
 
   /* One registry over every run's root (`checkouts`), or one rooted at a placed attempt's checkout. The shell reads
-   * each call's checkout by run id from this host's map, whichever registry serves the call. */
-  const shell = options.shell?.(checkouts);
+   * each call's checkout by run id from this host's map, whichever registry serves the call, and a call's chat from the
+   * runs a client started here: the chat the host admitted the run under, never model input. */
+  const shell = options.shell?.(checkouts, chatOfEntered(entered));
   const registryOptions = {
     revisions: revisions.history,
     filesystem: (root: string) => fileSystem.open(root),

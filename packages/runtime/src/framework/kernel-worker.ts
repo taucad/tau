@@ -98,7 +98,7 @@ import { createKernelError } from '#kernels/kernel-helpers.js';
 import { fileChangeDebounce } from '#framework/runtime-framework.constants.js';
 import { canonicalJson, sha256Bytes, sha256String } from '@taucad/utils/hash';
 import { contentDigest } from '@taucad/cache-core';
-import type { ContentDigest } from '@taucad/cache-core';
+import type { ActionDigest, ContentDigest } from '@taucad/cache-core';
 import { RuntimeTracer } from '#framework/runtime-tracer.js';
 import type { SpanHandle } from '#types/runtime-tracer.types.js';
 import { WorkerTelemetryCollector } from '#framework/worker-telemetry.js';
@@ -227,6 +227,19 @@ type DocumentEvaluation = {
   /** The latest projection of each offered view, instance and content, whatever options rendered it. */
   projections?: Map<string, { readonly hash: string; readonly result: RenderResult }>;
 };
+/**
+ * What the compute cache made of one mesh phase, so its projection can let go of the bytes once
+ * the cache holds them. Only the first evaluation counts: it is the outermost whole-mesh reuse.
+ */
+type ProjectionRelease = {
+  first?: 'pending' | 'held' | 'unheld' | { readonly deferred: ActionDigest };
+  /** The projection that keeps the bytes until the deferred publication settles. */
+  bound?: {
+    readonly projections: Map<string, { readonly hash: string; readonly result: RenderResult }>;
+    readonly slot: string;
+    readonly projection: { readonly hash: string; readonly result: RenderResult };
+  };
+};
 type ViewRecord = {
   readonly document: DocumentRecord;
   readonly id: string;
@@ -262,6 +275,8 @@ const sourceRevisionForArtifact = (artifact: MaterializedRender, fallback?: Sour
 };
 
 const neverAbortedSignal = new AbortController().signal;
+/** Mesh phases followed for an early projection release; the compute queue keeps at most 4 tasks. */
+const maxProjectionReleases = 16;
 const carriedKernelIssueSchema = runtimeIssueSchema.extend({
   code: z.unknown().optional().transform(toKernelIssueCode),
 });
@@ -711,6 +726,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   private _filesystem: KernelFileSystem | undefined;
   private computeHost: ComputeCapabilityHost | undefined;
+  /**
+   * Mesh phases awaiting a deferred publication, by compute operation. Bounded: a publication that
+   * never settles only costs the projection its early release.
+   */
+  private readonly projectionReleases = new Map<string, ProjectionRelease>();
   /** Compute facet bound beside the filesystem; the library default is memory (EQ13). */
   private computeBinding: ComputeBinding = { mode: 'memory' };
 
@@ -2019,6 +2039,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             const slot = canonicalJson([selection.view, selection.instance ?? null, view.content ?? null]);
             const latest = evaluation.projections.get(slot);
             let projected = latest?.hash === projectionHash ? latest.result : undefined;
+            let computeOperationId: string | undefined;
             if (!projected) {
               this.onDocumentProgressUpdate?.({
                 documentId: document.id,
@@ -2050,8 +2071,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                   });
                 },
               };
+              computeOperationId = randomUuid();
+              this.trackProjectionRelease(computeOperationId);
               try {
                 projected = await this.runMeshPhase({
+                  computeOperationId,
                   owner: artifact.owner,
                   identity,
                   selection,
@@ -2089,7 +2113,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               }
             }
             // One projection per offered view: a scrubbed option set replaces the last one instead of accumulating.
-            evaluation.projections.set(slot, { hash: projectionHash, result: projected });
+            const projection = { hash: projectionHash, result: projected };
+            evaluation.projections.set(slot, projection);
+            if (computeOperationId !== undefined) {
+              this.bindProjectionRelease(computeOperationId, { projections: evaluation.projections, slot, projection });
+            }
             const heapBytes = projected.success ? this.kernelHeapBytesForOwner(artifact.owner) : undefined;
             result = projected.success
               ? {
@@ -4740,6 +4768,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * costs no kernel work and no handle deserialization.
    */
   private async runMeshPhase(options: {
+    /** The compute operation its middleware evaluate under, when the caller follows their outcome. */
+    computeOperationId?: string;
     owner: OperationOwner;
     identity: RenderIdentity;
     selection: { view: string; mimeType: MediaType; instance?: string } | undefined;
@@ -4750,6 +4780,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     renderArtifact: MaterializedRender;
   }): Promise<RenderResult> {
     const {
+      computeOperationId,
       owner,
       identity,
       selection,
@@ -4847,7 +4878,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               onLog: this.onLog,
               middlewareName: middleware.name,
               filesystem: this.filesystem,
-              compute: this.createComputeRuntime(this.operationSignal ?? neverAbortedSignal),
+              compute: this.createComputeRuntime(this.operationSignal ?? neverAbortedSignal, computeOperationId),
               dependencies: identity.dependencies,
               dependencyHash: identity.dependencyHash,
               stateSchema: middleware.stateSchema,
@@ -7494,7 +7525,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return facade;
   }
 
-  private createComputeRuntime(signal: AbortSignal): KernelComputeCapability {
+  private createComputeRuntime(signal: AbortSignal, operationId: string = randomUuid()): KernelComputeCapability {
     this.computeHost ??= createComputeCapabilityHost({
       binding: this.computeBinding,
       workspace: 'worker',
@@ -7514,6 +7545,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         if (this.admittedOperations === 0) {
           this.telemetryCollector?.flush();
         }
+        this.settleProjectionRelease(operationId, actionDigest, status === 'stored' || reason === 'duplicate');
       },
       onScopeSettled: ({ operationId, generation, settlement }) => {
         this.tracer.startSpan('kernel.compute.reuse', { operationId }).end({
@@ -7526,8 +7558,44 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         });
       },
     });
-    const operationId = randomUuid();
-    const capability = this.computeHost.capability(signal, operationId);
+    const capability = this.observeComputeReuse(this.computeHost.capability(signal, operationId));
+    const release = this.projectionReleases.get(operationId);
+    if (capability.status === 'off' || !release) {
+      return capability;
+    }
+    const evaluate: typeof capability.evaluate = async (evaluation) => {
+      const observed = release.first === undefined;
+      if (observed) {
+        release.first = 'pending';
+      }
+      try {
+        const result = await capability.evaluate(evaluation);
+        if (observed) {
+          if (result.source === 'cache' || result.publication.status === 'stored') {
+            release.first = 'held';
+          } else if (result.publication.status === 'deferred') {
+            release.first = { deferred: result.actionDigest };
+          } else {
+            release.first = 'unheld';
+          }
+        }
+        return result;
+      } catch (error) {
+        if (observed) {
+          release.first = 'unheld';
+        }
+        throw error;
+      }
+    };
+    return { ...capability, evaluate };
+  }
+
+  /**
+   * Record the active operation's reuse outcome on its observed facts.
+   * @param capability - The compute capability for the operation.
+   * @returns The capability, its evaluate wrapped when an operation is observed.
+   */
+  private observeComputeReuse(capability: KernelComputeCapability): KernelComputeCapability {
     const observed = this.activeOperation?.observed;
     if (observed === undefined) {
       return capability;
@@ -7546,6 +7614,63 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         return result;
       },
     };
+  }
+
+  /**
+   * Follow one mesh phase's compute outcome so its projection can release the bytes (WP6 follow-up).
+   * @param operationId - The compute operation its middleware evaluate under.
+   */
+  private trackProjectionRelease(operationId: string): void {
+    this.projectionReleases.set(operationId, {});
+    while (this.projectionReleases.size > maxProjectionReleases) {
+      const oldest = this.projectionReleases.keys().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      this.projectionReleases.delete(oldest);
+    }
+  }
+
+  /**
+   * Keep a fresh projection only while it is the sole holder of its mesh. When the compute cache
+   * served it, or will hold it once its deferred publication stores, a later view of the same
+   * options is a cache hit, so the projection's whole copy of the bytes buys about one lookup.
+   * @param operationId - The compute operation of the mesh phase that made the projection.
+   * @param bound - The evaluation's projection map, the view slot, and the entry just stored there.
+   */
+  private bindProjectionRelease(operationId: string, bound: NonNullable<ProjectionRelease['bound']>): void {
+    const release = this.projectionReleases.get(operationId);
+    if (!release) {
+      return;
+    }
+    if (release.first === 'held') {
+      this.projectionReleases.delete(operationId);
+      bound.projections.delete(bound.slot);
+    } else if (typeof release.first === 'object') {
+      release.bound = bound;
+    } else {
+      // No reuse ran (compute off or no caching middleware), or it will not hold the mesh: keep it.
+      this.projectionReleases.delete(operationId);
+    }
+  }
+
+  /**
+   * A deferred publication settled: release its projection when the cache now holds the mesh.
+   * @param operationId - The compute operation that scheduled it.
+   * @param actionDigest - The published action.
+   * @param held - Whether the cache holds the action now (stored, or a duplicate of a stored one).
+   */
+  private settleProjectionRelease(operationId: string, actionDigest: ActionDigest, held: boolean): void {
+    const release = this.projectionReleases.get(operationId);
+    if (typeof release?.first !== 'object' || release.first.deferred !== actionDigest) {
+      return;
+    }
+    this.projectionReleases.delete(operationId);
+    const { bound } = release;
+    // A newer projection may have replaced it; that one has its own release.
+    if (held && bound && bound.projections.get(bound.slot) === bound.projection) {
+      bound.projections.delete(bound.slot);
+    }
   }
 
   /**

@@ -1,12 +1,15 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
-import process from 'node:process';
 import { ConfigService } from '@nestjs/config';
 import { HealthIndicatorService } from '@nestjs/terminus';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Environment } from '#config/environment.config.js';
+import { inProcessGitToolchain } from '#api/git/forwarding/in-process-executor.js';
 import { GitToolchainHealthIndicator } from '#api/health/git-toolchain-health.indicator.js';
+
+/* The probe is stubbed, never left to `PATH`: a runner with git anywhere it
+   can resolve must not decide what this test sees. */
+vi.mock('#api/git/forwarding/in-process-executor.js', () => ({
+  inProcessGitToolchain: vi.fn(async () => ({ git: undefined, lfs: undefined })),
+}));
 
 /**
  * DC3: once git is forwarded to tau-storage, the API image no longer needs
@@ -14,35 +17,27 @@ import { GitToolchainHealthIndicator } from '#api/health/git-toolchain-health.in
  * API still runs git and still refuses without it, as before.
  */
 describe('GitToolchainHealthIndicator', () => {
-  const originalPath = process.env['PATH'];
-  let emptyPath: string;
-
   beforeEach(() => {
-    /* A PATH that holds no git at all: what the API image is once it drops git. */
-    emptyPath = mkdtempSync(path.join(tmpdir(), 'tau-no-git-'));
-    process.env['PATH'] = emptyPath;
-  });
-
-  afterEach(() => {
-    process.env['PATH'] = originalPath;
-    rmSync(emptyPath, { recursive: true, force: true });
+    vi.mocked(inProcessGitToolchain).mockClear();
   });
 
   const indicator = (storageUrl: string | undefined): GitToolchainHealthIndicator =>
     new GitToolchainHealthIndicator(
       new HealthIndicatorService(),
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
-      new ConfigService({ TAU_STORAGE_URL: storageUrl }) as unknown as ConfigService<Environment, true>,
+      new ConfigService<Environment, true>({ TAU_STORAGE_URL: storageUrl }),
     );
 
-  it('should be up without git when git is forwarded to tau-storage', async () => {
+  it('should be up without git when git is forwarded to tau-storage, and never probe for it', async () => {
     const result = await indicator('http://tau-storage.flycast').isHealthy();
     expect(result['git']?.status).toBe('up');
     expect(result['git']).toMatchObject({ execution: 'forwarded' });
+    expect(inProcessGitToolchain).not.toHaveBeenCalled();
   });
 
   it('should still refuse without git when git runs in this process', async () => {
     const result = await indicator(undefined).isHealthy();
     expect(result['git']?.status).toBe('down');
+    expect(inProcessGitToolchain).toHaveBeenCalledOnce();
   });
 });

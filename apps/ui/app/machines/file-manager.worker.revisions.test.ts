@@ -464,9 +464,40 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     await expect(root.pullRemote('chat-1')).resolves.toBe(true);
 
     await root.placementSession();
+    /* Round 28: only a remotes read that settled on none says so; one still running is no evidence. */
+    await vi.waitFor(async () => {
+      await expect(root.pullRemote('chat-1')).resolves.toBe(false);
+    });
     alpha.send({ command: 'pullRemote', chatId: 'chat-1', id: 7 });
     await vi.waitFor(() => {
       expect(alpha.frames).toContainEqual({ type: 'result', id: 7, result: { kind: 'pulled', pulls: false } });
+    });
+  });
+
+  /*
+   * Round 28: the page tells the worker which device it is only after the worker starts. A pull asked before that is
+   * no evidence that this device cannot pull, so the page keeps waiting on the other device's run rather than running
+   * past it.
+   */
+  it('should not answer a pull pulls: false before the page has said which device it is', async () => {
+    const remote = { name: 'origin', url: 'https://git.example.test/alpha.git', kind: 'git', fetchOnly: true } as const;
+    const fixture = harness(['alpha'], (port) => ({
+      ...port,
+      listRemotes: async () => [remote],
+      fetch: async () => {
+        throw new Error('offline');
+      },
+    }));
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    await vi.waitFor(() => {
+      expect(root.status().remote).toMatchObject({ kind: 'git' });
+    });
+
+    await root.placementSession();
+    alpha.send({ command: 'pullRemote', chatId: 'chat-1', id: 7 });
+    await vi.waitFor(() => {
+      expect(alpha.frames).toContainEqual({ type: 'result', id: 7, result: { kind: 'pulled', pulls: true } });
     });
   });
 

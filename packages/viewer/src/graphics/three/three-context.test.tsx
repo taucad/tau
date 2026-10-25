@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
-import { useEffect } from 'react';
+import { act, cleanup, render, screen } from '@testing-library/react';
+import { useEffect, useState } from 'react';
 import type { ThreeCanvasInstanceProps } from '#graphics/three/three-canvas-instance.jsx';
 import { WebglErrorBoundary } from '#cad/webgl-error-boundary.jsx';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
@@ -9,7 +9,11 @@ import { ThreeProvider } from '#graphics/three/three-context.jsx';
 import { useWebglContextRef, WebglContextTrackerProvider } from '#hooks/use-webgl-context-tracker.jsx';
 
 const canvas = vi.hoisted(() => ({ cssPixels: 0 }));
-const allocation = vi.hoisted(() => ({ error: undefined as Error | undefined }));
+const allocation = vi.hoisted(() => ({
+  error: undefined as Error | undefined,
+  webglError: undefined as Error | undefined,
+  webglMounts: 0,
+}));
 
 vi.mock('#environment/viewer-environment.jsx', () => ({ useViewerFeature: () => false }));
 vi.mock('#graphics/three/three-canvas-instance.jsx', () => ({
@@ -17,8 +21,25 @@ vi.mock('#graphics/three/three-canvas-instance.jsx', () => ({
     useEffect(() => {
       onSurfaceResize?.(canvas.cssPixels, 2);
     }, [onSurfaceResize]);
+    // As the real canvas does, a renderer that cannot be created is reported after the canvas mounts.
+    const [createError, setCreateError] = useState<Error>();
+    useEffect(() => {
+      if (graphicsBackend !== 'webgl') {
+        return;
+      }
+      allocation.webglMounts += 1;
+      const failure = allocation.webglError;
+      if (failure) {
+        queueMicrotask(() => {
+          setCreateError(failure);
+        });
+      }
+    }, [graphicsBackend]);
     if (graphicsBackend === 'webgpu' && allocation.error) {
       throw allocation.error;
+    }
+    if (createError) {
+      throw createError;
     }
     return (
       <div aria-label={`${graphicsBackend} canvas`} data-testid='viewer-canvas'>
@@ -121,12 +142,40 @@ describe('ThreeProvider context admission', () => {
 describe('ThreeProvider initialization recovery', () => {
   beforeEach(() => {
     allocation.error = undefined;
+    allocation.webglError = undefined;
+    allocation.webglMounts = 0;
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
   });
   afterEach(() => {
     cleanup();
     allocation.error = undefined;
+    allocation.webglError = undefined;
     vi.restoreAllMocks();
+  });
+
+  it('should try the WebGL fallback once and hand its failure to the viewer when no context can be created', async () => {
+    // A browser that hands out no GPU context at all: WebGPU fails, and the node WebGL2 pipeline reports its own failed
+    // start as a WebGPU initialization error too.
+    allocation.error = new WebGpuInitializationError("Cannot read properties of null (reading 'configure')");
+    allocation.webglError = new WebGpuInitializationError(
+      "Cannot read properties of null (reading 'getSupportedExtensions')",
+    );
+    render(
+      <WebglErrorBoundary fallback={({ error }) => <div role='alert'>{error?.message}</div>}>
+        <ThreeProvider graphicsBackend='webgpu'>Model</ThreeProvider>
+      </WebglErrorBoundary>,
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Cannot read properties of null (reading 'getSupportedExtensions')",
+    );
+    for (let turn = 0; turn < 10; turn++) {
+      // oxlint-disable-next-line no-await-in-loop -- Each turn gives a remounted fallback the chance to fail again.
+      await act(async () => {
+        await Promise.resolve();
+      });
+    }
+    expect(allocation.webglMounts).toBe(1);
+    expect(screen.queryByLabelText('webgl canvas')).not.toBeInTheDocument();
   });
 
   it('should remount WebGL after WebGPU initialization fails and retry WebGPU after a preference change', () => {

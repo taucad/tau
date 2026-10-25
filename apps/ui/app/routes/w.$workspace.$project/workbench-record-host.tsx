@@ -504,7 +504,10 @@ export function WorkbenchRecordHost(): React.JSX.Element {
         workbenchRef.current = apply;
         applicationRef.current.workbench = false;
         setAppliedWorkbenchRevision(workbenchPaths.layout, undefined);
-        const current = store.snapshot().layout;
+        // The intended arrangement, not the last one on disk: a pane asked for while no workbench was mounted (a Share
+        // deep link) waits in the debounced edit, and an adapter seeded from the stored record would drop it and then
+        // report that arrangement as the person's, replacing the edit before it is written.
+        const current = store.intendedLayout();
         if (current) {
           const { epoch } = applicationRef.current;
           apply(current.workbench, () => {
@@ -537,6 +540,7 @@ export function WorkbenchRecordHost(): React.JSX.Element {
         };
         void store.edit(next);
       },
+      ready: () => store.ready(),
       personWorkbenchChanged: (node) => {
         if (!store.ready()) {
           if (typeof node === 'function') {

@@ -584,6 +584,40 @@ describe('live workbench record host', () => {
     host.unmount();
   });
 
+  it('seeds a workbench adapter that mounts before a pending pane request is written with that request', async () => {
+    const host = mount();
+    await waitFor(() => {
+      expect(host.controller.snapshot()?.layout).toEqual(first());
+    });
+    act(() => {
+      host.controller.personWorkbenchChanged((node) =>
+        node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane: 'share' }] } : node,
+      );
+    });
+    const apply = vi.fn((_node, applied: () => void) => {
+      applied();
+    });
+    act(() => {
+      host.controller.registerWorkbench(apply);
+    });
+    const requested = {
+      kind: 'group',
+      tabs: [
+        { kind: 'pane', pane: 'parameters' },
+        { kind: 'pane', pane: 'share' },
+      ],
+    };
+    expect(host.writes).not.toHaveBeenCalled();
+    expect(apply).toHaveBeenCalledExactlyOnceWith(requested, expect.any(Function));
+    await waitFor(
+      () => {
+        expect(host.controller.snapshot()?.layout.workbench).toEqual(requested);
+      },
+      { timeout: 1500 },
+    );
+    host.unmount();
+  });
+
   it('re-announces each distinct foreign adoption exactly once and ignores a byte-equal echo', async () => {
     const host = mount();
     await waitFor(() => {

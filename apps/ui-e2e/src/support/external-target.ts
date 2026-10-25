@@ -603,6 +603,14 @@ export const currentUrl = (): Promise<string> => evaluate(() => location.href);
 export const currentWebGpuProfile = (): TargetWebGpuProfile => inject('webGpuProfile');
 export const qualifyWebGpu = (profile = currentWebGpuProfile()): Promise<TargetWebGpuQualificationReport> =>
   server.commands.uiQualifyWebGpu(profile);
+/**
+ * The backend a viewport canvas presents on when it asks for `requested` in this run's WebGPU profile. Chromium on the
+ * software adapter (SwiftShader) cannot allocate a WebGPU canvas swap chain: the browser destroys the device at the first
+ * presented frame, so a WebGPU viewport there starts on WebGL, as it would for a user on that browser. Offscreen WebGPU
+ * (thumbnails, headless capture) still works there and is not affected.
+ */
+export const presentedGraphicsBackend = (requested: 'webgl' | 'webgpu'): 'webgl' | 'webgpu' =>
+  requested === 'webgpu' && currentWebGpuProfile() === 'software' ? 'webgl' : requested;
 export const expectGraphicsBackend = async (backend: 'webgl' | 'webgpu'): Promise<void> => {
   await expect
     .poll(() =>

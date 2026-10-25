@@ -484,7 +484,7 @@ test.describe('Section view contour fill regression', () => {
       const messageStart = backend === 'webgpu' ? await consoleMessageCount() : undefined;
       await target.navigate(`/__e2e/example-fixture?locator=jscad.section-cap-fixture&graphicsBackend=${backend}`);
       await target.expectVisible(selectors.getByCss('canvas[data-engine]'), 60_000);
-      await target.expectGraphicsBackend(backend);
+      await target.expectGraphicsBackend(target.presentedGraphicsBackend(backend));
       await target.expectGeometryFramed();
 
       await expectClosedSectionCapIntegrity(backend, -84);
@@ -501,7 +501,7 @@ test.describe('Section view contour fill regression', () => {
         `/__e2e/example-fixture?locator=jscad.cube-cylinder-section-fixture&graphicsBackend=${backend}`,
       );
       await target.expectVisible(selectors.getByCss('canvas[data-engine]'), 60_000);
-      await target.expectGraphicsBackend(backend);
+      await target.expectGraphicsBackend(target.presentedGraphicsBackend(backend));
       await target.expectGeometryFramed();
 
       await target.delay(500);
@@ -520,7 +520,7 @@ test.describe('Section view contour fill regression', () => {
         `/__e2e/example-fixture?locator=replicad.flower-attachment-section-outline-fixture&graphicsBackend=${backend}`,
       );
       await target.expectVisible(selectors.getByCss('canvas[data-engine]'), 60_000);
-      await target.expectGraphicsBackend(backend);
+      await target.expectGraphicsBackend(target.presentedGraphicsBackend(backend));
       await target.expectGeometryFramed();
 
       await driveFlowerAttachmentSectionView();
@@ -554,7 +554,7 @@ test.describe('Section view contour fill regression', () => {
         `/__e2e/example-fixture?locator=jscad.non-manifold-section-fixture&graphicsBackend=${backend}`,
       );
       await target.expectVisible(selectors.getByCss('canvas[data-engine]'), 60_000);
-      await target.expectGraphicsBackend(backend);
+      await target.expectGraphicsBackend(target.presentedGraphicsBackend(backend));
       await target.expectGeometryFramed();
 
       await driveNonManifoldSectionView();

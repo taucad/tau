@@ -614,7 +614,7 @@ async function waitForGraphicsTestBridge(): Promise<void> {
   await target.waitFor(() => Boolean((globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__));
   const requestedBackend = await target.evaluate(() => new URL(location.href).searchParams.get('graphicsBackend'));
   if (requestedBackend === 'webgl' || requestedBackend === 'webgpu') {
-    await target.expectGraphicsBackend(requestedBackend);
+    await target.expectGraphicsBackend(target.presentedGraphicsBackend(requestedBackend));
   }
   await target.expectGeometryFramed();
 }
@@ -1396,7 +1396,7 @@ test.describe('Graphics backend regression guard', () => {
     await target.expectVisible(toggle);
     await target.screenshot(selectors.getByRole('dialog', { name: 'Settings' }), 'webgpu-feature-flag.png');
     await target.click(toggle);
-    await target.expectGraphicsBackend('webgpu');
+    await target.expectGraphicsBackend(target.presentedGraphicsBackend('webgpu'));
     await target.expectGeometryFramed();
     await target.click(toggle);
     await target.expectGraphicsBackend('webgl');

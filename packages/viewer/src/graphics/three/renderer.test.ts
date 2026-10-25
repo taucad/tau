@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ThreeModule from 'three';
 import type * as ThreeWebGpuModule from 'three/webgpu';
+import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
 /* eslint-disable @typescript-eslint/naming-convention -- stub class + module-export property names mirror three.js's WebGPURenderer/WebGLRenderer spellings */
 
 /**
@@ -152,7 +153,6 @@ describe('createRenderer', () => {
 
   it('should reject a WebGPU viewport whose canvas cannot present, so the viewer starts on WebGL', async () => {
     const { createRenderer } = await import('#graphics/three/renderer.js');
-    const { WebGpuInitializationError } = await import('#graphics/three/webgpu-initialization-error.js');
     const { probeWebGpuSupport } = await import('#graphics/graphics-backend.js');
     hoisted.presentationDestroysDevice = true;
     const creation = createRenderer('viewport', 'webgpu', document.createElement('canvas'));

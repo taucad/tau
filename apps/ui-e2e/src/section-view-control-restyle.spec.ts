@@ -36,7 +36,7 @@ async function openSectionControlFixture(backend: 'webgl' | 'webgpu' = 'webgl'):
   await target.navigate(sectionControlFixtureRoute(backend));
   await target.expectVisible(selectors.getByCss(previewCanvasSelector), 60_000);
   // The banner sits over the bar's centre and the view cube's corner.
-  await target.expectGraphicsBackend(backend);
+  await target.expectGraphicsBackend(target.presentedGraphicsBackend(backend));
   await target.expectGeometryFramed();
 }
 

@@ -156,6 +156,7 @@ it.each([
   const { device } = mocks.gl.backend;
   mocks.gl.backend.device = undefined;
   mocks.gl.backend.gl = {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- WebGL API property.
     getExtension: () => ({ UNMASKED_VENDOR_WEBGL: 1, UNMASKED_RENDERER_WEBGL: 2 }),
     getParameter: (parameter) => (parameter === 1 ? 'Google Inc.' : renderer),
   };

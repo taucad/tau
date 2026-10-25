@@ -508,6 +508,7 @@ describe('ProjectWorkspaceProvider', () => {
       personWorkbenchChanged: (next) => {
         workbench = typeof next === 'function' ? next(workbench) : next;
       },
+      ready: () => true,
     };
     act(() => {
       workspace.registerLayoutController(controller);
@@ -537,6 +538,61 @@ describe('ProjectWorkspaceProvider', () => {
       workspace.layoutController.registerWorkbench(adopt);
     });
     expect(adopt).toHaveBeenCalledExactlyOnceWith(workbench, expect.any(Function));
+  });
+
+  it('asks for a pane as a change on top of the saved arrangement while the layout record is still being read', () => {
+    render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    const changes: Array<WorkbenchLaneNode | ((current: WorkbenchLaneNode) => WorkbenchLaneNode)> = [];
+    let read = false;
+    const controller: WorkbenchLayoutController = {
+      snapshot: () => undefined,
+      subscribe: () => () => undefined,
+      restorePreviousArrangement: async () => true,
+      registerViewer: () => () => undefined,
+      registerWorkbench: () => () => undefined,
+      personViewerChanged: () => undefined,
+      personWorkbenchChanged: (next) => {
+        changes.push(next);
+      },
+      ready: () => read,
+    };
+    const opener = vi.fn();
+    act(() => {
+      workspace.registerLayoutController(controller);
+      workspace.connectWorkbench(opener);
+    });
+
+    // A Share deep link lands before the record is read: opening Share straight into the Dockview would be undone
+    // when the saved arrangement replaces it, so the pane is asked for as a change to that arrangement.
+    act(() => {
+      workspace.openPanel('share');
+    });
+    expect(opener).not.toHaveBeenCalled();
+    expect(changes).toHaveLength(1);
+    const [change] = changes;
+    if (typeof change !== 'function') {
+      throw new TypeError('Share was not asked for as a change.');
+    }
+    const saved: WorkbenchLaneNode = { kind: 'group', tabs: [{ kind: 'pane', pane: 'parameters' }] };
+    expect(change(saved)).toEqual({
+      kind: 'group',
+      tabs: [
+        { kind: 'pane', pane: 'parameters' },
+        { kind: 'pane', pane: 'share' },
+      ],
+      active: 1,
+    });
+
+    read = true;
+    act(() => {
+      workspace.openPanel('export');
+    });
+    expect(opener).toHaveBeenCalledExactlyOnceWith('export');
+    expect(changes).toHaveLength(1);
   });
 
   it('maps supported Workbench actions to the existing mobile drawer tabs', () => {

@@ -14,11 +14,11 @@ class CatchRendererError extends Component<
   { readonly children: ReactNode; readonly onError: (error: unknown) => void },
   { readonly failed: boolean }
 > {
-  public override state = { failed: false };
-
   public static getDerivedStateFromError(): { failed: boolean } {
     return { failed: true };
   }
+
+  public override state = { failed: false };
 
   public override componentDidCatch(error: unknown): void {
     this.props.onError(error);

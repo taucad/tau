@@ -29,8 +29,21 @@ export function ThreeProvider(properties: ThreeContextProperties): React.JSX.Ele
         if (properties.graphicsBackend !== 'webgpu' || !(error instanceof WebGpuInitializationError)) {
           throw error ?? new Error('Renderer failed without an error description');
         }
-        // A canvas cannot change its GPU context type. Mount the node WebGL2 pipeline on a fresh owner.
-        return <ThreeProviderCanvas {...properties} graphicsBackend='webgl' />;
+        // A canvas cannot change its GPU context type. Mount the node WebGL2 pipeline on a fresh owner, once: this
+        // fallback renders inside the same boundary, so a WebGL failure that reached it again (the node pipeline also
+        // reports a failed start as a WebGPU initialization error) would remount WebGL without end. It leaves as an
+        // ordinary failure instead, for the viewer's failure screen and its Retry.
+        return (
+          <WebglErrorBoundary
+            fallback={({ error: fallbackError }) => {
+              throw fallbackError instanceof WebGpuInitializationError
+                ? new Error(fallbackError.message, { cause: fallbackError })
+                : (fallbackError ?? new Error('The WebGL renderer failed without an error description'));
+            }}
+          >
+            <ThreeProviderCanvas {...properties} graphicsBackend='webgl' />
+          </WebglErrorBoundary>
+        );
       }}
     >
       <ThreeProviderCanvas {...properties} />

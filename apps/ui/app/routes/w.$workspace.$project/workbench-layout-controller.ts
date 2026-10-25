@@ -32,6 +32,12 @@ export type WorkbenchLayoutController = Readonly<{
   registerWorkbench: (apply: (node: WorkbenchLaneNode, applied: () => void) => void) => () => void;
   personViewerChanged: (node: ViewerNode) => void;
   personWorkbenchChanged: (node: WorkbenchLaneNode | ((current: WorkbenchLaneNode) => WorkbenchLaneNode)) => void;
+  /**
+   * Whether the record's first read has finished. Until then the record's arrangement replaces whatever the workbench
+   * shows when it arrives, so a pane opened earlier must be asked for as a change ({@link personWorkbenchChanged} with a
+   * function), which is applied on top of the record once it is read.
+   */
+  ready: () => boolean;
 }>;
 
 type LayoutFiles = Readonly<{

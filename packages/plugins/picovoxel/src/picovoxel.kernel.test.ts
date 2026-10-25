@@ -2320,7 +2320,11 @@ describe('picovoxel observed heap', () => {
   it("should observe the warm runtime's WebAssembly memory after a render, until disposal", async () => {
     const runtime = createRuntime(sphere());
     const context = await initialize({ wasm: 'serial' }, runtime);
-    await definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context);
+    await definition.evaluate(
+      { entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane: 'fast' } },
+      runtime,
+      context,
+    );
     const observed = definition.observedHeapBytes!(context);
 
     expect(context.runtimes.size).toBe(1);
@@ -2335,7 +2339,11 @@ describe('picovoxel observed heap', () => {
     const runtime = createRuntime(sphere());
     const context = await initialize({ wasm: 'serial', recycleHeapBytes: 512 * mebibyte }, runtime);
     sessions.heapBytes = 600 * mebibyte;
-    await definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context);
+    await definition.evaluate(
+      { entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane: 'fast' } },
+      runtime,
+      context,
+    );
 
     expect(context.runtimes.size).toBe(0);
     expect(definition.observedHeapBytes!(context)).toBeUndefined();

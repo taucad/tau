@@ -13,6 +13,7 @@ import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { CreatePicoOptions, CreatePicoRuntimeOptions, Mesh, Pico, PicoRuntime, Voxels } from 'picovoxel';
 import type * as PicovoxelModule from 'picovoxel';
 
+import { picovoxelBuild } from '#picovoxel-build.js';
 import { picovoxelBuiltinModuleNames, picovoxelDetectPattern, picovoxelKernel } from '#picovoxel.kernel.js';
 import type { PicovoxelOptionsInput, PicovoxelRegion } from '#picovoxel.schemas.js';
 
@@ -1771,36 +1772,74 @@ describe('picovoxel kernel', () => {
       }
     });
 
-    it('refuses an adaptive view on the exact lane and under a PicoVoxel without adaptive meshing', async () => {
+    it('refuses an adaptive view on the exact lane and meshes it adaptively on the fast lane', async () => {
       const runtime = createRuntime(sphere());
       const context = await initialize({ wasm: 'serial' }, runtime);
       try {
-        const render = async (lane: 'fast' | 'exact') =>
-          buildIssues(
+        const options = { meshAdaptivity: 0.5, meshRelax: true } as const;
+        expect(
+          await buildIssues(
             definition.evaluate(
-              { entryPath: 'main.ts', parameters: {}, options: { lane, meshAdaptivity: 0.5, meshRelax: true } },
+              { entryPath: 'main.ts', parameters: {}, options: { lane: 'exact', ...options } },
               runtime,
               context,
             ),
-          );
-        expect(await render('exact')).toEqual([
+          ),
+        ).toEqual([
           expect.objectContaining({
             code: 'REPRESENTATION_UNSUPPORTED',
             details: expect.objectContaining({ refusal: 'PICOVOXEL_MESHING_EXACT_LANE', meshAdaptivity: 0.5 }),
           }),
         ]);
-        expect(await render('fast')).toEqual([
-          expect.objectContaining({
-            code: 'KERNEL_CAPABILITY_MISSING',
-            details: expect.objectContaining({ capability: 'PICOVOXEL_ADAPTIVE_MESHING', version: '0.1.0' }),
-          }),
-        ]);
+        const result = await definition.evaluate(
+          { entryPath: 'main.ts', parameters: { voxelSize: 1 }, options: { lane: 'fast', ...options } },
+          runtime,
+          context,
+        );
+        expect(result.handle.tessellation).toMatchObject({ adaptivity: 0.5, relax: true });
       } finally {
         await definition.onDispose!(context);
       }
     });
 
-    it.each(['fast', 'exact'] as const)('meshes an unset adaptivity uniformly on the %s lane', async (lane) => {
+    it('refuses an adaptive view under a PicoVoxel without adaptive meshing', async () => {
+      const runtime = createRuntime(sphere());
+      const context = await initialize({ wasm: 'serial' }, runtime);
+      const installed = picovoxelBuild.version;
+      // Simulate PicoVoxel 0.1.0, whose toMesh() takes no options; the kernel reads the version per build.
+      (picovoxelBuild as { version: string }).version = '0.1.0';
+      try {
+        expect(
+          await buildIssues(
+            definition.evaluate(
+              { entryPath: 'main.ts', parameters: {}, options: { lane: 'fast', meshAdaptivity: 0.5, meshRelax: true } },
+              runtime,
+              context,
+            ),
+          ),
+        ).toEqual([
+          expect.objectContaining({
+            code: 'KERNEL_CAPABILITY_MISSING',
+            details: expect.objectContaining({ capability: 'PICOVOXEL_ADAPTIVE_MESHING', version: '0.1.0' }),
+          }),
+        ]);
+        // An unset adaptivity never refuses: under 0.1.0 it is the uniform mesh on the fast lane too.
+        const result = await definition.evaluate(
+          { entryPath: 'main.ts', parameters: { voxelSize: 1 }, options: { lane: 'fast', meshRelax: false } },
+          runtime,
+          context,
+        );
+        expect(result.handle.tessellation).not.toHaveProperty('adaptivity');
+      } finally {
+        (picovoxelBuild as { version: string }).version = installed;
+        await definition.onDispose!(context);
+      }
+    });
+
+    it.each([
+      { lane: 'fast', adaptivity: 0.25 },
+      { lane: 'exact', adaptivity: undefined },
+    ] as const)('meshes an unset adaptivity on the $lane lane at $adaptivity', async ({ lane, adaptivity }) => {
       const runtime = createRuntime(sphere());
       const context = await initialize({ wasm: 'serial' }, runtime);
       try {
@@ -1809,8 +1848,12 @@ describe('picovoxel kernel', () => {
           runtime,
           context,
         );
-        expect(result.handle.tessellation).not.toHaveProperty('adaptivity');
-        expect(result.handle.tessellation).not.toHaveProperty('relax');
+        if (adaptivity === undefined) {
+          expect(result.handle.tessellation).not.toHaveProperty('adaptivity');
+          expect(result.handle.tessellation).not.toHaveProperty('relax');
+        } else {
+          expect(result.handle.tessellation).toMatchObject({ adaptivity, relax: false });
+        }
       } finally {
         await definition.onDispose!(context);
       }

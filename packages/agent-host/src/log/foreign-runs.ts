@@ -242,17 +242,33 @@ const observed = new WeakMap<Omit<ForeignRun, 'observedAt' | 'pulledQuiet' | 'ta
  * rows grew from an array already folded (`noteGrownRows`) folds just the rows it gained.
  */
 const runFolds = new WeakMap<readonly AgentLogEvent[], Map<string, RunFold>>();
-const grownFrom = new WeakMap<readonly AgentLogEvent[], readonly AgentLogEvent[]>();
+/*
+ * Round 22: what a grown array carries on from, the folds of the rows it grew from and how many rows those were, never
+ * those rows themselves. A fold holds no array of rows, so a segment a heartbeat grows every minute keeps one earlier
+ * fold, not every earlier copy of its rows.
+ */
+const grownFrom = new WeakMap<readonly AgentLogEvent[], Readonly<{ length: number; folds: Map<string, RunFold> }>>();
+
+/** A segment's folds by device, which the folds of its rows grown later carry on from. */
+const foldsOf = (events: readonly AgentLogEvent[]): Map<string, RunFold> => {
+  let byDevice = runFolds.get(events);
+  if (byDevice === undefined) {
+    byDevice = new Map();
+    runFolds.set(events, byDevice);
+  }
+  return byDevice;
+};
 
 /**
  * Say that `grown` is `prior`'s rows with more appended after them, so a run fold of `prior` is carried on, not redone.
+ * Only `prior`'s folds are kept for it, never `prior` itself.
  *
  * @param grown - The longer rows.
  * @param prior - The rows they begin with.
  * @internal
  */
 export const noteGrownRows = (grown: readonly AgentLogEvent[], prior: readonly AgentLogEvent[]): void => {
-  grownFrom.set(grown, prior);
+  grownFrom.set(grown, { length: prior.length, folds: foldsOf(prior) });
 };
 
 /** One device's segment as last parsed: its bytes, its rows, and how many of its bytes those rows came from. @public */
@@ -303,15 +319,11 @@ export const parseSegmentFrom = (prior: SegmentParse | undefined, bytes: Uint8Ar
 };
 
 const runFoldOf = (segment: ParsedLogSegment): RunFold => {
-  let byDevice = runFolds.get(segment.events);
-  if (byDevice === undefined) {
-    byDevice = new Map();
-    runFolds.set(segment.events, byDevice);
-  }
+  const byDevice = foldsOf(segment.events);
   let fold = byDevice.get(segment.deviceId);
   if (fold === undefined) {
     const prior = grownFrom.get(segment.events);
-    const carried = prior === undefined ? undefined : runFolds.get(prior)?.get(segment.deviceId);
+    const carried = prior?.folds.get(segment.deviceId);
     fold =
       carried === undefined || prior === undefined
         ? foldRuns(segment.deviceId, undefined, segment.events)

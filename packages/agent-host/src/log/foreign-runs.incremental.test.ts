@@ -2,6 +2,9 @@
  * XD3: a heartbeat grows one device's segment by a row every minute; its runs are folded on from the rows already
  * folded, never again from the start.
  */
+import { setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import type * as ChatLedgerModule from '#log/chat-ledger.js';
@@ -57,5 +60,41 @@ describe('a growing segment’s runs', () => {
         observedAt: expect.any(Number) as unknown,
       },
     ]);
+  });
+
+  /*
+   * Round 22, finding 2: each grown array kept the array it grew from, which kept the one before it, so a segment that
+   * a heartbeat grows every minute kept every earlier copy of its rows alive, in the worker and in the page. A grown
+   * array keeps only the fold of the rows it grew from, never those rows.
+   */
+  it('should keep no array a segment grew from alive once only its newest rows are held', async () => {
+    setFlagsFromString('--expose-gc');
+    const collect = runInNewContext('gc') as () => void;
+    const earlier: Array<WeakRef<readonly AgentLogEvent[]>> = [];
+    let rows: readonly AgentLogEvent[] = [
+      row(0, { type: 'run.lifecycle', state: 'admitted' }),
+      row(1, { type: 'run.lifecycle', state: 'running' }),
+    ];
+    for (let beat = 2; beat < 8; beat++) {
+      unsettledParsedRuns([{ deviceId: 'device-phone', events: rows }]);
+      earlier.push(new WeakRef(rows));
+      const grown = [...rows, row(beat, { type: 'run.heartbeat' })];
+      noteGrownRows(grown, rows);
+      rows = grown;
+    }
+    folded.rows = 0;
+    const runs = unsettledParsedRuns([{ deviceId: 'device-phone', events: rows }]);
+    for (let round = 0; round < 5; round++) {
+      // oxlint-disable-next-line no-await-in-loop -- each round lets the last one's releases run before collecting.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 10);
+      });
+      collect();
+    }
+
+    expect(folded.rows).toBe(1);
+    expect(runs).toMatchObject([{ runId: 'run-phone', tip: { sequence: 7 } }]);
+    expect(earlier.filter((array) => array.deref() !== undefined)).toEqual([]);
+    expect(rows).toHaveLength(8);
   });
 });

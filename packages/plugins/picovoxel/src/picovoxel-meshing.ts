@@ -28,8 +28,8 @@ export const picovoxelPreviewAdaptivity = 0.25;
  * watertightness obligation of the Balanced-adaptivity ruling. It is on because adaptive previews keep the in-line
  * seam triangles that stitch merged cells (D36, `dropZeroAreaTriangles`), which measured base-box and helix-heat-x
  * at 0.25 with no boundary and no non-manifold edges. Turn it off again if an adaptive preview opens. Under
- * PicoVoxel 0.1.0 it changes nothing: that release resolves every unset view to 0, and the release that meshes
- * adaptively moves the kernel version, the cache key, by itself.
+ * PicoVoxel 0.1.0 it changes nothing: that release resolves every unset view to 0. PicoVoxel 0.2.0, the first
+ * release that meshes adaptively, moved the kernel version, the cache key, by itself.
  */
 export const picovoxelAdaptivePreviewsWatertight = true;
 
@@ -107,8 +107,8 @@ export const resolvePicovoxelMeshing = (
  * @returns The field's mesh.
  */
 export const meshPicovoxelField = (field: Voxels, meshing: PicovoxelMeshing | undefined): Mesh =>
-  // The option form arrives with the PicoVoxel release after 0.1.0; resolvePicovoxelMeshing never passes it before.
-  (field.toMesh as (options?: PicovoxelMeshing) => Mesh).call(field, meshing);
+  // PicoVoxel 0.2.0 added the option form; resolvePicovoxelMeshing never passes it under 0.1.0.
+  field.toMesh(meshing);
 
 /**
  * The tessellation fields an adaptive mesh adds; none for the uniform mesh.

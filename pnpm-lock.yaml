@@ -691,8 +691,8 @@ catalogs:
       specifier: 2.4.5
       version: 2.4.5
     picovoxel:
-      specifier: 0.1.0
-      version: 0.1.0
+      specifier: 0.2.0
+      version: 0.2.0
     pino-pretty:
       specifier: ^13.1.3
       version: 13.2.0
@@ -3264,7 +3264,7 @@ importers:
         version: 0.3.4
       picovoxel:
         specifier: 'catalog:'
-        version: 0.1.0(three@0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064))
+        version: 0.2.0(three@0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064))
 
   libs/chat:
     dependencies:
@@ -3446,7 +3446,7 @@ importers:
         version: 3.4.1(@gltf-transform/core@4.5.1)(@gltf-transform/extensions@4.5.1)(@gltf-transform/functions@4.5.1(@types/node@24.0.15))(esbuild-wasm@0.28.2)
       picovoxel:
         specifier: 'catalog:'
-        version: 0.1.0(three@0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064))
+        version: 0.2.0(three@0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064))
       replicad:
         specifier: npm:@taulabs/replicad@1.1.0-taulabs.1
         version: '@taulabs/replicad@1.1.0-taulabs.1'
@@ -4747,7 +4747,7 @@ importers:
         version: link:../../kinematics
       picovoxel:
         specifier: 'catalog:'
-        version: 0.1.0(three@0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064))
+        version: 0.2.0(three@0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064))
     devDependencies:
       '@taucad/esbuild':
         specifier: workspace:*
@@ -22205,8 +22205,8 @@ packages:
     resolution: {integrity: sha512-0Z++uU8mvB0EvCPAEUq9BGiPcSravzJ+RPdXfjYlzXffqsogisiKRQqI6ctrSSJ6n985vxrgKtQ5n4sRINcJZg==}
     engines: {node: '>=18.0.0'}
 
-  picovoxel@0.1.0:
-    resolution: {integrity: sha512-X8Q4YlKfIuNc8HbH8KusVUW1T/nz8xJUFjJ2pvh3KTCB8gev24gf0EQZzdB8IDE6px8aGp5z266vm6tTmJ56PQ==}
+  picovoxel@0.2.0:
+    resolution: {integrity: sha512-Ym1mLTOuUEVza3zi/HhNvxSgy9I6s+nIm19q0yi3n9fJjC3lnV5W2C7SRnWiMJxwT8IRun/Gd0XpY0qpK6t3kA==}
     engines: {node: '>=22.14.0'}
     peerDependencies:
       three: '>=0.160'
@@ -44884,7 +44884,7 @@ snapshots:
 
   picospinner@3.1.2: {}
 
-  picovoxel@0.1.0(three@0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064)):
+  picovoxel@0.2.0(three@0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064)):
     optionalDependencies:
       three: 0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064)
 

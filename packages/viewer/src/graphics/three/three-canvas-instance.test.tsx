@@ -57,6 +57,10 @@ const rigCamera = new PerspectiveCamera();
 const orthographicCamera = new OrthographicCamera();
 const setClipPlanes = vi.fn();
 const cameraRig = { activeCamera: rigCamera, perspectiveCamera: rigCamera, orthographicCamera, setClipPlanes };
+/** Frame callbacks registered inside the stub root, run by a test as R3F's loop would. */
+const frameCallbacks = vi.hoisted((): Array<{ callback: () => void; priority: number | undefined }> => []);
+/** Frame requests made inside the stub root. */
+const stubInvalidate = vi.hoisted(() => vi.fn());
 const reportRenderer = vi.hoisted(() => vi.fn<(event: GraphicsEvent) => void>());
 const enabledFeatures = vi.hoisted(() => new Set<string>());
 /** When set, the mocked renderer factory throws it, as three's `WebGLRenderer` does without a context. */
@@ -98,6 +102,9 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
     readonly eventPrefix?: ReactThreeFiber.CanvasProps['eventPrefix'];
     readonly eventSource?: ReactThreeFiber.CanvasProps['eventSource'];
     readonly onCreated?: (state: StubRootState) => void;
+    // oxlint-disable-next-line react-js/boolean-prop-naming -- R3F forwards the ARIA attribute's own name.
+    readonly 'aria-busy'?: boolean;
+    readonly 'data-slot'?: string;
   };
 
   function StubCanvas({
@@ -108,6 +115,8 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
     eventSource,
     gl: glFactory,
     onCreated,
+    'aria-busy': ariaBusy,
+    'data-slot': dataSlot,
   }: StubCanvasProps): JSX.Element {
     latestCanvasCamera = camera;
     latestCanvasGl = glFactory;
@@ -174,10 +183,27 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
       queueMicrotask(microtaskHandle);
     }, [eventPrefix, onCreated]);
 
-    return <div data-testid='stub-canvas'>{children}</div>;
+    return (
+      <div data-testid='stub-canvas' aria-busy={ariaBusy} data-slot={dataSlot}>
+        {children}
+      </div>
+    );
   }
 
-  return { ...actual, Canvas: StubCanvas };
+  function useStubFrame(callback: () => void, priority?: number): void {
+    useEffect(() => {
+      const entry = { callback, priority };
+      frameCallbacks.push(entry);
+      return () => {
+        frameCallbacks.splice(frameCallbacks.indexOf(entry), 1);
+      };
+    }, [callback, priority]);
+  }
+
+  const useStubThree = <Selected,>(select: (state: { invalidate: typeof stubInvalidate }) => Selected): Selected =>
+    select({ invalidate: stubInvalidate });
+
+  return { ...actual, Canvas: StubCanvas, useFrame: useStubFrame, useThree: useStubThree };
 });
 
 vi.mock('#environment/viewer-environment.jsx', async (importOriginal) => ({
@@ -253,6 +279,8 @@ describe('ThreeCanvasInstance', () => {
     stubCoordinateSystem = WebGLCoordinateSystem;
     setClipPlanes.mockClear();
     rendererFailure.error = undefined;
+    frameCallbacks.length = 0;
+    stubInvalidate.mockClear();
   });
 
   afterEach(() => {
@@ -523,6 +551,29 @@ describe('ThreeCanvasInstance', () => {
     });
 
     expect(screen.getByTestId('actor-bridge')).toBeInTheDocument();
+  });
+
+  it('marks the stage busy until its first frame has reached the screen, then observes no further frames', async () => {
+    render(<KeyedThreeCanvas canvasKey='first-frame' />);
+    await screen.findByTestId('actor-bridge');
+    const stage = screen.getByTestId('stub-canvas');
+    expect(stage).toHaveAttribute('data-slot', 'viewer-canvas');
+    expect(stage).toHaveAttribute('aria-busy', 'true');
+    const observer = frameCallbacks.find(({ priority }) => priority === 6);
+    expect(observer).toBeDefined();
+    // The canvas may have drawn before the observer subscribed: it asks for exactly one frame to observe.
+    expect(stubInvalidate).toHaveBeenCalledTimes(1);
+
+    // Submitting the frame is not presenting it: the stage stays busy until two animation frames later.
+    act(() => {
+      observer?.callback();
+    });
+    expect(stage).toHaveAttribute('aria-busy', 'true');
+    await waitFor(() => {
+      expect(stage).not.toHaveAttribute('aria-busy');
+    });
+    expect(frameCallbacks.some(({ priority }) => priority === 6)).toBe(false);
+    expect(stubInvalidate).toHaveBeenCalledTimes(1);
   });
 
   it('forwards explicit Canvas event routing props to R3F', async () => {

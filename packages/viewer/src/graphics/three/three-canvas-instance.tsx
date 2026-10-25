@@ -1,5 +1,5 @@
 import type { RootState } from '@react-three/fiber';
-import { Canvas, flushSync as flushThreeSync, useThree } from '@react-three/fiber';
+import { Canvas, flushSync as flushThreeSync, useFrame, useThree } from '@react-three/fiber';
 import { flushSync } from 'react-dom';
 import type { RefCallback } from 'react';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -43,6 +43,41 @@ export type ThreeCanvasInstanceProps = ThreeContextProperties & {
   /** Receives the canvas's CSS pixel area and drawing-buffer pixel ratio when they change. */
   readonly onSurfaceResize?: (cssPixels: number, pixelRatio: number) => void;
 };
+
+/**
+ * Reports once that the stage's first frame has reached the screen. The frame's GPU work is submitted when its
+ * callbacks run, but the page only paints it once the compositor produces frames again: on a software adapter the
+ * browser first compiles every pipeline, which can hold the compositor for seconds. A second animation frame after
+ * that submission is the earliest point the page can show, and answer input over, the drawn stage.
+ */
+function FirstFramePresented({ onPresented }: Readonly<{ onPresented: () => void }>): undefined {
+  const invalidate = useThree((state) => state.invalidate);
+  const submittedRef = useRef(false);
+  const requestRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    // The canvas may have drawn before this observer subscribed; on demand, ask for the one frame it observes.
+    invalidate();
+    return () => {
+      if (requestRef.current !== undefined) {
+        cancelAnimationFrame(requestRef.current);
+      }
+    };
+  }, [invalidate]);
+  // After the final encoding (3.5) and the render-loop observer (5); requests no frame beyond the one above.
+  useFrame(() => {
+    if (submittedRef.current) {
+      return;
+    }
+    submittedRef.current = true;
+    requestRef.current = requestAnimationFrame(() => {
+      requestRef.current = requestAnimationFrame(() => {
+        requestRef.current = undefined;
+        onPresented();
+      });
+    });
+  }, 6);
+  return undefined;
+}
 
 /** Reports the canvas's surface size from inside the R3F root, on mount and whenever it changes. */
 function SurfaceSizeReporter({
@@ -132,6 +167,7 @@ export function ThreeCanvasInstance({
   }>();
   const [isContextLost, setIsContextLost] = useState(false);
   const [rendererError, setRendererError] = useState<Error>();
+  const [presentedFactory, setPresentedFactory] = useState<TauR3fGlFactory>();
   const cameraRig = useCameraRig();
   const rootRef = useRef<RootState | undefined>(undefined);
   const resize = useMemo(
@@ -184,6 +220,11 @@ export function ThreeCanvasInstance({
   );
 
   const isCanvasReady = initializedRenderer?.factory === glProperty;
+  const isFirstFramePresented = presentedFactory === glProperty;
+  const markPresented = useCallback(() => {
+    // The factory is a function: pass it through an updater so React stores it rather than calling it.
+    setPresentedFactory(() => glProperty);
+  }, [glProperty]);
   useEffect(() => {
     if (!initializedRenderer || initializedRenderer.factory !== glProperty || isContextLost || glProperty.isRetired()) {
       return;
@@ -282,6 +323,9 @@ export function ThreeCanvasInstance({
       frameloop='demand'
       resize={resize}
       className={cn('bg-background', className)}
+      // Busy until the first frame is on screen, so assistive technology and automation wait for a drawn stage.
+      aria-busy={!isFirstFramePresented || undefined}
+      data-slot='viewer-canvas'
       onCreated={onCanvasCreated}
     >
       <CanvasRendererLifetime factory={glProperty} />
@@ -310,6 +354,7 @@ export function ThreeCanvasInstance({
           </SceneOverlay>
         </OverlayDepthProvider>
         {isCanvasReady ? <ActorBridge /> : null}
+        {isCanvasReady && !isFirstFramePresented ? <FirstFramePresented onPresented={markPresented} /> : null}
         {renderSurfaceSizeReporter(onSurfaceResize)}
         {showRenderFps && isTauDebugEnabled ? (
           <RenderFpsOverlay hasTopRightGizmo={enableGizmo && Boolean(gizmoContainer)} />

@@ -263,7 +263,7 @@ export function ProjectWorkspaceProvider({
       registerViewer: (apply) => layoutControllerRef.current?.registerViewer(apply) ?? (() => undefined),
       registerWorkbench: (apply) => layoutControllerRef.current?.registerWorkbench(apply) ?? (() => undefined),
       personViewerChanged: (node) => layoutControllerRef.current?.personViewerChanged(node),
-      personWorkbenchChanged: (node) => layoutControllerRef.current?.personWorkbenchChanged(node),
+      personWorkbenchChanged: (node, unapplied) => layoutControllerRef.current?.personWorkbenchChanged(node, unapplied),
       // Without a record host there is no record to wait for.
       ready: () => layoutControllerRef.current?.ready() ?? true,
     }),
@@ -366,7 +366,17 @@ export function ProjectWorkspaceProvider({
       } else if (panelId === 'files') {
         pendingFilesRef.current = routeKey;
       } else {
-        layoutController.personWorkbenchChanged((node) => addPane(node, panelId));
+        // When the record cannot take the change, the pane opens straight into the workbench, or once it connects.
+        layoutController.personWorkbenchChanged(
+          (node) => addPane(node, panelId),
+          () => {
+            if (openerRef.current) {
+              openerRef.current(panelId);
+            } else {
+              pendingPreviewPanel.current = { route: routeKey, panel: panelId };
+            }
+          },
+        );
       }
     },
     [editorRef, isMobile, layoutController, setWorkbenchOpen, routeKey, workbenchMode, onWorkbenchOpen],

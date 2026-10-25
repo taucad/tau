@@ -28,6 +28,10 @@ const hoisted = vi.hoisted(() => {
     destroyDevice: vi.fn(),
     /** The browser destroys the device as the canvas presents its first frame (no swap chain backing). */
     presentationDestroysDevice: false,
+    /** Acquiring the canvas texture throws, the device staying alive. */
+    presentationThrows: false,
+    /** The queue never reports the first frame's work done. */
+    workDoneStalls: false,
     presentedFrames: 0,
   };
 });
@@ -79,12 +83,24 @@ vi.mock('three/webgpu', async (importOriginal) => {
               if (hoisted.presentationDestroysDevice) {
                 throw new Error('A valid external Instance reference no longer exists.');
               }
+              if (hoisted.workDoneStalls) {
+                await new Promise<never>(() => {
+                  // Never settles, like a stalled queue.
+                });
+              }
             },
           },
         },
       });
       Object.defineProperty(this.backend, 'context', {
-        value: { getCurrentTexture: () => ({ createView: () => ({}) }) },
+        value: {
+          getCurrentTexture: () => {
+            if (hoisted.presentationThrows) {
+              throw new Error('Canvas texture unavailable');
+            }
+            return { createView: () => ({}) };
+          },
+        },
       });
       hoisted.createdRenderers.push({
         setTransparentSort: this.setTransparentSort,
@@ -139,7 +155,42 @@ describe('createRenderer', () => {
     hoisted.nativeBackend = true;
     hoisted.destroyDevice.mockClear();
     hoisted.presentationDestroysDevice = false;
+    hoisted.presentationThrows = false;
+    hoisted.workDoneStalls = false;
     hoisted.presentedFrames = 0;
+  });
+
+  // First in this file: no test before it has reported a canvas loss to the shared module.
+  it('should fail a first frame that throws without a device loss as an ordinary start, keeping WebGPU on', async () => {
+    const { createRenderer } = await import('#graphics/three/renderer.js');
+    const { probeWebGpuSupport, webGpuFallbackReason } = await import('#graphics/graphics-backend.js');
+    hoisted.presentationThrows = true;
+    const creation = createRenderer('viewport', 'webgpu', document.createElement('canvas'));
+    await expect(creation).rejects.toBeInstanceOf(WebGpuInitializationError);
+    await expect(creation).rejects.toThrow('could not present its first frame: Canvas texture unavailable');
+    expect(hoisted.createdRenderers[0]?.dispose).toHaveBeenCalledOnce();
+    expect(hoisted.destroyDevice).toHaveBeenCalledOnce();
+    expect(webGpuFallbackReason()).toBeUndefined();
+    Object.defineProperty(navigator, 'gpu', { configurable: true, value: { requestAdapter: async () => ({}) } });
+    try {
+      expect(await probeWebGpuSupport()).toBe(true);
+    } finally {
+      Reflect.deleteProperty(navigator, 'gpu');
+    }
+  });
+
+  it('should not let a stalled first frame hold the renderer creation', async () => {
+    vi.useFakeTimers();
+    try {
+      const { createRenderer, firstCanvasFrameTimeout } = await import('#graphics/three/renderer.js');
+      hoisted.workDoneStalls = true;
+      const creation = createRenderer('viewport', 'webgpu', document.createElement('canvas'));
+      await vi.advanceTimersByTimeAsync(firstCanvasFrameTimeout + 10);
+      await expect(creation).resolves.toBeDefined();
+      expect(hoisted.destroyDevice).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('should present one frame on a WebGPU viewport before the scene compiles anything', async () => {

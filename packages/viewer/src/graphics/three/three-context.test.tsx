@@ -5,6 +5,7 @@ import type { ThreeCanvasInstanceProps } from '#graphics/three/three-canvas-inst
 import { WebglErrorBoundary } from '#cad/webgl-error-boundary.jsx';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
 import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
+import type * as GraphicsBackendModule from '#graphics/graphics-backend.js';
 import { ThreeProvider } from '#graphics/three/three-context.jsx';
 import { useWebglContextRef, WebglContextTrackerProvider } from '#hooks/use-webgl-context-tracker.jsx';
 
@@ -16,6 +17,11 @@ const allocation = vi.hoisted(() => ({
 }));
 
 vi.mock('#environment/viewer-environment.jsx', () => ({ useViewerFeature: () => false }));
+const fallback = vi.hoisted(() => ({ reason: undefined as 'canvas-loss' | undefined }));
+vi.mock('#graphics/graphics-backend.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof GraphicsBackendModule>()),
+  webGpuFallbackReason: () => fallback.reason,
+}));
 vi.mock('#graphics/three/three-canvas-instance.jsx', () => ({
   ThreeCanvasInstance({ onSurfaceResize, graphicsBackend, children }: ThreeCanvasInstanceProps): React.JSX.Element {
     useEffect(() => {
@@ -191,6 +197,21 @@ describe('ThreeProvider initialization recovery', () => {
     view.rerender(<ThreeProvider graphicsBackend='webgl'>Model</ThreeProvider>);
     view.rerender(<ThreeProvider graphicsBackend='webgpu'>Model</ThreeProvider>);
     expect(screen.getByLabelText('webgpu canvas')).toHaveTextContent('Model');
+  });
+
+  it('should keep the WebGL fallback canvas when a canvas loss turns the viewer to WebGL', () => {
+    allocation.error = new WebGpuInitializationError('The WebGPU canvas could not present a frame: destroyed');
+    const view = render(<ThreeProvider graphicsBackend='webgpu'>Model</ThreeProvider>);
+    const fallbackCanvas = screen.getByLabelText('webgl canvas');
+    expect(allocation.webglMounts).toBe(1);
+    fallback.reason = 'canvas-loss';
+    try {
+      view.rerender(<ThreeProvider graphicsBackend='webgl'>Model</ThreeProvider>);
+      expect(screen.getByLabelText('webgl canvas')).toBe(fallbackCanvas);
+      expect(allocation.webglMounts).toBe(1);
+    } finally {
+      fallback.reason = undefined;
+    }
   });
 
   it('should preserve ordinary rendering errors instead of silently changing the backend', () => {

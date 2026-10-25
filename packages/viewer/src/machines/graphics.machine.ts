@@ -1,4 +1,4 @@
-import { createAsyncLogic, setup, types } from 'xstate';
+import { createAsyncLogic, createCallbackLogic, setup, types } from 'xstate';
 import type {
   ActorRefFrom,
   AnyActor,
@@ -24,7 +24,11 @@ import type {
   PinnedMeasurement,
   ResolvedGraphicsBackend,
 } from '#graphics/graphics-settings.js';
-import { probeWebGpuSupportWithin, resolveGraphicsBackendPreference } from '#graphics/graphics-backend.js';
+import {
+  onWebGpuCanvasLoss,
+  probeWebGpuSupportWithin,
+  resolveGraphicsBackendPreference,
+} from '#graphics/graphics-backend.js';
 import {
   applySectionCutPatch,
   createDefaultPlaneCut,
@@ -334,6 +338,8 @@ export type GraphicsEvent =
   | { type: 'setPostProcessingVisibility'; payload: boolean }
   | { type: 'setUpDirection'; payload: 'x' | 'y' | 'z' }
   | { type: 'setGraphicsBackendPreference'; payload: GraphicsBackendPreference }
+  /** A WebGPU canvas on this page could not present, or lost its device to the browser: WebGPU is off for the page. */
+  | { type: 'webGpuCanvasLost' }
   | { type: 'rendererInitialized'; payload: NonNullable<GraphicsContext['activeRenderer']> }
   | { type: 'rendererRemoved'; canvasId: string }
   /** A canvas that draws frames has mounted; the stage waits for its first frame. */
@@ -665,6 +671,11 @@ const adoptedSection = (context: GraphicsContext, section: PersistedSectionView)
 
 const graphicsActors = {
   probeWebGpu: createAsyncLogic({ run: async () => probeWebGpuSupportWithin() }),
+  watchWebGpuCanvasLoss: createCallbackLogic<{ type: 'stop' }>(({ sendBack }) =>
+    onWebGpuCanvasLoss(() => {
+      sendBack({ type: 'webGpuCanvasLost' });
+    }),
+  ),
   modelInteraction: modelInteractionMachine,
   kinematics: kinematicsMachine,
 };
@@ -806,6 +817,7 @@ const graphicsMachineDefinition = setup({
         },
       }),
     },
+    { src: 'watchWebGpuCanvasLoss', id: 'watchWebGpuCanvasLossInvocation' },
   ],
 
   context: ({ input, spawn, actors }) => {
@@ -1017,6 +1029,13 @@ const graphicsMachineDefinition = setup({
           }),
         },
 
+        // A Retry or remount then starts on WebGL instead of repeating the WebGPU start the browser cannot present.
+        webGpuCanvasLost: {
+          context: ({ context }) => ({
+            webGpuAvailable: false,
+            resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, false),
+          }),
+        },
         rendererInitialized: { context: ({ event }) => ({ activeRenderer: event.payload }) },
         canvasMounted: {
           context: ({ event }) => ({ canvasPresentation: { canvasId: event.canvasId, presented: false } }),

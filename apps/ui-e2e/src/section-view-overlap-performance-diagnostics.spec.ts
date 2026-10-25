@@ -233,7 +233,7 @@ type FixtureDiagnosticsOptions = Readonly<{
 const collectFixtureDiagnostics = async ({ backend, fixture }: FixtureDiagnosticsOptions): Promise<void> => {
   await target.navigate(`/__e2e/example-fixture?locator=${fixture.projectId}&graphicsBackend=${backend}`);
   await target.expectVisible(selectors.getByCss('canvas[data-engine]'), 60_000);
-  await target.expectGraphicsBackend(target.presentedGraphicsBackend(backend));
+  await target.expectPresentedGraphicsBackend(backend);
   await target.expectGeometryFramed();
 
   const overlap = await collectPerformanceSweep({

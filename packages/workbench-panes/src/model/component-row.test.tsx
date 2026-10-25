@@ -94,6 +94,8 @@ describe('Model component rows', () => {
     // The refreshing preview's status describes the selection button; its name stays the part's.
     const selection = screen.getByRole('button', { name: 'planetary_housing' });
     expect(selection).toHaveAccessibleDescription('Preview loading');
+    // Read once, as that description: the status text itself is not in the row's reading order.
+    expect(screen.getByText('Preview loading')).not.toBeVisible();
     expect(selection.querySelector('button')).toBeNull();
 
     await userEvent.setup().click(preview);

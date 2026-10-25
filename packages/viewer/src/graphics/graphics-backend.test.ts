@@ -45,6 +45,34 @@ describe('probeWebGpuSupport', () => {
 
     expect(requestAdapter).toHaveBeenCalledTimes(2);
   });
+
+  it('should keep a canvas loss reported while a failing adapter request was in flight', async () => {
+    const request = Promise.withResolvers<unknown>();
+    requestAdapter.mockReturnValueOnce(request.promise).mockResolvedValue({});
+    const { probeWebGpuSupport, reportWebGpuCanvasLoss, webGpuFallbackReason } = await importBackend();
+
+    const inFlight = probeWebGpuSupport();
+    reportWebGpuCanvasLoss();
+    request.reject(new Error('GPU process restarting'));
+
+    expect(await inFlight).toBe(false);
+    expect(await probeWebGpuSupport()).toBe(false);
+    expect(requestAdapter).toHaveBeenCalledTimes(1);
+    expect(webGpuFallbackReason()).toBe('canvas-loss');
+  });
+
+  it('should tell loss listeners and report no fallback reason before a loss', async () => {
+    const { onWebGpuCanvasLoss, reportWebGpuCanvasLoss, webGpuFallbackReason } = await importBackend();
+    const listener = vi.fn();
+    const stop = onWebGpuCanvasLoss(listener);
+    expect(webGpuFallbackReason()).toBeUndefined();
+
+    reportWebGpuCanvasLoss();
+    stop();
+    reportWebGpuCanvasLoss();
+
+    expect(listener).toHaveBeenCalledOnce();
+  });
 });
 
 describe('probeWebGpuSupportWithin', () => {

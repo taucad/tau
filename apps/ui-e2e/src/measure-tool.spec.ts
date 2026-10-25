@@ -66,12 +66,8 @@ async function openMeasureFixture(backend: 'webgl' | 'webgpu', locator = measure
   }
 
   await target.expectGeometryFramed();
-  const actualBackend = await target.evaluate(() =>
-    (globalThis as unknown as MeasureBridgeWindow).__TAU_SECTION_VIEW_TEST__?.getGraphicsBackend(),
-  );
-  expect(actualBackend, 'the requested graphics backend must actually render').toBe(
-    target.presentedGraphicsBackend(backend),
-  );
+  // The requested graphics backend must actually render (on the software profile, WebGPU's canvas-loss fallback).
+  await target.expectPresentedGraphicsBackend(backend);
 
   if (locator !== measureFixtureLocator) {
     return;

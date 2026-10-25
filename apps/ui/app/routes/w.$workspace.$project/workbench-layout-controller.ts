@@ -31,7 +31,15 @@ export type WorkbenchLayoutController = Readonly<{
   registerViewer: (apply: (node: ViewerNode, applied: () => void) => void) => () => void;
   registerWorkbench: (apply: (node: WorkbenchLaneNode, applied: () => void) => void) => () => void;
   personViewerChanged: (node: ViewerNode) => void;
-  personWorkbenchChanged: (node: WorkbenchLaneNode | ((current: WorkbenchLaneNode) => WorkbenchLaneNode)) => void;
+  /**
+   * The person changed the workbench arrangement. A change given as a function is applied to the record's arrangement;
+   * `unapplied` runs instead when the record cannot take it (its first read failed, or it holds a refused record), so
+   * the caller can show the pane another way.
+   */
+  personWorkbenchChanged: (
+    node: WorkbenchLaneNode | ((current: WorkbenchLaneNode) => WorkbenchLaneNode),
+    unapplied?: () => void,
+  ) => void;
   /**
    * Whether the record's first read has finished. Until then the record's arrangement replaces whatever the workbench
    * shows when it arrives, so a pane opened earlier must be asked for as a change ({@link personWorkbenchChanged} with a

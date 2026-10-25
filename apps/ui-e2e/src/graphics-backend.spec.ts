@@ -614,7 +614,7 @@ async function waitForGraphicsTestBridge(): Promise<void> {
   await target.waitFor(() => Boolean((globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__));
   const requestedBackend = await target.evaluate(() => new URL(location.href).searchParams.get('graphicsBackend'));
   if (requestedBackend === 'webgl' || requestedBackend === 'webgpu') {
-    await target.expectGraphicsBackend(target.presentedGraphicsBackend(requestedBackend));
+    await target.expectPresentedGraphicsBackend(requestedBackend);
   }
   await target.expectGeometryFramed();
 }
@@ -1395,12 +1395,23 @@ test.describe('Graphics backend regression guard', () => {
     const toggle = selectors.getByRole('switch', { name: 'WebGPU rendering' });
     await target.expectVisible(toggle);
     await target.screenshot(selectors.getByRole('dialog', { name: 'Settings' }), 'webgpu-feature-flag.png');
+    // Each switch remounts the viewer on a new renderer, also where WebGPU then presents on its WebGL fallback.
+    const initialRenderer = await target.rendererGeneration();
     await target.click(toggle);
-    await target.expectGraphicsBackend(target.presentedGraphicsBackend('webgpu'));
+    await target.expectPresentedGraphicsBackend('webgpu');
     await target.expectGeometryFramed();
+    const switchedRenderer = await target.rendererGeneration();
+    expect(switchedRenderer).not.toBe(initialRenderer);
     await target.click(toggle);
     await target.expectGraphicsBackend('webgl');
     await target.expectGeometryFramed();
+    const restoredRenderer = await target.rendererGeneration();
+    if (target.presentedGraphicsBackend('webgpu') === 'webgpu') {
+      expect(restoredRenderer).not.toBe(switchedRenderer);
+    } else {
+      // WebGPU already presented on its WebGL fallback: switching back keeps that canvas instead of mounting another.
+      expect(restoredRenderer).toBe(switchedRenderer);
+    }
     await target.keyboardPress('Escape');
     await assertCanvasHasNonBackgroundPixels(previewCanvasSelector, 'flag switched back to WebGL');
   });

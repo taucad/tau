@@ -315,8 +315,9 @@ export const ComponentRow = memo(function ComponentRow({
         {/* A hidden part is labelled, not only dimmed (PN-TREE-2). */}
         {isHidden ? <span className='shrink-0 text-xs text-muted-foreground'>Hidden</span> : undefined}
       </button>
+      {/* Hidden, so the status is read once, as the selection button's description, not again as row text. */}
       {previewStatus === undefined ? undefined : (
-        <span id={previewStatusId} className='sr-only'>
+        <span hidden id={previewStatusId}>
           {previewStatus}
         </span>
       )}

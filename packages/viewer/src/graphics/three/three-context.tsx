@@ -7,6 +7,7 @@ import { useWebglContextRef } from '#hooks/use-webgl-context-tracker.jsx';
 import { useViewerFeature } from '#environment/viewer-environment.jsx';
 import { WebglErrorBoundary } from '#cad/webgl-error-boundary.jsx';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
+import { webGpuFallbackReason } from '#graphics/graphics-backend.js';
 import { resolveViewerPixelRatio } from '#graphics/three/utils/device-tier.js';
 import { admitsViewerContext, estimateViewerSurfaceBytes } from '#machines/webgl-context.machine.js';
 
@@ -22,17 +23,25 @@ let shaderStackOwners = 0;
  * @public
  */
 export function ThreeProvider(properties: ThreeContextProperties): React.JSX.Element {
+  // A canvas loss turns the viewer's backend to WebGL (graphics machine `webGpuCanvasLost`) while this boundary already
+  // shows its WebGL fallback: keeping the boundary's key then keeps that canvas instead of mounting a second one.
+  const boundaryBackend =
+    properties.graphicsBackend === 'webgl' && webGpuFallbackReason() === 'canvas-loss'
+      ? 'webgpu'
+      : properties.graphicsBackend;
   return (
     <WebglErrorBoundary
-      key={properties.graphicsBackend}
+      key={boundaryBackend}
       fallback={({ error }) => {
-        if (properties.graphicsBackend !== 'webgpu' || !(error instanceof WebGpuInitializationError)) {
+        if (boundaryBackend !== 'webgpu' || !(error instanceof WebGpuInitializationError)) {
           throw error ?? new Error('Renderer failed without an error description');
         }
-        // A canvas cannot change its GPU context type. Mount the node WebGL2 pipeline on a fresh owner, once: this
-        // fallback renders inside the same boundary, so a WebGL failure that reached it again (the node pipeline also
-        // reports a failed start as a WebGPU initialization error) would remount WebGL without end. It leaves as an
-        // ordinary failure instead, for the viewer's failure screen and its Retry.
+        // A canvas cannot change its GPU context type, so WebGL mounts on a fresh owner, and only once. An error thrown
+        // while a boundary renders its fallback goes to the boundary above, but the WebGL canvas reports a failed start
+        // after it has mounted (its renderer is created asynchronously), and this boundary, still an ancestor, would
+        // catch that and mount WebGL again, without end when no WebGL context can be created (the node pipeline
+        // reports its own failed start as a WebGPU initialization error too). The inner boundary passes any failure of
+        // the fallback up as an ordinary error, for the viewer's failure screen and its Retry.
         return (
           <WebglErrorBoundary
             fallback={({ error: fallbackError }) => {

@@ -626,6 +626,34 @@ export const expectGraphicsBackend = async (backend: 'webgl' | 'webgpu'): Promis
     )
     .toBe(backend);
 };
+/**
+ * Expect a viewport canvas that asked for `requested` to present on {@link presentedGraphicsBackend}. Where that is
+ * WebGL in place of WebGPU, the page must have fallen back for the one expected reason, a WebGPU canvas that could not
+ * present (`canvas-loss`): a WebGPU start failing any other way is a regression, not the software adapter's limit.
+ */
+export const expectPresentedGraphicsBackend = async (requested: 'webgl' | 'webgpu'): Promise<void> => {
+  const presented = presentedGraphicsBackend(requested);
+  await expectGraphicsBackend(presented);
+  if (presented !== requested) {
+    const reason = await evaluate(() =>
+      (
+        globalThis as typeof globalThis & {
+          __TAU_SECTION_VIEW_TEST__?: { getWebGpuFallbackReason(): string | undefined };
+        }
+      ).__TAU_SECTION_VIEW_TEST__?.getWebGpuFallbackReason(),
+    );
+    expect(reason, 'WebGPU fell back to WebGL for an unexpected reason').toBe('canvas-loss');
+  }
+};
+/** The graphics test bridge's renderer generation: it changes whenever the viewport's renderer is replaced. */
+export const rendererGeneration = async (): Promise<number | undefined> =>
+  evaluate(() =>
+    (
+      globalThis as typeof globalThis & {
+        __TAU_SECTION_VIEW_TEST__?: { getRendererGeneration(): number };
+      }
+    ).__TAU_SECTION_VIEW_TEST__?.getRendererGeneration(),
+  );
 export const expectGeometryFramed = async (): Promise<void> => {
   try {
     await expect
@@ -842,6 +870,32 @@ export const expectAttribute = async (
   } else {
     await assertion.toMatch(expected);
   }
+};
+/**
+ * Expect the element's accessible description (its `aria-describedby` references, read even when hidden, as assistive
+ * technology reads them) to be `expected`.
+ */
+export const expectAccessibleDescription = async (
+  selector: TargetSelector,
+  expected: string,
+  timeout = 10_000,
+): Promise<void> => {
+  await expect
+    .poll(
+      async () =>
+        (await read(selector)).count === 0
+          ? undefined
+          : evaluateLocator(selector, (element) =>
+              (element.getAttribute('aria-describedby') ?? '')
+                .split(/\s+/u)
+                .filter(Boolean)
+                .map((id) => element.ownerDocument.querySelector(`#${CSS.escape(id)}`)?.textContent.trim() ?? '')
+                .filter(Boolean)
+                .join(' '),
+            ),
+      { timeout },
+    )
+    .toBe(expected);
 };
 export const expectClass = async (selector: TargetSelector, expected: RegExp, timeout = 10_000): Promise<void> => {
   await expect.poll(async () => (await read(selector)).className, { timeout }).toMatch(expected);

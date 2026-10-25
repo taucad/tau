@@ -595,6 +595,44 @@ describe('ProjectWorkspaceProvider', () => {
     expect(changes).toHaveLength(1);
   });
 
+  it('opens a pane directly when the layout record cannot take the change', () => {
+    render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    const controller: WorkbenchLayoutController = {
+      snapshot: () => undefined,
+      subscribe: () => () => undefined,
+      restorePreviousArrangement: async () => true,
+      registerViewer: () => () => undefined,
+      registerWorkbench: () => () => undefined,
+      personViewerChanged: () => undefined,
+      personWorkbenchChanged: (_next, unapplied) => {
+        unapplied?.();
+      },
+      ready: () => false,
+    };
+    act(() => {
+      workspace.registerLayoutController(controller);
+    });
+    // No workbench is connected yet: the pane waits for it.
+    act(() => {
+      workspace.openPanel('share');
+    });
+    const opener = vi.fn();
+    act(() => {
+      workspace.connectWorkbench(opener);
+    });
+    expect(opener).toHaveBeenCalledExactlyOnceWith('share');
+    // A connected workbench opens it at once.
+    act(() => {
+      workspace.openPanel('export');
+    });
+    expect(opener).toHaveBeenLastCalledWith('export');
+    expect(opener).toHaveBeenCalledTimes(2);
+  });
+
   it('maps supported Workbench actions to the existing mobile drawer tabs', () => {
     state.isMobile = true;
     render(

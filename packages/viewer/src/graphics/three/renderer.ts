@@ -106,13 +106,30 @@ type PresentableWebGpuBackend = Readonly<{
 }>;
 
 /**
+ * The longest wait for the first presented frame's work to finish. A clear completes within milliseconds, a software
+ * adapter's within a few; the bound only keeps a stalled queue from holding the renderer's creation. Milliseconds.
+ * @public
+ */
+export const firstCanvasFrameTimeout = 2000;
+
+/** How long a failed first frame waits for the device loss that usually follows it. Milliseconds. */
+const firstCanvasFrameLossGrace = 100;
+
+const delay = async (milliseconds: number): Promise<void> =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+
+/**
  * Present one cleared frame and report whether the device survived it. A browser that cannot allocate the canvas's
  * swap chain (Chromium on a software adapter, whose compositor has no backing to share with the WebGPU canvas)
  * destroys the device within milliseconds of the first presented texture. Checking here, before the scene compiles a
  * single pipeline, lets the viewer start on WebGL at once; found later, the scene's pipeline builds hold the GPU
  * process for tens of seconds on a software adapter before anything can draw again.
  * @param renderer - The initialized renderer, on Three's WebGPU backend.
- * @returns The loss's message when the device did not survive the frame, otherwise `undefined`.
+ * @returns The loss's message when the device was lost, otherwise `undefined`.
+ * @throws {WebGpuInitializationError} When the frame could not be presented though the device was not lost: an
+ * ordinary failed start, which says nothing about later WebGPU starts on the page.
  */
 async function presentFirstCanvasFrame(renderer: WebGpuRenderer): Promise<string | undefined> {
   const backend = renderer.backend as unknown as PresentableWebGpuBackend;
@@ -126,6 +143,8 @@ async function presentFirstCanvasFrame(renderer: WebGpuRenderer): Promise<string
     const info = await device.lost;
     lossMessage = info.message || info.reason;
   })();
+  let failure: unknown;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const encoder = device.createCommandEncoder();
     encoder
@@ -141,16 +160,28 @@ async function presentFirstCanvasFrame(renderer: WebGpuRenderer): Promise<string
       })
       .end();
     device.queue.submit([encoder.finish()]);
-    await Promise.race([device.queue.onSubmittedWorkDone(), loss]);
+    const stalled = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, firstCanvasFrameTimeout);
+    });
+    await Promise.race([device.queue.onSubmittedWorkDone(), loss, stalled]);
   } catch (error) {
-    // A dropped device rejects the work-done promise; the loss above carries its reason.
-    lossMessage ??= error instanceof Error ? error.message : String(error);
+    // A dropped device rejects the work-done promise; only the device's own loss says the canvas cannot present.
+    failure = error;
+  } finally {
+    clearTimeout(timer);
   }
   // The loss is delivered as its own task; let it land before answering.
-  await new Promise<void>((resolve) => {
-    setTimeout(resolve, 0);
-  });
-  return lossMessage;
+  await (failure === undefined ? delay(0) : Promise.race([loss, delay(firstCanvasFrameLossGrace)]));
+  if (lossMessage !== undefined) {
+    return lossMessage;
+  }
+  if (failure !== undefined) {
+    throw new WebGpuInitializationError(
+      `The WebGPU canvas could not present its first frame: ${failure instanceof Error ? failure.message : JSON.stringify(failure)}`,
+      { cause: failure },
+    );
+  }
+  return undefined;
 }
 
 /**
@@ -258,7 +289,14 @@ export async function createRenderer(
     }
 
     if (useCase === 'viewport' && backend === 'webgpu') {
-      const lossMessage = await presentFirstCanvasFrame(renderer);
+      let lossMessage: string | undefined;
+      try {
+        lossMessage = await presentFirstCanvasFrame(renderer);
+      } catch (error) {
+        renderer.dispose();
+        destroyAllocatedDevice(requestedBackend);
+        throw error;
+      }
       if (lossMessage !== undefined) {
         renderer.dispose();
         destroyAllocatedDevice(requestedBackend);

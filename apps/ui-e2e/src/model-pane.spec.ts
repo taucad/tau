@@ -14,12 +14,22 @@ const treeItem = (path: string): Locator =>
 
 /**
  * A deferred automatic preview, as the Model row reports it: the row's selection button is described by its preview
- * status, read from the row's visually hidden status text. The part menu no longer repeats the preview or its status
- * (its header names the part; "the part's image lives in the gallery"), so the row's status and the menu's Retry
- * preview item are where a deferred preview shows.
+ * status. The part menu no longer repeats the preview or its status (its header names the part; "the part's image
+ * lives in the gallery"), so the row's description and the menu's Retry preview item are where a deferred preview
+ * shows.
  */
-const deferredPreviewStatus = (list: Locator): Locator =>
-  list.getByText('Preview unavailable', { exact: true }).first();
+const expectDeferredPreviewStatus = async (list: Locator): Promise<void> => {
+  // The first part row, named by its actions button ("Actions for <part>").
+  const actions = await target.getAttribute(list.getByRole('button', { name: /^Actions for /u }).first(), 'aria-label');
+  const name = actions?.replace(/^Actions for /u, '');
+  if (!name) {
+    throw new Error('The Model list has no part row.');
+  }
+  await target.expectAccessibleDescription(
+    list.getByRole('button', { name, exact: true }).first(),
+    'Preview unavailable',
+  );
+};
 
 /**
  * The part menu names the part in its header and carries no image of it: the 80px preview lives on the row, in
@@ -399,7 +409,7 @@ test('shows decoded part previews in the real Model rows and selected Properties
   let automaticDeferDuration: number | undefined;
   if (target.currentWebGpuProfile() === 'software') {
     await target.click(list.getByRole('button', { name: /^Actions for /u }).first());
-    await target.expectVisible(deferredPreviewStatus(list));
+    await expectDeferredPreviewStatus(list);
     await target.expectVisible(selectors.getByRole('menuitem', { name: 'Retry preview' }));
     automaticDeferDuration = await target.evaluate(() => {
       const state = (globalThis as typeof globalThis & { __TAU_PART_PREVIEW_PROBE__?: { startedAt: number } })
@@ -774,7 +784,7 @@ test('defers a cold part preview worker and resumes automatic previews after exp
     ),
   );
   await target.click(list.getByRole('button', { name: /^Actions for /u }).first());
-  await target.expectVisible(deferredPreviewStatus(list));
+  await expectDeferredPreviewStatus(list);
   await target.expectVisible(selectors.getByRole('menuitem', { name: 'Retry preview' }));
   await target.keyboardPress('Escape');
   await dragViewport();
@@ -801,7 +811,7 @@ test('defers a cold part preview worker and resumes automatic previews after exp
   const filter = selectors.getByRole('searchbox', { name: 'Filter parts' });
   await target.fill(filter, 'Preview part 7');
   await target.click(list.getByRole('button', { name: /^Actions for /u }).first());
-  await target.expectVisible(deferredPreviewStatus(list));
+  await expectDeferredPreviewStatus(list);
   await target.click(selectors.getByRole('menuitem', { name: 'Retry preview' }));
   await target.waitFor(
     () =>
@@ -953,6 +963,16 @@ test('admits previews for newly mounted virtual Model rows after scrolling', asy
   const last = partRow(list, 'Preview part 48');
   await target.expectVisible(last, 60_000);
   const lastImage = partPreviewImage(list, 'Preview part 48');
+  if (target.currentWebGpuProfile() === 'software') {
+    // A software adapter makes no automatic previews, by policy (each costs about 20 s of CPU and would stall the
+    // page): the newly mounted row shows its deferred status and no image, and asking for its preview still renders it.
+    await target.expectAccessibleDescription(last, 'Preview unavailable');
+    await target.expectCount(lastImage, 0);
+    await target.hover(last);
+    await target.click(list.getByRole('button', { name: 'Actions for Preview part 48', exact: true }));
+    await target.click(selectors.getByRole('menuitem', { name: /Retry preview/iu }));
+    await target.keyboardPress('Escape');
+  }
   await target.expectVisible(lastImage, 60_000);
   await target.click(last);
   const propertiesImage = selectors.getByCss('[data-slot="part-properties"] img[src^="blob:"]').first();

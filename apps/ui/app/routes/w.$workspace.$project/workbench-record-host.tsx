@@ -506,8 +506,9 @@ export function WorkbenchRecordHost(): React.JSX.Element {
         setAppliedWorkbenchRevision(workbenchPaths.layout, undefined);
         // The intended arrangement, not the last one on disk: a pane asked for while no workbench was mounted (a Share
         // deep link) waits in the debounced edit, and an adapter seeded from the stored record would drop it and then
-        // report that arrangement as the person's, replacing the edit before it is written.
-        const current = store.intendedLayout();
+        // report that arrangement as the person's, replacing the edit before it is written. A refused record takes no
+        // edits, so then only what is on disk is shown.
+        const current = store.snapshot().refusal ? store.snapshot().layout : store.intendedLayout();
         if (current) {
           const { epoch } = applicationRef.current;
           apply(current.workbench, () => {
@@ -541,21 +542,36 @@ export function WorkbenchRecordHost(): React.JSX.Element {
         void store.edit(next);
       },
       ready: () => store.ready(),
-      personWorkbenchChanged: (node) => {
+      personWorkbenchChanged: (node, unapplied) => {
         if (!store.ready()) {
           if (typeof node === 'function') {
             const change = node;
             const applyAfterFirstRead = async (): Promise<void> => {
-              if (!(await firstRead())) {
+              if (!(await firstRead()) || store.snapshot().refusal) {
+                unapplied?.();
                 return;
               }
               const current = store.intendedLayout() ?? fallbackLayout();
               const workbench = change(current.workbench);
               personWorkbenchRef.current = workbench;
-              await store.edit({ ...current, workbench });
+              void store.edit({ ...current, workbench });
+              // The read has just shown the saved arrangement on a mounted workbench, and the edit's echo is locally
+              // authored, so it is not shown again when it lands: show the change now.
+              const apply = workbenchRef.current;
+              if (apply) {
+                apply(workbench, () => {
+                  if (workbenchRef.current === apply) {
+                    appliedWorkbenchRef.current = workbench;
+                  }
+                });
+              }
             };
             void applyAfterFirstRead();
           }
+          return;
+        }
+        if (typeof node === 'function' && store.snapshot().refusal) {
+          unapplied?.();
           return;
         }
         const current = store.intendedLayout() ?? fallbackLayout();

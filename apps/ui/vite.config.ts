@@ -1,3 +1,5 @@
+// oxlint-disable-next-line eslint/no-restricted-imports -- Route/build configuration runs before app aliases are installed.
+import { isObservabilityHarnessBuild } from './app/lib/observability-harness-gate.js';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -105,9 +107,15 @@ export const uiResolveAlias = [
 
 type UiSourceAliasPluginOptions = {
   readonly emitModuleGraph?: boolean;
+  readonly observabilityHarnessEnabled?: boolean;
   readonly tauCloudEnabled?: boolean;
   readonly target?: 'web' | 'desktop';
 };
+
+const harnessDisabledOverrides = new Map([
+  ['#lib/observability-harness-context.js', '#lib/observability-harness-disabled.js'],
+  ['#lib/observability-harness-hydration.js', '#lib/observability-harness-hydration-disabled.js'],
+]);
 
 const cloudBoundarySpecifiers = new Set([
   '#cloud/commercial-features.js',
@@ -198,10 +206,14 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
         }
 
         const [requestedSpecifier, query] = source.split('?', 2);
+        const harnessSpecifier =
+          options.observabilityHarnessEnabled === true
+            ? requestedSpecifier
+            : (harnessDisabledOverrides.get(requestedSpecifier ?? '') ?? requestedSpecifier);
         const hostSpecifier =
-          options.target === 'desktop' && requestedSpecifier
-            ? (desktopSourceOverrides.get(requestedSpecifier) ?? requestedSpecifier)
-            : requestedSpecifier;
+          options.target === 'desktop' && harnessSpecifier
+            ? (desktopSourceOverrides.get(harnessSpecifier) ?? harnessSpecifier)
+            : harnessSpecifier;
         const targetSpecifier =
           options.tauCloudEnabled === false && hostSpecifier
             ? (selfHostSourceOverrides.get(hostSpecifier) ?? hostSpecifier)
@@ -454,6 +466,14 @@ export default defineConfig(({ command, mode }) => {
     root: __dirname,
     cacheDir: '../../node_modules/.vite/apps/ui',
     define: {
+      // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
+      ...(isTest
+        ? {}
+        : {
+            'import.meta.env.TAU_OBSERVABILITY_HARNESS': JSON.stringify(
+              isObservabilityHarnessBuild(process.env) ? 'enabled' : 'disabled',
+            ),
+          }),
       tauBuildFrontendUrl: JSON.stringify(buildFrontendUrl ?? ''),
       ...(isProductionBuild ? {} : buildIdDefine),
       tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
@@ -502,7 +522,11 @@ export default defineConfig(({ command, mode }) => {
     },
     plugins: [
       mtAssets.plugin,
-      createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
+      createUiSourceAliasPlugin({
+        emitModuleGraph: true,
+        tauCloudEnabled,
+        observabilityHarnessEnabled: isTest || isObservabilityHarnessBuild(process.env),
+      }),
       // WASM `fetch` integrity and the asset receipt (charter D26): build only.
       createAssetIntegrity({ receipt: true }),
       ...(buildRelease === undefined ? [] : [createReleaseManifestPlugin(buildRelease)]),
@@ -544,7 +568,11 @@ export default defineConfig(({ command, mode }) => {
       // Workers need their own plugins.
       // https://vite.dev/config/worker-options.html#worker-plugins
       plugins: () => [
-        createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
+        createUiSourceAliasPlugin({
+          emitModuleGraph: true,
+          tauCloudEnabled,
+          observabilityHarnessEnabled: isTest || isObservabilityHarnessBuild(process.env),
+        }),
         createAssetIntegrity({ receipt: false }),
       ],
     },

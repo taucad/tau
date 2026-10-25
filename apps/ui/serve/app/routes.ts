@@ -65,6 +65,7 @@ export default flatRoutes({
     // Browser-only e2e fixtures, all with server loaders. Their absence is
     // why the AV-4 vertical drives the real composer rather than a seed route.
     '../../app/routes/[[]__e2e[]].*/**',
+    '../../app/routes/[[]__debug[]].observability/**',
   ],
   // oxlint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- explicit module boundary required here.
 }) as Promise<RouteConfigEntry[]>;

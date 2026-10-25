@@ -55,6 +55,7 @@ const routes: RouteConfigEntry[] = await flatRoutes({
 
     // Browser-only e2e fixtures, all with server loaders.
     '../../app/routes/[[]__e2e[]].*/**',
+    '../../app/routes/[[]__debug[]].observability/**',
   ],
 });
 

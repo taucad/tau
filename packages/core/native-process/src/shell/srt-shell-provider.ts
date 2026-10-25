@@ -10,7 +10,7 @@ import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { closeSync, existsSync, lstatSync, mkdtempSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { isAbsolute, join, relative } from 'node:path';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import { createInterface } from 'node:readline';
 import { ReadStream } from 'node:tty';
 import { fileURLToPath } from 'node:url';
@@ -28,7 +28,7 @@ import type {
   ShellProvider,
   ShellTerminalSize,
 } from '#shell/shell-provider.js';
-import type { SupervisorJob, SupervisorReply } from '#shell/srt-supervisor.js';
+import type { SupervisorControl, SupervisorJob, SupervisorReply } from '#shell/srt-supervisor.js';
 
 /**
  * The parts of node-pty this provider uses. `native` is node-pty's own POSIX binding (`openpty` and `TIOCSWINSZ`),
@@ -178,6 +178,37 @@ const deniedVariants = (paths: readonly string[]): string[] =>
     }
   });
 
+/**
+ * Every directory between a writable root and a protected path inside it (D20, E04). On Linux each is bound onto itself,
+ * so it is a mount point the shell can neither rename nor remove: a read-only or denied path never moves away with its
+ * parent (`mv .tau elsewhere`). macOS needs none, because the runtime already denies moving a protected path's
+ * ancestors. Binding a directory that is already writable onto itself widens nothing.
+ *
+ * @param writable - The launch's writable roots.
+ * @param protectedPaths - Its read-only and denied paths.
+ * @returns The ancestors to bind, outermost first.
+ */
+const pinnedAncestors = (writable: readonly string[], protectedPaths: readonly string[]): string[] => {
+  if (process.platform !== 'linux') {
+    return [];
+  }
+  const pinned = new Set<string>();
+  for (const path of protectedPaths) {
+    const root = writable.find((candidate) => candidate !== path && inside(path, candidate));
+    if (root === undefined) {
+      continue;
+    }
+    const chain: string[] = [];
+    for (let ancestor = dirname(path); ancestor !== root && inside(ancestor, root); ancestor = dirname(ancestor)) {
+      chain.unshift(ancestor);
+    }
+    for (const ancestor of chain) {
+      pinned.add(ancestor);
+    }
+  }
+  return [...pinned].toSorted((left, right) => left.length - right.length);
+};
+
 export const shellSandboxProfile = (
   launch: Pick<ShellLaunch, 'filesystem' | 'network'>,
   options: SandboxShellProviderOptions = {},
@@ -200,7 +231,10 @@ export const shellSandboxProfile = (
         ...sandboxRuntimeReadRoots(),
         ...(runtimeDirectory === undefined ? [] : [runtimeDirectory]),
       ]),
-      allowWrite: physicalVariants(launch.filesystem.writable),
+      allowWrite: physicalVariants([
+        ...launch.filesystem.writable,
+        ...pinnedAncestors(launch.filesystem.writable, [...readOnly, ...launch.filesystem.denied]),
+      ]),
       denyWrite: [...new Set([...deniedWriteRoots(), ...denied, ...deniedVariants(readOnly)])],
     },
     allowPty: false,
@@ -267,7 +301,12 @@ export const bindOwnPty = (argv: readonly string[]): readonly string[] | undefin
   return [shell, flag, `${guard} ${profiled.trimStart()}`];
 };
 
-type Supervisor = Readonly<{ reply: SupervisorReply; close: () => Promise<void> }>;
+type Supervisor = Readonly<{
+  reply: SupervisorReply;
+  /** Hand the supervisor the launch's process group, which it kills if this process dies before releasing it. */
+  own: (group: number) => void;
+  close: () => Promise<void>;
+}>;
 
 /**
  * On Linux the runtime bridges the sandbox's network to its proxies through Unix sockets it creates under `TMPDIR`,
@@ -308,7 +347,16 @@ const startSupervisor = async (
     });
   });
   child.stdin.on('error', () => undefined);
+  const own = (group: number): void => {
+    if (group > 0 && child.stdin.writable) {
+      child.stdin.write(`${JSON.stringify({ own: group } satisfies SupervisorControl)}\n`);
+    }
+  };
   const close = async (): Promise<void> => {
+    /* An orderly release: the launch's tree is already gone, so the supervisor has nothing to kill. */
+    if (child.stdin.writable) {
+      child.stdin.write(`${JSON.stringify({ released: true } satisfies SupervisorControl)}\n`);
+    }
     child.stdin.end();
     const timer = setTimeout(() => child.kill('SIGKILL'), terminationMilliseconds);
     await exited;
@@ -343,7 +391,7 @@ const startSupervisor = async (
       });
     });
   });
-  return { reply, close };
+  return { reply, own, close };
 };
 
 /** How long an emptied stream may stay quiet after termination before it is closed. */
@@ -496,6 +544,7 @@ const settle = (
   signal: AbortSignal,
 ): Pick<ShellProcess, 'exited' | 'terminate' | typeof Symbol.asyncDispose> => {
   const tracker = process.platform === 'darwin' ? trackDescendants(started.pid) : undefined;
+  supervisor.own(started.pid);
   let terminating: Promise<void> | undefined;
   const stopTree = async (): Promise<void> => {
     terminating ??= (async () => {
@@ -557,8 +606,28 @@ const wrapperEnvironment = (launch: ShellLaunch): Record<string, string> => ({
   PATH: '/usr/bin:/bin',
 });
 
-const startPipes = (argv: readonly string[], launch: ShellLaunch, supervisor: Supervisor): ShellProcess => {
-  const child = spawn(argv[0]!, argv.slice(1), {
+/**
+ * The vector this process spawns. On Linux the wrapper shell execs bubblewrap instead of waiting on it, so bwrap's own
+ * `--die-with-parent` binds the sandbox to this process: a host that is killed takes every process in the sandbox with
+ * it (E11), where a waiting `/bin/sh` would be orphaned and keep bwrap and the shell running.
+ *
+ * @param argv - The supervisor's `[shell, '-c', wrapped]` vector.
+ * @param bwrapPath - The bubblewrap the wrapped command must start with; any other vector is spawned as it is.
+ * @returns The vector to spawn.
+ */
+const hostBound = (argv: readonly string[], bwrapPath: string): readonly string[] =>
+  process.platform === 'linux' && argv.length === 3 && argv[1] === '-c' && argv[2]!.startsWith(`${bwrapPath} `)
+    ? [argv[0]!, '-c', `exec ${argv[2]!}`]
+    : argv;
+
+const startPipes = (
+  argv: readonly string[],
+  launch: ShellLaunch,
+  supervisor: Supervisor,
+  bwrapPath: string,
+): ShellProcess => {
+  const vector = hostBound(argv, bwrapPath);
+  const child = spawn(vector[0]!, vector.slice(1), {
     cwd: launch.workingDirectory,
     env: wrapperEnvironment(launch),
     detached: true,
@@ -598,10 +667,12 @@ type TerminalStart = Readonly<{
 const startLinuxTerminal = (
   { argv, launch, size, supervisor }: TerminalStart,
   native: NonNullable<PtyBinding['native']>,
+  bwrapPath: string,
 ): ShellProcess => {
   /* Opened here, so no process outside the sandbox takes it as its controlling terminal; `setsid --ctty` inside does. */
   const pty = native.open(size.columns, size.rows);
-  const child = spawn(argv[0]!, argv.slice(1), {
+  const vector = hostBound(argv, bwrapPath);
+  const child = spawn(vector[0]!, vector.slice(1), {
     cwd: launch.workingDirectory,
     env: wrapperEnvironment(launch),
     detached: true,
@@ -774,13 +845,14 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
       launch.signal.throwIfAborted();
     }
     const { argv } = supervisor.reply;
+    const bwrapPath = options.bwrapPath ?? '/usr/bin/bwrap';
     if (launch.stdio.kind === 'pipes') {
-      return { status: 'started', process: startPipes(argv, launch, supervisor) };
+      return { status: 'started', process: startPipes(argv, launch, supervisor, bwrapPath) };
     }
     if (process.platform === 'linux') {
       return {
         status: 'started',
-        process: startLinuxTerminal({ argv, launch, size: launch.stdio.size, supervisor }, binding!.native!),
+        process: startLinuxTerminal({ argv, launch, size: launch.stdio.size, supervisor }, binding!.native!, bwrapPath),
       };
     }
     const bound = bindOwnPty(argv);

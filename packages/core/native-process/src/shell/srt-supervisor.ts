@@ -6,7 +6,8 @@
  * profile, and answers one {@link SupervisorReply} line on stdout: the wrapped spawn vector, or why the sandbox is
  * unavailable. It then holds the runtime, and with it this launch's own network proxy and that proxy's per-process
  * credential, until its stdin closes; then it cleans up and exits. It never spawns the shell itself, so the shell
- * never inherits this control channel.
+ * never inherits this control channel. If the channel closes while it owns the launch's process group and before the
+ * provider released it, the host died: the supervisor kills that group first (E11).
  *
  * Nothing runs unsandboxed: a missing prerequisite, a seccomp helper the runtime would only warn about, or a vector
  * that does not start the platform's sandbox is answered as `unavailable`.
@@ -29,6 +30,15 @@ export type SupervisorJob = Readonly<{
   /** Route granted names through the address guard (D26); set whenever the profile allows any domain. */
   guard: boolean;
 }>;
+
+/**
+ * A later line from the provider (E11): `own` hands over a started launch's process group; `released` says the
+ * launch ended in order. A channel that closes with a group owned and never released means the host died, and the
+ * supervisor kills that group before it exits, so no command outlives the host that started it.
+ *
+ * @public
+ */
+export type SupervisorControl = Readonly<{ own: number }> | Readonly<{ released: true }>;
 
 /** @public */
 export type SupervisorReply =
@@ -104,11 +114,30 @@ if (first.done !== true) {
   }
 }
 /* Hold the runtime, and its proxy, until the provider closes the channel: the launch has ended or the host died. */
+let owned: number | undefined;
+let released = false;
 for (;;) {
-  // oxlint-disable-next-line no-await-in-loop -- lines are drained only to observe the channel closing.
+  // oxlint-disable-next-line no-await-in-loop -- lines are read until the channel closes.
   const next = await iterator.next();
   if (next.done === true) {
     break;
+  }
+  try {
+    const control = JSON.parse(next.value) as Partial<{ own: number; released: boolean }>;
+    if (Number.isInteger(control.own) && control.own! > 0) {
+      owned = control.own;
+    } else if (control.released === true) {
+      released = true;
+    }
+  } catch {
+    /* Not a control line. */
+  }
+}
+if (owned !== undefined && !released) {
+  try {
+    process.kill(-owned, 'SIGKILL');
+  } catch {
+    /* The group is already gone. */
   }
 }
 if (initialized) {

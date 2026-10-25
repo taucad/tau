@@ -356,7 +356,10 @@ describe('shellSandboxProfile read-only roots', () => {
     expect(profile.filesystem['allowRead']).toStrictEqual(
       expect.arrayContaining(['/srv/project', '/srv/project/.tau/chats', '/srv/project/exports']),
     );
-    expect(profile.filesystem['allowWrite']).toStrictEqual(['/srv/project']);
+    /* On Linux the ancestors between the writable root and a protected path are bound onto themselves (E04). */
+    expect(profile.filesystem['allowWrite']).toStrictEqual(
+      process.platform === 'linux' ? ['/srv/project', '/srv/project/.tau'] : ['/srv/project'],
+    );
     expect(profile.filesystem['denyWrite']).toStrictEqual(
       expect.arrayContaining(['/srv/project/.tau/chats', '/srv/project/exports', '/srv/project/.git']),
     );

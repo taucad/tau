@@ -343,6 +343,7 @@ for (const backend of ['webgl', 'webgpu'] as const) {
       // Hover geometry is replaced, not accumulated: the count holds across sweeps once the scene has settled.
       expect(afterFour, JSON.stringify(counts)).toBeLessThanOrEqual(baseline! + 2);
       expect(afterEight, JSON.stringify(counts)).toBeLessThanOrEqual(afterFour! + 2);
+      expect(afterEight, JSON.stringify(counts)).toBeLessThanOrEqual(baseline! + 2);
       const after = await measureState();
       expect(after.measurementUiMeshCount).toBeLessThanOrEqual(12);
     });

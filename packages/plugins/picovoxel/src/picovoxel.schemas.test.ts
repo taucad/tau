@@ -105,7 +105,13 @@ describe('picovoxelOptionsSchema', () => {
 
 describe('lane schemas', () => {
   it('should render in the fast lane by default', () => {
+    // PicoVoxel 0.1.0 cannot mesh adaptively, so an unset adaptivity resolves to 0 on either lane.
     expect(picovoxelRenderSchema.parse({})).toEqual({ lane: 'fast', meshAdaptivity: 0, meshRelax: false });
+    expect(picovoxelRenderSchema.parse({ lane: 'exact' })).toEqual({
+      lane: 'exact',
+      meshAdaptivity: 0,
+      meshRelax: false,
+    });
   });
 
   it('should export exact by default in every native format', () => {
@@ -121,7 +127,8 @@ describe('lane schemas', () => {
     });
   });
 
-  it('should mesh views uniformly by default and pin the uniform mesh for every export', () => {
+  it('should resolve an unset view adaptivity, keep an explicit one and pin the uniform mesh for every export', () => {
+    expect(picovoxelRenderSchema.parse({ lane: 'exact', meshAdaptivity: 0.5 })).toMatchObject({ meshAdaptivity: 0.5 });
     expect(picovoxelRenderSchema.parse({ meshAdaptivity: 0.5, meshRelax: true })).toMatchObject({
       meshAdaptivity: 0.5,
       meshRelax: true,

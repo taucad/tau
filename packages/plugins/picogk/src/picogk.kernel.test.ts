@@ -51,8 +51,8 @@ const workerTimings = {
   artifactWrite: 7,
   unload: 8,
 };
-// The view default: today's uniform mesh, which never asks the worker for meshing.
-const uniform = picogkRenderSchema.parse({});
+// An explicit uniform view, which never asks the worker for meshing.
+const uniform = picogkRenderSchema.parse({ meshAdaptivity: 0 });
 
 const buildResult = (id = 'component:picogk-1') => ({
   artifactPath: '/private/model.tau-mesh',
@@ -373,8 +373,71 @@ describe('PicoGK kernel', () => {
     }
   });
 
-  it('declares uniform meshing for views and pins it for every export', () => {
-    expect(picogkRenderSchema.parse({})).toEqual({ meshAdaptivity: 0, meshRelax: false });
+  it('asks for Balanced meshing when a view sets none and shows a worker that meshes adaptively', async () => {
+    const value = context();
+    const meshing = { adaptivity: 0.25, relax: false };
+    value.session.request.mockResolvedValueOnce({ ...buildResult(), meshing });
+    const built = await definition.evaluate(
+      { entryPath: 'main.cs', parameters: {}, options: picogkRenderSchema.parse({}) },
+      runtime,
+      value,
+    );
+    expect(value.session.request).toHaveBeenLastCalledWith(
+      expect.objectContaining({ method: 'build', params: { entryPath: 'main.cs', parameters: {}, meshing } }),
+    );
+    expect(built.handle.tessellation).toMatchObject({ adaptivity: 0.25, relax: false });
+  });
+
+  it('accepts the uniform mesh of a worker without adaptive meshing for a view that sets none, built once', async () => {
+    const value = context();
+    value.session.request.mockResolvedValueOnce(buildResult());
+    const built = await definition.evaluate(
+      { entryPath: 'main.cs', parameters: {}, options: picogkRenderSchema.parse({ meshRelax: true }) },
+      runtime,
+      value,
+    );
+    expect(value.session.request.mock.calls.filter(([request]) => request.method === 'build')).toHaveLength(1);
+    expect(value.session.request).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        params: { entryPath: 'main.cs', parameters: {}, meshing: { adaptivity: 0.25, relax: true } },
+      }),
+    );
+    // The report states the mesh the worker built: uniform.
+    expect(built.handle.tessellation).not.toHaveProperty('adaptivity');
+    expect(built.handle.tessellation).not.toHaveProperty('relax');
+  });
+
+  it('refuses a defaulted view from a worker that echoes other meshing than it was asked for', async () => {
+    const value = context();
+    value.session.request.mockResolvedValueOnce({ ...buildResult(), meshing: { adaptivity: 0.5, relax: false } });
+    await expect(
+      definition.evaluate(
+        { entryPath: 'main.cs', parameters: {}, options: picogkRenderSchema.parse({}) },
+        runtime,
+        value,
+      ),
+    ).rejects.toMatchObject({
+      issues: [{ details: { reason: 'meshing-unsupported', meshAdaptivity: 0.25, meshRelax: false } }],
+    });
+  });
+
+  it('refuses an explicit Balanced view from a worker without adaptive meshing', async () => {
+    const value = context();
+    value.session.request.mockResolvedValueOnce(buildResult());
+    await expect(
+      definition.evaluate(
+        { entryPath: 'main.cs', parameters: {}, options: picogkRenderSchema.parse({ meshAdaptivity: 0.25 }) },
+        runtime,
+        value,
+      ),
+    ).rejects.toMatchObject({
+      issues: [{ details: { reason: 'meshing-unsupported', meshAdaptivity: 0.25, meshRelax: false } }],
+    });
+  });
+
+  it('leaves view adaptivity unset by default and pins uniform meshing for every export', () => {
+    expect(picogkRenderSchema.parse({})).toEqual({ meshRelax: false });
+    expect(picogkRenderSchema.parse({ meshAdaptivity: 0 })).toEqual({ meshAdaptivity: 0, meshRelax: false });
     expect(picogkRenderSchema.safeParse({ meshAdaptivity: 1 }).success).toBe(false);
     expect(picogkRenderSchema.safeParse({ meshAdaptivity: -0.1 }).success).toBe(false);
     for (const schema of [picogkExportSchemas.glb, picogkExportSchemas.gltf]) {

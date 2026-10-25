@@ -1799,6 +1799,22 @@ describe('picovoxel kernel', () => {
         await definition.onDispose!(context);
       }
     });
+
+    it.each(['fast', 'exact'] as const)('meshes an unset adaptivity uniformly on the %s lane', async (lane) => {
+      const runtime = createRuntime(sphere());
+      const context = await initialize({ wasm: 'serial' }, runtime);
+      try {
+        const result = await definition.evaluate(
+          { entryPath: 'main.ts', parameters: { voxelSize: 1 }, options: { lane, meshRelax: false } },
+          runtime,
+          context,
+        );
+        expect(result.handle.tessellation).not.toHaveProperty('adaptivity');
+        expect(result.handle.tessellation).not.toHaveProperty('relax');
+      } finally {
+        await definition.onDispose!(context);
+      }
+    });
   });
 
   describe('mesh and snapshots', () => {

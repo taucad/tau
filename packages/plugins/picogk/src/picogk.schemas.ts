@@ -10,8 +10,16 @@ import { z } from 'zod';
 export const picogkOptionsSchema = dotnetKernelOptionsSchema;
 
 /**
- * Construction options for views. The defaults build today's uniform mesh, so a view that sends no options
- * renders exactly as before.
+ * Balanced adaptivity: what a view that sets no `meshAdaptivity` asks the worker for. A worker that cannot mesh
+ * adaptively answers it with the uniform mesh; an explicit value is never downgraded.
+ * @internal
+ */
+export const picogkPreviewAdaptivity = 0.25;
+
+/**
+ * Construction options for views. An unset `meshAdaptivity` stays absent after parsing, so the kernel can tell
+ * the default from an explicit request: it asks for {@link picogkPreviewAdaptivity} and accepts the uniform mesh
+ * from a worker that predates adaptive meshing, while an explicit adaptive request to such a worker is refused.
  *
  * @public
  */
@@ -20,9 +28,9 @@ export const picogkRenderSchema = z.object({
     .number()
     .min(0)
     .lt(1)
-    .default(0)
+    .optional()
     .describe(
-      'OpenVDB mesh adaptivity in [0, 1) for the displayed Voxels: 0 (default) is the uniform marching-cubes mesh; higher values merge flat regions into fewer, larger triangles. It changes only the display mesh, never the voxels, and exports always mesh at 0.',
+      'OpenVDB mesh adaptivity in [0, 1) for the displayed Voxels: 0 is the uniform marching-cubes mesh; higher values merge flat regions into fewer, larger triangles. It changes only the display mesh, never the voxels, and exports always mesh at 0. Unset, a view meshes at 0.25 (Balanced) where the PicoGK runtime meshes adaptively and uniformly where it does not; the tessellation report says which. An explicit value above 0 on a runtime that cannot mesh adaptively is refused.',
     ),
   meshRelax: z
     .boolean()

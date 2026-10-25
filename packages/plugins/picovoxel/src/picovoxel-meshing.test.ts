@@ -3,7 +3,10 @@ import type { Voxels } from 'picovoxel';
 
 import {
   meshPicovoxelField,
+  picovoxelAdaptivePreviewsWatertight,
+  picovoxelDefaultAdaptivity,
   picovoxelMeshingReport,
+  picovoxelPreviewAdaptivity,
   resolvePicovoxelMeshing,
   snapshotPicovoxelMeshingReport,
 } from '#picovoxel-meshing.js';
@@ -22,6 +25,49 @@ describe('PicoVoxel adaptive meshing', () => {
       refusal: { code: 'REPRESENTATION_UNSUPPORTED', details: { refusal: 'PICOVOXEL_MESHING_EXACT_LANE' } },
     });
     expect(resolvePicovoxelMeshing({ meshAdaptivity: 0.5, meshRelax: false }, 'fast', '0.1.0')).toMatchObject({
+      refusal: { code: 'KERNEL_CAPABILITY_MISSING', details: { capability: 'PICOVOXEL_ADAPTIVE_MESHING' } },
+    });
+  });
+
+  it('keeps the preview default behind the watertightness gate, which is off', () => {
+    expect(picovoxelAdaptivePreviewsWatertight).toBe(false);
+    expect(picovoxelPreviewAdaptivity).toBe(0.25);
+    for (const lane of ['fast', 'exact'] as const) {
+      for (const version of ['0.1.0', '0.2.0']) {
+        expect(picovoxelDefaultAdaptivity(lane, version)).toBe(0);
+        expect(resolvePicovoxelMeshing({ meshRelax: true }, lane, version)).toEqual({});
+      }
+    }
+  });
+
+  it.each([
+    { lane: 'fast', version: '0.2.0', gate: true, adaptivity: 0.25 },
+    { lane: 'fast', version: '0.2.0', gate: false, adaptivity: 0 },
+    { lane: 'fast', version: '0.1.0', gate: true, adaptivity: 0 },
+    { lane: 'fast', version: '0.1.0', gate: false, adaptivity: 0 },
+    { lane: 'exact', version: '0.2.0', gate: true, adaptivity: 0 },
+    { lane: 'exact', version: '0.2.0', gate: false, adaptivity: 0 },
+    { lane: 'exact', version: '0.1.0', gate: true, adaptivity: 0 },
+    { lane: 'exact', version: '0.1.0', gate: false, adaptivity: 0 },
+  ] as const)(
+    'resolves an unset adaptivity on lane $lane of $version with the gate $gate to $adaptivity',
+    ({ lane, version, gate, adaptivity }) => {
+      expect(picovoxelDefaultAdaptivity(lane, version, gate)).toBe(adaptivity);
+      // The default runs wherever an explicit request of the same value runs: it never refuses.
+      expect(resolvePicovoxelMeshing({ meshAdaptivity: adaptivity, meshRelax: true }, lane, version)).toEqual(
+        adaptivity === 0 ? {} : { meshing: { adaptivity, relax: true } },
+      );
+    },
+  );
+
+  it('checks an explicit Balanced adaptivity as given', () => {
+    expect(resolvePicovoxelMeshing({ meshAdaptivity: 0.25, meshRelax: false }, 'fast', '0.2.0')).toEqual({
+      meshing: { adaptivity: 0.25, relax: false },
+    });
+    expect(resolvePicovoxelMeshing({ meshAdaptivity: 0.25, meshRelax: false }, 'exact', '0.2.0')).toMatchObject({
+      refusal: { code: 'REPRESENTATION_UNSUPPORTED', details: { refusal: 'PICOVOXEL_MESHING_EXACT_LANE' } },
+    });
+    expect(resolvePicovoxelMeshing({ meshAdaptivity: 0.25, meshRelax: false }, 'fast', '0.1.0')).toMatchObject({
       refusal: { code: 'KERNEL_CAPABILITY_MISSING', details: { capability: 'PICOVOXEL_ADAPTIVE_MESHING' } },
     });
   });

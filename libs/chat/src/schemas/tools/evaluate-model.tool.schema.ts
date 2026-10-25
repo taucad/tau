@@ -42,7 +42,7 @@ export const tessellationReportSchema = z
     downgraded: count.optional(),
   })
   .describe(
-    'Cost of the default view mesh: triangles, vertices and milliseconds to produce it; voxel kernels add voxelSize (mm), activeVoxels and memoryBytes, and adaptivity with relax only when the mesh is adaptive (meshAdaptivity above 0; absent means the uniform mesh). Tolerance-meshed kernels add the requested preset or explicit, the effective linearTolerance (mm) and angularTolerance (degrees), and downgraded coarser steps taken to fit the triangle budget.',
+    'Cost of the default view mesh: triangles, vertices and milliseconds to produce it; voxel kernels add voxelSize (mm), activeVoxels and memoryBytes, and adaptivity with relax only when the mesh is adaptive (absent means the uniform mesh; a PicoGK view that sets no meshAdaptivity asks for 0.25 and reports the mesh its runtime delivered, while a PicoVoxel view that sets none resolves it per lane and release, 0 on the exact lane and under PicoVoxel 0.1.0). Tolerance-meshed kernels add the requested preset or explicit, the effective linearTolerance (mm) and angularTolerance (degrees), and downgraded coarser steps taken to fit the triangle budget.',
   );
 
 const millimetrePointSchema = z.object({ x: z.number(), y: z.number(), z: z.number() }).strict();
@@ -77,7 +77,7 @@ export const modelSummarySchema = z
       .strict()
       .optional()
       .describe(
-        "What a whole-model GeoSpec loadModel would ask the engine to admit, estimated from the display mesh at 72 bytes per triangle, against the engine's limits; warning names each estimate over its limit. A kernel can export a finer subject than it displays, so an estimate within a factor of about two of its limit is uncertain; STEP and region loads are not estimated. Present when the host can read the limits of the engine its test_model uses.",
+        "What a whole-model GeoSpec loadModel would ask the engine to admit, estimated from the display mesh at 72 bytes per triangle, against the engine's limits; warning names each estimate over its limit, and is also present when the display mesh is adaptive (tessellation.adaptivity above 0), whose estimates are low because subjects export the uniform mesh. A kernel can export a finer subject than it displays, so an estimate within a factor of about two of its limit is uncertain; STEP and region loads are not estimated. Present when the host can read the limits of the engine its test_model uses.",
       ),
   })
   .strict()

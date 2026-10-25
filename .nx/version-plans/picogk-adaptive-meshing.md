@@ -2,7 +2,7 @@
 picogk: minor
 ---
 
-`@taucad/picogk` views take `meshAdaptivity` (0 to below 1, default 0) and `meshRelax` (default `false`). Above 0 the build asks the worker for an adaptive OpenVDB display mesh, and the tessellation report adds `adaptivity` and `relax`. The default sends today's request and renders today's mesh; glTF and GLB exports pin `meshAdaptivity` to 0. The worker protocol stays at version 8: a worker that does not echo the meshing it applied refuses the adaptive view with a typed `meshing-unsupported` issue instead of showing a uniform mesh as adaptive.
+`@taucad/picogk` views take `meshAdaptivity` (0 to below 1) and `meshRelax` (default `false`). Above 0 the build asks the worker for an adaptive OpenVDB display mesh, and the tessellation report adds `adaptivity` and `relax`. An explicit 0 sends today's request and renders today's mesh; glTF and GLB exports pin `meshAdaptivity` to 0. The worker protocol stays at version 8: a worker that does not echo the meshing it applied refuses the adaptive view with a typed `meshing-unsupported` issue instead of showing a uniform mesh as adaptive.
 
 The native PicoGK build now:
 

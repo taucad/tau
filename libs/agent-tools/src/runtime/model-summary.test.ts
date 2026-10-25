@@ -189,6 +189,37 @@ describe('summarizeRenderedModel', () => {
     });
   });
 
+  it('should caveat the estimates of an adaptive display mesh, within the limits or over them', async () => {
+    const caveat =
+      'The display mesh is adaptive (adaptivity 0.25), and a GeoSpec subject is exported uniformly with several times its triangles (about 3 to 6 times at 0.25), so every estimate here is low; read a figure within a factor of about six of its limit as uncertain.';
+    const summarize = async (count: number, adaptivity: number | undefined) =>
+      summarizeRenderedModel({
+        artifact: glbArtifact({
+          nodes: [{ mesh: 0 }],
+          meshes: [triangleMesh(0)],
+          accessors: [{ componentType: 5126, type: 'VEC3', count, min: [0, 0, 0], max: [0.1, 0.1, 0.1] }],
+        }),
+        issues: [],
+        tessellation: adaptivity === undefined ? {} : { adaptivity },
+        admissionLimits: async () => engineLimits,
+      });
+
+    // Within the limits, an adaptive mesh still warns, because its subject holds several times its triangles.
+    const within = await summarize(300_000, 0.25);
+    const uniform = await summarize(300_000, undefined);
+    const over = await summarize(3_000_192, 0.25);
+    expect(within?.admission).toEqual({
+      triangles: { estimated: 100_000, limit: 4_000_000 },
+      vertices: { estimated: 300_000, limit: 2_000_000 },
+      subjectBytes: { estimated: 7_200_000, limit: 67_108_864 },
+      warning: caveat,
+    });
+    expect(uniform?.admission).not.toHaveProperty('warning');
+    expect(over?.admission?.warning).toBe(
+      `A whole-model GeoSpec loadModel of this model is estimated to exceed the engine's admission limits (subject bytes about 72004608, limit 67108864; vertices about 3000192, limit 2000000). The engine refuses such a load, so its claims would be not decided at this capacity, not failed. ${estimateCaveat} ${caveat}`,
+    );
+  });
+
   it('should estimate admission from the mesh a display simplification started from', async () => {
     const simplified: KernelIssue = {
       message: 'The display mesh had 2000000 triangles, over the preview budget.',

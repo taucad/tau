@@ -512,6 +512,7 @@ export const createRuntimeAgentClients = (
               ? await summarizeRenderedModel({
                   artifact: projected.rendering.artifact,
                   issues: projected.rendering.issues,
+                  tessellation,
                   admissionLimits: input.admissionLimits,
                 })
               : undefined;

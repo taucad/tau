@@ -18,20 +18,56 @@ export type PicovoxelMeshing = { readonly adaptivity: number; readonly relax: bo
 const withoutAdaptiveMeshing: ReadonlySet<string> = new Set(['0.1.0']);
 
 /**
- * Decide the meshing a build runs with.
+ * Balanced adaptivity: what a fast-lane preview of a release that meshes adaptively would mesh at when the
+ * view sets no `meshAdaptivity`. An explicit value always wins, and exports always mesh at 0.
+ */
+export const picovoxelPreviewAdaptivity = 0.25;
+
+/**
+ * Whether an unset `meshAdaptivity` takes {@link picovoxelPreviewAdaptivity}. Off until PicoVoxel's adaptive
+ * previews of base-box and helix-heat-x come back watertight (the preview watertightness obligation of the
+ * Balanced-adaptivity ruling); until then every unset view meshes uniformly. Turning it on changes the
+ * default views' bytes, so the same change bumps the kernel version, the cache key.
+ */
+export const picovoxelAdaptivePreviewsWatertight = false;
+
+/**
+ * The adaptivity an unset `meshAdaptivity` resolves to: {@link picovoxelPreviewAdaptivity} on the fast lane of a
+ * release whose `toMesh()` takes options while `previewDefault` is on, else 0, the uniform mesh. It applies only
+ * where an explicit request of the same value would run, so the default never trips a refusal.
+ *
+ * @param lane - The build's lane.
+ * @param version - The installed PicoVoxel version.
+ * @param previewDefault - Whether an unset adaptivity may take the preview default; the watertightness gate.
+ * @returns The adaptivity in [0, 1) the view meshes at.
+ */
+export const picovoxelDefaultAdaptivity = (
+  lane: PicovoxelLane,
+  version: string,
+  previewDefault: boolean = picovoxelAdaptivePreviewsWatertight,
+): number =>
+  previewDefault && lane === 'fast' && !withoutAdaptiveMeshing.has(version) ? picovoxelPreviewAdaptivity : 0;
+
+/**
+ * Decide the meshing a build runs with. An unset `meshAdaptivity` takes {@link picovoxelDefaultAdaptivity}; an
+ * explicit value is checked as given.
  *
  * @param options - The view's construction options.
- * @param options.meshAdaptivity - Requested adaptivity in [0, 1); 0 is the uniform mesh.
+ * @param options.meshAdaptivity - Requested adaptivity in [0, 1), 0 for the uniform mesh; absent for the default.
  * @param options.meshRelax - Whether to relax an adaptive mesh.
  * @param lane - The build's lane.
  * @param version - The installed PicoVoxel version.
  * @returns The meshing to apply (absent for the uniform mesh), or the issue refusing the request.
  */
 export const resolvePicovoxelMeshing = (
-  { meshAdaptivity, meshRelax }: { readonly meshAdaptivity: number; readonly meshRelax: boolean },
+  {
+    meshAdaptivity: requested,
+    meshRelax,
+  }: { readonly meshAdaptivity?: number | undefined; readonly meshRelax: boolean },
   lane: PicovoxelLane,
   version: string,
 ): { readonly meshing?: PicovoxelMeshing } | { readonly refusal: KernelIssue } => {
+  const meshAdaptivity = requested ?? picovoxelDefaultAdaptivity(lane, version);
   if (meshAdaptivity <= 0) {
     return {};
   }

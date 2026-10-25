@@ -214,6 +214,8 @@ const openTouchPhone = async (viewport: { width: number; height: number }, route
   await target.navigate(route);
   await target.expectUrl(/\/w\/[^/]+\/[^/?]+/u, 120_000);
   await target.expectVisible(titleButton(), 60_000);
+  // A tap needs a stable target, which needs compositor frames: wait until the stage has drawn its first frame.
+  await waitForStageReady();
 };
 
 /** The project's directory in Home, which the fixture names after the URL's last segment. */

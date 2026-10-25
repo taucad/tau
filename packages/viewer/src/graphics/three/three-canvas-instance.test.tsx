@@ -288,7 +288,8 @@ describe('ThreeCanvasInstance', () => {
 
   it('should publish the initialized backend, then clear it on context loss', async () => {
     const view = render(<ThreeCanvasInstance graphicsBackend='webgpu' onRetry={() => undefined} />);
-    expect(reportRenderer).not.toHaveBeenCalled();
+    // Only the mount itself is declared before the renderer exists; no backend is published yet.
+    expect(reportRenderer.mock.calls.map(([event]) => event.type)).toEqual(['canvasMounted']);
     await waitFor(() => {
       expect(reportRenderer.mock.lastCall?.[0]).toMatchObject({
         type: 'rendererInitialized',
@@ -465,6 +466,35 @@ describe('ThreeCanvasInstance', () => {
     enabledFeatures.add('webGpuInspector');
     view.rerender(<ThreeCanvasInstance graphicsBackend='webgpu' onRetry={() => undefined} />);
     expect(screen.getByTestId('gpu-inspector')).toBeInTheDocument();
+  });
+
+  it('declares a canvas that draws frames from its mounting commit until its context is lost', async () => {
+    render(<ThreeCanvasInstance graphicsBackend='webgl' onRetry={() => undefined} />);
+    const mounted = reportRenderer.mock.calls.map(([event]) => event).find((event) => event.type === 'canvasMounted');
+    if (mounted?.type !== 'canvasMounted') {
+      throw new Error('Expected the canvas to declare itself in its mounting commit.');
+    }
+    await waitFor(() => {
+      expect(fireLatestWebGlContextLost).toBeDefined();
+    });
+    await act(async () => {
+      fireLatestWebGlContextLost?.();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Graphics context lost')).toBeInTheDocument();
+    });
+    // The fallback draws no frames, so the stage stops waiting for one.
+    expect(reportRenderer).toHaveBeenCalledWith({ type: 'canvasUnmounted', canvasId: mounted.canvasId });
+  });
+
+  it('withdraws the canvas declaration when it unmounts', () => {
+    const view = render(<ThreeCanvasInstance graphicsBackend='webgl' onRetry={() => undefined} />);
+    const mounted = reportRenderer.mock.calls.map(([event]) => event).find((event) => event.type === 'canvasMounted');
+    if (mounted?.type !== 'canvasMounted') {
+      throw new Error('Expected the canvas to declare itself in its mounting commit.');
+    }
+    view.unmount();
+    expect(reportRenderer).toHaveBeenCalledWith({ type: 'canvasUnmounted', canvasId: mounted.canvasId });
   });
 
   it('shows Graphics context lost fallback when WebGL fires context loss', async () => {

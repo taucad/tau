@@ -186,9 +186,10 @@ export function ViewerStage({
   const hasArtifact = useSelector(graphicsRef, (state) => state.context.artifact !== undefined);
   const hasModel = isModelShown ?? hasArtifact;
   const unitId = useSelector(graphicsRef, (state) => state.context.modelInteractionUnitId);
-  // The canvas reports its first frame on screen; until then the region is busy, so assistive technology and
-  // automation wait for a drawn stage. On a software adapter that first frame can take seconds of pipeline compiling.
-  const isCanvasPresented = useSelector(graphicsRef, (state) => state.context.activeRenderer?.presented === true);
+  // A mounted Three canvas reports its first frame on screen; until then the region is busy, so assistive technology
+  // and automation wait for a drawn stage. On a software adapter that first frame can take seconds of pipeline
+  // compiling. Content that draws no frames (an SVG, a placeholder) never declares a canvas, so it is never busy.
+  const isBusy = useSelector(graphicsRef, (state) => state.context.canvasPresentation?.presented === false);
 
   const handlePointerMove = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
@@ -215,8 +216,6 @@ export function ViewerStage({
     eventSource: regionRef as React.RefObject<HTMLElement>,
     onComponentSecondaryPointerCandidate: partMenu?.onComponentSecondaryPointerCandidate,
   });
-  // A host that draws no canvas here has no frame to wait for.
-  const isBusy = canvas !== null && canvas !== undefined && !isCanvasPresented;
 
   return (
     <div

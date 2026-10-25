@@ -28,7 +28,7 @@ describe('initialized renderer status', () => {
     }
   });
 
-  it('should mark only the active canvas presented, and keep it across a repeated report', async () => {
+  it('should wait only for a mounted canvas, and mark only that canvas presented', async () => {
     const guard = guardActors();
     const actor = createActor(
       graphicsMachine.provide({
@@ -38,21 +38,21 @@ describe('initialized renderer status', () => {
     );
     actor.start();
     try {
+      // Nothing that draws frames is mounted: nothing to wait for.
       actor.send({ type: 'rendererPresented', canvasId: 'early' });
-      expect(actor.getSnapshot().context.activeRenderer).toBeUndefined();
-      actor.send({ type: 'rendererInitialized', payload: { canvasId: 'stage', backend: 'webgpu' } });
+      expect(actor.getSnapshot().context.canvasPresentation).toBeUndefined();
+      actor.send({ type: 'canvasMounted', canvasId: 'stage' });
+      expect(actor.getSnapshot().context.canvasPresentation).toEqual({ canvasId: 'stage', presented: false });
       actor.send({ type: 'rendererPresented', canvasId: 'retired' });
-      expect(actor.getSnapshot().context.activeRenderer?.presented).toBeUndefined();
+      expect(actor.getSnapshot().context.canvasPresentation?.presented).toBe(false);
       actor.send({ type: 'rendererPresented', canvasId: 'stage' });
-      expect(actor.getSnapshot().context.activeRenderer).toEqual({
-        canvasId: 'stage',
-        backend: 'webgpu',
-        presented: true,
-      });
-      actor.send({ type: 'rendererInitialized', payload: { canvasId: 'stage', backend: 'webgpu' } });
-      expect(actor.getSnapshot().context.activeRenderer?.presented).toBe(true);
-      actor.send({ type: 'rendererInitialized', payload: { canvasId: 'replacement', backend: 'webgl' } });
-      expect(actor.getSnapshot().context.activeRenderer).toEqual({ canvasId: 'replacement', backend: 'webgl' });
+      expect(actor.getSnapshot().context.canvasPresentation).toEqual({ canvasId: 'stage', presented: true });
+      // A replacement waits afresh; the retired canvas's unmount does not clear it.
+      actor.send({ type: 'canvasMounted', canvasId: 'replacement' });
+      actor.send({ type: 'canvasUnmounted', canvasId: 'stage' });
+      expect(actor.getSnapshot().context.canvasPresentation).toEqual({ canvasId: 'replacement', presented: false });
+      actor.send({ type: 'canvasUnmounted', canvasId: 'replacement' });
+      expect(actor.getSnapshot().context.canvasPresentation).toBeUndefined();
     } finally {
       actor.stop();
     }

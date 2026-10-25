@@ -231,11 +231,13 @@ export interface GraphicsContext {
   webGpuAvailable: boolean;
   /** Capability-derived candidate; initialization can still fall back to WebGL. */
   resolvedGraphicsBackend: ResolvedGraphicsBackend;
+  /** Successfully initialized canvas; cleared on matching loss or teardown, never persisted. */
+  activeRenderer: Readonly<{ canvasId: string; backend: ResolvedGraphicsBackend }> | undefined;
   /**
-   * Successfully initialized canvas; cleared on matching loss or teardown, never persisted. `presented` turns true once
-   * its first frame is on screen: the stage is busy until then.
+   * The mounted canvas that draws frames, and whether its first frame is on screen. Only a Three canvas sets it, so a
+   * stage showing other content (an SVG, a placeholder) is never waiting. The stage is busy while `presented` is false.
    */
-  activeRenderer: Readonly<{ canvasId: string; backend: ResolvedGraphicsBackend; presented?: boolean }> | undefined;
+  canvasPresentation: Readonly<{ canvasId: string; presented: boolean }> | undefined;
 
   // Section view state
   isSectionViewActive: boolean;
@@ -324,8 +326,12 @@ export type GraphicsEvent =
   | { type: 'setGraphicsBackendPreference'; payload: GraphicsBackendPreference }
   | { type: 'rendererInitialized'; payload: NonNullable<GraphicsContext['activeRenderer']> }
   | { type: 'rendererRemoved'; canvasId: string }
+  /** A canvas that draws frames has mounted; the stage waits for its first frame. */
+  | { type: 'canvasMounted'; canvasId: string }
   /** The canvas's first frame is on screen. */
   | { type: 'rendererPresented'; canvasId: string }
+  /** The canvas no longer draws frames (unmounted, or replaced by its context-lost fallback). */
+  | { type: 'canvasUnmounted'; canvasId: string }
   // Section view events
   /** Turning the section on with no cuts adds the default plane, removing the side `viewDirection` faces. */
   | { type: 'setSectionViewActive'; payload: boolean; viewDirection?: SectionVector }
@@ -836,6 +842,7 @@ const graphicsMachineDefinition = setup({
       webGpuAvailable: false,
       resolvedGraphicsBackend: resolveGraphicsBackendPreference(preference, false),
       activeRenderer: undefined,
+      canvasPresentation: undefined,
 
       // Section view state (the cuts are durable and entry-scoped)
       ...createSectionViewSeed(input.sectionView),
@@ -997,21 +1004,22 @@ const graphicsMachineDefinition = setup({
           }),
         },
 
-        rendererInitialized: {
-          context: ({ context, event }) => ({
-            // A repeated report from the same canvas keeps what it has already presented.
-            activeRenderer:
-              context.activeRenderer?.canvasId === event.payload.canvasId && context.activeRenderer.presented
-                ? { ...event.payload, presented: true }
-                : event.payload,
-          }),
+        rendererInitialized: { context: ({ event }) => ({ activeRenderer: event.payload }) },
+        canvasMounted: {
+          context: ({ event }) => ({ canvasPresentation: { canvasId: event.canvasId, presented: false } }),
         },
         rendererPresented: {
           context: ({ context, event }) => ({
-            activeRenderer:
-              context.activeRenderer?.canvasId === event.canvasId
-                ? { ...context.activeRenderer, presented: true }
-                : context.activeRenderer,
+            canvasPresentation:
+              context.canvasPresentation?.canvasId === event.canvasId
+                ? { canvasId: event.canvasId, presented: true }
+                : context.canvasPresentation,
+          }),
+        },
+        canvasUnmounted: {
+          context: ({ context, event }) => ({
+            canvasPresentation:
+              context.canvasPresentation?.canvasId === event.canvasId ? undefined : context.canvasPresentation,
           }),
         },
         rendererRemoved: {

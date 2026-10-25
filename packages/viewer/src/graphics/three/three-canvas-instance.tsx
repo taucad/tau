@@ -237,6 +237,17 @@ export function ThreeCanvasInstance({
     // The stage reads this to stop being busy (`ViewerStage` sets `aria-busy` on its canvas region).
     graphicsRef.send({ type: 'rendererPresented', canvasId });
   }, [canvasId, glProperty, graphicsRef]);
+  // Only a canvas that draws frames makes the stage wait for one. Declared in the commit that mounts it, so the stage
+  // is never painted as ready in between; a lost context's fallback draws no frames, so it ends the wait.
+  useLayoutEffect(() => {
+    if (isContextLost) {
+      return;
+    }
+    graphicsRef.send({ type: 'canvasMounted', canvasId });
+    return () => {
+      graphicsRef.send({ type: 'canvasUnmounted', canvasId });
+    };
+  }, [canvasId, glProperty, graphicsRef, isContextLost]);
   useEffect(() => {
     if (!initializedRenderer || initializedRenderer.factory !== glProperty || isContextLost || glProperty.isRetired()) {
       return;

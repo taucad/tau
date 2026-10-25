@@ -44,7 +44,9 @@ type Project = Readonly<{
   filesystem: RevisionFileSystem;
   port: RevisionPort;
   /** Start a root over the same store, as a host (re)start does, and one placement session over it. */
-  open: () => Readonly<{ revisions: ProjectRevisions; placement: TurnPlacementAdapter<RevisionFileSystem> }>;
+  open: (
+    options?: Readonly<{ deviceId?: () => string | undefined; revisionPort?: RevisionPort }>,
+  ) => Readonly<{ revisions: ProjectRevisions; placement: TurnPlacementAdapter<RevisionFileSystem> }>;
 }>;
 
 const createProject = async (withAuthority = false): Promise<Project> => {

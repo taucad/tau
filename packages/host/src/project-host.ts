@@ -30,7 +30,7 @@ import { createHostMcpEndpoint } from '#mcp-server.js';
 import { createParameterActors, parameterKey, parameterRoot } from '#parameter-actors.js';
 import type { HostMcpEndpoint } from '#mcp-server.js';
 import { hostRevisionActor } from '#revision-actor.js';
-import { createProjectRevisions, hostDeviceId } from '#revisions.js';
+import { createProjectRevisions } from '#revisions.js';
 import type { HostRevisionEvent, ProjectRevisions, ProjectRevisionsOptions, TurnCheckout } from '#revisions.js';
 
 /**
@@ -288,8 +288,19 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
 
   const launcher = createAgentLauncher({
     chats: createNodeChatStore({ workspaceRoot }),
-    /* The id this host's chat segments sync under: an external turn's session is this device's, whatever its host id. */
-    deviceId: hostDeviceId,
+    /*
+     * The record device this project's chat segments sync under, read once the store has opened: an external turn's
+     * session is this device's, whatever its host id. Never the machine's name, which a rename changes, two machines
+     * can share, and a synced row must not carry (EQ10(a)). A store that cannot say stamps no device.
+     */
+    deviceId: async () => {
+      try {
+        await revisions.opened();
+        return await revisions.chatDevice();
+      } catch {
+        return undefined;
+      }
+    },
     modelTransport: options.modelTransport,
     credential: options.credential,
     systemPrompt: options.systemPrompt,

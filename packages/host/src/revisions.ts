@@ -319,6 +319,13 @@ export type ProjectRevisions = {
    * at start rather than at its close.
    */
   opened(): Promise<void>;
+  /**
+   * The record device this project's chat segments sync under, or `undefined` while it cannot be read (EQ10(a)).
+   *
+   * Not {@link hostDeviceId}: this host stamps it where a synced row says which device wrote it, so a renamed machine
+   * keeps its id, two machines that share a name and account do not share one, and neither name leaves the host.
+   */
+  chatDevice(): Promise<string | undefined>;
 };
 
 /**
@@ -582,11 +589,12 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     /*
      * Which device this host is (W13, W17).
      *
-     * A chat ref names one device's log segment, so a host that could not say
-     * which device it is would risk overwriting another's. A disk host has a
-     * stable answer the operating system already keeps — the machine's own
-     * hostname, per user — and unlike the browser's it needs no record of its
-     * own.
+     * A host that could not say which device it is records no chats, so it
+     * never risks overwriting another's segment. A disk host has a stable
+     * answer the operating system already keeps — the machine's own hostname,
+     * per user. It stays on this host: the segment itself, and every marker
+     * that names this device, use the record device the record set mints
+     * (`chatDevice`, EQ10(a)).
      */
     deviceId: () => hostDeviceId,
     /*
@@ -1749,6 +1757,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       }
     },
     status: () => selectRevisionStatus(actor.getSnapshot()),
+    chatDevice: async () => tree.chatDevice(),
     channel: {
       request: async (input) => ({
         result: await sendRevisionRequest(input),

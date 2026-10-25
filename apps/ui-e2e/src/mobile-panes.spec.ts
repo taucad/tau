@@ -2,6 +2,7 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
+import { waitForStageReady } from '#support/viewer-stage.js';
 
 /**
  * The phone pane pass (charter W6, T6) on the production route at 320px. Each listed pane opens in the sheet with
@@ -146,6 +147,7 @@ test('opens every changed pane at 320×640 with no horizontal overflow and no ta
     await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
   }
   await target.expectVisible(navigation(), 60_000);
+  await waitForStageReady();
   // The touch rows below are coarse-pointer rules; the emulated phone must report a coarse pointer (D12).
   expect(await target.evaluate(() => globalThis.matchMedia('(pointer: coarse)').matches)).toBe(true);
 

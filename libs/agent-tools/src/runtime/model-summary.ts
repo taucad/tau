@@ -1,5 +1,5 @@
 import type { ModelSummary } from '@taucad/chat/schemas/tools/evaluate-model';
-import type { KernelIssue } from '@taucad/runtime/types';
+import type { KernelIssue, TessellationReport } from '@taucad/runtime/types';
 
 import { isObject, renderedGlb } from '#runtime/glb-chunks.js';
 import type { JsonObject, RenderedArtifact } from '#runtime/glb-chunks.js';
@@ -22,6 +22,8 @@ export type ModelAdmissionLimits = Readonly<{
 type SummarizeRenderedModelInput = Readonly<{
   artifact: RenderedArtifact;
   issues: readonly KernelIssue[];
+  /** The default view's tessellation report, when its kernel gave one; read for an adaptive display mesh. */
+  tessellation?: Pick<TessellationReport, 'adaptivity'> | undefined;
   /** Resolves the engine's limits, or `undefined` when this host cannot say; read only for a GLB. */
   admissionLimits?: (() => Promise<ModelAdmissionLimits | undefined>) | undefined;
 }>;
@@ -44,6 +46,12 @@ const subjectBytesPerTriangle = 72;
 /** What every admission warning says the estimate cannot know. */
 const estimateCaveat =
   'The estimate comes from the display mesh: a kernel can export a finer subject, so a figure within a factor of about two of its limit is uncertain, and STEP and region loads are not estimated.';
+/**
+ * Why an estimate from an adaptive display mesh is low: GeoSpec subjects export the uniform mesh, which measured
+ * about 3 to 6 times the triangles of a Balanced (0.25) preview.
+ */
+const adaptiveCaveat = (adaptivity: number): string =>
+  `The display mesh is adaptive (adaptivity ${String(adaptivity)}), and a GeoSpec subject is exported uniformly with several times its triangles (about 3 to 6 times at 0.25), so every estimate here is low; read a figure within a factor of about six of its limit as uncertain.`;
 /** Triangle lists, strips and fans: the primitives a GeoSpec subject meshes. */
 const triangleModes: ReadonlySet<number> = new Set([4, 5, 6]);
 /** Divisors of the normalized integer position types `KHR_mesh_quantization` allows. */
@@ -285,10 +293,11 @@ const simplifiedFrom = (issues: readonly KernelIssue[]): Readonly<{ from: number
 };
 
 const admissionOf = (
-  mesh: Readonly<{ triangles: number; vertices: number }>,
+  mesh: Readonly<{ triangles: number; vertices: number; adaptivity?: number | undefined }>,
   issues: readonly KernelIssue[],
   limits: ModelAdmissionLimits,
 ): NonNullable<ModelSummary['admission']> => {
+  const { adaptivity } = mesh;
   const simplified = simplifiedFrom(issues);
   const triangles = simplified?.from ?? mesh.triangles;
   // Simplification keeps the topology, so the produced mesh keeps the delivered vertex share.
@@ -307,12 +316,14 @@ const admissionOf = (
   const over = checks
     .filter(([, { estimated, limit }]) => estimated > limit)
     .map(([noun, { estimated, limit }]) => `${noun} about ${String(estimated)}, limit ${String(limit)}`);
+  // The display mesh is the only count the report carries, so an adaptive one is caveated rather than corrected.
+  const adaptive = adaptivity !== undefined && adaptivity > 0 ? adaptiveCaveat(adaptivity) : undefined;
   if (over.length === 0) {
-    return estimates;
+    return adaptive === undefined ? estimates : { ...estimates, warning: adaptive };
   }
   return {
     ...estimates,
-    warning: `A whole-model GeoSpec loadModel of this model is estimated to exceed the engine's admission limits (${over.join('; ')}). The engine refuses such a load, so its claims would be not decided at this capacity, not failed. ${estimateCaveat}`,
+    warning: `A whole-model GeoSpec loadModel of this model is estimated to exceed the engine's admission limits (${over.join('; ')}). The engine refuses such a load, so its claims would be not decided at this capacity, not failed. ${estimateCaveat}${adaptive === undefined ? '' : ` ${adaptive}`}`,
   };
 };
 
@@ -322,7 +333,8 @@ const admissionOf = (
  *
  * Reads only the GLB's JSON chunk, so it costs milliseconds next to the render. The admission
  * figures are estimates: they count 72 bytes per triangle, and a subject is exported from the
- * model, so it may be meshed at another tolerance than the display.
+ * model, so it may be meshed at another tolerance than the display; an adaptive display mesh caveats them
+ * in `warning`, because its subject is exported uniformly.
  *
  * @internal
  * @param input - The default view's artifact and issues, and the engine limits when known.
@@ -340,6 +352,14 @@ export const summarizeRenderedModel = async (input: SummarizeRenderedModelInput)
     componentCount: components,
     triangles,
     vertices,
-    ...(limits === undefined ? {} : { admission: admissionOf({ triangles, vertices }, input.issues, limits) }),
+    ...(limits === undefined
+      ? {}
+      : {
+          admission: admissionOf(
+            { triangles, vertices, adaptivity: input.tessellation?.adaptivity },
+            input.issues,
+            limits,
+          ),
+        }),
   };
 };

@@ -23,6 +23,7 @@
 import type { Channel, ChannelServerHandle, RpcProtocol } from '@taucad/rpc';
 import type { MachineClient } from '#machines/machine-client.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
+import type { ResourceLimitDetails } from '#types/runtime.types.js';
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import type {
   BinaryContentDelivery,
@@ -87,6 +88,8 @@ export type RuntimeTransportCloseResult =
       readonly released?: boolean;
       /** Last bytes of the host's standard error, when the supervisor captured any. */
       readonly stderrTail?: string;
+      /** The limit the supervisor killed the host for, when it killed it for one. */
+      readonly exceeded?: ResourceLimitDetails;
     }
   | { readonly cause: 'wire-failure'; readonly error: Error };
 

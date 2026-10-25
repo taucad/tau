@@ -277,6 +277,21 @@ printf 'grok 1.0.52 (0920c8169e27)\n'
       release?.(f.home);
     }
   }, 5000);
+  it('should keep the cwd scope when git stops discovery at a filesystem boundary', async () => {
+    const f = await fixture();
+    const bin = join(f.root, 'bin');
+    await mkdir(bin);
+    await writeFile(
+      join(bin, 'git'),
+      `#!/bin/sh\nprintf 'fatal: not a git repository (or any parent up to mount point /tmp)\\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\\n' >&2\nexit 128\n`,
+    );
+    await chmod(join(bin, 'git'), 0o700);
+    vi.stubEnv('PATH', `${bin}:${process.env['PATH']}`);
+    const prepared = await createGrokPermissionReadback(f)?.prepare(request());
+    expect(prepared).toBeDefined();
+    await f.save('allowed_mcp_tools = ["tau__ask_questions"]');
+    expect(await prepared?.observe()).toMatchObject({ stored: 'present', preexisting: false });
+  });
   it('should decline relative HOME rather than resolving it against the host cwd', async () => {
     const f = await fixture();
     const adapter: AcpAdapter = { ...f.adapter, spawnEnv: { ...f.adapter.spawnEnv, HOME: '.' } };

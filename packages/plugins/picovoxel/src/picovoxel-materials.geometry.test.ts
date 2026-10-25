@@ -267,7 +267,7 @@ describe('PicoVoxel material charts and tangent geometry', () => {
   ])(
     'should keep the internal mapping fallback finite for collapsed charts and parallel normals (%j)',
     ({ positions, normal }) => {
-      // Direct math admission: production snapshot validation removes zero-area triangles before rendering.
+      // Direct math admission: snapshot validation keeps in-line triangles like these only in adaptive meshes.
       const mapped = projectSurfaceCoordinates({
         positions: new Float32Array(positions),
         normals: new Float32Array([...normal, ...normal, ...normal]),

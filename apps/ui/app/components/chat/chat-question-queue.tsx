@@ -297,6 +297,8 @@ export function ChatQuestionQueue({
       <CollapsibleContent>
         <ul
           aria-label='Questions'
+          // The list rests at its start; the phone sheet reads this to tell its own clipping from a person's scroll (I5).
+          data-scroll-rest='start'
           // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable list must be keyboard reachable (WCAG 2.1.1)
           tabIndex={0}
           className='flex max-h-[min(22rem,45cqh)] scroll-shadows-y flex-col divide-y overflow-y-auto overscroll-contain border-t bg-background px-2 pb-2 focus-visible:focus-outline'

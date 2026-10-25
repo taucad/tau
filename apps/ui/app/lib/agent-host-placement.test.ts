@@ -189,8 +189,11 @@ describe('listAgentHostPlacements', () => {
     }
   });
 
-  /* XD2: a daemon is a daemon for the page's life: a later listing whose probe fails keeps it, and never re-asks. */
-  it('should keep a settled origin daemon through a later listing whose probe would fail', async () => {
+  /*
+   * XD2: a daemon is a daemon for the page's life: a later listing whose probe fails asks again, and keeps the daemon
+   * as it last answered (round 27).
+   */
+  it('should keep a settled origin daemon through a later listing whose probe fails', async () => {
     resetOriginAgentHostAnswer();
     await listAgentHostPlacements({ discoverOrigin: async () => descriptor, listHosts: async () => [] });
     const failing = vi.fn(async () => {
@@ -199,10 +202,37 @@ describe('listAgentHostPlacements', () => {
 
     const listed = await listAgentHostPlacements({ discoverOrigin: failing, listHosts: async () => [] });
 
-    expect(failing).not.toHaveBeenCalled();
-    expect(listed.map((target) => target.hostId)).toContain('origin');
+    expect(failing).toHaveBeenCalledOnce();
+    expect(listed.find((target) => target.hostId === 'origin')).toMatchObject({ label: descriptor.label });
+    expect(isPlacementOnThisDeviceNow('origin')).toBe(true);
+    const unanswered = await listAgentHostPlacements({
+      discoverOrigin: async () => undefined,
+      listHosts: async () => [],
+    });
+    expect(unanswered.map((target) => target.hostId)).toContain('origin');
     expect(isPlacementOnThisDeviceNow('origin')).toBe(true);
     resetOriginAgentHostAnswer();
+  });
+
+  /*
+   * Round 27: only "found" is kept for the page's life, never the descriptor: each listing reads the daemon again, so a
+   * daemon that was renamed, moved its workspace or installed an agent since is listed as it is now.
+   */
+  it('should list the origin daemon as it answers now, not as it first answered', async () => {
+    await listAgentHostPlacements({
+      discoverOrigin: async () => ({ ...descriptor, externalAgents: [claudeAgent] }),
+      listHosts: async () => [],
+    });
+
+    const listed = await listAgentHostPlacements({
+      discoverOrigin: async () => ({ ...descriptor, label: 'studio-max', externalAgents: [claudeAgent, codexAgent] }),
+      listHosts: async () => [],
+    });
+
+    expect(listed.find((target) => target.hostId === 'origin')).toMatchObject({
+      label: 'studio-max',
+      externalAgents: [claudeAgent, codexAgent],
+    });
   });
 
   /* XD2: one recorder of the origin's reach: the listing's discovery answers every later reader, the notice's too. */

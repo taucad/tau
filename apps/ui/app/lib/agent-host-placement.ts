@@ -351,6 +351,7 @@ const loopbackAdmissions = new Map<TauAgentHostId, LoopbackAdmission>();
 /** Test-only: forget what this page's origin answered. @internal */
 export const resetOriginAgentHostAnswer = (): void => {
   originHostsAgent = undefined;
+  originLastFound = undefined;
 };
 
 const loopbackChanges = new Topic<void>({ name: 'agentHostPlacement.loopbackChanges' });
@@ -491,6 +492,8 @@ type OriginAsk = {
   readonly last?: Readonly<{ found: boolean; askedAt: number }>;
 };
 let originHostsAgent: OriginAsk | undefined;
+/** The origin daemon's descriptor as it last answered one: what a later ask that fails or finds none answers. */
+let originLastFound: TauHostDescriptor | undefined;
 
 /**
  * Whether the recorded ask answers without asking again: a found daemon stays found for the page's life, an ask in
@@ -504,16 +507,17 @@ const reusable = (asked: OriginAsk | undefined): asked is OriginAsk =>
   (asked.settled === undefined || asked.settled || Date.now() - asked.askedAt < originAnswerReuse);
 
 /**
- * The origin's descriptor for a listing: a daemon already found stays found for the page's life and is not asked
- * again, and an ask in flight is shared; only an unknown or "no daemon" answer is asked again, so a failed probe never
- * turns a found daemon into none.
+ * The origin's descriptor for a listing (round 27): asked again at each listing, as before XD2, so a daemon's label,
+ * workspace and external agents are as it answers now; an ask in flight is shared, and a fresh "no daemon" answer
+ * stands for its reuse interval. Only "found" is kept for the page's life: an ask that fails or finds none after a
+ * daemon answered lists that daemon as it last answered ({@link askOrigin}).
  *
  * @param discover - How to ask; {@link discoverOriginAgentHost} unless a test stands in.
  * @returns The descriptor, or `undefined` when the origin serves no agent.
  */
 const originForListing = async (discover?: typeof discoverOriginAgentHost): Promise<TauHostDescriptor | undefined> => {
   const asked = originHostsAgent;
-  return reusable(asked) ? asked.descriptor : askOrigin(discover).descriptor;
+  return reusable(asked) && asked.settled !== true ? asked.descriptor : askOrigin(discover).descriptor;
 };
 
 /**
@@ -540,12 +544,21 @@ const askOrigin = (discover: typeof discoverOriginAgentHost = discoverOriginAgen
       originChanges.emit();
     }
   };
+  /* A daemon found once stays found: an ask that fails or finds none answers its last descriptor (round 27). */
   asking.descriptor = (async (): Promise<TauHostDescriptor | undefined> => {
     try {
       const found = await discover();
-      settle(found !== undefined);
-      return found;
+      if (found !== undefined) {
+        originLastFound = found;
+      }
+      const answered = found ?? originLastFound;
+      settle(answered !== undefined);
+      return answered;
     } catch (error) {
+      if (originLastFound !== undefined) {
+        settle(true);
+        return originLastFound;
+      }
       settle(false);
       throw error;
     }

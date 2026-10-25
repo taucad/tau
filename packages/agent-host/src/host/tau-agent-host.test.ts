@@ -2830,64 +2830,75 @@ the cancelled tools left the system unchanged.
     expect(closedChats).toEqual(['chat-external-session', 'chat-external-session']);
   });
 
-  /* Every desktop places its own agents as `desktop`: the device's id on the marker says whose session a record names. */
-  it('stamps this device on an external turn’s marker, and restores the session it stamped', async () => {
+  /* Every desktop places its own agents as `desktop`: the device's id on the marker says whose session a record names.
+   * The id is read when a turn is admitted, as a disk host's record device is: only its store knows it. */
+  it('stamps this device on an external turn’s marker, and restores only the session its own device stamped', async () => {
     const file = createMemoryLogFile();
-    const seen: Array<JsonObject | undefined> = [];
+    const seen: Array<{ device: string; state: JsonObject | undefined }> = [];
     const placement = fakePlacement({ registry: tools(async () => ({ content: null, isError: false })) });
-    const externalPort: ExternalAgentPort = {
-      list: () => ['stub-agent'],
-      run: async (turn) => {
-        seen.push(turn.state);
-        await turn.remember({ acpSessionId: 'session-1', hostId: 'desktop' });
-      },
-    };
-    const host = createTauAgentHost({
-      ...hostOptions({
-        openEventLog: file.open,
-        transport: {
-          funding: { type: 'unfunded' },
-          stream: () => {
-            throw new Error('An external turn must never reach the Tau model.');
+    /* Each host is a later leader of the one log, as a device that reopens the chat is. */
+    let opened = 0;
+    const hostOf = (device: string): ReturnType<typeof createTauAgentHost> => {
+      opened += 1;
+      const externalPort: ExternalAgentPort = {
+        list: () => ['stub-agent'],
+        run: async (turn) => {
+          seen.push({ device, state: turn.state });
+          await turn.remember({ acpSessionId: `session-${device}`, hostId: 'desktop' });
+        },
+      };
+      return createTauAgentHost({
+        ...hostOptions({
+          openEventLog: file.open,
+          transport: {
+            funding: { type: 'unfunded' },
+            stream: () => {
+              throw new Error('An external turn must never reach the Tau model.');
+            },
           },
-        },
-        toolRegistry: tools(async () => ({ content: null, isError: false })),
-        idPrefix: 'external-device',
-      }),
-      deviceId: 'device-1',
-      placement: placement.port,
-      externalRunners: { acp: externalPort },
-    });
-    const start = async (runId: string, messageId: string): Promise<void> => {
-      await host.admit({
-        chatId: 'chat-external-device',
-        runId,
-        trigger: 'submit',
-        message: { id: messageId, role: 'user', content: 'Run this here.' },
-        config: {
-          systemPrompt: 'unused by an external turn',
-          toolChoice: 'none',
-          agent: { kind: 'acp', id: 'stub-agent', hostId: 'desktop' },
-        },
-      });
-      await host.cancel({ runId });
-      await vi.waitFor(() => {
-        const acknowledged = placement.calls.filter((call) => call.verb === 'acknowledge');
-        expect(acknowledged.map((call) => call.key.runId)).toContain(runId);
+          toolRegistry: tools(async () => ({ content: null, isError: false })),
+          idPrefix: `external-${opened}`,
+        }),
+        deviceId: async () => device,
+        placement: placement.port,
+        externalRunners: { acp: externalPort },
       });
     };
+    const start = async (device: string, runId: string, messageId: string): Promise<void> => {
+      const host = hostOf(device);
+      try {
+        await host.admit({
+          chatId: 'chat-external-device',
+          runId,
+          trigger: 'submit',
+          message: { id: messageId, role: 'user', content: 'Run this here.' },
+          config: {
+            systemPrompt: 'unused by an external turn',
+            toolChoice: 'none',
+            agent: { kind: 'acp', id: 'stub-agent', hostId: 'desktop' },
+          },
+        });
+        await host.cancel({ runId });
+        await vi.waitFor(() => {
+          const acknowledged = placement.calls.filter((call) => call.verb === 'acknowledge');
+          expect(acknowledged.map((call) => call.key.runId)).toContain(runId);
+        });
+      } finally {
+        await host.close();
+      }
+    };
 
-    try {
-      await start('run-1', 'turn-1');
-      await start('run-2', 'turn-2');
-      const log = await file.open();
-      const marker = reduceEventLog(await log.read()).find((message) => message.id === 'turn-1')?.metadata?.tauInternal;
-
-      expect(marker).toMatchObject({ kind: 'external-agent', deviceId: 'device-1', acpSessionId: 'session-1' });
-      expect(seen[1]).toMatchObject({ acpSessionId: 'session-1', deviceId: 'device-1' });
-    } finally {
-      await host.close();
-    }
+    await start('device-1', 'run-1', 'turn-1');
+    await start('device-2', 'run-2', 'turn-2');
+    await start('device-1', 'run-3', 'turn-3');
+    await start('device-2', 'run-4', 'turn-4');
+    expect(seen.map(({ device, state }) => [device, state?.['acpSessionId']])).toEqual([
+      ['device-1', undefined],
+      ['device-2', undefined],
+      ['device-1', 'session-device-1'],
+      ['device-2', 'session-device-2'],
+    ]);
+    expect(seen[2]?.state).toMatchObject({ deviceId: 'device-1' });
   });
 
   it('should record the stop details an external runner throws on its failed run', async () => {

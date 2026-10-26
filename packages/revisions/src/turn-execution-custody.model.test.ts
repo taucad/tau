@@ -1,13 +1,15 @@
 /**
  * TurnExecutionCustody projection onto real protected lease records. This slice
- * covers Hold, stale ReleaseExecution and RecoverRetire; the machine admission
- * and checkout-discard composition remain separate gates.
+ * covers Hold, stale ReleaseExecution, RecoverRetire and the effect-level
+ * checkout Discard check; machine closing-turn admission remains a separate gate.
  */
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+import { createActor } from 'xstate';
+import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionActors } from '#revision-effects.js';
@@ -83,4 +85,62 @@ describe('TurnExecutionCustody durable record projection', () => {
     ).toEqual([{ status: 'applied' }, { status: 'applied' }]);
     expect(JSON.parse(await filesystem.readFile(path, 'utf8'))).toMatchObject({ executionIds: ['one', 'two'] });
   });
+});
+
+describe('TurnExecutionCustody checkout discard projection', () => {
+  it('should refuse to discard a checkout whose lease still holds an execution, even from a stale registry', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-custody-discard-'));
+    roots.push(root);
+    const filesystem = new NodeFsProvider(root);
+    const side = await mkdtemp(join(tmpdir(), 'tau-custody-discard-side-'));
+    roots.push(side);
+    const sideFilesystem = new NodeFsProvider(side);
+    const port = createIsomorphicGitRevisionPort({
+      filesystem,
+      checkouts: { projectId: 'project-1', root: () => sideFilesystem },
+    });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await port.setHead('main');
+    await filesystem.writeFile('part.ts', 'one\n');
+    const receipt = await port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['part.ts', 'one\n']]),
+      provenance: { source: 'user', actorId: 'ada', createdAt: 1 },
+      summary: { generated: 'First' },
+    });
+    const head = revisionId(receipt.commitId);
+    await port.updateRef({ name: 'main', expectedHead: undefined, head });
+    const added = await port.addCheckout?.({ branch: 'side', from: head });
+    const checkoutId = added?.id ?? '';
+    await filesystem.writeFile(path, JSON.stringify({ ...key, checkoutId, startedAt: 1 }));
+    const owner = createRevisionActors({
+      port,
+      projectId: 'project-1',
+      filesystem: async (place) => (place.kind === 'live' ? filesystem : sideFilesystem),
+    });
+    owners.push(owner);
+    const discard = async (): Promise<void> =>
+      new Promise((resolve, reject) => {
+        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- drives the effect's own logic directly.
+        const actor = createActor(owner.checkouts.removeCheckout as Parameters<typeof createActor>[0], {
+          input: { projectId: 'project-1', id: checkoutId },
+        });
+        actor.subscribe({
+          next: (snapshot) => {
+            if (snapshot.status === 'done') {
+              resolve();
+            }
+          },
+          error: reject,
+        });
+        actor.start();
+      });
+    expect(await owner.turns.executions.hold({ key, executionId: 'one' })).toEqual({ status: 'applied' });
+    // Discard with a registry snapshot that no longer lists the lease: the effect itself refuses.
+    await expect(discard()).rejects.toThrow('Running work');
+    const retained = await port.listCheckouts?.();
+    expect(retained?.some((checkout) => checkout.id === checkoutId)).toBe(true);
+    expect(await owner.turns.executions.release({ key, executionId: 'one' })).toEqual({ status: 'applied' });
+    await discard();
+  }, 30_000);
 });

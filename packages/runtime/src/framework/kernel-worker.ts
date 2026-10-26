@@ -1921,7 +1921,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     );
   }
 
-  /** Metadata for the selected kernel's offered views. */
   /** The kernel's evaluate options as an evaluation offers them; none by default. */
   protected getDocumentEvaluateOptionsOffer(_owner: OperationOwner): {
     evaluateOptions?: { schema: JSONSchema7; defaults: Record<string, unknown> };
@@ -1929,6 +1928,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return {};
   }
 
+  /** Metadata for the selected kernel's offered views. */
   protected getDocumentViewOffers(_owner: OperationOwner, _offers?: KernelOffers): readonly ViewOffer[] {
     return [];
   }
@@ -6435,6 +6435,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     zodSchema: z.ZodType,
     label: string,
   ): { schema: JSONSchema7; defaults: Record<string, unknown> } {
+    // Offers derive the same kernel schemas on every evaluation; a schema's derivation never changes.
+    const cached = this.derivedJsonSchemas.get(zodSchema);
+    if (cached) {
+      return cached;
+    }
     let schema: JSONSchema7;
     try {
       // Spreading drops Zod's non-enumerable `~standard` key: the manifest is wire data, so it is plain JSON here.
@@ -6450,11 +6455,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
 
     const defaults = inputDefaults(schema);
-    return {
-      schema,
-      defaults: zodSchema.safeParse(defaults).success ? defaults : {},
-    };
+    const derived = { schema, defaults: zodSchema.safeParse(defaults).success ? defaults : {} };
+    this.derivedJsonSchemas.set(zodSchema, derived);
+    return derived;
   }
+
+  private readonly derivedJsonSchemas = new WeakMap<
+    z.ZodType,
+    { schema: JSONSchema7; defaults: Record<string, unknown> }
+  >();
 
   /**
    * Build the capabilities manifest from loaded kernel metadata and transcoder edges.

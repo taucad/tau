@@ -805,6 +805,8 @@ const renderRequestPatch = (context: CadContext, event: RenderTrigger): CadPatch
       return {
         ...bumped,
         entryPath: event.entryPath,
+        // Evaluate options belong to the entry's kernel; another entry starts from its defaults.
+        ...(event.entryPath === context.entryPath ? {} : { evaluateOptions: {} }),
         codeIssues: [],
         latestRenderingOutcome: undefined,
         parameterManifest: undefined,
@@ -825,6 +827,8 @@ const renderRequestPatch = (context: CadContext, event: RenderTrigger): CadPatch
       return {
         ...bumped,
         entryPath: event.entryPath,
+        // Evaluate options belong to the entry's kernel; another entry starts from its defaults.
+        ...(event.entryPath === context.entryPath ? {} : { evaluateOptions: {} }),
         // The staged bytes belong to the entry that was open; the new entry re-supplies its own.
         parameterRender: undefined,
         latestRenderingOutcome: undefined,
@@ -920,7 +924,13 @@ const runtimeSignals = {
   capabilitiesUpdated: ({ event }: CadArgs<'capabilitiesUpdated'>) => ({
     context: { capabilities: event.capabilities },
   }),
-  activeKernelChanged: ({ event }: CadArgs<'activeKernelChanged'>) => ({ context: { activeKernelId: event.kernelId } }),
+  activeKernelChanged: ({ context, event }: CadArgs<'activeKernelChanged'>) => ({
+    context: {
+      activeKernelId: event.kernelId,
+      // Another kernel's evaluate options mean nothing to this one.
+      ...(event.kernelId === context.activeKernelId ? {} : { evaluateOptions: {} }),
+    },
+  }),
 };
 
 /** Results and issues a unit with a kernel records in every state after connecting. */
@@ -1166,9 +1176,13 @@ export const cadMachine = setup({
     },
     setEvaluateOptions: ({ context, event }, enq) => {
       const { document } = context;
-      enq(() => {
-        // A document not open yet takes them when it opens.
-        void document?.update({ evaluateOptions: event.evaluateOptions });
+      // A document not open yet takes them when it opens.
+      enq(async () => {
+        try {
+          await document?.update({ evaluateOptions: event.evaluateOptions });
+        } catch {
+          // A refused or superseded update reports through the evaluation; nothing to do here.
+        }
       });
       return { context: { evaluateOptions: event.evaluateOptions } };
     },

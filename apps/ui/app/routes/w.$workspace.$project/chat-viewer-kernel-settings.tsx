@@ -15,21 +15,6 @@ import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 export const viewOptionsSaveDelay = 300;
 
 /**
- * Defaults to show for evaluate options: the schema's own, then each property's first example. An option the kernel
- * resolves itself when unset (a mesh adaptivity) declares no default but shows its usual value as an example.
- */
-const shownDefaults = (offer: Readonly<{ schema: unknown; defaults: Readonly<Record<string, unknown>> }>) => {
-  const properties = (offer.schema as { properties?: Record<string, { examples?: unknown }> }).properties ?? {};
-  const shown: Record<string, unknown> = {};
-  for (const [key, property] of Object.entries(properties)) {
-    if (Array.isArray(property.examples) && property.examples.length > 0) {
-      shown[key] = property.examples[0];
-    }
-  }
-  return { ...shown, ...offer.defaults };
-};
-
-/**
  * Kernel settings for the view this pane shows, inside the viewer settings menu: nothing when the view declares no
  * options. Each edit re-renders the view at once through the pane's live draft; the record is written once edits rest,
  * so a drag re-renders every frame without a file write per frame.
@@ -53,11 +38,17 @@ export function ViewerKernelSettings({
   const options = offered?.options;
   const groups = useMemo(() => (options ? kernelSettingsGroups(options.schema, options.defaults) : []), [options]);
   // Evaluate options are the document's: a change re-evaluates it, so edits rest before they are sent.
-  const evaluateOffer = evaluation?.success ? evaluation.evaluateOptions : undefined;
-  const evaluateDefaults = useMemo(() => (evaluateOffer ? shownDefaults(evaluateOffer) : {}), [evaluateOffer]);
+  /* A failed evaluation offers nothing, yet an option may be what failed it: the last offer stays so the setting and its
+   * Reset remain reachable. The CAD unit clears its options when its file or kernel changes. */
+  const [evaluateOffer, setEvaluateOffer] =
+    useState<Extract<NonNullable<typeof evaluation>, { success: true }>['evaluateOptions']>();
+  if (evaluation?.success && evaluation.evaluateOptions !== evaluateOffer) {
+    setEvaluateOffer(evaluation.evaluateOptions);
+  }
+  const evaluateDefaults = evaluateOffer?.defaults ?? {};
   const evaluateGroups = useMemo(
-    () => (evaluateOffer ? kernelSettingsGroups(evaluateOffer.schema, evaluateDefaults) : []),
-    [evaluateOffer, evaluateDefaults],
+    () => (evaluateOffer ? kernelSettingsGroups(evaluateOffer.schema, evaluateOffer.defaults) : []),
+    [evaluateOffer],
   );
   const evaluateOptions = useSelector(cadActor, selectCadEvaluateOptions);
   const [evaluateDraft, setEvaluateDraft] = useState<Record<string, unknown>>();

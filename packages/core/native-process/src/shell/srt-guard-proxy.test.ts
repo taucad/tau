@@ -23,10 +23,11 @@ afterEach(async () => {
 /** Send one raw request to the guard and read the first response line. */
 const ask = async (guard: GuardProxy, head: string): Promise<string> => {
   const url = new URL(guard.url);
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const socket = connect({ host: url.hostname, port: Number(url.port) }, () => {
       socket.write(head);
     });
+    socket.on('error', reject);
     let data = '';
     socket.on('data', (chunk) => {
       data += chunk.toString();

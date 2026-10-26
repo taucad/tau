@@ -44,6 +44,7 @@ const harness = (options?: {
 }) => {
   const started: string[] = [];
   const stopped: string[] = [];
+  const closeSteps: string[] = [];
   const readyChild = (region: ProjectSessionRegion) =>
     createCallbackLogic<EventObject, { projectId: string }>(({ sendBack }) => {
       sendBack({ type: 'childReady', region });
@@ -59,14 +60,18 @@ const harness = (options?: {
 
   const projectSession = projectSessionMachine.provide({
     actors: {
-      cancelRuns: fromSafeAsync<void, { projectId: string; runs: readonly string[] }>(async () => undefined),
-      flushProducers: fromSafeAsync<void, { projectId: string }>(async () => {
+      cancelRuns: fromSafeAsync<void, { projectId: string; runs: readonly string[] }>(async ({ input }) => {
+        closeSteps.push(`cancel:${input.projectId}`);
+      }),
+      flushProducers: fromSafeAsync<void, { projectId: string }>(async ({ input }) => {
+        closeSteps.push(`producers:${input.projectId}`);
         await options?.producerFlush;
         if (options?.flushRefuses === true) {
           throw new Error('An editor conflict is being recorded');
         }
       }),
-      flushSync: fromSafeAsync<void, { projectId: string; boundMilliseconds: number }>(async () => {
+      flushSync: fromSafeAsync<void, { projectId: string; boundMilliseconds: number }>(async ({ input }) => {
+        closeSteps.push(`flush:${input.projectId}`);
         await options?.closeFlush;
         if (options?.closeNever === true) {
           await new Promise<void>(() => {
@@ -91,7 +96,7 @@ const harness = (options?: {
     actor.on(type, (event) => emitted.push(event));
   }
   actor.start();
-  return { actor, started, stopped, emitted };
+  return { actor, started, stopped, emitted, closeSteps };
 };
 
 /** Let the session's own promise actors settle. */
@@ -149,6 +154,42 @@ describe('sessionsMachine', async () => {
 
     expect(started).toEqual(['projA']);
     expect(Object.keys(actor.getSnapshot().context.refs)).toEqual(['projA']);
+    actor.stop();
+  });
+
+  it('waits for a closing slot without restarting its flush or closing another live project', async () => {
+    const closeFlush = Promise.withResolvers<void>();
+    const guard = guardActors({
+      ignore: { sessions: sessionsIgnoredEvents, 'project-session': projectSessionIgnoredEvents },
+    });
+    const { actor, started, stopped, closeSteps } = harness({
+      budget: 2,
+      closeFlush: closeFlush.promise,
+      inspect: guard.inspect,
+    });
+    await openIdle(actor, 'projA');
+    await openIdle(actor, 'projB');
+    actor.send({ type: 'releaseMemory', keepProjectId: 'projB' });
+    await settle();
+    expect(closeSteps).toEqual(['cancel:projA', 'producers:projA', 'flush:projA']);
+
+    actor.send({ type: 'open', projectId: 'projC' });
+    actor.send({ type: 'releaseMemory', keepProjectId: 'projB' });
+    actor.send({ type: 'idleExpired', projectId: 'projA' });
+    await settle();
+    expect(closeSteps).toEqual(['cancel:projA', 'producers:projA', 'flush:projA']);
+    expect(started).toEqual(['projA', 'projB']);
+    expect(stopped).toEqual([]);
+    expect(actor.getSnapshot().context.pendingOpen).toBe('projC');
+    expect(sessionsCloseSuggestions(actor.getSnapshot().context)).toEqual(['projB']);
+
+    closeFlush.resolve();
+    await settle();
+    expect(stopped).toEqual(['projA']);
+    expect(started).toEqual(['projA', 'projB', 'projC']);
+    expect(Object.keys(actor.getSnapshot().context.refs)).toEqual(['projB', 'projC']);
+    expect(actor.getSnapshot().context.status['projC']?.state).toBe('live');
+    expect(actor.getSnapshot().context.pendingOpen).toBeUndefined();
     actor.stop();
   });
 

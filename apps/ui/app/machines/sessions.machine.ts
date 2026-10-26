@@ -141,7 +141,7 @@ const statusOf = (context: SessionsMachineContext, projectId: string): SessionsP
 /** A project a policy may close: no run, clean tree, nothing unpushed. */
 const isClosable = (context: SessionsMachineContext, projectId: string): boolean => {
   const status = statusOf(context, projectId);
-  return status?.runs === 0 && !status.dirty && status.pushed;
+  return status?.runs === 0 && status.state !== 'closing' && !status.dirty && status.pushed;
 };
 
 /** What stopped a policy from closing this project. */
@@ -252,7 +252,7 @@ export const sessionsMachine = setup({
   },
 }).createMachine({
   id: 'sessions',
-  version: '2',
+  version: '3',
   /* A fault no transition modelled is recorded and the registry keeps answering (MC-R12). */
   onError: ({ event }) => ({
     context: { fault: event.error instanceof Error ? event.error.message : 'sessions fault' },
@@ -370,6 +370,12 @@ export const sessionsMachine = setup({
                 refusals: withoutKey(context.refusals, event.projectId),
               },
             };
+          }
+          /* A closing slot is already making room. Restarting its close would
+           * cancel the active flush; selecting another victim would close more
+           * projects than this open needs. Keep only the latest destination. */
+          if (Object.values(context.status).some((status) => status.state === 'closing')) {
+            return { context: { pendingOpen: event.projectId } };
           }
           /* Over budget with something idle: close the least recently touched
            * idle project and say so on its row, then open (P47, AC24). The

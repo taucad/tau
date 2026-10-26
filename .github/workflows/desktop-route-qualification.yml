@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: All platforms, or Linux-only staging evidence (not public promotion)
+        description: All platforms, Linux-only staging evidence (not public promotion), or Mac-only staging ZIP/DMG evidence
         required: true
         default: all
         type: choice
-        options: [all, linux]
+        options: [all, linux, macos]
       channel:
         description: Exact candidate channel; all three candidates must agree
         required: true
@@ -63,7 +63,7 @@ jobs:
           node --input-type=module <<'NODE'
           import { appendFileSync } from 'node:fs';
           const scope = process.env.TAU_DESKTOP_QUALIFICATION_SCOPE;
-          if (!['all', 'linux'].includes(scope) || (scope === 'linux' && process.env.CHANNEL !== 'staging')) throw new Error('Invalid qualification scope/channel');
+          if (!['all', 'linux', 'macos'].includes(scope) || (scope !== 'all' && process.env.CHANNEL !== 'staging')) throw new Error('Invalid qualification scope/channel');
           const rows = [
             {"id": "macos-zip-arm64", "route": "macos-zip", "host": "[\"macos-26\"]"},
             {"id": "macos-dmg-arm64", "route": "macos-dmg", "host": "[\"macos-26\"]"},
@@ -75,7 +75,8 @@ jobs:
             {"id": "debian-apt-x11", "route": "linux-apt", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-debian13-x11\"]"},
             {"id": "debian-appimage-x11", "route": "linux-appimage", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-debian13-x11\"]"},
           ];
-          const selected = scope === 'linux' ? rows.filter(row => row.route.startsWith('linux-')) : rows;
+          // A scoped run selects exactly its own platform's rows: Mac-only is ZIP and DMG on both native architectures.
+          const selected = scope === 'all' ? rows : rows.filter(row => row.route.startsWith(scope === 'linux' ? 'linux-' : 'macos-'));
           appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(selected)}\n`);
           NODE
 
@@ -100,7 +101,8 @@ jobs:
       TAU_QUALIFICATION_RUN_C: ${{ inputs.candidate_c }}
       APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
       TAU_WINDOWS_PUBLISHER: ${{ vars.TAU_WINDOWS_PUBLISHER }}
-      TAU_APPIMAGE_PUBLIC_KEYS: ${{ vars.TAU_APPIMAGE_PUBLIC_KEYS }}
+      # Linux trust is only read by Linux rows; other rows get an inert empty key set instead of a Linux prerequisite.
+      TAU_APPIMAGE_PUBLIC_KEYS: ${{ !startsWith(matrix.route, 'linux-') && '{}' || vars.TAU_APPIMAGE_PUBLIC_KEYS }}
       TAU_APPIMAGE_KEY_ID: ${{ vars.TAU_APPIMAGE_KEY_ID }}
       TAU_APT_PRIMARY_FINGERPRINT: ${{ vars.TAU_APT_PRIMARY_FINGERPRINT }}
       TAU_APT_SIGNING_FINGERPRINT: ${{ vars.TAU_APT_SIGNING_FINGERPRINT }}
@@ -171,11 +173,11 @@ jobs:
         run: pnpm nx run desktop:collect-qualification-rows
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ inputs.scope == 'linux' && 'desktop-linux-host-matrix' || 'desktop-route-host-matrix' }}
+          name: ${{ inputs.scope == 'linux' && 'desktop-linux-host-matrix' || inputs.scope == 'macos' && 'desktop-macos-host-matrix' || 'desktop-route-host-matrix' }}
           path: out/qualification-receipts/host-matrix.json
           if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ inputs.scope == 'linux' && 'desktop-linux-ci-receipts' || 'desktop-route-ci-receipts' }}
+          name: ${{ inputs.scope == 'linux' && 'desktop-linux-ci-receipts' || inputs.scope == 'macos' && 'desktop-macos-ci-receipts' || 'desktop-route-ci-receipts' }}
           path: out/qualification-receipts/route-receipts.json
           if-no-files-found: error

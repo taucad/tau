@@ -10,6 +10,13 @@ export type { AcquireNodeAuthorityWriterInput, NodeAuthorityWriter } from '#back
 export { NodeFsAuthorityHost, serveNodeFsProvider } from '#backend/node/host.js';
 export type {
   CheckedDirectory,
+  CheckedEntryRename,
+  CheckedEntryRenameResult,
+  EntryIdentity,
+  EntryObservation,
+  EntryPrecondition,
+  LinkObservation,
+  ObserveEntryInput,
   CheckedEntryConflict,
   CheckedEntryResult,
   CheckedRename,

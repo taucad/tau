@@ -13,6 +13,12 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import { serveNodeFsProvider } from '#backend/node/host.js';
 import type { CheckedEntryResult, NodeFsRootRun, NodeFsServer } from '#backend/node/host.js';
+import type {
+  EntryIdentity,
+  EntryObservation,
+  EntryPrecondition,
+  NodeFsRootScope,
+} from '@taucad/filesystem/backend/node';
 import type { NodeFsPort } from '#backend/node/port.js';
 import { tauPathPolicy } from '#path-registry.js';
 
@@ -67,5 +73,39 @@ describe('NodeFsServer.run — type guarantees', () => {
     await run({ root: checkoutRoot, paths: ['part.ts'] }, async () => undefined);
     // @ts-expect-error The operation must be asynchronous so the server can track it until settlement.
     await run({ root: checkoutRoot }, () => 1);
+  });
+});
+
+describe('bounded entry public types', () => {
+  it('should infer no-follow observations and require limits and authentic identities', async () => {
+    await run({ root: checkoutRoot }, async (scope) => {
+      expectTypeOf(scope).toEqualTypeOf<NodeFsRootScope>();
+      const entry = await scope.observeEntry({ path: 'model', maximumBytes: 4096, maximumEntries: 16 });
+      expectTypeOf(entry).toEqualTypeOf<EntryObservation>();
+      if (entry.kind === 'symlink') {
+        expectTypeOf(entry.identity).toEqualTypeOf<EntryIdentity>();
+        expectTypeOf(entry.targetBytes).toEqualTypeOf<Uint8Array<ArrayBuffer>>();
+        expectTypeOf(entry.targets).toEqualTypeOf<readonly string[]>();
+        const condition = {
+          path: 'model',
+          expectedEntry: { kind: 'symlink', identity: entry.identity, targetBytes: entry.targetBytes },
+        } satisfies EntryPrecondition;
+        await scope.renameChecked({
+          from: 'model',
+          to: 'other',
+          preconditions: [condition, { path: 'other', expected: null }],
+        });
+      }
+      // @ts-expect-error Both hard allocation bounds are required.
+      await scope.observeEntry({ path: 'model', maximumBytes: 1 });
+      const invalid: EntryPrecondition = {
+        path: 'model',
+        // @ts-expect-error Entry identity cannot be fabricated from a path or caller string.
+        expectedEntry: { kind: 'directory', identity: 'model', empty: true },
+      };
+      void invalid;
+      // @ts-expect-error Observation is not a symlink creation capability.
+      await scope.symlink({ path: 'new', target: 'model' });
+    });
   });
 });

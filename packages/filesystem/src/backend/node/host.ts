@@ -20,6 +20,10 @@ import {
   drainNodeFsProviderWatchClosures,
   writeNodeFileCheckedWithAuthority,
   deleteNodeFileCheckedWithAuthority,
+  nodeEntryObserver,
+  nodeEntryKind,
+  readNodeFileBounded,
+  listNodeEntriesBounded,
 } from '#backend/node/provider.js';
 import { acquireNodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
@@ -314,9 +318,48 @@ export type NodeFsHostOptions = {
   allowRoot(root: string): boolean;
 };
 
+declare const entryIdentityBrand: unique symbol;
+
+/** Provider/root-bound no-follow entry incarnation. Re-observe after mutation; not authority or external-writer CAS. @public */
+export type EntryIdentity = string & { readonly [entryIdentityBrand]: true };
+
+/** Exact stored link bytes and ordered canonical rooted target hops, ending in the effective target. @public */
+export type LinkObservation = Readonly<{
+  /** Host-private bytes: never emit a backing absolute target into a projected mount. */
+  targetBytes: Uint8Array<ArrayBuffer>;
+  /** Revalidate every hop before reusing a projected target after any dependency changes. */
+  targets: readonly string[];
+}>;
+
+/** Mandatory payload and directory-name/link-hop bounds for one no-follow observation. @public */
+export type ObserveEntryInput = Readonly<{
+  path: string;
+  maximumBytes: number;
+  maximumEntries: number;
+  signal?: AbortSignal;
+}>;
+
+/** Owned bounded content or no-follow metadata from one admitted entry. @public */
+export type EntryObservation =
+  | Readonly<{ kind: 'absent' }>
+  | Readonly<{ kind: 'file'; identity: EntryIdentity; bytes: Uint8Array<ArrayBuffer> }>
+  | Readonly<{ kind: 'directory'; identity: EntryIdentity; names: readonly string[] }>
+  | (Readonly<{ kind: 'symlink'; identity: EntryIdentity }> & LinkObservation);
+
+/** Directory or existing-link equality at checked rename; ordinary files retain FileWritePrecondition. @public */
+export type EntryPrecondition = Readonly<{
+  path: string;
+  expectedEntry:
+    | Readonly<{ kind: 'directory'; identity: EntryIdentity; empty: boolean }>
+    | Readonly<{ kind: 'symlink'; identity: EntryIdentity; targetBytes: Uint8Array<ArrayBuffer> }>;
+}>;
+
 /** One entry whose observed state differed from what a checked entry operation required. @public */
-// oxlint-disable-next-line typescript/no-restricted-types -- `null` is the public checked-write absence sentinel.
-export type CheckedEntryConflict = Readonly<{ path: string; actual: Uint8Array<ArrayBuffer> | null | 'directory' }>;
+export type CheckedEntryConflict = Readonly<{
+  path: string;
+  // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the public checked-write absence sentinel.
+  actual: Uint8Array<ArrayBuffer> | null | 'directory' | 'symlink';
+}>;
 
 /** Outcome of a checked rename or directory operation. A conflict is returned, never thrown. @public */
 export type CheckedEntryResult =
@@ -334,9 +377,14 @@ export type CheckedEntryResult =
 export type CheckedRename = Readonly<{
   from: string;
   to: string;
-  preconditions: readonly FileWritePrecondition[];
+  preconditions: ReadonlyArray<FileWritePrecondition | EntryPrecondition>;
   signal?: AbortSignal;
 }>;
+
+/** The checked entry rename input; file preconditions remain byte-for-byte compatible. @public */
+export type CheckedEntryRename = CheckedRename;
+/** Checked rename outcome, including a no-follow symlink kind on conflicts. @public */
+export type CheckedEntryRenameResult = CheckedEntryResult;
 
 /**
  * Exactly one directory: create needs an existing parent and an absent path; remove needs an empty directory.
@@ -356,6 +404,8 @@ export type CheckedDirectory = Readonly<{ path: string; signal?: AbortSignal }>;
 export type NodeFsRootScope = Readonly<
   Pick<RootedFileSystem, 'readFile' | 'readdir' | 'stat' | 'exists' | 'writeFileChecked' | 'deleteFileChecked'> & {
     signal: AbortSignal;
+    /** Linux descriptor-relative observation; other runtimes reject EOPNOTSUPP before reading. */
+    observeEntry(input: ObserveEntryInput): Promise<EntryObservation>;
     renameChecked(input: CheckedRename): Promise<CheckedEntryResult>;
     mkdirChecked(input: CheckedDirectory): Promise<CheckedEntryResult>;
     rmdirChecked(input: CheckedDirectory): Promise<CheckedEntryResult>;
@@ -413,7 +463,10 @@ const bytesOf = (value: Uint8Array<ArrayBuffer> | string): Uint8Array<ArrayBuffe
   typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value);
 
 const sameBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
-  left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
+  left.byteLength === right.byteLength &&
+  Buffer.from(left.buffer, left.byteOffset, left.byteLength).equals(
+    Buffer.from(right.buffer, right.byteOffset, right.byteLength),
+  );
 
 const errnoCode = (error: unknown): string | undefined => (error as NodeJS.ErrnoException | undefined)?.code;
 
@@ -428,24 +481,24 @@ const parentOf = (rootedPath: string): string => {
 // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the public checked-write absence sentinel.
 type EntryState = CheckedEntryConflict['actual'];
 
-// Observe one entry through the admitted provider: bytes, absence, or a directory.
+// Existing checked operations retain portability; no-follow final kinds prevent accidental link flattening.
 const observeEntry = async (provider: NodeFsProvider, rootedPath: string): Promise<EntryState> => {
-  let stats: Awaited<ReturnType<NodeFsProvider['stat']>>;
-  try {
-    stats = await provider.stat(rootedPath);
-  } catch (error) {
-    if (errnoCode(error) === 'ENOENT' || errnoCode(error) === 'ENOTDIR') {
-      return null;
-    }
-    throw error;
+  const kind = await nodeEntryKind(provider, rootedPath);
+  if (kind === 'absent') {
+    return null;
   }
-  return stats.type === 'dir' ? 'directory' : provider.readFile(rootedPath);
+  if (kind === 'directory' || kind === 'symlink') {
+    return kind;
+  }
+  return readNodeFileBounded(provider, rootedPath, checkedRenameLimits.bytes);
 };
 
-type ExpectedState = Exclude<EntryState, 'directory'>;
+type ExpectedState = Exclude<EntryState, 'directory' | 'symlink'>;
 
 const matches = (actual: EntryState, expected: ExpectedState): boolean =>
-  actual === null ? expected === null : actual !== 'directory' && expected !== null && sameBytes(actual, expected);
+  actual === null
+    ? expected === null
+    : actual !== 'directory' && actual !== 'symlink' && expected !== null && sameBytes(actual, expected);
 
 const renameTooLarge = (from: string): Error =>
   Object.assign(
@@ -466,45 +519,61 @@ const spend = (budget: RenameBudget, bytes: number): void => {
   }
 };
 
-// Observe one entry, refusing before a read that would pass the rename's byte budget.
+// Remaining allowance reaches the descriptor reader before allocation, including growth races.
 const observeBounded = async (
   provider: NodeFsProvider,
   rootedPath: string,
   budget: RenameBudget,
 ): Promise<EntryState> => {
-  let stats: Awaited<ReturnType<NodeFsProvider['stat']>>;
+  const kind = await nodeEntryKind(provider, rootedPath);
+  if (kind === 'absent') {
+    return null;
+  }
+  if (kind === 'directory' || kind === 'symlink') {
+    return kind;
+  }
   try {
-    stats = await provider.stat(rootedPath);
+    const bytes = await readNodeFileBounded(provider, rootedPath, budget.bytes);
+    spend(budget, bytes.byteLength);
+    return bytes;
   } catch (error) {
-    if (errnoCode(error) === 'ENOENT' || errnoCode(error) === 'ENOTDIR') {
-      return null;
+    if (errnoCode(error) === 'EFBIG') {
+      throw renameTooLarge(budget.from);
     }
     throw error;
   }
-  if (stats.type === 'dir') {
-    return 'directory';
-  }
-  spend(budget, stats.size);
-  const bytes = await provider.readFile(rootedPath);
-  // A file that grew between stat and read is charged for what was read.
-  spend(budget, Math.max(0, bytes.byteLength - stats.size));
-  return bytes;
 };
 
 // Every regular file below one directory, by root-relative path, visiting at most the entry bound.
 const regularFilesBelow = async (
   provider: NodeFsProvider,
   directory: string,
-  signal: AbortSignal | undefined,
+  options: { signal: AbortSignal | undefined; budget: RenameBudget },
 ): Promise<string[]> => {
   const files: string[] = [];
   const pending = [directory];
   let visited = 0;
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
     // A close or cancellation stops the walk between directories, so it never holds the writer unbounded.
-    signal?.throwIfAborted();
+    options.signal?.throwIfAborted();
     // oxlint-disable-next-line no-await-in-loop -- One directory at a time keeps the walk's memory bounded.
-    const entries = await provider.readdirEntries(next);
+    let entries: Awaited<ReturnType<typeof listNodeEntriesBounded>>;
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- Sequential native reads preserve the shared bound and descriptor dependency order.
+      entries = await listNodeEntriesBounded(provider, next, {
+        maximumEntries: checkedRenameLimits.entries - visited,
+        maximumBytes: options.budget.bytes,
+      });
+    } catch (error) {
+      if (['EOVERFLOW', 'EFBIG'].includes(errnoCode(error) ?? '')) {
+        throw renameTooLarge(directory);
+      }
+      throw error;
+    }
+    spend(
+      options.budget,
+      entries.reduce((total, entry) => total + Buffer.byteLength(entry.name), 0),
+    );
     visited += entries.length;
     if (visited > checkedRenameLimits.entries) {
       throw renameTooLarge(directory);
@@ -523,12 +592,15 @@ const regularFilesBelow = async (
 
 // Canonical expected state per path; two preconditions for one path must agree.
 const expectationsOf = (
-  preconditions: readonly FileWritePrecondition[],
+  preconditions: ReadonlyArray<FileWritePrecondition | EntryPrecondition>,
   operation: string,
 ): Map<string, ExpectedState> => {
   const expected = new Map<string, ExpectedState>();
   for (const precondition of preconditions) {
     assertRootedPath(precondition.path);
+    if ('expectedEntry' in precondition) {
+      throw new TypeError('Entry expectations require the no-follow checked rename path.');
+    }
     const bytes = precondition.expected === null ? null : bytesOf(precondition.expected);
     const previous = expected.get(precondition.path);
     if (
@@ -564,6 +636,19 @@ const renameChecked = async (
   if (input.preconditions.length > checkedRenameLimits.entries + 1) {
     throw renameTooLarge(input.from);
   }
+  if (input.preconditions.some((condition) => 'expectedEntry' in condition)) {
+    return renameEntriesChecked(provider, writer, input);
+  }
+  let expectedSize = 0;
+  for (const condition of input.preconditions) {
+    if ('expected' in condition && condition.expected !== null) {
+      expectedSize +=
+        typeof condition.expected === 'string' ? Buffer.byteLength(condition.expected) : condition.expected.byteLength;
+    }
+  }
+  if (expectedSize > checkedRenameLimits.bytes) {
+    throw renameTooLarge(input.from);
+  }
   const expected = expectationsOf(input.preconditions, 'rename');
   if (!expected.has(input.to)) {
     throw new TypeError('Checked renames require a destination precondition.');
@@ -573,14 +658,15 @@ const renameChecked = async (
     spend(budget, bytes?.byteLength ?? 0);
   }
   await writer.assertCurrent();
-  const source = await observeEntry(provider, input.from);
+  const source = await observeBounded(provider, input.from, budget);
   const conflicts: CheckedEntryConflict[] = [];
   if (source === 'directory') {
     if (expected.has(input.from)) {
       conflicts.push({ path: input.from, actual: 'directory' });
     }
     // Membership: every regular file below the source is named, and nothing named is missing.
-    for (const file of await regularFilesBelow(provider, input.from, input.signal)) {
+    // oxlint-disable-next-line no-await-in-loop -- Sequential native reads preserve the shared bound and descriptor dependency order.
+    for (const file of await regularFilesBelow(provider, input.from, { signal: input.signal, budget })) {
       if (!expected.has(file)) {
         // oxlint-disable-next-line no-await-in-loop -- Conflicts report current bytes in a stable order.
         conflicts.push({ path: file, actual: await observeBounded(provider, file, budget) });
@@ -589,14 +675,9 @@ const renameChecked = async (
   } else if (!expected.has(input.from)) {
     throw new TypeError('Checked renames require a source precondition.');
   }
-  const observed = await Promise.all(
-    [...expected].map(async ([candidate, bytes]) => ({
-      candidate,
-      bytes,
-      actual: await observeBounded(provider, candidate, budget),
-    })),
-  );
-  for (const { candidate, bytes, actual } of observed) {
+  for (const [candidate, bytes] of expected) {
+    // oxlint-disable-next-line no-await-in-loop -- Sequential native reads preserve the shared bound and descriptor dependency order.
+    const actual = await observeBounded(provider, candidate, budget);
     if (!matches(actual, bytes)) {
       conflicts.push({ path: candidate, actual });
     }
@@ -608,6 +689,176 @@ const renameChecked = async (
   await writer.assertCurrent();
   try {
     await provider.rename(input.from, input.to);
+  } catch (error) {
+    potentiallyApplied(error);
+  }
+  return { status: 'applied' };
+};
+
+const observationState = (entry: EntryObservation): EntryState => {
+  if (entry.kind === 'absent') {
+    return null;
+  }
+  if (entry.kind === 'file') {
+    return entry.bytes;
+  }
+  return entry.kind;
+};
+
+const renameEntriesChecked = async (
+  provider: NodeFsProvider,
+  writer: NodeAuthorityWriter,
+  input: CheckedRename,
+): Promise<CheckedEntryResult> => {
+  const budget: RenameBudget = { bytes: checkedRenameLimits.bytes, from: input.from };
+  const expected = new Map<string, Readonly<{ path: string; expected: ExpectedState }> | EntryPrecondition>();
+  for (const condition of input.preconditions) {
+    assertRootedPath(condition.path);
+    if (expected.has(condition.path)) {
+      throw new TypeError('Checked entry rename requires one expectation per canonical path.');
+    }
+    if ('expectedEntry' in condition) {
+      if (condition.expectedEntry.kind === 'symlink') {
+        spend(budget, condition.expectedEntry.targetBytes.byteLength);
+        expected.set(condition.path, {
+          path: condition.path,
+          expectedEntry: {
+            ...condition.expectedEntry,
+            targetBytes: new Uint8Array(condition.expectedEntry.targetBytes),
+          },
+        });
+      } else {
+        expected.set(condition.path, { path: condition.path, expectedEntry: { ...condition.expectedEntry } });
+      }
+    } else {
+      spend(
+        budget,
+        condition.expected === null
+          ? 0
+          : typeof condition.expected === 'string'
+            ? Buffer.byteLength(condition.expected)
+            : condition.expected.byteLength,
+      );
+      expected.set(condition.path, {
+        path: condition.path,
+        expected: condition.expected === null ? null : bytesOf(condition.expected),
+      });
+    }
+  }
+  if (!expected.has(input.from) || !expected.has(input.to)) {
+    throw new TypeError('Checked entry renames require source and destination observations.');
+  }
+  const observer = nodeEntryObserver(provider);
+  const observed = new Map<string, EntryObservation>();
+  // Retained names and target hops share the same bound as observations, across every directory.
+  let remainingEntries: number = checkedRenameLimits.entries;
+  const capture = async (candidate: string): Promise<EntryObservation> => {
+    const previous = observed.get(candidate);
+    if (previous !== undefined) {
+      return previous;
+    }
+    if (remainingEntries === 0) {
+      throw renameTooLarge(input.from);
+    }
+    remainingEntries -= 1;
+    input.signal?.throwIfAborted();
+    const entry = await observer.observe(
+      {
+        path: candidate,
+        maximumBytes: budget.bytes,
+        maximumEntries: remainingEntries,
+        signal: input.signal,
+      },
+      () => input.signal?.throwIfAborted(),
+    );
+    if (entry.kind === 'file') {
+      spend(budget, entry.bytes.byteLength);
+    }
+    if (entry.kind === 'directory') {
+      remainingEntries -= entry.names.length;
+      spend(
+        budget,
+        entry.names.reduce((total, name) => total + Buffer.byteLength(name), 0),
+      );
+    }
+    if (entry.kind === 'symlink') {
+      remainingEntries -= entry.targets.length;
+      spend(
+        budget,
+        entry.targetBytes.byteLength + entry.targets.reduce((total, target) => total + Buffer.byteLength(target), 0),
+      );
+    }
+    observed.set(candidate, entry);
+    return entry;
+  };
+  await writer.assertCurrent();
+  const source = await capture(input.from);
+  const destination = await capture(input.to);
+  const conflicts: CheckedEntryConflict[] = [];
+  const membership = new Set<string>();
+  const visit = async (next: string): Promise<void> => {
+    const entry = await capture(next);
+    membership.add(next);
+    if (!expected.has(next)) {
+      conflicts.push({ path: next, actual: observationState(entry) });
+    }
+    if (entry.kind !== 'directory') {
+      return;
+    }
+    // Walk retained names directly; never allocate an additional fan-out-sized queue of rooted paths.
+    for (const name of entry.names) {
+      if (remainingEntries === 0) {
+        throw renameTooLarge(input.from);
+      }
+      spend(budget, Buffer.byteLength(next) + 1 + Buffer.byteLength(name));
+      // oxlint-disable-next-line no-await-in-loop -- Depth-first capture reserves metadata before constructing the next child path.
+      await visit(`${next}/${name}`);
+    }
+  };
+  await visit(input.from);
+  for (const [candidate, condition] of expected) {
+    // oxlint-disable-next-line no-await-in-loop -- Sequential native reads preserve the shared bound and descriptor dependency order.
+    const actual = await capture(candidate);
+    let equal: boolean;
+    if ('expectedEntry' in condition) {
+      const required = condition.expectedEntry;
+      equal =
+        actual.kind === required.kind &&
+        actual.identity === required.identity &&
+        (required.kind === 'directory'
+          ? actual.kind === 'directory' && (actual.names.length === 0) === required.empty
+          : actual.kind === 'symlink' && sameBytes(actual.targetBytes, required.targetBytes));
+    } else {
+      equal = matches(observationState(actual), condition.expected);
+    }
+    if (isDescendant(input.from, candidate) && !membership.has(candidate)) {
+      equal = false;
+    }
+    if (!equal) {
+      conflicts.push({ path: candidate, actual: observationState(actual) });
+    }
+  }
+  if (destination.kind === 'directory' && destination.names.length > 0) {
+    conflicts.push({ path: input.to, actual: 'directory' });
+  }
+  if (conflicts.length > 0) {
+    return { status: 'conflict', conflicts };
+  }
+  try {
+    await observer.rename({
+      from: input.from,
+      to: input.to,
+      source,
+      destination,
+      entries: observed,
+      maximumBytes: budget.bytes,
+      maximumEntries: remainingEntries,
+      signal: input.signal,
+      check: async () => {
+        input.signal?.throwIfAborted();
+        await writer.assertCurrent();
+      },
+    });
   } catch (error) {
     potentiallyApplied(error);
   }
@@ -656,14 +907,19 @@ const rmdirChecked = async (
   if (current !== 'directory') {
     return { status: 'conflict', conflicts: [{ path: input.path, actual: current }] };
   }
-  const children = await provider.readdir(input.path);
+  const entries = await listNodeEntriesBounded(provider, input.path, {
+    maximumEntries: checkedRenameLimits.entries,
+    maximumBytes: checkedRenameLimits.bytes,
+  });
+  const children = entries.map((entry) => entry.name);
   if (children.length > 0) {
-    const conflicts = await Promise.all(
-      children.map(async (name) => {
-        const child = `${input.path}/${name}`;
-        return { path: child, actual: await observeEntry(provider, child) };
-      }),
-    );
+    const budget: RenameBudget = { bytes: checkedRenameLimits.bytes, from: input.path };
+    const conflicts: CheckedEntryConflict[] = [];
+    for (const name of children) {
+      const child = `${input.path}/${name}`;
+      // oxlint-disable-next-line no-await-in-loop -- All retained conflict bytes share one bounded allowance.
+      conflicts.push({ path: child, actual: await observeBounded(provider, child, budget) });
+    }
     return { status: 'conflict', conflicts };
   }
   input.signal?.throwIfAborted();
@@ -1093,8 +1349,17 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
       });
     const scope: NodeFsRootScope = {
       signal,
+      observeEntry: async (input) =>
+        call(async () =>
+          nodeEntryObserver(provider).observe(input, () => {
+            signal.throwIfAborted();
+            if (!options.allowRoot(root)) {
+              throw codedError('Root admission was revoked during observation.', 'EACCES');
+            }
+          }),
+        ),
       // oxlint-disable-next-line typescript/promise-function-async -- Overloads forward to the provider's own.
-      readFile: ((rootedPath: string, encoding?: 'utf8') =>
+      readFile: (async (rootedPath: string, encoding?: 'utf8') =>
         call(async () =>
           encoding === undefined ? provider.readFile(rootedPath) : provider.readFile(rootedPath, encoding),
         )) as NodeFsRootScope['readFile'],
@@ -1116,7 +1381,13 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
         }
         return mutate(
           input.signal,
-          [input.from, input.to, ...input.preconditions.map((condition) => condition.path)],
+          input.preconditions.some((condition) => 'expectedEntry' in condition)
+            ? [
+                parentOf(input.from),
+                parentOf(input.to),
+                ...input.preconditions.map((condition) => parentOf(condition.path)),
+              ]
+            : [input.from, input.to, ...input.preconditions.map((condition) => condition.path)],
           async () =>
             renameChecked(provider, writer, {
               ...input,

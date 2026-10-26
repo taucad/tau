@@ -54,19 +54,13 @@ const injectFailureAfter = (stage: FailureStage): void => {
     });
     return;
   }
-  if (stage === 'read-back') {
-    const readFile = fs.readFile.bind(fs);
-    vi.spyOn(fs, 'readFile').mockImplementation(async (...args) => {
-      await readFile(...args);
-      throw failure;
-    });
-    return;
-  }
 
   const open = fs.open.bind(fs);
   vi.spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
     const handle = await open(path, flags, mode);
-    if (flags === 'wx' && stage === 'temp-write') {
+    if (stage === 'read-back' && typeof flags === 'number') {
+      vi.spyOn(handle, 'read').mockRejectedValue(failure);
+    } else if (flags === 'wx' && stage === 'temp-write') {
       const writeFile = handle.writeFile.bind(handle);
       vi.spyOn(handle, 'writeFile').mockImplementation(async (...args) => {
         await writeFile(...args);
@@ -392,10 +386,20 @@ describe('NodeFsProvider atomic writes', () => {
   it('should report WRITE_VERIFICATION_FAILED when committed bytes do not verify', async () => {
     const root = createRoot();
     const provider = new NodeFsProvider(root);
-    const readFile = fs.readFile.bind(fs);
-    vi.spyOn(fs, 'readFile').mockImplementation(async (...args) => {
-      await readFile(...args);
-      return Buffer.from('corrupt');
+    const open = fs.open.bind(fs);
+    vi.spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
+      const handle = await open(path, flags, mode);
+      if (typeof flags === 'number') {
+        const read = handle.read.bind(handle);
+        vi.spyOn(handle, 'read').mockImplementation(async (...arguments_: Parameters<typeof handle.read>) => {
+          const result = await read(...arguments_);
+          if (result.bytesRead > 0 && result.buffer instanceof Uint8Array) {
+            result.buffer[0] = 0;
+          }
+          return result;
+        });
+      }
+      return handle;
     });
 
     await expect(provider.writeFile('target.txt', 'new')).rejects.toMatchObject({ code: 'WRITE_VERIFICATION_FAILED' });

@@ -5,6 +5,10 @@
  
  */
 export type {
+  PreparedShell,
+  ShellExecution,
+  ShellRecovery,
+  ShellResource,
   ShellExit,
   ShellFilesystem,
   ShellLaunch,

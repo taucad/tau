@@ -32,6 +32,23 @@ export type ShellFilesystem = Readonly<{
   denied: readonly string[];
 }>;
 
+/** Durable identity prepared before any command can run. @public */
+export type PreparedShell = Readonly<{ executionId: string }>;
+
+/** A host-owned project or checkout binding. The provider never interprets its key. @public */
+export type ShellResource = Readonly<{ key: string; root: string }>;
+
+/** Durable custody metadata; an explicitly absent resource denotes a private-only probe. @public */
+export type ShellExecution = PreparedShell & Readonly<{ privateRoot: string; resource: ShellResource | undefined }>;
+
+/**
+ * A scoped recovery result. Stopped retains exclusive custody until release; blocked grants no deletion authority.
+ *
+ * @public
+ */
+export type ShellRecovery = ShellExecution &
+  (Readonly<{ status: 'stopped' }> | Readonly<{ status: 'blocked'; message: string }>);
+
 /** Terminal dimensions, in cells. @public */
 export type ShellTerminalSize = Readonly<{ columns: number; rows: number }>;
 

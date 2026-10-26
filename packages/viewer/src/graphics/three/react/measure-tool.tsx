@@ -510,6 +510,7 @@ export function MeasureTool(): React.JSX.Element {
       if (graphSourceRef.current === graphSource) {
         graphSourceRef.current = undefined;
       }
+      deferredPressGenerationRef.current++;
       graphClientRef.current?.dispose();
       graphClientRef.current = undefined;
       pointerGraphPendingRef.current = new WeakMap();
@@ -1267,6 +1268,7 @@ export function MeasureTool(): React.JSX.Element {
         return;
       }
       revision = snapshot.context.revision;
+      deferredPressGenerationRef.current++;
       graphicsActor.send({ type: 'measurementPoseChanged', revision });
       if (!isMeasureActive) {
         return;
@@ -1595,6 +1597,7 @@ export function MeasureTool(): React.JSX.Element {
         return;
       }
       cuts = context.committedSectionCuts;
+      deferredPressGenerationRef.current++;
       committedCutsRef.current = cuts;
       exactAbortRef.current?.abort();
       exactRequestRef.current++;

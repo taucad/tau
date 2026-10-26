@@ -376,6 +376,62 @@ describe('MeasureTool activation', () => {
     expect(actor.getSnapshot().context.measurements.map(({ id }) => id)).toEqual([pinned!.id]);
   });
 
+  it('should drop a waiting click when visibility exposes a different body', async () => {
+    clickWhilePreparing();
+    act(() => {
+      model.visible = false;
+      sideMesh.position.set(0, -0.5, 0.5);
+      sideMesh.updateMatrixWorld();
+      actor.send({ type: 'setSurfaceVisibility', payload: false });
+    });
+    await answerWorker();
+    await answerWorker();
+    expect(actor.getSnapshot().context.measurements).toEqual([]);
+  });
+
+  it('should drop a waiting click when component display changes', async () => {
+    clickWhilePreparing();
+    act(() => {
+      actor.getSnapshot().context.modelInteractionRef.send({
+        type: 'restoreComponentDisplay',
+        componentDisplay: { schemaVersion: 1, unitsById: { model: { hiddenComponentIds: ['body'] } } },
+      });
+    });
+    await answerWorker();
+    expect(actor.getSnapshot().context.measurements).toEqual([]);
+  });
+
+  it('should drop a waiting click when a pose changes before its graph arrives', async () => {
+    clickWhilePreparing();
+    act(() => {
+      actor.getSnapshot().context.kinematicsRef.send({
+        type: 'loadMechanism',
+        unitId: 'model',
+        mechanism: {
+          schemaVersion: 1,
+          units: { length: 'mm', angle: 'deg' },
+          root: 'base',
+          links: { base: { components: ['body'] } },
+          joints: {},
+        },
+      });
+    });
+    await answerWorker();
+    expect(actor.getSnapshot().context.measurements).toEqual([]);
+  });
+
+  it('should drop a waiting click when a committed cut changes before its graph arrives', async () => {
+    clickWhilePreparing();
+    act(() => {
+      actor.send({ type: 'addSectionCut', payload: { kind: 'plane', plane: 'xy' } });
+      const [cut] = actor.getSnapshot().context.sectionCuts;
+      actor.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: 2 } } });
+      actor.send({ type: 'commitSectionCuts', payload: actor.getSnapshot().context.sectionCuts });
+    });
+    await answerWorker();
+    expect(actor.getSnapshot().context.measurements).toEqual([]);
+  });
+
   it('drops a waiting click when the model is replaced', async () => {
     clickWhilePreparing();
     act(() => {

@@ -16,14 +16,21 @@ export const maskProblem = (filesystem: ShellFilesystem): string | undefined => 
     if (!isAbsolute(root) || root.includes('\0')) {
       return 'every masked container must be an absolute path.';
     }
+    // A firmlinked data-volume spelling is not the path the kernel reports, so no mask rule would match it.
+    if (root === '/System/Volumes/Data' || root.startsWith('/System/Volumes/Data/')) {
+      return 'a masked container must not be spelled through /System/Volumes/Data; use its firmlinked path.';
+    }
+    // The native realpath returns each component's stored case on macOS, so a root spelled in another case is
+    // refused rather than compiled into a mask that matches nothing.
+    const canonical = (path: string): string => realpathSync.native(path);
     try {
       const info = lstatSync(root, { throwIfNoEntry: false });
       if (info === undefined) {
         const parent = dirname(root);
-        if (!lstatSync(parent).isDirectory() || realpathSync(parent) !== parent) {
+        if (!lstatSync(parent).isDirectory() || canonical(parent) !== parent) {
           return 'an absent masked container must have a canonical directory parent.';
         }
-      } else if (!info.isDirectory() || realpathSync(root) !== root) {
+      } else if (!info.isDirectory() || canonical(root) !== root) {
         return 'a masked container must be a real directory without symbolic-link ancestors.';
       }
     } catch {

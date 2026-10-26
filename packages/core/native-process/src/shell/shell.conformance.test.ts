@@ -502,7 +502,7 @@ describe.runIf(enabled)('shell conformance', () => {
         masked: [reserved],
       };
       const positive = await run(
-        'cat .tau/AGENTS.md && ls .tau/parameters && cd .tau/parameters && printf CHILD > value && cd ../.. && realpath .tau/parameters && printf NESTED > .tau/a/b/value && ls .tau/a/b',
+        'cat .tau/AGENTS.md && ls .tau/parameters && cd .tau/parameters && printf CHILD > value && cd ../.. && realpath .tau/parameters && printf NESTED > .tau/a/b/value && ls .tau/a/b && (cd .tau/a/b && pwd -P) && realpath .tau/a/b',
         { filesystem, workingDirectory: project },
       );
       expect(positive.exitCode, positive.stderr).toBe(0);

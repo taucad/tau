@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { wrapCommandWithSandboxMacOS } from '@anthropic-ai/sandbox-runtime/dist/sandbox/macos-sandbox-utils.js';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -41,6 +41,18 @@ describe('masked container admission', () => {
     const alias = join(filesystem.writable[0]!, 'alias');
     symlinkSync(filesystem.masked![0]!, alias);
     expect(maskProblem({ ...filesystem, masked: [join(alias, 'missing')] })).toContain('canonical');
+  });
+  it('should refuse a container spelled through the data-volume firmlink', () => {
+    const filesystem = fixture();
+    expect(maskProblem({ ...filesystem, masked: ['/System/Volumes/Data/Users/someone/project/.tau'] })).toContain(
+      '/System/Volumes/Data',
+    );
+  });
+  it.runIf(process.platform === 'darwin')('should refuse a container spelled in a case it is not stored in', () => {
+    const filesystem = fixture();
+    const upper = filesystem.masked![0]!.toUpperCase();
+    expect(maskProblem({ ...filesystem, masked: [upper] })).toBeDefined();
+    expect(maskProblem({ ...filesystem, masked: [join(dirname(upper), 'reserved')] })).toBeDefined();
   });
   it('should refuse a child alias resolving outside its container', () => {
     const filesystem = fixture();

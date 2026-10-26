@@ -439,7 +439,7 @@ export function ProjectWorkspaceProvider({
     () => {
       openPanel('kinematics');
     },
-    // Monaco binds Ctrl+M on Windows and Linux to "Toggle Tab Key Moves Focus", its way out of the Tab trap.
+    // CodeMirror binds Ctrl+M on Windows and Linux to toggle Tab focus mode.
     { enabled: !isMobile, ignoreInputs: true },
   );
   useKeybinding(
@@ -487,7 +487,7 @@ export function ProjectWorkspaceProvider({
 
   useEffect(() => {
     const subscription = editorRef.on('fileOpened', (event) => {
-      /* Another file opening ends the way back; the preview's own open may report after Monaco loads it.
+      /* Another file opening ends the way back; the preview's own open may report after the code editor loads it.
        * ponytail: reopening the same file from the tree keeps it, until back or another file. */
       setReturnTo((current) => (current === undefined || current.path === event.path ? current : undefined));
       if (event.source !== 'user') {

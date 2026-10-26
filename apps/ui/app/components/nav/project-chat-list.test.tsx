@@ -15,8 +15,8 @@ vi.mock('#hooks/use-cloud-projects.js', () => ({
 
 const mockUseChats = vi.fn();
 const mockUseChatRecords = vi.fn();
-const mockWarmMonaco = vi.hoisted(() => vi.fn());
-vi.mock('#lib/monaco-warmup.js', () => ({ warmMonaco: mockWarmMonaco }));
+const mockWarmWorkspace = vi.hoisted(() => vi.fn());
+vi.mock('#lib/project-workspace-warmup.js', () => ({ warmProjectWorkspace: mockWarmWorkspace }));
 const { mockObserve, mockRelease, mockStore, mockUnread } = vi.hoisted(() => {
   const release = vi.fn<(chatId: string) => void>();
   const observe = vi.fn((chatId: string, _projectId: string) => () => {
@@ -462,13 +462,13 @@ describe('ProjectChatList', () => {
     expect(link.querySelector('.font-medium')).toBeNull();
   });
 
-  it('starts Monaco when a chat row is pointed at or focused', () => {
+  it('warms the workspace shell when a chat row is pointed at or focused', () => {
     render(<ProjectChatList project={project} isProjectActive />);
     const link = screen.getByRole('link', { name: 'Chat 12' });
 
     fireEvent.pointerEnter(link);
     fireEvent.focus(link);
-    expect(mockWarmMonaco).toHaveBeenCalledTimes(2);
+    expect(mockWarmWorkspace).toHaveBeenCalledTimes(2);
   });
 
   it('hangs the chats off a rail one slot in', () => {

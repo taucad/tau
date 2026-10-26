@@ -33,7 +33,7 @@ import { MobileProjectTopBar } from '#routes/w.$workspace.$project/mobile-projec
 
 /* B-27, D-UI-16: every panel but the chat is its own chunk, loaded when its surface
  * first opens. Only the active surface is mounted (Terminal survives hiding), so a phone that
- * stays on the chat never downloads the editor (Monaco and the dockview
+ * stays on the chat never downloads the editor (CodeMirror and the dockview
  * workbench), parameters, converter or revision panels. */
 const ChatFileTree = lazy(async () => {
   const module = await import('#routes/w.$workspace.$project/chat-file-tree.js');
@@ -268,7 +268,7 @@ function isEditingTarget(target: EventTarget | undefined): boolean {
   if (target instanceof HTMLInputElement) {
     return textEntryInputTypes.has(target.type);
   }
-  return target instanceof HTMLTextAreaElement || target.isContentEditable || target.closest('.monaco-editor') !== null;
+  return target instanceof HTMLTextAreaElement || target.isContentEditable || target.closest('.cm-editor') !== null;
 }
 
 const clippingOverflow = new Set(['auto', 'scroll', 'hidden', 'clip']);

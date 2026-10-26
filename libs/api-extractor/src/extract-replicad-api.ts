@@ -221,7 +221,7 @@ export function extractApi(): ApiEntry[] {
 
 /**
  * Build the bundled type declarations as a map of module path to raw `.d.ts`
- * content. Each entry is registered at its own virtual file path in Monaco.
+ * content. Each entry is registered at its own virtual file path in the TypeScript service.
  * Exported for testing.
  */
 export function buildBundledTypes(): Record<string, string> {
@@ -238,7 +238,7 @@ export function buildBundledTypes(): Record<string, string> {
   };
 }
 
-/** Extract the type-only model surface without pulling the runtime into Monaco. */
+/** Extract the type-only model surface without pulling the runtime into the TypeScript service. */
 export function buildReplicadModelTypes(): BundledTypesPackageMap {
   const root = join(import.meta.dirname, '../../..');
   const annotationRoot = join(root, 'packages/plugins/replicad/src');

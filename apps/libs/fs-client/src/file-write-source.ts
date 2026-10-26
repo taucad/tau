@@ -1,7 +1,7 @@
 /**
  * The source of a main-thread file write for cache / tree coordination.
  *
- * - **`editor`**: Write came from the Monaco editor (used to avoid redundant refresh work).
+ * - **`editor`**: Write came from a source editor (used to avoid redundant refresh work).
  * - **`user`**: Explicit user action (create file, upload, etc.).
  * - **`machine`**: Programmatic source (e.g. AI chat tooling).
  *

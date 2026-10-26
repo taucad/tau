@@ -46,8 +46,9 @@ describe.runIf(process.platform === 'linux')('Linux protected-path stand-ins', (
     expect(lstatSync(reserved).isDirectory()).toBe(true);
     // A directory row is stood in for by a directory, never a file.
     expect(lstatSync(control).isDirectory()).toBe(true);
-    // Below a stand-in nothing more is made: the stand-in alone is the mount point.
-    expect(existsSync(join(reserved, 'binding.json'))).toBe(false);
+    // The whole protected path is present, so the runtime makes no mount point of its own.
+    expect(lstatSync(join(reserved, 'binding.json')).isFile()).toBe(true);
+    expect(lstatSync(join(reserved, 'runs')).isDirectory()).toBe(true);
     const releaseSecond = holdProtectedStandIns(filesystem);
     releaseFirst();
     releaseFirst();

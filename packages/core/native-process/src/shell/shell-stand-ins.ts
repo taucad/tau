@@ -31,19 +31,25 @@ const removeStandIn = (path: string, directory: boolean): void => {
   }
 };
 
-/** Claim the stand-in for one protected path: an existing one this process holds, or a new one it creates. */
-const standInStep = (path: string, root: string, filesystem: ShellFilesystem): string | undefined => {
+/**
+ * Claim the stand-ins for one protected path: every absent component from the writable root down to the path itself,
+ * so the runtime finds the whole path present and creates no mount point of its own. Components this process already
+ * stands in for are held again.
+ */
+const standInSteps = (path: string, root: string, filesystem: ShellFilesystem): string[] => {
   const protectedPaths = new Set([...filesystem.denied, ...(filesystem.readOnly ?? [])]);
   const directories = new Set(filesystem.directories ?? []);
   const steps: string[] = [];
   for (let step = path; step !== root && inside(step, root); step = dirname(step)) {
     steps.unshift(step);
   }
+  const claimed: string[] = [];
   for (const step of steps) {
     const existing = standIns.get(step);
     if (existing !== undefined) {
       existing.holders += 1;
-      return step;
+      claimed.push(step);
+      continue;
     }
     const info = lstatSync(step, { throwIfNoEntry: false });
     if (info === undefined) {
@@ -57,29 +63,30 @@ const standInStep = (path: string, root: string, filesystem: ShellFilesystem): s
           closeSync(openSync(step, 'wx'));
         }
       } catch {
-        // Created by someone else meanwhile, or not creatable: the runtime handles it as before.
-        return undefined;
+        // Created by someone else meanwhile, or not creatable: the runtime handles the rest as before.
+        break;
       }
       standIns.set(step, { holders: 1, directory });
-      return step;
+      claimed.push(step);
+      continue;
     }
     if (step === path || info.isSymbolicLink() || !info.isDirectory() || protectedPaths.has(step)) {
-      return undefined;
+      break;
     }
   }
-  return undefined;
+  return claimed;
 };
 
 /**
- * Hold a host-side stand-in at the first absent component of every protected path inside a writable root, shared by
+ * Hold host-side stand-ins for every absent component of each protected path inside a writable root, shared by
  * every Linux launch of this process, before the launch's sandbox configuration observes the filesystem.
  *
  * Bubblewrap can only mask a name that exists, so the runtime creates such a mount point itself and its supervisor
  * deletes it on exit, even while another launch's sandbox is mounted on it: that sandbox's mask detaches, and a launch
  * configured against the vanished entry binds a source that is gone. A stand-in instead exists from before any launch
- * that relies on it is configured until the last of them has ended, so the runtime never creates or deletes it. It is
- * an empty directory for an intermediate component or a directory row, and an empty file only for a file row, so the
- * product never finds a file where it reads a directory. Paths under an existing protected directory, a symbolic
+ * that relies on it is configured until the last of them has ended, so the runtime never creates or deletes one. Each
+ * is an empty directory for an intermediate component or a directory row, and an empty file only for a file row, so
+ * the product never finds a file where it reads a directory. Paths under an existing protected directory, a symbolic
  * link or a file are left alone: those are already covered, and the host never writes there.
  *
  * @internal
@@ -98,15 +105,12 @@ export const holdProtectedStandIns = (filesystem: ShellFilesystem): (() => void)
     if (root === undefined) {
       continue;
     }
-    const step = standInStep(path, root, filesystem);
-    if (step !== undefined) {
-      held.push(step);
-    }
+    held.push(...standInSteps(path, root, filesystem));
   }
   if (held.length > 0 && !exitHookRegistered) {
     exitHookRegistered = true;
     process.once('exit', () => {
-      for (const [path, standIn] of standIns) {
+      for (const [path, standIn] of [...standIns].toSorted(([left], [right]) => right.length - left.length)) {
         removeStandIn(path, standIn.directory);
       }
     });

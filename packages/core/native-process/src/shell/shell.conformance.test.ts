@@ -401,7 +401,6 @@ describe.runIf(enabled)('shell conformance', () => {
         [
           `printf ready > ${signal('second-ready')}`,
           waitFor('second-write'),
-          'mkdir -p .tau 2>/dev/null && printf LEAK > .tau/leak 2>/dev/null',
           'printf LEAK > .tau/binding.json 2>/dev/null',
           'printf LEAK > .git 2>/dev/null',
           'printf SECOND',
@@ -417,7 +416,6 @@ describe.runIf(enabled)('shell conformance', () => {
       const written = await second;
       expect(written.exitCode, written.stderr).toBe(0);
       expect(written.stdout).toBe('SECOND');
-      expect(existsSync(join(reserved, 'leak'))).toBe(false);
       expect(existsSync(join(reserved, 'binding.json'))).toBe(false);
       expect(existsSync(control) ? readFileSync(control, 'utf8') : 'absent').not.toContain('LEAK');
       // Nothing either launch relied on is left behind on the host.

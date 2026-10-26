@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Inside a stock guest: install the real APT selector's profiled bwrap, then run the shell conformance targets as an
 # unprivileged user against it. Called over SSH by shell-conformance-vm.sh with the distro as its argument.
-# Required files: ~/bwrap-fixture/*.deb, ~/node, ~/tau (tracked sources plus verified host-built Electron/UI artifacts).
+# Required files: ~/bwrap-fixture/*.deb (staging), ~/bwrap-fixture-production/*.deb, ~/node, ~/tau (tracked sources plus verified host-built Electron/UI artifacts).
 # Required env: GITHUB_SHA/GITHUB_RUN_ID/GITHUB_REPOSITORY, TAU_SHELL_CONFORMANCE_ROW (forwarded identities).
 # Usage: bash shell-conformance-guest.sh ubuntu|debian (inside the disposable guest only).
 # Exit: nonzero for any prerequisite, conformance/application assertion, evidence or stock-policy failure.
@@ -62,6 +62,12 @@ sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommen
   "$HOME"/bwrap-fixture/tau-staging-runtime-*_amd64.deb "$HOME"/bwrap-fixture/tau-staging_*_amd64.deb
 sudo grep -Fx 'tau-staging-bwrap (unconfined)' /sys/kernel/security/apparmor/profiles
 bwrap=/opt/tau-staging/sandbox/bwrap
+# The production Electron application resolves the production channel's selector bwrap; install that real pair too.
+sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+  "$HOME"/bwrap-fixture-production/tau-runtime-*_amd64.deb "$HOME"/bwrap-fixture-production/tau_*_amd64.deb
+sudo grep -Fx 'tau-bwrap (unconfined)' /sys/kernel/security/apparmor/profiles
+application_bwrap=/opt/tau/sandbox/bwrap
+[[ -x "$application_bwrap" ]]
 cd "$HOME/tau"
 corepack enable --install-directory "$HOME/node/bin"
 pnpm install --frozen-lockfile
@@ -116,7 +122,7 @@ sha256sum "$VK_DRIVER_FILES" > "$evidence/vulkan-icd.sha256"
 application_status=0
 sudo -u tau env PATH="$PATH" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" VK_DRIVER_FILES="$VK_DRIVER_FILES" \
   NX_NO_CLOUD=true NX_DAEMON=false NODE_OPTIONS=--no-experimental-webstorage \
-  TAU_DESKTOP_SHELL_BWRAP="$bwrap" TAU_E2E_WEBGPU_PROFILE=software \
+  TAU_DESKTOP_SHELL_BWRAP="$application_bwrap" TAU_E2E_WEBGPU_PROFILE=software \
   GITHUB_SHA="$GITHUB_SHA" GITHUB_RUN_ID="$GITHUB_RUN_ID" \
   timeout --signal=TERM --kill-after=60s 45m xvfb-run -a \
   node --env-file=apps/api/.env.example node_modules/nx/dist/bin/nx.js \

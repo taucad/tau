@@ -98,10 +98,30 @@ ssh "${ssh_options[@]}" tau@127.0.0.1 'sudo cloud-init status --wait' > "$output
 # The real APT selector pair: it copies the distro bwrap to /opt/tau-staging/sandbox/bwrap and loads its profile.
 # dpkg-deb refuses control directories the 077 umask above would create.
 (umask 022 && cd "$REPO_ROOT" && node --import @oxc-node/core/register apps/desktop/scripts/hosted-linux-bwrap-fixture.mts "$work/bwrap-fixture")
-ssh "${ssh_options[@]}" tau@127.0.0.1 'mkdir -m 700 ~/bwrap-fixture ~/node ~/tau'
-for deb in "$work"/bwrap-fixture/*.deb; do
-  # shellcheck disable=SC2029 # Producer-controlled artifact name, expanded on the host by design.
-  ssh "${ssh_options[@]}" tau@127.0.0.1 "cat > ~/bwrap-fixture/$(basename "$deb")" < "$deb"
+# The unpackaged production Electron build resolves the production channel's Tau-owned bwrap
+# (`linuxInstallation('production').bwrap`), so the application tier needs the same real producer's production pair.
+mkdir -p "$work/bwrap-app/app/resources/branding" "$work/bwrap-fixture-production"
+printf 'fixture icon' > "$work/bwrap-app/app/resources/branding/icon.png"
+printf '#!/bin/sh\nexit 0\n' > "$work/bwrap-app/app/Tau"
+chmod 755 "$work/bwrap-app/app/Tau"
+cat > "$work/bwrap-app/build.mts" <<PRODUCER
+import { buildLinuxAptPackages } from '$REPO_ROOT/apps/desktop/scripts/linux-apt-package.mts';
+const files = await buildLinuxAptPackages({
+  appDirectory: process.argv[2]!,
+  outputDirectory: process.argv[3]!,
+  tag: 'desktop@0.1.0',
+  sourceCommit: 'f'.repeat(40),
+  maintainer: 'Tau VM proof <proof@example.invalid>',
+});
+console.log(files.join('\\n'));
+PRODUCER
+(umask 022 && cd "$REPO_ROOT" && node --import @oxc-node/core/register "$work/bwrap-app/build.mts" "$work/bwrap-app/app" "$work/bwrap-fixture-production")
+ssh "${ssh_options[@]}" tau@127.0.0.1 'mkdir -m 700 ~/bwrap-fixture ~/bwrap-fixture-production ~/node ~/tau'
+for fixture in bwrap-fixture bwrap-fixture-production; do
+  for deb in "$work/$fixture"/*.deb; do
+    # shellcheck disable=SC2029 # Producer-controlled artifact name, expanded on the host by design.
+    ssh "${ssh_options[@]}" tau@127.0.0.1 "cat > ~/$fixture/$(basename "$deb")" < "$deb"
+  done
 done
 # The verified Node from setup-nx, and the checked-out tracked sources; dependencies install fresh in the guest.
 node_root="$(dirname "$(dirname "$(command -v node)")")"

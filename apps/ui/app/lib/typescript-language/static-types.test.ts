@@ -15,7 +15,7 @@ describe('readStaticTypePackage', () => {
         }
         return path.endsWith('/dist') ? ['main.d.ts', 'extra.d.ts'] : [];
       }),
-      readFile: vi.fn(async (path: string) => files.get(path) ?? ''),
+      readFile: vi.fn(async (path: string) => new TextEncoder().encode(files.get(path) ?? '')),
     };
     const definitions = await readStaticTypePackage(reader, '@taucad/geo');
     expect(definitions).toEqual([

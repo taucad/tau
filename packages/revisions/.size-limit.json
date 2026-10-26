@@ -1,7 +1,7 @@
 [
   {
-    "name": "Revisions ES module outputs \u2014 atomic LFS hydration and bounded durable close; measured 108425 bytes brotli on macOS, 2026-10-21; about 109.0 kB on Linux CI, 2026-10-24, with the git HTTP client's retry of 429 and retryable 503 (Hosted Remote Storage DA6)",
+    "name": "Revisions ES module outputs \u2014 atomic LFS hydration and bounded durable close; measured 108425 bytes brotli on macOS, 2026-10-21; 109.51 kB on Linux, 2026-10-26, with I7 turn-lease execution holds, strict lease parsing and the held-checkout discard guard (Q9 I7 API revision 3)",
     "path": "dist/**/*.mjs",
-    "limit": "109.4 kB"
+    "limit": "110.6 kB"
   }
 ]

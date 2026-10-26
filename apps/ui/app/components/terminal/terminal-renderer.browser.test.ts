@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTerminalRenderer } from '#components/terminal/terminal-renderer.js';
+import { createTerminalRenderer, isTerminalPasteChord } from '#components/terminal/terminal-renderer.js';
 import type { TerminalRendererOptions, TerminalRendererView } from '#components/terminal/terminal-renderer.js';
 
 const theme = {
@@ -186,6 +186,40 @@ describe('createTerminalRenderer (AurigaX 0.3.6)', () => {
     clipboardData.setData('text/plain', 'echo one\necho two');
     textbox().dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
     expect(sent.join('')).toBe('echo one\recho two');
+  });
+
+  it('leaves Ctrl+Shift+V to the browser paste command and sends Ctrl+V to the shell as ^V', async () => {
+    const created = await create();
+    const sent: string[] = [];
+    created.onData((data) => {
+      sent.push(data);
+    });
+    created.focus();
+    const chord = new KeyboardEvent('keydown', {
+      key: 'V',
+      code: 'KeyV',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    textbox().dispatchEvent(chord);
+    expect(chord.defaultPrevented).toBe(false);
+    textbox().dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'v', code: 'KeyV', ctrlKey: true, bubbles: true, cancelable: true }),
+    );
+    await vi.waitFor(() => {
+      expect(sent.join('')).toBe('\u0016');
+    });
+  });
+
+  it('names Ctrl+Shift+V the paste chord on Linux and Windows, and none on macOS, where Cmd+V pastes', () => {
+    const chord = { code: 'KeyV', ctrlKey: true, shiftKey: true, altKey: false, metaKey: false };
+    expect(isTerminalPasteChord(chord, 'Linux x86_64')).toBe(true);
+    expect(isTerminalPasteChord(chord, 'Win32')).toBe(true);
+    expect(isTerminalPasteChord(chord, 'MacIntel')).toBe(false);
+    expect(isTerminalPasteChord({ ...chord, shiftKey: false }, 'Linux x86_64')).toBe(false);
+    expect(isTerminalPasteChord({ ...chord, altKey: true }, 'Win32')).toBe(false);
   });
 
   it('parses a large backlog in bounded slices and yields to the event loop between them', async () => {

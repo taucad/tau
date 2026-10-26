@@ -57,6 +57,26 @@ const announceDelay = 100;
 const announceMaxLines = 20;
 const announceRetainedLines = 100;
 
+/**
+ * Whether a key press is the platform's terminal paste chord other than macOS's Cmd+V, which needs no help: Ctrl+Shift+V
+ * on Linux and Windows. Plain Ctrl+V is not one; it reaches the program as ^V.
+ *
+ * @param event - The key press.
+ * @param platform - `navigator.platform`.
+ * @returns Whether to let the browser paste instead of encoding the key.
+ * @public
+ */
+export const isTerminalPasteChord = (
+  event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'metaKey'>,
+  platform: string,
+): boolean =>
+  !platform.startsWith('Mac') &&
+  event.code === 'KeyV' &&
+  event.ctrlKey &&
+  event.shiftKey &&
+  !event.altKey &&
+  !event.metaKey;
+
 /** Milliseconds between screen-mirror refreshes while output or resizes arrive. */
 const mirrorDelay = 150;
 
@@ -289,6 +309,13 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
       event.preventDefault();
       event.stopImmediatePropagation();
       options.onLeave();
+      return;
+    }
+    /* (9) The platform's terminal paste chord: Ctrl+Shift+V on Linux and Windows. AurigaX never encodes it, and the
+     * browser's own paste command on the editable textbox fires the `paste` event below. Cmd+V on macOS already
+     * reaches that event through AurigaX, and Ctrl+V stays ^V for the shell, as in xterm.js. */
+    if (isTerminalPasteChord(event, navigator.platform)) {
+      event.stopImmediatePropagation();
     }
   });
 

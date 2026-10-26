@@ -303,7 +303,8 @@ type DeferredMeasurePress = Readonly<{
   /** The camera it was released under: its screen position means nothing under another. */
   cameraWorld: THREE.Matrix4;
   cameraProjection: THREE.Matrix4;
-  /** Feature graph requests that had failed when it was released: after another fails, it stops waiting. */
+  /** The graph under the press and its failure count when released. */
+  pendingSurface?: THREE.Mesh;
   failures: number;
 }>;
 
@@ -400,8 +401,8 @@ export function MeasureTool(): React.JSX.Element {
   const pressPreparingRef = useRef<Promise<void> | undefined>(undefined);
   /** Where the current press went down, so a release that dragged away is never taken for a click. */
   const pressOriginRef = useRef<(MeasurePointerCoordinates & { pointerId: number }) | undefined>(undefined);
-  /** Pointer feature graph requests that failed, so a waiting press stops when the worker keeps failing. */
-  const pointerGraphFailuresRef = useRef(0);
+  /** Failures per surface, so an unrelated graph cannot cancel a waiting press. */
+  const pointerGraphFailuresRef = useRef(new WeakMap<THREE.Mesh, number>());
   /** The hover seed is taken once per activation, on the first listener bind, never on a later rebind. */
   const hoverSeedPendingRef = useRef(true);
   /**
@@ -639,7 +640,8 @@ export function MeasureTool(): React.JSX.Element {
           if (graphSourceRef.current !== graphSource) {
             return;
           }
-          pointerGraphFailuresRef.current++;
+          const failures = pointerGraphFailuresRef.current;
+          failures.set(surface, (failures.get(surface) ?? 0) + 1);
           const { context } = graphicsActor.getSnapshot();
           if (
             presentedKey === geometryKeyRef.current &&
@@ -823,17 +825,19 @@ export function MeasureTool(): React.JSX.Element {
       }
       invalidate();
 
+      const pendingSurface =
+        firstIntersection?.object instanceof THREE.Mesh && !getCachedMeshMeasurementFeatures(firstIntersection.object)
+          ? firstIntersection.object
+          : undefined;
+      const surfacePreparing = pendingSurface ? pointerGraphPendingRef.current.get(pendingSurface) : undefined;
       return {
         hasTarget: Boolean(firstIntersection) && (measureMode === 'point' || !measureSnapEnabled),
         hasActiveSnapTarget: Boolean(closest),
         point:
           closest?.position ?? (measureMode === 'point' || !measureSnapEnabled ? firstIntersection?.point : undefined),
         target: closest,
-        whenReady: preparing.length > 0 ? settleAny(preparing) : undefined,
-        pendingSurface:
-          firstIntersection?.object instanceof THREE.Mesh && !getCachedMeshMeasurementFeatures(firstIntersection.object)
-            ? firstIntersection.object
-            : undefined,
+        whenReady: surfacePreparing ?? (preparing.length > 0 ? settleAny(preparing) : undefined),
+        pendingSurface,
       };
     },
     [
@@ -1752,7 +1756,10 @@ export function MeasureTool(): React.JSX.Element {
           waits: 1,
           cameraWorld: cameraRef.current.matrixWorld.clone(),
           cameraProjection: cameraRef.current.projectionMatrix.clone(),
-          failures: pointerGraphFailuresRef.current,
+          pendingSurface: pointerSnapshot.pendingSurface,
+          failures: pointerSnapshot.pendingSurface
+            ? (pointerGraphFailuresRef.current.get(pointerSnapshot.pendingSurface) ?? 0)
+            : 0,
         });
         return;
       }
@@ -1794,12 +1801,21 @@ export function MeasureTool(): React.JSX.Element {
         // Zoomed, framed or turned by the view cube while it waited: the press's screen position is somewhere else now.
         return;
       }
+      if (press.pendingSurface && (pointerGraphFailuresRef.current.get(press.pendingSurface) ?? 0) !== press.failures) {
+        return;
+      }
       const snapshot = updatePointerSnapshot(coordinates, isTouch);
       if (!snapshot.hasActiveSnapTarget && snapshot.whenReady) {
-        if (waits < maxDeferredPressWaits && pointerGraphFailuresRef.current === press.failures) {
+        if (waits < maxDeferredPressWaits) {
           // Something else under it was still being prepared (a pick tree after the graph): wait for that too.
           prioritizePressSurface(snapshot);
-          deferPress({ ...press, preparing: snapshot.whenReady, waits: waits + 1 });
+          deferPress({
+            ...press,
+            preparing: snapshot.whenReady,
+            waits: waits + 1,
+            pendingSurface: snapshot.pendingSurface,
+            failures: snapshot.pendingSurface ? (pointerGraphFailuresRef.current.get(snapshot.pendingSurface) ?? 0) : 0,
+          });
         }
         return;
       }

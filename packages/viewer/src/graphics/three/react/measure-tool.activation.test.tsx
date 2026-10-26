@@ -17,7 +17,7 @@ import type { MeasurementFeatureWorkerClient } from '#graphics/three/utils/measu
 
 const worker = vi.hoisted(() => ({
   /** Feature graph requests the worker has not answered yet; a test answers them. */
-  pending: [] as Array<Readonly<{ mesh: unknown; answer: () => void }>>,
+  pending: [] as Array<Readonly<{ mesh: unknown; answer: () => void; fail: () => void }>>,
   /** Every feature graph request it received. */
   requests: 0,
   /** The meshes the tool asked it to prepare ahead of its queue, in order. */
@@ -42,9 +42,12 @@ vi.mock('#graphics/three/utils/measurement-features-worker-client.js', () => ({
       }
       return (
         getCachedMeshMeasurementFeatures(mesh) ??
-        new Promise((resolve) => {
+        new Promise((resolve, reject) => {
           worker.pending.push({
             mesh,
+            fail: () => {
+              reject(new Error('Measurement feature worker failed.'));
+            },
             answer: () => {
               resolve(getMeshMeasurementFeatures(mesh));
             },
@@ -238,9 +241,11 @@ describe('MeasureTool activation', () => {
   /** Answers every feature graph request the worker holds, and lets what waited on them run. */
   const answerWorker = async (only?: THREE.Mesh): Promise<void> => {
     await act(async () => {
-      for (const { mesh, answer } of worker.pending.splice(0)) {
-        if (only === undefined || mesh === only) {
-          answer();
+      for (const request of worker.pending.splice(0)) {
+        if (only === undefined || request.mesh === only) {
+          request.answer();
+        } else {
+          worker.pending.push(request);
         }
       }
       await new Promise((resolve) => {
@@ -306,6 +311,29 @@ describe('MeasureTool activation', () => {
     expect(worker.prioritized).not.toContain(sideMesh);
     await answerWorker(model);
     expect(actor.getSnapshot().context.measurements).toMatchObject([{ status: 'current' }]);
+  });
+
+  it('should retain a waiting click when an unrelated active graph fails before its prioritized graph succeeds', async () => {
+    act(() => {
+      actor.send({ type: 'setMeasureActive', payload: true });
+    });
+    dispatch('pointermove', pixelOf(5, 3, 0.5));
+    runFrames();
+    dispatch('pointerdown', pixelOf(0, -0.9, 1));
+    dispatch('pointerup', pixelOf(0, -0.9, 1));
+    expect(worker.prioritized).toContain(model);
+    const failed = worker.pending.find((request) => request.mesh === sideMesh);
+    expect(failed).toBeDefined();
+    await act(async () => {
+      failed!.fail();
+    });
+    expect(actor.getSnapshot().context.measurements).toEqual([]);
+
+    await answerWorker(model);
+
+    expect(actor.getSnapshot().context.measurements).toMatchObject([
+      { operation: 'edge-length', status: 'current', distance: 2 },
+    ]);
   });
 
   it('keeps a waiting click through a re-render of the tool', async () => {

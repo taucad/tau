@@ -9,11 +9,11 @@ VARIABLES record, barrier, writer, owner, live, tokens, used, acknowledged,
           observed, roots, resource, inventoryComplete, answered, event
 vars == <<record, barrier, writer, owner, live, tokens, used, acknowledged,
           observed, roots, resource, inventoryComplete, answered, event>>
-Init == /\ record = "prepared" /\ barrier = "absent" /\ ~writer
+Init == /\ record = "prepared" /\ barrier = "absent" /\ writer = FALSE
         /\ owner = "host" /\ live = Actors
         /\ tokens = [a \in Actors |-> IF a = "host" THEN "host" ELSE "none"]
-        /\ used = {"host"} /\ ~acknowledged /\ observed = "none"
-        /\ roots /\ resource /\ ~inventoryComplete /\ ~answered /\ event = "init"
+        /\ used = {"host"} /\ acknowledged = FALSE /\ observed = "none"
+        /\ roots = TRUE /\ resource = TRUE /\ inventoryComplete = FALSE /\ answered = FALSE /\ event = "init"
 Current(a) == a \in live /\ owner = a /\ tokens[a] = owner
 SpawnBlocked ==
   /\ Current("host") /\ record = "prepared" /\ barrier = "absent"

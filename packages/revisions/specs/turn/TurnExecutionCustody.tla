@@ -14,9 +14,9 @@ Turn == INSTANCE TurnProtocol WITH
 custody == <<executionIds, issued, stopped, closing, rootLive, checkoutLease,
              checkoutExists, returned, holdReply, releaseReply>>
 vars == <<turn, world, act, out, emits, custody>>
-Init == /\ Turn!Init /\ executionIds = {} /\ ~issued /\ ~stopped /\ ~closing
-        /\ rootLive /\ checkoutLease = world.leaseFile /\ checkoutExists
-        /\ ~returned /\ holdReply = "none" /\ releaseReply = "none"
+Init == /\ Turn!Init /\ executionIds = {} /\ issued = FALSE /\ stopped = FALSE /\ closing = FALSE
+        /\ rootLive = TRUE /\ checkoutLease = world.leaseFile /\ checkoutExists = TRUE
+        /\ returned = FALSE /\ holdReply = "none" /\ releaseReply = "none"
 Hold(key) ==
   /\ ~issued
   /\ LET accepted == key = "current" /\ rootLive /\ ~closing
@@ -28,7 +28,7 @@ Hold(key) ==
                   checkoutLease, checkoutExists, returned, releaseReply>>
 Cleanup(ok) ==
   /\ issued /\ executionIds # {}
-  /\ stopped' = stopped \/ ok /\ returned' = TRUE
+  /\ stopped' = (stopped \/ ok) /\ returned' = TRUE
   /\ UNCHANGED <<turn, world, act, out, emits, executionIds, issued, closing,
                   rootLive, checkoutLease, checkoutExists, holdReply, releaseReply>>
 ReleaseExecution(key) ==
@@ -50,7 +50,7 @@ ProtocolStep ==
   /\ (HonorCustody /\ executionIds # {}) =>
         /\ ~world'.cutAsked /\ ~world'.releaseAsked
         /\ turn'.phase = "held" /\ world'.leaseFile
-  /\ checkoutLease' = checkoutLease \/ (~world.leaseFile /\ world'.leaseFile)
+  /\ checkoutLease' = (checkoutLease \/ (~world.leaseFile /\ world'.leaseFile))
   /\ UNCHANGED <<executionIds, issued, stopped, closing, rootLive,
                   checkoutExists, returned, holdReply, releaseReply>>
 Crash ==

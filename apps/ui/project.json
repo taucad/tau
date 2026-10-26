@@ -99,6 +99,9 @@
           "env": "TAU_DEBUG"
         },
         {
+          "env": "SENTRY_ENVIRONMENT"
+        },
+        {
           "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
         },
         {

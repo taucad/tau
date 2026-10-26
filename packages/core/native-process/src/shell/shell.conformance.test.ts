@@ -15,8 +15,10 @@ import { createHash } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -360,6 +362,112 @@ describe.runIf(enabled)('shell conformance', () => {
        * never does, so the record stays where it was. */
       expect(existsSync(join(records, 'new.json'))).toBe(false);
       expect(existsSync(join(work, 'records-moved'))).toBe(false);
+    },
+  );
+
+  conformance(
+    'C17',
+    'an absent protected path shared by overlapping launches stays covered until the last of them ends',
+    async () => {
+      const project = join(work, 'shared-absent');
+      const sync = join(work, 'shared-sync');
+      mkdirSync(project);
+      mkdirSync(sync);
+      const reserved = join(project, '.tau');
+      const control = join(project, '.git');
+      const filesystem = {
+        readable: [readonly, home],
+        writable: [project, sync],
+        readOnly: [join(reserved, 'chats')],
+        denied: [secret, join(reserved, 'binding.json'), control],
+      };
+      const signal = (name: string): string => join(sync, name);
+      const waitFor = (name: string): string => `while [ ! -f ${signal(name)} ]; do sleep 0.02; done`;
+      const until = async (name: string): Promise<void> => {
+        for (let attempt = 0; attempt < 1500 && !existsSync(signal(name)); attempt++) {
+          // oxlint-disable-next-line no-await-in-loop -- a bounded wait for the sandbox's own signal file.
+          await delay(20);
+        }
+        expect(existsSync(signal(name)), name).toBe(true);
+      };
+      // The first launch stays up while the second is configured, then ends before the second writes.
+      const first = run(`printf ready > ${signal('first-ready')}; ${waitFor('first-release')}; printf FIRST`, {
+        filesystem,
+        workingDirectory: project,
+        commandId: 'conformance#c17-first',
+      });
+      await until('first-ready');
+      const second = run(
+        [
+          `printf ready > ${signal('second-ready')}`,
+          waitFor('second-write'),
+          'printf LEAK > .tau/binding.json 2>/dev/null',
+          'printf LEAK > .git 2>/dev/null',
+          'printf SECOND',
+        ].join('; '),
+        { filesystem, workingDirectory: project, commandId: 'conformance#c17-second' },
+      );
+      await until('second-ready');
+      writeFileSync(signal('first-release'), '');
+      const ended = await first;
+      expect(ended.exitCode, ended.stderr).toBe(0);
+      expect(ended.stdout).toBe('FIRST');
+      writeFileSync(signal('second-write'), '');
+      const written = await second;
+      expect(written.exitCode, written.stderr).toBe(0);
+      expect(written.stdout).toBe('SECOND');
+      expect(existsSync(join(reserved, 'binding.json'))).toBe(false);
+      expect(existsSync(control) ? readFileSync(control, 'utf8') : 'absent').not.toContain('LEAK');
+      // Nothing either launch relied on is left behind on the host.
+      expect(existsSync(reserved)).toBe(false);
+      expect(existsSync(control)).toBe(false);
+    },
+  );
+
+  conformance(
+    'C18',
+    'an absent protected directory row is never a file on the host while a launch is live',
+    async () => {
+      const project = join(work, 'runs-row');
+      const sync = join(work, 'runs-sync');
+      mkdirSync(join(project, '.tau', 'parameters'), { recursive: true });
+      mkdirSync(sync);
+      const runs = join(project, '.tau', 'runs');
+      const filesystem = {
+        readable: [readonly, home],
+        writable: [project, sync],
+        readOnly: [runs],
+        denied: [secret],
+        directories: [runs],
+      };
+      const live = run(
+        [
+          `printf ready > ${join(sync, 'ready')}`,
+          `while [ ! -f ${join(sync, 'release')} ]; do sleep 0.02; done`,
+          '(printf FORGED > .tau/runs/forged.json) 2>/dev/null || printf REFUSED',
+        ].join('; '),
+        { filesystem, workingDirectory: project, commandId: 'conformance#c18-live' },
+      );
+      for (let attempt = 0; attempt < 1500 && !existsSync(join(sync, 'ready')); attempt++) {
+        // oxlint-disable-next-line no-await-in-loop -- a bounded wait for the sandbox's own signal file.
+        await delay(20);
+      }
+      expect(existsSync(join(sync, 'ready'))).toBe(true);
+      // What the revisions engine does with its records while the session is live: test, list, then write.
+      const during = lstatSync(runs, { throwIfNoEntry: false });
+      expect(during === undefined || during.isDirectory(), 'a file stands where a directory row belongs').toBe(true);
+      if (during !== undefined) {
+        expect(readdirSync(runs)).toStrictEqual([]);
+      }
+      mkdirSync(runs, { recursive: true });
+      writeFileSync(join(runs, 'lease.json'), '{"lease":"HOST"}\n');
+      writeFileSync(join(sync, 'release'), '');
+      const ended = await live;
+      expect(ended.exitCode, ended.stderr).toBe(0);
+      expect(ended.stdout).toBe('REFUSED');
+      expect(existsSync(join(runs, 'forged.json'))).toBe(false);
+      // The host's own record survives the launch's release.
+      expect(readFileSync(join(runs, 'lease.json'), 'utf8')).toBe('{"lease":"HOST"}\n');
     },
   );
 

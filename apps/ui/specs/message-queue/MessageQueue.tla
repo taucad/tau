@@ -4,6 +4,8 @@
 \* button and its diagnostic origin does not change cancellation or queue delivery.
 \* Explicit reorder changes only the saved queue sequence under delivery exclusion.
 \* Enlarged-text reflow and readable busy labels retain the same disabled guards.
+\* Composer tray dividers, row padding and icon alignment are presentation only;
+\* queue edit, reorder, retry and targeted-send callbacks retain their guards and identity.
 \* Pending view actions remain serialized until settlement. Pointer cancellation,
 \* dropping outside the queue and unsaved inline edits further restrict Reorder.
 \* Failed steering retains its durable cancel identity; a removed item's view-only

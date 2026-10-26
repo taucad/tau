@@ -10,7 +10,9 @@ const first = await lines.next();
 const job = JSON.parse(String(first.value)) as { command: string };
 const reply = job.command.includes('TAU_FIXTURE_UNAVAILABLE')
   ? { status: 'unavailable', message: 'fixture prerequisite missing' }
-  : { status: 'ready', argv: ['/bin/sh', '-c', job.command] };
+  : job.command.includes('TAU_FIXTURE_CWD')
+    ? { status: 'unavailable', message: `cwd=${process.cwd()}` }
+    : { status: 'ready', argv: ['/bin/sh', '-c', job.command] };
 process.stdout.write(`${JSON.stringify(reply)}\n`);
 // oxlint-disable-next-line no-await-in-loop -- drained only to observe the channel closing.
 for (let next = await lines.next(); next.done !== true; next = await lines.next()) {

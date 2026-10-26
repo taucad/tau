@@ -11,6 +11,12 @@ const sentry = vi.hoisted(() => ({
   captureUiError: vi.fn(),
 }));
 
+const harness = vi.hoisted(() => ({ direct: false }));
+vi.mock('#lib/observability-harness-context.js', () => ({
+  isObservabilityHarnessDirect: () => harness.direct,
+  observabilityHarnessTags: () => ({}),
+}));
+
 const buildId = vi.hoisted(() => 1_792_730_113_029);
 vi.mock('#environment.config.js', () => ({
   // eslint-disable-next-line @typescript-eslint/naming-convention -- The environment's own names.
@@ -80,6 +86,7 @@ const settle = async (): Promise<void> => {
 
 beforeEach(() => {
   sentry.loads = 0;
+  harness.direct = false;
   globalThis.history.replaceState(null, '', '/invitations/secret-token?code=123#frag');
 });
 
@@ -92,6 +99,20 @@ afterEach(() => {
 });
 
 describe('error reporting', () => {
+  it('should send once through the existing fallback without importing the SDK in direct harness mode', async () => {
+    harness.direct = true;
+    const posted = stubIngest();
+    const reporter = await load();
+    const failure = new Error('Observability harness direct-path error');
+    await reporter.startErrorReporting();
+    await reporter.reportUiError(failure);
+    await reporter.reportUiError(failure);
+    expect(sentry.loads).toBe(0);
+    expect(reporter.isErrorTrackerListening()).toBe(false);
+    expect(posted).toHaveLength(1);
+    expect(posted[0]?.event.tags).toMatchObject({ delivery: 'without-sdk' });
+  });
+
   it('should load the SDK once per page, and hand a failed load over once', async () => {
     stubIngest();
     const { startErrorReporting, reportUiError, isErrorTrackerListening } = await load();

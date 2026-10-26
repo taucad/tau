@@ -347,7 +347,7 @@ catalog:
   '@swc-node/register': 1.11.1
   '@swc/core': 1.15.8
   '@better-auth-ui/core': 1.7.29
-  '@better-auth-ui/react': 1.7.29
+  '@better-auth-ui/react': 1.7.30
   smol-toml: 1.9.1
   nanoraster-darwin-arm64: 0.7.1
   '@napi-rs/keyring': 2.1.2

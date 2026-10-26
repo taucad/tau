@@ -22,6 +22,11 @@ on:
         options:
           - dmg
           - zip
+      inject_catalog_404:
+        description: 'Staging drill: inject a browser-only catalog 404 (requires expect=zip)'
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -60,6 +65,7 @@ jobs:
           CHROME_CHANNEL: chrome
           PAGE_URL: ${{ inputs.page_url }}
           EXPECT: ${{ inputs.expect }}
+          INJECT_CATALOG_404: ${{ inputs.inject_catalog_404 }}
           EVIDENCE_DIR: ${{ runner.temp }}/desktop-download-live-evidence
         run: |
           set -o pipefail
@@ -74,6 +80,8 @@ jobs:
             echo
             if [ -f "$summary" ]; then
               jq -r '"- Page: \(.pageUrl) (expect \(.expect))\n- Captured: \(.capturedAt)\n- Catalog: \(.catalog.status) \(.catalog.tag // "none") \(.catalog.sha256 // "")\n- Passed: \(.passed)"' "$summary"
+              echo
+              jq -r 'if .failureInjection then "- Failure injection: \(.failureInjection.kind) (\(.failureInjection.scope)); \(.failureInjection.requests | length) intercepted requests" else "- Failure injection: none" end' "$summary"
               echo
               echo '| Button | Label | Link |'
               echo '| --- | --- | --- |'

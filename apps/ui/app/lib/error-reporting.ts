@@ -1,3 +1,4 @@
+import { isObservabilityHarnessDirect } from '#lib/observability-harness-context.js';
 import { ENV } from '#environment.config.js';
 import type * as SentryLibrary from '#lib/sentry.lib.js';
 import { hasPageExited, isPageHidden } from '#lib/page-visibility.js';
@@ -259,6 +260,10 @@ const sendWaitingWithoutSdk = (): void => {
  * the SDK throwing as it starts leaves it unusable, logged once, and is not.
  */
 const loadAndStart = async (): Promise<LoadOutcome> => {
+  if (isObservabilityHarnessDirect()) {
+    sendWaitingWithoutSdk();
+    return {};
+  }
   let sentry: typeof SentryLibrary | undefined;
   try {
     sentry = await loadSentry();

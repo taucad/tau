@@ -1,3 +1,4 @@
+import { observabilityHarnessTags } from '#lib/observability-harness-context.js';
 import type { ErrorEvent } from '@sentry/react';
 import { randomUuid } from '@taucad/utils/id';
 import { ENV } from '#environment.config.js';
@@ -27,6 +28,10 @@ export const scrubUrl = (url: string): string => redactInvitationTokens(url.spli
  * @public
  */
 export const scrubSentryEvent = (event: ErrorEvent): ErrorEvent => {
+  const harnessTags = observabilityHarnessTags();
+  if (Object.keys(harnessTags).length > 0) {
+    event.tags = { ...event.tags, ...harnessTags };
+  }
   if (event.request) {
     const { url } = event.request;
     event.request = url === undefined ? {} : { url: scrubUrl(url) };

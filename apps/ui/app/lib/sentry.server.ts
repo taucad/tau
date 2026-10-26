@@ -6,7 +6,6 @@ import { ENV } from '#environment.config.js';
 import { readBuildId } from '#lib/build-identity.js';
 import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
 import { isObservabilityHarnessEnabled } from '#lib/observability-harness-context.js';
-import { isWeakKey } from '#lib/weak-key.js';
 import { scrubUrl, sentryEnvironment, sentryRelease } from '#lib/sentry-event.lib.js';
 
 /*
@@ -96,11 +95,16 @@ const startServerSentry = async (dsn: string): Promise<typeof SentryNode> => {
 
 let started: Promise<typeof SentryNode> | undefined;
 
+/** An object or function `Reflect.get` can read (`WeakKey` also admits symbols, which it cannot). */
+// oxlint-disable-next-line typescript/no-restricted-types -- `Reflect.get` takes exactly `object`.
+const isObjectLike = (value: unknown): value is object =>
+  (typeof value === 'object' && value !== null) || typeof value === 'function';
+
 /** Netlify Functions keep a promise handed to `Netlify.context.waitUntil` alive after the response; elsewhere it is absent. */
 const keepAlive = (promise: Promise<unknown>): void => {
   const netlify: unknown = Reflect.get(globalThis, 'Netlify');
-  const context: unknown = isWeakKey(netlify) ? Reflect.get(netlify, 'context') : undefined;
-  const waitUntil: unknown = isWeakKey(context) ? Reflect.get(context, 'waitUntil') : undefined;
+  const context: unknown = isObjectLike(netlify) ? Reflect.get(netlify, 'context') : undefined;
+  const waitUntil: unknown = isObjectLike(context) ? Reflect.get(context, 'waitUntil') : undefined;
   if (typeof waitUntil === 'function') {
     Reflect.apply(waitUntil, context, [promise]);
   }

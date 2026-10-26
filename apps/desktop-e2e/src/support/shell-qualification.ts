@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir, writeFile, stat } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { expect } from 'vitest';
 import type { Page } from 'playwright';
@@ -35,4 +36,132 @@ export const expectTerminalFile = async (root: string, path: string, expected: s
   await expect
     .poll(async () => readFile(join(root, path), 'utf8').catch(() => undefined), { timeout: 30_000 })
     .toBe(expected);
+};
+
+/** Locate a rendered word using the actual PTY grid and accessible screen, then let Playwright send real pointer input. */
+export const terminalWordPosition = async (
+  page: Page,
+  options: { readonly root: string; readonly sizeFile: string; readonly word: string },
+): Promise<{ x: number; y: number }> => {
+  const size = await readFile(join(options.root, options.sizeFile), 'utf8');
+  const [rows, columns] = size.trim().split(/\s+/u).map(Number);
+  expect(rows).toBeGreaterThan(0);
+  expect(columns).toBeGreaterThan(0);
+  const visibleRows = await page.locator('[data-terminal-screen-mirror] > div').allTextContents();
+  const row = visibleRows.findIndex((text) => text.trim() === options.word);
+  expect(row, `the output must visibly contain ${options.word}`).toBeGreaterThanOrEqual(0);
+  const canvas = await page
+    .getByRole('textbox', { name: 'Terminal', exact: true })
+    .locator('canvas')
+    .first()
+    .boundingBox();
+  expect(canvas).not.toBeNull();
+  return { x: canvas!.x + (canvas!.width / columns!) * 3, y: canvas!.y + (canvas!.height / rows!) * (row + 0.5) };
+};
+
+/** Observe Linux host process identities, including start time so PID reuse cannot look like a surviving writer. */
+type ObservedProcess = {
+  readonly pid: number;
+  readonly parent: number;
+  readonly started: string;
+  readonly command: string;
+};
+
+const processSnapshot = async (): Promise<readonly ObservedProcess[]> => {
+  const names = await readdir('/proc');
+  const rows = await Promise.all(
+    names
+      .filter((name) => /^\d+$/u.test(name))
+      .map(async (name) => {
+        try {
+          const owner = await stat(`/proc/${name}`);
+          if (owner.uid !== process.getuid?.()) {
+            return [];
+          }
+          const [status, command] = await Promise.all([
+            readFile(`/proc/${name}/stat`, 'utf8'),
+            readFile(`/proc/${name}/cmdline`, 'utf8'),
+          ]);
+          const fields = status.slice(status.lastIndexOf(')') + 2).split(' ');
+          return [{ pid: Number(name), parent: Number(fields[1]), started: fields[19]!, command }];
+        } catch (error) {
+          if (error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ESRCH')) {
+            return [];
+          }
+          throw error;
+        }
+      }),
+  );
+  return rows.flat();
+};
+
+/** A writer observed from outside Electron and its sandbox; no namespace-local PID is treated as a host PID. */
+export type TerminalWriter = {
+  readonly path: string;
+  readonly processes: readonly ObservedProcess[];
+};
+
+/** Start a real shell child, prove it writes repeatedly, then capture its host process tree. */
+export const startTerminalWriter = async (page: Page, root: string): Promise<TerminalWriter> => {
+  const name = `heartbeat-${randomUUID()}`;
+  const scriptPath = join(root, `${name}.sh`);
+  const path = join(root, `${name}.txt`);
+  await writeFile(
+    scriptPath,
+    `while :; do printf x >> '${path.replaceAll("'", String.raw`'\''`)}'; sleep 0.02; done\n`,
+  );
+  await typeTerminalCommand(page, `bash '${scriptPath.replaceAll("'", String.raw`'\''`)}' &`);
+  await expect
+    .poll(
+      async () => {
+        const bytes = await readFile(path);
+        return bytes.byteLength;
+      },
+      { timeout: 30_000 },
+    )
+    .toBeGreaterThan(2);
+  const snapshot = await processSnapshot();
+  const roots = snapshot.filter(({ command }) => command.split('\0').includes(scriptPath));
+  expect(roots, 'the external observer must find the running writer, not just an old file').toHaveLength(1);
+  const shell = snapshot.find(({ pid }) => pid === roots[0]!.parent);
+  expect(shell?.command.split('\0'), 'the writer must be a child of the real interactive session').toEqual(
+    expect.arrayContaining(['--noprofile', '--norc', '-i']),
+  );
+  const owned = new Set([shell!.pid]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const row of snapshot) {
+      if (owned.has(row.parent) && !owned.has(row.pid)) {
+        owned.add(row.pid);
+        changed = true;
+      }
+    }
+  }
+  return { path, processes: snapshot.filter(({ pid }) => owned.has(pid)) };
+};
+
+/** Return captured processes still alive under the same host identity. */
+export const survivingTerminalWriter = async (writer: TerminalWriter): Promise<readonly number[]> => {
+  const snapshot = await processSnapshot();
+  return writer.processes
+    .filter((owned) => snapshot.some((row) => row.pid === owned.pid && row.started === owned.started))
+    .map(({ pid }) => pid);
+};
+
+/** Cleanup is judged before the harness's fallback process killer or root deletion runs. */
+export const expectTerminalWriterStopped = async (writer: TerminalWriter): Promise<void> => {
+  await expect.poll(async () => survivingTerminalWriter(writer), { timeout: 10_000 }).toEqual([]);
+  const stoppedBytes = await readFile(writer.path);
+  // A bounded observation window detects writers that escaped the originally observed process tree.
+  const stableUntil = performance.now() + 300;
+  await expect
+    .poll(
+      async () => {
+        expect(await readFile(writer.path)).toEqual(stoppedBytes);
+        return performance.now() >= stableUntil;
+      },
+      { timeout: 2000, interval: 25 },
+    )
+    .toBe(true);
 };

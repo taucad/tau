@@ -1,12 +1,22 @@
 /* oxlint-disable no-template-curly-in-string -- These placeholders are expanded by Bash, never JavaScript. */
 import { access, readFile, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import process from 'node:process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { BrowserWindow } from 'electron';
 import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
-import { createTerminalProject, expectTerminalFile, typeTerminalCommand } from '#support/shell-qualification.js';
+import {
+  createTerminalProject,
+  expectTerminalFile,
+  typeTerminalCommand,
+  openTerminalPane,
+  startTerminalWriter,
+  expectTerminalWriterStopped,
+  survivingTerminalWriter,
+  terminalWordPosition,
+} from '#support/shell-qualification.js';
 
 let session: DesktopSession | undefined;
 
@@ -29,9 +39,13 @@ afterEach(async (context) => {
 });
 
 /** Start only by clicking trusted chrome; unavailable prerequisites fail the test. */
-const startTerminal = async (): Promise<{ session: DesktopSession; root: string }> => {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment variables retain their wire names.
-  session = await launchDesktopApp({ token: 'offline-shell-qualification', env: { TAU_DEBUG: 'false' } });
+const startTerminal = async (preserveProfile = false): Promise<{ session: DesktopSession; root: string }> => {
+  session = await launchDesktopApp({
+    token: 'offline-shell-qualification',
+    preserveProfile,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment variables retain their wire names.
+    env: { TAU_DEBUG: 'false' },
+  });
   const root = await createTerminalProject(session);
   await session.page.getByRole('button', { name: 'Start Terminal', exact: true }).click();
   await session.page.getByRole('button', { name: 'Restart', exact: true }).waitFor();
@@ -74,6 +88,40 @@ describe('production Electron Terminal keyboard qualification', () => {
     await page.keyboard.press('Backspace');
     await page.keyboard.press('Enter');
     await expectTerminalFile(root, 'edit.txt', 'right');
+  });
+
+  it('should bracket multiline Unicode paste until Enter and copy a mouse-selected word through the clipboard', async () => {
+    const { session: desktop, root } = await startTerminal();
+    const { page, application } = desktop;
+    await typeTerminalCommand(
+      page,
+      String.raw`bind 'set enable-bracketed-paste on'; printf ready > paste-ready.txt; printf 'readline-%s\n' ready`,
+    );
+    await expectTerminalFile(root, 'paste-ready.txt', 'ready');
+    await expect
+      .poll(async () => page.locator('[data-terminal-screen-mirror]').textContent())
+      .toContain('readline-ready');
+    await application.evaluate(({ clipboard }) => {
+      clipboard.writeText("printf '%s' 'λ東京' > pasted-one.txt\nprintf '%s' '$literal' > pasted-two.txt");
+    });
+    await page.keyboard.press('Control+v');
+    await expect
+      .poll(async () => page.locator('[data-terminal-screen-mirror]').textContent())
+      .toContain('pasted-two.txt');
+    await expect(stat(join(root, 'pasted-one.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(stat(join(root, 'pasted-two.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await page.keyboard.press('Enter');
+    await expectTerminalFile(root, 'pasted-one.txt', 'λ東京');
+    await expectTerminalFile(root, 'pasted-two.txt', '$literal');
+    await typeTerminalCommand(page, String.raw`stty size > copy-size.txt; printf 'copy%s\n' fixture`);
+    await expect.poll(async () => page.locator('[data-terminal-screen-mirror]').textContent()).toContain('copyfixture');
+    const word = await terminalWordPosition(page, { root, sizeFile: 'copy-size.txt', word: 'copyfixture' });
+    await page.mouse.dblclick(word.x, word.y);
+    await application.evaluate(({ clipboard }) => {
+      clipboard.writeText('not copied');
+    });
+    await page.keyboard.press('Control+c');
+    await expect.poll(async () => application.evaluate(({ clipboard }) => clipboard.readText())).toBe('copyfixture');
   });
 
   it('should resize the actual PTY and preserve the session when another tab hides it', async () => {
@@ -121,11 +169,73 @@ describe('production Electron Terminal keyboard qualification', () => {
     expect(await readFile(join(root, 'reload-count.txt'), 'utf8')).toBe('once');
   });
 
+  it('should stop an external writer on named Close and reopen with a clean session', async () => {
+    const { session: desktop, root } = await startTerminal();
+    const { page } = desktop;
+    const writer = await startTerminalWriter(page, root);
+    await page.keyboard.type('printf replayed > close-replay.txt');
+    await page.locator('.dv-tab[data-tab-panel-id="workbench:terminal"]').click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Close', exact: true }).click();
+    await page.getByRole('region', { name: 'Terminal', exact: true }).waitFor({ state: 'detached' });
+    await expectTerminalWriterStopped(writer);
+    await openTerminalPane(page);
+    await page.getByRole('button', { name: 'Start Terminal', exact: true }).click();
+    await page.getByRole('button', { name: 'Restart', exact: true }).waitFor();
+    await typeTerminalCommand(page, 'printf fresh > after-close.txt');
+    await expectTerminalFile(root, 'after-close.txt', 'fresh');
+    await expect(stat(join(root, 'close-replay.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('should stop the old project writer before accepting input in a different project', async () => {
+    const { session: desktop, root } = await startTerminal();
+    const { page } = desktop;
+    const writer = await startTerminalWriter(page, root);
+    await page.keyboard.type('printf stale > project-replay.txt');
+    await page.goto('app://tau/projects/new');
+    await page.getByLabel('Project Name *').fill('Other shell project');
+    await page.getByRole('button', { name: /^Create Project/u }).click();
+    await page.waitForURL(/\/w\//u);
+    await expectTerminalWriterStopped(writer);
+    await openTerminalPane(page);
+    await page.getByRole('button', { name: 'Start Terminal', exact: true }).click();
+    await page.getByRole('button', { name: 'Restart', exact: true }).waitFor();
+    await typeTerminalCommand(page, 'printf %s "$PWD" > project-cwd.txt');
+    const otherRoot = join(desktop.homeRoot, 'other-shell-project');
+    await expectTerminalFile(otherRoot, 'project-cwd.txt', otherRoot);
+    await expect(stat(join(root, 'project-replay.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(stat(join(otherRoot, 'project-replay.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('should stop owned writers on normal app quit and restart without replaying input', async () => {
+    const { session: desktop, root } = await startTerminal(true);
+    const { page, application } = desktop;
+    const projectUrl = page.url();
+    const writer = await startTerminalWriter(page, root);
+    await page.keyboard.type('printf stale > quit-replay.txt');
+    await expect.poll(async () => readFile(join(root, '.tau/workbench/layout.json'), 'utf8')).toContain('terminal');
+    await application.evaluate(({ app }) => {
+      app.quit();
+    });
+    await expect.poll(() => application.process().exitCode, { timeout: 30_000 }).toBe(0);
+    await expectTerminalWriterStopped(writer);
+    await desktop.close();
+    session = await launchDesktopApp({ token: 'offline-shell-qualification', profileRoot: dirname(desktop.homeRoot) });
+    await session.page.goto(projectUrl);
+    await session.page.getByRole('button', { name: 'Start Terminal', exact: true }).waitFor();
+    await expect(stat(join(root, 'quit-replay.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await session.page.getByRole('button', { name: 'Start Terminal', exact: true }).click();
+    await session.page.getByRole('button', { name: 'Restart', exact: true }).waitFor();
+    await typeTerminalCommand(session.page, 'printf restarted > after-quit.txt');
+    await expectTerminalFile(root, 'after-quit.txt', 'restarted');
+    await expect(stat(join(root, 'quit-replay.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('should replace access only after the trusted decision and never replay typed work', async () => {
     const { session: desktop, root } = await startTerminal();
     const { page } = desktop;
     await typeTerminalCommand(page, 'export TAU_OLD_SESSION=old; printf once >> executions.txt');
     await expectTerminalFile(root, 'executions.txt', 'once');
+    const writer = await startTerminalWriter(page, root);
     await page.keyboard.type('printf replayed >> executions.txt');
     await page.getByRole('button', { name: 'Request access', exact: true }).click();
     await page.getByLabel('Hosts to reach', { exact: true }).fill('fixture.invalid');
@@ -139,6 +249,9 @@ describe('production Electron Terminal keyboard qualification', () => {
       .poll(async () => page.getByRole('status').allTextContents())
       .toContain('The Terminal restarted with new access.');
     await page.getByRole('button', { name: 'Restart', exact: true }).waitFor();
+    // At the first observed replacement session, the old writer must already be gone.
+    expect(await survivingTerminalWriter(writer)).toEqual([]);
+    await expectTerminalWriterStopped(writer);
     await typeTerminalCommand(page, 'printf \'%s\' "${TAU_OLD_SESSION-unset}" > replaced.txt');
     await expectTerminalFile(root, 'replaced.txt', 'unset');
     expect(await readFile(join(root, 'executions.txt'), 'utf8')).toBe('once');
@@ -150,15 +263,42 @@ describe('production Electron Terminal keyboard qualification', () => {
     await application.evaluate(({ clipboard }) => {
       clipboard.writeText('fixture clipboard');
     });
+    // Prove the existing harness observer catches the production main-process action before relying on a negative.
+    await application.evaluate(async ({ shell }) => {
+      await shell.openExternal('https://fixture.invalid/observer-control');
+    });
+    expect(await application.evaluate(() => Reflect.get(globalThis, '__TAU_E2E_EXTERNAL_URL__') as unknown)).toBe(
+      'https://fixture.invalid/observer-control',
+    );
+    await application.evaluate(() => {
+      Reflect.deleteProperty(globalThis, '__TAU_E2E_EXTERNAL_URL__');
+    });
     const title = await page.title();
+    const location = page.url();
+    const windowCount = application.windows().length;
     await typeTerminalCommand(
       page,
-      String.raw`printf '\033]52;c;cmVwbGFjZWQ=\007\033]0;spoofed title\007'; printf '<script>window.open("https://fixture.invalid")</script>\n'; printf done > output-done.txt`,
+      String.raw`stty size > output-size.txt; printf '\033]52;c;cmVwbGFjZWQ=\007\033]0;spoofed title\007'; printf '\033]8;;https://fixture.invalid/osc8\007untrusted-link\033]8;;\007\n'; printf '\033]8;;file:///tmp/tau-shell-output-canary\007file-link\033]8;;\007\n'; printf '<script>window.open("https://fixture.invalid")</script>\n'; for ((i=0; i<256; i++)); do printf '\033]0;'; printf '%4096s' x; printf '\007'; done; printf done > output-done.txt; printf 'escape-stream-%s\n' drained`,
     );
     await expectTerminalFile(root, 'output-done.txt', 'done');
+    await expect
+      .poll(async () => page.locator('[data-terminal-screen-mirror]').textContent(), { timeout: 30_000 })
+      .toContain('escape-stream-drained');
     expect(await application.evaluate(({ clipboard }) => clipboard.readText())).toBe('fixture clipboard');
     expect(await page.title()).toBe(title);
+    expect(page.url()).toBe(location);
+    expect(application.windows()).toHaveLength(windowCount);
     expect(await application.evaluate(() => Reflect.has(globalThis, '__TAU_E2E_EXTERNAL_URL__'))).toBe(false);
+    const fileLink = await terminalWordPosition(page, { root, sizeFile: 'output-size.txt', word: 'file-link' });
+    await page.keyboard.down('Control');
+    try {
+      await page.mouse.click(fileLink.x, fileLink.y);
+    } finally {
+      await page.keyboard.up('Control');
+    }
+    expect(await application.evaluate(() => Reflect.has(globalThis, '__TAU_E2E_EXTERNAL_URL__'))).toBe(false);
+    expect(page.url()).toBe(location);
+    expect(application.windows()).toHaveLength(windowCount);
     await typeTerminalCommand(
       page,
       String.raw`for ((i=0; i<5000; i++)); do printf 'output %s\n' "$i"; done; printf flood-finished > flood.txt`,
@@ -179,5 +319,55 @@ describe('production Electron Terminal keyboard qualification', () => {
     await page.getByRole('textbox', { name: 'Find in Terminal', exact: true }).fill('after-focus-visible');
     await page.keyboard.press('Enter');
     expect(await page.getByRole('status').allTextContents()).not.toContain('No match for “after-focus-visible”.');
+  });
+
+  it('should retain readable output and keyboard escape at 200 percent zoom and forced colors', async () => {
+    const { session: desktop, root } = await startTerminal();
+    const { page, application } = desktop;
+    const window = await application.browserWindow(page);
+    // Keep the CSS viewport on the desktop layout so zoom itself, not a layout switch, is under test.
+    await window.evaluate((nativeWindow: BrowserWindow) => {
+      nativeWindow.setContentSize(2880, 1800);
+      nativeWindow.webContents.setZoomFactor(2);
+    });
+    await page.emulateMedia({ forcedColors: 'active' });
+    expect(await window.evaluate((nativeWindow: BrowserWindow) => nativeWindow.webContents.getZoomFactor())).toBe(2);
+    expect(await page.evaluate(() => matchMedia('(forced-colors: active)').matches)).toBe(true);
+    await typeTerminalCommand(page, String.raw`printf 'zoom-%s\n' visible; printf zoomed > zoom.txt`);
+    await expectTerminalFile(root, 'zoom.txt', 'zoomed');
+    await expect
+      .poll(async () => page.locator('[data-terminal-screen-mirror]').textContent())
+      .toContain('zoom-visible');
+    await page.keyboard.press('Shift+Escape');
+    await expect
+      .poll(async () =>
+        page.locator('[data-slot="terminal-chrome"]').evaluate((element) => element === document.activeElement),
+      )
+      .toBe(true);
+    await page.keyboard.press('Tab');
+    await expect
+      .poll(async () =>
+        page
+          .getByRole('button', { name: 'Find', exact: true })
+          .evaluate((element) => element === document.activeElement),
+      )
+      .toBe(true);
+    await page.keyboard.press('Enter');
+    await expect
+      .poll(async () =>
+        page
+          .getByRole('textbox', { name: 'Find in Terminal', exact: true })
+          .evaluate((element) => element === document.activeElement),
+      )
+      .toBe(true);
+    await page.keyboard.type('zoom-visible');
+    await page.keyboard.press('Escape');
+    await expect
+      .poll(async () =>
+        page
+          .getByRole('textbox', { name: 'Terminal', exact: true })
+          .evaluate((element) => element === document.activeElement),
+      )
+      .toBe(true);
   });
 });

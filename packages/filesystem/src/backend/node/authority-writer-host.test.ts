@@ -1,11 +1,18 @@
-import fs, { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import fs, { lstat, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import type * as NodeFsPromises from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { acquireNodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import { NodeFsChannel, NodeFsProviderClient } from '#backend/node/client.js';
 import { NodeFsAuthorityHost, serveNodeFsProvider } from '#backend/node/host.js';
 import { NodeFsProvider } from '#backend/node/provider.js';
 import { tauPathPolicy } from '#path-registry.js';
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof NodeFsPromises>();
+  return { ...actual, lstat: vi.fn(actual.lstat) };
+});
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -119,6 +126,34 @@ describe.runIf(['darwin', 'linux', 'win32'].includes(process.platform))('native 
       expect(entries.filter((name) => name.endsWith('.tmp'))).toEqual([]);
     },
   );
+
+  it('should reject a competing writer before starting asynchronous resource admission', async () => {
+    const sandbox = await mkdtemp(join(tmpdir(), 'tau-authority-admission-'));
+    cleanups.push(async () => rm(sandbox, { force: true, recursive: true }));
+    const root = join(sandbox, 'content');
+    const authorityRoot = join(sandbox, 'authority');
+    await mkdir(root);
+    await mkdir(authorityRoot);
+    await writeFile(join(root, 'model.txt'), 'initial');
+    const owner = await acquireNodeAuthorityWriter({ authorityRoot });
+    cleanups.push(async () => owner.release());
+    const contender = new NodeFsAuthorityHost({
+      authorityDirectory: () => authorityRoot,
+      authorityIdentity: (canonicalRoot) => canonicalRoot,
+    });
+    cleanups.push(contender.attach());
+    const resourceAdmission = vi.mocked(lstat);
+    resourceAdmission.mockClear();
+    const mutation = vi.fn(async () => undefined);
+
+    await expect(contender.run({ root, paths: ['model.txt'] }, mutation)).rejects.toMatchObject({
+      code: 'AUTHORITY_ALREADY_OWNED',
+    });
+    // A rejected acquisition must be awaited before filesystem IO can leave its rejection unobserved.
+    expect(resourceAdmission).not.toHaveBeenCalled();
+    expect(mutation).not.toHaveBeenCalled();
+    expect(await readFile(join(root, 'model.txt'), 'utf8')).toBe('initial');
+  });
 
   it('should persist checked mutations, refuse a second host, and transfer ownership after port disposal', async () => {
     const sandbox = await mkdtemp(join(tmpdir(), 'tau-authority-mutation-'));

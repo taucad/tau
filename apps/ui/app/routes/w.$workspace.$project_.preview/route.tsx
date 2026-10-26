@@ -37,6 +37,8 @@ function RouteProvider({ children }: { readonly children?: React.ReactNode }): R
 
 export const handle: Handle = {
   providers: () => RouteProvider,
+  // Preview draws its own top bar, with the sidebar and the crumb back to the project on phones (HDR-12, D11).
+  enablePageHeader: false,
 };
 
 export default function WorkspaceProjectPreviewRoute(): React.JSX.Element {

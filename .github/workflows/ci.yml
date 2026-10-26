@@ -276,24 +276,10 @@ jobs:
               "$RUNNER_TEMP/affected-test.log" | head -100
           fi
 
-      - name: Select affected Python checks
-        id: python-checks
+      # The M3 verdict helpers left with `geospec` for taucad/geospec, which runs them in its own CI.
+      - name: Check the affected GeoSpec consumer
         if: matrix.lane == 'build'
-        run: |
-          verdict_projects=$(pnpm nx show projects --affected --with-target test-m3-verdicts --json | tail -1)
-          if [ "$verdict_projects" != '[]' ]; then
-            echo "python-required=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Setup affected checks Python
-        if: matrix.lane == 'build' && steps.python-checks.outputs.python-required == 'true'
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: '3.12.14'
-
-      - name: Check affected GeoSpec consumer and verdict helpers
-        if: matrix.lane == 'build'
-        run: pnpm nx affected -t check-geospec-test-consumer test-m3-verdicts
+        run: pnpm nx affected -t check-geospec-test-consumer
 
       - name: Check workspace root hygiene
         if: always()

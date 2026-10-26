@@ -8,6 +8,7 @@
 
 import { createDiagnosticsLog } from '#main/diagnostics.js';
 import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 
 import type { HostPrepareKernel } from '@taucad/host';
 import { preparableKernels } from '@taucad/native-process-core/store';
@@ -157,6 +158,8 @@ const shell = createDesktopShell({
     (root): root is string => root !== undefined && root !== '',
   ),
   bwrapPath: process.env['TAU_DESKTOP_SHELL_BWRAP'] === '' ? undefined : process.env['TAU_DESKTOP_SHELL_BWRAP'],
+  /* Host-owned, denied to every shell: the stand-ins a crashed services host left behind are swept from here. */
+  standInJournal: join(authorityDirectory, 'shell-stand-ins.json'),
   ...(diagnostics === undefined
     ? {}
     : {
@@ -197,6 +200,9 @@ const host = createServicesHost({
   },
   machinesStreaming: (requestId, machines) => {
     parentPort.postMessage({ type: 'machines-streaming-answered', requestId, machines });
+  },
+  terminalSessionsAnswered: (requestId, sessions) => {
+    parentPort.postMessage({ type: 'terminal-sessions-answered', requestId, sessions });
   },
   machineBindingCompleted: (requestId, result) => {
     parentPort.postMessage(

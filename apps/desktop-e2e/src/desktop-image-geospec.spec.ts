@@ -216,13 +216,12 @@ const canonicalChatReport = (report: GeoSpecCanonicalClaimReport): NativeGeoSpec
   ...(report.evidence === undefined ? {} : { evidence: report.evidence }),
 });
 
-// Reuse the accepted 10 × 20 × 30 mm C2 box bytes in the actual chat VM.
+// Reuse the accepted 10 × 20 × 30 mm C2 box bytes in the actual chat VM: taucad/geospec's frozen
+// host-test input with this digest.
 const nativeFixtureHash = '1321806f5b10c87126bece80cee96cf867c6c131db655a9f28558a39a086616d';
 
 test('[native-geospec] compares fixed-fixture reports through packaged chat and the native API', async () => {
-  const fixtureBytes = await readFile(
-    new URL(`../../../packages/geospec/host-tests/fixtures/data/${nativeFixtureHash}`, import.meta.url),
-  );
+  const fixtureBytes = await readFile(new URL('../fixtures/geospec-c2-box.glb', import.meta.url));
   expect(createHash('sha256').update(fixtureBytes).digest('hex')).toBe(nativeFixtureHash);
   const nativeSource = `import { it, expectGeo } from 'geospec';
 import { loadModel } from 'geospec/model';

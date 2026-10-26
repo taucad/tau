@@ -139,7 +139,7 @@ export function QuestionTextAnswer({
               <Button
                 type='button'
                 variant='ghost'
-                size='icon-xs'
+                size='icon-sm'
                 aria-label='Send answer'
                 aria-busy={isPending}
                 className={cn(
@@ -151,8 +151,11 @@ export function QuestionTextAnswer({
                   void send();
                 }}
               >
-                <ArrowUp aria-hidden='true' />
-                {isPending ? <Loader className='motion-reduce:animate-none' /> : null}
+                {isPending ? (
+                  <Loader className='size-4 motion-reduce:animate-none' />
+                ) : (
+                  <ArrowUp aria-hidden='true' className='size-4' />
+                )}
               </Button>
             </TooltipTrigger>
             <TooltipContent>

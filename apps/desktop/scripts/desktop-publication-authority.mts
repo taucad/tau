@@ -81,6 +81,22 @@ export const verifyDesktopPublicationToken = (
   }
 };
 
+/** The repository variable that enables mutable installer publication for one channel only. */
+export const desktopInstallerPublicationVariable = (
+  channel: 'production' | 'staging',
+): 'DESKTOP_INSTALLER_PUBLICATION_PRODUCTION' | 'DESKTOP_INSTALLER_PUBLICATION_STAGING' =>
+  channel === 'production' ? 'DESKTOP_INSTALLER_PUBLICATION_PRODUCTION' : 'DESKTOP_INSTALLER_PUBLICATION_STAGING';
+
+/** Refuse publication unless this channel's own operator gate is exactly `true`; another channel's gate never applies. */
+export const requireDesktopInstallerPublicationEnabled = (
+  channel: 'production' | 'staging',
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): void => {
+  if (environment[desktopInstallerPublicationVariable(channel)] !== 'true') {
+    throw new Error(`Installer publication is disabled for ${channel}; operator release gate is required`);
+  }
+};
+
 /** Fetch identity from GitHub's runner endpoint, then verify against GitHub's fixed issuer key set. */
 export const requireDesktopPublicationAuthority = async (
   channel: 'production' | 'staging',

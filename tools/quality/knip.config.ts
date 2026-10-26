@@ -192,6 +192,8 @@ const config: KnipConfig = {
         'src/main/index.ts',
         'src/preload/**/*.ts',
         'src/tau/*.entry.ts',
+        // Bundled and launched by the native authority-writer Electron test.
+        'src/tau/fixtures/authority-writer-electron*.fixture.ts',
         'scripts/*.mts',
         // `apps/desktop/macos/project.json` runs both with paths from the workspace root.
         'macos/scripts/*.mts',
@@ -270,6 +272,9 @@ const config: KnipConfig = {
         // `tau-ui-source-alias` (vite.config.ts) swaps these in for their `#…` facades per build
         // target (cloud, self-host, desktop); knip only follows the facade import.
         'app/**/*.{cloud,self-host,desktop}.{ts,tsx}',
+        // The same resolver substitutes these no-op modules when the staging harness is disabled.
+        'app/lib/observability-harness-disabled.ts',
+        'app/lib/observability-harness-hydration-disabled.ts',
         // Vite alias replacement for `@resvg/resvg-js` in the browser bundle.
         'app/lib/browser-stubs/resvg-js.ts',
         // The deletion component browser suite selects this nested config with --config.
@@ -343,18 +348,6 @@ const config: KnipConfig = {
     'packages/filesystem': {
       // `authority-writer-lock.test.ts` forks these by path.
       entry: ['src/backend/node/*.fixture.ts'],
-    },
-    'packages/geospec': {
-      entry: [
-        // `test-m3-verdicts` runs both under `node --test`.
-        'host-tests/{m2-browser,m3-corpus}/verdict-host.mjs',
-        // `test-installed-vitest` runs these configs from the consumer that
-        // `scripts:prepare-geospec-test-consumer` stages from this directory.
-        'host-tests/{f1-public-a1,m3-corpus}/vitest.config.mjs',
-      ],
-      // Fixture model sources: the runtime CLI evaluates them to regenerate the committed
-      // STEP corpus, and each fixture manifest records its script as provenance.
-      ignore: ['fixtures/scripts/*/**'],
     },
     'packages/host': {
       // `runtime-child-render.integration.test.ts` spawns it by path.

@@ -111,6 +111,7 @@ import { TelemetryPanelContent } from '#routes/w.$workspace.$project/chat-kernel
 import { ChatConsole } from '#routes/w.$workspace.$project/chat-console.js';
 import { ProjectTerminalPane } from '#components/terminal/terminal-pane.js';
 import { isTerminalSurfaceOffered } from '#components/terminal/terminal-availability.js';
+import { TerminalCloseContext, useDockviewTerminalCloseHost } from '#components/terminal/terminal-close.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { ProjectShareWorkbenchPanel } from '#routes/w.$workspace.$project/project-share-action.js';
 import { WorkbenchToggleSlot } from '#routes/w.$workspace.$project/project-workspace-actions.js';
@@ -364,8 +365,19 @@ function ConsoleWorkbenchPanel(): React.JSX.Element {
   return enabled ? <ChatConsole /> : <p className='p-4 text-muted-foreground'>Console requires debug mode.</p>;
 }
 
-function TerminalWorkbenchPanel(): React.JSX.Element {
-  return <ProjectTerminalPane profile={useContext(WorkbenchProfileContext)} />;
+/* A running Terminal asks before its tab closes; Hide closes the Workbench lane, which keeps this panel mounted. */
+function TerminalWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
+  const profile = useContext(WorkbenchProfileContext);
+  const { setWorkbenchOpen } = useProjectWorkspace();
+  const hide = useCallback(() => {
+    setWorkbenchOpen(false);
+  }, [setWorkbenchOpen]);
+  const closeHost = useDockviewTerminalCloseHost(api, hide);
+  return (
+    <TerminalCloseContext.Provider value={closeHost}>
+      <ProjectTerminalPane profile={profile} />
+    </TerminalCloseContext.Provider>
+  );
 }
 
 type WorkbenchSurface = {

@@ -1,8 +1,8 @@
 const mode = process.argv[2] ?? 'unsupported';
 if (mode === 'unsupported') {
-  Object.defineProperty(process, 'platform', { value: 'win32' });
+  Object.defineProperty(process, 'platform', { value: 'freebsd' });
 } else if (mode === 'electron') {
-  Object.defineProperty(process, 'platform', { value: 'win32' });
+  Object.defineProperty(process, 'platform', { value: 'freebsd' });
   Object.defineProperty(process.versions, 'electron', { value: 'test' });
 } else {
   Object.defineProperty(process, 'execPath', { value: process.argv[3] });

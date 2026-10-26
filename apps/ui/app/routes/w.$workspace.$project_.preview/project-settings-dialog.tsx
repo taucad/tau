@@ -28,13 +28,35 @@ import {
   AlertDialogTitle,
 } from '@taucad/ui/components/alert-dialog';
 
-export function ProjectSettingsDialog(): React.JSX.Element {
+type ProjectSettingsDialogProps = {
+  /**
+   * Open the dialog from elsewhere (the phone bar's More menu) instead of its own Settings button. The dialog then
+   * draws no trigger, and `returnFocus` hands focus back to that control when it closes.
+   */
+  readonly controlled?: {
+    readonly open: boolean;
+    readonly onOpenChange: (open: boolean) => void;
+    readonly returnFocus: () => void;
+  };
+};
+
+export function ProjectSettingsDialog({ controlled }: ProjectSettingsDialogProps = {}): React.JSX.Element {
   const { project, updateName, updateDescription } = usePreviewProject();
   const { deleteProject } = useProjects();
   const navigate = useNavigate();
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
+  const returnFocus = controlled?.returnFocus ?? ((): void => settingsButtonRef.current?.focus());
 
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOwnOpen, setOwnOpen] = useState(false);
+  const isOpen = controlled?.open ?? isOwnOpen;
+  const onOpenChange = controlled?.onOpenChange;
+  const setIsOpen = useCallback(
+    (open: boolean) => {
+      setOwnOpen(open);
+      onOpenChange?.(open);
+    },
+    [onOpenChange],
+  );
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [localName, setLocalName] = useState(project?.name ?? '');
@@ -50,12 +72,12 @@ export function ProjectSettingsDialog(): React.JSX.Element {
     }
 
     setIsOpen(false);
-  }, [localName, localDescription, project, updateName, updateDescription]);
+  }, [localName, localDescription, project, setIsOpen, updateName, updateDescription]);
 
   const handleDeleteClick = useCallback(() => {
     setIsOpen(false);
     setIsDeleteDialogOpen(true);
-  }, []);
+  }, [setIsOpen]);
 
   const handleDeleteConfirm = useCallback(async () => {
     if (!project || isDeleting) {
@@ -82,17 +104,28 @@ export function ProjectSettingsDialog(): React.JSX.Element {
   return (
     <>
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <Tooltip>
-          <DialogTrigger asChild>
-            <TooltipTrigger asChild>
-              <Button ref={settingsButtonRef} variant='outline' size='icon' aria-label='Project settings'>
-                <Settings />
-              </Button>
-            </TooltipTrigger>
-          </DialogTrigger>
-          <TooltipContent>Project Settings</TooltipContent>
-        </Tooltip>
-        <DialogContent className='max-w-2xl'>
+        {controlled === undefined ? (
+          <Tooltip>
+            <DialogTrigger asChild>
+              <TooltipTrigger asChild>
+                <Button ref={settingsButtonRef} variant='outline' size='icon' aria-label='Project settings'>
+                  <Settings />
+                </Button>
+              </TooltipTrigger>
+            </DialogTrigger>
+            <TooltipContent>Project Settings</TooltipContent>
+          </Tooltip>
+        ) : null}
+        <DialogContent
+          className='max-w-2xl'
+          onCloseAutoFocus={(event) => {
+            if (controlled !== undefined) {
+              // No trigger of its own: focus goes back to the control that opened it.
+              event.preventDefault();
+              controlled.returnFocus();
+            }
+          }}
+        >
           <DialogHeader>
             <DialogTitle>Project Settings</DialogTitle>
             <DialogDescription>Update your project&apos;s details and preferences</DialogDescription>
@@ -158,7 +191,7 @@ export function ProjectSettingsDialog(): React.JSX.Element {
         <AlertDialogContent
           onCloseAutoFocus={(event) => {
             event.preventDefault();
-            settingsButtonRef.current?.focus();
+            returnFocus();
           }}
         >
           <AlertDialogHeader>

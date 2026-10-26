@@ -1,6 +1,5 @@
 ---
 agent-plugin: minor
-geospec: minor
 build123d: minor
 jscad: minor
 manifold: minor

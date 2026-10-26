@@ -278,7 +278,210 @@ const platformFixture = (route: 'macos-zip' | 'macos-dmg' | 'linux-appimage' | '
   }
   return input;
 };
+/** A Mac route run as clean-host acceptance on a native Intel host; every fact is a raw observation. */
+const cleanHostFixture = (route: 'macos-zip' | 'macos-dmg'): QualificationEvidence => {
+  const input = platformFixture(route);
+  const application = '/Applications/Tau.app';
+  for (const stage of input.stages) {
+    stage.installed.installationPath = `${application}/Contents/Resources/app.asar`;
+    stage.installed.executablePath = `${application}/Contents/MacOS/Tau`;
+    stage.probe.installedPath = stage.installed.installationPath;
+    for (const process of stage.security.processes) {
+      process.executable = stage.installed.executablePath;
+    }
+    stage.security.measurements = {
+      sip: 'System Integrity Protection status: enabled.',
+      gatekeeper: 'assessments enabled',
+    };
+  }
+  input.lifecycle.uninstall.removedInstallationPath = application;
+  input.suite = 'clean-host-route-a-b-c-v1';
+  const format = route === 'macos-dmg' ? 'dmg' : 'zip';
+  const quarantine = '0083;6720a1b2;Chromium;4D3F1C2B-0000-4000-8000-000000000001';
+  const install = (stage: 'initial' | 'reinstall', evidence: QualificationStageEvidence) => {
+    const artifact = evidence.candidate.artifacts.find((entry) => entry.kind === `macos-${format}`)!;
+    return {
+      stage,
+      format,
+      artifact: { name: artifact.name, sha256: artifact.sha256, size: artifact.size },
+      download: {
+        browser: 'Chromium 140.0.0.0',
+        url: `https://127.0.0.1:4443/releases/${encodeURIComponent(evidence.candidate.tag)}/${artifact.name}`,
+        sha256: artifact.sha256,
+        size: artifact.size,
+        quarantine,
+      },
+      installedPath: application,
+      installedQuarantine: quarantine,
+      ...(format === 'dmg' ? { ejected: true } : {}),
+      assessment: `${application}: accepted\nsource=Notarized Developer ID\norigin=Developer ID Application: Tau (AAAAAAAAAA)`,
+      staple: `Processing: ${application}\nThe validate action worked!`,
+    } as const;
+  };
+  input.acceptance = {
+    kind: 'vm',
+    host: {
+      runner: 'tau-mac-x64-1',
+      productVersion: '26.0.1',
+      machine: 'x86_64',
+      arm64: 'absent',
+      translated: '0',
+      sip: 'System Integrity Protection status: enabled.',
+      gatekeeper: 'assessments enabled',
+      existing: [],
+    },
+    installs: [install('initial', input.stages[0]), install('reinstall', input.stages[2])],
+    launches: [
+      {
+        stage: 'initial',
+        via: 'open',
+        application,
+        pid: input.stages[0].probe.pid,
+        prompt: 'approved',
+        quarantineBefore: quarantine,
+        quarantineAfter: '00c3;6720a1b2;Chromium;4D3F1C2B-0000-4000-8000-000000000001',
+      },
+      {
+        stage: 'reinstall',
+        via: 'open',
+        application,
+        pid: input.lifecycle.reinstall.mainPid,
+        prompt: 'approved',
+        quarantineBefore: quarantine,
+        quarantineAfter: quarantine,
+      },
+    ],
+  };
+  return input;
+};
+const cleanHostRefusals = (): void => {
+  for (const route of ['macos-zip', 'macos-dmg'] as const) {
+    const admitted = collectQualificationReceipt(cleanHostFixture(route));
+    assert.equal(admitted.environment.kind, 'vm');
+    const { host } = admitted.environment;
+    assert.ok(host);
+    assert.equal(host.sip, 'enabled');
+    assert.equal(host.nativeArch, 'x64');
+  }
+  // Without clean-host observations a Mac run is only ever a CI receipt.
+  const hosted = cleanHostFixture('macos-dmg');
+  delete hosted.acceptance;
+  assert.equal(collectQualificationReceipt(hosted).environment.kind, 'ci');
+  const refusals: Array<[string, (input: QualificationEvidence) => void, RegExp]> = [
+    [
+      'SIP disabled',
+      (input) => {
+        input.acceptance!.host.sip = 'System Integrity Protection status: disabled.';
+      },
+      /System Integrity/u,
+    ],
+    [
+      'SIP custom configuration',
+      (input) => {
+        input.acceptance!.host.sip = 'System Integrity Protection status: unknown (Custom Configuration).';
+      },
+      /System Integrity/u,
+    ],
+    [
+      'Gatekeeper disabled',
+      (input) => {
+        input.acceptance!.host.gatekeeper = 'assessments disabled';
+      },
+      /Gatekeeper/u,
+    ],
+    [
+      'Rosetta',
+      (input) => {
+        input.acceptance!.host.translated = '1';
+      },
+      /native architecture/u,
+    ],
+    [
+      'Apple silicon as x64',
+      (input) => {
+        input.acceptance!.host.arm64 = '1';
+      },
+      /native architecture/u,
+    ],
+    [
+      'dirty host',
+      (input) => {
+        input.acceptance!.host.existing = ['/Applications/Tau.app'];
+      },
+      /already has/u,
+    ],
+    [
+      'download without quarantine',
+      (input) => {
+        (input.acceptance!.installs[0] as { download: { quarantine: string } }).download.quarantine = '';
+      },
+      /lacks com\.apple\.quarantine/u,
+    ],
+    [
+      'installed copy without quarantine',
+      (input) => {
+        (input.acceptance!.installs[1] as { installedQuarantine: string }).installedQuarantine = '';
+      },
+      /lost quarantine/u,
+    ],
+    [
+      'not notarized',
+      (input) => {
+        (input.acceptance!.installs[0] as { assessment: string }).assessment =
+          '/Applications/Tau.app: accepted\nsource=Developer ID';
+      },
+      /Notarized/u,
+    ],
+    [
+      'online-only staple',
+      (input) => {
+        (input.acceptance!.installs[0] as { staple: string }).staple = 'Could not validate ticket';
+      },
+      /stapled/u,
+    ],
+    [
+      'other bytes',
+      (input) => {
+        (input.acceptance!.installs[0] as { download: { sha256: string } }).download.sha256 = hash(5);
+      },
+      /exact candidate/u,
+    ],
+    [
+      'no reinstall',
+      (input) => {
+        input.acceptance!.installs = input.acceptance!.installs.slice(0, 1);
+      },
+      /reinstall/u,
+    ],
+    [
+      'executed from elsewhere',
+      (input) => {
+        input.acceptance!.launches = [{ ...input.acceptance!.launches[0]!, pid: 1 }, input.acceptance!.launches[1]!];
+      },
+      /LaunchServices/u,
+    ],
+    [
+      'SIP changed during run',
+      (input) => {
+        input.stages[1].security.measurements['sip'] = 'System Integrity Protection status: disabled.';
+      },
+      /changed during the run/u,
+    ],
+  ];
+  for (const [name, change, message] of refusals) {
+    const input = cleanHostFixture('macos-dmg');
+    change(input);
+    assert.throws(() => collectQualificationReceipt(input), message, name);
+  }
+  const notEjected = cleanHostFixture('macos-dmg');
+  (notEjected.acceptance!.installs[0] as { ejected?: boolean }).ejected = false;
+  assert.throws(() => collectQualificationReceipt(notEjected), /ejected/u);
+  const windows = fixture();
+  windows.acceptance = cleanHostFixture('macos-zip').acceptance!;
+  assert.throws(() => collectQualificationReceipt(windows), /Mac routes only/u);
+};
 const main = (): void => {
+  cleanHostRefusals();
   const missingReinstall = fixture();
   missingReinstall.lifecycle.reinstall.projectSha256 = hash(100);
   assert.throws(() => collectQualificationReceipt(missingReinstall), /reinstall/u);
@@ -455,7 +658,7 @@ const main = (): void => {
   cycle.stages[1].renderer.nativeAncestry[0]!.parent = cycle.stages[1].renderer.nativeAncestry[0]!.pid;
   assert.throws(() => collectQualificationReceipt(cycle), /ancestry cycle/u);
   console.log(
-    'PASS collector synthetic decisions: five route A/B/C receipts and trust/source/payload/process/security/lifecycle/feed refusals; no native qualification claimed',
+    'PASS collector synthetic decisions: five route A/B/C receipts, clean-host SIP/Gatekeeper/quarantine/native-host refusals and trust/source/payload/process/security/lifecycle/feed refusals; no native qualification claimed',
   );
 };
 try {

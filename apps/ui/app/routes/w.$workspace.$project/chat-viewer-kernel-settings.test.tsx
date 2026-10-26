@@ -11,13 +11,20 @@ import { getLiveViewOptions, setLiveViewOptions } from '#workbench-records/live-
 
 type ViewRecord = ReturnType<typeof workbenchRecords.view.schema.parse>;
 
-const mockState = vi.hoisted(() => ({
-  evaluation: undefined as Evaluation | undefined,
-  record: undefined as ViewRecord | undefined,
-  edit: vi.fn(),
-}));
+const mockState = vi.hoisted(() => {
+  const evaluateOptions: Record<string, unknown> = {};
+  return {
+    evaluation: undefined as Evaluation | undefined,
+    evaluateOptions,
+    record: undefined as ViewRecord | undefined,
+    edit: vi.fn(),
+  };
+});
 
-vi.mock('@xstate/react', () => ({ useSelector: () => mockState.evaluation }));
+vi.mock('@xstate/react', () => ({
+  useSelector: (_actor: unknown, selector: { name: string }) =>
+    selector.name === 'selectCadEvaluateOptions' ? mockState.evaluateOptions : mockState.evaluation,
+}));
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ viewRecords: new Map(mockState.record ? [['pane-1', mockState.record]] : []) }),
 }));
@@ -73,6 +80,44 @@ const savedRecord = (): ViewRecord => {
 };
 
 describe('viewer kernel settings', () => {
+  it('shows evaluate options at their usual value and re-evaluates with an edit once it rests', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    cadActor.send.mockClear();
+    mockState.evaluation = {
+      id: 'e1',
+      success: true,
+      transient: false,
+      views: [{ id: 'model', title: 'Model', mimeType: 'model/gltf-binary' }],
+      exports: [],
+      issues: [],
+      evaluateOptions: {
+        schema: {
+          type: 'object',
+          properties: {
+            meshAdaptivity: { type: 'number', minimum: 0, exclusiveMaximum: 1, examples: [0.25] },
+            meshRelax: { type: 'boolean', default: false },
+          },
+        },
+        defaults: { meshRelax: false },
+      },
+    };
+    render(<SettingsMenu />);
+    fireEvent.click(screen.getByRole('menuitem', { name: /Kernel settings/ }));
+    expect(screen.getByRole('menuitem', { name: /^Mesh adaptivity, 0\.25/ })).toBeInTheDocument();
+
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: /^Mesh adaptivity/ }), { key: 'ArrowLeft' });
+    expect(cadActor.send).not.toHaveBeenCalled();
+    act(() => {
+      vi.advanceTimersByTime(viewOptionsSaveDelay);
+    });
+    const sent = cadActor.send.mock.lastCall?.[0];
+    expect(sent?.type).toBe('setEvaluateOptions');
+    if (sent?.type === 'setEvaluateOptions') {
+      expect(sent.evaluateOptions['meshAdaptivity']).toBeCloseTo(0.24, 5);
+    }
+    mockState.evaluation = undefined;
+  });
+
   afterEach(() => {
     vi.useRealTimers();
     setLiveViewOptions('pane-1', undefined);

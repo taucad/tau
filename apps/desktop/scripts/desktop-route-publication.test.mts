@@ -67,6 +67,24 @@ const receipt = (environment: 'ci' | 'vm') => ({
   logs: 'artifact://test-evidence',
 });
 const receipts = [receipt('ci'), receipt('vm')];
+/** Observed host facts every Mac clean-host receipt carries. */
+const cleanHost = (nativeArch: 'arm64' | 'x64') => ({
+  platform: 'darwin',
+  runner: 'local-mac-1',
+  productVersion: '26.0.1',
+  nativeArch,
+  translated: false,
+  sip: 'enabled',
+  gatekeeper: 'enabled',
+  quarantine: {
+    downloaded: '0083;6720a1b2;Chromium;4D3F1C2B-0000-4000-8000-000000000001',
+    installed: '0083;6720a1b2;Chromium;4D3F1C2B-0000-4000-8000-000000000001',
+  },
+  assessment: 'Notarized Developer ID',
+  staple: 'validated-offline',
+  installedPath: '/Applications/Tau.app',
+  launch: 'open',
+});
 const trust = { 'windows-nsis': 'CN=Expected publisher' };
 const approval = {
   schemaVersion: 1,
@@ -222,6 +240,9 @@ const productionReceipts = requirements.flatMap((requirement) =>
       arch: requirement.target.endsWith('arm64') ? 'arm64' : 'x64',
       kind: environment,
       sandbox: 'enabled',
+      ...(environment === 'vm' && requirement.target.startsWith('darwin-')
+        ? { host: cleanHost(requirement.target.endsWith('arm64') ? 'arm64' : 'x64') }
+        : {}),
     },
     trust: { kind: 'release', identity: productionTrust[requirement.route as keyof typeof productionTrust] },
   })),
@@ -302,6 +323,12 @@ const macReceipt = (
     arch: target === 'darwin-arm64' ? 'arm64' : 'x64',
     kind: environment,
     sandbox: 'enabled',
+    // A Mac clean-host receipt always carries its observed host facts.
+    ...(environment === 'vm'
+      ? {
+          host: cleanHost(target === 'darwin-arm64' ? 'arm64' : 'x64'),
+        }
+      : {}),
   },
   trust: { kind: 'release', identity: macTrust[route] },
 });
@@ -332,6 +359,13 @@ assert.deepEqual(
 );
 // The `all` scope keeps its original staging-subset admission for the same evidence.
 assert.equal(qualifyDesktopRoutes(macManifest, macReceipts, macTrust).routes.length, 2);
+assert.deepEqual(
+  macCatalog.routes.map(({ qualification }) => qualification),
+  [
+    { ci: true, vm: true, trust: 'release' },
+    { ci: true, vm: true, trust: 'release' },
+  ],
+);
 const rejectMac = (
   proofs: readonly unknown[],
   change: { candidate?: unknown; trust?: Record<string, string>; scope?: string } = {},
@@ -348,7 +382,6 @@ for (const index of macReceipts.keys()) {
   rejectMac(macReceipts.filter((_, other) => other !== index));
 }
 for (const remove of [
-  (proof: MacProof) => proof.environment.kind === 'vm',
   (proof: MacProof) => proof.environment.kind === 'ci',
   (proof: MacProof) => proof.target === 'darwin-x64',
   (proof: MacProof) => proof.target === 'darwin-arm64',
@@ -431,4 +464,114 @@ assert.throws(() => {
 assert.throws(() => {
   assertDesktopCatalogRetainsRoutes({ tag }, macCatalog);
 });
-console.log('Mac-only scope, CI/VM receipt, architecture and catalog retention checks passed');
+
+// Operator ruling: a staging Mac-only publication may proceed on CI receipts alone, explicitly clean-host pending.
+const macCi = macReceipts.filter((proof) => proof.environment.kind === 'ci');
+const ciOnlyCatalog = createDesktopInstallerCatalog({
+  manifest: macManifest,
+  receipts: macCi,
+  trust: macTrust,
+  approval: macApproval,
+  scope: 'macos',
+});
+assert.deepEqual(
+  ciOnlyCatalog.routes.map(({ target, qualification }) => [target, qualification]),
+  [
+    ['darwin-arm64', { ci: true, vm: 'pending', trust: 'release' }],
+    ['darwin-x64', { ci: true, vm: 'pending', trust: 'release' }],
+  ],
+);
+// The published bytes carry the marker unchanged, and nothing else about the catalog differs from a VM-qualified one.
+const publishedCatalog = `${JSON.stringify(ciOnlyCatalog)}\n`;
+assert.deepEqual(JSON.parse(publishedCatalog), ciOnlyCatalog);
+assert.deepEqual(
+  { ...ciOnlyCatalog, routes: ciOnlyCatalog.routes.map(({ qualification: _q, ...route }) => route) },
+  { ...macCatalog, routes: macCatalog.routes.map(({ qualification: _q, ...route }) => route) },
+);
+assert.deepEqual(
+  qualifyDesktopScopedRoutes(macManifest, macCi, { trust: macTrust, scope: 'macos' }).routes.map(
+    ({ cleanHost }) => cleanHost,
+  ),
+  ['pending', 'pending'],
+);
+// A present VM receipt upgrades only its own architecture's route.
+assert.deepEqual(
+  qualifyDesktopScopedRoutes(
+    macManifest,
+    macReceipts.filter((proof) => proof.environment.kind === 'ci' || proof.target === 'darwin-arm64'),
+    { trust: macTrust, scope: 'macos' },
+  ).routes.map(({ target, cleanHost }) => `${target}:${cleanHost}`),
+  ['darwin-arm64:passed', 'darwin-x64:pending'],
+);
+// CI evidence stays individually required and fully bound even when clean-host acceptance is pending.
+for (const index of macCi.keys()) {
+  rejectMac(macCi.filter((_, other) => other !== index));
+}
+rejectMac([...macCi, macCi[0]]);
+for (const change of [
+  (proof: MacProof) => ({ ...proof, sourceCommit: 'f'.repeat(40) }),
+  (proof: MacProof) => ({ ...proof, version: '1.1.3' }),
+  (proof: MacProof) => ({ ...proof, trust: { kind: 'release', identity: 'OTHERTEAM1' } }),
+  (proof: MacProof) => ({ ...proof, trust: { kind: 'test', identity: proof.trust.identity } }),
+  (proof: MacProof) => ({ ...proof, artifacts: proof.artifacts.map((item) => ({ ...item, sha256: 'e'.repeat(64) })) }),
+  (proof: MacProof) => ({ ...proof, target: proof.target === 'darwin-arm64' ? 'darwin-x64' : 'darwin-arm64' }),
+  // A well-formed clean-host receipt cannot stand in for the CI receipt it replaces.
+  (proof: MacProof) => ({
+    ...proof,
+    environment: {
+      ...proof.environment,
+      kind: 'vm',
+      host: cleanHost(proof.target === 'darwin-arm64' ? 'arm64' : 'x64'),
+    },
+  }),
+]) {
+  for (const index of macCi.keys()) {
+    rejectMac(macCi.map((proof, other) => (other === index ? change(proof) : proof)));
+  }
+}
+// A VM receipt that is present is never ignored: untrusted, mismatched, partial or duplicated VM evidence is refused.
+const macVm = macReceipts.filter((proof) => proof.environment.kind === 'vm');
+for (const change of [
+  (proof: MacProof) => ({ ...proof, trust: { kind: 'test', identity: proof.trust.identity } }),
+  (proof: MacProof) => ({ ...proof, trust: { kind: 'release', identity: 'OTHERTEAM1' } }),
+  (proof: MacProof) => ({ ...proof, sourceCommit: 'f'.repeat(40) }),
+  (proof: MacProof) => ({ ...proof, artifacts: proof.artifacts.map((item) => ({ ...item, sha256: 'e'.repeat(64) })) }),
+]) {
+  for (const vm of macVm) {
+    rejectMac([...macCi, change(vm)]);
+  }
+}
+for (const vm of macVm) {
+  rejectMac([...macCi, vm]);
+}
+rejectMac([...macReceipts, macVm[0]]);
+// CI-only evidence never qualifies the `all` scope, a production candidate or the five production routes.
+assert.throws(() => qualifyDesktopRoutes(macManifest, macCi, macTrust), /vm receipt/u);
+assert.throws(() =>
+  qualifyDesktopScopedRoutes(
+    { ...macManifest, tag: productionTag, ...productionIdentity },
+    macCi.map((proof) => ({ ...proof, tag: productionTag, ...productionIdentity })),
+    { trust: macTrust, scope: 'macos' },
+  ),
+);
+const productionCi = productionReceipts.filter((proof) => proof.environment.kind === 'ci');
+assert.throws(() => qualifyDesktopRoutes(production, productionCi, productionTrust), /vm receipt/u);
+assert.throws(() => qualifyDesktopScopedRoutes(production, productionCi, { trust: productionTrust, scope: 'all' }));
+assert.throws(() => qualifyDesktopScopedRoutes(production, productionCi, { trust: productionTrust, scope: 'macos' }));
+assert.deepEqual(
+  qualifyDesktopRoutes(production, productionReceipts, productionTrust).routes.map(({ cleanHost }) => cleanHost),
+  ['passed', 'passed', 'passed', 'passed', 'passed'],
+);
+assert.throws(() => qualifyDesktopRoutes(manifest, [receipt('ci')], trust), /vm receipt/u);
+assert.throws(() =>
+  qualifyDesktopRoutes(
+    mixed,
+    mixedReceipts.filter((proof) => proof.environment.kind === 'ci'),
+    {
+      ...macTrust,
+      ...trust,
+    },
+  ),
+);
+assert.deepEqual(catalog.routes[0]!.qualification, { ci: true, vm: true, trust: 'release' });
+console.log('Mac-only scope, CI/VM receipt, clean-host pending, architecture and catalog retention checks passed');

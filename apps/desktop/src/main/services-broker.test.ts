@@ -436,6 +436,45 @@ describe('createServicesBroker', () => {
     expect(resumes).toEqual([{ type: 'machines-resume', attemptId: 'quit-1' }]);
   });
 
+  it('should ask a running utility for its Terminal session count, answer none without one, and bound the wait (T15)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { broker, spawns } = brokerHarness();
+      await expect(broker.terminalSessions(1000)).resolves.toBe(0);
+      expect(spawns).toHaveLength(0);
+
+      broker.connect('nodeFs');
+      const question = (): Record<string, unknown> | undefined =>
+        (spawns[0]?.posted ?? []).findLast(
+          (message): message is Record<string, unknown> =>
+            typeof message === 'object' &&
+            message !== null &&
+            'type' in message &&
+            message['type'] === 'terminal-sessions',
+        );
+      const asked = broker.terminalSessions(1000);
+      spawns[0]?.message({ type: 'terminal-sessions-answered', requestId: question()?.['requestId'], sessions: 2 });
+      await expect(asked).resolves.toBe(2);
+      /* A peek carries no attempt; quit's question carries its attempt, which holds the utility's new starts. */
+      expect(question()).not.toHaveProperty('attemptId');
+      const quitAsked = broker.terminalSessions(1000, 'quit-9');
+      expect(question()?.['attemptId']).toBe('quit-9');
+      spawns[0]?.message({ type: 'terminal-sessions-answered', requestId: question()?.['requestId'], sessions: 1 });
+      await expect(quitAsked).resolves.toBe(1);
+
+      const invalid = broker.terminalSessions(1000);
+      spawns[0]?.message({ type: 'terminal-sessions-answered', requestId: question()?.['requestId'], sessions: -1 });
+      await expect(invalid).rejects.toThrow('invalid Terminal count');
+
+      const unanswered = broker.terminalSessions(1000);
+      const rejected = expect(unanswered).rejects.toThrow('did not say whether a Terminal is running');
+      await vi.advanceTimersByTimeAsync(1000);
+      await rejected;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('should peek at the streaming machines for keep-awake with a read-only question, never forking a utility', async () => {
     const { broker, spawns } = brokerHarness();
     await expect(broker.peekStreamingMachines(1000)).resolves.toEqual([]);

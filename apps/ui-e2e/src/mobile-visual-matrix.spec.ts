@@ -36,13 +36,6 @@ const portraitViewports = [
   { width: 390, height: 844 },
 ] as const;
 const themes = ['Light', 'Dark', 'Black', 'High Contrast'] as const;
-/** The `<html>` class each theme sets (`use-theme.tsx`). */
-const themeClasses: Readonly<Record<(typeof themes)[number], RegExp>> = {
-  Light: /\blight\b/u,
-  Dark: /\bdark\b/u,
-  Black: /\bblack\b/u,
-  'High Contrast': /\bhigh-contrast\b/u,
-};
 
 const topBar = (): Locator => selectors.getByCss('[data-slot="mobile-project-top-bar"]');
 const titleButton = (): Locator => selectors.getByCss('[data-slot="project-title-button"]');
@@ -553,7 +546,8 @@ const chooseTheme = async (theme: (typeof themes)[number]): Promise<void> => {
   }
   await target.click(themeButton, { touch: true });
   await target.click(selectors.getByRole('option', { name: new RegExp(`^${theme}`, 'iu') }), { touch: true });
-  await target.expectClass(selectors.getByCss('html'), themeClasses[theme]);
+  const themeClass = theme.toLowerCase().replaceAll(' ', '-');
+  await target.expectClass(selectors.getByCss('html'), new RegExp(`\\b${themeClass}\\b`, 'u'));
   await target.expectCount(selectors.getByRole('listbox'), 0, 30_000);
   /* On a phone Settings is a list and a detail: Escape steps back from General to the list (whose dialog is then named
    * Settings again) and from the list closes it. Close by Escape until no dialog is left. */

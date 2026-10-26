@@ -357,12 +357,17 @@ describe('shell projection activation boundary', () => {
     expect(source).not.toMatch(/NodeFsProviderClient|NodeFsChannel|@taucad\/filesystem\/backend'/u);
   });
 
-  it('should stay unactivated: no production module imports the projection', () => {
+  it('should stay unactivated: no production module imports the projection or its owner', () => {
+    const projection = [join('shell', 'shell-projection.ts'), join('shell', 'shell-projection-owner.ts')];
     const importers = sources(sourceRoot).filter(
       (path) =>
-        !path.endsWith(join('shell', 'shell-projection.ts')) &&
-        /shell\/shell-projection(?:\.js)?'/u.test(readFileSync(path, 'utf8')),
+        !projection.some((module) => path.endsWith(module)) &&
+        /shell\/shell-projection(?:-owner)?(?:\.js)?'/u.test(readFileSync(path, 'utf8')),
     );
     expect(importers).toEqual([]);
+    // The owner reaches the authority only through the held scope, never through a wire client (PO-Q5).
+    expect(readFileSync(join(sourceRoot, 'shell', 'shell-projection-owner.ts'), 'utf8')).not.toMatch(
+      /NodeFsProviderClient|NodeFsChannel|@taucad\/filesystem\/backend'/u,
+    );
   });
 });

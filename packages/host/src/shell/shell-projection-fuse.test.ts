@@ -256,6 +256,13 @@ const createOwner = (publisher: Publisher, seed: ReadonlyArray<Readonly<{ path: 
         return { entry: entry(request.inode) };
       }
       case 'open': {
+        // The bridge negotiates atomic O_TRUNC, so the truncation arrives here rather than as a setattr.
+        if (Math.floor(request.flags / 0o1000) % 2 === 1 && (nodes.get(request.inode)?.bytes.length ?? 0) > 0) {
+          const failed = await replace(request.inode, new Uint8Array(0));
+          if (failed !== undefined) {
+            return failed;
+          }
+        }
         return { handle: request.inode };
       }
       case 'read': {

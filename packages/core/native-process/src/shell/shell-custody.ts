@@ -6,7 +6,8 @@ import { basename, dirname, join } from 'node:path';
 
 import { z } from 'zod';
 
-import { processTable } from '#shell/process-tree.js';
+import { processTable, terminateOwnedProcesses } from '#shell/process-tree.js';
+import type { ProcessRow } from '#shell/process-tree.js';
 import type { PreparedShell, ShellExecution, ShellRecovery, ShellResource } from '#shell/shell-provider.js';
 
 /** One execution's kernel lock. Only the credential-free supervisor inherits its descriptor. */
@@ -125,14 +126,26 @@ const recordSchema = z.strictObject({
 type CustodyRecord = z.infer<typeof recordSchema>;
 type HeldCustody = Readonly<{ lock: CustodyLock; token: string }>;
 
+/** The supervisor and staged root of one launch, registered before its start barrier opens. */
+export type ShellRegistration = PreparedShell & Readonly<{ supervisor: number; root: number }>;
+
 /** Existing native custody owner; a stopped recovery keeps its lock until release or close. */
 export type ShellCustody = Readonly<{
   prepare: (input: Readonly<{ privateRoot: string; resource: ShellResource | undefined }>) => Promise<PreparedShell>;
+  /** The prepared lock's descriptor, inherited only by the launch's supervisor when it is spawned. */
+  descriptor: (executionId: string) => number;
+  /** Durably arm a prepared execution with the creation identities of its supervisor and still-blocked root. */
+  register: (input: ShellRegistration) => Promise<void>;
+  /** Fence this owner after the supervisor holds the inherited lock; the supervisor's exit releases it. */
+  handoff: (executionId: string) => Promise<void>;
   inventory: () => Promise<readonly ShellExecution[]>;
   recover: (input: Readonly<{ executionIds: readonly string[] }>) => Promise<readonly ShellRecovery[]>;
   release: (input: PreparedShell) => Promise<void>;
   close: () => Promise<void>;
 }>;
+
+/** How long armed recovery may spend terminating and confirming registered identities. Milliseconds. */
+const recoveryMilliseconds = 5000;
 
 const missing = (error: unknown): boolean => error instanceof Error && 'code' in error && error.code === 'ENOENT';
 const metadata = (record: CustodyRecord): ShellExecution => ({
@@ -195,8 +208,30 @@ const selfIdentity = async (): Promise<z.infer<typeof processIdentity>> => {
  * @returns The provider-local owner; stopped results retain native locks across returned promises.
  */
 export const createShellCustody = (
-  options: Readonly<{ directory: string; sessionDirectory: string }>,
+  options: Readonly<{
+    directory: string;
+    sessionDirectory: string;
+    /** The process table; injectable only to exercise unreadable-table retention. */
+    table?: () => Promise<readonly ProcessRow[]>;
+  }>,
 ): ShellCustody => {
+  const reader = options.table ?? processTable;
+  /* Every observation is bounded; a hung table read answers blocked instead of holding the recovery queue. */
+  const table = async (): Promise<readonly ProcessRow[]> => {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        reader(),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            reject(new Error('The process table did not answer in time.'));
+          }, 1000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   const held = new Map<string, HeldCustody>();
   let pending: Promise<unknown> = Promise.resolve();
   const state = { closed: false };
@@ -309,6 +344,70 @@ export const createShellCustody = (
       }
     }
   };
+  const identify = async (pids: readonly number[]): Promise<ReadonlyArray<z.infer<typeof processIdentity>>> => {
+    const rows = await table();
+    return pids.map((pid) => {
+      const row = rows.find((candidate) => candidate.pid === pid && !candidate.zombie);
+      if (row?.started === undefined || pid < 2) {
+        throw new Error('A registered shell process is not running.');
+      }
+      return { pid, started: row.started };
+    });
+  };
+  /*
+   * Called only while holding the exclusive record lock, which the supervisor held until it exited. A changed boot
+   * proves every recorded process gone. Otherwise only processes whose creation identity still matches are signalled;
+   * a reused pid is not ours, and group members of an absent root are ambiguous, so they keep custody blocked.
+   */
+  const confirmArmedStopped = async (record: CustodyRecord): Promise<void> => {
+    if ((await bootIdentity()) !== record.boot) {
+      return;
+    }
+    const root = record.root!;
+    const recorded = [root, record.supervisor!, ...record.descendants];
+    const matching = (rows: readonly ProcessRow[]): readonly number[] =>
+      recorded
+        .filter((identity) =>
+          rows.some((row) => row.pid === identity.pid && row.started === identity.started && !row.zombie),
+        )
+        .map((identity) => identity.pid);
+    const deadline = Date.now() + recoveryMilliseconds;
+    const rows = await table();
+    if (matching(rows).includes(root.pid)) {
+      const survivors = await terminateOwnedProcesses({
+        root: root.pid,
+        group: root.pid,
+        deadlineMilliseconds: recoveryMilliseconds,
+        table,
+      });
+      if (survivors.length > 0) {
+        throw new Error(`Registered shell processes survived termination: ${survivors.join(', ')}.`);
+      }
+    } else if (rows.some((row) => row.pgid === root.pid && row.pid !== root.pid && !row.zombie)) {
+      throw new Error('The registered shell process group cannot be attributed to this execution.');
+    }
+    for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- polled until the registered identities are gone or the deadline.
+      const remaining = matching(await table());
+      if (remaining.length === 0) {
+        return;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`Registered shell processes are still running: ${remaining.join(', ')}.`);
+      }
+      for (const pid of remaining) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          /* Already gone. */
+        }
+      }
+      // oxlint-disable-next-line no-await-in-loop -- polled until the deadline.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+    }
+  };
   const ensureOpen = (): void => {
     if (state.closed) {
       throw new Error('Shell custody provider is closed.');
@@ -355,6 +454,33 @@ export const createShellCustody = (
           throw error;
         }
       }),
+    descriptor: (executionId) => {
+      const ownership = held.get(executionId);
+      if (ownership === undefined) {
+        throw new Error('Shell execution is not owned by this provider.');
+      }
+      return ownership.lock.descriptor;
+    },
+    register: async ({ executionId, supervisor, root }) =>
+      serialized(async () => {
+        ensureOpen();
+        const { record, ownership } = await current(executionId);
+        if (record.phase !== 'prepared') {
+          throw new Error('Only a prepared shell execution can be registered.');
+        }
+        const [supervisorIdentity, rootIdentity] = await identify([supervisor, root]);
+        await persist({ ...record, phase: 'armed', supervisor: supervisorIdentity, root: rootIdentity }, ownership);
+      }),
+    handoff: async (executionId) =>
+      serialized(async () => {
+        ensureOpen();
+        const { record, ownership } = await current(executionId);
+        if (record.phase !== 'armed') {
+          throw new Error('Only a registered shell execution can be handed to its supervisor.');
+        }
+        held.delete(executionId);
+        await ownership.lock.handoff();
+      }),
     inventory: async () =>
       serialized(async () => {
         ensureOpen();
@@ -379,9 +505,8 @@ export const createShellCustody = (
               };
               const latest = await read(executionId);
               await validateRoots(latest);
-              // Armed recovery is wired with the supervisor protocol; uncertainty cannot clear custody.
               if (latest.phase === 'armed') {
-                throw new Error('Armed shell execution requires confirmed native cleanup.');
+                await confirmArmedStopped(latest);
               }
               const stopped: CustodyRecord = {
                 ...latest,

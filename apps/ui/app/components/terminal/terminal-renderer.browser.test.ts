@@ -222,6 +222,19 @@ describe('createTerminalRenderer (AurigaX 0.3.6)', () => {
     expect(isTerminalPasteChord({ ...chord, altKey: true }, 'Win32')).toBe(false);
   });
 
+  it('keeps up with a shell that prints line by line: small writes share a parse task', async () => {
+    await create();
+    const lines = 2000;
+    const started = performance.now();
+    for (let index = 0; index < lines - 1; index++) {
+      view!.write(`output ${String(index)}\r\n`, () => undefined);
+    }
+    await write(`output ${String(lines - 1)}\r\nafter-flood-visible\r\n`);
+    /* One task per frame is at least 4 ms each once timers nest: eight seconds for this backlog. */
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(await mirrorText()).toContain('after-flood-visible');
+  });
+
   it('parses a large backlog in bounded slices and yields to the event loop between them', async () => {
     await create();
     const events: string[] = [];

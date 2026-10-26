@@ -403,23 +403,34 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
     enableAccessibility();
   }
 
-  /* Bounded parse work per task: each slice is parsed, then the queue yields to the event loop so key events are
-   * handled between slices of a large backlog (Q3/5: input under CPU starvation). */
+  /* Bounded parse work per task: up to one slice's worth of queued output is parsed, then the queue yields to the event
+   * loop so key events are handled between slices of a large backlog (Q3/5: input under CPU starvation). Small writes
+   * share a task: a shell printing line by line sends thousands of small frames, and one task each (a nested timer is
+   * clamped to 4 ms) left the screen seconds behind the shell. */
   const queue: Array<{ data: string; painted?: () => void }> = [];
   let writing = false;
   let disposed = false;
   let yieldTimer: ReturnType<typeof setTimeout> | undefined;
   const pump = (): void => {
     yieldTimer = undefined;
-    const next = queue.shift();
-    if (next === undefined || disposed) {
+    if (queue.length === 0 || disposed) {
       writing = false;
       return;
     }
     writing = true;
-    accessibility?.push(next.data);
-    terminal.write(next.data, () => {
-      next.painted?.();
+    const batch = [queue.shift()!];
+    let size = batch[0]!.data.length;
+    while (queue.length > 0 && size + queue[0]!.data.length <= writeSliceCharacters) {
+      const next = queue.shift()!;
+      batch.push(next);
+      size += next.data.length;
+    }
+    const data = batch.length === 1 ? batch[0]!.data : batch.map((entry) => entry.data).join('');
+    accessibility?.push(data);
+    terminal.write(data, () => {
+      for (const entry of batch) {
+        entry.painted?.();
+      }
       if (!disposed) {
         yieldTimer = setTimeout(pump, 0);
       }

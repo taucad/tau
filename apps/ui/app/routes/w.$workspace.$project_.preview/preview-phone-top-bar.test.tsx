@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
@@ -57,7 +57,7 @@ describe('PreviewPhoneTopBar (HDR-12, D11)', () => {
     expect(within(bar).queryByRole('button', { name: 'Export' })).toBeNull();
   });
 
-  it('keeps Edit, Download source and Project settings in More, with Edit opening the editor', async () => {
+  it('keeps Download source and Project settings in More; the crumb alone goes to the editor (I4)', async () => {
     const user = userEvent.setup();
     const onDownloadSource = vi.fn();
     renderBar(onDownloadSource);
@@ -67,8 +67,10 @@ describe('PreviewPhoneTopBar (HDR-12, D11)', () => {
       within(menu)
         .getAllByRole('menuitem')
         .map((item) => item.textContent),
-    ).toEqual(['Edit', 'Download source', 'Project settings']);
-    expect(within(menu).getByRole('menuitem', { name: 'Edit' })).toHaveAttribute('href', '/w/home/bracket');
+    ).toEqual(['Download source', 'Project settings']);
+    expect(
+      screen.getAllByRole('link', { hidden: true }).filter((link) => link.getAttribute('href') === '/w/home/bracket'),
+    ).toHaveLength(1);
 
     await user.click(within(menu).getByRole('menuitem', { name: 'Download source' }));
     expect(onDownloadSource).toHaveBeenCalledOnce();
@@ -79,5 +81,31 @@ describe('PreviewPhoneTopBar (HDR-12, D11)', () => {
       expect(screen.getByRole('dialog', { name: 'Project Settings' })).toBeInTheDocument();
     });
     expect(settings.open).toBe(true);
+  });
+
+  it.each([
+    { pointer: 'fine', shows: true },
+    { pointer: 'coarse', shows: false },
+  ])('opens the Workbench tooltip on focus only on a $pointer pointer that can hover', async ({ pointer, shows }) => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(pointer: coarse)' && pointer === 'coarse',
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    try {
+      renderBar();
+      // Focus as the closing drawer or menu hands it back.
+      act(() => {
+        screen.getByRole('button', { name: 'Workbench' }).focus();
+      });
+      await (shows
+        ? expect(screen.findByRole('tooltip')).resolves.toHaveTextContent('Workbench')
+        : waitFor(() => {
+            expect(screen.queryByRole('tooltip')).toBeNull();
+          }));
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

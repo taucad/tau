@@ -27,7 +27,13 @@ import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-works
 import { useIsProjectUnavailable } from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
 import { useFollowChat } from '#routes/w.$workspace.$project/revision-status-action.js';
 import { RecordIssuesAction } from '#routes/w.$workspace.$project/record-issues-action.js';
-import { cloudUnavailable, revisionName, useRevisionFacts } from '#routes/w.$workspace.$project/revision-vocabulary.js';
+import {
+  cloudUnavailable,
+  conflictSentence,
+  hasRevisionConflict,
+  revisionName,
+  useRevisionFacts,
+} from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import type { RevisionFacts } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 
 /** The line a project starts on; the status line names any other (D3). */
@@ -35,9 +41,6 @@ const defaultBranch = 'main';
 
 /** The shared vocabulary's sentence for an unconfirmed write, which the status line keeps verbatim. */
 const saveNotConfirmed = 'Save not confirmed';
-
-/** The status line's word for a conflict (D3). */
-const conflictWord = 'Conflict';
 
 /** The shared vocabulary's clause for a viewer who may not write. */
 const viewOnly = 'View only';
@@ -93,7 +96,7 @@ export const selectProjectStatusLine = ({
       return { icon: CircleAlert, tone: 'text-feature', isBusy: false, word: saveNotConfirmed };
     }
     if (facts.icon === GitMerge) {
-      return { icon: GitMerge, tone: facts.tone, isBusy: false, word: conflictWord };
+      return { icon: GitMerge, tone: facts.tone, isBusy: false, word: 'Conflict' };
     }
     if (issues?.state === 'unconfirmed') {
       return { icon: CircleAlert, tone: 'text-feature', isBusy: false, word: saveNotConfirmed };
@@ -144,6 +147,11 @@ function useProjectStatus(): Readonly<{
   head: number | undefined;
   branch: string | undefined;
   followChat: ReturnType<typeof useFollowChat>;
+  /**
+   * The sentence of a conflict that waits on the person's decision, read from the revision status itself: the line may
+   * name a more urgent fact first, and the decision still waits (I5).
+   */
+  conflict: string | undefined;
   /** The desktop trigger's words for the records, announced as it announces them. */
   issuesName: string;
 }> {
@@ -157,6 +165,7 @@ function useProjectStatus(): Readonly<{
     head: where.head,
     branch: where.branch,
     followChat,
+    conflict: status !== undefined && hasRevisionConflict(status) ? conflictSentence(status, where) : undefined,
     issuesName: issues ? `${issues.label} · ${String(issues.count)} ${issues.count === 1 ? 'record' : 'records'}` : '',
   };
 }
@@ -229,11 +238,14 @@ function SheetRow({
   icon: Icon,
   label,
   meta,
+  tone = 'text-muted-foreground',
   onSelect,
 }: {
   readonly icon: React.ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
   readonly label: string;
   readonly meta?: string;
+  /** The glyph's tone; colour lives on the glyph only. */
+  readonly tone?: string;
   readonly onSelect: () => void;
 }): React.JSX.Element {
   const labelId = useId();
@@ -250,7 +262,7 @@ function SheetRow({
         className='w-full justify-start gap-3 rounded-none font-normal'
         onClick={onSelect}
       >
-        <Icon aria-hidden className='size-4 shrink-0 text-muted-foreground' />
+        <Icon aria-hidden className={cn('size-4 shrink-0', tone)} />
         <span id={labelId} className='shrink-0'>
           {label}
         </span>
@@ -267,7 +279,9 @@ function SheetRow({
 /**
  * The project sheet the title opens: the name and status line, the recovery a
  * status names (Follow chat, settings records), then Revisions, Export and
- * Details, each once. Share is not here: it is the bar's own trailing control.
+ * Details, each once. A waiting conflict moves the Revisions row first, as the
+ * decision it opens (I5), rather than adding a second way there (I4). Share is
+ * not here: it is the bar's own trailing control.
  */
 function ProjectSheet({
   isOpen,
@@ -298,6 +312,17 @@ function ProjectSheet({
   }, [onOpenChange]);
   const head = revisionName(status.head);
   const revisionsMeta = [head, status.branch].filter(Boolean).join(' · ');
+  const revisionsRow = (
+    <SheetRow
+      icon={status.conflict === undefined ? History : GitMerge}
+      label={paneTitle('revisions')}
+      meta={status.conflict ?? (revisionsMeta === '' ? undefined : revisionsMeta)}
+      {...(status.conflict === undefined ? {} : { tone: 'text-warning' })}
+      onSelect={() => {
+        open('revisions');
+      }}
+    />
+  );
   return (
     <Drawer open={isOpen} onOpenChange={onOpenChange}>
       <DrawerContent
@@ -344,19 +369,12 @@ function ProjectSheet({
           </Tooltip>
         </div>
         <div className='min-h-0 overflow-y-auto pb-3'>
-          {/* I5: a conflict is a decision, so the sheet offers it first and opens Revisions, where it is made. */}
-          {status.line.word === conflictWord ? (
+          {/* I5: a conflict is a decision, so its Revisions row comes first and says so; it opens where it is made. */}
+          {status.conflict === undefined ? null : (
             <ul aria-label='Decision' className='border-t py-1'>
-              <SheetRow
-                icon={GitMerge}
-                label='Resolve conflict'
-                meta={status.facts.sentence}
-                onSelect={() => {
-                  open('revisions');
-                }}
-              />
+              {revisionsRow}
             </ul>
-          ) : null}
+          )}
           {status.followChat === undefined ? null : (
             <ul aria-label='Chat' className='border-t py-1'>
               <SheetRow
@@ -380,14 +398,7 @@ function ProjectSheet({
             />
           </div>
           <ul aria-label='Project' className='border-t py-1'>
-            <SheetRow
-              icon={History}
-              label={paneTitle('revisions')}
-              meta={revisionsMeta === '' ? undefined : revisionsMeta}
-              onSelect={() => {
-                open('revisions');
-              }}
-            />
+            {status.conflict === undefined ? revisionsRow : null}
             <SheetRow
               icon={workbenchPanes.export.icon}
               label={paneTitle('export')}

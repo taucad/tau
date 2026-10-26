@@ -464,11 +464,14 @@ test.each([
     expect(conflictBar.documentOverflow).toBeLessThanOrEqual(0);
     await target.screenshot(undefined, `mobile-status-conflict-${String(viewport.width)}.png`);
 
-    // The project sheet offers the decision, and it opens where the decision is made (I5).
+    // The project sheet moves Revisions first as the decision, once, and it opens where the decision is made (I4, I5).
     await target.click(titleButton(), { touch: true });
     await target.expectVisible(projectSheet());
-    const decide = projectSheet().getByRole('button', { name: 'Resolve conflict', exact: true });
+    const decide = projectSheet()
+      .getByRole('list', { name: 'Decision', exact: true })
+      .getByRole('button', { name: 'Revisions', exact: true });
     await target.expectVisible(decide, 30_000);
+    await target.expectCount(projectSheet().getByRole('button', { name: 'Revisions', exact: true }), 1);
     await target.expectAccessibleDescription(decide, 'Needs your decision on main');
     await target.screenshot(undefined, `mobile-project-sheet-conflict-${String(viewport.width)}.png`);
     await target.click(decide, { touch: true });

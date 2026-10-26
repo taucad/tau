@@ -72,7 +72,7 @@ describe.each([
   { width: 320, height: 720 },
   { width: 390, height: 844 },
 ])('mobile Preview at $width×$height (HDR-12)', (viewport) => {
-  test('should put a 48px bar with a crumb back to the project over the stage, and keep Edit returning to it', async () => {
+  test('should put a 48px bar with a crumb back to the project over the stage, with Export in the Workbench', async () => {
     await target.setViewport({ width: 1280, height: 720 });
     await target.navigate('/__e2e/project-navigation');
     await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
@@ -122,16 +122,23 @@ describe.each([
     await target.expectVisible(selectors.getByRole('tabpanel', { name: 'Open file', exact: true }));
     expect(await seriousAxeViolations()).toEqual([]);
     await target.screenshot(undefined, `preview-workbench-${String(viewport.width)}.png`);
+    // Export is not on the bar (I4); the Workbench is where it lives.
+    await target.click(selectors.getByRole('button', { name: 'Open workbench tab', exact: true }));
+    await target.click(selectors.getByRole('menuitem', { name: 'Export', exact: true }));
+    await target.expectVisible(selectors.getByRole('tabpanel', { name: 'Export', exact: true }));
     await target.keyboardPress('Escape');
     await target.expectHidden(drawer);
 
-    // Edit, in More, returns to the project editor.
+    // More holds the page's other actions; the crumb alone goes to the editor (I4).
     await target.click(selectors.getByRole('button', { name: 'More preview actions', exact: true }));
-    await target.click(selectors.getByRole('menuitem', { name: 'Edit', exact: true }));
-    await target.expectUrl(new RegExp(`${editorUrl}$`, 'u'));
+    const more = selectors.getByRole('menu');
+    await target.expectVisible(more);
+    await target.expectCount(more.getByRole('menuitem'), 2);
+    await target.expectVisible(more.getByRole('menuitem', { name: 'Download source', exact: true }));
+    await target.expectVisible(more.getByRole('menuitem', { name: 'Project settings', exact: true }));
+    await target.keyboardPress('Escape');
+    await target.expectHidden(more);
 
-    // So does the crumb.
-    await target.navigate(`${editorUrl}/preview`);
     const crumb = selectors.getByRole('link', { name: 'Back to Project Navigation A', exact: true });
     await target.expectVisible(crumb, 60_000);
     await target.click(crumb);

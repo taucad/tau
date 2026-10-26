@@ -434,6 +434,21 @@ describe('chatProjectionLogic (PV-S7)', () => {
     expect(selectPosition(state).cursor).toBe(rows.length);
   });
 
+  it('names an open question over a later call opened beside it (I5)', () => {
+    const withCalls = (...names: string[]): ChatProjection => ({
+      ...initialChatProjection,
+      openTools: Object.fromEntries(
+        names.map((toolName, index) => [`call_${String(index)}`, { runId: 'run_1', toolName }]),
+      ),
+    });
+    expect(selectToolsInFlight(withCalls('AskUserQuestion', 'write_file'))).toEqual({
+      count: 2,
+      toolName: 'AskUserQuestion',
+    });
+    expect(selectToolsInFlight(withCalls('read_file', 'write_file'))).toEqual({ count: 2, toolName: 'write_file' });
+    expect(selectToolsInFlight(withCalls())).toEqual({ count: 0 });
+  });
+
   it('is invariant to how the log is chunked', () => {
     const rows = readLog('recorded/daemon-reattach-hexnut-4runs');
     const one = project(rows, 1);

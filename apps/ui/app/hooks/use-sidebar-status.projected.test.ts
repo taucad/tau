@@ -39,6 +39,16 @@ describe('selectProjectedChatStatus — a listed chat whose agent is asking (WB-
     expect(selectChatFacts(status)).toEqual({ mark: 'attention', sentence: 'Waiting for you' });
   });
 
+  it.each(['AskUserQuestion', 'request_user_input'])(
+    'reads an external agent’s %s call in flight as a question, as the transcript does (I6)',
+    (toolName) => {
+      projected.tools = { count: 1, toolName };
+      const status = selectProjectedChatStatus(projection, false);
+      expect(status.state).toBe('question');
+      expect(selectChatFacts(status)).toEqual({ mark: 'attention', sentence: 'Waiting for you' });
+    },
+  );
+
   it('keeps any other call in flight a running tool', () => {
     projected.tools = { count: 1, toolName: 'geospec_check' };
     const status = selectProjectedChatStatus(projection, false);

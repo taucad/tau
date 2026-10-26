@@ -5,9 +5,12 @@ import { useSelector } from '@xstate/react';
 import { ArrowLeft, Download, FileCode } from 'lucide-react';
 import { WebglContextTrackerProvider } from '@taucad/viewer/hooks/use-webgl-context-tracker';
 import { Button } from '@taucad/ui/components/button';
+import { cn } from '@taucad/ui/utils/cn';
 import { Loader } from '@taucad/ui/components/loader';
+import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { downloadBlob } from '@taucad/utils/file';
 import { PreviewWorkbenchLayout } from '#components/share/preview-workbench-layout.js';
+import { desktopTitlebarInset } from '#components/layout/page.js';
 import { MonacoModelServiceProvider } from '#hooks/use-monaco-model-service.js';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
 import { useProjectKernelOptions } from '#hooks/use-project-kernel-options.js';
@@ -58,6 +61,7 @@ export function OwnedPreviewWorkbench(): React.JSX.Element {
   const ready = useSelector(projectRef, (state) => state.matches('ready'));
   const error = useSelector(projectRef, (state) => state.context.error);
   const editorUrl = useProjectUrl(project?.id);
+  const isMobile = useIsMobile();
   const fileManager = useFileManager();
   const downloadSource = useCallback(() => {
     if (!project) {
@@ -74,8 +78,9 @@ export function OwnedPreviewWorkbench(): React.JSX.Element {
   }, [fileManager, project]);
   const renderTopbar = useCallback(
     (workbenchTrigger?: React.ReactNode) =>
-      // The layout hands a Workbench trigger only while it is compact: the bar is then the 48px phone bar (HDR-12).
-      workbenchTrigger === undefined ? (
+      /* The layout hands a Workbench trigger while its container is compact. On a phone the bar is then the 48px phone
+       * bar (HDR-12, D12); a wider viewport whose open sidebar narrows the container keeps this header and its trigger. */
+      workbenchTrigger === undefined || !isMobile ? (
         <header
           data-slot='owned-preview-topbar'
           className='flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b px-2 py-2 @min-[640px]/preview:h-12 @min-[640px]/preview:flex-nowrap @min-[640px]/preview:gap-4 @min-[640px]/preview:px-4 @min-[640px]/preview:py-0'
@@ -117,7 +122,7 @@ export function OwnedPreviewWorkbench(): React.JSX.Element {
       ) : (
         <PreviewPhoneTopBar projectName={project?.name} editorUrl={editorUrl} onDownloadSource={downloadSource} />
       ),
-    [downloadSource, editorUrl, project?.name],
+    [downloadSource, editorUrl, isMobile, project?.name],
   );
   if (error) {
     return (
@@ -141,7 +146,7 @@ export function OwnedPreviewWorkbench(): React.JSX.Element {
   return (
     // The route draws its own bar (`enablePageHeader: false`), so it keeps the shell's inset under the closed
     // sidebar's titlebar controls from `md` up, as the shell gives a headerless page.
-    <div className='size-full md:group-data-[sidebar-open=false]/app-shell:pt-9'>
+    <div className={cn('size-full', desktopTitlebarInset)}>
       <PreviewWorkbenchLayout renderTopbar={renderTopbar} />
     </div>
   );

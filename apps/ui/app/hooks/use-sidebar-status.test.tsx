@@ -6,9 +6,9 @@ import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
 import type { Chat } from '@taucad/chat';
-import * as chatConstants from '@taucad/chat/constants';
 import type { RevisionStatusProjection } from '@taucad/revisions';
 import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
+import * as questionTool from '#utils/question-tool.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type { ChatSessionActorRef, ChatSessionMachineEvent } from '#machines/chat-session.machine.js';
@@ -422,6 +422,19 @@ const agentStateRows: ReadonlyArray<{
     events: [
       { type: 'runLifecycle', phase: 'running' },
       { type: 'toolParts', inFlight: 1, approvals: 0, toolName: 'ask_questions' },
+    ],
+    state: 'question',
+    label: 'Waiting for you',
+    mark: 'attention',
+    sentence: 'Waiting for you',
+  },
+  {
+    /* I6: an external agent's question arrives under its native name over ACP; it reads as the transcript reads it. */
+    signal: 'AskUserQuestion call in flight',
+    target: 'chat',
+    events: [
+      { type: 'runLifecycle', phase: 'running' },
+      { type: 'toolParts', inFlight: 1, approvals: 0, toolName: 'AskUserQuestion' },
     ],
     state: 'question',
     label: 'Waiting for you',
@@ -1234,7 +1247,7 @@ const compiledHooks = await (async () => {
   const modules: Record<string, unknown> = {
     react: await import('react'),
     'react/compiler-runtime': await import('react/compiler-runtime'),
-    '@taucad/chat/constants': chatConstants,
+    '#utils/question-tool.js': questionTool,
     '#machines/sessions.machine.js': await import('#machines/sessions.machine.js'),
     '#services/sessions-store.js': await import('#services/sessions-store.js'),
     '#hooks/use-revision-status.js': await import('#hooks/use-revision-status.js'),

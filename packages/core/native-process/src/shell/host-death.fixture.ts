@@ -5,12 +5,22 @@
  *
  * Configuration: `TAU_HOST_DEATH_BWRAP`, `TAU_HOST_DEATH_WORK` (the writable folder) and `TAU_HOST_DEATH_MARKER`.
  */
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { createSandboxShellProvider } from '#shell/srt-shell-provider.js';
 
 const work = process.env['TAU_HOST_DEATH_WORK'] ?? '';
 const marker = process.env['TAU_HOST_DEATH_MARKER'] ?? '';
 const provider = createSandboxShellProvider({ bwrapPath: process.env['TAU_HOST_DEATH_BWRAP'] ?? '/usr/bin/bwrap' });
+/* Prepared like every launch (I7); the killed host leaves its receipt armed, as a crashed host would. */
+const { executionId } = await provider.prepare({
+  privateRoot: await mkdtemp(join(tmpdir(), 'tau-shell-')),
+  resource: undefined,
+});
 const outcome = await provider.launch({
+  executionId,
   executablePath: '/bin/bash',
   arguments: [
     '--noprofile',

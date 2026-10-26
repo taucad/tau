@@ -38,6 +38,9 @@ export type PreparedShell = Readonly<{ executionId: string }>;
 /** A host-owned project or checkout binding. The provider never interprets its key. @public */
 export type ShellResource = Readonly<{ key: string; root: string }>;
 
+/** What {@link ShellProvider.prepare} records before any process exists. @public */
+export type ShellPreparation = Readonly<{ privateRoot: string; resource: ShellResource | undefined }>;
+
 /** Durable custody metadata; an explicitly absent resource denotes a private-only probe. @public */
 export type ShellExecution = PreparedShell & Readonly<{ privateRoot: string; resource: ShellResource | undefined }>;
 
@@ -67,6 +70,11 @@ export type ShellStdio = Readonly<{ kind: 'pipes' }> | Readonly<{ kind: 'termina
  * @public
  */
 export type ShellLaunch = Readonly<{
+  /**
+   * The execution {@link ShellProvider.prepare} returned for this launch (I7). A provider refuses an execution it did
+   * not prepare, or one that already launched, before anything starts.
+   */
+  executionId: string;
   /** The resolved shell executable ({@link resolveShellExecutable}). */
   executablePath: string;
   /** Arguments after the executable, such as `['--noprofile', '--norc', '-c', command]`; never reinterpreted. */
@@ -167,5 +175,24 @@ export type ShellLaunchOutcome =
 export type ShellProvider = Readonly<{
   /** Stable name recorded on every receipt (I12), such as `srt-0.0.75` or `codex-restricted-token-fallback`. */
   name: string;
+  /**
+   * Durably record the intent to launch before any process exists (I7): a fresh execution identity, the private root it
+   * may write and the project resource it runs against (`undefined` only for a private-only probe). Rejects when the
+   * custody record cannot be written; nothing may launch then.
+   */
+  prepare: (input: ShellPreparation) => Promise<PreparedShell>;
+  /**
+   * Start a prepared execution. Any outcome other than `started`, and a rejection, ran no workload; the caller then
+   * {@link ShellProvider.recover recovers} the execution before it deletes the private roots.
+   */
   launch: (launch: ShellLaunch) => Promise<ShellLaunchOutcome>;
+  /** Every durable execution in this provider's custody namespace, read-only. Rejects on any unreadable record. */
+  inventory: () => Promise<readonly ShellExecution[]>;
+  /**
+   * Claim exactly the named executions: `stopped` only once every registered process is confirmed gone, keeping
+   * exclusive custody until {@link ShellProvider.release}; `blocked` grants nothing. A live owner is never taken over.
+   */
+  recover: (input: Readonly<{ executionIds: readonly string[] }>) => Promise<readonly ShellRecovery[]>;
+  /** Erase a stopped execution's receipt after its private root is deleted and every other hold is released. */
+  release: (input: PreparedShell) => Promise<void>;
 }>;

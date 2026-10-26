@@ -10,7 +10,8 @@
 # GitHub-hosted macOS reports SIP disabled (ruling X19), so it can never run this workflow: every row fails closed in
 # its preflight unless the host shows SIP and Gatekeeper enabled, native architecture (no Rosetta) and no prior Tau
 # installation, profile or ShipIt cache. `desktop-macos-vm-receipts` is uploaded only by a Mac-scoped staging dispatch
-# on main whose every row passed that preflight and its run; a partial-architecture run uploads no receipt set.
+# on main whose every row passed that preflight and its run. No Intel clean host exists yet: without `x64_runner_label`
+# the run covers Apple silicon only (the `local-mac` runner) and uploads no receipt set, so clean-host stays unqualified.
 name: Desktop clean-host route acceptance
 
 on:
@@ -34,12 +35,6 @@ on:
         description: Successful trusted Mac installer-candidate run C; its source must equal this dispatch's main commit
         required: true
         type: string
-      architectures:
-        description: Both produce the receipt set; a single architecture is a diagnostic run that uploads no receipts
-        required: true
-        default: both
-        type: choice
-        options: [both, arm64, x64]
       runner_group:
         description: Self-hosted runner group holding the clean-host Macs
         required: true
@@ -51,9 +46,9 @@ on:
         default: local-mac
         type: string
       x64_runner_label:
-        description: Label of the SIP-enabled Intel clean host (no default host exists; replace the placeholder)
-        required: true
-        default: tau-mac-x64-unregistered
+        description: Label of a SIP-enabled Intel clean host; empty (no Intel host exists) runs Apple silicon only and uploads no receipt set
+        required: false
+        default: ''
         type: string
       reset_host:
         description: Delete /Applications/Tau.app, Tau profiles and ShipIt caches on the runner first (destroys that account's Tau data)
@@ -92,23 +87,19 @@ jobs:
             echo '::error::Clean-host acceptance not run: requires a Mac-scoped main dispatch and explicit operator enablement.'
             exit 1
           fi
-      - name: Select the clean-host rows for the requested architectures
+      - name: Select the clean-host rows for the available hosts
         id: selection
         env:
-          ARCHITECTURES: ${{ inputs.architectures }}
           RUNNER_GROUP: ${{ inputs.runner_group }}
           ARM64_LABEL: ${{ inputs.arm64_runner_label }}
           X64_LABEL: ${{ inputs.x64_runner_label }}
         run: |
           node --input-type=module <<'NODE'
           import { appendFileSync } from 'node:fs';
-          const { ARCHITECTURES: architectures, RUNNER_GROUP: group, ARM64_LABEL: arm64, X64_LABEL: x64 } = process.env;
+          const { RUNNER_GROUP: group, ARM64_LABEL: arm64, X64_LABEL: x64 } = process.env;
           const label = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-          if (!['both', 'arm64', 'x64'].includes(architectures) || !label.test(group) || !label.test(arm64) || !label.test(x64)) {
-            throw new Error('Invalid architecture selection or runner label');
-          }
-          if (architectures !== 'arm64' && x64 === 'tau-mac-x64-unregistered') {
-            throw new Error('No Intel clean host is registered: supply x64_runner_label, or run arm64 alone as a diagnostic');
+          if (!label.test(group) || !label.test(arm64) || (x64 !== '' && !label.test(x64))) {
+            throw new Error('Invalid runner group or label');
           }
           // Self-hosted only: a GitHub-hosted image can never satisfy the clean-host contract.
           const host = (arch, name) => ({ group, labels: ['self-hosted', 'macOS', arch === 'arm64' ? 'ARM64' : 'X64', name] });
@@ -117,7 +108,7 @@ jobs:
             { id: 'macos-dmg-arm64', route: 'macos-dmg', arch: 'arm64', host: host('arm64', arm64) },
             { id: 'macos-zip-x64', route: 'macos-zip', arch: 'x64', host: host('x64', x64) },
             { id: 'macos-dmg-x64', route: 'macos-dmg', arch: 'x64', host: host('x64', x64) },
-          ].filter((row) => architectures === 'both' || row.arch === architectures);
+          ].filter((row) => row.arch === 'arm64' || x64 !== '');
           appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(rows)}\n`);
           NODE
 
@@ -236,8 +227,8 @@ jobs:
 
   receipts:
     needs: installed
-    # A diagnostic single-architecture run never yields the receipt set publication admits.
-    if: inputs.architectures == 'both' && inputs.scope == 'macos'
+    # Without an Intel clean host the run is Apple silicon evidence only and never yields the receipt set publication admits.
+    if: inputs.x64_runner_label != '' && inputs.scope == 'macos'
     environment: desktop-qualification-staging
     runs-on: ubuntu-24.04
     timeout-minutes: 20

@@ -118,9 +118,10 @@ export function OpenInDesktop({ continueLabel }: OpenInDesktopProps): React.JSX.
      would otherwise navigate to the scheme twice. */
   const attempted = useRef(false);
 
-  const deepLink = isDesktopTarget() || !isDesktopSupported
-    ? undefined
-    : desktopDeepLink(`${location.pathname}${location.search}${location.hash}`, scheme);
+  const deepLink =
+    isDesktopTarget() || !isDesktopSupported
+      ? undefined
+      : desktopDeepLink(`${location.pathname}${location.search}${location.hash}`, scheme);
 
   const handOff = useCallback((): void => {
     if (deepLink === undefined) {

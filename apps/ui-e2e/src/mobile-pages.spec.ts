@@ -221,7 +221,9 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
     );
     await target.expectCount(selectors.getByText(/^Could not open /u), 0);
     await target.expectVisible(selectors.getByRole('link', { name: `Open ${seededProjects[0]}`, exact: true }));
-    await target.click(selectors.getByRole('link', { name: `Open ${seededProjects[0]}`, exact: true }), { touch: true });
+    await target.click(selectors.getByRole('link', { name: `Open ${seededProjects[0]}`, exact: true }), {
+      touch: true,
+    });
     await target.expectUrl(/\/w\/[^/]+\/project-navigation-a-copy(?:[/?#]|$)/u, 60_000);
     await waitForStageReady();
     await openFromAll('Files');
@@ -314,7 +316,9 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
     await openTouchPhone(viewport);
     await target.addInitScript(() => {
       Object.defineProperties(navigator, {
-        userAgent: { value: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130.0.0.0 Mobile Safari/537.36' },
+        userAgent: {
+          value: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130.0.0.0 Mobile Safari/537.36',
+        },
         userAgentData: { value: undefined },
         platform: { value: 'Linux armv8l' },
       });
@@ -453,7 +457,9 @@ test.each([false, true])('a signed-out invitation on Windows offers Tau Desktop 
   await target.commands.uiOpenTarget({ hasTouch });
   await target.addInitScript(() => {
     Object.defineProperties(navigator, {
-      userAgent: { value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36' },
+      userAgent: {
+        value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36',
+      },
       userAgentData: { value: undefined },
       platform: { value: 'Win32' },
     });

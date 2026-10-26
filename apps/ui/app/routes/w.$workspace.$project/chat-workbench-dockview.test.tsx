@@ -114,7 +114,8 @@ const mockReadRawBytes = vi.fn();
 const mockWriteFile = vi.fn();
 const mockDocuments = new Map<string, EditorDocument>();
 const mockSessionApply = vi.fn((path: string, transaction: DocumentTransaction): DocumentChange | undefined =>
-  mockDocuments.get(path)?.apply(transaction));
+  mockDocuments.get(path)?.apply(transaction),
+);
 const mockSessionSave = vi.fn(async (_path: string): Promise<void> => undefined);
 const mockSessionGet = vi.fn((path: string): EditorDocument | undefined => mockDocuments.get(path));
 const mockSession = { apply: mockSessionApply, save: mockSessionSave, get: mockSessionGet };
@@ -277,7 +278,10 @@ vi.mock('#routes/w.$workspace.$project/file-viewers/built-in-viewers.js', () => 
           readonly resource: { readonly outcome: FileContentResult };
           readonly textEditor?: {
             readonly language: string;
-            readonly onApply: (document: EditorDocument, transaction: DocumentTransaction) => DocumentChange | undefined;
+            readonly onApply: (
+              document: EditorDocument,
+              transaction: DocumentTransaction,
+            ) => DocumentChange | undefined;
             readonly onHistory: (document: EditorDocument, kind: 'undo' | 'redo') => DocumentChange | undefined;
           };
           readonly renderPane: (content: {
@@ -294,13 +298,7 @@ vi.mock('#routes/w.$workspace.$project/file-viewers/built-in-viewers.js', () => 
                   Viewer
                 </button>
               ) : undefined,
-            body: (
-              <Viewer
-                filePath={request.path}
-                content={content}
-                textEditor={request.textEditor}
-              />
-            ),
+            body: <Viewer filePath={request.path} content={content} textEditor={request.textEditor} />,
           });
         },
       };
@@ -910,8 +908,16 @@ describe('FileEditor routing', () => {
 
   it('should keep simultaneous file-pane owners independent', async () => {
     mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('hello') });
-    const firstApi = { ...mockPanelApi, updateParameters: vi.fn(), setTitle: vi.fn() } as unknown as IDockviewPanelProps['api'];
-    const secondApi = { ...mockPanelApi, updateParameters: vi.fn(), setTitle: vi.fn() } as unknown as IDockviewPanelProps['api'];
+    const firstApi = {
+      ...mockPanelApi,
+      updateParameters: vi.fn(),
+      setTitle: vi.fn(),
+    } as unknown as IDockviewPanelProps['api'];
+    const secondApi = {
+      ...mockPanelApi,
+      updateParameters: vi.fn(),
+      setTitle: vi.fn(),
+    } as unknown as IDockviewPanelProps['api'];
 
     render(
       <>
@@ -1008,14 +1014,20 @@ describe('FileEditor routing', () => {
     };
     const showEditButton = (document: EditorDocument, text: string): void => {
       mockResolveViewer.mockReturnValue(({ textEditor }: EditorCallbacks) => (
-        <button type='button' data-testid='trigger-change' onClick={() => {
-          textEditor?.onApply(document, {
-            changes: [{ from: 0, to: document.text.length, insert: text }],
-            origin: 'view',
-            expectedVersion: document.version,
-            viewId: 'pane-1',
-          });
-        }}>change</button>
+        <button
+          type='button'
+          data-testid='trigger-change'
+          onClick={() => {
+            textEditor?.onApply(document, {
+              changes: [{ from: 0, to: document.text.length, insert: text }],
+              origin: 'view',
+              expectedVersion: document.version,
+              viewId: 'pane-1',
+            });
+          }}
+        >
+          change
+        </button>
       ));
     };
 
@@ -1066,18 +1078,27 @@ describe('FileEditor routing', () => {
       showEditButton(document, 'changed');
       render(<FileEditor paneId='pane-1' filePath={document.path} panelApi={mockPanelApi} />);
       await userEvent.click(screen.getByTestId('trigger-change'));
-      await vi.waitFor(() => { expect(mockToastError).toHaveBeenCalledWith("Couldn't save 'main.ts'"); });
+      await vi.waitFor(() => {
+        expect(mockToastError).toHaveBeenCalledWith("Couldn't save 'main.ts'");
+      });
       expect(mockSessionSave).toHaveBeenCalledOnce();
     });
 
     it('undoes through the held document and saves the resulting text', async () => {
       const document = new EditorDocument('src/main.ts', 'hello');
-      document.apply({ changes: [{ from: 5, to: 5, insert: ' world' }], origin: 'view', expectedVersion: document.version, viewId: 'pane-1' });
+      document.apply({
+        changes: [{ from: 5, to: 5, insert: ' world' }],
+        origin: 'view',
+        expectedVersion: document.version,
+        viewId: 'pane-1',
+      });
       mockDocuments.set(document.path, document);
       editorMachineSnapshot.context.openFiles = [{ paneId: 'pane-1', path: document.path }];
       mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('hello world') });
       mockResolveViewer.mockReturnValue(({ textEditor }: EditorCallbacks) => (
-        <button type='button' data-testid='trigger-undo' onClick={() => textEditor?.onHistory(document, 'undo')}>undo</button>
+        <button type='button' data-testid='trigger-undo' onClick={() => textEditor?.onHistory(document, 'undo')}>
+          undo
+        </button>
       ));
       render(<FileEditor paneId='pane-1' filePath={document.path} panelApi={mockPanelApi} />);
       await userEvent.click(screen.getByTestId('trigger-undo'));
@@ -1118,7 +1139,13 @@ const createTestDockview = (initialPanels: TestPanel[] = []) => {
     const panel: TestPanel = {
       id: options.id,
       params: options.params ?? {},
-      api: { setActive: vi.fn(), updateParameters: vi.fn(), setTitle: vi.fn(), isVisible: true, onDidVisibilityChange: vi.fn(() => ({ dispose: vi.fn() })) },
+      api: {
+        setActive: vi.fn(),
+        updateParameters: vi.fn(),
+        setTitle: vi.fn(),
+        isVisible: true,
+        onDidVisibilityChange: vi.fn(() => ({ dispose: vi.fn() })),
+      },
     };
     panels.push(panel);
     return panel;
@@ -1149,7 +1176,13 @@ const createTestDockview = (initialPanels: TestPanel[] = []) => {
 const panel = (id: string, params: Record<string, unknown> = {}): TestPanel => ({
   id,
   params,
-  api: { setActive: vi.fn(), updateParameters: vi.fn(), setTitle: vi.fn(), isVisible: true, onDidVisibilityChange: vi.fn(() => ({ dispose: vi.fn() })) },
+  api: {
+    setActive: vi.fn(),
+    updateParameters: vi.fn(),
+    setTitle: vi.fn(),
+    isVisible: true,
+    onDidVisibilityChange: vi.fn(() => ({ dispose: vi.fn() })),
+  },
 });
 
 const openFile = (paneId: string, path: string) => ({

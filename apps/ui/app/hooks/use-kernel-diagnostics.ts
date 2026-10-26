@@ -72,29 +72,35 @@ export function useKernelDiagnostics(options: {
           byFile.set(path, list);
         }
       }
-      await Promise.all([...byFile].map(async ([path, entries]) => {
-        const document = await session.getOrEnsureDocument(path);
-        // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cleanup can happen while materialization awaits.
-        if (!active || !document) {
-          return;
-        }
-        const diagnostics = entries.map((issue): EditorDiagnostic => {
-          const { location } = issue;
-          const from = location ? offsetAt(document.text, location.startLineNumber, location.startColumn) : 0;
-          const to = location
-            ? offsetAt(document.text, location.endLineNumber ?? location.startLineNumber, location.endColumn ?? location.startColumn + 1)
-            : from;
-          return {
-            from,
-            to: Math.max(from, to),
-            message: issue.message,
-            severity: severityOf(issue.severity),
-            source: 'kernel',
-          };
-        });
-        current.add(document.uri);
-        session.diagnostics.set(document.uri, kernelOwner, diagnostics);
-      }));
+      await Promise.all(
+        [...byFile].map(async ([path, entries]) => {
+          const document = await session.getOrEnsureDocument(path);
+          // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cleanup can happen while materialization awaits.
+          if (!active || !document) {
+            return;
+          }
+          const diagnostics = entries.map((issue): EditorDiagnostic => {
+            const { location } = issue;
+            const from = location ? offsetAt(document.text, location.startLineNumber, location.startColumn) : 0;
+            const to = location
+              ? offsetAt(
+                  document.text,
+                  location.endLineNumber ?? location.startLineNumber,
+                  location.endColumn ?? location.startColumn + 1,
+                )
+              : from;
+            return {
+              from,
+              to: Math.max(from, to),
+              message: issue.message,
+              severity: severityOf(issue.severity),
+              source: 'kernel',
+            };
+          });
+          current.add(document.uri);
+          session.diagnostics.set(document.uri, kernelOwner, diagnostics);
+        }),
+      );
       // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cleanup can happen while materialization awaits.
       if (!active) {
         return;
@@ -124,17 +130,22 @@ export function useKernelDiagnostics(options: {
       const uri = URI.parse(event.uri);
       const document = uri.scheme === 'file' ? session.get(uri.path.slice(1)) : undefined;
       if (document) {
-        byUri.set(event.uri, event.diagnostics.filter((item) => item.severity === 'error').map((item) => {
-          const start = positionAt(document.text, item.from);
-          const end = positionAt(document.text, item.to);
-          return {
-            message: item.message,
-            startLineNumber: start.line,
-            startColumn: start.column,
-            endLineNumber: end.line,
-            endColumn: end.column,
-          };
-        }));
+        byUri.set(
+          event.uri,
+          event.diagnostics
+            .filter((item) => item.severity === 'error')
+            .map((item) => {
+              const start = positionAt(document.text, item.from);
+              const end = positionAt(document.text, item.to);
+              return {
+                message: item.message,
+                startLineNumber: start.line,
+                startColumn: start.column,
+                endLineNumber: end.line,
+                endColumn: end.column,
+              };
+            }),
+        );
       } else {
         byUri.delete(event.uri);
       }

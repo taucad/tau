@@ -134,7 +134,9 @@ export class PromiseMap<K, V> {
 
   /** Reject every unresolved response when its transport stops. */
   public clear(error: Error): void {
-    for (const key of this.map.keys()) { this.delete(key, error); }
+    for (const key of this.map.keys()) {
+      this.delete(key, error);
+    }
   }
 
   public get size(): number {

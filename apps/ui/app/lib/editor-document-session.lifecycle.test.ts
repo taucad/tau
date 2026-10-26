@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { ContentChangeEvent, FileContentResult, FileContentService, OutcomeChangeEvent } from '@taucad/fs-client/file-content-service';
+import type {
+  ContentChangeEvent,
+  FileContentResult,
+  FileContentService,
+  OutcomeChangeEvent,
+} from '@taucad/fs-client/file-content-service';
 import { EditorDocumentSession, maxBackgroundDocuments } from '#lib/editor-document-session.js';
 
 const bytes = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text);
@@ -36,8 +41,12 @@ function fixture(initial = 'base'): {
   return {
     content,
     outcomes,
-    contentChange: (event) => { contentListener(event); },
-    outcomeChange: (event) => { outcomeListener(event); },
+    contentChange: (event) => {
+      contentListener(event);
+    },
+    outcomeChange: (event) => {
+      outcomeListener(event);
+    },
   };
 }
 
@@ -61,8 +70,11 @@ describe('EditorDocumentSession lifecycle', () => {
     const { content } = fixture();
     const session = new EditorDocumentSession({ contentService: content, projectId: 'p' });
     const held = await session.acquire('held.ts');
-    await Promise.all(Array.from({ length: maxBackgroundDocuments + 1 }, async (_, index) =>
-      session.getOrEnsureDocument(`background-${String(index)}.ts`)));
+    await Promise.all(
+      Array.from({ length: maxBackgroundDocuments + 1 }, async (_, index) =>
+        session.getOrEnsureDocument(`background-${String(index)}.ts`),
+      ),
+    );
     expect(session.get('held.ts')).toBe(held);
     expect(session.get('background-0.ts')).toBeUndefined();
     expect(session.get(`background-${String(maxBackgroundDocuments)}.ts`)).toBeDefined();
@@ -76,8 +88,11 @@ describe('EditorDocumentSession lifecycle', () => {
     const dirty = await session.acquire('dirty.ts');
     session.apply('dirty.ts', { origin: 'view', expectedVersion: 1, changes: [{ from: 0, to: 4, insert: 'mine' }] });
     session.release('dirty.ts');
-    await Promise.all(Array.from({ length: maxBackgroundDocuments + 1 }, async (_, index) =>
-      session.getOrEnsureDocument(`clean-${String(index)}.ts`)));
+    await Promise.all(
+      Array.from({ length: maxBackgroundDocuments + 1 }, async (_, index) =>
+        session.getOrEnsureDocument(`clean-${String(index)}.ts`),
+      ),
+    );
     expect(session.get('dirty.ts')).toBe(dirty);
     expect(dirty?.text).toBe('mine');
     expect(session.get('clean-0.ts')).toBeUndefined();

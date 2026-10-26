@@ -927,12 +927,7 @@ describe('funded invocation HTTP boundary', () => {
         const databaseService = { database };
         const usage = new BillingUsageService(databaseService, config, ledger);
         const module = await Test.createTestingModule({
-          controllers: [
-            BillingController,
-            BillingAttemptController,
-            ChatController,
-            LlmGatewayController,
-          ],
+          controllers: [BillingController, BillingAttemptController, ChatController, LlmGatewayController],
           providers: [
             Reflector,
             AuthGuard,

@@ -38,13 +38,13 @@ Every object that needs cleanup implements `Disposable`. This is the single requ
 
 Semantic names provide discoverability and describe **what** the cleanup does. They are the primary API consumers call directly. The `dispose()` method delegates to the semantic method (or vice versa when `dispose` is itself the natural term).
 
-| Term                | Scope                                                         | Web/TC39 alignment                                    |
-| ------------------- | ------------------------------------------------------------- | ----------------------------------------------------- |
+| Term                | Scope                                                         | Web/TC39 alignment                                     |
+| ------------------- | ------------------------------------------------------------- | ------------------------------------------------------ |
 | `dispose()`         | General resource release (the default and universal protocol) | TC39 `Symbol.dispose`, VS Code `IDisposable`, Three.js |
-| `close()`           | Connections, transports, streams                              | `WebSocket.close()`, `MessagePort.close()`            |
-| `terminate()`       | Workers and processes                                         | `Worker.terminate()`                                  |
-| `stop()`            | Running computations, actors                                  | XState `actor.stop()`, AI SDK `chat.stop()`           |
-| Return `() => void` | Subscriptions and one-time registrations                      | React `useEffect`, RxJS                               |
+| `close()`           | Connections, transports, streams                              | `WebSocket.close()`, `MessagePort.close()`             |
+| `terminate()`       | Workers and processes                                         | `Worker.terminate()`                                   |
+| `stop()`            | Running computations, actors                                  | XState `actor.stop()`, AI SDK `chat.stop()`            |
+| Return `() => void` | Subscriptions and one-time registrations                      | React `useEffect`, RxJS                                |
 
 `**dispose` is the default.\*\* When none of the specific terms (`close`, `terminate`, `stop`) apply, `dispose` is both the semantic name and the protocol method.
 

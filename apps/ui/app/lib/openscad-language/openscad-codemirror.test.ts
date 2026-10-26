@@ -3,7 +3,13 @@ import { mock } from 'vitest-mock-extended';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import { EditorDocument } from '#lib/editor-document.js';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
-import { callContext, definitionFor, hoverTextFor, importedHoverTextFor, parameterCompletions } from '#lib/openscad-language/openscad-codemirror.js';
+import {
+  callContext,
+  definitionFor,
+  hoverTextFor,
+  importedHoverTextFor,
+  parameterCompletions,
+} from '#lib/openscad-language/openscad-codemirror.js';
 import { parseOpenScad } from '#lib/openscad-language/openscad-pseudoparser.js';
 
 describe('OpenSCAD CodeMirror language behavior', () => {
@@ -11,21 +17,29 @@ describe('OpenSCAD CodeMirror language behavior', () => {
     const source = 'module custom(radius=2, height=5) {}\ncustom(radius=sin(1), ';
     const context = callContext(source, source.length);
     expect(context).toEqual({ name: 'custom', argument: 1, used: ['radius'] });
-    if (!context) { throw new Error('Expected call context'); }
+    if (!context) {
+      throw new Error('Expected call context');
+    }
     const parsed = parseOpenScad('main.scad', source, false);
     expect(parameterCompletions(context, parsed).map((completion) => completion.label)).toEqual(['height=']);
   });
 
   it('does not count commas nested in calls, arrays or strings as new arguments', () => {
     const source = 'custom(radius=max(1, 2), height=[1, 2], note="a,b", ';
-    expect(callContext(source, source.length)).toEqual({ name: 'custom', argument: 3, used: ['radius', 'height', 'note'] });
+    expect(callContext(source, source.length)).toEqual({
+      name: 'custom',
+      argument: 3,
+      used: ['radius', 'height', 'note'],
+    });
   });
 
   it('offers built-in OpenSCAD parameter names', () => {
     const source = 'cube(';
     const context = callContext(source, source.length);
     expect(context?.name).toBe('cube');
-    if (!context) { throw new Error('Expected call context'); }
+    if (!context) {
+      throw new Error('Expected call context');
+    }
     const options = parameterCompletions(context, parseOpenScad('main.scad', source, false));
     expect(options.map((option) => option.label)).toContain('size=');
   });
@@ -33,12 +47,23 @@ describe('OpenSCAD CodeMirror language behavior', () => {
   it('resolves modules from use and variables from include through content authority', async () => {
     const contentService = mock<FileContentService>();
     const environment = mock<EditorLanguageEnvironment>({ contentService });
-    contentService.resolve.mockResolvedValue({ kind: 'text', content: new TextEncoder().encode('module imported() {}\nsize = 5;') });
+    contentService.resolve.mockResolvedValue({
+      kind: 'text',
+      content: new TextEncoder().encode('module imported() {}\nsize = 5;'),
+    });
     const used = new EditorDocument('models/main.scad', 'use <library.scad>\nimported();');
-    expect(await definitionFor(used, environment, 'imported')).toEqual({ uri: 'file:///models/library.scad', line: 1, column: 8 });
+    expect(await definitionFor(used, environment, 'imported')).toEqual({
+      uri: 'file:///models/library.scad',
+      line: 1,
+      column: 8,
+    });
     expect(await importedHoverTextFor(used, environment, 'imported')).toBe('imported()');
     const included = new EditorDocument('models/main.scad', 'include <library.scad>\ncube(size);');
-    expect(await definitionFor(included, environment, 'size')).toEqual({ uri: 'file:///models/library.scad', line: 2, column: 1 });
+    expect(await definitionFor(included, environment, 'size')).toEqual({
+      uri: 'file:///models/library.scad',
+      line: 2,
+      column: 1,
+    });
   });
 
   it('keeps built-in and group comment hover text', () => {

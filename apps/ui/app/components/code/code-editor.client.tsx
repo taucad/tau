@@ -32,7 +32,8 @@ export type CodeEditorProps = Readonly<{
   onMount?: (view: EditorView) => void | (() => void);
 }>;
 
-export type CodeEditorBoundaryProps = Omit<CodeEditorProps, 'document' | 'syntaxExtension'> & Readonly<{ document?: EditorDocument }>;
+export type CodeEditorBoundaryProps = Omit<CodeEditorProps, 'document' | 'syntaxExtension'> &
+  Readonly<{ document?: EditorDocument }>;
 
 /** The source pane boundary; importing this file does not request CodeMirror. */
 export function CodeEditor(props: CodeEditorBoundaryProps): React.ReactNode {
@@ -59,7 +60,9 @@ export function CodeEditor(props: CodeEditorBoundaryProps): React.ReactNode {
       }
     };
     void load();
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [attempt, props.viewId]);
   useEffect(() => {
     const controller = new AbortController();
@@ -78,7 +81,9 @@ export function CodeEditor(props: CodeEditorBoundaryProps): React.ReactNode {
       }
     };
     void load();
-    return () => { controller.abort(); };
+    return () => {
+      controller.abort();
+    };
   }, [props.languageId, syntaxAttempt]);
   useEffect(() => {
     if (props.document) {
@@ -87,24 +92,57 @@ export function CodeEditor(props: CodeEditorBoundaryProps): React.ReactNode {
   }, [props.document, props.viewId]);
   if (failure && !View) {
     return (
-      <div role='alert' className='flex size-full flex-col items-center justify-center gap-3 bg-background p-4 text-sm text-foreground'>
+      <div
+        role='alert'
+        className='flex size-full flex-col items-center justify-center gap-3 bg-background p-4 text-sm text-foreground'
+      >
         <span>Code editor could not load.</span>
-        <Button type='button' size='sm' variant='outline' onClick={() => { setFailure(undefined); setAttempt((value) => value + 1); }}>
+        <Button
+          type='button'
+          size='sm'
+          variant='outline'
+          onClick={() => {
+            setFailure(undefined);
+            setAttempt((value) => value + 1);
+          }}
+        >
           Retry editor
         </Button>
       </div>
     );
   }
-  const body = View && props.document
-    ? <View {...props} document={props.document} syntaxExtension={syntax?.languageId === props.languageId ? syntax.extension : undefined} />
-    : props.loading ?? <EditorPanePlaceholder label='Loading editor' />;
+  const body =
+    View && props.document ? (
+      <View
+        {...props}
+        document={props.document}
+        syntaxExtension={syntax?.languageId === props.languageId ? syntax.extension : undefined}
+      />
+    ) : (
+      (props.loading ?? <EditorPanePlaceholder label='Loading editor' />)
+    );
   return syntaxFailure && View && props.document ? (
     <div className='relative size-full'>
       {body}
-      <div role='status' className='absolute right-3 bottom-3 z-20 flex items-center gap-2 rounded-md border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-sm'>
+      <div
+        role='status'
+        className='absolute right-3 bottom-3 z-20 flex items-center gap-2 rounded-md border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-sm'
+      >
         <span>Syntax colors could not load. Editing is still available.</span>
-        <Button type='button' size='xs' variant='outline' onClick={() => { setSyntaxFailure(undefined); setSyntaxAttempt((value) => value + 1); }}>Retry syntax</Button>
+        <Button
+          type='button'
+          size='xs'
+          variant='outline'
+          onClick={() => {
+            setSyntaxFailure(undefined);
+            setSyntaxAttempt((value) => value + 1);
+          }}
+        >
+          Retry syntax
+        </Button>
       </div>
     </div>
-  ) : body;
+  ) : (
+    body
+  );
 }

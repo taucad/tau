@@ -82,7 +82,8 @@ vi.mock('@taucad/ui/hooks/use-mobile', () => ({
 }));
 
 vi.mock('#hooks/use-editor-document-session.js', () => ({
-  EditorDocumentSessionProvider: ({ children }: { readonly children: React.JSX.Element }): React.JSX.Element => children,
+  EditorDocumentSessionProvider: ({ children }: { readonly children: React.JSX.Element }): React.JSX.Element =>
+    children,
 }));
 
 vi.mock('@taucad/viewer/hooks/use-webgl-context-tracker', () => ({

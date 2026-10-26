@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { EditorSaveConflictError } from '@taucad/fs-client/file-content-service';
-import type { ContentChangeEvent, FileContentService, FileContentResult, OutcomeChangeEvent } from '@taucad/fs-client/file-content-service';
+import type {
+  ContentChangeEvent,
+  FileContentService,
+  FileContentResult,
+  OutcomeChangeEvent,
+} from '@taucad/fs-client/file-content-service';
 import type { EditorConflictOutcome } from '@taucad/revisions/revision-effects';
 import { EditorDocumentSession, isRecordingEditorConflict } from '#lib/editor-document-session.js';
 
@@ -27,7 +32,15 @@ function service(initial: string): {
     return () => undefined;
   });
   content.saveEditor.mockResolvedValue(undefined);
-  return { content, contentChange: (event) => { contentChange(event); }, outcomeChange: (event) => { outcomeChange(event); } };
+  return {
+    content,
+    contentChange: (event) => {
+      contentChange(event);
+    },
+    outcomeChange: (event) => {
+      outcomeChange(event);
+    },
+  };
 }
 
 describe('EditorDocumentSession', () => {
@@ -38,7 +51,14 @@ describe('EditorDocumentSession', () => {
     const right = await session.acquire('main.ts');
     expect(right).toBe(left);
     expect(content.resolve).toHaveBeenCalledTimes(1);
-    expect(session.apply('main.ts', { expectedVersion: 1, origin: 'view', viewId: 'left', changes: [{ from: 3, to: 3, insert: ' two' }] })?.version).toBe(2);
+    expect(
+      session.apply('main.ts', {
+        expectedVersion: 1,
+        origin: 'view',
+        viewId: 'left',
+        changes: [{ from: 3, to: 3, insert: ' two' }],
+      })?.version,
+    ).toBe(2);
     await session.save('main.ts');
     expect(content.saveEditor).toHaveBeenCalledWith('main.ts', bytes('one two'), bytes('one'));
     session.release('main.ts');
@@ -94,8 +114,19 @@ describe('EditorDocumentSession', () => {
     const base = bytes('one\n');
     vi.mocked(content.saveEditor).mockRejectedValueOnce(new EditorSaveConflictError('main.ts', base));
     vi.mocked(content.peekOutcome).mockReturnValue(outcome('theirs\n'));
-    const record = vi.fn(async (): Promise<EditorConflictOutcome> => ({ status: 'recorded', revisionId: 'r1', line: 'main', into: 'main' }));
-    const session = new EditorDocumentSession({ contentService: content, projectId: 'p', recordEditorConflict: record });
+    const record = vi.fn(
+      async (): Promise<EditorConflictOutcome> => ({
+        status: 'recorded',
+        revisionId: 'r1',
+        line: 'main',
+        into: 'main',
+      }),
+    );
+    const session = new EditorDocumentSession({
+      contentService: content,
+      projectId: 'p',
+      recordEditorConflict: record,
+    });
     await session.acquire('main.ts');
     session.apply('main.ts', { expectedVersion: 1, origin: 'view', changes: [{ from: 0, to: 3, insert: 'mine' }] });
     await session.save('main.ts');
@@ -110,12 +141,25 @@ describe('EditorDocumentSession', () => {
     const base = bytes('original');
     vi.mocked(content.saveEditor).mockRejectedValueOnce(new EditorSaveConflictError('main.ts', base));
     vi.mocked(content.peekOutcome).mockReturnValue({ kind: 'orphaned' });
-    const record = vi.fn(async (): Promise<EditorConflictOutcome> => ({ status: 'recorded', revisionId: 'r1', line: 'main', into: 'main' }));
-    const session = new EditorDocumentSession({ contentService: content, projectId: 'p', recordEditorConflict: record });
+    const record = vi.fn(
+      async (): Promise<EditorConflictOutcome> => ({
+        status: 'recorded',
+        revisionId: 'r1',
+        line: 'main',
+        into: 'main',
+      }),
+    );
+    const session = new EditorDocumentSession({
+      contentService: content,
+      projectId: 'p',
+      recordEditorConflict: record,
+    });
     await session.acquire('main.ts');
     session.apply('main.ts', { expectedVersion: 1, origin: 'view', changes: [{ from: 0, to: 8, insert: 'mine' }] });
     const saved = session.save('main.ts');
-    await vi.waitFor(() => { expect(content.peekOutcome).toHaveBeenCalled(); });
+    await vi.waitFor(() => {
+      expect(content.peekOutcome).toHaveBeenCalled();
+    });
     contentChange({ type: 'deleted', path: 'main.ts', source: 'user' });
     await saved;
     expect(record).toHaveBeenCalledWith({ path: 'main.ts', base: 'original', mine: 'mine' });

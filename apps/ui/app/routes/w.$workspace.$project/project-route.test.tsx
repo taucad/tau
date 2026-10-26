@@ -727,7 +727,9 @@ describe('project route session identity', () => {
       await session.acquire('main.ts');
       session.apply('main.ts', { origin: 'view', expectedVersion: 1, changes: [{ from: 0, to: 3, insert: 'mine' }] });
       const saved = session.save('main.ts');
-      await vi.waitFor(() => { expect(isRecordingEditorConflict('proj-recording')).toBe(true); });
+      await vi.waitFor(() => {
+        expect(isRecordingEditorConflict('proj-recording')).toBe(true);
+      });
       await expect(
         sessionsModule.flushProjectSessionPersistence({
           projectId: 'proj-recording',

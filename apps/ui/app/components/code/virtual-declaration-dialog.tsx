@@ -11,7 +11,11 @@ export type VirtualDeclaration = Readonly<{
 }>;
 
 /** Read-only source view for a declaration held by the TypeScript worker. */
-export function VirtualDeclarationDialog({ declaration, onClose, restoreFocus }: {
+export function VirtualDeclarationDialog({
+  declaration,
+  onClose,
+  restoreFocus,
+}: {
   readonly declaration: VirtualDeclaration | undefined;
   readonly onClose: () => void;
   readonly restoreFocus: () => void;
@@ -26,10 +30,20 @@ export function VirtualDeclarationDialog({ declaration, onClose, restoreFocus }:
     view.focus();
   };
   return (
-    <Dialog open={declaration !== undefined} onOpenChange={(open) => { if (!open) { onClose(); } }}>
+    <Dialog
+      open={declaration !== undefined}
+      onOpenChange={(open) => {
+        if (!open) {
+          onClose();
+        }
+      }}
+    >
       <DialogContent
         className='flex h-[80vh] w-[90vw] max-w-5xl flex-col'
-        onCloseAutoFocus={(event) => { event.preventDefault(); restoreFocus(); }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          restoreFocus();
+        }}
       >
         <DialogHeader>
           <DialogTitle>{declaration?.document.path.split('/').at(-1) ?? 'TypeScript declaration'}</DialogTitle>

@@ -114,9 +114,10 @@ export class EditorDocument {
       } else {
         this.#undo.push({
           steps: [step],
-          kind: transaction.history?.kind === 'typing' || transaction.history?.kind === 'composition'
-            ? transaction.history.kind
-            : 'isolated',
+          kind:
+            transaction.history?.kind === 'typing' || transaction.history?.kind === 'composition'
+              ? transaction.history.kind
+              : 'isolated',
           viewId: transaction.viewId,
           groupId: transaction.history?.groupId,
           atMilliseconds,
@@ -170,10 +171,12 @@ export class EditorDocument {
     const event = this.#commit([{ from: 0, to: prior.length, insert: text }], 'filesystem');
     if (preserveUndo) {
       this.#undo.push({
-        steps: [{
-          forward: [{ from: 0, to: prior.length, insert: text }],
-          backward: [{ from: 0, to: text.length, insert: prior }],
-        }],
+        steps: [
+          {
+            forward: [{ from: 0, to: prior.length, insert: text }],
+            backward: [{ from: 0, to: text.length, insert: prior }],
+          },
+        ],
         kind: 'external',
         atMilliseconds: Date.now(),
       });

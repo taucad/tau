@@ -90,7 +90,9 @@ class GenericMockWorker {
     if (request.id === null || request.id === undefined) {
       return;
     }
-    if (this.stallMethods.has(request.method)) { return; }
+    if (this.stallMethods.has(request.method)) {
+      return;
+    }
 
     const result =
       request.method === 'initialize'
@@ -136,11 +138,21 @@ describe('KclLspClient', () => {
     const client = new KclLspClient({ fs: createTestFs(), onError });
     await client.initialize();
     mockWorker.stallMethods.add('textDocument/hover');
-    const pending = client.textDocumentHover({ textDocument: { uri: 'file:///main.kcl' }, position: { line: 0, character: 0 } });
-    await vi.waitFor(() => { expect(mockWorker.postMessageCalls.some((call) => {
-      const event = call as LspWorkerEvent;
-      return event.eventType === lspWorkerEventType.call && decodeMessage<JSONRPCRequest>(event.eventData as Uint8Array<ArrayBuffer>).method === 'textDocument/hover';
-    })).toBe(true); });
+    const pending = client.textDocumentHover({
+      textDocument: { uri: 'file:///main.kcl' },
+      position: { line: 0, character: 0 },
+    });
+    await vi.waitFor(() => {
+      expect(
+        mockWorker.postMessageCalls.some((call) => {
+          const event = call as LspWorkerEvent;
+          return (
+            event.eventType === lspWorkerEventType.call &&
+            decodeMessage<JSONRPCRequest>(event.eventData as Uint8Array<ArrayBuffer>).method === 'textDocument/hover'
+          );
+        }),
+      ).toBe(true);
+    });
     mockWorker.emitError();
     await expect(pending).rejects.toThrow('disposed');
     expect(onError).toHaveBeenCalledOnce();

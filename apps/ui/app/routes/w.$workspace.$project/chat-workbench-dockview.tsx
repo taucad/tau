@@ -58,12 +58,7 @@ import type { WorkbenchLaneNode } from '@taucad/workbench';
 import { fromDockview, toDockview } from '#workbench-records/converters.js';
 import { paneTitle } from '#workbench-records/pane-titles.js';
 import { isSurfaceShipped, withoutUnshippedPanes } from '#workbench-records/surface-availability.js';
-import {
-  tauFileDragMime,
-  tauEditorPanelDragMime,
-  tauViewerPanelDragMime,
-  idPrefix,
-} from '@taucad/types/constants';
+import { tauFileDragMime, tauEditorPanelDragMime, tauViewerPanelDragMime, idPrefix } from '@taucad/types/constants';
 import { FileSelector } from '#components/files/file-selector.js';
 import { useProject } from '#hooks/use-project.js';
 import { Dockview } from '#components/panes/dockview.js';
@@ -1355,17 +1350,20 @@ export const FileEditor = memo(function ({
     throw new Error(`File '${filePath}' is not available to a viewer`);
   }, [contentService, filePath, textContent, binarySize]);
 
-  const reportSave = useCallback((path: string): void => {
-    if (!documentSession) {
-      return;
-    }
-    const completion = documentSession.save(path);
-    if (handledSaveCompletion.current === completion) {
-      return;
-    }
-    handledSaveCompletion.current = completion;
-    void reportEditorSaveFailure(completion, path);
-  }, [documentSession]);
+  const reportSave = useCallback(
+    (path: string): void => {
+      if (!documentSession) {
+        return;
+      }
+      const completion = documentSession.save(path);
+      if (handledSaveCompletion.current === completion) {
+        return;
+      }
+      handledSaveCompletion.current = completion;
+      void reportEditorSaveFailure(completion, path);
+    },
+    [documentSession],
+  );
 
   const handleEditorApply = useCallback(
     (document: EditorDocument, transaction: DocumentTransaction): DocumentChange | undefined => {
@@ -1478,9 +1476,7 @@ export const FileEditor = memo(function ({
         viewId: paneState.viewId,
         resource: { outcome: result, readAll: handleReadAll },
         textEditor:
-          result.kind === 'text'
-            ? { language, onApply: handleEditorApply, onHistory: handleEditorHistory }
-            : undefined,
+          result.kind === 'text' ? { language, onApply: handleEditorApply, onHistory: handleEditorHistory } : undefined,
         binaryFallback: result.kind === 'binary' ? { onForceOpen: handleForceOpenBinary } : undefined,
       };
       break;
@@ -1551,9 +1547,11 @@ export const FileEditor = memo(function ({
   }
 
   if (result.kind === 'binary' || result.kind === 'text') {
-    return isPanelShown
-      ? <RoutedFileViewer viewer={resolvedViewer!} request={viewerRequest!} renderPane={renderPane} />
-      : renderPane({ body: <EditorPanePlaceholder label={`Loading ${name}`} /> });
+    return isPanelShown ? (
+      <RoutedFileViewer viewer={resolvedViewer!} request={viewerRequest!} renderPane={renderPane} />
+    ) : (
+      renderPane({ body: <EditorPanePlaceholder label={`Loading ${name}`} /> })
+    );
   }
 
   return renderPane({ body });

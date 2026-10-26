@@ -8,7 +8,13 @@ import { EditorDocument } from '#lib/editor-document.js';
 const runtime = vi.hoisted(() => ({ imported: vi.fn() }));
 vi.mock('#components/code/code-editor-view.client.js', () => {
   runtime.imported();
-  return { CodeEditorView: ({ document }: { readonly document: EditorDocument }) => <div role='textbox' aria-label='Code editor'>{document.text}</div> };
+  return {
+    CodeEditorView: ({ document }: { readonly document: EditorDocument }) => (
+      <div role='textbox' aria-label='Code editor'>
+        {document.text}
+      </div>
+    ),
+  };
 });
 
 it('begins importing the editor while the admitted document promise is still held', async () => {
@@ -24,12 +30,16 @@ it('begins importing the editor while the admitted document promise is still hel
         }
       };
       void load();
-      return () => { active = false; };
+      return () => {
+        active = false;
+      };
     }, []);
     return <CodeEditor document={document} viewId='pending-pane' languageId='typescript' />;
   }
   render(<PendingPane />);
-  await waitFor(() => { expect(runtime.imported).toHaveBeenCalledOnce(); });
+  await waitFor(() => {
+    expect(runtime.imported).toHaveBeenCalledOnce();
+  });
   expect(screen.queryByRole('textbox', { name: 'Code editor' })).not.toBeInTheDocument();
   pending.resolve(new EditorDocument('main.ts', 'ready'));
   expect(await screen.findByRole('textbox', { name: 'Code editor' })).toHaveTextContent('ready');

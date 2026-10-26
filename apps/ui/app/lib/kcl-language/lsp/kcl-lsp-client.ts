@@ -305,7 +305,9 @@ export class KclLspClient {
   }
 
   public async executeCommand(parameters: LSP.ExecuteCommandParams): Promise<unknown> {
-    if (!this.serverCapabilities.executeCommandProvider) { return undefined; }
+    if (!this.serverCapabilities.executeCommandProvider) {
+      return undefined;
+    }
     return this.request('workspace/executeCommand', parameters);
   }
 
@@ -367,8 +369,12 @@ export class KclLspClient {
     };
 
     this.worker.addEventListener('message', handleWorkerMessage);
-    this.worker.addEventListener('error', (event) => { this.failWorker(new Error(event.message || 'KCL LSP worker failed')); });
-    this.worker.addEventListener('messageerror', () => { this.failWorker(new Error('KCL LSP worker sent an unreadable message')); });
+    this.worker.addEventListener('error', (event) => {
+      this.failWorker(new Error(event.message || 'KCL LSP worker failed'));
+    });
+    this.worker.addEventListener('messageerror', () => {
+      this.failWorker(new Error('KCL LSP worker sent an unreadable message'));
+    });
 
     const sendRequest = async (request: JSONRPCRequest): Promise<void> => {
       log.debug('Sending request:', request.method, 'id:', request.id);
@@ -445,7 +451,9 @@ export class KclLspClient {
   }
 
   private failWorker(error: Error): void {
-    if (this.failed) { return; }
+    if (this.failed) {
+      return;
+    }
     this.failed = true;
     log.error('Worker error:', error);
     this.options.onError?.(error);

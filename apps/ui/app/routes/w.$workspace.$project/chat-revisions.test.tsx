@@ -48,7 +48,9 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 /* CodeMirror and syntax highlighting are the editor's, not this pane's: the conflict rows are
  * asserted by their verbs and the bytes they hand back (P43). */
 vi.mock('#components/code/code-editor.client.js', () => ({
-  CodeEditor: ({ document }: { readonly document: EditorDocument }) => <pre data-testid='conflict-buffer'>{document.text}</pre>,
+  CodeEditor: ({ document }: { readonly document: EditorDocument }) => (
+    <pre data-testid='conflict-buffer'>{document.text}</pre>
+  ),
 }));
 vi.mock('#components/code/diff-viewer.js', () => ({
   DiffViewer: ({

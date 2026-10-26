@@ -35,6 +35,4 @@ describe('ChatEditorMarkdownViewer', () => {
     expect(screen.getByRole('textbox', { name: 'Source editor' })).toBeInTheDocument();
     expect(screen.queryByTestId('markdown-preview')).not.toBeInTheDocument();
   });
-
-
 });

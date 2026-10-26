@@ -21,12 +21,27 @@ vi.mock('#components/code/code-editor.client.js', () => ({
   CodeEditor: ({ document, extensions, onApply }: CodeEditorProps) => (
     <div>
       <output data-testid='language-mode'>{extensions ? 'semantic' : 'basic'}</output>
-      <button type='button' onClick={() => onApply?.({ origin: 'view', expectedVersion: document.version, changes: [{ from: document.text.length, to: document.text.length, insert: ' edited' }] })}>Type</button>
+      <button
+        type='button'
+        onClick={() =>
+          onApply?.({
+            origin: 'view',
+            expectedVersion: document.version,
+            changes: [{ from: document.text.length, to: document.text.length, insert: ' edited' }],
+          })
+        }
+      >
+        Type
+      </button>
     </div>
   ),
 }));
 
-afterEach(() => { vi.restoreAllMocks(); runtime.acquire.mockReset(); runtime.dispose.mockReset(); });
+afterEach(() => {
+  vi.restoreAllMocks();
+  runtime.acquire.mockReset();
+  runtime.dispose.mockReset();
+});
 
 it('keeps the document editable and offers a fresh semantic lease after worker failure', async () => {
   const user = userEvent.setup();
@@ -37,23 +52,33 @@ it('keeps the document editable and offers a fresh semantic lease after worker f
     failure = request.onFailure;
     return { extensions: [{}], dispose: runtime.dispose };
   });
-  render(<ChatEditorCodeViewer
-    paneId='pane'
-    filePath='main.ts'
-    content='base'
-    language='typescript'
-    onApply={(document, transaction) => document.apply(transaction)}
-    onHistory={(document, kind) => document[kind]('pane')}
-  />);
-  await waitFor(() => { expect(screen.getByTestId('language-mode')).toHaveTextContent('semantic'); });
-  act(() => { failure?.(new Error('worker stopped')); });
+  render(
+    <ChatEditorCodeViewer
+      paneId='pane'
+      filePath='main.ts'
+      content='base'
+      language='typescript'
+      onApply={(document, transaction) => document.apply(transaction)}
+      onHistory={(document, kind) => document[kind]('pane')}
+    />,
+  );
+  await waitFor(() => {
+    expect(screen.getByTestId('language-mode')).toHaveTextContent('semantic');
+  });
+  act(() => {
+    failure?.(new Error('worker stopped'));
+  });
   expect(screen.getByText('Language tools are unavailable. Editing is still available.')).toBeInTheDocument();
   expect(screen.getByTestId('language-mode')).toHaveTextContent('basic');
   await user.click(screen.getByRole('button', { name: 'Type' }));
   expect(heldDocument.text).toBe('base edited');
   await user.click(screen.getByRole('button', { name: 'Retry language tools' }));
-  await waitFor(() => { expect(runtime.acquire).toHaveBeenCalledTimes(2); });
-  await waitFor(() => { expect(screen.getByTestId('language-mode')).toHaveTextContent('semantic'); });
+  await waitFor(() => {
+    expect(runtime.acquire).toHaveBeenCalledTimes(2);
+  });
+  await waitFor(() => {
+    expect(screen.getByTestId('language-mode')).toHaveTextContent('semantic');
+  });
   expect(heldDocument.text).toBe('base edited');
   expect(runtime.dispose).toHaveBeenCalled();
 });

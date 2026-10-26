@@ -17,14 +17,20 @@ function depthDecorations(view: EditorView): ReturnType<typeof Decoration.set> {
       }
       if (node.name === 'PropertyName' && node.to - node.from >= 2) {
         const colorIndex = Math.max(0, depth - 1) % 7;
-        ranges.push(Decoration.mark({ class: `cm-json-key-depth${String(colorIndex)}` }).range(node.from + 1, node.to - 1));
+        ranges.push(
+          Decoration.mark({ class: `cm-json-key-depth${String(colorIndex)}` }).range(node.from + 1, node.to - 1),
+        );
         ranges.push(Decoration.mark({ class: 'cm-json-key-quote' }).range(node.from, node.from + 1));
         ranges.push(Decoration.mark({ class: 'cm-json-key-quote' }).range(node.to - 1, node.to));
       }
       if (node.name === 'Object' && node.to - node.from >= 2) {
         const colorIndex = depth % 3;
-        ranges.push(Decoration.mark({ class: `cm-json-bracket-depth${String(colorIndex)}` }).range(node.from, node.from + 1));
-        ranges.push(Decoration.mark({ class: `cm-json-bracket-depth${String(colorIndex)}` }).range(node.to - 1, node.to));
+        ranges.push(
+          Decoration.mark({ class: `cm-json-bracket-depth${String(colorIndex)}` }).range(node.from, node.from + 1),
+        );
+        ranges.push(
+          Decoration.mark({ class: `cm-json-bracket-depth${String(colorIndex)}` }).range(node.to - 1, node.to),
+        );
       }
     },
   });
@@ -33,14 +39,21 @@ function depthDecorations(view: EditorView): ReturnType<typeof Decoration.set> {
 }
 
 /** Preserve depth-colored JSON keys and braces while Lezer owns parsing. */
-export const jsonDepthHighlighting = ViewPlugin.fromClass(class {
-  public decorations: ReturnType<typeof Decoration.set>;
-  public constructor(view: EditorView) {
-    this.decorations = depthDecorations(view);
-  }
-  public update(update: ViewUpdate): void {
-    if (update.docChanged || update.viewportChanged || update.transactions.some((transaction) => transaction.reconfigured)) {
-      this.decorations = depthDecorations(update.view);
+export const jsonDepthHighlighting = ViewPlugin.fromClass(
+  class {
+    public decorations: ReturnType<typeof Decoration.set>;
+    public constructor(view: EditorView) {
+      this.decorations = depthDecorations(view);
     }
-  }
-}, { decorations: (plugin) => plugin.decorations });
+    public update(update: ViewUpdate): void {
+      if (
+        update.docChanged ||
+        update.viewportChanged ||
+        update.transactions.some((transaction) => transaction.reconfigured)
+      ) {
+        this.decorations = depthDecorations(update.view);
+      }
+    }
+  },
+  { decorations: (plugin) => plugin.decorations },
+);

@@ -12,7 +12,10 @@ import type { VirtualDeclaration } from '#components/code/virtual-declaration-di
 import { URI } from 'vscode-uri';
 import { assertRootedPath } from '@taucad/utils/path';
 
-type EditorContextValue = { session: EditorDocumentSession | undefined; environment: EditorLanguageEnvironment | undefined };
+type EditorContextValue = {
+  session: EditorDocumentSession | undefined;
+  environment: EditorLanguageEnvironment | undefined;
+};
 const EditorSessionContext = createContext<EditorContextValue>({ session: undefined, environment: undefined });
 
 /** Owns one filesystem-backed document session for the mounted project. */
@@ -57,50 +60,74 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
     };
   }, [contentService, editorRef, fileManagerRef, projectId]);
 
-  const fileManager = useMemo(() => ({ readFile, exists, readdir, getDirectoryStat }), [readFile, exists, readdir, getDirectoryStat]);
-  const navigate = useCallback(async (target: EditorNavigationTarget): Promise<void> => {
-    const uri = URI.parse(target.uri);
-    if (uri.scheme !== 'file' || uri.authority || uri.query || uri.fragment || !uri.path.startsWith('/')) {
-      return;
-    }
-    const path = assertRootedPath(uri.path.slice(1));
-    if (target.declaration) {
-      if ((!path.startsWith('__typescript_lib__/') && !path.startsWith('cdn-types/')) || !path.endsWith('.d.ts')) {
+  const fileManager = useMemo(
+    () => ({ readFile, exists, readdir, getDirectoryStat }),
+    [readFile, exists, readdir, getDirectoryStat],
+  );
+  const navigate = useCallback(
+    async (target: EditorNavigationTarget): Promise<void> => {
+      const uri = URI.parse(target.uri);
+      if (uri.scheme !== 'file' || uri.authority || uri.query || uri.fragment || !uri.path.startsWith('/')) {
         return;
       }
-      opener.current = globalThis.document.activeElement instanceof HTMLElement
-        ? globalThis.document.activeElement
-        : undefined;
-      setDeclaration({
-        uri: target.uri,
-        document: new EditorDocument(path, target.declaration.text),
-        line: target.line,
+      const path = assertRootedPath(uri.path.slice(1));
+      if (target.declaration) {
+        if ((!path.startsWith('__typescript_lib__/') && !path.startsWith('cdn-types/')) || !path.endsWith('.d.ts')) {
+          return;
+        }
+        opener.current =
+          globalThis.document.activeElement instanceof HTMLElement ? globalThis.document.activeElement : undefined;
+        setDeclaration({
+          uri: target.uri,
+          document: new EditorDocument(path, target.declaration.text),
+          line: target.line,
+          column: target.column,
+        });
+        return;
+      }
+      const entry = await treeService?.getEntry(path);
+      if (entry?.type !== 'file') {
+        return;
+      }
+      editorRef.send({
+        type: 'openFile',
+        path,
+        source: 'user',
+        readOnly: entry.provenance !== undefined && entry.provenance.source !== 'project',
+        lineNumber: target.line,
         column: target.column,
       });
-      return;
-    }
-    const entry = await treeService?.getEntry(path);
-    if (entry?.type !== 'file') {
-      return;
-    }
-    editorRef.send({
-      type: 'openFile',
-      path,
-      source: 'user',
-      readOnly: entry.provenance !== undefined && entry.provenance.source !== 'project',
-      lineNumber: target.line,
-      column: target.column,
-    });
-  }, [editorRef, treeService]);
-  const environment = useMemo((): EditorLanguageEnvironment | undefined =>
-    session && contentService && treeService
-      ? { session, diagnostics: session.diagnostics, fileManagerRef, contentService, treeService, fileManager, navigate }
-      : undefined, [session, contentService, treeService, fileManagerRef, fileManager, navigate]);
+    },
+    [editorRef, treeService],
+  );
+  const environment = useMemo(
+    (): EditorLanguageEnvironment | undefined =>
+      session && contentService && treeService
+        ? {
+            session,
+            diagnostics: session.diagnostics,
+            fileManagerRef,
+            contentService,
+            treeService,
+            fileManager,
+            navigate,
+          }
+        : undefined,
+    [session, contentService, treeService, fileManagerRef, fileManager, navigate],
+  );
   const value = useMemo(() => ({ session, environment }), [session, environment]);
   return (
     <EditorSessionContext.Provider value={value}>
       {children}
-      <VirtualDeclarationDialog declaration={declaration} onClose={() => { setDeclaration(undefined); }} restoreFocus={() => { opener.current?.focus(); }} />
+      <VirtualDeclarationDialog
+        declaration={declaration}
+        onClose={() => {
+          setDeclaration(undefined);
+        }}
+        restoreFocus={() => {
+          opener.current?.focus();
+        }}
+      />
     </EditorSessionContext.Provider>
   );
 }

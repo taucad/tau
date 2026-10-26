@@ -35,9 +35,11 @@ describe('AppModule', () => {
     // and telemetry in one constructor.
     expect(moduleRef.get(ChatController)).toBeInstanceOf(ChatController);
     expect(moduleRef.get(DirectModelInvocationService)).toBeInstanceOf(DirectModelInvocationService);
-    expect(ApiModule.forRoot({ tauCloudEnabled: false }).imports?.map((entry) =>
-      typeof entry === 'function' ? entry.name : 'module' in entry ? entry.module.name : '',
-    )).not.toContain('CodeCompletionModule');
+    expect(
+      ApiModule.forRoot({ tauCloudEnabled: false }).imports?.map((entry) =>
+        typeof entry === 'function' ? entry.name : 'module' in entry ? entry.module.name : '',
+      ),
+    ).not.toContain('CodeCompletionModule');
     expect(() => moduleRef.get(BillingPaymentsService)).toThrow();
   });
 

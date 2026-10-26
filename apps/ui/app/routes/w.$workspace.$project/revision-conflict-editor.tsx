@@ -105,10 +105,14 @@ export function RevisionConflictEditor({
 
   const lines = useMemo(() => draft.split('\n'), [draft]);
   const hunks = useMemo(() => conflictHunks(lines), [lines]);
-  const lineHighlights = useMemo<NonNullable<CodeEditorProps['lineHighlights']>>(() => hunks.flatMap((hunk) => [
-    { fromLine: hunk.open + 1, toLine: hunk.middle, tone: 'mine' },
-    { fromLine: hunk.middle + 1, toLine: hunk.close + 1, tone: 'theirs' },
-  ]), [hunks]);
+  const lineHighlights = useMemo<NonNullable<CodeEditorProps['lineHighlights']>>(
+    () =>
+      hunks.flatMap((hunk) => [
+        { fromLine: hunk.open + 1, toLine: hunk.middle, tone: 'mine' },
+        { fromLine: hunk.middle + 1, toLine: hunk.close + 1, tone: 'theirs' },
+      ]),
+    [hunks],
+  );
   const replaceDraft = (next: string): void => {
     const accepted = document.apply({
       changes: [{ from: 0, to: document.text.length, insert: next }],

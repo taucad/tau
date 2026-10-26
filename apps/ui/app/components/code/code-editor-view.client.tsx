@@ -32,7 +32,13 @@ import { defaultKeymap, indentWithTab, selectAll, toggleComment } from '@codemir
 import { gotoLine, openSearchPanel, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { forceLinting, linter, lintGutter, lintKeymap } from '@codemirror/lint';
 import { cn } from '@taucad/ui/utils/cn';
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@taucad/ui/components/context-menu';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@taucad/ui/components/context-menu';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { markCodeEditorMilestone } from '#components/code/code-editor.client.js';
 import { jsonDepthHighlighting } from '#components/code/json-depth-highlighting.js';
@@ -67,10 +73,12 @@ function restoreViewPosition(document: EditorDocument, viewId: string, view: Edi
   if (!position) {
     return;
   }
-  view.dispatch({ selection: {
-    anchor: Math.min(position.anchor, view.state.doc.length),
-    head: Math.min(position.head, view.state.doc.length),
-  } });
+  view.dispatch({
+    selection: {
+      anchor: Math.min(position.anchor, view.state.doc.length),
+      head: Math.min(position.head, view.state.doc.length),
+    },
+  });
   view.requestMeasure({
     read: () => undefined,
     write: () => {
@@ -195,9 +203,7 @@ export function CodeEditorView({
       if (callbacksRef.current.readOnly) {
         return false;
       }
-      const change = callbacksRef.current.onHistory
-        ? callbacksRef.current.onHistory(kind)
-        : document[kind](viewId);
+      const change = callbacksRef.current.onHistory ? callbacksRef.current.onHistory(kind) : document[kind](viewId);
       return change !== undefined;
     };
     const view = new EditorView({
@@ -227,11 +233,13 @@ export function CodeEditorView({
           diagnostics ? linter(() => diagnostics.get(document.uri).get('kernel') ?? [], { delay: 100 }) : [],
           syntaxHighlighting(tokenColors, { fallback: true }),
           tooltips({ parent: overlay, position: 'fixed' }),
-          Prec.highest(keymap.of([
-            { key: 'Mod-z', run: () => applyHistory('undo') },
-            { key: 'Mod-Shift-z', run: () => applyHistory('redo') },
-            { key: 'Mod-y', run: () => applyHistory('redo') },
-          ])),
+          Prec.highest(
+            keymap.of([
+              { key: 'Mod-z', run: () => applyHistory('undo') },
+              { key: 'Mod-Shift-z', run: () => applyHistory('redo') },
+              { key: 'Mod-y', run: () => applyHistory('redo') },
+            ]),
+          ),
           keymap.of([
             ...defaultKeymap,
             ...searchKeymap,
@@ -251,20 +259,29 @@ export function CodeEditorView({
               return;
             }
             const now = Date.now();
-            const isComposition = update.view.composing || update.transactions.some((item) => item.isUserEvent('input.type.compose'));
+            const isComposition =
+              update.view.composing || update.transactions.some((item) => item.isUserEvent('input.type.compose'));
             const isTyping = update.transactions.some((item) => item.isUserEvent('input.type'));
-            let history: { kind: 'typing' | 'composition' | 'paste' | 'command'; groupId?: string; atMilliseconds: number };
+            let history: {
+              kind: 'typing' | 'composition' | 'paste' | 'command';
+              groupId?: string;
+              atMilliseconds: number;
+            };
             if (isComposition || isTyping) {
               const kind = isComposition ? 'composition' : 'typing';
               const prior = historyRef.current;
-              const groupId = prior?.kind === kind && now - prior.at <= 1000
-                ? prior.groupId
-                : `${viewId}-${String(++historySequence.current)}`;
+              const groupId =
+                prior?.kind === kind && now - prior.at <= 1000
+                  ? prior.groupId
+                  : `${viewId}-${String(++historySequence.current)}`;
               historyRef.current = { kind, groupId, at: now };
               history = { kind, groupId, atMilliseconds: now };
             } else {
               historyRef.current = undefined;
-              history = { kind: update.transactions.some((item) => item.isUserEvent('input.paste')) ? 'paste' : 'command', atMilliseconds: now };
+              history = {
+                kind: update.transactions.some((item) => item.isUserEvent('input.paste')) ? 'paste' : 'command',
+                atMilliseconds: now,
+              };
             }
             const transaction = {
               changes: changesFromView(update),
@@ -333,7 +350,9 @@ export function CodeEditorView({
     if (!view) {
       return;
     }
-    view.dispatch({ effects: editable.current.reconfigure([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]) });
+    view.dispatch({
+      effects: editable.current.reconfigure([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]),
+    });
   }, [readOnly]);
 
   useEffect(() => {
@@ -351,12 +370,22 @@ export function CodeEditorView({
     }
     const decorations = (lineHighlights ?? []).flatMap((highlight) => {
       const output = [];
-      for (let line = Math.max(1, highlight.fromLine); line <= Math.min(highlight.toLine, view.state.doc.lines); line += 1) {
-        output.push(Decoration.line({ class: highlight.tone === 'mine' ? 'cm-conflict-mine' : 'cm-conflict-theirs' }).range(view.state.doc.line(line).from));
+      for (
+        let line = Math.max(1, highlight.fromLine);
+        line <= Math.min(highlight.toLine, view.state.doc.lines);
+        line += 1
+      ) {
+        output.push(
+          Decoration.line({ class: highlight.tone === 'mine' ? 'cm-conflict-mine' : 'cm-conflict-theirs' }).range(
+            view.state.doc.line(line).from,
+          ),
+        );
       }
       return output;
     });
-    view.dispatch({ effects: highlightedLines.current.reconfigure(EditorView.decorations.of(Decoration.set(decorations, true))) });
+    view.dispatch({
+      effects: highlightedLines.current.reconfigure(EditorView.decorations.of(Decoration.set(decorations, true))),
+    });
   }, [lineHighlights]);
 
   useEffect(() => {
@@ -364,7 +393,15 @@ export function CodeEditorView({
     if (!view) {
       return;
     }
-    view.dispatch({ effects: syntax.current.reconfigure(syntaxExtension === undefined ? [] : languageId === 'json' ? [syntaxExtension, jsonDepthHighlighting] : syntaxExtension) });
+    view.dispatch({
+      effects: syntax.current.reconfigure(
+        syntaxExtension === undefined
+          ? []
+          : languageId === 'json'
+            ? [syntaxExtension, jsonDepthHighlighting]
+            : syntaxExtension,
+      ),
+    });
     if (syntaxExtension !== undefined) {
       markCodeEditorMilestone('syntax-ready', viewId);
     }
@@ -381,9 +418,7 @@ export function CodeEditorView({
     if (readOnly) {
       return;
     }
-    const changed = callbacksRef.current.onHistory
-      ? callbacksRef.current.onHistory(kind)
-      : document[kind](viewId);
+    const changed = callbacksRef.current.onHistory ? callbacksRef.current.onHistory(kind) : document[kind](viewId);
     if (changed) {
       viewRef.current?.focus();
     }
@@ -395,16 +430,67 @@ export function CodeEditorView({
         <div ref={hostRef} className={cn('editor-container ph-no-capture size-full overflow-hidden', className)} />
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem disabled={readOnly} onSelect={() => { runHistory('undo'); }}>Undo</ContextMenuItem>
-        <ContextMenuItem disabled={readOnly} onSelect={() => { runHistory('redo'); }}>Redo</ContextMenuItem>
+        <ContextMenuItem
+          disabled={readOnly}
+          onSelect={() => {
+            runHistory('undo');
+          }}
+        >
+          Undo
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={readOnly}
+          onSelect={() => {
+            runHistory('redo');
+          }}
+        >
+          Redo
+        </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onSelect={() => { runCommand(selectAll); }}>Select All</ContextMenuItem>
-        <ContextMenuItem onSelect={() => { runCommand(openSearchPanel); }}>Find and Replace</ContextMenuItem>
-        <ContextMenuItem onSelect={() => { runCommand(gotoLine); }}>Go to Line</ContextMenuItem>
+        <ContextMenuItem
+          onSelect={() => {
+            runCommand(selectAll);
+          }}
+        >
+          Select All
+        </ContextMenuItem>
+        <ContextMenuItem
+          onSelect={() => {
+            runCommand(openSearchPanel);
+          }}
+        >
+          Find and Replace
+        </ContextMenuItem>
+        <ContextMenuItem
+          onSelect={() => {
+            runCommand(gotoLine);
+          }}
+        >
+          Go to Line
+        </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem disabled={readOnly} onSelect={() => { runCommand(toggleComment); }}>Toggle Comment</ContextMenuItem>
-        <ContextMenuItem onSelect={() => { runCommand(foldCode); }}>Fold</ContextMenuItem>
-        <ContextMenuItem onSelect={() => { runCommand(unfoldCode); }}>Unfold</ContextMenuItem>
+        <ContextMenuItem
+          disabled={readOnly}
+          onSelect={() => {
+            runCommand(toggleComment);
+          }}
+        >
+          Toggle Comment
+        </ContextMenuItem>
+        <ContextMenuItem
+          onSelect={() => {
+            runCommand(foldCode);
+          }}
+        >
+          Fold
+        </ContextMenuItem>
+        <ContextMenuItem
+          onSelect={() => {
+            runCommand(unfoldCode);
+          }}
+        >
+          Unfold
+        </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   );

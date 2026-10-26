@@ -2,6 +2,7 @@ import { observabilityHarnessTags } from '#lib/observability-harness-context.js'
 import type { ErrorEvent } from '@sentry/react';
 import { randomUuid } from '@taucad/utils/id';
 import { ENV } from '#environment.config.js';
+import { apiRequestIdTags } from '#lib/api-request-id.js';
 import { readBuildId } from '#lib/build-identity.js';
 import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
 import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
@@ -208,7 +209,7 @@ const buildEnvelope = ({ dsn, error, tags, stackLimit, fingerprint }: EnvelopeIn
     level: 'error',
     ...(release === undefined ? {} : { release }),
     ...(environment === undefined ? {} : { environment }),
-    tags: { ...tags, delivery: 'without-sdk' },
+    tags: { ...apiRequestIdTags(error), ...tags, delivery: 'without-sdk' },
     exception: {
       values: [
         {

@@ -83,6 +83,7 @@ import { useEditorDocumentSession } from '#hooks/use-editor-document-session.js'
 import type { EditorDocument, DocumentChange, DocumentTransaction } from '#lib/editor-document.js';
 import { requestEditorNavigation } from '#lib/editor-navigation-service.js';
 import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
+import { CodeEditor } from '#components/code/code-editor.client.js';
 import { useKernelDiagnostics } from '#hooks/use-kernel-diagnostics.js';
 import { useFeature } from '#flags/use-feature.js';
 import { fileViewerRouter } from '#routes/w.$workspace.$project/file-viewers/built-in-viewers.js';
@@ -1407,7 +1408,19 @@ export const FileEditor = memo(function ({
   const availability = useProjectAvailability();
   switch (result.kind) {
     case 'loading': {
-      body = <EditorPanePlaceholder label={`Loading ${filePath.split('/').pop() ?? filePath}`} />;
+      const placeholder = <EditorPanePlaceholder label={`Loading ${filePath.split('/').pop() ?? filePath}`} />;
+      const language = getEditorLanguage(filePath);
+      const isSourcePane =
+        language !== undefined &&
+        language !== 'stl' &&
+        !/\.(?:usdc|usdz)$/iu.test(filePath) &&
+        (!filePath.toLowerCase().endsWith('.md') || paneParameters.viewId === 'source');
+      body =
+        isPanelShown && isSourcePane ? (
+          <CodeEditor viewId={paneId} languageId={language} loading={placeholder} />
+        ) : (
+          placeholder
+        );
       break;
     }
     case 'too-large': {

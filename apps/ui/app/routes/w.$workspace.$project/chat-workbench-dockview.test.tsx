@@ -1,6 +1,6 @@
 /* oxlint-disable @typescript-eslint/consistent-type-assertions -- Dockview structural test doubles cover only exercised fields */
 import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { isValidElement, useEffect, useState, StrictMode, Fragment } from 'react';
 import { MemoryRouter } from 'react-router';
@@ -37,6 +37,20 @@ const { featureState, mobileState, mockOpenPanel, mockProjectSend, mockToastErro
     mockPrintBody: vi.fn(),
     mockExportBody: vi.fn(),
   }));
+
+const mockEditorRuntimeImported = vi.hoisted(() => vi.fn());
+const mockEditorViewMounted = vi.hoisted(() => vi.fn());
+const mockLoadEditorSyntax = vi.hoisted(() => vi.fn(async () => []));
+vi.mock('#components/code/code-editor-view.client.js', () => {
+  mockEditorRuntimeImported();
+  return {
+    CodeEditorView: () => {
+      mockEditorViewMounted();
+      return <div role='textbox' aria-label='Code editor' />;
+    },
+  };
+});
+vi.mock('#lib/editor-syntax.js', () => ({ loadEditorSyntax: mockLoadEditorSyntax }));
 
 vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
 
@@ -514,6 +528,43 @@ describe('FileEditor routing', () => {
     expect(placeholder).toHaveAttribute('data-slot', 'editor-pane-placeholder');
     expect(placeholder).toHaveTextContent('Loading mystery.dat');
     expect(screen.getAllByRole('group', { name: 'File actions for mystery.dat' })).toHaveLength(1);
+  });
+
+  it('does not load the editor runtime or syntax for a hidden source pane', async () => {
+    const api = { ...mockPanelApi, isVisible: false } as unknown as IDockviewPanelProps['api'];
+    mockUseFileContent.mockReturnValue({ kind: 'loading' });
+    render(<FileEditor paneId='hidden-pane' filePath='main.ts' panelApi={api} />);
+
+    await act(async () => undefined);
+    expect(screen.getByRole('status')).toHaveTextContent('Loading main.ts');
+    expect(mockEditorRuntimeImported).not.toHaveBeenCalled();
+    expect(mockLoadEditorSyntax).not.toHaveBeenCalled();
+    expect(mockEditorViewMounted).not.toHaveBeenCalled();
+  });
+
+  it('loads the visible source editor runtime while file content is still pending', async () => {
+    let content: FileContentResult = { kind: 'loading' };
+    mockUseFileContent.mockImplementation(() => content);
+    const pane = render(<FileEditor paneId='source-pane' filePath='main.ts' panelApi={mockPanelApi} />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('Loading main.ts');
+    await waitFor(() => {
+      expect(mockEditorRuntimeImported).toHaveBeenCalledOnce();
+      expect(mockLoadEditorSyntax).toHaveBeenCalledWith('typescript', expect.any(AbortSignal));
+    });
+    expect(mockEditorViewMounted).not.toHaveBeenCalled();
+    expect(mockResolveViewer).not.toHaveBeenCalled();
+
+    content = { kind: 'text', content: new TextEncoder().encode('let ready = true;') };
+    pane.rerender(
+      <FileEditor
+        paneId='source-pane'
+        filePath='main.ts'
+        panelApi={mockPanelApi}
+        parameters={{ filePath: 'main.ts' }}
+      />,
+    );
+    expect(screen.getByTestId('viewer-content')).toHaveTextContent('let ready = true;');
   });
 
   it('does not rerender for unrelated or unchanged open file entries', () => {

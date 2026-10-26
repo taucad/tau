@@ -39,13 +39,18 @@ if ($share -notmatch '^tau-authority-[a-f0-9]+$') { throw 'Invalid fixture share
 $unc = "\\localhost\$share"
 Import-Module SmbShare
 Write-Phase 'module'
-if ($Action -eq 'cleanup') {
+function Remove-FixtureResources {
+  $owned = Get-SmbShare -Name $share -ErrorAction SilentlyContinue
+  if (-not $owned) { return }
+  if ($owned.Path -ne $env:TAU_AUTHORITY_TEST_ROOT) { throw 'Fixture share name already bound elsewhere' }
+  # A selected drive letter is not ownership. Remove only mappings to this verified fixture share.
   $mappings = Get-SmbMapping -ErrorAction SilentlyContinue | Where-Object { $_.RemotePath -eq $unc }
   foreach ($mapping in $mappings) { Remove-SmbMapping -LocalPath $mapping.LocalPath -Force -UpdateProfile }
   Write-Phase 'mapping-removed'
-  if (Get-SmbShare -Name $share -ErrorAction SilentlyContinue) {
-    Remove-SmbShare -Name $share -Force
-  }
+  Remove-SmbShare -Name $share -Force
+}
+if ($Action -eq 'cleanup') {
+  Remove-FixtureResources
   Write-Phase 'done'
   exit 0
 }
@@ -77,8 +82,7 @@ try {
   Write-Phase 'emitted'
 } catch {
   Write-Phase 'failed' "error=$($_.Exception.Message)"
-  if ($drive) { Remove-SmbMapping -LocalPath "$($drive):" -Force -ErrorAction SilentlyContinue }
-  if (Get-SmbShare -Name $share -ErrorAction SilentlyContinue) { Remove-SmbShare -Name $share -Force }
+  Remove-FixtureResources
   if ($script:readinessFailure) {
     # A runner that has SMB but is slow to bring it up is a failure with diagnostics, never an unavailable skip.
     [Console]::Error.WriteLine("tau-smb-fixture readiness failure: $script:readinessFailure")

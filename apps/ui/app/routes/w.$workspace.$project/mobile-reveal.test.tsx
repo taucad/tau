@@ -103,7 +103,7 @@ const editorRef = {
 };
 
 vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({ editorRef, mainEntryPath: 'main.ts', projectId: 'project-1' }),
+  useProject: () => ({ editorRef, mainEntryPath: 'main.ts', projectId: 'project-1', viewRecords: new Map() }),
 }));
 vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => true }));
@@ -216,6 +216,13 @@ vi.mock('#routes/w.$workspace.$project/project-manifest-issue-banner.js', () => 
 vi.mock('#routes/w.$workspace.$project/workspace-skeleton.js', () => ({ WorkspaceSkeleton: () => null }));
 /* The project top bar (W2) has its own suite; this shell suite only needs its slot. */
 vi.mock('#routes/w.$workspace.$project/mobile-project-top-bar.js', () => ({ MobileProjectTopBar: () => null }));
+
+// Prepare the real modules before interaction: Vitest's source transformation is not chunk delivery time.
+// The lazy mocks still withhold these modules until the test opens their gates after the reveal.
+await Promise.all([
+  vi.importActual('#routes/w.$workspace.$project/chat-explorer.js'),
+  vi.importActual('#routes/w.$workspace.$project/chat-kinematics.js'),
+]);
 
 const { ProjectWorkspaceProvider } = await import('#routes/w.$workspace.$project/project-workspace-context.js');
 const { ChatInterfaceMobile } = await import('#routes/w.$workspace.$project/chat-interface-mobile.js');

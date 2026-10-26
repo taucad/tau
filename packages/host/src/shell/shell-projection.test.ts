@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -31,7 +32,7 @@ afterEach(async () => {
  * stands in for a concurrent editor and for test setup, never for the projection owner (PO-Q5).
  */
 const connect = () => {
-  const sandbox = mkdtempSync(join(tmpdir(), 'tau-shell-projection-'));
+  const sandbox = realpathSync(mkdtempSync(join(tmpdir(), 'tau-shell-projection-')));
   const root = join(sandbox, 'project');
   const authorityRoot = join(sandbox, 'authority');
   mkdirSync(root);
@@ -116,27 +117,36 @@ describe('shell projection outbound publication', () => {
     expect(readFileSync(join(root, 'part.ts'), 'utf8')).toBe('newer editor save');
   });
 
-  it.each(['.TAU/unknown', '.tau./unknown', '.tau:alias/unknown', '.git/config', '.tau/chats/item.json'])(
-    'should refuse protected spelling %s before it reaches backing storage',
-    async (path) => {
-      const { publish, root } = connect();
-      expect(await publish({ path, baseline: null, projected: 'secret' })).toEqual({
-        status: 'refused',
-        reason: 'protected-path',
-      });
-      expect(existsSync(join(root, path))).toBe(false);
-    },
-  );
+  it.each([
+    '.TAU/unknown',
+    '.tau./unknown',
+    '.tau:alias/unknown',
+    '.git/config',
+    '.tau/chats/item.json',
+    'exportſ/model.step',
+  ])('should refuse protected spelling %s before it reaches backing storage', async (path) => {
+    const { publish, root } = connect();
+    expect(await publish({ path, baseline: null, projected: 'secret' })).toEqual({
+      status: 'refused',
+      reason: 'protected-path',
+    });
+    expect(existsSync(join(root, path))).toBe(false);
+  });
 
-  it.each(['.TAU/chats', '.tau./runs', '.tau:alias/export', 'vendor/.Git', '.tau/lo\u212Afile.json', '.TAU/future'])(
-    'should refuse creating protected directory spelling %s',
-    async (path) => {
-      const { editor, publishEntry, root } = connect();
-      await editor.mkdir(path.split('/').slice(0, -1).join('/') || '.', { recursive: true });
-      expect(await publishEntry({ kind: 'mkdir', path })).toEqual({ status: 'refused', reason: 'protected-path' });
-      expect(existsSync(join(root, path))).toBe(false);
-    },
-  );
+  it.each([
+    '.TAU/chats',
+    '.tau./runs',
+    '.tau:alias/export',
+    'vendor/.Git',
+    '.tau/lo\u212Afile.json',
+    '.TAU/future',
+    '.tau/chatſ',
+  ])('should refuse creating protected directory spelling %s', async (path) => {
+    const { editor, publishEntry, root } = connect();
+    await editor.mkdir(path.split('/').slice(0, -1).join('/') || '.', { recursive: true });
+    expect(await publishEntry({ kind: 'mkdir', path })).toEqual({ status: 'refused', reason: 'protected-path' });
+    expect(existsSync(join(root, path))).toBe(false);
+  });
 
   it('should refuse a rename whose destination or moved descendant folds onto a reserved path', async () => {
     const { editor, publishEntry, root } = connect();
@@ -163,6 +173,78 @@ describe('shell projection outbound publication', () => {
     expect(readFileSync(join(root, 'notes.md'), 'utf8')).toBe('n');
     expect(readFileSync(join(root, 'd/chats'), 'utf8')).toBe('c');
   });
+
+  it('should derive rename descendants under the claim and refuse a list that does not match them', async () => {
+    const { editor, publishEntry, root } = connect();
+    await editor.writeFile('d/chats', 'c');
+    await editor.writeFile('d/notes/a.md', 'a');
+    const preconditions = (to: string) => [
+      { path: 'd/chats', expected: 'c' },
+      { path: 'd/notes/a.md', expected: 'a' },
+      { path: to, expected: null },
+    ];
+    // The caller's empty list would have let `d/chats` land on the `.Tau/chats` row unclassified.
+    expect(
+      await publishEntry({
+        kind: 'rename',
+        from: 'd',
+        to: '.Tau',
+        preconditions: preconditions('.Tau'),
+        descendants: [],
+      }),
+    ).toEqual({ status: 'refused', reason: 'protected-path' });
+    expect(existsSync(join(root, '.Tau'))).toBe(false);
+    const move = { kind: 'rename', from: 'd', to: 'archive', preconditions: preconditions('archive') } as const;
+    for (const descendants of [[], ['notes', 'notes/a.md'], ['chats', 'notes', 'notes/a.md', 'extra']]) {
+      // eslint-disable-next-line no-await-in-loop -- each list is one held claim.
+      expect(await publishEntry({ ...move, descendants })).toEqual({
+        status: 'refused',
+        reason: 'descendant-mismatch',
+      });
+    }
+    expect(readFileSync(join(root, 'd/chats'), 'utf8')).toBe('c');
+    expect(existsSync(join(root, 'archive'))).toBe(false);
+    // The derived set, in any order, admits the move.
+    expect(await publishEntry({ ...move, descendants: ['notes/a.md', 'chats', 'notes'] })).toEqual({
+      status: 'settled',
+      result: { status: 'applied' },
+    });
+    expect(readFileSync(join(root, 'archive/notes/a.md'), 'utf8')).toBe('a');
+  });
+
+  it.each(['.tau', '.Tau', '.TAU.', '.tau:alias'])(
+    'should create container spelling %s but never rename or remove it',
+    async (container) => {
+      const { editor, publishEntry, root } = connect();
+      expect(await publishEntry({ kind: 'mkdir', path: container })).toEqual({
+        status: 'settled',
+        result: { status: 'applied' },
+      });
+      const away = {
+        kind: 'rename',
+        from: container,
+        to: 'elsewhere',
+        descendants: [],
+        preconditions: [{ path: 'elsewhere', expected: null }],
+      } as const;
+      expect(await publishEntry(away)).toEqual({ status: 'refused', reason: 'protected-path' });
+      expect(await publishEntry({ kind: 'rmdir', path: container })).toEqual({
+        status: 'refused',
+        reason: 'protected-path',
+      });
+      await editor.mkdir('empty');
+      const onto = {
+        kind: 'rename',
+        from: 'empty',
+        to: container,
+        descendants: [],
+        preconditions: [{ path: container, expected: null }],
+      } as const;
+      expect(await publishEntry(onto)).toEqual({ status: 'refused', reason: 'protected-path' });
+      expect(existsSync(join(root, 'empty'))).toBe(true);
+      expect(existsSync(join(root, 'elsewhere'))).toBe(false);
+    },
+  );
 
   it('should publish ordinary directory creation, rename and removal through the held claim', async () => {
     const { editor, publishEntry, root } = connect();

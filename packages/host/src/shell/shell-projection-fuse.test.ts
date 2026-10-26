@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { spawn } from 'node:child_process';
-import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -73,6 +73,18 @@ const classified = (scope: NodeFsRootScope): Publisher => ({
     return outcome.status === 'refused' ? 'refused' : outcome.result.status;
   },
 });
+
+/**
+ * A harness that under-reports what a directory rename carries: classification must come from the claim's own
+ * walk, never from the caller's list (Q11/3h C1).
+ */
+const forgetful = (scope: NodeFsRootScope): Publisher => {
+  const honest = classified(scope);
+  return {
+    ...honest,
+    entry: async (change) => honest.entry(change.kind === 'rename' ? { ...change, descendants: [] } : change),
+  };
+};
 
 /** Negative control: the same scope with the PP3 classification removed. */
 const unclassified = (scope: NodeFsRootScope): Publisher => ({
@@ -304,6 +316,10 @@ const families: ReadonlyArray<readonly [label: string, script: string, allowed: 
   ['future reserved child .TAU/not-yet-a-row', 'printf x > .TAU/not-yet-a-row', false],
   ['rename a file onto .tau./export', 'printf r > r.md && mv r.md .tau./export', false],
   ['rename a directory onto .TAU.', 'mkdir d && printf c > d/chats && mv d .TAU.', false],
+  ['rename a directory with a protected child onto .tAu', 'mkdir e && printf c > e/chats && mv e .tAu', false],
+  ['Unicode long s exportſ', 'mkdir exportſ && printf x > exportſ/model.step', false],
+  ['rename the container alias .taU away', 'mkdir .taU && mv .taU gone', false],
+  ['remove the container alias .tau:x', 'mkdir .tau:x && rmdir .tau:x', false],
 ];
 /** Paths that must never exist on the backing checkout when the classifier is in place. */
 const protectedLanded = [
@@ -316,6 +332,9 @@ const protectedLanded = [
   '.TAU/not-yet-a-row',
   '.tau./export',
   '.TAU./chats',
+  '.tAu/chats',
+  'exportſ',
+  'gone',
 ];
 
 const shell = async (cwd: string): Promise<string[]> => {
@@ -355,7 +374,7 @@ const landed = async (root: string, path: string): Promise<boolean> => {
 
 describe.runIf(enabled)('G5 PP3 spelling families through the FUSE path', () => {
   const run = async (strategy: (scope: NodeFsRootScope) => Publisher) => {
-    const sandbox = await mkdtemp(join(tmpdir(), 'tau-projection-pp3-'));
+    const sandbox = await realpath(await mkdtemp(join(tmpdir(), 'tau-projection-pp3-')));
     const root = join(sandbox, 'project');
     const authority = join(sandbox, 'authority');
     const mountpoint = join(sandbox, 'mount');
@@ -402,6 +421,16 @@ describe.runIf(enabled)('G5 PP3 spelling families through the FUSE path', () => 
     }
     const top = await readdir(root);
     expect(top).not.toContain('.TAU.');
+    expect(top).toContain('.tau');
+    expect(top).toContain('.tau:x');
+  }, 30_000);
+
+  it('derives what a directory rename carries, so a harness that drops descendants is refused the same', async () => {
+    const { lines, root, sandbox } = await run(forgetful);
+    onTestFinished(async () => rm(sandbox, { recursive: true, force: true }));
+    expect(lines).toStrictEqual(families.map(([label, , allowed]) => `${label}: ${allowed ? 'ok' : 'refused'}`));
+    expect(await landed(root, '.tAu/chats')).toBe(false);
+    expect(await readFile(join(root, 'e/chats'), 'utf8')).toBe('c');
   }, 30_000);
 
   it('negative control: the same owner without classification lets every family reach disk', async () => {

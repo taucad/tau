@@ -1,49 +1,139 @@
 /**
  * Host-side stand-ins for absent protected paths on Linux, shared by every launch of this process.
  */
-import { closeSync, lstatSync, mkdirSync, openSync, readdirSync, rmdirSync, unlinkSync } from 'node:fs';
-import { dirname, isAbsolute, relative } from 'node:path';
+import {
+  closeSync,
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmdirSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import type { BigIntStats } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 
-import type { ShellFilesystem } from '#shell/shell-provider.js';
+/** A stand-in this process created, the identity it was created with, and how many live launches rely on it. */
+type StandIn = { holders: number; directory: boolean; dev: string; ino: string };
 
-/** A stand-in this process created for an absent protected path, and how many live launches rely on it. */
-type StandIn = { holders: number; directory: boolean };
+/** One journal row: what a crashed process may have left behind. */
+type JournalRow = Readonly<{ path: string; directory: boolean; dev: string; ino: string }>;
 
 const standIns = new Map<string, StandIn>();
+let journalPath: string | undefined;
 let exitHookRegistered = false;
+let privateNames = 0;
 
 const inside = (path: string, root: string): boolean => {
   const step = relative(root, path);
   return step === '' || (!step.startsWith('..') && !isAbsolute(step));
 };
 
-const removeStandIn = (path: string, directory: boolean): void => {
-  try {
-    const info = lstatSync(path, { throwIfNoEntry: false });
-    // Only the empty entry this process made is removed; anything written into it since is someone's real data.
-    if (directory && info?.isDirectory() === true && readdirSync(path).length === 0) {
-      rmdirSync(path);
-    } else if (!directory && info?.isFile() === true && info.size === 0) {
-      unlinkSync(path);
-    }
-  } catch {
-    // Already gone or no longer ours.
+const identity = (path: string): BigIntStats | undefined => lstatSync(path, { bigint: true, throwIfNoEntry: false });
+
+const sameEntry = (info: BigIntStats | undefined, expected: Readonly<{ dev: string; ino: string }>): boolean =>
+  info !== undefined && String(info.dev) === expected.dev && String(info.ino) === expected.ino;
+
+/** Persist the live stand-ins, so the next start can sweep what a crash left behind. */
+const writeJournal = (): void => {
+  if (journalPath === undefined) {
+    return;
   }
+  const rows: JournalRow[] = [...standIns].map(([path, { directory, dev, ino }]) => ({ path, directory, dev, ino }));
+  const staging = `${journalPath}.${String(process.pid)}.tmp`;
+  try {
+    writeFileSync(staging, `${JSON.stringify(rows)}\n`, { mode: 0o600 });
+    renameSync(staging, journalPath);
+  } catch {
+    // The journal is a crash backstop; a launch never fails for it.
+  }
+};
+
+/**
+ * Remove one stand-in only while it is still the entry this process created, and still empty. A directory is removed
+ * by `rmdir`, which refuses a non-empty directory atomically. A file is first renamed to a private name in the same
+ * directory, so a real file renamed into place meanwhile is never the one unlinked; anything that is not the empty
+ * stand-in is put back.
+ */
+const removeStandIn = (path: string, expected: Readonly<{ directory: boolean; dev: string; ino: string }>): void => {
+  try {
+    const info = identity(path);
+    if (!sameEntry(info, expected)) {
+      return;
+    }
+    if (expected.directory) {
+      if (info!.isDirectory()) {
+        rmdirSync(path);
+      }
+      return;
+    }
+    if (!info!.isFile() || info!.size !== 0n) {
+      return;
+    }
+    privateNames += 1;
+    const aside = join(dirname(path), `.${basename(path)}.tau-stand-in-${String(process.pid)}-${String(privateNames)}`);
+    renameSync(path, aside);
+    const moved = identity(aside);
+    if (sameEntry(moved, expected) && moved!.isFile() && moved!.size === 0n) {
+      unlinkSync(aside);
+      return;
+    }
+    // Not ours any more: put it back without replacing anything that has since appeared at the path.
+    linkSync(aside, path);
+    unlinkSync(aside);
+  } catch {
+    // Already gone, no longer ours, or not empty: left in place.
+  }
+};
+
+/**
+ * Sweep the stand-ins a previous process journalled and never released, then journal this process's own there. Only
+ * an entry that is still the journalled one (device and inode) and still empty is removed, deepest first.
+ *
+ * @internal
+ * @param path - A journal file under host-owned state, outside every checkout.
+ */
+export const useStandInJournal = (path: string): void => {
+  if (journalPath === path) {
+    return;
+  }
+  journalPath = path;
+  let rows: JournalRow[] = [];
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    rows = Array.isArray(parsed) ? (parsed as JournalRow[]) : [];
+  } catch {
+    // No journal yet, or unreadable: nothing to sweep.
+  }
+  for (const row of rows.toSorted((left, right) => right.path.length - left.path.length)) {
+    if (typeof row.path === 'string' && isAbsolute(row.path) && !standIns.has(row.path)) {
+      removeStandIn(row.path, row);
+    }
+  }
+  writeJournal();
 };
 
 /**
  * Claim the stand-ins for one protected path: every absent component from the writable root down to the path itself,
  * so the runtime finds the whole path present and creates no mount point of its own. Components this process already
- * stands in for are held again.
+ * stands in for are held again. Each claim is pushed onto `claimed` as soon as it is taken, so a throw midway leaves
+ * an exact record of what to release.
  */
-const standInSteps = (path: string, root: string, filesystem: ShellFilesystem): string[] => {
-  const protectedPaths = new Set([...filesystem.denied, ...(filesystem.readOnly ?? [])]);
-  const directories = new Set(filesystem.directories ?? []);
+type Claim = Readonly<{
+  root: string;
+  protectedPaths: ReadonlySet<string>;
+  directories: ReadonlySet<string>;
+  claimed: string[];
+}>;
+
+const claimSteps = (path: string, { root, protectedPaths, directories, claimed }: Claim): void => {
   const steps: string[] = [];
   for (let step = path; step !== root && inside(step, root); step = dirname(step)) {
     steps.unshift(step);
   }
-  const claimed: string[] = [];
   for (const step of steps) {
     const existing = standIns.get(step);
     if (existing !== undefined) {
@@ -64,22 +154,52 @@ const standInSteps = (path: string, root: string, filesystem: ShellFilesystem): 
         }
       } catch {
         // Created by someone else meanwhile, or not creatable: the runtime handles the rest as before.
-        break;
+        return;
       }
-      standIns.set(step, { holders: 1, directory });
+      const created = identity(step)!;
+      standIns.set(step, { holders: 1, directory, dev: String(created.dev), ino: String(created.ino) });
       claimed.push(step);
+      writeJournal();
       continue;
     }
     if (step === path || info.isSymbolicLink() || !info.isDirectory() || protectedPaths.has(step)) {
-      break;
+      return;
     }
   }
-  return claimed;
 };
+
+const release = (claimed: readonly string[]): void => {
+  let changed = false;
+  for (const step of claimed.toSorted((left, right) => right.length - left.length)) {
+    const standIn = standIns.get(step);
+    if (standIn === undefined) {
+      continue;
+    }
+    standIn.holders -= 1;
+    if (standIn.holders === 0) {
+      standIns.delete(step);
+      removeStandIn(step, standIn);
+      changed = true;
+    }
+  }
+  if (changed) {
+    writeJournal();
+  }
+};
+
+/** The runtime configuration a hold is computed from: exactly what the sandbox runtime is handed. */
+export type StandInProfile = Readonly<{
+  /** The runtime's `denyWrite` list: the only paths it creates mount points for. */
+  denyWrite: readonly string[];
+  /** The runtime's `allowWrite` list. */
+  allowWrite: readonly string[];
+  /** The protected paths that are directories when present. */
+  directories?: readonly string[] | undefined;
+}>;
 
 /**
  * Hold host-side stand-ins for every absent component of each protected path inside a writable root, shared by
- * every Linux launch of this process, before the launch's sandbox configuration observes the filesystem.
+ * every Linux launch of this process, before the launch's sandbox runtime observes the filesystem.
  *
  * Bubblewrap can only mask a name that exists, so the runtime creates such a mount point itself and its supervisor
  * deletes it on exit, even while another launch's sandbox is mounted on it: that sandbox's mask detaches, and a launch
@@ -89,31 +209,42 @@ const standInSteps = (path: string, root: string, filesystem: ShellFilesystem): 
  * the product never finds a file where it reads a directory. Paths under an existing protected directory, a symbolic
  * link or a file are left alone: those are already covered, and the host never writes there.
  *
+ * The set is computed from the exact `denyWrite` and `allowWrite` arrays handed to the runtime, so a baseline deny or
+ * a physical spelling inside a writable root is stood in for too. A hold that throws midway releases what it took.
+ *
  * @internal
- * @param filesystem - The launch's filesystem grant.
+ * @param profile - The runtime's deny and write lists, and the directory rows.
  * @returns Release, idempotent: call it once the launch's sandbox and supervisor are gone.
  */
-export const holdProtectedStandIns = (filesystem: ShellFilesystem): (() => void) => {
-  // PROBE ONLY: stand-ins disabled so C17 can show the runtime's own mount points racing. Restored next commit.
-  if (process.platform !== 'linux' || filesystem.writable.length >= 0) {
+export const holdProtectedStandIns = (profile: StandInProfile): (() => void) => {
+  if (process.platform !== 'linux') {
     return () => undefined;
   }
-  const held: string[] = [];
-  for (const path of [...filesystem.denied, ...(filesystem.readOnly ?? [])]) {
-    const root = filesystem.writable
-      .filter((candidate) => candidate !== path && inside(path, candidate))
-      .toSorted((left, right) => right.length - left.length)[0];
-    if (root === undefined) {
-      continue;
+  const protectedPaths = new Set(profile.denyWrite);
+  const directories = new Set(profile.directories ?? []);
+  const claimed: string[] = [];
+  try {
+    for (const path of protectedPaths) {
+      const root = profile.allowWrite
+        .filter((candidate) => candidate !== path && inside(path, candidate))
+        // The outermost root: the runtime's write list also pins absent ancestors, which a walk must create.
+        .toSorted((left, right) => left.length - right.length)[0];
+      if (root !== undefined) {
+        claimSteps(path, { root, protectedPaths, directories, claimed });
+      }
     }
-    held.push(...standInSteps(path, root, filesystem));
+  } catch (error) {
+    release(claimed);
+    throw error;
   }
-  if (held.length > 0 && !exitHookRegistered) {
+  if (claimed.length > 0 && !exitHookRegistered) {
     exitHookRegistered = true;
     process.once('exit', () => {
       for (const [path, standIn] of [...standIns].toSorted(([left], [right]) => right.length - left.length)) {
-        removeStandIn(path, standIn.directory);
+        removeStandIn(path, standIn);
       }
+      standIns.clear();
+      writeJournal();
     });
   }
   let released = false;
@@ -122,16 +253,6 @@ export const holdProtectedStandIns = (filesystem: ShellFilesystem): (() => void)
       return;
     }
     released = true;
-    for (const step of held.toSorted((left, right) => right.length - left.length)) {
-      const standIn = standIns.get(step);
-      if (standIn === undefined) {
-        continue;
-      }
-      standIn.holders -= 1;
-      if (standIn.holders === 0) {
-        standIns.delete(step);
-        removeStandIn(step, standIn.directory);
-      }
-    }
+    release(claimed);
   };
 };

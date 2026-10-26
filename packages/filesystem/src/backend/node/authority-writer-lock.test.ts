@@ -1,4 +1,5 @@
 import { fork, spawnSync } from 'node:child_process';
+import type { SpawnSyncReturns } from 'node:child_process';
 import { access, mkdir, mkdtemp, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -62,20 +63,29 @@ const nextMessage = async (child: ReturnType<typeof fork>): Promise<unknown> =>
 /**
  * Runs the disposable SMB fixture with no stdin, so nothing it starts can wait on a prompt, and keeps its
  * stderr phase lines: on success they are logged as measured setup time, and on a timeout or failure they
- * name the last phase the fixture reached.
+ * name the last phase the fixture reached. PowerShell 7 is preferred because a cold Windows PowerShell 5.1
+ * launch alone measured 5.5 s of a 14.7 s setup on windows-2025 (and exceeded the 20 s bound on three of
+ * four runs), while the SMB share and mapping work itself took about 1.5 s.
  */
 const runNetworkFixture = (fixture: string, action: 'cleanup' | 'setup', environment: NodeJS.ProcessEnv): string => {
   const started = performance.now();
-  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', fixture, action], {
-    env: environment,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: 20_000,
-    windowsHide: true,
-  });
+  const run = (shell: string): SpawnSyncReturns<string> =>
+    spawnSync(shell, ['-NoProfile', '-NonInteractive', '-File', fixture, action], {
+      env: environment,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 20_000,
+      windowsHide: true,
+    });
+  let shell = 'pwsh.exe';
+  let result = run(shell);
+  if ((result.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
+    shell = 'powershell.exe';
+    result = run(shell);
+  }
   /** Milliseconds. */
   const elapsed = Math.round(performance.now() - started);
-  const diagnostics = `${action} after ${elapsed} ms (status ${String(result.status)}, signal ${String(result.signal)})\n${result.stderr}`;
+  const diagnostics = `${action} via ${shell} after ${elapsed} ms (status ${String(result.status)}, signal ${String(result.signal)})\n${result.stderr}`;
   if (result.error !== undefined || result.status !== 0) {
     throw new Error(`Disposable SMB fixture ${diagnostics}`, { cause: result.error });
   }

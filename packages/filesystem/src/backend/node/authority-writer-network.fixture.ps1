@@ -2,10 +2,11 @@ param([ValidateSet('setup', 'cleanup')][string]$Action)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $clock = [Diagnostics.Stopwatch]::StartNew()
-$launchMs = [int]((Get-Date) - (Get-Process -Id $PID).StartTime).TotalMilliseconds
+$launchMs = [int]([DateTime]::Now - [Diagnostics.Process]::GetCurrentProcess().StartTime).TotalMilliseconds
+$hostVersion = $PSVersionTable.PSVersion.ToString()
 # Phase lines go to stderr as they happen, so a caller that kills this process on timeout still sees the last phase reached.
 function Write-Phase([string]$Name, [string]$Detail = '') {
-  [Console]::Error.WriteLine("tau-smb-fixture action=$Action phase=$Name launchMs=$launchMs elapsedMs=$($clock.ElapsedMilliseconds) $Detail".TrimEnd())
+  [Console]::Error.WriteLine("tau-smb-fixture action=$Action host=$hostVersion phase=$Name launchMs=$launchMs elapsedMs=$($clock.ElapsedMilliseconds) $Detail".TrimEnd())
   [Console]::Error.Flush()
 }
 function Wait-Until([string]$Name, [int]$Seconds, [scriptblock]$Ready) {
@@ -71,7 +72,9 @@ try {
   Write-Phase 'mapping' "drive=$drive"
   Wait-Until 'mapped drive' 5 { Test-Path -LiteralPath "$($drive):\" -PathType Container }
   Write-Phase 'ready'
-  @{ status = 'ready'; unc = $unc; drive = $drive } | ConvertTo-Json -Compress
+  [Console]::Out.WriteLine((@{ status = 'ready'; unc = $unc; drive = $drive } | ConvertTo-Json -Compress))
+  [Console]::Out.Flush()
+  Write-Phase 'emitted'
 } catch {
   Write-Phase 'failed' "error=$($_.Exception.Message)"
   if ($drive) { Remove-SmbMapping -LocalPath "$($drive):" -Force -ErrorAction SilentlyContinue }

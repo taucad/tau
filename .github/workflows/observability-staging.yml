@@ -38,7 +38,7 @@ jobs:
           else
             # Reusable deploy names are prefixed by the calling job. A skipped
             # unaffected UI deploy must not start an observability check.
-            ready=$(gh api --paginate --slurp "repos/$GH_REPO/actions/runs/$RUN_ID/jobs" --jq 'any(.[].jobs[]; (.name | endswith("Deploy UI to staging")) and .conclusion == "success" and any(.steps[]; .name == "Record this staging deploy" and .conclusion == "success"))')
+            ready=$(gh api --paginate --slurp "repos/$GH_REPO/actions/runs/$RUN_ID/jobs" | jq 'any(.[].jobs[]; (.name | endswith("Deploy UI to staging")) and .conclusion == "success" and any(.steps[]; .name == "Record this staging deploy" and .conclusion == "success"))')
             if [ "$ready" = true ]; then
               echo 'ready=true' >> "$GITHUB_OUTPUT"
             fi

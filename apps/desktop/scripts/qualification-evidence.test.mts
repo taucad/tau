@@ -5,7 +5,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { parseDesktopArtifactManifest, desktopArtifactKinds, desktopArtifactName } from '#shared/desktop-release.js';
 /* oxlint-disable no-restricted-imports -- Test the actual collector decision boundary. */
-import { collectQualificationReceipt } from './qualification-evidence.mjs';
+import { collectQualificationReceipt, windowsConsumerHostDigest } from './qualification-evidence.mjs';
 import type { QualificationEvidence, QualificationStageEvidence } from './qualification-evidence.mjs';
 /* oxlint-enable no-restricted-imports */
 const hash = (value: number): string => value.toString(16).padStart(64, '0');
@@ -359,7 +359,7 @@ const cleanHostRefusals = (): void => {
     const admitted = collectQualificationReceipt(cleanHostFixture(route));
     assert.equal(admitted.environment.kind, 'vm');
     const { host } = admitted.environment;
-    assert.ok(host);
+    assert.ok(host?.platform === 'darwin');
     assert.equal(host.sip, 'enabled');
     assert.equal(host.nativeArch, 'x64');
   }
@@ -666,4 +666,92 @@ try {
 } catch (error) {
   console.error(error);
   process.exitCode = 1;
+}
+
+// Synthetic inputs exercise admission only; they are never persisted as qualification evidence.
+const windowsConsumerFixture = (): QualificationEvidence => {
+  const input = fixture();
+  input.suite = 'clean-host-route-a-b-c-v1';
+  const host = {
+    runner: 'consumer',
+    identity: hash(55),
+    osVersion: 'Microsoft Windows 11 Pro 10.0.26100',
+    productType: 1,
+    build: 26_100,
+    nativeMachine: 34_404,
+    processMachine: 0,
+    elevated: 0,
+    elevationType: 1,
+    administrator: false,
+    uacEnabled: 1,
+    defender: { service: true, antivirus: true, realTime: true, mode: 'Normal' },
+    existing: [],
+  };
+  for (const stage of input.stages) {
+    stage.security.measurements['consumerHost'] = JSON.stringify(host);
+  }
+  input.windowsAcceptance = {
+    kind: 'vm',
+    host,
+    installs: [input.stages[0], input.stages[2]].map((stage, index) => {
+      const artifact = stage.candidate.artifacts[0]!;
+      const phase = index === 0 ? 'initial' : 'reinstall';
+      return {
+        stage: phase,
+        artifact: { name: artifact.name, sha256: artifact.sha256, size: artifact.size },
+        download: {
+          browser: 'Chromium synthetic',
+          url: `${stage.probe.mirrorOrigin}/releases/${encodeURIComponent(stage.candidate.tag)}/${artifact.name}`,
+          sha256: artifact.sha256,
+          size: artifact.size,
+          zoneIdentifier: '[ZoneTransfer]\r\nZoneId=3\r\n',
+        },
+        installedPath: stage.installed.installationPath,
+        requestedAt: 100,
+        completedAt: 300,
+        manual: {
+          nonce: stage.probe.nonce,
+          hostSha256: windowsConsumerHostDigest(host),
+          stage: phase,
+          artifactSha256: artifact.sha256,
+          requestedAt: 100,
+          observedAt: 200,
+          observer: 'synthetic',
+          launchedFrom: 'explorer',
+          defaultDestination: true,
+          freshCapturesForRequest: true,
+          smartScreen: { checkAppsAndFiles: 'enabled', result: 'not-shown', publisher: null },
+          uac: 'not-shown',
+          installer: 'completed',
+          screenshots: [
+            { kind: 'security-settings', name: 'security.png', capturedAt: 150, sha256: hash(60), size: 10 },
+            { kind: 'installer-result', name: 'result.png', capturedAt: 150, sha256: hash(61), size: 10 },
+          ],
+        },
+      };
+    }),
+  };
+  return input;
+};
+assert.equal(collectQualificationReceipt(windowsConsumerFixture()).environment.host?.platform, 'win32');
+for (const mutate of [
+  (input: QualificationEvidence) => {
+    input.windowsAcceptance!.host.elevationType = 3;
+  },
+  (input: QualificationEvidence) => {
+    input.windowsAcceptance!.installs[0]!.download.zoneIdentifier = '[ZoneTransfer]\nZoneId=1';
+  },
+  (input: QualificationEvidence) => {
+    input.windowsAcceptance!.installs[0]!.manual.nonce = randomUUID();
+  },
+  (input: QualificationEvidence) => {
+    input.windowsAcceptance!.installs[0]!.manual.smartScreen.result = 'unknown';
+  },
+  (input: QualificationEvidence) => {
+    input.stages[1].security.measurements['consumerHost'] = 'null';
+  },
+]) {
+  const input = windowsConsumerFixture();
+  mutate(input);
+  assert.throws(() => collectQualificationReceipt(input));
 }

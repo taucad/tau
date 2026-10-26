@@ -7,6 +7,7 @@ import type { getDefaultWritePaths } from '@anthropic-ai/sandbox-runtime';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { launchInNativeSandbox, NativeRuntimeUnavailableError, nativeSandboxPolicy } from '#index.js';
+import { sandboxRuntimeSeccomp } from '#native-sandbox.js';
 
 /** A fresh module registry per file keeps the launcher's one-time initialization observable. */
 const sandbox = vi.hoisted(() => ({
@@ -213,5 +214,33 @@ describe('nativeSandboxPolicy', () => {
       allowWrite: [],
       denyWrite: policy.filesystem.denyWrite,
     });
+  });
+});
+
+describe('packaged sandbox helper', () => {
+  it('uses the unpacked executable for Linux ASAR packages and leaves ordinary installations intact', () => {
+    expect(
+      sandboxRuntimeSeccomp(
+        '/tmp/.mount_Tau/resources/app.asar/node_modules/@anthropic-ai/sandbox-runtime/dist/index.js',
+        'linux',
+        'x64',
+      ),
+    ).toEqual({
+      applyPath: join(
+        '/tmp/.mount_Tau/resources/app.asar.unpacked/node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp/x64/apply-seccomp',
+      ),
+    });
+    expect(
+      sandboxRuntimeSeccomp('/opt/node_modules/@anthropic-ai/sandbox-runtime/dist/index.js', 'linux', 'arm64'),
+    ).toEqual({
+      applyPath: join('/opt/node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp/arm64/apply-seccomp'),
+    });
+    expect(
+      sandboxRuntimeSeccomp(
+        '/Applications/Tau.app/Contents/Resources/app.asar/node_modules/@anthropic-ai/sandbox-runtime/dist/index.js',
+        'darwin',
+        'arm64',
+      ),
+    ).toBeUndefined();
   });
 });

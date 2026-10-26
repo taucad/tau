@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import type { ProcessRow } from '#shell/process-tree.js';
 import { ownedProcesses, processTable, terminateOwnedProcesses, trackDescendants } from '#shell/process-tree.js';
 
 describe('ownedProcesses', () => {
@@ -47,6 +48,52 @@ describe('terminateOwnedProcesses', () => {
     }
   });
 
+  it('should bound a hung table read and still kill the already frozen tree', async () => {
+    vi.useFakeTimers();
+    const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+    let reads = 0;
+    try {
+      const termination = terminateOwnedProcesses({
+        root: 100,
+        group: 100,
+        deadlineMilliseconds: 50,
+        table: async () => {
+          reads += 1;
+          return reads === 1
+            ? [{ pid: 101, ppid: 100, pgid: 101, zombie: false }]
+            : Promise.withResolvers<readonly ProcessRow[]>().promise;
+        },
+      });
+      const rejected = expect(termination).rejects.toThrow('termination is unconfirmed');
+      await vi.advanceTimersByTimeAsync(50);
+      await rejected;
+      expect(kill).toHaveBeenCalledWith(101, 'SIGKILL');
+      expect(kill).toHaveBeenCalledWith(-100, 'SIGKILL');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      kill.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('should report a live root as a survivor rather than successful cleanup', async () => {
+    vi.useFakeTimers();
+    const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+    try {
+      const termination = terminateOwnedProcesses({
+        root: 100,
+        group: 100,
+        deadlineMilliseconds: 20,
+        table: async () => [{ pid: 100, ppid: 1, pgid: 100, zombie: false }],
+      });
+      await vi.advanceTimersByTimeAsync(20);
+      await expect(termination).resolves.toStrictEqual([100]);
+    } finally {
+      kill.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('should do nothing for a launch that never started', async () => {
     expect(await terminateOwnedProcesses({ root: -1, group: -1, deadlineMilliseconds: 10 })).toStrictEqual([]);
   });
@@ -83,6 +130,26 @@ describe('terminateOwnedProcesses', () => {
 });
 
 describe('trackDescendants', () => {
+  it('should stop tracking after a bounded failed read without overlapping polls', async () => {
+    vi.useFakeTimers();
+    let reads = 0;
+    const tracker = trackDescendants(100, async () => {
+      reads += 1;
+      return Promise.withResolvers<readonly ProcessRow[]>().promise;
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(750);
+      expect(reads).toBe(1);
+      const stopped = tracker.stop();
+      await vi.advanceTimersByTimeAsync(500);
+      await stopped;
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      await tracker.stop();
+      vi.useRealTimers();
+    }
+  });
+
   it('should drop remembered ownership when a process id is reused', async () => {
     let row = { pid: 11, ppid: 10, pgid: 11, zombie: false, started: 'first' };
     const tracker = trackDescendants(10, async () => [row]);

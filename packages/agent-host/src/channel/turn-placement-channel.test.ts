@@ -1,6 +1,8 @@
 /**
  * The placement session on rpc (W6 RH-S11, W8 TS-S5): both halves over one `MessageChannel`, with a scripted session.
  */
+import { serveAgentWorkerChannel } from '#channel/worker-channel.js';
+import { z } from 'zod';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { connectTurnPlacementChannel, serveTurnPlacementChannel } from '#channel/turn-placement-channel.js';
@@ -92,6 +94,57 @@ describe('the placement session channel', () => {
       held: [{ key, checkoutId: 'live' }],
     });
     expect(served.complete).toHaveBeenCalledWith({ requestId: 'complete-1', key, cut: true });
+  });
+
+  /* XD3: a session with no publish verb records no chat ref, so no other device reads the chat: no heartbeat. */
+  it('should refuse a publish CHAT_NOT_SHARED for a session with no publish verb', async () => {
+    const { client } = connect(session());
+
+    await expect(client.publish?.({ requestId: 'publish-1', chatId: 'chat-1' })).resolves.toMatchObject({
+      requestId: 'publish-1',
+      status: 'refused',
+      code: 'CHAT_NOT_SHARED',
+    });
+  });
+
+  const anyCall = { args: z.unknown(), result: z.unknown() };
+  /* XD3: a placement server older than XD3 has no publish verb at all; its chat is not shared, so no heartbeat. */
+  it('should read a publish a server older than XD3 has no verb for as CHAT_NOT_SHARED', async () => {
+    const { port1, port2 } = new MessageChannel();
+    serveAgentWorkerChannel(port1, {
+      sessionKey: 'turn-placement:project-1',
+      protocolSchemas: {
+        hello: z.strictObject({ projectId: z.string() }),
+        calls: { admit: anyCall, complete: anyCall, abandon: anyCall, reconcile: anyCall, acknowledge: anyCall },
+        notifies: {},
+        listens: { settlements: { args: z.unknown(), event: z.unknown() } },
+      },
+      impl: {
+        call: async (_context, name) => {
+          throw Object.assign(new Error(`The placement session could not read a ${name} request: no such verb`), {
+            code: 'FRAME_UNREADABLE',
+          });
+        },
+        listen: () =>
+          (async function* () {
+            /* An older server's settlements: none here. */
+          })(),
+      },
+      label: 'turn-placement',
+      hello: { projectId: 'project-1' },
+      keepaliveInterval: 1000,
+    });
+    const client = connectTurnPlacementChannel({ port: port2, projectId: 'project-1', toolsFor: () => registry });
+    closers.push(() => {
+      client.close();
+      port1.close();
+    });
+
+    await expect(client.publish?.({ requestId: 'publish-1', chatId: 'chat-1' })).resolves.toMatchObject({
+      requestId: 'publish-1',
+      status: 'refused',
+      code: 'CHAT_NOT_SHARED',
+    });
   });
 
   it('should answer a request it cannot read FRAME_UNREADABLE and never call the session', async () => {

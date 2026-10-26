@@ -5,7 +5,7 @@ Executable oracle over a line-based trace file, line format v2 (no `Lean.Json` i
 generator is `src/log/chat-ledger.differential.test.ts`; its output for each corpus must equal this oracle's.
 
 A row is `<term> <seq> <run> <kind> <arg> <ms> <epoch> <attempt>` (`epoch`/`attempt` 0: absent); kinds
-`L S H O R P V M U`. Commands (`#` comments and blank lines ignored):
+`L S H O R P V M U W C K`. Commands (`#` comments and blank lines ignored):
   T <name>                     start a trace: an empty file, an appender open on it, an empty reader
   E <row>                      append through the appender              → `A <i> <outcome>`
   W <row> / WJ / TEAR          another writer's row, a junk line, a torn fragment (no output)
@@ -22,7 +22,39 @@ A row is `<term> <seq> <run> <kind> <arg> <ms> <epoch> <attempt>` (`epoch`/`atte
   DELIVER1 <requested> <limit> a version-1 clamp of the writer's view     → `D <fold>`
   RLEDGER                      the reader's ledger, each line prefixed `r`
   SEG <device> / ROW <row> / MERGE   segments                             → `M …`, `MC …`
+  MERGEB <bound>               the merge's terms started by `bound`        → `MB <keys>`
+  MH                           the history the merge folds to (rows that only append messages: no `H`)
+                                                                           → `MH <intact> <message ids>`
   TABLES                       the three legality tables                  → `TO … / TS … / TL …`
+  ADMIT <verb> <takenOver> <wrote>   the host's admission of a start, resume or approval
+                                                                           → `QA <admission>`
+  TERMOF <admission> <slotHeld>   the term an admitted command's rows go under → `QT held|fresh`
+  TERMS <wrote> <steps|->       a chat's terms on this host: from the incarnation's term `1`, written under or not,
+                               steps `p<command>.<run>.<term>`, `w<run>.<heartbeat>`, `a<command>.<applied>`, and a
+                               write split in two: `b<run>.<heartbeat>` begins it, `e` ends it (round 20)
+                                                                           → `QM <written|-> <term> <heartbeat|->`
+  XADMIT <verb> <takenOver> <wrote> <runs|->   the one admission of a start, resume or approval past other devices'
+                               runs, each `<run>:<abandoned>:<said>:<words>` → `QX taken-over|held|<admission> <says|->`
+  CARRY <steps|->              what admitted commands' first batches carry: steps `c<command>.<run>.<says, + apart|->`,
+                               `w<run>.<heartbeat>`, `h<run>` (a batch with no place for them, round 21),
+                               `a<command>.<applied>`   → `QC <each write's says, + apart|->,…>`
+  PLAN <history|-> <says|-> <rows|->   where a batch's carried turns go (round 21): history messages `c<calls|->`,
+                               `o<call>`, `s<id>`; rows those, `k<keep>` a rewind, `p<keep>` a turn's commit that
+                               keeps that many and says the turn `1000` (round 24), `l` no message
+                               → `QW <open calls|-> <place|-> <well formed after> <carried survive>`
+  PLANT <history|-> <says|-> <rows|->   the same for a batch whose run says its person's turn next, past the batch
+                               (round 23, `placeAhead`) → `QW …`
+  RESUMEB <history|-> <cut>    a Resume's batch over that history, its last message rewound or not (round 21)
+                               → `QZ <calls it closes|-> <well formed after>`
+  APPENDM <device> <row>       the merged rows after this device appends the row to its segment (round 21)
+                               → `MA <keys>`
+  REFRESHM <device> <row>      the merged rows the appender folds after a refresh reads the row appended to that
+                               device's segments, or in a new segment of it (round 26)
+                                                                           → `MR <rows, as M prints them>`
+  STAND <bound> <ask> <changed> <now> <quiet|-> <takenOver> <pulls>   where another device's run stands
+                                                                           → `QF <standing> [changesAt]`
+  PULL <cap> <throttle> <clock:size:quiet|-> <now> <size>   a pull's record of one segment (chat-ref.ts `notePull`)
+                                                                           → `QN <clock> <size> <quiet>`
   X                            end the trace
 -/
 open ChatLedger
@@ -31,7 +63,7 @@ def num (s : String) : Nat := s.toNat?.getD 0
 
 def kindOf : String → Kind
   | "L" => .L | "S" => .S | "H" => .H | "O" => .O | "R" => .R
-  | "P" => .P | "V" => .V | "M" => .M | _ => .U
+  | "P" => .P | "V" => .V | "M" => .M | "W" => .W | "C" => .C | "K" => .K | _ => .U
 
 def rowOf (ws : List String) : Row :=
   match ws with
@@ -86,6 +118,12 @@ def anomalyName : AnomalyKind → String
 
 def bit (b : Bool) : String := if b then "1" else "0"
 
+/-- A message id as the generator spells it: `m-<term>-<seq>`, `u-<term>-<seq>-<arg>`, `w-<arg>`. -/
+def idText : Nat × Nat × Nat × Nat → String
+  | (0, t, q, _) => s!"m-{t}-{q}"
+  | (1, t, q, a) => s!"u-{t}-{q}-{a}"
+  | (_, a, _, _) => s!"w-{a}"
+
 def ledgerLines (L : Ledger) (prefix_ : String := "") : List String :=
   let runs := L.runs.map fun (r, en) =>
     let life := match en.life with | some l => lifeName l | none => "-"
@@ -126,6 +164,23 @@ def foldName : ReadFold → String
   | .reset .cursorAhead => "reset:cursor-ahead"
   | .reset .identityMismatch => "reset:identity-mismatch"
   | .reset .clamped => "reset:clamped"
+
+/-- A history message of a `PLAN` line: `c<calls, + apart|->`, `o<call>`, `s<id>`. -/
+def msgOf (t : String) : Msg :=
+  let rest := (t.drop 1).toString
+  match (t.take 1).toString with
+  | "c" => .call (if rest == "-" then [] else (rest.splitOn "+").map num)
+  | "o" => .out (num rest)
+  | _ => .say (num rest)
+
+/-- A batch row of a `PLAN` line: a message, `k<keep>` a rewind, `p<keep>` the run's turn's commit (round 24), which
+keeps that many messages and says the turn `1000` at once, `l` a row that is no message. -/
+def opOf (t : String) : Op :=
+  match (t.take 1).toString with
+  | "k" => .rewind (num (t.drop 1).toString)
+  | "p" => .commit (num (t.drop 1).toString) 1000
+  | "l" => .other
+  | _ => .msg (msgOf t)
 
 structure St where
   file : File := {}
@@ -207,6 +262,111 @@ def runLine (st : St) (line : String) : St × List String :=
     let (rows, conflicts) := mergeFull st.segs
     (st, [s!"M {",".intercalate (rows.map fun e => s!"{e.term}:{e.seq}:{e.run}:O{e.arg}:{e.ms}")}",
           s!"MC {listText (conflicts.map fun ((t, q), k, d) => s!"{t}:{q}:{k}:{d}")}"])
+  | ["MERGEB", b] =>
+    (st, [s!"MB {listText ((mergeUpTo (num b) st.segs).map fun e => s!"{e.term}:{e.seq}")}"])
+  | ["ADMIT", v, t, w] =>
+    let verb : Verb := match v with | "resume" => .resume | "approve" => .approve | _ => .start
+    let name := match admission verb (t == "1") (w == "1") with
+      | .takenOver => "taken-over" | .newTerm => "new-term" | .sameTerm => "same-term"
+    (st, [s!"QA {name}"])
+  | ["TERMOF", a, h] =>
+    let adm : Admission := match a with | "taken-over" => .takenOver | "new-term" => .newTerm | _ => .sameTerm
+    (st, [s!"QT {if rowsTerm adm (h == "1") 1 2 = 2 then "fresh" else "held"}"])
+  | ["TERMS", w, ops] =>
+    let start : Terms := { held := 1, wrote := if w == "1" then some 1 else none }
+    let steps := if ops == "-" then [] else ops.splitOn ","
+    let (fin, written, _) := steps.foldl (fun (acc : Terms × List Nat × Option (Terms × Nat × Bool)) step =>
+      let args := ((step.drop 1).toString.splitOn ".").map num
+      let a := args.getD 0 0
+      let b := args.getD 1 0
+      match (step.take 1).toString with
+      | "p" => (acc.1.step (.propose a b (args.getD 2 0)), acc.2.1, acc.2.2)
+      | "w" => (acc.1.step (.write a (b == 1)), acc.2.1 ++ [acc.1.rowsTerm a (b == 1)], acc.2.2)
+      | "b" => (acc.1, acc.2.1 ++ [acc.1.rowsTerm a (b == 1)], some (acc.1, a, b == 1))
+      | "e" =>
+        match acc.2.2 with
+        | some (begun, r, hb) => (acc.1.finish begun r hb, acc.2.1, none)
+        | none => acc
+      | _ => (acc.1.step (.answer a (b == 1)), acc.2.1, acc.2.2)) (start, [], none)
+    let hb := match fin.heartbeat with | some t => toString t | none => "-"
+    (st, [s!"QM {if written.isEmpty then "-" else ",".intercalate (written.map toString)} {fin.term} {hb}"])
+  | ["XADMIT", v, t, w, fs] =>
+    let verb : Verb := match v with | "resume" => .resume | "approve" => .approve | _ => .start
+    let foreign := (if fs == "-" then [] else fs.splitOn ",").map fun f =>
+      match (f.splitOn ":").map num with
+      | [r, a, s_, w_] => ({ run := r, abandoned := a == 1, said := s_ == 1, words := w_ == 1 } : Passed)
+      | _ => { run := 0, abandoned := false, said := false, words := false }
+    let text := match admit verb (t == "1") (w == "1") foreign with
+      | .takenOver => "taken-over"
+      | .held => "held"
+      | .admitted a says =>
+        let name := match a with | .takenOver => "taken-over" | .newTerm => "new-term" | .sameTerm => "same-term"
+        s!"{name} {listText (says.map toString)}"
+    (st, [s!"QX {text}"])
+  | ["CARRY", ops] =>
+    let steps := if ops == "-" then [] else ops.splitOn ","
+    let (_, said) := steps.foldl (fun (acc : Carried × List String) step =>
+      let args := (step.drop 1).toString.splitOn "."
+      let a := num (args.getD 0 "")
+      let b := args.getD 1 ""
+      let op : CarryOp := match (step.take 1).toString with
+        | "c" =>
+          let says := args.getD 2 "-"
+          .carry a (num b) (if says == "-" then [] else (says.splitOn "+").map num)
+        | "w" => .write a (b == "1")
+        | "h" => .hold a
+        | "s" => .settle a
+        | _ => .answer a (b == "1")
+      let (next, out) := carryStep acc.1 op
+      match op with
+      | .write _ _ | .hold _ => (next, acc.2 ++ [if out.isEmpty then "-" else "+".intercalate (out.map toString)])
+      | _ => (next, acc.2)) ([], [])
+    (st, [s!"QC {listText said}"])
+  | ["PLAN", hs, ss, os] | ["PLANT", hs, ss, os] =>
+    let h := (if hs == "-" then [] else hs.splitOn ",").map msgOf
+    let says := (if ss == "-" then [] else ss.splitOn "+").map num
+    let ops := (if os == "-" then [] else os.splitOn ",").map opOf
+    /- `PLANT` (round 23): the batch's run has not committed its turn, so it says that turn next, past the batch
+    (`turnAhead`, round 24). -/
+    let ahead := turnAhead (!line.startsWith "PLANT ")
+    let place := if ahead then placeAhead h ops 1000 else placeAt h ops
+    let after := applyAll h ((planFor ahead h says ops 1000).getD ops)
+    let survive := place.isSome && says.all (fun s => after.contains (.say s))
+    let at_ := match place with | some i => toString i | none => "-"
+    (st, [s!"QW {listText ((openCalls h).map toString)} {at_} {bit (wf after)} {bit survive}"])
+  | ["RESUMEB", hs, cut] =>
+    let h := (if hs == "-" then [] else hs.splitOn ",").map msgOf
+    let ops := (Batch.resume (cut == "1") 7).ops h
+    let closed := ops.filterMap fun op => match op with | .msg (.out c) => some (toString c) | _ => none
+    (st, [s!"QZ {listText closed} {bit (wf (applyAll h ops))}"])
+  | "APPENDM" :: d :: rest =>
+    let e := rowOf rest
+    (st, [s!"MA {listText ((appendMerged st.segs (num d) (merge st.segs) e).map fun r => s!"{r.term}:{r.seq}")}"])
+  | "REFRESHM" :: d :: rest =>
+    let e := rowOf rest
+    let dev := num d
+    let next := if st.segs.any (fun s => decide (s.1 = dev)) then
+        st.segs.map fun s => if s.1 = dev then (s.1, s.2 ++ [e]) else s
+      else st.segs ++ [(dev, [e])]
+    (st, [s!"MR {",".intercalate ((refreshMerged (merge st.segs) (merge next)).map fun e =>
+      s!"{e.term}:{e.seq}:{e.run}:O{e.arg}:{e.ms}")}"])
+  | ["PULL", cap, th, prior, n, sz] =>
+    let rec_ := if prior == "-" then none else
+      match (prior.splitOn ":").map num with
+      | [c, s, q] => some ⟨c, s, q⟩
+      | _ => none
+    let r := notePull (num cap) (num th) rec_ (num n) (num sz)
+    (st, [s!"QN {r.clock} {r.size} {r.quiet}"])
+  | ["STAND", b, a, c, n, p, t, u] =>
+    let text := match standing (num b) (num a) (num c) (num n) (if p == "-" then none else some (num p)) (t == "1")
+        (u == "1") with
+      | .holds at_ => s!"QF holds {at_}" | .awaitsPull => "QF awaits-pull" | .abandoned => "QF abandoned"
+    (st, [text])
+  | ["MH"] =>
+    let text := match histOf (merge st.segs) with
+      | some h => s!"MH 1 {listText (h.ids.map idText)}"
+      | none => "MH 0 -"
+    (st, [text])
   | _ => (st, [s!"ERROR {line}"])
 
 def main (args : List String) : IO Unit := do

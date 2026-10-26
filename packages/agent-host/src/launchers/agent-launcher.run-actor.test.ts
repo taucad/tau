@@ -14,6 +14,7 @@ import { createNodeLauncher } from '#launchers/node-launcher.fixture.js';
 import type { AgentLauncher } from '#launchers/agent-launcher.js';
 import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixture.js';
 import type { AgentLogEvent } from '#log/event-types.js';
+import { reduceEventLog } from '#log/reducer.js';
 import type { ToolRegistry } from '#waist/ports.js';
 import type { CommandAnswer, HostCommand } from '#wire/commands.schema.js';
 
@@ -285,6 +286,49 @@ describe('the run actor on the daemon (W7)', () => {
     expect(lifecycleStates(await rowsOf(root, 'chat-restart')).at(-1)).toBe('cancelled');
   });
 
+  /* XD3: a run is never moved between devices in flight, so resuming this device's paused run waits too. */
+  it('should refuse to resume a run while another device runs the chat', async () => {
+    const root = await makeRoot();
+    const launcher = makeLauncher(root, gateway(true).fetch);
+    await startRun(launcher, 'chat-fenced', 'run-fenced');
+    await until(root, 'chat-fenced', (rows) => lifecycleStates(rows).includes('running'));
+    await execute(launcher, {
+      type: 'interrupt',
+      payload: { chatId: 'chat-fenced', runId: 'run-fenced', interruptId: 'int-1', kind: 'approval', prompt: 'Write?' },
+    });
+    await until(root, 'chat-fenced', (rows) => rows.some((row) => row.type === 'turn.finalized'));
+    await execute(launcher, {
+      type: 'resolve-interrupt',
+      payload: { chatId: 'chat-fenced', runId: 'run-fenced', interruptId: 'int-1', outcome: 'approved' },
+    });
+    /* Sync brings another device's segment: its run is admitted and running there now. */
+    const foreign = {
+      version: 1,
+      leaderEpoch: 'desktop-term',
+      recordedAt: new Date().toISOString(),
+      runId: 'run-desk',
+    };
+    await mkdir(join(root, '.tau', 'chats', 'chat-fenced', 'events'), { recursive: true });
+    await writeFile(
+      join(root, '.tau', 'chats', 'chat-fenced', 'events', 'device-desktop.jsonl'),
+      [
+        { ...foreign, sequence: 0, type: 'run.lifecycle', state: 'admitted' },
+        { ...foreign, sequence: 1, type: 'run.lifecycle', state: 'running' },
+      ]
+        .map((row) => `${JSON.stringify(row)}\n`)
+        .join(''),
+    );
+
+    const answer = await execute(launcher, { type: 'resume', payload: { chatId: 'chat-fenced', runId: 'run-fenced' } });
+
+    expect(answer).toMatchObject({
+      status: 'refused',
+      code: 'RUN_ACTIVE_ON_ANOTHER_DEVICE',
+      details: { deviceId: 'device-desktop', runId: 'run-desk' },
+    });
+    expect(lifecycleStates(await rowsOf(root, 'chat-fenced')).at(-1)).toBe('paused');
+  });
+
   it('should refuse INTERRUPT_PENDING instead of holding the slot', async () => {
     const root = await makeRoot();
     const launcher = makeLauncher(root, gateway(true).fetch);
@@ -406,7 +450,11 @@ describe('the run actor on the daemon (W7)', () => {
     expect(upstream.models).toEqual(['switched-model']);
   });
 
-  it('should answer a replayed start with its admission and restart an uncommitted run from its payload', async () => {
+  /*
+   * XD3, round 16: the next incarnation abandons the orphan, and its `failed` row's batch says the person's turn as
+   * data. Resume then reads the turn as committed and continues from the history: it never commits the turn again.
+   */
+  it('should answer a replayed start with its admission, and resume the abandoned run without committing its turn again', async () => {
     const root = await makeRoot();
     const message = { id: 'user-uncommitted', role: 'user', content: 'Journaled.' } as const;
     await seed(root, 'chat-journal', [
@@ -434,8 +482,19 @@ describe('the run actor on the daemon (W7)', () => {
     });
     expect(resumed).toMatchObject({ status: 'applied', effect: 'durable' });
     const rows = await until(root, 'chat-journal', (all) => lifecycleStates(all).at(-1) === 'completed');
-    expect(rows.find((row) => row.type === 'turn.history-projection-committed')).toMatchObject({
-      message: { id: 'user-uncommitted' },
+    expect(rows.some((row) => row.type === 'turn.history-projection-committed')).toBe(false);
+    const said = rows.findIndex((row) => row.type === 'message.appended' && row.message.id === message.id);
+    expect(rows[said]).toMatchObject({ message: { metadata: { tauInternal: { kind: 'abandoned-turn' } } } });
+    expect(rows[said + 1]).toMatchObject({
+      type: 'run.lifecycle',
+      state: 'failed',
+      detail: { code: 'RUN_ABANDONED' },
+      leaderEpoch: rows[said]!.leaderEpoch,
     });
+    expect(
+      reduceEventLog(rows)
+        .filter((entry) => entry.role === 'user')
+        .map((entry) => entry.id),
+    ).toEqual([message.id]);
   });
 });

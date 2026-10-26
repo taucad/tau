@@ -759,7 +759,8 @@ export const projectAgentHostUserTurn = (event: PresentationEvent): MyUIMessage 
   }
   if (event.type === 'message.appended' && event.message.role === 'user') {
     const internal = event.message.metadata?.tauInternal;
-    if (internal !== undefined && internal['kind'] !== 'external-agent') {
+    /* A copy of an abandoned turn (XD3) is another run's words said as data, an external agent's keeping its marker. */
+    if (internal !== undefined && (internal['kind'] !== 'external-agent' || internal['abandoned'] === true)) {
       return undefined;
     }
     if (event.message.id.startsWith('tau:')) {
@@ -1364,10 +1365,12 @@ export const projectAgentHostEvent = (
     case 'turn.finalized':
     case 'turn.conflicted':
     case 'turn.failed':
-    case 'turn.history-projection-committed': {
+    case 'turn.history-projection-committed':
+    case 'run.heartbeat': {
       /* The three turn settlements are facts about the project's revision
        * graph, not about the transcript: they are read by
-       * `projectTurnFinalized` and render no chunk of their own. */
+       * `projectTurnFinalized` and render no chunk of their own. A heartbeat
+       * only says the run is alive, for the cross-device fence (XD3). */
       return [];
     }
     case 'interrupt.recorded': {

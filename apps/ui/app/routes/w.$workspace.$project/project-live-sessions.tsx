@@ -44,7 +44,7 @@ import {
 } from '#services/agent-host-client.js';
 import { createDaemonAgentHostTransport } from '#services/daemon-agent-host-client.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
-import { dialAgentHost, agentHostClientConfig } from '#chat-clients/_internal/turn-body.js';
+import { dialExecutionHost, agentHostClientConfig } from '#chat-clients/_internal/turn-body.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { useComputeReuseMode } from '#lib/compute-reuse-preference.js';
 import { ENV } from '#environment.config.js';
@@ -210,8 +210,9 @@ function ProjectSessionBinding({
       editorRef.send({ type: 'retryEnsureFocusedChat' });
     }
   }, [editorRef, isChatDeferred, status?.sync.chats]);
-  /* Every live project publishes one read connector, even without a focused chat. Each chat's persisted placement
-   * decides which owner log to read; opening an observer never issues Start or acquires an SDK session. */
+  /* Every live project publishes one read connector, even without a focused chat. Each chat's placement on this
+   * device — its stored execution and this device's own choice for it — decides which owner log to read; opening an
+   * observer never issues Start or acquires an SDK session. */
   useEffect(() => {
     if (client === undefined || !viewsReady) {
       return;
@@ -230,7 +231,7 @@ function ProjectSessionBinding({
       const daemonHostId = daemonPlacementOf(execution);
       if (daemonHostId !== undefined) {
         return {
-          ...createAgentHostClient(createDaemonAgentHostTransport(async () => dialAgentHost(daemonHostId, projectId))),
+          ...createAgentHostClient(createDaemonAgentHostTransport(async () => dialExecutionHost(execution, projectId))),
           placement: { hostId: daemonHostId },
         };
       }
@@ -312,7 +313,7 @@ function ProjectSessionBinding({
       const daemonHostId = daemonPlacementOf(execution);
       if (daemonHostId !== undefined) {
         try {
-          const channel = await dialAgentHost(daemonHostId, projectId);
+          const channel = await dialExecutionHost(execution, projectId);
           channel.close();
           return 'stoppable';
         } catch {

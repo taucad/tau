@@ -1,7 +1,5 @@
 /* oxlint-disable no-await-in-loop -- Observe sequential UI saves and bounded filesystem polling. */
 /** Drive the installed renderer over loopback CDP; no main inspector, fixture gateway, or injected filesystem. */
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import { readFile, readdir, writeFile, stat } from 'node:fs/promises';
 import { join, relative, resolve, dirname, basename } from 'node:path';
@@ -14,22 +12,6 @@ import { requestQualificationQuit } from './qualification-quit.mjs';
 
 const source =
   'from dataclasses import dataclass\nfrom build123d import Box, Shape\n\n@dataclass(frozen=True)\nclass Params:\n    width: float = 12\n    depth: float = 18\n    height: float = 6\n\ndef main(params: Params) -> Shape:\n    return Box(params.width, params.depth, params.height)\n';
-const readNativeClipboard = async (): Promise<string> => {
-  const command =
-    process.platform === 'darwin'
-      ? { executable: '/usr/bin/pbpaste', args: [] }
-      : process.platform === 'win32'
-        ? {
-            executable: 'powershell.exe',
-            args: ['-NoProfile', '-NonInteractive', '-Command', '[Console]::Write((Get-Clipboard -Raw))'],
-          }
-        : { executable: 'xclip', args: ['-selection', 'clipboard', '-o'] };
-  const { stdout } = await promisify(execFile)(command.executable, command.args, {
-    timeout: 10_000,
-    maxBuffer: 1024 * 1024,
-  });
-  return stdout;
-};
 const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 const findSource = async (root: string): Promise<string[]> => {
   const result: string[] = [];
@@ -242,16 +224,14 @@ const main = async (): Promise<void> => {
       await page.locator('label[for="kernel-build123d"]').click();
       await page.getByRole('button', { name: /^Create Project/u }).click();
       await page.getByRole('tab', { name: 'main.py', exact: true }).last().click();
-      await page.locator('.monaco-editor').first().waitFor({ state: 'visible' });
-      await page.locator('.monaco-editor').first().locator('.native-edit-context, textarea.inputarea').last().focus();
+      // Monaco also has a zero-size overflow-widget node; use the visible editing surface.
+      const editor = page.locator('.editor-container:visible .monaco-editor:visible').last();
+      await editor.waitFor({ state: 'visible' });
+      await editor.locator('.native-edit-context, textarea.inputarea').last().focus();
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+a' : 'Control+a');
-      const previousClipboard = await readNativeClipboard();
-      try {
-        await page.evaluate(async (text) => navigator.clipboard.writeText(text), source);
-        await page.keyboard.press(process.platform === 'darwin' ? 'Meta+v' : 'Control+v');
-      } finally {
-        await page.evaluate(async (text) => navigator.clipboard.writeText(text), previousClipboard);
-      }
+      // This disposable host may have no clipboard owner. Keep the paste payload until save is verified.
+      await page.evaluate(async (text) => navigator.clipboard.writeText(text), source);
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+v' : 'Control+v');
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+s' : 'Control+s');
     }
     const projectMatch = /^\/w\/home\/([a-z0-9-]+)$/u.exec(new URL(page.url()).pathname);

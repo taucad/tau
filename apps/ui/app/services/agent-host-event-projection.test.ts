@@ -258,6 +258,19 @@ describe('projectAgentHostEvent', () => {
     ).toEqual(expected);
   });
 
+  /* A takeover says another device's turn as data (XD3); an external turn's copy keeps its marker, and is no new turn. */
+  it('projects no user turn from a copy of an abandoned turn, an external agent’s included', () => {
+    const external = { kind: 'external-agent', runKind: 'acp', agentId: 'claude' };
+    for (const tauInternal of [{ kind: 'abandoned-turn' }, { ...external, abandoned: true }]) {
+      const message = { id: 'user-copy', role: 'user', content: 'Go on.', metadata: { tauInternal } } as const;
+      expect(projectAgentHostUserTurn({ ...base, type: 'message.appended', message })).toBeUndefined();
+    }
+    const turn = { id: 'user-own', role: 'user', content: 'Go on.', metadata: { tauInternal: external } } as const;
+    expect(projectAgentHostUserTurn({ ...base, type: 'message.appended', message: turn })).toMatchObject({
+      id: 'user-own',
+    });
+  });
+
   it('streams each block once and lets its matching durable message close it without replay', () => {
     const streamedBlocks = new Map();
     const live = {

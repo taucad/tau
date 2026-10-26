@@ -746,6 +746,9 @@ theorem grows_known (L : Ledger) (e : Row) : Grows L (L.known e) := by
     · exact grows_of_same (same_markShown _ _)
     · exact grows_of_same fun _ => rfl
   · exact grows_of_same fun _ => rfl
+  · exact grows_of_same (same_put rfl)
+  · exact grows_of_same fun _ => rfl
+  · exact grows_of_same fun _ => rfl
 
 theorem same_book (L : Ledger) (e : Row) (broken : Bool) (ep : Nat) : SameSettle L (L.book e broken ep) := by
   unfold Ledger.book
@@ -1140,6 +1143,9 @@ theorem terms_known (L : Ledger) (e : Row) : (L.known e).terms = L.terms := by
     · exact terms_markShown _ _
     · rfl
   · rfl
+  · rfl
+  · rfl
+  · rfl
 
 theorem terms_markOpaque (L : Ledger) (e : Row) : (L.markOpaque e).terms = L.terms := by
   unfold Ledger.markOpaque; dsimp only; split <;> rfl
@@ -1422,12 +1428,12 @@ def TermsWF (ts : List MTerm) : Prop := (ts.map (·.term)).Nodup ∧ ∀ t ∈ t
 /-- `c` is one of the copies read. -/
 def Holds (ts : List MTerm) (c : Copy) : Prop := ∃ t ∈ ts, ∃ sc ∈ t.copies, c ∈ sc.2
 
-theorem add_copies (t : MTerm) (dev : Nat) (o : Option Nat) (e : Row) :
+theorem add_copies (t : MTerm) (dev : Nat) (o : Option (Nat × Nat)) (e : Row) :
     (t.add dev o e).copies = upsert e.seq (((lookup e.seq t.copies).getD []) ++ [⟨e, dev⟩]) t.copies := rfl
 
-theorem add_term (t : MTerm) (dev : Nat) (o : Option Nat) (e : Row) : (t.add dev o e).term = t.term := rfl
+theorem add_term (t : MTerm) (dev : Nat) (o : Option (Nat × Nat)) (e : Row) : (t.add dev o e).term = t.term := rfl
 
-theorem add_wf (t : MTerm) (dev : Nat) (o : Option Nat) (e : Row) (hw : t.WF) (ht : t.term = e.term) :
+theorem add_wf (t : MTerm) (dev : Nat) (o : Option (Nat × Nat)) (e : Row) (hw : t.WF) (ht : t.term = e.term) :
     (t.add dev o e).WF := by
   refine ⟨by rw [add_copies]; exact upsert_nodup _ _ _ hw.1, ?_⟩
   intro sc hsc
@@ -1447,7 +1453,7 @@ theorem add_wf (t : MTerm) (dev : Nat) (o : Option Nat) (e : Row) (hw : t.WF) (h
     · exact ⟨ht.symm, rfl⟩
   · exact hw.2 sc hsc
 
-theorem add_holds (t : MTerm) (dev : Nat) (o : Option Nat) (e : Row) (hw : t.WF) (c : Copy) :
+theorem add_holds (t : MTerm) (dev : Nat) (o : Option (Nat × Nat)) (e : Row) (hw : t.WF) (c : Copy) :
     (∃ sc ∈ (t.add dev o e).copies, c ∈ sc.2) ↔ (∃ sc ∈ t.copies, c ∈ sc.2) ∨ c = ⟨e, dev⟩ := by
   rw [add_copies]
   constructor
@@ -1483,7 +1489,7 @@ theorem addRow_spec (dev : Nat) (st : List MTerm × List Nat) (e : Row) (h : Ter
     simp only [decide_eq_true_eq] at ht0e
     refine ⟨⟨?_, ?_⟩, ?_⟩
     · have : (st.1.map fun t => if t.term = e.term then t.add dev
-          (if (!st.2.contains e.term) = true then some ((if (!st.2.contains e.term) = true then
+          (if (!st.2.contains e.term) = true then some (st.2.headD e.term, (if (!st.2.contains e.term) = true then
             st.2 ++ [e.term] else st.2).length - 1) else none) e else t).map (·.term) = st.1.map (·.term) := by
         simp only [List.map_map]
         congr 1; funext t; simp only [Function.comp]; split <;> rfl
@@ -1597,46 +1603,12 @@ theorem mergedTerms_spec (segs : List (Nat × List Row)) :
 theorem keySort_perm {α : Type} (κ : α → List (List Nat)) (l : List α) : (keySort κ l).Perm l :=
   isort_perm _ l
 
-theorem keptCopy_mem (d : Nat) (cs : List Copy) (h : cs ≠ []) : keptCopy d cs ∈ cs := by
+theorem keptCopy_mem (cs : List Copy) (h : cs ≠ []) : keptCopy cs ∈ cs := by
   unfold keptCopy
-  dsimp only
-  generalize hpool : (if (cs.filter fun c => decide (c.device = d)).isEmpty = true then cs
-      else cs.filter fun c => decide (c.device = d)) = pool
-  have hsub : ∀ x ∈ pool, x ∈ cs := by
-    intro x hx; rw [← hpool] at hx; split at hx
-    · exact hx
-    · exact (List.mem_filter.1 hx).1
-  have hne : pool ≠ [] := by
-    rw [← hpool]; split
-    · exact h
-    · rename_i hf; simpa using hf
-  apply hsub
-  have hp := keySort_perm copyKey pool
-  cases hs : keySort copyKey pool with
-  | nil => rw [hs] at hp; exact absurd (List.Perm.nil_eq hp).symm hne
+  have hp := keySort_perm copyKey cs
+  cases hs : keySort copyKey cs with
+  | nil => rw [hs] at hp; exact absurd (List.Perm.nil_eq hp).symm h
   | cons x xs => rw [hs] at hp; exact hp.mem_iff.1 List.mem_cons_self
-
-/-- The kept copy is the term device's own whenever that device holds a copy of the key. -/
-theorem keptCopy_own (d : Nat) (cs : List Copy) (h : ∃ c ∈ cs, c.device = d) : (keptCopy d cs).device = d := by
-  unfold keptCopy
-  dsimp only
-  obtain ⟨c, hc, hcd⟩ := h
-  have hne : (cs.filter fun c => decide (c.device = d)).isEmpty = false := by
-    cases he : (cs.filter fun c => decide (c.device = d)).isEmpty
-    · rfl
-    · rw [List.isEmpty_iff, List.filter_eq_nil_iff] at he
-      exact absurd (by simpa using hcd) (he c hc)
-  simp only [hne, Bool.false_eq_true, ↓reduceIte]
-  have hp := keySort_perm copyKey (cs.filter fun c => decide (c.device = d))
-  cases hs : keySort copyKey (cs.filter fun c => decide (c.device = d)) with
-  | nil =>
-    rw [hs] at hp
-    have := (List.Perm.nil_eq hp).symm
-    rw [this] at hne; simp at hne
-  | cons x xs =>
-    rw [hs] at hp
-    have := hp.mem_iff.1 List.mem_cons_self
-    simpa using (List.mem_filter.1 this).2
 
 theorem dropScan_sub (k : Copy) (xs acc : List Copy) :
     ∀ a ∈ xs.foldl (fun (acc : List Copy) c =>
@@ -1723,8 +1695,8 @@ theorem perm_flatMap_left {α β : Type} (l : List α) (f g : α → List β)
 def allKeys (ts : List MTerm) : List Key := ts.flatMap fun t => t.copies.map fun sc => (t.term, sc.1)
 
 theorem mergeKey_key (t : MTerm) (hw : t.WF) (sc : Nat × List Copy) (hsc : sc ∈ t.copies) :
-    (mergeKey (place t) sc).1.key = (t.term, sc.1) ∧ keptCopy (deviceOf t) sc.2 ∈ sc.2 := by
-  have hm := keptCopy_mem (deviceOf t) sc.2 (hw.2 sc hsc).1
+    (mergeKey (place t) sc).1.key = (t.term, sc.1) ∧ keptCopy sc.2 ∈ sc.2 := by
+  have hm := keptCopy_mem sc.2 (hw.2 sc hsc).1
   have := (hw.2 sc hsc).2 _ hm
   refine ⟨?_, hm⟩
   simp [mergeKey, keep, place, Row.key, this.1, this.2]
@@ -1848,13 +1820,13 @@ theorem t7_conflicts_complete (segs : List (Nat × List Row)) (s1 s2 : Nat × Li
   subst htt
   have hss : sc1 = sc2 := inj_of_nodup_map (hw.2 t1 ht1).1 hsc1 hsc2 (by simp only at e1 e2; rw [← e1.2, ← e2.2, hk.2])
   subst hss
-  have hne : dropped (keptCopy (deviceOf t1) sc1.2) sc1.2 ≠ [] := by
+  have hne : dropped (keptCopy sc1.2) sc1.2 ≠ [] := by
     apply dropped_complete
-    by_cases hkx : x.fp = (keptCopy (deviceOf t1) sc1.2).row.fp
+    by_cases hkx : x.fp = (keptCopy sc1.2).row.fp
     · exact ⟨⟨y, s2.1⟩, hc2, fun h => hf (hkx.trans h.symm)⟩
     · exact ⟨⟨x, s1.1⟩, hc1, hkx⟩
   obtain ⟨a, ha⟩ := List.exists_mem_of_ne_nil _ hne
-  refine ⟨(keptCopy (deviceOf t1) sc1.2).device, a.device, ?_⟩
+  refine ⟨(keptCopy sc1.2).device, a.device, ?_⟩
   rw [mergeFull_eq]
   refine List.mem_flatMap.2 ⟨_, (mem_mergeKeys segs _).2 ⟨t1, ht1, sc1, hsc1, rfl⟩, ?_⟩
   simp only [mergeKey, keep, place, List.map_map, List.mem_map, Function.comp_def]
@@ -2177,18 +2149,11 @@ theorem isEmpty_congr {α : Type} {l l' : List α} (hm : ∀ x, x ∈ l ↔ x �
   exact this
 
 /-- The kept copy's content and device depend only on which copies were read (not their order or multiplicity). -/
-theorem keptCopy_det (d : Nat) (cs cs' : List Copy) (hm : ∀ c, c ∈ cs ↔ c ∈ cs') :
-    (keptCopy d cs).row.fp = (keptCopy d cs').row.fp ∧ (keptCopy d cs).device = (keptCopy d cs').device := by
+theorem keptCopy_det (cs cs' : List Copy) (hm : ∀ c, c ∈ cs ↔ c ∈ cs') :
+    (keptCopy cs).row.fp = (keptCopy cs').row.fp ∧ (keptCopy cs).device = (keptCopy cs').device := by
   unfold keptCopy
-  dsimp only
-  have hown : ∀ x, x ∈ cs.filter (fun c => decide (c.device = d)) ↔ x ∈ cs'.filter (fun c => decide (c.device = d)) := by
-    intro x; simp only [List.mem_filter, hm]
-  rw [isEmpty_congr hown]
   apply copyKey_inj
-  apply keySort_head_key
-  by_cases hc : (cs'.filter (fun c => decide (c.device = d))).isEmpty = true
-  · simp only [hc, ↓reduceIte]; exact hm
-  · simp only [hc, Bool.false_eq_true, ↓reduceIte]; exact hown
+  exact keySort_head_key copyKey cs cs' default hm
 
 /-- The dropped scan's step. -/
 def dropStep (k : Copy) (acc : List Copy) (c : Copy) : List Copy :=
@@ -2351,9 +2316,20 @@ theorem mem_introduced (p : List Row) (τ : Nat) : τ ∈ introduced p ↔ ∃ r
         · exact Or.inl h
         · exact Or.inr rfl
 
-/-- The file orders of term `τ` on device `d`: its place in `introduced` of each segment of `d` holding it. -/
+/-- The writer of a segment: the first term it introduces (0 for an empty segment, which holds no term). -/
+def firstTerm (q : List Row) : Nat := (introduced q).headD 0
+
+theorem headD_snoc (l : List Nat) (x y : Nat) : (l ++ [x]).headD y = l.headD x := by
+  cases l <;> rfl
+
+theorem headD_snoc_of_ne (l : List Nat) (x y : Nat) (h : l ≠ []) : (l ++ [x]).headD y = l.headD y := by
+  cases l with
+  | nil => exact absurd rfl h
+  | cons _ _ => rfl
+
+/-- The file orders of term `τ` under writer `d`: its place in `introduced` of each segment of `d` holding it. -/
 def ordsOf (segs : List (Nat × List Row)) (d τ : Nat) : List Nat :=
-  segs.filterMap fun s => if s.1 = d ∧ τ ∈ introduced s.2 then some ((introduced s.2).idxOf τ) else none
+  segs.filterMap fun s => if firstTerm s.2 = d ∧ τ ∈ introduced s.2 then some ((introduced s.2).idxOf τ) else none
 
 /-- The times of term `τ`'s rows. -/
 def msOf (segs : List (Nat × List Row)) (τ : Nat) : List Nat :=
@@ -2367,11 +2343,11 @@ def TermChar (segs : List (Nat × List Row)) (ts : List MTerm) : Prop :=
 
 theorem ordsOf_seg (segs : List (Nat × List Row)) (dev : Nat) (q : List Row) (d τ : Nat) :
     ordsOf (segs ++ [(dev, q)]) d τ =
-      ordsOf segs d τ ++ (if dev = d ∧ τ ∈ introduced q then [(introduced q).idxOf τ] else []) := by
+      ordsOf segs d τ ++ (if firstTerm q = d ∧ τ ∈ introduced q then [(introduced q).idxOf τ] else []) := by
   unfold ordsOf
   rw [List.filterMap_append]
   simp only [List.filterMap_cons, List.filterMap_nil]
-  by_cases h : dev = d ∧ τ ∈ introduced q <;> simp [h]
+  by_cases h : firstTerm q = d ∧ τ ∈ introduced q <;> simp [h]
 
 theorem msOf_seg (segs : List (Nat × List Row)) (dev : Nat) (q : List Row) (τ : Nat) :
     msOf (segs ++ [(dev, q)]) τ = msOf segs τ ++ (q.filter fun r => decide (r.term = τ)).map (·.ms) := by
@@ -2379,27 +2355,35 @@ theorem msOf_seg (segs : List (Nat × List Row)) (dev : Nat) (q : List Row) (τ 
 
 theorem ordsOf_step_other (segs : List (Nat × List Row)) (dev : Nat) (p : List Row) (e : Row) (d τ : Nat)
     (h : τ ≠ e.term) : ordsOf (segs ++ [(dev, p ++ [e])]) d τ = ordsOf (segs ++ [(dev, p)]) d τ := by
-  rw [ordsOf_seg, ordsOf_seg, introduced_snoc]
+  rw [ordsOf_seg, ordsOf_seg]
+  unfold firstTerm
+  rw [introduced_snoc]
   split
   · rfl
   · have hm : τ ∈ introduced p ++ [e.term] ↔ τ ∈ introduced p := by simp [h]
-    simp only [hm]
-    split
-    · rename_i hc; rw [List.idxOf_append, ite_eq_left hc.2]
-    · rfl
+    by_cases hτ : τ ∈ introduced p
+    · have hne : introduced p ≠ [] := fun hn => by rw [hn] at hτ; simp at hτ
+      rw [headD_snoc_of_ne _ _ _ hne, List.idxOf_append, ite_eq_left hτ]
+      simp only [hm]
+    · have h1 : ¬ ((introduced p ++ [e.term]).headD 0 = d ∧ τ ∈ introduced p ++ [e.term]) := fun hc => hτ (hm.1 hc.2)
+      have h2 : ¬ ((introduced p).headD 0 = d ∧ τ ∈ introduced p) := fun hc => hτ hc.2
+      rw [ite_eq_right_iff.2 (fun hc => absurd hc h1), ite_eq_right_iff.2 (fun hc => absurd hc h2)]
 
 theorem ordsOf_step_new (segs : List (Nat × List Row)) (dev : Nat) (p : List Row) (e : Row) (d : Nat)
     (h : e.term ∉ introduced p) : ordsOf (segs ++ [(dev, p ++ [e])]) d e.term =
-      ordsOf (segs ++ [(dev, p)]) d e.term ++ (if dev = d then [(introduced p).length] else []) := by
-  rw [ordsOf_seg, ordsOf_seg, introduced_snoc]
+      ordsOf (segs ++ [(dev, p)]) d e.term ++ (if (introduced p).headD e.term = d then [(introduced p).length] else []) := by
+  rw [ordsOf_seg, ordsOf_seg]
+  unfold firstTerm
+  rw [introduced_snoc]
   have hc : (introduced p).contains e.term = false := by
     cases hc : (introduced p).contains e.term
     · rfl
     · exact absurd (List.contains_iff_mem.1 hc) h
-  simp only [hc, Bool.false_eq_true, ↓reduceIte, h, and_false, List.append_nil]
-  by_cases hd : dev = d
+  simp only [hc, Bool.false_eq_true, ↓reduceIte, h, and_false, List.append_nil, headD_snoc]
+  by_cases hd : (introduced p).headD e.term = d
   · simp [hd, List.idxOf_append, h]
-  · simp [hd]
+  · rw [List.headD_eq_head?_getD] at hd
+    simp [hd]
 
 theorem msOf_step (segs : List (Nat × List Row)) (dev : Nat) (p : List Row) (e : Row) (τ : Nat) :
     msOf (segs ++ [(dev, p ++ [e])]) τ = msOf (segs ++ [(dev, p)]) τ ++ (if e.term = τ then [e.ms] else []) := by
@@ -2442,9 +2426,9 @@ theorem addRow_char (segs : List (Nat × List Row)) (dev : Nat) (p : List Row) (
     refine ⟨fun d => by rw [ordsOf_step_other _ _ _ _ _ _ hne, c2 t ht d], ?_⟩
     rw [msOf_step, ite_eq_right (Ne.symm hne), List.append_nil, c3 t ht]
   -- The order `addRow` passes.
-  have horder : (if (!st.2.contains e.term) = true then some ((if (!st.2.contains e.term) = true then st.2 ++ [e.term]
-      else st.2).length - 1) else none) =
-      if e.term ∈ introduced p then none else some (introduced p).length := by
+  have horder : (if (!st.2.contains e.term) = true then some (st.2.headD e.term, (if (!st.2.contains e.term) = true
+      then st.2 ++ [e.term] else st.2).length - 1) else none) =
+      if e.term ∈ introduced p then none else some ((introduced p).headD e.term, (introduced p).length) := by
     rw [h2]
     by_cases hm : e.term ∈ introduced p
     · simp [hm]
@@ -2457,7 +2441,8 @@ theorem addRow_char (segs : List (Nat × List Row)) (dev : Nat) (p : List Row) (
   have upd : ∀ t : MTerm, t.term = e.term → (∀ d, lookup d t.orders = (ordsOf (segs ++ [(dev, p)]) d t.term).min?) →
       (msOf (segs ++ [(dev, p)]) t.term).min? = some t.started ∨ (t.orders = [] ∧ t.started = e.ms ∧
         msOf (segs ++ [(dev, p)]) t.term = [] ∧ e.term ∉ introduced p) →
-      let t' := t.add dev (if e.term ∈ introduced p then none else some (introduced p).length) e
+      let t' := t.add dev (if e.term ∈ introduced p then none else some ((introduced p).headD e.term,
+        (introduced p).length)) e
       (∀ d, lookup d t'.orders = (ordsOf (segs ++ [(dev, p ++ [e])]) d t'.term).min?) ∧
         (msOf (segs ++ [(dev, p ++ [e])]) t'.term).min? = some t'.started := by
     intro t hte hord hms
@@ -2470,13 +2455,16 @@ theorem addRow_char (segs : List (Nat × List Row)) (dev : Nat) (p : List Row) (
         rw [hord d]
         have : introduced (p ++ [e]) = introduced p := by
           rw [introduced_snoc, ite_eq_left (List.contains_iff_mem.2 hm)]
-        rw [ordsOf_seg, ordsOf_seg, this]
+        rw [ordsOf_seg, ordsOf_seg]
+        unfold firstTerm
+        rw [this]
       · simp only [MTerm.add, hm, ↓reduceIte]
         rw [lookup_upsert, ordsOf_step_new _ _ _ _ _ hm]
-        by_cases hd : dev = d
-        · subst hd; simp only [↓reduceIte]; rw [minOpt_step, ← hord dev]
-          cases lookup dev t.orders <;> simp [Nat.min_comm]
-        · simp [hd, hord d]
+        by_cases hd : (introduced p).headD e.term = d
+        · simp only [hd, ↓reduceIte]; rw [minOpt_step, ← hord d]
+          cases lookup d t.orders <;> simp [Nat.min_comm]
+        · rw [List.headD_eq_head?_getD] at hd
+          simp [hd, hord d]
     · simp only [MTerm.add]
       rw [msOf_step, ite_eq_left rfl, minOpt_step]
       rcases hms with hms | ⟨_, hst, hnil, _⟩
@@ -2606,7 +2594,7 @@ theorem lookup_isSome {β : Type} (k : Nat) (l : List (Nat × β)) : (lookup k l
     · subst h; simp
     · simp [h, ih, Ne.symm h]
 
-theorem deviceOf_eq (t : MTerm) : deviceOf t = (keySort (fun d => [digits d]) (t.orders.map Prod.fst)).headD 0 := by
+theorem deviceOf_eq (t : MTerm) : deviceOf t = (keySort (fun d => [termId d]) (t.orders.map Prod.fst)).headD 0 := by
   unfold deviceOf; split <;> simp_all
 
 /-- Segment lists with the same members. -/
@@ -2672,10 +2660,10 @@ theorem place_data {segs segs' : List (Nat × List Row)} (hS : SameSegs segs seg
   obtain ⟨h1, _, _⟩ := term_data hS t t' ht ht' he
   have hd : deviceOf t = deviceOf t' := by
     rw [deviceOf_eq, deviceOf_eq]
-    have := keySort_head_key (fun d => [digits d]) (t.orders.map Prod.fst) (t'.orders.map Prod.fst) 0
+    have := keySort_head_key (fun d => [termId d]) (t.orders.map Prod.fst) (t'.orders.map Prod.fst) 0
       (fun x => by rw [← lookup_isSome, ← lookup_isSome, h1])
     simp only [List.cons.injEq, and_true] at this
-    exact digits_inj this
+    exact termId_inj this
   simp only [place, hd, h1]
 
 /-- Two copies of one key, merged from the same segments in any order, have the same copies read. -/
@@ -2897,11 +2885,10 @@ theorem keyObs_eq {segs segs' : List (Nat × List Row)} (hS : SameSegs segs segs
     (ht : t ∈ mergedTerms segs) (ht' : t' ∈ mergedTerms segs') (he : t.term = t'.term)
     (sc sc' : Nat × List Copy) (hs : sc'.1 = sc.1) (hm : ∀ c, c ∈ sc.2 ↔ c ∈ sc'.2) :
     keyObs (place t) sc = keyObs (place t') sc' := by
-  have hd : deviceOf t = deviceOf t' := congrArg Prod.fst (place_data hS t t' ht ht' he)
-  obtain ⟨k1, k2⟩ := keptCopy_det (deviceOf t) sc.2 sc'.2 hm
-  have hdr := dropped_det (keptCopy (deviceOf t) sc.2) (keptCopy (deviceOf t) sc'.2) sc.2 sc'.2 hm k1
+  obtain ⟨k1, k2⟩ := keptCopy_det sc.2 sc'.2 hm
+  have hdr := dropped_det (keptCopy sc.2) (keptCopy sc'.2) sc.2 sc'.2 hm k1
   simp only [keyObs, mergeKey, keep, place]
-  rw [hdr, k1, k2, hd, he, hs]
+  rw [hdr, k1, k2, he, hs]
 
 theorem keys_obs_eq {segs segs' : List (Nat × List Row)} (hS : SameSegs segs segs') (t t' : MTerm)
     (ht : t ∈ mergedTerms segs) (ht' : t' ∈ mergedTerms segs') (he : t.term = t'.term) :
@@ -3042,29 +3029,365 @@ theorem t7_duplicate_segment (l1 l2 : List (Nat × List Row)) (s : Nat × List R
       · exact Or.inl h
       · exact Or.inr (Or.inr h)
 
-/-! ### T7: each device's file order is kept (the per-device clamp) -/
+/-! ### T7: the merge reads rows and writers, never what a segment is called
 
-/-- **T7** (file order): a merged term's order is its first place among the terms its device's segments introduce. -/
+The order reads the terms read, each writer's file places and each term's start; the kept rows read the rows. A writer
+is the first term of a segment, so neither the id a segment is read under nor a second, overlapping copy of one file
+changes anything. -/
+
+/-- The data the order reads: the terms read, each writer's file places, and each term's start. -/
+def SameData (segs segs' : List (Nat × List Row)) : Prop :=
+  (∀ τ, (∃ s ∈ segs, ∃ r ∈ s.2, r.term = τ) ↔ ∃ s ∈ segs', ∃ r ∈ s.2, r.term = τ) ∧
+  (∀ d τ, (ordsOf segs d τ).min? = (ordsOf segs' d τ).min?) ∧
+  (∀ τ, (msOf segs τ).min? = (msOf segs' τ).min?)
+
+theorem SameData.symm {segs segs' : List (Nat × List Row)} (h : SameData segs segs') : SameData segs' segs :=
+  ⟨fun τ => (h.1 τ).symm, fun d τ => (h.2.1 d τ).symm, fun τ => (h.2.2 τ).symm⟩
+
+theorem matchD {segs segs' : List (Nat × List Row)} (hD : SameData segs segs') (t : MTerm)
+    (ht : t ∈ mergedTerms segs) : ∃ t' ∈ mergedTerms segs', t'.term = t.term := by
+  have h1 := ((mergedTerms_char segs).1 t.term).1 ⟨t, ht, rfl⟩
+  rw [hD.1] at h1
+  exact ((mergedTerms_char segs').1 t.term).2 h1
+
+theorem termDataD {segs segs' : List (Nat × List Row)} (hD : SameData segs segs') (t t' : MTerm)
+    (ht : t ∈ mergedTerms segs) (ht' : t' ∈ mergedTerms segs') (he : t.term = t'.term) :
+    (∀ d, lookup d t.orders = lookup d t'.orders) ∧ t.started = t'.started := by
+  obtain ⟨_, a2, a3⟩ := mergedTerms_char segs
+  obtain ⟨_, b2, b3⟩ := mergedTerms_char segs'
+  refine ⟨fun d => by rw [a2 t ht, b2 t' ht', hD.2.1, he], ?_⟩
+  have := a3 t ht
+  rw [hD.2.2, he, b3 t' ht'] at this
+  exact (Option.some.inj this).symm
+
+theorem placeD {segs segs' : List (Nat × List Row)} (hD : SameData segs segs') (t t' : MTerm)
+    (ht : t ∈ mergedTerms segs) (ht' : t' ∈ mergedTerms segs') (he : t.term = t'.term) :
+    (place t).2 = (place t').2 := by
+  obtain ⟨h1, _⟩ := termDataD hD t t' ht ht' he
+  have hd : deviceOf t = deviceOf t' := by
+    rw [deviceOf_eq, deviceOf_eq]
+    have := keySort_head_key (fun d => [termId d]) (t.orders.map Prod.fst) (t'.orders.map Prod.fst) 0
+      (fun x => by rw [← lookup_isSome, ← lookup_isSome, h1])
+    simp only [List.cons.injEq, and_true] at this
+    exact termId_inj this
+  simp only [place, hd, h1]
+
+theorem clampSetD {segs segs' : List (Nat × List Row)} (hD : SameData segs segs') (t t' : MTerm)
+    (ht : t ∈ mergedTerms segs) (ht' : t' ∈ mergedTerms segs') (he : t.term = t'.term) (y : Nat) :
+    y ∈ clampSet ((mergedTerms segs).map place) (place t) → y ∈ clampSet ((mergedTerms segs').map place) (place t') := by
+  have hp := placeD hD t t' ht ht' he
+  unfold clampSet
+  simp only [List.mem_map, List.mem_filter, Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true']
+  rintro ⟨q, ⟨⟨u, hu, rfl⟩, hq1, hq2⟩, rfl⟩
+  obtain ⟨u', hu', hue⟩ := matchD hD u hu
+  have hpu := placeD hD u u' hu hu' hue.symm
+  have hst := (termDataD hD u u' hu hu' hue.symm).2
+  refine ⟨place u', ⟨⟨u', hu', rfl⟩, ?_, ?_⟩, ?_⟩
+  · rw [← hpu, ← hp]; exact hq1
+  · have e1 : clampKey (place u') = clampKey (place u) := by
+      unfold clampKey; rw [← hpu]; simp only [place]; rw [hue]
+    have e2 : clampKey (place t') = clampKey (place t) := by
+      unfold clampKey; rw [← hp]; simp only [place]; rw [he]
+    rw [e1, e2]; exact hq2
+  · simp only [place]; exact hst.symm
+
+theorem placedKeyD {segs segs' : List (Nat × List Row)} (hD : SameData segs segs') (t t' : MTerm)
+    (ht : t ∈ mergedTerms segs) (ht' : t' ∈ mergedTerms segs') (he : t.term = t'.term) :
+    placedKey (clampStarts ((mergedTerms segs).map place)) (place t) =
+      placedKey (clampStarts ((mergedTerms segs').map place)) (place t') := by
+  have hp := placeD hD t t' ht ht' he
+  have hc : lookup t.term (clampStarts ((mergedTerms segs).map place)) =
+      lookup t'.term (clampStarts ((mergedTerms segs').map place)) := by
+    have h1 := clamp_lookup _ (placed_nodup segs) (place t) (List.mem_map_of_mem ht)
+    have h2 := clamp_lookup _ (placed_nodup segs') (place t') (List.mem_map_of_mem ht')
+    simp only [place] at h1 h2
+    rw [h1, h2]
+    exact maxOpt_congr fun y => ⟨clampSetD hD t t' ht ht' he y, clampSetD hD.symm t' t ht' ht he.symm y⟩
+  simp only [placedKey, place] at hp ⊢
+  simp only [Prod.mk.injEq] at hp
+  rw [hc, hp.2, hp.1, he]
+
+/-- A row is read: some segment holds it. -/
+def RowRead (segs : List (Nat × List Row)) (r : Row) : Prop := ∃ s ∈ segs, r ∈ s.2
+
+/-- Two layouts that read the same rows under the same writers, at the same file places. -/
+def SameRead (segs segs' : List (Nat × List Row)) : Prop :=
+  (∀ r, RowRead segs r ↔ RowRead segs' r) ∧ ∀ d τ, (ordsOf segs d τ).min? = (ordsOf segs' d τ).min?
+
+theorem SameRead.symm {segs segs' : List (Nat × List Row)} (h : SameRead segs segs') : SameRead segs' segs :=
+  ⟨fun r => (h.1 r).symm, fun d τ => (h.2 d τ).symm⟩
+
+theorem sameData_of_sameRead {segs segs' : List (Nat × List Row)} (h : SameRead segs segs') : SameData segs segs' := by
+  refine ⟨fun τ => ⟨?_, ?_⟩, h.2, fun τ => minOpt_congr fun x => ?_⟩
+  · rintro ⟨s, hs, r, hr, hrt⟩
+    obtain ⟨s', hs', hr'⟩ := (h.1 r).1 ⟨s, hs, hr⟩
+    exact ⟨s', hs', r, hr', hrt⟩
+  · rintro ⟨s, hs, r, hr, hrt⟩
+    obtain ⟨s', hs', hr'⟩ := (h.1 r).2 ⟨s, hs, hr⟩
+    exact ⟨s', hs', r, hr', hrt⟩
+  · simp only [msOf, List.mem_flatMap, List.mem_map, List.mem_filter, decide_eq_true_eq]
+    constructor
+    · rintro ⟨s, hs, r, ⟨hr, hrt⟩, rfl⟩
+      obtain ⟨s', hs', hr'⟩ := (h.1 r).1 ⟨s, hs, hr⟩
+      exact ⟨s', hs', r, ⟨hr', hrt⟩, rfl⟩
+    · rintro ⟨s, hs, r, ⟨hr, hrt⟩, rfl⟩
+      obtain ⟨s', hs', hr'⟩ := (h.1 r).2 ⟨s, hs, hr⟩
+      exact ⟨s', hs', r, ⟨hr', hrt⟩, rfl⟩
+
+/-- A key's copies, as rows. -/
+theorem key_rows (segs : List (Nat × List Row)) (t : MTerm) (ht : t ∈ mergedTerms segs) (sc : Nat × List Copy)
+    (hsc : sc ∈ t.copies) (r : Row) :
+    (∃ c ∈ sc.2, c.row = r) ↔ RowRead segs r ∧ r.term = t.term ∧ r.seq = sc.1 := by
+  have hw := (mergedTerms_spec segs).1.2 t ht
+  constructor
+  · rintro ⟨c, hc, rfl⟩
+    have hhc := (term_copies segs t ht c).1 ⟨sc, hsc, hc⟩
+    obtain ⟨hh, hct⟩ := hhc
+    have hs := ((hw.2 sc hsc).2 c hc).2
+    obtain ⟨seg, hseg, _, hr⟩ := ((mergedTerms_spec segs).2 c).1 hh
+    exact ⟨⟨seg, hseg, hr⟩, hct, hs⟩
+  · rintro ⟨⟨seg, hseg, hr⟩, hrt, hrs⟩
+    have hh : Holds (mergedTerms segs) ⟨r, seg.1⟩ := ((mergedTerms_spec segs).2 _).2 ⟨seg, hseg, rfl, hr⟩
+    have hin := (term_copies segs t ht ⟨r, seg.1⟩).2 ⟨hh, hrt⟩
+    exact ⟨⟨r, seg.1⟩, (key_copies t hw sc hsc _).2 ⟨hin, hrs⟩, rfl⟩
+
+theorem keyRowsD {segs segs' : List (Nat × List Row)} (h : SameRead segs segs') (t t' : MTerm)
+    (ht : t ∈ mergedTerms segs) (ht' : t' ∈ mergedTerms segs') (he : t.term = t'.term)
+    (sc : Nat × List Copy) (hsc : sc ∈ t.copies) :
+    ∃ sc' ∈ t'.copies, sc'.1 = sc.1 ∧ ∀ r, (∃ c ∈ sc.2, c.row = r) ↔ (∃ c ∈ sc'.2, c.row = r) := by
+  have hw := (mergedTerms_spec segs).1.2 t ht
+  obtain ⟨c, hc⟩ := List.exists_mem_of_ne_nil _ (hw.2 sc hsc).1
+  obtain ⟨hr, hrt, hrs⟩ := (key_rows segs t ht sc hsc c.row).1 ⟨c, hc, rfl⟩
+  obtain ⟨seg', hseg', hr'⟩ := (h.1 c.row).1 hr
+  have hh' : Holds (mergedTerms segs') ⟨c.row, seg'.1⟩ := ((mergedTerms_spec segs').2 _).2 ⟨seg', hseg', rfl, hr'⟩
+  obtain ⟨sc', hsc', hc'⟩ := (term_copies segs' t' ht' _).2 ⟨hh', by rw [hrt, he]⟩
+  have hw' := (mergedTerms_spec segs').1.2 t' ht'
+  have hs : sc'.1 = sc.1 := by rw [← ((hw'.2 sc' hsc').2 _ hc').2, hrs]
+  refine ⟨sc', hsc', hs, fun r => ?_⟩
+  rw [key_rows segs t ht sc hsc, key_rows segs' t' ht' sc' hsc', h.1, he, hs]
+
+theorem lexBy_append_of_lt {α : Type} [DecidableEq α] (lt : α → α → Bool) :
+    ∀ (A A' B B' : List α), A.length = A'.length → lexBy lt A A' = true → lexBy lt (A ++ B) (A' ++ B') = true
+  | [], [], _, _, _, h => by simp [lexBy] at h
+  | [], _ :: _, _, _, hl, _ => by simp at hl
+  | _ :: _, [], _, _, hl, _ => by simp at hl
+  | a :: as, b :: bs, B, B', hl, h => by
+    simp only [List.length_cons, Nat.add_right_cancel_iff] at hl
+    simp only [List.cons_append, lexBy, Bool.or_eq_true, Bool.and_eq_true, decide_eq_true_eq] at h ⊢
+    rcases h with h | ⟨rfl, h⟩
+    · exact Or.inl h
+    · exact Or.inr ⟨rfl, lexBy_append_of_lt lt as bs B B' hl h⟩
+
+theorem canonKey_length (r : Row) : (canonKey r).length = 8 := rfl
+
+/-- The kept copy's content depends only on the rows read, whatever segments they were read from. -/
+theorem keptCopy_fp (cs cs' : List Copy) (h : cs ≠ []) (h' : cs' ≠ [])
+    (hr : ∀ r, (∃ c ∈ cs, c.row = r) ↔ (∃ c ∈ cs', c.row = r)) : (keptCopy cs).row.fp = (keptCopy cs').row.fp := by
+  have least : ∀ (l : List Copy), l ≠ [] → ∀ z ∈ l, keyLt (canonKey z.row.fp) (canonKey (keptCopy l).row.fp) = false := by
+    intro l hl z hz
+    cases hs : keySort copyKey l with
+    | nil => have := keySort_perm copyKey l; rw [hs] at this; exact absurd (List.Perm.nil_eq this).symm hl
+    | cons k ks =>
+      have hk : keptCopy l = k := by unfold keptCopy; rw [hs]; rfl
+      rw [hk]
+      cases hlt : keyLt (canonKey z.row.fp) (canonKey k.row.fp)
+      · rfl
+      · have := lexBy_append_of_lt lexLt _ _ [digits z.device] [digits k.device] (by rw [canonKey_length, canonKey_length]) hlt
+        have hmin := (keySort_head_min copyKey l k ks hs).2 z hz
+        unfold copyKey at hmin
+        rw [show keyLt = lexBy lexLt from rfl, this] at hmin
+        exact absurd hmin (by simp)
+  have m1 : keptCopy cs ∈ cs := keptCopy_mem cs h
+  have m2 : keptCopy cs' ∈ cs' := keptCopy_mem cs' h'
+  obtain ⟨c1, hc1, e1⟩ := (hr (keptCopy cs).row).1 ⟨_, m1, rfl⟩
+  obtain ⟨c2, hc2, e2⟩ := (hr (keptCopy cs').row).2 ⟨_, m2, rfl⟩
+  have a := least cs' h' c1 hc1
+  have b := least cs h c2 hc2
+  rw [e1] at a
+  rw [e2] at b
+  apply canonKey_inj
+  rcases keyLt_st.total (canonKey (keptCopy cs).row.fp) (canonKey (keptCopy cs').row.fp) with heq | hlt | hlt
+  · exact heq
+  · rw [hlt] at a; exact absurd a (by simp)
+  · rw [hlt] at b; exact absurd b (by simp)
+
+/-- What the merge emits for one term, as rows: its final-order key, and its kept rows in sequence order. -/
+def termObsR (cl : List (Nat × Nat)) (p : MTerm × Nat × Nat) : List (List Nat) × List (Nat × Row) :=
+  (placedKey cl p, (keySort (fun sc => [[sc.1]]) p.1.copies).map fun sc => (sc.1, (keptCopy sc.2).row.fp))
+
+theorem keysR_eq {segs segs' : List (Nat × List Row)} (h : SameRead segs segs') (t t' : MTerm)
+    (ht : t ∈ mergedTerms segs) (ht' : t' ∈ mergedTerms segs') (he : t.term = t'.term) :
+    (keySort (fun sc => [[sc.1]]) t.copies).map (fun sc => (sc.1, (keptCopy sc.2).row.fp)) =
+      (keySort (fun sc => [[sc.1]]) t'.copies).map (fun sc => (sc.1, (keptCopy sc.2).row.fp)) := by
+  have hw := (mergedTerms_spec segs).1.2 t ht
+  have hw' := (mergedTerms_spec segs').1.2 t' ht'
+  have sorted : ∀ u : MTerm, u.WF → ((keySort (fun sc => [[sc.1]]) u.copies).map
+      (fun sc : Nat × List Copy => (sc.1, (keptCopy sc.2).row.fp))).Pairwise
+      (fun x y => keyLt [[x.1]] [[y.1]] = true) := by
+    intro u hu
+    rw [List.pairwise_map]
+    apply sorted_strict keyLt_st (fun sc : Nat × List Copy => [[sc.1]]) _ (keySort_sorted _ _)
+    have : ((keySort (fun sc : Nat × List Copy => [[sc.1]]) u.copies).map Prod.fst).Nodup :=
+      (((keySort_perm _ _).map _).nodup_iff).2 hu.1
+    rw [List.Nodup, List.pairwise_map] at this ⊢
+    exact this.imp fun h he => h (by simpa using he)
+  apply eq_of_sorted (fun a => by rw [keyLt_st.irrefl]; simp)
+    (fun a b h1 h2 => by rw [keyLt_st.asymm _ _ h1] at h2; exact absurd h2 (by simp)) _ _ (sorted t hw) (sorted t' hw')
+  intro x
+  simp only [List.mem_map]
+  constructor
+  · rintro ⟨sc, hsc, rfl⟩
+    have hsc0 := (keySort_perm _ _).mem_iff.1 hsc
+    obtain ⟨sc', hsc', hs, hm⟩ := keyRowsD h t t' ht ht' he sc hsc0
+    refine ⟨sc', (keySort_perm _ _).mem_iff.2 hsc', ?_⟩
+    rw [hs, keptCopy_fp sc'.2 sc.2 (hw'.2 sc' hsc').1 (hw.2 sc hsc0).1 fun r => (hm r).symm]
+  · rintro ⟨sc', hsc', rfl⟩
+    have hsc0 := (keySort_perm _ _).mem_iff.1 hsc'
+    obtain ⟨sc, hsc, hs, hm⟩ := keyRowsD h.symm t' t ht' ht he.symm sc' hsc0
+    refine ⟨sc, (keySort_perm _ _).mem_iff.2 hsc, ?_⟩
+    rw [hs, keptCopy_fp sc.2 sc'.2 (hw.2 sc hsc).1 (hw'.2 sc' hsc0).1 fun r => (hm r).symm]
+
+theorem obsR_eq {segs segs' : List (Nat × List Row)} (h : SameRead segs segs') :
+    let placed := (mergedTerms segs).map place
+    let placed' := (mergedTerms segs').map place
+    (keySort (placedKey (clampStarts placed)) placed).map (termObsR (clampStarts placed)) =
+      (keySort (placedKey (clampStarts placed')) placed').map (termObsR (clampStarts placed')) := by
+  dsimp only
+  have hD := sameData_of_sameRead h
+  have sorted : ∀ sg : List (Nat × List Row), ((keySort (placedKey (clampStarts ((mergedTerms sg).map place)))
+      ((mergedTerms sg).map place)).map (termObsR (clampStarts ((mergedTerms sg).map place)))).Pairwise
+      (fun x y => keyLt x.1 y.1 = true) := by
+    intro sg
+    rw [List.pairwise_map]
+    apply sorted_strict keyLt_st _ _ (keySort_sorted _ _)
+    have := (((keySort_perm (placedKey (clampStarts ((mergedTerms sg).map place)))
+      ((mergedTerms sg).map place)).map (·.1.term)).nodup_iff).2 (placed_nodup sg)
+    rw [List.Nodup, List.pairwise_map] at this ⊢
+    exact this.imp fun h he => h (termId_inj (by simp only [termObsR, placedKey, List.cons.injEq] at he; exact he.2.2.2.1))
+  apply eq_of_sorted (fun a => by rw [keyLt_st.irrefl]; simp)
+    (fun a b h1 h2 => by rw [keyLt_st.asymm _ _ h1] at h2; exact absurd h2 (by simp)) _ _ (sorted segs) (sorted segs')
+  intro x
+  simp only [List.mem_map, (keySort_perm _ _).mem_iff]
+  have obs : ∀ t t', t ∈ mergedTerms segs → t' ∈ mergedTerms segs' → t.term = t'.term →
+      termObsR (clampStarts ((mergedTerms segs).map place)) (place t) =
+        termObsR (clampStarts ((mergedTerms segs').map place)) (place t') := by
+    intro t t' ht ht' he
+    unfold termObsR
+    rw [placedKeyD hD t t' ht ht' he, show (place t).1 = t from rfl, show (place t').1 = t' from rfl,
+      keysR_eq h t t' ht ht' he]
+  constructor
+  · rintro ⟨_, ⟨t, ht, rfl⟩, rfl⟩
+    obtain ⟨t', ht', he⟩ := matchD hD t ht
+    exact ⟨place t', ⟨t', ht', rfl⟩, (obs t t' ht ht' he.symm).symm⟩
+  · rintro ⟨_, ⟨t', ht', rfl⟩, rfl⟩
+    obtain ⟨t, ht, he⟩ := matchD hD.symm t' ht'
+    exact ⟨place t, ⟨t, ht, rfl⟩, obs t t' ht ht' he⟩
+
+theorem merge_obsR (segs : List (Nat × List Row)) :
+    let placed := (mergedTerms segs).map place
+    (merge segs).map Row.fp =
+      ((keySort (placedKey (clampStarts placed)) placed).map (termObsR (clampStarts placed))).flatMap
+        (fun o => o.2.map (·.2)) := by
+  dsimp only
+  unfold merge
+  rw [mergeFull_eq]
+  unfold mergeKeys
+  simp [List.map_flatMap, List.flatMap_map, termObsR, mergeKey, keep, Function.comp_def]
+
+/-- **T7** (rows, not segments): two layouts that read the same rows under the same writers, at the same file places,
+merge to the same rows in the same order, whatever their segments are called and however many copies of a file
+they hold. -/
+theorem t7_same_rows (segs segs' : List (Nat × List Row)) (h : SameRead segs segs') :
+    (merge segs).map Row.fp = (merge segs').map Row.fp := by
+  have a := merge_obsR segs
+  have b := merge_obsR segs'
+  have := obsR_eq h
+  dsimp only at a b this
+  rw [a, b, this]
+
+/-- **T7** (segment ids): what a segment is called changes nothing, so a writer that reads its own file under no id
+merges as every other device does under its id. -/
+theorem t7_segment_ids (segs : List (Nat × List Row)) (f : Nat → Nat) :
+    (merge (segs.map fun s => (f s.1, s.2))).map Row.fp = (merge segs).map Row.fp := by
+  apply t7_same_rows
+  refine ⟨fun r => ?_, fun d τ => ?_⟩
+  · simp only [RowRead, List.mem_map]
+    constructor
+    · rintro ⟨_, ⟨s, hs, rfl⟩, hr⟩; exact ⟨s, hs, hr⟩
+    · rintro ⟨s, hs, hr⟩; exact ⟨_, ⟨s, hs, rfl⟩, hr⟩
+  · simp [ordsOf, List.filterMap_map, Function.comp_def]
+
+theorem introduced_append (q : List Row) : ∀ rest : List Row, ∃ l, introduced (q ++ rest) = introduced q ++ l := by
+  intro rest
+  induction rest using snoc_induction with
+  | nil => exact ⟨[], by simp⟩
+  | append_singleton rest e ih =>
+    obtain ⟨l, hl⟩ := ih
+    rw [← List.append_assoc, introduced_snoc, hl]
+    split
+    · exact ⟨l, rfl⟩
+    · exact ⟨l ++ [e.term], by simp⟩
+
+/-- **T7** (overlapping copies): a segment that holds a prefix of another segment's rows — the file a device left
+behind when its id changed — changes nothing. -/
+theorem t7_prefix_segment (segs : List (Nat × List Row)) (s : Nat × List Row) (hs : s ∈ segs) (q rest : List Row)
+    (hq : s.2 = q ++ rest) (dev : Nat) :
+    (merge (segs ++ [(dev, q)])).map Row.fp = (merge segs).map Row.fp := by
+  apply t7_same_rows
+  refine ⟨fun r => ?_, fun d τ => ?_⟩
+  · simp only [RowRead, List.mem_append, List.mem_singleton]
+    constructor
+    · rintro ⟨s', hs' | rfl, hr⟩
+      · exact ⟨s', hs', hr⟩
+      · exact ⟨s, hs, by rw [hq]; exact List.mem_append_left _ hr⟩
+    · rintro ⟨s', hs', hr⟩; exact ⟨s', Or.inl hs', hr⟩
+  · rw [ordsOf_seg]
+    apply minOpt_congr
+    intro x
+    simp only [List.mem_append]
+    constructor
+    · rintro (hx | hx)
+      · exact hx
+      · split at hx
+        · rename_i hc
+          obtain ⟨l, hl⟩ := introduced_append q rest
+          have hne : introduced q ≠ [] := fun hn => by rw [hn] at hc; simp at hc
+          rw [List.mem_singleton.1 hx]
+          refine List.mem_filterMap.2 ⟨s, hs, ?_⟩
+          have hf : firstTerm s.2 = d := by
+            unfold firstTerm at hc ⊢
+            rw [hq, hl]
+            cases hi : introduced q with
+            | nil => exact absurd hi hne
+            | cons a as => rw [hi] at hc; exact hc.1
+          have hm : τ ∈ introduced s.2 := by rw [hq, hl]; exact List.mem_append_left _ hc.2
+          rw [ite_eq_left ⟨hf, hm⟩, hq, hl, List.idxOf_append, ite_eq_left hc.2]
+        · simp at hx
+    · intro hx; exact Or.inl hx
+
+/-! ### T7: each writer's file order is kept (the per-writer clamp) -/
+
+/-- **T7** (file order): a merged term's order is its first place among the terms its writer's segments introduce. -/
 theorem t7_file_order (segs : List (Nat × List Row)) (t : MTerm) (ht : t ∈ mergedTerms segs) :
     (place t).2.2 ∈ ordsOf segs (deviceOf t) t.term ∧ ∀ o ∈ ordsOf segs (deviceOf t) t.term, (place t).2.2 ≤ o := by
   obtain ⟨c1, c2, _⟩ := mergedTerms_char segs
   obtain ⟨s, hs, r, hr, hrt⟩ := (c1 t.term).1 ⟨t, ht, rfl⟩
-  have hsome : (lookup s.1 t.orders).isSome := by
+  have hsome : (lookup (firstTerm s.2) t.orders).isSome := by
     rw [c2 t ht]
-    cases h : (ordsOf segs s.1 t.term).min? with
+    cases h : (ordsOf segs (firstTerm s.2) t.term).min? with
     | some _ => rfl
     | none =>
       rw [List.min?_eq_none_iff] at h
-      have : (introduced s.2).idxOf t.term ∈ ordsOf segs s.1 t.term :=
+      have : (introduced s.2).idxOf t.term ∈ ordsOf segs (firstTerm s.2) t.term :=
         List.mem_filterMap.2 ⟨s, hs, by rw [ite_eq_left ⟨rfl, (mem_introduced _ _).2 ⟨r, hr, hrt⟩⟩]⟩
       rw [h] at this; simp at this
   have hdev : (lookup (deviceOf t) t.orders).isSome := by
     rw [lookup_isSome, deviceOf_eq]
     have hne : t.orders.map Prod.fst ≠ [] := by
       intro h; rw [lookup_isSome, h] at hsome; simp at hsome
-    cases hk : keySort (fun d => [digits d]) (t.orders.map Prod.fst) with
+    cases hk : keySort (fun d => [termId d]) (t.orders.map Prod.fst) with
     | nil =>
-      have := keySort_perm (fun d => [digits d]) (t.orders.map Prod.fst)
+      have := keySort_perm (fun d => [termId d]) (t.orders.map Prod.fst)
       rw [hk] at this; exact absurd (List.Perm.nil_eq this).symm hne
     | cons d _ => exact (keySort_head_min _ _ d _ hk).1
   rw [c2 t ht] at hdev
@@ -3177,6 +3500,446 @@ theorem t7_device_file_order (segs : List (Nat × List Row)) (t1 t2 : MTerm) (h1
     have hqt := hblock q (hmemS q (by rw [hsplit]; simp [hq])) r hr
     exact hSn.2.1.1 ⟨q, hq, by rw [← hqt, hrt]; rfl⟩
 
+/-- **T7** (stamped after what it read): a term that starts after every other term's start and is its writer's newest
+has every merged row of every other term before every merged row of its own, so a turn written over the rows read
+never merges ahead of a row it names. `stampAfterRead` bounds what it follows by `foreignClockAheadMilliseconds`; the
+bounded form is `t7_projection_after_visible`. -/
+theorem t7_stamped_after_read (segs : List (Nat × List Row)) (t : MTerm) (ht : t ∈ mergedTerms segs)
+    (hlate : ∀ u ∈ mergedTerms segs, u.term ≠ t.term → u.started < t.started)
+    (hlast : ∀ u ∈ mergedTerms segs, u.term ≠ t.term → deviceOf u = deviceOf t → (place u).2.2 < (place t).2.2) :
+    ∃ A B, merge segs = A ++ B ∧ (∀ r ∈ A, r.term ≠ t.term) ∧ (∀ r ∈ B, r.term = t.term) := by
+  have hw := (mergedTerms_spec segs).1
+  have hn := placed_nodup segs
+  have hsort := placed_sorted segs
+  dsimp only at hsort
+  generalize hpl : (mergedTerms segs).map place = placed at hn hsort
+  have hpt : place t ∈ placed := hpl ▸ List.mem_map_of_mem ht
+  have hself : ∀ p ∈ placed, p.1.started ∈ clampSet placed p := fun p hp =>
+    List.mem_map.2 ⟨p, List.mem_filter.2 ⟨hp, by simp [keyLt_st.irrefl]⟩, rfl⟩
+  have ne : ∀ p ∈ placed, (clampSet placed p).max? ≠ none := fun p hp h => by
+    rw [List.max?_eq_none_iff] at h; have := hself p hp; rw [h] at this; simp at this
+  -- Every other term's clamped start is before the new term's.
+  have hcl : ∀ q ∈ placed, q.1.term ≠ t.term →
+      (lookup q.1.term (clampStarts placed)).getD 0 < (lookup (place t).1.term (clampStarts placed)).getD 0 := by
+    intro q hq hqt
+    rw [clamp_lookup placed hn _ hq, clamp_lookup placed hn _ hpt]
+    obtain ⟨m1, hm1⟩ := Option.ne_none_iff_exists'.1 (ne _ hq)
+    obtain ⟨m2, hm2⟩ := Option.ne_none_iff_exists'.1 (ne _ hpt)
+    rw [hm1, hm2]
+    rw [List.max?_eq_some_iff] at hm1 hm2
+    have hge : t.started ≤ m2 := hm2.2 _ (hself _ hpt)
+    obtain ⟨y, hy, rfl⟩ := List.mem_map.1 hm1.1
+    simp only [List.mem_filter, Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true'] at hy
+    obtain ⟨hy1, hyd, hyk⟩ := hy
+    rw [← hpl] at hy1
+    obtain ⟨v, hv, rfl⟩ := List.mem_map.1 hy1
+    by_cases hvt : v.term = t.term
+    · exfalso
+      have hvteq : v = t := inj_of_nodup_map hw.1 hv ht hvt
+      subst hvteq
+      rw [← hpl] at hq
+      obtain ⟨u, hu, rfl⟩ := List.mem_map.1 hq
+      have hd : deviceOf u = deviceOf v := by simpa [place] using hyd.symm
+      have ho := hlast u hu hqt hd
+      have : keyLt (clampKey (place u)) (clampKey (place v)) = true := by
+        simp [clampKey, keyLt, lexBy, lexLt, ho]
+      rw [this] at hyk; exact absurd hyk (by simp)
+    · exact Nat.lt_of_lt_of_le (hlate v hv hvt) hge
+  -- So the new term sorts last.
+  have hκ : ∀ q ∈ placed, q.1.term ≠ t.term →
+      keyLt (placedKey (clampStarts placed) q) (placedKey (clampStarts placed) (place t)) = true := by
+    intro q hq hqt
+    unfold placedKey
+    simp [keyLt, lexBy, lexLt, hcl q hq hqt]
+  generalize hS : keySort (placedKey (clampStarts placed)) placed = S at hsort
+  have hSn : (S.map (·.1.term)).Nodup := by
+    rw [← hS]; exact (((keySort_perm _ _).map _).nodup_iff).2 hn
+  have hmemS : ∀ q ∈ S, q ∈ placed := fun q hq => (hS ▸ keySort_perm _ placed).mem_iff.1 hq
+  obtain ⟨l1, l2, hsplit⟩ := List.append_of_mem ((hS ▸ keySort_perm _ placed).mem_iff.2 hpt)
+  have hl2 : l2 = [] := by
+    cases l2 with
+    | nil => rfl
+    | cons x xs =>
+      exfalso
+      rw [hsplit] at hsort hSn
+      have hx : x ∈ placed := hmemS x (by rw [hsplit]; simp)
+      have hxt : x.1.term ≠ t.term := by
+        intro h
+        rw [List.map_append, List.nodup_append] at hSn
+        have hn2 := hSn.2.1
+        rw [List.map_cons, List.nodup_cons] at hn2
+        apply hn2.1
+        simp only [List.map_cons, List.mem_cons]
+        exact Or.inl (by simp [place, h])
+      have h1 := (List.pairwise_cons.1 (List.pairwise_append.1 hsort).2.1).1 x List.mem_cons_self
+      rw [keyLt_st.asymm _ _ (hκ x hx hxt)] at h1
+      exact absurd h1 (by simp)
+  subst hl2
+  have hblock : ∀ q ∈ placed, ∀ r ∈ ((keySort (fun sc => [[sc.1]]) q.1.copies).map (mergeKey q)).map Prod.fst,
+      r.term = q.1.term := by
+    intro q hq r hr
+    rw [← hpl] at hq
+    obtain ⟨u, hu, rfl⟩ := List.mem_map.1 hq
+    obtain ⟨_, ⟨sc, hsc, rfl⟩, rfl⟩ := by simpa only [List.mem_map] using hr
+    have := (mergeKey_key u (hw.2 u hu) sc ((keySort_perm _ _).mem_iff.1 hsc)).1
+    simp only [Row.key, Prod.mk.injEq] at this
+    exact this.1
+  rw [hsplit, List.map_append] at hSn
+  have hdis := (List.nodup_append.1 hSn).2.2
+  refine ⟨(l1.flatMap fun p => (keySort (fun sc => [[sc.1]]) p.1.copies).map (mergeKey p)).map Prod.fst,
+    ((keySort (fun sc => [[sc.1]]) (place t).1.copies).map (mergeKey (place t))).map Prod.fst, ?_, ?_, ?_⟩
+  · unfold merge
+    rw [mergeFull_eq]
+    unfold mergeKeys
+    rw [hpl, hS, hsplit]
+    simp
+  · intro r hr hrt
+    simp only [List.map_flatMap, List.mem_flatMap] at hr
+    obtain ⟨q, hq, hr⟩ := hr
+    have hqt := hblock q (hmemS q (by rw [hsplit]; simp [hq])) r hr
+    exact hdis _ (List.mem_map_of_mem hq) _ (List.mem_map_of_mem (List.mem_singleton_self (place t)))
+      (by rw [← hqt, hrt]; rfl)
+  · intro r hr
+    exact hblock (place t) hpt r hr
+
+/-! ## T7: the history a reader folds at a bound, and the clock it stamps by (round 16)
+
+A reader keeps the merge's terms whose clamped start is at most a bound `B` (`mergeUpTo`): its wall clock plus
+`foreignClockAheadMilliseconds`. It stamps its next term after the newest start it kept, a hybrid logical clock that
+never runs past `B + 1`, so one fast or corrupt clock carries nobody's rows ahead; and a turn so stamped merges after
+every row its projection read. -/
+
+/-- A list sorted by a relation under which a predicate holds downward splits into the elements that satisfy it and
+then the rest. -/
+theorem filter_split {α : Type} (P : α → Bool) (R : α → α → Prop) (hR : ∀ a b, R a b → P b = true → P a = true) :
+    ∀ l : List α, l.Pairwise R → l = l.filter P ++ l.filter (fun a => !P a)
+  | [], _ => rfl
+  | a :: t, h => by
+    rw [List.pairwise_cons] at h
+    have ih := filter_split P R hR t h.2
+    by_cases hp : P a = true
+    · simp only [List.filter_cons, hp, ite_true, Bool.not_true, Bool.false_eq_true, ite_false, List.cons_append]
+      exact congrArg (a :: ·) ih
+    · have hn : t.filter P = [] := List.filter_eq_nil_iff.2 fun b hb hpb => hp (hR a b (h.1 b hb) hpb)
+      have hp' : P a = false := by simpa using hp
+      rw [hn, List.nil_append] at ih
+      simp only [List.filter_cons, hp', Bool.false_eq_true, ite_false, Bool.not_false, ite_true, hn, List.nil_append]
+      exact congrArg (a :: ·) ih
+
+theorem flatMap_split {α β : Type} (f : α → List β) (l A B : List α) (h : l = A ++ B) :
+    l.flatMap f = A.flatMap f ++ B.flatMap f := by
+  rw [← List.flatMap_append, ← h]
+
+/-- The merge's order never puts a term before one with a smaller clamped start. -/
+theorem placedKey_clamp_le (cl : List (Nat × Nat)) (a b : MTerm × Nat × Nat)
+    (h : keyLt (placedKey cl b) (placedKey cl a) = false) :
+    (lookup a.1.term cl).getD 0 ≤ (lookup b.1.term cl).getD 0 := by
+  unfold placedKey at h
+  simp only [keyLt, lexBy, lexLt, Bool.or_eq_false_iff, decide_eq_false_iff_not] at h
+  omega
+
+/-- The merge, term by term in its final order. -/
+theorem merge_eq_blocks (segs : List (Nat × List Row)) :
+    let placed := (mergedTerms segs).map place
+    merge segs = (keySort (placedKey (clampStarts placed)) placed).flatMap fun p =>
+      ((keySort (fun sc => [[sc.1]]) p.1.copies).map (mergeKey p)).map Prod.fst := by
+  dsimp only
+  unfold merge
+  rw [mergeFull_eq]
+  unfold mergeKeys
+  simp [List.map_flatMap]
+
+/-- `mergeUpTo`, term by term in the merge's order. -/
+theorem mergeUpTo_eq_blocks (B : Nat) (segs : List (Nat × List Row)) :
+    let placed := (mergedTerms segs).map place
+    mergeUpTo B segs = ((keySort (placedKey (clampStarts placed)) placed).filter
+      (fun p => decide ((lookup p.1.term (clampStarts placed)).getD 0 ≤ B))).flatMap fun p =>
+      ((keySort (fun sc => [[sc.1]]) p.1.copies).map (mergeKey p)).map Prod.fst := by
+  dsimp only
+  unfold mergeUpTo mergedTerms
+  simp [List.map_map, Function.comp_def]
+
+/-- A merged block's rows are its term's. -/
+theorem block_terms (segs : List (Nat × List Row)) (q : MTerm × Nat × Nat) (hq : q ∈ (mergedTerms segs).map place)
+    (r : Row) (hr : r ∈ ((keySort (fun sc => [[sc.1]]) q.1.copies).map (mergeKey q)).map Prod.fst) :
+    r.term = q.1.term := by
+  have hw := (mergedTerms_spec segs).1
+  obtain ⟨u, hu, rfl⟩ := List.mem_map.1 hq
+  obtain ⟨_, ⟨sc, hsc, rfl⟩, rfl⟩ := by simpa only [List.mem_map] using hr
+  have := (mergeKey_key u (hw.2 u hu) sc ((keySort_perm _ _).mem_iff.1 hsc)).1
+  simp only [Row.key, Prod.mk.injEq] at this
+  exact this.1
+
+/-- **T7** (bounded, a prefix): what a reader keeps at a bound is a prefix of the whole merge: the terms it leaves out
+merge after every row it keeps, so taking them up later only appends. -/
+theorem t7_bounded_prefix (B : Nat) (segs : List (Nat × List Row)) :
+    ∃ rest, merge segs = mergeUpTo B segs ++ rest := by
+  rw [merge_eq_blocks, mergeUpTo_eq_blocks]
+  have hsort := keySort_sorted (placedKey (clampStarts ((mergedTerms segs).map place))) ((mergedTerms segs).map place)
+  have hs := filter_split (fun p => decide ((lookup p.1.term (clampStarts ((mergedTerms segs).map place))).getD 0 ≤ B))
+    _ (fun a b h hb => by
+      simp only [decide_eq_true_eq] at hb ⊢
+      exact Nat.le_trans (placedKey_clamp_le _ a b h) hb) _ hsort
+  exact ⟨_, flatMap_split _ _ _ _ hs⟩
+
+/-- `mergeUpTo`'s rows, as the observations `t7_same_rows` compares. -/
+theorem mergeUpTo_obsR (B : Nat) (segs : List (Nat × List Row)) :
+    let placed := (mergedTerms segs).map place
+    (mergeUpTo B segs).map Row.fp =
+      (((keySort (placedKey (clampStarts placed)) placed).map (termObsR (clampStarts placed))).filter
+        (fun o => decide ((o.1.headD []).headD 0 ≤ B))).flatMap (fun o => o.2.map (·.2)) := by
+  rw [mergeUpTo_eq_blocks]
+  dsimp only
+  rw [List.filter_map]
+  simp [List.map_flatMap, List.flatMap_map, termObsR, placedKey, mergeKey, keep, Function.comp_def]
+  rfl
+
+/-- **T7** (bounded, order-independent): two layouts that read the same rows keep the same rows in the same order at
+every bound, so two devices with the same rows and the same clock fold one history. -/
+theorem t7_bounded_same_rows (B : Nat) (segs segs' : List (Nat × List Row)) (h : SameRead segs segs') :
+    (mergeUpTo B segs).map Row.fp = (mergeUpTo B segs').map Row.fp := by
+  have a := mergeUpTo_obsR B segs
+  have b := mergeUpTo_obsR B segs'
+  have := obsR_eq h
+  dsimp only at a b this
+  rw [a, b, this]
+
+/-- A term's clamped start is at least its own start. -/
+theorem started_le_clamp (segs : List (Nat × List Row)) (t : MTerm) (ht : t ∈ mergedTerms segs) :
+    t.started ≤ clampOf segs t.term := by
+  have hn := placed_nodup segs
+  have hpt : place t ∈ (mergedTerms segs).map place := List.mem_map_of_mem ht
+  have hself : t.started ∈ clampSet ((mergedTerms segs).map place) (place t) :=
+    List.mem_map.2 ⟨place t, List.mem_filter.2 ⟨hpt, by simp [keyLt_st.irrefl]⟩, rfl⟩
+  unfold clampOf
+  rw [show segs.foldl mergeSegment [] = mergedTerms segs from rfl]
+  rw [show t.term = (place t).1.term from rfl, clamp_lookup _ hn _ hpt]
+  cases hm : (clampSet ((mergedTerms segs).map place) (place t)).max? with
+  | none => rw [List.max?_eq_none_iff] at hm; rw [hm] at hself; simp at hself
+  | some m => exact (List.max?_eq_some_iff.1 hm).2 _ hself
+
+/-- **T7** (a projection only references rows that merge before it): a term stamped after the clamped start of every
+other term a reader kept at bound `B` merges after every row of every such term, wherever the terms the reader left
+out land. A turn written over the history `mergeUpTo B` never names a row that merges after it. -/
+theorem t7_projection_after_visible (B : Nat) (segs : List (Nat × List Row)) (t : MTerm) (ht : t ∈ mergedTerms segs)
+    (hs : ∀ u ∈ mergedTerms segs, u.term ≠ t.term → clampOf segs u.term ≤ B → clampOf segs u.term < t.started) :
+    ∃ A C, merge segs = A ++ C ∧ (∀ r ∈ A, r.term ≠ t.term) ∧
+      (∀ r ∈ C, r.term = t.term ∨ B < clampOf segs r.term) := by
+  have hn := placed_nodup segs
+  have hpt : place t ∈ (mergedTerms segs).map place := List.mem_map_of_mem ht
+  have hct := started_le_clamp segs t ht
+  rw [merge_eq_blocks]
+  generalize hcl : clampStarts ((mergedTerms segs).map place) = cl
+  have hclo : ∀ τ, clampOf segs τ = (lookup τ cl).getD 0 := fun τ => by
+    rw [← hcl]; rfl
+  rw [hclo] at hct
+  have hsort := keySort_sorted (placedKey cl) ((mergedTerms segs).map place)
+  let P := fun p : MTerm × Nat × Nat => decide ((lookup p.1.term cl).getD 0 < (lookup t.term cl).getD 0)
+  have hsplit := filter_split P _ (fun a b h hb => by
+      simp only [P, decide_eq_true_eq] at hb ⊢
+      exact Nat.lt_of_le_of_lt (placedKey_clamp_le _ a b h) hb) _ hsort
+  have hmem : ∀ q, q ∈ keySort (placedKey cl) ((mergedTerms segs).map place) → q ∈ (mergedTerms segs).map place :=
+    fun q hq => (keySort_perm _ _).mem_iff.1 hq
+  refine ⟨_, _, flatMap_split _ _ _ _ hsplit, ?_, ?_⟩
+  · intro r hr hrt
+    obtain ⟨q, hq, hr⟩ := List.mem_flatMap.1 hr
+    obtain ⟨hq1, hq2⟩ := List.mem_filter.1 hq
+    have hqm := hmem q hq1
+    have hqt := block_terms segs q hqm r hr
+    have hqe : q = place t := inj_of_nodup_map hn hqm hpt (by rw [← hqt, hrt]; rfl)
+    subst hqe
+    exact absurd (of_decide_eq_true hq2) (Nat.lt_irrefl _)
+  · intro r hr
+    obtain ⟨q, hq, hr⟩ := List.mem_flatMap.1 hr
+    obtain ⟨hq1, hq2⟩ := List.mem_filter.1 hq
+    have hqm := hmem q hq1
+    have hqt := block_terms segs q hqm r hr
+    simp only [P, Bool.not_eq_true', decide_eq_false_iff_not, Nat.not_lt] at hq2
+    obtain ⟨u, hu, rfl⟩ := List.mem_map.1 hqm
+    by_cases hut : u.term = t.term
+    · exact Or.inl (hqt.trans hut)
+    · right
+      rw [hqt, hclo]
+      rcases Nat.lt_or_ge B ((lookup u.term cl).getD 0) with hlt | hle
+      · exact hlt
+      · have := hs u hu hut (by rw [hclo]; exact hle)
+        rw [hclo] at this
+        simp only [place] at hq2
+        omega
+
+/-! ## T9: a person's turn said by more than one device (XD3, round 16)
+
+A run that settles before committing its turn says the person's words as data (`W`, `abandonedTurnOf`): its own
+device as it fails, or the device that finds it abandoned and goes on. Two devices may both say it. -/
+
+/-- **T9** (never invalid): a person's turn said as its run settled never breaks the history. -/
+theorem t9_words_never_invalid (h : Hist) (e : Row) (he : e.kind = .W) : (h.transition e).isSome := by
+  unfold Hist.transition msgId
+  rw [he]
+  dsimp only
+  split
+  · simp
+  · split <;> simp
+
+/-- **T9** (merge as one): the same turn said again, by any device, changes nothing. -/
+theorem t9_words_merge_once (h : Hist) (e e' : Row) (he : e.kind = .W) (he' : e'.kind = .W) (ha : e.arg = e'.arg)
+    (hr : e.run = e'.run) :
+    (h.transition e).bind (·.transition e') = h.transition e := by
+  unfold Hist.transition msgId
+  rw [he, he']
+  dsimp only
+  rw [← ha, ← hr]
+  by_cases hc : (((2, e.arg, 0, 0) : Nat × Nat × Nat × Nat), e.run) ∈ h.copied
+  · simp [hc]
+  · by_cases hin : ((2, e.arg, 0, 0) : Nat × Nat × Nat × Nat) ∈ h.ids
+    · simp [hc, hin]
+    · simp [hc, hin]
+
+/-- **T9** (copy, then the run's own turn): the run's own row of a turn a copy already said, merged after the copy,
+changes nothing: the history holds it once and stays valid (`turnSaidAgain`). -/
+theorem t9_copy_then_turn (h : Hist) (w c : Row) (hw : w.kind = .W) (hc : c.kind = .C) (ha : w.arg = c.arg)
+    (hr : w.run = c.run) (hnew : ((2, w.arg, 0, 0) : Nat × Nat × Nat × Nat) ∉ h.ids) :
+    (h.transition w).bind (·.transition c) = h.transition w := by
+  unfold Hist.transition msgId
+  rw [hw, hc]
+  dsimp only
+  rw [← ha, ← hr]
+  by_cases hcp : (((2, w.arg, 0, 0) : Nat × Nat × Nat × Nat), w.run) ∈ h.copied
+  · simp [hcp]
+  · simp [hcp, hnew]
+
+/-- A transition never forgets a turn the history took from a copy: `copiedTurns` only grows, a rewind's included. -/
+theorem copied_grows (h h' : Hist) (e : Row) (ht : h.transition e = some h') : ∀ x ∈ h.copied, x ∈ h'.copied := by
+  intro x hx
+  unfold Hist.transition at ht
+  split at ht
+  · split at ht
+    · cases ht; exact hx
+    · split at ht
+      · split at ht <;> first | (cases ht; exact hx) | cases ht
+      · cases ht
+        dsimp only
+        split <;> simp [hx]
+  · split at ht <;> (try split at ht) <;> first | (cases ht; exact hx) | cases ht
+
+theorem foldlM_copied_grows : ∀ (rows : List Row) (h0 h : Hist), rows.foldlM Hist.transition h0 = some h →
+    ∀ x ∈ h0.copied, x ∈ h.copied
+  | [], h0, h, hf, x, hx => by
+    simp only [List.foldlM, Option.pure_def, Option.some.injEq] at hf; subst hf; exact hx
+  | e :: rs, h0, h, hf, x, hx => by
+    simp only [List.foldlM] at hf
+    cases ht : h0.transition e with
+    | none => rw [ht] at hf; simp at hf
+    | some h1 =>
+      rw [ht] at hf
+      exact foldlM_copied_grows rs h1 h hf x (copied_grows h0 h1 e ht x hx)
+
+/-- A row of a run's turn the history took from that run's copy, `W` or the run's own `C`, changes nothing. -/
+theorem copied_said_again (h : Hist) (e : Row) (hk : e.kind = .W ∨ e.kind = .C)
+    (hcp : (((2, e.arg, 0, 0) : Nat × Nat × Nat × Nat), e.run) ∈ h.copied) : h.transition e = some h := by
+  unfold Hist.transition msgId
+  rcases hk with hk | hk <;> rw [hk] <;> simp [hcp]
+
+/-- **T9** (copy, then anything, then the run's own turn; round 17): once the history took a turn from a copy, the
+run's own row of it changes nothing whatever came between, a rewind that removed the turn included. The rewound turn
+never comes back, and the history never breaks on it. -/
+theorem t9_copy_then_turn_ever (h h2 : Hist) (w c : Row) (rows : List Row) (hw : w.kind = .W) (hc : c.kind = .C)
+    (ha : w.arg = c.arg) (hr : w.run = c.run) (hnew : ((2, w.arg, 0, 0) : Nat × Nat × Nat × Nat) ∉ h.ids)
+    (hf : (h.transition w).bind (fun h1 => rows.foldlM Hist.transition h1) = some h2) :
+    h2.transition c = some h2 := by
+  cases hw1 : h.transition w with
+  | none => rw [hw1] at hf; simp at hf
+  | some h1 =>
+    rw [hw1] at hf
+    simp only [Option.bind_some] at hf
+    have hin : (((2, w.arg, 0, 0) : Nat × Nat × Nat × Nat), w.run) ∈ h1.copied := by
+      unfold Hist.transition msgId at hw1
+      rw [hw] at hw1
+      dsimp only at hw1
+      by_cases hcp : (((2, w.arg, 0, 0) : Nat × Nat × Nat × Nat), w.run) ∈ h.copied
+      · simp [hcp] at hw1; subst hw1; exact hcp
+      · simp [hcp, hnew] at hw1; subst hw1; simp
+    have := foldlM_copied_grows rows h1 h2 hf _ hin
+    exact copied_said_again h2 c (Or.inr hc) (by rw [← ha, ← hr]; exact this)
+
+/-- A rewind that retains nothing (`history.rewound`, no retained ids), under term `t`. -/
+def kr (t : Nat) : Row := { term := t, seq := 0, run := 1, kind := .K, arg := 0, ms := t, epoch := 1, attempt := 0 }
+
+/-- Every transition keeps the history's message ids distinct. -/
+theorem transition_nodup (h h' : Hist) (e : Row) (hn : h.ids.Nodup) (ht : h.transition e = some h') : h'.ids.Nodup := by
+  unfold Hist.transition at ht
+  split at ht
+  · rename_i id _
+    by_cases hcp : (e.kind = .W ∨ e.kind = .C) ∧ (id, e.run) ∈ h.copied
+    · simp only [hcp, and_self, ite_true, Option.some.injEq] at ht
+      subst ht; exact hn
+    · simp only [hcp, ite_false] at ht
+      by_cases hin : id ∈ h.ids
+      · simp only [hin, ite_true] at ht
+        split at ht <;> first | (cases ht; exact hn) | cases ht
+      · simp only [hin, ite_false] at ht
+        cases ht
+        exact List.nodup_append.2 ⟨hn, by simp, fun a ha b hb hab => by
+          simp only [List.mem_singleton] at hb; subst hb; subst hab; exact hin ha⟩
+  · split at ht <;> (try split at ht) <;> first | (cases ht; first | exact hn | exact List.nodup_nil) | cases ht
+
+theorem foldlM_nodup : ∀ (rows : List Row) (h0 h : Hist), h0.ids.Nodup → rows.foldlM Hist.transition h0 = some h →
+    h.ids.Nodup
+  | [], h0, h, hn, hf => by simp only [List.foldlM, Option.pure_def, Option.some.injEq] at hf; subst hf; exact hn
+  | e :: rs, h0, h, hn, hf => by
+    simp only [List.foldlM] at hf
+    cases ht : h0.transition e with
+    | none => rw [ht] at hf; simp at hf
+    | some h1 =>
+      rw [ht] at hf
+      exact foldlM_nodup rs h1 h (transition_nodup h0 h1 e hn ht) hf
+
+/-- **T9** (one copy): whatever the merge brings, the history holds each message once: two devices that both say a
+person's turn leave one copy of it. -/
+theorem t9_history_ids_once (rows : List Row) (h : Hist) (hf : histOf rows = some h) : h.ids.Nodup :=
+  foldlM_nodup rows {} h List.nodup_nil hf
+
+/-- A person's turn `w-7` of run 1, said under term `t`. -/
+def wr (t : Nat) : Row := { term := t, seq := 0, run := 1, kind := .W, arg := 7, ms := t, epoch := 1, attempt := 0 }
+
+/-- **T9** (two devices, one turn): the run's device and the device that found it abandoned each said its turn under
+their own terms; the merge holds both rows and the history one message. -/
+theorem t9_two_devices_one_turn :
+    (merge [(0, [wr 1]), (1, [wr 2])]).map Row.key = [(1, 0), (2, 0)] ∧
+      (histOf (merge [(0, [wr 1]), (1, [wr 2])])).map (·.ids) = some [(2, 7, 0, 0)] := by
+  decide
+
+/-- The run's own row of the turn `w-7`, said under term `t`. -/
+def cr (t : Nat) : Row := { term := t, seq := 0, run := 1, kind := .C, arg := 7, ms := t, epoch := 1, attempt := 0 }
+
+/-- **T9** (the copy first): a device said the turn of a run it found abandoned under an older term; the run's own
+device settles it later and its row of the turn merges after the copy. The history holds one message. -/
+theorem t9_copy_merged_first :
+    (merge [(0, [wr 1]), (1, [cr 2])]).map Row.key = [(1, 0), (2, 0)] ∧
+      (histOf (merge [(0, [wr 1]), (1, [cr 2])])).map (·.ids) = some [(2, 7, 0, 0)] := by
+  decide
+
+/-- **T9** (the copy rewound; round 17): a device said the turn of a run it found abandoned, a rewind under a later term
+removed every message, and the run's own row of the turn merges last. The turn stays removed and the history valid. -/
+theorem t9_copy_rewound_stays_gone :
+    (merge [(0, [wr 1]), (1, [kr 2]), (2, [cr 3])]).map Row.key = [(1, 0), (2, 0), (3, 0)] ∧
+      (histOf (merge [(0, [wr 1]), (1, [kr 2]), (2, [cr 3])])).map (·.ids) = some [] := by
+  decide
+
+/-- **T9** (a Retry after the rewind; round 17): a later run re-admits the person's message the copy said, after a
+rewind removed it, as a Retry of a turn that failed before it was recorded does. Its row is the message again. -/
+theorem t9_retry_after_rewind :
+    (histOf (merge [(0, [wr 1]), (1, [kr 2]), (2, [{ cr 3 with run := 2 }])])).map (·.ids) = some [(2, 7, 0, 0)] := by
+  decide
+
+/-- **T9** (the ledger reads it as committed): a turn said as its run settled commits the run's turn, so a Resume
+continues the run rather than committing the turn again. -/
+theorem t9_words_commit (L : Ledger) (e : Row) (he : e.kind = .W) : ((L.known e).entry e.run).committed = true := by
+  unfold Ledger.known
+  rw [he]
+  dsimp only
+  simp [Ledger.entry, Ledger.put, lookup_upsert]
+
 /-! ## S5's "Today" witnesses, rerun on the fixed code
 
 Each S5 counterexample trace, evaluated by the kernel on the W3 model: the defect it showed is gone. The D5
@@ -3256,5 +4019,811 @@ theorem t7_merge_not_prefix_stable :
     (merge [(0, [mr 1 0 100])]).map Row.key = [(1, 0)] ∧
       (merge [(0, [mr 1 0 100]), (1, [mr 2 0 50])]).map Row.key = [(2, 0), (1, 0)] := by
   decide
+
+/-! ## T10: an approval continues a run (XD3, round 17)
+
+An approval lets the paused run's tool act at once. It continues the run, so it is admitted as a Resume is, and it is
+refused once another device took the run over: found it abandoned, said its turn and went on. -/
+
+/-- **T10** (taken over): an approval of a run another device took over is refused, whatever else holds. -/
+theorem t10_approval_refused_after_takeover (wrote : Bool) : admission .approve true wrote = .takenOver := by
+  cases wrote <;> rfl
+
+/-- **T10** (the same admission): an approval of a run nobody took over is admitted exactly as a Resume and a start
+are. -/
+theorem t10_approval_admitted_as_resume (t wrote : Bool) :
+    admission .approve false wrote = admission .resume t wrote ∧ admission .resume t wrote = admission .start t wrote := by
+  cases t <;> cases wrote <;> decide
+
+/-- **T10** (a new term after what it read): a command admitted after this device read another device's rows since its
+term began is never admitted under that term. -/
+theorem t10_new_term_after_foreign_rows (v : Verb) (t : Bool) : admission v t true ≠ .sameTerm := by
+  cases v <;> cases t <;> decide
+
+/-- **T10** (a Resume is never refused as taken over): a Resume reads the history again and continues the run after
+whatever another device ran meanwhile. -/
+theorem t10_resume_not_taken_over (t wrote : Bool) : admission .resume t wrote ≠ .takenOver := by
+  cases t <;> cases wrote <;> decide
+
+/-- **T10** (why the new term): a row written under the term this device held before another device's turn merges
+ahead of that turn on every device; under a new term started after what it read it merges after it
+(`t7_stamped_after_read`). -/
+theorem t10_old_term_merges_ahead :
+    (merge [(0, [mr 1 0 10, mr 1 1 30]), (1, [mr 2 0 20])]).map Row.key = [(1, 0), (1, 1), (2, 0)] ∧
+      (merge [(0, [mr 1 0 10, mr 3 0 30]), (1, [mr 2 0 20])]).map Row.key = [(1, 0), (2, 0), (3, 0)] := by
+  decide
+
+/-- **T10** (a new term, whatever the slot): a command admitted under a new term writes its rows under the term this
+device opened, whether or not the incarnation still holds its run's slot. -/
+theorem t10_new_term_whatever_the_slot (slotHeld : Bool) (held fresh : Nat) :
+    rowsTerm .newTerm slotHeld held fresh = fresh := by
+  rfl
+
+/-! ## T11: a foreign run is abandoned only on the evidence of pulls (XD3, rounds 18 and 19)
+
+Another device's run is abandoned when it went quiet for the staleness bound. Quiet is evidenced, never inferred from
+this device's clock or a segment's age, and never one reading of this device's clock against another, either of
+which can jump: pulls that each found the run's segment as it was evidence it, gap by gap, each gap counted at most
+`cap`, a gap the clock ran backwards across counted as nothing. -/
+
+theorem notePull_size (cap th : Nat) (prior : Option PullRec) (now size : Nat) :
+    (notePull cap th prior now size).size = size := by
+  unfold notePull
+  split
+  · rfl
+  · rename_i r
+    by_cases hs : r.size = size
+    · by_cases hk : r.clock ≤ now ∧ now - r.clock < th
+      · simp [hs, hk]
+      · simp [hs, hk]
+    · simp [hs]
+
+theorem quietPulls_head (p : Nat × Nat) (older : List (Nat × Nat)) :
+    quietPulls (p :: older) p.2 = quietPulls older p.2 + 1 := by
+  simp [quietPulls]
+
+/-- **T11** (quiet needs pulls): the quiet a record holds for a segment is at most `cap` for each pull after the first
+of the newest pulls that found it that long, in a row. However this device's clock jumps, quiet past a bound needs more
+than `bound / cap` gaps between pulls that found nothing new. -/
+theorem t11_quiet_needs_pulls (cap th : Nat) (ps : List (Nat × Nat)) (r : PullRec)
+    (h : recordOf cap th ps = some r) : r.quiet + cap ≤ cap * quietPulls ps r.size := by
+  induction ps generalizing r with
+  | nil => simp [recordOf] at h
+  | cons p older ih =>
+    simp only [recordOf, Option.some.injEq] at h
+    subst h
+    rw [notePull_size, quietPulls_head, Nat.mul_succ]
+    cases ho : recordOf cap th older with
+    | none => simp [notePull]
+    | some r0 =>
+      have hi := ih r0 ho
+      by_cases hs : r0.size = p.2
+      · rw [hs] at hi
+        by_cases hk : r0.clock ≤ p.1 ∧ p.1 - r0.clock < th
+        · simp only [notePull, hs, hk, and_self, ite_true]
+          omega
+        · simp only [notePull, hs, ite_true, hk, ite_false]
+          have := Nat.min_le_left cap (p.1 - r0.clock)
+          omega
+      · simp [notePull, hs]
+
+/-- **T11** (abandonment needs a span of quiet pulls): a run is found abandoned only after more than `bound / cap + 1`
+pulls in a row found its segment as this reader holds it, whatever this device's clock did meanwhile. -/
+theorem t11_abandon_needs_quiet_pulls (cap th bound ask changed now size : Nat) (ps : List (Nat × Nat))
+    (h : standing bound ask changed now (quietFor (recordOf cap th ps) size) false = .abandoned) :
+    bound + cap < cap * quietPulls ps size := by
+  unfold standing quietFor at h
+  cases hr : recordOf cap th ps with
+  | none => rw [hr] at h; simp at h; split at h <;> simp at h
+  | some r =>
+    rw [hr] at h
+    have hq := t11_quiet_needs_pulls cap th ps r hr
+    by_cases hs : r.size = size
+    · subst hs
+      by_cases hb : r.quiet > bound
+      · omega
+      · simp [hb] at h; split at h <;> simp at h
+    · simp [hs] at h; split at h <;> simp at h
+
+/-- **T11** (a live run holds): a pull that found the run's segment changed starts its quiet again, so the run holds
+however long this device was away and whatever its clock reads. -/
+theorem t11_changed_segment_holds (cap th : Nat) (p : Nat × Nat) (older : List (Nat × Nat))
+    (hc : ∀ r0, recordOf cap th older = some r0 → r0.size ≠ p.2) :
+    (recordOf cap th (p :: older)).map PullRec.quiet = some 0 := by
+  simp only [recordOf, Option.map_some]
+  cases ho : recordOf cap th older with
+  | none => simp [notePull]
+  | some r0 => simp [notePull, hc r0 ho]
+
+/-- **T11** (no evidence, no abandonment): with no pull record for the bytes this reader holds, a run is never found
+abandoned, however late this device's clock reads (it slept, was closed, or its clock jumped). -/
+theorem t11_unobserved_never_abandoned (bound ask changed now : Nat) :
+    standing bound ask changed now none false ≠ .abandoned := by
+  unfold standing
+  simp only [Option.getD_none, Bool.false_or]
+  have : ¬ (0 > bound) := by omega
+  simp only [this, decide_false, Bool.false_eq_true, ite_false]
+  split <;> simp
+
+/-- **T11** (pulls are asked for): a run quiet here past `ask`, or whose segment changed later than this device's
+clock now reads, that its pulls have not shown abandoned awaits pulls, so a reader asks for them rather than wait on
+pulls nobody makes. -/
+theorem t11_quiet_run_awaits_pull (bound ask changed now : Nat) (quiet : Option Nat)
+    (hn : now > changed + ask ∨ now < changed)
+    (hnot : standing bound ask changed now quiet false ≠ .abandoned) :
+    standing bound ask changed now quiet false = .awaitsPull := by
+  unfold standing at *
+  split
+  · simp_all
+  · simp [hn]
+
+/-- **T11** (round 27: no pulls, no wait for them): on a device that cannot pull the chat (chat sync off, no remote, no
+record identity), a run that would await pulls no longer holds the chat, since no pull evidence can come; one quiet
+here less than `ask` still holds it, so a device that has only just lost its pulls does not pass a run live a moment
+ago. -/
+theorem t11_unpullable_released (bound ask changed now : Nat) (quiet : Option Nat) (t : Bool)
+    (hn : now > changed + ask ∨ now < changed) :
+    standing bound ask changed now quiet t false = .abandoned := by
+  unfold standing
+  split
+  · rfl
+  · simp [hn]
+
+theorem t11_unpullable_recent_holds (bound ask changed now : Nat)
+    (hn : ¬ (now > changed + ask ∨ now < changed)) :
+    standing bound ask changed now none false false = .holds (changed + ask + 1) := by
+  unfold standing
+  have : ¬ (0 > bound) := by omega
+  simp [this, hn]
+
+/-- **T11** (a dead device cannot lock a chat): pulls once a minute that keep finding the segment as it was free the
+chat once they span more than the bound. -/
+theorem t11_quiet_run_released :
+    standing 600 120 0 660 (quietFor (recordOf 120 30 ((List.range 12).reverse.map fun i => (60 * i, 7))) 7) false
+      = .abandoned := by
+  decide
+
+/-- **T11** (a forward jump counts one capped gap): a pull an hour later on a clock that jumped forward adds `cap`,
+not an hour; the run still holds. -/
+theorem t11_forward_jump_bounded :
+    recordOf 120 30 [(3660, 7), (60, 7), (0, 7)] = some ⟨3660, 7, 180⟩ ∧
+      standing 600 120 0 3660 (some 180) false = .awaitsPull := by
+  decide
+
+/-- **T11** (round 19's finding): a pull recorded on a clock that ran an hour ahead, then corrected back, counts the
+gap back as nothing; the pulls after it count as they go, so the run is freed only once they span the bound, and
+then it is. -/
+theorem t11_back_jump_recovers :
+    (recordOf 120 30 ([(600, 7), (540, 7), (480, 7), (420, 7), (360, 7), (300, 7), (240, 7), (180, 7), (120, 7),
+        (60, 7), (0, 7), (3600, 7)])).map PullRec.quiet = some 600 ∧
+      (recordOf 120 30 ([(660, 7), (600, 7), (540, 7), (480, 7), (420, 7), (360, 7), (300, 7), (240, 7), (180, 7),
+        (120, 7), (60, 7), (0, 7), (3600, 7)])).map PullRec.quiet = some 660 := by
+  decide
+
+/-! ## T12: a refused command leaves no trace, and a live run's heartbeat keeps its term (round 19)
+
+An admitted command may need a new term for its rows (T10). The term is proposed, and it becomes the chat's only with
+the first row of the command's run written under it; a command answered otherwise withdraws it. So what heartbeats
+read, the chat's term and the term this host last wrote it under, never part. -/
+
+theorem t12_step_keeps_heartbeat (s : Terms) (op : TermOp) (h : s.wrote = some s.term) :
+    (s.step op).wrote = some (s.step op).term := by
+  cases op with
+  | propose c r f => simpa [Terms.step, Terms.term] using h
+  | write r hb =>
+    unfold Terms.step Terms.finish
+    cases ht : s.taken r hb with
+    | none => simp [ht, Terms.term]
+    | some p => simp [ht, Terms.term]
+  | answer c applied =>
+    cases applied
+    · simpa [Terms.step, Terms.term] using h
+    · simpa [Terms.step] using h
+
+/-- **T12** (heartbeat liveness): once this host wrote a chat under its term, a heartbeat target stays, under the
+chat's term, whatever commands are proposed, refused or applied and whatever rows are written. -/
+theorem t12_heartbeat_kept (s : Terms) (ops : List TermOp) (h : s.wrote = some s.term) :
+    (s.run ops).heartbeat = some (s.run ops).term := by
+  induction ops generalizing s with
+  | nil => simp [Terms.run, Terms.heartbeat, h]
+  | cons op rest ih => exact ih (s.step op) (t12_step_keeps_heartbeat s op h)
+
+theorem t12_writes_keep (u : Terms) (c r f : Nat) (hu : u.proposed = [(c, r, f)]) (ws : List (Nat × Bool))
+    (hw : ∀ w ∈ ws, ¬ (w.1 = r ∧ w.2 = false)) :
+    (u.run (ws.map fun w => .write w.1 w.2)).opened = u.opened ∧
+      (u.run (ws.map fun w => .write w.1 w.2)).proposed = [(c, r, f)] ∧
+      (u.run (ws.map fun w => .write w.1 w.2)).held = u.held := by
+  induction ws generalizing u with
+  | nil => simp [Terms.run, hu]
+  | cons w rest ih =>
+    have hnone : u.taken w.1 w.2 = none := by
+      have hw' := hw w (List.mem_cons_self ..)
+      unfold Terms.taken
+      cases h2 : w.2
+      · have hne : r ≠ w.1 := fun e => hw' ⟨e.symm, h2⟩
+        simp [hu, hne]
+      · simp
+    have hstep : u.step (.write w.1 w.2) = { u with wrote := some u.term } := by
+      simp only [Terms.step, Terms.finish, hnone]
+    have hrest := ih { u with wrote := some u.term } hu (fun x hx => hw x (List.mem_cons_of_mem _ hx))
+    have hrun : u.run ((w :: rest).map fun w => .write w.1 w.2) =
+        ({ u with wrote := some u.term } : Terms).run (rest.map fun w => .write w.1 w.2) := by
+      simp only [List.map_cons, Terms.run, List.foldl_cons, hstep]
+    rw [hrun]
+    exact hrest
+
+/-- **T12** (a refused command leaves no trace): a command that proposed a term and was refused leaves the chat's
+terms as they were, though other runs' rows and heartbeats were written meanwhile: they never land under its term. -/
+theorem t12_refused_no_trace (s : Terms) (hp : s.proposed = []) (c r f : Nat) (ws : List (Nat × Bool))
+    (hw : ∀ w ∈ ws, ¬ (w.1 = r ∧ w.2 = false)) :
+    (((s.step (.propose c r f)).run (ws.map fun w => .write w.1 w.2)).step (.answer c false)).opened = s.opened ∧
+      (((s.step (.propose c r f)).run (ws.map fun w => .write w.1 w.2)).step (.answer c false)).proposed =
+        s.proposed ∧
+      (((s.step (.propose c r f)).run (ws.map fun w => .write w.1 w.2)).step (.answer c false)).term = s.term := by
+  have ⟨ho, hq, hh⟩ := t12_writes_keep (s.step (.propose c r f)) c r f (by simp [Terms.step, hp]) ws hw
+  have hs : (s.step (.propose c r f)).opened = s.opened ∧ (s.step (.propose c r f)).held = s.held := by
+    simp [Terms.step]
+  rw [hs.1] at ho
+  rw [hs.2] at hh
+  generalize (s.step (.propose c r f)).run (ws.map fun w => .write w.1 w.2) = u at ho hq hh ⊢
+  obtain ⟨uh, uo, up, uw⟩ := u
+  simp only at ho hq hh
+  subst hq ho hh
+  simp [Terms.step, Terms.term, hp]
+
+/-- **T12** (a refusal spares the others): a command refused while another's proposal waits for its run's first row
+withdraws only its own, and that row still goes under the term proposed for it. -/
+theorem t12_refusal_spares_others (s : Terms) (hp : s.proposed = []) (a ra fa b rb fb : Nat) (hab : a ≠ b) :
+    (((s.step (.propose a ra fa)).step (.propose b rb fb)).step (.answer b false)).rowsTerm ra false = fa := by
+  have hf : List.filter (fun p : Nat × Nat × Nat => p.1 != b) [(a, ra, fa), (b, rb, fb)] = [(a, ra, fa)] := by
+    have : (a != b) = true := bne_iff_ne.mpr hab
+    simp [List.filter, this]
+  simp only [Terms.step, hp, List.nil_append, List.cons_append, Bool.false_eq_true, ite_false, Terms.rowsTerm,
+    Terms.taken, hf]
+  simp
+
+/-- **T12** (the command's rows go under its term): the first batch of the command's run is written under the term it
+proposed, which is the chat's from then on. -/
+theorem t12_command_commits (s : Terms) (hp : s.proposed = []) (c r f : Nat) :
+    (s.step (.propose c r f)).rowsTerm r false = f ∧
+      ((s.step (.propose c r f)).step (.write r false)).heartbeat = some f := by
+  simp [Terms.step, Terms.finish, Terms.rowsTerm, Terms.taken, Terms.heartbeat, Terms.term, hp]
+
+/-- Proposals and answers: what may run beside a batch's write (`rehome`, `withdrawTerm`), off the chat's chain. -/
+def TermOp.beside : TermOp → Bool
+  | .write _ _ => false
+  | _ => true
+
+theorem beside_keeps (s : Terms) (ops : List TermOp) (h : ∀ op ∈ ops, op.beside = true) :
+    (s.run ops).opened = s.opened ∧ (s.run ops).held = s.held := by
+  induction ops generalizing s with
+  | nil => simp [Terms.run]
+  | cons op rest ih =>
+    have hop := h op (List.mem_cons_self ..)
+    have hr := ih (s.step op) (fun x hx => h x (List.mem_cons_of_mem _ hx))
+    have hs : (s.step op).opened = s.opened ∧ (s.step op).held = s.held := by
+      cases op with
+      | propose c r f => simp [Terms.step]
+      | write r hb => simp [TermOp.beside] at hop
+      | answer c applied => cases applied <;> simp [Terms.step]
+    have hrun : s.run (op :: rest) = (s.step op).run rest := by simp [Terms.run]
+    rw [hrun]
+    exact ⟨hr.1.trans hs.1, hr.2.trans hs.2⟩
+
+/-- **T12** (one decision, round 20): a batch's write commits what it decided as it began, whatever proposals were made
+or withdrawn while it was written: the term it was written under is the chat's term after it and the one this host
+last wrote under, so its heartbeats go on under it. -/
+theorem t12_write_decided_once (s : Terms) (r : Nat) (hb : Bool) (mid : List TermOp)
+    (h : ∀ op ∈ mid, op.beside = true) :
+    ((s.run mid).finish s r hb).term = s.rowsTerm r hb ∧
+      ((s.run mid).finish s r hb).heartbeat = some (s.rowsTerm r hb) := by
+  have ⟨ho, hh⟩ := beside_keeps s mid h
+  unfold Terms.finish Terms.rowsTerm
+  cases ht : s.taken r hb with
+  | some p => simp [Terms.term, Terms.heartbeat]
+  | none => simp [Terms.term, Terms.heartbeat, ho, hh]
+
+/-! ## T13: one admission for every command that starts or continues a run (round 20)
+
+A start, a Resume and an approval are admitted by one rule: where the run and the other devices' runs stand, the term,
+and the abandoned foreign runs the command goes on past. Its run's first batch says each one's turn, whatever the
+command, so every device then reads that run taken over: it holds the chat nowhere, and its own approval is refused. -/
+
+/-- **T13** (one admission): an approval nobody took over, a Resume and a start are admitted by the same rule, over the
+same foreign runs. -/
+theorem t13_one_admission (t w : Bool) (foreign : List Passed) :
+    admit .approve false w foreign = admit .resume t w foreign ∧ admit .resume t w foreign = admit .start t w foreign := by
+  have h := t10_approval_admitted_as_resume t w
+  unfold admit
+  rw [h.1, h.2]
+  exact ⟨rfl, rfl⟩
+
+/-- **T13** (it names every run it passes): any command admitted past another device's abandoned run whose words are
+known and whose turn no device said names that run. -/
+theorem t13_says_every_passed (v : Verb) (t w : Bool) (foreign : List Passed) (a : Admission) (says : List Nat)
+    (h : admit v t w foreign = .admitted a says) (f : Passed) (hf : f ∈ foreign) (hw : f.words = true)
+    (hs : f.said = false) : f.run ∈ says := by
+  unfold admit at h
+  split at h
+  · cases h
+  · split at h
+    · cases h
+    · obtain ⟨-, rfl⟩ := Admit.admitted.inj h
+      exact List.mem_map.mpr ⟨f, List.mem_filter.mpr ⟨hf, by simp [hw, hs]⟩, rfl⟩
+
+/-- **T13** (never past a live run): no command is admitted while another device's run holds the chat. -/
+theorem t13_held_refuses (v : Verb) (t w : Bool) (foreign : List Passed) (f : Passed) (hf : f ∈ foreign)
+    (hl : f.abandoned = false) (a : Admission) (says : List Nat) : admit v t w foreign ≠ .admitted a says := by
+  unfold admit
+  have hany : foreign.any (fun f => !f.abandoned) = true := List.any_eq_true.mpr ⟨f, hf, by simp [hl]⟩
+  split <;> simp [hany]
+
+/-- **T13** (kept until its batch): what a command carries stays until its run writes a batch that is no lone
+heartbeat, its run settles, or its admission is answered other than applied; other runs' batches and settlements and
+other admissions' answers leave it. -/
+theorem t13_carry_kept (c : Carried) (e : Nat × Nat × List Nat) (he : e ∈ c) (op : CarryOp)
+    (hw : ∀ hb, op = .write e.2.1 hb → hb = true) (hs : op ≠ .settle e.2.1) (ha : op ≠ .answer e.1 false) :
+    e ∈ (carryStep c op).1 := by
+  cases op with
+  | carry k r says => simp [carryStep, he]
+  | hold r => simpa [carryStep] using he
+  | settle r =>
+    have hr : e.2.1 ≠ r := fun h => hs (by rw [h])
+    simp only [carryStep]
+    exact List.mem_filter.mpr ⟨he, by simp [hr]⟩
+  | write r hb =>
+    cases ht : carriedTaken c r hb with
+    | none => simpa [carryStep, ht] using he
+    | some p =>
+      simp only [carryStep, ht]
+      refine (List.mem_erase_of_ne ?_).mpr he
+      intro hep
+      subst hep
+      unfold carriedTaken at ht
+      cases hb with
+      | true => simp at ht
+      | false =>
+        have hr := List.find?_some ht
+        have : e.2.1 = r := by simpa using hr
+        exact absurd (hw false (by rw [this])) (by simp)
+  | answer k applied =>
+    cases applied with
+    | true => simpa [carryStep] using he
+    | false =>
+      have hk : k ≠ e.1 := fun hk => ha (by rw [hk])
+      simp only [carryStep, Bool.false_eq_true, ite_false]
+      exact List.mem_filter.mpr ⟨he, by simp [Ne.symm hk]⟩
+
+/-- **T13** (in the first batch): the command's run's first batch says what its admission named. -/
+theorem t13_first_batch (c : Carried) (k r : Nat) (says : List Nat) (hc : ∀ p ∈ c, p.2.1 ≠ r) :
+    (carryStep (carryStep c (.carry k r says)).1 (.write r false)).2 = says := by
+  have hnone : c.find? (fun p => p.2.1 == r) = none :=
+    List.find?_eq_none.mpr (fun p hp => by simpa using hc p hp)
+  simp [carryStep, carriedTaken, List.find?_append, hnone]
+
+/-- **T13** (a passed run is taken over): any command admitted past another device's abandoned run, whose words are
+known and whose turn no device said, says its turn in the command's run's first batch; from then on that run stands
+abandoned on every device, and its own device's approval of it is refused. -/
+theorem t13_passed_taken_over (v : Verb) (t w : Bool) (foreign : List Passed) (a : Admission) (says : List Nat)
+    (h : admit v t w foreign = .admitted a says) (c : Carried) (k r : Nat) (hc : ∀ p ∈ c, p.2.1 ≠ r)
+    (f : Passed) (hf : f ∈ foreign) (hw : f.words = true) (hs : f.said = false)
+    (bound ask changed now : Nat) (quiet : Option Nat) (wrote : Bool) :
+    f.run ∈ (carryStep (carryStep c (.carry k r says)).1 (.write r false)).2 ∧
+      standing bound ask changed now quiet true = .abandoned ∧ admission .approve true wrote = .takenOver := by
+  refine ⟨?_, by simp [standing], t10_approval_refused_after_takeover wrote⟩
+  rw [t13_first_batch c k r says hc]
+  exact t13_says_every_passed v t w foreign a says h f hf hw hs
+
+/-- **T13** (a batch with no place keeps it, round 21): a batch of the run's rows at which every place leaves a tool call
+open says nothing and keeps what the command carries for the run's next batch. -/
+theorem t13_hold_keeps (c : Carried) (r : Nat) : carryStep c (.hold r) = (c, []) := rfl
+
+/-! ## T14: the history is well formed (round 21)
+
+Every tool output the history holds follows its call directly, before any other message: the host's batches keep that
+by their kinds, and the turns a command carries go where no call is open, after every rewind of their batch, so they
+never part a call from its output and their own batch's rewind never cuts them. -/
+
+/-- The messages a batch's rows append. -/
+def opMsgs : List Op → List Msg
+  | [] => []
+  | .msg m :: rest => m :: opMsgs rest
+  | _ :: rest => opMsgs rest
+
+theorem wfFrom_append (o : List Nat) (a b : List Msg) :
+    wfFrom o (a ++ b) = (wfFrom o a && wfFrom (a.foldl openAfter o) b) := by
+  induction a generalizing o with
+  | nil => simp [wfFrom]
+  | cons m rest ih => simp [wfFrom, ih, Bool.and_assoc]
+
+theorem openCalls_append (a b : List Msg) : openCalls (a ++ b) = b.foldl openAfter (openCalls a) := by
+  simp [openCalls, List.foldl_append]
+
+theorem wf_append (a b : List Msg) : wf (a ++ b) = (wf a && wfFrom (openCalls a) b) := wfFrom_append [] a b
+
+theorem wf_take {h : List Msg} (k : Nat) (hw : wf h = true) : wf (h.take k) = true := by
+  have := wf_append (h.take k) (h.drop k)
+  rw [List.take_append_drop, hw] at this
+  exact (Bool.and_eq_true_iff.mp this.symm).1
+
+theorem says_wf (o : List Nat) (ss : List Nat) : wfFrom o (ss.map Msg.say) = true := by
+  induction ss generalizing o with
+  | nil => rfl
+  | cons s rest ih => simp [wfFrom, Msg.fits, ih]
+
+theorem says_open (ss : List Nat) : (ss.map Msg.say).foldl openAfter [] = [] := by
+  induction ss with
+  | nil => rfl
+  | cons s rest ih => simpa [openAfter] using ih
+
+/-- Outputs for every open call, in order, are well formed and close them all. -/
+theorem outs_wf (o : List Nat) : wfFrom o (o.map Msg.out) = true ∧ (o.map Msg.out).foldl openAfter o = [] := by
+  induction o with
+  | nil => exact ⟨rfl, rfl⟩
+  | cons c cs ih =>
+    have he : (c :: cs).erase c = cs := List.erase_cons_head c cs
+    simp only [List.map_cons, wfFrom, Msg.fits, openAfter, List.foldl_cons, he, List.contains_cons, BEq.rfl,
+      Bool.true_or, Bool.true_and]
+    exact ih
+
+theorem applyAll_append (h : List Msg) (a b : List Op) : applyAll h (a ++ b) = applyAll (applyAll h a) b :=
+  List.foldl_append
+
+theorem applyAll_noRewind (h : List Msg) (ops : List Op) (hn : ops.all (fun op => !op.isRewind) = true) :
+    applyAll h ops = h ++ opMsgs ops := by
+  induction ops generalizing h with
+  | nil => simp [applyAll, opMsgs]
+  | cons op rest ih =>
+    simp only [List.all_cons, Bool.and_eq_true] at hn
+    cases op with
+    | msg m =>
+      have := ih (h ++ [m]) hn.2
+      simp only [applyAll, List.foldl_cons, Op.apply] at this ⊢
+      rw [this]; simp [opMsgs]
+    | rewind k => simp [Op.isRewind] at hn
+    | commit k id => simp [Op.isRewind] at hn
+    | other =>
+      have := ih h hn.2
+      simp only [applyAll, List.foldl_cons, Op.apply] at this ⊢
+      rw [this]; simp [opMsgs]
+
+theorem opMsgs_map (l : List Nat) (f : Nat → Msg) : opMsgs (l.map fun x => Op.msg (f x)) = l.map f := by
+  induction l with
+  | nil => rfl
+  | cons x rest ih => simp [opMsgs, ih]
+
+theorem map_msg_noRewind (l : List Nat) (f : Nat → Msg) : (l.map fun x => Op.msg (f x)).all (fun op => !op.isRewind) = true := by
+  simp [Op.isRewind]
+
+theorem placeAt_spec {h : List Msg} {ops : List Op} {i : Nat} (hp : placeAt h ops = some i) :
+    (ops.drop i).all (fun op => !op.isRewind) = true ∧
+      ((openCalls (applyAll h (ops.take i))).isEmpty || nextSays (ops.drop i)) = true := by
+  unfold placeAt at hp
+  have := List.find?_some hp
+  simpa only [Bool.and_eq_true] using this
+
+/-- Rows whose next message is a say append a say first. -/
+theorem nextSays_msgs {ops : List Op} (hs : nextSays ops = true) : ∃ x rest, opMsgs ops = Msg.say x :: rest := by
+  induction ops with
+  | nil => simp [nextSays] at hs
+  | cons op tail ih =>
+    cases op with
+    | msg m =>
+      cases m with
+      | say x => exact ⟨x, opMsgs tail, rfl⟩
+      | call cs => simp [nextSays] at hs
+      | out c => simp [nextSays] at hs
+    | rewind k =>
+      obtain ⟨x, rest, he⟩ := ih (by simpa [nextSays] using hs)
+      exact ⟨x, rest, by simpa [opMsgs] using he⟩
+    | commit k id =>
+      obtain ⟨x, rest, he⟩ := ih (by simpa [nextSays] using hs)
+      exact ⟨x, rest, by simpa [opMsgs] using he⟩
+    | other =>
+      obtain ⟨x, rest, he⟩ := ih (by simpa [nextSays] using hs)
+      exact ⟨x, rest, by simpa [opMsgs] using he⟩
+
+/-- A say fits whatever is open and leaves nothing open. -/
+theorem wfFrom_say (o : List Nat) (x : Nat) (rest : List Msg) : wfFrom o (Msg.say x :: rest) = wfFrom [] rest := by
+  simp [wfFrom, Msg.fits, openAfter]
+
+/-- The batch with its carried turns, as the history it leaves: what the batch leaves up to their place, then the
+turns, then what the rest of the batch appends. At their place no call is open, or a say follows them. -/
+theorem plan_after {h : List Msg} {says : List Nat} {ops ops' : List Op} (hp : plan h says ops = some ops') :
+    ∃ i, ((openCalls (applyAll h (ops.take i))).isEmpty || nextSays (ops.drop i)) = true ∧
+      applyAll h ops = applyAll h (ops.take i) ++ opMsgs (ops.drop i) ∧
+      applyAll h ops' = applyAll h (ops.take i) ++ says.map Msg.say ++ opMsgs (ops.drop i) := by
+  unfold plan at hp
+  cases hi : placeAt h ops with
+  | none => simp [hi] at hp
+  | some i =>
+    simp only [hi, Option.map_some, Option.some.injEq] at hp
+    subst hp
+    have ⟨hn, ho⟩ := placeAt_spec hi
+    refine ⟨i, ho, ?_, ?_⟩
+    · rw [← applyAll_noRewind _ _ hn, ← applyAll_append, List.take_append_drop]
+    · rw [applyAll_append, applyAll_append, applyAll_noRewind _ _ (map_msg_noRewind says Msg.say),
+        applyAll_noRewind _ _ hn, opMsgs_map]
+
+/-- **T14** (carried turns keep the history well formed): a batch that leaves the history well formed still does
+with the turns its command carries at their place. -/
+theorem t14_plan_well_formed (h : List Msg) (says : List Nat) (ops ops' : List Op)
+    (hw : wf (applyAll h ops) = true) (hp : plan h says ops = some ops') : wf (applyAll h ops') = true := by
+  obtain ⟨i, ho, h1, h2⟩ := plan_after hp
+  rw [h1, wf_append] at hw
+  rw [h2, wf_append, wf_append]
+  rcases Bool.or_eq_true_iff.mp ho with ho | ho
+  · have hc : openCalls (applyAll h (ops.take i)) = [] := List.isEmpty_iff.mp ho
+    rw [openCalls_append, hc, says_open, says_wf]
+    rw [hc] at hw
+    simpa using hw
+  · obtain ⟨x, rest, he⟩ := nextSays_msgs ho
+    rw [he, wfFrom_say] at hw ⊢
+    rw [says_wf]
+    simpa using hw
+
+/-- **T14** (a carried turn survives its batch's rewind): the turns a command carries are in the history its batch
+leaves, whatever rewinds the batch holds; they go after every one of them. -/
+theorem t14_carried_survive_rewind (h : List Msg) (says : List Nat) (ops ops' : List Op)
+    (hp : plan h says ops = some ops') (s : Nat) (hs : s ∈ says) : Msg.say s ∈ applyAll h ops' := by
+  obtain ⟨i, -, -, h2⟩ := plan_after hp
+  rw [h2]
+  exact List.mem_append_left _ (List.mem_append_right _ (List.mem_map_of_mem hs))
+
+/-- A Resume's rows, as the history they leave: what it keeps, an output for each call that leaves open, and the
+reminder when there are any. -/
+theorem resume_after (h : List Msg) (cut : Bool) (r : Nat) :
+    let kept := if cut then h.take (h.length - 1) else h
+    applyAll h ((Batch.resume cut r).ops h) =
+      kept ++ (openCalls kept).map Msg.out ++ (if (openCalls kept).isEmpty then [] else [Msg.say r]) := by
+  intro kept
+  have hk : applyAll h ([Op.other] ++ (if cut then [Op.rewind (h.length - 1)] else [])) = kept := by
+    cases cut <;> simp [applyAll, Op.apply, kept]
+  simp only [Batch.ops, List.isEmpty_map]
+  rw [applyAll_append, applyAll_append, hk, applyAll_noRewind _ _ (map_msg_noRewind _ Msg.out), opMsgs_map]
+  cases (openCalls kept).isEmpty <;> simp [applyAll, Op.apply, kept]
+
+theorem resume_closes (h : List Msg) (cut : Bool) (r : Nat) :
+    openCalls (applyAll h ((Batch.resume cut r).ops h)) = [] := by
+  rw [resume_after]
+  generalize hk : (if cut then h.take (h.length - 1) else h) = kept
+  rw [openCalls_append, openCalls_append, (outs_wf (openCalls kept)).2]
+  cases (openCalls kept).isEmpty <;> simp [openAfter]
+
+/-- Every batch the host writes by its kinds keeps a well-formed history well formed. -/
+theorem batch_wf (h : List Msg) (b : Batch) (hw : wf h = true) (hl : b.legal h = true) :
+    wf (applyAll h (b.ops h)) = true := by
+  cases b with
+  | turn id => simp [Batch.ops, applyAll, Op.apply, wf_append, hw, wfFrom, Msg.fits]
+  | retry k id => simp [Batch.ops, applyAll, Op.apply, wf_append, wf_take k hw, wfFrom, Msg.fits]
+  | commit k id => simp [Batch.ops, applyAll, Op.apply, wf_append, wf_take k hw, wfFrom, Msg.fits]
+  | reply cs => simp [Batch.ops, applyAll, Op.apply, wf_append, hw, wfFrom, Msg.fits]
+  | output c =>
+    simp only [Batch.legal] at hl
+    simp only [Batch.ops, applyAll, List.foldl_cons, List.foldl_nil, Op.apply, wf_append, hw, wfFrom, Msg.fits, hl,
+      Bool.and_self]
+  | resume cut r =>
+    rw [resume_after]
+    generalize hk : (if cut then h.take (h.length - 1) else h) = kept
+    have hwk : wf kept = true := by
+      rw [← hk]; cases cut
+      · exact hw
+      · exact wf_take _ hw
+    rw [wf_append, wf_append, hwk, (outs_wf _).1, openCalls_append, (outs_wf _).2]
+    cases (openCalls kept).isEmpty <;> simp [wfFrom, Msg.fits]
+  | other => simpa [Batch.ops, applyAll, Op.apply] using hw
+
+/-- **T14** (every reachable history is well formed): whatever batches the host writes by their kinds, each with the
+turns its command carries at their place or waiting for the next, every tool output in the history follows its call
+directly, before any other message, so the provider is never sent a stray tool result. -/
+theorem t14_reachable_well_formed {h : List Msg} (hr : Reached h) : wf h = true := by
+  induction hr with
+  | nil => rfl
+  | step b says _ hl ih =>
+    have hb := batch_wf _ b ih hl
+    cases hp : plan _ says (b.ops _) with
+    | none => simpa using hb
+    | some ops' =>
+      simp only [Option.getD_some]
+      exact t14_plan_well_formed _ _ _ _ hb hp
+
+theorem placeAt_end (h : List Msg) (ops : List Op) (he : openCalls (applyAll h ops) = []) :
+    (placeAt h ops).isSome = true := by
+  unfold placeAt
+  rw [List.find?_isSome]
+  exact ⟨ops.length, List.mem_range.mpr (Nat.lt_succ_self _), by simp [he]⟩
+
+/-- **T14** (a turn, a Retry and a Resume say what they carry at once): their first batch always has a place, so only a
+batch that leaves a call open everywhere (an approval's, before its tool returns) makes carried turns wait. -/
+theorem t14_turns_place (h : List Msg) (id k r : Nat) (cut : Bool) :
+    (placeAt h ((Batch.turn id).ops h)).isSome = true ∧ (placeAt h ((Batch.retry k id).ops h)).isSome = true ∧
+      (placeAt h ((Batch.resume cut r).ops h)).isSome = true := by
+  refine ⟨placeAt_end _ _ ?_, placeAt_end _ _ ?_, placeAt_end _ _ (resume_closes _ _ _)⟩
+  · simp [Batch.ops, applyAll, Op.apply, openCalls_append, openAfter]
+  · simp [Batch.ops, applyAll, Op.apply, openCalls_append, openAfter]
+
+/-! ## T16: a person's turn stays last past the turns its run carries (round 23) -/
+
+/-- Where `placeAhead` puts a batch's carried turns, its rows from there on drop nothing: the place is in the batch, or
+just past it. -/
+theorem placeAhead_spec {h : List Msg} {ops : List Op} {t i : Nat} (hp : placeAhead h ops t = some i) :
+    (ops.drop i).all (fun op => !op.isRewind) = true := by
+  have hn := (placeAt_spec hp).1
+  rw [List.drop_append] at hn
+  exact (Bool.and_eq_true_iff.mp (by simpa only [List.all_append] using hn)).1
+
+/-- A batch whose run's turn is still ahead always has a place: just past the batch, before that turn, at the latest. -/
+theorem placeAhead_isSome (h : List Msg) (ops : List Op) (t : Nat) : (placeAhead h ops t).isSome = true := by
+  unfold placeAhead placeAt
+  rw [List.find?_isSome]
+  refine ⟨ops.length, List.mem_range.mpr (by simp; omega), ?_⟩
+  simp [List.drop_left', nextSays, Op.isRewind]
+
+/-- The batch with its carried turns where `placeAhead` puts them, as the history it leaves: they are all in it. -/
+theorem planAhead_says {h : List Msg} {says : List Nat} {ops ops' : List Op} {t : Nat}
+    (hp : planAhead h says ops t = some ops') (s : Nat) (hs : s ∈ says) : Msg.say s ∈ applyAll h ops' := by
+  unfold planAhead at hp
+  cases hi : placeAhead h ops t with
+  | none => simp [hi] at hp
+  | some i =>
+    simp only [hi, Option.map_some, Option.some.injEq] at hp
+    subst hp
+    rw [applyAll_append, applyAll_append, applyAll_noRewind _ _ (map_msg_noRewind says Msg.say),
+      applyAll_noRewind _ _ (placeAhead_spec hi), opMsgs_map]
+    exact List.mem_append_left _ (List.mem_append_right _ (List.mem_map_of_mem hs))
+
+/-- **T16** (a person's turn stays last, round 24): a start's or a Retry's turn is two batches, its admission's, which
+says nothing, and its commit, one row that keeps the history and says the turn at once. While the run's turn is not
+committed (`turnAheadOf`), the turns its run carries go in the admission's batch, whatever history it is written over,
+a call no output answers included; the commit keeps them, and the person's turn is the history's last message after
+them. Were the turn not known to be ahead, an admission's batch over such a call would have no place, and the carried
+turns would follow the commit, after the person's turn (`t16_stale_prompt`). -/
+theorem t16_turn_last (h : List Msg) (says : List Nat) (ops : List Op) (t : Nat) (committed : Bool)
+    (hc : committed = false) :
+    (turnWritten committed h says ops t).getLast? = some (.say t) ∧
+      ∀ s ∈ says, Msg.say s ∈ turnWritten committed h says ops t := by
+  subst hc
+  have hsome := placeAhead_isSome h ops t
+  have hplan : (planAhead h says ops t).isSome = true := by
+    unfold planAhead; cases hi : placeAhead h ops t <;> simp_all
+  obtain ⟨ops', hp⟩ := Option.isSome_iff_exists.mp hplan
+  have hw : turnWritten false h says ops t = applyAll h ops' ++ [.say t] := by
+    simp [turnWritten, planFor, turnAhead, hp, Batch.ops, applyAll, Op.apply]
+  rw [hw]
+  exact ⟨List.getLast?_concat .., fun s hs => List.mem_append_left _ (planAhead_says hp s hs)⟩
+
+/-- **T16** (the bugs rounds 23 and 24 fixed): over a history ending in a call no output answers, a turn's admission
+batch had no place for the turns its run carried, which then went after the person's turn its commit says: the model
+answered the stale prompt. Known ahead, they go before it. -/
+theorem t16_stale_prompt :
+    turnWritten false [Msg.say 0, .call [1]] [9] [.other] 5 = [.say 0, .call [1], .say 9, .say 5] ∧
+      plan [Msg.say 0, .call [1]] [9] [.other] = none ∧
+      applyAll [Msg.say 0, .call [1]]
+          ((plan [Msg.say 0, .call [1]] [9] [.commit 2 5]).getD [.commit 2 5]) = [.say 0, .call [1], .say 5, .say 9] ∧
+      placeAhead [Msg.say 0, .call [1]] [.other] 5 = some 0 := by
+  decide
+
+/-- **T14** (round 21's finding 1): the turns a Resume carried at the head of its batch, before the outputs that close
+the calls the history left open, part a call from its output, and the provider rejects the stray result; at their
+place they follow the outputs. -/
+theorem t14_head_parts_call :
+    let h := [Msg.say 0, .call [1]]
+    let ops := (Batch.resume false 7).ops h
+    wf (applyAll h ([Op.msg (.say 9)] ++ ops)) = false ∧ (plan h [9] ops).map (fun o => wf (applyAll h o)) = some true ∧
+      plan h [9] ops = some [.other, .msg (.out 1), .msg (.say 9), .msg (.say 7)] := by
+  decide
+
+/-- **T14** (round 21's finding 2): a Resume that rewinds a transport failure's marker names what it keeps before
+anything is carried, so turns carried at the head of its batch are cut by its own rewind; at their place, after the
+rewind, they stay. -/
+theorem t14_head_cut_by_rewind :
+    let h := [Msg.say 0, .call []]
+    let ops := (Batch.resume true 7).ops h
+    Msg.say 9 ∉ applyAll h ([Op.msg (.say 9)] ++ ops) ∧
+      (plan h [9] ops).map (fun o => decide (Msg.say 9 ∈ applyAll h o)) = some true := by
+  decide
+
+/-- **T14** (an approval's turns wait): while the paused call is open, an approval's rows have no place for what it
+carries; the tool's output does, right after it. -/
+theorem t14_approval_waits :
+    placeAt [Msg.say 0, .call [1]] [.other] = none ∧ placeAt [Msg.say 0, .call [1]] [.msg (.out 1)] = some 1 := by
+  decide
+
+/-- **T14** (only the tail's calls are open): a call another message already followed is the adapter's to answer; an
+output written for it now, as a Resume that closed every unanswered call did, is a stray result. -/
+theorem t14_no_late_output :
+    openCalls [Msg.say 0, .call [1], .say 5, .call []] = [] ∧
+      wf [Msg.say 0, .call [1], .say 5, .call [], .out 1] = false := by
+  decide
+
+/-- **T14** (the appended row's place, round 21's finding 3): a row this device appends under an older term merges
+before every later term, so the appender folds the whole merge again rather than append it at the tail; under the
+merge's last term it appends. -/
+theorem t14_incremental_is_merge :
+    let segs := [(0, [mr 1 0 10]), (1, [mr 2 0 20])]
+    (appendMerged segs 0 (merge segs) (mr 1 1 30)).map Row.key = [(1, 0), (1, 1), (2, 0)] ∧
+      (merge segs ++ [mr 1 1 30]).map Row.key = [(1, 0), (2, 0), (1, 1)] ∧
+      appendMerged segs 1 (merge segs) (mr 2 1 30) = merge [(0, [mr 1 0 10]), (1, [mr 2 0 20, mr 2 1 30])] := by
+  decide
+
+/-- **T14** (refolded, it is the merge): a row whose term does not end the merge folds the whole merge again. -/
+theorem t14_refold_is_merge (segs : List (Nat × List Row)) (dev : Nat) (merged : List Row) (e : Row)
+    (h : merged.getLast?.map Row.term ≠ some e.term) :
+    appendMerged segs dev merged e = merge (segs.map fun s => if s.1 = dev then (s.1, s.2 ++ [e]) else s) := by
+  simp [appendMerged, h]
+
+/-- **T14** (refreshed, it is the merge; round 26): the fold a refresh goes on with is the whole merge it read,
+whatever the merge it held before. -/
+theorem t14_refresh_is_merge (merged rows : List Row) : refreshMerged merged rows = rows := by
+  unfold refreshMerged
+  split
+  · rename_i h
+    exact (List.prefix_iff_eq_append.mp (List.isPrefixOf_iff_prefix.mp h))
+  · rfl
+
+/-- **T14** (a copy replaces a row mid-term; round 26): a later segment's smaller copy of a row neither a term's first
+row nor the last one held replaces it in the merge, so a fold that checked only those places would keep the stale
+row; the refreshed fold is the merge. -/
+theorem t14_refresh_mid_term :
+    let segs := [(0, [mr 1 0 10, mr 1 1 11 5]), (1, [mr 2 0 20])]
+    let next := segs ++ [(2, [mr 1 1 11 0])]
+    (merge segs).map Row.key = (merge next).map Row.key ∧ merge segs ≠ merge next ∧
+      refreshMerged (merge segs) (merge next) = merge next := by
+  decide
+
+/-! ## T15: a replay changes nothing, a settled run carries nothing, an unread approval is refused (round 22) -/
+
+/-- **T15** (a replay changes nothing): a command this host already sent on, in flight or applied, is never admitted
+again: it adds no entry, and since it holds no admission its answer, whatever it is, withdraws none, its original's
+included. -/
+theorem t15_replay_no_change (c : Carried) (seen : List Nat) (next command run : Nat) (says : List Nat)
+    (h : seen.contains command = true) :
+    admitCarry c seen next command run says = (none, c) ∧
+      ∀ applied, answerCarry (admitCarry c seen next command run says).2
+        (admitCarry c seen next command run says).1 applied = c := by
+  have hm : command ∈ seen := by simpa using h
+  refine ⟨by simp [admitCarry, hm], fun applied => ?_⟩
+  simp [admitCarry, hm, answerCarry]
+
+/-- **T15** (an answer withdraws its own): an admission's answer leaves every other admission's entry, so a copy of a
+command admitted again (after its original was refused) never withdraws what another admission carries. -/
+theorem t15_answer_own_only (c : Carried) (k : Nat) (applied : Bool) (e : Nat × Nat × List Nat) (he : e ∈ c)
+    (hk : e.1 ≠ k) : e ∈ answerCarry c (some k) applied := by
+  simp only [answerCarry]
+  exact t13_carry_kept c e he (.answer k applied) (by simp) (by simp)
+    (by intro h; injection h with h1 _; exact hk h1.symm)
+
+/-- **T15** (admissions are distinct): an entry an admission adds is keyed apart from every entry before it, while the
+next admission is past them all. -/
+theorem t15_admissions_distinct (c : Carried) (seen : List Nat) (next command run : Nat) (says : List Nat)
+    (hc : ∀ p ∈ c, p.1 < next) (h : seen.contains command = false) :
+    admitCarry c seen next command run says = (some next, c ++ [(next, run, says)]) ∧ ∀ p ∈ c, p.1 ≠ next := by
+  have hm : command ∉ seen := by simpa using h
+  refine ⟨by simp [admitCarry, hm, carryStep], fun p hp => Nat.ne_of_lt (hc p hp)⟩
+
+/-- **T15** (a settled run carries nothing): once a row settles a run, no entry for that run is left, even one whose
+batch had no place for it (a Stop while the approved call is open); every other run's stays. -/
+theorem t15_settle_drops (c : Carried) (r : Nat) :
+    (∀ p ∈ (carryStep c (.settle r)).1, p.2.1 ≠ r) ∧ (carryStep c (.settle r)).2 = [] ∧
+      ∀ p ∈ c, p.2.1 ≠ r → p ∈ (carryStep c (.settle r)).1 := by
+  refine ⟨fun p hp => ?_, rfl, fun p hp hr => List.mem_filter.mpr ⟨hp, by simp [hr]⟩⟩
+  have := (List.mem_filter.mp hp).2
+  simpa using this
+
+/-- **T15** (the bug round 22 fixed): keyed by the command, a replay's answer withdrew its original's entry, held for
+the run's next batch, and that batch said nothing; keyed by the admission, it still says the turn. -/
+theorem t15_replay_keeps_held :
+    let held := (carryStep (carryStep [] (.carry 0 1 [5])).1 (.hold 1)).1
+    (carryStep (answerCarry held none false) (.write 1 false)).2 = [5] ∧
+      (carryStep (held.filter (fun p => p.1 != 0)) (.write 1 false)).2 = [] := by
+  decide
+
+/-- **T15** (no approval unchecked once another device could have judged the run abandoned): an approval whose check
+could not read another device's segment is refused, inside the pause's hold too. That device's standing of this
+device's run rests on its own pulls alone, which can pass the bound inside any hold whose rows never reached the remote,
+so the hold is no evidence the run still holds the chat there. -/
+theorem t15_unread_refused (held : Bool) (bound ask changed now : Nat) :
+    approveUnread held = .refused ∧ standing bound ask changed now (some (bound + 1)) false = .abandoned := by
+  simp [approveUnread, standing]
 
 end ChatLedger

@@ -11,6 +11,8 @@ import { RuntimeIngestService } from '#api/telemetry/runtime-ingest.service.js';
 
 const maximumSyncLagMilliseconds = 24 * 60 * 60 * 1000;
 const maximumSyncPending = 10_000;
+/* A push or pull is aborted at its 15-minute deadline; an hour bounds a skewed client clock. */
+const maximumSyncAttemptMilliseconds = 60 * 60 * 1000;
 
 /**
  * Receives batched telemetry from the client runtime (web workers).
@@ -298,7 +300,12 @@ export class TelemetryController {
     const { direction, outcome, placement, lagMilliseconds, pending } = entry.detail;
     const attributes = { 'agent.placement': placement };
     this.metrics.syncClientAttempts.add(1, { direction, outcome, ...attributes });
-    /* A client clock or a corrupt queue must not stretch the histograms: clamp to a day and a bounded depth. */
+    /* A client clock or a corrupt queue must not stretch the histograms: clamp to an hour, a day and a bounded depth. */
+    this.metrics.syncClientAttemptDuration.record(Math.min(entry.duration, maximumSyncAttemptMilliseconds) / 1000, {
+      direction,
+      outcome,
+      ...attributes,
+    });
     if (lagMilliseconds !== undefined) {
       this.metrics.syncClientLag.record(Math.min(lagMilliseconds, maximumSyncLagMilliseconds) / 1000, attributes);
     }

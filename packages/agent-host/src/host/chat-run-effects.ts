@@ -92,7 +92,15 @@ export type ChatRunDeps = Readonly<{
   answer: (answer: CommandAnswer) => void;
   /** Re-send held commands once the slot can act on them. */
   redeliver: (commands: readonly HeldCommand[]) => void;
-  delays?: Readonly<{ idleEviction?: number; driverStopBound?: number; cutRetry?: number }> | undefined;
+  delays?:
+    | Readonly<{
+        idleEviction?: number;
+        driverStopBound?: number;
+        cutRetry?: number;
+        /** How long a command waits for a closing incarnation to end ({@link chatClosingWaitMilliseconds}). */
+        closingWait?: number;
+      }>
+    | undefined;
 }>;
 
 /** The actor `createChatRunActor` returns, unstarted. */

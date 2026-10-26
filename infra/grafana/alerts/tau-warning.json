@@ -1043,7 +1043,8 @@
         "component": "runtime",
         "kind": "trigger",
         "trigger": "telemetry-heartbeat",
-        "package": "runtime-observability"
+        "package": "runtime-observability",
+        "repeat_interval": "7d"
       },
       "isPaused": true
     },

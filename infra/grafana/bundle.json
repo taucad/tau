@@ -18,6 +18,6 @@
     "dashboards/tau-sync.json": "3af2f4a48ed8c22c9d40c3a2c8db20f00720926e07ac4225890c587b6117bcb4",
     "dashboards/websocket-rpc.json": "4b79c58efc8e1ae5215b956e1346d4629a4f83a50215eb1b5ba4fc0fcd05a3fd",
     "alerts/tau-critical.json": "7e1d068831320238c0f118308a13471061ee83120f7b78ccc97ce69abe5ffca1",
-    "alerts/tau-warning.json": "6d67561d9d797c018cec5162d7132a660bbcc7377011e0c7b724e9ebfbc50b85"
+    "alerts/tau-warning.json": "d668a83bcb700d51e37d04dfe260d9515928d42d6d0b11b291006541fe7b9a83"
   }
 }

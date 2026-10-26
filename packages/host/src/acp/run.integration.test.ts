@@ -377,6 +377,33 @@ const until = async (
 };
 
 /**
+ * Answer an approval once the run has rested on it. The request row is durable before the attempt that asked has
+ * settled, and until it has the host answers `CHAT_RUN_LIVE` (`wait`, "settling"): the same command is sent again,
+ * as a client does, rather than dropped (which left the run paused for good).
+ *
+ * @param launcher - The launcher.
+ * @param command - The `resolve-interrupt` command.
+ * @returns The answer that was not a `wait` refusal.
+ */
+const resolveOnceSettled = async (
+  launcher: Pick<AgentLauncher, 'execute'>,
+  command: Parameters<AgentLauncher['execute']>[0],
+): ReturnType<AgentLauncher['execute']> => {
+  const deadline = Date.now() + 25_000;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- one command at a time, until it is not refused for a settling run.
+    const answer = await launcher.execute(command);
+    if (answer.status !== 'refused' || answer.code !== 'CHAT_RUN_LIVE' || Date.now() > deadline) {
+      return answer;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- see above.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+  }
+};
+
+/**
  * One chat's log, reduced to what the ACP port reads and writes (W10 EA-S2).
  *
  * The host's semantics, not a merging stub: each turn has its own user-message
@@ -775,7 +802,7 @@ describe('the external agent run kind', () => {
         };
         await until(hasApproval, 'the approval request', { dump: async () => readLog(workspaceRoot, chatId) });
         const [pending] = await launcher.pendingInterrupts(runId);
-        await launcher.execute({
+        await resolveOnceSettled(launcher, {
           type: 'resolve-interrupt',
           commandId: 'cmd-2',
           payload: { chatId, runId, interruptId: pending?.interruptId ?? '', outcome: 'approved' },
@@ -890,7 +917,7 @@ describe('the external agent run kind', () => {
         },
       });
       expect(JSON.stringify(pending?.payload)).not.toContain('permission-metadata-canary');
-      await launcher.execute({
+      await resolveOnceSettled(launcher, {
         type: 'resolve-interrupt',
         commandId: 'cmd-2',
         payload: { chatId, runId, interruptId: pending?.interruptId ?? '', outcome: 'approved', optionId },
@@ -995,7 +1022,7 @@ describe('the external agent run kind', () => {
       return pending.length > 0;
     }, 'a fresh continuation approval');
     const [resumedPermission] = await launcher.pendingInterrupts(runId);
-    await launcher.execute({
+    await resolveOnceSettled(launcher, {
       type: 'resolve-interrupt',
       commandId: 'approve-resumed',
       payload: { chatId, runId, interruptId: resumedPermission?.interruptId ?? '', outcome: 'approved' },
@@ -2799,6 +2826,72 @@ describe('authentication, initialize and prompt content', () => {
     await expect(readdir(harness.workspaceRoot)).resolves.not.toContain('AGENTS.md');
   }, 60_000);
 
+  /*
+   * Seamless handoff: an agent keeps its own session, so turns it never saw — Tau's, or another device's synced into
+   * the chat's segments — reach it as context on its next prompt: the whole chat for a fresh session, and only what
+   * came after its own last turn for a session it continues.
+   */
+  it('gives the agent the chat turns its session has not seen, from Tau or another device', async () => {
+    const harness = await startHarness();
+    const chatId = 'chat-handoff';
+    const segments = join(harness.workspaceRoot, '.tau', 'chats', chatId, 'events');
+    await mkdir(segments, { recursive: true });
+    const phoneRows = (turns: ReadonlyArray<readonly [string, string, string]>): string =>
+      turns
+        .flatMap(([at, question, answer], turn) => [
+          {
+            sequence: turn * 2,
+            type: 'message.appended',
+            message: { id: `phone-user-${String(turn)}`, role: 'user', content: question },
+            at,
+          },
+          {
+            sequence: turn * 2 + 1,
+            type: 'message.appended',
+            message: {
+              id: `phone-answer-${String(turn)}`,
+              role: 'assistant',
+              content: [{ type: 'text', text: answer }],
+            },
+            at,
+          },
+        ])
+        .map(
+          ({ sequence, at, ...body }) =>
+            /* Each phone turn opened its own incarnation there, so each is its own term. */
+            `${JSON.stringify({ version: 1, leaderEpoch: `phone-${String(Math.floor(sequence / 2))}`, sequence: sequence % 2, recordedAt: at, runId: `phone-run-${String(Math.floor(sequence / 2))}`, ...body })}\n`,
+        )
+        .join('');
+    const earlier = new Date(Date.now() - 60_000).toISOString();
+    await writeFile(join(segments, 'device-phone.jsonl'), phoneRows([[earlier, 'from the phone', 'phone answer']]));
+
+    await runTurn(harness, { chatId, runId: 'run-handoff-1', text: 'first noask' });
+    /* The session's own later turns carry markers without its id: they are still its turns. */
+    await runTurn(harness, { chatId, runId: 'run-handoff-2', text: 'second noask' });
+    await runTurn(harness, { chatId, runId: 'run-handoff-3', text: 'third noask' });
+    const later = new Date(Date.now() + 1000).toISOString();
+    await writeFile(
+      join(segments, 'device-phone.jsonl'),
+      phoneRows([
+        [earlier, 'from the phone', 'phone answer'],
+        [later, 'phone again', 'second phone answer'],
+      ]),
+    );
+    await runTurn(harness, { chatId, runId: 'run-handoff-4', text: 'fourth noask' });
+
+    const [first, second, third, fourth] = promptFrames(harness.frames);
+    expect(first).toContain('tau://chat-handoff');
+    expect(first).toContain('from the phone');
+    expect(first).toContain('phone answer');
+    expect(first?.indexOf('first noask')).toBeLessThan(first?.indexOf('tau://chat-handoff') ?? -1);
+    expect(second).not.toContain('tau://chat-handoff');
+    expect(third).not.toContain('tau://chat-handoff');
+    expect(fourth).toContain('tau://chat-handoff');
+    expect(fourth).toContain('phone again');
+    expect(fourth).not.toContain('from the phone');
+    expect(fourth).not.toContain('second noask');
+  }, 60_000);
+
   it('falls textual Tau context back to ordinary ACP text when embedded context is unsupported', async () => {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names
     const textOnly: AcpAdapter = { ...fakeAgent, spawnEnv: { TAU_FAKE_AGENT_MODE: 'text-only' } };
@@ -3073,6 +3166,7 @@ describe('external turns through the revision port', () => {
     });
   }, 60_000);
 
+  /* XD4: an id no checkout and no branch here derives, in a project with no remote to bring it, is refused for good. */
   it.each([false, true])(
     'refuses a missing persisted checkout instead of main (previous turn: %s)',
     async (previousTurn) => {

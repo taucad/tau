@@ -62,5 +62,21 @@
     "test": "src/turn.machine.conformance.test.ts",
     "find": "  announce({ ...context, ...fields }, enq);\n  return { target: 'settled', context: fields } as const;",
     "replace": "  return { target: 'settled', context: fields } as const;"
+  },
+  {
+    "id": "remote-read-failure-is-no-remote",
+    "drift": "round 28: a remotes read that failed, or one still running, counts as no remote (its `kind` is `'none'` too), so a pull is refused CHAT_NOT_SHARED and the host runs past another device's live run",
+    "file": "src/turn-placement.ts",
+    "test": "src/turn-placement.test.ts",
+    "find": "    return remote !== undefined && remote.value !== 'none';\n",
+    "replace": "    return remote !== undefined && remote.context.kind !== 'none';\n"
+  },
+  {
+    "id": "identity-read-failure-is-no-identity",
+    "drift": "round 28: a record-devices read that failed, or a device id the page has not sent yet, counts as no identity, so a pull is refused CHAT_NOT_SHARED and the host runs past another device's live run",
+    "file": "src/revision-effects.ts",
+    "test": "src/turn-placement.test.ts",
+    "find": "      return syncChats && options.deviceId !== undefined && options.deviceId() !== '';\n",
+    "replace": "      return syncChats && (await chatContext()) !== undefined;\n"
   }
 ]

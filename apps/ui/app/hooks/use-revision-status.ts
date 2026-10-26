@@ -108,6 +108,12 @@ export type RevisionClient = Readonly<{
   ) => Promise<RevisionFileComparison>;
   send: (command: WorkerRevisionCommand) => void;
   /**
+   * Pull the remote now for another device's run on `chatId` that awaits pulls (XD3), and answer whether this device
+   * can pull the chat at all (round 27): `false` where the placement's pull is refused `CHAT_NOT_SHARED`. A root that
+   * answers nothing (an older host) is taken to pull, as the agent host takes a placement with no pull verb.
+   */
+  pullRemote: (chatId: string) => Promise<boolean>;
+  /**
    * Record what is on disk and wait for the answer (C16, contract §6).
    *
    * The correlated form of `send({ command: 'saveRevision' })`: it resolves
@@ -516,6 +522,11 @@ export const createHostRevisionClient = (input: {
         ...(options?.against === undefined ? {} : { against: options.against }),
       })) as unknown as RevisionFileComparison,
     send,
+    pullRemote: async (chatId) => {
+      /* An older host answers nothing: taken to pull. */
+      const { pulls } = ((await ask({ command: 'pullRemote', chatId })) ?? {}) as { pulls?: unknown };
+      return pulls !== false;
+    },
     saveRevision: async (trigger) => {
       await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
     },
@@ -1171,6 +1182,10 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
     },
     send: (command) => {
       post(command);
+    },
+    pullRemote: async (chatId) => {
+      const result = await ask({ command: 'pullRemote', chatId });
+      return result.kind !== 'pulled' || result.pulls;
     },
     saveRevision: async (trigger) => {
       await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });

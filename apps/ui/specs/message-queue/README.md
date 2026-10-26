@@ -10,14 +10,14 @@ The model is untimed. It does not assert eventual progress: a tab may remain off
 
 The receipt cases begin with a missing predecessor: one has a known accepting host, the other is legacy and unqualified. A known foreign receipt permits continuation; an unseen same-host receipt waits. Legacy rebasing preserves that predecessor and grants only the explicit destination. `Switch`, `CancelBack`, and `CommitGrant` model a B grant write landing after selection returned to A. The target keeps that late grant scoped to B. This is a safety/permission model, not a promise that a provider or disconnected host eventually responds.
 
-| Companion action/state                | Runtime seam                                                                                                       |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `pin`, `Retry`, host-local `accepted` | `#connectQueuedCommand` persists `commandPlacement` before transmission and refuses another connection destination |
-| `Acknowledge`, `afterPlacement`       | Durable acknowledgement records the actual accepting connection’s `afterPlacement`                                 |
-| `BarrierAllows`, `observed`           | `#advanceMessageQueue` compares a verified attachment’s placement with the stored receipt                          |
-| `Switch`, `CommitGrant`, `rebased`    | Placement persistence writes destination-specific `rebasedPlacement`, retaining `afterRunId`                       |
-| `CancelBack`                          | A superseding selection cancels the original persistence actor while its queue write can still finish              |
-| legacy-prepared initial state         | An unqualified prepared command is marked `unconfirmed` before rebind, even without previous attachment metadata   |
+| Companion action/state                | Runtime seam                                                                                                                     |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `pin`, `Retry`, host-local `accepted` | `#connectQueuedCommand` persists `commandPlacement` before transmission and refuses another connection destination               |
+| `Acknowledge`, `afterPlacement`       | Durable acknowledgement records the actual accepting connection’s `afterPlacement`                                               |
+| `BarrierAllows`, `observed`           | `#advanceMessageQueue` compares a verified attachment’s placement with the stored receipt                                        |
+| `Switch`, `CommitGrant`, `rebased`    | Placement persistence writes destination-specific `rebasedPlacement`, retaining `afterRunId`, for a pick or a reach change alike |
+| `CancelBack`                          | A superseding selection cancels the original persistence actor while its queue write can still finish                            |
+| legacy-prepared initial state         | An unqualified prepared command is marked `unconfirmed` before rebind, even without previous attachment metadata                 |
 
 The passing companion checks six invariants. `cross-host-replay` removes the pin guard and must violate `AtMostOneAcceptingHost`; `unscoped-rebase` deletes the predecessor instead of retaining a destination grant and must violate `RebaseStaysAtDestination`. Each witness checks exactly one property. The prepared initial states abstract earlier submission/pinning; they do not prove write ordering or migration themselves. Runtime service tests cover write-before-transmit, initial attachment absence, cancelled persistence, same-host retry, wrong-host blocking and queue progress. The concrete store conformance checks persistence/reopen of pins, receipt placement and legacy grants, plus grant retirement on acknowledgement; it does not duplicate the service’s delivery guards.
 

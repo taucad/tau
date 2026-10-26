@@ -102,7 +102,8 @@ export function NewProjectChatComposer({
            * so a project started from a "Tau Host · …" chip ran its first turn
            * in this browser instead, against a chip that still named the
            * daemon. Both providers keep this execution's Tau model in step with
-           * the model chip, so there is nothing left to override here. */
+           * the model chip, so there is nothing left to override here. Project
+           * creation keeps a device-relative host for this device only (XD2). */
           activeExecution: execution,
           initialMessage: { content, attachments, ...(attachmentSource === undefined ? {} : { attachmentSource }) },
           editorState: {

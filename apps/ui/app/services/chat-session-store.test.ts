@@ -1,6 +1,7 @@
 // @vitest-environment node
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat / DefaultChatTransport classes uses the SDK's own PascalCase names and `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructors omit the `public` keyword to mirror the AI SDK's published shape. */
+import { writeChatPlacement } from '#db/chat-placements.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { KeyedMutex } from '#db/keyed-mutex.js';
@@ -23,7 +24,7 @@ import type * as AiSdk from 'ai';
 import type { WatchEvent } from '@taucad/filesystem';
 import type { CatchUpFrame, CommandAnswer, HostCommand } from '@taucad/agent-host/wire';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
-import { chunksOf } from '#machines/chat-projection.logic.js';
+import { chunksOf, selectRunElsewhere, selectRunElsewhereAwaitsPull } from '#machines/chat-projection.logic.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
 import type { ChatRequest, ChatTurnGesture } from '#machines/chat-session.machine.js';
@@ -215,9 +216,17 @@ type ChatSessionDeps = Parameters<StoreType['setDependencies']>[0];
  * that doesn't structurally match the typed closure fields.
  */
 type StubDeps = {
-  [K in Exclude<keyof ChatSessionDeps, 'client' | 'watchRecordFile' | 'queueLock'>]: ReturnType<
-    typeof vi.fn<ChatSessionDeps[K]>
-  >;
+  [K in Exclude<
+    keyof ChatSessionDeps,
+    | 'client'
+    | 'watchRecordFile'
+    | 'queueLock'
+    | 'adoptLegacyChatPlacement'
+    | 'isPlacementOnThisDevice'
+    | 'isPlacementOnThisDeviceNow'
+    | 'onPlacementReachabilityChanged'
+    | 'pullRemote'
+  >]: ReturnType<typeof vi.fn<ChatSessionDeps[K]>>;
 } & { client: MemoryClient; queueLock: NonNullable<ChatSessionDeps['queueLock']> };
 
 const notFound = (path: string): Error => Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
@@ -6088,5 +6097,958 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
     expect(client.json(unreadPath)).toBeUndefined();
     expect(client.namesUnder(`/.tau/composers/chats/${projectId}`)).toEqual([]);
     store.release(chatId);
+  });
+});
+
+/*
+ * XD2: the chat owns intent and the device owns placement. `chat.json` syncs to
+ * every device, so a placement that names a host only on this one — `origin`,
+ * `desktop`, a loopback daemon — is this device's composer record, never the
+ * chat's.
+ */
+describe('ChatSessionStore — this device places the chat (XD2)', () => {
+  const projectId = 'proj_handoff';
+  const model = 'anthropic-claude-opus-4.8';
+
+  const placementsPath = `/.tau/composers/chats/${projectId}/placements.json`;
+  /* This tab reaches every device-relative placement unless a test says otherwise. */
+  const openLoaded = async (deps: ChatSessionDeps, chatId: string) => {
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies({ isPlacementOnThisDevice: async () => true, ...deps });
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
+    return { store, session };
+  };
+
+  const placementOnDisk = (deps: StubDeps, chatId: string): unknown =>
+    (deps.client.json(placementsPath) as { placements?: Record<string, unknown> } | undefined)?.placements?.[chatId];
+  const seedPlacement = (deps: StubDeps, chatId: string, placement: string): void => {
+    deps.client.files.set(
+      placementsPath,
+      new TextEncoder().encode(JSON.stringify({ version: 1, placements: { [chatId]: placement } })),
+    );
+  };
+
+  it('should write a local placement row with no device-relative hostId and keep no placement for it', async () => {
+    const chatId = 'chat_local_row';
+    const deps = createStubDeps();
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const { store, session } = await openLoaded(deps, chatId);
+
+    session.persistenceActorRef.send({
+      type: 'setActiveExecution',
+      execution: { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'desktop' },
+    });
+
+    await vi.waitFor(() => {
+      expect(deps.patchChat).toHaveBeenCalledWith(
+        chatId,
+        'activeExecution',
+        expect.objectContaining({ kind: 'tau', model: 'openai-gpt-5.5' }),
+      );
+    });
+    await settle();
+    expect(placementOnDisk(deps, chatId)).toBeUndefined();
+    store.release(chatId);
+  });
+
+  it('should keep an explicit daemon choice in this device’s composer record instead of chat.json', async () => {
+    const chatId = 'chat_origin_pin';
+    const deps = createStubDeps();
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const { store, session } = await openLoaded(deps, chatId);
+
+    session.persistenceActorRef.send({
+      type: 'setActiveExecution',
+      execution: { kind: 'tau', model, hostId: 'origin' },
+    });
+
+    await vi.waitFor(() => {
+      expect(placementOnDisk(deps, chatId)).toBe('origin');
+    });
+    expect(deps.patchChat).toHaveBeenCalledWith(
+      chatId,
+      'activeExecution',
+      expect.objectContaining({ kind: 'tau', model }),
+    );
+    expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
+      kind: 'tau',
+      model,
+      hostId: 'origin',
+    });
+
+    session.persistenceActorRef.send({ type: 'setActiveExecution', execution: { kind: 'tau', model } });
+    await vi.waitFor(() => {
+      expect(placementOnDisk(deps, chatId)).toBeUndefined();
+    });
+    store.release(chatId);
+  });
+
+  it('should reopen a chat on the placement this device chose for it, for the composer and the read connector', async () => {
+    const chatId = 'chat_reopened_pin';
+    const deps = createStubDeps();
+    seedPlacement(deps, chatId, 'origin');
+    deps.getChat.mockResolvedValue(
+      chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model }, activeKernel: 'replicad' }),
+    );
+    const { store, session } = await openLoaded(deps, chatId);
+
+    expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
+      kind: 'tau',
+      model,
+      hostId: 'origin',
+    });
+    await expect(store.getChatHostSettings(chatId)).resolves.toEqual({
+      activeExecution: { kind: 'tau', model, hostId: 'origin' },
+      activeKernel: 'replicad',
+    });
+    await expect(store.getChatExecution(chatId)).resolves.toEqual({ kind: 'tau', model, hostId: 'origin' });
+    store.release(chatId);
+  });
+
+  /* Another tab can change this chat's composer record; a choice made here is written, never skipped as unchanged. */
+  it('should write a placement change even when this session last saw the same placement', async () => {
+    const chatId = 'chat_cross_tab';
+    const deps = createStubDeps();
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const { store, session } = await openLoaded(deps, chatId);
+    /* Another tab pins the chat to the daemon that served it. */
+    seedPlacement(deps, chatId, 'origin');
+
+    session.persistenceActorRef.send({ type: 'setActiveExecution', execution: { kind: 'tau', model } });
+
+    await vi.waitFor(() => {
+      expect(placementOnDisk(deps, chatId)).toBeUndefined();
+    });
+    store.release(chatId);
+  });
+
+  /* The read connector asks for the chat's placement right after a choice; it never sees the one before it. */
+  it('should answer the host settings with the open session’s placement before its record write lands', async () => {
+    const chatId = 'chat_unwritten_pin';
+    const deps = createStubDeps();
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const { store, session } = await openLoaded(deps, chatId);
+    const held = Promise.withResolvers<void>();
+    const writeFile = deps.client.writeFile.bind(deps.client);
+    vi.spyOn(deps.client, 'writeFile').mockImplementation(async (path, data) => {
+      if (path === placementsPath) {
+        await held.promise;
+      }
+      return writeFile(path, data);
+    });
+
+    session.persistenceActorRef.send({
+      type: 'setActiveExecution',
+      execution: { kind: 'tau', model, hostId: 'origin' },
+    });
+
+    await expect(store.getChatHostSettings(chatId)).resolves.toMatchObject({
+      activeExecution: { kind: 'tau', model, hostId: 'origin' },
+    });
+    expect(placementOnDisk(deps, chatId)).toBeUndefined();
+    held.resolve();
+    await vi.waitFor(() => {
+      expect(placementOnDisk(deps, chatId)).toBe('origin');
+    });
+    store.release(chatId);
+  });
+
+  /* A pre-XD2 record's daemon is adopted once, on open, where it is reachable, and written out of the chat record. */
+  it('should adopt a reachable legacy placement once on open, through the chat store’s adopting write', async () => {
+    const chatId = 'chat_legacy_pin';
+    const deps = createStubDeps();
+    let legacy: string | undefined = 'origin';
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const adoptLegacyChatPlacement = vi.fn<NonNullable<ChatSessionDeps['adoptLegacyChatPlacement']>>(
+      async (_chatId, _projectId, accept) => {
+        if (legacy === undefined || !(await accept(legacy))) {
+          return undefined;
+        }
+        const adopted = legacy;
+        legacy = undefined;
+        return adopted;
+      },
+    );
+    const withLegacy = {
+      ...deps,
+      adoptLegacyChatPlacement,
+      isPlacementOnThisDevice: vi.fn(async (hostId: string) => hostId === 'origin'),
+    };
+    const { store, session } = await openLoaded(withLegacy, chatId);
+
+    expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
+      kind: 'tau',
+      model,
+      hostId: 'origin',
+    });
+    expect(placementOnDisk(deps, chatId)).toBe('origin');
+    expect(deps.patchChat).not.toHaveBeenCalled();
+
+    /* The person picks this device's local row: nothing adopts the old pin again on the next open. */
+    session.persistenceActorRef.send({ type: 'setActiveExecution', execution: { kind: 'tau', model } });
+    await vi.waitFor(() => {
+      expect(placementOnDisk(deps, chatId)).toBeUndefined();
+    });
+    store.release(chatId);
+    const reopened = await openLoaded(withLegacy, chatId);
+    expect(reopened.session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({ kind: 'tau', model });
+    reopened.store.release(chatId);
+  });
+
+  /* A device that already placed the chat never reads, or touches, the record's legacy host again. */
+  it('should leave the chat record’s legacy host alone once this device placed the chat', async () => {
+    const chatId = 'chat_legacy_already_placed';
+    const deps = createStubDeps();
+    seedPlacement(deps, chatId, 'origin');
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const adopt = vi.fn<NonNullable<ChatSessionDeps['adoptLegacyChatPlacement']>>(async () => 'origin');
+    const { store, session } = await openLoaded({ ...deps, adoptLegacyChatPlacement: adopt }, chatId);
+
+    expect(adopt).not.toHaveBeenCalled();
+    expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
+      kind: 'tau',
+      model,
+      hostId: 'origin',
+    });
+    store.release(chatId);
+  });
+
+  /* A legacy host that is not the placement this device chose since is not this device's to drop. */
+  it('should leave a legacy placement in the chat record that differs from this device’s own placement', async () => {
+    const chatId = 'chat_legacy_other';
+    const deps = createStubDeps();
+    seedPlacement(deps, chatId, 'loopback:http://127.0.0.1:4100');
+    let legacy: string | undefined = 'origin';
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const { store } = await openLoaded(
+      {
+        ...deps,
+        adoptLegacyChatPlacement: async (_chatId, _projectId, accept) => {
+          if (legacy === undefined || !(await accept(legacy))) {
+            return undefined;
+          }
+          legacy = undefined;
+          return 'origin';
+        },
+      },
+      chatId,
+    );
+
+    expect(legacy).toBe('origin');
+    expect(placementOnDisk(deps, chatId)).toBe('loopback:http://127.0.0.1:4100');
+    store.release(chatId);
+  });
+
+  it('should leave a legacy placement that names no host here unadopted and in the chat record', async () => {
+    const chatId = 'chat_legacy_elsewhere';
+    const deps = createStubDeps();
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const { store, session } = await openLoaded(
+      {
+        ...deps,
+        adoptLegacyChatPlacement: async (_chatId, _projectId, accept) =>
+          (await accept('origin')) ? 'origin' : undefined,
+        isPlacementOnThisDevice: async () => false,
+      },
+      chatId,
+    );
+
+    expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({ kind: 'tau', model });
+    expect(deps.patchChat).not.toHaveBeenCalled();
+    expect(placementOnDisk(deps, chatId)).toBeUndefined();
+    store.release(chatId);
+  });
+
+  /* A placement chosen in a tab that was handed a loopback daemon reaches every tab on the device; one that was not
+   * handed it runs the chat here and says so, and leaves the placement for the tab that can reach it. */
+  it('should run locally and hold this device’s placement in a tab that cannot reach it', async () => {
+    const chatId = 'chat_other_tab_pin';
+    const deps = createStubDeps();
+    seedPlacement(deps, chatId, 'loopback:http://127.0.0.1:4100');
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const { store, session } = await openLoaded({ ...deps, isPlacementOnThisDevice: async () => false }, chatId);
+
+    const { context } = session.persistenceActorRef.getSnapshot();
+    expect(context.activeExecution).toEqual({ kind: 'tau', model });
+    expect(context.heldPlacement).toBe('loopback:http://127.0.0.1:4100');
+    await expect(store.getChatHostSettings(chatId)).resolves.toMatchObject({ activeExecution: { kind: 'tau', model } });
+
+    session.persistenceActorRef.send({
+      type: 'setActiveExecution',
+      execution: { kind: 'tau', model: 'openai-gpt-5.5' },
+    });
+    await vi.waitFor(() => {
+      expect(deps.patchChat).toHaveBeenCalledWith(
+        chatId,
+        'activeExecution',
+        expect.objectContaining({ kind: 'tau', model: 'openai-gpt-5.5' }),
+      );
+    });
+    expect(placementOnDisk(deps, chatId)).toBe('loopback:http://127.0.0.1:4100');
+    store.release(chatId);
+  });
+
+  it('should stop holding this device’s placement once the person picks an execution elsewhere', async () => {
+    const chatId = 'chat_held_then_acp';
+    const deps = createStubDeps();
+    seedPlacement(deps, chatId, 'loopback:http://127.0.0.1:4100');
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const { store, session } = await openLoaded({ ...deps, isPlacementOnThisDevice: async () => false }, chatId);
+    expect(session.persistenceActorRef.getSnapshot().context.heldPlacement).toBe('loopback:http://127.0.0.1:4100');
+
+    session.persistenceActorRef.send({
+      type: 'setActiveExecution',
+      execution: { kind: 'acp', hostId: 'desktop', agentId: 'codex' },
+    });
+
+    expect(session.persistenceActorRef.getSnapshot().context.heldPlacement).toBeUndefined();
+    /* The choice replaces this device's placement for the chat: no tab reopens it on the held daemon. */
+    await vi.waitFor(() => {
+      expect(placementOnDisk(deps, chatId)).toBeUndefined();
+    });
+    store.release(chatId);
+  });
+
+  it('should apply a held placement once this tab can reach it', async () => {
+    const chatId = 'chat_held_then_reachable';
+    const deps = createStubDeps();
+    seedPlacement(deps, chatId, 'loopback:http://127.0.0.1:4100');
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    let reachable = false;
+    const listeners = new Set<() => void>();
+    const { store, session } = await openLoaded(
+      {
+        ...deps,
+        isPlacementOnThisDevice: async () => reachable,
+        onPlacementReachabilityChanged: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      },
+      chatId,
+    );
+    expect(session.persistenceActorRef.getSnapshot().context.heldPlacement).toBe('loopback:http://127.0.0.1:4100');
+
+    reachable = true;
+    for (const listener of listeners) {
+      listener();
+    }
+
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
+        kind: 'tau',
+        model,
+        hostId: 'loopback:http://127.0.0.1:4100',
+      });
+    });
+    expect(session.persistenceActorRef.getSnapshot().context.heldPlacement).toBeUndefined();
+    store.release(chatId);
+    expect(listeners.size).toBe(0);
+  });
+
+  /*
+   * Round 19: reach changes where the chat runs as the person's own pick does. When this tab comes to reach its held
+   * daemon (`tau open --desktop` handing it over), or learns after the load that it cannot reach the placement it
+   * applied, the chat's log observer moves to the host its turns now go to and its queued commands are marked
+   * unconfirmed, so that host's run shows; nothing is persisted.
+   */
+  it.each([
+    {
+      name: 'reaches its held daemon',
+      placement: 'loopback:http://127.0.0.1:4100',
+      knownAtLoad: false,
+      reachableAfter: true,
+    },
+    {
+      name: 'cannot reach the placement it applied at load',
+      placement: 'origin',
+      knownAtLoad: undefined,
+      reachableAfter: false,
+    },
+  ] as const)(
+    'should move the chat’s observer and mark its queued commands when this tab $name',
+    async ({ placement, knownAtLoad, reachableAfter }) => {
+      const chatId = `chat_observer_follows_${String(reachableAfter)}`;
+      const deps = createStubDeps();
+      seedPlacement(deps, chatId, placement);
+      deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+      const prepared = {
+        id: 'queued_message',
+        requestId: 'queued_request',
+        message: { id: 'queued_message', role: 'user', parts: [{ type: 'text', text: 'queued' }] },
+        command: {
+          type: 'start',
+          commandId: 'queued_request',
+          payload: {
+            chatId,
+            runId: 'queued_request',
+            trigger: 'submit',
+            message: { id: 'queued_message', role: 'user', content: 'queued' },
+          },
+        },
+      };
+      await deps.client.writeFile(
+        chatMessageQueuePath(projectId, chatId),
+        new TextEncoder().encode(JSON.stringify({ version: 1, items: [prepared] })),
+      );
+      let reachable: boolean = knownAtLoad ?? false;
+      const probe = Promise.withResolvers<boolean>();
+      const listeners = new Set<() => void>();
+      const store = new ChatSessionStore({ chatSession });
+      store.setDependencies({
+        ...deps,
+        isPlacementOnThisDevice: async () => (knownAtLoad === undefined ? probe.promise : reachable),
+        ...(knownAtLoad === undefined ? { isPlacementOnThisDeviceNow: () => undefined } : {}),
+        onPlacementReachabilityChanged: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      });
+      const session = store.acquire(chatId, projectId);
+      await vi.waitFor(() => {
+        expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+      });
+      const connected: Array<string | undefined> = [];
+      const closed: Array<string | undefined> = [];
+      /* As the project's connector does: the host this device runs the chat on now. */
+      const unpublish = store.publishProjectHostConnector(projectId, async (id) => {
+        const settings = await store.getChatHostSettings(id);
+        const hostId = settings?.activeExecution?.hostId;
+        connected.push(hostId);
+        return {
+          placement: { hostId },
+          catchUp: writerOwnedCatchUp,
+          read: vi.fn<AgentHostClient['read']>(),
+          subscribe: vi.fn<AgentHostClient['subscribe']>(() => vi.fn()),
+          hostCommand: vi.fn<AgentHostClient['hostCommand']>(),
+          close: vi.fn(async () => {
+            closed.push(hostId);
+          }),
+        };
+      });
+      const unobserve = store.observe(chatId, projectId);
+      try {
+        await vi.waitFor(() => {
+          expect(connected.length).toBeGreaterThan(0);
+        });
+        const before = connected.at(-1);
+
+        if (knownAtLoad === undefined) {
+          probe.resolve(reachableAfter);
+        } else {
+          reachable = reachableAfter;
+          for (const listener of listeners) {
+            listener();
+          }
+        }
+
+        const after = reachableAfter ? placement : undefined;
+        await vi.waitFor(() => {
+          expect(session.persistenceActorRef.getSnapshot().context.activeExecution?.hostId).toBe(after);
+          expect(connected.at(-1)).toBe(after);
+        });
+        expect(before).not.toBe(after);
+        await vi.waitFor(() => {
+          expect(closed).toContain(before);
+          expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toHaveProperty('items', [
+            { ...prepared, commandPlacement: 'unconfirmed' },
+          ]);
+        });
+        /* Reach is this tab's, not the chat's: neither the chat record nor the device's placement changes. */
+        expect(deps.patchChat).not.toHaveBeenCalledWith(chatId, 'activeExecution', expect.anything());
+        expect(placementOnDisk(deps, chatId)).toBe(placement);
+      } finally {
+        unpublish();
+        unobserve();
+        store.release(chatId);
+      }
+    },
+  );
+
+  /* A legacy host the chat store declines (the tab knows it cannot reach it) is never written as this device's. */
+  it('should write no placement for a legacy host the chat store declines', async () => {
+    const chatId = 'chat_legacy_drop_refused';
+    const deps = createStubDeps();
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const { store, session } = await openLoaded(
+      {
+        ...deps,
+        adoptLegacyChatPlacement: async () => undefined,
+      },
+      chatId,
+    );
+
+    expect(placementOnDisk(deps, chatId)).toBeUndefined();
+    expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({ kind: 'tau', model });
+    store.release(chatId);
+  });
+
+  /* A placement write that fails costs nothing: the chat record still names the legacy host, and the next open adopts
+   * it again. */
+  it('should run this session on an adopted host even when its placement cannot be written', async () => {
+    const chatId = 'chat_legacy_unwritable';
+    const deps = createStubDeps();
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    vi.spyOn(deps.client, 'writeFile').mockRejectedValue(new Error('quota'));
+    const { store, session } = await openLoaded(
+      {
+        ...deps,
+        adoptLegacyChatPlacement: async (_chatId, _projectId, accept) =>
+          (await accept('origin')) ? 'origin' : undefined,
+      },
+      chatId,
+    );
+
+    expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
+      kind: 'tau',
+      model,
+      hostId: 'origin',
+    });
+    store.release(chatId);
+  });
+
+  it('should not rewrite an unchanged placement, and read the placements once for the project', async () => {
+    const chatId = 'chat_same_pin';
+    const deps = createStubDeps();
+    seedPlacement(deps, chatId, 'origin');
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const { store, session } = await openLoaded(deps, chatId);
+    const writes = vi.spyOn(deps.client, 'writeFile');
+
+    session.persistenceActorRef.send({
+      type: 'setActiveExecution',
+      execution: { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'origin' },
+    });
+    await vi.waitFor(() => {
+      expect(deps.patchChat).toHaveBeenCalledWith(
+        chatId,
+        'activeExecution',
+        expect.objectContaining({ kind: 'tau', model: 'openai-gpt-5.5' }),
+      );
+    });
+    expect(writes.mock.calls.filter(([path]) => path === placementsPath)).toHaveLength(0);
+
+    const reads = vi.spyOn(deps.client, 'readFile');
+    await Promise.all([store.getChatHostSettings(chatId), store.getChatHostSettings(chatId)]);
+    expect(reads.mock.calls.filter(([path]) => path === placementsPath).length).toBeLessThanOrEqual(1);
+    store.release(chatId);
+  });
+
+  /*
+   * Opening a chat never waits on the network, and never falls back to this tab while it does not know: a placement
+   * whose reach is not known yet is applied, so admission waits for that host, and it is held only once the answer
+   * says this tab cannot reach it.
+   */
+  it.each([
+    [true, { kind: 'tau', model, hostId: 'origin' }, undefined],
+    [false, { kind: 'tau', model }, 'origin'],
+  ] as const)(
+    'should apply a placement whose reach is unknown at load, and settle it when the probe answers %s',
+    async (answer, settled, held) => {
+      const chatId = `chat_probe_${String(answer)}`;
+      const deps = createStubDeps();
+      seedPlacement(deps, chatId, 'origin');
+      deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+      const probe = Promise.withResolvers<boolean>();
+      const { store, session } = await openLoaded(
+        {
+          ...deps,
+          isPlacementOnThisDevice: async () => probe.promise,
+          isPlacementOnThisDeviceNow: () => undefined,
+        },
+        chatId,
+      );
+      expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
+        kind: 'tau',
+        model,
+        hostId: 'origin',
+      });
+      expect(session.persistenceActorRef.getSnapshot().context.heldPlacement).toBeUndefined();
+
+      probe.resolve(answer);
+
+      await vi.waitFor(() => {
+        expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual(settled);
+      });
+      expect(session.persistenceActorRef.getSnapshot().context.heldPlacement).toBe(held);
+      store.release(chatId);
+    },
+  );
+
+  /* A pick made while discovery answers wins: the late answer adopts nothing over it. */
+  it('should not adopt a legacy placement over a choice made while its reach was being asked', async () => {
+    const chatId = 'chat_legacy_pick_during_probe';
+    const deps = createStubDeps();
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const probe = Promise.withResolvers<boolean>();
+    const { store, session } = await openLoaded(
+      {
+        ...deps,
+        adoptLegacyChatPlacement: async (_chatId, _projectId, accept) =>
+          (await accept('origin')) ? 'origin' : undefined,
+        isPlacementOnThisDevice: async () => probe.promise,
+        isPlacementOnThisDeviceNow: () => undefined,
+      },
+      chatId,
+    );
+    const picked = { kind: 'tau', model: 'openai-gpt-5.5' } as const;
+    session.persistenceActorRef.send({ type: 'setActiveExecution', execution: picked });
+    await vi.waitFor(() => {
+      expect(deps.patchChat).toHaveBeenCalledWith(chatId, 'activeExecution', picked);
+    });
+
+    probe.resolve(true);
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual(picked);
+    expect(placementOnDisk(deps, chatId)).toBeUndefined();
+    store.release(chatId);
+  });
+
+  /* Every placements write, the project manager's for a new chat included, is seen by the next read at once. */
+  it('should read a placement another writer just kept, without waiting out the read reuse', async () => {
+    const chatId = 'chat_placement_written_elsewhere';
+    const deps = createStubDeps();
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies({ isPlacementOnThisDevice: async () => true, ...deps });
+    await expect(store.getChatExecution(chatId)).resolves.toEqual({ kind: 'tau', model });
+
+    await writeChatPlacement({ client: deps.client, projectId, chatId, placement: 'origin' });
+
+    await expect(store.getChatExecution(chatId)).resolves.toEqual({ kind: 'tau', model, hostId: 'origin' });
+  });
+
+  /* One read path: a chat opened right after a listing read its project's placements reads them no second time. */
+  it('should open a chat on the placements a read moments before already holds', async () => {
+    const chatId = 'chat_open_after_listing';
+    const deps = createStubDeps();
+    seedPlacement(deps, chatId, 'origin');
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies({ isPlacementOnThisDevice: async () => true, ...deps });
+    await store.getChatHostSettings(chatId);
+    const reads = vi.spyOn(deps.client, 'readFile');
+
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
+
+    expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
+      kind: 'tau',
+      model,
+      hostId: 'origin',
+    });
+    expect(reads.mock.calls.filter(([path]) => path === placementsPath)).toHaveLength(0);
+    store.release(chatId);
+  });
+
+  /* A reach change heard while the chat loads is not lost: the held placement is checked again once it is held. */
+  it('should apply a placement whose host became reachable while the chat was loading', async () => {
+    const chatId = 'chat_reach_during_load';
+    const deps = createStubDeps();
+    seedPlacement(deps, chatId, 'origin');
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const listeners = new Set<() => void>();
+    let asks = 0;
+    const { store, session } = await openLoaded(
+      {
+        ...deps,
+        isPlacementOnThisDeviceNow: () => undefined,
+        onPlacementReachabilityChanged: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+        isPlacementOnThisDevice: async () => {
+          asks += 1;
+          if (asks === 1) {
+            /* The daemon comes up right after the first answer, before the load has held the placement. */
+            queueMicrotask(() => {
+              for (const listener of listeners) {
+                listener();
+              }
+            });
+            return false;
+          }
+          return true;
+        },
+      },
+      chatId,
+    );
+
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
+        kind: 'tau',
+        model,
+        hostId: 'origin',
+      });
+    });
+    expect(session.persistenceActorRef.getSnapshot().context.heldPlacement).toBeUndefined();
+    store.release(chatId);
+  });
+
+  /* XD2: a legacy origin placement opened past the reuse interval of a failed probe is kept and asked about again. */
+  it('should keep a legacy origin placement opened more than 30 s after a failed probe, and ask the origin again', async () => {
+    const placementModule = await import('#lib/agent-host-placement.js');
+    vi.useFakeTimers({ now: Date.parse('2026-10-23T10:00:00.000Z'), toFake: ['Date'] });
+    vi.stubGlobal('location', { origin: 'http://127.0.0.1:7777' });
+    const fetch = vi.fn<typeof globalThis.fetch>().mockRejectedValueOnce(new TypeError('network down'));
+    fetch.mockResolvedValue(
+      new Response(JSON.stringify({ v: 1, agent: true, label: 'Studio', workspaceRoot: '/work' }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetch);
+    placementModule.resetOriginAgentHostAnswer();
+    try {
+      await expect(placementModule.isPlacementOnThisDevice('origin')).resolves.toBe(false);
+      vi.setSystemTime(Date.parse('2026-10-23T10:01:00.000Z'));
+      const chatId = 'chat_legacy_after_failed_probe';
+      const deps = createStubDeps();
+      deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+      let legacy: string | undefined = 'origin';
+      const { store, session } = await openLoaded(
+        {
+          ...deps,
+          isPlacementOnThisDevice: placementModule.isPlacementOnThisDevice,
+          isPlacementOnThisDeviceNow: placementModule.isPlacementOnThisDeviceNow,
+          adoptLegacyChatPlacement: async (_chatId, _projectId, accept) => {
+            if (legacy === undefined || !(await accept(legacy))) {
+              return undefined;
+            }
+            const adopted = legacy;
+            legacy = undefined;
+            return adopted;
+          },
+        },
+        chatId,
+      );
+
+      await vi.waitFor(() => {
+        expect(placementOnDisk(deps, chatId)).toBe('origin');
+      });
+      expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
+        kind: 'tau',
+        model,
+        hostId: 'origin',
+      });
+      expect(fetch).toHaveBeenCalledTimes(2);
+      store.release(chatId);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+      placementModule.resetOriginAgentHostAnswer();
+    }
+  });
+
+  it('should not hold the load on finishing a half-done legacy adoption', async () => {
+    const chatId = 'chat_adoption_slow';
+    const deps = createStubDeps();
+    seedPlacement(deps, chatId, 'origin');
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const adopting = Promise.withResolvers<undefined>();
+    const { store, session } = await openLoaded(
+      { ...deps, adoptLegacyChatPlacement: async () => adopting.promise },
+      chatId,
+    );
+
+    expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    adopting.resolve(undefined);
+    store.release(chatId);
+  });
+
+  it('should keep a paired device id in chat.json, where every device can reach it', async () => {
+    const chatId = 'chat_paired';
+    const deps = createStubDeps();
+    seedPlacement(deps, chatId, 'origin');
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const { store, session } = await openLoaded(deps, chatId);
+
+    const paired = { kind: 'tau', model, hostId: 'dev_studio_mini' } as const;
+    session.persistenceActorRef.send({ type: 'setActiveExecution', execution: paired });
+
+    await vi.waitFor(() => {
+      expect(deps.patchChat).toHaveBeenCalledWith(chatId, 'activeExecution', paired);
+    });
+    await vi.waitFor(() => {
+      expect(placementOnDisk(deps, chatId)).toBeUndefined();
+    });
+    store.release(chatId);
+  });
+});
+
+/* XD3: the page names another device's run as every agent host does, by the segment's device id. */
+describe('ChatSessionStore — a run on another device (XD3)', () => {
+  /* Round 17: the page measures a run from when its segment last changed on this device, as the agent host does. */
+  it('should measure a foreign run from its segment’s modification time, as the agent host reads it', async () => {
+    const projectId = 'project_run_received';
+    const chatId = 'chat_run_received';
+    const receivedAt = Date.now() - 20 * 60 * 1000;
+    const client = Object.assign(createMemoryClient(), {
+      stat: vi.fn(async (path: string) => ({ size: 0, mtimeMs: path.endsWith('.jsonl') ? receivedAt : 0 })),
+    });
+    const row = (sequence: number, state: string) =>
+      `${JSON.stringify({ version: 1, leaderEpoch: 'desk', sequence, recordedAt: new Date(receivedAt).toISOString(), runId: 'run-received', type: 'run.lifecycle', state })}\n`;
+    await client.writeFile(
+      `/projects/${projectId}/.tau/chats/${chatId}/events/device-desktop.jsonl`,
+      new TextEncoder().encode(row(0, 'admitted') + row(1, 'running')),
+    );
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies(createStubDeps(client));
+    const unobserve = store.observe(chatId, projectId);
+    store.acquire(chatId, projectId);
+
+    await store.refreshRemoteSegments(chatId, projectId);
+
+    await vi.waitFor(() => {
+      expect(store.getProjection(chatId)?.remote?.unsettled).toEqual([
+        expect.objectContaining({ runId: 'run-received', observedAt: receivedAt }),
+      ]);
+    });
+    store.release(chatId);
+    unobserve();
+  });
+
+  /*
+   * Rounds 18 and 19: quiet is evidenced by pulls, as the agent host reads it. The page reads this device's record of
+   * its pulls beside the segments, so a run quiet here for twenty minutes holds the chat until pulls found its segment
+   * as it is for more than the bound, and the page asks its project for pulls meanwhile.
+   */
+  it('should hold a foreign run until pulls found it quiet past the bound, and ask the project for them', async () => {
+    const projectId = 'project_run_pulled';
+    const chatId = 'chat_run_pulled';
+    const receivedAt = Date.now() - 20 * 60 * 1000;
+    const client = Object.assign(createMemoryClient(), {
+      stat: vi.fn(async (path: string) => ({ size: 0, mtimeMs: path.endsWith('.jsonl') ? receivedAt : 0 })),
+    });
+    const events = `/projects/${projectId}/.tau/chats/${chatId}/events`;
+    const row = (sequence: number, state: string) =>
+      `${JSON.stringify({ version: 1, leaderEpoch: 'desk', sequence, recordedAt: new Date(receivedAt).toISOString(), runId: 'run-pulled', type: 'run.lifecycle', state })}\n`;
+    const segment = new TextEncoder().encode(row(0, 'admitted') + row(1, 'running'));
+    await client.writeFile(`${events}/device-desktop.jsonl`, segment);
+    const record = (quiet: number) =>
+      new TextEncoder().encode(
+        `${String(Date.now())}\ndevice-desktop.jsonl ${String(segment.byteLength)} ${String(quiet)}`,
+      );
+    await client.writeFile(`${events}/pulled-at`, record(60_000));
+    const pulls: string[] = [];
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies({
+      ...createStubDeps(client),
+      pullRemote: async (id) => {
+        pulls.push(id);
+        return true;
+      },
+    });
+    const unobserve = store.observe(chatId, projectId);
+    store.acquire(chatId, projectId);
+
+    await store.refreshRemoteSegments(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(store.getProjection(chatId)?.remote?.unsettled).toEqual([
+        expect.objectContaining({ runId: 'run-pulled', observedAt: receivedAt, pulledQuiet: 60_000 }),
+      ]);
+    });
+    const projection = store.getProjection(chatId)!;
+    expect(selectRunElsewhere(projection, Date.now())).toMatchObject({ runId: 'run-pulled' });
+    expect(selectRunElsewhereAwaitsPull(projection, Date.now())).toBe(true);
+    await store.requestRemotePull(chatId);
+    expect(pulls).toEqual([projectId]);
+
+    /* Pulls found nothing newer for more than the bound: the run no longer holds. */
+    await client.writeFile(`${events}/pulled-at`, record(20 * 60 * 1000));
+    await store.refreshRemoteSegments(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(selectRunElsewhere(store.getProjection(chatId)!, Date.now())).toBeUndefined();
+    });
+    store.release(chatId);
+    unobserve();
+  });
+
+  /*
+   * Round 27: where this device cannot pull the chat (chat sync off, no remote, no record identity), the pull the page
+   * asks for is refused CHAT_NOT_SHARED. The pulls a quiet run awaits can then never come, so it no longer holds the
+   * chat and the composer sends, as the host's fence carries its turn; a run quiet here for less than the ask interval
+   * still holds it.
+   */
+  it.each([
+    { quietFor: 20 * 60 * 1000, holds: false },
+    { quietFor: 60 * 1000, holds: true },
+  ])(
+    'should pass a run quiet for $quietFor ms only past the ask interval where this device’s pulls are refused',
+    async ({ quietFor, holds }) => {
+      const projectId = 'project_run_unpullable';
+      const chatId = `chat_run_unpullable_${String(quietFor)}`;
+      const receivedAt = Date.now() - quietFor;
+      const client = Object.assign(createMemoryClient(), {
+        stat: vi.fn(async (path: string) => ({ size: 0, mtimeMs: path.endsWith('.jsonl') ? receivedAt : 0 })),
+      });
+      const row = (sequence: number, state: string) =>
+        `${JSON.stringify({ version: 1, leaderEpoch: 'desk', sequence, recordedAt: new Date(receivedAt).toISOString(), runId: 'run-unpullable', type: 'run.lifecycle', state })}\n`;
+      await client.writeFile(
+        `/projects/${projectId}/.tau/chats/${chatId}/events/device-desktop.jsonl`,
+        new TextEncoder().encode(row(0, 'admitted') + row(1, 'running')),
+      );
+      const asked: Array<readonly [string, string]> = [];
+      const store = new ChatSessionStore({ chatSession });
+      store.setDependencies({
+        ...createStubDeps(client),
+        pullRemote: async (id, chat) => {
+          asked.push([id, chat]);
+          return false;
+        },
+      });
+      const unobserve = store.observe(chatId, projectId);
+      store.acquire(chatId, projectId);
+      await store.refreshRemoteSegments(chatId, projectId);
+      await vi.waitFor(() => {
+        expect(selectRunElsewhere(store.getProjection(chatId)!, Date.now())).toMatchObject({ runId: 'run-unpullable' });
+      });
+
+      await store.requestRemotePull(chatId);
+
+      expect(asked).toEqual([[projectId, chatId]]);
+      const elsewhere = selectRunElsewhere(store.getProjection(chatId)!, Date.now());
+      if (holds) {
+        expect(elsewhere).toMatchObject({ runId: 'run-unpullable' });
+      } else {
+        expect(elsewhere).toBeUndefined();
+      }
+      store.release(chatId);
+      unobserve();
+    },
+  );
+
+  it('should name the device a foreign run is on without the segment file’s extension', async () => {
+    const projectId = 'project_run_elsewhere';
+    const chatId = 'chat_run_elsewhere';
+    const client = createMemoryClient();
+    const recordedAt = new Date().toISOString();
+    const row = (sequence: number, state: string) =>
+      `${JSON.stringify({ version: 1, leaderEpoch: 'desk', sequence, recordedAt, runId: 'run-desk', type: 'run.lifecycle', state })}\n`;
+    await client.writeFile(
+      `/projects/${projectId}/.tau/chats/${chatId}/events/device-desktop.jsonl`,
+      new TextEncoder().encode(row(0, 'admitted') + row(1, 'running')),
+    );
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies(createStubDeps(client));
+    const unobserve = store.observe(chatId, projectId);
+    store.acquire(chatId, projectId);
+
+    await store.refreshRemoteSegments(chatId, projectId);
+
+    await vi.waitFor(() => {
+      expect(store.getProjection(chatId)?.remote?.unsettled).toEqual([
+        expect.objectContaining({ deviceId: 'device-desktop', runId: 'run-desk', state: 'running' }),
+      ]);
+    });
+    store.release(chatId);
+    unobserve();
   });
 });

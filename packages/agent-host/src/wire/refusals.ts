@@ -44,6 +44,18 @@ export const refusals = {
   // ── host: admission, run and command answers (W7 owns the producers) ─────────────────────────
   /** Another run holds the chat; `details.state` names it. Re-send the same key once it settles. */
   CHAT_RUN_LIVE: { owner: 'host', retry: 'wait' },
+  /**
+   * Another device runs this chat and has not settled the run (XD3); `details` names its `deviceId`, `runId`, `state`
+   * and `staleAt`. Re-send the same key once sync brings its settlement, or after `staleAt`, when it no longer holds
+   * the chat. A run is never moved between devices in flight, and this device cannot stop it.
+   */
+  RUN_ACTIVE_ON_ANOTHER_DEVICE: { owner: 'host', retry: 'wait' },
+  /**
+   * Another device found this paused run abandoned, said its turn and went on with the chat (XD3), so an approval of
+   * its request is not applied: the tool would act on a project that device has changed since. Deny the request, then
+   * send what is wanted next.
+   */
+  RUN_TAKEN_OVER: { owner: 'host', retry: 'never' },
   /** A different command id reused this run id; mint a new run id. A re-send with the original key answers `replayed`. */
   RUN_ID_TAKEN: { owner: 'host', retry: 'never' },
   /** Nothing on this chat can be continued; the card offers "Try again" (a re-send or a rewind). */
@@ -52,6 +64,11 @@ export const refusals = {
   RUN_ABANDONED: { owner: 'host', retry: 'resume' },
   /** This chat admitted no run. */
   NO_RUN_ADMITTED: { owner: 'host', retry: 'never' },
+  /**
+   * A Stop for this chat arrived while this command still waited on its checks: the Stop is applied at once, and the
+   * commands that were waiting are not run. Send it again if it is still wanted.
+   */
+  COMMAND_SUPERSEDED: { owner: 'host', retry: 'never' },
   /** A rewinding trigger did not retain an unchanged strict history prefix. */
   HISTORY_PREFIX_INVALID: { owner: 'host', retry: 'never' },
   /** A second, differing settlement for one attempt. */
@@ -121,6 +138,11 @@ export const refusals = {
   STORAGE_SHORT_WRITE: { owner: 'log', retry: 'never' },
   /** Another writer holds the log; the OPFS open failure moves here from `STORAGE_NOT_WRITABLE`. */
   WRITER_LOCKED: { owner: 'log', retry: 'wait' },
+  /**
+   * Another device's segment of this chat exists but could not be read (XD3), so whether that device runs the chat is
+   * unknown and the cross-device fence holds. Re-send the same key; the next admission reads the segments again.
+   */
+  SEGMENTS_UNREADABLE: { owner: 'log', retry: 'wait' },
 
   // ── channel: `@taucad/rpc` ──────────────────────────────────────────────────────────────────
   /** Closed here. On a command: effect unknown, re-send the same key. */
@@ -275,6 +297,13 @@ export const refusals = {
   CAS_LOST: { owner: 'revisions', retry: 'wait' },
   LEASE_UNAVAILABLE: { owner: 'revisions', retry: 'never' },
   CHECKOUT_UNKNOWN: { owner: 'revisions', retry: 'never' },
+  /**
+   * The chat's branch is not on this device yet (XD4): its checkout was opened on another device and no branch here
+   * derives it, and a remote may still bring it. A `wait`: never final. Placement runs after the admission row, so the
+   * run ends `RUN_ABANDONED` with this code in its details (no ending row carries a `wait` code, RA-R1), and that
+   * ending offers Resume, which places the turn again once sync brings the branch.
+   */
+  BRANCH_UNAVAILABLE: { owner: 'revisions', retry: 'wait' },
   /** The branch or publish machine is busy with another verb (W5 RM-S8). */
   REVISIONS_BUSY: { owner: 'revisions', retry: 'wait' },
   /** Another root holds the turn's lease (W5, RV2-F1). */

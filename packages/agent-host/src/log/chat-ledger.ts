@@ -17,6 +17,7 @@ import type {
   ProjectionSourceHealth,
 } from '#log/projection-facts.js';
 import type { ReadRow } from '#log/serialization.js';
+import { isAbandonedTurn } from '#log/event-types.js';
 import { isResumableRun } from '#log/resumable.js';
 import lifecycleTable from '#log/run-lifecycle.legality.json' with { type: 'json' };
 import operationTable from '#log/run-operation.legality.json' with { type: 'json' };
@@ -340,7 +341,11 @@ const createFold = (ledger: ChatLedger) => {
       return;
     }
     const kind = internalKind(message);
-    if (kind === 'external-agent') {
+    /* The person's turn, appended as its run settled before committing it (XD3): the turn is in the history. A copy of
+     * an external agent's turn keeps its marker for the handoff, and says nothing more of the run. */
+    if (isAbandonedTurn(message)) {
+      entry.committed = true;
+    } else if (kind === 'external-agent') {
       entry.kind = 'external';
       entry.committed = true;
       const prompted = message.metadata?.tauInternal?.['acpPromptedRequestId'];

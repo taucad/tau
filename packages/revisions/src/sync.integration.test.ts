@@ -186,7 +186,7 @@ const device = async (
       policy: tauPathPolicy,
       allowRoot: (candidate) => candidate === root,
       authority,
-    });
+    }).close;
     const channel = new NodeFsChannel(toNodeFsPort(port1));
     filesystem = new NodeFsProviderClient(channel, root);
     authorityCleanups.push(async () => {

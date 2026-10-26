@@ -229,7 +229,7 @@ describe('real filesystem authority', () => {
         authority,
         policy: tauPathPolicy,
         allowRoot: (candidate) => candidate === root,
-      });
+      }).close;
       const channel = new NodeFsChannel(ports.port1);
       return { ports, channel, stop, provider: new NodeFsProviderClient(channel, root) };
     };

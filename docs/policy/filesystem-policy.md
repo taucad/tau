@@ -77,6 +77,8 @@ Every rooted bridge open names its `root` and `consumer` (`'user'`, `'agent'` or
 
 A host states one `PathPolicy`, beside `handlerForRoot` on `exposeFileSystem` and beside `allowRoot` on `serveNodeFsProvider`; both are required. The bridge rebases it on the connection's root and hands it to `handlerForRoot`, so the view a masked consumer reads and the change stream it hears are masked by the same object. Hosts do not compute a second `policyAtRoot` of their own.
 
+`serveNodeFsProvider` returns the served owner, `NodeFsServer { run, close }`. `close` is the disposer. `run` is for trusted in-process host composition only, never a renderer port: it holds one admitted root's whole-root `NodeFsAuthorityHost` claim and hands the operation a scope of rooted reads, checked file writes and the checked entry operations `renameChecked`, `mkdirChecked` and `rmdirChecked`. The scope is the unmasked rooted primitive, so a caller that publishes into it owns its own protected-path refusal. A caller never awaits a wire mutation of the same root inside `run`; that waits on the held claim forever.
+
 Open the `'agent'` view for agent tools and every executor of agent-authored project code: the kernel runtime, GeoSpec runner, Quick Look runtime, host-daemon runtime child and desktop `runtimeFileSystem` route. This view is defence in depth, not a sandbox: Node and desktop execute a real Node module that can import `node:fs`, and a browser worker can reach browser storage APIs directly. Use an OS or container sandbox when project code is adversarial.
 
 ## Rooted runtime filesystem rules

@@ -12,6 +12,9 @@ the code through the committed goldens `corpus/*.expected`:
                                                                              `reopens`, `gateCode`, `stamp`, tables
   host/tau-agent-host.ts     appendChatRows (M1's append) of a settlement    → `hostSettle`
   log/segments.ts            mergeLogSegments (CL-R14)                        → `merge`
+  log/foreign-runs.ts        foreignRunStanding (XD3)                         → `standing`
+  revisions chat-ref.ts      notePull (XD3, round 19)                         → `notePull`, `recordOf`
+  host/tau-agent-host.ts     the chat's terms (round 19)                      → `Terms`
 
 Every list is in PHYSICAL (file) order. A row is the trace's `<term> <seq> <run> <kind> <arg> <ms> <epoch>
 <attempt>`: `term` is the `leaderEpoch` `e<NN>`, `epoch`/`attempt` 0 mean absent, and `(kind, arg)` names the
@@ -23,8 +26,14 @@ namespace ChatLedger
 
 /-! ## Rows -/
 
+/-- `W` is the person's turn appended as its run settled before committing it (`abandonedTurnOf`): a user
+`message.appended` row whose message id `w-<arg>` names its content, so two devices that append it append the same
+message. `C` is that turn as the run's own device said it (a person's `message.appended` with no internal kind): the
+row a copy `W` repeats, which merges after the copy when its device's clock ran far ahead. `K` is a history rewind
+that retains nothing (`history.rewound` with no retained ids): it removes every message the history holds. `C` and `K`
+rows appear only in merge traces. -/
 inductive Kind where
-  | L | S | H | O | R | P | V | M | U
+  | L | S | H | O | R | P | V | M | U | W | C | K
   deriving DecidableEq, Repr, Inhabited
 
 structure Row where
@@ -50,6 +59,7 @@ def canonArg : Kind → Nat → Nat
   | .M, a => if a < 4 then a else 4 + a % 4
   | .V, a => a % 16
   | .U, a => min a 2
+  | .K, _ => 0
   | _, a => a
 
 /-- The row's canonical form (`canonicalJson`): two rows are the same row iff their `fp`s are equal. -/
@@ -166,29 +176,45 @@ def Seq.commit (S : Seq) (e : Row) : Seq :=
 
 /-! ## reducer.ts: the history rules the generated rows reach -/
 
-/-- A provider message id: `m-<term>-<seq>` (assistant reply) or `u-<term>-<seq>-<arg>` (committed user turn). -/
+/-- A provider message id: `m-<term>-<seq>` (assistant reply), `u-<term>-<seq>-<arg>` (committed user turn) or
+`w-<arg>` (a person's turn appended as its run settled, the same id from every device that appends it, and the id of
+the run's own row of that turn). -/
 def msgId (e : Row) : Option (Nat × Nat × Nat × Nat) :=
   match e.kind with
   | .M => some (0, e.term, e.seq, 0)
   | .H => some (1, e.term, e.seq, e.arg)
+  | .W => some (2, e.arg, 0, 0)
+  | .C => some (2, e.arg, 0, 0)
   | _ => none
 
-/-- `knownMessageIds`, `preparedInvocations`, `settledInvocations` (attempt ids `a<n>` as `n`). -/
+/-- `knownMessageIds`, `preparedInvocations`, `settledInvocations` (attempt ids `a<n>` as `n`), and `copiedTurns`:
+the ids the history first took from a copy `W`. `ids` is also the history's messages, in order: every row these traces
+reach that removes a message (`K`) removes it from both. `copied` is never cleared, a rewind's included, and keeps
+each turn with the run whose copy it was: a later run's row of the same turn (a Retry) is a new message. -/
 structure Hist where
   ids : List (Nat × Nat × Nat × Nat) := []
   prepared : List Nat := []
   settled : List Nat := []
+  copied : List ((Nat × Nat × Nat × Nat) × Nat) := []
 
-/-- `transitionOf`: `none` is `HISTORY_INVALID`. -/
+/-- `transitionOf`: `none` is `HISTORY_INVALID`. A person's turn said again is the same message (`turnSaidAgain`, XD3):
+a copy `W` of a turn the history holds, or any row of that run's turn it first took from a copy, `W` or the run's own
+`C`, changes nothing, whether that turn is still held or a rewind has removed it since (round 17). Another run's row of
+the turn after a rewind removed it (a Retry re-admits the person's message) is the message again. A rewind `K` removes
+every message. -/
 def Hist.transition (h : Hist) (e : Row) : Option Hist :=
   match msgId e with
-  | some id => if id ∈ h.ids then none else some { h with ids := h.ids ++ [id] }
+  | some id =>
+    if (e.kind = .W ∨ e.kind = .C) ∧ (id, e.run) ∈ h.copied then some h
+    else if id ∈ h.ids then (if e.kind = .W then some h else none)
+    else some { h with ids := h.ids ++ [id], copied := if e.kind = .W then h.copied ++ [(id, e.run)] else h.copied }
   | none =>
     match e.kind with
     | .P => if e.arg % 4 ∈ h.prepared then none else some { h with prepared := h.prepared ++ [e.arg % 4] }
     | .V =>
       if e.arg % 4 ∈ h.prepared ∧ e.arg % 4 ∉ h.settled then some { h with settled := h.settled ++ [e.arg % 4] }
       else none
+    | .K => some { h with ids := [] }
     | _ => some h
 
 structure Reducer where
@@ -558,6 +584,9 @@ def Ledger.known (L : Ledger) (e : Row) : Ledger :=
         inv.run (e.arg % 4)
   | .M => if e.arg < 4 then L.markShown (e.arg % 4) else L
   | .U => L
+  | .W => let en := L.entry e.run; L.put e.run { en with committed := true }
+  | .C => L
+  | .K => L
 
 /-- The term rules' bookkeeping for a row that is not a redelivery: its anomaly, its term, the position. -/
 def Ledger.book (L0 : Ledger) (e : Row) (broken : Bool) (ep : Nat) : Ledger :=
@@ -783,6 +812,414 @@ def hostSettle (F : File) (run c : Nat) : Settled :=
       | .refused r => .refused r
   | c => .code c
 
+/-! ## tau-agent-host.ts: a command that runs or continues a run, across devices (XD1, XD3; round 17) -/
+
+/-- The commands admitted across devices: a turn's start, a Resume, and an approval of a paused run's request (a
+denial or a cancellation ends the run, and a Stop is never held back). -/
+inductive Verb where
+  | start | resume | approve
+  deriving DecidableEq, Repr
+
+/-- `TermAdmission`: refused `RUN_TAKEN_OVER`; admitted under a new term opened before its rows (`rowsTerm`); or admitted
+under the term the incarnation holds. -/
+inductive Admission where
+  | takenOver | newTerm | sameTerm
+  deriving DecidableEq, Repr
+
+/-- `termAdmission(verb, {takenOver, foreignWrote})`. `takenOver`: another device's segment says the run's turn
+(`runTakenOver`): it found the run abandoned and went on, so an approval would let the tool act on a project that
+device has changed since. `wrote`: this device read another device's rows since the incarnation's term began
+(`foreignWroteSinceTermBegan`), so rows under that term would merge ahead of them. An approval continues the run: past
+the takeover it is admitted exactly as a Resume is. -/
+def admission (v : Verb) (takenOver wrote : Bool) : Admission :=
+  if v = .approve ∧ takenOver = true then .takenOver
+  else if wrote then .newTerm else .sameTerm
+
+/-- The term an admitted command's rows are written under (round 18): `held` is the term the chat's incarnation holds,
+`fresh` one this device opens after what it read. A new term is opened before the command's rows whether or not the
+incarnation holds its run's slot (an external agent waiting on its person does), and never falls back to the old one;
+nothing here closes the incarnation. -/
+def rowsTerm (a : Admission) (_slotHeld : Bool) (held fresh : Nat) : Nat :=
+  match a with
+  | .newTerm => fresh
+  | _ => held
+
+/-! ## tau-agent-host.ts: a chat's terms on this host (round 19) -/
+
+/-- A chat's terms while its incarnation stays open (`ChatTerms`): `held` is the incarnation's own term; `opened` a term
+this host opened in its place, which a row written under it committed; `proposed` the terms admitted commands opened
+for their runs' rows, each `(admission, run, term)` (round 22: keyed by the admission that proposed it, never by the
+command's id, which a re-sent copy shares), which only that run's first row (never a heartbeat) commits;
+`wrote` the term this host last wrote the chat under. -/
+structure Terms where
+  held : Nat
+  opened : Option Nat := none
+  proposed : List (Nat × Nat × Nat) := []
+  wrote : Option Nat := none
+  deriving DecidableEq, Repr
+
+/-- `chatTermOf`: the chat's term now, the one heartbeats and the term check read. A proposal is no part of it. -/
+def Terms.term (s : Terms) : Nat := s.opened.getD s.held
+
+/-- The proposal a batch of `run`'s rows (`heartbeat`: a lone `run.heartbeat`) commits: the first for its run. -/
+def Terms.taken (s : Terms) (run : Nat) (heartbeat : Bool) : Option (Nat × Nat × Nat) :=
+  if heartbeat then none else s.proposed.find? (fun p => p.2.1 == run)
+
+/-- `writtenTermOf`: the term a batch is written under. -/
+def Terms.rowsTerm (s : Terms) (run : Nat) (heartbeat : Bool) : Nat :=
+  match s.taken run heartbeat with
+  | some p => p.2.2
+  | none => s.term
+
+inductive TermOp where
+  /-- An admission opens `fresh` for its `run`'s rows (`rehome`). -/
+  | propose (admission run fresh : Nat)
+  /-- A batch of `run`'s rows is written. -/
+  | write (run : Nat) (heartbeat : Bool)
+  /-- The admitted command is answered: `applied`, or refused or superseded. -/
+  | answer (admission : Nat) (applied : Bool)
+  deriving DecidableEq, Repr
+
+/-- `termsAfterWrite` (round 20): a batch of `run`'s rows written from `begun`, the terms as its write began
+(`termWriteOf`), ends on `s`, the terms now. It commits exactly what it decided as it began: the proposal it was written
+under, which is the chat's term from then on, and the term it was written under as the one this host last wrote, however
+many proposals were made or withdrawn while it was written. -/
+def Terms.finish (s begun : Terms) (run : Nat) (heartbeat : Bool) : Terms :=
+  match begun.taken run heartbeat with
+  | some p => { s with opened := some p.2.2, proposed := s.proposed.erase p, wrote := some p.2.2 }
+  | none => { s with wrote := some begun.term }
+
+/-- `termsAfter…`: one step. A batch's write commits the proposal it is written under; a command answered other than
+applied withdraws its proposal, so nothing of it is left, and nothing of any other command's. -/
+def Terms.step (s : Terms) : TermOp → Terms
+  | .propose c r f => { s with proposed := s.proposed ++ [(c, r, f)] }
+  | .write r hb => s.finish s r hb
+  | .answer c applied => if applied then s else { s with proposed := s.proposed.filter (fun p => p.1 != c) }
+
+def Terms.run (s : Terms) (ops : List TermOp) : Terms := ops.foldl Terms.step s
+
+/-- `heartbeatTarget`'s term: a heartbeat is written only under the chat's term, and only once this host wrote under it
+(a heartbeat never opens a term). -/
+def Terms.heartbeat (s : Terms) : Option Nat := if s.wrote = some s.term then some s.term else none
+
+/-! ## tau-agent-host.ts: one admission for every command that starts or continues a run (round 20) -/
+
+/-- Another device's unsettled run as an admission reads it (`PassedRun`): abandoned or not (`standing`), whether a
+device already said its turn (`takenOver`), and whether its person's words are known. -/
+structure Passed where
+  run : Nat
+  abandoned : Bool
+  said : Bool
+  words : Bool
+  deriving DecidableEq, Repr
+
+/-- What the one admission answers (`CommandAdmission`): refused `RUN_TAKEN_OVER`; refused while another device's run
+holds the chat (`RUN_ACTIVE_ON_ANOTHER_DEVICE`); or admitted, with the runs whose turns its first batch says. -/
+inductive Admit where
+  | takenOver
+  | held
+  | admitted (a : Admission) (says : List Nat)
+  deriving DecidableEq, Repr
+
+/-- `commandAdmission`: the one admission of a start, a Resume and an approval. It checks where the run and the other
+devices' runs stand, decides the term (`admission`), and names the abandoned foreign runs it goes on past whose turns
+no device said yet: the command's first batch says each, so every device then reads that run taken over. -/
+def admit (v : Verb) (takenOver wrote : Bool) (foreign : List Passed) : Admit :=
+  match admission v takenOver wrote with
+  | .takenOver => .takenOver
+  | a =>
+    if foreign.any (fun f => !f.abandoned) then .held
+    else .admitted a ((foreign.filter (fun f => f.words && !f.said)).map Passed.run)
+
+/-- What admitted commands' runs' first batches carry (`ChatStore.carried`): each `(admission, run, says)`, keyed by the
+admission that derived it (round 22), never by the command's id, which a re-sent copy of the command shares. -/
+abbrev Carried := List (Nat × Nat × List Nat)
+
+/-- The entry a batch of `run`'s rows carries: the first for its run, never for a lone heartbeat. -/
+def carriedTaken (c : Carried) (run : Nat) (heartbeat : Bool) : Option (Nat × Nat × List Nat) :=
+  if heartbeat then none else c.find? (fun p => p.2.1 == run)
+
+inductive CarryOp where
+  /-- An admission's run's first batch is to say `says` (`rehome`). -/
+  | carry (admission run : Nat) (says : List Nat)
+  /-- A batch of `run`'s rows is written, with a place for what it carries (`carriedPlace`, round 21). -/
+  | write (run : Nat) (heartbeat : Bool)
+  /-- A batch of `run`'s rows is written that has no place for what it carries: every place in it leaves a tool call
+  open (an approval's rows before its tool returns), so its turns wait for the run's next batch (round 21). -/
+  | hold (run : Nat)
+  /-- A row settles `run` (round 22): nothing writes its rows again. -/
+  | settle (run : Nat)
+  /-- The admitted command is answered. -/
+  | answer (admission : Nat) (applied : Bool)
+  deriving DecidableEq, Repr
+
+/-- One step (`carriedAfterRow`, `carriedAfterAnswer`), and the runs whose turns its batch says: a write with a place
+says what its run's entry carries and spends it; a batch with none keeps it; a row that settles a run drops every entry
+for it, which the chat's next admission derives afresh (round 22); a command answered other than applied withdraws its
+own admission's entry. -/
+def carryStep (c : Carried) : CarryOp → Carried × List Nat
+  | .carry k r says => (c ++ [(k, r, says)], [])
+  | .write r hb =>
+    match carriedTaken c r hb with
+    | some p => (c.erase p, p.2.2)
+    | none => (c, [])
+  | .hold _ => (c, [])
+  | .settle r => (c.filter (fun p => p.2.1 != r), [])
+  | .answer k applied => (if applied then c else c.filter (fun p => p.1 != k), [])
+
+/-- A command as it reaches this host's admission (`execute`, round 22). `seen`: the commands this host sent on that
+are in flight or applied. A command among them is a replay: it is never admitted, so it carries nothing and holds no
+admission its answer could withdraw, and it shares its original's answer. Any other is admitted as the fresh admission
+`next`. Answers the admission, if any, and what admitted commands carry then. -/
+def admitCarry (c : Carried) (seen : List Nat) (next command run : Nat) (says : List Nat) : Option Nat × Carried :=
+  if seen.contains command then (none, c) else (some next, (carryStep c (.carry next run says)).1)
+
+/-- A dispatch's answer (`withdrawAdmission`): by its own admission, and nothing for a dispatch this host never
+admitted (a replay). -/
+def answerCarry (c : Carried) (admission : Option Nat) (applied : Bool) : Carried :=
+  match admission with
+  | none => c
+  | some k => (carryStep c (.answer k applied)).1
+
+/-- What an approval's check answers when another device's segment could not be read (round 22): refused
+`SEGMENTS_UNREADABLE` (`wait`), whatever the pause's hold. Another device judges this device's paused run abandoned on
+its own pulls of the remote's copy of this device's segment, and this device cannot know when its rows last reached
+that copy (a publish is answered once queued), so the hold is no evidence that no device has. -/
+inductive Unread where
+  | refused
+  | admitted
+  deriving DecidableEq, Repr
+
+def approveUnread (_pauseHeld : Bool) : Unread := .refused
+
+/-! ## run-history.ts and tau-agent-host.ts: the history is well formed (round 21)
+
+The model's history is a list of messages the provider reads in order. It is well formed when every tool output
+follows its call directly: it answers a call of the assistant turn that only outputs follow, before any other message.
+A call left open when another message follows is answered by the provider's adapter as having no result
+(`transformMessages`), but an output written after that message is a stray result every provider rejects. A batch's
+own rows keep the history well formed by their kinds; the turns a command carries go where no call is open, after
+every rewind of the batch. -/
+
+/-- A history message as the provider reads it (`ProviderMessage`): an assistant turn calling the tools `calls` (none:
+a reply), a tool's output for call `c`, or any other message `id` (a person's words, a reminder). -/
+inductive Msg where
+  | call (calls : List Nat)
+  | out (c : Nat)
+  | say (id : Nat)
+  deriving DecidableEq, Repr
+
+/-- The calls open after one more message (`openToolCalls`): an assistant turn opens its own and leaves any before it
+to the adapter; an output closes its call; any other message leaves every open call to the adapter. -/
+def openAfter (o : List Nat) : Msg → List Nat
+  | .call cs => cs
+  | .out c => o.erase c
+  | .say _ => []
+
+/-- `openToolCalls`: the calls the history leaves open at its tail. -/
+def openCalls (h : List Msg) : List Nat := h.foldl openAfter []
+
+/-- Whether a message may follow a history whose open calls are `o`: an output only for an open call. -/
+def Msg.fits (o : List Nat) : Msg → Bool
+  | .out c => o.contains c
+  | _ => true
+
+/-- `historyWellFormed`, from the open calls `o`. -/
+def wfFrom : List Nat → List Msg → Bool
+  | _, [] => true
+  | o, m :: rest => m.fits o && wfFrom (openAfter o m) rest
+
+def wf (h : List Msg) : Bool := wfFrom [] h
+
+/-- A batch's row as it changes the history: a message appended; a rewind that keeps the first `keep` messages it
+names (`history.rewound`, and a compaction, which drops what it does not keep); a turn's commit
+(`turn.history-projection-committed`, round 24), one row that keeps the first `keep` messages it names and says the
+person's turn `id` at once, so nothing goes between the two; or a row that is no message (a lifecycle or interrupt
+row). A rewind or a commit names the messages it keeps when its batch is built, before anything is carried into it. -/
+inductive Op where
+  | msg (m : Msg)
+  | rewind (keep : Nat)
+  | commit (keep id : Nat)
+  | other
+  deriving DecidableEq, Repr
+
+def Op.apply (h : List Msg) : Op → List Msg
+  | .msg m => h ++ [m]
+  | .rewind k => h.take k
+  | .commit k id => h.take k ++ [.say id]
+  | .other => h
+
+/-- A row that drops the messages it does not keep (`dropsMessages`): a rewind, or a turn's commit. -/
+def Op.isRewind : Op → Bool
+  | .rewind _ => true
+  | .commit _ _ => true
+  | _ => false
+
+def applyAll (h : List Msg) (ops : List Op) : List Msg := ops.foldl Op.apply h
+
+/-- `saysNext` (round 23): whether the next message the rows append is a say. A say leaves every open call to the
+adapter, so turns carried just before it leave the same calls to the adapter it did, and no output follows them. A
+commit is passed over, as `saysNext` passes over a row that appends no message: a place is only ever after it. -/
+def nextSays : List Op → Bool
+  | [] => false
+  | .msg (.say _) :: _ => true
+  | .msg _ :: _ => false
+  | _ :: rest => nextSays rest
+
+/-- `carriedPlace`: where a batch's carried turns go. The first place after every rewind the batch holds at which the
+history leaves no call open, so they follow the outputs that close the calls a Resume found open and are never cut by
+the batch's own rewind, or at which a say comes next (round 23), so a person's turn the batch says stays last, after
+them, even past a call no output answers; none when every place in the batch leaves a call open that the batch's run
+still answers, and they wait for the run's next batch (`CarryOp.hold`). The host splits a turn into its admission's
+batch and its commit's: a run whose turn is not committed has a say next past its batch (`turnAhead`), which is this
+over the batch followed by that say (`placeAhead`). -/
+def placeAt (h : List Msg) (ops : List Op) : Option Nat :=
+  (List.range (ops.length + 1)).find? fun i =>
+    (ops.drop i).all (fun op => !op.isRewind) &&
+      ((openCalls (applyAll h (ops.take i))).isEmpty || nextSays (ops.drop i))
+
+/-- `carriedPlace(history, bodies, true)`: the place in a batch whose run says its person's turn `t` next. -/
+def placeAhead (h : List Msg) (ops : List Op) (t : Nat) : Option Nat := placeAt h (ops ++ [.msg (.say t)])
+
+/-- The batch written with its carried turns `says` at their place. -/
+def plan (h : List Msg) (says : List Nat) (ops : List Op) : Option (List Op) :=
+  (placeAt h ops).map fun i => ops.take i ++ says.map (fun s => Op.msg (.say s)) ++ ops.drop i
+
+/-- The batch of a run whose turn `t` is still ahead, written with its carried turns at their place (`placeAhead`). -/
+def planAhead (h : List Msg) (says : List Nat) (ops : List Op) (t : Nat) : Option (List Op) :=
+  (placeAhead h ops t).map fun i => ops.take i ++ says.map (fun s => Op.msg (.say s)) ++ ops.drop i
+
+/-- A batch the host writes, by the kinds of its rows: a person's turn (a run settling before it committed its turn);
+a Retry, which rewinds to `keep` messages first; a turn's commit, which keeps `keep` messages and says the turn `id`
+(round 24: a start's or a Retry's admission batch says nothing, and its commit says the turn); the model's reply calling
+`calls`; a tool's output; a Resume, which rewinds a transport failure's marker (`cut`, the history's last message),
+then writes an output for each call the history leaves open (`CLIENT_DISCONNECTED`) and a reminder `r` when there are
+any; any other rows. -/
+inductive Batch where
+  | turn (id : Nat)
+  | retry (keep id : Nat)
+  | commit (keep id : Nat)
+  | reply (calls : List Nat)
+  | output (c : Nat)
+  | resume (cut : Bool) (r : Nat)
+  | other
+  deriving DecidableEq, Repr
+
+/-- The rows of a batch written over `h`, before anything is carried into it. -/
+def Batch.ops (h : List Msg) : Batch → List Op
+  | .turn id => [.other, .msg (.say id)]
+  | .retry k id => [.other, .rewind k, .msg (.say id)]
+  | .commit k id => [.commit k id]
+  | .reply cs => [.msg (.call cs)]
+  | .output c => [.msg (.out c)]
+  | .resume cut r =>
+    let kept := if cut then h.take (h.length - 1) else h
+    let outs := (openCalls kept).map fun c => Op.msg (.out c)
+    [.other] ++ (if cut then [.rewind (h.length - 1)] else []) ++ outs ++
+      (if outs.isEmpty then [] else [.msg (.say r)])
+  | .other => [.other]
+
+/-- `turnAheadOf` (round 24): a run whose turn the ledger does not hold committed says that turn next, past any batch
+before its commit. -/
+def turnAhead (committed : Bool) : Bool := !committed
+
+/-- The batch a run writes with its carried turns `says` at their place: past it, its person's turn `t` when that is
+still ahead (`carriedPlace(history, bodies, turnAhead)`). -/
+def planFor (ahead : Bool) (h : List Msg) (says : List Nat) (ops : List Op) (t : Nat) : Option (List Op) :=
+  if ahead then planAhead h says ops t else plan h says ops
+
+/-- A start's or a Retry's turn `t` as the host writes it (round 24): its admission's batch `ops`, which says nothing
+(the lifecycle row, and a Retry's rewind), with the turns the run carries at their place when it has one; then the
+turn's commit (`Batch.commit`), which keeps every message the history then holds (`retainedMessageIds` is read as it is
+written) and says the turn, with the carried turns at their place in it when the admission's batch had none.
+`committed`: whether the ledger holds the run's turn as the admission's batch is written. -/
+def turnWritten (committed : Bool) (h : List Msg) (says : List Nat) (ops : List Op) (t : Nat) : List Msg :=
+  match planFor (turnAhead committed) h says ops t with
+  | some ops' =>
+    let h1 := applyAll h ops'
+    applyAll h1 ((Batch.commit h1.length t).ops h1)
+  | none =>
+    let h1 := applyAll h ops
+    let c := (Batch.commit h1.length t).ops h1
+    applyAll h1 ((plan h1 says c).getD c)
+
+/-- What the host writes only where it may: a tool's output only for a call the history leaves open (its driver runs
+the calls of the reply it just wrote). -/
+def Batch.legal (h : List Msg) : Batch → Bool
+  | .output c => (openCalls h).contains c
+  | _ => true
+
+/-- The histories the host's batches reach: each batch is written over the history it lands after, with the turns its
+run's command carries at their place, or without them when it has none (they wait). That the history a batch is planned
+over is the one it lands after is the merge's (`t7_projection_after_visible`) and the appender's (`appendMerged`). -/
+inductive Reached : List Msg → Prop
+  | nil : Reached []
+  | step {h : List Msg} (b : Batch) (says : List Nat) :
+      Reached h → b.legal h = true → Reached (applyAll h ((plan h says (b.ops h)).getD (b.ops h)))
+
+
+/-! ## foreign-runs.ts and chat-ref.ts: where another device's run stands (XD3, rounds 18 and 19) -/
+
+/-- `foreignRunStanding`: the run still holds the chat until a moment (`changesAt`); it holds it and its reader asks
+for pulls (`awaitsPull`); or it is abandoned. -/
+inductive Standing where
+  | holds (changesAt : Nat)
+  | awaitsPull
+  | abandoned
+  deriving DecidableEq, Repr
+
+/-- One chat segment's entry in a pull record (`events/pulled-at`): the device clock of the last recorded pull (`clock`),
+the segment's size here after it, and the quiet this device's pulls evidenced for exactly those bytes. -/
+structure PullRec where
+  clock : Nat
+  size : Nat
+  quiet : Nat
+  deriving DecidableEq, Repr
+
+/-- `notePull` (chat-ref.ts, round 19): a pull at device clock `now` that left the segment `size` bytes long here.
+Quiet is never one clock reading against another: it is the sum of the gaps between recorded pulls that found the
+same bytes, each gap counted at most `cap` and a gap the clock ran backwards across counted as nothing (`Nat`
+subtraction), so a backward jump only shortens it and a forward jump adds at most `cap`. A pull under `throttle`
+after the recorded one that changed nothing records nothing. Any change of size starts it again. -/
+def notePull (cap throttle : Nat) (prior : Option PullRec) (now size : Nat) : PullRec :=
+  match prior with
+  | none => ⟨now, size, 0⟩
+  | some r =>
+    if r.size = size then
+      if r.clock ≤ now ∧ now - r.clock < throttle then r
+      else ⟨now, size, r.quiet + min cap (now - r.clock)⟩
+    else ⟨now, size, 0⟩
+
+/-- The record after the pulls `ps`, newest first, each `(clock, size)`. -/
+def recordOf (cap throttle : Nat) : List (Nat × Nat) → Option PullRec
+  | [] => none
+  | p :: older => some (notePull cap throttle (recordOf cap throttle older) p.1 p.2)
+
+/-- How many of the newest pulls found the segment `size` bytes long, in a row. -/
+def quietPulls : List (Nat × Nat) → Nat → Nat
+  | [], _ => 0
+  | p :: older, s => if p.2 = s then quietPulls older s + 1 else 0
+
+/-- `pulledQuietOf`: the quiet a record evidences for the segment as this reader read it (`size`), none for any other
+bytes. -/
+def quietFor (r : Option PullRec) (size : Nat) : Option Nat :=
+  match r with
+  | some r => if r.size = size then some r.quiet else none
+  | none => none
+
+/-- `foreignRunStanding(run, now, bound)`. `quiet`: what this device's pulls evidenced for the run's segment as read
+(`pulledQuiet`); `changed`: when the segment last changed here (`observedAt`); `now`: this device's clock; `ask`: how
+long a run may be quiet here before its reader asks for pulls; `takenOver`: another device said the run's turn;
+`pulls`: whether this device can pull the chat at all (round 27: false with chat sync off, no remote, or no record
+identity). Abandoned only on the evidence of pulls: their quiet past `bound`. The clock decides only when pulls are
+asked for, and a clock behind `changed` asks at once; a run that would await pulls this device cannot make cannot move
+here, so it is abandoned then. -/
+def standing (bound ask changed now : Nat) (quiet : Option Nat) (takenOver : Bool) (pulls : Bool := true) :
+    Standing :=
+  if takenOver || decide (quiet.getD 0 > bound) then .abandoned
+  else if now > changed + ask ∨ now < changed then (if pulls then .awaitsPull else .abandoned)
+  else .holds (changed + ask + 1)
+
 /-! ## segments.ts: `mergeLogSegments` (CL-R14) -/
 
 structure Copy where
@@ -790,7 +1227,8 @@ structure Copy where
   device : Nat
   deriving DecidableEq, Repr, Inhabited
 
-/-- A term across segments: `orders` is `orderByDevice`, `copies` maps a sequence to every copy read. -/
+/-- A term across segments: `orders` maps a writer (the first term of a segment holding it, `firstTerm`) to its
+place in that writer's file; `copies` maps a sequence to every copy read. -/
 structure MTerm where
   term : Nat
   orders : List (Nat × Nat)
@@ -799,7 +1237,8 @@ structure MTerm where
   deriving Repr
 
 def Kind.ix : Kind → Nat
-  | .L => 0 | .S => 1 | .H => 2 | .O => 3 | .R => 4 | .P => 5 | .V => 6 | .M => 7 | .U => 8
+  | .L => 0 | .S => 1 | .H => 2 | .O => 3 | .R => 4 | .P => 5 | .V => 6 | .M => 7 | .U => 8 | .W => 9 | .C => 10
+  | .K => 11
 
 /-- A row's `canonicalJson` as a sort key. For the merge's interrupt rows (keys sorted: epoch, interruptId,
 leaderEpoch, phase, reason, recordedAt, runId, sequence, type, version) the first six fields are exactly its code-unit
@@ -810,21 +1249,22 @@ def canonKey (r : Row) : List (List Nat) :=
 /-- The kept copy's comparator: canonical form, then device id. -/
 def copyKey (c : Copy) : List (List Nat) := canonKey c.row.fp ++ [digits c.device]
 
-/-- Record one copy of `e` read from device `dev`; `order` is the term's place in this segment when the segment
-introduces it here. -/
-def MTerm.add (t : MTerm) (dev : Nat) (order : Option Nat) (e : Row) : MTerm :=
+/-- Record one copy of `e` read from device `dev`; `order` is `(writer, place)`, the segment's first term and the
+term's place in it, when the segment introduces it here. -/
+def MTerm.add (t : MTerm) (dev : Nat) (order : Option (Nat × Nat)) (e : Row) : MTerm :=
   { t with
     orders := match order with
-      | some o => upsert dev (min o ((lookup dev t.orders).getD o)) t.orders
+      | some (w, o) => upsert w (min o ((lookup w t.orders).getD o)) t.orders
       | none => t.orders
     started := min t.started e.ms
     copies := upsert e.seq (((lookup e.seq t.copies).getD []) ++ [⟨e, dev⟩]) t.copies }
 
-/-- One row of one segment; `st.2` is this segment's `introduced`, in order. -/
+/-- One row of one segment; `st.2` is this segment's `introduced`, in order. The segment's writer is the first term it
+introduces: the same row in every copy of one file, whatever the segment is called. -/
 def addRow (dev : Nat) (st : List MTerm × List Nat) (e : Row) : List MTerm × List Nat :=
   let fresh := !st.2.contains e.term
   let intro := if fresh then st.2 ++ [e.term] else st.2
-  let order := if fresh then some (intro.length - 1) else none
+  let order := if fresh then some (st.2.headD e.term, intro.length - 1) else none
   if st.1.any (fun t => decide (t.term = e.term)) then
     (st.1.map (fun t => if t.term = e.term then t.add dev order e else t), intro)
   else (st.1 ++ [MTerm.add ⟨e.term, [], [], e.ms⟩ dev order e], intro)
@@ -832,9 +1272,11 @@ def addRow (dev : Nat) (st : List MTerm × List Nat) (e : Row) : List MTerm × L
 def mergeSegment (terms : List MTerm) (seg : Nat × List Row) : List MTerm :=
   (seg.2.foldl (addRow seg.1) (terms, [])).1
 
-/-- `deviceOf(term)`: the smallest device id holding the term. -/
+/-- `writerOf(term)`: the smallest writer (in term order) of the segments holding the term. It reads no segment id:
+a writer reads its own file under no id and others read it under theirs, and a device whose id changed leaves two
+overlapping files on one machine and one on another. -/
 def deviceOf (t : MTerm) : Nat :=
-  match keySort (fun d => [digits d]) (t.orders.map Prod.fst) with
+  match keySort (fun d => [termId d]) (t.orders.map Prod.fst) with
   | d :: _ => d
   | [] => 0
 
@@ -850,11 +1292,10 @@ def clampStarts (placed : List (MTerm × Nat × Nat)) : List (Nat × Nat) :=
       let floor := match acc.1 with | some f => max f p.1.started | none => p.1.started
       (some floor, acc.2 ++ [(p.1.term, floor)])) (none, [])).2
 
-/-- The kept copy of one key: the smallest canonical form (then device id) among the term device's own copies, or
-among all copies when that device holds none. -/
-def keptCopy (device : Nat) (copies : List Copy) : Copy :=
-  let own := copies.filter (fun c => decide (c.device = device))
-  (keySort copyKey (if own.isEmpty then copies else own)).headD default
+/-- The kept copy of one key: the smallest canonical form among all copies, whichever segment holds it (then device id,
+which only names the copy reported kept). -/
+def keptCopy (copies : List Copy) : Copy :=
+  (keySort copyKey copies).headD default
 
 /-- One copy per distinct content other than the kept one, from the smallest device holding it. -/
 def dropped (kept : Copy) (copies : List Copy) : List Copy :=
@@ -862,17 +1303,17 @@ def dropped (kept : Copy) (copies : List Copy) : List Copy :=
     if c.row.fp = kept.row.fp ∨ acc.any (fun d => decide (d.row.fp = c.row.fp)) then acc else acc ++ [c]) []
 
 /-- The kept copy of one key and the devices of the distinct dropped copies. -/
-def keep (device : Nat) (copies : List Copy) : Copy × List Nat :=
-  (keptCopy device copies, (dropped (keptCopy device copies) copies).map (·.device))
+def keep (copies : List Copy) : Copy × List Nat :=
+  (keptCopy copies, (dropped (keptCopy copies) copies).map (·.device))
 
 /-- One merged key: the kept row, and the conflicts `(key, kept device, dropped device)` it reports. -/
 def mergeKey (p : MTerm × Nat × Nat) (sc : Nat × List Copy) : Row × List (Key × Nat × Nat) :=
-  let k := keep p.2.1 sc.2
+  let k := keep sc.2
   (k.1.row, k.2.map fun d => ((p.1.term, sc.1), k.1.device, d))
 
-/-- The final order's key of a placed term: clamped start, device, file order, term. -/
+/-- The final order's key of a placed term: clamped start, writer, file order, term. -/
 def placedKey (clamped : List (Nat × Nat)) (p : MTerm × Nat × Nat) : List (List Nat) :=
-  [[(lookup p.1.term clamped).getD 0], digits p.2.1, [p.2.2], termId p.1.term]
+  [[(lookup p.1.term clamped).getD 0], termId p.2.1, [p.2.2], termId p.1.term]
 
 /-- `mergeLogSegments(segments, {onConflict})`: the merged rows and the conflicts `(key, kept, dropped)`. -/
 def mergeFull (segs : List (Nat × List Row)) : List Row × List (Key × Nat × Nat) :=
@@ -882,5 +1323,35 @@ def mergeFull (segs : List (Nat × List Row)) : List Row × List (Key × Nat × 
   (keys.map Prod.fst, keys.flatMap Prod.snd)
 
 def merge (segs : List (Nat × List Row)) : List Row := (mergeFull segs).1
+
+/-- A term's clamped start in the merge of `segs` (0 for a term it does not hold). -/
+def clampOf (segs : List (Nat × List Row)) (τ : Nat) : Nat :=
+  (lookup τ (clampStarts ((segs.foldl mergeSegment []).map place))).getD 0
+
+/-- `mergeSegmentsUpTo(segments, B)`: the merge's terms whose clamped start is at most `B`, in merge order. A reader
+folds this at `B` = its wall clock plus `foreignClockAheadMilliseconds` (or its own newest row, if later), and stamps
+its next term after the newest start kept: a hybrid logical clock bounded by its own. -/
+def mergeUpTo (B : Nat) (segs : List (Nat × List Row)) : List Row :=
+  let placed := (segs.foldl mergeSegment []).map place
+  let cl := clampStarts placed
+  ((keySort (placedKey cl) placed).filter (fun p => decide ((lookup p.1.term cl).getD 0 ≤ B))).flatMap fun p =>
+    (keySort (fun sc => [[sc.1]]) p.1.copies).map fun sc => (mergeKey p sc).1
+
+/-- The history a fold of `rows` reaches from nothing (`createEventLogReducer('history')`), `none` once invalid. -/
+def histOf (rows : List Row) : Option Hist := rows.foldlM Hist.transition {}
+
+/-- The merged rows the appender holds after this device appends `e` to its own segment `dev`
+(`EventLogAppender.append`, round 21): at the merge's tail when the merge ends in `e`'s term, which the new row
+extends, and otherwise the whole merge again, since a row under an older term merges before every later term. -/
+def appendMerged (segs : List (Nat × List Row)) (dev : Nat) (merged : List Row) (e : Row) : List Row :=
+  if merged.getLast?.map Row.term = some e.term then merged ++ [e]
+  else merge (segs.map fun s => if s.1 = dev then (s.1, s.2 ++ [e]) else s)
+
+/-- The merged rows the appender folds after a refresh merges `rows`, having folded `merged` (`extendsMerged`, round
+26): it goes on from what it replayed only while those rows are, row by row, the first rows of the new merge, and
+otherwise folds the whole merge again. The merge keeps the smallest canonical copy of a key from any segment, so a
+later segment can replace a row anywhere in a term, not only at a term's first row or the last row held. -/
+def refreshMerged (merged rows : List Row) : List Row :=
+  if merged.isPrefixOf rows then merged ++ rows.drop merged.length else rows
 
 end ChatLedger

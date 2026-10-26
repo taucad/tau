@@ -61,6 +61,7 @@ import { githubNoreplyAuthor, githubProjectBinding } from '#lib/github-project-b
 import { shareOrigin } from '#lib/share-origin.js';
 
 export const handle: Handle = {
+  title: 'Import',
   enableOverflowY: true,
 };
 

@@ -337,6 +337,7 @@ const sharedEventShapes = {
     reason: z.string(),
     code: nonEmptyString.optional(),
   },
+  runHeartbeat: { type: z.literal('run.heartbeat') },
   modelInvocationPrepared: {
     type: z.literal('model.invocation-prepared'),
     attemptId: opaqueInvocationId,
@@ -376,6 +377,7 @@ const sharedEventSchemas = [
   z.looseObject({ ...eventBase, ...sharedEventShapes.turnFinalized }),
   z.looseObject({ ...eventBase, ...sharedEventShapes.turnConflicted }),
   z.looseObject({ ...eventBase, ...sharedEventShapes.turnFailed }),
+  z.looseObject({ ...eventBase, ...sharedEventShapes.runHeartbeat }),
   z.looseObject({ ...eventBase, ...sharedEventShapes.modelInvocationPrepared }),
   z.looseObject({ ...eventBase, ...sharedEventShapes.modelInvocationBound }),
   z.looseObject({ ...eventBase, ...sharedEventShapes.modelInvocationSettledCharged }),
@@ -403,6 +405,7 @@ export const projectionEffectSchemas = [
   z.object(sharedEventShapes.turnFinalized),
   z.object(sharedEventShapes.turnConflicted),
   z.object(sharedEventShapes.turnFailed),
+  z.object(sharedEventShapes.runHeartbeat),
   z.object(sharedEventShapes.modelInvocationPrepared),
   z.object(sharedEventShapes.modelInvocationBound),
   z.object(sharedEventShapes.modelInvocationSettledCharged),

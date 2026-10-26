@@ -10,7 +10,7 @@
  */
 
 import { z } from 'zod';
-import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
+import type { CadAgentExecution, MyUIMessage, TauAgentHostId } from '@taucad/chat';
 import { cadAgentExecutionSchema, safeValidateUiMessages } from '@taucad/chat';
 import { chatMode } from '@taucad/chat/constants';
 import type { RowKey } from '@taucad/agent-host';
@@ -31,6 +31,11 @@ export const composerRecordPaths = {
   chat: (projectId: string, chatId: string): string => `${composersRoot}/chats/${projectId}/${chatId}.json`,
   /** One record per project holding each chat's read receipt, so the sidebar reads them in one call. */
   unread: (projectId: string): string => `${composersRoot}/chats/${projectId}/unread.json`,
+  /**
+   * One record per project holding this device's placement for each chat that has one (XD2). Its own path, not a
+   * field of the chat record: a build that predates placement reads its chat records strictly and never reads this.
+   */
+  placements: (projectId: string): string => `${composersRoot}/chats/${projectId}/placements.json`,
   /** The directory removed when a project is deleted. */
   project: (projectId: string): string => `${composersRoot}/chats/${projectId}`,
   /**
@@ -56,6 +61,13 @@ export type ComposerRecord = {
   /** Each chat's read receipt: the attention row the person last saw (W9 PV-S8). */
   readonly readThrough?: Readonly<Record<string, RowKey>>;
   readonly execution?: CadAgentExecution;
+  /**
+   * This device's placement for each chat, by chat id, when the person chose one that differs from the device
+   * default: `origin` on a daemon-served page, or a `loopback:` daemon. Only the per-project placements record
+   * (`composerRecordPaths.placements`) carries it; the chat record keeps intent and never a device-relative host
+   * (cross-device chat handoff, XD2).
+   */
+  readonly placements?: Readonly<Record<string, TauAgentHostId>>;
 };
 
 /**
@@ -71,6 +83,8 @@ export type ComposerRecordPatch = {
   /** A receipt per chat; `false` removes the chat's receipt. */
   readonly readThrough?: Readonly<Record<string, RowKey | false>>;
   readonly execution?: CadAgentExecution;
+  /** A placement per chat; `false` removes the chat's, so it takes the device default. */
+  readonly placements?: Readonly<Record<string, TauAgentHostId | false>>;
 };
 
 /** Absence and unreadable bytes are different outcomes, and neither is an exception. */
@@ -141,6 +155,7 @@ const envelopeSchema = z
     unread: z.record(z.string(), z.literal(true)).optional(),
     readThrough: z.record(z.string(), rowKeySchema).optional(),
     execution: cadAgentExecutionSchema.optional(),
+    placements: z.record(z.string(), z.string().min(1)).optional(),
   })
   .strict();
 
@@ -148,7 +163,16 @@ const envelopeSchema = z
 const mutex = new KeyedMutex<string>();
 
 // The write order every record is serialised in, so equal records produce equal bytes.
-const fieldOrder = ['draft', 'messageEdits', 'toolChoice', 'mode', 'unread', 'readThrough', 'execution'] as const;
+const fieldOrder = [
+  'draft',
+  'messageEdits',
+  'toolChoice',
+  'mode',
+  'unread',
+  'readThrough',
+  'execution',
+  'placements',
+] as const;
 
 const invalid = (error: unknown): ComposerRecordReadResult => ({
   status: 'invalid',
@@ -246,7 +270,7 @@ const parseRecord = async (text: string): Promise<ComposerRecordReadResult> => {
   if (!envelope.success) {
     return invalid(envelope.error);
   }
-  const { version, draft, messageEdits, toolChoice, mode, unread, readThrough, execution } = envelope.data;
+  const { version, draft, messageEdits, toolChoice, mode, unread, readThrough, execution, placements } = envelope.data;
 
   // Records written before empties were omitted still carry `parts: []` (D8); they mean "no field".
   const storedDraft = draft === undefined || isClearedMessage(draft) ? undefined : draft;
@@ -281,6 +305,7 @@ const parseRecord = async (text: string): Promise<ComposerRecordReadResult> => {
       ...withField('unread', nonEmptyMap({ ...unread })),
       ...withField('readThrough', nonEmptyMap({ ...readThrough })),
       ...withField('execution', execution),
+      ...withField('placements', nonEmptyMap({ ...placements })),
     },
   };
 };
@@ -299,6 +324,10 @@ const mergeRecord = (record: ComposerRecord, fields: ComposerRecordPatch): Compo
     fields.readThrough === undefined
       ? { ...record.readThrough }
       : omitEmpty({ ...record.readThrough, ...fields.readThrough }, (value) => value === false);
+  const placements =
+    fields.placements === undefined
+      ? { ...record.placements }
+      : omitEmpty({ ...record.placements, ...fields.placements }, (value) => value === false);
 
   return {
     version: 1,
@@ -310,6 +339,7 @@ const mergeRecord = (record: ComposerRecord, fields: ComposerRecordPatch): Compo
     ...withField('unread', nonEmptyMap(unread) as Readonly<Record<string, true>> | undefined),
     ...withField('readThrough', nonEmptyMap(readThrough) as Readonly<Record<string, RowKey>> | undefined),
     ...withField('execution', fields.execution ?? record.execution),
+    ...withField('placements', nonEmptyMap(placements) as Readonly<Record<string, TauAgentHostId>> | undefined),
   };
 };
 

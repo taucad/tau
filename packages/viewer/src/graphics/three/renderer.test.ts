@@ -250,6 +250,7 @@ describe('createRenderer', () => {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Three constructor option.
       forceWebGL: true,
       reversedDepthBuffer: false,
+      logarithmicDepthBuffer: true,
       samples: 0,
     });
     expect(hoisted.createdRenderers[0]?.setTransparentSort).not.toHaveBeenCalled();

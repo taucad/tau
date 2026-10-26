@@ -161,6 +161,12 @@ export type WorkerRevisionCommand =
      with and sent its frame first; `remote.machine` re-validates (D3). */
   | Readonly<{ command: 'authorizeRemote' }>
   | Readonly<{ command: 'syncNow' }>
+  /**
+   * Pull the remote now (XD3, round 18): another device's run on one of this project's chats has been quiet here a
+   * while, and only pulls show whether it stayed quiet there. A question since round 27: answered `pulled`, with
+   * whether this device can pull the chat at all, as the placement session's own pull answers it.
+   */
+  | Readonly<{ command: 'pullRemote'; chatId?: string }>
   /** Separate, consent-gated candidate artifact route; never authored sync. */
   | Readonly<{ command: 'fetchGeoSpecCandidates' }>
   | Readonly<{ command: 'publishGeoSpecCandidate'; candidate: Uint8Array<ArrayBuffer> }>
@@ -486,6 +492,14 @@ export type WorkerProjectRevisions = Readonly<{
    * its turn actors.
    */
   placementSession: () => Promise<TurnPlacementAdapter<FileSystemBridgeConnection>>;
+  /**
+   * Pull the remote now for the page (XD3, round 27), through the placement session's own pull, and answer whether
+   * this device can pull the chat: `false` where that pull is refused `CHAT_NOT_SHARED` (chat sync off, no remote, no
+   * record identity). One rule, the placement's, decides it for the page and for the agent host. With no session yet
+   * the pull is made as a remote move would make one; that, or a fenced session, evidences no refusal, so it answers
+   * `true`.
+   */
+  pullRemote: (chatId: string) => Promise<boolean>;
   /** Stop the tree and wait for the store's own creation to finish. */
   release: () => Promise<void>;
 }>;
@@ -694,7 +708,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   const events = new Topic<WorkerRevisionEvent>({ name: 'WorkerProjectRevisionEvents' });
   const toasts = new Topic<RevisionToast>({ name: 'WorkerProjectRevisionToasts' });
 
-  const { actor, settled, turns, recordEditorConflict, readConflict } = createProjectRevisionsActor({
+  const { actor, settled, turns, recordEditorConflict, readConflict, pullsChats } = createProjectRevisionsActor({
     port: options.port,
     projectId,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
@@ -1460,7 +1474,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         case 'diff':
         case 'compare':
         case 'readConflict':
-        case 'recordEditorConflict': {
+        case 'recordEditorConflict':
+        case 'pullRemote': {
           break;
         }
         case 'fetchGeoSpecCandidates':
@@ -1579,11 +1594,19 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     recordEditorConflict,
     readConflict,
     createBranch,
+    pullRemote: async (chatId) => {
+      const answer = await session?.pull({ requestId: `page-pull:${chatId}:${String(Date.now())}`, chatId });
+      if (answer === undefined) {
+        actor.send({ type: 'sync', event: { type: 'remoteMoved', generation: 0, refs: [] } });
+      }
+      return !(answer?.status === 'refused' && answer.code === 'CHAT_NOT_SHARED');
+    },
     placementSession: async () => {
       await session?.fence();
       /* Each attempt's tools are a filesystem bridge over its checkout, sent to the agent host as a transferable. */
       session = createTurnPlacementPort({
-        revisions: { actor, turns },
+        /* Round 27: a pull this device cannot make for the chats is refused, so its host stops waiting for one. */
+        revisions: { actor, turns, pullsChats },
         openTools: ({ filesystem }) => createFileSystemBridgePort(filesystem),
       });
       return session;
@@ -1706,7 +1729,9 @@ export type WorkerRevisionResult =
    * chat on the branch it just made would otherwise subscribe to the whole
    * projection to infer it.
    */
-  | (Readonly<{ kind: 'branch' }> & BranchCreated);
+  | (Readonly<{ kind: 'branch' }> & BranchCreated)
+  /** A `pullRemote` was asked (round 27): `pulls: false` where this device cannot pull the chat (`CHAT_NOT_SHARED`). */
+  | Readonly<{ kind: 'pulled'; pulls: boolean }>;
 
 /** A branch that now exists, and the checkout the registry made for it. @public */
 export type BranchCreated = Readonly<{ branch: string; checkoutId: string; checkoutRoot: string }>;
@@ -1919,6 +1944,10 @@ const answerOf = (
      * it needs the checkout rather than a projection diff to guess from. */
     case 'createBranch': {
       return tree.createBranch(request.name, request.from).then((created) => ({ kind: 'branch', ...created }) as const);
+    }
+    /* A question since round 27: the page holds its composer on the answer, as the agent host's fence does. */
+    case 'pullRemote': {
+      return tree.pullRemote(request.chatId ?? '').then((pulls) => ({ kind: 'pulled', pulls }) as const);
     }
     default: {
       return undefined;

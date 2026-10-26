@@ -6,9 +6,16 @@ import { appendFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/p
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { extractFile } from '@electron/asar';
-import { desktopArchiveName, desktopReleaseBaseUrl, desktopReleaseIdentity } from '#shared/desktop-release.js';
-// oxlint-disable-next-line no-restricted-imports -- Native DMG script wraps the same finalized application.
+import {
+  desktopArchiveName,
+  desktopReleaseBaseUrl,
+  desktopReleaseIdentity,
+  parseDesktopArtifactManifest,
+} from '#shared/desktop-release.js';
+/* oxlint-disable no-restricted-imports -- Native DMG script wraps the same finalized application; publication owns scope shape. */
 import { createMacosDmg } from './macos-dmg.mjs';
+import { desktopCandidateRoutes } from './desktop-route-publication.mjs';
+/* oxlint-enable no-restricted-imports */
 
 const required = (name: string): string => {
   const value = process.env[name];
@@ -47,13 +54,23 @@ const metadataSchema = z.strictObject({
   sourceCommit: z.string().regex(/^[a-f\d]{40}$/u),
   assets: z.record(z.string(), assetSchema),
 });
+/** Archives each candidate scope stages; a scoped candidate never reads or signs another platform's archive. */
+const scopeTargets = {
+  all: ['darwin-arm64', 'darwin-x64', 'win32-x64', 'linux-x64'],
+  linux: ['linux-x64'],
+  macos: ['darwin-arm64', 'darwin-x64'],
+} as const;
 const main = async (): Promise<void> => {
   const operation = process.argv[2];
   const tag = required('DESKTOP_RELEASE_TAG');
   const identity = desktopReleaseIdentity(tag);
-  const scope = z.enum(['all', 'linux']).parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
+  const scope = z.enum(['all', 'linux', 'macos']).parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
   if (scope === 'linux' && identity.channel !== 'staging') {
     throw new Error('Linux-only candidates are staging qualification only');
+  }
+  if (scope === 'macos' && identity.channel !== 'staging') {
+    // Production publication still requires all five routes; a Mac-only production candidate could never be promoted.
+    throw new Error('Mac-only candidates are staging qualification only');
   }
   if (operation === 'resolve') {
     if (required('GITHUB_REF') !== 'refs/heads/main') {
@@ -82,15 +99,16 @@ const main = async (): Promise<void> => {
       run.path !== '.github/workflows/release-build.yml' ||
       run.event !== 'push' ||
       run.status !== 'completed' ||
-      (scope === 'linux' ? !['success', 'failure'].includes(run.conclusion) : run.conclusion !== 'success') ||
+      (scope === 'all' ? run.conclusion !== 'success' : !['success', 'failure'].includes(run.conclusion)) ||
       run.head_sha !== source ||
       run.head_repository.full_name !== repository ||
       run.repository.full_name !== repository
     ) {
       throw new Error('Source archive run is not an admissible same-repository release build for the exact tag');
     }
-    if (scope === 'linux') {
-      // A macOS OTA failure must not erase successful Linux archive evidence. Full candidates retain whole-run success.
+    if (scope !== 'all') {
+      // A failure on another platform must not erase successful archive evidence for the selected platform, so a
+      // scoped candidate admits only its own exact prerequisite jobs. Full candidates retain whole-run success.
       /* eslint-disable @typescript-eslint/naming-convention -- GitHub job provenance fields. */
       const pages = z
         .array(
@@ -121,7 +139,14 @@ const main = async (): Promise<void> => {
       for (const name of [
         'resolve',
         `Verify ${tag}`,
-        'Package linux-x64 (unsigned)',
+        ...(scope === 'linux'
+          ? ['Package linux-x64 (unsigned)']
+          : [
+              'Package macOS arm64 (signed)',
+              'Package macOS x64 (signed)',
+              'Verify native macOS arm64 OTA replacement',
+              'Verify native macOS x64 OTA replacement',
+            ]),
         'Attach immutable candidate assets',
       ]) {
         const matches = jobs.filter((job) => job.name === name);
@@ -132,7 +157,9 @@ const main = async (): Promise<void> => {
           matches[0]!.status !== 'completed' ||
           matches[0]!.conclusion !== 'success'
         ) {
-          throw new Error(`Linux source archive prerequisite did not succeed at the exact source/run: ${name}`);
+          throw new Error(
+            `${scope === 'linux' ? 'Linux' : 'Mac'} source archive prerequisite did not succeed at the exact source/run: ${name}`,
+          );
         }
       }
     }
@@ -146,6 +173,17 @@ const main = async (): Promise<void> => {
     .string()
     .regex(/^[a-f\d]{40}$/u)
     .parse(required('TAU_DESKTOP_SOURCE_SHA'));
+  if (operation === 'admit-scope') {
+    // After assembly, a Mac-only candidate must be exactly both Mac ZIP/DMG pairs and nothing from another platform.
+    const manifest = parseDesktopArtifactManifest(
+      JSON.parse(await readFile(join(resolve(required('DESKTOP_ASSETS_DIR')), 'desktop-artifacts.json'), 'utf8')),
+    );
+    if (manifest.tag !== tag || manifest.sourceCommit !== source || scope !== 'macos') {
+      throw new Error('Scoped candidate manifest does not bind the exact Mac-only candidate');
+    }
+    desktopCandidateRoutes(manifest, 'macos');
+    return;
+  }
   const root = resolve(required('DESKTOP_CANDIDATE_ARCHIVES'));
   const metadata = metadataSchema.parse(JSON.parse(await readFile(join(root, 'download.json'), 'utf8')));
   if (
@@ -157,12 +195,14 @@ const main = async (): Promise<void> => {
     throw new Error('Archive metadata does not bind the exact candidate');
   }
   if (operation === 'preflight') {
-    const targets = scope === 'linux' ? ['linux-x64'] : ['darwin-arm64', 'darwin-x64', 'win32-x64', 'linux-x64'];
+    const targets = scopeTargets[scope];
     for (const requiredTarget of targets) {
       const requiredAsset = metadata.assets[requiredTarget];
       if (!requiredAsset) {
         throw new Error(
-          'Full installer candidates require all four archives. Rebuild the prior staging release with Intel Mac enabled and notarization enabled; existing staging defaults remain unchanged.',
+          scope === 'macos'
+            ? 'Mac-only installer candidates require both Mac archives. Rebuild the staging release with Intel Mac enabled and notarization enabled; existing staging defaults remain unchanged.'
+            : 'Full installer candidates require all four archives. Rebuild the prior staging release with Intel Mac enabled and notarization enabled; existing staging defaults remain unchanged.',
         );
       }
     }
@@ -172,8 +212,8 @@ const main = async (): Promise<void> => {
   const target = z
     .enum(['darwin-arm64', 'darwin-x64', 'win32-x64', 'linux-x64'])
     .parse(required('DESKTOP_CANDIDATE_TARGET'));
-  if (scope === 'linux' && target !== 'linux-x64') {
-    throw new Error('Linux-only candidates cannot stage another platform');
+  if (!(scopeTargets[scope] as readonly string[]).includes(target)) {
+    throw new Error(`${scope === 'linux' ? 'Linux' : 'Mac'}-only candidates cannot stage another platform`);
   }
   const [platform, arch] = target.split('-');
   const archiveName = desktopArchiveName(platform!, arch!);

@@ -1,5 +1,85 @@
-import { createDesktopDownloadCatalog, detectDesktopPlatform } from '#www/downloads.js';
-import { downloadsOrigin } from '#www/environment.js';
+import {
+  createDesktopDownloadCatalog,
+  desktopDownloadHref,
+  desktopDownloadLabel,
+  desktopDownloads,
+  desktopFileLabel,
+  detectDesktopPlatform,
+} from '#www/downloads.js';
+import type { QualifiedDesktopDownload } from '#www/downloads.js';
+import { downloadsOrigin, environmentHref, stagingDesktopNote } from '#www/environment.js';
+
+/**
+ * Recommend the visitor's build before any catalog is read. Direct Mac links name the ZIP they serve.
+ * @param hostname - The hostname serving the page, which selects the download origin and staging note.
+ */
+export const initializeHostDownload = (hostname: string): void => {
+  const hostPlatform = detectDesktopPlatform(navigator);
+  if (!hostPlatform) {
+    return;
+  }
+  const download = desktopDownloads[hostPlatform];
+  for (const link of document.querySelectorAll('[data-host-download]')) {
+    if (link instanceof HTMLElement && link.dataset['hostDownload'] === 'direct') {
+      link.innerHTML = desktopFileLabel(hostPlatform);
+      link.setAttribute('href', environmentHref(desktopDownloadHref(hostPlatform), hostname));
+    } else {
+      link.innerHTML = desktopDownloadLabel(hostPlatform);
+    }
+  }
+  const intelDownload = document.querySelector('[data-mac-intel]');
+  if (intelDownload instanceof HTMLElement) {
+    intelDownload.hidden = hostPlatform !== 'mac';
+  }
+  const detail = document.querySelector('[data-download-detail]');
+  const instructions = document.querySelector('[data-install-instructions]');
+  const note = document.querySelector('[data-platform-note]');
+  if (detail) {
+    detail.textContent = download.detail;
+  }
+  if (instructions) {
+    instructions.textContent = download.install;
+  }
+  if (note) {
+    note.textContent = (hostPlatform === 'mac' ? stagingDesktopNote(hostname) : undefined) ?? download.updates;
+  }
+};
+
+/**
+ * A Mac link may say DMG only over a disk image URL, and only with its ZIP still offered beside it.
+ * @param choice - A qualified route.
+ * @returns The Mac platform and its paired ZIP, or undefined for anything else.
+ */
+const macDiskImage = (
+  choice: QualifiedDesktopDownload,
+): { platform: 'mac' | 'macIntel'; archive: { name: string; href: string } } | undefined => {
+  const archive = choice.alternatives.find((artifact) => new URL(artifact.href).pathname.endsWith('.zip'));
+  return (choice.platform === 'mac' || choice.platform === 'macIntel') &&
+    choice.primaryKind === 'macos-dmg' &&
+    new URL(choice.href).pathname.endsWith('.dmg') &&
+    archive
+    ? { platform: choice.platform, archive }
+    : undefined;
+};
+
+/**
+ * Show a qualified Mac disk image's detail with its paired ZIP as a visible secondary link.
+ * @param element - A download detail line.
+ * @param choice - The qualified Mac route.
+ * @param archive - Its ZIP alternative.
+ */
+const describeDiskImage = (
+  element: Element,
+  choice: QualifiedDesktopDownload,
+  archive: { name: string; href: string },
+) => {
+  const link = document.createElement('a');
+  link.className = 'text-link';
+  link.href = archive.href;
+  link.textContent = archive.name;
+  link.dataset['downloadAlternative'] = choice.platform;
+  element.replaceChildren(`${choice.detail} · ZIP: `, link);
+};
 
 /** Upgrade the shipping download surface only after explicit server configuration and verified route qualification. */
 export const initializeInstallerCatalog = async (signal: AbortSignal): Promise<void> => {
@@ -60,27 +140,41 @@ export const initializeInstallerCatalog = async (signal: AbortSignal): Promise<v
     fragment.append(guideHeading);
     for (const choice of catalog) {
       const primaryHref = choice.platform === 'linux' ? '/download/#linux-installation' : choice.href;
-      for (const link of document.querySelectorAll<HTMLAnchorElement>(
-        `a[data-download-platform="${choice.platform}"]`,
-      )) {
+      const mac = choice.platform === 'mac' || choice.platform === 'macIntel';
+      const diskImage = macDiskImage(choice);
+      if (mac && !diskImage) {
+        continue;
+      }
+      const label = (link: HTMLAnchorElement): void => {
         link.href = primaryHref;
         if (choice.platform === 'linux') {
           link.textContent = 'Set up Linux with APT';
+        } else if (diskImage) {
+          link.innerHTML = desktopFileLabel(diskImage.platform, 'DMG');
         }
+      };
+      const describe = (detail: Element): void => {
+        if (diskImage) {
+          describeDiskImage(detail, choice, diskImage.archive);
+        } else {
+          detail.textContent = choice.detail;
+        }
+      };
+      for (const link of document.querySelectorAll<HTMLAnchorElement>(
+        `a[data-download-platform="${choice.platform}"]`,
+      )) {
+        label(link);
       }
       for (const detail of document.querySelectorAll(`[data-download-detail="${choice.platform}"]`)) {
-        detail.textContent = choice.detail;
+        describe(detail);
       }
       if (choice.platform === host) {
         for (const link of document.querySelectorAll<HTMLAnchorElement>('a[data-host-download="direct"]')) {
-          link.href = primaryHref;
-          if (host === 'linux') {
-            link.textContent = 'Set up Linux with APT';
-          }
+          label(link);
         }
         const detail = document.querySelector('[data-download-detail="host"]');
         if (detail) {
-          detail.textContent = choice.detail;
+          describe(detail);
         }
         const instructions = document.querySelector('[data-install-instructions]');
         if (instructions) {
@@ -88,7 +182,7 @@ export const initializeInstallerCatalog = async (signal: AbortSignal): Promise<v
         }
         const note = document.querySelector('[data-platform-note]');
         if (note) {
-          note.textContent = choice.updates;
+          note.textContent = (mac ? stagingDesktopNote(location.hostname) : undefined) ?? choice.updates;
         }
       }
       const section = document.createElement('details');

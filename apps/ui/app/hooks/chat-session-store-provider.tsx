@@ -19,7 +19,13 @@ import type { EventRejection } from 'xstate';
 import { ChatSessionStore } from '#services/chat-session-store.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
+import { peekRevisionClient } from '#hooks/use-revision-status.js';
 import { inspect } from '#machines/inspector.js';
+import {
+  isPlacementOnThisDevice,
+  isPlacementOnThisDeviceNow,
+  onPlacementReachabilityChanged,
+} from '#lib/agent-host-placement.js';
 
 const ChatSessionStoreContext = createContext<ChatSessionStore | undefined>(undefined);
 
@@ -53,12 +59,19 @@ export function ChatSessionStoreProvider({ children }: ChatSessionStoreProviderP
   store.setDependencies({
     getChat: projectManager.getChat,
     patchChat: projectManager.patchChat,
+    adoptLegacyChatPlacement: projectManager.adoptLegacyChatPlacement,
+    isPlacementOnThisDevice,
+    isPlacementOnThisDeviceNow,
+    onPlacementReachabilityChanged,
     touchChatRecency: projectManager.touchChatRecency,
     consumeChatStartupRequest: projectManager.consumeChatStartupRequest,
     commitCancelledDraftRestore: projectManager.commitCancelledDraftRestore,
     // Composer records and chat attachments are files, reached through the root that owns them.
     client: recordFiles,
     watchRecordFile,
+    /* The project's revision client, wherever its revisions run: this tab's worker or the desktop host. */
+    /* Round 27: and it answers whether this device can pull the chat, as its placement's pull does. */
+    pullRemote: async (projectId, chatId) => (await peekRevisionClient(projectId)?.pullRemote(chatId)) ?? true,
   });
 
   return <ChatSessionStoreContext.Provider value={store}>{children}</ChatSessionStoreContext.Provider>;

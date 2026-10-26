@@ -92,7 +92,7 @@
     "dompurify": "catalog:",
     "eventsource-parser": "3.1.0",
     "express": "catalog:",
-    "geospec": "workspace:*",
+    "geospec": "catalog:",
     "geospec-engine": "catalog:",
     "isbot": "catalog:",
     "isomorphic-git": "catalog:",

@@ -12,15 +12,33 @@
  *
  * - A row is `<term> <seq> <run> <kind> <arg> <ms> <epoch> <attempt>`; `epoch` and `attempt` 0 mean absent.
  * - Kinds: `L` lifecycle, `S` settlement, `H` turn commit, `O`/`R` interrupt requested/resolved, `P` invocation
- *   prepared, `V` invocation settled, `M` assistant reply, `U` opaque (only written raw).
+ *   prepared, `V` invocation settled, `M` assistant reply, `U` opaque (only written raw), `W` a person's turn said as its
+ *   run settled (`abandonedTurnOf`, id `w-<arg>`), `C` that turn as its run's own device said it, `K` a rewind that
+ *   retains nothing (`C` and `K` in merge traces only).
  * - Commands: `E` append through the appender, `W` another writer's row, `WJ` a junk line, `TEAR` a torn tail,
  *   `RELOAD`, `LEDGER`, `SETTLE`, `LIFE`, `RESOLVE`, `PREP`, `BATCH`, `READER`, `READ`, `DELIVER`, `DELIVER1`, `RLEDGER`, `SEG`,
- *   `ROW`, `MERGE`, `TABLES`.
+ *   `ROW`, `MERGE`, `MERGEB`, `MH`, `TABLES`, `ADMIT`, `TERMOF`, `TERMS`, `XADMIT`, `CARRY`, `PLAN`, `PLANT`, `RESUMEB`, `APPENDM`, `REFRESHM`, `STAND` (and `PULL`, which the
+ *   revisions package's `notePull` answers from `corpus/pull-records.trace`).
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { appendChatRows } from '#host/tau-agent-host.js';
+import {
+  appendChatRows,
+  carriedAfterAnswer,
+  carriedAfterRow,
+  carriedBy,
+  chatTermOf,
+  commandAdmission,
+  rowsTermOf,
+  termAdmission,
+  termsAfterAnswer,
+  termsAfterWrite,
+  termWriteOf,
+} from '#host/tau-agent-host.js';
+import type { CarriedTurns, ChatTerms, PassedRun, TermWrite } from '#host/tau-agent-host.js';
+import type { ChatRunRow } from '#host/chat-run-events.js';
+import { carriedPlace, historyAfter, historyWellFormed, openToolCalls } from '#host/run-history.js';
 import {
   chatRunState,
   emptyChatLedger,
@@ -36,11 +54,14 @@ import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogAppender } from '#log/event-log-appender.js';
 import { memoryEventLogStorage } from '#log/event-log-storage.fixture.js';
 import { classifyLogRow } from '#log/event-schema.js';
-import type { AgentLogEvent, RowKey } from '#log/event-types.js';
+import { abandonedTurnOf } from '#log/event-types.js';
+import type { AgentLogEvent, ProviderMessage, RowKey } from '#log/event-types.js';
 import lifecycleTable from '#log/run-lifecycle.legality.json' with { type: 'json' };
 import operationTable from '#log/run-operation.legality.json' with { type: 'json' };
 import settlementTable from '#log/run-settlement.legality.json' with { type: 'json' };
-import { mergeLogSegments } from '#log/segments.js';
+import { foreignRunStanding } from '#log/foreign-runs.js';
+import { createEventLogReducer } from '#log/reducer.js';
+import { mergeLogSegments, mergeSegmentsUpTo, parseLogSegments } from '#log/segments.js';
 import { serializeLogEventBytes } from '#log/serialization.js';
 
 const corpusDirectory = fileURLToPath(new URL('../../specs/lean/corpus/', import.meta.url));
@@ -78,7 +99,7 @@ type Random = ReturnType<typeof randomOf>;
 const below = (random: Random, bound: number) => Math.floor(random() * bound);
 const pick = <T>(random: Random, items: readonly T[]): T => items[below(random, items.length)]!;
 
-type Kind = 'L' | 'S' | 'H' | 'O' | 'R' | 'P' | 'V' | 'M' | 'U';
+type Kind = 'L' | 'S' | 'H' | 'O' | 'R' | 'P' | 'V' | 'M' | 'U' | 'W' | 'C' | 'K';
 /** `undefinedKeys`: the row object carries optional keys set to `undefined`, invisible to the oracle and to the bytes. */
 type Row = {
   term: number;
@@ -218,6 +239,18 @@ const bodyOf = (row: Pick<Row, 'term' | 'seq' | 'run' | 'kind' | 'argument'>): R
         },
       };
     }
+    case 'W': {
+      return {
+        type: 'message.appended',
+        message: abandonedTurnOf({ id: `w-${argument}`, role: 'user', content: 'x' }),
+      };
+    }
+    case 'C': {
+      return { type: 'message.appended', message: { id: `w-${argument}`, role: 'user', content: 'x' } };
+    }
+    case 'K': {
+      return { type: 'history.rewound', trigger: 'retry', retainedMessageIds: [] };
+    }
     case 'U': {
       // A newer build's rows: an unknown type, a history row of a newer version, an unknown lifecycle state.
       return argument === 0
@@ -250,10 +283,18 @@ const keyText = (key: RowKey | undefined) => (key === undefined ? '-' : `${termO
 const listText = (items: readonly string[]) => (items.length === 0 ? '-' : items.join(','));
 const runOf = (runId: string) => runId.slice(1);
 
-/** Merge rows print as `<term>:<seq>:<run>:O<arg>:<ms>`. */
+/**
+ * Merge rows print as `<term>:<seq>:<run>:O<arg>:<ms>`, whatever their kind: an interrupt's `i<arg>`, a turn's `w-<arg>`,
+ * a rewind's 0.
+ */
 const mergedText = (event: AgentLogEvent) => {
-  const interrupt = event as Extract<AgentLogEvent, { type: 'interrupt.recorded' }>;
-  return `${termOf(event.leaderEpoch)}:${event.sequence}:${runOf(event.runId)}:O${interrupt.interruptId.slice(1)}:${Date.parse(event.recordedAt) - base}`;
+  const argument =
+    event.type === 'message.appended'
+      ? event.message.id.slice('w-'.length)
+      : event.type === 'history.rewound'
+        ? '0'
+        : (event as Extract<AgentLogEvent, { type: 'interrupt.recorded' }>).interruptId.slice(1);
+  return `${termOf(event.leaderEpoch)}:${event.sequence}:${runOf(event.runId)}:O${argument}:${Date.parse(event.recordedAt) - base}`;
 };
 
 /** The ledger, projected onto what the Lean model keeps. */
@@ -631,7 +672,7 @@ const logTrace = async (random: Random, name: string, profile: Profile): Promise
   return { text, expected };
 };
 
-type MergeRow = Omit<Row, 'kind'> & { kind: 'O' };
+type MergeRow = Omit<Row, 'kind'> & { kind: 'O' | 'W' | 'C' | 'K' };
 const segmentBytes = (rows: readonly MergeRow[]): Uint8Array<ArrayBuffer> =>
   encoder.encode(rows.map((row) => `${JSON.stringify(eventOf(row))}\n`).join(''));
 
@@ -677,8 +718,200 @@ const mergeSegmentsOf = (random: Random, duplicates: boolean): Array<{ device: n
   return segments;
 };
 
-const mergeTrace = (random: Random, name: string, duplicates: boolean): Trace => {
-  const segments = mergeSegmentsOf(random, duplicates);
+/**
+ * Devices whose terms start in the same millisecond (`ties`: the order breaks the tie on the writer, never a segment
+ * id), or a device whose id changed and left its old file, a prefix of its new one, beside it (`overlap`).
+ */
+const layoutSegmentsOf = (random: Random, layout: 'ties' | 'overlap'): Array<{ device: number; rows: MergeRow[] }> => {
+  const devices = 2 + below(random, 2);
+  const at = 10 + below(random, 30);
+  /* Device ids drawn apart from term order, so a tie broken on the id and one broken on the writer disagree. */
+  const ids = Array.from({ length: devices }, (_unused, index) => index + 1);
+  for (let index = ids.length - 1; index > 0; index--) {
+    const other = below(random, index + 1);
+    [ids[index], ids[other]] = [ids[other]!, ids[index]!];
+  }
+  let nextTerm = 0;
+  const segments = Array.from({ length: devices }, (_unused, device) => {
+    const rows: MergeRow[] = [];
+    let clock = layout === 'ties' ? at : below(random, 60);
+    for (let index = 0, terms = 1 + below(random, 3); index < terms; index++) {
+      const term = nextTerm++;
+      if (index > 0) {
+        clock =
+          random() < (layout === 'overlap' ? 0.6 : 0.3)
+            ? Math.max(0, clock - below(random, 60))
+            : clock + below(random, 3);
+      }
+      for (let seq = 0, count = 1 + below(random, 3); seq < count; seq++) {
+        rows.push({ term, seq, run: 1, kind: 'O', argument: below(random, 3), ms: clock, epoch: term + 1, attempt: 0 });
+      }
+    }
+    return { device: ids[device]!, rows };
+  });
+  if (layout === 'overlap') {
+    const source = pick(random, segments);
+    const kept = 1 + below(random, source.rows.length);
+    /* The old file's id may sort before or after the new one's. */
+    segments.push({ device: random() < 0.5 ? 0 : devices + 1, rows: source.rows.slice(0, kept) });
+  }
+  for (let index = segments.length - 1; index > 0; index--) {
+    const other = below(random, index + 1);
+    [segments[index], segments[other]] = [segments[other]!, segments[index]!];
+  }
+  return segments;
+};
+
+/**
+ * Devices taking turns on one chat with skewed clocks, each stamping its rows after every row it has read (the
+ * clock `stampAfterRead` keeps when no term is dated past its bound): a device that writes a turn first reads every row
+ * written before it.
+ */
+const skewedSegmentsOf = (random: Random): Array<{ device: number; rows: MergeRow[] }> => {
+  const devices = 2 + below(random, 2);
+  const skew = Array.from({ length: devices }, () => below(random, 120));
+  const files: MergeRow[][] = Array.from({ length: devices }, () => []);
+  let newest = -1;
+  for (let turn = 0, turns = 2 + below(random, 4); turn < turns; turn++) {
+    const device = below(random, devices);
+    const clock = skew[device]! + turn * below(random, 5);
+    const at = Math.max(clock, newest + 1);
+    const term = turn;
+    for (let seq = 0, count = 1 + below(random, 3); seq < count; seq++) {
+      files[device]!.push({
+        term,
+        seq,
+        run: 1,
+        kind: 'O',
+        argument: below(random, 3),
+        ms: at + seq,
+        epoch: term + 1,
+        attempt: 0,
+      });
+      newest = Math.max(newest, at + seq);
+    }
+  }
+  return files.flatMap((rows, device) => (rows.length === 0 ? [] : [{ device, rows }]));
+};
+
+/**
+ * Devices that each say people's turns as runs settle (`W`, round 16): the same turn, said under different terms by
+ * different devices, between interrupt rows, and sometimes the run's own row of it (`C`), before or after a copy. The
+ * history folds every copy of one turn, and the run's own row after a copy, as one message. With `rewinds`, rewinds
+ * that retain nothing (`K`, round 17) fall between them, over two turns and two runs: a run's turn taken from a copy and
+ * rewound stays removed whatever row of that run's turn merges later, and another run's row of it is the message again.
+ */
+const wordsSegmentsOf = (random: Random, rewinds = false): Array<{ device: number; rows: MergeRow[] }> => {
+  const devices = 2 + below(random, 2);
+  let nextTerm = 0;
+  return Array.from({ length: devices }, (_unused, device) => {
+    const rows: MergeRow[] = [];
+    let clock = below(random, 60);
+    for (let index = 0, terms = 1 + below(random, 3); index < terms; index++) {
+      const term = nextTerm++;
+      clock += below(random, 20);
+      for (let seq = 0, count = 1 + below(random, 3); seq < count; seq++) {
+        const draw = random();
+        const kind = rewinds
+          ? draw < 0.4
+            ? 'W'
+            : draw < 0.6
+              ? 'C'
+              : draw < 0.8
+                ? 'K'
+                : 'O'
+          : draw < 0.5
+            ? 'W'
+            : draw < 0.65
+              ? 'C'
+              : 'O';
+        const argument = kind === 'K' ? 0 : below(random, rewinds ? 2 : 4);
+        /* With rewinds, a later run's row of a turn sometimes re-admits it, as a Retry does. */
+        const run = rewinds ? 1 + below(random, 2) : 1;
+        rows.push({ term, seq, run, kind, argument, ms: clock, epoch: term + 1, attempt: 0 });
+        clock += below(random, 4);
+      }
+    }
+    return { device, rows };
+  });
+};
+
+/** `foreignClockAheadMilliseconds`, in the model's milliseconds. */
+const clockAhead = 100;
+
+/**
+ * Devices taking turns with skewed clocks, one of them sometimes far ahead (a future-dated row) and sometimes put right
+ * again (its next term clamped up to the future one), each stamping by the bounded hybrid clock (`stampAfterRead`, round 16): after the newest start among the terms it keeps, never following
+ * one dated more than {@link clockAhead} past its own wall clock. Readers at several walls fold `mergeUpTo`.
+ */
+const boundedSegmentsOf = (
+  random: Random,
+): Readonly<{ segments: Array<{ device: number; rows: MergeRow[] }>; bounds: number[] }> => {
+  const devices = 2 + below(random, 2);
+  const skew = Array.from({ length: devices }, () => 200 + below(random, 60));
+  const fast = random() < 0.7 ? below(random, devices) : undefined;
+  if (fast !== undefined) {
+    skew[fast] = 600 + below(random, 3000);
+  }
+  const files: MergeRow[][] = Array.from({ length: devices }, () => []);
+  const starts: number[] = [];
+  const walls: number[] = [];
+  for (let turn = 0, turns = 2 + below(random, 5); turn < turns; turn++) {
+    const device = below(random, devices);
+    /* The fast clock is sometimes put right: its next term starts before its last, and the merge clamps it there. */
+    if (device === fast && random() < 0.4) {
+      skew[device] = 200 + below(random, 60);
+    }
+    const wall = skew[device]! + turn * below(random, 5);
+    walls.push(wall);
+    const kept = starts.filter((start) => start <= wall + clockAhead);
+    const at = Math.max(wall, kept.length === 0 ? 0 : Math.max(...kept) + 1);
+    starts.push(at);
+    for (let seq = 0, count = 1 + below(random, 3); seq < count; seq++) {
+      files[device]!.push({
+        term: turn,
+        seq,
+        run: 1,
+        kind: 'O',
+        argument: below(random, 3),
+        ms: at + seq,
+        epoch: turn + 1,
+        attempt: 0,
+      });
+    }
+  }
+  const bounds = [...new Set([...walls.map((wall) => wall + clockAhead), Math.min(...skew) + clockAhead])].toSorted(
+    (left, right) => left - right,
+  );
+  return { segments: files.flatMap((rows, device) => (rows.length === 0 ? [] : [{ device, rows }])), bounds };
+};
+
+/** The segments of every merge shape but `bounded`, which also draws the bounds its readers fold at. */
+const unboundedSegmentsOf = (
+  random: Random,
+  layout: 'ties' | 'overlap' | 'skewed' | 'words' | 'rewinds' | undefined,
+  duplicates: boolean,
+): Array<{ device: number; rows: MergeRow[] }> => {
+  if (layout === undefined) {
+    return mergeSegmentsOf(random, duplicates);
+  }
+  if (layout === 'skewed') {
+    return skewedSegmentsOf(random);
+  }
+  if (layout === 'words' || layout === 'rewinds') {
+    return wordsSegmentsOf(random, layout === 'rewinds');
+  }
+  return layoutSegmentsOf(random, layout);
+};
+
+const mergeTrace = (
+  random: Random,
+  name: string,
+  shape: Readonly<{ duplicates: boolean; layout?: 'ties' | 'overlap' | 'skewed' | 'words' | 'rewinds' | 'bounded' }>,
+): Trace => {
+  const { duplicates, layout } = shape;
+  const bounded = layout === 'bounded' ? boundedSegmentsOf(random) : undefined;
+  const segments = bounded?.segments ?? (layout === 'bounded' ? [] : unboundedSegmentsOf(random, layout, duplicates));
   const text = [`T ${name}`];
   for (const segment of segments) {
     text.push(`SEG ${segment.device}`, ...segment.rows.map((row) => `ROW ${rowLine(row)}`));
@@ -692,16 +925,31 @@ const mergeTrace = (random: Random, name: string, duplicates: boolean): Trace =>
       },
     },
   );
-  text.push('MERGE', 'X');
-  return {
-    text,
-    expected: [
-      `T ${name}`,
-      `M ${merged.map((event) => mergedText(event)).join(',')}`,
-      `MC ${listText(conflicts)}`,
-      'X',
-    ],
-  };
+  text.push('MERGE');
+  const expected = [
+    `T ${name}`,
+    `M ${merged.map((event) => mergedText(event)).join(',')}`,
+    `MC ${listText(conflicts)}`,
+  ];
+  for (const bound of bounded?.bounds ?? []) {
+    const parsed = parseLogSegments(
+      segments.map((segment) => ({ deviceId: `d${segment.device}`, bytes: segmentBytes(segment.rows) })),
+    );
+    text.push(`MERGEB ${bound}`);
+    expected.push(`MB ${listText(mergeSegmentsUpTo(parsed, base + bound).rows.map((event) => keyText(event)))}`);
+  }
+  if (layout === 'words' || layout === 'rewinds') {
+    const history = createEventLogReducer('history');
+    for (const event of merged) {
+      history.replay(event);
+    }
+    const intact = history.historyIntact();
+    text.push('MH');
+    expected.push(`MH ${intact ? 1 : 0} ${intact ? listText(history.messages().map((message) => message.id)) : '-'}`);
+  }
+  text.push('X');
+  expected.push('X');
+  return { text, expected };
 };
 
 /** The three legality tables, every cell (T8). */
@@ -749,6 +997,533 @@ const interruptResolutionTrace = (): Trace => {
   };
 };
 
+/** The host's admission of a start, a Resume and an approval across devices, every input (T10, round 17). */
+const admissionTrace = (): Trace => {
+  const text = ['T admissions'];
+  const expected = ['T admissions'];
+  for (const verb of ['start', 'resume', 'approve'] as const) {
+    for (const takenOver of [false, true]) {
+      for (const foreignWrote of [false, true]) {
+        text.push(`ADMIT ${verb} ${takenOver ? 1 : 0} ${foreignWrote ? 1 : 0}`);
+        const admitted = termAdmission(verb, { takenOver, foreignWrote });
+        expected.push(`QA ${admitted}`);
+        /* Round 18: the slot the incarnation holds is no input to the term; both are asked to show it changes nothing. */
+        for (const slotHeld of [0, 1]) {
+          text.push(`TERMOF ${admitted} ${slotHeld}`);
+          expected.push(`QT ${rowsTermOf(admitted, 'held', () => 'fresh')}`);
+        }
+      }
+    }
+  }
+  text.push('X');
+  expected.push('X');
+  return { text, expected };
+};
+
+/** One batch of a run's rows for the term and carry traces: a lone heartbeat, or a row that is none. */
+const batchOf = (run: string, heartbeat: string): ChatRunRow[] => [
+  {
+    runId: `r${run}`,
+    body: (heartbeat === '1' ? { type: 'run.heartbeat' } : { type: 'run.lifecycle', state: 'running' }) as LogRowBody,
+  },
+];
+
+/**
+ * A chat's terms on this host over every sequence of up to four steps (T12, rounds 19 and 20): an admitted command
+ * proposing a term for its run's rows, a batch of a run's rows or a heartbeat written, a command answered applied or
+ * not, and a batch's write split around the steps that run off the chat's chain while it is written (`b` begins it,
+ * `e` ends it). Each trace says the terms the writes went under, the chat's term after, and the term a heartbeat would
+ * write under.
+ */
+const termsTrace = (): Trace => {
+  const text = ['T terms'];
+  const expected = ['T terms'];
+  const steps = ['p1.1.2', 'p2.2.3', 'w1.0', 'w1.1', 'w2.0', 'w3.0', 'a1.0', 'a1.1', 'a2.0'];
+  /* Every sequence of up to three steps, and the four-step ones that open with two proposals (two commands racing). */
+  const sequences: string[][] = [[]];
+  for (let length = 1; length <= 4; length++) {
+    for (const prefix of sequences.filter((sequence) => sequence.length === length - 1)) {
+      if (length < 4 || (prefix[0]?.startsWith('p') === true && prefix[1]?.startsWith('p') === true)) {
+        sequences.push(...steps.map((step) => [...prefix, step]));
+      }
+    }
+  }
+  /* Round 20: a write begun with or without a proposal for its run, while proposals are made and withdrawn. */
+  const beside = ['p1.1.2', 'p2.1.3', 'a1.0', 'a2.0', 'a1.1'];
+  for (const opening of [[], ['p1.1.2'], ['p2.2.3'], ['p1.1.2', 'p2.1.3']]) {
+    for (const begin of ['b1.0', 'b1.1', 'b2.0']) {
+      for (const first of [undefined, ...beside]) {
+        for (const second of first === undefined ? [undefined] : [undefined, ...beside]) {
+          const middle = [first, second].filter((step) => step !== undefined);
+          sequences.push([...opening, begin, ...middle, 'e', 'w1.0']);
+        }
+      }
+    }
+  }
+  for (const wroteFirst of [0, 1]) {
+    for (const sequence of sequences) {
+      text.push(`TERMS ${String(wroteFirst)} ${sequence.length === 0 ? '-' : sequence.join(',')}`);
+      let terms: ChatTerms = {};
+      let wrote = wroteFirst === 1 ? 't1' : undefined;
+      let writing: TermWrite | undefined;
+      const written: string[] = [];
+      for (const step of sequence) {
+        const [a, b, c] = step.slice(1).split('.');
+        if (step.startsWith('p')) {
+          terms = {
+            ...terms,
+            proposed: [
+              ...(terms.proposed ?? []),
+              { replaces: 't1', leaderEpoch: `t${c!}`, admission: Number(a), runId: `r${b!}` },
+            ],
+          };
+        } else if (step.startsWith('w') || step.startsWith('b')) {
+          writing = termWriteOf(terms, 't1', batchOf(a!, b!));
+          written.push(writing.leaderEpoch.slice(1));
+        } else if (step !== 'e') {
+          terms = termsAfterAnswer(terms, Number(a), b === '1');
+        }
+        /* A `w` ends at once; a `b` ends at its `e`. */
+        if (writing !== undefined && !step.startsWith('b') && (step === 'e' || step.startsWith('w'))) {
+          terms = termsAfterWrite(terms, writing);
+          wrote = writing.leaderEpoch;
+          writing = undefined;
+        }
+      }
+      const term = chatTermOf(terms, 't1');
+      expected.push(
+        `QM ${written.length === 0 ? '-' : written.join(',')} ${term.slice(1)} ${wrote === term ? term.slice(1) : '-'}`,
+      );
+    }
+  }
+  text.push('X');
+  expected.push('X');
+  return { text, expected };
+};
+
+/**
+ * The one admission of a start, a Resume and an approval past other devices' runs (T13, round 20): every verb and fact,
+ * over foreign runs live or abandoned, said or not, with or without known words.
+ */
+const crossAdmissionTrace = (): Trace => {
+  const text = ['T cross-admissions'];
+  const expected = ['T cross-admissions'];
+  const runs = ['1:0:0:1', '1:1:0:1', '1:1:1:1', '1:1:0:0'];
+  const lists: string[][] = [[], ...runs.map((run) => [run]), ['1:1:0:1', '2:1:0:1'], ['1:1:0:1', '2:0:0:1']];
+  for (const verb of ['start', 'resume', 'approve'] as const) {
+    for (const takenOver of [false, true]) {
+      for (const foreignWrote of [false, true]) {
+        for (const list of lists) {
+          text.push(
+            `XADMIT ${verb} ${takenOver ? 1 : 0} ${foreignWrote ? 1 : 0} ${list.length === 0 ? '-' : list.join(',')}`,
+          );
+          const foreign = list.map((run): PassedRun => {
+            const [runId, abandoned, said, words] = run.split(':');
+            return { runId: runId!, abandoned: abandoned === '1', said: said === '1', words: words === '1' };
+          });
+          const admitted = commandAdmission(verb, { takenOver, foreignWrote, foreign });
+          expected.push(
+            'refused' in admitted
+              ? `QX ${admitted.refused === 'RUN_TAKEN_OVER' ? 'taken-over' : 'held'}`
+              : `QX ${admitted.admitted} ${admitted.says.length === 0 ? '-' : admitted.says.join(',')}`,
+          );
+        }
+      }
+    }
+  }
+  text.push('X');
+  expected.push('X');
+  return { text, expected };
+};
+
+/**
+ * What admitted commands' runs' first batches carry over every sequence of up to three steps (T13, rounds 20 and 22):
+ * an admission carrying turns for its run, a batch of a run's rows or a heartbeat written, a row settling a run, an
+ * admission answered applied or not. Each trace says the turns each write said.
+ */
+const carryTrace = (): Trace => {
+  const text = ['T carried'];
+  const expected = ['T carried'];
+  const steps = ['c1.1.5+6', 'c2.1.7', 'c3.2.-', 'w1.0', 'w1.1', 'w2.0', 'h1', 's1', 's2', 'a1.0', 'a1.1', 'a2.0'];
+  const sequences: string[][] = [[]];
+  for (let length = 1; length <= 3; length++) {
+    for (const prefix of sequences.filter((sequence) => sequence.length === length - 1)) {
+      sequences.push(...steps.map((step) => [...prefix, step]));
+    }
+  }
+  for (const sequence of sequences) {
+    text.push(`CARRY ${sequence.length === 0 ? '-' : sequence.join(',')}`);
+    let carried: readonly CarriedTurns[] = [];
+    const said: string[] = [];
+    for (const step of sequence) {
+      const [a, b, c] = step.slice(1).split('.');
+      if (step.startsWith('c')) {
+        const says = c === '-' ? [] : c!.split('+');
+        carried = [
+          ...carried,
+          {
+            admission: Number(a),
+            runId: `r${b!}`,
+            says: says.map((run): ChatRunRow => ({ runId: run, body: { type: 'run.heartbeat' } })),
+          },
+        ];
+      } else if (step.startsWith('w') || step.startsWith('h')) {
+        /* `h`: a batch written while the history leaves a call open everywhere in it (round 21): no place. */
+        const held = step.startsWith('h');
+        const batch = batchOf(a!, held ? '0' : b!);
+        const entry = carriedBy(carried, batch);
+        const place =
+          entry === undefined
+            ? undefined
+            : carriedPlace(
+                held ? [planMessage('c1', 0)] : [],
+                batch.map((row) => row.body),
+              );
+        for (const row of batch) {
+          carried = carriedAfterRow(carried, place === undefined ? undefined : entry, {
+            runId: row.runId,
+            ...row.body,
+          });
+        }
+        said.push(
+          place === undefined || entry!.says.length === 0 ? '-' : entry!.says.map((row) => row.runId).join('+'),
+        );
+      } else if (step.startsWith('s')) {
+        /* Round 22: a row settles the run, as a Stop's does while the approved call is open. */
+        carried = carriedAfterRow(carried, undefined, { runId: `r${a!}`, type: 'run.lifecycle', state: 'cancelled' });
+      } else {
+        carried = carriedAfterAnswer(carried, Number(a), b === '1');
+      }
+    }
+    expected.push(`QC ${said.length === 0 ? '-' : said.join(',')}`);
+  }
+  text.push('X');
+  expected.push('X');
+  return { text, expected };
+};
+
+/**
+ * One history message of a `PLAN` line (round 21): `c<calls, + apart|->` an assistant turn calling those tools, `o<call>`
+ * a tool's output, `s<id>` a person's words; `at` keeps the ids of calls and outputs apart.
+ */
+const planMessage = (token: string, at: number): ProviderMessage => {
+  const rest = token.slice(1);
+  if (token.startsWith('c')) {
+    const calls = rest === '-' ? [] : rest.split('+');
+    return {
+      id: `m${String(at)}`,
+      role: 'assistant',
+      content:
+        calls.length === 0
+          ? [{ type: 'text', text: 'reply' }]
+          : calls.map((call) => ({ type: 'toolCall', id: `x${call}`, name: 'read_file', arguments: {} })),
+      metadata: { stopReason: calls.length === 0 ? 'stop' : 'toolUse' },
+    };
+  }
+  if (token.startsWith('o')) {
+    return {
+      id: `o${String(at)}`,
+      role: 'tool-output',
+      toolCallId: `x${rest}`,
+      toolName: 'read_file',
+      content: 'ok',
+      isError: false,
+    };
+  }
+  return { id: `s${rest}`, role: 'user', content: 'words' };
+};
+
+/**
+ * Where a batch's carried turns go and the history it leaves (T14, round 21; `carriedPlace`, `openToolCalls`,
+ * `historyWellFormed`): histories with calls open, answered, or followed by another message, and batches of outputs,
+ * rewinds, turn commits (round 24: `p<keep>`, the one row that keeps what it names and says the run's turn) and other
+ * rows, each with no, one or two carried turns, and each with its run's person's turn still ahead past it or not (round
+ * 23).
+ */
+const planTrace = (): Trace => {
+  const text = ['T plans'];
+  const expected = ['T plans'];
+  const histories = ['-', 's0', 's0,c1', 's0,c1+2', 's0,c1+2,o1', 's0,c1,o1', 's0,c1,s5,c-', 's0,c-', 's0,c1,o2'];
+  const batches = [
+    '-',
+    'l',
+    'l,s7',
+    'o1',
+    'o1,o2',
+    'l,o1,s7',
+    'l,k1',
+    'l,k1,s7',
+    'l,k1,o1',
+    'c3',
+    'c3,o3',
+    'l,o2,o1',
+    's7,k0',
+    /* Round 24: a turn's commit keeps what it names and says the turn at once, one row. */
+    'p1',
+    'l,p2',
+    'l,k1,p1,c3',
+  ];
+  for (const history of histories) {
+    for (const batch of batches) {
+      for (const [says, ahead] of ['-', '9', '8+9'].flatMap((said) => [
+        [said, false] as const,
+        [said, true] as const,
+      ])) {
+        /* `PLANT` (round 23): the batch's run says its person's turn next, past the batch. */
+        text.push(`${ahead ? 'PLANT' : 'PLAN'} ${history} ${says} ${batch}`);
+        const before = history === '-' ? [] : history.split(',').map((token, at) => planMessage(token, at));
+        /* The batch as it is built: a rewind names the messages it keeps then, before anything is carried. */
+        let building: readonly ProviderMessage[] = before;
+        const bodies = (batch === '-' ? [] : batch.split(',')).map((token, at): LogRowBody => {
+          const kept = building.slice(0, Number(token.slice(1))).map((message) => message.id);
+          const body: LogRowBody = token.startsWith('k')
+            ? { type: 'history.rewound', trigger: 'retry', retainedMessageIds: kept }
+            : token.startsWith('p')
+              ? {
+                  type: 'turn.history-projection-committed',
+                  retainedMessageIds: kept,
+                  message: { id: 's1000', role: 'user', content: 'words' },
+                  context: { version: 1, systemPrompt: '', initialMessages: [], postCompactionMessages: [] },
+                }
+              : token === 'l'
+                ? { type: 'run.lifecycle', state: 'running' }
+                : { type: 'message.appended', message: planMessage(token, 100 + at) };
+          building = historyAfter(building, body);
+          return body;
+        });
+        const carried = (says === '-' ? [] : says.split('+')).map(
+          (id): LogRowBody => ({
+            type: 'message.appended',
+            message: { id: `s${id}`, role: 'user', content: 'carried' },
+          }),
+        );
+        const place = carriedPlace(before, bodies, ahead);
+        const planned = place === undefined ? bodies : [...bodies.slice(0, place), ...carried, ...bodies.slice(place)];
+        let after: readonly ProviderMessage[] = before;
+        for (const body of planned) {
+          after = historyAfter(after, body);
+        }
+        const open = openToolCalls(before).map((call) => call.toolCallId.slice(1));
+        const survive =
+          place !== undefined &&
+          carried.every((body) => body.type === 'message.appended' && after.some((m) => m.id === body.message.id));
+        expected.push(
+          `QW ${open.length === 0 ? '-' : open.join(',')} ${place === undefined ? '-' : String(place)} ${
+            historyWellFormed(after) ? 1 : 0
+          } ${survive ? 1 : 0}`,
+        );
+      }
+    }
+  }
+  text.push('X');
+  expected.push('X');
+  return { text, expected };
+};
+
+/**
+ * A Resume's batch over a history whose last message it rewinds or keeps (T14, round 21; `openToolCalls`): it closes the
+ * calls the history it keeps leaves open, and only those, then says a reminder, and the history after is well formed.
+ */
+const resumeBatchTrace = (): Trace => {
+  const text = ['T resume-batches'];
+  const expected = ['T resume-batches'];
+  const histories = ['-', 's0', 's0,c1', 's0,c1+2', 's0,c1+2,o1', 's0,c1,o1', 's0,c1,s5,c-', 's0,c-', 's0,c1,c2'];
+  for (const history of histories) {
+    for (const cut of [false, true]) {
+      text.push(`RESUMEB ${history} ${cut ? 1 : 0}`);
+      const before = history === '-' ? [] : history.split(',').map((token, at) => planMessage(token, at));
+      const kept = cut ? before.slice(0, -1) : before;
+      const closed = openToolCalls(kept);
+      const after = [
+        ...kept,
+        ...closed.map(
+          (call, at): ProviderMessage => ({
+            id: `r${String(at)}`,
+            role: 'tool-output',
+            toolCallId: call.toolCallId,
+            toolName: call.toolName,
+            content: 'disconnected',
+            isError: true,
+          }),
+        ),
+        ...(closed.length === 0 ? [] : [{ id: 's7', role: 'user', content: 'reminder' } satisfies ProviderMessage]),
+      ];
+      expected.push(
+        `QZ ${listText(closed.map((call) => call.toolCallId.slice(1)))} ${historyWellFormed(after) ? 1 : 0}`,
+      );
+    }
+  }
+  text.push('X');
+  expected.push('X');
+  return { text, expected };
+};
+
+/**
+ * The merged rows after one device appends a row (T14, round 21; the appender's incremental append): a row under the
+ * merge's latest term extends it, and one under an older term, or a newer term written earlier, lands where a fresh
+ * merge of the segments puts it.
+ */
+const appendMergeTrace = (): Trace[] => {
+  const row = (term: number, seq: number, ms: number): MergeRow => ({
+    term,
+    seq,
+    run: 1,
+    kind: 'O',
+    argument: 0,
+    ms,
+    epoch: term + 1,
+    attempt: 0,
+  });
+  const cases: ReadonlyArray<{ segments: Array<{ device: number; rows: MergeRow[] }>; device: number; row: MergeRow }> =
+    [
+      {
+        segments: [
+          { device: 0, rows: [row(1, 0, 10)] },
+          { device: 1, rows: [row(2, 0, 20)] },
+        ],
+        device: 0,
+        row: row(1, 1, 30),
+      },
+      {
+        segments: [
+          { device: 0, rows: [row(1, 0, 10)] },
+          { device: 1, rows: [row(2, 0, 20)] },
+        ],
+        device: 1,
+        row: row(2, 1, 30),
+      },
+      {
+        segments: [
+          { device: 0, rows: [row(1, 0, 10)] },
+          { device: 1, rows: [row(2, 0, 20)] },
+        ],
+        device: 0,
+        row: row(3, 0, 40),
+      },
+      {
+        segments: [
+          { device: 0, rows: [row(1, 0, 10)] },
+          { device: 1, rows: [row(3, 0, 20)] },
+        ],
+        device: 0,
+        row: row(2, 0, 15),
+      },
+      {
+        segments: [
+          { device: 0, rows: [row(1, 0, 10), row(4, 0, 40)] },
+          { device: 1, rows: [row(2, 0, 20)] },
+          { device: 2, rows: [row(3, 0, 30)] },
+        ],
+        device: 1,
+        row: row(2, 1, 50),
+      },
+      { segments: [{ device: 0, rows: [row(1, 0, 10)] }], device: 0, row: row(1, 1, 11) },
+    ];
+  return cases.map(({ segments, device, row: appended }, index) => {
+    const name = `append-merge-${String(index)}`;
+    const text = [`T ${name}`];
+    for (const segment of segments) {
+      text.push(`SEG ${segment.device}`, ...segment.rows.map((each) => `ROW ${rowLine(each)}`));
+    }
+    text.push(`APPENDM ${device} ${rowLine(appended)}`, 'X');
+    const merged = mergeLogSegments(
+      segments.map((segment) => ({
+        deviceId: `d${segment.device}`,
+        bytes: segmentBytes(segment.device === device ? [...segment.rows, appended] : segment.rows),
+      })),
+    );
+    return { text, expected: [`T ${name}`, `MA ${listText(merged.map((event) => keyText(event)))}`, 'X'] };
+  });
+};
+
+/**
+ * The merged rows the appender folds after a refresh reads a row another segment brought (T14, round 26; the
+ * appender's `extendsMerged`): a later segment's smaller copy of a row in the middle of a term replaces it, so the
+ * fold is the whole new merge, as it is when the row extends the merge's last term or merges before a later term.
+ */
+const refreshMergeTrace = (): Trace[] => {
+  const row = (term: number, seq: number, ms: number): MergeRow => ({
+    term,
+    seq,
+    run: 1,
+    kind: 'O',
+    argument: 0,
+    ms,
+    epoch: term + 1,
+    attempt: 0,
+  });
+  const held = [
+    { device: 0, rows: [row(1, 0, 10), { ...row(1, 1, 11), argument: 5 }, row(1, 2, 12)] },
+    { device: 1, rows: [row(2, 0, 20)] },
+  ];
+  const cases: ReadonlyArray<{ segments: Array<{ device: number; rows: MergeRow[] }>; device: number; row: MergeRow }> =
+    [
+      /* A new device's smaller copy of a row mid-term: neither the term's first row nor the last one held. */
+      { segments: held, device: 2, row: row(1, 1, 11) },
+      /* A larger copy: the held row stays. */
+      { segments: held, device: 2, row: { ...row(1, 1, 11), argument: 9 } },
+      /* A row that extends the merge's last term. */
+      { segments: held, device: 1, row: row(2, 1, 21) },
+      /* A row under an older term, which merges before the later term. */
+      { segments: held, device: 0, row: row(1, 3, 30) },
+    ];
+  return cases.map(({ segments, device, row: brought }, index) => {
+    const name = `refresh-merge-${String(index)}`;
+    const text = [`T ${name}`];
+    for (const segment of segments) {
+      text.push(`SEG ${segment.device}`, ...segment.rows.map((each) => `ROW ${rowLine(each)}`));
+    }
+    text.push(`REFRESHM ${device} ${rowLine(brought)}`, 'X');
+    const next = segments.some((segment) => segment.device === device)
+      ? segments.map((segment) => (segment.device === device ? { device, rows: [...segment.rows, brought] } : segment))
+      : [...segments, { device, rows: [brought] }];
+    const merged = mergeLogSegments(
+      next.map((segment) => ({ deviceId: `d${segment.device}`, bytes: segmentBytes(segment.rows) })),
+    );
+    return { text, expected: [`T ${name}`, `MR ${merged.map((event) => mergedText(event)).join(',')}`, 'X'] };
+  });
+};
+
+/**
+ * Where another device's run stands on this device, over every case of the evidence rule (T11, rounds 18 and 19): when
+ * its segment last changed here, this device's clock (behind that included), the quiet its pulls found (or none), a
+ * takeover, and whether this device can pull the chat at all (round 27).
+ */
+const standingTrace = (): Trace => {
+  const text = ['T standings'];
+  const expected = ['T standings'];
+  const bound = 600;
+  const ask = 120;
+  for (const changed of [0, 1000]) {
+    for (const now of [changed - 1, changed, changed + ask, changed + ask + 1, changed + 7200].filter(
+      (at) => at >= 0,
+    )) {
+      for (const quiet of [undefined, 0, bound, bound + 1, 7200]) {
+        for (const takenOver of [false, true]) {
+          for (const pulls of [true, false]) {
+            text.push(`STAND ${bound} ${ask} ${changed} ${now} ${quiet ?? '-'} ${takenOver ? 1 : 0} ${pulls ? 1 : 0}`);
+            const standing = foreignRunStanding(
+              { observedAt: changed, pulledQuiet: quiet, ...(takenOver ? { takenOver: true } : {}) },
+              now,
+              { bound, ask, pulls },
+            );
+            expected.push(
+              standing.abandoned
+                ? 'QF abandoned'
+                : standing.awaitsPull
+                  ? 'QF awaits-pull'
+                  : `QF holds ${String(standing.changesAt)}`,
+            );
+          }
+        }
+      }
+    }
+  }
+  text.push('X');
+  expected.push('X');
+  return { text, expected };
+};
+
 const historyKinds: readonly Kind[] = ['L', 'L', 'L', 'L', 'S', 'S', 'S', 'H', 'O'];
 const baseProfile: Profile = {
   appendKinds: historyKinds,
@@ -769,6 +1544,12 @@ type Corpus = {
   /** Merge traces instead of log traces; `true` draws duplicated and conflicting segments. */
   readonly merge?: boolean;
   readonly duplicates?: boolean;
+  /**
+   * Merge traces of one shape: terms tied at one millisecond across devices, a file overlapping its old copy, devices
+   * with skewed clocks, people's turns said by more than one device (with rewinds between them, or not), or a clock far
+   * ahead read at a bound.
+   */
+  readonly layout?: 'ties' | 'overlap' | 'skewed' | 'words' | 'rewinds' | 'bounded';
 };
 
 /** The tables, then `count` traces of the corpus's kind, from one seeded stream. */
@@ -778,13 +1559,29 @@ const generate = async (corpus: Corpus, seed = corpus.seed): Promise<Trace[]> =>
   for (let index = 0; index < corpus.count; index++) {
     traces.push(
       corpus.merge === true
-        ? mergeTrace(random, `merge-${index}`, corpus.duplicates === true)
+        ? mergeTrace(random, `merge-${index}`, {
+            duplicates: corpus.duplicates === true,
+            ...(corpus.layout === undefined ? {} : { layout: corpus.layout }),
+          })
         : // oxlint-disable-next-line no-await-in-loop -- one trace at a time keeps the seeded stream reproducible.
           await logTrace(random, `log-${index}`, corpus.profile ?? baseProfile),
     );
   }
   if (corpus.name === 'invocations') {
     traces.push(interruptResolutionTrace());
+  }
+  if (corpus.name === 'base') {
+    traces.push(
+      admissionTrace(),
+      termsTrace(),
+      crossAdmissionTrace(),
+      carryTrace(),
+      planTrace(),
+      resumeBatchTrace(),
+      ...appendMergeTrace(),
+      ...refreshMergeTrace(),
+      standingTrace(),
+    );
   }
   return traces;
 };
@@ -829,6 +1626,18 @@ const corpora: readonly Corpus[] = [
     profile: { ...baseProfile, raw: 0.15, reader: true, queries: false },
   },
   { name: 'duplicate-segments', seed: 20_260_928, count: 150, merge: true, duplicates: true },
+  { name: 'merge-ties', seed: 20_261_023, count: 120, merge: true, layout: 'ties' },
+  { name: 'overlapping-segments', seed: 20_261_024, count: 120, merge: true, layout: 'overlap' },
+  { name: 'skewed-clocks', seed: 20_261_025, count: 120, merge: true, layout: 'skewed' },
+  { name: 'shared-turns', seed: 20_261_026, count: 120, merge: true, layout: 'words' },
+  { name: 'rewound-turns', seed: 20_261_029, count: 120, merge: true, layout: 'rewinds' },
+  { name: 'future-rows', seed: 20_261_027, count: 120, merge: true, layout: 'bounded' },
+  {
+    name: 'abandoned-turns',
+    seed: 20_261_028,
+    count: 120,
+    profile: { ...baseProfile, appendKinds: [...historyKinds, 'W', 'W'], rawKinds: [...historyKinds, 'W'], raw: 0.15 },
+  },
   { name: 'legacy-epochs', seed: 20_260_929, count: 120, profile: { ...baseProfile, legacy: 0.5, attempts: 0.3 } },
   {
     name: 'opaque-rows',

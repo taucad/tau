@@ -702,6 +702,38 @@ describe('ChatError', () => {
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
+  /* XD3: another device runs the chat; its run cannot be moved or stopped from here. */
+  it('should state that another device is running the chat and offer nothing', () => {
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'Chat chat_1 is running on another device; send this again once that run finishes.',
+      code: 'RUN_ACTIVE_ON_ANOTHER_DEVICE',
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('This chat is running on another device')).toBeInTheDocument();
+    expect(screen.getByText('Send again here once that run finishes.')).toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  /* XD3/XD4: the chat waits on sync from another device; nothing here can hurry it. */
+  it.each([
+    ['SEGMENTS_UNREADABLE', "Another device's copy of this chat could not be read."],
+    ['BRANCH_UNAVAILABLE', 'The branch this chat ran on has not arrived on this device yet.'],
+  ])('should say a %s chat is waiting on sync from another device and offer nothing', (code, message) => {
+    persisted({ category: errorCategory.generic, title: 'Error', message, code });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Waiting on sync from another device')).toBeInTheDocument();
+    expect(
+      screen.getByText('This chat continues once sync brings what another device wrote. Send again then.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
   /* The one restart that loses nothing: admission refused before a run existed. */
   it('should keep Try again for a turn that never started', async () => {
     const user = userEvent.setup();
@@ -794,6 +826,25 @@ describe('ChatError', () => {
     await user.click(screen.getByRole('button', { name: 'Resume' }));
     expect(continueChat).toHaveBeenCalledTimes(1);
     expect(regenerate).not.toHaveBeenCalled();
+  });
+
+  /* XD4: a placement refused `wait` after the run was admitted ends it RUN_ABANDONED with the code kept (RA-R1): the
+   * card says what it waits on, and Resume places it again once sync brings the branch. */
+  it('should say an abandoned run waits on sync for its branch, and offer Resume', async () => {
+    const user = userEvent.setup();
+    projected({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: "This chat's branch is not on this device yet.",
+      code: 'RUN_ABANDONED',
+      details: { code: 'BRANCH_UNAVAILABLE' },
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Waiting on sync from another device')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(continueChat).toHaveBeenCalledTimes(1);
   });
 
   it.each([

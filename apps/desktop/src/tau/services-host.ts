@@ -198,6 +198,9 @@ const host = createServicesHost({
   machinesStreaming: (requestId, machines) => {
     parentPort.postMessage({ type: 'machines-streaming-answered', requestId, machines });
   },
+  terminalSessionsAnswered: (requestId, sessions) => {
+    parentPort.postMessage({ type: 'terminal-sessions-answered', requestId, sessions });
+  },
   machineBindingCompleted: (requestId, result) => {
     parentPort.postMessage(
       'error' in result

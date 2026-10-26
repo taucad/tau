@@ -22,7 +22,7 @@
   },
   {
     "id": "M4",
-    "drift": "no per-device clamp (holdFileOrder) in the merge (T7)",
+    "drift": "no per-writer clamp (holdFileOrder) in the merge (T7)",
     "file": "specs/lean/ChatLedger.lean",
     "find": "let floor := match acc.1 with | some f => max f p.1.started | none => p.1.started",
     "replace": "let floor := p.1.started"
@@ -71,10 +71,10 @@
   },
   {
     "id": "M11",
-    "drift": "the merge keeps the smallest copy of any device, not the term device's own (T7)",
+    "drift": "the merge reads a segment's id as its writer, not the first term it holds (T7: t7_segment_ids, t7_prefix_segment)",
     "file": "specs/lean/ChatLedger.lean",
-    "find": "(keySort copyKey (if own.isEmpty then copies else own)).headD default",
-    "replace": "(keySort copyKey copies).headD default"
+    "find": "let order := if fresh then some (st.2.headD e.term, intro.length - 1) else none",
+    "replace": "let order := if fresh then some (dev, intro.length - 1) else none"
   },
   {
     "id": "M12",
@@ -139,5 +139,401 @@
     "file": "specs/lean/ChatLedger.lean",
     "find": "  | some .paused => !en.external\n",
     "replace": "  | some .paused => true\n"
+  },
+  {
+    "id": "M20",
+    "drift": "a person's turn said by two devices breaks the history instead of merging as one (T9: t9_words_merge_once)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "if (e.kind = .W ∨ e.kind = .C) ∧ (id, e.run) ∈ h.copied then some h\n    else if id ∈ h.ids then (if e.kind = .W then some h else none)",
+    "replace": "if id ∈ h.ids then none"
+  },
+  {
+    "id": "M21",
+    "drift": "a person's turn said as its run settled does not commit the run's turn, so a Resume commits it again (T9: t9_words_commit)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | .W => let en := L.entry e.run; L.put e.run { en with committed := true }\n",
+    "replace": "  | .W => L\n"
+  },
+  {
+    "id": "M22",
+    "drift": "a reader keeps terms by their own start, not their clamped start, so what it keeps is no longer a prefix of the merge (T7: t7_bounded_prefix)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "filter (fun p => decide ((lookup p.1.term cl).getD 0 ≤ B))",
+    "replace": "filter (fun p => decide (p.1.started ≤ B))"
+  },
+  {
+    "id": "M23",
+    "drift": "the run's own row of a turn a copy already said breaks the history instead of merging as one (T9: t9_copy_then_turn)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "(e.kind = .W ∨ e.kind = .C) ∧ (id, e.run) ∈ h.copied then",
+    "replace": "e.kind = .W ∧ (id, e.run) ∈ h.copied then"
+  },
+  {
+    "id": "M24",
+    "drift": "the history forgets which turns it took from a copy, so the run's own row of one breaks it (T9: t9_copy_merged_first)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "copied := if e.kind = .W then h.copied ++ [(id, e.run)] else h.copied",
+    "replace": "copied := h.copied"
+  },
+  {
+    "id": "M25",
+    "drift": "a turn taken from a copy is said again only while the history still holds it, so after a rewind the run's own row brings it back (T9: t9_copy_then_turn_ever)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "(e.kind = .W ∨ e.kind = .C) ∧ (id, e.run) ∈ h.copied then",
+    "replace": "(e.kind = .W ∨ e.kind = .C) ∧ (id, e.run) ∈ h.copied ∧ id ∈ h.ids then"
+  },
+  {
+    "id": "M26",
+    "drift": "a rewind forgets which turns the history took from a copy (T9: t9_copy_rewound_stays_gone)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "| .K => some { h with ids := [] }",
+    "replace": "| .K => some { h with ids := [], copied := [] }"
+  },
+  {
+    "id": "M27",
+    "drift": "an approval continues a run another device took over (T10: t10_approval_refused_after_takeover)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "if v = .approve ∧ takenOver = true then .takenOver",
+    "replace": "if False then .takenOver"
+  },
+  {
+    "id": "M28",
+    "drift": "an approval keeps the term it held before another device's rows, so its rows merge ahead of them (T10: t10_new_term_after_foreign_rows)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "else if wrote then .newTerm else .sameTerm",
+    "replace": "else if wrote ∧ v ≠ .approve then .newTerm else .sameTerm"
+  },
+  {
+    "id": "M29",
+    "drift": "a turn taken from one run's copy is said again for every run, so a Retry after a rewind never brings the person's message back (T9: t9_retry_after_rewind)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "(e.kind = .W ∨ e.kind = .C) ∧ (id, e.run) ∈ h.copied then",
+    "replace": "(e.kind = .W ∨ e.kind = .C) ∧ h.copied.any (fun x => decide (x.1 = id)) then"
+  },
+  {
+    "id": "M30",
+    "drift": "a pull's gap is counted whole, so one forward clock jump between two pulls reads as the bound of quiet and a live run is abandoned (round 19, finding 3; T11: t11_quiet_needs_pulls, t11_forward_jump_bounded)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "      else ⟨now, size, r.quiet + min cap (now - r.clock)⟩",
+    "replace": "      else ⟨now, size, r.quiet + (now - r.clock)⟩"
+  },
+  {
+    "id": "M31",
+    "drift": "a pull that found the segment changed keeps its quiet, so a live run's new rows do not hold the chat (T11: t11_changed_segment_holds, t11_quiet_needs_pulls)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "    else ⟨now, size, 0⟩",
+    "replace": "    else ⟨now, size, r.quiet⟩"
+  },
+  {
+    "id": "M32",
+    "drift": "a new term falls back to the incarnation's old one while the incarnation holds its run's slot, so an external agent's approval lands under the old term (T10: t10_new_term_whatever_the_slot)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | .newTerm => fresh\n",
+    "replace": "  | .newTerm => if _slotHeld then held else fresh\n"
+  },
+  {
+    "id": "M33",
+    "drift": "a pull record is never moved back, so after the clock goes back no pull is recorded until it catches up (round 19, finding 2; T11: t11_back_jump_recovers)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "      if r.clock ≤ now ∧ now - r.clock < throttle then r",
+    "replace": "      if now - r.clock < throttle then r"
+  },
+  {
+    "id": "M34",
+    "drift": "a foreign run is found abandoned from this device's clock rather than from the quiet its pulls found (round 17's segment-age rule; T11: t11_unobserved_never_abandoned)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  if takenOver || decide (quiet.getD 0 > bound) then .abandoned",
+    "replace": "  if takenOver || decide (now > changed + bound) then .abandoned"
+  },
+  {
+    "id": "M35",
+    "drift": "a term opened for a command is the chat's at once, before any row under it, so a refused command stops the live run's heartbeats (round 19, finding 1; T12: t12_heartbeat_kept)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | .propose c r f => { s with proposed := s.proposed ++ [(c, r, f)] }",
+    "replace": "  | .propose c r f => { s with opened := some f, proposed := s.proposed ++ [(c, r, f)] }"
+  },
+  {
+    "id": "M36",
+    "drift": "a refused command's proposed term is never withdrawn (T12: t12_refused_no_trace)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | .answer c applied => if applied then s else { s with proposed := s.proposed.filter (fun p => p.1 != c) }",
+    "replace": "  | .answer c applied => if applied || true then s else { s with proposed := s.proposed.filter (fun p => p.1 != c) }"
+  },
+  {
+    "id": "M37",
+    "drift": "a heartbeat commits a command's proposed term, so a heartbeat opens a term (T12: t12_refused_no_trace)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  if heartbeat then none else s.proposed.find? (fun p => p.2.1 == run)",
+    "replace": "  s.proposed.find? (fun p => p.2.1 == run)"
+  },
+  {
+    "id": "M38",
+    "drift": "a refused command withdraws every proposed term, so a start still waiting for its first row loses its term to another command's refusal (T12: t12_refusal_spares_others)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "{ s with proposed := s.proposed.filter (fun p => p.1 != c) }",
+    "replace": "{ s with proposed := [] }"
+  },
+  {
+    "id": "M39",
+    "drift": "a batch's write commits what the terms say as it ends, not what it decided as it began, so a term proposed while it was written becomes the chat's with no row under it, and one withdrawn meanwhile leaves the batch's term behind (round 20, T12: t12_write_decided_once)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  match begun.taken run heartbeat with\n  | some p => { s with opened := some p.2.2, proposed := s.proposed.erase p, wrote := some p.2.2 }\n  | none => { s with wrote := some begun.term }",
+    "replace": "  match s.taken run heartbeat with\n  | some p => { s with opened := some p.2.2, proposed := s.proposed.erase p, wrote := some p.2.2 }\n  | none => { s with wrote := some s.term }"
+  },
+  {
+    "id": "M40",
+    "drift": "only a start says the turns of the abandoned foreign runs it goes past, so a Resume or an approval past one never marks it taken over (round 20, T13: t13_says_every_passed)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "    else .admitted a ((foreign.filter (fun f => f.words && !f.said)).map Passed.run)",
+    "replace": "    else .admitted a (if v = .start then (foreign.filter (fun f => f.words && !f.said)).map Passed.run else [])"
+  },
+  {
+    "id": "M41",
+    "drift": "an admission goes on past another device's run that still holds the chat (round 20, T13: t13_held_refuses)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "    if foreign.any (fun f => !f.abandoned) then .held",
+    "replace": "    if foreign.any (fun _ => false) then .held"
+  },
+  {
+    "id": "M42",
+    "drift": "a lone heartbeat spends what a command's run's first batch is to carry, so the turns it names are never said (round 20, T13: t13_carry_kept)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  if heartbeat then none else c.find? (fun p => p.2.1 == run)",
+    "replace": "  c.find? (fun p => p.2.1 == run)"
+  },
+  {
+    "id": "M43",
+    "drift": "a refused command's carried turns are kept, so a later batch of its run says turns no admitted command went past (round 20, T13: t13_carry_kept)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | .answer k applied => (if applied then c else c.filter (fun p => p.1 != k), [])",
+    "replace": "  | .answer _ _ => (c, [])"
+  },
+  {
+    "id": "M44",
+    "drift": "a batch's carried turns go at the first place after its rewinds, open calls or not, so a Resume's carried words part a call from its output (round 21, T14: t14_plan_well_formed, t14_head_parts_call)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "    (ops.drop i).all (fun op => !op.isRewind) &&\n      ((openCalls (applyAll h (ops.take i))).isEmpty || nextSays (ops.drop i))",
+    "replace": "    (ops.drop i).all (fun op => !op.isRewind)"
+  },
+  {
+    "id": "M45",
+    "drift": "a batch's carried turns may go before its own rewind, which names what it keeps without them, so the rewind cuts them (round 21, T14: t14_carried_survive_rewind, t14_head_cut_by_rewind)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "    (ops.drop i).all (fun op => !op.isRewind) &&\n      ((openCalls (applyAll h (ops.take i))).isEmpty || nextSays (ops.drop i))",
+    "replace": "      ((openCalls (applyAll h (ops.take i))).isEmpty || nextSays (ops.drop i))"
+  },
+  {
+    "id": "M46",
+    "drift": "carried turns go at the head of their batch again, before the outputs that close the calls a Resume found open and before its rewind (round 21, T14: t14_plan_well_formed, t14_head_parts_call)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  (placeAt h ops).map fun i => ops.take i ++ says.map (fun s => Op.msg (.say s)) ++ ops.drop i",
+    "replace": "  (placeAt h ops).map fun _ => says.map (fun s => Op.msg (.say s)) ++ ops"
+  },
+  {
+    "id": "M47",
+    "drift": "a Resume closes every call no output answered, even one another message already followed, so its output is a stray result (round 21, T14: batch_wf, t14_reachable_well_formed)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "    let outs := (openCalls kept).map fun c => Op.msg (.out c)",
+    "replace": "    let outs := (kept.foldl (fun o m => match m with | .call cs => o ++ cs | .out c => o.erase c | .say _ => o) []).map fun c => Op.msg (.out c)"
+  },
+  {
+    "id": "M48",
+    "drift": "a message after a reply leaves its calls open, so an output written after another message reads as well formed (round 21, T14: t14_head_parts_call, t14_no_late_output)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | .out c => o.erase c\n  | .say _ => []",
+    "replace": "  | .out c => o.erase c\n  | .say _ => o"
+  },
+  {
+    "id": "M49",
+    "drift": "a batch with no place for what its command carries spends it anyway, so the turns of the run it went past are never said (round 21, T13: t13_hold_keeps)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | .hold _ => (c, [])",
+    "replace": "  | .hold r => match carriedTaken c r false with\n    | some p => (c.erase p, [])\n    | none => (c, [])"
+  },
+  {
+    "id": "M50",
+    "drift": "the appender puts every row it appends at the merge's tail, so a row under an older term lands after a later term the full merge puts after it (round 21, T14: t14_incremental_is_merge)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  if merged.getLast?.map Row.term = some e.term then merged ++ [e]",
+    "replace": "  if True then merged ++ [e]"
+  },
+  {
+    "id": "M51",
+    "drift": "a row that settles a run keeps what a command carried for it, so an entry its batch had no place for is never cleared (round 22, finding 4, T15: t15_settle_drops)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | .settle r => (c.filter (fun p => p.2.1 != r), [])",
+    "replace": "  | .settle _ => (c, [])"
+  },
+  {
+    "id": "carried-head-placement",
+    "drift": "round 21, finding 1: carriedPlace puts carried turns at the head of their batch again, between a call a Resume closes and its output (T14: t14_plan_well_formed)",
+    "file": "src/host/run-history.ts",
+    "test": "src/log/history-invariant.test.ts",
+    "find": "    if (index > lastDrop && (open.length === 0 || saysNext(bodies, index, turnAhead))) {",
+    "replace": "    if (index >= 0) {"
+  },
+  {
+    "id": "carried-before-rewind",
+    "drift": "round 21, finding 2: carriedPlace may put carried turns before their batch's own rewind, which cuts them (T14: t14_carried_survive_rewind)",
+    "file": "src/host/run-history.ts",
+    "test": "src/host/history-well-formed.test.ts",
+    "find": "  const lastDrop = bodies.findLastIndex((body) => dropsMessages(body));",
+    "replace": "  const lastDrop = -1;"
+  },
+  {
+    "id": "merged-tail-always",
+    "drift": "round 21, finding 3: the appender puts every row it appends at the merged fold's tail, so a row under an older term follows a later term until the next refold (T14: t14_incremental_is_merge)",
+    "file": "src/log/event-log-appender.ts",
+    "test": "src/log/history-invariant.test.ts",
+    "find": "        const atTail = merged === undefined || extendsMergedTail(transition.event);",
+    "replace": "        const atTail = true;"
+  },
+  {
+    "id": "resume-closes-unanswered",
+    "drift": "round 21: a Resume closes every call no output answered, even one another message already followed, so its output is a stray result (T14: t14_no_late_output)",
+    "file": "src/host/run-history.ts",
+    "test": "src/log/history-invariant.test.ts",
+    "find": "export const openToolCalls = (messages: readonly ProviderMessage[]): ToolCall[] => {\n  let open: readonly ToolCall[] = [];",
+    "replace": "export const openToolCalls = (messages: readonly ProviderMessage[]): ToolCall[] => {\n  if (messages.length >= 0) {\n    return messages.flatMap(callsOf).filter((call) => !messages.some((m) => m.role === 'tool-output' && m.toolCallId === call.toolCallId));\n  }\n  let open: readonly ToolCall[] = [];"
+  },
+  {
+    "id": "replay-admitted",
+    "drift": "round 22, finding 1: a copy of a command this host already applied is admitted again, so it reads the other devices' segments and proposes and carries for its run again (T15: t15_replay_no_change)",
+    "file": "src/host/tau-agent-host.ts",
+    "test": "src/host/tau-agent-host.test.ts",
+    "find": "        if (applied === true || (applied !== false && (await applied))) {",
+    "replace": "        if (applied !== applied) {"
+  },
+  {
+    "id": "replay-withdraws-original",
+    "drift": "round 22, finding 1: a dispatch this host never admitted (a replay) withdraws the newest admission's entries on its answer, its original's, so the turn held for the run's next batch is never said (T15: t15_replay_keeps_held)",
+    "file": "src/host/tau-agent-host.ts",
+    "test": "src/host/tau-agent-host.test.ts",
+    "find": "      store.carried = carriedAfterAnswer(store.carried, dispatch.admission, applied);",
+    "replace": "      store.carried = carriedAfterAnswer(store.carried, dispatch.admission ?? admissionCount, applied);"
+  },
+  {
+    "id": "settled-keeps-carried",
+    "drift": "round 22, finding 4: a row that settles a run keeps what was carried for it, so an entry its batch had no place for is never cleared (T15: t15_settle_drops)",
+    "file": "src/host/tau-agent-host.ts",
+    "test": "src/log/chat-ledger.differential.test.ts",
+    "find": "    : carried.filter((entry) => entry !== spent && !(settles && entry.runId === row.runId));",
+    "replace": "    : carried.filter((entry) => entry !== spent);"
+  },
+  {
+    "id": "unread-approval-in-hold",
+    "drift": "round 22, finding 3: an approval inside its paused run's hold is admitted without the takeover check while another device's segment cannot be read (T15: t15_unread_refused)",
+    "file": "src/host/tau-agent-host.ts",
+    "test": "src/launchers/agent-launcher.segments.test.ts",
+    "find": "      const { code, message, details } = codedFailureDetail(error);\n      /* Fail closed (round 20)",
+    "replace": "      const { code, message, details } = codedFailureDetail(error);\n      if (code === 'SEGMENTS_UNREADABLE' && details?.['unchecked'] === undefined && pauseHeld(store)) {\n        return undefined;\n      }\n      /* Fail closed (round 20)"
+  },
+  {
+    "id": "grown-rows-chain",
+    "drift": "round 22, finding 2: a grown segment's rows keep the rows they grew from, which keep theirs, so every earlier copy of a heartbeat-grown segment stays alive",
+    "file": "src/log/foreign-runs.ts",
+    "test": "src/log/foreign-runs.incremental.test.ts",
+    "find": "  grownFrom.set(grown, { length: prior.length, folds: foldsOf(prior) });",
+    "replace": "  grownFrom.set(grown, Object.assign({ length: prior.length, folds: foldsOf(prior) }, { prior }));"
+  },
+  {
+    "id": "turn-not-last",
+    "drift": "round 23: a place where a call is open is no place even when a say comes next, so over a history ending in a call no output answers a turn's carried turns wait past its admission and are said after the person's new turn, which is no longer last (T16: t16_turn_last, t16_stale_prompt)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "      ((openCalls (applyAll h (ops.take i))).isEmpty || nextSays (ops.drop i))",
+    "replace": "      (openCalls (applyAll h (ops.take i))).isEmpty"
+  },
+  {
+    "id": "turn-ahead-ignored",
+    "drift": "round 23: the host never tells carriedPlace that a run's turn is still ahead, so a turn's admission batch over a call no output answers has no place, and the abandoned run's words are said after the person's new turn",
+    "file": "src/host/tau-agent-host.ts",
+    "test": "src/host/history-well-formed.test.ts",
+    "find": "              turnAheadOf(prior, carried.runId, history),\n",
+    "replace": "              false,\n"
+  },
+  {
+    "id": "turn-ahead-ignored-model",
+    "drift": "round 24: the model never knows a run's turn is still ahead, so a turn's admission batch over a call no output answers has no place, the carried turns follow the commit, and the person's new turn is no longer last (T16: t16_turn_last, t16_stale_prompt)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "def turnAhead (committed : Bool) : Bool := !committed",
+    "replace": "def turnAhead (_committed : Bool) : Bool := false"
+  },
+  {
+    "id": "replay-reads-unloaded-ledger",
+    "drift": "round 23: the replay check reads the in-memory ledger, so after an idle eviction a copy of an applied approval runs full admission and is refused because another device started a run",
+    "file": "src/host/tau-agent-host.ts",
+    "test": "src/host/tau-agent-host.test.ts",
+    "find": "        const applied = appliedDurably(ordered, command);\n",
+    "replace": "        const applied = storeOf(ordered).ledger?.applied[command.commandId] !== undefined;\n"
+  },
+  {
+    "id": "refresh-checks-term-starts",
+    "drift": "round 26: a refresh goes on with the merged fold it held when only each term's first row and the last row held are unchanged, so a later segment's smaller copy of a row mid-term is never replayed and the history differs from a fresh fold (T14: t14_refresh_is_merge, t14_refresh_mid_term)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  if merged.isPrefixOf rows then merged ++ rows.drop merged.length else rows",
+    "replace": "  if merged.length ≤ rows.length && (List.range merged.length).all (fun i =>\n      !(i == 0 || i + 1 == merged.length || merged[i - 1]?.map Row.term != merged[i]?.map Row.term) ||\n        rows[i]? == merged[i]?) then merged ++ rows.drop merged.length else rows"
+  },
+  {
+    "id": "refresh-checks-term-starts-host",
+    "drift": "round 26: the appender reuses its merged fold when only each term's first row and the last row held keep their identity, so a later segment's smaller copy of a row mid-term is never replayed and the history differs from a fresh fold",
+    "file": "src/log/event-log-appender.ts",
+    "test": "src/log/event-log-appender.segments.test.ts",
+    "find": "    rows.length >= mergedRows.length && mergedRows.every((row, index) => rows[index] === row);",
+    "replace": "    rows.length >= mergedRows.length &&\n    mergedRows.every(\n      (row, index) =>\n        !(index === 0 || index === mergedRows.length - 1 || mergedRows[index - 1]!.leaderEpoch !== row.leaderEpoch) ||\n        rows[index] === row,\n    );"
+  },
+  {
+    "id": "admission-read-unbounded",
+    "drift": "round 26: only an approval's segment read is bounded, so a start whose read never returns holds the chat's dispatch turn, and the approval and every send behind it never reach their own bound",
+    "file": "src/host/tau-agent-host.ts",
+    "test": "src/launchers/agent-launcher.segments.test.ts",
+    "find": "      await refreshFor(log, command.commandId);\n",
+    "replace": "      await (command.verb === 'approve' ? boundedRefresh(log) : log.refresh?.());\n"
+  },
+  {
+    "id": "unpullable-awaits-pull",
+    "drift": "round 27: a run on a device that cannot pull the chat awaits pulls that cannot come, so a crashed device's unsettled run holds the chat there for ever (T11: t11_unpullable_released)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "then (if pulls then .awaitsPull else .abandoned)",
+    "replace": "then .awaitsPull"
+  },
+  {
+    "id": "pull-refusal-ignored",
+    "drift": "round 27: the host reads every pull answer as a pull, so a device whose placement cannot pull the chat (chat sync off, no remote) waits on another device's crashed run for ever",
+    "file": "src/host/tau-agent-host.ts",
+    "test": "src/launchers/agent-launcher.segments.test.ts",
+    "find": "      pulls = !(answer?.status === 'refused' && answer.code === 'CHAT_NOT_SHARED');\n",
+    "replace": "      pulls = answer?.status !== undefined;\n"
+  },
+  {
+    "id": "segment-read-in-write-queue",
+    "drift": "round 27: a refresh reads the segments inside the log's write queue, so a read that never returns holds every later append, a Stop's and a denial's included, past the admission's bound",
+    "file": "src/log/event-log-appender.ts",
+    "test": "src/launchers/agent-launcher.segments.test.ts",
+    "find": "            const { order, read } = await sharedRead(readSegments);\n            await enqueue(async () => {\n              assertOpen();\n              land(order, read);\n            });\n",
+    "replace": "            await enqueue(async () => {\n              assertOpen();\n              const { order, read } = await sharedRead(readSegments);\n              land(order, read);\n            });\n"
+  },
+  {
+    "id": "open-read-unbounded",
+    "drift": "round 27: opening a chat log waits for its first segment read with no bound, so a chat whose segments never answer never opens and a Stop of its paused run waits for ever",
+    "file": "src/log/event-log-appender.ts",
+    "test": "src/launchers/agent-launcher.segments.test.ts",
+    "find": "    const first = await Promise.race([result, expired.promise]);\n",
+    "replace": "    const first: Landing | 'expired' = await result;\n"
+  },
+  {
+    "id": "standing-ignores-pulls",
+    "drift": "round 27: the standing the host's fence and the page both read keeps a run that awaits pulls holding the chat on a device that cannot pull it, so the page shows it running on another device and holds its send for ever (T11: t11_unpullable_released)",
+    "file": "src/log/foreign-runs.ts",
+    "test": "src/log/chat-ledger.differential.test.ts",
+    "find": "    return pulls\n      ? { abandoned: false, awaitsPull: true, changesAt: undefined }\n      : { abandoned: true, awaitsPull: false, changesAt: undefined };\n",
+    "replace": "    return { abandoned: false, awaitsPull: true, changesAt: undefined };\n"
+  },
+  {
+    "id": "segment-reads-unshared",
+    "drift": "round 28: every refresh starts a segment read of its own while an earlier read is still in flight, so on a hung network mount a few resends hold every thread the process's file reads share and stall all file access in the host",
+    "file": "src/log/event-log-appender.ts",
+    "test": "src/log/event-log-appender.segments.test.ts",
+    "find": "      if (!reading || inFlight === undefined) {\n",
+    "replace": "      if (queued === undefined) {\n"
   }
 ]

@@ -1,5 +1,8 @@
 import type { Material, Mesh, Object3D, WebGLProgramParametersWithUniforms } from 'three';
+import type { Node, MeshStandardNodeMaterial } from 'three/webgpu';
+import { dFdx, dFdy, Fn, min, positionView, uniform, vec2 } from 'three/tsl';
 import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
+import { logarithmicGeometryDepth } from '#graphics/three/logarithmic-depth.js';
 import { gltfEdgeLineWidth } from '#graphics/three/materials/gltf-edges.js';
 
 const webGpuSlopeScale = gltfEdgeLineWidth * 0.5 + 1;
@@ -20,6 +23,39 @@ const shaderCacheKey = 'tau-gltf-surface-depth-bias-v3';
  * ratio. See `docs/research/viewer-edge-end-bleed-blueprint.md`.
  */
 const webGlSlopeScale = { value: gltfEdgeLineWidth * 0.5 + 0.5 };
+const nodeSlopeScale = uniform(1).onRenderUpdate(
+  ({ renderer }) => gltfEdgeLineWidth * 0.5 * (renderer?.getPixelRatio() ?? 1) + 0.5,
+);
+type AuthoredDepth = MeshStandardNodeMaterial['depthNode'];
+type DepthMaterial = Material & { depthNode?: AuthoredDepth };
+
+const createLogSurfaceDepth = (previous?: AuthoredDepth): Node<'float'> =>
+  // oxlint-disable-next-line new-cap -- Three TSL function factory.
+  Fn(() => {
+    // Three types authored depth generically, but its shader contract requires a float.
+    const geometric = (previous as Node<'float'> | undefined) ?? logarithmicGeometryDepth(positionView.z);
+    // @types/three r184 omits the scalar overload supported by TSL/GLSL.
+    const derivativeX = dFdx as unknown as (value: Node<'float'>) => Node<'float'>;
+    const derivativeY = dFdy as unknown as (value: Node<'float'>) => Node<'float'>;
+    const slope = vec2(derivativeX(geometric), derivativeY(geometric)).length();
+    return min(1, geometric.add(min(webGlDepthClamp, slope.mul(nodeSlopeScale).add(webGlDepthStep))));
+  })();
+
+// Equivalent surfaces must share the same executable depth identity to remain batchable.
+// Weak keys preserve authored-node lifetime without a permanent material cache.
+const biasedDepthNodes = new WeakMap<Node, Node<'float'>>();
+const defaultBiasedDepth = createLogSurfaceDepth();
+const sharedLogSurfaceDepth = (previous?: AuthoredDepth): Node<'float'> => {
+  if (!previous) {
+    return defaultBiasedDepth;
+  }
+  let node = biasedDepthNodes.get(previous);
+  if (!node) {
+    node = createLogSurfaceDepth(previous);
+    biasedDepthNodes.set(previous, node);
+  }
+  return node;
+};
 
 /**
  * The shared surface update. Classic materials call it as a render hook; the node renderer
@@ -29,12 +65,29 @@ const webGlSlopeScale = { value: gltfEdgeLineWidth * 0.5 + 0.5 };
  */
 export function syncGltfSurfaceDepthBias(
   this: Material,
-  renderer: Readonly<{ getPixelRatio: () => number; reversedDepthBuffer?: boolean }>,
+  renderer: Readonly<{ getPixelRatio: () => number; reversedDepthBuffer?: boolean; logarithmicDepthBuffer?: boolean }>,
 ): void {
   const margin = gltfEdgeLineWidth * 0.5 * renderer.getPixelRatio() + 0.5;
   webGlSlopeScale.value = margin;
   const state = states.get(this);
   if (state?.backend === 'webgpu') {
+    if (renderer.logarithmicDepthBuffer) {
+      const material = this as DepthMaterial;
+      if (!state.logDepthNode) {
+        state.previousDepthNode = material.depthNode;
+        state.logDepthNode = sharedLogSurfaceDepth(material.depthNode);
+      }
+      if (material.depthNode !== state.logDepthNode) {
+        material.depthNode = state.logDepthNode;
+        material.needsUpdate = true;
+      }
+      // Fragment depth replaces rasterizer depth; apply exactly one separation there.
+      this.polygonOffsetFactor = 0;
+      this.polygonOffsetUnits = 0;
+      state.appliedPolygonOffsetFactor = 0;
+      state.appliedPolygonOffsetUnits = 0;
+      return;
+    }
     // The node family can execute with either depth convention. Separate surfaces
     // away from the camera, using the actual device-pixel stroke footprint.
     const sign = renderer.reversedDepthBuffer ? -1 : 1;
@@ -53,6 +106,8 @@ export function syncGltfSurfaceDepthBias(
 export const isGltfSurfaceDepthBiasRenderHook = (hook: unknown): boolean => hook === syncGltfSurfaceDepthBias;
 
 type SurfaceDepthBiasState = {
+  previousDepthNode?: AuthoredDepth;
+  logDepthNode?: Node<'float'>;
   configuredBackend: ResolvedGraphicsBackend;
   composed: boolean;
   appliedPolygonOffsetFactor?: number;
@@ -140,6 +195,10 @@ const composeSurfaceDepthBias = (material: Material, state: SurfaceDepthBiasStat
 };
 
 const deactivateSurfaceDepthBias = (material: Material, state: SurfaceDepthBiasState): void => {
+  const depthMaterial = material as DepthMaterial;
+  if (state.logDepthNode && depthMaterial.depthNode === state.logDepthNode) {
+    depthMaterial.depthNode = state.previousDepthNode;
+  }
   state.backend = undefined;
   material.polygonOffset = state.polygonOffset;
   material.polygonOffsetFactor = state.polygonOffsetFactor;

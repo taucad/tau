@@ -99,6 +99,28 @@ describe('shutdown owner', () => {
     expect(actor.getSnapshot().matches('exiting')).toBe(true);
     actor.stop();
   });
+  it('reviews running Terminals, and stopping them goes to settlement without forcing machines (T15)', () => {
+    const { actor, effects } = harness();
+    actor.send({ type: 'quit' });
+    const { attemptId } = actor.getSnapshot().context;
+    actor.send({ type: 'done', attemptId, result: 'review', machines: [], terminals: 2 });
+    expect(actor.getSnapshot().matches('reviewing')).toBe(true);
+    expect(actor.getSnapshot().context.terminals).toBe(2);
+    actor.send({ type: 'done', attemptId, result: 'confirmed' });
+    expect(actor.getSnapshot().matches('renderer')).toBe(true);
+    expect(actor.getSnapshot().context.forceMachines).toBe(false);
+    expect(effects).toEqual(['assessing', 'reviewing', 'renderer']);
+
+    /* A new attempt forgets the last one's count; Keep Tau open cancels. */
+    actor.stop();
+    const second = harness();
+    second.actor.send({ type: 'quit' });
+    expect(second.actor.getSnapshot().context.terminals).toBeUndefined();
+    second.done('review');
+    second.done('cancel');
+    expect(second.actor.getSnapshot().matches('cancelling')).toBe(true);
+    second.actor.stop();
+  });
   it('keeps restart ownership through repeated quit until cleanup is prepared', () => {
     const { actor, done } = harness();
     actor.send({ type: 'quit', purpose: 'restart' });

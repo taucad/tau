@@ -2167,3 +2167,48 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     }
   });
 });
+
+describe('Terminal sessions for quit (T15)', () => {
+  it("should answer main with the terminal concern's own live session count", async () => {
+    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-terminal-count-'));
+    const root = join(sandbox, 'project');
+    const authorityDirectory = join(sandbox, 'authority');
+    await Promise.all([mkdir(root), mkdir(authorityDirectory)]);
+    const answers: Array<[string, number]> = [];
+    const host = createServicesHost({
+      authorityDirectory,
+      log: vi.fn(),
+      terminalSessionsAnswered: (requestId, sessions) => {
+        answers.push([requestId, sessions]);
+      },
+    });
+    const ports = new MessageChannel();
+    try {
+      host.handleMessage(frame({ type: 'terminal-sessions', requestId: 'quit-1' }));
+      expect(answers).toEqual([['quit-1', 0]]);
+
+      host.handleMessage(frame({ type: 'allowRoots', roots: [root] }));
+      host.handleMessage(
+        frame({ type: 'concern', concern: 'terminal', context: { projectRoot: root, windowId: 'window-1' } }, [
+          ports.port1 as unknown as UtilityPort,
+        ]),
+      );
+      host.handleMessage(frame({ type: 'terminal-sessions', requestId: 'quit-2' }));
+      expect(answers.at(-1)).toEqual(['quit-2', 1]);
+
+      /* A request without an id is not a question and gets no answer. */
+      host.handleMessage(frame({ type: 'terminal-sessions' }));
+      expect(answers).toHaveLength(2);
+
+      ports.port2.close();
+      await vi.waitFor(() => {
+        host.handleMessage(frame({ type: 'terminal-sessions', requestId: 'quit-3' }));
+        expect(answers.at(-1)).toEqual(['quit-3', 0]);
+      });
+    } finally {
+      ports.port1.close();
+      ports.port2.close();
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  });
+});

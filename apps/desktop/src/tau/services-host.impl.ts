@@ -313,6 +313,8 @@ export type ServicesHostOptions = {
   ) => void;
   /** Reply to main with the machines a streamed run is feeding now, by name, so quit can refuse (Q-streamed-host). */
   readonly machinesStreaming?: (requestId: string, machines: readonly StreamingMachine[]) => void;
+  /** Reply to main with how many human Terminal sessions this utility serves, so quit can ask first (T15). */
+  readonly terminalSessionsAnswered?: (requestId: string, sessions: number) => void;
   /** The contained shell the agent's `shell` tool runs on (`services-host-shell.ts`); absent, no project offers it. */
   readonly shell?: DesktopShell | undefined;
   /** The desktop shell probe the `terminal` concern opens human sessions through; absent, each is refused. */
@@ -399,6 +401,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     machineBindingCompleted,
     machinesDirectory,
     machinesStreaming,
+    terminalSessionsAnswered,
     nativeKernels,
     onRevisionsUnavailable,
     quiesced,
@@ -1260,6 +1263,14 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         });
         for (const waiting of agentHostConfigWaiters) {
           waiting();
+        }
+        return;
+      }
+      case 'terminal-sessions': {
+        /* Quit's Terminal question (T15): the sessions this utility serves now, read without holding anything. */
+        const { requestId } = frame;
+        if (typeof requestId === 'string') {
+          terminalSessionsAnswered?.(requestId, terminals.sessions());
         }
         return;
       }

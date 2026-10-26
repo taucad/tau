@@ -75,6 +75,7 @@ const state = vi.hoisted(() => ({
     machineId: 'workshop-x1c',
   })),
   servicesStreaming: vi.fn(async (_boundMilliseconds: number): Promise<readonly StreamingMachine[]> => []),
+  servicesTerminals: vi.fn(async (_boundMilliseconds: number): Promise<number> => 0),
   servicesResumeStarts: vi.fn(),
   servicesRecover: vi.fn(async () => undefined),
   runtimePrewarm: vi.fn(),
@@ -398,6 +399,7 @@ vi.mock('#main/services-broker.js', () => ({
       connect: state.servicesConnect,
       completeMachineBinding: state.servicesCompleteBinding,
       streamingMachines: state.servicesStreaming,
+      terminalSessions: state.servicesTerminals,
       peekStreamingMachines: vi.fn(async () => []),
       resumeMachineStarts: state.servicesResumeStarts,
       recover: state.servicesRecover,
@@ -1205,6 +1207,89 @@ describe('desktop main compute owner', () => {
       expect(fakeWindow.webContents.send).toHaveBeenCalledWith(quitChannels.navigate, '/machines/host/mill');
       expect(state.sentToRenderer).not.toContain(quitChannels.ask);
       expect(state.servicesDispose).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'asks before quitting stops running Terminal sessions, and Keep Tau open tears nothing down (T15)',
+    async () => {
+      await bootstrap();
+      state.servicesTerminals.mockResolvedValueOnce(2);
+      dialog.showMessageBox.mockResolvedValueOnce({ response: 0 });
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await vi.waitFor(() => {
+        expect(state.servicesResumeStarts).toHaveBeenCalledOnce();
+      });
+      expect(dialog.showMessageBox).toHaveBeenCalledOnce();
+      expect(dialog.showMessageBox.mock.calls[0]?.[0]).toMatchObject({
+        message: '2 Terminal sessions are running in Tau.',
+        buttons: ['Keep Tau open', 'Quit anyway'],
+        defaultId: 0,
+        cancelId: 0,
+      });
+      expect(state.servicesQuiesce).not.toHaveBeenCalled();
+      expect(state.servicesDispose).not.toHaveBeenCalled();
+      expect(app.quit).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'quits once the person chooses to stop the running Terminal, without the machine interruption prompt (T15)',
+    async () => {
+      await bootstrap();
+      state.servicesTerminals.mockResolvedValueOnce(1);
+      dialog.showMessageBox.mockResolvedValueOnce({ response: 1 });
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await vi.waitFor(() => {
+        expect(app.quit).toHaveBeenCalledOnce();
+      });
+      expect(dialog.showMessageBox).toHaveBeenCalledOnce();
+      expect(dialog.showMessageBox.mock.calls[0]?.[0]).toMatchObject({
+        message: 'A Terminal session is running in Tau.',
+      });
+      expect(state.servicesQuiesce).toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.objectContaining({ forceMachines: false }),
+      );
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'asks rather than hangs when the Terminal count is unanswered, and Quit anyway still quits (T15)',
+    async () => {
+      await bootstrap();
+      state.servicesTerminals.mockRejectedValueOnce(new Error('The desktop shell service did not answer'));
+      dialog.showMessageBox.mockResolvedValueOnce({ response: 1 });
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await vi.waitFor(() => {
+        expect(app.quit).toHaveBeenCalledOnce();
+      });
+      expect(dialog.showMessageBox.mock.calls[0]?.[0]).toMatchObject({
+        message: 'Tau could not check whether a Terminal is running.',
+        buttons: ['Keep Tau open', 'Quit anyway'],
+      });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'keeps the machine review and names running Terminals in it (T15)',
+    async () => {
+      await bootstrap();
+      state.servicesTerminals.mockResolvedValueOnce(1);
+      state.servicesStreaming.mockResolvedValueOnce([{ hostId: 'host', machineId: 'mill', name: 'LongMill' }]);
+      dialog.showMessageBox.mockResolvedValueOnce({ response: 1 });
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await vi.waitFor(() => {
+        expect(state.servicesResumeStarts).toHaveBeenCalledOnce();
+      });
+      const [options] = dialog.showMessageBox.mock.calls[0] as unknown as [{ buttons: string[]; detail: string }];
+      expect(options.buttons).toEqual(['View machines', 'Keep Tau open', 'Quit anyway']);
+      expect(options.detail).toContain('Quitting also stops a running Terminal session.');
+      expect(state.servicesQuiesce).not.toHaveBeenCalled();
     },
     bootMilliseconds,
   );

@@ -1857,15 +1857,47 @@ const bootstrapElectronApp = async (): Promise<void> => {
       try {
         switch (stage) {
           case 'assessing': {
+            /* Running Terminals (T15) are counted by the utility that serves them; an unanswered count is unknown,
+             * which asks rather than stopping them unseen, and never holds quit past its bound. */
+            const terminals = await services.terminalSessions(machineStreamingMilliseconds).catch(() => undefined);
+            const terminalsClear = terminals === 0;
             try {
               const machines = await services.streamingMachines(machineStreamingMilliseconds, context.attemptId);
-              done(machines.length === 0 ? 'clear' : 'review', { machines });
+              done(machines.length === 0 && terminalsClear ? 'clear' : 'review', {
+                machines,
+                ...(terminals === undefined ? {} : { terminals }),
+              });
             } catch (error) {
-              done('review', { error: String(error) });
+              done('review', { error: String(error), ...(terminals === undefined ? {} : { terminals }) });
             }
             break;
           }
           case 'reviewing': {
+            const terminalNote =
+              context.terminals === 0
+                ? ''
+                : context.terminals === undefined
+                  ? ' Tau could not check whether a Terminal is running; quitting stops any that is.'
+                  : ` Quitting also stops ${context.terminals === 1 ? 'a running Terminal session' : `${String(context.terminals)} running Terminal sessions`}.`;
+            if (context.machines?.length === 0) {
+              /* Only Terminals to review: the machine question has nothing to say. */
+              const { response } = await dialog.showMessageBox({
+                type: 'warning',
+                buttons: ['Keep Tau open', context.purpose === 'restart' ? 'Restart anyway' : 'Quit anyway'],
+                defaultId: 0,
+                cancelId: 0,
+                message:
+                  context.terminals === undefined
+                    ? 'Tau could not check whether a Terminal is running.'
+                    : context.terminals === 1
+                      ? 'A Terminal session is running in Tau.'
+                      : `${String(context.terminals)} Terminal sessions are running in Tau.`,
+                detail:
+                  'Quitting stops each Terminal session and anything running in it. Tau will not run their commands again when it starts.',
+              });
+              done(response === 1 ? 'confirmed' : 'cancel');
+              break;
+            }
             const names = context.machines?.map(({ name }) => name);
             const { response } = await dialog.showMessageBox({
               type: 'warning',
@@ -1875,8 +1907,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
               message: names?.length
                 ? `Tau is streaming a program to ${new Intl.ListFormat('en', { type: 'conjunction' }).format(names)}.`
                 : 'Tau could not check whether a machine needs this connection.',
-              detail:
-                'Open Machines to review the run and use its stop control. Keep Tau open while it finishes, or explicitly quit and interrupt the connection. Quitting is not an emergency stop; buffered motion may continue.',
+              detail: `Open Machines to review the run and use its stop control. Keep Tau open while it finishes, or explicitly quit and interrupt the connection. Quitting is not an emergency stop; buffered motion may continue.${terminalNote}`,
             });
             done(response === 0 ? 'view' : response === 2 ? 'force' : 'cancel');
             break;

@@ -112,16 +112,18 @@ export type ShellExit =
 /**
  * A running contained process.
  *
- * `exited` settles only after the shell has exited **and** every owned descendant has stopped, so a host that awaits
- * it may release a checkout afterwards (I7). Disposal terminates the whole owned process tree and resolves at the same
- * point. Output iterables end once every writer is gone.
+ * `exited` resolves only after the shell has exited **and** every owned descendant is confirmed stopped, so a host that
+ * awaits it may release a checkout afterwards (I7). When cleanup cannot be confirmed (a survivor, or an unreadable
+ * process table) it rejects instead: output iterables still end, but the host keeps the launch's roots and checkout and
+ * reports the command `interrupted`, never a completed result. Disposal terminates the whole owned process tree and
+ * settles at the same point.
  *
  * @public
  */
 type ShellProcessBase = AsyncDisposable &
   Readonly<{
     exited: Promise<ShellExit>;
-    /** Terminate the owned process tree; resolves with {@link ShellProcessBase.exited}. */
+    /** Terminate the owned process tree; settles with {@link ShellProcessBase.exited}. */
     terminate: () => Promise<ShellExit>;
   }>;
 

@@ -20,6 +20,8 @@ export type FakeShellScript =
       stdout?: string;
       stderr?: string;
       exit?: ShellExit;
+      /** Cleanup that cannot be confirmed: `exited` rejects once the launch ends, as a real provider's does (I7). */
+      cleanup?: 'uncertain';
     }>;
 
 /**
@@ -67,9 +69,16 @@ export const createFakeShellProvider = (script: (launch: ShellLaunch) => FakeShe
       return outcome;
     }
     let finish: (exit: ShellExit) => void = () => undefined;
-    const exited = new Promise<ShellExit>((resolve) => {
+    const ended = new Promise<ShellExit>((resolve) => {
       finish = resolve;
     });
+    const exited =
+      outcome.cleanup === 'uncertain'
+        ? (async (): Promise<ShellExit> => {
+            await ended;
+            throw new Error('Owned processes survived termination: fake.');
+          })()
+        : ended;
     const terminate = async (): Promise<ShellExit> => {
       finish({ signal: 'SIGKILL' });
       return exited;

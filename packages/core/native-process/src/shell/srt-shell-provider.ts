@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 
 import { deniedReadRoots, deniedWriteRoots, physicalVariants, sandboxRuntimeReadRoots } from '#native-sandbox.js';
 import { terminateOwnedProcesses, trackDescendants } from '#shell/process-tree.js';
+import type { ProcessRow } from '#shell/process-tree.js';
 import { shellBaselineDenied } from '#shell/shell-baseline.js';
 import { refusedShellEnvironment } from '#shell/shell-environment.js';
 import type {
@@ -103,6 +104,8 @@ export type SandboxShellProviderOptions = Readonly<{
   loadPty?: () => Promise<PtyBinding>;
   /** How long a supervisor may take to answer. */
   startupMilliseconds?: number;
+  /** The process table cleanup confirms against; injectable only to exercise unconfirmed cleanup. */
+  processTable?: () => Promise<readonly ProcessRow[]>;
 }>;
 
 const quote = (value: string): string => `'${value.replaceAll("'", String.raw`'\''`)}'`;
@@ -301,7 +304,10 @@ type Supervisor = Readonly<{
   reply: SupervisorReply;
   /** Hand the supervisor the launch's process group, which it kills if this process dies before releasing it. */
   own: (group: number) => void;
+  /** An orderly release after confirmed stop. */
   close: () => Promise<void>;
+  /** Close the channel without asserting release: the supervisor kills its retained group before it exits. */
+  abandon: () => Promise<void>;
 }>;
 
 /**
@@ -348,9 +354,9 @@ const startSupervisor = async (
       child.stdin.write(`${JSON.stringify({ own: group } satisfies SupervisorControl)}\n`);
     }
   };
-  const close = async (): Promise<void> => {
+  const finish = async (released: boolean): Promise<void> => {
     /* An orderly release: the launch's tree is already gone, so the supervisor has nothing to kill. */
-    if (child.stdin.writable) {
+    if (released && child.stdin.writable) {
       child.stdin.write(`${JSON.stringify({ released: true } satisfies SupervisorControl)}\n`);
     }
     child.stdin.end();
@@ -387,7 +393,12 @@ const startSupervisor = async (
       });
     });
   });
-  return { reply, own, close };
+  return {
+    reply,
+    own,
+    close: async () => finish(true),
+    abandon: async () => finish(false),
+  };
 };
 
 /** How long an emptied stream may stay quiet after termination before it is closed. */
@@ -481,6 +492,21 @@ const queueStream = (stream: NodeJS.ReadableStream & { destroy: () => void }): B
   return queue;
 };
 
+/** Who owns one started launch's cleanup: its supervisor, and the process table cleanup confirms against. */
+type LaunchOwner = Readonly<{
+  supervisor: Supervisor;
+  table: (() => Promise<readonly ProcessRow[]>) | undefined;
+}>;
+
+/** Await a promise whose failure another path reports. */
+const quietly = async (promise: Promise<unknown>): Promise<void> => {
+  try {
+    await promise;
+  } catch {
+    /* Reported where `exited` settles. */
+  }
+};
+
 type Started = Readonly<{
   pid: number;
   exited: Promise<ShellExit>;
@@ -489,47 +515,65 @@ type Started = Readonly<{
 
 /**
  * Wrap one started launch: termination on exit, abort or disposal, then supervisor release, then settlement.
+ *
+ * `exited` resolves only once every owned process is confirmed gone. An unreadable process table or a survivor
+ * rejects it instead (I7): readers still end, but the supervisor is not told the launch ended in order, so it kills
+ * its retained group as it exits, and the caller keeps the launch's roots and custody.
  */
 const settle = (
   started: Started,
-  supervisor: Supervisor,
+  { supervisor, table }: LaunchOwner,
   signal: AbortSignal,
 ): Pick<ShellProcess, 'exited' | 'terminate' | typeof Symbol.asyncDispose> => {
-  const tracker = process.platform === 'darwin' ? trackDescendants(started.pid) : undefined;
+  const tracker = process.platform === 'darwin' ? trackDescendants(started.pid, table) : undefined;
   supervisor.own(started.pid);
   let terminating: Promise<void> | undefined;
   const stopTree = async (): Promise<void> => {
     terminating ??= (async () => {
-      await terminateOwnedProcesses({
-        root: started.pid,
-        group: started.pid,
-        deadlineMilliseconds: terminationMilliseconds,
-        ...(tracker === undefined ? {} : { table: tracker.table }),
-      });
-      await tracker?.stop();
+      let survivors: readonly number[];
+      try {
+        survivors = await terminateOwnedProcesses({
+          root: started.pid,
+          group: started.pid,
+          deadlineMilliseconds: terminationMilliseconds,
+          ...(tracker === undefined ? (table === undefined ? {} : { table }) : { table: tracker.table }),
+        });
+      } catch (error) {
+        throw new Error(
+          `Cleanup could not confirm that every owned process stopped: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
+        );
+      } finally {
+        await tracker?.stop();
+      }
+      if (survivors.length > 0) {
+        throw new Error(`Owned processes survived termination: ${survivors.join(', ')}.`);
+      }
     })();
     await terminating;
   };
   const exited = (async (): Promise<ShellExit> => {
     const onAbort = (): void => {
-      void stopTree();
+      void quietly(stopTree());
     };
     signal.addEventListener('abort', onAbort, { once: true });
+    let confirmed = false;
     try {
       const exit = await started.exited;
       await stopTree();
+      confirmed = true;
       return exit;
     } finally {
       signal.removeEventListener('abort', onAbort);
       started.release();
-      await supervisor.close();
+      await (confirmed ? supervisor.close() : supervisor.abandon());
     }
   })();
   if (signal.aborted) {
-    void stopTree();
+    void quietly(stopTree());
   }
   const terminate = async (): Promise<ShellExit> => {
-    await stopTree();
+    await quietly(stopTree());
     return exited;
   };
   return {
@@ -572,7 +616,7 @@ const hostBound = (argv: readonly string[], bwrapPath: string): readonly string[
     ? [argv[0]!, '-c', `exec ${argv[2]!}`]
     : argv;
 
-const startPipes = (argv: readonly string[], launch: ShellLaunch, supervisor: Supervisor): ShellProcess => {
+const startPipes = (argv: readonly string[], launch: ShellLaunch, owner: LaunchOwner): ShellProcess => {
   const child = spawn(argv[0]!, argv.slice(1), {
     cwd: launch.workingDirectory,
     env: wrapperEnvironment(launch),
@@ -596,7 +640,7 @@ const startPipes = (argv: readonly string[], launch: ShellLaunch, supervisor: Su
         });
       },
     },
-    supervisor,
+    owner,
     launch.signal,
   );
   return { kind: 'pipes', stdout: stdout.iterable, stderr: stderr.iterable, ...settled };
@@ -607,11 +651,11 @@ type TerminalStart = Readonly<{
   argv: readonly string[];
   launch: ShellLaunch;
   size: ShellTerminalSize;
-  supervisor: Supervisor;
+  owner: LaunchOwner;
 }>;
 
 const startLinuxTerminal = (
-  { argv, launch, size, supervisor }: TerminalStart,
+  { argv, launch, size, owner }: TerminalStart,
   native: NonNullable<PtyBinding['native']>,
 ): ShellProcess => {
   /* Opened here, so no process outside the sandbox takes it as its controlling terminal; `setsid --ctty` inside does. */
@@ -636,7 +680,7 @@ const startLinuxTerminal = (
         });
       },
     },
-    supervisor,
+    owner,
     launch.signal,
   );
   return {
@@ -652,7 +696,7 @@ const startLinuxTerminal = (
   };
 };
 
-const startMacTerminal = ({ argv, launch, size, supervisor }: TerminalStart, binding: PtyBinding): ShellProcess => {
+const startMacTerminal = ({ argv, launch, size, owner }: TerminalStart, binding: PtyBinding): ShellProcess => {
   const terminal = binding.spawn(argv[0]!, argv.slice(1), {
     name: launch.environment['TERM'] ?? 'xterm-256color',
     cols: size.columns,
@@ -687,7 +731,7 @@ const startMacTerminal = ({ argv, launch, size, supervisor }: TerminalStart, bin
         });
       },
     },
-    supervisor,
+    owner,
     launch.signal,
   );
   return {
@@ -790,12 +834,15 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
     }
     const argv = hostBound(supervisor.reply.argv, options.bwrapPath ?? '/usr/bin/bwrap');
     if (launch.stdio.kind === 'pipes') {
-      return { status: 'started', process: startPipes(argv, launch, supervisor) };
+      return { status: 'started', process: startPipes(argv, launch, { supervisor, table: options.processTable }) };
     }
     if (process.platform === 'linux') {
       return {
         status: 'started',
-        process: startLinuxTerminal({ argv, launch, size: launch.stdio.size, supervisor }, binding!.native!),
+        process: startLinuxTerminal(
+          { argv, launch, size: launch.stdio.size, owner: { supervisor, table: options.processTable } },
+          binding!.native!,
+        ),
       };
     }
     const bound = bindOwnPty(argv);
@@ -805,7 +852,10 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
     }
     return {
       status: 'started',
-      process: startMacTerminal({ argv: bound, launch, size: launch.stdio.size, supervisor }, binding!),
+      process: startMacTerminal(
+        { argv: bound, launch, size: launch.stdio.size, owner: { supervisor, table: options.processTable } },
+        binding!,
+      ),
     };
   },
 });

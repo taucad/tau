@@ -62,4 +62,19 @@ describe('createFakeShellProvider', () => {
       resized: [[{ columns: 100, rows: 30 }]],
     });
   });
+
+  it('should reject settlement for scripted uncertain cleanup', async () => {
+    const provider = createFakeShellProvider(() => ({
+      status: 'started',
+      stdout: 'partial',
+      exit: { exitCode: 0 },
+      cleanup: 'uncertain',
+    }));
+    const outcome = await provider.launch(launch());
+    if (outcome.status !== 'started') {
+      throw new Error('expected a started launch');
+    }
+
+    await expect(outcome.process.exited).rejects.toThrow('survived');
+  });
 });

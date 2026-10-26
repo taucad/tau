@@ -14,9 +14,42 @@ import {
 
 // P1 intentionally proves only deployed harness access. These are not A1–A17 signal acceptance.
 describe('P1 deployed staging observability harness', () => {
-  it('should require the staging read-token prerequisite', () => {
-    expect(Boolean(process.env['SENTRY_E2E_READ_TOKEN']), 'Configure staging SENTRY_E2E_READ_TOKEN').toBe(true);
-  });
+  it('should read staging event ids for tau-ui and tau-api', async () => {
+    const token = process.env['SENTRY_E2E_READ_TOKEN'];
+    expect(Boolean(token), 'Configure staging SENTRY_E2E_READ_TOKEN').toBe(true);
+    await Promise.all(
+      (
+        [
+          ['tau-ui', '4512297038446593'],
+          ['tau-api', '4512297038512128'],
+        ] as const
+      ).map(async ([projectName, projectId]) => {
+        const url = new URL('https://us.sentry.io/api/0/organizations/taucad/events/');
+        url.searchParams.set('project', projectId);
+        url.searchParams.set('environment', 'staging');
+        url.searchParams.set('query', `e2e_run:${createObservabilityRunId()}`);
+        url.searchParams.set('field', 'id');
+        url.searchParams.set('statsPeriod', '1h');
+        // A fresh correlation id avoids reading existing events; an empty 200 proves read access.
+        const response = await fetch(url, {
+          headers: { authorization: `Bearer ${token}` },
+          redirect: 'error',
+          signal: AbortSignal.timeout(15_000),
+        }).catch(() => {
+          throw new Error(`Sentry read check failed for ${projectName} without exposing response details`);
+        });
+        expect(response.status, `Sentry staging read access for ${projectName}`).toBe(200);
+        const body: unknown = await response.json().catch(() => {
+          throw new TypeError(`Sentry read check returned invalid JSON for ${projectName}`);
+        });
+        // Assert only a boolean so malformed responses cannot leak event contents in test output.
+        expect(
+          typeof body === 'object' && body !== null && 'data' in body && Array.isArray(body.data),
+          `Sentry event-id result for ${projectName}`,
+        ).toBe(true);
+      }),
+    );
+  }, 20_000);
 
   for (const [browserName, browserType] of [
     ['chromium', chromium],

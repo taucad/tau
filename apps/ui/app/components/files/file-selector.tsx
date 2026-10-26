@@ -196,13 +196,9 @@ export function FileSelector({
     return (
       <Drawer open={open} onOpenChange={handleOpenChange}>
         <DrawerTrigger asChild>{triggerButton}</DrawerTrigger>
-        <DrawerContent aria-labelledby='drawer-title' aria-describedby='drawer-description'>
-          <DrawerTitle className='sr-only' id='drawer-title'>
-            {title}
-          </DrawerTitle>
-          <DrawerDescription className='sr-only' id='drawer-description'>
-            {description}
-          </DrawerDescription>
+        <DrawerContent>
+          <DrawerTitle className='sr-only'>{title}</DrawerTitle>
+          <DrawerDescription className='sr-only'>{description}</DrawerDescription>
           {content}
         </DrawerContent>
       </Drawer>

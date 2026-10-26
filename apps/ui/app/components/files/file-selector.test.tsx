@@ -4,13 +4,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createStaticDataSource } from '@taucad/workbench-panes/files/file-selector';
 import type { FileSelectorDataSource } from '@taucad/workbench-panes/files/file-selector';
 import type { FilesEntry } from '@taucad/workbench-panes/files/files-source';
+import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
+import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '@taucad/ui/components/drawer';
 import { FileSelector } from '#components/files/file-selector.js';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import { classifyDirectoryListingError } from '@taucad/fs-client/directory-listing';
 import type { DirectoryListing, ListedDirectoryEntry } from '@taucad/fs-client/directory-listing';
 
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({
-  useIsMobile: () => false,
+  useIsMobile: vi.fn(() => false),
 }));
 
 vi.mock('#hooks/use-file-manager.js', () => ({
@@ -41,6 +43,7 @@ const observeListing =
     });
 
 beforeEach(() => {
+  vi.mocked(useIsMobile).mockReturnValue(false);
   Element.prototype.scrollIntoView = vi.fn();
 });
 
@@ -397,5 +400,32 @@ describe('FileSelector (context auto-wiring)', () => {
     });
 
     vi.mocked(useOptionalFileManager).mockReturnValue(undefined);
+  });
+});
+
+describe('FileSelector mobile drawer naming', () => {
+  it('should keep its own accessible name and description beside an existing drawer title', async () => {
+    vi.mocked(useIsMobile).mockReturnValue(true);
+    render(
+      <>
+        <Drawer open modal={false}>
+          <DrawerContent aria-labelledby='drawer-title' aria-describedby='drawer-description'>
+            <DrawerTitle id='drawer-title'>Chat Interface</DrawerTitle>
+            <DrawerDescription id='drawer-description'>Chat with the project</DrawerDescription>
+          </DrawerContent>
+        </Drawer>
+        <FileSelector
+          dataSource={createStaticDataSource([{ path: 'main.ts' }])}
+          selectedFile={undefined}
+          onSelect={vi.fn()}
+          title='Open File'
+          description='Choose a file to open in a new view'
+        />
+      </>,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Select file…' }));
+    const picker = await screen.findByRole('dialog', { name: 'Open File' });
+    expect(picker).toHaveAccessibleDescription('Choose a file to open in a new view');
+    expect(document.querySelector('#drawer-title')).toHaveTextContent('Chat Interface');
   });
 });

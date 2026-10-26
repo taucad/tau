@@ -49,6 +49,24 @@ describe('TypeScript CodeMirror navigation adapter', () => {
     await createTypeScriptActions({ document, service, navigate }).definition(2);
     expect(navigate).not.toHaveBeenCalled();
   });
+
+  it('resolves a type definition through the worker navigation action', async () => {
+    const document = new EditorDocument('main.ts', 'const value: number = 1;');
+    const navigate = vi.fn();
+    const location = { uri: 'file:///types.ts', line: 3, column: 1, start: 20, length: 6 };
+    const request = vi.fn(async () => [location]);
+    const service = { flush: vi.fn(async () => undefined), client: { request } } as unknown as TypeScriptService;
+
+    await createTypeScriptActions({ document, service, navigate }).typeDefinition(document.text.indexOf('value'));
+
+    expect(request).toHaveBeenCalledWith({
+      kind: 'typeDefinitionLocations',
+      uri: document.uri,
+      position: document.text.indexOf('value'),
+      expectedVersion: document.version,
+    });
+    expect(navigate).toHaveBeenCalledWith(location);
+  });
 });
 
 describe('TypeScript completion edits', () => {

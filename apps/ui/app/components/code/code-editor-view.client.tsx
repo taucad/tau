@@ -13,6 +13,7 @@ import {
   keymap,
   lineNumbers,
   rectangularSelection,
+  runScopeHandlers,
   tooltips,
 } from '@codemirror/view';
 import {
@@ -48,6 +49,7 @@ import type { DocumentChange, EditorDocument, TextChange } from '#lib/editor-doc
 type ViewPosition = Readonly<{ anchor: number; head: number; scrollTop: number; scrollLeft: number }>;
 const rememberedPositions = new WeakMap<EditorDocument, Map<string, ViewPosition>>();
 const maxRememberedViewsPerDocument = 32;
+const typeScriptLanguages = new Set(['typescript', 'typescriptreact', 'javascript', 'javascriptreact']);
 
 function rememberViewPosition(document: EditorDocument, viewId: string, view: EditorView): void {
   const positions = rememberedPositions.get(document) ?? new Map<string, ViewPosition>();
@@ -423,6 +425,13 @@ export function CodeEditorView({
       viewRef.current?.focus();
     }
   };
+  const runTypeDefinition = (): void => {
+    const view = viewRef.current;
+    if (view) {
+      view.focus();
+      runScopeHandlers(view, new KeyboardEvent('keydown', { key: 'F12', code: 'F12', altKey: true }), 'editor');
+    }
+  };
 
   return (
     <ContextMenu>
@@ -468,6 +477,9 @@ export function CodeEditorView({
         >
           Go to Line
         </ContextMenuItem>
+        {typeScriptLanguages.has(languageId) && extensions !== undefined && (
+          <ContextMenuItem onSelect={runTypeDefinition}>Go to Type Definition</ContextMenuItem>
+        )}
         <ContextMenuSeparator />
         <ContextMenuItem
           disabled={readOnly}

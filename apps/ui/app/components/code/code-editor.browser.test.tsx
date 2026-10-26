@@ -83,6 +83,7 @@ it('opens editor context actions and its search panel', async () => {
   );
   await expect.poll(() => container.querySelector('.cm-content')).toBeTruthy();
   fireEvent.contextMenu(container.querySelector('.cm-content')!);
+  await expect.element(page.getByRole('menuitem', { name: 'Go to Type Definition' })).not.toBeInTheDocument();
   await page.getByRole('menuitem', { name: 'Find and Replace' }).click();
   await expect.poll(() => container.querySelector('.cm-search')).toBeTruthy();
 });
@@ -117,7 +118,10 @@ it('opens a real TypeScript standard-library definition as read-only source', as
     import('#lib/typescript-language/typescript-service.js'),
     import('#lib/typescript-language/create-typescript-extensions.js'),
   ]);
-  const sourceDocument = new EditorDocument('main.ts', 'const value: number = 1;\nvalue.toFixed(2);\n');
+  const sourceDocument = new EditorDocument(
+    'main.ts',
+    'const value: number = 1;\nvalue.toFixed(2);\nclass Shape { count = 1; }\nconst typed = new Shape();\ntyped.count;\n',
+  );
   const service = await createTypeScriptService({ dynamicTypes: false });
   let view: EditorView | undefined;
   let target: EditorNavigationTarget | undefined;
@@ -149,6 +153,20 @@ it('opens a real TypeScript standard-library definition as read-only source', as
     await userEvent.keyboard('{F12}');
     await expect.poll(() => target?.declaration?.text).toContain('toFixed');
     expect(target?.uri).toMatch(/^file:\/\/\/(?:__typescript_lib__|cdn-types)\//u);
+    const valuePosition = sourceDocument.text.indexOf('typed.count') + 1;
+    target = undefined;
+    view!.dispatch({ selection: { anchor: valuePosition } });
+    fireEvent.keyDown(view!.contentDOM, { key: 'F12', code: 'F12', altKey: true });
+    await expect.poll(() => target?.uri).toBe(sourceDocument.uri);
+    target = undefined;
+    fireEvent.contextMenu(view!.contentDOM);
+    await page.screenshot();
+    await page.getByRole('menuitem', { name: 'Go to Type Definition' }).click();
+    await expect.poll(() => target?.uri).toBe(sourceDocument.uri);
+    target = undefined;
+    view!.dispatch({ selection: { anchor: sourceDocument.text.indexOf('toFixed') } });
+    await userEvent.keyboard('{F12}');
+    await expect.poll(() => target?.declaration?.text).toContain('toFixed');
     const declarationDocument = new EditorDocument(target!.uri.replace('file:///', ''), target!.declaration!.text);
     rerender(
       <VirtualDeclarationDialog

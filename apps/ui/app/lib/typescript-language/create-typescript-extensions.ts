@@ -625,6 +625,13 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
         },
       },
       {
+        key: 'Alt-F12',
+        run: (view) => {
+          void runAction(options, async () => actions.typeDefinition(view.state.selection.main.head));
+          return true;
+        },
+      },
+      {
         key: 'Mod-Shift-F12',
         run: (view) => {
           void runAction(options, async () => actions.implementation(view.state.selection.main.head));

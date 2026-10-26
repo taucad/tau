@@ -155,6 +155,7 @@ function StageStatus({
  *       createElement(ModelViewer, {
  *         graphicsRef,
  *         artifact: undefined,
+ *         artifactHash: undefined,
  *         gizmoContainer,
  *         onComponentSecondaryPointerCandidate,
  *       }),

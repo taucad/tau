@@ -191,6 +191,14 @@ export type ShellServiceOptions = Readonly<{
   now?: (() => number) | undefined;
 }>;
 
+/** How long capture may wait for output readers after an unconfirmed cleanup. Milliseconds. */
+const drainMilliseconds = 2000;
+
+const delay = async (milliseconds: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, milliseconds).unref();
+  });
+
 /** One stream left empty, for calls that ended before any output. */
 const emptyStream = { text: '', bytes: 0, truncated: false, undecodable: false } as const;
 
@@ -362,6 +370,13 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
   const executions = createGate(options.maxExecutions ?? 8);
   const maxTerminals = options.maxTerminals ?? 4;
   let terminals = 0;
+  /*
+   * Physical roots whose last launch could not confirm that every owned process stopped (I7). Their private roots are
+   * kept and nothing else launches against them in this host: a survivor may still write there.
+   */
+  const uncertain = new Set<string>();
+  const uncertainMessage =
+    'Tau could not confirm that an earlier command in this project folder stopped, so nothing else runs here. Restart Tau to confirm cleanup.';
 
   const grantHost = (): ShellGrantHost => ({
     platform,
@@ -454,6 +469,9 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       return notStarted('checkout-unavailable', "The run's project folder is gone, so the command did not run.");
     }
     const { real: root, fingerprint } = identity;
+    if (uncertain.has(root)) {
+      return notStarted('checkout-unavailable', uncertainMessage);
+    }
     const cwd = await resolveShellCwd(root, input.cwd);
     if ('status' in cwd) {
       return notStarted('invalid-cwd', cwd.message);
@@ -547,6 +565,8 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       () => undefined,
     );
     const session = await createSessionRoots(sessionBase);
+    /* Cleared only by an unconfirmed cleanup: its private roots then stay for a later confirmed recovery (I7). */
+    let retainRoots = false;
     try {
       const filesystem = await compileShellFilesystem({
         checkout: admitted.root,
@@ -628,17 +648,27 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
           name: `${request.toolCallId.replaceAll(/[^\w.-]/gu, '_').slice(0, 64)}-${randomUUID()}.log`,
         },
       });
+      const drained = Promise.all([capture.drain('stdout', child.stdout), capture.drain('stderr', child.stderr)]);
       let exit: ShellExit;
       try {
-        [exit] = await Promise.all([
-          child.exited,
-          capture.drain('stdout', child.stdout),
-          capture.drain('stderr', child.stderr),
-        ]);
+        exit = await child.exited;
+      } catch (error) {
+        /* Unconfirmed cleanup: keep the roots and the checkout, and never report a finished command (I7, D23). A
+         * surviving writer cannot hold the answer open: capture waits a bounded time for the readers to end. */
+        retainRoots = true;
+        uncertain.add(admitted.root);
+        await Promise.race([drained.catch(() => undefined), delay(drainMilliseconds)]);
+        const { log } = await capture.finish();
+        return {
+          status: 'interrupted',
+          message: `Tau did not confirm that this command stopped, so its result is unknown and it will not be run again: ${error instanceof Error ? error.message : String(error)}`,
+          log,
+        };
       } finally {
         clearTimeout(timer);
         request.signal.removeEventListener('abort', onAbort);
       }
+      await drained;
       const durationMs = Math.max(0, Math.round(now() - started));
       const captured = await capture.finish();
       const ran = { ...captured, durationMs, ...(approval === undefined ? {} : { approval }) };
@@ -653,8 +683,10 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         ? { status: 'signalled', signal: exit.signal, ...ran }
         : { status: 'completed', exitCode: exit.exitCode, ...ran };
     } finally {
-      /* After `exited`: no descendant can still be writing into the private roots (I7). */
-      await rm(session.root, { recursive: true, force: true }).catch(() => undefined);
+      /* After a confirmed `exited`: no descendant can still be writing into the private roots (I7). */
+      if (!retainRoots) {
+        await rm(session.root, { recursive: true, force: true }).catch(() => undefined);
+      }
     }
   };
 
@@ -681,6 +713,9 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         'This project is not open in Tau.',
         'Open the project, then start the Terminal.',
       );
+    }
+    if (uncertain.has(identity.real)) {
+      return refuse('sandbox-unavailable', uncertainMessage, 'Restart Tau, then open the Terminal again.');
     }
     if (terminals >= maxTerminals) {
       return refuse('session-limit', 'Too many Terminal sessions are open.', 'Close another Terminal, then try again.');
@@ -757,11 +792,17 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       return refuse('pty-unavailable', 'The provider did not start a terminal.', 'Restart Tau and try again.');
     }
     const exited = (async (): Promise<ShellExit> => {
+      let exit: ShellExit;
       try {
-        return await child.exited;
-      } finally {
-        await cleanup();
+        exit = await child.exited;
+      } catch (error) {
+        /* Unconfirmed cleanup keeps this session's roots and blocks its project (I7). */
+        uncount();
+        uncertain.add(root);
+        throw error;
       }
+      await cleanup();
+      return exit;
     })();
     return {
       status: 'opened',
@@ -827,6 +868,8 @@ export const probeHostShell = async (options: ProbeHostShellOptions): Promise<Sh
     };
   }
   const session = await createSessionRoots(options.sessionDirectory ?? tmpdir());
+  /* An unconfirmed probe cleanup keeps its private roots, like any launch (I7). Read live in `finally`. */
+  const retained = { roots: false };
   try {
     const outcome = await options.provider.launch({
       executablePath: executable.path,
@@ -869,7 +912,16 @@ export const probeHostShell = async (options: ProbeHostShellOptions): Promise<Sh
         }
       }
     };
-    const [exit] = await Promise.all([exited, drain(stdout, true), drain(stderr, false)]);
+    const drained = Promise.all([drain(stdout, true), drain(stderr, false)]);
+    let exit: ShellExit;
+    try {
+      exit = await exited;
+    } catch (error) {
+      retained.roots = true;
+      await Promise.race([drained.catch(() => undefined), delay(drainMilliseconds)]);
+      throw error;
+    }
+    await drained;
     version = version.trim();
     if (exit.exitCode !== 0 || version === '') {
       return {
@@ -898,6 +950,8 @@ export const probeHostShell = async (options: ProbeHostShellOptions): Promise<Sh
       recovery: 'Reinstall Tau to restore its sandbox components.',
     };
   } finally {
-    await rm(session.root, { recursive: true, force: true }).catch(() => undefined);
+    if (!retained.roots) {
+      await rm(session.root, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 };

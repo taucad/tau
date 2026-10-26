@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { createDesktopDownloadCatalog, desktopDownloadHref, desktopDownloads } from '#www/downloads.js';
+import {
+  createDesktopDownloadCatalog,
+  desktopDownloadHref,
+  desktopDownloadLabel,
+  desktopDownloads,
+  desktopFileLabel,
+} from '#www/downloads.js';
 
 import { projection } from '#www/download-catalog.fixture.js';
 
@@ -78,5 +84,65 @@ describe('qualified desktop download catalog', () => {
     const catalog = createDesktopDownloadCatalog({ enabled: true, channel: 'staging', qualification: value });
     expect(catalog?.[0]?.href).toContain('https://downloads.taucad.dev/releases/desktop-staging%400.1.0-staging.75/');
     expect(() => select(value)).toThrow();
+  });
+  it('names the Mac file format a direct link serves and keeps Windows and Linux labels', () => {
+    expect(desktopFileLabel('mac')).toContain('<span>Download ZIP for Apple silicon</span>');
+    expect(desktopFileLabel('macIntel')).toContain('<span>Download ZIP for Intel Mac</span>');
+    expect(desktopFileLabel('mac', 'DMG')).toContain('<span>Download DMG for Apple silicon</span>');
+    expect(desktopFileLabel('macIntel', 'DMG')).toContain('<span>Download DMG for Intel Mac</span>');
+    expect(desktopFileLabel('windows', 'DMG')).toBe(desktopDownloadLabel('windows'));
+    expect(desktopFileLabel('linux')).toBe(desktopDownloadLabel('linux'));
+    expect(desktopDownloads.mac.detail).toContain('ZIP');
+    expect(desktopDownloads.macIntel.detail).toContain('ZIP');
+  });
+  it('selects both Mac disk images from a Mac-only staging catalog with mount, drag, eject and launch steps', () => {
+    const value = projection();
+    const catalog = createDesktopDownloadCatalog({
+      enabled: true,
+      channel: 'staging',
+      qualification: {
+        ...value,
+        tag: 'desktop-staging@0.1.0-staging.455',
+        version: '1.4.55',
+        channel: 'staging',
+        routes: value.routes.slice(0, 2),
+      },
+    })!;
+    expect(catalog.map((choice) => [choice.platform, choice.primaryKind, choice.href])).toEqual([
+      [
+        'mac',
+        'macos-dmg',
+        'https://downloads.taucad.dev/releases/desktop-staging%400.1.0-staging.455/Tau-macos-arm64.dmg',
+      ],
+      [
+        'macIntel',
+        'macos-dmg',
+        'https://downloads.taucad.dev/releases/desktop-staging%400.1.0-staging.455/Tau-macos-x64.dmg',
+      ],
+    ]);
+    for (const choice of catalog) {
+      expect(choice.detail).toContain('DMG installer');
+      expect(choice.install).toMatch(
+        /Open the DMG to mount it, drag Tau to Applications, eject the disk image, then launch/u,
+      );
+      expect(choice.alternatives.map((artifact) => artifact.href)).toEqual([choice.href.replace(/\.dmg$/u, '.zip')]);
+    }
+    expect(() =>
+      createDesktopDownloadCatalog({
+        enabled: true,
+        channel: 'production',
+        qualification: { ...value, routes: value.routes.slice(0, 2) },
+      }),
+    ).toThrow(/every supported route/u);
+  });
+  it('rejects a Mac route whose disk image is missing or replaced by another kind', () => {
+    for (const artifacts of [
+      [projection().routes[0]!.artifacts[1]!],
+      [{ ...projection().routes[0]!.artifacts[1]! }, { ...projection().routes[0]!.artifacts[1]! }],
+    ]) {
+      const value = projection();
+      value.routes[0]!.artifacts = artifacts;
+      expect(() => select(value)).toThrow();
+    }
   });
 });

@@ -41,57 +41,64 @@ const stopChildren = (): void => {
   }
 };
 
-try {
-  await app.whenReady();
-  const authorityRoot = join(root, 'authority with spaces');
-  const alias = join(root, 'alias');
-  await mkdir(authorityRoot);
-  await symlink(authorityRoot, alias, process.platform === 'win32' ? 'junction' : 'dir');
-  const owner = launch(authorityRoot);
-  const first = await receive(owner);
-  assert.equal(typeof first, 'object');
-  assert.ok(first && typeof first === 'object' && 'status' in first && first.status === 'owned');
-  assert.ok('type' in first && first.type === 'utility');
-  const competitor = await receive(launch(alias));
-  assert.ok(
-    competitor &&
-      typeof competitor === 'object' &&
-      'code' in competitor &&
-      competitor.code === 'AUTHORITY_ALREADY_OWNED',
-  );
-  const died = new Promise<void>((resolve) => {
-    owner.once('exit', () => {
-      resolve();
+const run = async (): Promise<void> => {
+  try {
+    await app.whenReady();
+    const authorityRoot = join(root, 'authority with spaces');
+    const alias = join(root, 'alias');
+    await mkdir(authorityRoot);
+    await symlink(authorityRoot, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const owner = launch(authorityRoot);
+    const first = await receive(owner);
+    assert.equal(typeof first, 'object');
+    assert.ok(first && typeof first === 'object' && 'status' in first && first.status === 'owned');
+    assert.ok('type' in first && first.type === 'utility');
+    const competitor = await receive(launch(alias));
+    assert.ok(
+      competitor &&
+        typeof competitor === 'object' &&
+        'code' in competitor &&
+        competitor.code === 'AUTHORITY_ALREADY_OWNED',
+    );
+    const died = new Promise<void>((resolve) => {
+      owner.once('exit', () => {
+        resolve();
+      });
     });
-  });
-  assert.ok(owner.pid);
-  process.kill(owner.pid, 'SIGKILL');
-  await died;
-  const recovered = launch(authorityRoot);
-  const recovery = await receive(recovered);
-  assert.ok(recovery && typeof recovery === 'object' && 'status' in recovery && recovery.status === 'owned');
-  const released = receive(recovered);
-  recovered.postMessage('release');
-  assert.deepEqual(await released, { status: 'released' });
-  const replacement = await receive(launch(authorityRoot));
-  assert.ok(
-    replacement && typeof replacement === 'object' && 'status' in replacement && replacement.status === 'owned',
-  );
-  console.info(
-    JSON.stringify({
-      status: 'passed',
-      platform: process.platform,
-      electron: process.versions.electron,
-      utilityExclusion: true,
-      junctionAlias: true,
-      forceKillRecovery: true,
-      explicitRelease: true,
-    }),
-  );
-  stopChildren();
-  app.exit(0);
-} catch (error) {
-  console.error(error);
-  stopChildren();
-  app.exit(1);
-}
+    assert.ok(owner.pid);
+    process.kill(owner.pid, 'SIGKILL');
+    await died;
+    const recovered = launch(authorityRoot);
+    const recovery = await receive(recovered);
+    assert.ok(recovery && typeof recovery === 'object' && 'status' in recovery && recovery.status === 'owned');
+    const released = receive(recovered);
+    recovered.postMessage('release');
+    assert.deepEqual(await released, { status: 'released' });
+    const replacement = await receive(launch(authorityRoot));
+    assert.ok(
+      replacement && typeof replacement === 'object' && 'status' in replacement && replacement.status === 'owned',
+    );
+    console.info(
+      JSON.stringify({
+        status: 'passed',
+        platform: process.platform,
+        electron: process.versions.electron,
+        utilityExclusion: true,
+        junctionAlias: true,
+        forceKillRecovery: true,
+        explicitRelease: true,
+      }),
+    );
+    stopChildren();
+    app.exit(0);
+  } catch (error) {
+    console.error(error);
+    stopChildren();
+    app.exit(1);
+  }
+};
+
+// Electron emits ready after its main ESM entry finishes evaluating.
+// Detach this caught bootstrap so waiting for ready cannot deadlock module loading.
+// oxlint-disable-next-line unicorn/prefer-top-level-await -- Electron ready requires this ESM module to finish evaluating.
+void run();

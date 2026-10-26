@@ -84,17 +84,18 @@ export const openShellProjectionMount = (options: Readonly<{
   const failures: unknown[] = [];
   let disposal: Promise<void> | undefined;
   let mount: object;
-  const close = (): void => {
+  const close = (reason: Error): void => {
     binding.close(mount);
     const mounted = readFileSync('/proc/self/mountinfo', 'utf8').split('\n').some((line) =>
       line.split(' ')[4]?.replace(/\\([0-7]{3})/gu, (_match, octal: string) => String.fromCharCode(Number.parseInt(octal, 8))) === mountpoint);
     if (mounted) throw new Error('Projection unmount is unconfirmed; owner must retain accounting and custody.');
     // Only confirmed unmount permits the owner to reconcile all remaining inode references.
-    controller.abort(new Error('Shell projection mount closed.'));
+    controller.abort(reason);
   };
   const failed = (): void => {
-    failures.push(new Error('Projection mount failed; lifetime accounting requires whole-mount reconciliation.'));
-    try { close(); } catch (error) { failures.push(error); }
+    const reason = new Error('Projection mount failed; lifetime accounting requires whole-mount reconciliation.');
+    failures.push(reason);
+    try { close(reason); } catch (error) { failures.push(error); }
   };
   const settle = async (request: ShellProjectionRequest): Promise<void> => {
     let reply: ShellProjectionReply;
@@ -119,7 +120,7 @@ export const openShellProjectionMount = (options: Readonly<{
   return {
     [Symbol.asyncDispose]: () => {
       disposal ??= (async () => {
-        close();
+        close(new Error('Shell projection mount closed.'));
         await Promise.allSettled(pending);
         if (failures.length > 0) throw new AggregateError(failures, 'Shell projection callbacks failed.');
       })();

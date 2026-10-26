@@ -5,6 +5,20 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="${ROOT}/infra/docker-compose.yml"
 
+# A bare host:container mapping listens on 0.0.0.0. Require an explicit loopback bind.
+require_loopback_ports() {
+  local file=$1
+  local unbound
+  unbound="$(grep -nE "^[[:space:]]+- '[0-9]+:" "${file}" || true)"
+  if [[ -n "${unbound}" ]]; then
+    echo "ERROR: ${file} publishes a port on every interface; bind it to 127.0.0.1" >&2
+    echo "${unbound}" >&2
+    exit 1
+  fi
+}
+
+require_loopback_ports "${COMPOSE_FILE}"
+
 docker compose -f "${COMPOSE_FILE}" up -d minio minio-bootstrap
 
 attempts=120

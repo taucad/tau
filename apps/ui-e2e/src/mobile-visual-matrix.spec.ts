@@ -1,0 +1,868 @@
+import { describe, expect, test } from 'vitest';
+import { page as selectors } from 'vitest/browser';
+import type { Locator } from 'vitest/browser';
+import * as target from '#support/external-target.js';
+import { composerSelector, prepareComposerPage } from '#support/chat-attachments.js';
+import { measureHorizontalOverflow, seriousAxeViolations, setTextZoom } from '#support/page-audit.js';
+import {
+  allSheet,
+  detent,
+  detents,
+  grabber,
+  moveSheet,
+  navButton,
+  navigation,
+  sheetSettled,
+  tapDestination,
+} from '#support/phone-shell.js';
+import { waitForStageReady } from '#support/viewer-stage.js';
+
+/**
+ * T5 on the real project route (W1–W11; I3, I7, D12): the phone shell's geometry across the responsive matrix, read
+ * from layout boxes and hit tests rather than from screenshots alone. At 320, 360 and 390px, at the stage, with the
+ * sheet at Half, with All open and with the project sheet open, nothing scrolls sideways, every visible action is at
+ * least 24px, wholly inside the viewport and its clip, and is what a tap at its centre reaches; the top bar's and the
+ * nav's controls are 40px, the viewer's are 28px and centred, the grabber's target is 40px, nothing blank sits under
+ * the nav, and the composer and Send clear it. The same holds in all four themes, at 200% text, with a 34px
+ * home-indicator inset and with reduced motion, which also stills the status glyph and the sheet's slide. 767px is the
+ * last phone width and 768px the first desktop one; a coarse-pointer tablet and a landscape phone keep the desktop
+ * composition with the coarse rules (D12). Screenshots are saved for the record beside the boxes.
+ */
+
+const seedRoute = '/__e2e/chat-attachments';
+const portraitViewports = [
+  { width: 320, height: 640 },
+  { width: 360, height: 780 },
+  { width: 390, height: 844 },
+] as const;
+const themes = ['Light', 'Dark', 'Black', 'High Contrast'] as const;
+/** The `<html>` class each theme sets (`use-theme.tsx`). */
+const themeClasses: Readonly<Record<(typeof themes)[number], RegExp>> = {
+  Light: /\blight\b/u,
+  Dark: /\bdark\b/u,
+  Black: /\bblack\b/u,
+  'High Contrast': /\bhigh-contrast\b/u,
+};
+
+const topBar = (): Locator => selectors.getByCss('[data-slot="mobile-project-top-bar"]');
+const titleButton = (): Locator => selectors.getByCss('[data-slot="project-title-button"]');
+const projectSheet = (): Locator => selectors.getByCss('[data-slot="project-sheet"]');
+const viewerControls = (): Locator => selectors.getByRole('group', { name: 'Viewer controls' }).first();
+const composer = (): Locator => selectors.getByCss(composerSelector).first();
+const send = (): Locator => selectors.getByRole('button', { name: 'Send', exact: true }).first();
+const chatLaneToggle = (): Locator => selectors.getByRole('button', { name: 'Toggle Chat lane' });
+
+type Box = Readonly<{ left: number; top: number; right: number; bottom: number; width: number; height: number }>;
+
+type LayerAudit = Readonly<{
+  viewport: Readonly<{ width: number; height: number }>;
+  /** Width the document scrolls past the viewport. */
+  documentOverflow: number;
+  /** How many visible actions were judged. */
+  judged: number;
+  /** Why each failing action fails: under 24px, outside the viewport or its clip, covered, or overlapping another. */
+  problems: readonly string[];
+}>;
+
+/**
+ * Judge every visible action on screen: each one a tap can reach (`elementFromPoint` at its centre lands in it) must
+ * be at least 24 × 24 (I3; inline text links are WCAG 2.5.8's exception), wholly inside the viewport and any ancestor
+ * that clips it sideways, and must not overlap another action in its layer. An action behind another layer (the sheet
+ * or a dialog over the stage) is that layer's to answer for, and one scrolled out of its scroller is not on screen.
+ *
+ * @returns The audit.
+ */
+const auditLayer = async (): Promise<LayerAudit> =>
+  target.evaluate(() => {
+    const actionSelector = [
+      'button',
+      'a[href]',
+      '[role="button"]',
+      '[role="slider"]',
+      '[role="tab"]',
+      '[role="switch"]',
+      '[role="checkbox"]',
+      '[role="radio"]',
+      '[role="menuitem"]',
+      '[role="option"]',
+      'input:not([type="hidden"])',
+      'select',
+    ].join(', ');
+    const layerSelector = '[role="dialog"], [role="alertdialog"]';
+    const width = document.documentElement.clientWidth;
+    const height = window.innerHeight;
+    type Judged = { element: HTMLElement; box: DOMRect; layer: Element | undefined };
+    const describe = (element: Element): string => {
+      const label = element.getAttribute('aria-label') ?? element.textContent.trim().slice(0, 30);
+      const slot = element instanceof HTMLElement ? element.dataset['slot'] : undefined;
+      const what = slot ? `[${slot}]` : `.${String(element.getAttribute('class')).split(' ').slice(0, 3).join('.')}`;
+      return `${element.tagName.toLowerCase()}${what} "${label}"`;
+    };
+    /** A control a person can aim at: shown, hit-testable, and more than a visually hidden 1px box. */
+    const isAimable = (element: HTMLElement): boolean =>
+      !element.closest('[aria-hidden="true"], [inert]') &&
+      element.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
+      getComputedStyle(element).pointerEvents !== 'none' &&
+      element.getBoundingClientRect().width > 1 &&
+      element.getBoundingClientRect().height > 1;
+    /** The vertical clip its scrollers give it, and the first ancestor that cuts it off sideways. */
+    const clipOf = (element: HTMLElement, box: DOMRect): { top: number; bottom: number; sideways?: string } => {
+      const clip: { top: number; bottom: number; sideways?: string } = { top: 0, bottom: height };
+      for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+        const style = getComputedStyle(parent);
+        const parentBox = parent.getBoundingClientRect();
+        if (style.overflowY !== 'visible') {
+          clip.top = Math.max(clip.top, parentBox.top);
+          clip.bottom = Math.min(clip.bottom, parentBox.bottom);
+        }
+        const cutSideways = box.left < parentBox.left - 0.5 || box.right > parentBox.right + 0.5;
+        /* A sideways scroller lets a person scroll the rest in, as a vertical one does, so long as the action fits it
+         * whole; others clip. Dockview's tab strip hides its native overflow and scrolls with its own scrollbar. */
+        const isScroller = /auto|scroll/u.test(style.overflowX) || parent.classList.contains('dv-tabs-container');
+        const scrollsSideways =
+          isScroller && parent.scrollWidth > parent.clientWidth && box.width <= parent.clientWidth + 0.5;
+        if (style.overflowX !== 'visible' && !scrollsSideways && clip.sideways === undefined && cutSideways) {
+          clip.sideways = `${describe(element)} is cut off sideways by ${describe(parent)}`;
+        }
+      }
+      return clip;
+    };
+    /** What a tap at its centre reaches: it, another layer over it, or something in its own layer covering it. */
+    const tapAt = (element: HTMLElement, box: DOMRect): 'reaches' | 'behind' | string => {
+      const hit = document.elementFromPoint((box.left + box.right) / 2, (box.top + box.bottom) / 2);
+      if (!hit) {
+        return `${describe(element)} has its centre off screen`;
+      }
+      if (element.contains(hit) || (hit instanceof HTMLLabelElement && hit.control === element)) {
+        return 'reaches';
+      }
+      const hitLayer = hit.closest(layerSelector) ?? undefined;
+      if (hitLayer !== (element.closest(layerSelector) ?? undefined) && !hitLayer?.contains(element)) {
+        return 'behind';
+      }
+      return `${describe(element)} is covered by ${describe(hit)}`;
+    };
+    const problems: string[] = [];
+    const judged: Judged[] = [];
+    for (const element of document.querySelectorAll<HTMLElement>(actionSelector)) {
+      if (!isAimable(element)) {
+        continue;
+      }
+      const box = element.getBoundingClientRect();
+      // Wholly beside the viewport is offstage (a lane parked off screen), not on screen; part-way is judged.
+      if (box.left >= width - 0.5 || box.right <= 0.5) {
+        continue;
+      }
+      const clip = clipOf(element, box);
+      // Scrolled out of its scroller (or below the fold) is not on screen; scrolled part-way, a person scrolls it in.
+      if (box.top < clip.top - 0.5 || box.bottom > clip.bottom + 0.5) {
+        continue;
+      }
+      const tap = tapAt(element, box);
+      if (tap === 'behind') {
+        // Behind another layer: that layer is judged, not what it covers.
+        continue;
+      }
+      if (tap !== 'reaches') {
+        problems.push(tap);
+        continue;
+      }
+      const isInlineLink = element.tagName === 'A' && getComputedStyle(element).display === 'inline';
+      if (!isInlineLink && (box.width < 23.5 || box.height < 23.5)) {
+        problems.push(`${describe(element)} is ${box.width.toFixed(1)}×${box.height.toFixed(1)}, under 24px`);
+      }
+      if (box.left < -0.5 || box.right > width + 0.5) {
+        problems.push(
+          `${describe(element)} leaves the viewport sideways (${box.left.toFixed(1)}–${box.right.toFixed(1)})`,
+        );
+      } else if (clip.sideways) {
+        problems.push(clip.sideways);
+      }
+      judged.push({ element, box, layer: element.closest(layerSelector) ?? undefined });
+    }
+    const within = (inner: DOMRect, outer: DOMRect): boolean =>
+      inner.left >= outer.left - 0.5 &&
+      inner.right <= outer.right + 0.5 &&
+      inner.top >= outer.top - 0.5 &&
+      inner.bottom <= outer.bottom + 0.5;
+    /* Two actions in one layer collide when their boxes cross each other's edges. One nested in the other, or a row's
+     * own action drawn over its row (a ⋯ on a sidebar link), is not a collision: both took a tap at their centres. */
+    const collides = (first: Judged, second: Judged): boolean => {
+      if (
+        first.layer !== second.layer ||
+        first.element.contains(second.element) ||
+        second.element.contains(first.element)
+      ) {
+        return false;
+      }
+      if (within(first.box, second.box) || within(second.box, first.box)) {
+        return false;
+      }
+      const overlapX = Math.min(first.box.right, second.box.right) - Math.max(first.box.left, second.box.left);
+      const overlapY = Math.min(first.box.bottom, second.box.bottom) - Math.max(first.box.top, second.box.top);
+      return overlapX > 1 && overlapY > 1;
+    };
+    for (const [index, first] of judged.entries()) {
+      for (const second of judged.slice(index + 1)) {
+        if (collides(first, second)) {
+          problems.push(`${describe(first.element)} overlaps ${describe(second.element)}`);
+        }
+      }
+    }
+    return {
+      viewport: { width, height },
+      documentOverflow: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - width,
+      judged: judged.length,
+      problems,
+    };
+  });
+
+/**
+ * Assert the generic T5 rules for the state on screen and return the audit.
+ *
+ * @param state - The state's name, for the failure message.
+ */
+const expectWholeLayer = async (state: string): Promise<LayerAudit> => {
+  const audit = await auditLayer();
+  expect(audit.documentOverflow, `${state}: the page scrolls sideways`).toBeLessThanOrEqual(0);
+  expect(audit.problems, `${state}: actions`).toEqual([]);
+  expect(audit.judged, `${state}: no action was on screen to judge`).toBeGreaterThan(0);
+  return audit;
+};
+
+const boxOf = async (locator: Locator, what: string): Promise<Box> =>
+  target.evaluateLocator(
+    locator,
+    (element, name) => {
+      const { left, top, right, bottom, width, height } = element.getBoundingClientRect();
+      if (width === 0 && height === 0) {
+        throw new Error(`${name} has no layout box.`);
+      }
+      return { left, top, right, bottom, width, height };
+    },
+    what,
+  );
+
+/** Whether a tap at the element's centre reaches it. */
+const reachable = async (locator: Locator): Promise<boolean> =>
+  target.evaluateLocator(locator, (element) => {
+    const box = element.getBoundingClientRect();
+    const hit = document.elementFromPoint((box.left + box.right) / 2, (box.top + box.bottom) / 2);
+    return hit !== null && element.contains(hit);
+  });
+
+/** Wait for every running animation and transition in the document to finish or be replaced. */
+const motionSettled = async (): Promise<void> =>
+  target.evaluate(async () => {
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          resolve();
+        });
+      });
+    });
+    const finite = document
+      .getAnimations()
+      .filter((animation) => Number.isFinite(Number(animation.effect?.getComputedTiming().endTime ?? 0)));
+    await Promise.all(finite.map(async (animation) => animation.finished.catch(() => undefined)));
+  });
+
+/**
+ * Open a touch phone at `viewport` on the seed route and wait for its stage to draw its first frame.
+ *
+ * @param viewport - The phone's size.
+ * @param route - The seed route.
+ */
+const openPhoneProject = async (
+  viewport: Readonly<{ width: number; height: number }>,
+  route: string = seedRoute,
+): Promise<void> => {
+  await target.commands.uiOpenTarget({ hasTouch: true, isMobile: true });
+  await prepareComposerPage();
+  await target.setViewport(viewport);
+  await target.navigate(route);
+  await target.expectUrl(/\/w\/[^/]+\/[^/?]+/u, 120_000);
+  await target.expectVisible(navigation(), 60_000);
+  await target.expectVisible(titleButton(), 60_000);
+  await waitForStageReady();
+};
+
+/** The project's 48px bar: three controls, each at least 40px tall, side by side inside it (D2, I3). */
+const expectTopBar = async (viewport: Readonly<{ width: number }>): Promise<void> => {
+  const bar = await boxOf(topBar(), 'The project top bar');
+  expect(bar.top).toBeLessThanOrEqual(0.5);
+  expect(bar.right).toBeLessThanOrEqual(viewport.width + 0.5);
+  const controls = await target.evaluateLocator(topBar(), (element) =>
+    [...element.querySelectorAll('button')].map((button) => {
+      const { left, right, top, bottom, width, height } = button.getBoundingClientRect();
+      return { name: button.getAttribute('aria-label') ?? 'title', left, right, top, bottom, width, height };
+    }),
+  );
+  expect(controls).toHaveLength(3);
+  for (const control of controls) {
+    expect(control.height, `${control.name} height`).toBeGreaterThanOrEqual(40);
+    expect(control.top).toBeGreaterThanOrEqual(bar.top - 0.5);
+    expect(control.bottom).toBeLessThanOrEqual(bar.bottom + 0.5);
+  }
+  const [sidebar, title, share] = controls;
+  expect(sidebar!.width).toBeGreaterThanOrEqual(40);
+  expect(share!.width).toBeGreaterThanOrEqual(40);
+  expect(sidebar!.right).toBeLessThanOrEqual(title!.left + 0.5);
+  expect(title!.right).toBeLessThanOrEqual(share!.left + 0.5);
+};
+
+/**
+ * The nav: four 40px destinations a tap reaches, and nothing under it: it ends at the viewport's bottom, so a tap on
+ * the last pixel row lands in it.
+ *
+ * @returns The nav's box.
+ */
+const expectNavigation = async (): Promise<Box> => {
+  const nav = await boxOf(navigation(), 'The workbench nav');
+  const viewportHeight = await target.evaluate(() => window.innerHeight);
+  expect(nav.bottom).toBeGreaterThanOrEqual(viewportHeight - 0.5);
+  expect(nav.bottom).toBeLessThanOrEqual(viewportHeight + 0.5);
+  const lastRow = await target.evaluateLocator(navigation(), (element) => {
+    const hit = document.elementFromPoint(document.documentElement.clientWidth / 2, window.innerHeight - 1);
+    return hit !== null && element.contains(hit);
+  });
+  expect(lastRow, 'the last pixel row should be the nav, not a blank strip').toBe(true);
+  for (const name of ['Chat', 'Parameters', 'Model', 'All']) {
+    // oxlint-disable-next-line no-await-in-loop -- one destination at a time.
+    const button = await boxOf(navButton(name), `The ${name} destination`);
+    expect(button.height, `${name} height`).toBeGreaterThanOrEqual(40);
+    expect(button.top).toBeGreaterThanOrEqual(nav.top - 0.5);
+    expect(button.bottom).toBeLessThanOrEqual(nav.bottom + 0.5);
+    // oxlint-disable-next-line no-await-in-loop -- one destination at a time.
+    expect(await reachable(navButton(name)), `${name} should take a tap`).toBe(true);
+    // Its icon and label stay inside it on one line each, at any text size.
+    // oxlint-disable-next-line no-await-in-loop -- one destination at a time.
+    const spill = await target.evaluateLocator(navButton(name), (element) => {
+      const outer = element.getBoundingClientRect();
+      return [...element.querySelectorAll(':scope > span:not([hidden])')]
+        .map((part) => part.getBoundingClientRect())
+        .filter((part) => part.top < outer.top - 0.5 || part.bottom > outer.bottom + 0.5)
+        .map(
+          (part) =>
+            `${part.top.toFixed(1)}–${part.bottom.toFixed(1)} outside ${outer.top.toFixed(1)}–${outer.bottom.toFixed(1)}`,
+        );
+    });
+    expect(spill, `${name}'s icon and label should stay inside it`).toEqual([]);
+  }
+  return nav;
+};
+
+/** The viewer bar: one group of 28px tools (scaled with the root text size), centred on the stage, inside it (D6). */
+const expectViewerBar = async (): Promise<void> => {
+  const layout = await target.evaluateLocator(viewerControls(), (group) => {
+    const toBox = (element: Element): Box => {
+      const { left, top, right, bottom, width, height } = element.getBoundingClientRect();
+      return { left, top, right, bottom, width, height };
+    };
+    const frame = group.closest('[data-viewer-frame]');
+    if (!frame) {
+      throw new Error('The viewer bar is not on a viewer stage.');
+    }
+    return {
+      frame: toBox(frame),
+      group: toBox(group),
+      tools: [...group.querySelectorAll('button')]
+        .filter((button) => button.getClientRects().length > 0)
+        .map((button) => ({
+          name: button.getAttribute('aria-label') ?? '',
+          box: toBox(button),
+          // A wider bar shows some tools' labels beside their icons (a container query); those grow sideways only.
+          labelled: [...button.querySelectorAll('span')].some(
+            (span) => span.checkVisibility() && span.textContent.trim() !== '',
+          ),
+        })),
+      /* The tools are sized in rem, so text zoom scales them with the rest of the page. */
+      scale: Number.parseFloat(getComputedStyle(document.documentElement).fontSize) / 16,
+    };
+  });
+  const tools = layout.tools.slice(layout.tools.findIndex(({ name }) => name.startsWith('Grid ')));
+  expect(tools.map(({ name }) => name)).toEqual(
+    expect.arrayContaining(['Section view', 'Measure', 'Fit view', 'Viewer settings']),
+  );
+  const size = 28 * layout.scale;
+  for (const tool of tools) {
+    expect([tool.name, tool.box.height]).toEqual([tool.name, size]);
+    if (tool.labelled) {
+      expect(tool.box.width, tool.name).toBeGreaterThanOrEqual(size);
+    } else {
+      expect([tool.name, tool.box.width]).toEqual([tool.name, size]);
+    }
+  }
+  const centre = (box: Box): number => (box.left + box.right) / 2;
+  expect(Math.abs(centre(layout.group) - centre(layout.frame))).toBeLessThanOrEqual(1);
+  expect(layout.group.left).toBeGreaterThanOrEqual(layout.frame.left - 0.5);
+  expect(layout.group.right).toBeLessThanOrEqual(layout.frame.right + 0.5);
+};
+
+/**
+ * The stage state: the model fills the space between the bar and the nav with no blank band, the viewer bar is whole.
+ *
+ * @param viewport - The phone's size.
+ */
+const expectStage = async (viewport: Readonly<{ width: number }>): Promise<void> => {
+  await expect.poll(async () => target.getAttribute(navButton('Model'), 'aria-current')).toBe('page');
+  await target.expectCount(selectors.getByCss('[data-slot="mobile-surface"]'), 0);
+  await target.expectVisible(viewerControls(), 60_000);
+  await expectTopBar(viewport);
+  const nav = await expectNavigation();
+  const bar = await boxOf(topBar(), 'The project top bar');
+  const frame = await boxOf(selectors.getByCss('[data-viewer-frame]').first(), 'The viewer stage');
+  // The stage (under its dock strip) runs from the bar down to the nav, edge to edge.
+  expect(frame.top).toBeGreaterThanOrEqual(bar.bottom - 0.5);
+  expect(frame.bottom).toBeGreaterThanOrEqual(nav.top - 0.5);
+  expect(frame.left).toBeLessThanOrEqual(0.5);
+  expect(frame.right).toBeGreaterThanOrEqual(viewport.width - 0.5);
+  // Nothing blank between the bar and the nav: every point down the left edge, the middle and the right edge lands in
+  // the stage's pane, never on the page behind it.
+  const blanks = await target.evaluate(
+    ({ from, to }) => {
+      const misses: string[] = [];
+      const width = document.documentElement.clientWidth;
+      for (let y = from + 1; y < to - 1; y += 8) {
+        for (const x of [1, width / 2, width - 1]) {
+          const hit = document.elementFromPoint(x, y);
+          if (!hit || hit === document.body || hit === document.documentElement) {
+            misses.push(`${String(Math.round(x))},${String(Math.round(y))}`);
+          }
+        }
+      }
+      return misses;
+    },
+    { from: bar.bottom, to: nav.top },
+  );
+  expect(blanks, 'blank points between the bar and the nav').toEqual([]);
+  await expectViewerBar();
+  // I3: the dock tab's close glyph (decorative to assistive technology, which closes with Delete) is a 24px target.
+  const closes = await target.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('.dv-tab .dv-default-tab-action')]
+      .filter((glyph) => glyph.checkVisibility({ opacityProperty: true }))
+      .map((glyph) => {
+        const { width, height } = glyph.getBoundingClientRect();
+        return { width, height };
+      }),
+  );
+  expect(closes.length, 'the active dock tab should show its close glyph').toBeGreaterThan(0);
+  for (const close of closes) {
+    expect(close.width).toBeGreaterThanOrEqual(23.5);
+    expect(close.height).toBeGreaterThanOrEqual(23.5);
+  }
+  await expectWholeLayer('stage');
+};
+
+/**
+ * Chat at Half: the grabber's target is 40px, the sheet reaches down to the nav, and the composer and Send are whole,
+ * reachable and above the nav.
+ *
+ * @param viewport - The phone's size.
+ */
+const expectChatAtHalf = async (viewport: Readonly<{ width: number }>): Promise<void> => {
+  await tapDestination('Chat');
+  await target.expectVisible(composer(), 60_000);
+  await expect.poll(detent).toBe(detents.half);
+  await sheetSettled();
+  await expectTopBar(viewport);
+  const nav = await expectNavigation();
+  const handle = await boxOf(grabber(), 'The grabber');
+  expect(handle.height).toBeGreaterThanOrEqual(40);
+  const chat = await boxOf(selectors.getByRole('region', { name: 'Chat', exact: true }), 'The chat surface');
+  expect(chat.bottom).toBeLessThanOrEqual(nav.top + 0.5);
+  for (const [what, locator] of [
+    ['The composer', composer()],
+    ['Send', send()],
+  ] as const) {
+    // oxlint-disable-next-line no-await-in-loop -- each in turn.
+    const box = await boxOf(locator, what);
+    expect(box.bottom, `${what} should end above the nav`).toBeLessThanOrEqual(nav.top + 0.5);
+    expect(box.top).toBeGreaterThanOrEqual(0);
+    expect(box.left).toBeGreaterThanOrEqual(-0.5);
+    expect(box.right).toBeLessThanOrEqual(viewport.width + 0.5);
+    // oxlint-disable-next-line no-await-in-loop -- each in turn.
+    expect(await reachable(locator), `${what} should take a tap`).toBe(true);
+  }
+  await expectWholeLayer('Chat at Half');
+};
+
+/** All: its destinations fit across the sheet without sideways scroll, each one whole. */
+const expectAllOpen = async (): Promise<void> => {
+  await target.click(navButton('All'), { touch: true });
+  await target.expectVisible(allSheet());
+  await motionSettled();
+  const overflow = await target.evaluateLocator(allSheet(), (sheet) => sheet.scrollWidth - sheet.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+  await expectWholeLayer('All open');
+};
+
+/** The project sheet: each row is a 40px target inside the viewport. */
+const expectProjectSheetOpen = async (viewport: Readonly<{ width: number }>): Promise<void> => {
+  await target.click(titleButton(), { touch: true });
+  await target.expectVisible(projectSheet());
+  await motionSettled();
+  const rows = await target.evaluateLocator(projectSheet(), (sheet) =>
+    [...sheet.querySelectorAll<HTMLElement>('[data-slot="project-sheet-row"]')].map((row) => {
+      const { height, right } = row.getBoundingClientRect();
+      return { height, right };
+    }),
+  );
+  expect(rows.length).toBeGreaterThanOrEqual(3);
+  for (const row of rows) {
+    expect(row.height).toBeGreaterThanOrEqual(40);
+    expect(row.right).toBeLessThanOrEqual(viewport.width + 0.5);
+  }
+  await expectWholeLayer('project sheet open');
+};
+
+/** Close whatever sheet or dialog is open with Escape and wait for it to leave. */
+const dismiss = async (locator: Locator): Promise<void> => {
+  await target.keyboardPress('Escape');
+  await target.expectCount(locator, 0, 30_000);
+  await motionSettled();
+};
+
+/** Return to the stage through Model (D8). */
+const returnToStage = async (): Promise<void> => {
+  await tapDestination('Model');
+  await target.expectCount(selectors.getByCss('[data-slot="mobile-surface"]'), 0, 30_000);
+  await motionSettled();
+};
+
+/**
+ * Choose a theme in Settings › General, as a person does on a phone: the list, then General, then the theme.
+ *
+ * @param theme - The theme's name.
+ */
+/** How many dialogs are on screen, counted in the page so a dialog leaving mid-count is simply not counted. */
+const openDialogs = async (): Promise<number> =>
+  target.evaluate(
+    () => [...document.querySelectorAll('[role="dialog"]')].filter((dialog) => dialog.checkVisibility()).length,
+  );
+
+const chooseTheme = async (theme: (typeof themes)[number]): Promise<void> => {
+  const url = new URL(await target.currentUrl());
+  url.searchParams.set('settings', 'general');
+  await target.navigate(`${url.pathname}${url.search}`);
+  const settings = selectors.getByRole('dialog', { name: /^settings$/iu });
+  await target.expectVisible(settings, 60_000);
+  const themeButton = selectors.getByRole('button', { name: /^(?:light|dark|black|high contrast|system)$/iu });
+  if (!(await target.isVisible(themeButton))) {
+    await target.click(settings.getByRole('button', { name: /^General/u }).first(), { touch: true });
+  }
+  await target.click(themeButton, { touch: true });
+  await target.click(selectors.getByRole('option', { name: new RegExp(`^${theme}`, 'iu') }), { touch: true });
+  await target.expectClass(selectors.getByCss('html'), themeClasses[theme]);
+  await target.expectCount(selectors.getByRole('listbox'), 0, 30_000);
+  /* On a phone Settings is a list and a detail: Escape steps back from General to the list (whose dialog is then named
+   * Settings again) and from the list closes it. Close by Escape until no dialog is left. */
+  // oxlint-disable-next-line no-await-in-loop -- whether a dialog is left decides the next step.
+  for (let step = 0; step < 3 && (await openDialogs()) > 0; step++) {
+    // oxlint-disable-next-line no-await-in-loop -- one step back at a time.
+    await target.keyboardPress('Escape');
+    // oxlint-disable-next-line no-await-in-loop -- the dialog's exit animation runs between steps.
+    await motionSettled();
+  }
+  await target.expectCount(selectors.getByRole('dialog'), 0, 30_000);
+  await target.expectVisible(navigation(), 60_000);
+  await waitForStageReady();
+  await motionSettled();
+};
+
+describe('the phone shell across portrait widths', () => {
+  test.each(portraitViewports)(
+    'keeps the stage, Half, All and the project sheet whole at $width×$height',
+    async (viewport) => {
+      await openPhoneProject(viewport);
+
+      await expectStage(viewport);
+      if (viewport.width === 320) {
+        await target.screenshot(undefined, `mobile-matrix-stage-${String(viewport.width)}.png`);
+      }
+
+      await expectChatAtHalf(viewport);
+      if (viewport.width === 360) {
+        await target.screenshot(undefined, `mobile-matrix-half-${String(viewport.width)}.png`);
+      }
+
+      await expectAllOpen();
+      if (viewport.width === 390) {
+        await target.screenshot(undefined, `mobile-matrix-all-${String(viewport.width)}.png`);
+      }
+      await dismiss(allSheet());
+
+      await returnToStage();
+      await expectProjectSheetOpen(viewport);
+      if (viewport.width === 390) {
+        await target.screenshot(undefined, `mobile-matrix-project-sheet-${String(viewport.width)}.png`);
+      }
+      await dismiss(projectSheet());
+      await expectStage(viewport);
+    },
+  );
+});
+
+describe.each(themes)('the phone shell in %s', (theme) => {
+  test('keeps the top bar, viewer bar, sheet and All whole and readable at 360×780', async () => {
+    const viewport = portraitViewports[1];
+    await openPhoneProject(viewport);
+    await chooseTheme(theme);
+    await expectStage(viewport);
+    await expectChatAtHalf(viewport);
+    expect(
+      await seriousAxeViolations({ rules: ['color-contrast'], selector: '[data-slot="mobile-project-top-bar"]' }),
+    ).toEqual([]);
+    expect(await seriousAxeViolations({ rules: ['color-contrast'], selector: 'nav[aria-label="Workbench"]' })).toEqual(
+      [],
+    );
+    await target.screenshot(undefined, `mobile-matrix-theme-${theme.replaceAll(' ', '-').toLowerCase()}-360.png`);
+    await expectAllOpen();
+    expect(await seriousAxeViolations({ rules: ['color-contrast'], selector: '[role="dialog"]' })).toEqual([]);
+    await dismiss(allSheet());
+  });
+});
+
+describe('the 767/768 breakpoint', () => {
+  test('keeps the phone composition at 767px and the desktop one at 768px', async () => {
+    const phone = { width: 767, height: 1024 };
+    await openPhoneProject(phone);
+    await expectStage(phone);
+    await expectChatAtHalf(phone);
+    await target.screenshot(undefined, 'mobile-matrix-breakpoint-767.png');
+
+    await target.setViewport({ width: 768, height: 1024 });
+    await target.expectCount(navigation(), 0, 30_000);
+    await target.expectCount(topBar(), 0, 30_000);
+    await target.expectVisible(chatLaneToggle(), 60_000);
+    await waitForStageReady();
+    await motionSettled();
+    await expect.poll(measureHorizontalOverflow).toEqual({ document: 0, scroller: 0, offenders: [] });
+    await expectWholeLayer('desktop at 768');
+    await target.screenshot(undefined, 'mobile-matrix-breakpoint-768.png');
+  });
+});
+
+/**
+ * D12: from 768px up the layout is the desktop's, and a coarse pointer adds only I2, I3 and I7 — row actions shown
+ * without hover, nothing under 24px, and no keyboard hints.
+ *
+ * @param state - The state's name.
+ */
+const expectCoarseDesktop = async (state: string): Promise<void> => {
+  expect(await target.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
+  await target.expectCount(navigation(), 0);
+  await target.expectCount(topBar(), 0);
+  await target.expectVisible(chatLaneToggle(), 60_000);
+  // I7: the keyboard hints are in the page, and none of them shows.
+  const hints = await target.evaluate(() => {
+    const all = [...document.querySelectorAll<HTMLElement>('[class~="pointer-coarse:hidden"]')];
+    return { present: all.length, shown: all.filter((hint) => hint.checkVisibility()).length };
+  });
+  expect(hints.present).toBeGreaterThan(0);
+  expect(hints.shown).toBe(0);
+  await expect.poll(measureHorizontalOverflow).toEqual({ document: 0, scroller: 0, offenders: [] });
+  await expectWholeLayer(state);
+};
+
+describe('the desktop composition under a coarse pointer', () => {
+  test('keeps a 1024×1366 touch tablet on the desktop layout with the coarse rules (D12)', async () => {
+    await target.commands.uiOpenTarget({ hasTouch: true });
+    await prepareComposerPage();
+    await target.setViewport({ width: 1024, height: 1366 });
+    await target.navigate(seedRoute);
+    await target.expectUrl(/\/w\/[^/]+\/[^/?]+/u, 120_000);
+    await waitForStageReady();
+    await motionSettled();
+    await expectCoarseDesktop('tablet 1024×1366');
+    await target.screenshot(undefined, 'mobile-matrix-tablet-1024x1366.png');
+  });
+
+  test('keeps a landscape phone at 844×390 on the desktop layout with the composer and Send whole', async () => {
+    await target.commands.uiOpenTarget({ hasTouch: true, isMobile: true });
+    await prepareComposerPage();
+    await target.setViewport({ width: 844, height: 390 });
+    await target.navigate(seedRoute);
+    await target.expectUrl(/\/w\/[^/]+\/[^/?]+/u, 120_000);
+    await waitForStageReady();
+    await motionSettled();
+    await expectCoarseDesktop('landscape 844×390');
+    await target.expectVisible(composer(), 60_000);
+    for (const [what, locator] of [
+      ['The composer', composer()],
+      ['Send', send()],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- each in turn.
+      const box = await boxOf(locator, what);
+      expect(box.bottom, `${what} should end inside the viewport`).toBeLessThanOrEqual(390.5);
+      expect(box.right).toBeLessThanOrEqual(844.5);
+      // oxlint-disable-next-line no-await-in-loop -- each in turn.
+      expect(await reachable(locator), `${what} should take a tap`).toBe(true);
+    }
+    await target.screenshot(undefined, 'mobile-matrix-landscape-844x390.png');
+  });
+});
+
+describe('the phone shell with a home-indicator inset', () => {
+  test('keeps the nav, composer and Send clear of a 34px bottom inset at 390×844', async () => {
+    const viewport = portraitViewports[2];
+    const inset = 34;
+    await openPhoneProject(viewport);
+    const before = await boxOf(navigation(), 'The workbench nav');
+    await target.emulateSafeAreaInsets({ bottom: inset });
+    try {
+      await expect
+        .poll(async () => {
+          const nav = await boxOf(navigation(), 'The workbench nav');
+          return nav.height;
+        })
+        .toBeCloseTo(before.height + inset, 0);
+      await expectStage(viewport);
+      const nav = await expectNavigation();
+      for (const name of ['Chat', 'Parameters', 'Model', 'All']) {
+        // oxlint-disable-next-line no-await-in-loop -- one destination at a time.
+        const button = await boxOf(navButton(name), `The ${name} destination`);
+        expect(button.bottom, `${name} should sit above the inset`).toBeLessThanOrEqual(nav.bottom - inset + 0.5);
+      }
+      await expectChatAtHalf(viewport);
+      await target.screenshot(undefined, 'mobile-matrix-safe-area-390.png');
+    } finally {
+      await target.emulateSafeAreaInsets(null);
+    }
+  });
+});
+
+describe('the phone shell at 200% text', () => {
+  test('reflows the stage and Half without sideways scroll at 360×780', async () => {
+    const viewport = portraitViewports[1];
+    await openPhoneProject(viewport);
+    await setTextZoom(200);
+    try {
+      await motionSettled();
+      await expectStage(viewport);
+      await expectChatAtHalf(viewport);
+      await target.screenshot(undefined, 'mobile-matrix-text-200-360.png');
+    } finally {
+      await setTextZoom(100);
+    }
+  });
+});
+
+type MotionRecord = Readonly<{ what: string; duration: number }>;
+
+/** Record every transition that starts inside a sheet from now on, with its duration in milliseconds. */
+const recordSheetTransitions = async (): Promise<void> =>
+  target.evaluate(() => {
+    const scope = globalThis as typeof globalThis & { tauSheetTransitions?: MotionRecord[] };
+    scope.tauSheetTransitions = [];
+    document.addEventListener(
+      'transitionrun',
+      (event) => {
+        if (!(event.target instanceof Element) || !event.target.closest('[data-slot="drawer-content"]')) {
+          return;
+        }
+        for (const animation of event.target.getAnimations()) {
+          scope.tauSheetTransitions?.push({
+            what: `${(event.target instanceof HTMLElement ? event.target.dataset['slot'] : undefined) ?? event.target.tagName.toLowerCase()} ${event.propertyName}`,
+            duration: Number(animation.effect?.getComputedTiming().duration ?? 0),
+          });
+        }
+      },
+      true,
+    );
+  });
+
+const readSheetTransitions = async (): Promise<MotionRecord[]> =>
+  target.evaluate(
+    () => (globalThis as typeof globalThis & { tauSheetTransitions?: MotionRecord[] }).tauSheetTransitions ?? [],
+  );
+
+describe('the phone shell with reduced motion', () => {
+  test('stills the Saving glyph and moves the sheet without a slide at 390×844', async () => {
+    const viewport = portraitViewports[2];
+    await target.commands.uiOpenTarget({ hasTouch: true, isMobile: true });
+    await target.emulateReducedMotion('reduce');
+    await prepareComposerPage();
+    /* Every time the status glyph turns busy, what its computed animation is at that moment: the busy state lasts as
+     * long as the save, so it is caught as it happens rather than polled for. */
+    await target.addInitScript(() => {
+      const scope = globalThis as typeof globalThis & {
+        tauBusyGlyphs?: Array<{ animationName: string; running: number }>;
+      };
+      const seen: Array<{ animationName: string; running: number }> = [];
+      scope.tauBusyGlyphs = seen;
+      const inspect = (node: Node): void => {
+        if (!(node instanceof Element)) {
+          return;
+        }
+        for (const element of [node, ...node.querySelectorAll('[data-slot="status-line-icon"]')]) {
+          if (element.matches('[data-slot="status-line-icon"][class~="animate-spin"]')) {
+            seen.push({
+              animationName: getComputedStyle(element).animationName,
+              running: element.getAnimations().filter((animation) => animation.playState === 'running').length,
+            });
+          }
+        }
+      };
+      new MutationObserver((records) => {
+        for (const record of records) {
+          inspect(record.target);
+          for (const added of record.addedNodes) {
+            inspect(added);
+          }
+        }
+      }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+    });
+    await target.setViewport(viewport);
+    await target.navigate('/__e2e/project-file-tree?main=touch-parameters');
+    await target.expectUrl(/\/w\/[^/]+\/[^/?]+/u, 120_000);
+    await target.expectVisible(titleButton(), 60_000);
+    await waitForStageReady();
+    expect(await target.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
+
+    // A real save: change Width, then Save revision from the project sheet's Revisions.
+    await tapDestination('Parameters');
+    const width = selectors.getByRole('region', { name: 'Parameters', exact: true }).getByLabelText('Input for Width');
+    await target.expectVisible(width.first(), 60_000);
+    await target.fill(width.first(), '31');
+    await target.press(width.first(), 'Enter');
+    await target.expectValue(width.first(), '31', 30_000);
+    await target.click(titleButton(), { touch: true });
+    await target.click(projectSheet().getByRole('button', { name: 'Revisions', exact: true }), { touch: true });
+    const save = selectors
+      .getByRole('region', { name: 'Revisions', exact: true })
+      .getByRole('region', { name: 'Where you are', exact: true })
+      .getByRole('button', { name: 'Save revision', exact: true });
+    await target.expectVisible(save, 60_000);
+    await target.click(save, { touch: true });
+    await target.expectVisible(titleButton().getByText('Saved', { exact: true }), 120_000);
+    const glyphs = await target.evaluate(
+      () =>
+        (globalThis as typeof globalThis & { tauBusyGlyphs?: Array<{ animationName: string; running: number }> })
+          .tauBusyGlyphs ?? [],
+    );
+    expect(glyphs.length, 'the save should have shown the busy glyph').toBeGreaterThan(0);
+    for (const glyph of glyphs) {
+      expect(glyph).toEqual({ animationName: 'none', running: 0 });
+    }
+
+    // The sheet moves between detents in one step: every transition it starts is the reduced-motion 0.01ms.
+    await recordSheetTransitions();
+    await moveSheet('Home', detents.peek);
+    await moveSheet('End', detents.full);
+    await moveSheet('ArrowDown', detents.half);
+    const reduced = await readSheetTransitions();
+    for (const transition of reduced) {
+      expect(transition.duration, transition.what).toBeLessThanOrEqual(1);
+    }
+
+    // The same moves with motion allowed do slide, so the recorder sees the sheet's transitions.
+    await target.emulateReducedMotion('no-preference');
+    await recordSheetTransitions();
+    await moveSheet('Home', detents.peek);
+    await moveSheet('End', detents.full);
+    const allowed = await readSheetTransitions();
+    expect(Math.max(0, ...allowed.map(({ duration }) => duration))).toBeGreaterThan(100);
+    expect(reduced.length, 'the reduced moves should have started transitions too').toBeGreaterThan(0);
+  });
+});

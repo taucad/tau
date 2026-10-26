@@ -26,7 +26,10 @@ import {
   verifyDesktopRouteDescriptor,
 } from './desktop-route-publication.mjs';
 import type { DesktopRouteTrust } from './desktop-route-publication.mjs';
-import { requireDesktopPublicationAuthority } from './desktop-publication-authority.mjs';
+import {
+  requireDesktopInstallerPublicationEnabled,
+  requireDesktopPublicationAuthority,
+} from './desktop-publication-authority.mjs';
 import { fetchDesktopQualifiedReceipts } from './desktop-receipt-provenance.mjs';
 import {
   desktopAptSnapshotPrefix,
@@ -445,9 +448,7 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
     }
     return;
   }
-  if (process.env['TAU_ENABLE_INSTALLER_PROMOTION'] !== 'true') {
-    throw new Error('Installer promotion is disabled; operator release gate is required');
-  }
+  requireDesktopInstallerPublicationEnabled(manifest.channel);
   if (operation !== 'promote-routes' && operation !== 'renew-routes') {
     throw new Error('Unknown mutable publication operation');
   }

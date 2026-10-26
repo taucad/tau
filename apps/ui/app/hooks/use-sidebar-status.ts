@@ -31,6 +31,7 @@
 
 import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { SnapshotFrom } from 'xstate';
+import { toolName as toolNames } from '@taucad/chat/constants';
 import type { RevisionStatusProjection } from '@taucad/revisions';
 import type { ChatSessionActorRef, chatSessionMachine } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
@@ -163,6 +164,12 @@ const keySeparator = '\u0000';
  * because that is how the machine's own `always` guards resolve; reading them
  * in another order here would invent a second derivation of the same fact.
  */
+/*
+ * A native agent question waits as its `ask_questions` call in flight, not as a paused run: the run holds the call open
+ * until the person answers or its countdown settles it. It is a decision all the same (I5), so it reads as one.
+ */
+const isAskingTool = (name: string | undefined): boolean => name === toolNames.askQuestions;
+
 const chatRunState = (snapshot: ChatSnapshot): ChatSidebarState => {
   if (snapshot.matches({ run: 'queued' })) {
     return 'queued';
@@ -174,7 +181,7 @@ const chatRunState = (snapshot: ChatSnapshot): ChatSidebarState => {
     return 'question';
   }
   if (snapshot.matches({ run: { running: 'tool' } })) {
-    return 'tool';
+    return isAskingTool(snapshot.context.toolName) ? 'question' : 'tool';
   }
   if (snapshot.matches({ run: { running: 'generating' } })) {
     return 'working';
@@ -224,7 +231,9 @@ export const selectProjectedChatStatus = (
         ? 'queued'
         : run.lifecycle === 'running'
           ? tools.count > 0
-            ? 'tool'
+            ? isAskingTool(tools.toolName)
+              ? 'question'
+              : 'tool'
             : 'working'
           : run.lifecycle === 'paused'
             ? approvals > 0

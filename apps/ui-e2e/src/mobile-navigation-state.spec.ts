@@ -11,6 +11,7 @@ import {
   detents,
   expectDetentHeld,
   followSidebarLink,
+  grabber,
   moveSheet,
   navButton,
   openFromAll,
@@ -34,7 +35,7 @@ import {
  * - The open surface is the project's own state (`panelState.mobileActiveTab`, stored per project), so a reload or a
  *   history step back into a project reopens the surface that project had, and another project never shows it.
  * - The sheet's height is not stored: a surface reopens at half, the height every reopen takes
- *   (`use-chat-interface-state.ts`); a file opens at full (WB-07).
+ *   (`use-chat-interface-state.ts`), whether it was left at full or at the peek; a file opens at full (WB-07).
  * - A chat draft lives in the chat's composer record, so it outlives every unmount and stays with its chat.
  * - Scroll offsets are not asserted: the canvas and charter specify none, and the phone mounts only the active
  *   surface, the chat reopening at its latest turn.
@@ -64,11 +65,19 @@ test.each(phoneViewports)(
     expect(await detent()).toBe(detents.half);
     await moveSheet('End', detents.full);
 
-    // Reload: the project's surface comes back, at the height a surface reopens at.
+    // Reload: the project's surface comes back, at the height a surface reopens at, by name as well as by place.
     await target.reload();
     await target.expectVisible(surface('Parameters'), 60_000);
     expect(await target.getAttribute(navButton('Parameters'), 'aria-current')).toBe('page');
     await expect.poll(detent).toBe(detents.half);
+    await target.expectAttribute(grabber(), 'aria-valuetext', 'Half');
+    // Left at the peek, it reopens at half too: no detent is stored.
+    await moveSheet('Home', detents.peek);
+    await target.expectAttribute(grabber(), 'aria-valuetext', 'Peek');
+    await target.reload();
+    await target.expectVisible(surface('Parameters'), 60_000);
+    await expect.poll(detent).toBe(detents.half);
+    await target.expectAttribute(grabber(), 'aria-valuetext', 'Half');
 
     // Another project: its own state, never the surface this one had open.
     await followSidebarLink('Project Navigation B');
@@ -288,9 +297,11 @@ test.each(phoneViewports)(
     await expectShown([question, recommended, other], 'the detent it raised the sheet to');
     await expectPersonsDetentsHold([question, recommended, other], viewport.width !== 320);
 
-    // Away and back: the question is still waiting.
+    // Away and back: the question is still waiting, and Chat says so while another surface has the sheet (I5, WB-08).
     await tapDestination('Parameters');
     await target.expectVisible(surface('Parameters'), 60_000);
+    await target.expectAccessibleDescription(navButton('Chat'), 'A chat needs you', 30_000);
+    await target.expectAttribute(navButton('Chat').getByCss('[data-slot="destination-cue"]'), 'data-tone', 'attention');
     // Back on Chat the question is still there at the peek the person chose; raised to full, answering it finishes
     // the turn.
     await tapDestination('Chat');
@@ -298,6 +309,35 @@ test.each(phoneViewports)(
     await expect.poll(async () => unshownEverywhere(other), { timeout: 30_000 }).toBeUndefined();
     await target.click(other.first(), { touch: true });
     await target.expectVisible(selectors.getByText('Going with the faceted gem.', { exact: true }), 120_000);
+  },
+);
+
+test.each(phoneViewports)(
+  'shows one activity line for a streaming run and no second cue on Chat from another surface at $width×$height (WB-08)',
+  async (viewport) => {
+    await openPhone(viewport, '/__e2e/chat-attachments');
+    await target.installAgentHostGatewayFixture([{ text: 'Thickening the wall now.', gated: true, usage }]);
+    await tapDestination('Chat');
+    await target.expectVisible(composer(), 60_000);
+    await moveSheet('Home', detents.peek);
+    await send('Thicken the wall');
+    await target.waitForAgentHostGatewayGate({ kind: 'stream' });
+
+    // While the run streams, the peek carries its one activity line above the composer.
+    const activity = surface('Chat').getByRole('status', { name: 'Current activity', exact: true });
+    await target.expectCount(activity, 1, 60_000);
+    await target.expectCount(selectors.getByRole('status', { name: 'Current activity', exact: true }), 1);
+
+    // Another surface: a run in flight is not a decision, so Chat carries no cue of its own (I5 cues decisions only).
+    await tapDestination('Parameters');
+    await target.expectVisible(surface('Parameters'), 60_000);
+    await target.expectCount(navButton('Chat').getByCss('[data-slot="destination-cue"]'), 0);
+    expect(await target.getAttribute(navButton('Chat'), 'aria-describedby')).toBeNull();
+
+    await target.releaseAgentHostGatewayFixture();
+    await tapDestination('Chat');
+    await target.expectVisible(selectors.getByText('Thickening the wall now.', { exact: true }), 120_000);
+    await target.expectCount(selectors.getByRole('status', { name: 'Current activity', exact: true }), 0, 60_000);
   },
 );
 

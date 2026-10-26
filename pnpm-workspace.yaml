@@ -311,7 +311,7 @@ catalog:
   zod: 4.4.3
   nanoraster: ^0.7.1
   # Exact: @taucad/picovoxel's kernel version carries this release's build-time digests.
-  picovoxel: 0.2.0
+  picovoxel: 0.2.1
   # Exact: @taucad/smlib's kernel version and compute identity carry this release's WASM.
   '@classcad/smlibwasm': 0.3.4
   n8ao: 1.10.2

@@ -1,6 +1,8 @@
 import { isObservabilityHarnessDirect } from '#lib/observability-harness-context.js';
 import { ENV } from '#environment.config.js';
 import { drainEarlyErrors } from '#lib/early-error-buffer.js';
+import { recordErrorDetails } from '#lib/error-details.js';
+import type { ErrorDetails } from '#lib/error-details.js';
 import type * as SentryLibrary from '#lib/sentry.lib.js';
 import { hasPageExited, isPageHidden } from '#lib/page-visibility.js';
 import { sendSentryEventDirectly, sendSentryEventsOnHide } from '#lib/sentry-event.lib.js';
@@ -386,12 +388,21 @@ export const isSdkLoadFailure = (value: unknown): boolean | Promise<boolean> => 
  * {@link directErrorLimit} per page), or when the page goes before it loads. On a hidden page it
  * waits for nothing: it goes at once, within the keepalive budget. Nothing is stored on the device.
  * An error is marked reported only once it is captured, kept or sent, so one dropped while the SDK
- * loads can be reported again. Never rejects.
+ * loads can be reported again. Never rejects. What the caller knows of the error (`details`: tags such as
+ * `worker`, contexts such as React's component stack, a fingerprint) is recorded on it, so its event carries it on
+ * either delivery path; a second report of an error already handed over only adds to them.
  *
  * @param error - The caught value.
+ * @param details - Tags, contexts and grouping the caller knows; a primitive cannot carry them.
  */
-export const reportUiError = async (error: unknown): Promise<void> => {
-  if (!ENV.SENTRY_DSN || (isWeakKey(error) && reported.has(error))) {
+export const reportUiError = async (error: unknown, details?: ErrorDetails): Promise<void> => {
+  if (!ENV.SENTRY_DSN) {
+    return;
+  }
+  if (details !== undefined) {
+    recordErrorDetails(error, details);
+  }
+  if (isWeakKey(error) && reported.has(error)) {
     return;
   }
   const markReported = (): void => {

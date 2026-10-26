@@ -10,7 +10,6 @@ import type { ReloadState, StaleBuildOutcome } from '#lib/stale-build-recovery.j
 
 const mocks = vi.hoisted(() => ({
   routeError: undefined as unknown,
-  captureException: vi.fn(),
   reportUiError: vi.fn(async () => undefined),
   recoverFromStaleBuild: vi.fn(async (_failure: unknown): Promise<StaleBuildOutcome> => 'current'),
   reloadState: 'idle' as ReloadState,
@@ -40,12 +39,6 @@ const setOutcome = (failure: unknown, outcome: StaleBuildOutcome): void => {
 vi.mock('react-router', async (importOriginal) => ({
   ...(await importOriginal<typeof ReactRouter>()),
   useRouteError: () => mocks.routeError,
-}));
-const analytics = { captureException: mocks.captureException };
-/** `false` models a provider that hands out a new analytics object on every render. */
-let isAnalyticsStable = true;
-vi.mock('#hooks/use-analytics.js', () => ({
-  useAnalytics: () => (isAnalyticsStable ? analytics : { captureException: mocks.captureException }),
 }));
 vi.mock('#lib/error-reporting.js', () => ({ reportUiError: mocks.reportUiError }));
 vi.mock('#lib/stale-build-recovery.js', async (importOriginal) => ({
@@ -176,7 +169,6 @@ describe('ErrorPage', () => {
 
       expect(await screen.findByRole('heading', { name: 'Tau has been updated' })).toBeInTheDocument();
       expect(mocks.reportUiError).not.toHaveBeenCalled();
-      expect(mocks.captureException).not.toHaveBeenCalled();
     },
   );
 
@@ -250,7 +242,6 @@ describe('ErrorPage', () => {
     expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Prompt owned' })).toHaveTextContent('false');
     expect(mocks.reportUiError).not.toHaveBeenCalled();
-    expect(mocks.captureException).not.toHaveBeenCalled();
   });
 
   it('should switch a failure first called genuine to the update prompt once the server confirms another build', async () => {
@@ -280,7 +271,6 @@ describe('ErrorPage', () => {
     expect(screen.queryByLabelText('Stack trace')).not.toBeInTheDocument();
     // The recovery reports a genuine failure a boundary caught (`onGenuineFailure`); a second report would double it.
     expect(mocks.reportUiError).not.toHaveBeenCalled();
-    expect(mocks.captureException).not.toHaveBeenCalled();
   });
 
   it('should still show the stack of any other error', async () => {
@@ -308,35 +298,29 @@ describe('ErrorPage', () => {
     expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
   });
 
-  it('should report any other error as the same value, and to analytics once, however often the page renders', async () => {
-    isAnalyticsStable = false;
-    try {
-      const error = new Error('controlled render failure');
-      const view = renderPage(error);
-      await waitFor(() => {
-        expect(mocks.reportUiError).toHaveBeenCalledWith(error);
-      });
+  it('should report any other error as the same value however often the page renders', async () => {
+    const error = new Error('controlled render failure');
+    const view = renderPage(error);
+    await waitFor(() => {
+      expect(mocks.reportUiError).toHaveBeenCalledWith(error);
+    });
 
-      view.rerender(
-        <MemoryRouter>
-          <ErrorPage />
-        </MemoryRouter>,
-      );
-      await act(async () => {
-        await new Promise((resolve) => {
-          setTimeout(resolve, 20);
-        });
+    view.rerender(
+      <MemoryRouter>
+        <ErrorPage />
+      </MemoryRouter>,
+    );
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
       });
+    });
 
-      // The same value each time: the error tracker's report deduplicates it (`reportUiError`).
-      expect(new Set(reportedValues())).toStrictEqual(new Set([error]));
-      expect(mocks.captureException).toHaveBeenCalledOnce();
-    } finally {
-      isAnalyticsStable = true;
-    }
+    // The same value each time: the error tracker's report deduplicates it (`reportUiError`).
+    expect(new Set(reportedValues())).toStrictEqual(new Set([error]));
   });
 
-  it('should report an error as the same value, and to analytics once, when the error page mounts again for it', async () => {
+  it('should report an error as the same value when the error page mounts again for it', async () => {
     const error = new Error('controlled render failure');
     const first = renderPage(error);
     await waitFor(() => {
@@ -352,7 +336,6 @@ describe('ErrorPage', () => {
     });
 
     expect(new Set(reportedValues())).toStrictEqual(new Set([error]));
-    expect(mocks.captureException).toHaveBeenCalledOnce();
   });
 
   it('should report a server error response as the same value however often the page mounts for it', async () => {
@@ -372,7 +355,6 @@ describe('ErrorPage', () => {
     const reported = new Set(reportedValues());
     expect(reported.size).toBe(1);
     expect([...reported][0]).toMatchObject({ name: 'route_error', message: '503 Service Unavailable' });
-    expect(mocks.captureException).toHaveBeenCalledOnce();
   });
 
   it('should report any other error without asking the server', async () => {

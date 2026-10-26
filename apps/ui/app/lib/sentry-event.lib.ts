@@ -3,8 +3,8 @@ import { defaultStackParser } from '@sentry/react';
 import type { ErrorEvent, StackFrame } from '@sentry/react';
 import { randomUuid } from '@taucad/utils/id';
 import { ENV } from '#environment.config.js';
-import { apiRequestIdTags } from '#lib/api-request-id.js';
 import { readBuildId } from '#lib/build-identity.js';
+import { applyErrorDetails } from '#lib/error-details.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { applyTauEventContext } from '#lib/sentry-context.lib.js';
 import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
@@ -308,7 +308,7 @@ const buildEnvelope = ({ dsn, error, tags, stackLimit, fingerprint }: EnvelopeIn
     level: 'error',
     ...(release === undefined ? {} : { release }),
     ...(environment === undefined ? {} : { environment }),
-    tags: { ...apiRequestIdTags(error), ...tags, delivery: 'without-sdk' },
+    tags: { ...tags, delivery: 'without-sdk' },
     exception: {
       values: [
         {
@@ -328,8 +328,8 @@ const buildEnvelope = ({ dsn, error, tags, stackLimit, fingerprint }: EnvelopeIn
     },
     ...(fingerprint === undefined ? {} : { fingerprint: [...fingerprint] }),
   };
-  // Given the processor's context and decorated exactly as the SDK's own events are (principle 7).
-  const withContext = applyTauEventContext(plain);
+  // Given the processor's context and the reporter's details, decorated as the SDK's own events are (principle 7).
+  const withContext = applyTauEventContext(applyErrorDetails(plain, error));
   const event = scrubSentryEvent(
     isStaleBuildTag(staleBuild) ? decorateForStaleBuild(withContext, staleBuild) : withContext,
   );

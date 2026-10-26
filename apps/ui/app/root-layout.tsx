@@ -47,8 +47,6 @@ import { SvgSpriteMount } from '#components/icons/svg-sprite-mount.js';
 import { HeadlessImageProvider } from '#providers/headless-image-provider.js';
 import { authErrorMessage, betterFetchErrorBodyMessage } from '#utils/auth-error.utils.js';
 import { CloudRootBoundary, useCloudPaymentActionReturn } from '#cloud/root-billing.js';
-import { useAnalytics } from '#hooks/use-analytics.js';
-import { subscribeGenuineFailures } from '#lib/stale-build-recovery.js';
 
 export type RootLoaderData = {
   readonly env: ClientEnvironment;
@@ -229,16 +227,6 @@ function LayoutDocument({
   useEffect(() => {
     setFaviconColor(color.serialized.hex);
   }, [setFaviconColor, color]);
-
-  // TAU-UI-6: analytics hears each module load failure the recovery decided genuine, once, wherever it was caught.
-  const analytics = useAnalytics();
-  useEffect(
-    () =>
-      subscribeGenuineFailures((failure) => {
-        analytics.captureException(failure, { context: { component: 'StaleBuildRecovery' } });
-      }),
-    [analytics],
-  );
 
   return (
     <html

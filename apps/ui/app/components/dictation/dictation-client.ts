@@ -1,6 +1,7 @@
 import { dictationEventSchema, dictationStatusSchema } from '@taucad/chat/schemas';
 import type { DictationStatus } from '@taucad/chat/schemas';
 import { ENV } from '#environment.config.js';
+import { recordApiRequestId } from '#lib/api-request-id.js';
 
 const unavailable: DictationStatus = { available: false };
 
@@ -43,7 +44,7 @@ export async function transcribeDictation(
     signal: options.signal,
   });
   if (!response.ok || !response.body) {
-    throw new Error(await errorMessage(response));
+    throw recordApiRequestId(new Error(await errorMessage(response)), response);
   }
   let preview = '';
   let buffered = '';

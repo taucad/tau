@@ -24,7 +24,9 @@ const requestIds = new WeakMap<WeakKey, string>();
  * @returns The request id, or `undefined`.
  */
 export const readApiRequestId = (response: Response): string | undefined => {
-  const value = response.headers.get(apiRequestIdHeader);
+  // Recording an id never breaks the failure it describes: a response-like value without headers names none.
+  const headers: Partial<Pick<Headers, 'get'>> | undefined = (response as Partial<Response>).headers;
+  const value = typeof headers?.get === 'function' ? headers.get(apiRequestIdHeader) : null;
   return value !== null && requestIdPattern.test(value) ? value : undefined;
 };
 

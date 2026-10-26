@@ -273,6 +273,21 @@ export function TerminalPane({
   useEffect(() => {
     onRunningChange?.(runningLabel);
   }, [onRunningChange, runningLabel]);
+  /* A running session holds the page's unload, so Tau desktop asks before closing or reloading the window stops it
+   * (T15). Only while it runs: no other page state ever holds an unload. */
+  const isRunning = state.phase === 'running';
+  useEffect(() => {
+    if (!isRunning) {
+      return;
+    }
+    const holdUnload = (event: BeforeUnloadEvent): void => {
+      event.preventDefault();
+    };
+    globalThis.addEventListener('beforeunload', holdUnload);
+    return () => {
+      globalThis.removeEventListener('beforeunload', holdUnload);
+    };
+  }, [isRunning]);
 
   const projectRoot = availability.status === 'available' ? availability.projectRoot : undefined;
   const bridge = availability.status === 'available' ? availability.bridge : undefined;

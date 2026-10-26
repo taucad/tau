@@ -501,6 +501,30 @@ describe('TerminalPane running report (T15)', () => {
   });
 });
 
+describe('TerminalPane unload hold (T15)', () => {
+  const unload = (): Event => {
+    const event = new Event('beforeunload', { cancelable: true });
+    globalThis.dispatchEvent(event);
+    return event;
+  };
+
+  it('holds the page unload only while a session runs', async () => {
+    const { unmount } = render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
+    /* Negative control: no session, no hold. */
+    expect(unload().defaultPrevented).toBe(false);
+    await startTerminal();
+    expect(unload().defaultPrevented).toBe(true);
+    harness.emit({ type: 'exited', exitCode: 0, signal: null, reason: 'shell-exited' });
+    expect(unload().defaultPrevented).toBe(false);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Start a new Terminal' }));
+    harness.emit(opened);
+    expect(unload().defaultPrevented).toBe(true);
+    unmount();
+    expect(unload().defaultPrevented).toBe(false);
+  });
+});
+
 describe('TerminalPane project change (T15)', () => {
   it('keeps the old session out of the new project and starts the new one clean, with nothing replayed', async () => {
     const first = harness;

@@ -49,6 +49,7 @@ import {
 } from '#services/agent-host-event-projection.js';
 import type { AgentHostLiveBlocks } from '#services/agent-host-event-projection.js';
 import { finalizeInterruptedToolParts } from '#utils/chat.utils.js';
+import { isQuestionTool } from '#utils/question-tool.js';
 
 /** One read's answer, as the host's `read` and `attach` return it (W3 CL-R13). @public */
 export type ChatProjectionReadAnswer = Parameters<typeof foldReadAnswer>[1];
@@ -1606,16 +1607,19 @@ export const selectOpenInterrupts = (projection: ChatProjection): Readonly<Recor
   selectCurrentRun(projection)?.pendingInterrupts ?? {};
 
 /**
- * The tool calls in flight and the newest one's name, replacing the per-chunk scans (G04, L3 D19).
+ * The tool calls in flight and the one to name, replacing the per-chunk scans (G04, L3 D19).
+ *
+ * While any open call asks the person a question, that call is the one named: a later call opened beside it must not
+ * hide the decision (I5). Otherwise the newest call is named.
  *
  * @param projection - The chat's projection.
- * @returns How many calls are open, and the last opened call's tool.
+ * @returns How many calls are open, and the open question's tool or else the last opened call's tool.
  * @public
  */
 export const selectToolsInFlight = (projection: ChatProjection): Readonly<{ count: number; toolName?: string }> => {
   const calls = Object.values(projection.openTools);
-  const last = calls.at(-1);
-  return last === undefined ? { count: 0 } : { count: calls.length, toolName: last.toolName };
+  const named = calls.find((call) => isQuestionTool(call.toolName)) ?? calls.at(-1);
+  return named === undefined ? { count: 0 } : { count: calls.length, toolName: named.toolName };
 };
 
 /**

@@ -177,7 +177,23 @@ export function ChatInterfaceNav({
         >
           <DrawerTitle className='px-3'>All surfaces</DrawerTitle>
           <DrawerDescription className='sr-only'>Choose a workbench surface</DrawerDescription>
-          <div className='min-h-0 overflow-y-auto pb-3'>
+          <div
+            className='min-h-0 overflow-y-auto pb-3'
+            onFocusCapture={(event) => {
+              const focused = event.target;
+              // Radix wraps focus with preventScroll. Keep the focused action inside this scrollport,
+              // but do not scroll All for events bubbling from a portaled picker or menu.
+              if (!(focused instanceof HTMLElement) || !event.currentTarget.contains(focused)) {
+                return;
+              }
+              if (focused.dataset['openViewFile'] === undefined) {
+                focused.scrollIntoView({ block: 'nearest' });
+              } else {
+                // The first action belongs with the Views heading above it.
+                event.currentTarget.scrollTop = 0;
+              }
+            }}
+          >
             {viewerApi ? (
               <section aria-labelledby='all-views-title'>
                 <h3 id='all-views-title' className='px-3 pt-3 pb-1 text-xs font-medium text-muted-foreground'>

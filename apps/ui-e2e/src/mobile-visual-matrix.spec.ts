@@ -825,6 +825,27 @@ test('switches model files through phone Files actions without desktop tabs', as
   await target.screenshot(undefined, 'mobile-matrix-file-switch-360.png');
 });
 
+test('keeps both ends of the All focus loop visible at 320px', async () => {
+  await openPhoneProject(portraitViewports[0]);
+  await target.click(navButton('All'), { touch: true });
+  await motionSettled();
+  const first = allSheet().getByRole('button', { name: 'Open file', exact: true });
+  const last = allSheet().getByRole('button', { name: 'Console', exact: true });
+  await target.focus(last);
+  await target.keyboardPress('Tab');
+  await expect.poll(async () => target.evaluate(() => document.activeElement?.textContent)).toBe('Open file');
+  expect(await reachable(first)).toBe(true);
+  const heading = await boxOf(allSheet().getByRole('heading', { name: 'Views', exact: true }), 'Views heading');
+  const firstBox = await boxOf(first, 'Open file');
+  expect(heading.bottom).toBeLessThanOrEqual(firstBox.top);
+  expect(await reachable(allSheet().getByRole('heading', { name: 'Views', exact: true }))).toBe(true);
+  await target.keyboardPress('Shift+Tab');
+  await expect.poll(async () => target.evaluate(() => document.activeElement?.textContent)).toBe('Console');
+  expect(await reachable(last)).toBe(true);
+  await target.keyboardPress('Tab');
+  expect(await reachable(first)).toBe(true);
+});
+
 test('opens a fresh same-file view and keeps view actions reachable after closing every view', async () => {
   const viewport = portraitViewports[1];
   const workspace = 'phone-view-actions';

@@ -236,7 +236,9 @@ export function ViewerStage({
         aria-label={regionLabel}
         aria-busy={isBusy || undefined}
         tabIndex={partMenu === undefined ? undefined : 0}
-        className='relative min-h-0 flex-1 overflow-hidden focus-visible:focus-outline'
+        /* `isolate` keeps what the canvas stacks inside it (the orientation cube is z-index 1000) under the viewer bar: on
+           a short stage, such as a phone's at Half, the cube's box reaches the bar and would take its taps. */
+        className='relative isolate min-h-0 flex-1 overflow-hidden focus-visible:focus-outline'
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
         onPointerCancel={handlePointerLeave}

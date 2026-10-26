@@ -2,7 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { lstat, mkdtemp, readFile, readdir, realpath, rm, writeFile, mkdir } from 'node:fs/promises';
+import { lstat, mkdtemp, readFile, readdir, realpath, rm, rmdir, unlink, writeFile, mkdir } from 'node:fs/promises';
 import { setTimeout as wait } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
@@ -173,6 +173,62 @@ type WindowsConsumerRun = {
   download(options: { url: string; directory: string; name: string }): Promise<{ path: string; browser: string }>;
 };
 
+/** Remove only the unchanged in-place NSIS uninstaller and its otherwise empty, canonical directory. */
+export const removeWindowsUninstallerRemainder = async (options: {
+  installationPath: string;
+  uninstaller: string;
+  sha256: string;
+}): Promise<void> => {
+  const { installationPath, uninstaller, sha256 } = options;
+  const info = await lstat(installationPath).catch((error: unknown) => {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      return undefined;
+    }
+    throw error;
+  });
+  if (!info) {
+    return;
+  }
+  const canonical = await realpath(installationPath);
+  if (
+    !info.isDirectory() ||
+    canonical.toLowerCase() !== resolve(installationPath).toLowerCase() ||
+    !/^Uninstall[^/\\]*\.exe$/iu.test(uninstaller)
+  ) {
+    throw new Error('Uninstaller remainder path redirects or is invalid');
+  }
+  const remaining = await readdir(installationPath);
+  if (remaining.some((name) => name !== uninstaller)) {
+    throw new Error('Uninstaller retained unexpected installation contents');
+  }
+  if (remaining.length > 0) {
+    const path = join(installationPath, uninstaller);
+    if ((await hashFile(path)) !== sha256) {
+      throw new Error('Uninstaller remainder bytes changed');
+    }
+    await unlink(path);
+  }
+  // Never recursively remove the directory: concurrent or unexpected contents must refuse cleanup.
+  await rmdir(installationPath);
+};
+
+/** Wait for a complete JSON response; incomplete writes are retried only until the caller's deadline (milliseconds). */
+export const readWindowsConsumerResponse = async (path: string, deadline: number): Promise<unknown> => {
+  /* oxlint-disable no-await-in-loop -- Poll one operator response in order until its bounded deadline. */
+  while (Date.now() < deadline) {
+    try {
+      return JSON.parse(await readFile(path, 'utf8')) as unknown;
+    } catch (error) {
+      if (!(error instanceof SyntaxError) && !(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+        throw error;
+      }
+    }
+    await wait(Math.min(1000, Math.max(0, deadline - Date.now())));
+  }
+  /* oxlint-enable no-await-in-loop */
+  throw new Error('Consumer response deadline expired');
+};
+
 const executeInstaller = (path: string, args: string[]): void => {
   host();
   const result = spawnSync(path, args, { windowsVerbatimArguments: true, encoding: 'utf8', timeout: 180_000 });
@@ -338,21 +394,7 @@ export const createWindowsQualificationDriver = (
       }),
       { flag: 'wx' },
     );
-    const deadline = Date.now() + 1_800_000;
-    let response: unknown;
-    /* oxlint-disable no-await-in-loop -- Poll one operator response in order until its bounded deadline. */
-    while (Date.now() < deadline) {
-      try {
-        response = JSON.parse(await readFile(join(directory, 'response.json'), 'utf8'));
-        break;
-      } catch (error) {
-        if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
-          throw error;
-        }
-      }
-      await wait(1000);
-    }
-    /* oxlint-enable no-await-in-loop */
+    const response = await readWindowsConsumerResponse(join(directory, 'response.json'), Date.now() + 1_800_000);
     const manual = assertWindowsConsumerManual(response, binding, options.publisher!);
     if (manual.observedAt > Date.now()) {
       throw new Error('Future manual observation');
@@ -649,7 +691,9 @@ $os=Get-CimInstance Win32_OperatingSystem;
       if (uninstallers.length !== 1) {
         throw new Error('Ambiguous uninstaller');
       }
-      executeInstaller(join(installationPath, uninstallers[0]!), ['/S', `_?=${installationPath}`]);
+      const uninstaller = uninstallers[0]!;
+      const uninstallerSha256 = await hashFile(join(installationPath, uninstaller));
+      executeInstaller(join(installationPath, uninstaller), ['/S', `_?=${installationPath}`]);
       try {
         await lstat(join(installationPath, 'Tau.exe'));
         throw new Error('Uninstaller retained executable');
@@ -658,6 +702,7 @@ $os=Get-CimInstance Win32_OperatingSystem;
           throw error;
         }
       }
+      await removeWindowsUninstallerRemainder({ installationPath, uninstaller, sha256: uninstallerSha256 });
       await Promise.all(
         preservedFiles.map(async (file) => {
           if ((await hashFile(file.path)) !== file.sha256) {

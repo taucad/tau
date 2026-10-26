@@ -13,7 +13,7 @@ import { z } from 'zod';
 import { linuxInstallation } from '#shared/linux-installation.js';
 import { promisify } from 'node:util';
 import { defaultPayloadStore } from '@taucad/host';
-import { fetchQualificationCandidates } from './qualification-candidates.mjs';
+import { assertQualificationConsumerScope, fetchQualificationCandidates } from './qualification-candidates.mjs';
 import { qualificationArtifactObjects, qualificationFeed } from './qualification-feeds.mjs';
 import { startQualificationMirrorProcess } from './qualification-mirror-process.mjs';
 import { assertDisposableQualificationHost, prepareQualificationTls } from './qualification-tls.mjs';
@@ -140,6 +140,12 @@ const main = async (): Promise<void> => {
   }
   // Consumer acceptance requires native observations before the run creates its profile.
   const acceptanceKind = z.enum(['ci', 'vm']).parse(process.env['TAU_DESKTOP_ACCEPTANCE_KIND'] ?? 'ci');
+  assertQualificationConsumerScope({
+    kind: acceptanceKind,
+    route,
+    scope: process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'],
+    channel: required('TAU_QUALIFICATION_CHANNEL'),
+  });
   const cleanHost =
     acceptanceKind === 'vm' && route.startsWith('macos-')
       ? await (async () => {
@@ -157,11 +163,7 @@ const main = async (): Promise<void> => {
     acceptanceKind === 'vm' && route === 'windows-nsis'
       ? assertWindowsConsumerHost(observeWindowsConsumerHost(required('RUNNER_NAME')))
       : undefined;
-  if (
-    acceptanceKind === 'vm' &&
-    (((!cleanHost && !windowsHost) || (windowsHost && process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] !== 'windows')) ??
-      required('TAU_QUALIFICATION_CHANNEL') !== 'staging')
-  ) {
+  if (acceptanceKind === 'vm' && !cleanHost && !windowsHost) {
     throw new Error('Consumer acceptance requires its staging platform scope');
   }
   const root = resolve(required('TAU_QUALIFICATION_DIRECTORY'));

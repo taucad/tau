@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 /* oxlint-disable no-restricted-imports -- Cross-driver package producer contract. */
-import { assertQualificationSource } from './qualification-candidates.mjs';
+import { assertQualificationConsumerScope, assertQualificationSource } from './qualification-candidates.mjs';
 import { desktopManifestFields } from './runtime-stage.mjs';
 import { windowsQualificationPackageSchema } from './qualification-windows.mjs';
 import { linuxQualificationPackageSchema } from './qualification-linux.mjs';
@@ -44,6 +44,21 @@ try {
 }
 
 const current = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+for (const route of ['windows-nsis', 'macos-zip', 'macos-dmg']) {
+  const input = {
+    kind: 'vm',
+    route,
+    scope: route === 'windows-nsis' ? 'windows' : 'macos',
+    channel: 'staging',
+  } as const;
+  assertQualificationConsumerScope(input);
+  for (const change of [{ channel: 'production' }, { scope: 'all' }, { scope: undefined }, { route: 'linux-apt' }]) {
+    assert.throws(() => {
+      assertQualificationConsumerScope({ ...input, ...change });
+    }, /staging platform scope/u);
+  }
+  assertQualificationConsumerScope({ ...input, kind: 'ci', scope: 'all', channel: 'production' });
+}
 assertQualificationSource({ sourceCommit: current, workflowCommit: current, scope: 'windows', channel: 'staging' });
 for (const change of [{ channel: 'production' }, { sourceCommit: 'a'.repeat(40) }, { scope: 'windows-ci' }]) {
   assert.throws(() => {

@@ -2,7 +2,8 @@
 /** Purpose: Exercise Windows driver execution guards and real artifact-byte admission without granting installer authority. */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { setTimeout as wait } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseDesktopArtifactManifest } from '#shared/desktop-release.js';
@@ -12,6 +13,8 @@ import {
   admitWindowsConsumerDestination,
   createWindowsQualificationDriver,
   verifyWindowsQualificationArtifact,
+  removeWindowsUninstallerRemainder,
+  readWindowsConsumerResponse,
 } from './qualification-windows.mjs';
 import { createQualificationReinstallGuard, QualificationUnavailable } from './qualification-platform-types.mjs';
 import {
@@ -127,6 +130,76 @@ const main = async (): Promise<void> => {
   const originalGuard = process.env['TAU_QUALIFICATION_DISPOSABLE_HOST'];
   delete process.env['TAU_QUALIFICATION_DISPOSABLE_HOST'];
   try {
+    const installationPath = join(root, 'removed-installation');
+    const uninstaller = 'Uninstall Tau Staging.exe';
+    const remainder = Buffer.from('inert owned uninstaller');
+    const cleanup = { installationPath, uninstaller, sha256: createHash('sha256').update(remainder).digest('hex') };
+    await removeWindowsUninstallerRemainder(cleanup);
+    await mkdir(installationPath);
+    await writeFile(join(installationPath, uninstaller), remainder);
+    const retainedProfile = join(root, 'retained-profile');
+    await writeFile(retainedProfile, 'preserved user bytes');
+    /* oxlint-disable no-await-in-loop -- Mutate and inspect the same installation fixture in lifecycle order. */
+    for (const name of ['Tau.exe', 'unexpected-project']) {
+      await writeFile(join(installationPath, name), 'never delete');
+      await assert.rejects(removeWindowsUninstallerRemainder(cleanup), /unexpected installation contents/u);
+      assert.equal(await readFile(join(installationPath, name), 'utf8'), 'never delete');
+      assert.deepEqual(await readFile(join(installationPath, uninstaller)), remainder);
+      await rm(join(installationPath, name));
+    }
+    /* oxlint-enable no-await-in-loop */
+    await writeFile(join(installationPath, uninstaller), 'changed');
+    await assert.rejects(removeWindowsUninstallerRemainder(cleanup), /remainder bytes changed/u);
+    await writeFile(join(installationPath, uninstaller), remainder);
+    await removeWindowsUninstallerRemainder(cleanup);
+    await removeWindowsUninstallerRemainder(cleanup);
+    assert.equal(await readFile(retainedProfile, 'utf8'), 'preserved user bytes');
+    await assert.rejects(readFile(join(installationPath, uninstaller)), { code: 'ENOENT' });
+    await mkdir(installationPath);
+    await removeWindowsUninstallerRemainder(cleanup);
+    await symlink(root, installationPath, 'junction');
+    await assert.rejects(removeWindowsUninstallerRemainder(cleanup), /path redirects/u);
+    await rm(installationPath);
+    if (process.platform !== 'win32') {
+      await mkdir(installationPath);
+      await symlink(retainedProfile, join(installationPath, uninstaller));
+      await assert.rejects(removeWindowsUninstallerRemainder(cleanup), /canonical regular file/u);
+      assert.equal(await readFile(retainedProfile, 'utf8'), 'preserved user bytes');
+      await rm(installationPath, { recursive: true });
+    }
+    const responsePath = join(root, 'response.json');
+    /* oxlint-disable no-await-in-loop -- Exercise successive writes to the same operator response path. */
+    for (const partial of [undefined, '{"nonce":']) {
+      if (partial !== undefined) {
+        await writeFile(responsePath, partial);
+      }
+      const pending = readWindowsConsumerResponse(responsePath, Date.now() + 5000);
+      const writer = (async () => {
+        await wait(25);
+        await writeFile(responsePath, JSON.stringify(manual));
+      })();
+      try {
+        assert.deepEqual(assertWindowsConsumerManual(await pending, binding, 'Publisher'), manual);
+      } finally {
+        await writer;
+      }
+    }
+    /* oxlint-enable no-await-in-loop */
+    await writeFile(responsePath, JSON.stringify({ ...manual, nonce: '123e4567-e89b-42d3-a456-426614174001' }));
+    const wrongBinding = await readWindowsConsumerResponse(responsePath, Date.now() + 5000);
+    assert.throws(() => assertWindowsConsumerManual(wrongBinding, binding, 'Publisher'));
+    await writeFile(responsePath, '{}');
+    assert.deepEqual(await readWindowsConsumerResponse(responsePath, Date.now() + 5000), {});
+    await writeFile(responsePath, '{');
+    await assert.rejects(readWindowsConsumerResponse(responsePath, Date.now() + 20), /deadline expired/u);
+    await rm(responsePath);
+    await assert.rejects(readWindowsConsumerResponse(responsePath, Date.now() + 20), /deadline expired/u);
+    await mkdir(responsePath);
+    await assert.rejects(
+      readWindowsConsumerResponse(responsePath, Date.now() + 5000),
+      (error: unknown) =>
+        error instanceof Error && 'code' in error && ['EISDIR', 'EPERM', 'EACCES'].includes(String(error.code)),
+    );
     const programs = join(root, 'missing-programs');
     assert.equal(await admitWindowsConsumerDestination(programs, false), join(programs, 'tau-desktop'));
     await assert.rejects(admitWindowsConsumerDestination(programs, true), /retained installer/u);

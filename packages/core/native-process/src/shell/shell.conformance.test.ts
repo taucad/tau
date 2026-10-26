@@ -456,7 +456,13 @@ describe.runIf(enabled)('shell conformance', () => {
     const project = join(work, 'absent-container');
     mkdirSync(project);
     const reserved = join(project, '.tau');
-    const filesystem = { readable: [readonly, home], writable: [project], denied: [secret], masked: [reserved] };
+    const filesystem = {
+      readable: [readonly, home],
+      writable: [project],
+      readOnly: [join(reserved, 'chats')],
+      denied: [secret, join(reserved, 'host')],
+      masked: [reserved],
+    };
     expect(existsSync(reserved)).toBe(false);
     const positive = await run('printf AUTHORED > authored.txt && cat authored.txt', {
       filesystem,

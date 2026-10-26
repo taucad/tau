@@ -217,7 +217,16 @@ export const shellSandboxProfile = (
   ]);
   const readOnly = launch.filesystem.readOnly ?? [];
   const masked = process.platform === 'linux' ? deniedVariants(launch.filesystem.masked ?? []) : [];
-  const absentMasked = masked.filter((path) => !existsSync(path));
+  // A strict child makes SRT mount an empty directory at the absent container. A direct
+  // deny would mount /dev/null there and conflict with the directory stubs for protected children.
+  const absentMasked = masked.filter((path) => !existsSync(path)).map((path) => join(path, '.tau-mask-boundary'));
+  // A mask already pins its container. Rebinding that host directory would expose everything
+  // the tmpfs hid. Only ancestors within explicitly writable children may be restored.
+  const pinned = pinnedAncestors(launch.filesystem.writable, [...readOnly, ...launch.filesystem.denied]).filter(
+    (path) =>
+      !masked.some((root) => inside(path, root)) ||
+      launch.filesystem.writable.some((root) => masked.some((mask) => inside(root, mask)) && inside(path, root)),
+  );
   const { domains } = launch.network;
   return {
     network: { allowedDomains: [...domains], deniedDomains: domains.length > 0 ? [] : ['*'], strictAllowlist: true },
@@ -230,10 +239,7 @@ export const shellSandboxProfile = (
         ...sandboxRuntimeReadRoots(),
         ...(runtimeDirectory === undefined ? [] : [runtimeDirectory]),
       ]),
-      allowWrite: physicalVariants([
-        ...launch.filesystem.writable,
-        ...pinnedAncestors(launch.filesystem.writable, [...readOnly, ...launch.filesystem.denied]),
-      ]),
+      allowWrite: physicalVariants([...launch.filesystem.writable, ...pinned]),
       denyWrite: [...new Set([...deniedWriteRoots(), ...denied, ...deniedVariants(readOnly), ...absentMasked])],
     },
     allowPty: false,

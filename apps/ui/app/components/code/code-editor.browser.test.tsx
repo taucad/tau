@@ -17,6 +17,26 @@ import type { EditorView } from '@codemirror/view';
 
 const isMac = navigator.platform.includes('Mac');
 
+function contrastRatio(foreground: string, background: string): number {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1;
+  canvas.height = 1;
+  const context = canvas.getContext('2d')!;
+  const luminance = (color: string): number => {
+    context.fillStyle = color;
+    context.fillRect(0, 0, 1, 1);
+    const channels = context.getImageData(0, 0, 1, 1).data;
+    const linear = [channels[0], channels[1], channels[2]].map((channel) => {
+      const value = channel! / 255;
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    });
+    return linear[0]! * 0.2126 + linear[1]! * 0.7152 + linear[2]! * 0.0722;
+  };
+  const first = luminance(foreground);
+  const second = luminance(background);
+  return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+}
+
 afterEach(() => {
   cleanup();
   document.documentElement.className = '';
@@ -153,6 +173,46 @@ it('opens editor context actions and its search panel', async () => {
   await page.getByRole('menuitem', { name: 'Find and Replace' }).click();
   await expect.poll(() => container.querySelector('.cm-search')).toBeTruthy();
 });
+
+it.each([Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST])(
+  'keeps the actual %s search controls readable on mobile',
+  async (theme) => {
+    await page.viewport(390, 720);
+    document.documentElement.className =
+      theme === Theme.BLACK || theme === Theme.HIGH_CONTRAST ? `dark ${theme}` : theme;
+    const sourceDocument = new EditorDocument('main.ts', 'const value = 1;');
+    const { container } = render(
+      <ThemeProvider specifiedTheme={theme} themeAction='/'>
+        <div className='h-72'>
+          <CodeEditor document={sourceDocument} viewId='search-colors' languageId='typescript' />
+        </div>
+      </ThemeProvider>,
+    );
+    await expect.poll(() => container.querySelector('.cm-content')).toBeTruthy();
+    fireEvent.contextMenu(container.querySelector('.cm-content')!);
+    await page.getByRole('menuitem', { name: 'Find and Replace' }).click();
+    await expect.poll(() => container.querySelector('.cm-search .cm-textfield')).toBeTruthy();
+
+    const panel = container.querySelector<HTMLElement>('.cm-search')!;
+    const input = panel.querySelector<HTMLInputElement>('.cm-textfield')!;
+    const button = panel.querySelector<HTMLButtonElement>('.cm-button')!;
+    const label = panel.querySelector<HTMLLabelElement>('label')!;
+    const panelBackground = getComputedStyle(container.querySelector('.cm-panels')!).backgroundColor;
+    for (const control of [input, button]) {
+      const style = getComputedStyle(control);
+      expect(contrastRatio(style.color, style.backgroundColor)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(style.borderTopColor, style.backgroundColor)).toBeGreaterThanOrEqual(3);
+      expect(Number.parseFloat(style.minHeight)).toBeGreaterThanOrEqual(24);
+    }
+    const inputStyle = getComputedStyle(input);
+    expect(
+      contrastRatio(getComputedStyle(input, '::placeholder').color, inputStyle.backgroundColor),
+    ).toBeGreaterThanOrEqual(4.5);
+    expect(Number.parseFloat(inputStyle.fontSize)).toBeGreaterThanOrEqual(16);
+    expect(contrastRatio(getComputedStyle(label).color, panelBackground)).toBeGreaterThanOrEqual(4.5);
+    await page.screenshot();
+  },
+);
 
 it('keeps a rejected read-only view transaction out of its document', async () => {
   const sourceDocument = new EditorDocument('__typescript_lib__/lib.es5.d.ts', 'interface Number {}');

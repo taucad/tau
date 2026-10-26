@@ -189,6 +189,49 @@ describe('shell service cleanup custody', () => {
 });
 
 describe('shell service execution custody', () => {
+  it.each(['terminal:earlier', 'resource:earlier'])(
+    'should retain the stopped %s receipt until its whole owning project can be read',
+    async (key) => {
+      const privateRoot = join(sessions, 'tau-shell-bound');
+      await mkdir(privateRoot);
+      const projects: ShellProjectExecutions[] = [];
+      const { service, provider } = serviceOf(() => ({ status: 'started', exit: { exitCode: 0 } }), {
+        fake: {
+          prior: [{ executionId: 'bound', privateRoot, resource: { key, root: project }, phase: 'exited' }],
+        },
+        projects: () => projects,
+      });
+
+      await service.reconcile?.();
+      expect(provider.released).toEqual([]);
+      expect(existsSync(privateRoot)).toBe(true);
+      expect(await service.run(call('run-1', 'echo blocked'))).toMatchObject({ status: 'not-started' });
+      expect(provider.launches).toHaveLength(0);
+
+      projects.push({ owns: async () => false, held: async () => new Map() });
+      await service.reconcile?.();
+      expect(provider.released).toEqual([]);
+      expect(existsSync(privateRoot)).toBe(true);
+
+      projects.push({
+        owns: async (root) => root === project,
+        held: async () => {
+          throw new Error('Project inventory is incomplete.');
+        },
+      });
+      await service.reconcile?.();
+      expect(provider.released).toEqual([]);
+      expect(existsSync(privateRoot)).toBe(true);
+
+      projects.pop();
+      projects.push({ owns: async (root) => root === project, held: async () => new Map() });
+      await service.reconcile?.();
+      expect(provider.released).toEqual(['bound']);
+      expect(existsSync(privateRoot)).toBe(false);
+      expect(await service.run(call('run-1', 'echo admitted'))).toMatchObject({ status: 'completed' });
+    },
+  );
+
   it('should prepare against the checkout, hold the run before launch, and release only after the roots are gone', async () => {
     const log: string[] = [];
     const { service, provider } = serviceOf(() => ({ status: 'started', stdout: 'ok\n', exit: { exitCode: 0 } }), {
@@ -312,7 +355,7 @@ describe('shell service execution custody', () => {
       status: 'not-started',
       code: 'checkout-unavailable',
     });
-    expect(existsSync(agentRoot)).toBe(false);
+    expect(existsSync(agentRoot)).toBe(true);
     expect(provider.released).toEqual([]);
 
     projects.push({
@@ -322,6 +365,8 @@ describe('shell service execution custody', () => {
           [
             'agent',
             async () => {
+              expect(existsSync(agentRoot)).toBe(false);
+              expect(provider.released).toEqual([]);
               released.push('agent');
               return { status: 'applied' } as const;
             },

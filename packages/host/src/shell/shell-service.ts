@@ -512,7 +512,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
     return finished;
   };
 
-  /* An earlier host's agent receipts, already stopped and rootless, that wait on their project's turn store. */
+  /* An earlier host's stopped resource receipts retain their roots until their whole project can be read. */
   const pending = new Map<string, ShellExecution>();
   let reconciling: Promise<void> = Promise.resolve();
   const settledOf = async (promise: Promise<void>): Promise<void> => {
@@ -542,6 +542,10 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         // oxlint-disable-next-line no-await-in-loop -- one complete read per receipt, never a cached one.
         held = await owner.held();
       } catch {
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- roots are removed only after this project's complete inventory.
+      if (!(await removePrivateRoot(sessionBase, row.privateRoot))) {
         continue;
       }
       const release = held.get(executionId);
@@ -588,14 +592,14 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         block(row.resource?.root, row.executionId);
         continue;
       }
-      // oxlint-disable-next-line no-await-in-loop -- see above.
-      if (!(await removePrivateRoot(sessionBase, row.privateRoot))) {
-        block(row.resource?.root, row.executionId);
-        continue;
-      }
-      if (row.resource?.key.startsWith('agent:') === true) {
+      if (row.resource !== undefined) {
         pending.set(row.executionId, row);
         block(row.resource.root, row.executionId);
+        continue;
+      }
+      // Only an explicitly resource-free probe needs no project inventory before its roots are removed.
+      // oxlint-disable-next-line no-await-in-loop -- each stopped receipt is cleaned up in order.
+      if (!(await removePrivateRoot(sessionBase, row.privateRoot))) {
         continue;
       }
       // oxlint-disable-next-line no-await-in-loop -- see above.

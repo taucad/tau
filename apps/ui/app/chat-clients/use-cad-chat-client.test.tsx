@@ -199,6 +199,7 @@ vi.mock('#lib/agent-host-placement.js', () => ({
   daemonPlacementOf: (execution: CadAgentExecution) =>
     execution.kind === 'tau' ? (execution.hostId ?? placementHarness.localHostId) : execution.hostId,
   openAgentHostChannel: browserHostHarness.openAgentHostChannel,
+  unplaceableExecutionReason: () => undefined,
 }));
 vi.mock('#filesystem/handle-store.js', () => ({
   getProjectFileSystemConfig: async () => ({

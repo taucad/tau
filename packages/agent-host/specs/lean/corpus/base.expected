@@ -11752,3 +11752,6146 @@ QB refused cursor-ahead 0 -
 QB refused cursor-ahead 0 -
 QB refused cursor-ahead 0 -
 X
+T admissions
+QA same-term
+QT held
+QT held
+QA new-term
+QT fresh
+QT fresh
+QA same-term
+QT held
+QT held
+QA new-term
+QT fresh
+QT fresh
+QA same-term
+QT held
+QT held
+QA new-term
+QT fresh
+QT fresh
+QA same-term
+QT held
+QT held
+QA new-term
+QT fresh
+QT fresh
+QA same-term
+QT held
+QT held
+QA new-term
+QT fresh
+QT fresh
+QA taken-over
+QT held
+QT held
+QA taken-over
+QT held
+QT held
+X
+T terms
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2 2 2
+QM 2 2 2
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3 3 3
+QM 3 3 3
+QM 3 3 3
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2 2 2
+QM 2 2 2
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2 2 2
+QM 2 2 2
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 3 3 3
+QM 3,2 2 2
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3 3 3
+QM 3 3 3
+QM 3 3 3
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2 2 2
+QM 2 2 2
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 3 3 3
+QM 3,2 2 2
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3 3 3
+QM 3 3 3
+QM 3 3 3
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 2 2 2
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3 3 3
+QM 3 3 3
+QM 3 3 3
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 -
+QM - 1 -
+QM - 1 -
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 3,3 3 3
+QM 3,2 2 2
+QM 3,2 2 2
+QM 3,2 2 2
+QM 3,3 3 3
+QM 3,2 2 2
+QM 3,2 2 2
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,2 2 2
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,2 2 2
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,2 2 2
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2 2 2
+QM 2 2 2
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3 3 3
+QM 3 3 3
+QM 3 3 3
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2 2 2
+QM 2 2 2
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2 2 2
+QM 2 2 2
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 3 3 3
+QM 3,2 2 2
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3 3 3
+QM 3 3 3
+QM 3 3 3
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2 2 2
+QM 2 2 2
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 3 3 3
+QM 3,2 2 2
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3 3 3
+QM 3 3 3
+QM 3 3 3
+QM 1 1 1
+QM 1 1 1
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 2 2 2
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3 3 3
+QM 3 3 3
+QM 3 3 3
+QM 1 1 1
+QM 1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 3 3 3
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM 1 1 1
+QM - 1 1
+QM - 1 1
+QM - 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,1 1 1
+QM 1,1 1 1
+QM 3,3 3 3
+QM 3,2 2 2
+QM 3,2 2 2
+QM 3,2 2 2
+QM 3,3 3 3
+QM 3,2 2 2
+QM 3,2 2 2
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,2 2 2
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,2 2 2
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,2 2 2
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 3,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,2 2 2
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,3 3 3
+QM 2,2 2 2
+QM 2,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,3 3 3
+QM 1,1 1 1
+QM 1,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,1 1 1
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,2 2 2
+QM 1,3 3 3
+QM 1,2 2 2
+QM 1,2 2 2
+X
+T cross-admissions
+QX same-term -
+QX held
+QX same-term 1
+QX same-term -
+QX same-term -
+QX same-term 1,2
+QX held
+QX new-term -
+QX held
+QX new-term 1
+QX new-term -
+QX new-term -
+QX new-term 1,2
+QX held
+QX same-term -
+QX held
+QX same-term 1
+QX same-term -
+QX same-term -
+QX same-term 1,2
+QX held
+QX new-term -
+QX held
+QX new-term 1
+QX new-term -
+QX new-term -
+QX new-term 1,2
+QX held
+QX same-term -
+QX held
+QX same-term 1
+QX same-term -
+QX same-term -
+QX same-term 1,2
+QX held
+QX new-term -
+QX held
+QX new-term 1
+QX new-term -
+QX new-term -
+QX new-term 1,2
+QX held
+QX same-term -
+QX held
+QX same-term 1
+QX same-term -
+QX same-term -
+QX same-term 1,2
+QX held
+QX new-term -
+QX held
+QX new-term 1
+QX new-term -
+QX new-term -
+QX new-term 1,2
+QX held
+QX same-term -
+QX held
+QX same-term 1
+QX same-term -
+QX same-term -
+QX same-term 1,2
+QX held
+QX new-term -
+QX held
+QX new-term 1
+QX new-term -
+QX new-term -
+QX new-term 1,2
+QX held
+QX taken-over
+QX taken-over
+QX taken-over
+QX taken-over
+QX taken-over
+QX taken-over
+QX taken-over
+QX taken-over
+QX taken-over
+QX taken-over
+QX taken-over
+QX taken-over
+QX taken-over
+QX taken-over
+X
+T carried
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 5+6
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 7
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 5+6
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 5+6
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 5+6
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 5+6
+QC 5+6
+QC 5+6
+QC 5+6,-
+QC 5+6,-
+QC 5+6,-
+QC 5+6,-
+QC 5+6
+QC 5+6
+QC 5+6
+QC 5+6
+QC 5+6
+QC -
+QC -
+QC -
+QC -,5+6
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,5+6
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,5+6
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 5+6
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 5+6
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 5+6
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 7
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 7
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 7
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 7
+QC 7
+QC 7
+QC 7,-
+QC 7,-
+QC 7,-
+QC 7,-
+QC 7
+QC 7
+QC 7
+QC 7
+QC 7
+QC -
+QC -
+QC -
+QC -,7
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,7
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,7
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 7
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 7
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 7
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 5+6
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 7
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,5+6
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,7
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,5+6
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,7
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,5+6
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,7
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,5+6
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,7
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 5+6
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 7
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 5+6
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 7
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 5+6
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 7
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 5+6
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 7
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 5+6
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC 7
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -,-
+QC -,-
+QC -,-
+QC -,-
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+QC -
+X
+T plans
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW 1 - 1 0
+QW 1 0 1 1
+QW 1 - 1 0
+QW 1 0 1 1
+QW 1 - 1 0
+QW 1 0 1 1
+QW 1 - 1 0
+QW 1 0 1 1
+QW 1 - 1 0
+QW 1 0 1 1
+QW 1 - 1 0
+QW 1 0 1 1
+QW 1 0 1 1
+QW 1 0 1 1
+QW 1 0 1 1
+QW 1 0 1 1
+QW 1 0 1 1
+QW 1 0 1 1
+QW 1 1 1 1
+QW 1 1 1 1
+QW 1 1 1 1
+QW 1 1 1 1
+QW 1 1 1 1
+QW 1 1 1 1
+QW 1 1 0 1
+QW 1 1 0 1
+QW 1 1 0 1
+QW 1 1 0 1
+QW 1 1 0 1
+QW 1 1 0 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 0 1
+QW 1 2 0 1
+QW 1 2 0 1
+QW 1 2 0 1
+QW 1 2 0 1
+QW 1 2 0 1
+QW 1 - 1 0
+QW 1 1 1 1
+QW 1 - 1 0
+QW 1 1 1 1
+QW 1 - 1 0
+QW 1 1 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 3 0 1
+QW 1 3 0 1
+QW 1 3 0 1
+QW 1 3 0 1
+QW 1 3 0 1
+QW 1 3 0 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 1 1 1
+QW 1 1 1 1
+QW 1 1 1 1
+QW 1 1 1 1
+QW 1 1 1 1
+QW 1 1 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 3 1 1
+QW 1 3 1 1
+QW 1 3 1 1
+QW 1 3 1 1
+QW 1 3 1 1
+QW 1 3 1 1
+QW 1,2 - 1 0
+QW 1,2 0 1 1
+QW 1,2 - 1 0
+QW 1,2 0 1 1
+QW 1,2 - 1 0
+QW 1,2 0 1 1
+QW 1,2 - 1 0
+QW 1,2 0 1 1
+QW 1,2 - 1 0
+QW 1,2 0 1 1
+QW 1,2 - 1 0
+QW 1,2 0 1 1
+QW 1,2 0 1 1
+QW 1,2 0 1 1
+QW 1,2 0 1 1
+QW 1,2 0 1 1
+QW 1,2 0 1 1
+QW 1,2 0 1 1
+QW 1,2 - 1 0
+QW 1,2 1 1 1
+QW 1,2 - 1 0
+QW 1,2 1 1 1
+QW 1,2 - 1 0
+QW 1,2 1 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 0 1
+QW 1,2 2 0 1
+QW 1,2 2 0 1
+QW 1,2 2 0 1
+QW 1,2 2 0 1
+QW 1,2 2 0 1
+QW 1,2 - 1 0
+QW 1,2 1 1 1
+QW 1,2 - 1 0
+QW 1,2 1 1 1
+QW 1,2 - 1 0
+QW 1,2 1 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 3 1 1
+QW 1,2 3 1 1
+QW 1,2 3 1 1
+QW 1,2 3 1 1
+QW 1,2 3 1 1
+QW 1,2 3 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 1 1 1
+QW 1,2 1 1 1
+QW 1,2 1 1 1
+QW 1,2 1 1 1
+QW 1,2 1 1 1
+QW 1,2 1 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 2 1 1
+QW 1,2 3 1 1
+QW 1,2 3 1 1
+QW 1,2 3 1 1
+QW 1,2 3 1 1
+QW 1,2 3 1 1
+QW 1,2 3 1 1
+QW 2 - 1 0
+QW 2 0 1 1
+QW 2 - 1 0
+QW 2 0 1 1
+QW 2 - 1 0
+QW 2 0 1 1
+QW 2 - 1 0
+QW 2 0 1 1
+QW 2 - 1 0
+QW 2 0 1 1
+QW 2 - 1 0
+QW 2 0 1 1
+QW 2 0 1 1
+QW 2 0 1 1
+QW 2 0 1 1
+QW 2 0 1 1
+QW 2 0 1 1
+QW 2 0 1 1
+QW 2 - 0 0
+QW 2 1 0 1
+QW 2 - 0 0
+QW 2 1 0 1
+QW 2 - 0 0
+QW 2 1 0 1
+QW 2 2 0 1
+QW 2 2 0 1
+QW 2 2 0 1
+QW 2 2 0 1
+QW 2 2 0 1
+QW 2 2 0 1
+QW 2 2 0 1
+QW 2 2 0 1
+QW 2 2 0 1
+QW 2 2 0 1
+QW 2 2 0 1
+QW 2 2 0 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 0 1
+QW 2 2 0 1
+QW 2 2 0 1
+QW 2 2 0 1
+QW 2 2 0 1
+QW 2 2 0 1
+QW 2 - 1 0
+QW 2 1 1 1
+QW 2 - 1 0
+QW 2 1 1 1
+QW 2 - 1 0
+QW 2 1 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 0 1
+QW 2 2 0 1
+QW 2 2 0 1
+QW 2 2 0 1
+QW 2 2 0 1
+QW 2 2 0 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 1 1 1
+QW 2 1 1 1
+QW 2 1 1 1
+QW 2 1 1 1
+QW 2 1 1 1
+QW 2 1 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 2 1 1
+QW 2 3 1 1
+QW 2 3 1 1
+QW 2 3 1 1
+QW 2 3 1 1
+QW 2 3 1 1
+QW 2 3 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 2 0 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 1 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 0 0 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 1 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 2 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW - 3 1 1
+QW 1 - 0 0
+QW 1 0 0 1
+QW 1 - 0 0
+QW 1 0 0 1
+QW 1 - 0 0
+QW 1 0 0 1
+QW 1 - 0 0
+QW 1 0 0 1
+QW 1 - 0 0
+QW 1 0 0 1
+QW 1 - 0 0
+QW 1 0 0 1
+QW 1 0 0 1
+QW 1 0 0 1
+QW 1 0 0 1
+QW 1 0 0 1
+QW 1 0 0 1
+QW 1 0 0 1
+QW 1 1 0 1
+QW 1 1 0 1
+QW 1 1 0 1
+QW 1 1 0 1
+QW 1 1 0 1
+QW 1 1 0 1
+QW 1 1 0 1
+QW 1 1 0 1
+QW 1 1 0 1
+QW 1 1 0 1
+QW 1 1 0 1
+QW 1 1 0 1
+QW 1 2 0 1
+QW 1 2 0 1
+QW 1 2 0 1
+QW 1 2 0 1
+QW 1 2 0 1
+QW 1 2 0 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 0 1
+QW 1 2 0 1
+QW 1 2 0 1
+QW 1 2 0 1
+QW 1 2 0 1
+QW 1 2 0 1
+QW 1 - 0 0
+QW 1 1 0 1
+QW 1 - 0 0
+QW 1 1 0 1
+QW 1 - 0 0
+QW 1 1 0 1
+QW 1 2 0 1
+QW 1 2 0 1
+QW 1 2 0 1
+QW 1 2 0 1
+QW 1 2 0 1
+QW 1 2 0 1
+QW 1 3 0 1
+QW 1 3 0 1
+QW 1 3 0 1
+QW 1 3 0 1
+QW 1 3 0 1
+QW 1 3 0 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 1 1 1
+QW 1 1 1 1
+QW 1 1 1 1
+QW 1 1 1 1
+QW 1 1 1 1
+QW 1 1 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 2 1 1
+QW 1 3 1 1
+QW 1 3 1 1
+QW 1 3 1 1
+QW 1 3 1 1
+QW 1 3 1 1
+QW 1 3 1 1
+X
+T resume-batches
+QZ - 1
+QZ - 1
+QZ - 1
+QZ - 1
+QZ 1 1
+QZ - 1
+QZ 1,2 1
+QZ - 1
+QZ 2 1
+QZ 1,2 1
+QZ - 1
+QZ 1 1
+QZ - 1
+QZ - 1
+QZ - 1
+QZ - 1
+QZ 2 1
+QZ 1 1
+X
+T append-merge-0
+MA 1:0,1:1,2:0
+X
+T append-merge-1
+MA 1:0,2:0,2:1
+X
+T append-merge-2
+MA 1:0,2:0,3:0
+X
+T append-merge-3
+MA 1:0,2:0,3:0
+X
+T append-merge-4
+MA 1:0,2:0,2:1,3:0,4:0
+X
+T append-merge-5
+MA 1:0,1:1
+X
+T refresh-merge-0
+MR 1:0:1:O0:10,1:1:1:O0:11,1:2:1:O0:12,2:0:1:O0:20
+X
+T refresh-merge-1
+MR 1:0:1:O0:10,1:1:1:O5:11,1:2:1:O0:12,2:0:1:O0:20
+X
+T refresh-merge-2
+MR 1:0:1:O0:10,1:1:1:O5:11,1:2:1:O0:12,2:0:1:O0:20,2:1:1:O0:21
+X
+T refresh-merge-3
+MR 1:0:1:O0:10,1:1:1:O5:11,1:2:1:O0:12,1:3:1:O0:30,2:0:1:O0:20
+X
+T standings
+QF holds 121
+QF holds 121
+QF abandoned
+QF abandoned
+QF holds 121
+QF holds 121
+QF abandoned
+QF abandoned
+QF holds 121
+QF holds 121
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF holds 121
+QF holds 121
+QF abandoned
+QF abandoned
+QF holds 121
+QF holds 121
+QF abandoned
+QF abandoned
+QF holds 121
+QF holds 121
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF abandoned
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF abandoned
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF abandoned
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF abandoned
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF abandoned
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF abandoned
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF holds 1121
+QF holds 1121
+QF abandoned
+QF abandoned
+QF holds 1121
+QF holds 1121
+QF abandoned
+QF abandoned
+QF holds 1121
+QF holds 1121
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF holds 1121
+QF holds 1121
+QF abandoned
+QF abandoned
+QF holds 1121
+QF holds 1121
+QF abandoned
+QF abandoned
+QF holds 1121
+QF holds 1121
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF abandoned
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF abandoned
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF abandoned
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF abandoned
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+X

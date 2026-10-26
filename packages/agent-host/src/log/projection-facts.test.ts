@@ -28,6 +28,7 @@ const bodies = [
   },
   { type: 'turn.conflicted', turnId: 't', chatId: 'c' },
   { type: 'turn.failed', turnId: 't', chatId: 'c', reason: 'why' },
+  { type: 'run.heartbeat' },
   { type: 'model.invocation-prepared', attemptId: 'a', purpose: 'generation', modelId: 'm' },
   { type: 'model.invocation-bound', attemptId: 'a', operationId: 'o', status: 'pending' },
   { type: 'model.invocation-settled', attemptId: 'a', outcome: 'settled', operationId: 'o', chargedCreditAtoms: '0' },

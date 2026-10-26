@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  isPlacementOnThisDeviceNow,
+  resetOriginAgentHostAnswer,
   AgentHostPlacementError,
   discoverOriginAgentHost,
   externalAgentDisplayName,
@@ -55,6 +57,11 @@ const silentSocket = (): WebSocket => {
     },
   } as unknown as WebSocket;
 };
+
+/* The origin's reach is recorded for the page's life: each test is a new page. */
+afterEach(() => {
+  resetOriginAgentHostAnswer();
+});
 
 describe('discoverOriginAgentHost', () => {
   it('reads the same-origin descriptor without sending anything of its own', async () => {
@@ -146,6 +153,99 @@ describe('shouldAutoOfferCloudPlacement', () => {
 });
 
 describe('listAgentHostPlacements', () => {
+  /* XD2: a "no daemon" answer stands for its reuse interval: listings inside it ask nothing again. */
+  it('should not ask the origin again inside the reuse interval of a no-daemon answer', async () => {
+    const discover = vi.fn(async () => undefined);
+    await listAgentHostPlacements({ discoverOrigin: discover, listHosts: async () => [] });
+    await listAgentHostPlacements({ discoverOrigin: discover, listHosts: async () => [] });
+
+    expect(discover).toHaveBeenCalledTimes(1);
+    expect(isPlacementOnThisDeviceNow('origin')).toBe(false);
+  });
+
+  /*
+   * XD2: only a fresh "no daemon" may decline a placement: past its reuse interval the answer reads as unknown, so a
+   * legacy origin placement opened then is kept and the origin asked again, not declined on an old answer.
+   */
+  it('should read a stale no-daemon answer as unknown until the origin answers again', async () => {
+    vi.useFakeTimers({ now: Date.parse('2026-10-23T10:00:00.000Z'), toFake: ['Date'] });
+    try {
+      await listAgentHostPlacements({ discoverOrigin: async () => undefined, listHosts: async () => [] });
+      expect(isPlacementOnThisDeviceNow('origin')).toBe(false);
+      vi.setSystemTime(Date.parse('2026-10-23T10:01:00.000Z'));
+
+      expect(isPlacementOnThisDeviceNow('origin')).toBeUndefined();
+      const answer = Promise.withResolvers<undefined>();
+      const listing = listAgentHostPlacements({
+        discoverOrigin: async () => answer.promise,
+        listHosts: async () => [],
+      });
+      expect(isPlacementOnThisDeviceNow('origin')).toBeUndefined();
+      answer.resolve(undefined);
+      await listing;
+      expect(isPlacementOnThisDeviceNow('origin')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /*
+   * XD2: a daemon is a daemon for the page's life: a later listing whose probe fails asks again, and keeps the daemon
+   * as it last answered (round 27).
+   */
+  it('should keep a settled origin daemon through a later listing whose probe fails', async () => {
+    resetOriginAgentHostAnswer();
+    await listAgentHostPlacements({ discoverOrigin: async () => descriptor, listHosts: async () => [] });
+    const failing = vi.fn(async () => {
+      throw new TypeError('network blip');
+    });
+
+    const listed = await listAgentHostPlacements({ discoverOrigin: failing, listHosts: async () => [] });
+
+    expect(failing).toHaveBeenCalledOnce();
+    expect(listed.find((target) => target.hostId === 'origin')).toMatchObject({ label: descriptor.label });
+    expect(isPlacementOnThisDeviceNow('origin')).toBe(true);
+    const unanswered = await listAgentHostPlacements({
+      discoverOrigin: async () => undefined,
+      listHosts: async () => [],
+    });
+    expect(unanswered.map((target) => target.hostId)).toContain('origin');
+    expect(isPlacementOnThisDeviceNow('origin')).toBe(true);
+    resetOriginAgentHostAnswer();
+  });
+
+  /*
+   * Round 27: only "found" is kept for the page's life, never the descriptor: each listing reads the daemon again, so a
+   * daemon that was renamed, moved its workspace or installed an agent since is listed as it is now.
+   */
+  it('should list the origin daemon as it answers now, not as it first answered', async () => {
+    await listAgentHostPlacements({
+      discoverOrigin: async () => ({ ...descriptor, externalAgents: [claudeAgent] }),
+      listHosts: async () => [],
+    });
+
+    const listed = await listAgentHostPlacements({
+      discoverOrigin: async () => ({ ...descriptor, label: 'studio-max', externalAgents: [claudeAgent, codexAgent] }),
+      listHosts: async () => [],
+    });
+
+    expect(listed.find((target) => target.hostId === 'origin')).toMatchObject({
+      label: 'studio-max',
+      externalAgents: [claudeAgent, codexAgent],
+    });
+  });
+
+  /* XD2: one recorder of the origin's reach: the listing's discovery answers every later reader, the notice's too. */
+  it('should record the origin it discovers, so a reader without the network knows it', async () => {
+    resetOriginAgentHostAnswer();
+    expect(isPlacementOnThisDeviceNow('origin')).toBeUndefined();
+
+    await listAgentHostPlacements({ discoverOrigin: async () => descriptor, listHosts: async () => [] });
+
+    expect(isPlacementOnThisDeviceNow('origin')).toBe(true);
+    resetOriginAgentHostAnswer();
+  });
+
   it('lists rung 1 first and only paired devices that advertised the capability', async () => {
     await expect(
       listAgentHostPlacements({

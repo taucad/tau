@@ -26,7 +26,7 @@ on:
         description: Trusted native qualification run (W9, promotion only)
         type: string
       vm-run-id:
-        description: Trusted operator VM acceptance run (W10, promotion only)
+        description: Trusted operator VM acceptance run (W10, promotion only; may be left empty only for a staging Mac-only promotion, which then publishes its routes as clean-host pending)
         type: string
       manifest-sha256:
         description: Reviewed canonical manifest digest (promotion only)

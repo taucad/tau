@@ -8,6 +8,12 @@ describe('readStaticTypePackage', () => {
       ['/node_modules/@taucad/geo/dist/main.d.ts', 'export declare const shape: object;'],
       ['/node_modules/@taucad/geo/dist/extra.d.ts', 'export declare const extra: number;'],
     ]);
+    async function readFile(path: string, options: 'utf8'): Promise<string>;
+    async function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
+    async function readFile(path: string, options?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
+      const content = files.get(path) ?? '';
+      return options === 'utf8' ? content : new TextEncoder().encode(content);
+    }
     const reader = {
       readdir: vi.fn(async (path: string) => {
         if (path === '/node_modules/@taucad/geo') {
@@ -15,7 +21,7 @@ describe('readStaticTypePackage', () => {
         }
         return path.endsWith('/dist') ? ['main.d.ts', 'extra.d.ts'] : [];
       }),
-      readFile: vi.fn(async (path: string) => new TextEncoder().encode(files.get(path) ?? '')),
+      readFile,
     };
     const definitions = await readStaticTypePackage(reader, '@taucad/geo');
     expect(definitions).toEqual([

@@ -6,6 +6,7 @@ import { EditorDocument } from '#lib/editor-document.js';
 import { acquireTypeScriptLanguage } from '#lib/typescript-language/typescript-codemirror.js';
 
 const createTypeScriptService = vi.hoisted(() => vi.fn());
+// eslint-disable-next-line @typescript-eslint/naming-convention -- Mock the exported environment contract and its configuration key.
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_ACQUISITION: 'locked' } }));
 vi.mock('#lib/typescript-language/typescript-service.js', () => ({ createTypeScriptService }));
 vi.mock('#lib/typescript-language/create-typescript-extensions.js', () => ({
@@ -29,7 +30,9 @@ describe('TypeScript project worker recovery', () => {
         attachedTexts.push(attached.text);
       }),
       detach: vi.fn(async () => undefined),
-      dispose: vi.fn(() => client.dispose()),
+      dispose: vi.fn(() => {
+        client.dispose();
+      }),
       client,
     });
     const createdServices: Array<ReturnType<typeof makeService>> = [];

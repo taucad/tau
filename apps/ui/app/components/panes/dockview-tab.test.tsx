@@ -48,6 +48,8 @@ describe('DockviewTab', () => {
       'right-1',
       'z-10',
       'size-4.5!',
+      // A 24px target under a coarse pointer (I3).
+      'pointer-coarse:size-6!',
       'opacity-0',
       'group-hover/tab:opacity-100',
       'pointer-coarse:opacity-100',

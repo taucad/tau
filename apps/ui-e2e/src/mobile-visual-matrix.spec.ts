@@ -16,6 +16,7 @@ import {
   tapDestination,
 } from '#support/phone-shell.js';
 import { waitForStageReady } from '#support/viewer-stage.js';
+import { readWorkbenchTree, writeWorkbenchFile } from '#support/workbench-files.js';
 
 /**
  * T5 on the real project route (W1–W11; I3, I7, D12): the phone shell's geometry across the responsive matrix, read
@@ -108,8 +109,27 @@ const auditLayer = async (): Promise<LayerAudit> =>
       // A hidden/clip ancestor contributes no movement; an outer scroller cannot repair clipping inside it.
       let reachableTop = box.top;
       let reachableBottom = box.top;
+      let escapesToFixedBlock = getComputedStyle(element).position === 'fixed';
       for (let parent = element.parentElement; parent; parent = parent.parentElement) {
         const style = getComputedStyle(parent);
+        // Fixed descendants escape intermediate overflow until the ancestor establishing their containing block.
+        const establishesFixedBlock =
+          [
+            style.transform,
+            style.translate,
+            style.rotate,
+            style.scale,
+            style.perspective,
+            style.filter,
+            style.backdropFilter,
+          ].some((value) => value !== '' && value !== 'none') ||
+          /layout|paint|strict|content/u.test(style.contain) ||
+          /transform|translate|rotate|scale|perspective|filter/u.test(style.willChange) ||
+          style.contentVisibility === 'auto';
+        if (escapesToFixedBlock && !establishesFixedBlock) {
+          continue;
+        }
+        escapesToFixedBlock = style.position === 'fixed';
         const parentBox = parent.getBoundingClientRect();
         if (style.overflowY !== 'visible') {
           clip.top = Math.max(clip.top, parentBox.top);
@@ -242,6 +262,10 @@ const auditLayer = async (): Promise<LayerAudit> =>
  */
 const expectWholeLayer = async (state: string): Promise<LayerAudit> => {
   const audit = await auditLayer();
+  if (audit.problems.length > 0) {
+    await target.screenshot(undefined, 'mobile-matrix-audit-failure.png');
+    await target.writeArtifact('mobile-matrix-audit-failure.json', JSON.stringify({ state, audit }, null, 2));
+  }
   expect(audit.documentOverflow, `${state}: the page scrolls sideways`).toBeLessThanOrEqual(0);
   expect(audit.problems, `${state}: actions`).toEqual([]);
   expect(audit.judged, `${state}: no action was on screen to judge`).toBeGreaterThan(0);
@@ -285,8 +309,23 @@ const motionSettled = async (): Promise<void> =>
     await Promise.all(finite.map(async (animation) => animation.finished.catch(() => undefined)));
   });
 
+/** Wait for a rendered stage with geometry, rather than an empty first frame. */
+const waitForModelReady = async (): Promise<void> => {
+  await waitForStageReady();
+  await expect
+    .poll(
+      async () =>
+        target.getAttribute(
+          viewerControls().getByRole('button', { name: 'Section view', exact: true }),
+          'aria-disabled',
+        ),
+      { timeout: 60_000 },
+    )
+    .toBe('false');
+};
+
 /**
- * Open a touch phone at `viewport` on the seed route and wait for its stage to draw its first frame.
+ * Open a touch phone at `viewport` on the seed route and wait for its geometry.
  *
  * @param viewport - The phone's size.
  * @param route - The seed route.
@@ -302,7 +341,7 @@ const openPhoneProject = async (
   await target.expectUrl(/\/w\/[^/]+\/[^/?]+/u, 120_000);
   await target.expectVisible(navigation(), 60_000);
   await target.expectVisible(titleButton(), 60_000);
-  await waitForStageReady();
+  await waitForModelReady();
 };
 
 /** The project's 48px bar: three controls, each at least 40px tall, side by side inside it (D2, I3). */
@@ -430,8 +469,8 @@ const expectStage = async (viewport: Readonly<{ width: number }>): Promise<void>
   const nav = await expectNavigation();
   const bar = await boxOf(topBar(), 'The project top bar');
   const frame = await boxOf(selectors.getByCss('[data-viewer-frame]').first(), 'The viewer stage');
-  // The stage (under its dock strip) runs from the bar down to the nav, edge to edge.
-  expect(frame.top).toBeGreaterThanOrEqual(bar.bottom - 0.5);
+  // D1: the stage starts directly below the project bar, without a Dockview header.
+  expect(frame.top).toBeCloseTo(bar.bottom, 0);
   expect(frame.bottom).toBeGreaterThanOrEqual(nav.top - 0.5);
   expect(frame.left).toBeLessThanOrEqual(0.5);
   expect(frame.right).toBeGreaterThanOrEqual(viewport.width - 0.5);
@@ -455,20 +494,13 @@ const expectStage = async (viewport: Readonly<{ width: number }>): Promise<void>
   );
   expect(blanks, 'blank points between the bar and the nav').toEqual([]);
   await expectViewerBar();
-  // I3: the dock tab's close glyph (decorative to assistive technology, which closes with Delete) is a 24px target.
-  const closes = await target.evaluate(() =>
-    [...document.querySelectorAll<HTMLElement>('.dv-tab .dv-default-tab-action')]
-      .filter((glyph) => glyph.checkVisibility({ opacityProperty: true }))
-      .map((glyph) => {
-        const { width, height } = glyph.getBoundingClientRect();
-        return { width, height };
-      }),
+  const visibleHeaders = await target.evaluate(
+    () =>
+      [...document.querySelectorAll<HTMLElement>('.dv-tabs-and-actions-container')].filter((header) =>
+        header.checkVisibility(),
+      ).length,
   );
-  expect(closes.length, 'the active dock tab should show its close glyph').toBeGreaterThan(0);
-  for (const close of closes) {
-    expect(close.width).toBeGreaterThanOrEqual(23.5);
-    expect(close.height).toBeGreaterThanOrEqual(23.5);
-  }
+  expect(visibleHeaders, 'D1: phones have no dock strip, Split or tab close').toBe(0);
   await expectWholeLayer('stage');
 };
 
@@ -585,7 +617,7 @@ const chooseTheme = async (theme: (typeof themes)[number]): Promise<void> => {
   }
   await target.expectCount(selectors.getByRole('dialog'), 0, 30_000);
   await target.expectVisible(navigation(), 60_000);
-  await waitForStageReady();
+  await waitForModelReady();
   await motionSettled();
 };
 
@@ -612,6 +644,30 @@ test.each(['hidden', 'clip', 'auto', 'scroll'] as const)(
     }
   },
 );
+
+test.each([false, true])('audits a fixed action with a transformed containing ancestor: %s', async (transformed) => {
+  await target.setViewport({ width: 360, height: 780 });
+  await target.evaluate((hasTransform) => {
+    document.body.replaceChildren();
+    const clip = document.createElement('div');
+    clip.style.cssText = 'position:absolute;top:0;left:0;width:200px;height:100px;overflow:hidden';
+    if (hasTransform) {
+      clip.style.transform = 'translateZ(0)';
+    }
+    const button = document.createElement('button');
+    button.textContent = 'Fixed action';
+    button.style.cssText = 'position:fixed;top:80px;left:40px;width:100px;height:40px';
+    clip.append(button);
+    document.body.append(clip);
+  }, transformed);
+  const audit = await auditLayer();
+  if (transformed) {
+    expect(audit.problems).toEqual(expect.arrayContaining([expect.stringContaining('Fixed action')]));
+  } else {
+    expect(await reachable(selectors.getByRole('button', { name: 'Fixed action' }))).toBe(true);
+    expect(audit.problems).toEqual([]);
+  }
+});
 
 test('reports a dialog action covered by page chrome', async () => {
   await target.setViewport({ width: 360, height: 780 });
@@ -666,6 +722,207 @@ describe('the phone shell across portrait widths', () => {
   );
 });
 
+test('switches model files through phone Files actions without desktop tabs', async () => {
+  await openPhoneProject(portraitViewports[1], '/__e2e/project-file-tree?main=touch-parameters');
+  for (const file of ['box-corner.js', 'touch-parameters.js']) {
+    // oxlint-disable-next-line no-await-in-loop -- each file switch uses the real phone navigation in sequence.
+    await target.click(navButton('All'), { touch: true });
+    // oxlint-disable-next-line no-await-in-loop -- the All sheet must open before its destination is tapped.
+    await target.click(allSheet().getByRole('button', { name: 'Files', exact: true }), { touch: true });
+    // oxlint-disable-next-line no-await-in-loop -- expand the parent directories before reaching the file action.
+    await target.expectVisible(selectors.getByRole('tree', { name: 'Project files' }));
+    for (const path of ['public', 'public/models']) {
+      const folder = selectors.getByCss(`[data-file-tree-path="${path}"]`);
+      // oxlint-disable-next-line no-await-in-loop -- open only closed ancestors of the file being selected.
+      if ((await target.getAttribute(folder, 'aria-expanded')) !== 'true') {
+        // oxlint-disable-next-line no-await-in-loop -- a child is reachable only after its parent opens.
+        await target.click(folder, { touch: true, position: { x: 8, y: 14 } });
+      }
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a touch-visible menu is the phone's file-view selection route.
+    await target.click(
+      selectors
+        .getByCss(`[data-file-tree-path="public/models/${file}"]`)
+        .getByRole('button', { name: `More actions for ${file}` }),
+      {
+        touch: true,
+      },
+    );
+    // oxlint-disable-next-line no-await-in-loop -- choose the real viewer action, not a programmatic projection edit.
+    await target.click(selectors.getByRole('menuitem', { name: 'Open in Viewer', exact: true }), { touch: true });
+    // oxlint-disable-next-line no-await-in-loop -- returning to Model exposes the selected viewer for geometry readiness.
+    await tapDestination('Model');
+    // oxlint-disable-next-line no-await-in-loop -- hidden tab metadata identifies which retained view the action selected.
+    const title = file === 'touch-parameters.js' ? `public/models/${file}` : file;
+    const selectedTab = selectors.getByCss(`.dv-tab.dv-active-tab[aria-label="${title}"]`);
+    // oxlint-disable-next-line no-await-in-loop -- the initial tab carries its entry path, new tabs their basename.
+    await target.expectCount(selectedTab, 1);
+    // oxlint-disable-next-line no-await-in-loop -- verify the selected view's durable file identity as well as its title.
+    const selectedView = await target.getAttribute(selectedTab, 'data-tab-panel-id');
+    // oxlint-disable-next-line no-await-in-loop -- wait for that selected view's persisted record.
+    await expect
+      .poll(async () => {
+        const tree = await readWorkbenchTree();
+        const bytes = tree[`/.tau/workbench/views/${selectedView}.json`];
+        return bytes ? (JSON.parse(bytes) as { entryPath: string }).entryPath : undefined;
+      })
+      .toBe(`public/models/${file}`);
+    // oxlint-disable-next-line no-await-in-loop -- the selected file must produce geometry before judging it.
+    await waitForModelReady();
+    // oxlint-disable-next-line no-await-in-loop -- every selected model retains the phone composition.
+    await expectStage(portraitViewports[1]);
+  }
+  await target.expectCount(selectors.getByCss('.dv-tab'), 2);
+  await target.screenshot(undefined, 'mobile-matrix-file-switch-360.png');
+});
+
+test('reselects same-file saved views through All after reload without changing their records', async () => {
+  const workspace = 'phone-saved-views';
+  await openPhoneProject(portraitViewports[1], `/__e2e/project-file-tree?main=touch-parameters&workspace=${workspace}`);
+  const layoutPath = '/.tau/workbench/layout.json';
+  const frontPath = '/.tau/workbench/views/phone-front.json';
+  const rightPath = '/.tau/workbench/views/phone-right.json';
+  await expect
+    .poll(
+      async () => {
+        const tree = await readWorkbenchTree(workspace);
+        return tree[layoutPath];
+      },
+      { timeout: 60_000 },
+    )
+    .toBeDefined();
+  const initialTree = await readWorkbenchTree(workspace);
+  const initial = JSON.parse(initialTree[layoutPath]!) as Record<string, unknown>;
+  const entryPath = 'public/models/touch-parameters.js';
+  const front = JSON.stringify({
+    version: 1,
+    entryPath,
+    name: 'Front inspection',
+    camera: { kind: 'preset', preset: 'front' },
+    grid: { unit: 'mm' },
+  });
+  const right = JSON.stringify({
+    version: 1,
+    entryPath,
+    name: 'Right inspection',
+    camera: { kind: 'preset', preset: 'right' },
+    grid: { unit: 'in' },
+  });
+  await writeWorkbenchFile(frontPath, front, workspace);
+  await writeWorkbenchFile(rightPath, right, workspace);
+  await writeWorkbenchFile(
+    layoutPath,
+    JSON.stringify({
+      ...initial,
+      viewer: {
+        kind: 'group',
+        tabs: [
+          { kind: 'view', view: 'phone-front' },
+          { kind: 'view', view: 'phone-right' },
+        ],
+        active: 0,
+      },
+    }),
+    workspace,
+  );
+  await target.reload();
+  await waitForModelReady();
+  const cameras: number[][] = [];
+  for (const [id, name, unit, keyboard] of [
+    ['phone-right', 'Right inspection', 'in', false],
+    ['phone-front', 'Front inspection', 'mm', true],
+    ['phone-right', 'Right inspection', 'in', false],
+  ] as const) {
+    // oxlint-disable-next-line no-await-in-loop -- each saved view is selected from the existing All sheet.
+    await target.click(navButton('All'), { touch: true });
+    const choice = allSheet()
+      .getByRole('region', { name: 'Views', exact: true })
+      .getByRole('button', { name: `${name} · touch-parameters.js`, exact: true });
+    // oxlint-disable-next-line no-await-in-loop -- every target must be visible and named before it is used.
+    await target.expectVisible(choice);
+    // oxlint-disable-next-line no-await-in-loop -- the distinguishing name must be visible, not only accessible.
+    const visibleName = await target.evaluateLocator(choice, (button) => {
+      const label = button.querySelector('span')!;
+      const text = label.firstChild!;
+      const range = document.createRange();
+      range.setStart(text, 0);
+      range.setEnd(text, text.textContent!.indexOf(' · '));
+      return { nameRight: range.getBoundingClientRect().right, labelRight: label.getBoundingClientRect().right };
+    });
+    expect(visibleName.nameRight).toBeLessThanOrEqual(visibleName.labelRight + 0.5);
+    // oxlint-disable-next-line no-await-in-loop -- the added section must keep the existing target/clip audit whole.
+    await expectWholeLayer('All with saved views');
+    if (keyboard) {
+      // oxlint-disable-next-line no-await-in-loop -- exercise the same choice through keyboard activation.
+      await target.focus(choice);
+      // oxlint-disable-next-line no-await-in-loop -- focus must remain visible before Enter.
+      expect(await reachable(choice)).toBe(true);
+      // oxlint-disable-next-line no-await-in-loop -- activate the focused saved view.
+      await target.keyboardPress('Enter');
+    } else {
+      // oxlint-disable-next-line no-await-in-loop -- exercise real touch activation.
+      await target.click(choice, { touch: true });
+    }
+    // oxlint-disable-next-line no-await-in-loop -- selection closes All and restores the Model destination.
+    await target.expectCount(allSheet(), 0);
+    if (keyboard) {
+      // oxlint-disable-next-line no-await-in-loop -- dismissal must restore a visible focus destination.
+      await expect
+        .poll(async () =>
+          target.evaluate(
+            () =>
+              document.activeElement?.closest('nav[aria-label="Workbench"]') !== null &&
+              document.activeElement?.textContent === 'Model',
+          ),
+        )
+        .toBe(true);
+      // oxlint-disable-next-line no-await-in-loop -- focus must land on a reachable Model button, not a hidden tab.
+      expect(await reachable(navButton('Model'))).toBe(true);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- the selected panel identity, not merely a file match, must change.
+    await target.expectAttribute(selectors.getByCss(`.dv-tab[data-tab-panel-id="${id}"]`), 'aria-selected', 'true');
+    // oxlint-disable-next-line no-await-in-loop -- wait for the selected record's geometry.
+    await waitForModelReady();
+    // oxlint-disable-next-line no-await-in-loop -- its saved settings must be applied to the live viewer.
+    await target.expectVisible(
+      selectors.getByRole('button', { name: new RegExp(`Grid .* ${unit}, units and grid`, 'u') }),
+    );
+    // oxlint-disable-next-line no-await-in-loop -- capture the rendered camera, not only the authored record.
+    cameras.push(
+      // oxlint-disable-next-line no-await-in-loop -- capture each selected live camera before switching away.
+      await target.evaluate(
+        () =>
+          (
+            globalThis as { __TAU_SECTION_VIEW_TEST__?: { getCamera(): { position: number[] } } }
+          ).__TAU_SECTION_VIEW_TEST__!.getCamera().position,
+      ),
+    );
+    // oxlint-disable-next-line no-await-in-loop -- capture the selected geometry before All overlays the stage.
+    await target.screenshot(undefined, `mobile-matrix-saved-view-${id}.png`);
+    // oxlint-disable-next-line no-await-in-loop -- reload proves selection survives panel reconstruction.
+    await target.reload();
+    // oxlint-disable-next-line no-await-in-loop -- the same selected panel must be restored after reload.
+    await target.expectAttribute(
+      selectors.getByCss(`.dv-tab[data-tab-panel-id="${id}"]`),
+      'aria-selected',
+      'true',
+      60_000,
+    );
+    // oxlint-disable-next-line no-await-in-loop -- settle each restored viewer before continuing.
+    await waitForModelReady();
+  }
+  expect(cameras[0]).not.toEqual(cameras[1]);
+  for (let axis = 0; axis < 3; axis++) {
+    expect(cameras[2]![axis]).toBeCloseTo(cameras[0]![axis]!, 3);
+  }
+  const finalFiles = await readWorkbenchTree(workspace);
+  expect(JSON.parse(finalFiles[frontPath]!)).toEqual(JSON.parse(front));
+  expect(JSON.parse(finalFiles[rightPath]!)).toEqual(JSON.parse(right));
+  await target.click(navButton('All'), { touch: true });
+  expect(await seriousAxeViolations({ selector: '[role="dialog"]' })).toEqual([]);
+  await target.screenshot(undefined, 'mobile-matrix-saved-views-360.png');
+});
+
 describe.each(themes)('the phone shell in %s', (theme) => {
   test('keeps the top bar, viewer bar, sheet and All whole and readable at 360×780', async () => {
     const viewport = portraitViewports[1];
@@ -698,7 +955,7 @@ describe('the 767/768 breakpoint', () => {
     await target.expectCount(navigation(), 0, 30_000);
     await target.expectCount(topBar(), 0, 30_000);
     await target.expectVisible(chatLaneToggle(), 60_000);
-    await waitForStageReady();
+    await waitForModelReady();
     await motionSettled();
     await expect.poll(measureHorizontalOverflow).toEqual({ document: 0, scroller: 0, offenders: [] });
     await expectWholeLayer('desktop at 768');
@@ -725,6 +982,20 @@ const expectCoarseDesktop = async (state: string): Promise<void> => {
   expect(hints.present).toBeGreaterThan(0);
   expect(hints.shown).toBe(0);
   await expect.poll(measureHorizontalOverflow).toEqual({ document: 0, scroller: 0, offenders: [] });
+  // I3: the dock tab's close glyph (decorative to assistive technology, which closes with Delete) is a 24px target.
+  const closes = await target.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('.dv-tab .dv-default-tab-action')]
+      .filter((glyph) => glyph.checkVisibility({ opacityProperty: true }))
+      .map((glyph) => {
+        const { width, height } = glyph.getBoundingClientRect();
+        return { width, height };
+      }),
+  );
+  expect(closes.length, 'the active dock tab should show its close glyph').toBeGreaterThan(0);
+  for (const close of closes) {
+    expect(close.width).toBeGreaterThanOrEqual(23.5);
+    expect(close.height).toBeGreaterThanOrEqual(23.5);
+  }
   await expectWholeLayer(state);
 };
 
@@ -738,7 +1009,7 @@ describe('the desktop composition under a coarse pointer', () => {
     await target.setViewport(viewport);
     await target.navigate(seedRoute);
     await target.expectUrl(/\/w\/[^/]+\/[^/?]+/u, 120_000);
-    await waitForStageReady();
+    await waitForModelReady();
     await motionSettled();
     await expectCoarseDesktop('narrow desktop before tools');
     const sidebarTrigger = selectors.getByRole('button', { name: 'Toggle Sidebar' }).first();
@@ -799,7 +1070,7 @@ describe('the desktop composition under a coarse pointer', () => {
     await target.setViewport({ width: 1024, height: 1366 });
     await target.navigate(seedRoute);
     await target.expectUrl(/\/w\/[^/]+\/[^/?]+/u, 120_000);
-    await waitForStageReady();
+    await waitForModelReady();
     await motionSettled();
     await expectCoarseDesktop('tablet 1024×1366');
     await target.screenshot(undefined, 'mobile-matrix-tablet-1024x1366.png');
@@ -811,7 +1082,7 @@ describe('the desktop composition under a coarse pointer', () => {
     await target.setViewport({ width: 844, height: 390 });
     await target.navigate(seedRoute);
     await target.expectUrl(/\/w\/[^/]+\/[^/?]+/u, 120_000);
-    await waitForStageReady();
+    await waitForModelReady();
     await motionSettled();
     await expectCoarseDesktop('landscape 844×390');
     await target.expectVisible(composer(), 60_000);
@@ -944,7 +1215,7 @@ describe('the phone shell with reduced motion', () => {
     await target.navigate('/__e2e/project-file-tree?main=touch-parameters');
     await target.expectUrl(/\/w\/[^/]+\/[^/?]+/u, 120_000);
     await target.expectVisible(titleButton(), 60_000);
-    await waitForStageReady();
+    await waitForModelReady();
     expect(await target.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
 
     // A real save: change Width, then Save revision from the project sheet's Revisions.

@@ -546,8 +546,11 @@ export function ViewerRightActions(properties: IDockviewHeaderActionsProps): Rea
  */
 export const ViewerDockview = memo(function ({
   profile = 'editor',
+  onApiChange,
 }: {
   readonly profile?: ViewerProfile;
+  /** Exposes the mounted viewer for a host-owned view selector; clears it on teardown. */
+  readonly onApiChange?: (api: DockviewApi | undefined) => void;
 } = {}): React.JSX.Element {
   const { projectRef, mainEntryPath, viewRecords, entriesRecord, geometryUnits, setViewEntryPath } = useProject();
   const viewCommands = useWorkbenchViewCommands();
@@ -563,6 +566,12 @@ export const ViewerDockview = memo(function ({
     [profile],
   );
   const [api, setApi] = useState<DockviewApi>();
+  useEffect(() => {
+    onApiChange?.(api);
+    return () => {
+      onApiChange?.(undefined);
+    };
+  }, [api, onApiChange]);
   const isRestoringLayout = useRef(false);
   const adoptedProjectionRef = useRef<string | undefined>(undefined);
   // Track the active (focused) viewer panel for settings inheritance
@@ -1031,7 +1040,10 @@ export const ViewerDockview = memo(function ({
         />
       ) : null}
       <div className='@container/viewer relative size-full'>
+        {/* D1: phones keep the mounted viewer and its file state without desktop tabs or split/close actions.
+          Dockview observes the hidden header's zero height and gives that space back to the canvas. */}
         <Dockview
+          className='max-md:[&_.dv-tabs-and-actions-container]:!hidden'
           components={components}
           noPanelsOverlay='emptyGroup'
           defaultTabComponent={ViewerDockviewTab}

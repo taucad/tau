@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
+import type { DockviewApi, DockviewPanelApi, IDockviewPanel } from 'dockview-react';
+import { mock } from 'vitest-mock-extended';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { ChatInterfaceNav, chatTabs } from '#routes/w.$workspace.$project/chat-interface-nav.js';
 import type { MobilePanelId } from '#constants/editor.constants.js';
@@ -241,4 +243,58 @@ describe('Chat cue (I5)', () => {
     expect(shown).not.toHaveAccessibleDescription();
     expect(shown.querySelector('[data-slot=destination-cue]')).toBeNull();
   });
+});
+
+it('selects existing same-file views and releases the previous viewer subscriptions', async () => {
+  const frontApi = mock<DockviewPanelApi>({ setActive: vi.fn() });
+  const rightApi = mock<DockviewPanelApi>({ setActive: vi.fn() });
+  Object.defineProperty(frontApi, 'title', { value: 'main.ts' });
+  Object.defineProperty(rightApi, 'title', { value: 'main.ts' });
+  const front = mock<IDockviewPanel>({ id: 'front' });
+  const right = mock<IDockviewPanel>({ id: 'right' });
+  Object.defineProperty(front, 'api', { value: frontApi });
+  Object.defineProperty(right, 'api', { value: rightApi });
+  const api = mock<DockviewApi>();
+  const dispose = vi.fn();
+  for (const event of [
+    'onDidAddPanel',
+    'onDidRemovePanel',
+    'onDidActivePanelChange',
+    'onDidLayoutFromJSON',
+    'onDidLayoutChange',
+  ] as const) {
+    Object.defineProperty(api, event, { value: () => ({ dispose }) });
+  }
+  Object.defineProperties(api, { panels: { value: [front, right] }, activePanel: { value: front } });
+  const onTabChange = vi.fn();
+  const view = render(
+    <ChatInterfaceNav
+      activeTab='viewer'
+      onTabChange={onTabChange}
+      viewerApi={api}
+      viewerNames={
+        new Map([
+          ['front', 'Front inspection'],
+          ['right', 'Right inspection'],
+        ])
+      }
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'All' }));
+  const choices = within(screen.getByRole('region', { name: 'Views' }));
+  expect(choices.getByRole('button', { name: 'Front inspection · main.ts' })).toHaveAttribute('aria-current', 'page');
+  fireEvent.click(choices.getByRole('button', { name: 'Right inspection · main.ts' }));
+  expect(rightApi.setActive).toHaveBeenCalledOnce();
+  expect(frontApi.setActive).not.toHaveBeenCalled();
+  expect(onTabChange).toHaveBeenLastCalledWith('viewer');
+  await waitFor(() => {
+    expect(screen.queryByRole('dialog', { name: 'All surfaces' })).not.toBeInTheDocument();
+  });
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: 'Model' })).toHaveFocus();
+  });
+  view.rerender(<ChatInterfaceNav activeTab='viewer' onTabChange={onTabChange} />);
+  expect(dispose).toHaveBeenCalledTimes(5);
+  fireEvent.click(screen.getByRole('button', { name: 'All' }));
+  expect(screen.queryByRole('region', { name: 'Views' })).not.toBeInTheDocument();
 });

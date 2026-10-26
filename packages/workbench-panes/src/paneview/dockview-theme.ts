@@ -101,15 +101,15 @@ export const dockviewStyleOverrides = cn(
   // ── Tab bar container ──
   '[&_.dv-tabs-and-actions-container]:relative',
   '[&_.dv-tabs-and-actions-container]:z-6',
-  // A narrow Viewer reserves two header rows: project actions above, tabs and file/split actions below.
+  // A narrow desktop Viewer reserves two header rows: project actions above, tabs and file/split actions below.
   // Keep the upper-right workbench slot in place and let Dockview subtract the full header height from its content.
-  '@max-[20rem]/viewer:[--dv-tabs-and-actions-container-height:4.5rem]',
-  '@max-[20rem]/viewer:[&_.dv-tabs-and-actions-container]:items-end',
-  '@max-[20rem]/viewer:[&_:is(.dv-tabs-container,.dv-left-actions-container,.dv-pre-actions-container,.dv-void-container)]:h-9',
-  '@max-[20rem]/viewer:[&_.dv-right-actions-container]:absolute',
-  '@max-[20rem]/viewer:[&_.dv-right-actions-container]:top-0',
-  '@max-[20rem]/viewer:[&_.dv-right-actions-container]:right-0',
-  '@max-[20rem]/viewer:[&_.dv-right-actions-container]:h-9',
+  'md:@max-[20rem]/viewer:[--dv-tabs-and-actions-container-height:4.5rem]',
+  'md:@max-[20rem]/viewer:[&_.dv-tabs-and-actions-container]:items-end',
+  'md:@max-[20rem]/viewer:[&_:is(.dv-tabs-container,.dv-left-actions-container,.dv-pre-actions-container,.dv-void-container)]:h-9',
+  'md:@max-[20rem]/viewer:[&_.dv-right-actions-container]:absolute',
+  'md:@max-[20rem]/viewer:[&_.dv-right-actions-container]:top-0',
+  'md:@max-[20rem]/viewer:[&_.dv-right-actions-container]:right-0',
+  'md:@max-[20rem]/viewer:[&_.dv-right-actions-container]:h-9',
 
   // ── Adaptive horizontal tab geometry ──
   // Share available width equally from 160px down to a 112px floor, then scroll.

@@ -19,6 +19,8 @@ import {
   Terminal,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
+import type { DockviewApi } from 'dockview-react';
+import { useDockviewPanels } from '#components/panes/dockview-tab-overflow-picker.js';
 import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '@taucad/ui/components/drawer';
 import { Button } from '@taucad/ui/components/button';
 import { MobileWorkbenchNavigation } from '#components/mobile-workbench-navigation.js';
@@ -106,16 +108,23 @@ export function ChatInterfaceNav({
   activeTab,
   onTabChange,
   chatCue,
+  viewerApi,
+  viewerNames,
 }: {
   readonly className?: string;
   readonly activeTab: MobilePanelId;
   readonly onTabChange: (id: MobilePanelId) => void;
   /** A decision or failure waiting in the chat, shown on Chat while another surface has the sheet (I5). */
   readonly chatCue?: MobileWorkbenchDestinationCue;
+  /** Existing viewer panels, including distinct saved views of the same file. */
+  readonly viewerApi?: DockviewApi;
+  readonly viewerNames?: ReadonlyMap<string, string>;
 }): React.ReactNode {
   const [isAllOpen, setAllOpen] = useState(false);
+  const views = useDockviewPanels(viewerApi);
   // Choosing a surface hands focus to that surface; All must not take it back as it closes.
   const hasChosenSurface = useRef(false);
+  const hasChosenView = useRef(false);
   const sheetRef = useRef<HTMLDivElement>(null);
   // All has no dialog trigger, so Radix has nowhere to return focus; it goes back to what opened All.
   const opener = useRef<HTMLElement | undefined>(undefined);
@@ -131,6 +140,7 @@ export function ChatInterfaceNav({
         onSelect={(id) => {
           if (id === 'all') {
             hasChosenSurface.current = false;
+            hasChosenView.current = false;
             opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
             setAllOpen(true);
           } else {
@@ -149,7 +159,9 @@ export function ChatInterfaceNav({
           }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
-            if (!hasChosenSurface.current && opener.current?.isConnected) {
+            if (hasChosenView.current) {
+              document.querySelector<HTMLElement>('nav[aria-label="Workbench"] [aria-current="page"]')?.focus();
+            } else if (!hasChosenSurface.current && opener.current?.isConnected) {
               opener.current.focus({ preventScroll: true });
             }
           }}
@@ -157,6 +169,37 @@ export function ChatInterfaceNav({
           <DrawerTitle className='px-3'>All surfaces</DrawerTitle>
           <DrawerDescription className='sr-only'>Choose a workbench surface</DrawerDescription>
           <div className='min-h-0 overflow-y-auto pb-3'>
+            {views.length > 1 ? (
+              <section aria-labelledby='all-views-title'>
+                <h3 id='all-views-title' className='px-3 pt-3 pb-1 text-xs font-medium text-muted-foreground'>
+                  Views
+                </h3>
+                <div className='grid grid-cols-[repeat(auto-fill,minmax(8rem,1fr))] gap-2 px-3'>
+                  {views.map((panel) => (
+                    <Button
+                      key={panel.id}
+                      variant={panel.id === viewerApi?.activePanel?.id ? 'secondary' : 'outline'}
+                      size='touch'
+                      aria-current={panel.id === viewerApi?.activePanel?.id ? 'page' : undefined}
+                      className='min-w-0 justify-start'
+                      onClick={() => {
+                        hasChosenSurface.current = true;
+                        hasChosenView.current = true;
+                        panel.api.setActive();
+                        onTabChange('viewer');
+                        setAllOpen(false);
+                      }}
+                    >
+                      <Box aria-hidden />
+                      <span className='truncate'>
+                        {viewerNames?.get(panel.id) ? `${viewerNames.get(panel.id)} · ` : ''}
+                        {panel.api.title ?? 'Untitled view'}
+                      </span>
+                    </Button>
+                  ))}
+                </div>
+              </section>
+            ) : null}
             {groups.map((group) => (
               <section key={group.label} aria-labelledby={`all-surfaces-${group.label}`}>
                 <h3

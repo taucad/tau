@@ -17,7 +17,13 @@ import { fileURLToPath } from 'node:url';
 
 import { deniedReadRoots, deniedWriteRoots, physicalVariants, sandboxRuntimeReadRoots } from '#native-sandbox.js';
 import { terminateOwnedProcesses, trackDescendants } from '#shell/process-tree.js';
-import { bindMaskedDirectories, holdProtectedStandIns, maskProblem } from '#shell/shell-project-mask.js';
+import {
+  bindMaskedDirectories,
+  holdProtectedStandIns,
+  maskProblem,
+  useStandInJournal,
+} from '#shell/shell-project-mask.js';
+import type { StandInProfile } from '#shell/shell-project-mask.js';
 import { shellBaselineDenied } from '#shell/shell-baseline.js';
 import { refusedShellEnvironment } from '#shell/shell-environment.js';
 import type {
@@ -104,6 +110,11 @@ export type SandboxShellProviderOptions = Readonly<{
   loadPty?: () => Promise<PtyBinding>;
   /** How long a supervisor may take to answer. */
   startupMilliseconds?: number;
+  /**
+   * On Linux, a file under host-owned state (never inside a checkout) journalling the stand-ins this process holds, so
+   * the next start sweeps the ones a crash left behind.
+   */
+  standInJournal?: string;
 }>;
 
 const quote = (value: string): string => `'${value.replaceAll("'", String.raw`'\''`)}'`;
@@ -329,6 +340,8 @@ const startSupervisor = async (
   const { executablePath, arguments: supervisorArguments } = options.supervisor ?? defaultSupervisor();
   const temporaryDirectory = runtimeDirectory ?? process.env['TMPDIR'];
   const child = spawn(executablePath, supervisorArguments, {
+    /* The runtime resolves its mandatory deny names against this directory: never a checkout. */
+    ...(runtimeDirectory === undefined ? {} : { cwd: runtimeDirectory }),
     /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
     env: {
       PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
@@ -759,7 +772,29 @@ const admit = (launch: ShellLaunch, options: SandboxShellProviderOptions): Shell
  * @param options - Supervisor, prerequisite paths and the macOS Terminal flag.
  * @returns A provider; each launch is fully contained or refused.
  */
-export const createSandboxShellProvider = (options: SandboxShellProviderOptions = {}): ShellProvider => ({
+export const createSandboxShellProvider = (options: SandboxShellProviderOptions = {}): ShellProvider => {
+  if (process.platform === 'linux' && options.standInJournal !== undefined) {
+    useStandInJournal(options.standInJournal);
+  }
+  return createProvider(options);
+};
+
+/** The runtime lists a hold is computed from: exactly those of the profile, plus the grant's directory rows and masks. */
+const standInProfile = (profile: Record<string, unknown>, launch: ShellLaunch): StandInProfile => {
+  const { denyWrite, allowWrite } = profile['filesystem'] as Readonly<{
+    denyWrite: readonly string[];
+    allowWrite: readonly string[];
+  }>;
+  return {
+    denyWrite,
+    allowWrite,
+    directories: launch.filesystem.directories,
+    masked: deniedVariants(launch.filesystem.masked ?? []),
+    writable: physicalVariants(launch.filesystem.writable),
+  };
+};
+
+const createProvider = (options: SandboxShellProviderOptions): ShellProvider => ({
   name: 'srt-0.0.75',
   launch: async (launch) => {
     launch.signal.throwIfAborted();
@@ -781,15 +816,53 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
         return { status: 'sandbox-unavailable', message: 'node-pty has no POSIX binding on this host.' };
       }
     }
-    // Absent protected paths get shared stand-ins before the profile observes the filesystem, released only once this
-    // launch's supervisor is gone (see holdProtectedStandIns).
-    const releaseStandIns = holdProtectedStandIns(launch.filesystem);
+    // The runtime also masks its own mandatory names relative to the supervisor's working directory. The supervisor
+    // runs in its private runtime directory; a host that itself runs inside a writable root is refused as well.
+    if (
+      process.platform === 'linux' &&
+      physicalVariants(launch.filesystem.writable).some((root) => inside(process.cwd(), root))
+    ) {
+      return {
+        status: 'sandbox-unavailable',
+        message: `the host process runs inside a writable root (${process.cwd()}); start it outside every project.`,
+      };
+    }
+    const runtimeDirectory = createRuntimeDirectory();
+    // Absent protected paths get shared stand-ins, computed from exactly the lists the runtime is handed, before it
+    // observes the filesystem; released only once this launch's supervisor is gone (see holdProtectedStandIns). A
+    // masked container's stand-in changes the profile (it is no longer absent), so the profile handed to the runtime is
+    // computed again once the stand-ins exist and held from its own lists.
+    let releaseStandIns: () => void;
+    let profile: Record<string, unknown>;
+    try {
+      const releaseFirst = holdProtectedStandIns(
+        standInProfile(shellSandboxProfile(launch, options, runtimeDirectory), launch),
+      );
+      try {
+        profile = shellSandboxProfile(launch, options, runtimeDirectory);
+        const releaseSecond = holdProtectedStandIns(standInProfile(profile, launch));
+        releaseStandIns = () => {
+          releaseSecond();
+          releaseFirst();
+        };
+      } catch (error) {
+        releaseFirst();
+        throw error;
+      }
+    } catch (error) {
+      if (runtimeDirectory !== undefined) {
+        rmSync(runtimeDirectory, { recursive: true, force: true });
+      }
+      return {
+        status: 'sandbox-unavailable',
+        message: `a protected path could not be prepared: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
     let started: Supervisor;
     try {
-      const runtimeDirectory = createRuntimeDirectory();
       started = await startSupervisor(
         {
-          profile: shellSandboxProfile(launch, options, runtimeDirectory),
+          profile,
           command: shellSandboxCommand(launch),
           workingDirectory: launch.workingDirectory,
           commandId: launch.commandId,

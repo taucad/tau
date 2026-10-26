@@ -86,6 +86,34 @@ describe.runIf(process.platform === 'linux')('durable shell custody intent', () 
     }
   });
 
+  it('should let the owner stop its own never-launched preparation and replay that stopped claim', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'tau-custody-own-'));
+    const directory = join(base, 'records');
+    const privateRoot = await mkdtemp(join(base, 'tau-shell-'));
+    const owner = createShellCustody({ directory, sessionDirectory: base });
+    const other = createShellCustody({ directory, sessionDirectory: base });
+    try {
+      const prepared = await owner.prepare({ privateRoot, resource: undefined });
+      expect(await owner.recover({ executionIds: [prepared.executionId] })).toEqual([
+        expect.objectContaining({ ...prepared, status: 'stopped' }),
+      ]);
+      expect(await owner.recover({ executionIds: [prepared.executionId] })).toEqual([
+        expect.objectContaining({ ...prepared, status: 'stopped' }),
+      ]);
+      // The stopped claim keeps the lock: nobody else can take it while the owner finishes cleanup.
+      expect(await other.recover({ executionIds: [prepared.executionId] })).toEqual([
+        expect.objectContaining({ ...prepared, status: 'blocked' }),
+      ]);
+      await rm(privateRoot, { recursive: true });
+      await owner.release(prepared);
+      expect(await other.inventory()).toEqual([]);
+    } finally {
+      await owner.close();
+      await other.close();
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
   it('should retain custody when the project resource root has been replaced', async () => {
     const base = await mkdtemp(join(tmpdir(), 'tau-custody-resource-'));
     const directory = join(base, 'records');

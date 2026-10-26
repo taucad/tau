@@ -18,6 +18,8 @@
           "TAU_SHELL_CONFORMANCE": "1"
         }
       }
-    }
+    },
+    "formal": {},
+    "formal:nightly": {}
   }
 }

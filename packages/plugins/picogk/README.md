@@ -129,6 +129,14 @@ One preset, `default`, selecting `kernels.default`.
 
 `@taucad/picogk/project/*` holds the files a new PicoGK project carries, so it runs outside Tau with the .NET 10 SDK on macOS arm64 or Windows x64 (`dotnet restore --locked-mode`, then `dotnet run`, which opens PicoGK's viewer): `project.csproj`, which Tau writes as `<Name>.csproj` and which references upstream PicoGK 2.3.0 from NuGet, and its `packages.lock.json`. The project's `main.cs` is the program, so no separate entry file is needed. When a root `.csproj` references PicoGK at another version, evaluation succeeds with a `LIBRARY_VERSION_MISMATCH` warning located at the reference.
 
+## Display meshing
+
+`meshAdaptivity` (0 to below 1) and `meshRelax` (default `false`) are evaluate options, so the viewer's
+settings menu shows them and a change re-evaluates the model. Unset, a view meshes at 0.25 (Balanced) where the
+prepared runtime meshes adaptively, and uniformly where it does not; the tessellation report says which. Exports
+take the same two options and mesh uniformly (0) unless they set one, so `export('glb', { meshAdaptivity: 0.25 })`
+writes the adaptive mesh. An export whose meshing matches the view's reuses the view's build; any other rebuilds.
+
 ## Large models
 
 Mechanism serialization retains large payloads without a fixed byte or value-count ceiling. Cancellation, cycle detection and JSON nesting validation still apply.

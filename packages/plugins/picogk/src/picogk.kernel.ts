@@ -324,13 +324,17 @@ const picogkKernelDefinition = defineKernel({
     }
   },
 
-  /* A worker that predates adaptive meshing answers a default view with the uniform mesh, and its report carries no
-   * adaptivity. That handle is byte for byte what the export's uniform build gives, so the export reuses it. An adaptive
-   * mesh, or a snapshot without a report, says nothing and the export builds the uniform mesh. */
+  /* The report names the mesh a handle holds: no adaptivity is the uniform mesh (also what a worker that predates
+   * adaptive meshing answers a default view with), otherwise its adaptivity and relax. An export asking for that same
+   * meshing reuses the handle; any other export builds. A snapshot without a report says nothing. */
   effectiveOptions: ({ handle, options }) =>
-    handle.tessellation !== undefined && handle.tessellation.adaptivity === undefined
-      ? { ...options, meshAdaptivity: 0, meshRelax: false }
-      : undefined,
+    handle.tessellation === undefined
+      ? undefined
+      : {
+          ...options,
+          meshAdaptivity: handle.tessellation.adaptivity ?? 0,
+          meshRelax: handle.tessellation.relax ?? false,
+        },
 
   async render({ handle }) {
     return { content: handle.glb, ...(handle.tessellation ? { tessellation: handle.tessellation } : {}) };

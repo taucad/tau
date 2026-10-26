@@ -19,7 +19,7 @@ const withoutAdaptiveMeshing: ReadonlySet<string> = new Set(['0.1.0']);
 
 /**
  * Balanced adaptivity: what a fast-lane preview of a release that meshes adaptively would mesh at when the
- * view sets no `meshAdaptivity`. An explicit value always wins, and exports always mesh at 0.
+ * view sets no `meshAdaptivity`. An explicit value always wins, and an export meshes at its own value, 0 by default.
  */
 export const picovoxelPreviewAdaptivity = 0.25;
 

@@ -9,8 +9,9 @@
  */
 
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -101,6 +102,7 @@ try {
   const archive = join(fixtureRoot, 'app.asar');
   const unpacked = [
     'node_modules/native/addon.node',
+    'node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp/x64/apply-seccomp',
     'node_modules/native/engine.dll',
     'node_modules/@esbuild/darwin-arm64/bin/esbuild',
     'node_modules/@esbuild/win32-x64/esbuild.exe',
@@ -123,6 +125,26 @@ try {
     assert.equal(readFileSync(join(`${archive}.unpacked`, file), 'utf8'), 'fixture');
   }
   assert.ok(!('unpacked' in statFile(archive, 'app.js')), 'ordinary JavaScript remains packed');
+  if (process.platform === 'linux') {
+    const helper = `node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp/${process.arch}/apply-seccomp`;
+    const dependency = dirname(dirname(fileURLToPath(import.meta.resolve('@anthropic-ai/sandbox-runtime'))));
+    await mkdir(dirname(join(source, helper)), { recursive: true });
+    await copyFile(join(dependency, 'vendor/seccomp', process.arch, 'apply-seccomp'), join(source, helper));
+    await createPackageWithOptions(source, archive, runtimeAsarOptions);
+    const executable = join(`${archive}.unpacked`, helper);
+    const positive = spawnSync(executable, ['/bin/true'], { encoding: 'utf8' });
+    assert.equal(positive.status, 0, `unpacked seccomp helper must execute: ${positive.stderr}`);
+    const denied = spawnSync(
+      executable,
+      [
+        process.execPath,
+        '-e',
+        "require('node:net').createServer().on('error', e => process.exit(e.code === 'EPERM' ? 0 : 2)).listen('/tmp/tau-seccomp-probe-' + process.pid, () => process.exit(3))",
+      ],
+      { encoding: 'utf8' },
+    );
+    assert.equal(denied.status, 0, `packaged helper must refuse Unix sockets: ${denied.stderr}`);
+  }
 } finally {
   await rm(fixtureRoot, { recursive: true, force: true });
 }

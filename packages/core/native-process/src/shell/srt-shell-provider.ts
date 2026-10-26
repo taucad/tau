@@ -15,7 +15,13 @@ import { createInterface } from 'node:readline';
 import { ReadStream } from 'node:tty';
 import { fileURLToPath } from 'node:url';
 
-import { deniedReadRoots, deniedWriteRoots, physicalVariants, sandboxRuntimeReadRoots } from '#native-sandbox.js';
+import {
+  deniedReadRoots,
+  deniedWriteRoots,
+  physicalVariants,
+  sandboxRuntimeReadRoots,
+  sandboxRuntimeSeccomp,
+} from '#native-sandbox.js';
 import { terminateOwnedProcesses, trackDescendants } from '#shell/process-tree.js';
 import { shellBaselineDenied } from '#shell/shell-baseline.js';
 import { refusedShellEnvironment } from '#shell/shell-environment.js';
@@ -217,6 +223,7 @@ export const shellSandboxProfile = (
   const readOnly = launch.filesystem.readOnly ?? [];
   const { domains } = launch.network;
   return {
+    seccomp: sandboxRuntimeSeccomp(),
     network: { allowedDomains: [...domains], deniedDomains: domains.length > 0 ? [] : ['*'], strictAllowlist: true },
     filesystem: {
       denyRead: [...new Set([...deniedReadRoots(), ...denied])],

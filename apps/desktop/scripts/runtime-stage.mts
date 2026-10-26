@@ -10,7 +10,7 @@
 
 import { cp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { acpAgentProfiles } from '@taucad/host';
@@ -32,7 +32,7 @@ export type RuntimeTarget = 'darwin-arm64' | 'darwin-x64' | 'linux-x64' | 'win32
 /** Match binary basenames and relative package directories so hidden checkout ancestors cannot defeat ASAR unpacking. */
 export const runtimeAsarOptions = {
   unpack: '{*.node,*.dll,esbuild,esbuild.exe}',
-  unpackDir: '**/node_modules/{@agentclientprotocol,@img}',
+  unpackDir: '**/node_modules/{@agentclientprotocol,@img,node-pty}',
 };
 
 /** The optional platform package each runtime engine loads its native payload from. */
@@ -55,6 +55,13 @@ export type RuntimePlatformPackages = Readonly<{
    * `native-sandbox.ts` reads the seccomp directory on Linux only.
    */
   unusedSandboxHelpers: readonly string[];
+  /**
+   * The directory, relative to node-pty's root, that holds the addon its `loadNativeModule` loads on this target:
+   * Linux builds `build/Release/pty.node` from source at install, macOS uses the package's own prebuild (with the
+   * `spawn-helper` its fork path runs from `app.asar.unpacked`). Windows has no shell provider, so it ships node-pty's
+   * JavaScript without an addon and a Terminal answers `sandbox-unavailable`.
+   */
+  nodePtyNative: string | undefined;
 }>;
 
 /** Platform package names, exactly as each engine's `optionalDependencies` declares them. */
@@ -70,6 +77,7 @@ export const runtimePlatformPackages: Readonly<Record<RuntimeTarget, RuntimePlat
       '@parcel/watcher-darwin-arm64',
     ],
     unusedSandboxHelpers: ['vendor/seccomp', 'vendor/srt-win'],
+    nodePtyNative: 'prebuilds/darwin-arm64',
   },
   'darwin-x64': {
     openrscadEngine: '@taulabs/openrscad-engine-darwin-x64',
@@ -83,6 +91,7 @@ export const runtimePlatformPackages: Readonly<Record<RuntimeTarget, RuntimePlat
       '@parcel/watcher-darwin-x64',
     ],
     unusedSandboxHelpers: ['vendor/seccomp', 'vendor/srt-win'],
+    nodePtyNative: 'prebuilds/darwin-x64',
   },
   'linux-x64': {
     openrscadEngine: '@taulabs/openrscad-engine-linux-x64-gnu',
@@ -95,6 +104,7 @@ export const runtimePlatformPackages: Readonly<Record<RuntimeTarget, RuntimePlat
       '@parcel/watcher-linux-x64-glibc',
     ],
     unusedSandboxHelpers: ['vendor/seccomp/arm64', 'vendor/srt-win'],
+    nodePtyNative: 'build/Release',
   },
   'win32-x64': {
     openrscadEngine: '@taulabs/openrscad-engine-win32-x64-msvc',
@@ -104,6 +114,7 @@ export const runtimePlatformPackages: Readonly<Record<RuntimeTarget, RuntimePlat
     /* `@img/sharp-win32-x64` carries libvips itself; there is no separate libvips package. */
     bundledOptionalDependencies: ['@img/sharp-win32-x64', '@parcel/watcher-win32-x64'],
     unusedSandboxHelpers: ['vendor/seccomp', 'vendor/srt-win/arm64'],
+    nodePtyNative: undefined,
   },
 };
 
@@ -121,6 +132,7 @@ export type ResolvedRuntimePackages = Readonly<{
   nanoraster: InstalledPackage;
   nanorasterPlatform: string;
   sandboxRuntime: InstalledPackage;
+  nodePty: InstalledPackage;
   bundledImports: readonly InstalledPackage[];
   acpAdapters: readonly InstalledPackage[];
 }>;
@@ -183,6 +195,14 @@ export const resolveRuntimePackages = async (
   const sandboxRuntime = await installed(
     await realpath(resolve(desktopRoot, 'node_modules/@anthropic-ai/sandbox-runtime')),
   );
+  /* The Terminal's PTY: staged without its sources, build tree or other targets' prebuilds. */
+  const nodePty = await installed(await realpath(resolve(desktopRoot, 'node_modules/node-pty')));
+  if (platform.nodePtyNative !== undefined) {
+    const addon = resolve(nodePty.source, platform.nodePtyNative, 'pty.node');
+    await readFile(addon).catch(() => {
+      throw new Error(`node-pty has no ${target} addon at ${addon}; reinstall with its build toolchain.`);
+    });
+  }
   const bundledImports = await Promise.all(
     [
       '@gltf-transform/core',
@@ -208,6 +228,7 @@ export const resolveRuntimePackages = async (
     nanoraster,
     nanorasterPlatform: platformPackage(nanoraster.source, platform.nanoraster),
     sandboxRuntime,
+    nodePty,
     bundledImports,
     acpAdapters,
   };
@@ -270,6 +291,27 @@ export const desktopManifestFields = (
 };
 
 /**
+ * Whether one node-pty path is part of its runtime on a target: the manifest, licence and non-test `lib/` JavaScript,
+ * and the target's own addon directory without debug symbols.
+ * @param relativePath - The path relative to node-pty's root, in either separator.
+ * @param native - The target's addon directory (`RuntimePlatformPackages.nodePtyNative`).
+ * @returns True when the path is staged.
+ */
+export const keepsNodePtyPath = (relativePath: string, native: string | undefined): boolean => {
+  const path = relativePath.split(sep).join('/');
+  if (path === '' || path === 'package.json' || path === 'LICENSE') {
+    return true;
+  }
+  if (path === 'lib' || path.startsWith('lib/')) {
+    return !path.endsWith('.test.js') && excludesBuildDiagnostics(path);
+  }
+  if (native === undefined) {
+    return false;
+  }
+  return native.startsWith(`${path}/`) || path === native || (path.startsWith(`${native}/`) && !path.endsWith('.pdb'));
+};
+
+/**
  * Stage the built main/preload bundles, every runtime package and the app manifest into `stageRoot`.
  * @param options - The desktop root, the staging directory, the resolved packages, any dependencies
  *   the caller already staged (listed first in the staged manifest) and any extra manifest fields.
@@ -328,6 +370,9 @@ export const stageRuntimePackages = async (
       ? copyRuntimePackage(platform.libassimp, packages.libassimpPlatform)
       : undefined,
     copyRuntimePackage('nanoraster', packages.nanoraster.source),
+    copyTree(packages.nodePty.source, resolve(stageRoot, 'node_modules/node-pty'), (path) =>
+      keepsNodePtyPath(relative(packages.nodePty.source, path), platform.nodePtyNative),
+    ),
     copyRuntimePackage(platform.nanoraster, packages.nanorasterPlatform),
     writeFile(
       resolve(stageRoot, 'package.json'),
@@ -350,6 +395,7 @@ export const stageRuntimePackages = async (
             nanoraster: packages.nanoraster.version,
             [platform.nanoraster]: packages.nanoraster.version,
             '@anthropic-ai/sandbox-runtime': packages.sandboxRuntime.version,
+            'node-pty': packages.nodePty.version,
             ...Object.fromEntries(packages.bundledImports.map(({ name, version }) => [name, version])),
             ...Object.fromEntries(packages.acpAdapters.map(({ name, version }) => [name, version])),
           },

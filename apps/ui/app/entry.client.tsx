@@ -1,3 +1,6 @@
+// SB5: first, so its listeners catch what any module below throws before the SDK's handlers are in.
+// oxlint-disable-next-line import/no-unassigned-import -- evaluated for its listeners, before every other module.
+import '#lib/early-error-buffer.js';
 import { HydratedRouter } from 'react-router/dom';
 import { startTransition, StrictMode } from 'react';
 import { hydrateRoot } from 'react-dom/client';

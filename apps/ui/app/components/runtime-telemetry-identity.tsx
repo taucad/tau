@@ -1,6 +1,7 @@
 /**
  * Bridges the page's session, the account's privacy preference and the device preference into runtime telemetry
- * (`#telemetry/runtime-telemetry`), outside React's render (AR-W5-02, AR-W15-06).
+ * (`#telemetry/runtime-telemetry`), and the account id into error reporting's `user.id`
+ * (`#lib/sentry-context.lib`), outside React's render (AR-W5-02, AR-W15-06).
  *
  * Headless, mounted once at the application root beside the revision actor identity, where the session's react-query
  * provider is guaranteed.
@@ -15,6 +16,7 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { privacyPreferencesMutationKey, usePrivacyPreferences } from '#hooks/use-privacy-preferences.js';
 import { authClient } from '#lib/auth-client.js';
 import { isGlobalPrivacyControlEnabled } from '#lib/global-privacy-control.lib.js';
+import { setReportedUserId } from '#lib/sentry-context.lib.js';
 import type { BrowserIdentity } from '#telemetry/page-telemetry.js';
 import { pageTelemetry } from '#telemetry/runtime-telemetry.js';
 
@@ -50,6 +52,14 @@ export function RuntimeTelemetryIdentity(): ReactNode {
   const accountId = identity.kind === 'signed-in' ? identity.accountId : undefined;
   const isResolved = identity.kind !== 'unresolved';
   const globalPrivacyControl = isGlobalPrivacyControlEnabled();
+
+  /* Error reporting's `user.id` (D1): the opaque account id once the session resolves, cleared on sign-out. Not
+   * consent-gated: error reporting is not tracking. */
+  useEffect(() => {
+    if (isResolved) {
+      setReportedUserId(accountId);
+    }
+  }, [accountId, isResolved]);
 
   /* Runs on every input change, never in render: the mirror and the desktop notice live in `onConsentInputsChanged`. */
   useEffect(() => {

@@ -1,5 +1,6 @@
 import { isObservabilityHarnessDirect } from '#lib/observability-harness-context.js';
 import { ENV } from '#environment.config.js';
+import { drainEarlyErrors } from '#lib/early-error-buffer.js';
 import type * as SentryLibrary from '#lib/sentry.lib.js';
 import { hasPageExited, isPageHidden } from '#lib/page-visibility.js';
 import { sendSentryEventDirectly, sendSentryEventsOnHide } from '#lib/sentry-event.lib.js';
@@ -294,19 +295,33 @@ const loadAndStart = async (): Promise<LoadOutcome> => {
   return { sentry };
 };
 
+/**
+ * Report what the early buffer caught before the SDK's handlers were in (`#lib/early-error-buffer`)
+ * and remove its listeners. Runs in the same turn the load settles, so no failure reaches both the
+ * buffer and the SDK's own handlers.
+ */
+const reportEarlyErrors = (): void => {
+  for (const error of drainEarlyErrors()) {
+    // async-iife: bootstrap -- each goes as any reported error does; reporting never rejects.
+    void reportUiError(error);
+  }
+};
+
 /** Start the SDK once per page ({@link loadAndStart}), noting how it ended. */
 const start = async (): Promise<LoadOutcome> => {
   started ??= (async (): Promise<LoadOutcome> => {
     const outcome = await loadAndStart();
     loadOutcome = outcome;
+    reportEarlyErrors();
     return outcome;
   })();
   return started;
 };
 
 /**
- * Start reporting uncaught errors and unhandled rejections. Never rejects. The SDK is loaded once
- * per page: a failed load goes to `onLoadFailure`, once, as its rejection used to reach the global
+ * Start reporting uncaught errors and unhandled rejections. Never rejects. What reached `window`
+ * before the SDK's handlers (the early buffer, at most 20) is reported once the load settles, and the
+ * buffer's listeners removed. The SDK is loaded once per page: a failed load goes to `onLoadFailure`, once, as its rejection used to reach the global
  * handler (the entry hands it to the stale-build recovery, since a deploy may have replaced the
  * SDK's own chunk), and errors reported from then on are sent without the SDK.
  *

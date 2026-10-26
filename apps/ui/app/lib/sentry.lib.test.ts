@@ -8,6 +8,7 @@ import {
   consoleBreadcrumbTextLimit,
   createBeforeSend,
   isUnhandledAbortRejection,
+  scrubSelectorText,
   scrubSentryBreadcrumb,
 } from '#lib/sentry.lib.js';
 import { scrubSentryEvent, sentryEnvelopeUrl, sentryRelease, staleBuildFingerprint } from '#lib/sentry-event.lib.js';
@@ -96,7 +97,50 @@ describe('scrubSentryEvent', () => {
   });
 });
 
+describe('scrubSentryEvent context (SB1)', () => {
+  it('keeps only the User-Agent header, so Sentry derives browser, OS and device', () => {
+    const scrubbed = scrubSentryEvent({
+      type: undefined,
+      request: {
+        url: 'https://taucad.dev/projects',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 Test',
+          Referer: 'https://taucad.dev/?token=secret',
+          Authorization: 'secret',
+        },
+      },
+    });
+
+    expect(scrubbed.request).toStrictEqual({
+      url: 'https://taucad.dev/projects',
+      headers: { 'User-Agent': 'Mozilla/5.0 Test' },
+    });
+  });
+
+  it('keeps only the opaque user id: no email, name, username or IP', () => {
+    const scrubbed = scrubSentryEvent({
+      type: undefined,
+      user: { id: 'usr_opaque123', email: 'person@example.com', username: 'person', ip_address: '198.51.100.2' },
+    });
+
+    expect(scrubbed.user).toStrictEqual({ id: 'usr_opaque123' });
+  });
+});
+
 describe('scrubSentryBreadcrumb', () => {
+  it('drops element text from a click breadcrumb but keeps the selector (principle 6)', () => {
+    const breadcrumb = scrubSentryBreadcrumb({
+      category: 'ui.click',
+      message: 'body > div.panel > button#delete[aria-label="Delete My Secret Project"][title=\'part.scad\']',
+    });
+
+    expect(breadcrumb.message).toBe('body > div.panel > button#delete[aria-label][title]');
+  });
+
+  it('leaves a selector without quoted text unchanged', () => {
+    expect(scrubSelectorText('div.toolbar > button.icon')).toBe('div.toolbar > button.icon');
+  });
+
   it('scrubs navigation and fetch URLs', () => {
     const breadcrumb = scrubSentryBreadcrumb({
       category: 'navigation',

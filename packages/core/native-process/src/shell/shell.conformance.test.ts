@@ -486,27 +486,43 @@ describe.runIf(enabled)('shell conformance', () => {
       const agents = join(reserved, 'AGENTS.md');
       const regionOnly = join(reserved, 'region-only');
       const hiddenDirectory = join(reserved, 'hidden-dir');
+      // A child opened two levels down: its parent must stay traversable without listing hidden siblings.
+      const nested = join(reserved, 'a', 'b');
       mkdirSync(authored, { recursive: true });
       mkdirSync(hiddenDirectory);
+      mkdirSync(nested, { recursive: true });
+      writeFileSync(join(reserved, 'a', 'hidden-sibling'), 'SIBLING-CANARY');
       writeFileSync(agents, 'AUTHORED');
       writeFileSync(regionOnly, 'REGION-CANARY');
       writeFileSync(join(hiddenDirectory, 'inner'), 'HIDDEN-DIR-CANARY');
       const filesystem = {
         readable: [readonly, home],
-        writable: [project, authored, agents],
+        writable: [project, authored, agents, nested],
         denied: [secret],
         masked: [reserved],
       };
       const positive = await run(
-        'cat .tau/AGENTS.md && ls .tau/parameters && cd .tau/parameters && printf CHILD > value && cd ../.. && realpath .tau/parameters',
+        'cat .tau/AGENTS.md && ls .tau/parameters && cd .tau/parameters && printf CHILD > value && cd ../.. && realpath .tau/parameters && printf NESTED > .tau/a/b/value && ls .tau/a/b',
         { filesystem, workingDirectory: project },
       );
       expect(positive.exitCode, positive.stderr).toBe(0);
       expect(positive.stdout).toContain('AUTHORED');
       expect(readFileSync(join(authored, 'value'), 'utf8')).toBe('CHILD');
+      expect(readFileSync(join(nested, 'value'), 'utf8')).toBe('NESTED');
+      if (process.platform === 'darwin') {
+        // Positive control for the upper-cased probe below: an authored child is reachable through the same
+        // spelling, so a refusal of the hidden entry there is the mask's doing, not an unresolvable path.
+        const upper = await run('U=$(pwd | tr a-z A-Z); cat "$U/.tau/AGENTS.md"', {
+          filesystem,
+          workingDirectory: project,
+        });
+        expect(upper.exitCode, upper.stderr).toBe(0);
+        expect(upper.stdout).toBe('AUTHORED');
+      }
       // Each probe names a different way to observe an entry the mask alone hides; the macOS one spells the
       // checkout in upper case, which a case-insensitive volume resolves to the same directory.
       const probes = [
+        'ls -a .tau/a',
         'cat .tau/region-only',
         'ls -a .tau',
         'ln .tau/region-only linked && cat linked',
@@ -522,12 +538,28 @@ describe.runIf(enabled)('shell conformance', () => {
         })),
       );
       const leaks = outcomes
-        .filter(({ stdout }) => /REGION-CANARY|HIDDEN-DIR-CANARY|region-only|hidden-dir|VISIBLE/u.test(stdout))
+        .filter(({ stdout }) =>
+          /REGION-CANARY|HIDDEN-DIR-CANARY|SIBLING-CANARY|region-only|hidden-dir|hidden-sibling|VISIBLE/u.test(stdout),
+        )
         .map(({ command, stdout }) => ({ command, stdout }));
       expect(leaks).toEqual([]);
       expect(existsSync(join(project, 'linked'))).toBe(false);
       expect(existsSync(join(reserved, 'future'))).toBe(false);
       expect(readFileSync(regionOnly, 'utf8')).toBe('REGION-CANARY');
+      // Compare the error for a hidden entry with the error for an absent name. Linux shows neither, so both
+      // are ENOENT. Seatbelt can only refuse, so macOS reports EPERM for an existing hidden name: a guessed
+      // name can be confirmed, never read. The disclosure on ShellFilesystem.masked states this.
+      const errorFor = async (name: string): Promise<string> => {
+        const { stderr } = await run(`stat .tau/${name}`, { filesystem, workingDirectory: project });
+        return stderr.replaceAll(name, 'NAME');
+      };
+      const [hiddenError, absentError] = await Promise.all([errorFor('region-only'), errorFor('absent-name')]);
+      expect(absentError).toMatch(/No such file/u);
+      if (process.platform === 'darwin') {
+        expect(hiddenError).toMatch(/Operation not permitted/u);
+      } else {
+        expect(hiddenError).toBe(absentError);
+      }
     },
   );
 

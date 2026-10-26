@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { wrapCommandWithSandboxMacOS } from '@anthropic-ai/sandbox-runtime/dist/sandbox/macos-sandbox-utils.js';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { bindMaskedDirectories, maskProblem } from '#shell/shell-project-mask.js';
@@ -79,6 +80,45 @@ describe('macOS masked directory profile composition', () => {
     expect(appended).toContain('[tT][aA][uU][. ]*(:[^/]*)?');
     expect(argv[2]).not.toContain('Reserved directory');
   });
+  it('should place every mask deny after the runtime directory-metadata allow in the real profile', () => {
+    const filesystem: ShellFilesystem = {
+      readable: [],
+      writable: ['/project', '/project/.tau/parameters', '/project/.tau/a/b'],
+      denied: ['/project/.tau/secret'],
+      masked: ['/project/.tau'],
+    };
+    const wrapped = wrapCommandWithSandboxMacOS({
+      command: 'true',
+      needsNetworkRestriction: false,
+      readConfig: { denyOnly: [...filesystem.denied], allowWithinDeny: [] },
+      writeConfig: { allowOnly: [...filesystem.writable], denyWithinAllow: [...filesystem.denied] },
+      binShell: 'bash',
+    });
+    const profile = bindMaskedDirectories(['/bin/sh', '-c', wrapped], filesystem)![2]!;
+    const lastAllow = (operation: string): number => profile.lastIndexOf(`(allow ${operation}`);
+    const metadataAllow = lastAllow('file-read-metadata');
+    expect(metadataAllow).toBeGreaterThan(-1);
+    const boundary = profile.indexOf('; Reserved directory creation boundary');
+    expect(boundary).toBeGreaterThan(Math.max(metadataAllow, lastAllow('file-read'), lastAllow('file-write')));
+    const denies = profile.slice(boundary).match(/\(deny [a-z*-]+(?: [a-z*-]+)*/gu) ?? [];
+    expect(denies).toEqual([
+      '(deny file-read*',
+      '(deny file-read-data',
+      '(deny file-read-metadata',
+      '(deny file-write*',
+      '(deny file-write-create file-write-unlink',
+    ]);
+    // Every runtime allow of these operations precedes the boundary.
+    expect(profile.slice(boundary)).not.toContain('(allow ');
+    // A directory between the container and an opened child stays stat-able but never listable.
+    const between = '(literal "/project/.tau/a")';
+    const data = profile
+      .slice(boundary)
+      .split('\n')
+      .find((line) => line.startsWith('(deny file-read-data'));
+    expect(data).toContain(between);
+  });
+
   it('should refuse an unrecognized sandbox vector', () => {
     expect(bindMaskedDirectories(['/bin/bash', '-c', 'true'], fixture())).toBeUndefined();
   });

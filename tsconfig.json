@@ -62,9 +62,6 @@
       "path": "./examples/electron"
     },
     {
-      "path": "./packages/geospec"
-    },
-    {
       "path": "./packages/plugins/openrscad"
     },
     {

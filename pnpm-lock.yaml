@@ -573,9 +573,12 @@ catalogs:
     geist:
       specifier: ^1.7.2
       version: 1.7.2
+    geospec:
+      specifier: 0.4.1-next.322
+      version: 0.4.1-next.322
     geospec-engine:
-      specifier: 0.4.0
-      version: 0.4.0
+      specifier: 0.4.1-next.322
+      version: 0.4.1-next.322
     graphics-debug:
       specifier: 0.0.100
       version: 0.0.100
@@ -1660,11 +1663,11 @@ importers:
         specifier: 'catalog:'
         version: 63.0.0(eslint@9.32.0(jiti@2.7.0))
       geospec:
-        specifier: workspace:*
-        version: link:packages/geospec
+        specifier: 'catalog:'
+        version: 0.4.1-next.322(vitest@4.1.11)
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.4.0
+        version: 0.4.1-next.322
       gray-matter:
         specifier: 'catalog:'
         version: 4.0.3
@@ -1856,11 +1859,11 @@ importers:
         specifier: workspace:*
         version: link:../../libs/vite
       geospec:
-        specifier: workspace:*
-        version: link:../../packages/geospec
+        specifier: 'catalog:'
+        version: 0.4.1-next.322(vitest@4.1.11)
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.4.0
+        version: 0.4.1-next.322
       pino-pretty:
         specifier: 'catalog:'
         version: 13.2.0
@@ -2013,7 +2016,7 @@ importers:
         version: 0.8.3
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.4.0
+        version: 0.4.1-next.322
       libassimp:
         specifier: 'catalog:'
         version: 0.3.0
@@ -2578,11 +2581,11 @@ importers:
         specifier: ^8.18.1
         version: 8.18.2
       geospec:
-        specifier: workspace:*
-        version: link:../../packages/geospec
+        specifier: 'catalog:'
+        version: 0.4.1-next.322(vitest@4.1.11)
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.4.0
+        version: 0.4.1-next.322
       ws:
         specifier: 'catalog:'
         version: 8.22.0
@@ -2827,11 +2830,11 @@ importers:
         specifier: 'catalog:'
         version: 5.3.0
       geospec:
-        specifier: workspace:*
-        version: link:../../packages/geospec
+        specifier: 'catalog:'
+        version: 0.4.1-next.322(vitest@4.1.11)
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.4.0
+        version: 0.4.1-next.322
       isbot:
         specifier: 'catalog:'
         version: 5.2.2
@@ -3234,8 +3237,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/workbench
       geospec:
-        specifier: workspace:*
-        version: link:../../packages/geospec
+        specifier: 'catalog:'
+        version: 0.4.1-next.322(vitest@4.1.11)
     devDependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
@@ -3436,14 +3439,14 @@ importers:
         specifier: workspace:*
         version: link:../../packages/runtime-testing
       geospec:
-        specifier: workspace:*
-        version: link:../../packages/geospec
+        specifier: 'catalog:'
+        version: 0.4.1-next.322(vitest@4.1.11)
       libcascade:
         specifier: 'catalog:'
         version: 3.1.0
       manifold-3d:
         specifier: 'catalog:'
-        version: 3.4.1(@gltf-transform/core@4.5.1)(@gltf-transform/extensions@4.5.1)(@gltf-transform/functions@4.5.1(@types/node@24.0.15))(esbuild-wasm@0.28.2)
+        version: 3.4.1(@gltf-transform/core@4.5.1)(@gltf-transform/extensions@4.5.1)(@gltf-transform/functions@4.5.1(@types/node@26.6.5))(esbuild-wasm@0.28.2)
       picovoxel:
         specifier: 'catalog:'
         version: 0.2.0(three@0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064))
@@ -3763,11 +3766,11 @@ importers:
         specifier: 'catalog:'
         version: 3.4.2
       geospec:
-        specifier: workspace:*
-        version: link:../geospec
+        specifier: 'catalog:'
+        version: 0.4.1-next.322(vitest@4.1.11)
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.4.0
+        version: 0.4.1-next.322
       ink:
         specifier: 'catalog:'
         version: 6.8.0(@types/react@19.2.17)(react@19.2.7)
@@ -4022,25 +4025,6 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
-  packages/geospec:
-    dependencies:
-      esbuild:
-        specifier: 'catalog:'
-        version: 0.28.2
-      geospec-engine:
-        specifier: 'catalog:'
-        version: 0.4.0
-      vitest:
-        specifier: 4.1.11
-        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
-    devDependencies:
-      '@gltf-transform/core':
-        specifier: 'catalog:'
-        version: 4.5.1
-
   packages/host:
     dependencies:
       '@agentclientprotocol/sdk':
@@ -4159,11 +4143,11 @@ importers:
         specifier: ^8.18.1
         version: 8.18.2
       geospec:
-        specifier: workspace:*
-        version: link:../geospec
+        specifier: 'catalog:'
+        version: 0.4.1-next.322(vitest@4.1.11)
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.4.0
+        version: 0.4.1-next.322
       xstate:
         specifier: 'catalog:'
         version: 6.0.0-alpha.59
@@ -5457,8 +5441,8 @@ importers:
         specifier: workspace:*
         version: link:../plugins/zoo
       geospec:
-        specifier: workspace:*
-        version: link:../geospec
+        specifier: 'catalog:'
+        version: 0.4.1-next.322(vitest@4.1.11)
     devDependencies:
       '@taucad/telemetry':
         specifier: workspace:*
@@ -5757,8 +5741,8 @@ importers:
         specifier: workspace:*
         version: link:../../libs/types
       geospec:
-        specifier: workspace:*
-        version: link:../geospec
+        specifier: 'catalog:'
+        version: 0.4.1-next.322(vitest@4.1.11)
       replicad:
         specifier: npm:@taulabs/replicad@1.1.0-taulabs.1
         version: '@taulabs/replicad@1.1.0-taulabs.1'
@@ -18615,29 +18599,39 @@ packages:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
     engines: {node: '>=6.9.0'}
 
-  geospec-engine-darwin-arm64@0.4.0:
-    resolution: {integrity: sha512-NVqHSxJXYDE0piEjRrAH3x/KsX/IfH3/n5JMuEfx5tCCDM0r+JCPZuiJqHgHTi3njxIElB90f3cJQ8gk1kP8Rw==}
+  geospec-engine-darwin-arm64@0.4.1-next.322:
+    resolution: {integrity: sha512-PmGxAaadSwu6tU5EUBcooktc8NuW97RfTY4wYTvQ0ggduASiaGROpjjFX6W9DhILu4Bekx2cdkBhbtB0qzE7pg==}
     engines: {node: '>=24.0.0'}
     cpu: [arm64]
     os: [darwin]
 
-  geospec-engine-linux-arm64-gnu@0.4.0:
-    resolution: {integrity: sha512-3UefwAjeBGb1O2cRQrr2EYTnCz7H1g6AOlmaMnBmFG9uIaLfAHhcF0ecGGUUS1HaUaeusqNMz/usHfK6tkXPUQ==}
+  geospec-engine-linux-arm64-gnu@0.4.1-next.322:
+    resolution: {integrity: sha512-N4zViXpNzhjcSwCUjhibTTaTvngNw0HIcYDT9Kd+h+aXJuYv4O9mVU6PMUiWKF6dH5Zt0O2ICOqxNRI1AAGcLA==}
     engines: {node: '>=24.0.0'}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  geospec-engine-linux-x64-gnu@0.4.0:
-    resolution: {integrity: sha512-gTgasy3Q2OesveLJndz2zKJrpDjUbGL+RVQkAri95IjbXpuCQnly31b5RVVeAy4Z6OIU6MVc3KZg1YODMoSBww==}
+  geospec-engine-linux-x64-gnu@0.4.1-next.322:
+    resolution: {integrity: sha512-lS5BkNUhH4WVFJ0eIVNZ87BoXUf+vGNLbzOmEeKHFaXvQTurG77T66sRMaypSl0E2jzF4WJ78AE39i1gDc4frg==}
     engines: {node: '>=24.0.0'}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  geospec-engine@0.4.0:
-    resolution: {integrity: sha512-RkCgoPza8xXMHTyze1syWW9MVY6lCys3p5oTRWwtEU37RpFhzZk36Tn2ZxJpwNbOQOI8Ki3QAczY8zWShCt4EQ==}
+  geospec-engine@0.4.1-next.322:
+    resolution: {integrity: sha512-iNDlBaajhm4yzxB6dBt+LRF2W8vcKy5xgHEr1+gf0cTbcHAIcjCBOz3oufPyMPP++7GlN5B62LXGwxw5BIQddA==}
     engines: {node: '>=24.0.0'}
+
+  geospec@0.4.1-next.322:
+    resolution: {integrity: sha512-cdi9btBq7wHhbiQ7CHv3V6o5T90ZJbd43jwXREpyiiNqEVAvabYMA0c6uv98VbnKVO/0Fmy3PkMJYhQ/ykPo2w==}
+    engines: {node: '>=24.0.0'}
+    hasBin: true
+    peerDependencies:
+      vitest: 4.1.11
+    peerDependenciesMeta:
+      vitest:
+        optional: true
 
   get-amd-module-type@6.0.2:
     resolution: {integrity: sha512-7zShVYAYtMnj9S65CfN+hvpBCByfuB1OY8xID01nZEzXTZbx4YyysAfi+nMl95JSR6odt4q8TCj2W63KAoyVLQ==}
@@ -20092,8 +20086,8 @@ packages:
   leac@0.6.0:
     resolution: {integrity: sha512-y+SqErxb8h7nE/fiEX07jsbuhrpO9lL8eca7/Y1nuWV2moNlXhyd59iDGcRf6moVyDMbmTNzL40SUyrFU/yDpg==}
 
-  legacy-javascript@0.0.3:
-    resolution: {integrity: sha512-1r6MT4dVaJyXt4G07Cm2cQ0AUaLJdefiEp4SmIAylA++gnEQ82YvmzE58RkM5EP0fk5hROLCslUPGnwIYdZQVA==}
+  legacy-javascript@0.0.4:
+    resolution: {integrity: sha512-UTmeKBVxnfJcpmpOvzzNnLsQT99BXHpPlc/ZKddIRmWmrR0fw6335I3lq4+sJoP60UTbBNaYsGYVPc65YB1x3A==}
 
   less-loader@12.3.3:
     resolution: {integrity: sha512-F0+ErFFDj3Pt+nVrCN6VlEGEzocv9s7x/aR9v2riI+WM83UAfTYBDBjGPJnT55lBLR6JSI4fmWblt+aA2JN6/w==}
@@ -32239,7 +32233,7 @@ snapshots:
 
   '@paulirish/trace_engine@0.0.65':
     dependencies:
-      legacy-javascript: 0.0.3
+      legacy-javascript: 0.0.4
       third-party-web: 0.30.0
 
   '@peculiar/asn1-android@2.11.0':
@@ -40380,20 +40374,28 @@ snapshots:
 
   gensync@1.0.0-beta.2: {}
 
-  geospec-engine-darwin-arm64@0.4.0:
+  geospec-engine-darwin-arm64@0.4.1-next.322:
     optional: true
 
-  geospec-engine-linux-arm64-gnu@0.4.0:
+  geospec-engine-linux-arm64-gnu@0.4.1-next.322:
     optional: true
 
-  geospec-engine-linux-x64-gnu@0.4.0:
+  geospec-engine-linux-x64-gnu@0.4.1-next.322:
     optional: true
 
-  geospec-engine@0.4.0:
+  geospec-engine@0.4.1-next.322:
     optionalDependencies:
-      geospec-engine-darwin-arm64: 0.4.0
-      geospec-engine-linux-arm64-gnu: 0.4.0
-      geospec-engine-linux-x64-gnu: 0.4.0
+      geospec-engine-darwin-arm64: 0.4.1-next.322
+      geospec-engine-linux-arm64-gnu: 0.4.1-next.322
+      geospec-engine-linux-x64-gnu: 0.4.1-next.322
+
+  geospec@0.4.1-next.322(vitest@4.1.11):
+    dependencies:
+      esbuild: 0.28.2
+      geospec-engine: 0.4.1-next.322
+      zod: 4.6.7
+    optionalDependencies:
+      vitest: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
 
   get-amd-module-type@6.0.2:
     dependencies:
@@ -42224,7 +42226,7 @@ snapshots:
 
   leac@0.6.0: {}
 
-  legacy-javascript@0.0.3: {}
+  legacy-javascript@0.0.4: {}
 
   less-loader@12.3.3(@rspack/core@1.6.8(@swc/helpers@0.5.23))(less@4.5.1)(webpack@5.111.1(@swc/core@1.15.8(@swc/helpers@0.5.23))(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.30)):
     dependencies:

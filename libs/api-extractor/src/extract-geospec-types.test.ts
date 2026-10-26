@@ -4,22 +4,21 @@ import ts from 'typescript';
 import { buildGeoSpecTypeBundle } from '#extract-geospec-types.js';
 
 describe('GeoSpec public type extraction', () => {
-  it('should match every public source export and the checked-in declarations', () => {
+  it('should match every public export of the installed package and the checked-in declarations', () => {
     const generated = buildGeoSpecTypeBundle();
     const checkedIn: unknown = JSON.parse(
       readFileSync(new URL('generated/geospec/geospec.bundled.json', import.meta.url), 'utf8'),
     );
     expect(generated).toStrictEqual(checkedIn);
     const manifest = JSON.parse(
-      readFileSync(new URL('../../../packages/geospec/package.json', import.meta.url), 'utf8'),
-    ) as { exports: Record<string, string> };
+      readFileSync(new URL('../../../node_modules/geospec/package.json', import.meta.url), 'utf8'),
+    ) as { exports: Record<string, string | { types?: string }> };
     const expectedExports = Object.fromEntries(
-      Object.entries(manifest.exports)
-        .filter(([, source]) => source.startsWith('./src/'))
-        .map(([specifier, source]) => [
-          specifier,
-          { types: source.replace('./src/', './').replace(/\.ts$/u, '.d.ts') },
-        ]),
+      Object.entries(manifest.exports).flatMap(([specifier, target]) =>
+        typeof target === 'object' && target.types !== undefined
+          ? [[specifier, { types: target.types.replace('./dist/', './').replace(/\.d\.mts$/u, '.d.ts') }]]
+          : [],
+      ),
     );
     const bundle = generated['geospec']!;
     expect(bundle.packageJson['exports']).toStrictEqual(expectedExports);

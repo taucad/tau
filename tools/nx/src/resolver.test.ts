@@ -91,17 +91,19 @@ describe('projects()', () => {
 });
 
 describe('publishable()', () => {
-  it('is every non-private type:package project, sorted — fifty-nine today', () => {
+  it('is every non-private type:package project, sorted — fifty-eight today', () => {
     const names = publishable(live).map((entry) => entry.name);
 
     // The count is the tripwire; re-baselining it is the point at which a new
     // package is noticed. Pinning the whole list would only restate the rule.
-    expect(names).toHaveLength(59);
+    // `geospec` left for taucad/geospec, taking the count from 59 to 58.
+    expect(names).toHaveLength(58);
     expect(names).toEqual([...names].sort());
     // Both ends of the train.
-    for (const name of ['archive-core', 'runtime', 'runtime-testing', 'geospec']) {
+    for (const name of ['archive-core', 'runtime', 'runtime-testing', 'cli']) {
       expect(names).toContain(name);
     }
+    expect(names).not.toContain('geospec');
 
     // Dev-time tools and private libraries are outside the set by construction.
     for (const name of ['nx', 'scripts', 'oxlint', 'types', 'chat']) {

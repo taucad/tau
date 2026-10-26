@@ -120,7 +120,7 @@ try {
   );
   await createPackageWithOptions(source, archive, runtimeAsarOptions);
   for (const file of unpacked) {
-    const entry = statFile(archive, file);
+    const entry = statFile(archive, join(file));
     assert.ok('unpacked' in entry && entry.unpacked, `${file} must exist outside the archive`);
     assert.equal(readFileSync(join(`${archive}.unpacked`, file), 'utf8'), 'fixture');
   }
@@ -129,11 +129,18 @@ try {
     const helper = `node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp/${process.arch}/apply-seccomp`;
     const dependency = dirname(dirname(fileURLToPath(import.meta.resolve('@anthropic-ai/sandbox-runtime'))));
     await mkdir(dirname(join(source, helper)), { recursive: true });
+    // A copy over the text placeholder retains its non-executable mode on Linux.
+    await rm(join(source, helper), { force: true });
     await copyFile(join(dependency, 'vendor/seccomp', process.arch, 'apply-seccomp'), join(source, helper));
-    await createPackageWithOptions(source, archive, runtimeAsarOptions);
-    const executable = join(`${archive}.unpacked`, helper);
+    const executableArchive = join(fixtureRoot, 'executable.asar');
+    await createPackageWithOptions(source, executableArchive, runtimeAsarOptions);
+    const executable = join(`${executableArchive}.unpacked`, helper);
     const positive = spawnSync(executable, ['/bin/true'], { encoding: 'utf8' });
-    assert.equal(positive.status, 0, `unpacked seccomp helper must execute: ${positive.stderr}`);
+    assert.equal(
+      positive.status,
+      0,
+      `unpacked seccomp helper must execute: ${positive.error?.message ?? positive.stderr}`,
+    );
     const denied = spawnSync(
       executable,
       [
@@ -143,7 +150,11 @@ try {
       ],
       { encoding: 'utf8' },
     );
-    assert.equal(denied.status, 0, `packaged helper must refuse Unix sockets: ${denied.stderr}`);
+    assert.equal(
+      denied.status,
+      0,
+      `packaged helper must refuse Unix sockets: ${denied.error?.message ?? denied.stderr}`,
+    );
   }
 } finally {
   await rm(fixtureRoot, { recursive: true, force: true });

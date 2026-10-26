@@ -179,9 +179,9 @@ serial build, so exact output is identical in every host.
 The render options `meshAdaptivity` (0 to below 1) and `meshRelax` (default `false`) ask for an adaptive
 display mesh in the fast lane; exports always mesh at 0. An exact render that asks for adaptivity is
 refused with a typed `REPRESENTATION_UNSUPPORTED` issue. PicoVoxel 0.1.0, whose `toMesh()` takes no
-options, refuses every adaptive request with `KERNEL_CAPABILITY_MISSING`; the pinned 0.2.0 meshes them.
+options, refuses every adaptive request with `KERNEL_CAPABILITY_MISSING`; the pinned 0.2.1 meshes them.
 An unset `meshAdaptivity` never refuses: it meshes uniformly on the exact lane and under 0.1.0, and at
-0.25 (Balanced) on the fast lane of a release whose `toMesh()` takes options, as the pinned 0.2.0 does.
+0.25 (Balanced) on the fast lane of a release whose `toMesh()` takes options, as the pinned 0.2.1 does.
 An explicitly fast STL export of such a view therefore replays a uniform fast build of its own.
 
 ### Runtime lifetime
@@ -221,12 +221,12 @@ PicoVoxel's pure serializer.
 
 | Field     | Value                                                                                                          |
 | --------- | -------------------------------------------------------------------------------------------------------------- |
-| Specifier | `picovoxel@0.2.0` (exact workspace catalog pin)                                                                |
-| Source    | `taucad/picovoxel` release `v0.2.0`, commit `49546e52aff2aefb046ad111355ced96ef2fc234`                         |
-| Version   | `0.2.0`                                                                                                        |
-| CI run    | [40203675170](https://github.com/taucad/picovoxel/actions/runs/40203675170), green (23 jobs passed, 2 skipped) |
-| Size      | 13,232,809 bytes unpacked                                                                                      |
-| Integrity | `sha512-Ym1mLTOuUEVza3zi/HhNvxSgy9I6s+nIm19q0yi3n9fJjC3lnV5W2C7SRnWiMJxwT8IRun/Gd0XpY0qpK6t3kA==`              |
+| Specifier | `picovoxel@0.2.1` (exact workspace catalog pin)                                                                |
+| Source    | `taucad/picovoxel` release `v0.2.1`, commit `370120d01b2beb0a735e9d71afbe749db133d922`                         |
+| Version   | `0.2.1`                                                                                                        |
+| CI run    | [40277162955](https://github.com/taucad/picovoxel/actions/runs/40277162955), green (23 jobs passed, 2 skipped) |
+| Size      | 13,215,399 bytes unpacked                                                                                      |
+| Integrity | `sha512-wZL+tqewOFznSrPYSPKLZF/A3tx41krEWtUV8NJ766+veZ/vTUOAdnPSxLIkMHrjj+HBcltiyqdEChGn6yszTA==`              |
 
 Both WebAssembly binaries are CI-built. The kernel version carries the package version, both binary
 digests and one digest over every shipped script; `picovoxel.asset-ownership.test.ts` recomputes all

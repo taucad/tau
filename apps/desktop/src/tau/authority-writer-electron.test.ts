@@ -17,7 +17,7 @@ describe.runIf(process.platform === 'win32' || process.platform === 'darwin')(
         await mkdir(join(root, 'profile'));
         await Promise.all([
           build({
-            entryPoints: [join(import.meta.dirname, 'authority-writer-electron.fixture.ts')],
+            entryPoints: [join(import.meta.dirname, 'fixtures/authority-writer-electron.fixture.ts')],
             outfile: join(root, 'main.mjs'),
             bundle: true,
             platform: 'node',
@@ -25,7 +25,7 @@ describe.runIf(process.platform === 'win32' || process.platform === 'darwin')(
             external: ['electron'],
           }),
           build({
-            entryPoints: [join(import.meta.dirname, 'authority-writer-electron-utility.fixture.ts')],
+            entryPoints: [join(import.meta.dirname, 'fixtures/authority-writer-electron-utility.fixture.ts')],
             outfile: join(root, 'utility.mjs'),
             bundle: true,
             platform: 'node',

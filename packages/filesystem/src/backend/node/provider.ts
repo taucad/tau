@@ -16,6 +16,7 @@
  */
 
 import fs from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import type { Dirent, Stats } from 'node:fs';
 import { realpathSync, statSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -989,8 +990,12 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
 
     let replaced = false;
     let failure: unknown;
+    let retainedHandle: FileHandle | undefined;
     try {
       const handle = await fs.open(temporaryPath, 'wx', existingMode ?? 0o666);
+      if (process.platform === 'win32') {
+        retainedHandle = handle;
+      }
       try {
         await handle.writeFile(bytes);
         if (existingMode !== undefined) {
@@ -998,7 +1003,9 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         }
         await handle.sync();
       } finally {
-        await handle.close();
+        if (retainedHandle === undefined) {
+          await handle.close();
+        }
       }
 
       const currentDirectory = await fs.realpath(path.dirname(targetPath));
@@ -1013,11 +1020,19 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       await beforeReplace?.();
       await fs.rename(temporaryPath, admittedTarget);
       replaced = true;
-      const directoryHandle = await fs.open(admittedDirectory, 'r');
-      try {
-        await directoryHandle.sync();
-      } finally {
-        await directoryHandle.close();
+      if (retainedHandle === undefined) {
+        const directoryHandle = await fs.open(admittedDirectory, 'r');
+        try {
+          await directoryHandle.sync();
+        } finally {
+          await directoryHandle.close();
+        }
+      } else {
+        // Windows FlushFileBuffers commits file metadata as well as content.
+        // Keep the writable handle through rename to flush the same file object,
+        // without reopening a replaced path or trying to sync a read-only directory.
+        // https://learn.microsoft.com/en-us/windows/win32/fileio/file-caching
+        await retainedHandle.sync();
       }
 
       const committed = new Uint8Array(await fs.readFile(admittedTarget));
@@ -1026,6 +1041,12 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       }
     } catch (error) {
       failure = error;
+    } finally {
+      try {
+        await retainedHandle?.close();
+      } catch (error) {
+        failure ??= error;
+      }
     }
     try {
       await fs.unlink(temporaryPath);

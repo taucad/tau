@@ -10,7 +10,7 @@
       "cache": false,
       "options": {
         "cwd": "{projectRoot}",
-        "command": "vitest run --config vitest.config.ts src/backend/node/authority-writer-lock.test.ts src/backend/node/authority-writer-host.test.ts --typecheck.enabled=false"
+        "command": "vitest run --config vitest.config.ts src/backend/node/authority-writer-lock.test.ts src/backend/node/authority-writer-host.test.ts src/backend/node/provider.test.ts --typecheck.enabled=false"
       }
     },
     "build": {

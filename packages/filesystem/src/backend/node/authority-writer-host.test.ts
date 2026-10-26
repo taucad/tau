@@ -1,13 +1,15 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import fs, { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NodeFsChannel, NodeFsProviderClient } from '#backend/node/client.js';
 import { NodeFsAuthorityHost, serveNodeFsProvider } from '#backend/node/host.js';
+import { NodeFsProvider } from '#backend/node/provider.js';
 import { tauPathPolicy } from '#path-registry.js';
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const cleanup of cleanups.splice(0).reverse()) {
     // oxlint-disable-next-line no-await-in-loop -- Close ports and release ownership before removing storage.
     await cleanup();
@@ -36,6 +38,88 @@ const connect = (root: string, authorityRoot: string): { client: NodeFsProviderC
 };
 
 describe.runIf(['darwin', 'linux', 'win32'].includes(process.platform))('native filesystem authority mutations', () => {
+  it('should durably replace a file through the native provider', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-native-write-'));
+    cleanups.push(async () => rm(root, { force: true, recursive: true }));
+    await writeFile(join(root, 'model.txt'), 'initial');
+    if (process.platform === 'win32') {
+      // Record the former POSIX-only durability primitive's native behavior without treating it as supported.
+      try {
+        const directory = await fs.open(root, 'r');
+        try {
+          await directory.sync();
+          console.info('Windows read-only directory sync probe: supported');
+        } finally {
+          await directory.close();
+        }
+      } catch (error) {
+        console.info('Windows read-only directory sync probe:', error);
+      }
+    }
+    const provider = new NodeFsProvider(root, { policy: tauPathPolicy });
+    try {
+      await provider.writeFile('model.txt', 'saved');
+    } catch (error) {
+      // The port intentionally hides internal causes; this native test preserves the real syscall failure.
+      console.error('Native provider atomic-write cause', error instanceof Error ? error.cause : error);
+      throw error;
+    }
+    expect(await readFile(join(root, 'model.txt'), 'utf8')).toBe('saved');
+  });
+
+  it.each(['before-replace', 'after-replace', ...(process.platform === 'win32' ? ['close'] : [])] as const)(
+    'should refuse checked-write acknowledgement when durability fails %s',
+    async (stage) => {
+      const sandbox = await mkdtemp(join(tmpdir(), 'tau-authority-flush-'));
+      cleanups.push(async () => rm(sandbox, { force: true, recursive: true }));
+      const root = join(sandbox, 'content');
+      const authorityRoot = join(sandbox, 'authority');
+      await mkdir(root);
+      await mkdir(authorityRoot);
+      await writeFile(join(root, 'model.txt'), 'initial');
+      const owner = connect(root, authorityRoot);
+      const open = fs.open.bind(fs);
+      vi.spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
+        const handle = await open(path, flags, mode);
+        const beforeReplace = stage === 'before-replace';
+        const failureFlags = beforeReplace || process.platform === 'win32' ? 'wx' : 'r';
+        if (stage === 'close' && flags === 'wx') {
+          const close = handle.close.bind(handle);
+          vi.spyOn(handle, 'close').mockImplementation(async () => {
+            await close();
+            throw Object.assign(new Error('Injected close failure'), { code: 'EIO' });
+          });
+          return handle;
+        }
+        if (flags === failureFlags) {
+          const sync = handle.sync.bind(handle);
+          let calls = 0;
+          vi.spyOn(handle, 'sync').mockImplementation(async () => {
+            await sync();
+            calls += 1;
+            if (calls === (!beforeReplace && process.platform === 'win32' ? 2 : 1)) {
+              throw Object.assign(new Error('Injected durability failure'), { code: 'EIO' });
+            }
+          });
+        }
+        return handle;
+      });
+      await expect(
+        owner.client.writeFileChecked({
+          path: 'model.txt',
+          data: 'saved',
+          preconditions: [{ path: 'model.txt', expected: 'initial' }],
+        }),
+      ).rejects.toMatchObject({
+        code: stage === 'before-replace' ? 'EIO' : 'CHECKED_WRITE_POTENTIALLY_APPLIED',
+        applicationState: stage === 'before-replace' ? 'known-not-applied' : 'potentially-applied',
+      });
+      expect(await readFile(join(root, 'model.txt'), 'utf8')).toBe(stage === 'before-replace' ? 'initial' : 'saved');
+      const entries = await fs.readdir(root);
+      expect(entries.filter((name) => name.endsWith('.tmp'))).toEqual([]);
+    },
+  );
+
   it('should persist checked mutations, refuse a second host, and transfer ownership after port disposal', async () => {
     const sandbox = await mkdtemp(join(tmpdir(), 'tau-authority-mutation-'));
     cleanups.push(async () => rm(sandbox, { force: true, recursive: true }));

@@ -1738,6 +1738,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                     transient,
                     views: this.getDocumentViewOffers(owner, artifact.evaluationSlot?.offers),
                     exports: this.getDocumentExportOffers(owner, artifact.evaluationSlot?.offers),
+                    ...this.getDocumentEvaluateOptionsOffer(owner),
                     issues: result.issues,
                     sourceRevision: sourceRevisionForArtifact(artifact, described.sourceRevision),
                   },
@@ -1921,6 +1922,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /** Metadata for the selected kernel's offered views. */
+  /** The kernel's evaluate options as an evaluation offers them; none by default. */
+  protected getDocumentEvaluateOptionsOffer(_owner: OperationOwner): {
+    evaluateOptions?: { schema: JSONSchema7; defaults: Record<string, unknown> };
+  } {
+    return {};
+  }
+
   protected getDocumentViewOffers(_owner: OperationOwner, _offers?: KernelOffers): readonly ViewOffer[] {
     return [];
   }

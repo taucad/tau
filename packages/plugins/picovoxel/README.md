@@ -177,7 +177,9 @@ serial build, so exact output is identical in every host.
   in-line triangles to stitch merged cells to their neighbours, and dropping them would open cracks.
 
 The render options `meshAdaptivity` (0 to below 1) and `meshRelax` (default `false`) ask for an adaptive
-display mesh in the fast lane; exports always mesh at 0. An exact render that asks for adaptivity is
+display mesh in the fast lane. The viewer's settings menu shows both, since they are evaluate options every
+view shares; a change re-evaluates the model. Exports take the same two options and mesh uniformly (0) unless they
+set one; an adaptive export needs `lane: 'fast'`, and as every fast export, only STL is written. An exact render that asks for adaptivity is
 refused with a typed `REPRESENTATION_UNSUPPORTED` issue. PicoVoxel 0.1.0, whose `toMesh()` takes no
 options, refuses every adaptive request with `KERNEL_CAPABILITY_MISSING`; the pinned 0.2.0 meshes them.
 An unset `meshAdaptivity` never refuses: it meshes uniformly on the exact lane and under 0.1.0, and at

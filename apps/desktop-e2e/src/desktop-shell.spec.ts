@@ -107,7 +107,8 @@ describe('production Electron Terminal keyboard qualification', () => {
     await application.evaluate(({ clipboard }) => {
       clipboard.writeText("printf '%s' 'λ東京' > pasted-one.txt\nprintf '%s' '$literal' > pasted-two.txt");
     });
-    await page.keyboard.press('Control+v');
+    // The platform's terminal paste chord; plain Ctrl+V is ^V for the shell.
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+v' : 'Control+Shift+V');
     await expect
       .poll(async () => page.locator('[data-terminal-screen-mirror]').textContent())
       .toContain('pasted-two.txt');
@@ -148,7 +149,8 @@ describe('production Electron Terminal keyboard qualification', () => {
     await expect.poll(async () => readFile(join(root, 'size-after.txt'), 'utf8')).toMatch(/^\d+ \d+\r?\n$/u);
     expect(await readFile(join(root, 'size-after.txt'), 'utf8')).not.toBe(before);
     await page.getByRole('button', { name: 'Open workbench tab', exact: true }).first().click();
-    await page.getByRole('menuitem', { name: 'Details', exact: true }).click();
+    // The item's name ends with its keyboard shortcut.
+    await page.getByRole('menuitem', { name: /^Details/u }).click();
     await page.locator('.dv-tab[data-tab-panel-id="workbench:terminal"]').click();
     await typeTerminalCommand(page, 'printf %s "$TAU_HIDDEN_SESSION" > hidden-state.txt');
     await expectTerminalFile(root, 'hidden-state.txt', 'retained');
@@ -328,11 +330,15 @@ describe('production Electron Terminal keyboard qualification', () => {
     const { session: desktop, root } = await startTerminal();
     const { page, application } = desktop;
     const window = await application.browserWindow(page);
-    // Keep the CSS viewport on the desktop layout so zoom itself, not a layout switch, is under test.
+    // Keep the CSS viewport on the desktop layout so zoom itself, not a layout switch, is under test. The project
+    // helper emulates a 1440 by 900 viewport, which zoom would halve to the phone layout, where no Terminal is
+    // offered; the emulated viewport, not the window, has to double.
+    await page.setViewportSize({ width: 2880, height: 1800 });
     await window.evaluate((nativeWindow: BrowserWindow) => {
       nativeWindow.setContentSize(2880, 1800);
       nativeWindow.webContents.setZoomFactor(2);
     });
+    await expect.poll(async () => page.evaluate(() => innerWidth)).toBe(1440);
     await page.emulateMedia({ forcedColors: 'active' });
     expect(await window.evaluate((nativeWindow: BrowserWindow) => nativeWindow.webContents.getZoomFactor())).toBe(2);
     expect(await page.evaluate(() => matchMedia('(forced-colors: active)').matches)).toBe(true);

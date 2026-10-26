@@ -192,6 +192,8 @@ const config: KnipConfig = {
         'src/main/index.ts',
         'src/preload/**/*.ts',
         'src/tau/*.entry.ts',
+        // Bundled and launched by the native authority-writer Electron test.
+        'src/tau/fixtures/authority-writer-electron*.fixture.ts',
         'scripts/*.mts',
         // `apps/desktop/macos/project.json` runs both with paths from the workspace root.
         'macos/scripts/*.mts',

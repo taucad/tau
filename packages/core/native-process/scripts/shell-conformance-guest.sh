@@ -40,13 +40,23 @@ sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq
 # Runtime prerequisites (bubblewrap, socat, ripgrep) and the toolchain node-pty builds from source with.
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   apparmor bubblewrap socat ripgrep curl git git-lfs ca-certificates build-essential python3 util-linux \
-  xvfb xauth dbus-x11 xdg-utils libsecret-1-0 libgtk-3-0t64 libnss3 libasound2t64 libatk-bridge2.0-0t64 libcups2t64 \
+  xvfb xauth dbus-x11 dbus-user-session xdg-utils libsecret-1-0 libgtk-3-0t64 libnss3 libasound2t64 libatk-bridge2.0-0t64 libcups2t64 \
   libdrm2 libgbm1 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libx11-xcb1 libxss1 \
   libvulkan1 mesa-vulkan-drivers vulkan-tools docker.io
 case "$ID" in ubuntu) compose_package=docker-compose-v2 ;; debian) compose_package=docker-compose ;; esac
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$compose_package"
 sudo systemctl enable --now docker
 sudo usermod -aG docker tau
+# Named E06 services are real guest services, not absent endpoints mistaken for containment.
+user_uid="$(id -u)"
+sudo loginctl enable-linger tau
+sudo systemctl start "user@$user_uid.service"
+export XDG_RUNTIME_DIR="/run/user/$user_uid"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+sudo -u tau env XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
+  systemctl --user start dbus.socket
+[[ -S /var/run/docker.sock && -S "$XDG_RUNTIME_DIR/bus" ]]
+
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   "$HOME"/bwrap-fixture/tau-staging-runtime-*_amd64.deb "$HOME"/bwrap-fixture/tau-staging_*_amd64.deb
 sudo grep -Fx 'tau-staging-bwrap (unconfined)' /sys/kernel/security/apparmor/profiles
@@ -82,7 +92,9 @@ NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
   TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/shell-service-conformance-receipt.json" \
   pnpm nx run host:test:shell-conformance --skip-nx-cache || status=$?
 # The W7 qualification rows: the agent host over the same provider and bwrap, with their own receipt.
-NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
+sudo -u tau env PATH="$PATH" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
+  GITHUB_SHA="$GITHUB_SHA" GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SERVER_URL="$GITHUB_SERVER_URL" \
+  TAU_SHELL_CONFORMANCE_ROW="$TAU_SHELL_CONFORMANCE_ROW" NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
   TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/shell-qualification-receipt.json" \
   pnpm nx run host:test:shell-qualification --skip-nx-cache || status=$?
 # The desktop Terminal's rows through the services host's terminal concern (W5), with their own receipt.
@@ -93,8 +105,7 @@ NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
 icds=(/usr/share/vulkan/icd.d/lvp_icd*.json)
 [[ "${#icds[@]}" == 1 && -s "${icds[0]}" ]]
 export VK_DRIVER_FILES="${icds[0]}"
-export XDG_RUNTIME_DIR="$HOME/tau-runtime"
-mkdir -m 700 -p "$XDG_RUNTIME_DIR"
+[[ -d "$XDG_RUNTIME_DIR" && -O "$XDG_RUNTIME_DIR" ]]
 xvfb-run -a vulkaninfo --summary > "$evidence/vulkan-summary.txt" 2>&1
 grep -E 'deviceType.*CPU' "$evidence/vulkan-summary.txt"
 sha256sum "$VK_DRIVER_FILES" > "$evidence/vulkan-icd.sha256"

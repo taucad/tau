@@ -443,7 +443,9 @@ describe.runIf(enabled)('shell qualification', () => {
               placement: 'applied-immediately fixture, not revision custody',
               candidate: 'copied directory, not revision checkout owner',
               network: 'controlled DNS/connect preload, not unmodified DNS/rebinding',
-              namedUnixServices: 'unverified; E06 proves reachable owned canaries only',
+              namedUnixServices: linux
+                ? 'E06-services requires reachable Docker, session D-Bus and user systemd positives'
+                : 'systemd not applicable on macOS; Docker and session D-Bus unverified',
             },
             identity,
             results,
@@ -1292,10 +1294,15 @@ describe.runIf(enabled)('shell qualification', () => {
 
   qualification(
     'E06',
-    'reachable owned Unix sockets inside and outside the project are unreachable without a grant',
+    'reachable owned Unix sockets stay unreachable even beside an explicitly read-granted file',
     async () => {
       const inside = join(project, 'data', 'canary.sock');
-      const outside = join(root, 'outside.sock');
+      const externalDirectory = join(root, 'socket-grant');
+      mkdirSync(externalDirectory);
+      const outside = join(externalDirectory, 'outside.sock');
+      const readable = join(externalDirectory, 'readable.txt');
+      writeFileSync(readable, 'GRANTED-FILE-CONTROL\n');
+      expect(readFileSync(readable, 'utf8')).toBe('GRANTED-FILE-CONTROL\n');
       const insideCanary = await unixCanary(inside);
       const outsideCanary = await unixCanary(outside);
       try {
@@ -1315,18 +1322,40 @@ describe.runIf(enabled)('shell qualification', () => {
         const connect = (path: string) =>
           `python3 -c "import socket,sys; s=socket.socket(socket.AF_UNIX); s.settimeout(3); s.connect(sys.argv[1]); print('CONNECTED', s.recv(16))" ${path}`;
         const { outputs } = await drive('e06', [
+          shellCall('e06-client', { command: `python3 -c "import socket; print('AF-UNIX-CLIENT-READY')"` }),
           shellCall('e06-inside', { command: connect(inside) }),
           shellCall('e06-outside', { command: connect(outside) }),
+          shellCall('e06-file-baseline', { command: `cat ${readable}` }),
         ]);
         measurements = {
           reachableOwnedSocketControls: 2,
-          namedDockerSessionBusSystemdServices:
-            'unverified: this row does not establish reachable named services or commands',
+          externalReadableFileOwnerControl: 1,
         };
+        expect(ok(outputs[0]).stdout.text).toBe('AF-UNIX-CLIENT-READY\n');
 
-        for (const output of outputs) {
+        for (const output of outputs.slice(1)) {
           expect(completed(output).exitCode).not.toBe(0);
           expect(completed(output).stdout.text).not.toContain('CONNECTED');
+        }
+        expect(completed(outputs[3]).stdout.text).not.toContain('GRANTED-FILE-CONTROL');
+        const driven = await agentHostOver(
+          'e06-read-grant',
+          widening('e06-granted', {
+            command: `cat ${readable} && ${connect(outside)}`,
+            access: { reason: 'Read the owned external fixture file', read: [externalDirectory] },
+          }),
+        );
+        try {
+          await driven.admit();
+          const asked = await driven.answer('approved');
+          expect(asked.payload).toMatchObject({ kind: 'shell', access: { read: [externalDirectory], write: [] } });
+          const granted = completed(await driven.output('e06-granted'));
+          expect(granted.stdout.text).toBe('GRANTED-FILE-CONTROL\n');
+          expect(granted.exitCode).not.toBe(0);
+          expect(driven.counting.widened(externalDirectory)).toHaveLength(1);
+          measurements['readGrantedFileSucceededWithSocketBlocked'] = 1;
+        } finally {
+          await driven.host.close();
         }
         expect(insideCanary.connections() + outsideCanary.connections()).toBe(2);
       } finally {
@@ -1335,6 +1364,58 @@ describe.runIf(enabled)('shell qualification', () => {
       }
     },
   );
+
+  // On macOS there is no systemd user manager. Its applicability is recorded above, never counted as a service pass.
+  if (linux) {
+    qualification('E06-services', 'reachable Docker, session D-Bus and user systemd remain inaccessible', async () => {
+      const uid = process.getuid!();
+      const runtime = `/run/user/${String(uid)}`;
+      const bus = `${runtime}/bus`;
+      const docker = '/var/run/docker.sock';
+      expect(statSync(docker).isSocket()).toBe(true);
+      expect(statSync(bus).isSocket()).toBe(true);
+      const address = `unix:path=${bus}`;
+      const environment = `/usr/bin/env XDG_RUNTIME_DIR=${runtime} DBUS_SESSION_BUS_ADDRESS=${address}`;
+      const marker = `TAU-SYSTEMD-E06-${String(process.pid)}`;
+      const commands = [
+        `/usr/bin/curl --fail --silent --show-error --max-time 5 --unix-socket ${docker} http://localhost/_ping`,
+        `/usr/bin/busctl --address=${address} --timeout=5 call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetId`,
+        `${environment} /usr/bin/systemd-run --user --wait --pipe --collect --unit=tau-shell-e06-${String(process.pid)} /usr/bin/printf ${marker}`,
+      ];
+      // Run exactly the same explicit address and command outside the sandbox before judging its refusal inside.
+      const controls = commands.map((command) =>
+        execFileSync('/bin/bash', ['--noprofile', '--norc', '-c', command], { encoding: 'utf8', timeout: 15_000 }),
+      );
+      expect(controls[0]).toBe('OK');
+      expect(controls[1]).toMatch(/^s "[a-f0-9]{32}"\n$/u);
+      expect(controls[2]).toBe(marker);
+      measurements = {
+        dockerOwnerPing: 'OK',
+        sessionBusOwnerGetId: 'valid 32-hex ID',
+        userSystemdOwnerMarker: marker,
+        explicitRuntimeDirectory: runtime,
+        explicitSessionBusAddress: address,
+      };
+
+      const { outputs } = await drive('e06-services', [
+        shellCall('e06-services-binaries', {
+          command:
+            '/usr/bin/curl --version && /usr/bin/busctl --version && /usr/bin/systemd-run --version && /usr/bin/env --version',
+        }),
+        ...commands.map((command, index) => shellCall(`e06-service-${String(index)}`, { command })),
+      ]);
+      const binaries = ok(outputs[0]);
+      expect(binaries.stdout.text).toContain('curl');
+      expect(binaries.stdout.text).toContain('systemd');
+      expect(binaries.stdout.text).toContain('GNU coreutils');
+      measurements['sandboxBinaryControls'] = 4;
+      for (const [index, output] of outputs.slice(1).entries()) {
+        const denied = completed(output);
+        expect(denied.exitCode).not.toBe(0);
+        expect(denied.stdout.text).not.toContain(controls[index]!.trim());
+      }
+    });
+  }
 
   qualification('E07', 'an approved and an unapproved run at the same time get independent grants', async () => {
     const checkouts = new Map<string, ShellCheckout>([

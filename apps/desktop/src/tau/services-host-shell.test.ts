@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createFakeShellProvider } from '@taucad/native-process-core/shell';
 
-import { createDesktopShell, desktopShellProvider } from '#tau/services-host-shell.js';
+import { createDesktopShell, desktopShellCustody, desktopShellProvider } from '#tau/services-host-shell.js';
 
 let base = '';
 let project = '';
@@ -131,6 +131,70 @@ describe.runIf(process.platform === 'linux' || process.platform === 'darwin')('c
 
     await expect(shell.probe()).resolves.toMatchObject({ status: 'unavailable', code: 'sandbox-unavailable' });
     expect(current()).toBeUndefined();
+  });
+});
+
+/* I7: the desktop keeps shell receipts in app data and releases an earlier agent receipt once its project answers. */
+describe.runIf(process.platform === 'linux' || process.platform === 'darwin')('createDesktopShell custody', () => {
+  it('keeps the sandbox provider’s receipts in Tau’s app data', () => {
+    expect(desktopShellCustody([appData])).toEqual({
+      directory: join(appData, 'shell-custody'),
+      sessionDirectory: tmpdir(),
+    });
+    expect(desktopShellCustody([])).toBeUndefined();
+  });
+
+  it('releases an earlier agent receipt once the project that owns its checkout registers', async () => {
+    const privateRoot = await mkdtemp(join(tmpdir(), 'tau-shell-'));
+    const provider = createFakeShellProvider(
+      (launch) =>
+        launch.arguments.at(-1)?.includes('BASH_VERSION') === true
+          ? { status: 'started', stdout: '5.2.21(1)-release\n', exit: { exitCode: 0 } }
+          : { status: 'started', stdout: 'ok\n', exit: { exitCode: 0 } },
+      {
+        prior: [
+          {
+            executionId: 'earlier',
+            privateRoot,
+            resource: { key: 'agent:run-0', root: project },
+            phase: 'exited',
+          },
+        ],
+      },
+    );
+    const shell = createDesktopShell({ appDataRoots: [appData], provider, home: base });
+    const probe = await shell.probe();
+    if (probe.status !== 'available') {
+      throw new Error(probe.message);
+    }
+    const released: string[] = [];
+    const checkouts = Object.assign(new Map([['run-1', { cwd: project }]]), {
+      executions: {
+        owns: async (root: string) => root === project,
+        held: async () =>
+          new Map([
+            [
+              'earlier',
+              async () => {
+                released.push('earlier');
+                return { status: 'applied' } as const;
+              },
+            ],
+          ]),
+      },
+    });
+    shell.forProject(project, checkouts);
+
+    await expect.poll(() => provider.released).toContain('earlier');
+    expect(released).toEqual(['earlier']);
+    await expect(
+      probe.shell.run({
+        runId: 'run-1',
+        toolCallId: 'call-1',
+        signal: new AbortController().signal,
+        input: { command: 'pwd' },
+      }),
+    ).resolves.toMatchObject({ status: 'completed' });
   });
 });
 

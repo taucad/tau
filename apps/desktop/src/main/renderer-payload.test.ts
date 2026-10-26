@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, writeFile, rm, symlink } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createPackage } from '@electron/asar';
@@ -25,6 +26,11 @@ const asset = (fileName: string, bytes: Uint8Array<ArrayBuffer>) => ({
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(async (path) => rm(path, { recursive: true, force: true })));
 });
+
+const violationsOf = async (paths: { renderer: string; host: string }) => {
+  const report = await inspectDesktopPayload(paths);
+  return report.violations;
+};
 
 const fixture = async () => {
   const root = await mkdtemp(join(tmpdir(), 'tau-payload-test-'));
@@ -93,6 +99,64 @@ describe('Desktop renderer ownership', () => {
     const duplicated = await inspectDesktopPayload(paths);
     expect(duplicated.violations).toEqual([
       `Renderer WASM budget exceeded: ${2 * kcl.byteLength + clipper.byteLength} bytes`,
+    ]);
+  });
+
+  it('should admit the Terminal VT engine only from its owning UI manifest and budget one copy', async () => {
+    const paths = await fixture();
+    const ghosttySource = createRequire(join(import.meta.dirname, '../../../ui/package.json'))
+      .resolve('@aurigax-ai/ghostty-web/ghostty-vt.wasm')
+      .replaceAll('\\', '/');
+    const [ghostty, clipper] = await Promise.all([
+      readFile(ghosttySource).then((bytes) => Uint8Array.from(bytes)),
+      readFile(clipperSource).then((bytes) => Uint8Array.from(bytes)),
+    ]);
+    const writeGraph = async (ghosttyFileNames: string[]) =>
+      writeFile(
+        join(paths.renderer, 'tau-module-graph-123.json'),
+        JSON.stringify({
+          chunks: [{ fileName: 'renamed.js', moduleIds: ['apps/ui/app/root-layout.tsx'] }],
+          assets: [
+            asset('clipper2z.wasm', clipper),
+            ...ghosttyFileNames.map((fileName) => ({ ...asset(fileName, ghostty), sourcePath: ghosttySource })),
+          ],
+        }),
+      );
+    await Promise.all([
+      writeFile(join(paths.renderer, 'clipper2z.wasm'), clipper),
+      writeFile(join(paths.renderer, 'ghostty-vt-123.wasm'), ghostty),
+      writeGraph(['ghostty-vt-123.wasm']),
+    ]);
+    expect(await violationsOf(paths)).toEqual([]);
+
+    // Other bytes under the Terminal's name are not its producer.
+    await Promise.all([writeFile(join(paths.renderer, 'ghostty-vt-123.wasm'), clipper), writeGraph([])]);
+    expect(await violationsOf(paths)).toEqual([
+      'Renderer WASM lacks allowed producer provenance: ghostty-vt-123.wasm (missing)',
+    ]);
+
+    // With every approved producer present, a second Terminal copy exceeds the one-copy budget.
+    const kclSource = require.resolve('@taucad/kcl-wasm-lib/kcl.wasm').replaceAll('\\', '/');
+    const kcl = Uint8Array.from(await readFile(kclSource));
+    await Promise.all([
+      writeFile(join(paths.renderer, 'ghostty-vt-123.wasm'), ghostty),
+      writeFile(join(paths.renderer, 'ghostty-vt-copy.wasm'), ghostty),
+      writeFile(join(paths.renderer, 'kcl_wasm_lib_bg.wasm'), kcl),
+      writeFile(
+        join(paths.renderer, 'tau-module-graph-123.json'),
+        JSON.stringify({
+          chunks: [{ fileName: 'renamed.js', moduleIds: ['apps/ui/app/root-layout.tsx'] }],
+          assets: [
+            asset('clipper2z.wasm', clipper),
+            { ...asset('kcl_wasm_lib_bg.wasm', kcl), sourcePath: kclSource },
+            { ...asset('ghostty-vt-123.wasm', ghostty), sourcePath: ghosttySource },
+            { ...asset('ghostty-vt-copy.wasm', ghostty), sourcePath: ghosttySource },
+          ],
+        }),
+      ),
+    ]);
+    expect(await violationsOf(paths)).toEqual([
+      `Renderer WASM budget exceeded: ${kcl.byteLength + clipper.byteLength + 2 * ghostty.byteLength} bytes`,
     ]);
   });
 
@@ -195,6 +259,46 @@ describe('Desktop renderer ownership', () => {
         'Renderer JavaScript is absent from module graph: renamed.js',
       ]),
     );
+  });
+
+  it('should classify the Terminal trampoline builder only in a chunk made wholly of its package', async () => {
+    const paths = await fixture();
+    const packageRoot = createRequire(join(import.meta.dirname, '../../../ui/package.json'))
+      .resolve('@aurigax-ai/ghostty-web/ghostty-vt.wasm')
+      .replace(/ghostty-vt\.wasm$/u, '');
+    const abi = relative(
+      join(import.meta.dirname, '../../../..'),
+      join(realpathSync(packageRoot), 'lib/abi.ts'),
+    ).replaceAll('\\', '/');
+    const trampoline = 'export const t = () => new Uint8Array([0,97,115,109,1,0,0,0]);';
+    const writeChunk = async (source: string, moduleIds: string[]) =>
+      Promise.all([
+        writeFile(join(paths.renderer, 'lib-123.js'), source),
+        writeFile(
+          join(paths.renderer, 'tau-module-graph-123.json'),
+          JSON.stringify({
+            chunks: [
+              { fileName: 'renamed.js', moduleIds: ['apps/ui/app/root-layout.tsx'] },
+              { fileName: 'lib-123.js', moduleIds },
+            ],
+          }),
+        ),
+      ]);
+
+    await writeChunk(trampoline, [abi]);
+    expect(await violationsOf(paths)).toEqual([]);
+
+    // Another module sharing the chunk could be the one that carries the bytes.
+    await writeChunk(trampoline, [abi, 'apps/ui/app/root-layout.tsx']);
+    expect(await violationsOf(paths)).toEqual(['Embedded WASM requires producer classification: lib-123.js']);
+
+    // Encoded WASM is a shipped binary, not a generated header, even from the producer's package.
+    await writeChunk(`${trampoline} const b = "AGFzbQEAAAA=";`, [abi]);
+    expect(await violationsOf(paths)).toEqual(['Embedded WASM requires producer classification: lib-123.js']);
+
+    // A look-alike path outside the installed package is not the producer.
+    await writeChunk(trampoline, ['vendor/ghostty-web/lib/abi.ts']);
+    expect(await violationsOf(paths)).toEqual(['Embedded WASM requires producer classification: lib-123.js']);
   });
 
   it('should reject unclassified binary data while allowing shipped images and fonts', async () => {

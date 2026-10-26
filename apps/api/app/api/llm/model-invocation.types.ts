@@ -3,7 +3,7 @@ import type { FinancialActivityKind } from '@taucad/billing';
 
 export const modelInvocationServiceKey = Symbol('modelInvocationService');
 
-export type ModelInvocationSurface = 'gateway' | 'project_name' | 'commit_name' | 'code_completion';
+export type ModelInvocationSurface = 'gateway' | 'project_name' | 'commit_name';
 export type ModelProviderWire = 'anthropic' | 'openai-completions' | 'openai-responses';
 
 export type ModelInvocationIntent = {

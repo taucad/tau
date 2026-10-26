@@ -618,7 +618,7 @@ export class FileContentService {
   }
 
   /**
-   * Persist Monaco working-copy changes with one active write and one
+   * Persist editor working-copy changes with one active write and one
    * replaceable latest value per workspace path.
    *
    * Each write is checked against the bytes the editor's text was made from —
@@ -1159,7 +1159,7 @@ export class FileContentService {
 
   /**
    * Subscribe to all content change events.
-   * Used by MonacoModelService, FileTreeService, toast notifications.
+   * Used by EditorDocumentSession, FileTreeService, toast notifications.
    * @param handler - Invoked for every {@link ContentChangeEvent}.
    * @returns Unsubscribe function removing `handler`.
    */

@@ -866,7 +866,7 @@ const ViewerContent = memo(function ({
         if (
           !(target instanceof HTMLElement) ||
           target.isContentEditable ||
-          target.closest('input, textarea, select, [contenteditable], [role="textbox"], .monaco-editor')
+          target.closest('input, textarea, select, [contenteditable], [role="textbox"], .cm-editor')
         ) {
           return;
         }

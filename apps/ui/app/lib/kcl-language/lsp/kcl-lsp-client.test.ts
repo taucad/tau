@@ -38,10 +38,14 @@ class GenericMockWorker {
   public terminated = false;
 
   private messageListeners: MessageListener[] = [];
+  private readonly errorListeners: MessageListener[] = [];
+  public readonly stallMethods = new Set<string>();
 
   public addEventListener(type: string, listener: MessageListener): void {
     if (type === 'message') {
       this.messageListeners.push(listener);
+    } else if (type === 'error') {
+      this.errorListeners.push(listener);
     }
   }
 
@@ -74,12 +78,19 @@ class GenericMockWorker {
     }
   }
 
+  public emitError(): void {
+    for (const listener of this.errorListeners) {
+      listener(new MessageEvent('error'));
+    }
+  }
+
   private respondToMessage(data: Uint8Array<ArrayBuffer>): void {
     const request = decodeMessage<JSONRPCRequest>(data);
 
     if (request.id === null || request.id === undefined) {
       return;
     }
+    if (this.stallMethods.has(request.method)) { return; }
 
     const result =
       request.method === 'initialize'
@@ -120,6 +131,21 @@ afterEach(() => {
 });
 
 describe('KclLspClient', () => {
+  it('reports a fatal worker error and rejects an in-flight LSP request', async () => {
+    const onError = vi.fn();
+    const client = new KclLspClient({ fs: createTestFs(), onError });
+    await client.initialize();
+    mockWorker.stallMethods.add('textDocument/hover');
+    const pending = client.textDocumentHover({ textDocument: { uri: 'file:///main.kcl' }, position: { line: 0, character: 0 } });
+    await vi.waitFor(() => { expect(mockWorker.postMessageCalls.some((call) => {
+      const event = call as LspWorkerEvent;
+      return event.eventType === lspWorkerEventType.call && decodeMessage<JSONRPCRequest>(event.eventData as Uint8Array<ArrayBuffer>).method === 'textDocument/hover';
+    })).toBe(true); });
+    mockWorker.emitError();
+    await expect(pending).rejects.toThrow('disposed');
+    expect(onError).toHaveBeenCalledOnce();
+    expect(mockWorker.terminated).toBe(true);
+  });
   describe('initialization', () => {
     it('should initialize and become ready', async () => {
       const client = new KclLspClient({ fs: createTestFs() });

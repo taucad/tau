@@ -275,9 +275,9 @@ const saveRevisionInBrowser = async (client: BrowserClient): Promise<void> => {
   await client.page.keyboard.press(`${modifier}+KeyS`);
 };
 
-/** Focus the visible Monaco surface before sending keyboard input to its model. */
+/** Focus the visible CodeMirror content before sending keyboard input. */
 const focusBrowserEditor = async (client: BrowserClient): Promise<void> => {
-  const surface = client.page.locator('.editor-container:visible .monaco-editor .view-lines').last();
+  const surface = client.page.locator('.editor-container:visible .cm-editor .cm-content').last();
   await surface.waitFor({ state: 'visible', timeout: 60_000 });
   await surface.click();
 };
@@ -1514,13 +1514,13 @@ describe('a project on the browser client', () => {
       await client.page.getByRole('button', { name: 'cad-openscad', exact: true }).last().click();
       await client.page.keyboard.press('Control+KeyF');
       await client.page.getByRole('button', { name: 'View source', exact: true }).last().click();
-      const skillEditor = client.page.locator('.editor-container:visible .monaco-editor').last();
+      const skillEditor = client.page.locator('.editor-container:visible .cm-editor').last();
       await skillEditor.waitFor({ state: 'visible', timeout: 60_000 });
-      const skillSource = skillEditor.locator('.view-lines');
+      const skillSource = skillEditor.locator('.cm-content');
       await expect
         .poll(
           async () => {
-            // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- Monaco's token spans need rendered spacing; textContent collapses `OpenSCAD authoring` into `OpenSCADauthoring`.
+            // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- CodeMirror token spans need rendered spacing; textContent collapses `OpenSCAD authoring` into `OpenSCADauthoring`.
             const renderedSource = await skillSource.innerText();
             return renderedSource.replaceAll('\u00A0', ' ');
           },
@@ -1530,8 +1530,8 @@ describe('a project on the browser client', () => {
           },
         )
         .toContain('OpenSCAD authoring');
-      await expect(skillEditor.getByRole('textbox').getAttribute('aria-autocomplete')).resolves.toBe('none');
-      // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- read the same rendered Monaco text before and after the rejected edit.
+      await expect(skillEditor.locator('.cm-content').getAttribute('contenteditable')).resolves.toBe('false');
+      // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- read the same rendered CodeMirror text before and after the rejected edit.
       const sourceBeforeEditAttempt = await skillSource.innerText();
       await skillEditor.getByRole('textbox').focus();
       await client.page.keyboard.insertText('must-not-edit-system-skill');

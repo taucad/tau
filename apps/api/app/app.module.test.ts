@@ -8,6 +8,7 @@ import { getEnvironment } from '#config/environment.config.js';
 import { Test } from '@nestjs/testing';
 import { describe, expect, it } from 'vitest';
 import { AppModule } from '#app.module.js';
+import { ApiModule } from '#api/api.module.js';
 import { ChatController } from '#api/chat/chat.controller.js';
 import { DirectModelInvocationService } from '#api/llm/direct-model-invocation.service.js';
 
@@ -34,6 +35,9 @@ describe('AppModule', () => {
     // and telemetry in one constructor.
     expect(moduleRef.get(ChatController)).toBeInstanceOf(ChatController);
     expect(moduleRef.get(DirectModelInvocationService)).toBeInstanceOf(DirectModelInvocationService);
+    expect(ApiModule.forRoot({ tauCloudEnabled: false }).imports?.map((entry) =>
+      typeof entry === 'function' ? entry.name : 'module' in entry ? entry.module.name : '',
+    )).not.toContain('CodeCompletionModule');
     expect(() => moduleRef.get(BillingPaymentsService)).toThrow();
   });
 

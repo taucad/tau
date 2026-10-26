@@ -1442,39 +1442,5 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         streaming: true,
       },
     },
-    // Off-catalog metering row (AD14): the code-completion service bills its
-    // Cerebras calls through the credit ledger via getModelCost; never listed.
-    'llama-3.3-70b': {
-      enabled: false,
-      id: 'cerebras-llama-3.3-70b',
-      providerKind: 'tau-hosted',
-      name: 'Llama 3.3 70B (completion metering)',
-      slug: 'cerebras-llama-3.3-70b',
-      description: 'Internal cost-metering entry for the inline code-completion service.',
-      provider: {
-        id: 'cerebras',
-        name: 'Cerebras',
-      },
-      model: 'llama-3.3-70b',
-      support: {
-        toolChoice: false,
-        modalities: textOnlyModalities,
-      },
-      details: {
-        family: 'llama',
-        families: ['llama'],
-        contextWindow: 128_000,
-        maxTokens: 8192,
-        cost: {
-          inputTokens: 0.85,
-          outputTokens: 1.2,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: false,
-      },
-    },
   },
 } as const satisfies Record<CloudCatalogProviderId, Record<string, ModelListEntry>>;

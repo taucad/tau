@@ -48,8 +48,6 @@ import { BillingUsageService } from '#api/billing/billing-usage.service.js';
 import { BillingEstimatesService } from '#api/billing/billing-estimates.service.js';
 import { ChatController } from '#api/chat/chat.controller.js';
 import { ChatService } from '#api/chat/chat.service.js';
-import { CodeCompletionController } from '#api/code-completion/code-completion.controller.js';
-import { CodeCompletionService } from '#api/code-completion/code-completion.service.js';
 import { LlmGatewayController } from '#api/llm/llm-gateway.controller.js';
 import { LlmGatewayAuthGuard } from '#api/llm/llm-gateway.guard.js';
 import { LlmGatewayService } from '#api/llm/llm-gateway.service.js';
@@ -933,7 +931,6 @@ describe('funded invocation HTTP boundary', () => {
             BillingController,
             BillingAttemptController,
             ChatController,
-            CodeCompletionController,
             LlmGatewayController,
           ],
           providers: [
@@ -959,7 +956,6 @@ describe('funded invocation HTTP boundary', () => {
             { provide: BillingAccountClosureService, useValue: mockDeep<BillingAccountClosureService>() },
             LlmGatewayService,
             ChatService,
-            CodeCompletionService,
           ],
         }).compile();
         app = module.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -1118,7 +1114,7 @@ describe('funded invocation HTTP boundary', () => {
         };
         await invokeNameGenerator('project_name');
         await invokeNameGenerator('commit_name');
-        const completion = await fetch(`${base}/v1/code-completion`, {
+        const retiredCompletion = await fetch(`${base}/v1/code-completion`, {
           method: 'POST',
           headers,
           body: JSON.stringify({
@@ -1126,10 +1122,9 @@ describe('funded invocation HTTP boundary', () => {
             completionMetadata: { textBeforeCursor: 'const value = ', textAfterCursor: ';' },
           }),
         });
-        expect(completion.status).toBe(200);
-        expect(completion.headers.get('x-tau-operation-id')).toBeTypeOf('string');
-        await completion.text();
-        expect(requests).toBe(4);
+        expect(retiredCompletion.status).toBe(404);
+        expect(retiredCompletion.headers.get('x-tau-operation-id')).toBeNull();
+        expect(requests).toBe(3);
 
         delayBody = true;
         const disconnectedAttempt = `disconnected-${randomUUID()}`;
@@ -1160,7 +1155,7 @@ describe('funded invocation HTTP boundary', () => {
             return operation !== undefined && operation.cancellationRequestedAt !== null;
           })
           .toBe(true);
-        expect(requests).toBe(5);
+        expect(requests).toBe(4);
         delayBody = false;
 
         rejectProvider = true;
@@ -1177,7 +1172,7 @@ describe('funded invocation HTTP boundary', () => {
         });
         expect(rejected.status).toBe(503);
         expect(rejected.headers.get('x-tau-operation-id')).toBeTypeOf('string');
-        expect(requests).toBe(6);
+        expect(requests).toBe(5);
 
         rejectProvider = false;
         delayBody = true;
@@ -1201,8 +1196,8 @@ describe('funded invocation HTTP boundary', () => {
         } else {
           expect(malformedRead.reason).toBeInstanceOf(Error);
         }
-        expect(requests).toBe(7);
-        expect(countBodies).toHaveLength(exactCount ? 7 : 0);
+        expect(requests).toBe(6);
+        expect(countBodies).toHaveLength(exactCount ? 6 : 0);
 
         const ownLookup = await fetch(`${base}/v1/billing/attempts/gateway/${gatewayAttempt}`, { headers });
         expect(ownLookup.status).toBe(200);

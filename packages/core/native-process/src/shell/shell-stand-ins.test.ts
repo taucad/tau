@@ -4,22 +4,30 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import type * as NodeFs from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { holdProtectedStandIns, useStandInJournal } from '#shell/shell-stand-ins.js';
 import type { StandInProfile } from '#shell/shell-stand-ins.js';
 
+vi.mock('node:fs', async (importOriginal) => {
+  const fs = await importOriginal<typeof NodeFs>();
+  return { ...fs, renameSync: vi.fn(fs.renameSync) };
+});
+
 const roots: string[] = [];
 afterEach(() => {
+  vi.mocked(renameSync).mockReset();
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -160,5 +168,66 @@ describe.runIf(process.platform === 'linux')('Linux protected-path stand-ins', (
     expect(existsSync(join(left, '.tau', 'runs', 'lease.json'))).toBe(true);
     expect(existsSync(join(left, 'thumbnail.webp'))).toBe(true);
     expect(JSON.parse(readFileSync(next, 'utf8'))).toStrictEqual([]);
+  });
+});
+
+describe('stand-in journal cleanup', () => {
+  const crashedFile = () => {
+    const root = temporary('tau-stand-in-cleanup-');
+    const path = join(root, 'thumbnail.webp');
+    const journal = join(temporary('tau-stand-in-journal-'), 'journal.json');
+    writeFileSync(path, '');
+    const info = lstatSync(path, { bigint: true });
+    writeFileSync(journal, JSON.stringify([{ path, directory: false, dev: String(info.dev), ino: String(info.ino) }]));
+    return { root, path, journal };
+  };
+
+  it('should preserve an authored sibling with the old cleanup-aside name', async () => {
+    vi.resetModules();
+    const { useStandInJournal: sweep } = await import('#shell/shell-stand-ins.js');
+    const { root, path, journal } = crashedFile();
+    const canary = join(root, `.thumbnail.webp.tau-stand-in-${String(process.pid)}-1`);
+    writeFileSync(canary, 'authored canary bytes');
+
+    sweep(journal);
+
+    expect(readFileSync(canary, 'utf8')).toBe('authored canary bytes');
+    expect(existsSync(path)).toBe(false);
+    expect(readdirSync(root)).toStrictEqual([basename(canary)]);
+  });
+
+  it('should restore a file replaced between the identity lookup and rename', async () => {
+    const { renameSync: rename } = await vi.importActual<typeof NodeFs>('node:fs');
+    const { root, path, journal } = crashedFile();
+    const replacement = join(root, 'replacement');
+    writeFileSync(replacement, 'concurrent authored bytes');
+    vi.mocked(renameSync).mockImplementationOnce((source, destination) => {
+      rename(replacement, path);
+      rename(source, destination);
+    });
+
+    useStandInJournal(journal);
+
+    expect(readFileSync(path, 'utf8')).toBe('concurrent authored bytes');
+    expect(readdirSync(root)).toStrictEqual(['thumbnail.webp']);
+  });
+
+  it('should retain both authored files when restoration finds the path occupied', async () => {
+    const { renameSync: rename } = await vi.importActual<typeof NodeFs>('node:fs');
+    const { path, journal } = crashedFile();
+    const replacement = `${path}.next`;
+    let movedPath = '';
+    writeFileSync(replacement, 'first authored bytes');
+    vi.mocked(renameSync).mockImplementationOnce((source, destination) => {
+      rename(replacement, path);
+      rename(source, destination);
+      movedPath = String(destination);
+      writeFileSync(path, 'second authored bytes');
+    });
+
+    useStandInJournal(journal);
+
+    expect(readFileSync(path, 'utf8')).toBe('second authored bytes');
+    expect(readFileSync(movedPath, 'utf8')).toBe('first authored bytes');
   });
 });

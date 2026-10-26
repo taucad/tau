@@ -6,6 +6,7 @@ import {
   linkSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
   readFileSync,
   renameSync,
@@ -25,7 +26,6 @@ type JournalRow = Readonly<{ path: string; directory: boolean; dev: string; ino:
 const standIns = new Map<string, StandIn>();
 let journalPath: string | undefined;
 let exitHookRegistered = false;
-let privateNames = 0;
 
 const inside = (path: string, root: string): boolean => {
   const step = relative(root, path);
@@ -54,9 +54,12 @@ const writeJournal = (): void => {
 
 /**
  * Remove one stand-in only while it is still the entry this process created, and still empty. A directory is removed
- * by `rmdir`, which refuses a non-empty directory atomically. A file is first renamed to a private name in the same
- * directory, so a real file renamed into place meanwhile is never the one unlinked; anything that is not the empty
- * stand-in is put back.
+ * by `rmdir`, which refuses a non-empty directory atomically. A file is first renamed inside an exclusively allocated
+ * sibling directory, so no existing destination is overwritten. Anything that is not the empty stand-in is put back
+ * without replacing a newer entry, or retained in the private directory if restoration fails.
+ *
+ * @param path - The claimed stand-in path.
+ * @param expected - The entry kind and identity recorded when it was created.
  */
 const removeStandIn = (path: string, expected: Readonly<{ directory: boolean; dev: string; ino: string }>): void => {
   try {
@@ -73,17 +76,22 @@ const removeStandIn = (path: string, expected: Readonly<{ directory: boolean; de
     if (!info!.isFile() || info!.size !== 0n) {
       return;
     }
-    privateNames += 1;
-    const aside = join(dirname(path), `.${basename(path)}.tau-stand-in-${String(process.pid)}-${String(privateNames)}`);
-    renameSync(path, aside);
-    const moved = identity(aside);
-    if (sameEntry(moved, expected) && moved!.isFile() && moved!.size === 0n) {
+    const privateDirectory = mkdtempSync(join(dirname(path), `.${basename(path)}.tau-stand-in-`));
+    const aside = join(privateDirectory, 'entry');
+    try {
+      renameSync(path, aside);
+      const moved = identity(aside);
+      if (sameEntry(moved, expected) && moved!.isFile() && moved!.size === 0n) {
+        unlinkSync(aside);
+        return;
+      }
+      // Not ours any more: put it back without replacing anything that has since appeared at the path.
+      linkSync(aside, path);
       unlinkSync(aside);
-      return;
+    } finally {
+      // Only remove an empty container; a replacement we could not restore must survive.
+      rmdirSync(privateDirectory);
     }
-    // Not ours any more: put it back without replacing anything that has since appeared at the path.
-    linkSync(aside, path);
-    unlinkSync(aside);
   } catch {
     // Already gone, no longer ours, or not empty: left in place.
   }

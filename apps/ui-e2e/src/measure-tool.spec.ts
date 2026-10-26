@@ -355,10 +355,16 @@ for (const backend of ['webgl', 'webgpu'] as const) {
       await chooseByTyping('Measurement mode', 'Points');
       await toggleTargetControls();
       await tapWorldPoint(insetTowardsFaceCenter(nearCorner));
+      // A tap before the model's feature graph is prepared previews its target once the worker answers.
+      await expect
+        .poll(async () => {
+          const state = await measureState();
+          return state.activeCandidateId;
+        })
+        .toBeTruthy();
       const preview = await measureState();
       expect(preview.currentStart).toBeUndefined();
       expect(preview.measurements).toHaveLength(0);
-      expect(preview.activeCandidateId).toBeTruthy();
       await toggleTargetControls();
       await target.click(selectors.getByRole('button', { name: 'Use target', exact: true }));
       await expect

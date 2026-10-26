@@ -185,6 +185,15 @@ export function CodeEditorView({
   const editable = useRef(new Compartment());
   const highlightedLines = useRef(new Compartment());
   const callbacksRef = useRef({ onApply, onHistory, onMount, readOnly });
+  const mountRegistration = useRef<
+    | {
+        view: EditorView;
+        path: string;
+        callback: CodeEditorProps['onMount'];
+        dispose?: () => void;
+      }
+    | undefined
+  >(undefined);
   const historyRef = useRef<{ kind: 'typing' | 'composition'; groupId: string; at: number } | undefined>(undefined);
   const historySequence = useRef(0);
   const markedFirstEdit = useRef(false);
@@ -335,10 +344,20 @@ export function CodeEditorView({
         forceLinting(view);
       }
     });
-    const disposeMount = callbacksRef.current.onMount?.(view);
+    const callback = callbacksRef.current.onMount;
+    const dispose = callback?.(view, document.path);
+    mountRegistration.current = {
+      view,
+      path: document.path,
+      callback,
+      dispose: typeof dispose === 'function' ? dispose : undefined,
+    };
     return () => {
       rememberViewPosition(document, viewId, view);
-      disposeMount?.();
+      if (mountRegistration.current?.view === view) {
+        mountRegistration.current.dispose?.();
+        mountRegistration.current = undefined;
+      }
       unsubscribe();
       unsubscribeDiagnostics?.();
       viewRef.current = undefined;
@@ -346,6 +365,26 @@ export function CodeEditorView({
       overlay.remove();
     };
   }, [diagnostics, document, isMobile, viewId]);
+
+  const documentPath = document.path;
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) {
+      return;
+    }
+    const registered = mountRegistration.current;
+    if (registered?.view === view && registered.path === documentPath && registered.callback === onMount) {
+      return;
+    }
+    registered?.dispose?.();
+    const dispose = onMount?.(view, documentPath);
+    mountRegistration.current = {
+      view,
+      path: documentPath,
+      callback: onMount,
+      dispose: typeof dispose === 'function' ? dispose : undefined,
+    };
+  }, [documentPath, onMount]);
 
   useEffect(() => {
     const view = viewRef.current;

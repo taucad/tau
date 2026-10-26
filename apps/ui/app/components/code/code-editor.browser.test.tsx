@@ -9,6 +9,7 @@ import { VirtualDeclarationDialog } from '#components/code/virtual-declaration-d
 import { jsonDepthHighlighting } from '#components/code/json-depth-highlighting.js';
 import { EditorDocument } from '#lib/editor-document.js';
 import { EditorDocumentSession, maxBackgroundDocuments } from '#lib/editor-document-session.js';
+import { clearEditorNavigation, registerEditorView, requestEditorNavigation } from '#lib/editor-navigation-service.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { EditorNavigationTarget } from '#lib/editor-language-environment.js';
 import { Theme, ThemeProvider } from '#hooks/use-theme.js';
@@ -72,6 +73,71 @@ it('shares accepted text and undo across split views without sharing focus', asy
   await userEvent.keyboard(isMac ? '{Meta>}z{/Meta}' : '{Control>}z{/Control}');
   await expect.poll(() => sourceDocument.text).toBe('alpha');
   await expect.poll(() => container.querySelectorAll('.cm-content')[0]?.textContent).toContain('alpha');
+});
+
+it('moves navigation to a renamed path without remounting the editor view', async () => {
+  const sourceDocument = new EditorDocument('before.ts', 'first line\nsecond line\n');
+  let view: EditorView | undefined;
+  const editor = (document: EditorDocument) => (
+    <div className='h-72'>
+      <CodeEditor
+        document={document}
+        viewId='rename-pane'
+        languageId='typescript'
+        onMount={(mounted, path) => {
+          view = mounted;
+          return registerEditorView({
+            projectId: 'rename-browser',
+            path,
+            paneId: 'rename-pane',
+            reveal: (line, column) => {
+              const row = mounted.state.doc.line(line);
+              mounted.dispatch({ selection: { anchor: row.from + column - 1 } });
+            },
+          });
+        }}
+      />
+    </div>
+  );
+  const { rerender, unmount } = render(editor(sourceDocument));
+  try {
+    await expect.poll(() => view).toBeDefined();
+    const initialView = view;
+    sourceDocument.rename('after.ts');
+    rerender(editor(sourceDocument));
+    requestEditorNavigation({
+      projectId: 'rename-browser',
+      path: 'before.ts',
+      paneId: 'rename-pane',
+      line: 2,
+      column: 3,
+    });
+    expect(view?.state.selection.main.head).toBe(0);
+    requestEditorNavigation({
+      projectId: 'rename-browser',
+      path: 'after.ts',
+      paneId: 'rename-pane',
+      line: 2,
+      column: 3,
+    });
+    expect(view).toBe(initialView);
+    expect(view?.state.selection.main.head).toBe(sourceDocument.text.indexOf('second') + 2);
+
+    const replacement = new EditorDocument('after.ts', 'replacement\nnew second line\n');
+    rerender(editor(replacement));
+    await expect.poll(() => view === initialView).toBe(false);
+    requestEditorNavigation({
+      projectId: 'rename-browser',
+      path: 'after.ts',
+      paneId: 'rename-pane',
+      line: 2,
+      column: 3,
+    });
+    expect(view?.state.selection.main.head).toBe(replacement.text.indexOf('new second') + 2);
+  } finally {
+    unmount();
+    clearEditorNavigation('rename-browser');
+  }
 });
 
 it('opens editor context actions and its search panel', async () => {

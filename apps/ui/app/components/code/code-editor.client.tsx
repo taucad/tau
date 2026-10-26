@@ -29,7 +29,8 @@ export type CodeEditorProps = Readonly<{
   lineHighlights?: ReadonlyArray<Readonly<{ fromLine: number; toLine: number; tone: 'mine' | 'theirs' }>>;
   onApply?: (transaction: DocumentTransaction) => DocumentChange | undefined;
   onHistory?: (kind: 'undo' | 'redo') => DocumentChange | undefined;
-  onMount?: (view: EditorView) => void | (() => void);
+  /** Re-registers when the mounted view's document path changes. */
+  onMount?: (view: EditorView, path: string) => void | (() => void);
 }>;
 
 export type CodeEditorBoundaryProps = Omit<CodeEditorProps, 'document' | 'syntaxExtension'> &

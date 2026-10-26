@@ -135,10 +135,10 @@ function MountedCodeEditor({
         onHistory={document ? (kind) => onHistory(document, kind) : undefined}
         onMount={
           document
-            ? (view) =>
+            ? (view, path) =>
                 registerEditorView({
                   projectId,
-                  path: document.path,
+                  path,
                   paneId,
                   reveal: (line, column) => {
                     const textLine = view.state.doc.line(Math.max(1, Math.min(line, view.state.doc.lines)));

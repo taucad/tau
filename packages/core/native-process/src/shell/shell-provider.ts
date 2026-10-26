@@ -38,7 +38,10 @@ export type ShellFilesystem = Readonly<{
    * and absent directory roots are omitted. Unknown temporary children never reach the host filesystem.
    * On both platforms a file root cannot be atomically replaced through a temporary sibling inside the
    * container, because that sibling is an unknown child. Listing the container shows only the opened
-   * children on Linux and is refused on macOS.
+   * children on Linux and is refused on macOS, as is listing a directory between it and an opened child.
+   * Recursive tools run from the checkout (`find`, `grep -r`, `ls -R`) therefore report an error and exit
+   * non-zero on macOS. A hidden entry fails with EPERM on macOS but ENOENT on Linux, so on macOS a guessed
+   * name can be confirmed to exist, though never read, listed or stat-ed.
    */
   masked?: readonly string[] | undefined;
 }>;

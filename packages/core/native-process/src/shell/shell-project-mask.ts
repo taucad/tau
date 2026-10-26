@@ -88,8 +88,9 @@ export const bindMaskedDirectories = (
     return undefined;
   }
   const regexEscape = (path: string): string => path.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`);
-  // Volumes on macOS are normally case-insensitive, so a path may be spelled in any letter case. Fold every ASCII
-  // letter of the parent and the reserved name; on a case-sensitive volume this only over-protects.
+  // Seatbelt matches the path of the resolved vnode, not the caller's spelling, so the parent keeps its physical
+  // spelling: C16 reaches an authored child, and is refused a hidden one, through an upper-cased checkout path.
+  // Only the reserved name is folded, for distinct spellings on a case-sensitive volume.
   const fold = (text: string): string =>
     [...text]
       .map((character) =>
@@ -100,7 +101,7 @@ export const bindMaskedDirectories = (
     .flatMap((root) => {
       // Registry-reserved names are ASCII. Match their trailing dot/space/colon spellings without interpreting
       // arbitrary path bytes as SBPL or regex syntax.
-      const container = `^${fold(dirname(root))}/${fold(basename(root))}[. ]*(:[^/]*)?`;
+      const container = `^${regexEscape(dirname(root))}/${fold(basename(root))}[. ]*(:[^/]*)?`;
       const region = `(regex ${JSON.stringify(`${container}(/.*)?$`)})`;
       const itself = `(regex ${JSON.stringify(`${container}$`)})`;
       const within = (paths: readonly string[]): string[] =>
@@ -122,8 +123,9 @@ export const bindMaskedDirectories = (
           : `(require-all ${region} ${[...new Set(filters)].map((filter) => `(require-not ${filter})`).join(' ')})`;
       return [
         `(deny file-read* ${subtract([itself, ...between, ...explicit(opened)])})`,
-        // The container stays traversable, but listing it would disclose every hidden name.
-        `(deny file-read-data ${itself})`,
+        // The container and the directories leading to opened children stay traversable, but listing any of
+        // them would disclose hidden names.
+        `(deny file-read-data ${[itself, ...new Set(between)].join(' ')})`,
         // The runtime allows directory metadata everywhere with an operation-specific rule, which outranks the
         // wildcard above; hidden directories must not even be stat-able.
         `(deny file-read-metadata ${subtract([itself, ...between, ...explicit(opened)])})`,

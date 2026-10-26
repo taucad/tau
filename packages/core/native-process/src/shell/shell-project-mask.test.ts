@@ -74,7 +74,7 @@ describe('macOS masked directory profile composition', () => {
     expect(reads).toContain('(require-not (subpath "/project/.tau/chats"))');
     expect(writes).not.toContain('/project/.tau/chats');
     expect(writes).toContain('(deny file-write-create file-write-unlink (require-all (regex');
-    expect(reads).toContain('(deny file-read-data (regex "^/[pP][rR][oO][jJ][eE][cC][tT]/');
+    expect(reads).toContain('(deny file-read-data (regex "^/project/');
     expect(reads).toContain('(deny file-read-metadata (require-all (regex');
     expect(reads).toContain('(require-not (subpath "/project/.tau/parameters"))');
     expect(appended).toContain('[tT][aA][uU][. ]*(:[^/]*)?');

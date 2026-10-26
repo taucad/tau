@@ -1027,6 +1027,7 @@ groups:
           kind: trigger
           trigger: telemetry-heartbeat
           package: runtime-observability
+          repeat_interval: 7d
         isPaused: true
       - uid: alerting-rule-health
         title: TauAlertingRuleHealth

@@ -1020,6 +1020,12 @@ describe('Runtime observability dashboards and rules (T13, T32)', () => {
     expect(unpaused).toEqual([]);
     expect(rulesIn(grafanaRoot).find(({ rule }) => rule.uid === 'telemetry-heartbeat')?.rule.isPaused).toBe(true);
   });
+
+  it('should repeat the heartbeat weekly, since Tau Cloud renders a missing repeat_interval as the 24 h info default', () => {
+    expect(
+      rulesIn(grafanaRoot).find(({ rule }) => rule.uid === 'telemetry-heartbeat')?.rule.labels?.['repeat_interval'],
+    ).toBe('7d');
+  });
 });
 
 describe('Binding contract v2 selectors (W14 OB1 d)', () => {

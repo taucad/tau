@@ -14,11 +14,38 @@ export type QualificationCandidateInput = {
   runId: string;
 };
 
-/** Final candidate source must be this protected main dispatch; older baselines must be its ancestors. */
+/**
+ * Keep Linux staging evidence pinned to a trusted ancestor; other qualification scopes remain exact-source. The
+ * Mac-only staging scope stays exact-source because its receipts feed publication, whose provenance requires the
+ * qualification run's head to equal the candidate source.
+ */
+export const assertQualificationSource = (options: {
+  sourceCommit: string;
+  workflowCommit: string;
+  scope: string;
+  channel: string;
+}): void => {
+  if (
+    !/^[a-f\d]{40}$/u.test(options.sourceCommit) ||
+    !/^[a-f\d]{40}$/u.test(options.workflowCommit) ||
+    !['all', 'linux', 'macos'].includes(options.scope) ||
+    !['staging', 'production'].includes(options.channel) ||
+    (options.scope !== 'all' && options.channel !== 'staging')
+  ) {
+    throw new Error('Invalid qualification source scope/channel');
+  }
+  if (options.scope !== 'linux' && options.sourceCommit !== options.workflowCommit) {
+    throw new Error('Qualification requires the workflow exact source');
+  }
+  execFileSync('git', ['merge-base', '--is-ancestor', options.sourceCommit, options.workflowCommit]);
+};
+
+/** Fetch signed candidates at trusted main ancestors without confusing tested source with harness source. */
 export const fetchQualificationCandidates = async (options: {
   runIds: readonly [string, string, string];
   directory: string;
   sourceCommit: string;
+  scope: string;
 }): Promise<readonly [QualificationCandidateInput, QualificationCandidateInput, QualificationCandidateInput]> => {
   if (!/^[a-f\d]{40}$/u.test(options.sourceCommit) || new Set(options.runIds).size !== 3) {
     throw new Error('Qualification requires exact source and three distinct candidate runs');
@@ -60,15 +87,22 @@ export const fetchQualificationCandidates = async (options: {
   const a = await fetchOne(options.runIds[0], 'a');
   const b = await fetchOne(options.runIds[1], 'b');
   const c = await fetchOne(options.runIds[2], 'c');
+  assertQualificationSource({
+    sourceCommit: c.manifest.sourceCommit,
+    workflowCommit: options.sourceCommit,
+    scope: options.scope,
+    channel: c.manifest.channel,
+  });
+  execFileSync('git', ['merge-base', '--is-ancestor', a.manifest.sourceCommit, c.manifest.sourceCommit]);
+  execFileSync('git', ['merge-base', '--is-ancestor', b.manifest.sourceCommit, c.manifest.sourceCommit]);
   const numeric = (version: string) => version.split('.').reduce((total, part) => total * 100 + Number(part), 0);
   if (
     a.manifest.channel !== c.manifest.channel ||
     b.manifest.channel !== c.manifest.channel ||
-    c.manifest.sourceCommit !== options.sourceCommit ||
     numeric(a.manifest.version) >= numeric(b.manifest.version) ||
     numeric(b.manifest.version) >= numeric(c.manifest.version)
   ) {
-    throw new Error('Qualification chain must increase within one channel and end at the workflow exact source');
+    throw new Error('Qualification chain must increase within one channel and end at the admitted candidate source');
   }
   return [a, b, c];
 };

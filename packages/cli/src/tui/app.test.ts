@@ -827,9 +827,11 @@ describe('tau tui', () => {
         type: 'run.lifecycle',
         state: 'completed',
       },
+      /* The host's order: a start's admission, then the external run's marker message. */
+      { ...base, sequence: 1, runId: 'new-run', type: 'run.lifecycle', state: 'admitted' },
       {
         ...base,
-        sequence: 1,
+        sequence: 2,
         runId: 'new-run',
         type: 'message.appended',
         message: {
@@ -839,7 +841,6 @@ describe('tau tui', () => {
           metadata: { tauInternal: { kind: 'external-agent', agentId: 'codex', model: 'gpt-5.3-codex' } },
         },
       },
-      { ...base, sequence: 2, runId: 'new-run', type: 'run.lifecycle', state: 'admitted' },
       { ...base, sequence: 3, runId: 'new-run', type: 'run.lifecycle', state: 'running' },
       {
         ...base,
@@ -916,6 +917,123 @@ describe('tau tui', () => {
       expect(client.execute.mock.calls.some(([command]) => command.type === 'steer')).toBe(false);
       terminal.stdin.write('\u001B');
       await settle();
+      terminal.stdin.write('q');
+      await expect(finished).resolves.toBeUndefined();
+    } finally {
+      replay.mockRestore();
+      opened.mockRestore();
+    }
+  }, 120_000);
+
+  it('keeps a Retry run selected when its batch carries a takeover copy of an external turn', async () => {
+    const client = mock<AgentChannelClient>();
+    client.execute.mockImplementation(async (command) => ({
+      commandId: command.commandId,
+      generation: 1,
+      status: 'applied',
+      effect: 'durable',
+      cursor: 0,
+    }));
+    const chatId = 'chat-tui-takeover-copy';
+    const base = { version: 1, leaderEpoch: 'epoch-1', recordedAt: new Date(0).toISOString() } as const;
+    const externalTurn = {
+      id: 'abandoned-user',
+      role: 'user',
+      content: 'turn another device left behind',
+      metadata: { tauInternal: { kind: 'external-agent', agentId: 'codex', model: 'gpt-5.3-codex' } },
+    } as const;
+    const events = [
+      /* Another device's external run R, abandoned while running. */
+      { ...base, sequence: 0, runId: 'abandoned-run', type: 'run.lifecycle', state: 'admitted' },
+      { ...base, sequence: 1, runId: 'abandoned-run', type: 'message.appended', message: externalTurn },
+      { ...base, sequence: 2, runId: 'abandoned-run', type: 'run.lifecycle', state: 'running' },
+      /* This device's Retry B goes on past it: its admission batch carries R's turn, under R's id, after the rewind. */
+      { ...base, sequence: 3, runId: 'retry-run', type: 'run.lifecycle', state: 'admitted' },
+      {
+        ...base,
+        sequence: 4,
+        runId: 'retry-run',
+        type: 'history.rewound',
+        trigger: 'retry',
+        retainedMessageIds: [],
+      },
+      {
+        ...base,
+        sequence: 5,
+        runId: 'abandoned-run',
+        type: 'message.appended',
+        message: {
+          ...externalTurn,
+          metadata: { tauInternal: { ...externalTurn.metadata.tauInternal, abandoned: true } },
+        },
+      },
+      { ...base, sequence: 6, runId: 'retry-run', type: 'run.lifecycle', state: 'running' },
+      {
+        ...base,
+        sequence: 7,
+        runId: 'retry-run',
+        type: 'interrupt.recorded',
+        interruptId: 'retry-interrupt',
+        phase: 'requested',
+        reason: 'May I write the retried plate?',
+        payload: { context: { options: [{ optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' }] } },
+      },
+      { ...base, sequence: 8, runId: 'retry-run', type: 'run.lifecycle', state: 'paused' },
+    ] satisfies AgentLogEvent[];
+    const opened = vi.spyOn(agentClient, 'openAgentChannel').mockResolvedValue({
+      client,
+      url: new URL('http://127.0.0.1:1'),
+    });
+    const replay = vi.spyOn(agentClient, 'readNext').mockImplementation(async ({ ledger, signal }) => {
+      if (ledger.position.cursor === 0) {
+        return {
+          ledger: { ...ledger, position: { cursor: events.length } },
+          events,
+          endCursor: events.length,
+          reset: false,
+          sourceHealth: undefined,
+        };
+      }
+      await new Promise<void>((resolve) => {
+        signal?.addEventListener(
+          'abort',
+          () => {
+            resolve();
+          },
+          { once: true },
+        );
+      });
+      return { ledger, events: [], endCursor: events.length, reset: false, sourceHealth: undefined };
+    });
+    try {
+      const terminal = createTerminal();
+      const finished = runTui({
+        host: 'http://127.0.0.1:1',
+        chatId,
+        from: 0,
+        stdin: terminal.stdin,
+        stdout: terminal.stdout,
+      });
+      mounted.push({ terminal, finished });
+      await untilPainted(terminal, /Approval needed: May I write the retried plate\?/u);
+      terminal.stdin.write('y');
+      await until(() =>
+        client.execute.mock.calls.some(([command]) => command.type === 'resolve-interrupt') ? true : undefined,
+      );
+      expect(client.execute.mock.calls).toContainEqual([
+        expect.objectContaining({
+          type: 'resolve-interrupt',
+          payload: {
+            chatId,
+            runId: 'retry-run',
+            interruptId: 'retry-interrupt',
+            outcome: 'approved',
+            optionId: 'allow-once',
+          },
+        }),
+      ]);
+      /* B is a Tau run: the copy lends it no other device's agent. */
+      expect(terminal.output()).not.toContain('EXTERNAL_AGENT_UNSUPPORTED');
       terminal.stdin.write('q');
       await expect(finished).resolves.toBeUndefined();
     } finally {

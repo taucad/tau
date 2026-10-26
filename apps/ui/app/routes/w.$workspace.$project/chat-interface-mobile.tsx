@@ -1,4 +1,5 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { XIcon } from 'lucide-react';
 import { ChatHistory } from '#routes/w.$workspace.$project/chat-history.js';
 import { ProjectUnavailableOverlay } from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
@@ -29,7 +30,7 @@ import { useProjectSidebarRow } from '#hooks/use-sidebar-status.js';
 import { MobileProjectTopBar } from '#routes/w.$workspace.$project/mobile-project-top-bar.js';
 
 /* B-27, D-UI-16: every panel but the chat is its own chunk, loaded when its surface
- * first opens. Only the active surface is mounted, so a phone that
+ * first opens. Only the active surface is mounted (Terminal survives hiding), so a phone that
  * stays on the chat never downloads the editor (Monaco and the dockview
  * workbench), parameters, converter or revision panels. */
 const ChatFileTree = lazy(async () => {
@@ -103,13 +104,15 @@ const ProjectTerminalPane = lazy(async () => {
 function MobilePane({
   id,
   children,
+  onOpenChange,
 }: {
+  readonly onOpenChange?: (open: boolean) => void;
   readonly id: MobilePanelId;
   readonly children: React.ReactNode;
 }): React.ReactNode {
   const title = surfaceTitle(id);
   return (
-    <FloatingPanel isOpen side='right'>
+    <FloatingPanel isOpen side='right' onOpenChange={onOpenChange}>
       <FloatingPanelContent>
         <FloatingPanelContentHeader>
           <FloatingPanelContentTitle>{title}</FloatingPanelContentTitle>
@@ -238,11 +241,8 @@ function MobileSurface({ id }: { readonly id: MobilePanelId }): React.ReactNode 
       );
     }
     case 'terminal': {
-      return (
-        <MobilePane id={id}>
-          <ProjectTerminalPane />
-        </MobilePane>
-      );
+      // The shell owns this pane above the drawer so hiding it preserves the session.
+      return null;
     }
     case 'viewer': {
       return null;
@@ -484,6 +484,41 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
     setSection(element ?? undefined);
   }, []);
 
+  // React keeps the pane in one portal; only its host DOM node moves with the drawer's transient slot.
+  const [terminalHost, setTerminalHost] = useState<HTMLDivElement>();
+  const [terminalSlot, setTerminalSlot] = useState<HTMLDivElement>();
+  const attachTerminalSlot = useCallback<React.RefCallback<HTMLDivElement>>((element) => {
+    setTerminalSlot(element ?? undefined);
+    if (element) {
+      setTerminalHost((host) => {
+        if (host) {
+          return host;
+        }
+        const container = document.createElement('div');
+        container.className = 'size-full';
+        return container;
+      });
+    }
+  }, []);
+  useEffect(() => {
+    if (!terminalHost || !terminalSlot) {
+      return;
+    }
+    terminalSlot.append(terminalHost);
+    return () => {
+      terminalHost.remove();
+    };
+  }, [terminalHost, terminalSlot]);
+  const closeTerminal = useCallback(
+    (open: boolean) => {
+      if (!open) {
+        setTerminalHost(undefined);
+        handleDrawerChange(false);
+      }
+    },
+    [handleDrawerChange],
+  );
+
   // A surface the person chooses takes focus; one restored from storage or opened by the app does not.
   const surfaceToFocus = useRef<MobilePanelId | undefined>(undefined);
   const chooseSurface = useCallback(
@@ -622,14 +657,27 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
                 }}
               >
                 <div className='flex h-full flex-1 flex-col'>
-                  <Suspense fallback={null}>
-                    <MobileSurface id={activeTab} />
-                  </Suspense>
+                  {activeTab === 'terminal' ? (
+                    <div ref={attachTerminalSlot} className='size-full' />
+                  ) : (
+                    <Suspense fallback={null}>
+                      <MobileSurface id={activeTab} />
+                    </Suspense>
+                  )}
                 </div>
               </section>
             </DrawerContent>
           ) : null}
         </Drawer>
+
+        {terminalHost
+          ? createPortal(
+              <MobilePane id='terminal' onOpenChange={closeTerminal}>
+                <ProjectTerminalPane />
+              </MobilePane>,
+              terminalHost,
+            )
+          : null}
 
         {/* Navigation tabs - Always visible and sticky to bottom */}
         <div

@@ -1211,6 +1211,7 @@ describe('hostAttachment', () => {
       expect(subscribe).not.toHaveBeenCalled();
       projection.send({
         type: 'remote',
+        at: 0,
         segments: [
           {
             deviceId: 'foreign-device',

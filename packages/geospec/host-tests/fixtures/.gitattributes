@@ -1,2 +1,0 @@
-# Preserve hash-bound exporter bytes, including STEP trailing whitespace.
-data/* -text whitespace=-blank-at-eol

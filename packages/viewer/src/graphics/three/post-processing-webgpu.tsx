@@ -58,6 +58,7 @@ import { defaultPostProcessingSettings, resolveAoRadiusCssPixels } from '#graphi
 import type { PostProcessingSettings } from '#graphics/three/post-processing-settings.js';
 import { retireTransmissionCopy } from '#graphics/three/transmission-retirement.js';
 import { createGtaoCameraAdapter } from '#graphics/three/gtao-depth-camera.js';
+import { createLogDepthAoAdapter } from '#graphics/three/gtao-log-depth.js';
 
 type PostProcessingPipelineResources = Readonly<{
   camera: ThreeCamera;
@@ -453,12 +454,20 @@ const createPipelineResources = ({
 
     // GTAONode rejects forward depth >= 1 as background. Pair 1-depth with
     // forward projection matrices; changing only the samples corrupts positions.
-    const aoCamera = createGtaoCameraAdapter(camera, gpuRenderer.reversedDepthBuffer);
+    const logDepth = gpuRenderer.logarithmicDepthBuffer
+      ? createLogDepthAoAdapter(
+          camera,
+          sample((uv) => scenePassDepth.sample(uv).r),
+        )
+      : undefined;
+    const aoCamera = logDepth ?? createGtaoCameraAdapter(camera, gpuRenderer.reversedDepthBuffer);
     // oxlint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access -- TSL texture node fluent API.
-    const aoDepth = sample((uv) =>
-      gpuRenderer.reversedDepthBuffer ? scenePassDepth.sample(uv).r.oneMinus() : scenePassDepth.sample(uv).r,
-    );
-    aoNode = ao(aoDepth, scenePassNormal, aoCamera.camera as Camera);
+    const aoDepth =
+      logDepth?.forwardDepth ??
+      sample((uv) =>
+        gpuRenderer.reversedDepthBuffer ? scenePassDepth.sample(uv).r.oneMinus() : scenePassDepth.sample(uv).r,
+      );
+    aoNode = ao(logDepth?.gtaoDepth ?? aoDepth, scenePassNormal, aoCamera.camera as Camera);
     aoNode.resolutionScale = 0.5;
     // Temporal direction rotation shimmers under `frameloop='demand'` because the
     // viewport never accumulates frame-to-frame.

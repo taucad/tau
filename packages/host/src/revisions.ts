@@ -336,6 +336,13 @@ export type ProjectRevisions = {
    * at start rather than at its close.
    */
   opened(): Promise<void>;
+  /**
+   * The record device this project's chat segments sync under, or `undefined` while it cannot be read (EQ10(a)).
+   *
+   * Not {@link hostDeviceId}: this host stamps it where a synced row says which device wrote it, so a renamed machine
+   * keeps its id, two machines that share a name and account do not share one, and neither name leaves the host.
+   */
+  chatDevice(): Promise<string | undefined>;
 };
 
 /**
@@ -430,7 +437,7 @@ const revisionJson = (value: unknown): JsonValue =>
  * browser's equivalent is `apps/ui/app/lib/device-id.ts` and neither mints the
  * other's.
  */
-const hostDeviceId = `${hostname()}:${userInfo().username}`;
+export const hostDeviceId = `${hostname()}:${userInfo().username}`;
 
 /**
  * The store a disk host's project is recorded in (S12, OQ-B8).
@@ -599,11 +606,12 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     /*
      * Which device this host is (W13, W17).
      *
-     * A chat ref names one device's log segment, so a host that could not say
-     * which device it is would risk overwriting another's. A disk host has a
-     * stable answer the operating system already keeps — the machine's own
-     * hostname, per user — and unlike the browser's it needs no record of its
-     * own.
+     * A host that could not say which device it is records no chats, so it
+     * never risks overwriting another's segment. A disk host has a stable
+     * answer the operating system already keeps — the machine's own hostname,
+     * per user. It stays on this host: the segment itself, and every marker
+     * that names this device, use the record device the record set mints
+     * (`chatDevice`, EQ10(a)).
      */
     deviceId: () => hostDeviceId,
     /*
@@ -1307,6 +1315,9 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     };
   };
 
+  /* The session `placement` opened last, whose pull answers the page's (round 27): one rule for the page and the host. */
+  let placed: Pick<TurnPlacementAdapter<unknown>, 'pull'> | undefined;
+
   // oxlint-disable-next-line complexity -- One validated dispatch table mirrors the established worker wire without another protocol layer.
   const sendRevisionRequest = async (value: JsonValue): Promise<JsonValue> => {
     const request = hostRevisionRequestSchema.parse(value) as {
@@ -1590,6 +1601,16 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       case 'syncNow':
         actor.send({ type: 'syncNow' });
         break;
+      /* XD3, rounds 18 and 19: another device's run has been quiet here a while; pulls show whether it stayed quiet.
+       * Round 27: through the placement's pull, so the page hears where this device cannot pull the chat at all. */
+      case 'pullRemote': {
+        const chatId = optionalText(request, 'chatId') ?? '';
+        const answer = await placed?.pull({ requestId: `page-pull:${chatId}:${String(Date.now())}`, chatId });
+        if (answer === undefined) {
+          actor.send({ type: 'sync', event: { type: 'remoteMoved', generation: 0, refs: [] } });
+        }
+        return { pulls: !(answer?.status === 'refused' && answer.code === 'CHAT_NOT_SHARED') };
+      }
       case 'publishProject':
         actor.send({
           type: 'publish',
@@ -1768,6 +1789,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       }
     },
     status: () => selectRevisionStatus(actor.getSnapshot()),
+    chatDevice: async () => tree.chatDevice(),
     channel: {
       request: async (input) => ({
         result: await sendRevisionRequest(input),
@@ -1775,14 +1797,17 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       }),
       events: channelEvents,
     },
-    placement: (openTools) =>
-      createTurnPlacementPort({
+    placement: (openTools) => {
+      const session = createTurnPlacementPort({
         revisions: tree,
         openTools,
         root: (checkout) => (checkout.kind === 'live' ? options.workspaceRoot : checkout.root),
         /* E1: the watcher catches up before an admission's dirty base and before a completion cut. */
         settle: settleWatch,
-      }),
+      });
+      placed = session;
+      return session;
+    },
   };
   startWatching();
   return revisions;

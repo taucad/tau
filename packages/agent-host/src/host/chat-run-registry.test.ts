@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { SimulatedClock } from 'xstate';
 
 import { createTauAgentHost } from '#host/tau-agent-host.js';
 import { createChatRunRegistry } from '#host/chat-run-registry.js';
@@ -220,6 +221,230 @@ describe('the chat-run registry (RA-S3)', () => {
     expect(opens).toBe(1);
     releaseOpen.resolve();
     await registry.close();
+  });
+
+  /* An idle incarnation closing on its eviction bound is not a closed host: a command that arrives while its log is
+   * still closing is served by the next incarnation, never refused HOST_CLOSED. */
+  it('should serve a command that arrives while an evicted incarnation is still closing its log', async () => {
+    const closingLog = Promise.withResolvers<void>();
+    const closeStarted = Promise.withResolvers<void>();
+    let opens = 0;
+    const registry = createChatRunRegistry({
+      createTerm: () => 'term-1',
+      services: {
+        openLog: async () => {
+          opens++;
+          return { ledger: emptyChatLedger, repair: [] };
+        },
+        append: async () => {
+          throw new Error('Unexpected append');
+        },
+        prepareAdmission: async () => {
+          throw Object.assign(new Error('No model here.'), { code: 'MODEL_UNAVAILABLE' });
+        },
+        prepareResume: async () => {
+          throw new Error('Unexpected resume');
+        },
+        startDriver: () => {
+          throw new Error('Unexpected driver');
+        },
+        closeLog: async () => {
+          if (opens === 1) {
+            closeStarted.resolve();
+            await closingLog.promise;
+          }
+        },
+      },
+    });
+    await registry.claim('chat-evict-closing');
+    const evicted = registry.evict('chat-evict-closing');
+    await closeStarted.promise;
+
+    const command = registry.execute({
+      type: 'start',
+      commandId: key(),
+      payload: {
+        chatId: 'chat-evict-closing',
+        runId: 'run-evict-closing',
+        trigger: 'submit',
+        message: { id: 'turn-evict-closing', role: 'user', content: 'Start.' },
+      },
+    });
+    closingLog.resolve();
+    await evicted;
+
+    const answer = await command;
+    expect(answer).toMatchObject({ status: 'refused' });
+    expect(answer).not.toMatchObject({ code: 'HOST_CLOSED' });
+    expect(opens).toBe(2);
+    await registry.close();
+  });
+
+  /* A close that never finishes still holds the chat's writer: a command waits for it only so long, then is refused
+   * retryably, and no second incarnation opens over a writer that may still be held. */
+  it('should refuse WRITER_LOCKED once an evicted incarnation has spent the bound closing its log', async () => {
+    const closeStarted = Promise.withResolvers<void>();
+    let opens = 0;
+    const registry = createChatRunRegistry({
+      createTerm: () => 'term-1',
+      delays: { closingWait: 50 },
+      services: {
+        openLog: async () => {
+          opens++;
+          return { ledger: emptyChatLedger, repair: [] };
+        },
+        append: async () => {
+          throw new Error('Unexpected append');
+        },
+        prepareAdmission: async () => {
+          throw new Error('Unexpected admission');
+        },
+        prepareResume: async () => {
+          throw new Error('Unexpected resume');
+        },
+        startDriver: () => {
+          throw new Error('Unexpected driver');
+        },
+        closeLog: async () => {
+          closeStarted.resolve();
+          await new Promise<never>(() => {
+            /* A close that never finishes. */
+          });
+        },
+      },
+    });
+    await registry.claim('chat-stuck-closing');
+    void registry.evict('chat-stuck-closing');
+    await closeStarted.promise;
+
+    const answer = await registry.execute({
+      type: 'start',
+      commandId: key(),
+      payload: {
+        chatId: 'chat-stuck-closing',
+        runId: 'run-stuck-closing',
+        trigger: 'submit',
+        message: { id: 'turn-stuck-closing', role: 'user', content: 'Start.' },
+      },
+    });
+
+    expect(answer).toMatchObject({ status: 'refused', code: 'WRITER_LOCKED' });
+    expect(opens).toBe(1);
+  });
+
+  /* The bound never keeps a daemon's process open at shutdown, as `AbortSignal.timeout` never did. */
+  it('should not hold the process open while it waits out the closing bound', async () => {
+    const unref = vi.fn();
+    const clock = {
+      setTimeout: (callback: () => void, timerDelay: number) => ({ timer: setTimeout(callback, timerDelay), unref }),
+      clearTimeout: (handle: { timer: ReturnType<typeof setTimeout> } | undefined) => {
+        clearTimeout(handle?.timer);
+      },
+    };
+    const closeStarted = Promise.withResolvers<void>();
+    const registry = createChatRunRegistry({
+      createTerm: () => 'term-1',
+      delays: { closingWait: 20 },
+      actorOptions: { clock },
+      services: {
+        openLog: async () => ({ ledger: emptyChatLedger, repair: [] }),
+        append: async () => {
+          throw new Error('Unexpected append');
+        },
+        prepareAdmission: async () => {
+          throw new Error('Unexpected admission');
+        },
+        prepareResume: async () => {
+          throw new Error('Unexpected resume');
+        },
+        startDriver: () => {
+          throw new Error('Unexpected driver');
+        },
+        closeLog: async () => {
+          closeStarted.resolve();
+          await new Promise<never>(() => {
+            /* A close that never finishes. */
+          });
+        },
+      },
+    });
+    await registry.claim('chat-unref-closing');
+    void registry.evict('chat-unref-closing');
+    await closeStarted.promise;
+    unref.mockClear();
+
+    await expect(
+      registry.execute({
+        type: 'start',
+        commandId: key(),
+        payload: {
+          chatId: 'chat-unref-closing',
+          runId: 'run-unref-closing',
+          trigger: 'submit',
+          message: { id: 'turn-unref-closing', role: 'user', content: 'Start.' },
+        },
+      }),
+    ).resolves.toMatchObject({ code: 'WRITER_LOCKED' });
+    expect(unref).toHaveBeenCalled();
+  });
+
+  /* The bound runs on the clock the incarnations run on, never the process's: a simulated clock alone ends it. */
+  it('should measure the closing bound on the injected clock', async () => {
+    const clock = new SimulatedClock();
+    const closeStarted = Promise.withResolvers<void>();
+    const registry = createChatRunRegistry({
+      createTerm: () => 'term-1',
+      delays: { closingWait: 50 },
+      actorOptions: { clock },
+      services: {
+        openLog: async () => ({ ledger: emptyChatLedger, repair: [] }),
+        append: async () => {
+          throw new Error('Unexpected append');
+        },
+        prepareAdmission: async () => {
+          throw new Error('Unexpected admission');
+        },
+        prepareResume: async () => {
+          throw new Error('Unexpected resume');
+        },
+        startDriver: () => {
+          throw new Error('Unexpected driver');
+        },
+        closeLog: async () => {
+          closeStarted.resolve();
+          await new Promise<never>(() => {
+            /* A close that never finishes. */
+          });
+        },
+      },
+    });
+    await registry.claim('chat-simulated-closing');
+    void registry.evict('chat-simulated-closing');
+    await closeStarted.promise;
+    const answer = registry.execute({
+      type: 'start',
+      commandId: key(),
+      payload: {
+        chatId: 'chat-simulated-closing',
+        runId: 'run-simulated-closing',
+        trigger: 'submit',
+        message: { id: 'turn-simulated-closing', role: 'user', content: 'Start.' },
+      },
+    });
+
+    const pending = Symbol('pending');
+    const early = await Promise.race([
+      answer,
+      new Promise<typeof pending>((resolve) => {
+        setTimeout(() => {
+          resolve(pending);
+        }, 150);
+      }),
+    ]);
+    expect(early).toBe(pending);
+    clock.increment(50);
+
+    await expect(answer).resolves.toMatchObject({ status: 'refused', code: 'WRITER_LOCKED' });
   });
 
   it('should refuse commands with HOST_CLOSED and open no log after close', async () => {
@@ -1485,6 +1710,70 @@ describe('the external slot through its driver handle (RA-S14, with W10 EA-S8)',
     await vi.waitFor(() => {
       expect(durableAtResolve).toBe(true);
     });
+    await host.close();
+  });
+
+  /*
+   * Round 18: an approval admitted after this device read another device's rows opens a new term before its rows. An
+   * external agent waiting on its person keeps its slot, so the term cannot come from closing the incarnation: it is
+   * opened in place, and the resolution and every row the agent writes after it land under it, never the old term.
+   */
+  it('should write an external agent’s approval and what follows under a new term while it holds its slot', async () => {
+    const encoder = new TextEncoder();
+    let foreign: ReadonlyArray<{ deviceId: string; bytes: Uint8Array<ArrayBuffer> }> = [];
+    const file = createMemoryLogFile({ segments: async () => foreign });
+    const done = Promise.withResolvers<void>();
+    const port: ExternalAgentPort = {
+      list: () => ['stub-agent'],
+      run: async (turn) => {
+        await turn.approve({ prompt: 'Write main.ts?' });
+        await turn.append([
+          {
+            type: 'message.appended',
+            message: { id: 'after-approval', role: 'assistant', content: [{ type: 'text', text: 'Written.' }] },
+          },
+        ]);
+        done.resolve();
+        return undefined;
+      },
+    };
+    const host = externalHost(file, port, 'approve-term');
+    await startExternal(host, { chatId: 'chat-approve-term', runId: 'run-1' });
+    await vi.waitFor(async () => {
+      expect(await pendingOf(file)).toHaveLength(1);
+    });
+    const [interruptId = ''] = await pendingOf(file);
+    /* Another device's whole turn arrives by sync while the agent waits on its person. */
+    const at = new Date(Date.now() + 1000).toISOString();
+    const phone = (sequence: number, body: Record<string, unknown>): string =>
+      `${JSON.stringify({ version: 1, leaderEpoch: 'phone', sequence, recordedAt: at, runId: 'run-phone', ...body })}\n`;
+    foreign = [
+      {
+        deviceId: 'device-phone',
+        bytes: encoder.encode(
+          phone(0, { type: 'run.lifecycle', state: 'admitted' }) +
+            phone(1, { type: 'message.appended', message: { id: 'phone-user', role: 'user', content: 'phone' } }) +
+            phone(2, { type: 'run.lifecycle', state: 'completed' }),
+        ),
+      },
+    ];
+
+    const answer = await host.command({
+      type: 'resolve-interrupt',
+      commandId: key(),
+      payload: { chatId: 'chat-approve-term', runId: 'run-1', interruptId, outcome: 'approved' },
+    });
+
+    expect(answer).toMatchObject({ status: 'applied', effect: 'durable' });
+    await done.promise;
+    const log = await readLog(file);
+    const requested = log.find((event) => event.type === 'interrupt.recorded' && event.phase === 'requested');
+    const resolved = log.find((event) => event.type === 'interrupt.recorded' && event.phase === 'resolved');
+    const after = log.find((event) => event.type === 'message.appended' && event.message.id === 'after-approval');
+    expect(resolved?.leaderEpoch).toBeDefined();
+    expect(resolved?.leaderEpoch).not.toBe(requested?.leaderEpoch);
+    expect(after?.leaderEpoch).toBe(resolved?.leaderEpoch);
+    expect(Date.parse(resolved!.recordedAt)).toBeGreaterThan(Date.parse(at));
     await host.close();
   });
 

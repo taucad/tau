@@ -7,7 +7,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(169);
+    expect(metrics).toHaveLength(170);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -189,14 +189,67 @@ describe('TauMetrics', () => {
   });
 
   it('should split retryable refusals out of error as busy on the sync edge', () => {
-    for (const metric of [TauMetrics.syncOperations, TauMetrics.syncOperationDuration]) {
-      expect(
-        metric.attributes.safeParse({
-          'tau.sync.operation': 'push',
-          outcome: 'busy',
-        }).success,
-      ).toBe(true);
-    }
+    expect(
+      TauMetrics.syncOperations.attributes.safeParse({
+        'tau.sync.operation': 'push',
+        outcome: 'busy',
+      }).success,
+    ).toBe(true);
+    expect(
+      TauMetrics.syncOperationDuration.attributes.safeParse({
+        'tau.sync.operation': 'push',
+        outcome: 'busy',
+        'tau.git.execution': 'forwarded',
+        'tau.git.affinity': 'rendezvous',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('should label sync request latency by where git ran and how tau-storage was chosen, from enums alone', () => {
+    const latency = (execution: string, affinity: string): boolean =>
+      TauMetrics.syncOperationDuration.attributes.safeParse({
+        'tau.sync.operation': 'push',
+        outcome: 'ok',
+        'tau.git.execution': execution,
+        'tau.git.affinity': affinity,
+      }).success;
+    expect(latency('in_process', 'off')).toBe(true);
+    expect(latency('forwarded', 'off')).toBe(true);
+    expect(latency('forwarded', 'rendezvous')).toBe(true);
+    expect(latency('storage-1', 'off')).toBe(false);
+    expect(latency('forwarded', 'member-2')).toBe(false);
+    expect(
+      TauMetrics.syncOperationDuration.attributes.safeParse({ 'tau.sync.operation': 'push', outcome: 'ok' }).success,
+    ).toBe(false);
+  });
+
+  it('should resolve the 3–5 s server push band and the 3–30 s client save band', () => {
+    expect(TauMetrics.syncOperationDuration.buckets).toEqual([0.05, 0.1, 0.25, 0.5, 1, 2, 3, 4, 5, 10, 30, 60, 120]);
+    expect(TauMetrics.syncClientLag.buckets).toEqual([
+      0.5, 1, 2, 3, 4, 5, 7.5, 10, 15, 20, 30, 60, 120, 300, 900, 3600,
+    ]);
+    expect(TauMetrics.syncClientAttemptDuration.buckets).toEqual([
+      0.1, 0.25, 0.5, 1, 2, 3, 4, 5, 7.5, 10, 15, 20, 30, 60, 120, 300, 900,
+    ]);
+  });
+
+  it('should label client attempt durations as the attempt counter does', () => {
+    expect(TauMetrics.syncClientAttemptDuration).toMatchObject({
+      name: 'tau.sync.client.attempt.duration',
+      type: 'histogram',
+      unit: 's',
+    });
+    expect(Object.keys(TauMetrics.syncClientAttemptDuration.attributes.shape)).toEqual(
+      Object.keys(TauMetrics.syncClientAttempts.attributes.shape),
+    );
+    const attempt = (outcome: string): boolean =>
+      TauMetrics.syncClientAttemptDuration.attributes.safeParse({
+        direction: 'push',
+        outcome,
+        'agent.placement': 'browser',
+      }).success;
+    expect(attempt('retry')).toBe(true);
+    expect(attempt('proj_1')).toBe(false);
   });
 
   it('should bound a refusal to a declared code, never a free-form one', () => {

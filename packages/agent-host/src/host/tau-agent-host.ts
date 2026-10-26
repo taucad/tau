@@ -28,6 +28,7 @@ import { createChatRunRegistry } from '#host/chat-run-registry.js';
 import type { ExternalAgentPort, ExternalRunKind, TauAgentAdmissionConfig } from '#host/external-agent.js';
 import { startExternalTurn } from '#host/external-turn.driver.js';
 import {
+  carriedPlace,
   externalMarker,
   externalSessionOf,
   externalTurnKind,
@@ -36,7 +37,7 @@ import {
   isInterruptPayload,
   isJsonObject,
   latestTurnId,
-  pendingToolCalls,
+  openToolCalls,
 } from '#host/run-history.js';
 import {
   chatRunState,
@@ -51,6 +52,13 @@ import {
 } from '#log/chat-ledger.js';
 import type { ChatLedger, LogRowBody } from '#log/chat-ledger.js';
 import { v1Batch } from '#log/event-log-appender.js';
+import {
+  foreignRunStaleMilliseconds,
+  foreignRunStanding,
+  isAbandonedForeignRun,
+  liveForeignRun,
+} from '#log/foreign-runs.js';
+import type { ForeignRun } from '#log/foreign-runs.js';
 import type { EventLogBatch } from '#log/event-log-appender.js';
 import { reduceEventLog } from '#log/reducer.js';
 import type {
@@ -63,6 +71,8 @@ import type {
   TurnModelConfig,
   UserProviderMessage,
 } from '#log/event-types.js';
+import { abandonedTurnOf } from '#log/event-types.js';
+import { segmentRefreshMilliseconds } from '#log/segments.js';
 import type {
   AgentLiveEvent,
   DurableEventLog,
@@ -119,7 +129,13 @@ export type CreateTauAgentHostOptions = {
   readonly model?: AgentSessionModel | undefined;
   readonly modelTransport: ModelTransport;
   readonly toolRegistry: ToolRegistry;
-  /** Opens the project-root `.tau/chats/<chatId>/events.jsonl` appender. */
+  /**
+   * Opens the project-root `.tau/chats/<chatId>/events.jsonl` appender.
+   *
+   * Two views of one chat (XD1): `read`/`readBatch` are this device's own rows, which every run decision reads — run
+   * ids, sequences, leadership epochs, admission and resume markers, approvals — and `messages` is the chat's history
+   * over every device's segment, which is what the model is given and what a turn's history rows are checked against.
+   */
   readonly openEventLog: (chatId: string) => Promise<DurableEventLog>;
   readonly createId?: (() => string) | undefined;
   readonly createLeaderEpoch?: (() => string) | undefined;
@@ -147,6 +163,14 @@ export type CreateTauAgentHostOptions = {
    */
   readonly externalRunners?: Readonly<Record<string, ExternalAgentPort>> | undefined;
   /**
+   * Which device this host is, stable across restarts and renames: the record device its chat segment is synced under,
+   * read when an external turn is admitted or resumed, because only the host's store knows it. Stamped on every
+   * external turn's marker, so a vendor session is told apart from another device's that shares its host id (every
+   * desktop places its own agents as `desktop`), and only this device's records restore a session here. It travels
+   * in synced rows, so it is never a machine name or an account (EQ10(a)); `undefined` stamps no device.
+   */
+  readonly deviceId?: (() => Promise<string | undefined>) | undefined;
+  /**
    * W8's placement port: every attempt is placed, settled and acknowledged (RA-R12). A host without one only reads: it
    * refuses every `start` and `resume` `REVISIONS_UNAVAILABLE` before any row, so no run edits unplaced (D13).
    */
@@ -161,7 +185,20 @@ export type CreateTauAgentHostOptions = {
    * bound (E9, 300 s).
    */
   readonly delays?:
-    | Readonly<{ idleEviction?: number; driverStopBound?: number; cutRetry?: number; streamStall?: number }>
+    | Readonly<{
+        idleEviction?: number;
+        driverStopBound?: number;
+        cutRetry?: number;
+        streamStall?: number;
+        /** How long a live run's chat may go without a row before a heartbeat is written; {@link runHeartbeatMilliseconds}. */
+        runHeartbeat?: number;
+        /** How long a paused run's heartbeats continue; {@link pausedRunHoldMilliseconds}. */
+        pausedRunHold?: number;
+        /** How long a command waits for a chat's closing incarnation before `WRITER_LOCKED`; ten seconds. */
+        closingWait?: number;
+        /** How long an admission waits to read the segments; {@link segmentRefreshMilliseconds}. */
+        segmentRefresh?: number;
+      }>
     | undefined;
   /** The clock every incarnation and its stream stall bound run on; the process's timers when absent. */
   readonly clock?: HostClock | undefined;
@@ -273,6 +310,12 @@ export type TauAgentHost = {
 };
 
 /** A chat's log, its ledger, its one append chain, and the attempts whose drivers may still write (RA-R6). */
+/**
+ * One dispatch of a command (rounds 17 and 22): the log it refreshed, so it is not refreshed again within it; whether it
+ * was admitted before reaching the registry; and the admission it was given, which keys what it proposed and carried.
+ */
+type Dispatch = { refreshed?: DurableEventLog; admitted?: true; admission?: number };
+
 type ChatStore = {
   log?: Promise<DurableEventLog> | undefined;
   ledger?: ChatLedger | undefined;
@@ -287,6 +330,323 @@ type ChatStore = {
   externalKind?: string | undefined;
   /** The ledger the host's close left: a read after close answers from it and opens nothing (L2a D14). */
   final?: ChatLedger | undefined;
+  /** The term this host last wrote the chat under, and when: a heartbeat writes only under a term already claimed. */
+  wrote?: Readonly<{ leaderEpoch: string; at: number }> | undefined;
+  /** The armed heartbeat (XD3): the incarnation it was armed for, and how to cancel it. */
+  heartbeat?: Readonly<{ deliver: ChatStore['deliver']; cancel: () => void }> | undefined;
+  /** When this host last paused the chat's run under its current term: where its hold starts (XD3). */
+  pausedAt?: number | undefined;
+  /** When this host last asked the placement to publish the chat's ref for its live run (XD3). */
+  publishedAt?: number | undefined;
+  /**
+   * What the placement last said about the chat reaching another device (XD3): shared, or not shared until a moment
+   * one heartbeat interval after it said so; unknown before the first answer and once that moment has passed.
+   */
+  sharing?: Readonly<{ shared: true } | { shared: false; until: number }> | undefined;
+  /** The run whose start already asked the placement about sharing, so it is asked once per run. */
+  sharingAsked?: string | undefined;
+  /**
+   * The terms this host opened for the chat while its incarnation stayed open (XD1, rounds 18 and 19; {@link ChatTerms}).
+   * A command admitted after this device read another device's rows proposes one before its rows
+   * ({@link termAdmission}), whether or not the incarnation holds its run's slot, so nothing waits on a close; its run's
+   * first row makes it the chat's term, and a command answered otherwise withdraws it.
+   */
+  terms?: ChatTerms | undefined;
+  /**
+   * The rows admitted commands' runs' first batches carry (round 20, {@link commandAdmission}): the turns of the
+   * abandoned foreign runs each command goes on past. The run's first batch that is no lone heartbeat and has a place
+   * for them ({@link carriedPlace}, round 21) spends its entry; a command answered otherwise withdraws its own.
+   */
+  carried?: readonly CarriedTurns[] | undefined;
+  /** When this host last asked the placement to pull, for another device's run that awaits one (XD3, round 18). */
+  pullAskedAt?: number | undefined;
+  /**
+   * Whether that ask found this device able to pull the chat (round 27): `false` once the placement answered it
+   * `CHAT_NOT_SHARED`, until it is asked again.
+   */
+  pulls?: boolean | undefined;
+};
+
+/**
+ * How long a live run's chat may go without a row before its host writes a `run.heartbeat`: one minute (XD3).
+ *
+ * The cross-device run fence reads a foreign run's newest row against a ten-minute bound (`foreignRunStaleMilliseconds`),
+ * so a run that writes nothing for a while — a long tool call, a paused run waiting on its person — must still show it
+ * is alive. While the chat's incarnation is open here and its run is admitted, running or paused, a minute with no
+ * row writes one heartbeat under the incarnation's term and asks the placement to record the chat's ref
+ * (`TurnPlacementPort.publish`). A run that keeps writing rows needs no heartbeat, but its rows reach the other devices
+ * only through a publish: while it is live, the chat is published at least once an interval whenever rows were
+ * written since the last publish. A host that closes, or whose incarnation ends, writes none, and the run goes stale on
+ * the other devices like any run whose device went away.
+ *
+ * @public
+ */
+export const runHeartbeatMilliseconds = 60_000;
+
+/**
+ * How long a paused run keeps holding its chat for the other devices: thirty minutes from its pause (XD3). A paused run waits on a person, who may never
+ * come back to it; past this its heartbeats stop, and the other devices free the chat one staleness bound
+ * (`foreignRunStaleMilliseconds`) later, so a forgotten pause costs a bounded number of rows, commits and pushes.
+ * An idle incarnation's eviction (`idleEviction`) can end the hold sooner.
+ *
+ * @public
+ */
+export const pausedRunHoldMilliseconds = 30 * 60 * 1000;
+
+/** A command admitted across devices: a turn's start, a Resume, or an approval of a paused run's request. @internal */
+export type AdmissionVerb = 'start' | 'resume' | 'approve';
+
+/** How {@link termAdmission} admits a command. @internal */
+export type TermAdmission = 'taken-over' | 'new-term' | 'same-term';
+
+/**
+ * How a command that runs or continues a run is admitted across devices (XD1, XD3, round 17; `admission` in
+ * ChatLedger.lean, T10). An approval lets the paused run's tool act at once, so it continues the run: it is refused
+ * `RUN_TAKEN_OVER` once another device said the run's turn and went on past it, and is otherwise admitted exactly as a
+ * Resume is. Any of them, after this device read another device's rows since its incarnation's term began, is admitted
+ * under a new term that starts after those rows, never the old one, whose rows would merge ahead of them.
+ *
+ * @internal
+ * @param verb - Which command is admitted: a start, a Resume or an approval.
+ * @param facts - `takenOver`: another device took the run over (`runTakenOver`); `foreignWrote`: another device wrote
+ *   since the term began (`foreignWroteSinceTermBegan`).
+ * @returns Refused, under a new term, or under the term the incarnation holds.
+ */
+export const termAdmission = (
+  verb: AdmissionVerb,
+  facts: Readonly<{ takenOver: boolean; foreignWrote: boolean }>,
+): TermAdmission => {
+  if (verb === 'approve' && facts.takenOver) {
+    return 'taken-over';
+  }
+  return facts.foreignWrote ? 'new-term' : 'same-term';
+};
+
+/**
+ * The term an admitted command's rows are written under (round 18; `rowsTerm` in ChatLedger.lean, T10): under a new
+ * term, one opened for them now, else the term the chat's incarnation holds. Whatever the incarnation holds, its run's
+ * slot included, is no input: a new term never waits on a close and never falls back to the old term.
+ *
+ * @internal
+ * @param admitted - How the command was admitted ({@link termAdmission}).
+ * @param held - The term the incarnation holds.
+ * @param open - Opens a new term.
+ * @returns The term the command's rows go under.
+ */
+export const rowsTermOf = (admitted: TermAdmission, held: string, open: () => string): string =>
+  admitted === 'new-term' ? open() : held;
+
+/** Another device's unsettled run as an admission reads it (`Passed` in ChatLedger.lean, T13). @internal */
+export type PassedRun = Readonly<{ runId: string; abandoned: boolean; said: boolean; words: boolean }>;
+
+/** What {@link commandAdmission} answers. @internal */
+export type CommandAdmission =
+  | Readonly<{ refused: 'RUN_TAKEN_OVER' | 'RUN_ACTIVE_ON_ANOTHER_DEVICE' }>
+  | Readonly<{ admitted: Exclude<TermAdmission, 'taken-over'>; says: readonly string[] }>;
+
+/**
+ * The one admission of every command that starts or continues a run (round 20; `admit` in ChatLedger.lean, T13): a
+ * start, a Resume and an approval alike. It checks where the run and the other devices' runs stand, decides the term
+ * ({@link termAdmission}), and names each abandoned foreign run the command goes on past whose turn no device said yet:
+ * the command's run's first batch says each one's turn, so every device then reads that run taken over.
+ *
+ * @internal
+ * @param verb - The command.
+ * @param facts - `takenOver` and `foreignWrote` as for {@link termAdmission}; `foreign`: the other devices' unsettled
+ *   runs.
+ * @returns Refused, or admitted with its term and the runs whose turns it says.
+ */
+export const commandAdmission = (
+  verb: AdmissionVerb,
+  facts: Readonly<{ takenOver: boolean; foreignWrote: boolean; foreign: readonly PassedRun[] }>,
+): CommandAdmission => {
+  const admitted = termAdmission(verb, facts);
+  if (admitted === 'taken-over') {
+    return { refused: 'RUN_TAKEN_OVER' };
+  }
+  return facts.foreign.some((run) => !run.abandoned)
+    ? { refused: 'RUN_ACTIVE_ON_ANOTHER_DEVICE' }
+    : { admitted, says: facts.foreign.filter((run) => run.words && !run.said).map((run) => run.runId) };
+};
+
+/** A term this host opened in place of its incarnation's own (`replaces`). @internal */
+export type TermOpening = Readonly<{ replaces: string; leaderEpoch: string }>;
+
+/**
+ * A term an admitted command proposed for its run's rows (round 19), keyed by the admission that proposed it (round 22):
+ * never by the command's id, which a re-sent copy of the command shares. @internal
+ */
+export type TermProposal = TermOpening & Readonly<{ admission: number; runId: string }>;
+
+/**
+ * A chat's terms on this host while its incarnation stays open (round 19; `Terms` in ChatLedger.lean, T12). `opened`:
+ * the term this host opened in place of the incarnation's, which a row written under it made the chat's. `proposed`:
+ * the terms admitted commands opened for their runs' rows ({@link rowsTermOf}), each the chat's only once the first of
+ * those rows is written under it ({@link termsAfterWrite}); a command answered otherwise withdraws its own
+ * ({@link termsAfterAnswer}). So a refused command leaves no trace, and the chat's term, which a heartbeat writes
+ * under only once this host wrote under it, never moves away from the term a live run wrote under without a row.
+ *
+ * @internal
+ */
+export type ChatTerms = Readonly<{
+  opened?: TermOpening | undefined;
+  proposed?: readonly TermProposal[] | undefined;
+}>;
+
+/**
+ * The chat's term now (`Terms.term`): the one this host opened in place of the incarnation's, else the incarnation's.
+ * A proposal is no part of it.
+ *
+ * @internal
+ * @param terms - The chat's terms.
+ * @param held - The incarnation's term.
+ * @returns The term.
+ */
+export const chatTermOf = (terms: ChatTerms, held: string): string =>
+  terms.opened?.replaces === held ? terms.opened.leaderEpoch : held;
+
+/**
+ * The entry a batch takes (`Terms.taken`, `carriedTaken`): the first for a run the batch writes a row of that is no
+ * heartbeat.
+ */
+const takenBy = <Entry extends Readonly<{ runId: string }>>(
+  entries: readonly Entry[] | undefined,
+  rows: readonly ChatRunRow[],
+): Entry | undefined =>
+  entries?.find((entry) => rows.some((row) => row.runId === entry.runId && row.body.type !== 'run.heartbeat'));
+
+/** What a batch's write decided as it began (round 20; `Terms.finish`'s `begun`): its term, and the proposal it commits. @internal */
+export type TermWrite = Readonly<{ held: string; leaderEpoch: string; taken?: TermProposal | undefined }>;
+
+/**
+ * The term a batch is written under (`Terms.rowsTerm`), decided once as its write begins: the term proposed for its
+ * run, else the chat's term.
+ *
+ * @internal
+ * @param terms - The chat's terms.
+ * @param held - The incarnation's term.
+ * @param rows - The batch.
+ * @returns The decision, which {@link termsAfterWrite} commits.
+ */
+export const termWriteOf = (terms: ChatTerms, held: string, rows: readonly ChatRunRow[]): TermWrite => {
+  const taken = takenBy(
+    terms.proposed?.filter((proposal) => proposal.replaces === held),
+    rows,
+  );
+  return { held, leaderEpoch: taken?.leaderEpoch ?? chatTermOf(terms, held), taken };
+};
+
+/**
+ * The chat's terms once a batch is written (`Terms.finish`): exactly what its write decided as it began
+ * ({@link termWriteOf}), whatever was proposed or withdrawn while it was written. The proposal it was written under is
+ * the chat's term; nothing else changes.
+ *
+ * @internal
+ * @param terms - The chat's terms now.
+ * @param write - The decision.
+ * @returns The terms.
+ */
+export const termsAfterWrite = (terms: ChatTerms, { held, taken }: TermWrite): ChatTerms =>
+  taken === undefined
+    ? terms
+    : {
+        opened: { replaces: held, leaderEpoch: taken.leaderEpoch },
+        proposed: terms.proposed?.filter((proposal) => proposal !== taken),
+      };
+
+/**
+ * The rows an admitted command's run's first batch carries (round 20; `Carried` in ChatLedger.lean, T13), keyed by the
+ * admission that derived them (round 22), never by the command's id. @internal
+ */
+export type CarriedTurns = Readonly<{ admission: number; runId: string; says: readonly ChatRunRow[] }>;
+
+/**
+ * Whether a run has its person's turn still to say (round 23, `placeAhead` in ChatLedger.lean, T16): the ledger holds no
+ * commit of it and the history no message of it. A turn's admission and the commit that says it are separate batches, so
+ * the run's next message past any batch before that commit is the person's turn, a say ({@link carriedPlace}).
+ *
+ * @param ledger - The chat's ledger before the batch.
+ * @param runId - The run that writes the batch.
+ * @param history - The history the batch lands after.
+ * @returns Whether the run's turn is still ahead.
+ */
+export const turnAheadOf = (ledger: ChatLedger, runId: string, history: readonly ProviderMessage[]): boolean => {
+  const entry = ledger.runs[runId];
+  return entry?.committed !== true && !history.some((message) => message.id === entry?.turnId);
+};
+
+/**
+ * What a batch carries (`carriedTaken`): the first entry for a run the batch writes a row of that is no heartbeat. The
+ * batch spends it only where it has a place for it ({@link carriedPlace}, round 21); one with none keeps it for the
+ * run's next batch (`CarryOp.hold` in ChatLedger.lean).
+ *
+ * @internal
+ * @param carried - What admitted commands carry.
+ * @param rows - The batch.
+ * @returns The entry the batch spends.
+ */
+export const carriedBy = (
+  carried: readonly CarriedTurns[] | undefined,
+  rows: readonly ChatRunRow[],
+): CarriedTurns | undefined => takenBy(carried, rows);
+
+/**
+ * The chat's terms once a command is answered (`Terms.step`, `answer`): one answered other than applied withdraws the
+ * terms its admission proposed that none of its rows were written under, and no other admission's (round 22). A
+ * replayed command was never admitted here, so its answer withdraws nothing.
+ *
+ * @internal
+ * @param terms - The chat's terms.
+ * @param admission - The command's admission, none for a command this host did not admit.
+ * @param applied - Whether it was applied.
+ * @returns The terms.
+ */
+export const termsAfterAnswer = (terms: ChatTerms, admission: number | undefined, applied: boolean): ChatTerms =>
+  applied || admission === undefined || terms.proposed === undefined
+    ? terms
+    : { ...terms, proposed: terms.proposed.filter((proposal) => proposal.admission !== admission) };
+
+/**
+ * What admitted commands carry once a command is answered (`carryStep`, `answer`): one answered other than applied
+ * withdraws its own admission's entry, and no other admission's (round 22). A replayed command was never admitted
+ * here, so its answer withdraws nothing (`t15_replay_no_change` in ChatLedgerProofs.lean).
+ *
+ * @internal
+ * @param carried - What admitted commands carry.
+ * @param admission - The command's admission, none for a command this host did not admit.
+ * @param applied - Whether it was applied.
+ * @returns What they carry now.
+ */
+export const carriedAfterAnswer = (
+  carried: readonly CarriedTurns[],
+  admission: number | undefined,
+  applied: boolean,
+): readonly CarriedTurns[] =>
+  applied || admission === undefined ? carried : carried.filter((entry) => entry.admission !== admission);
+
+const liveRunStates: ReadonlySet<string> = new Set(['admitted', 'running', 'paused']);
+
+/**
+ * What admitted commands carry once one row of a batch lands (`carryStep`, `write` and `settle`): the entry the batch
+ * spends is gone, and a row that settles its run drops every entry for that run (round 22), even one the batch had no
+ * place for (a Stop while the approved call is open): nothing writes that run's rows again, and the chat's next
+ * admission derives the turns it goes on past afresh (`t15_settle_drops`).
+ *
+ * @internal
+ * @param carried - What admitted commands carry.
+ * @param spent - The entry the batch spends, if it had a place for it.
+ * @param row - The row that landed.
+ * @returns What they carry now.
+ */
+export const carriedAfterRow = (
+  carried: readonly CarriedTurns[],
+  spent: CarriedTurns | undefined,
+  row: Readonly<{ runId: string; type: string; state?: string }>,
+): readonly CarriedTurns[] => {
+  const settles = row.type === 'run.lifecycle' && row.state !== undefined && !liveRunStates.has(row.state);
+  return spent === undefined && !settles
+    ? carried
+    : carried.filter((entry) => entry !== spent && !(settles && entry.runId === row.runId));
 };
 
 type AdmissionRecord = Readonly<{
@@ -587,6 +947,16 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const legacyConfigs = new Map<string, TauAgentAdmissionConfig>();
   let closed = false;
   let closing: Promise<void> | undefined;
+
+  const createTerm = options.createLeaderEpoch ?? createPortableId;
+  /**
+   * The chat's term now ({@link chatTermOf}): the one this host opened in place of the incarnation's and wrote under
+   * ({@link rehome}), else the incarnation's own. A term only proposed is no part of it.
+   */
+  const termOf = (chatId: string): string | undefined => {
+    const held = registry.termOf(chatId);
+    return held === undefined ? undefined : chatTermOf(stores.get(chatId)?.terms ?? {}, held);
+  };
 
   const storeOf = (chatId: string): ChatStore => {
     let store = stores.get(chatId);
@@ -981,6 +1351,678 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     },
   });
 
+  /**
+   * Keep a live run's chat moving for the other devices (XD3, {@link runHeartbeatMilliseconds}). Armed by every write;
+   * each tick writes a heartbeat when the chat has gone a full interval without a row, and otherwise publishes rows written
+   * since the last publish once an interval has passed since it, then re-arms while the run is
+   * live, the incarnation that wrote under the term is still the chat's, and the host is open.
+   *
+   * @param chatId - The chat.
+   */
+  const heartbeatInterval = options.delays?.runHeartbeat ?? runHeartbeatMilliseconds;
+  /*
+   * XD3: ask the placement to record the chat's ref; a publish that fails is the next heartbeat's to repeat. Records
+   * whether the chat reaches another device: shared only on an applied publish; not shared when the placement refuses
+   * `CHAT_NOT_SHARED` or has no publish verb at all (that answer stands for one heartbeat interval); unknown after a
+   * fence or a failure, which writes no heartbeat either and is asked again the next interval.
+   */
+  const publishChat = async (store: ChatStore, chatId: string, runId: string): Promise<boolean> => {
+    const notShared = (): boolean => {
+      store.sharing = { shared: false, until: now().getTime() + heartbeatInterval };
+      return false;
+    };
+    const publish = options.placement?.publish;
+    if (publish === undefined) {
+      return notShared();
+    }
+    let answer: Awaited<ReturnType<typeof publish>>;
+    try {
+      answer = await publish({ requestId: `publish:${chatId}:${runId}:${String(now().getTime())}`, chatId });
+    } catch {
+      /* No answer says nothing about sharing: unknown, so no heartbeat, and asked again the next interval. */
+      store.sharing = undefined;
+      return false;
+    }
+    if (answer.status === 'refused' && answer.code === 'CHAT_NOT_SHARED') {
+      return notShared();
+    }
+    if (answer.status !== 'applied' && answer.status !== 'replayed') {
+      /* A fenced session says nothing about sharing either (an offline remote still answers `applied`). */
+      store.sharing = undefined;
+      return false;
+    }
+    store.sharing = { shared: true };
+    return true;
+  };
+  /**
+   * What the placement last said about sharing (XD3): `shared`; `not-shared` while that answer is under an interval
+   * old; `recheck` once it is older (a remote may have been added); `unknown` before any answer, or after a fence or a
+   * failure.
+   */
+  const sharingOf = (store: ChatStore): 'shared' | 'not-shared' | 'recheck' | 'unknown' => {
+    const { sharing } = store;
+    if (sharing === undefined) {
+      return 'unknown';
+    }
+    if (sharing.shared) {
+      return 'shared';
+    }
+    return now().getTime() < sharing.until ? 'not-shared' : 'recheck';
+  };
+  const pausedHold = options.delays?.pausedRunHold ?? pausedRunHoldMilliseconds;
+  /** Whether the chat's current run is paused here and still inside its hold (XD3). */
+  const pauseHeld = (store: ChatStore | undefined): boolean =>
+    store?.ledger !== undefined &&
+    chatRunState(store.ledger) === 'paused' &&
+    store.pausedAt !== undefined &&
+    now().getTime() - store.pausedAt < pausedHold;
+  /**
+   * The run a heartbeat may be written for now, under which term, or `undefined` when none may: the host is open, the
+   * chat's incarnation is the one that armed it and its log is open, its run is live, and this host already wrote the
+   * chat under the incarnation's term. A heartbeat never opens a term (RA-R9: that is a person's command's to claim),
+   * so an old paused chat that is only reopened writes nothing. A paused run is held for
+   * {@link pausedRunHoldMilliseconds} from its pause, and no longer.
+   *
+   * @param store - The chat's state.
+   * @param chatId - The chat.
+   * @param deliver - The incarnation that armed the heartbeat.
+   * @returns The run and term, or `undefined`.
+   */
+  const heartbeatTarget = (
+    store: ChatStore,
+    chatId: string,
+    deliver: ChatStore['deliver'],
+  ): Readonly<{ runId: string; leaderEpoch: string }> | undefined => {
+    const { ledger, wrote } = store;
+    const runId = ledger?.currentRunId;
+    const leaderEpoch = termOf(chatId);
+    const state = ledger === undefined ? 'none' : chatRunState(ledger);
+    const held = state !== 'paused' || pauseHeld(store);
+    return closed ||
+      deliver === undefined ||
+      store.deliver !== deliver ||
+      store.log === undefined ||
+      runId === undefined ||
+      leaderEpoch === undefined ||
+      wrote?.leaderEpoch !== leaderEpoch ||
+      !liveRunStates.has(state) ||
+      !held
+      ? undefined
+      : { runId, leaderEpoch };
+  };
+  const armHeartbeat = (chatId: string, heartbeatDelay?: number): void => {
+    const store = storeOf(chatId);
+    const { deliver } = store;
+    if (closed || deliver === undefined) {
+      return;
+    }
+    /* One heartbeat per chat, for its current incarnation: one an older incarnation armed is replaced, never kept. */
+    if (store.heartbeat !== undefined) {
+      if (store.heartbeat.deliver === deliver) {
+        return;
+      }
+      store.heartbeat.cancel();
+    }
+    /* Asked once at the run's start, so its first heartbeat already knows whether the chat is shared. */
+    const starting = heartbeatTarget(store, chatId, deliver);
+    if (store.sharing === undefined && starting !== undefined && store.sharingAsked !== starting.runId) {
+      store.sharingAsked = starting.runId;
+      void publishChat(store, chatId, starting.runId);
+    }
+    const clock: HostClock = options.clock ?? globalThis;
+    const tick = async (): Promise<void> => {
+      if (store.heartbeat?.deliver === deliver) {
+        store.heartbeat = undefined;
+      }
+      const target = heartbeatTarget(store, chatId, deliver);
+      if (target === undefined) {
+        return;
+      }
+      const { wrote } = store;
+      /* What this tick decided on: a heartbeat is written only if no row lands before it does. */
+      const decided = wrote;
+      const at = now().getTime();
+      const quiet = wrote?.leaderEpoch === target.leaderEpoch ? at - wrote.at : heartbeatInterval;
+      if (quiet < heartbeatInterval) {
+        /* Rows were written within the interval, so no heartbeat; those rows are published on the same cadence, or a
+         * busy run's chat would reach the other devices only when it settles and look stale there (XD3). A tick that
+         * publishes them waits a whole interval for the next, so a heartbeat never publishes again moments later: the
+         * newest row is then at most two intervals old, far inside the staleness bound. */
+        const sincePublish = store.publishedAt === undefined ? heartbeatInterval : at - store.publishedAt;
+        const unpublished = wrote !== undefined && (store.publishedAt === undefined || wrote.at > store.publishedAt);
+        if (unpublished && sincePublish >= heartbeatInterval) {
+          store.publishedAt = at;
+          void publishChat(store, chatId, target.runId);
+          armHeartbeat(chatId);
+          return;
+        }
+        const nextPublish = unpublished ? heartbeatInterval - sincePublish : heartbeatInterval;
+        armHeartbeat(chatId, Math.min(heartbeatInterval - quiet, nextPublish));
+        return;
+      }
+      /*
+       * A heartbeat row is this run's liveness, and only a definite "not shared" (`CHAT_NOT_SHARED`, a project with no
+       * remote) stops it: no other device reads the chat, and builds older than XD3 read the row as opaque. Unknown
+       * (no answer yet, a fence, a failure) writes the row and publishes it, so publish trouble never makes a live run
+       * look gone elsewhere. The chat is asked at the run's start (`armHeartbeat`), and a "not shared" is asked again
+       * once an interval old, by that tick's one publish, before its row; no tick publishes twice.
+       */
+      const sharing = sharingOf(store);
+      if (sharing === 'not-shared') {
+        store.publishedAt = now().getTime();
+        armHeartbeat(chatId);
+        return;
+      }
+      /* A recheck publishes first, and its answer decides this tick's row: shared or unknown writes it, unpublished
+       * until the next tick, so the tick still publishes once. */
+      const rechecked = sharing === 'recheck';
+      if (rechecked) {
+        store.publishedAt = now().getTime();
+        await publishChat(store, chatId, target.runId);
+        if (sharingOf(store) === 'not-shared') {
+          armHeartbeat(chatId);
+          return;
+        }
+      }
+      const heartbeat: LogRowBody = { type: 'run.heartbeat' };
+      try {
+        /* Checked again inside the chat's chain: a settlement or a `closeLog` queued ahead of this row wins, and a
+         * closed log is never reopened for a heartbeat. */
+        const committed = await serial(chatId, async () => {
+          const current = heartbeatTarget(store, chatId, deliver);
+          /* A row written while this tick waited (for the chain, or for a recheck's answer) is the run's liveness
+           * already, and its write armed the next tick: this one writes and publishes nothing, so two ticks never
+           * both publish. */
+          if (current === undefined || store.wrote !== decided) {
+            return undefined;
+          }
+          return write(chatId, current.leaderEpoch, [{ runId: current.runId, body: heartbeat }]);
+        });
+        if (committed === undefined) {
+          return;
+        }
+        if (store.deliver === deliver) {
+          deliver({ type: 'rowsCommitted', ledger: committed.ledger, messageIds: committed.messageIds });
+        }
+        /* Fire and forget: an offline remote queues the push, and an older session has no such verb. */
+        if (!rechecked) {
+          store.publishedAt = now().getTime();
+          void publishChat(store, chatId, target.runId);
+        }
+      } catch {
+        /* A fenced or closed log ends the heartbeat with the incarnation that wrote it. */
+        return;
+      }
+      armHeartbeat(chatId);
+    };
+    /* The interval, or what is left of it since the chat's last row. */
+    const timer: unknown = clock.setTimeout(() => {
+      void tick();
+    }, heartbeatDelay ?? heartbeatInterval); // Bound: runHeartbeatMilliseconds.
+    /* A liveness signal never keeps a process open: a daemon that is shutting down exits on time (Node's timers). */
+    (timer as { unref?: () => void } | undefined)?.unref?.();
+    store.heartbeat = {
+      deliver,
+      cancel: () => {
+        clock.clearTimeout(timer);
+        store.heartbeat = undefined;
+      },
+    };
+  };
+
+  /**
+   * This device for an external turn (round 27): what its marker is stamped with and whose records restore a session.
+   * A host with no device provider stamps none and restores as it always has. A host given one that cannot read its
+   * device (it answers none, or fails) fails closed: restoring without it would pass over this device's own stamped
+   * sessions for an older unstamped one, and its marker, unstamped, would be restored by every device.
+   *
+   * @returns The device, `undefined` where no provider is configured, or `unreadable`.
+   */
+  const deviceOf = async (): Promise<Readonly<{ deviceId: string | undefined }> | 'unreadable'> => {
+    if (options.deviceId === undefined) {
+      return { deviceId: undefined };
+    }
+    try {
+      const deviceId = await options.deviceId();
+      return deviceId === undefined || deviceId === '' ? 'unreadable' : { deviceId };
+    } catch {
+      return 'unreadable';
+    }
+  };
+  /** An external start's device: one that cannot be read refuses it `REVISIONS_UNAVAILABLE` (`wait`), before any row. */
+  const deviceForExternalTurn = async (): Promise<Readonly<{ deviceId: string | undefined }>> => {
+    const device = await deviceOf();
+    if (device === 'unreadable') {
+      throw coded(
+        'REVISIONS_UNAVAILABLE' satisfies RefusalCode,
+        'This device’s identity for its chats could not be read, so the external agent was not started; send it again.',
+      );
+    }
+    return device;
+  };
+  /**
+   * The session an external run resumes on: the newest this device's records name for the agent and its host, else the
+   * run's own admission's. Where this device cannot be read, the run's own turn's record, which its own device wrote,
+   * else its admission's: never another turn's, whose device is then unknown.
+   */
+  const resumedSession = async (
+    events: readonly AgentLogEvent[],
+    run: Readonly<{
+      agentId: string;
+      agent: ExternalRunKind;
+      admission: Readonly<{ turnId?: string | undefined; state?: JsonObject | undefined }> | undefined;
+    }>,
+  ): Promise<JsonObject | undefined> => {
+    const { agentId, agent, admission } = run;
+    const hostId = typeof agent['hostId'] === 'string' ? agent['hostId'] : undefined;
+    const device = await deviceOf();
+    const turnId = admission?.turnId ?? externalTurnOf(events)?.messageId;
+    const remembered =
+      device === 'unreadable'
+        ? turnId === undefined
+          ? undefined
+          : externalSessionOf(events, agentId, { hostId, turnId })
+        : externalSessionOf(events, agentId, { hostId, deviceId: device.deviceId });
+    return remembered ?? admission?.state;
+  };
+  /**
+   * Ask the placement to pull the project's remote now (XD3, rounds 18 and 19), and answer whether this device can pull
+   * the chat at all (round 27). Another device's run on the chat has been quiet here a while, and only pulls show
+   * whether it stayed quiet there for the staleness bound (`foreignRunStanding`). At most once a heartbeat interval per
+   * chat (a clock that went back asks again); between asks the last answer stands. The ask is answered once made, not
+   * once pulled, and waited for within the admission's segment bound: what the pull brings, the next command reads.
+   *
+   * A placement that cannot pull the chat (chat sync off, no remote, no record identity) answers `CHAT_NOT_SHARED`: no
+   * pull evidence can then come, so the run cannot move here and no longer holds the chat. A placement with no pull
+   * verb, or one fenced, failing or not answering in time, is taken to pull, and the run keeps holding the chat.
+   *
+   * @param chatId - The chat.
+   * @param at - This device's time.
+   * @returns Whether this device can pull the chat.
+   */
+  const askPull = async (chatId: string, at: number): Promise<boolean> => {
+    const store = storeOf(chatId);
+    const pull = options.placement?.pull;
+    const since = store.pullAskedAt === undefined ? heartbeatInterval : at - store.pullAskedAt;
+    if (pull === undefined) {
+      return true;
+    }
+    if (since >= 0 && since < heartbeatInterval) {
+      return store.pulls ?? true;
+    }
+    store.pullAskedAt = at;
+    let pulls = true;
+    try {
+      const answer = await withinSegmentBound(pull({ requestId: `pull:${chatId}:${String(at)}`, chatId }));
+      pulls = !(answer?.status === 'refused' && answer.code === 'CHAT_NOT_SHARED');
+    } catch {
+      /* Unanswered or failing: no evidence this device cannot pull, so the run keeps holding the chat. */
+    }
+    store.pulls = pulls;
+    return pulls;
+  };
+
+  /*
+   * Read what sync brought once per dispatch of a command: the term check and the admission that follow one `execute`
+   * share one refresh. A re-send of the same command (a `wait` refusal asks for exactly that) is a new dispatch and
+   * reads again. Entries live only while their dispatch does.
+   */
+  const dispatches = new Map<string, Dispatch>();
+  /** Each command a dispatch sent on to the registry, until its answer settles: a copy of it is a replay (round 22). */
+  const reachedCommands = new Map<string, Promise<CommandAnswer>>();
+  const releaseReached = async (commandId: string, sent: Promise<CommandAnswer>): Promise<void> => {
+    await absorbed(sent);
+    if (reachedCommands.get(commandId) === sent) {
+      reachedCommands.delete(commandId);
+    }
+  };
+  /** A replay's answer (SC-R8, as the registry gives it): its original's, marked replayed where that applied durably. */
+  const replayOf = async (original: Promise<CommandAnswer>): Promise<CommandAnswer> => {
+    const settled = await original;
+    return settled.status === 'applied' && settled.effect === 'durable' ? { ...settled, status: 'replayed' } : settled;
+  };
+  /**
+   * End one dispatch's entry once its command is answered: when the registry's answer settles, or at once for a
+   * command answered before it reached the registry (superseded by a Stop, refused by a check).
+   */
+  const releaseDispatch = async (
+    commandId: string,
+    dispatch: Dispatch,
+    answer: Promise<CommandAnswer> | undefined,
+  ): Promise<void> => {
+    if (answer !== undefined) {
+      await absorbed(answer);
+    }
+    if (dispatches.get(commandId) === dispatch) {
+      dispatches.delete(commandId);
+    }
+  };
+  /** An admission's segment read, once per dispatch, and always bounded ({@link boundedRefresh}). */
+  const refreshFor = async (log: DurableEventLog, commandId: string): Promise<void> => {
+    const dispatch = dispatches.get(commandId);
+    if (dispatch?.refreshed === log) {
+      return;
+    }
+    await boundedRefresh(log);
+    if (dispatch !== undefined) {
+      dispatch.refreshed = log;
+    }
+  };
+  /*
+   * Each chat's commands, in the order they arrive, until each has reached the registry: whatever a command awaits
+   * first (a term check, an approval's fence) the commands behind it wait for. A Stop does not wait: it is applied at
+   * once, and the commands still waiting when it arrives are refused `COMMAND_SUPERSEDED`. The newest command's turn; a
+   * command with none ahead adds no wait.
+   */
+  const dispatchOrder = new Map<string, Promise<void>>();
+  /** Each chat's Stops so far: a command that waited on its checks across one is superseded, not run. */
+  const stops = new Map<string, number>();
+  /** Whether the chat's open incarnation already wrote under the term it holds: only such a term can be stale. */
+  const wroteUnderTerm = (chatId: string): boolean => {
+    const leaderEpoch = termOf(chatId);
+    return leaderEpoch !== undefined && stores.get(chatId)?.wrote?.leaderEpoch === leaderEpoch;
+  };
+  /*
+   * Admitted under a new term, propose it for the command's run's rows, now and synchronously (rounds 18 and 19,
+   * {@link rowsTermOf}, {@link ChatTerms}): the run's first row is written under it and makes it the chat's term, and a
+   * command answered other than applied withdraws it ({@link withdrawTerm}), so a refused command leaves the chat's
+   * term, and a live run's heartbeats, as they were. Nothing is closed, so it holds whatever the incarnation holds (an
+   * external agent waiting on its person keeps its slot), nothing behind it waits on a close, and the command's rows
+   * never land under the old term.
+   */
+  const rehome = (
+    chatId: string,
+    admitted: TermAdmission,
+    { admission, runId, says = [] }: Pick<TermProposal, 'admission' | 'runId'> & { says?: readonly ChatRunRow[] },
+  ): void => {
+    const store = storeOf(chatId);
+    if (says.length > 0) {
+      store.carried = [...(store.carried ?? []), { admission, runId, says }];
+    }
+    const held = registry.termOf(chatId);
+    if (held === undefined) {
+      return;
+    }
+    const leaderEpoch = rowsTermOf(admitted, held, createTerm);
+    if (leaderEpoch !== held) {
+      store.terms = {
+        ...store.terms,
+        proposed: [...(store.terms?.proposed ?? []), { replaces: held, leaderEpoch, admission, runId }],
+      };
+    }
+  };
+  /**
+   * A command's answer: one other than applied withdraws what its own admission proposed and carried
+   * ({@link termsAfterAnswer}, {@link carriedAfterAnswer}; round 22), and nothing of another admission's, a replayed
+   * command's original included. A dispatch this host did not admit (a replay) withdraws nothing.
+   */
+  const withdrawAdmission = async (
+    chatId: string,
+    dispatch: Dispatch,
+    answer: Promise<CommandAnswer> | undefined,
+  ): Promise<void> => {
+    const applied = await (answer ?? Promise.resolve(undefined)).then(
+      (settled) => settled?.status === 'applied',
+      () => false,
+    );
+    const store = stores.get(chatId);
+    if (store?.terms !== undefined) {
+      store.terms = termsAfterAnswer(store.terms, dispatch.admission, applied);
+    }
+    if (store?.carried !== undefined) {
+      store.carried = carriedAfterAnswer(store.carried, dispatch.admission, applied);
+    }
+  };
+  /** Each admission's own key (round 22): a re-sent command shares its original's id, never its admission. */
+  let admissionCount = 0;
+  /**
+   * The one cross-device admission of every command that starts or continues a run (round 20, {@link commandAdmission};
+   * `admit` in ChatLedger.lean, T13): a start, a Resume and an approval. After this dispatch's read of what sync brought
+   * (every admission's bounded, round 26: it runs in the chat's dispatch turn), it checks the run's and the other devices' runs' standing, decides the term and proposes
+   * a new one ({@link rehome}), and hands the command's run's first batch with a place for them ({@link carriedPlace})
+   * the turn of every abandoned foreign run it goes on past, so every device reads that run taken over whichever command
+   * passed it.
+   *
+   * The cross-device run fence (XD3): another device's synced segment holds a run it has not settled, and that run is
+   * not abandoned, so nothing runs on the chat until it settles. A run is never moved between devices while it is in
+   * flight (OQ-N21: refuse or interrupt-and-seal; this host refuses). The refusal is a `wait`: the same command is
+   * admitted once sync brings that run's settlement, or once pulls found its segment as it is for more than
+   * {@link foreignRunStaleMilliseconds}. A run quiet here a while awaits such pulls, so the refusal asks the placement
+   * for one ({@link askPull}), unless it cannot pull the chat at all. An approval of a run another device took over is refused `RUN_TAKEN_OVER`.
+   *
+   * A new term for a turn another device's turn came between (XD1): an incarnation keeps one term while it stays open,
+   * and a term's rows merge together, ordered by the term's start (CL-R14), so a command admitted after this
+   * incarnation wrote under its term and read another device's rows since is written under a new term that starts
+   * after them. What "since" means is what this host read, not when the other device's clock says it wrote.
+   *
+   * It fails closed: a check that fails with anything but a decision refuses the command with a `wait` code, the read's
+   * own when it has one, else `SEGMENTS_UNREADABLE`. Nothing is forwarded unchecked.
+   *
+   * @param chatId - The chat.
+   * @param log - Its log.
+   * @param command - The command, its run and verb, and its dispatch, which keeps the admission it is given.
+   */
+  const admitAcross = async (
+    chatId: string,
+    log: DurableEventLog,
+    command: Readonly<{ commandId: string; runId: string; verb: AdmissionVerb; dispatch: Dispatch }>,
+  ): Promise<void> => {
+    const { dispatch } = command;
+    let runs: readonly ForeignRun[] = [];
+    let admitted: CommandAdmission;
+    let at = 0;
+    let pulls = true;
+    try {
+      await refreshFor(log, command.commandId);
+      const takenOver = command.verb === 'approve' && (await log.runTakenOver?.(command.runId)) === true;
+      /* An unread segment may hold a live run: `foreignRuns` rejects `SEGMENTS_UNREADABLE` (`wait`), never answers none. */
+      runs = takenOver ? [] : ((await log.foreignRuns?.()) ?? []);
+      const foreignWrote = wroteUnderTerm(chatId) && (await log.foreignWroteSinceTermBegan?.()) === true;
+      at = now().getTime();
+      const asked = at;
+      pulls = runs.some((run) => foreignRunStanding(run, asked).awaitsPull) ? await askPull(chatId, asked) : true;
+      admitted = commandAdmission(command.verb, {
+        takenOver,
+        foreignWrote,
+        foreign: runs.map((run) => ({
+          runId: run.runId,
+          abandoned: isAbandonedForeignRun(run, asked, { pulls }),
+          said: run.takenOver === true,
+          words: run.words !== undefined,
+        })),
+      });
+    } catch (error) {
+      const { code, message } = codedFailureDetail(error);
+      if (code !== undefined && refusalOf(code).retry === 'wait') {
+        throw error;
+      }
+      throw coded(
+        'SEGMENTS_UNREADABLE' satisfies RefusalCode,
+        `Whether another device is running this chat could not be checked, so nothing was run: ${message}`,
+        { details: { unchecked: code ?? 'uncoded' } },
+      );
+    }
+    if ('refused' in admitted) {
+      if (admitted.refused === 'RUN_TAKEN_OVER') {
+        throw coded(
+          'RUN_TAKEN_OVER' satisfies RefusalCode,
+          'Another device found this paused turn abandoned and went on with the chat, so its request can no longer be approved here. Deny it, then send what you want next.',
+        );
+      }
+      const held = liveForeignRun(runs, at, { pulls })!;
+      throw coded(
+        'RUN_ACTIVE_ON_ANOTHER_DEVICE' satisfies RefusalCode,
+        `Chat ${chatId} is running on another device; send this again once that run finishes.`,
+        {
+          details: {
+            deviceId: held.deviceId,
+            runId: held.runId,
+            state: held.state,
+            lastRecordedAt: new Date(held.lastRecordedAt).toISOString(),
+            /* The earliest a pull can show it abandoned: one that finds nothing newer after this. */
+            staleAt: new Date(held.observedAt + foreignRunStaleMilliseconds).toISOString(),
+          },
+        },
+      );
+    }
+    const passed = new Set(admitted.says);
+    admissionCount += 1;
+    dispatch.admission = admissionCount;
+    rehome(chatId, admitted.admitted, {
+      admission: admissionCount,
+      runId: command.runId,
+      says: runs.flatMap((run): ChatRunRow[] =>
+        passed.has(run.runId) && run.words !== undefined
+          ? [{ runId: run.runId, body: { type: 'message.appended', message: abandonedTurnOf(run.words) } }]
+          : [],
+      ),
+    });
+  };
+
+  /**
+   * A start's or a Resume's admission ({@link admitAcross}), once per dispatch. Where the chat's incarnation already
+   * wrote under its term, it runs before the command reaches the registry ({@link admitBeforeRegistry}): the commands
+   * behind it wait for it, and a Stop supersedes it. A first command is reserved synchronously and admitted here, as the
+   * registry prepares it.
+   */
+  const admitOnce = async (
+    chatId: string,
+    log: DurableEventLog,
+    command: Readonly<{ commandId: string; runId: string; verb: AdmissionVerb }>,
+  ): Promise<void> => {
+    const dispatch = dispatches.get(command.commandId) ?? {};
+    if (dispatch.admitted !== true) {
+      await admitAcross(chatId, log, { ...command, dispatch });
+    }
+  };
+  const admitBeforeRegistry = (
+    command: Readonly<{
+      commandId: string;
+      type: 'start' | 'resume';
+      payload: Readonly<{ chatId: string; runId: string }>;
+    }>,
+    dispatch: Dispatch,
+  ): Promise<CommandAnswer | undefined> | undefined => {
+    const opened = stores.get(command.payload.chatId)?.log;
+    return opened === undefined || !wroteUnderTerm(command.payload.chatId)
+      ? undefined
+      : admitOpened(command, dispatch, opened);
+  };
+  const admitOpened = async (
+    command: Parameters<typeof admitBeforeRegistry>[0],
+    dispatch: Dispatch,
+    opened: Promise<DurableEventLog>,
+  ): Promise<CommandAnswer | undefined> => {
+    const { chatId, runId } = command.payload;
+    try {
+      await admitAcross(chatId, await opened, { commandId: command.commandId, runId, verb: command.type, dispatch });
+      dispatch.admitted = true;
+      return undefined;
+    } catch (error) {
+      if (opened !== stores.get(chatId)?.log) {
+        /* The log closed meanwhile: the registry opens the chat again and admits the command as it prepares it. */
+        return undefined;
+      }
+      const { code, message, details } = codedFailureDetail(error);
+      return {
+        commandId: command.commandId,
+        generation: storeOf(chatId).ledger?.maxEpoch ?? 0,
+        status: 'refused',
+        effect: 'not-applied',
+        code: code ?? ('SEGMENTS_UNREADABLE' satisfies RefusalCode),
+        message,
+        ...(details === undefined ? {} : { details }),
+      };
+    }
+  };
+
+  /**
+   * Wait for `work` at most the admission's segment bound: past it, the wait is refused `SEGMENTS_UNREADABLE` (`wait`)
+   * and the chat's dispatch turn is released (round 26). The work itself goes on; nothing that waits behind it in the
+   * log's write queue is held by it (round 27).
+   */
+  const withinSegmentBound = async <Result>(work: Promise<Result> | undefined): Promise<Result | undefined> => {
+    if (work === undefined) {
+      return undefined;
+    }
+    const clock: HostClock = options.clock ?? globalThis;
+    const expired = Promise.withResolvers<'expired'>();
+    const timer: unknown = clock.setTimeout(() => {
+      expired.resolve('expired');
+    }, options.delays?.segmentRefresh ?? segmentRefreshMilliseconds); // Bound: segmentRefreshMilliseconds.
+    (timer as { unref?: () => void } | undefined)?.unref?.();
+    const settled = async (): Promise<Readonly<{ result: Result }>> => ({ result: await work });
+    try {
+      const first = await Promise.race([settled(), expired.promise]);
+      if (first === 'expired') {
+        throw Object.assign(new Error('The other devices’ copies of this chat could not be read in time.'), {
+          code: 'SEGMENTS_UNREADABLE' satisfies RefusalCode,
+        });
+      }
+      return first.result;
+    } finally {
+      clock.clearTimeout(timer);
+    }
+  };
+  /** An admission's segment read, bounded ({@link withinSegmentBound}): one that does not finish in time is unreadable. */
+  const boundedRefresh = async (log: DurableEventLog): Promise<void> => {
+    await withinSegmentBound(log.refresh?.());
+  };
+  /**
+   * The cross-device admission of an approval (XD3, round 17). An approval lets the paused run's tool act on it at
+   * once: it continues the run, so it is admitted as a Resume is ({@link termAdmission}), after a bounded read of the
+   * other devices' segments and before any row. It is refused `RUN_TAKEN_OVER` once another device found the run
+   * abandoned, said its turn and went on past it: the tool would act on a project that device has changed since, and
+   * its rows would land beside that device's turn. It is refused while another device holds the chat, since a pause
+   * stops holding it after {@link pausedRunHoldMilliseconds}. Admitted after this device read another device's rows
+   * since its incarnation's term began, it is written under a new term that starts after them. A denial or a
+   * cancellation ends the paused run and is never refused.
+   *
+   * Round 22: a segment that cannot be read refuses it `SEGMENTS_UNREADABLE` (`wait`) inside the pause's own hold too.
+   * Another device judges this run abandoned on its own pulls of the remote's copy of this segment, and this host
+   * cannot know when its heartbeats last reached that copy (a publish is answered once queued, not once pushed), so no
+   * part of the hold is one in which no other device could have found it abandoned and gone on past it in that very
+   * segment (`t15_unread_refused` in ChatLedgerProofs.lean).
+   *
+   * @param approval - The approval's command, the chat its paused run belongs to, and that run.
+   * @param dispatch - The approval's dispatch, which keeps its admission.
+   * @returns The refusal, or `undefined` to apply it.
+   */
+  const admitApproval = async (
+    { commandId, chatId, runId }: Readonly<{ commandId: string; chatId: string; runId: string }>,
+    dispatch: Dispatch,
+  ): Promise<CommandAnswer | undefined> => {
+    const store = storeOf(chatId);
+    const refused = (code: string, message: string, details: Record<string, unknown> | undefined): CommandAnswer => ({
+      commandId,
+      generation: store.ledger?.maxEpoch ?? 0,
+      status: 'refused',
+      effect: 'not-applied',
+      code,
+      message,
+      ...(details === undefined ? {} : { details }),
+    });
+    try {
+      /* Open or not, the log is read: a takeover is in the segments, whether or not a driver waits here. */
+      const log = await logOf(chatId);
+      await admitAcross(chatId, log, { commandId, runId, verb: 'approve', dispatch });
+      return undefined;
+    } catch (error) {
+      const { code, message, details } = codedFailureDetail(error);
+      /* Fail closed (round 20): a log that does not open, or any failure that is not a decision, refuses retryably. */
+      if (code === undefined || (code !== 'RUN_TAKEN_OVER' && refusalOf(code).retry !== 'wait')) {
+        return refused('SEGMENTS_UNREADABLE' satisfies RefusalCode, message, { unchecked: code ?? 'uncoded' });
+      }
+      return refused(
+        code,
+        code === 'RUN_ACTIVE_ON_ANOTHER_DEVICE'
+          ? `${message} This paused turn stopped holding the chat, and another device has taken it over; deny the request or resume the turn once that run finishes.`
+          : message,
+        details,
+      );
+    }
+  };
+
   const messagesOf = async (chatId: string): ReturnType<DurableEventLog['messages']> => {
     const log = await logOf(chatId);
     return log.messages();
@@ -1008,6 +2050,34 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       runChats.set(runId, chatId);
     }
     return folded;
+  };
+
+  /**
+   * Whether the chat's durable ledger records the command applied, read before this host admits it (round 23): from
+   * the ledger as loaded ({@link ledgerOf}), never only from what happens to be in memory, since an idle eviction, a
+   * fenced log, a reopen or a restart unloads it, and a copy read against nothing ran full admission. A command this
+   * host does not admit itself before the registry (a start or resume on a chat whose log is not open) is left to the
+   * registry, which reads the ledger as it opens the chat and answers a copy `replayed`. A log that does not open reads
+   * as nothing applied: admission then fails closed.
+   *
+   * @param chatId - The chat the command is ordered in.
+   * @param command - The command, a copy of an applied one or not.
+   * @returns Whether it is applied: at once when the ledger is loaded or need not be.
+   */
+  const appliedDurably = (chatId: string, command: HostCommand): boolean | Promise<boolean> => {
+    const store = storeOf(chatId);
+    const applied = (ledger: ChatLedger | undefined): boolean => ledger?.applied[command.commandId] !== undefined;
+    const admitsHere =
+      store.log !== undefined || (command.type === 'resolve-interrupt' && command.payload.outcome === 'approved');
+    /* Answered at once when nothing need be loaded: a start's reservation is synchronous with its command. */
+    const loaded = async (): Promise<boolean> => {
+      try {
+        return applied(await ledgerOf(chatId));
+      } catch {
+        return false;
+      }
+    };
+    return store.ledger !== undefined || !admitsHere ? applied(store.ledger) : loaded();
   };
 
   const dropLog = async (chatId: string): Promise<void> => {
@@ -1056,24 +2126,105 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     }
   };
 
-  /** Write one batch under `leaderEpoch`, inside the chat's chain ({@link appendChatRows}). */
+  /**
+   * The person's turns a batch says as data (XD3). A run that settles `failed` before it committed its turn appends
+   * the message it was admitted with in the same batch, just before its `failed` row, whichever incarnation settles it:
+   * its own driver, or the next one abandoning it as an orphan. The ledger then reads that turn as committed, so a
+   * Resume does not commit it again, and every copy of it merges as one in the history (`abandonedTurnOf`). The turns
+   * of other devices' runs a command goes on past are its admission's ({@link admitAcross}), carried by its run's first
+   * batch with a place for them ({@link carriedPlace}).
+   */
+  const withFailedTurns = async (
+    log: DurableEventLog,
+    ledger: ChatLedger,
+    rows: readonly ChatRunRow[],
+  ): Promise<readonly ChatRunRow[]> => {
+    const said = new Set<string>();
+    for (const row of rows) {
+      if (row.body.type === 'turn.history-projection-committed') {
+        said.add(row.runId);
+      }
+    }
+    const unsaid = (row: ChatRunRow): boolean =>
+      row.body.type === 'run.lifecycle' &&
+      row.body.state === 'failed' &&
+      ledger.runs[row.runId]?.kind === 'tau' &&
+      ledger.runs[row.runId]?.committed === false &&
+      !said.has(row.runId);
+    if (!rows.some((row) => unsaid(row))) {
+      return rows;
+    }
+    const events = await log.read();
+    return rows.flatMap((row): ChatRunRow[] => {
+      const message = unsaid(row) ? admittedRowOf(events, row.runId)?.admission?.message : undefined;
+      if (message === undefined) {
+        return [row];
+      }
+      said.add(row.runId);
+      return [{ runId: row.runId, body: { type: 'message.appended', message: abandonedTurnOf(message) } }, row];
+    });
+  };
+
+  /**
+   * Write one batch, inside the chat's chain ({@link appendChatRows}): under the incarnation's term, or under the term
+   * this host opened in its place ({@link rehome}). What the batch's term and carried rows are is decided once, as the
+   * write begins ({@link termWriteOf}, {@link carriedBy}), and its first landed row commits exactly that decision
+   * ({@link termsAfterWrite}; round 20, `Terms.finish` in ChatLedger.lean, T12): a term proposed or withdrawn off the
+   * chain while the batch is written changes neither the term it is written under nor what it commits. The carried rows
+   * go at their place in the batch ({@link carriedPlace}; round 21, T14), never between a call and its output nor before
+   * the batch's own rewind.
+   */
   const write = async (
     chatId: string,
-    leaderEpoch: string,
+    incarnationTerm: string,
     rows: readonly ChatRunRow[],
   ): Promise<Readonly<{ ledger: ChatLedger; messageIds: readonly string[] }>> => {
     const store = storeOf(chatId);
     const messageIds: string[] = [];
+    const decided = termWriteOf(store.terms ?? {}, incarnationTerm, rows);
+    const { leaderEpoch } = decided;
+    const carried = carriedBy(store.carried, rows);
     try {
+      const log = await logOf(chatId);
+      /* The hybrid clock (XD1): after every term start the history read, never past its bound ahead of this clock. */
+      const at = now().getTime();
+      const stamped = (await log.stampAfterRead?.(at)) ?? at;
+      const prior = await ledgerOf(chatId);
+      const own = await withFailedTurns(log, prior, rows);
+      /*
+       * Round 21: the carried turns go where the history leaves no tool call open, after every rewind the batch holds
+       * ({@link carriedPlace}), so they never part a call from its output and the batch's own rewind never cuts them.
+       * Round 23: or where a say comes next, which leaves the open calls to the adapter anyway; a run whose person's
+       * turn is not yet said says it next ({@link turnAheadOf}), so that turn stays last, after them. A batch with no
+       * such place carries them to the run's next one.
+       */
+      const history = carried === undefined ? undefined : await log.messages();
+      const place =
+        carried === undefined || history === undefined
+          ? undefined
+          : carriedPlace(
+              history,
+              own.map((row) => row.body),
+              turnAheadOf(prior, carried.runId, history),
+            );
       const ledger = await appendChatRows({
         chatId,
-        log: await logOf(chatId),
-        ledger: await ledgerOf(chatId),
+        log,
+        ledger: prior,
         leaderEpoch,
-        recordedAt: now().toISOString(),
-        rows,
+        recordedAt: new Date(stamped).toISOString(),
+        rows: place === undefined ? own : [...own.slice(0, place), ...carried!.says, ...own.slice(place)],
         onAppended: (row, ledger) => {
           store.ledger = ledger;
+          /* The batch's first row commits what its write decided (rounds 19 and 20). */
+          store.terms = termsAfterWrite(store.terms ?? {}, decided);
+          if (store.carried !== undefined) {
+            store.carried = carriedAfterRow(store.carried, place === undefined ? undefined : carried, row);
+          }
+          store.wrote = { leaderEpoch, at: now().getTime() };
+          if (row.type === 'run.lifecycle' && row.state === 'paused') {
+            store.pausedAt = now().getTime();
+          }
           runChats.set(row.runId, chatId);
           if (row.type === 'message.appended') {
             messageIds.push(row.message.id);
@@ -1081,6 +2232,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           wake(store);
         },
       });
+      armHeartbeat(chatId);
       return { ledger, messageIds };
     } catch (error) {
       if (codedFailureDetail(error).code === 'LOG_FENCED') {
@@ -1274,6 +2426,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         legacyConfigs.get(commandId) ?? admissionConfigOf(start.config, { systemPrompt: options.systemPrompt });
       legacyConfigs.delete(commandId);
       const log = await logOf(chatId);
+      /* Whatever sync brought since the log opened joins the history this turn is given (XD1). */
+      await admitOnce(chatId, log, { commandId, runId: start.runId, verb: 'start' });
       const events = await log.read();
       const { agent } = config;
       if (agent !== undefined) {
@@ -1340,11 +2494,11 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       if (agent !== undefined) {
         /* The chat's own session (VSC3). A rewind keeps the selection and drops the vendor session, which holds a
          * turn Tau has just retracted. */
-        const remembered = externalSessionOf(
-          events,
-          agent.id,
-          typeof agent['hostId'] === 'string' ? agent['hostId'] : undefined,
-        );
+        const { deviceId } = await deviceForExternalTurn();
+        const remembered = externalSessionOf(events, agent.id, {
+          hostId: typeof agent['hostId'] === 'string' ? agent['hostId'] : undefined,
+          deviceId,
+        });
         let state: JsonObject | undefined = remembered;
         if (rewind !== undefined) {
           await closeExternalChat(chatId);
@@ -1357,7 +2511,13 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           ...start.message,
           metadata: {
             ...start.message.metadata,
-            tauInternal: { ...agent, kind: externalTurnKind, runKind: agent.kind, agentId: agent.id },
+            tauInternal: {
+              ...agent,
+              kind: externalTurnKind,
+              runKind: agent.kind,
+              agentId: agent.id,
+              ...(deviceId === undefined ? {} : { deviceId }),
+            },
           },
         };
         return {
@@ -1410,10 +2570,11 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         ...(start.checkoutId === undefined ? {} : { checkoutId: start.checkoutId }),
       };
     },
-    prepareResume: async ({ chatId, runId, payload }) => {
+    prepareResume: async ({ chatId, commandId, runId, payload }) => {
       refuseUnplaced();
       const resume = payload as unknown as CommandPayload<'resume'>;
       const log = await logOf(chatId);
+      await admitOnce(chatId, log, { commandId, runId, verb: 'resume' });
       const ledger = await ledgerOf(chatId);
       const entry = ledger.runs[runId];
       const events = await log.read();
@@ -1441,7 +2602,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           recovery.push(cleared);
         }
       }
-      const missing = pendingToolCalls(history);
+      const missing = openToolCalls(history);
       /* Never rerun: a call with no output row is recorded `interrupted` (D23, I13). */
       const disconnected = missing.map(
         (call): ProviderMessage => interruptedToolOutput({ id: createId(), ...call, timestamp: now().getTime() }),
@@ -1529,13 +2690,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
             /* The session this chat reached, not the one its admission asked for: `remember` replaces the user
              * message's envelope, which only the reducer's view carries. */
             const state =
-              mode === 'start'
-                ? admission?.state
-                : (externalSessionOf(
-                    events,
-                    agentId,
-                    typeof agent['hostId'] === 'string' ? agent['hostId'] : undefined,
-                  ) ?? admission?.state);
+              mode === 'start' ? admission?.state : await resumedSession(events, { agentId, agent, admission });
             const remember = async (remembered: JsonObject): Promise<void> => {
               const current = externalTurnOf(await log.read());
               const message =
@@ -1576,6 +2731,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
                 ...(mode === 'start' && admission?.config ? { config: admission.config } : {}),
                 ...(state === undefined ? {} : { state }),
                 history: events,
+                /* Every device's turns, merged: the runner hands its agent those its session has not seen. */
+                transcript: await log.messages(),
                 append,
                 /* Session state the agent reports between prompts outlives the attempt: not gated by it (VSC3). */
                 appendSession: driverAppender({ chatId, key, leaderEpoch, gated: false }),
@@ -1723,6 +2880,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     closeLog: async (chatId) => {
       const store = storeOf(chatId);
       store.deliver = undefined;
+      store.heartbeat?.cancel();
       store.live.clear();
       await closeExternalChat(chatId).catch(() => undefined);
       if (!closed && !deferredLogCloses.has(chatId)) {
@@ -1734,7 +2892,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
 
   const registry = createChatRunRegistry({
     services,
-    createTerm: options.createLeaderEpoch ?? createPortableId,
+    createTerm,
     ...(options.delays === undefined ? {} : { delays: options.delays }),
     ...(options.clock === undefined ? {} : { actorOptions: { clock: options.clock } }),
     ...(options.onChatQuiescent === undefined ? {} : { onQuiescent: options.onChatQuiescent }),
@@ -1841,7 +2999,100 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       /* Known before any row, so a legacy cancel of a reserving run finds its chat. */
       runChats.set(command.payload.runId, command.payload.chatId);
     }
-    const answer = registry.execute(command);
+    /* One dispatch of this command: what it refreshes is not refreshed again within it, and only within it. */
+    const dispatch: Dispatch = {};
+    const ordered = command.payload.chatId;
+    let answer: Promise<CommandAnswer>;
+    if (command.type === 'cancel') {
+      /* A Stop never waits behind another command's checks: it is applied at once, and supersedes them. */
+      stops.set(ordered, (stops.get(ordered) ?? 0) + 1);
+      answer = registry.execute(command);
+    } else {
+      const stopsSeen = stops.get(ordered) ?? 0;
+      const superseded = (): CommandAnswer | undefined =>
+        (stops.get(ordered) ?? 0) === stopsSeen
+          ? undefined
+          : {
+              commandId: command.commandId,
+              generation: storeOf(ordered).ledger?.maxEpoch ?? 0,
+              status: 'refused',
+              effect: 'not-applied',
+              code: 'COMMAND_SUPERSEDED',
+              message: 'A Stop for this chat arrived while this command waited on its checks, so it was not run.',
+            };
+      const ahead = dispatchOrder.get(ordered);
+      const turn = Promise.withResolvers<void>();
+      dispatchOrder.set(ordered, turn.promise);
+      const admits = command.type === 'start' || command.type === 'resume';
+      /*
+       * The dispatch's entry is registered, and its release set up, before anything can answer the command early; a
+       * copy of a command another dispatch registered leaves that dispatch's entry alone until it is known to be no
+       * replay, when the other's entry is stale (round 22).
+       */
+      const register = (replaces: boolean): boolean => {
+        if (admits && (replaces || !dispatches.has(command.commandId))) {
+          dispatches.set(command.commandId, dispatch);
+          return true;
+        }
+        return false;
+      };
+      let registered = register(false);
+      let reached: Promise<CommandAnswer> | undefined;
+      try {
+        if (ahead !== undefined) {
+          await ahead;
+        }
+        /*
+         * Round 22: a copy of a command this host already sent on (in flight, or applied durably) is a replay. It is
+         * never admitted: it reads nothing, proposes and carries nothing, and its answer withdraws nothing, so the
+         * original's term and the turns it carries stand (`t15_replay_no_change`). It shares the original's answer.
+         */
+        const original = reachedCommands.get(command.commandId);
+        if (original !== undefined) {
+          answer = replayOf(original);
+          return await answer;
+        }
+        const applied = appliedDurably(ordered, command);
+        if (applied === true || (applied !== false && (await applied))) {
+          answer = registry.execute(command);
+          return await answer;
+        }
+        registered = register(true) || registered;
+        const admitting = admits ? admitBeforeRegistry(command, dispatch) : undefined;
+        if (admitting !== undefined) {
+          const held = await admitting;
+          const stopped = superseded();
+          if (stopped !== undefined || held !== undefined) {
+            return stopped ?? held!;
+          }
+        }
+        if (command.type === 'resolve-interrupt' && command.payload.outcome === 'approved') {
+          const held = await admitApproval({ commandId: command.commandId, ...command.payload }, dispatch);
+          const stopped = superseded();
+          if (stopped !== undefined || held !== undefined) {
+            return stopped ?? held!;
+          }
+        }
+        const stopped = superseded();
+        if (stopped !== undefined) {
+          return stopped;
+        }
+        reached = registry.execute(command);
+        answer = reached;
+        reachedCommands.set(command.commandId, reached);
+        void releaseReached(command.commandId, reached);
+      } finally {
+        turn.resolve();
+        if (dispatchOrder.get(ordered) === turn.promise) {
+          dispatchOrder.delete(ordered);
+        }
+        if (registered) {
+          void releaseDispatch(command.commandId, dispatch, reached);
+        }
+        /* A command refused or superseded, here or by the registry, leaves no term behind (rounds 19 and 22). */
+        void withdrawAdmission(ordered, dispatch, reached);
+      }
+    }
     if (command.type === 'resolve-interrupt' || command.type === 'cancel' || command.type === 'resume') {
       const { chatId, runId } = command.payload;
       const scanned = Promise.withResolvers<void>();
@@ -2218,6 +3469,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     close: async () => {
       closing ??= (async () => {
         closed = true;
+        for (const store of stores.values()) {
+          store.heartbeat?.cancel();
+        }
         await registry.close();
         await Promise.allSettled([...deferredLogCloses.values()].map(async ({ done }) => done.promise));
         await drainApprovalScans();

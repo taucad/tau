@@ -41,7 +41,7 @@
     "@taucad/types": "workspace:*",
     "@taulabs/openrscad-engine": "catalog:",
     "@types/ws": "^8.18.1",
-    "geospec": "workspace:*",
+    "geospec": "catalog:",
     "geospec-engine": "catalog:",
     "ws": "catalog:",
     "xstate": "catalog:"

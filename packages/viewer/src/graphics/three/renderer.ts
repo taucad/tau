@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { WebGPUBackend, WebGPURenderer as ThreeWebGPURenderer } from 'three/webgpu';
 import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
 import { reversedDepthTransparentSort } from '#graphics/three/reversed-depth-transparent-sort.js';
+import { installLogarithmicGeometryDepth } from '#graphics/three/logarithmic-depth.js';
 import { syncGltfSurfaceDepthBias } from '#graphics/three/materials/gltf-surface-depth-bias.js';
 import { installWebGpuDepthSampling } from '#graphics/three/webgpu-depth-sampling.js';
 import { installWebGpuStencilState } from '#graphics/three/webgpu-stencil-state.js';
@@ -32,7 +33,7 @@ export type RendererInstance = WebGlRenderer | WebGpuRenderer;
 /**
  * Tau-owned renderer presets for disparate surfaces:
  *
- * - **`viewport`** — Interactive CAD `<Canvas>`: the lean node candidate uses single-sample targets with reversed-Z + GTAO;
+ * - **`viewport`** — Interactive CAD `<Canvas>`: the node pipeline uses single-sample targets with GTAO and reversed-Z (WebGPU) or logarithmic depth (WebGL2);
  *   classic WebGL retains MSAA, log-depth + N8AO and `powerPreference: 'high-performance'` (matches @react-three/fiber defaults
  *   for object-form `gl` props; factory `gl` must set it explicitly). TRAA/temporal AA is intentionally absent because the viewport runs
  *   `frameloop='demand'` (see `docs/policy/graphics-backend-policy.md`) and temporal effects cannot
@@ -261,7 +262,7 @@ export async function createRenderer(
         reversedDepthBuffer: backend === 'webgpu',
         // eslint-disable-next-line @typescript-eslint/naming-convention -- Three constructor option.
         forceWebGL: backend === 'webgl',
-        logarithmicDepthBuffer: false,
+        logarithmicDepthBuffer: backend === 'webgl',
         stencil: true,
       } satisfies Partial<ConstructorParameters<typeof ThreeWebGPURenderer>[0]>);
     } else {
@@ -310,6 +311,9 @@ export async function createRenderer(
       // draw callback for renderer-dependent surface bias, without per-draw arrays.
       // oxlint-disable-next-line max-params -- Three draw callback signature; avoid a rest-array allocation per draw.
       renderer.setRenderObjectFunction((object, scene, camera, geometry, material, group, lights, clipping, passId) => {
+        if (renderer.logarithmicDepthBuffer) {
+          installLogarithmicGeometryDepth(material);
+        }
         syncGltfSurfaceDepthBias.call(material, renderer);
         renderer.renderObject(object, scene, camera, geometry, material, group, lights, clipping, passId);
       });

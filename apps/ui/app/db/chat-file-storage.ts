@@ -3,7 +3,7 @@ import { chatMessageQueuePath, createChatMessageQueueStore } from '#db/chat-mess
 import type { PartialDeep } from 'type-fest';
 import deepmerge from 'deepmerge';
 import { safeValidateUiMessages } from '@taucad/chat';
-import type { Chat } from '@taucad/chat';
+import type { Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import { parseChatRecord, serializeChatRecord } from '@taucad/chat/schemas';
 import { chatLogFileName, chatRecordFileName, chatRecordsPath } from '@taucad/revisions';
@@ -15,6 +15,7 @@ import { composerRecordPaths, createComposerRecordStore } from '#db/composer-rec
 import { KeyedMutex } from '#db/keyed-mutex.js';
 import type { ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
+import { chatPlacementOf, portableExecutionOf, withChatPlacement } from '#utils/chat-execution.js';
 
 /**
  * The chat store, on the filesystem.
@@ -49,6 +50,12 @@ import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
  * The composer — draft, message edits, unread — is not the chat's at all: it is
  * this device's composer records (blueprint D3, W8), and this module only
  * removes a deleted chat's record.
+ *
+ * Neither is a device's placement. `activeExecution` is the chat's intent, so a
+ * Tau execution's device-relative host (`desktop`, `origin`, a loopback daemon)
+ * is dropped on every read and every write (`portableExecutionOf`): absent is
+ * what "local placement" reads as on every device, and a record another device
+ * wrote before this rule reads the same way (cross-device chat handoff, XD2).
  */
 
 const defaultNavigationChatName = 'New chat';
@@ -80,6 +87,12 @@ const placeholderRecord = (projectId: string, chatId: string): Chat => ({
   createdAt: 0,
   updatedAt: 0,
 });
+
+/** A chat record without a device's placement: see the module header. */
+const withPortableExecution = <Row extends Pick<Chat, 'activeExecution'>>(record: Row): Row => {
+  const activeExecution = portableExecutionOf(record.activeExecution);
+  return activeExecution === record.activeExecution ? record : { ...record, activeExecution };
+};
 
 /**
  * The slice of the worker filesystem client the chat store needs. @internal
@@ -173,18 +186,42 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
     };
   };
 
-  const readRecord = async (projectId: string, chatId: string): Promise<ChatRecord | undefined> => {
+  /** The legacy device-relative host each chat's record held when this store last read or wrote it (XD2). */
+  const legacyHosts = new Map<string, TauAgentHostId | undefined>();
+
+  /**
+   * A chat record as `chat.json` holds it, a placement written before placement moved to the device included. Only
+   * the write path and {@link ChatStorage.adoptLegacyChatPlacement} read it so: everything else reads {@link readRecord}.
+   */
+  const readStoredRecord = async (projectId: string, chatId: string): Promise<ChatRecord | undefined> => {
     const text = await readText(recordPath(projectId, chatId));
     const record = text === undefined ? undefined : parseChatRecord(text);
     if (record === undefined) {
+      legacyHosts.delete(chatId);
       return undefined;
     }
     located.set(record.id, projectId);
+    legacyHosts.set(record.id, chatPlacementOf(record.activeExecution));
     return record;
   };
 
-  const writeRecord = async (projectId: string, chat: Chat): Promise<void> => {
-    await options.client.writeFile(recordPath(projectId, chat.id), serializeChatRecord(chat));
+  const readRecord = async (projectId: string, chatId: string): Promise<ChatRecord | undefined> => {
+    const record = await readStoredRecord(projectId, chatId);
+    return record === undefined ? undefined : withPortableExecution(record);
+  };
+
+  /**
+   * Write a chat record. A caller's execution is stored portable; `legacy`, a device-relative host the stored record
+   * already carried from before placement moved to the device, is written back onto a Tau execution with no host of
+   * its own, so an unrelated write never loses it before the device it names adopts it (XD2).
+   */
+  const writeRecord = async (projectId: string, chat: Chat, legacy?: TauAgentHostId): Promise<void> => {
+    const portable = withPortableExecution(chat);
+    const stored =
+      legacy === undefined
+        ? portable
+        : { ...portable, activeExecution: withChatPlacement(portable.activeExecution, legacy) };
+    await options.client.writeFile(recordPath(projectId, chat.id), serializeChatRecord(stored));
     located.set(chat.id, projectId);
   };
 
@@ -281,38 +318,73 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
    * which is what keeps a no-op clear from bumping `updatedAt` — the same
    * contract the object store's `writeChatAtomic` had.
    */
-  const write = async (chatId: string, mutate: (chat: Chat) => Chat | undefined): Promise<Chat | undefined> =>
+  const write = async (
+    chatId: string,
+    mutate: (chat: Chat) => Chat | undefined,
+    writeOptions: Readonly<{ supersedeLegacyPlacement?: boolean }> = {},
+  ): Promise<Chat | undefined> =>
     mutex.run(chatId, async () => {
       const projectId = await locate(chatId);
       if (projectId === undefined) {
         return undefined;
       }
-      const record = await readRecord(projectId, chatId);
+      const stored = await readStoredRecord(projectId, chatId);
+      /* Mutators see the portable record; a legacy host rides along untouched unless this write supersedes it. */
+      const storedLegacy = chatPlacementOf(stored?.activeExecution);
+      const record = stored === undefined ? undefined : withPortableExecution(stored);
       const existing = record === undefined ? await readChatDirectory(projectId, chatId) : { ...record, messages: [] };
       if (existing === undefined || existing.purgedAt !== undefined) {
         return undefined;
       }
-      const updated = mutate(existing);
+      const mutated = mutate(existing);
+      /* The same execution chosen again still drops the pin it supersedes: the record is written without it. */
+      const updated =
+        mutated === undefined && writeOptions.supersedeLegacyPlacement === true && storedLegacy !== undefined
+          ? existing
+          : mutated;
+      /*
+       * Any write that sets the chat's execution supersedes a legacy pin, whichever writer: an explicit choice (a
+       * patch of `activeExecution`, even to the same value) or a new execution in an update. Only a write that leaves
+       * the execution alone keeps it.
+       */
+      const supersedes =
+        writeOptions.supersedeLegacyPlacement === true ||
+        (updated !== undefined && !valuesEqual(portableExecutionOf(updated.activeExecution), existing.activeExecution));
+      const legacy = supersedes ? undefined : storedLegacy;
       if (updated === undefined) {
         /* A no-op is reported as `undefined`, exactly as the object store's
          * `writeChatAtomic` did: the caller's cache invalidation is keyed on a
          * returned chat, so a clear that changed nothing must not repaint. */
         return undefined;
       }
-      await writeRecord(projectId, updated);
-      return hydrate(updated);
+      await writeRecord(projectId, updated, legacy);
+      legacyHosts.set(chatId, legacy);
+      return hydrate(withPortableExecution(updated));
     });
 
   /** As {@link write}, but `false` from the mutator means "nothing changed". */
-  const patch = async (chatId: string, mutate: (chat: Chat) => boolean): Promise<Chat | undefined> =>
-    write(chatId, (chat) => {
-      const draft = { ...chat };
-      if (!mutate(draft)) {
-        return undefined;
-      }
-      draft.updatedAt = Date.now();
-      return draft;
-    });
+  const patch = async (
+    chatId: string,
+    mutate: (chat: Chat) => boolean,
+    writeOptions: Parameters<typeof write>[2] = {},
+  ): Promise<Chat | undefined> =>
+    write(
+      chatId,
+      (chat) => {
+        const draft = { ...chat };
+        if (!mutate(draft)) {
+          return undefined;
+        }
+        /* Written portable (see the module header), so a change that only names this device's host is no change. */
+        const portable = withPortableExecution(draft);
+        if (valuesEqual(portable, chat)) {
+          return undefined;
+        }
+        portable.updatedAt = Date.now();
+        return portable;
+      },
+      writeOptions,
+    );
 
   const create = async (
     resourceId: string,
@@ -468,17 +540,38 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
       );
     },
 
+    /*
+     * XD2: read only on a session's open, never on a list. The one write that drops a legacy host from the record is
+     * this one, and only once `accept` (asked outside the chat's lock) says the host is this device's to adopt.
+     */
+    adoptLegacyChatPlacement: async (chatId, projectId, accept) => {
+      /* The record the session's load just read answers, with no read of its own; a chat not read yet is read once. */
+      let legacy = legacyHosts.get(chatId);
+      if (!legacyHosts.has(chatId)) {
+        const owner = projectId ?? (await locate(chatId));
+        legacy = chatPlacementOf(
+          (owner === undefined ? undefined : await readStoredRecord(owner, chatId))?.activeExecution,
+        );
+      }
+      /* Never written out of the synced record: no device can prove the host is its own (XD2). */
+      return legacy !== undefined && (await accept(legacy)) ? legacy : undefined;
+    },
+
     patchChat: async (chatId, key, value) =>
-      patch(chatId, (chat) => {
-        if (key === 'messages') {
-          throw new Error('Chat transcript messages are host-log-owned and cannot be patched in chat.json.');
-        }
-        if (valuesEqual(chat[key], value)) {
-          return false;
-        }
-        chat[key] = value;
-        return true;
-      }),
+      patch(
+        chatId,
+        (chat) => {
+          if (key === 'messages') {
+            throw new Error('Chat transcript messages are host-log-owned and cannot be patched in chat.json.');
+          }
+          if (valuesEqual(chat[key], value)) {
+            return false;
+          }
+          chat[key] = value;
+          return true;
+        },
+        { supersedeLegacyPlacement: key === 'activeExecution' },
+      ),
 
     touchChatRecency: async (chatId, requestedAt) =>
       patch(chatId, (chat) => {

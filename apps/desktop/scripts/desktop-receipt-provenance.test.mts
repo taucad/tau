@@ -83,4 +83,44 @@ for (const difference of [
   );
 }
 assert.throws(() => verifyDesktopReceiptProvenance(run, artifact, { environment: 'vm', manifest }));
+// The Mac-only scope keeps the same trusted workflows and same-source admission under its own artifact names.
+const macCi = { ...artifact, name: 'desktop-macos-ci-receipts' };
+assert.equal(verifyDesktopReceiptProvenance(run, macCi, { environment: 'ci', manifest, scope: 'macos' }).id, 456);
+for (const name of ['desktop-route-ci-receipts', 'desktop-linux-ci-receipts', 'desktop-macos-vm-receipts']) {
+  assert.throws(() =>
+    verifyDesktopReceiptProvenance(run, { ...artifact, name }, { environment: 'ci', manifest, scope: 'macos' }),
+  );
+}
+assert.throws(() => verifyDesktopReceiptProvenance(run, macCi, { environment: 'ci', manifest }));
+const vmRun = { ...run, path: '.github/workflows/desktop-route-vm-acceptance.yml' };
+const macVm = { ...artifact, name: 'desktop-macos-vm-receipts' };
+assert.equal(verifyDesktopReceiptProvenance(vmRun, macVm, { environment: 'vm', manifest, scope: 'macos' }).id, 456);
+// A receipt artifact forged by another producer workflow, a fork, another source or another run is refused.
+assert.throws(() => verifyDesktopReceiptProvenance(run, macVm, { environment: 'vm', manifest, scope: 'macos' }));
+assert.throws(() => verifyDesktopReceiptProvenance(vmRun, macCi, { environment: 'ci', manifest, scope: 'macos' }));
+for (const difference of [
+  { path: '.github/workflows/desktop-installer-candidate.yml' },
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
+  { head_sha: 'd'.repeat(40) },
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
+  { head_repository: { full_name: 'fork/tau' } },
+  { event: 'push' },
+  { status: 'in_progress' },
+]) {
+  assert.throws(() =>
+    verifyDesktopReceiptProvenance({ ...vmRun, ...difference }, macVm, { environment: 'vm', manifest, scope: 'macos' }),
+  );
+}
+for (const difference of [
+  { expired: true },
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
+  { workflow_run: { id: 999, head_sha: manifest.sourceCommit } },
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
+  { workflow_run: { id: 123, head_sha: 'd'.repeat(40) } },
+  { digest: 'sha256:short' },
+]) {
+  assert.throws(() =>
+    verifyDesktopReceiptProvenance(vmRun, { ...macVm, ...difference }, { environment: 'vm', manifest, scope: 'macos' }),
+  );
+}
 console.log('Trusted workflow and artifact provenance checks passed');

@@ -132,6 +132,52 @@ describe('chatPersistenceMachine', () => {
     actor.stop();
   });
 
+  /*
+   * Round 19: every change of where the chat runs takes the one step that follows it (moving the log observer, marking
+   * queued commands); only the person's pick is written, and a pick still being written when reach changes stays
+   * written by the step that follows.
+   */
+  it('follows a change of reach through the persistence step, writing only a pick', async () => {
+    const steps: string[] = [];
+    const gate = Promise.withResolvers<void>();
+    const actor = createActor(
+      chatPersistenceMachine.provide({
+        actors: {
+          persistActiveExecutionActor: createAsyncLogic<
+            void,
+            { chatId: string; activeExecution: Chat['activeExecution']; persist: boolean }
+          >({
+            run: async ({ input }) => {
+              steps.push(`${input.persist ? 'write' : 'follow'}:${input.activeExecution?.hostId ?? 'local'}`);
+              if (input.activeExecution?.model === 'held') {
+                await gate.promise;
+              }
+            },
+          }),
+        },
+      }),
+      { input: { activeChatId: 'chat_a' } },
+    ).start();
+    const idle = async () => waitFor(actor, (snapshot) => snapshot.matches({ activeExecutionPersistence: 'idle' }));
+
+    actor.send({ type: 'placementReachable', execution: { kind: 'tau', model: 'model-a', hostId: 'loopback:x' } });
+    await idle();
+    actor.send({
+      type: 'placementUnreachable',
+      execution: { kind: 'tau', model: 'model-a' },
+      heldPlacement: 'loopback:x',
+    });
+    await idle();
+    actor.send({ type: 'setActiveExecution', execution: { kind: 'tau', model: 'held' } });
+    actor.send({ type: 'placementReachable', execution: { kind: 'tau', model: 'held', hostId: 'loopback:x' } });
+    gate.resolve();
+    await idle();
+
+    expect(steps).toEqual(['follow:loopback:x', 'follow:local', 'write:local', 'write:loopback:x']);
+    expect(actor.getSnapshot().context.executionUnwritten).toBe(false);
+    actor.stop();
+  });
+
   it('clears a stored refusal when a new turn is requested, including after reload', async () => {
     let storedError: ChatError | undefined = refusal;
     const machine = chatPersistenceMachine.provide({

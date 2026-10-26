@@ -3,6 +3,7 @@ import {
   desktopRuntimeDrift,
   enginePlatformPackages,
   generateNotices,
+  parseProjectionLibfuse,
   parseOcctRevision,
   parseVendoredComponents,
   platformFamilyName,
@@ -72,6 +73,7 @@ describe('generateNotices', () => {
     lgpl: 'GNU LESSER GENERAL PUBLIC LICENSE\n',
     occtException: 'Open CASCADE exception (version 1.0) to GNU LGPL version 2.1.\n',
     engine: { version: '0.1.0-next.19', occtRevision: '3d097a0328e71b826377d4814ab05ec3c3d23871' },
+    libfuse: { version: '3.17.2' },
   });
 
   it('names the installed GeoSpec engine release and the OCCT revision it compiles in', () => {
@@ -85,6 +87,18 @@ describe('generateNotices', () => {
     expect(notices).toContain('facilities provided by the **Open CASCADE Technology** software');
     expect(notices).toContain('- libcascade 3.0.2 ([source](https://github.com/taucad/opencascade.js))');
     expect(notices).toContain('reverse engineer them to debug such modifications');
+  });
+
+  it('gives the libfuse notice under the reproduced LGPL-2.1 with its pinned source', () => {
+    expect(notices).toContain(
+      "## libfuse\n\nOn Linux, the desktop app's private shell projection bridge links dynamically",
+    );
+    expect(notices).toContain(
+      '[GNU Lesser General Public License version 2.1](#gnu-lesser-general-public-license-version-2.1)',
+    );
+    expect(notices).toContain(
+      'unmodified libfuse 3.17.2\n([source](https://github.com/libfuse/libfuse/releases/tag/fuse-3.17.2))',
+    );
   });
 
   it('reproduces the LGPL-2.1 and Open CASCADE exception texts in full', () => {
@@ -181,5 +195,17 @@ describe('desktopRuntimeDrift', () => {
         dependencies: { 'net10.0': { 'Microsoft.CodeAnalysis.CSharp': { resolved: '5.10.0' } } },
       }),
     ).toStrictEqual(['Microsoft.CodeAnalysis.CSharp 5.9.0 != 5.10.0']);
+  });
+});
+
+describe('parseProjectionLibfuse', () => {
+  it('reads the libfuse version the bridge build records in its provenance', () => {
+    expect(parseProjectionLibfuse("        abi: 'x',\n        libfuse: '3.17.2',\n")).toStrictEqual({
+      version: '3.17.2',
+    });
+  });
+
+  it('refuses a build script that records no libfuse version', () => {
+    expect(() => parseProjectionLibfuse("libfuse: 'next',")).toThrow('records no libfuse version');
   });
 });

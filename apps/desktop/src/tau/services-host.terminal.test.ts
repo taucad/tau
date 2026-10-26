@@ -545,6 +545,28 @@ describe('terminal concern', () => {
       expect(late.of('exited')[0]?.reason).toBe('host-stopped');
     });
 
+    it('should keep holding starts after quit stops every Terminal, until the quit is called off', async () => {
+      const { concern: owner, connect, sessions } = setup();
+      const running = connect('1');
+      await opened(running);
+      await owner.closeAll();
+      expect(running.of('exited')[0]?.reason).toBe('host-stopped');
+
+      /* A pane that connects during the rest of quiesce and exit opens nothing that would be stopped unasked. */
+      const late = connect('2');
+      late.send({ type: 'open', size });
+      await flush();
+      expect(sessions).toHaveLength(1);
+      expect(late.of('opened')).toHaveLength(0);
+      expect(late.of('refused')).toHaveLength(0);
+      expect(owner.sessions()).toBe(0);
+
+      owner.releaseStarts();
+      await flush();
+      expect(late.of('opened')).toHaveLength(1);
+      expect(sessions).toHaveLength(2);
+    });
+
     it('should open at once when nothing holds starts (control)', async () => {
       const { connect, sessions } = setup();
       const port = connect();

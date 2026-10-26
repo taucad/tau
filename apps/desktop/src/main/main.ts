@@ -1705,7 +1705,17 @@ const bootstrapElectronApp = async (): Promise<void> => {
         event.preventDefault();
       }
     });
+    /* The restoring mark is one-shot: whichever way the restore load ends, the next close or reload asks again. */
     window.webContents.on('did-finish-load', () => {
+      restoringReloads.delete(contentsId);
+    });
+    window.webContents.on('did-fail-load', (...failure) => {
+      /* Only the page's own load is the restore; a subframe that fails is not. */
+      if (failure[4]) {
+        restoringReloads.delete(contentsId);
+      }
+    });
+    window.webContents.on('render-process-gone', () => {
       restoringReloads.delete(contentsId);
     });
     window.once('close', () => {
@@ -2030,17 +2040,24 @@ const bootstrapElectronApp = async (): Promise<void> => {
             }
             await services.recover(context.attemptId, quitQuiesceMilliseconds);
             quitting = false;
-            for (const window of BrowserWindow.getAllWindows()) {
-              if (!window.isDestroyed()) {
+            try {
+              for (const window of BrowserWindow.getAllWindows().filter((open) => !open.isDestroyed())) {
                 restoringReloads.add(window.webContents.id);
                 window.reload();
               }
+              resumeQueuedNavigation();
+              /* Restoring after the last window closed (Windows and Linux quit then) keeps a window, not a bare
+               * process. */
+              if (process.platform !== 'darwin' && BrowserWindow.getAllWindows().length === 0) {
+                await createMainWindow();
+              }
+            } finally {
+              /* The quit is over whatever the window work did: a later quit must not wait on this one. */
+              done('settled');
+              settleShutdown?.(false);
+              shutdownPending = undefined;
+              settleShutdown = undefined;
             }
-            resumeQueuedNavigation();
-            done('settled');
-            settleShutdown?.(false);
-            shutdownPending = undefined;
-            settleShutdown = undefined;
             break;
           }
           case 'recoveryReview': {
@@ -2060,24 +2077,32 @@ const bootstrapElectronApp = async (): Promise<void> => {
             services.resumeMachineStarts(context.attemptId);
             quitting = false;
             resumeQueuedNavigation();
-            /* Keep Tau open after the last window closed (Windows and Linux quit then) keeps a window, not a bare
-             * process. */
-            if (stage === 'cancelling' && process.platform !== 'darwin' && BrowserWindow.getAllWindows().length === 0) {
-              await createMainWindow();
+            try {
+              /* Keep Tau open after the last window closed (Windows and Linux quit then) keeps a window, not a bare
+               * process. */
+              if (
+                stage === 'cancelling' &&
+                process.platform !== 'darwin' &&
+                BrowserWindow.getAllWindows().length === 0
+              ) {
+                await createMainWindow();
+              }
+              if (stage === 'viewing') {
+                const machine = context.machines?.length === 1 ? context.machines[0] : undefined;
+                const route = machine
+                  ? `/machines/${encodeURIComponent(machine.hostId)}/${encodeURIComponent(machine.machineId)}`
+                  : '/machines';
+                const window = BrowserWindow.getAllWindows()[0] ?? (await createMainWindow());
+                window.webContents.send(quitChannels.navigate, route);
+                focusMainWindow();
+              }
+            } finally {
+              /* The quit is called off whatever the window work did: a later quit must not wait on this one. */
+              done('settled');
+              settleShutdown?.(false);
+              shutdownPending = undefined;
+              settleShutdown = undefined;
             }
-            if (stage === 'viewing') {
-              const machine = context.machines?.length === 1 ? context.machines[0] : undefined;
-              const route = machine
-                ? `/machines/${encodeURIComponent(machine.hostId)}/${encodeURIComponent(machine.machineId)}`
-                : '/machines';
-              const window = BrowserWindow.getAllWindows()[0] ?? (await createMainWindow());
-              window.webContents.send(quitChannels.navigate, route);
-              focusMainWindow();
-            }
-            done('settled');
-            settleShutdown?.(false);
-            shutdownPending = undefined;
-            settleShutdown = undefined;
             break;
           }
           case 'exiting': {

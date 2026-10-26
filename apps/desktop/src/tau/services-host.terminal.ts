@@ -65,12 +65,15 @@ export type TerminalConcern = {
   serve(port: TerminalPort, context: Readonly<Record<string, unknown>> | undefined): void;
   /** End every session whose project main no longer admits (a revoked grant). */
   revokeUntrusted(): void;
-  /** End every session and resolve once each shell and its descendants have stopped (quit). */
+  /**
+   * End every session and resolve once each shell and its descendants have stopped (quit). Starts stay held afterwards
+   * until {@link TerminalConcern.releaseStarts} or the process exits.
+   */
   closeAll(): Promise<void>;
   /**
-   * Hold every shell start until {@link TerminalConcern.releaseStarts} or {@link TerminalConcern.closeAll}: once quit
-   * has counted the sessions it asks about, no new one can start and be stopped unasked (T15). A held pane stays
-   * starting; nothing is refused.
+   * Hold every shell start until {@link TerminalConcern.releaseStarts}: once quit has counted the sessions it asks
+   * about, no new one can start and be stopped unasked (T15). A held pane stays starting; nothing is refused.
+   * {@link TerminalConcern.closeAll} keeps a hold in place for the rest of quiesce and exit.
    */
   holdStarts(): void;
   /** Quit was called off: held starts go on. */
@@ -528,8 +531,11 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
       const ending = Promise.allSettled(
         [...connections].map(async (connection) => connection.end(undefined, 'host-stopped')),
       );
-      /* Held starts wake to find their connection ended. */
-      releaseStarts();
+      /* Held starts wake to find their connection ended; a fresh hold stays for the rest of quiesce and exit, so a
+       * pane that connects now opens nothing that would then be stopped unasked. Only a call-off removes it. */
+      const woken = startHold;
+      startHold = Promise.withResolvers<void>();
+      woken?.resolve();
       await ending;
     },
     holdStarts() {

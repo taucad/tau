@@ -1361,6 +1361,137 @@ describe('desktop main compute owner', () => {
   );
 
   it(
+    'creates no window on macOS when Keep Tau open answers a quit with no window open (T15 control)',
+    async () => {
+      const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+      Object.defineProperty(process, 'platform', { ...platform, value: 'darwin' });
+      try {
+        await bootstrap();
+        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+        getWindows.mockReturnValue([]);
+        state.servicesTerminals.mockResolvedValueOnce(1);
+        dialog.showMessageBox.mockResolvedValueOnce({ response: 0 });
+        state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+        await vi.waitFor(() => {
+          expect(state.servicesResumeStarts).toHaveBeenCalledOnce();
+        });
+        /* A later quit goes through, so the cancelled one settled; the dock reopens a window, not the quit. */
+        state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+        await vi.waitFor(() => {
+          expect(app.quit).toHaveBeenCalledOnce();
+        });
+        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+      } finally {
+        Object.defineProperty(process, 'platform', platform);
+      }
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'settles a called-off quit even when reopening the window fails, so a later quit still quits (T15)',
+    async () => {
+      const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+      Object.defineProperty(process, 'platform', { ...platform, value: 'linux' });
+      try {
+        await bootstrap();
+        getWindows.mockReturnValue([]);
+        fakeWindow.loadURL.mockRejectedValueOnce(new Error('renderer failed to load'));
+        state.servicesTerminals.mockResolvedValueOnce(1);
+        dialog.showMessageBox.mockResolvedValueOnce({ response: 0 });
+        state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+        await vi.waitFor(() => {
+          expect(fakeWindow.loadURL).toHaveBeenCalledTimes(2);
+        });
+        expect(app.quit).not.toHaveBeenCalled();
+
+        state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+        await vi.waitFor(() => {
+          expect(app.quit).toHaveBeenCalledOnce();
+        });
+      } finally {
+        Object.defineProperty(process, 'platform', platform);
+      }
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'keeps a window when restoring the workspace follows a quit that closed the last window (T15)',
+    async () => {
+      const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+      Object.defineProperty(process, 'platform', { ...platform, value: 'linux' });
+      try {
+        await bootstrap();
+        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+        getWindows.mockReturnValue([]);
+        state.servicesQuiesce.mockResolvedValueOnce({ status: 'failed', message: 'drain failed' });
+        dialog.showMessageBox.mockResolvedValueOnce({ response: 0 });
+        state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+        await vi.waitFor(() => {
+          expect(fakeWindow.loadURL).toHaveBeenCalledTimes(2);
+        });
+        expect(state.servicesRecover).toHaveBeenCalledOnce();
+        expect(fakeWindow.reload).not.toHaveBeenCalled();
+        expect(app.quit).not.toHaveBeenCalled();
+      } finally {
+        Object.defineProperty(process, 'platform', platform);
+      }
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'skips the window prompt for one restoring reload only, however that reload ends (T15)',
+    async () => {
+      await bootstrap();
+      const listener = (name: string): ((...args: unknown[]) => void) =>
+        fakeWindow.webContents.on.mock.calls.findLast(([event]) => event === name)![1];
+      const unload = listener('will-prevent-unload');
+      const restore = async (reloads: number): Promise<void> => {
+        state.servicesQuiesce.mockResolvedValueOnce({ status: 'failed', message: 'drain failed' });
+        dialog.showMessageBox.mockResolvedValueOnce({ response: 0 });
+        state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+        await vi.waitFor(() => {
+          expect(fakeWindow.reload).toHaveBeenCalledTimes(reloads);
+        });
+      };
+      const asks = (): boolean => {
+        dialog.showMessageBoxSync.mockClear();
+        dialog.showMessageBoxSync.mockReturnValueOnce(0);
+        unload({ preventDefault: vi.fn() });
+        return dialog.showMessageBoxSync.mock.calls.length === 1;
+      };
+
+      /* The restoring reload itself is not asked about, and only that one unload. */
+      await restore(1);
+      const restoring = { preventDefault: vi.fn() };
+      dialog.showMessageBoxSync.mockClear();
+      unload(restoring);
+      expect(restoring.preventDefault).toHaveBeenCalledOnce();
+      expect(dialog.showMessageBoxSync).not.toHaveBeenCalled();
+      expect(asks()).toBe(true);
+
+      /* A restore load that fails in the main frame leaves no mark behind; a subframe failure is not the restore. */
+      await restore(2);
+      listener('did-fail-load')({}, -2, 'failed', 'app://tau/', false);
+      listener('did-fail-load')({}, -2, 'failed', 'app://tau/', true);
+      expect(asks()).toBe(true);
+
+      /* Nor does a renderer that is gone before the restore load finishes. */
+      await restore(3);
+      listener('render-process-gone')({}, { reason: 'crashed', exitCode: 1 });
+      expect(asks()).toBe(true);
+
+      /* Nor a restore load that finishes. */
+      await restore(4);
+      listener('did-finish-load')();
+      expect(asks()).toBe(true);
+    },
+    bootMilliseconds,
+  );
+
+  it(
     'asks for the quit attempt so the utility holds new Terminal starts, alongside the machine question (T15)',
     async () => {
       await bootstrap();

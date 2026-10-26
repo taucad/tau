@@ -8,13 +8,15 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { processTable } from '#shell/process-tree.js';
-import type { ShellLaunch, ShellPipesProcess, ShellProcess } from '#shell/shell-provider.js';
+import { createShellCustody } from '#shell/shell-custody.js';
+import type { ShellLaunch, ShellLaunchOutcome, ShellPipesProcess, ShellProcess } from '#shell/shell-provider.js';
 import {
   bindOwnPty,
   createSandboxShellProvider,
   shellSandboxCommand,
   shellSandboxProfile,
 } from '#shell/srt-shell-provider.js';
+import type { SandboxShellProviderOptions } from '#shell/srt-shell-provider.js';
 
 /*
  * Orchestration tests (testing contract, layering rule 2): the supervisor fixture answers with an unsandboxed vector,
@@ -43,6 +45,7 @@ const fixtureRoot = (): string => {
 const launchOf = (overrides: Partial<ShellLaunch> & Pick<ShellLaunch, 'arguments'>): ShellLaunch => {
   const root = fixtureRoot();
   return {
+    executionId: '',
     executablePath: '/bin/bash',
     workingDirectory: root,
     commandId: 'test#1',
@@ -65,7 +68,7 @@ const text = async (chunks: AsyncIterable<Uint8Array<ArrayBuffer>>): Promise<str
 };
 
 const started = async (launch: ShellLaunch): Promise<ShellProcess> => {
-  const outcome = await createSandboxShellProvider({ supervisor }).launch(launch);
+  const outcome = await custodial().launch(launch);
   if (outcome.status !== 'started') {
     throw new Error(`expected a started launch, got ${JSON.stringify(outcome)}`);
   }
@@ -152,9 +155,113 @@ describe('createSandboxShellProvider admission', () => {
   });
 });
 
+/*
+ * I7 custody: every launch here is prepared first in its own custody namespace, so a test owns exactly the records it
+ * makes. `launch` prepares a fresh private root and execution, then launches it.
+ */
+const custodial = (overrides: Omit<SandboxShellProviderOptions, 'supervisor' | 'custody'> = {}) => {
+  const base = fixtureRoot();
+  const custody = { directory: join(base, 'custody'), sessionDirectory: base };
+  const provider = createSandboxShellProvider({ supervisor, custody, ...overrides });
+  const executions: string[] = [];
+  const privateRoots: string[] = [];
+  return {
+    provider,
+    custody,
+    executions,
+    privateRoots,
+    launch: async (launch: ShellLaunch): Promise<ShellLaunchOutcome> => {
+      const privateRoot = mkdtempSync(join(base, 'tau-shell-'));
+      const { executionId } = await provider.prepare({ privateRoot, resource: undefined });
+      executions.push(executionId);
+      privateRoots.push(privateRoot);
+      return provider.launch({ ...launch, executionId });
+    },
+  };
+};
+
+describe.runIf(process.platform === 'linux')('createSandboxShellProvider custody', () => {
+  it('should refuse a launch it did not prepare before starting anything', async () => {
+    const { provider } = custodial();
+    const outcome = await provider.launch({
+      ...launchOf({ arguments: ['--noprofile', '--norc', '-c', 'true'] }),
+      executionId: '22222222-2222-4222-8222-222222222222',
+    });
+
+    expect(outcome).toMatchObject({ status: 'sandbox-unavailable' });
+    expect(outcome.status === 'sandbox-unavailable' ? outcome.message : '').toContain('not prepared');
+  });
+
+  it('should hand custody to the supervisor while the launch runs and claim it as soon as exited settles', async () => {
+    const fixture = custodial();
+    const outcome = await fixture.launch(launchOf({ arguments: ['--noprofile', '--norc', '-c', 'sleep 300'] }));
+    if (outcome.status !== 'started') {
+      throw new Error(`expected a started launch, got ${JSON.stringify(outcome)}`);
+    }
+    const [executionId] = fixture.executions;
+    const other = createShellCustody(fixture.custody);
+    try {
+      expect(await other.recover({ executionIds: [executionId!] })).toMatchObject([{ status: 'blocked' }]);
+      await outcome.process.terminate();
+
+      // Post-exit claim: the supervisor has exited, so nothing still holds the lock.
+      expect(await fixture.provider.recover({ executionIds: [executionId!] })).toMatchObject([
+        { executionId, status: 'stopped' },
+      ]);
+      expect(await other.recover({ executionIds: [executionId!] })).toMatchObject([{ status: 'blocked' }]);
+      rmSync(fixture.privateRoots[0]!, { recursive: true });
+      await fixture.provider.release({ executionId: executionId! });
+      expect(await other.inventory()).toEqual([]);
+    } finally {
+      await other.close();
+    }
+  }, 20_000);
+
+  it('should give exactly one of two racing claimants the stopped claim after exit', async () => {
+    const fixture = custodial();
+    const outcome = await fixture.launch(launchOf({ arguments: ['--noprofile', '--norc', '-c', 'exit 0'] }));
+    if (outcome.status !== 'started') {
+      throw new Error(`expected a started launch, got ${JSON.stringify(outcome)}`);
+    }
+    const [executionId] = fixture.executions;
+    await outcome.process.exited;
+    const other = createShellCustody(fixture.custody);
+    try {
+      const answers = await Promise.all([
+        fixture.provider.recover({ executionIds: [executionId!] }),
+        other.recover({ executionIds: [executionId!] }),
+      ]);
+
+      expect(
+        answers.map(([answer]) => answer?.status ?? 'missing').toSorted((left, right) => left.localeCompare(right)),
+      ).toEqual(['blocked', 'stopped']);
+    } finally {
+      await other.close();
+    }
+  }, 20_000);
+
+  it('should let the owner stop a launch the supervisor refused', async () => {
+    const fixture = custodial();
+    const outcome = await fixture.launch(
+      launchOf({ arguments: ['--noprofile', '--norc', '-c', 'echo TAU_FIXTURE_UNAVAILABLE'] }),
+    );
+
+    expect(outcome).toMatchObject({ status: 'sandbox-unavailable' });
+    expect(await fixture.provider.recover({ executionIds: fixture.executions })).toMatchObject([{ status: 'stopped' }]);
+  });
+
+  it('should never pass the custody lock to the workload', async () => {
+    const shell = pipesOf(await started(launchOf({ arguments: ['--noprofile', '--norc', '-c', 'ls -l /proc/$$/fd'] })));
+    const listing = await text(shell.stdout);
+    await shell.exited;
+
+    expect(listing).not.toContain('.lock');
+  });
+});
+
 describe.runIf(posix)('createSandboxShellProvider plumbing', () => {
   it('should answer sandbox-unavailable when the supervisor cannot prepare the sandbox', async () => {
-    const outcome = await createSandboxShellProvider({ supervisor }).launch(
+    const outcome = await custodial().launch(
       launchOf({ arguments: ['--noprofile', '--norc', '-c', 'echo TAU_FIXTURE_UNAVAILABLE'] }),
     );
 
@@ -226,7 +333,7 @@ describe.runIf(posix)('createSandboxShellProvider uncertain cleanup', () => {
     table: NonNullable<Parameters<typeof createSandboxShellProvider>[0]>['processTable'],
     command: string,
   ): Promise<ShellPipesProcess> => {
-    const outcome = await createSandboxShellProvider({ supervisor, processTable: table }).launch(
+    const outcome = await custodial({ processTable: table }).launch(
       launchOf({ arguments: ['--noprofile', '--norc', '-c', command] }),
     );
     if (outcome.status !== 'started') {
@@ -247,8 +354,7 @@ describe.runIf(posix)('createSandboxShellProvider uncertain cleanup', () => {
 
   it('should reject settlement when an owned process survives termination', async () => {
     const root = { pid: 0 };
-    const lying = await createSandboxShellProvider({
-      supervisor,
+    const lying = await custodial({
       processTable: async () => {
         const rows = await processTable();
         return [

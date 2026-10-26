@@ -61,7 +61,7 @@ const createProject = async (withAuthority = false): Promise<Project> => {
       authorityDirectory: () => authorityRoot,
       authorityIdentity: () => root,
     });
-    const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: () => true, authority });
+    const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: () => true, authority }).close;
     const registry = new ProviderRegistry({ createNodeFsPort: async () => port1 });
     const scope = { backend: 'node', path: root, storageRootKey: `node:${root}` } as const;
     const mounts = new MountTable();

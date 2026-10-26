@@ -165,7 +165,7 @@ export const openNodeProjectFileSystem = async (workspaceRoot: string): Promise<
     authority,
     allowRoot: (root) => admitted.has(root),
     policy: tauPathPolicy,
-  });
+  }).close;
   return {
     open: (root) => {
       admitted.add(root);

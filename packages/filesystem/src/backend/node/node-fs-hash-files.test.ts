@@ -45,7 +45,10 @@ const connect = () => {
   const root = join(sandbox, 'root');
   mkdirSync(root);
   const { port1, port2 } = new MessageChannel();
-  const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: (candidate) => candidate === root });
+  const stop = serveNodeFsProvider(port2, {
+    policy: tauPathPolicy,
+    allowRoot: (candidate) => candidate === root,
+  }).close;
   const tap = { ops: [] as string[], repliedBodyBytes: 0 };
   const tapped: NodeFsPort = {
     postMessage(message) {

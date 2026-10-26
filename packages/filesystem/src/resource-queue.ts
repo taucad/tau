@@ -52,8 +52,13 @@ export class ResourceQueue {
    *
    * `descendantPrefix` is opaque and caller-owned so browser POSIX paths and
    * native host paths can supply their own separators without path parsing here.
+   * An aborted `signal` withdraws a still-waiting operation with the signal's reason; a started one completes.
    */
-  public async queueForClaims<T>(claims: readonly ResourceQueueClaim[], operation: () => Promise<T>): Promise<T> {
+  public async queueForClaims<T>(
+    claims: readonly ResourceQueueClaim[],
+    operation: () => Promise<T>,
+    options?: Readonly<{ signal?: AbortSignal }>,
+  ): Promise<T> {
     const ownedClaims = claims.map(({ key, descendantPrefix }) => ({
       key,
       ...(descendantPrefix === undefined ? {} : { descendantPrefix }),
@@ -71,7 +76,23 @@ export class ResourceQueue {
     this._operations.add(queued);
 
     try {
-      await Promise.all(blockers);
+      const signal = options?.signal;
+      if (signal === undefined) {
+        await Promise.all(blockers);
+      } else {
+        signal.throwIfAborted();
+        const aborted = Promise.withResolvers<never>();
+        const abort = (): void => {
+          aborted.reject(signal.reason);
+        };
+        signal.addEventListener('abort', abort, { once: true });
+        try {
+          await Promise.race([Promise.all(blockers), aborted.promise]);
+        } finally {
+          signal.removeEventListener('abort', abort);
+        }
+        signal.throwIfAborted();
+      }
       return await operation();
     } finally {
       this._operations.delete(queued);

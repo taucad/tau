@@ -8,7 +8,18 @@ export { drainNodeFsProviderWatchClosures, NodeFsProvider } from '#backend/node/
 export { acquireNodeAuthorityWriter, NodeAuthorityWriterError } from '#backend/node/authority-writer-lock.js';
 export type { AcquireNodeAuthorityWriterInput, NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 export { NodeFsAuthorityHost, serveNodeFsProvider } from '#backend/node/host.js';
-export type { NodeFsAuthorityOperationInput, NodeFsHostOptions } from '#backend/node/host.js';
+export type {
+  CheckedDirectory,
+  CheckedEntryConflict,
+  CheckedEntryResult,
+  CheckedRename,
+  NodeFsAuthorityOperationInput,
+  NodeFsHostOptions,
+  NodeFsRootRun,
+  NodeFsRootRunInput,
+  NodeFsRootScope,
+  NodeFsServer,
+} from '#backend/node/host.js';
 export { toNodeFsPort } from '#backend/node/port.js';
 export type { EmitterPort, NodeFsPort } from '#backend/node/port.js';
 export { nodeFsProtocolVersion } from '#backend/node/protocol.js';

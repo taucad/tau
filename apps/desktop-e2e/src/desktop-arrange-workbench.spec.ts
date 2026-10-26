@@ -219,12 +219,12 @@ test('refuses an arrangement when the desktop authority fences a concurrent chec
     policy: tauPathPolicy,
     allowRoot: (candidate) => candidate === root,
     authority,
-  });
+  }).close;
   const stopSecond = serveNodeFsProvider(secondPorts.port2, {
     policy: tauPathPolicy,
     allowRoot: (candidate) => candidate === root,
     authority,
-  });
+  }).close;
   const firstChannel = new NodeFsChannel(firstPorts.port1);
   const secondChannel = new NodeFsChannel(secondPorts.port1);
   const first = new NodeFsProviderClient(firstChannel, root);

@@ -101,7 +101,7 @@ nativeGitIntegration('native Git adapter integration', () => {
       policy: tauPathPolicy,
       authority,
       allowRoot: (root) => admittedRoots.has(root),
-    });
+    }).close;
     const channel = new NodeFsChannel(toNodeFsPort(port2));
     const removeEntered = Promise.withResolvers<void>();
     const allowRemove = Promise.withResolvers<void>();

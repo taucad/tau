@@ -571,7 +571,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       ? undefined
       : /* The reserved layout every provider this host opens enforces, so a
          * symlink inside a checkout cannot resolve onto the control plane (G0-6). */
-        serve(toNodeFsPort(internalPorts.port1), { allowRoot: isInternalRoot, authority, policy: tauPathPolicy });
+        serve(toNodeFsPort(internalPorts.port1), { allowRoot: isInternalRoot, authority, policy: tauPathPolicy }).close;
   const internalChannel =
     internalPorts === undefined ? undefined : new NodeFsChannel(toNodeFsPort(internalPorts.port2));
 
@@ -1703,7 +1703,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
             allowRoot: isTrustedRoot,
             policy: tauPathPolicy,
             ...(authority ? { authority } : {}),
-          });
+          }).close;
           let stopped: Promise<void> | undefined;
           // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the repeated-close contract.
           const disposeFileSystem = (): Promise<void> => {

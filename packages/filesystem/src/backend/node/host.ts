@@ -24,6 +24,9 @@ import {
 import { acquireNodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import type { PathPolicy } from '#types.js';
+import type { RootedFileSystem } from '#rooted-views.js';
+import type { CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { ResourceQueue } from '#resource-queue.js';
 import type { ResourceQueueClaim } from '#resource-queue.js';
 import { assertRootedPath, VirtualPathError } from '@taucad/utils/path';
@@ -43,6 +46,15 @@ type AuthorityConfiguration = Readonly<{
 }>;
 
 const authorityConfigurations = new WeakMap<NodeFsAuthorityHost, AuthorityConfiguration>();
+
+/** Package-private claim entry point: {@link NodeFsAuthorityHost.run} plus cancellation while queued. */
+type AuthorityClaimRunner = <T>(
+  input: NodeFsAuthorityOperationInput,
+  operation: (writer: NodeAuthorityWriter) => Promise<T>,
+  signal: AbortSignal | undefined,
+) => Promise<T>;
+
+const authorityClaimRunners = new WeakMap<NodeFsAuthorityHost, AuthorityClaimRunner>();
 
 /** Canonical-root mutation resources held by {@link NodeFsAuthorityHost.run}. @public */
 export type NodeFsAuthorityOperationInput = Readonly<{
@@ -142,6 +154,7 @@ export class NodeFsAuthorityHost {
       authorityDirectory: options.authorityDirectory,
       authorityIdentity: options.authorityIdentity,
     });
+    authorityClaimRunners.set(this, async (input, operation, signal) => this._run(input, operation, signal));
   }
 
   /** Register one served port. The returned async disposer releases ownership after quiescence. */
@@ -169,6 +182,22 @@ export class NodeFsAuthorityHost {
   public async run<T>(
     input: NodeFsAuthorityOperationInput,
     operation: (writer: NodeAuthorityWriter) => Promise<T>,
+  ): Promise<T> {
+    return this._run(input, operation, undefined);
+  }
+
+  private _assertLive(): void {
+    if (this._servers === 0) {
+      throw Object.assign(new Error('Node filesystem authority host has no attached server.'), {
+        code: 'AUTHORITY_HOST_INACTIVE',
+      });
+    }
+  }
+
+  private async _run<T>(
+    input: NodeFsAuthorityOperationInput,
+    operation: (writer: NodeAuthorityWriter) => Promise<T>,
+    signal: AbortSignal | undefined,
   ): Promise<T> {
     const snapshot = { root: input.root, paths: [...input.paths] };
     const { canonicalRoot, identity, authorityRoot } = await resolveAuthorityRoot(this, snapshot.root, () => {
@@ -201,6 +230,7 @@ export class NodeFsAuthorityHost {
           await writer.assertCurrent();
           return operation(writer);
         },
+        signal === undefined ? undefined : { signal },
       );
     } finally {
       entry.operations -= 1;
@@ -215,14 +245,6 @@ export class NodeFsAuthorityHost {
           }
         }
       }
-    }
-  }
-
-  private _assertLive(): void {
-    if (this._servers === 0) {
-      throw Object.assign(new Error('Node filesystem authority host has no attached server.'), {
-        code: 'AUTHORITY_HOST_INACTIVE',
-      });
     }
   }
 
@@ -290,6 +312,291 @@ export type NodeFsHostOptions = {
    * standing between a renderer-supplied string and the whole host filesystem.
    */
   allowRoot(root: string): boolean;
+};
+
+/** One entry whose observed state differed from what a checked entry operation required. @public */
+// oxlint-disable-next-line typescript/no-restricted-types -- `null` is the public checked-write absence sentinel.
+export type CheckedEntryConflict = Readonly<{ path: string; actual: Uint8Array<ArrayBuffer> | null | 'directory' }>;
+
+/** Outcome of a checked rename or directory operation. A conflict is returned, never thrown. @public */
+export type CheckedEntryResult =
+  | Readonly<{ status: 'applied' }>
+  | Readonly<{ status: 'conflict'; conflicts: readonly CheckedEntryConflict[] }>;
+
+/**
+ * Move one file or directory in one native rename. `preconditions` name the source file (or every regular
+ * file below a source directory, which must match the directory's membership exactly) and the destination,
+ * `null` when it must be absent. Same-directory and cross-directory moves inside the root are both atomic.
+ * @public
+ */
+export type CheckedRename = Readonly<{
+  from: string;
+  to: string;
+  preconditions: readonly FileWritePrecondition[];
+  signal?: AbortSignal;
+}>;
+
+/**
+ * Exactly one directory: create needs an existing parent and an absent path; remove needs an empty directory.
+ * @public
+ */
+export type CheckedDirectory = Readonly<{ path: string; signal?: AbortSignal }>;
+
+/**
+ * What one held root claim may do: existing rooted reads, existing checked file writes, and three checked
+ * entry operations. No unchecked mutation, watch, dispose, provider, writer or host path leaves the server.
+ * `signal` aborts when the run's own signal aborts or the server starts closing. A method's `signal` is
+ * checked before its mutation starts; a started mutation completes. Every call re-decides root admission.
+ * Calls still in flight when the operation settles are awaited before the claim is released; later calls
+ * reject with `AUTHORITY_SCOPE_CLOSED`.
+ * @public
+ */
+export type NodeFsRootScope = Readonly<
+  Pick<RootedFileSystem, 'readFile' | 'readdir' | 'stat' | 'exists' | 'writeFileChecked' | 'deleteFileChecked'> & {
+    signal: AbortSignal;
+    renameChecked(input: CheckedRename): Promise<CheckedEntryResult>;
+    mkdirChecked(input: CheckedDirectory): Promise<CheckedEntryResult>;
+    rmdirChecked(input: CheckedDirectory): Promise<CheckedEntryResult>;
+  }
+>;
+
+/** One admitted canonical root; the claim always covers the whole root. `signal` cancels a queued run. @public */
+export type NodeFsRootRunInput = Readonly<{ root: string; signal?: AbortSignal }>;
+
+/** Run one operation while the root's OS writer and whole-root resource claim are held. @public */
+export type NodeFsRootRun = <T>(
+  input: NodeFsRootRunInput,
+  operation: (scope: NodeFsRootScope) => Promise<T>,
+) => Promise<T>;
+
+/** The served node filesystem: its root claims for trusted composition, and its one disposer. @public */
+export type NodeFsServer = Readonly<{
+  /**
+   * Hold one admitted root's whole-root claim for an in-process operation. Trusted host composition only:
+   * a mutation of the same root through a wire client awaited inside `operation` waits on this claim forever.
+   */
+  run: NodeFsRootRun;
+  /** Stop serving, abort open scopes' signals, wait for accepted work, release the authority. */
+  close(): Promise<void>;
+}>;
+
+const codedError = (message: string, code: string): Error => Object.assign(new Error(message), { code });
+
+const scopeClosedError = (): Error =>
+  codedError(
+    'This filesystem scope ended when its operation settled. Call run again to hold a new claim.',
+    'AUTHORITY_SCOPE_CLOSED',
+  );
+
+const serverInactiveError = (): Error =>
+  codedError('Node filesystem server is no longer accepting requests.', 'AUTHORITY_HOST_INACTIVE');
+
+/** Live flag of the operation whose async context a call runs in; cleared when that operation settles. */
+const heldClaims = new AsyncLocalStorage<{ live: boolean }>();
+
+const bytesOf = (value: Uint8Array<ArrayBuffer> | string): Uint8Array<ArrayBuffer> =>
+  typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value);
+
+const sameBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
+  left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
+
+const errnoCode = (error: unknown): string | undefined => (error as NodeJS.ErrnoException | undefined)?.code;
+
+const isDescendant = (ancestor: string, candidate: string): boolean =>
+  ancestor === '' ? candidate !== '' : candidate.startsWith(`${ancestor}/`);
+
+const parentOf = (rootedPath: string): string => {
+  const separator = rootedPath.lastIndexOf('/');
+  return separator === -1 ? '' : rootedPath.slice(0, separator);
+};
+
+// oxlint-disable-next-line typescript/no-restricted-types -- `null` is the public checked-write absence sentinel.
+type EntryState = CheckedEntryConflict['actual'];
+
+// Observe one entry through the admitted provider: bytes, absence, or a directory.
+const observeEntry = async (provider: NodeFsProvider, rootedPath: string): Promise<EntryState> => {
+  let stats: Awaited<ReturnType<NodeFsProvider['stat']>>;
+  try {
+    stats = await provider.stat(rootedPath);
+  } catch (error) {
+    if (errnoCode(error) === 'ENOENT' || errnoCode(error) === 'ENOTDIR') {
+      return null;
+    }
+    throw error;
+  }
+  return stats.type === 'dir' ? 'directory' : provider.readFile(rootedPath);
+};
+
+type ExpectedState = Exclude<EntryState, 'directory'>;
+
+const matches = (actual: EntryState, expected: ExpectedState): boolean =>
+  actual === null ? expected === null : actual !== 'directory' && expected !== null && sameBytes(actual, expected);
+
+// Every regular file below one directory, by root-relative path.
+const regularFilesBelow = async (provider: NodeFsProvider, directory: string): Promise<string[]> => {
+  const files: string[] = [];
+  const pending = [directory];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    // oxlint-disable-next-line no-await-in-loop -- One directory at a time keeps the walk's memory bounded.
+    const entries = await provider.readdirEntries(next);
+    for (const entry of entries) {
+      const child = next === '' ? entry.name : `${next}/${entry.name}`;
+      if (entry.kind === 'dir') {
+        pending.push(child);
+      } else {
+        files.push(child);
+      }
+    }
+  }
+  return files;
+};
+
+// Canonical expected state per path; two preconditions for one path must agree.
+const expectationsOf = (
+  preconditions: readonly FileWritePrecondition[],
+  operation: string,
+): Map<string, ExpectedState> => {
+  const expected = new Map<string, ExpectedState>();
+  for (const precondition of preconditions) {
+    assertRootedPath(precondition.path);
+    const bytes = precondition.expected === null ? null : bytesOf(precondition.expected);
+    const previous = expected.get(precondition.path);
+    if (
+      expected.has(precondition.path) &&
+      (previous === null ? bytes !== null : bytes === null || !sameBytes(previous!, bytes))
+    ) {
+      throw new TypeError(`Checked ${operation} aliases disagree for '${precondition.path}'.`);
+    }
+    expected.set(precondition.path, bytes);
+  }
+  return expected;
+};
+
+// Mark an error thrown once a provider mutation began; recovery must re-observe.
+const potentiallyApplied = (error: unknown): never => {
+  if (error instanceof Error && (error as { applicationState?: unknown }).applicationState === undefined) {
+    Object.assign(error, { applicationState: 'potentially-applied' });
+  }
+  throw error;
+};
+
+const renameChecked = async (
+  provider: NodeFsProvider,
+  writer: NodeAuthorityWriter,
+  input: CheckedRename,
+): Promise<CheckedEntryResult> => {
+  input.signal?.throwIfAborted();
+  assertRootedPath(input.from);
+  assertRootedPath(input.to);
+  if (input.from === '' || input.to === '' || isDescendant(input.from, input.to)) {
+    throw codedError(`EINVAL: invalid argument, rename '${input.from}' -> '${input.to}'`, 'EINVAL');
+  }
+  const expected = expectationsOf(input.preconditions, 'rename');
+  if (!expected.has(input.to)) {
+    throw new TypeError('Checked renames require a destination precondition.');
+  }
+  await writer.assertCurrent();
+  const source = await observeEntry(provider, input.from);
+  const conflicts: CheckedEntryConflict[] = [];
+  if (source === 'directory') {
+    if (expected.has(input.from)) {
+      conflicts.push({ path: input.from, actual: 'directory' });
+    }
+    // Membership: every regular file below the source is named, and nothing named is missing.
+    for (const file of await regularFilesBelow(provider, input.from)) {
+      if (!expected.has(file)) {
+        // oxlint-disable-next-line no-await-in-loop -- Conflicts report current bytes in a stable order.
+        conflicts.push({ path: file, actual: await observeEntry(provider, file) });
+      }
+    }
+  } else if (!expected.has(input.from)) {
+    throw new TypeError('Checked renames require a source precondition.');
+  }
+  const observed = await Promise.all(
+    [...expected].map(async ([candidate, bytes]) => ({
+      candidate,
+      bytes,
+      actual: await observeEntry(provider, candidate),
+    })),
+  );
+  for (const { candidate, bytes, actual } of observed) {
+    if (!matches(actual, bytes)) {
+      conflicts.push({ path: candidate, actual });
+    }
+  }
+  if (conflicts.length > 0) {
+    return { status: 'conflict', conflicts };
+  }
+  input.signal?.throwIfAborted();
+  await writer.assertCurrent();
+  try {
+    await provider.rename(input.from, input.to);
+  } catch (error) {
+    potentiallyApplied(error);
+  }
+  return { status: 'applied' };
+};
+
+const mkdirChecked = async (
+  provider: NodeFsProvider,
+  writer: NodeAuthorityWriter,
+  input: CheckedDirectory,
+): Promise<CheckedEntryResult> => {
+  input.signal?.throwIfAborted();
+  assertRootedPath(input.path);
+  await writer.assertCurrent();
+  const current = await observeEntry(provider, input.path);
+  if (current !== null) {
+    return { status: 'conflict', conflicts: [{ path: input.path, actual: current }] };
+  }
+  const parent = parentOf(input.path);
+  const parentState = await observeEntry(provider, parent);
+  if (parentState !== 'directory') {
+    return { status: 'conflict', conflicts: [{ path: parent, actual: parentState }] };
+  }
+  input.signal?.throwIfAborted();
+  await writer.assertCurrent();
+  try {
+    await provider.mkdir(input.path);
+  } catch (error) {
+    potentiallyApplied(error);
+  }
+  return { status: 'applied' };
+};
+
+const rmdirChecked = async (
+  provider: NodeFsProvider,
+  writer: NodeAuthorityWriter,
+  input: CheckedDirectory,
+): Promise<CheckedEntryResult> => {
+  input.signal?.throwIfAborted();
+  assertRootedPath(input.path);
+  if (input.path === '') {
+    throw codedError("EINVAL: invalid argument, rmdir ''", 'EINVAL');
+  }
+  await writer.assertCurrent();
+  const current = await observeEntry(provider, input.path);
+  if (current !== 'directory') {
+    return { status: 'conflict', conflicts: [{ path: input.path, actual: current }] };
+  }
+  const children = await provider.readdir(input.path);
+  if (children.length > 0) {
+    const conflicts = await Promise.all(
+      children.map(async (name) => {
+        const child = `${input.path}/${name}`;
+        return { path: child, actual: await observeEntry(provider, child) };
+      }),
+    );
+    return { status: 'conflict', conflicts };
+  }
+  input.signal?.throwIfAborted();
+  await writer.assertCurrent();
+  try {
+    await provider.rmdir(input.path);
+  } catch (error) {
+    potentiallyApplied(error);
+  }
+  return { status: 'applied' };
 };
 
 const errorFrame = (id: number, error: unknown): NodeFsResponse => ({
@@ -454,19 +761,21 @@ const runOperation = async (
 
 /**
  * Serve node filesystem requests arriving on `port` until the returned
- * disposer runs.
+ * server closes.
  *
  * @param port - Transport to the renderer's file-manager worker.
  * @param options - Root admission policy.
- * @returns Disposer that drops every provider and watch subscription.
+ * @returns The server: `run` holds one admitted root's claim for trusted in-process composition, and `close`
+ * drops every provider and watch subscription after accepted work settles.
  * @public
  */
-export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions): () => Promise<void> {
+export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions): NodeFsServer {
   const providers = new Map<string, NodeFsProvider>();
   const subscriptions = new Map<number, () => void>();
   const pendingSubscriptions = new Map<number, { cancelled: boolean }>();
   const operations = new Set<Promise<void>>();
   let disposed = false;
+  const closing = new AbortController();
   const detachAuthority = options.authority?.attach();
 
   const send = (response: NodeFsResponse): void => {
@@ -636,12 +945,138 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
   port.addEventListener('message', listener);
   port.start?.();
 
+  const track = (work: Promise<unknown>): void => {
+    const settled = (async (): Promise<void> => {
+      try {
+        await work;
+      } catch {
+        // The caller of `run` receives the rejection; `close` only waits for settlement.
+      }
+    })();
+    operations.add(settled);
+    const forget = async (): Promise<void> => {
+      await settled;
+      operations.delete(settled);
+    };
+    // async-iife: bootstrap -- the claim is retained in `operations` and awaited by `close`.
+    void forget();
+  };
+
+  const scopeFor = ({
+    root,
+    provider,
+    writer,
+    signal,
+  }: Readonly<{
+    root: string;
+    provider: NodeFsProvider;
+    writer: NodeAuthorityWriter;
+    signal: AbortSignal;
+  }>): { scope: NodeFsRootScope; settle(): Promise<void> } => {
+    let open = true;
+    const inFlight = new Set<Promise<unknown>>();
+    const call = async <T>(work: () => Promise<T>): Promise<T> => {
+      if (!open) {
+        throw scopeClosedError();
+      }
+      // Admission is re-decided on every call, so a root narrowed mid-operation stops it here.
+      if (!options.allowRoot(root)) {
+        throw codedError(`Refusing to serve an unadmitted filesystem root: ${root}`, 'EACCES');
+      }
+      const pending = work();
+      inFlight.add(pending);
+      try {
+        return await pending;
+      } finally {
+        inFlight.delete(pending);
+      }
+    };
+    const scope: NodeFsRootScope = {
+      signal,
+      // oxlint-disable-next-line typescript/promise-function-async -- Overloads forward to the provider's own.
+      readFile: ((rootedPath: string, encoding?: 'utf8') =>
+        call(async () =>
+          encoding === undefined ? provider.readFile(rootedPath) : provider.readFile(rootedPath, encoding),
+        )) as NodeFsRootScope['readFile'],
+      readdir: async (rootedPath) => call(async () => provider.readdir(rootedPath)),
+      // oxlint-disable-next-line typescript/promise-function-async -- Overloads forward to the provider's own.
+      stat: ((rootedPath: string, statOptions?: Parameters<NodeFsProvider['stat']>[1]) =>
+        call(async () =>
+          statOptions === undefined ? provider.stat(rootedPath) : provider.stat(rootedPath, statOptions),
+        )) as NodeFsRootScope['stat'],
+      exists: async (rootedPath) => call(async () => provider.exists(rootedPath)),
+      writeFileChecked: async ({ signal: writeSignal, ...input }): Promise<CheckedFileWriteResult> =>
+        call(async () => {
+          writeSignal?.throwIfAborted();
+          return writeNodeFileCheckedWithAuthority(provider, input, writer);
+        }),
+      deleteFileChecked: async ({ signal: deleteSignal, ...input }): Promise<CheckedFileWriteResult> =>
+        call(async () => {
+          deleteSignal?.throwIfAborted();
+          return deleteNodeFileCheckedWithAuthority(provider, input, writer);
+        }),
+      renameChecked: async (input) => call(async () => renameChecked(provider, writer, input)),
+      mkdirChecked: async (input) => call(async () => mkdirChecked(provider, writer, input)),
+      rmdirChecked: async (input) => call(async () => rmdirChecked(provider, writer, input)),
+    };
+    return {
+      scope,
+      settle: async () => {
+        open = false;
+        // Nothing joins after `open` is cleared, so one settlement covers every accepted call.
+        await Promise.allSettled(inFlight);
+      },
+    };
+  };
+
+  const run: NodeFsRootRun = async (input, operation) => {
+    if (heldClaims.getStore()?.live === true) {
+      throw codedError(
+        'A filesystem root claim is already held by this operation. Use its scope instead of calling run again.',
+        'AUTHORITY_CLAIM_NESTED',
+      );
+    }
+    const { authority } = options;
+    if (authority === undefined) {
+      throw codedError(
+        'Filesystem root claims require a node filesystem authority owner. Compose this server with a NodeFsAuthorityHost.',
+        'AUTHORITY_CLAIM_UNSUPPORTED',
+      );
+    }
+    if (disposed) {
+      throw serverInactiveError();
+    }
+    input.signal?.throwIfAborted();
+    const { root } = input;
+    const signal = input.signal === undefined ? closing.signal : AbortSignal.any([closing.signal, input.signal]);
+    const claimed = (async () => {
+      const provider = await providerFor(root);
+      return authorityClaimRunners.get(authority)!(
+        { root, paths: [''] },
+        async (writer) => {
+          const held = scopeFor({ root, provider, writer, signal });
+          const context = { live: true };
+          try {
+            return await heldClaims.run(context, async () => operation(held.scope));
+          } finally {
+            context.live = false;
+            await held.settle();
+          }
+        },
+        signal,
+      );
+    })();
+    track(claimed);
+    return claimed;
+  };
+
   const dispose = async (): Promise<void> => {
     if (disposed) {
       return;
     }
     port.removeEventListener?.('message', listener);
     disposed = true;
+    closing.abort(serverInactiveError());
     for (const pending of pendingSubscriptions.values()) {
       pending.cancelled = true;
     }
@@ -685,10 +1120,13 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
     }
   };
   let disposal: Promise<void> | undefined;
-  // Deliberately non-async: repeated disposal calls must receive the same settlement promise.
-  // oxlint-disable-next-line typescript/promise-function-async -- Promise identity exposes one quiescence result.
-  return () => {
-    disposal ??= dispose();
-    return disposal;
+  return {
+    run,
+    // Deliberately non-async: repeated close calls must receive the same settlement promise.
+    // oxlint-disable-next-line typescript/promise-function-async -- Promise identity exposes one quiescence result.
+    close: () => {
+      disposal ??= dispose();
+      return disposal;
+    },
   };
 }

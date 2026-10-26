@@ -11,6 +11,8 @@ import {
   Info,
   ListTree,
   MessageCircleIcon,
+  MoreHorizontal,
+  Plus,
   Printer,
   Rotate3d,
   Share2,
@@ -23,6 +25,10 @@ import type { DockviewApi } from 'dockview-react';
 import { useDockviewPanels } from '#components/panes/dockview-tab-overflow-picker.js';
 import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '@taucad/ui/components/drawer';
 import { Button } from '@taucad/ui/components/button';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent } from '@taucad/ui/components/dropdown-menu';
+import { FileSelector } from '#components/files/file-selector.js';
+import { ViewerTabContextMenu } from '#components/panes/viewer-tab-context-menu.js';
+import type { ViewerFileActions } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import { MobileWorkbenchNavigation } from '#components/mobile-workbench-navigation.js';
 import type { MobileWorkbenchDestinationCue } from '#components/mobile-workbench-navigation.js';
 import type { MobilePanelId } from '#constants/editor.constants.js';
@@ -110,6 +116,7 @@ export function ChatInterfaceNav({
   chatCue,
   viewerApi,
   viewerNames,
+  fileActions,
 }: {
   readonly className?: string;
   readonly activeTab: MobilePanelId;
@@ -119,6 +126,8 @@ export function ChatInterfaceNav({
   /** Existing viewer panels, including distinct saved views of the same file. */
   readonly viewerApi?: DockviewApi;
   readonly viewerNames?: ReadonlyMap<string, string>;
+  /** Creates a fresh viewer, including another view of an already-open file. */
+  readonly fileActions?: ViewerFileActions;
 }): React.ReactNode {
   const [isAllOpen, setAllOpen] = useState(false);
   const views = useDockviewPanels(viewerApi);
@@ -169,34 +178,89 @@ export function ChatInterfaceNav({
           <DrawerTitle className='px-3'>All surfaces</DrawerTitle>
           <DrawerDescription className='sr-only'>Choose a workbench surface</DrawerDescription>
           <div className='min-h-0 overflow-y-auto pb-3'>
-            {views.length > 1 ? (
+            {viewerApi ? (
               <section aria-labelledby='all-views-title'>
                 <h3 id='all-views-title' className='px-3 pt-3 pb-1 text-xs font-medium text-muted-foreground'>
                   Views
                 </h3>
-                <div className='grid grid-cols-[repeat(auto-fill,minmax(8rem,1fr))] gap-2 px-3'>
-                  {views.map((panel) => (
+                <div className='grid grid-cols-1 gap-2 px-3'>
+                  <FileSelector
+                    dataSource={fileActions?.dataSource}
+                    selectedFile={undefined}
+                    title='Open File'
+                    description='Choose a file to open in a new view'
+                    searchPlaceholder='Search files…'
+                    isDisabled={!fileActions}
+                    onSelect={(path) => {
+                      fileActions?.openFile(path);
+                      hasChosenSurface.current = true;
+                      hasChosenView.current = true;
+                      onTabChange('viewer');
+                      setAllOpen(false);
+                    }}
+                  >
                     <Button
-                      key={panel.id}
-                      variant={panel.id === viewerApi?.activePanel?.id ? 'secondary' : 'outline'}
+                      data-open-view-file
+                      variant='outline'
                       size='touch'
-                      aria-current={panel.id === viewerApi?.activePanel?.id ? 'page' : undefined}
-                      className='min-w-0 justify-start'
-                      onClick={() => {
-                        hasChosenSurface.current = true;
-                        hasChosenView.current = true;
-                        panel.api.setActive();
-                        onTabChange('viewer');
-                        setAllOpen(false);
-                      }}
+                      className='justify-start'
+                      disabled={!fileActions}
                     >
-                      <Box aria-hidden />
-                      <span className='truncate'>
-                        {viewerNames?.get(panel.id) ? `${viewerNames.get(panel.id)} · ` : ''}
-                        {panel.api.title ?? 'Untitled view'}
-                      </span>
+                      <Plus aria-hidden />
+                      Open file
                     </Button>
-                  ))}
+                  </FileSelector>
+                  {views.map((panel) => {
+                    const title = `${viewerNames?.get(panel.id) ? `${viewerNames.get(panel.id)} · ` : ''}${panel.api.title ?? 'Untitled view'}`;
+                    return (
+                      <div key={panel.id} data-view-id={panel.id} className='flex min-w-0 gap-1'>
+                        <Button
+                          variant={panel.id === viewerApi.activePanel?.id ? 'secondary' : 'outline'}
+                          size='touch'
+                          aria-current={panel.id === viewerApi.activePanel?.id ? 'page' : undefined}
+                          className='min-w-0 flex-1 justify-start'
+                          onClick={() => {
+                            hasChosenSurface.current = true;
+                            hasChosenView.current = true;
+                            panel.api.setActive();
+                            onTabChange('viewer');
+                            setAllOpen(false);
+                          }}
+                        >
+                          <Box aria-hidden />
+                          <span className='truncate'>{title}</span>
+                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant='outline' size='icon-touch' aria-label={`More actions for ${title}`}>
+                              <MoreHorizontal aria-hidden />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            onCloseAutoFocus={(event) => {
+                              if (hasChosenSurface.current) {
+                                event.preventDefault();
+                              } else if (!viewerApi.getPanel(panel.id)) {
+                                event.preventDefault();
+                                sheetRef.current?.querySelector<HTMLElement>('[data-open-view-file]')?.focus();
+                              }
+                            }}
+                          >
+                            <ViewerTabContextMenu
+                              api={panel.api}
+                              params={panel.params}
+                              variant='dropdown'
+                              onNavigate={(surface) => {
+                                hasChosenSurface.current = true;
+                                onTabChange(surface);
+                                setAllOpen(false);
+                              }}
+                            />
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    );
+                  })}
                 </div>
               </section>
             ) : null}

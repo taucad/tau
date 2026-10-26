@@ -23,6 +23,7 @@ import { graphicsSettingsForView, newViewRecord } from '@taucad/workbench-panes/
 import { viewTabTitle } from '#workbench-records/view-titles.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { createStaticDataSource } from '@taucad/workbench-panes/files/file-selector';
+import type { FileSelectorDataSource } from '@taucad/workbench-panes/files/file-selector';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
@@ -534,6 +535,12 @@ export function ViewerRightActions(properties: IDockviewHeaderActionsProps): Rea
   return <ProjectWorkspaceActions {...properties} />;
 }
 
+/** The mounted viewer's fresh-view command and its runtime-supported project files. */
+export type ViewerFileActions = Readonly<{
+  openFile: (path: string) => void;
+  dataSource: FileSelectorDataSource;
+}>;
+
 /**
  * ViewerDockview
  *
@@ -547,10 +554,13 @@ export function ViewerRightActions(properties: IDockviewHeaderActionsProps): Rea
 export const ViewerDockview = memo(function ({
   profile = 'editor',
   onApiChange,
+  onFileActionsChange,
 }: {
   readonly profile?: ViewerProfile;
   /** Exposes the mounted viewer for a host-owned view selector; clears it on teardown. */
   readonly onApiChange?: (api: DockviewApi | undefined) => void;
+  /** Registers the same fresh-view action used by the desktop file picker; clears it on teardown. */
+  readonly onFileActionsChange?: (actions: ViewerFileActions | undefined) => void;
 } = {}): React.JSX.Element {
   const { projectRef, mainEntryPath, viewRecords, entriesRecord, geometryUnits, setViewEntryPath } = useProject();
   const viewCommands = useWorkbenchViewCommands();
@@ -565,6 +575,8 @@ export const ViewerDockview = memo(function ({
     }),
     [profile],
   );
+  const files = useViewerSelectableFiles();
+  const fileDataSource = useMemo(() => createStaticDataSource(files ?? []), [files]);
   const [api, setApi] = useState<DockviewApi>();
   useEffect(() => {
     onApiChange?.(api);
@@ -1002,7 +1014,7 @@ export const ViewerDockview = memo(function ({
 
   // Open-file action: add a new viewer panel in the same group
   const handleOpenFile = useCallback(
-    (path: string, group: DockviewGroupPanel, containerApi: DockviewApi) => {
+    (path: string, group: DockviewGroupPanel | undefined, containerApi: DockviewApi) => {
       const viewId = mintViewRecordId();
       const fileName = path.split('/').pop() ?? path;
 
@@ -1011,10 +1023,7 @@ export const ViewerDockview = memo(function ({
         component: 'viewer',
         title: fileName,
         params: { viewId, entryPath: path },
-        position: {
-          direction: 'within',
-          referenceGroup: group,
-        },
+        ...(group ? { position: { direction: 'within', referenceGroup: group } } : {}),
       });
 
       if (profile === 'editor') {
@@ -1029,6 +1038,22 @@ export const ViewerDockview = memo(function ({
     },
     [entriesRecord, getInheritedSettings, profile, projectRef, viewCommands],
   );
+
+  useEffect(() => {
+    onFileActionsChange?.(
+      api
+        ? {
+            openFile: (path) => {
+              handleOpenFile(path, api.activeGroup ?? api.groups[0], api);
+            },
+            dataSource: fileDataSource,
+          }
+        : undefined,
+    );
+    return () => {
+      onFileActionsChange?.(undefined);
+    };
+  }, [api, fileDataSource, handleOpenFile, onFileActionsChange]);
 
   return (
     <DockviewFileActionProvider value={handleOpenFile}>

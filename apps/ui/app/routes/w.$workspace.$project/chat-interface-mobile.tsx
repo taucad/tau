@@ -14,6 +14,7 @@ import type { MobilePanelId } from '#constants/editor.constants.js';
 import { useChatInterfaceState } from '#routes/w.$workspace.$project/use-chat-interface-state.js';
 import { viewName } from '#workbench-records/view-titles.js';
 import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
+import type { ViewerFileActions } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '@taucad/ui/components/drawer';
 import { ChatHistoryGate, ChatInterfaceSessionGate } from '#routes/w.$workspace.$project/focused-chat-gate.js';
 import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
@@ -482,6 +483,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
     useChatInterfaceState();
   const chatCue = useChatCue();
   const [viewerApi, setViewerApi] = useState<DockviewApi>();
+  const [viewerFileActions, setViewerFileActions] = useState<ViewerFileActions>();
   const { viewRecords } = useProject();
   const viewerNames = useMemo(
     () => new Map([...viewRecords].map(([id, record]) => [id, viewName(record)])),
@@ -614,7 +616,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
             paddingBottom: isViewerTab ? 'var(--nav-offset)' : `calc(${sheetHeight})`,
           }}
         >
-          <ViewerDockview onApiChange={setViewerApi} />
+          <ViewerDockview onApiChange={setViewerApi} onFileActionsChange={setViewerFileActions} />
           <ProjectManifestIssueBanner />
 
           {/* Renders the shared failure notice or WorkspaceUnavailableRecovery
@@ -726,6 +728,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
             chatCue={chatCue}
             viewerApi={viewerApi}
             viewerNames={viewerNames}
+            fileActions={viewerFileActions}
             onTabChange={chooseSurface}
           />
         </div>

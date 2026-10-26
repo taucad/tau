@@ -825,6 +825,146 @@ test('switches model files through phone Files actions without desktop tabs', as
   await target.screenshot(undefined, 'mobile-matrix-file-switch-360.png');
 });
 
+test('opens a fresh same-file view and keeps view actions reachable after closing every view', async () => {
+  const viewport = portraitViewports[1];
+  const workspace = 'phone-view-actions';
+  const entryPath = 'public/models/touch-parameters.js';
+  await openPhoneProject(viewport, `/__e2e/project-file-tree?main=touch-parameters&workspace=${workspace}`);
+  const activeTab = selectors.getByCss('.dv-tab.dv-active-tab');
+  const originalId = await target.getAttribute(activeTab, 'data-tab-panel-id');
+  expect(originalId).toBeTruthy();
+  const originalPath = `/.tau/workbench/views/${originalId}.json`;
+  await expect
+    .poll(
+      async () => {
+        const tree = await readWorkbenchTree(workspace);
+        return tree[originalPath];
+      },
+      { timeout: 60_000 },
+    )
+    .toBeDefined();
+  const before = await readWorkbenchTree(workspace);
+  expect(before['/tau.json']).toBeDefined();
+
+  await target.click(navButton('All'), { touch: true });
+  const openFile = () => allSheet().getByRole('button', { name: 'Open file', exact: true });
+  const picker = () => selectors.getByRole('dialog', { name: 'Open File', exact: true });
+  await target.click(openFile(), { touch: true });
+  await target.expectVisible(picker());
+  await dismiss(picker());
+  await target.expectVisible(allSheet());
+  await expect
+    .poll(async () =>
+      target.evaluate(
+        () =>
+          document.activeElement instanceof HTMLElement && document.activeElement.dataset['openViewFile'] !== undefined,
+      ),
+    )
+    .toBe(true);
+  expect(await reachable(openFile())).toBe(true);
+
+  const selectSameFile = async (): Promise<void> => {
+    await target.click(openFile(), { touch: true });
+    await target.expectVisible(picker());
+    await target.fill(picker().getByCss('[cmdk-input]'), 'touch-parameters');
+    await target.click(picker().getByCss(`[cmdk-item][data-value="${entryPath}"]`), { touch: true });
+    await target.waitFor(() => document.querySelector('[role="dialog"][data-vaul-drawer]') === null, undefined, {
+      timeout: 10_000,
+    });
+    await waitForModelReady();
+    await expect
+      .poll(async () =>
+        target.evaluate(
+          () =>
+            document.activeElement?.textContent === 'Model' &&
+            document.activeElement.closest('nav[aria-label="Workbench"]') !== null,
+        ),
+      )
+      .toBe(true);
+    expect(await reachable(navButton('Model'))).toBe(true);
+    await expectStage(viewport);
+  };
+  await selectSameFile();
+  await target.expectCount(selectors.getByCss('.dv-tab'), 2);
+  const freshId = await target.getAttribute(activeTab, 'data-tab-panel-id');
+  expect(freshId).toBeTruthy();
+  expect(freshId).not.toBe(originalId);
+  const freshPath = `/.tau/workbench/views/${freshId}.json`;
+  await expect
+    .poll(
+      async () => {
+        const tree = await readWorkbenchTree(workspace);
+        const bytes = tree[freshPath];
+        return bytes ? (JSON.parse(bytes) as { entryPath: string }).entryPath : undefined;
+      },
+      { timeout: 60_000 },
+    )
+    .toBe(entryPath);
+  const created = await readWorkbenchTree(workspace);
+  expect(created['/tau.json']).toBe(before['/tau.json']);
+  expect(JSON.parse(created[originalPath]!)).toEqual(JSON.parse(before[originalPath]!));
+  await target.reload();
+  await waitForModelReady();
+  await target.expectCount(selectors.getByCss('.dv-tab'), 2);
+  await target.expectAttribute(activeTab, 'data-tab-panel-id', freshId!);
+  await target.click(navButton('All'), { touch: true });
+  await motionSettled();
+  await expectWholeLayer('All view actions');
+  await target.screenshot(undefined, 'mobile-matrix-view-actions-360.png');
+  await target.click(
+    allSheet()
+      .getByCss(`[data-view-id="${freshId}"]`)
+      .getByRole('button', { name: /More actions/ }),
+    { touch: true },
+  );
+  await target.expectCount(selectors.getByRole('menuitem', { name: 'Split Right' }), 0);
+  await target.screenshot(undefined, 'mobile-matrix-view-menu-360.png');
+  await target.click(selectors.getByRole('menuitem', { name: 'Close', exact: true }), { touch: true });
+  await target.expectCount(selectors.getByCss('.dv-tab'), 1);
+  await expect
+    .poll(
+      async () => {
+        const tree = await readWorkbenchTree(workspace);
+        return tree[freshPath];
+      },
+      { timeout: 60_000 },
+    )
+    .toBeUndefined();
+  const afterClose = await readWorkbenchTree(workspace);
+  expect(afterClose[originalPath]).toBeDefined();
+  await expect
+    .poll(async () =>
+      target.evaluate(
+        () =>
+          document.activeElement instanceof HTMLElement && document.activeElement.dataset['openViewFile'] !== undefined,
+      ),
+    )
+    .toBe(true);
+  await target.click(
+    allSheet()
+      .getByCss(`[data-view-id="${originalId}"]`)
+      .getByRole('button', { name: /More actions/ }),
+    { touch: true },
+  );
+  await target.expectAttribute(selectors.getByRole('menuitem', { name: 'Close Others' }), 'aria-disabled', 'true');
+  await target.click(selectors.getByRole('menuitem', { name: 'Close All', exact: true }), { touch: true });
+  await target.expectCount(selectors.getByCss('.dv-tab'), 0);
+  await expect
+    .poll(async () =>
+      target.evaluate(
+        () =>
+          document.activeElement instanceof HTMLElement && document.activeElement.dataset['openViewFile'] !== undefined,
+      ),
+    )
+    .toBe(true);
+  expect(await reachable(openFile())).toBe(true);
+  await target.screenshot(undefined, 'mobile-matrix-empty-view-actions-360.png');
+  await selectSameFile();
+  await target.expectCount(selectors.getByCss('.dv-tab'), 1);
+  const afterReopen = await readWorkbenchTree(workspace);
+  expect(afterReopen['/tau.json']).toBe(before['/tau.json']);
+});
+
 test('reselects same-file saved views through All after reload without changing their records', async () => {
   const workspace = 'phone-saved-views';
   await openPhoneProject(portraitViewports[1], `/__e2e/project-file-tree?main=touch-parameters&workspace=${workspace}`);

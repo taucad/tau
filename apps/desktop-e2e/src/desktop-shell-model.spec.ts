@@ -10,6 +10,7 @@ import { shellOutputSchema } from '@taucad/chat/schemas/tools/shell';
 import { exportModelOutputSchema } from '@taucad/chat/schemas/tools/export-model';
 import { z } from 'zod';
 import { launchDesktopApp } from '#support/desktop-app.js';
+import { reportShellDiagnostics } from '#support/shell-qualification.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import {
   failedGatewayToolResults,
@@ -67,7 +68,10 @@ let session: DesktopSession | undefined;
 let fixture: GatewayFixture | undefined;
 let seededEmail: string | undefined;
 
-afterEach(async () => {
+afterEach(async (context) => {
+  if (context.task.result?.state === 'fail' && session) {
+    await reportShellDiagnostics(session);
+  }
   await session?.close();
   session = undefined;
   await fixture?.close();

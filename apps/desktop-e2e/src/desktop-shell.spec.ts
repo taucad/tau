@@ -17,6 +17,7 @@ import {
   survivingTerminalWriter,
   terminalWordPosition,
   terminalRegion,
+  reportShellDiagnostics,
 } from '#support/shell-qualification.js';
 
 let session: DesktopSession | undefined;
@@ -32,8 +33,9 @@ beforeEach(async () => {
 });
 
 afterEach(async (context) => {
-  if (context.task.result?.state === 'fail') {
-    await session?.capture(`shell-qualification-${context.task.id}`);
+  if (context.task.result?.state === 'fail' && session) {
+    await reportShellDiagnostics(session);
+    await session.capture(`shell-qualification-${context.task.id}`);
   }
   await session?.close();
   session = undefined;

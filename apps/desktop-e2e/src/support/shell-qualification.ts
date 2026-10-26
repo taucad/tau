@@ -12,6 +12,26 @@ import type { DesktopSession } from '#support/desktop-app.js';
 export const terminalRegion = (page: Page): Locator =>
   page.getByRole('region', { name: 'Terminal', exact: true }).getByRole('region', { name: 'Terminal', exact: true });
 
+/**
+ * On a failed row, print the shell's own diagnostics into the job log: the desktop log's shell, Terminal and supervisor
+ * lines (probe outcome, refusals) and the Terminal pane's visible text. Reporting only; it never changes a verdict.
+ *
+ * @param session - The failed row's session, before it closes.
+ */
+export const reportShellDiagnostics = async (session: DesktopSession): Promise<void> => {
+  const log = await readFile(session.logPath, 'utf8').catch((error: unknown) => `unreadable: ${String(error)}`);
+  const lines = log
+    .split('\n')
+    .filter((line) => /shell|terminal|pty|supervisor|sandbox/iu.test(line))
+    .slice(-60)
+    .map((line) => line.slice(0, 600));
+  const pane = await terminalRegion(session.page)
+    .textContent({ timeout: 2000 })
+    .then((text) => text ?? '')
+    .catch(() => 'no Terminal pane');
+  console.info('SHELL DIAGNOSTICS', JSON.stringify({ lines, pane: pane.slice(0, 2000) }));
+};
+
 /** Open the production workbench surface through its ordinary menu. */
 export const openTerminalPane = async (page: Page): Promise<void> => {
   await page.getByRole('button', { name: 'Open workbench tab', exact: true }).first().click();

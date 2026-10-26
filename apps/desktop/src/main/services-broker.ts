@@ -154,12 +154,15 @@ export type ServicesBroker = {
   streamingMachines(boundMilliseconds: number, attemptId: string): Promise<readonly StreamingMachine[]>;
   /**
    * How many human Terminal sessions the utility holds now (T15), so quit can ask before it stops them. No utility, no
-   * session.
+   * session. Asked for a quit attempt, the utility also holds new shell starts until
+   * {@link ServicesBroker.resumeMachineStarts} calls the quit off or quiesce stops every Terminal, so the count cannot
+   * grow before the sessions are stopped.
    *
    * @param boundMilliseconds - How long to wait for the utility's answer before rejecting.
+   * @param attemptId - The quit attempt asking, which holds starts; absent, the question only reads.
    * @returns The utility's own session count.
    */
-  terminalSessions(boundMilliseconds: number): Promise<number>;
+  terminalSessions(boundMilliseconds: number, attemptId?: string): Promise<number>;
   /** Quit was called off after {@link ServicesBroker.streamingMachines}: the utility starts machine jobs again. */
   resumeMachineStarts(attemptId: string): void;
   /** Recover only after utility teardown has actually settled; never kill a pending save. */
@@ -288,7 +291,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   };
 
   /** Ask the utility how many Terminal sessions it holds; it answers from the sessions it serves, nothing else. */
-  const askTerminalSessions = async (boundMilliseconds: number): Promise<number> => {
+  const askTerminalSessions = async (boundMilliseconds: number, attemptId?: string): Promise<number> => {
     const spawned = utility;
     if (spawned === undefined) {
       return 0;
@@ -302,7 +305,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     }, boundMilliseconds);
     bound.unref();
     try {
-      spawned.postMessage({ type: 'terminal-sessions', requestId });
+      spawned.postMessage({ type: 'terminal-sessions', requestId, ...(attemptId === undefined ? {} : { attemptId }) });
       return await pending.promise;
     } finally {
       clearTimeout(bound);
@@ -883,8 +886,8 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     async streamingMachines(boundMilliseconds, attemptId) {
       return askStreaming('machines-streaming', boundMilliseconds, attemptId);
     },
-    async terminalSessions(boundMilliseconds) {
-      return askTerminalSessions(boundMilliseconds);
+    async terminalSessions(boundMilliseconds, attemptId) {
+      return askTerminalSessions(boundMilliseconds, attemptId);
     },
     async peekStreamingMachines(boundMilliseconds) {
       const machines = await askStreaming('machines-streaming-peek', boundMilliseconds);

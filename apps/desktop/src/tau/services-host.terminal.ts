@@ -67,7 +67,15 @@ export type TerminalConcern = {
   revokeUntrusted(): void;
   /** End every session and resolve once each shell and its descendants have stopped (quit). */
   closeAll(): Promise<void>;
-  /** Sessions with a live or starting shell, for diagnostics and tests. */
+  /**
+   * Hold every shell start until {@link TerminalConcern.releaseStarts} or {@link TerminalConcern.closeAll}: once quit
+   * has counted the sessions it asks about, no new one can start and be stopped unasked (T15). A held pane stays
+   * starting; nothing is refused.
+   */
+  holdStarts(): void;
+  /** Quit was called off: held starts go on. */
+  releaseStarts(): void;
+  /** Sessions whose shell is running or past the start hold, not ones still waiting to open or already ending. */
   sessions(): number;
 };
 
@@ -126,9 +134,17 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
   /** Live connections by `windowId\0projectRoot`: one PTY per project and window. */
   const live = new Map<string, Connection>();
   const connections = new Set<Connection>();
+  /** Set while quit holds shell starts; every held start awaits it. */
+  let startHold: PromiseWithResolvers<void> | undefined;
+  const releaseStarts = (): void => {
+    startHold?.resolve();
+    startHold = undefined;
+  };
 
   type Connection = {
     readonly projectRoot: string;
+    /** A shell runs, or is starting past the start hold, and the connection is not ending. */
+    isLive(): boolean;
     /** Ends the connection with one final frame, or none when the pane is already gone. */
     end(frame: TerminalHostFrame | undefined, reason?: TerminalExitReason): Promise<void>;
   };
@@ -156,6 +172,8 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
     let acknowledgement: PromiseWithResolvers<void> | undefined;
     let pendingAccess: { id: string; access: TerminalAccess; accessExpires: number } | undefined;
     let opening = false;
+    /** Inside {@link start} past the start hold: a shell is being opened that quit must count. */
+    let starting = false;
     let claimed = false;
     /** Sessions opened on this port; a frame stamped with an earlier count was meant for a shell that is gone. */
     let opened = 0;
@@ -197,6 +215,7 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
 
     const connection: Connection = {
       projectRoot,
+      isLive: () => !isEnded() && (session !== undefined || starting),
       // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the repeated-close contract.
       end(frame, reason) {
         ended ??= (async (): Promise<void> => {
@@ -267,7 +286,7 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
     };
 
     /** Start one shell for this connection; refuses end the connection with the shell service's own words. */
-    const start = async (size: TerminalSize, access: TerminalAccess | undefined): Promise<void> => {
+    const openShell = async (size: TerminalSize, access: TerminalAccess | undefined): Promise<void> => {
       if (!options.isTrustedRoot(projectRoot)) {
         await refuse(
           refusal(
@@ -333,6 +352,23 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
       log('terminal.opened', { granted: access !== undefined });
       // async-iife: bootstrap -- the pump ends the connection itself; nobody awaits a port's output.
       void pump(outcome.session, generation);
+    };
+
+    /** Open a shell once quit holds no starts; a connection that ends while held opens nothing. */
+    const start = async (size: TerminalSize, access: TerminalAccess | undefined): Promise<void> => {
+      for (let hold = startHold; hold !== undefined; hold = startHold) {
+        // oxlint-disable-next-line no-await-in-loop -- a released hold can be taken again by the next quit.
+        await hold.promise;
+        if (isEnded()) {
+          return;
+        }
+      }
+      starting = true;
+      try {
+        await openShell(size, access);
+      } finally {
+        starting = false;
+      }
     };
 
     const handle = async (frame: TerminalClientFrame, epoch: number): Promise<void> => {
@@ -489,8 +525,17 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
       }
     },
     async closeAll() {
-      await Promise.allSettled([...connections].map(async (connection) => connection.end(undefined, 'host-stopped')));
+      const ending = Promise.allSettled(
+        [...connections].map(async (connection) => connection.end(undefined, 'host-stopped')),
+      );
+      /* Held starts wake to find their connection ended. */
+      releaseStarts();
+      await ending;
     },
-    sessions: () => connections.size,
+    holdStarts() {
+      startHold ??= Promise.withResolvers<void>();
+    },
+    releaseStarts,
+    sessions: () => [...connections].filter((connection) => connection.isLive()).length,
   };
 };

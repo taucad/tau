@@ -450,6 +450,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   /* Counts main's quit questions and call-offs, so a hold that lands after its quit was called off lets go at once. */
   let quitAttempt = 0;
   let activeQuitRequest: string | undefined;
+  /** The quit attempt whose Terminal question holds new shell starts (T15). */
+  let terminalHoldAttempt: string | undefined;
   const releaseHeldStarts = (): void => {
     heldStarts?.();
     heldStarts = undefined;
@@ -1267,11 +1269,18 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         return;
       }
       case 'terminal-sessions': {
-        /* Quit's Terminal question (T15): the sessions this utility serves now, read without holding anything. */
-        const { requestId } = frame;
-        if (typeof requestId === 'string') {
-          terminalSessionsAnswered?.(requestId, terminals.sessions());
+        /* Quit's Terminal question (T15): the sessions this utility serves now. Asked for a quit attempt, it also
+         * holds new shell starts until the quit is called off or quiesce stops every Terminal, so the count main
+         * asks about cannot grow before then. */
+        const { requestId, attemptId } = frame;
+        if (typeof requestId !== 'string') {
+          return;
         }
+        if (typeof attemptId === 'string') {
+          terminals.holdStarts();
+          terminalHoldAttempt = attemptId;
+        }
+        terminalSessionsAnswered?.(requestId, terminals.sessions());
         return;
       }
       case 'machines-streaming': {
@@ -1345,6 +1354,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       }
       case 'machines-resume': {
         /* Main called its quit off after asking: admit starts again. */
+        if (terminalHoldAttempt !== undefined && frame['attemptId'] === terminalHoldAttempt) {
+          terminalHoldAttempt = undefined;
+          terminals.releaseStarts();
+        }
         if (frame['attemptId'] !== activeQuitRequest) {
           return;
         }

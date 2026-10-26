@@ -455,6 +455,12 @@ describe('createServicesBroker', () => {
       const asked = broker.terminalSessions(1000);
       spawns[0]?.message({ type: 'terminal-sessions-answered', requestId: question()?.['requestId'], sessions: 2 });
       await expect(asked).resolves.toBe(2);
+      /* A peek carries no attempt; quit's question carries its attempt, which holds the utility's new starts. */
+      expect(question()).not.toHaveProperty('attemptId');
+      const quitAsked = broker.terminalSessions(1000, 'quit-9');
+      expect(question()?.['attemptId']).toBe('quit-9');
+      spawns[0]?.message({ type: 'terminal-sessions-answered', requestId: question()?.['requestId'], sessions: 1 });
+      await expect(quitAsked).resolves.toBe(1);
 
       const invalid = broker.terminalSessions(1000);
       spawns[0]?.message({ type: 'terminal-sessions-answered', requestId: question()?.['requestId'], sessions: -1 });

@@ -481,4 +481,77 @@ describe('terminal concern', () => {
     expect(port.of('opened')).toHaveLength(0);
     expect(port.of('exited')[0]?.reason).toBe('closed');
   });
+
+  describe('quit (T15)', () => {
+    it('should count only connections whose shell runs or is starting, not idle or ending ones', async () => {
+      const gate = Promise.withResolvers<void>();
+      const { shell } = createShell();
+      const { concern: owner, connect } = setup({
+        shell: async () => {
+          await gate.promise;
+          return { status: 'available', shell };
+        },
+      });
+      const idle = connect('1');
+      expect(owner.sessions()).toBe(0);
+      const starting = connect('2');
+      starting.send({ type: 'open', size });
+      await flush();
+      expect(owner.sessions()).toBe(1);
+      gate.resolve();
+      await flush();
+      expect(starting.of('opened')).toHaveLength(1);
+      expect(owner.sessions()).toBe(1);
+      /* Ending counts as gone at once, before the shell has finished stopping. */
+      starting.send({ type: 'close' });
+      expect(owner.sessions()).toBe(0);
+      await flush();
+      expect(idle.closed()).toBe(false);
+      expect(owner.sessions()).toBe(0);
+    });
+
+    it('should hold a start while quit holds starts, and open it once the quit is called off', async () => {
+      const { concern: owner, connect, sessions } = setup();
+      const running = connect('1');
+      await opened(running);
+      owner.holdStarts();
+      expect(owner.sessions()).toBe(1);
+
+      const late = connect('2');
+      late.send({ type: 'open', size });
+      await flush();
+      /* The count quit asked about cannot grow: nothing opened, nothing refused. */
+      expect(sessions).toHaveLength(1);
+      expect(late.of('opened')).toHaveLength(0);
+      expect(late.of('refused')).toHaveLength(0);
+      expect(owner.sessions()).toBe(1);
+
+      owner.releaseStarts();
+      await flush();
+      expect(late.of('opened')).toHaveLength(1);
+      expect(owner.sessions()).toBe(2);
+    });
+
+    it('should open nothing held when quit stops every Terminal', async () => {
+      const { concern: owner, connect, sessions } = setup();
+      owner.holdStarts();
+      const late = connect();
+      late.send({ type: 'open', size });
+      await flush();
+      await owner.closeAll();
+      await flush();
+      expect(sessions).toHaveLength(0);
+      expect(late.of('opened')).toHaveLength(0);
+      expect(late.of('exited')[0]?.reason).toBe('host-stopped');
+    });
+
+    it('should open at once when nothing holds starts (control)', async () => {
+      const { connect, sessions } = setup();
+      const port = connect();
+      port.send({ type: 'open', size });
+      await flush();
+      expect(sessions).toHaveLength(1);
+      expect(port.of('opened')).toHaveLength(1);
+    });
+  });
 });

@@ -573,6 +573,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
   removeStaleQuickLookSessions(quickLookTemporaryRoot);
   const quickLookControllers = new Map<number, QuickLookController>();
   let quitting = false;
+  /* Windows main reloads to restore the workspace after a quit was called off: their Terminal sessions were already
+   * covered by quit's own question, so their unload is not asked about again (T15). */
+  const restoringReloads = new Set<number>();
 
   const auth = createAuthService({
     callbackScheme: desktopScheme === 'tau-staging:' ? 'tau-staging' : 'tau',
@@ -1677,6 +1680,34 @@ const bootstrapElectronApp = async (): Promise<void> => {
     window.on('enter-full-screen', publishFullscreen);
     window.on('leave-full-screen', publishFullscreen);
     window.webContents.on('did-finish-load', publishFullscreen);
+    /*
+     * A running Terminal's pane holds the page's unload (T15), so closing the window (its close button, Cmd/Ctrl+W, the
+     * last window on Windows and Linux, which would quit) and reloading it (Cmd/Ctrl+R) ask first. Keep open leaves
+     * the window and its session as they were; Close and stop lets the unload go on, which ends the session. Quit
+     * asked its own question already, and a restoring reload follows one, so neither asks again.
+     */
+    const { id: contentsId } = window.webContents;
+    window.webContents.on('will-prevent-unload', (event) => {
+      if (quitting || restoringReloads.delete(contentsId)) {
+        event.preventDefault();
+        return;
+      }
+      const response = dialog.showMessageBoxSync(window, {
+        type: 'warning',
+        buttons: ['Keep open', 'Close and stop'],
+        defaultId: 0,
+        cancelId: 0,
+        message: 'A Terminal session is running in this window.',
+        detail:
+          'Closing or reloading this window stops its Terminal session and anything running in it. Tau will not run its commands again.',
+      });
+      if (response === 1) {
+        event.preventDefault();
+      }
+    });
+    window.webContents.on('did-finish-load', () => {
+      restoringReloads.delete(contentsId);
+    });
     window.once('close', () => {
       try {
         writeWindowState(windowStatePath, {
@@ -1857,18 +1888,20 @@ const bootstrapElectronApp = async (): Promise<void> => {
       try {
         switch (stage) {
           case 'assessing': {
-            /* Running Terminals (T15) are counted by the utility that serves them; an unanswered count is unknown,
-             * which asks rather than stopping them unseen, and never holds quit past its bound. */
-            const terminals = await services.terminalSessions(machineStreamingMilliseconds).catch(() => undefined);
-            const terminalsClear = terminals === 0;
-            try {
-              const machines = await services.streamingMachines(machineStreamingMilliseconds, context.attemptId);
-              done(machines.length === 0 && terminalsClear ? 'clear' : 'review', {
-                machines,
-                ...(terminals === undefined ? {} : { terminals }),
-              });
-            } catch (error) {
-              done('review', { error: String(error), ...(terminals === undefined ? {} : { terminals }) });
+            /* Running Terminals (T15) are counted by the utility that serves them, alongside the machine question;
+             * the quit's question also holds new Terminal starts until the quit is called off or quiesce stops them.
+             * An unanswered count is unknown, which asks rather than stopping them unseen, within the same bound. */
+            const [terminalCount, machineAnswer] = await Promise.allSettled([
+              services.terminalSessions(machineStreamingMilliseconds, context.attemptId),
+              services.streamingMachines(machineStreamingMilliseconds, context.attemptId),
+            ]);
+            const terminals = terminalCount.status === 'fulfilled' ? terminalCount.value : undefined;
+            const counted = terminals === undefined ? {} : { terminals };
+            if (machineAnswer.status === 'fulfilled') {
+              const machines = machineAnswer.value;
+              done(machines.length === 0 && terminals === 0 ? 'clear' : 'review', { machines, ...counted });
+            } else {
+              done('review', { error: String(machineAnswer.reason), ...counted });
             }
             break;
           }
@@ -1961,7 +1994,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
               defaultId: 0,
               cancelId: context.retryable ? 1 : 0,
               message: 'Tau has not finished saving every project.',
-              detail: `${context.error ?? ''} Retry saving, or restore the app after pending saves settle. Quitting anyway may lose changes.`,
+              detail: `${context.error ?? ''} Retry saving, or restore the app after pending saves settle. Quitting anyway may lose changes.${context.terminals === 0 ? '' : ' Restoring reloads each window, which also stops the Terminal sessions quit asked about.'}`,
             });
             done(
               context.retryable
@@ -1999,6 +2032,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
             quitting = false;
             for (const window of BrowserWindow.getAllWindows()) {
               if (!window.isDestroyed()) {
+                restoringReloads.add(window.webContents.id);
                 window.reload();
               }
             }
@@ -2026,6 +2060,11 @@ const bootstrapElectronApp = async (): Promise<void> => {
             services.resumeMachineStarts(context.attemptId);
             quitting = false;
             resumeQueuedNavigation();
+            /* Keep Tau open after the last window closed (Windows and Linux quit then) keeps a window, not a bare
+             * process. */
+            if (stage === 'cancelling' && process.platform !== 'darwin' && BrowserWindow.getAllWindows().length === 0) {
+              await createMainWindow();
+            }
             if (stage === 'viewing') {
               const machine = context.machines?.length === 1 ? context.machines[0] : undefined;
               const route = machine

@@ -74,8 +74,10 @@ const state = vi.hoisted(() => ({
     status: 'bound',
     machineId: 'workshop-x1c',
   })),
-  servicesStreaming: vi.fn(async (_boundMilliseconds: number): Promise<readonly StreamingMachine[]> => []),
-  servicesTerminals: vi.fn(async (_boundMilliseconds: number): Promise<number> => 0),
+  servicesStreaming: vi.fn(
+    async (_boundMilliseconds: number, _attemptId?: string): Promise<readonly StreamingMachine[]> => [],
+  ),
+  servicesTerminals: vi.fn(async (_boundMilliseconds: number, _attemptId?: string): Promise<number> => 0),
   servicesResumeStarts: vi.fn(),
   servicesRecover: vi.fn(async () => undefined),
   runtimePrewarm: vi.fn(),
@@ -241,6 +243,7 @@ const getWindows = vi.fn(() => [fakeWindow]);
 /* The quit hold's only visible surface when it cannot settle (C69). */
 const dialog = {
   showOpenDialog: vi.fn(),
+  showMessageBoxSync: vi.fn((_window: unknown, _options: Readonly<{ buttons?: readonly string[] }>) => 0),
   showMessageBox: vi.fn(
     async (_options: Readonly<{ buttons?: readonly string[] }>): Promise<{ response: number }> => ({ response: 0 }),
   ),
@@ -1290,6 +1293,91 @@ describe('desktop main compute owner', () => {
       expect(options.buttons).toEqual(['View machines', 'Keep Tau open', 'Quit anyway']);
       expect(options.detail).toContain('Quitting also stops a running Terminal session.');
       expect(state.servicesQuiesce).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'asks before a window close or reload stops a running Terminal, and Keep open keeps the window (T15)',
+    async () => {
+      await bootstrap();
+      const unload = fakeWindow.webContents.on.mock.calls.findLast(([name]) => name === 'will-prevent-unload')?.[1];
+      expect(unload).toBeDefined();
+
+      /* Keep open: the page's hold stands, so the window neither closes nor reloads. */
+      dialog.showMessageBoxSync.mockReturnValueOnce(0);
+      const kept = { preventDefault: vi.fn() };
+      unload!(kept);
+      expect(dialog.showMessageBoxSync).toHaveBeenCalledOnce();
+      expect(dialog.showMessageBoxSync.mock.calls[0]?.[1]).toMatchObject({
+        message: 'A Terminal session is running in this window.',
+        buttons: ['Keep open', 'Close and stop'],
+        defaultId: 0,
+        cancelId: 0,
+      });
+      expect(kept.preventDefault).not.toHaveBeenCalled();
+
+      /* Close and stop: the unload goes on. */
+      dialog.showMessageBoxSync.mockReturnValueOnce(1);
+      const stopped = { preventDefault: vi.fn() };
+      unload!(stopped);
+      expect(stopped.preventDefault).toHaveBeenCalledOnce();
+
+      /* Negative control: once quit owns the close, the window unloads without a second question. */
+      dialog.showMessageBoxSync.mockClear();
+      const assessment = Promise.withResolvers<readonly StreamingMachine[]>();
+      state.servicesStreaming.mockReturnValueOnce(assessment.promise);
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      const quitting = { preventDefault: vi.fn() };
+      unload!(quitting);
+      expect(quitting.preventDefault).toHaveBeenCalledOnce();
+      expect(dialog.showMessageBoxSync).not.toHaveBeenCalled();
+      assessment.resolve([]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'keeps a window when Keep Tau open answers a quit that followed the last window closing (T15)',
+    async () => {
+      const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+      Object.defineProperty(process, 'platform', { ...platform, value: 'linux' });
+      try {
+        await bootstrap();
+        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+        getWindows.mockReturnValue([]);
+        state.servicesTerminals.mockResolvedValueOnce(1);
+        dialog.showMessageBox.mockResolvedValueOnce({ response: 0 });
+        state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+        await vi.waitFor(() => {
+          expect(fakeWindow.loadURL).toHaveBeenCalledTimes(2);
+        });
+        expect(app.quit).not.toHaveBeenCalled();
+      } finally {
+        Object.defineProperty(process, 'platform', platform);
+      }
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'asks for the quit attempt so the utility holds new Terminal starts, alongside the machine question (T15)',
+    async () => {
+      await bootstrap();
+      const terminals = Promise.withResolvers<number>();
+      state.servicesTerminals.mockReturnValueOnce(terminals.promise);
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      /* Both questions are out before either answers. */
+      await vi.waitFor(() => {
+        expect(state.servicesStreaming).toHaveBeenCalled();
+      });
+      const [, attemptId] = state.servicesTerminals.mock.calls.at(-1) as unknown as [number, string];
+      expect(typeof attemptId).toBe('string');
+      expect(state.servicesStreaming.mock.calls.at(-1)?.[1]).toBe(attemptId);
+      terminals.resolve(0);
+      await vi.waitFor(() => {
+        expect(app.quit).toHaveBeenCalledOnce();
+      });
     },
     bootMilliseconds,
   );

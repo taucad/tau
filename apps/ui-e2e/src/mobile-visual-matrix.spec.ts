@@ -152,7 +152,7 @@ const auditLayer = async (): Promise<LayerAudit> =>
         return 'reaches';
       }
       const hitLayer = hit.closest(layerSelector) ?? undefined;
-      if (hitLayer !== (element.closest(layerSelector) ?? undefined) && !hitLayer?.contains(element)) {
+      if (hitLayer && hitLayer !== (element.closest(layerSelector) ?? undefined) && !hitLayer.contains(element)) {
         return 'behind';
       }
       return `${describe(element)} is covered by ${describe(hit)}`;
@@ -612,6 +612,26 @@ test.each(['hidden', 'clip', 'auto', 'scroll'] as const)(
     }
   },
 );
+
+test('reports a dialog action covered by page chrome', async () => {
+  await target.setViewport({ width: 360, height: 780 });
+  await target.evaluate(() => {
+    document.body.replaceChildren();
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.style.cssText = 'position:fixed;top:40px;left:40px;width:100px;height:48px';
+    const button = document.createElement('button');
+    button.textContent = 'Dialog action';
+    button.style.cssText = 'width:80px;height:40px';
+    dialog.append(button);
+    const navigation = document.createElement('nav');
+    navigation.textContent = 'Page navigation';
+    navigation.style.cssText = 'position:fixed;top:40px;left:40px;width:100px;height:48px;z-index:2';
+    document.body.append(dialog, navigation);
+  });
+  const audit = await auditLayer();
+  expect(audit.problems).toEqual(expect.arrayContaining([expect.stringContaining('"Dialog action" is covered by')]));
+});
 
 describe('the phone shell across portrait widths', () => {
   test.each(portraitViewports)(

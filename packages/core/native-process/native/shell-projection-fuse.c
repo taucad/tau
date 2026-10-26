@@ -22,9 +22,18 @@
 #define MAX_SAFE 9007199254740991ULL
 
 enum operation { LOOKUP, GETATTR, OPEN, READ, WRITE, CREATE, MKDIR, SETATTR,
-  RENAME, UNLINK, RMDIR, READDIR, RELEASE, FLUSH, FSYNC, FORGET, READLINK, INTERRUPT };
+  RENAME, UNLINK, RMDIR, READDIR, RELEASE, FLUSH, FSYNC, FORGET, READLINK, INTERRUPT, LIFETIME };
 static const char *names[] = {"lookup","getattr","open","read","write","create","mkdir","setattr",
-  "rename","unlink","rmdir","readdir","release","flush","fsync","forget","readlink","interrupt"};
+  "rename","unlink","rmdir","readdir","release","flush","fsync","forget","readlink","interrupt","lifetime"};
+/* Lifetime notifications never occupy a request slot. FORGET and RELEASE are answered natively, counted here and
+ * delivered as one coalesced batch through a reserved queue slot, so a forget storm cannot exhaust the request
+ * budget or fail the mount. */
+struct forgotten_inode { uint64_t inode, count; };
+struct released_handle { uint64_t inode, handle; };
+struct lifetime {
+  struct forgotten_inode *forgets; size_t forget_used, forget_capacity;
+  struct released_handle *releases; size_t release_used, release_capacity;
+};
 struct pending { fuse_req_t request; uint64_t id; enum operation operation; size_t size; off_t offset; struct pending *next; };
 struct mount_state {
   struct fuse_session *session;
@@ -38,6 +47,9 @@ struct mount_state {
   napi_threadsafe_function callback;
   napi_threadsafe_function failure_callback;
   bool failed;
+  /* Unreported lifetime notifications, and whether one batch message is already queued for them. */
+  struct lifetime lifetime;
+  bool lifetime_posted;
   unsigned callbacks;
   napi_ref owner;
   napi_env env;
@@ -71,6 +83,59 @@ static struct pending *take_pending(struct mount_state *mount,uint64_t id) {
   pthread_mutex_unlock(&mount->mutex);
   return result;
 }
+static void free_lifetime(struct lifetime *lifetime) {
+  free(lifetime->forgets); free(lifetime->releases); *lifetime=(struct lifetime){0};
+}
+/* Open addressing on the inode; inode 0 is never issued, so it marks an empty slot. Called with the mutex held. */
+static bool count_forget(struct lifetime *lifetime,uint64_t inode,uint64_t count) {
+  if (!inode || !count) return true;
+  if ((lifetime->forget_used+1)*2>lifetime->forget_capacity) {
+    size_t capacity=lifetime->forget_capacity?lifetime->forget_capacity*2:256;
+    struct forgotten_inode *table=calloc(capacity,sizeof(*table));
+    if (!table) return false;
+    for (size_t i=0;i<lifetime->forget_capacity;i++) {
+      struct forgotten_inode entry=lifetime->forgets[i];
+      if (!entry.inode) continue;
+      size_t slot=(size_t)(entry.inode*0x9e3779b97f4a7c15ULL)&(capacity-1);
+      while (table[slot].inode) slot=(slot+1)&(capacity-1);
+      table[slot]=entry;
+    }
+    free(lifetime->forgets); lifetime->forgets=table; lifetime->forget_capacity=capacity;
+  }
+  size_t slot=(size_t)(inode*0x9e3779b97f4a7c15ULL)&(lifetime->forget_capacity-1);
+  while (lifetime->forgets[slot].inode && lifetime->forgets[slot].inode!=inode) slot=(slot+1)&(lifetime->forget_capacity-1);
+  if (!lifetime->forgets[slot].inode) { lifetime->forgets[slot].inode=inode; lifetime->forget_used++; }
+  /* The kernel's lookup counts are 64-bit; a sum that would wrap saturates and the owner reconciles it. */
+  uint64_t total=lifetime->forgets[slot].count+count;
+  lifetime->forgets[slot].count=total<count?UINT64_MAX:total;
+  return true;
+}
+static bool count_release(struct lifetime *lifetime,uint64_t inode,uint64_t handle) {
+  if (lifetime->release_used==lifetime->release_capacity) {
+    size_t capacity=lifetime->release_capacity?lifetime->release_capacity*2:64;
+    struct released_handle *grown=realloc(lifetime->releases,capacity*sizeof(*grown));
+    if (!grown) return false;
+    lifetime->releases=grown; lifetime->release_capacity=capacity;
+  }
+  lifetime->releases[lifetime->release_used++]=(struct released_handle){.inode=inode,.handle=handle};
+  return true;
+}
+/* Queue one batch message when lifetime notifications are waiting and none is queued. Safe from either thread: it
+ * never blocks, and a post that fails is retried on the next request, reply or notification. */
+static void schedule_lifetime(struct mount_state *mount) {
+  pthread_mutex_lock(&mount->mutex);
+  bool post=!mount->closing && !mount->failed && !mount->lifetime_posted &&
+    (mount->lifetime.forget_used || mount->lifetime.release_used);
+  if (post) mount->lifetime_posted=true;
+  pthread_mutex_unlock(&mount->mutex);
+  if (!post) return;
+  struct message *message=calloc(1,sizeof(*message));
+  if (message) *message=(struct message){.mount=mount,.operation=LIFETIME};
+  if (!message || napi_call_threadsafe_function(mount->callback,message,napi_tsfn_nonblocking)!=napi_ok) {
+    free(message);
+    pthread_mutex_lock(&mount->mutex); mount->lifetime_posted=false; pthread_mutex_unlock(&mount->mutex);
+  }
+}
 static napi_value number(napi_env env,double value) { napi_value result; napi_create_double(env,value,&result); return result; }
 static napi_value integer(napi_env env,uint64_t value) { napi_value result; napi_create_bigint_uint64(env,value,&result); return result; }
 static void property(napi_env env,napi_value object,const char *name,napi_value value) { napi_set_named_property(env,object,name,value); }
@@ -79,10 +144,46 @@ static void text_property(napi_env env,napi_value object,const char *name,const 
   napi_value value; napi_create_string_utf8(env,text,NAPI_AUTO_LENGTH,&value); property(env,object,name,value);
 }
 static void fail_mount(struct mount_state *mount);
+static void deliver_lifetime(napi_env env,napi_value callback,struct mount_state *mount) {
+  pthread_mutex_lock(&mount->mutex);
+  struct lifetime batch=mount->lifetime; mount->lifetime=(struct lifetime){0}; mount->lifetime_posted=false;
+  pthread_mutex_unlock(&mount->mutex);
+  napi_value input,forgets,releases,global,result;
+  napi_create_object(env,&input);
+  text_property(env,input,"operation",names[LIFETIME]);
+  napi_create_array_with_length(env,batch.forget_used,&forgets);
+  uint32_t index=0;
+  for (size_t i=0;i<batch.forget_capacity;i++) {
+    if (!batch.forgets[i].inode) continue;
+    napi_value row; napi_create_object(env,&row);
+    property(env,row,"inode",integer(env,batch.forgets[i].inode));
+    property(env,row,"lookupCount",integer(env,batch.forgets[i].count));
+    napi_set_element(env,forgets,index++,row);
+  }
+  napi_create_array_with_length(env,batch.release_used,&releases);
+  for (size_t i=0;i<batch.release_used;i++) {
+    napi_value row; napi_create_object(env,&row);
+    property(env,row,"inode",integer(env,batch.releases[i].inode));
+    property(env,row,"handle",integer(env,batch.releases[i].handle));
+    napi_set_element(env,releases,(uint32_t)i,row);
+  }
+  free_lifetime(&batch);
+  property(env,input,"forgets",forgets);
+  property(env,input,"releases",releases);
+  napi_get_global(env,&global);
+  /* The kernel cannot resend these; a batch the wrapper cannot accept fails the mount instead of losing accounting. */
+  if (napi_call_function(env,global,callback,1,&input,&result)!=napi_ok) {
+    napi_value exception; napi_get_and_clear_last_exception(env,&exception); fail_mount(mount);
+  }
+}
 static void call_javascript(napi_env env,napi_value callback,void *context,void *data) {
   (void)context;
   struct message *message=data;
   if (!env || !callback || message->mount->closing) { free_message(message); return; }
+  if (message->operation==LIFETIME) {
+    struct mount_state *mount=message->mount; free_message(message);
+    deliver_lifetime(env,callback,mount); schedule_lifetime(mount); return;
+  }
   napi_value input,global,result;
   napi_create_object(env,&input);
   property(env,input,"id",number(env,(double)message->id));
@@ -113,9 +214,7 @@ static void call_javascript(napi_env env,napi_value callback,void *context,void 
   if (napi_call_function(env,global,callback,1,&input,&result) != napi_ok) {
     napi_value exception; napi_get_and_clear_last_exception(env,&exception);
     struct pending *pending=take_pending(message->mount,message->id);
-    if (pending) {
-      if(pending->operation==FORGET || pending->operation==RELEASE) fail_mount(message->mount);
-      failure(pending->request,pending->operation,EIO); free(pending); }
+    if (pending) { failure(pending->request,pending->operation,EIO); free(pending); }
   }
   free_message(message);
 }
@@ -130,8 +229,7 @@ static void fail_mount(struct mount_state *mount) {
     napi_fatal_error("shell-projection",NAPI_AUTO_LENGTH,"Cannot report failed projection mount",NAPI_AUTO_LENGTH);
 }
 static void rejected(fuse_req_t request,enum operation operation,int error,struct mount_state *mount) {
-  if (operation==FORGET || operation==RELEASE) fail_mount(mount);
-  failure(request,operation,error);
+  (void)mount; failure(request,operation,error);
 }
 static void report_failure(napi_env env,napi_value callback,void *context,void *data) {
   (void)context;(void)data;
@@ -182,12 +280,13 @@ static void dispatch(fuse_req_t request,enum operation operation,fuse_ino_t inod
   uint64_t id=message->id;
   /* Register before delivery: once posted, the owner's reply may free the request. An interrupt that wins this race
    * reaches the wrapper before its request and is answered from the still-pending entry. */
-  if (operation!=FORGET && operation!=RELEASE) fuse_req_interrupt_func(request,interrupted,(void *)(uintptr_t)id);
+  fuse_req_interrupt_func(request,interrupted,(void *)(uintptr_t)id);
   if (napi_call_threadsafe_function(mount->callback,message,napi_tsfn_nonblocking)!=napi_ok) {
     pending=take_pending(mount,id);
     if (pending) { rejected(request,operation,EBUSY,mount); free(pending); }
     free_message(message);
   }
+  schedule_lifetime(mount);
 }
 static void lookup(fuse_req_t r,fuse_ino_t p,const char *n) { dispatch(r,LOOKUP,p,NULL,n,NULL,0,0,0,NULL,0,0,0,0); }
 static void getattr(fuse_req_t r,fuse_ino_t i,struct fuse_file_info *f) { dispatch(r,GETATTR,i,f,NULL,NULL,0,0,0,NULL,0,0,0,0); }
@@ -200,9 +299,10 @@ static void setattr(fuse_req_t r,fuse_ino_t i,struct stat *a,int mask,struct fus
   /* The session loop is single-threaded, so this handoff into the copied message cannot race. */
   modified_at=(mask&FUSE_SET_ATTR_MTIME_NOW)?-1:(mask&FUSE_SET_ATTR_MTIME)?(double)a->st_mtim.tv_sec*1000+(double)a->st_mtim.tv_nsec/1e6:0;
   dispatch(r,SETATTR,i,f,NULL,NULL,0,(mask&FUSE_SET_ATTR_SIZE)?a->st_size:0,0,NULL,(mask&FUSE_SET_ATTR_MODE)?a->st_mode:0,0,(unsigned)mask,0); }
-/* Only RENAME_NOREPLACE and RENAME_EXCHANGE reach the owner; whiteouts and unknown flags never do. */
+/* Only a plain rename and RENAME_NOREPLACE reach the owner. RENAME_EXCHANGE has no classified publication, so it is
+ * refused here like whiteouts and unknown flags. */
 static void renamed(fuse_req_t r,fuse_ino_t p,const char *n,fuse_ino_t q,const char *m,unsigned flags) {
-  if ((flags&~(unsigned)(RENAME_NOREPLACE|RENAME_EXCHANGE)) || flags==(unsigned)(RENAME_NOREPLACE|RENAME_EXCHANGE)) {
+  if (flags&~(unsigned)RENAME_NOREPLACE) {
     fuse_reply_err(r,EINVAL); return;
   }
   dispatch(r,RENAME,p,NULL,n,m,q,0,0,NULL,0,flags,0,0);
@@ -210,7 +310,17 @@ static void renamed(fuse_req_t r,fuse_ino_t p,const char *n,fuse_ino_t q,const c
 static void removed(fuse_req_t r,fuse_ino_t p,const char *n) { dispatch(r,UNLINK,p,NULL,n,NULL,0,0,0,NULL,0,0,0,0); }
 static void removed_directory(fuse_req_t r,fuse_ino_t p,const char *n) { dispatch(r,RMDIR,p,NULL,n,NULL,0,0,0,NULL,0,0,0,0); }
 static void listing(fuse_req_t r,fuse_ino_t i,size_t n,off_t o,struct fuse_file_info *f) { dispatch(r,READDIR,i,f,NULL,NULL,0,o,n,NULL,0,0,0,0); }
-static void released(fuse_req_t r,fuse_ino_t i,struct fuse_file_info *f) { dispatch(r,RELEASE,i,f,NULL,NULL,0,0,0,NULL,0,0,0,0); }
+/* Lifetime notifications are recorded under the mutex and answered at once; losing one fails the mount. */
+static void lifetime_counted(struct mount_state *mount,bool counted) {
+  if (!counted) fail_mount(mount); else schedule_lifetime(mount);
+}
+static void released(fuse_req_t r,fuse_ino_t i,struct fuse_file_info *f) {
+  struct mount_state *mount=fuse_req_userdata(r);
+  pthread_mutex_lock(&mount->mutex);
+  bool counted=mount->closing || count_release(&mount->lifetime,i,f?f->fh:0);
+  pthread_mutex_unlock(&mount->mutex);
+  fuse_reply_err(r,0); lifetime_counted(mount,counted);
+}
 /* Writes are write-through and acknowledged synchronously, so close() has nothing to flush. Answering here keeps
  * a close-on-exec descriptor from blocking a child's exec on the owner's thread (the exec FLUSH deadlock). */
 static void flushed(fuse_req_t r,fuse_ino_t i,struct fuse_file_info *f) { (void)i;(void)f;fuse_reply_err(r,0); }
@@ -219,7 +329,21 @@ static void read_link(fuse_req_t r,fuse_ino_t i) { dispatch(r,READLINK,i,NULL,NU
 static void linked(fuse_req_t r,fuse_ino_t i,fuse_ino_t p,const char *n) { (void)i;(void)p;(void)n;fuse_reply_err(r,EPERM); }
 static void symlinked(fuse_req_t r,const char *t,fuse_ino_t p,const char *n) { (void)t;(void)p;(void)n;fuse_reply_err(r,EPERM); }
 static void synced(fuse_req_t r,fuse_ino_t i,int data,struct fuse_file_info *f) { dispatch(r,FSYNC,i,f,NULL,NULL,0,0,0,NULL,0,(unsigned)data,0,0); }
-static void forgotten(fuse_req_t r,fuse_ino_t i,uint64_t count) { dispatch(r,FORGET,i,NULL,NULL,NULL,0,0,0,NULL,0,0,0,count); }
+static void forgotten(fuse_req_t r,fuse_ino_t i,uint64_t count) {
+  struct mount_state *mount=fuse_req_userdata(r);
+  pthread_mutex_lock(&mount->mutex);
+  bool counted=mount->closing || count_forget(&mount->lifetime,i,count);
+  pthread_mutex_unlock(&mount->mutex);
+  fuse_reply_none(r); lifetime_counted(mount,counted);
+}
+static void forgotten_many(fuse_req_t r,size_t count,struct fuse_forget_data *forgets) {
+  struct mount_state *mount=fuse_req_userdata(r);
+  pthread_mutex_lock(&mount->mutex);
+  bool counted=true;
+  for (size_t i=0;!mount->closing && counted && i<count;i++) counted=count_forget(&mount->lifetime,forgets[i].ino,forgets[i].nlookup);
+  pthread_mutex_unlock(&mount->mutex);
+  fuse_reply_none(r); lifetime_counted(mount,counted);
+}
 static void initialized(void *data,struct fuse_conn_info *connection) {
   (void)data;
   connection->want &= ~(FUSE_CAP_ASYNC_READ|FUSE_CAP_WRITEBACK_CACHE|FUSE_CAP_ASYNC_DIO|FUSE_CAP_PARALLEL_DIROPS|FUSE_CAP_NO_OPEN_SUPPORT|FUSE_CAP_NO_OPENDIR_SUPPORT);
@@ -227,7 +351,7 @@ static void initialized(void *data,struct fuse_conn_info *connection) {
 }
 static const struct fuse_lowlevel_ops operations={.init=initialized,.lookup=lookup,.getattr=getattr,.open=opened,
   .read=read_bytes,.write=write_bytes,.create=created,.mkdir=directory,.setattr=setattr,.rename=renamed,
-  .unlink=removed,.rmdir=removed_directory,.readdir=listing,.release=released,.flush=flushed,.fsync=synced,.forget=forgotten,
+  .unlink=removed,.rmdir=removed_directory,.readdir=listing,.release=released,.flush=flushed,.fsync=synced,.forget=forgotten,.forget_multi=forgotten_many,
   .readlink=read_link,.link=linked,.symlink=symlinked};
 
 static bool get_number(napi_env e,napi_value o,const char *key,uint64_t *out) {
@@ -279,8 +403,8 @@ static napi_value reply(napi_env env,napi_callback_info info) {
   napi_get_boolean(env,pending!=NULL,&result);if(!pending)return result;
   uint64_t error=0;bool has_error=false;
   napi_has_named_property(env,args[2],"error",&has_error);
-  if (pending->operation==FORGET) fuse_reply_none(pending->request);
-  else if (has_error) { if(!get_number(env,args[2],"error",&error) || error>4095)error=EIO;fuse_reply_err(pending->request,(int)error); }
+  /* An error reply names a real errno; zero is success only by omitting it, never a payload-free success. */
+  if (has_error) { if(!get_number(env,args[2],"error",&error) || error==0 || error>4095)error=EIO;fuse_reply_err(pending->request,(int)error); }
   else {
     struct fuse_entry_param entry;uint64_t handle;
     struct fuse_file_info file={0};
@@ -315,7 +439,8 @@ static napi_value reply(napi_env env,napi_callback_info info) {
           napi_value row,name;char text[MAX_NAME+1];size_t size;uint64_t ino,mode;
           if(napi_get_element(env,rows,i,&row)!=napi_ok || !get_integer(env,row,"inode",&ino) || !get_number(env,row,"mode",&mode) ||
              napi_get_named_property(env,row,"name",&name)!=napi_ok || napi_get_value_string_utf8(env,name,NULL,0,&size)!=napi_ok || size>MAX_NAME ||
-             napi_get_value_string_utf8(env,name,text,sizeof(text),&size)!=napi_ok || strchr(text,'/')) {valid=false;break;}
+             napi_get_value_string_utf8(env,name,text,sizeof(text),&size)!=napi_ok || strlen(text)!=size || size==0 ||
+             strchr(text,'/') || !strcmp(text,".") || !strcmp(text,"..")) {valid=false;break;}
           /* A row's cookie is the offset the next readdir resumes from; it defaults to the row's position. */
           uint64_t cookie=(uint64_t)pending->offset+i+1;bool has_cookie=false;
           napi_has_named_property(env,row,"cookie",&has_cookie);
@@ -337,7 +462,7 @@ static napi_value reply(napi_env env,napi_callback_info info) {
       default:fuse_reply_err(pending->request,0);break;
     }
   }
-  free(pending);return result;
+  free(pending);schedule_lifetime(mount);return result;
 }
 
 static void *loop(void *data) { struct mount_state *mount=data;fuse_session_loop(mount->session);fail_mount(mount);return NULL; }
@@ -355,6 +480,8 @@ static void stop(struct mount_state *mount) {
   }
   if(mount->callback)napi_release_threadsafe_function(mount->callback,napi_tsfn_abort);
   if(mount->failure_callback)napi_release_threadsafe_function(mount->failure_callback,napi_tsfn_abort);
+  /* After the loop has joined nothing records more; the owner reconciles unreported references after unmount. */
+  pthread_mutex_lock(&mount->mutex);free_lifetime(&mount->lifetime);pthread_mutex_unlock(&mount->mutex);
 }
 static void cleanup(void *data) {stop(data);}
 static void finalized(napi_env env,void *data,void *hint) {(void)env;(void)hint;struct mount_state *mount=data;pthread_mutex_destroy(&mount->mutex);free(mount);}
@@ -379,7 +506,8 @@ static napi_value mount_projection(napi_env env,napi_callback_info info) {
   pthread_mutex_init(&mount->mutex,NULL);mount->env=env;
   napi_create_object(env,&object);napi_type_tag_object(env,object,&mount_tag);napi_wrap(env,object,mount,finalized,NULL,NULL);
   napi_create_reference(env,object,1,&mount->owner);napi_create_string_utf8(env,"Tau shell projection",NAPI_AUTO_LENGTH,&label);
-  if(napi_create_threadsafe_function(env,values[1],NULL,label,MAX_PENDING,1,mount,callback_finished,NULL,call_javascript,&mount->callback)!=napi_ok) {
+  /* Queue: one message per pending request, at most one interrupt each, and one reserved lifetime batch. */
+  if(napi_create_threadsafe_function(env,values[1],NULL,label,2*MAX_PENDING+1,1,mount,callback_finished,NULL,call_javascript,&mount->callback)!=napi_ok) {
     mount->closing=true;napi_delete_reference(env,mount->owner);napi_throw_error(env,NULL,"Projection callback setup failed.");return NULL;
   }
   mount->callbacks=1;

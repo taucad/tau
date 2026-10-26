@@ -164,69 +164,120 @@ describe.runIf(enabled)('private projection native transport', () => {
       await rm(mountpoint, { recursive: true });
     }
   }, 15_000);
-  it('fails and drains the mount when saturated release accounting cannot be delivered', async () => {
+  it('survives a saturated request budget and a forget storm with every lifetime notification accounted', async () => {
     const mountpoint = await mkdtemp(join(tmpdir(), 'tau-projection-pressure-'));
     const saturated = Promise.withResolvers<void>();
-    const gone = Promise.withResolvers<void>();
     const drain = Promise.withResolvers<void>();
-    let reads = 0;
+    const released = Promise.withResolvers<void>();
+    // A synthetic tree of 40 directories of 100 files; every inode is issued once and never reused.
+    type Node = { inode: bigint; directory: boolean; children: Map<string, Node> };
+    const nodes = new Map<bigint, Node>();
+    const add = (children: Map<string, Node>, name: string, directory: boolean): Node => {
+      const node = { inode: BigInt(nodes.size + 2), directory, children: new Map<string, Node>() };
+      nodes.set(node.inode, node);
+      children.set(name, node);
+      return node;
+    };
+    const root: Node = { inode: 1n, directory: true, children: new Map() };
+    nodes.set(1n, root);
+    const held = add(root.children, 'held', false);
+    const tree = add(root.children, 'tree', true);
+    for (let directory = 0; directory < 40; directory++) {
+      const parent = add(tree.children, `d${String(directory)}`, true);
+      for (let file = 0; file < 100; file++) {
+        add(parent.children, `f${String(file)}`, false);
+      }
+    }
+    const lookups = new Map<bigint, bigint>();
+    let forgets = 0;
+    let lifetimeFailures = 0;
     let references = 0;
-    let observedSignal = false;
-    let abortReason: unknown;
-    const mount = openShellProjectionMount({
-      binary,
-      mountpoint,
-      handle: async (request, signal) => {
-        if (!observedSignal) {
-          observedSignal = true;
-          signal.addEventListener(
-            'abort',
-            () => {
-              abortReason = signal.reason;
-              references = 0;
-              drain.resolve();
-              gone.resolve();
-            },
-            { once: true },
-          );
-        }
-        const entry = { inode: 2n, mode: 0o10_0600, size: 64 * 1024 * 1024, links: 1 };
-        switch (request.operation) {
-          case 'lookup': {
-            return { entry };
-          }
-          case 'getattr': {
-            return { entry: request.inode === 1n ? { ...entry, inode: 1n, mode: 0o4_0700 } : entry };
-          }
-          case 'open': {
-            references++;
-            return { handle: 2n };
-          }
-          case 'release': {
-            references--;
-            return {};
-          }
-          case 'read': {
-            reads++;
-            if (reads === 128) {
-              saturated.resolve();
-            }
-            await drain.promise;
-            return { error: 5 };
-          }
-          default: {
-            return {};
-          }
-        }
-      },
+    let reads = 0;
+    const entry = (node: Node): ShellProjectionEntry => ({
+      inode: node.inode,
+      mode: node.directory ? 0o4_0700 : 0o10_0600,
+      size: node === held ? 64 * 1024 * 1024 : 0,
+      links: node.directory ? 2 : 1,
     });
-    const child = spawn(
-      'python3',
-      [
-        '-c',
-        `
+    const lookedUp = (node: Node): ShellProjectionReply => {
+      lookups.set(node.inode, (lookups.get(node.inode) ?? 0n) + 1n);
+      return { entry: entry(node) };
+    };
+    const remove = (request: ShellProjectionRequest): ShellProjectionReply => {
+      const parent = nodes.get(request.inode);
+      const child = parent?.children.get(request.name ?? '');
+      if (parent === undefined || child === undefined) {
+        return { error: 2 };
+      }
+      if (child.children.size > 0) {
+        return { error: 39 };
+      }
+      parent.children.delete(request.name ?? '');
+      return {};
+    };
+    const handle = async (request: ShellProjectionRequest): Promise<ShellProjectionReply> => {
+      const node = nodes.get(request.inode);
+      switch (request.operation) {
+        case 'lookup': {
+          const child = node?.children.get(request.name ?? '');
+          return child === undefined ? { error: 2 } : lookedUp(child);
+        }
+        case 'getattr': {
+          return node === undefined ? { error: 2 } : { entry: entry(node) };
+        }
+        case 'open': {
+          references++;
+          return { handle: request.inode };
+        }
+        case 'release': {
+          references--;
+          if (request.inode === held.inode) {
+            released.resolve();
+          }
+          return {};
+        }
+        case 'forget': {
+          const remaining = (lookups.get(request.inode) ?? 0n) - request.lookupCount;
+          if (remaining < 0n) {
+            lifetimeFailures++;
+          }
+          lookups.set(request.inode, remaining);
+          forgets++;
+          return {};
+        }
+        case 'read': {
+          reads++;
+          if (reads === 128) {
+            saturated.resolve();
+          }
+          await drain.promise;
+          return { error: 5 };
+        }
+        case 'readdir': {
+          const rows = [...(node?.children ?? new Map<string, Node>()).entries()].map(([name, child], index) => ({
+            name,
+            inode: child.inode,
+            mode: entry(child).mode,
+            cookie: index + 1,
+          }));
+          return { entries: rows.filter((row) => row.cookie > request.offset) };
+        }
+        case 'unlink':
+        case 'rmdir': {
+          return remove(request);
+        }
+        default: {
+          return {};
+        }
+      }
+    };
+    const mount = openShellProjectionMount({ binary, mountpoint, handle });
+    // 128 blocked reads fill the request budget; the held descriptor's release then arrives while it is full.
+    const readers = python(
+      `
 import os, sys, threading
 fd = os.open(sys.argv[1], os.O_RDONLY)
+print("open", flush=True)
 sys.stdin.readline()
 def read(index):
     try: os.pread(fd, 1, index * 256 * 1024)
@@ -235,46 +286,61 @@ threads = [threading.Thread(target=read, args=(i,)) for i in range(128)]
 for thread in threads: thread.start()
 for thread in threads: thread.join()
 os.close(fd)
+print("done", flush=True)
 `,
-        join(mountpoint, 'file'),
-      ],
-      { stdio: ['pipe', 'ignore', 'ignore'] },
+      join(mountpoint, 'held'),
     );
-    const exited = new Promise<void>((resolve, reject) => {
-      child.once('exit', () => {
-        resolve();
-      });
-      child.once('error', reject);
-    });
-    const held = await open(join(mountpoint, 'file'), 'r');
-    child.stdin.end('start\n');
-    const deadline = Promise.withResolvers<void>();
+    const next = lines(readers);
+    const deadline = Promise.withResolvers<never>();
     const stallTimeout = setTimeout(() => {
-      deadline.reject(new Error(`Pressure test stalled after ${reads} reads`));
-    }, 5000);
+      deadline.reject(new Error(`Pressure test stalled after ${String(reads)} reads`));
+    }, 20_000);
     try {
+      expect(await Promise.race([next(), deadline.promise])).toBe('open');
+      const other = await open(join(mountpoint, 'held'), 'r');
+      readers.stdin.end('start\n');
       await Promise.race([saturated.promise, deadline.promise]);
       expect(references).toBe(2);
-      await held.close().catch(() => undefined);
-      await Promise.race([gone.promise, deadline.promise]);
+      await other.close();
+      // The release is answered natively and reaches the owner even though every request slot is taken.
+      await Promise.race([released.promise, deadline.promise]);
+      expect(references).toBe(1);
+      expect(mounted(mountpoint)).toBe(true);
+      drain.resolve();
+      expect(await Promise.race([next(), deadline.promise])).toBe('done');
+      // A find over thousands of entries, then rm -rf: every evicted inode produces a forget.
+      const walk = await execute('find', [join(mountpoint, 'tree')], { maxBuffer: 16 * 1024 * 1024 });
+      expect(walk.stdout.trim().split('\n')).toHaveLength(1 + 40 + 4000);
+      await execute('rm', ['-rf', join(mountpoint, 'tree')]);
+      expect(root.children.has('tree')).toBe(false);
+      expect(mounted(mountpoint)).toBe(true);
+      // Forgets are coalesced per inode and delivered after the requests that caused them.
+      const removed = [...nodes.keys()].filter((inode) => inode !== 1n && inode !== held.inode);
+      const balanced = (): boolean => removed.every((inode) => lookups.get(inode) === 0n);
+      const storm = Promise.withResolvers<void>();
+      const settled = setInterval(() => {
+        if (balanced()) {
+          storm.resolve();
+        }
+      }, 20);
+      try {
+        await Promise.race([storm.promise, deadline.promise]);
+      } finally {
+        clearInterval(settled);
+      }
+      expect(lifetimeFailures).toBe(0);
+      expect(forgets).toBeGreaterThanOrEqual(removed.length);
       expect(references).toBe(0);
-      // The owner's abort reason is the fatal lifecycle failure, not the ordinary explicit-close reason.
-      expect(abortReason).toBeInstanceOf(Error);
-      expect((abortReason as Error).message).toMatch(
-        /^Projection mount failed; lifetime accounting requires whole-mount reconciliation\.$/u,
-      );
-      await exited;
-      await expect(mount[Symbol.asyncDispose]()).rejects.toBeInstanceOf(AggregateError);
+      expect(await readdir(mountpoint)).toStrictEqual(['held']);
     } finally {
       clearTimeout(stallTimeout);
       drain.resolve();
-      child.kill();
-      await held.close().catch(() => undefined);
-      await Promise.resolve(mount[Symbol.asyncDispose]()).catch(() => undefined);
-      await exited;
+      readers.kill();
+      await exited(readers);
+      await mount[Symbol.asyncDispose]();
       await rm(mountpoint, { recursive: true });
     }
-  }, 15_000);
+  }, 60_000);
 
   it('rejects missing, substituted, and competing same-SONAME library resolution before mounting', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'tau-projection-loader-'));
@@ -353,14 +419,6 @@ const createOwner = (): Readonly<{
     }
     if (request.flags === 1 && destination !== undefined) {
       return { error: 17 };
-    }
-    if (request.flags === 2) {
-      if (destination === undefined) {
-        return { error: 2 };
-      }
-      names.set(request.name ?? '', destination);
-      names.set(request.destinationName ?? '', source);
-      return {};
     }
     names.delete(request.name ?? '');
     names.set(request.destinationName ?? '', source);
@@ -574,7 +632,25 @@ describe.runIf(enabled)('private projection D8 core-correctness gates', () => {
     );
   }, 30_000);
 
-  it('G1 forwards NOREPLACE and EXCHANGE renames and keeps whiteout and combined flags from the owner', async () => {
+  it('G1 answers EIO for an error-zero reply and for directory rows that are empty, dot, dot-dot or hold NUL', async () => {
+    let listing: Array<Readonly<{ name: string; inode: bigint; mode: number }>> = [];
+    await withMount(async (mountpoint, owner) => {
+      owner.override.set('lookup', async (request) =>
+        request.name === 'zero' ? { error: 0 } : { entry: { inode: 2n, mode: 0o10_0600, size: 0, links: 1 } },
+      );
+      await expect(stat(join(mountpoint, 'zero'))).rejects.toMatchObject({ code: 'EIO' });
+      owner.override.set('readdir', async (request) => ({ entries: request.offset === 0 ? listing : [] }));
+      for (const name of ['', '.', '..', 'a\0b']) {
+        listing = [{ name, inode: 2n, mode: 0o10_0600 }];
+        // eslint-disable-next-line no-await-in-loop -- each listing is a separate kernel request.
+        await expect(readdir(mountpoint)).rejects.toMatchObject({ code: 'EIO' });
+      }
+      listing = [{ name: 'fine', inode: 2n, mode: 0o10_0600 }];
+      expect(await readdir(mountpoint)).toStrictEqual(['fine']);
+    });
+  }, 15_000);
+
+  it('G1 forwards NOREPLACE renames and refuses EXCHANGE, whiteout and combined flags natively', async () => {
     await withMount(
       async (mountpoint, owner) => {
         const child = python(
@@ -591,18 +667,18 @@ for source, target, flags in [("a", "b", 1), ("a", "b", 2), ("a", "c", 1), ("c",
         const next = lines(child);
         const results = [await next(), await next(), await next(), await next(), await next()];
         await exited(child);
-        // NOREPLACE onto a name the fresh lookup finds is EEXIST; EXCHANGE swaps; NOREPLACE onto a free name renames.
-        // WHITEOUT is EPERM from the VFS without CAP_MKNOD, else EINVAL natively; NOREPLACE|EXCHANGE is EINVAL from the
-        // VFS. The native refusal of both is defence in depth: no unprivileged caller reaches it.
-        expect(results).toStrictEqual(['17', '0', '0', expect.stringMatching(/^(?:1|22)$/u), '22']);
+        // NOREPLACE onto a name the fresh lookup finds is EEXIST; NOREPLACE onto a free name renames. EXCHANGE has no
+        // classified publication, so it is EINVAL natively. WHITEOUT is EPERM from the VFS without CAP_MKNOD, else
+        // EINVAL natively; NOREPLACE|EXCHANGE is EINVAL from the VFS.
+        expect(results).toStrictEqual(['17', '22', '0', expect.stringMatching(/^(?:1|22)$/u), '22']);
         expect(owner.names.has('a')).toBe(false);
-        expect(owner.names.get('b')).toBe(2n);
-        expect(owner.names.get('c')).toBe(3n);
+        expect(owner.names.get('b')).toBe(3n);
+        expect(owner.names.get('c')).toBe(2n);
         expect(owner.names.has('d')).toBe(false);
         const flags = owner.requests
           .filter((request) => request.operation === 'rename')
           .map((request) => request.flags);
-        expect(flags).toStrictEqual([2, 1]);
+        expect(flags).toStrictEqual([1]);
       },
       (owner) => {
         owner.names.set('a', 2n);

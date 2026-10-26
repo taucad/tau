@@ -66,6 +66,16 @@ export type ShellProjectionReply = Readonly<{
 /** Native-only notice that the kernel interrupted a pending request. */
 type ShellProjectionInterrupt = Readonly<{ id: number; operation: 'interrupt' }>;
 
+/**
+ * Native-only batch of FORGET and RELEASE notifications. The bridge answers them at once, sums forgets per inode and
+ * delivers them outside the request budget, so they never take a request slot.
+ */
+type ShellProjectionLifetime = Readonly<{
+  operation: 'lifetime';
+  forgets: ReadonlyArray<Readonly<{ inode: bigint; lookupCount: bigint }>>;
+  releases: ReadonlyArray<Readonly<{ inode: bigint; handle: bigint }>>;
+}>;
+
 declare const nativeMountBrand: unique symbol;
 /** Opaque native mount handle; only the binding that returned it can read it. */
 type NativeMount = Readonly<{ [nativeMountBrand]: true }>;
@@ -73,7 +83,7 @@ type NativeMount = Readonly<{ [nativeMountBrand]: true }>;
 type NativeBinding = Readonly<{
   mount: (
     path: string,
-    callback: (request: ShellProjectionInterrupt | ShellProjectionRequest) => void,
+    callback: (request: ShellProjectionInterrupt | ShellProjectionLifetime | ShellProjectionRequest) => void,
     failure: () => void,
   ) => NativeMount;
   libraryIdentity: () => Readonly<{ path: string; version: string }>;
@@ -91,7 +101,9 @@ export type ShellProjectionMount = AsyncDisposable;
  * those resources until disposal settles. Native writeback caching is disabled; requests and copied byte buffers
  * are bounded. Incoming versions require new inode identities, not overwriting an existing mapped inode. A kernel
  * interrupt aborts only that request's handler signal. FLUSH is answered natively, hard links and new symbolic links
- * are refused natively, and only the NOREPLACE and EXCHANGE rename flags reach the handler.
+ * are refused natively, and only a plain rename or RENAME_NOREPLACE reaches the handler; RENAME_EXCHANGE is refused.
+ * FORGET and RELEASE are answered natively and reach the handler as `forget` and `release` requests with id 0,
+ * coalesced per inode, whose replies are not sent to the kernel; a failed one fails the whole mount.
  *
  * @internal
  * @param options - Exact reviewed binary, private mountpoint and authority-owned request handler.
@@ -170,6 +182,33 @@ export const openShellProjectionMount = (
   const interrupt = (id: number): void => {
     requests.get(id)?.abort(new Error('Projection request interrupted.'));
   };
+  // Lifetime accounting has no kernel reply: a handler that refuses or fails it leaves the owner's counts unknown.
+  const account = async (request: ShellProjectionRequest): Promise<void> => {
+    let reply: ShellProjectionReply;
+    try {
+      reply = await options.handle(request, controller.signal);
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        failures.push(error);
+        failed();
+      }
+      return;
+    }
+    if (reply.error !== undefined && reply.error !== 0 && !controller.signal.aborted) {
+      failed();
+    }
+  };
+  const lifetime = (batch: ShellProjectionLifetime): Array<Promise<void>> => {
+    const base = { id: 0, destinationParent: 0n, offset: 0, length: 0, flags: 0, mode: 0, attributes: 0 } as const;
+    return [
+      ...batch.forgets.map(async ({ inode, lookupCount }) =>
+        account({ ...base, operation: 'forget', inode, handle: 0n, lookupCount }),
+      ),
+      ...batch.releases.map(async ({ inode, handle }) =>
+        account({ ...base, operation: 'release', inode, handle, lookupCount: 0n }),
+      ),
+    ];
+  };
   const settle = async (request: ShellProjectionRequest): Promise<void> => {
     let reply: ShellProjectionReply;
     const local = new AbortController();
@@ -186,16 +225,23 @@ export const openShellProjectionMount = (
     } finally {
       requests.delete(request.id);
     }
-    if (
-      (request.operation === 'forget' || request.operation === 'release') &&
-      reply.error !== undefined &&
-      reply.error !== 0
-    ) {
-      failed();
-    }
     if (!controller.signal.aborted) {
       binding.reply(mount, request.id, reply);
     }
+  };
+  const track = (operation: Promise<void>): void => {
+    pending.add(operation);
+    const remove = async (): Promise<void> => {
+      try {
+        await operation;
+      } catch (error) {
+        failures.push(error);
+      } finally {
+        pending.delete(operation);
+      }
+    };
+    // async-iife: bootstrap -- every accepted operation remains owned by pending until disposal observes it.
+    void remove();
   };
   // The callbacks above read `mount` only after native delivery, which cannot precede this assignment.
   const mount = binding.mount(
@@ -205,19 +251,10 @@ export const openShellProjectionMount = (
         interrupt(request.id);
         return;
       }
-      const operation = settle(request);
-      pending.add(operation);
-      const remove = async (): Promise<void> => {
-        try {
-          await operation;
-        } catch (error) {
-          failures.push(error);
-        } finally {
-          pending.delete(operation);
-        }
-      };
-      // async-iife: bootstrap -- every accepted operation remains owned by pending until disposal observes it.
-      void remove();
+      const operations = request.operation === 'lifetime' ? lifetime(request) : [settle(request)];
+      for (const operation of operations) {
+        track(operation);
+      }
     },
     failed,
   );

@@ -114,8 +114,8 @@ const main = async (): Promise<void> => {
     throw new Error('Invalid renderer debugging port');
   }
   const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+  let page: Page | undefined;
   try {
-    let page: Page | undefined;
     const rendererDeadline = Date.now() + 120_000;
     while (!page && Date.now() < rendererDeadline) {
       page = browser
@@ -297,6 +297,81 @@ const main = async (): Promise<void> => {
       ),
       { flag: 'wx' },
     );
+  } catch (error) {
+    if (page) {
+      // Read-only failure evidence from the disposable fixture, never a substitute for acceptance.
+      const observations = await Promise.allSettled([
+        page.screenshot({ path: `${output}.failure.png`, fullPage: true, timeout: 10_000 }),
+        page.locator('body').evaluate(
+          () => {
+            const describe = (element: Element) => {
+              const bounds = element.getBoundingClientRect();
+              return {
+                tag: element.tagName,
+                role: element.getAttribute('role'),
+                label: element.getAttribute('aria-label'),
+                className: element.className,
+                width: bounds.width,
+                height: bounds.height,
+                display: getComputedStyle(element).display,
+                visibility: getComputedStyle(element).visibility,
+              };
+            };
+            return {
+              url: location.href,
+              focused: document.activeElement ? describe(document.activeElement) : undefined,
+              editors: [...document.querySelectorAll('.editor-container, .monaco-editor')]
+                .slice(0, 20)
+                .map((element) => describe(element)),
+              tabs: [...document.querySelectorAll('[role="tab"]')].slice(0, 30).map((element) => ({
+                ...describe(element),
+                text: element.textContent.slice(0, 200),
+                selected: element.getAttribute('aria-selected'),
+              })),
+              alerts: [...document.querySelectorAll('[role="alert"]')]
+                .slice(0, 10)
+                .map((element) => element.textContent.slice(0, 1000)),
+            };
+          },
+          undefined,
+          { timeout: 10_000 },
+        ),
+        (async () => {
+          const projectMatch = /^\/w\/home\/([a-z0-9-]+)$/u.exec(new URL(page.url()).pathname);
+          if (!projectMatch?.[1]) {
+            return [];
+          }
+          const paths = await findSource(join(profile, 'home', projectMatch[1]));
+          return Promise.all(
+            paths.slice(0, 20).map(async (path) => {
+              const bytes = await readFile(path, 'utf8');
+              return { path: relative(profile, path), bytes: Buffer.byteLength(bytes), sha256: sha256(bytes) };
+            }),
+          );
+        })(),
+      ]);
+      await writeFile(
+        `${output}.failure.json`,
+        JSON.stringify(
+          {
+            stage,
+            expectedSourceSha256: sha256(source),
+            error: error instanceof Error ? error.message : String(error),
+            observations: observations.map((result) =>
+              result.status === 'fulfilled'
+                ? { status: result.status, value: Buffer.isBuffer(result.value) ? 'screenshot saved' : result.value }
+                : { status: result.status, error: String(result.reason) },
+            ),
+          },
+          undefined,
+          2,
+        ),
+        { flag: 'wx' },
+      ).catch((diagnosticError: unknown) => {
+        console.error('Could not save renderer failure observations', diagnosticError);
+      });
+    }
+    throw error;
   } finally {
     // CDP disconnect leaves the shipping process alive for the actual updater.
     await browser.close();

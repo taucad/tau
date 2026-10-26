@@ -3779,11 +3779,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         let resolvedParameters: Readonly<Record<string, unknown>>;
         try {
           resolvedParameters = resolveParameterInputValues(entry.parameterManifest, chainParameters);
-          const observed = this.activeOperation?.observed;
-          if (observed) {
-            // Retained only while a client observes; counted after the reply.
-            observed.parameters = { manifest: entry.parameterManifest, resolved: resolvedParameters };
-          }
         } catch (error) {
           computeSpan.end();
           const diagnostic = error instanceof ParameterAdmissionError ? error.diagnostics[0] : undefined;
@@ -3802,6 +3797,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           { ...resolvedParameters },
           entry.parameterSchema,
         );
+        const observed = this.activeOperation?.observed;
+        if (observed) {
+          // Retained only while a client observes; counted after the reply. The merged values are what the kernel
+          // receives, so a leaf the caller left out is its default rather than a difference from it.
+          observed.parameters = { manifest: entry.parameterManifest, resolved: parameters };
+        }
         if (!validateJsonSchemaValue(entry.parameterSchema, parameters)) {
           computeSpan.end();
           return createKernelError([

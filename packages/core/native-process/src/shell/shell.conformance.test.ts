@@ -12,7 +12,7 @@
  * `operator-validation-pending` and never run here (ruling 2026-10-24T05:39Z).
  */
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -30,6 +30,7 @@ import { createServer } from 'node:net';
 import type { AddressInfo, Server } from 'node:net';
 import { arch, networkInterfaces, platform, release, tmpdir, version } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -580,6 +581,93 @@ describe.runIf(enabled)('shell conformance', () => {
 
     expect(exit).toStrictEqual({ signal: 'SIGKILL' });
     expect(Date.now() - startedAt).toBeLessThan(10_000);
+  });
+
+  conformance(
+    'C11',
+    "a protected path's ancestors cannot be renamed or removed, so the path never moves (E04)",
+    async () => {
+      const project = join(work, 'c11');
+      const chats = join(project, '.tau', 'chats');
+      mkdirSync(chats, { recursive: true });
+      mkdirSync(join(project, '.tau', 'parameters'), { recursive: true });
+      writeFileSync(join(chats, 'chat-1.json'), 'RECORD\n');
+      const before = digestOf(join(chats, 'chat-1.json'));
+      const filesystem = { readable: [], writable: [work], readOnly: [chats], denied: [] };
+      const positive = await run("printf '{}' > c11/.tau/parameters/main.json", { filesystem });
+
+      expect(positive.exitCode, positive.stderr).toBe(0);
+      expect(readFileSync(join(project, '.tau', 'parameters', 'main.json'), 'utf8')).toBe('{}');
+      for (const command of [
+        'mv c11/.tau c11/.tau-moved',
+        'mv c11 c11-moved',
+        'rm -rf c11/.tau',
+        'mv c11/.tau/chats c11/stolen',
+      ]) {
+        // oxlint-disable-next-line no-await-in-loop -- one escape at a time, each judged outside.
+        await run(command, { filesystem });
+
+        expect(digestOf(join(chats, 'chat-1.json')), command).toBe(before);
+      }
+      expect(existsSync(join(project, '.tau-moved')) || existsSync(join(work, 'c11-moved'))).toBe(false);
+    },
+  );
+
+  conformance('C12', 'a host killed mid-command takes its whole sandbox with it (E11)', async () => {
+    const marker = `tau-c12-${String(process.pid)}`;
+    const folder = join(work, 'c12');
+    mkdirSync(folder, { recursive: true });
+    const host = spawn(process.execPath, [fileURLToPath(new URL('host-death.fixture.ts', import.meta.url))], {
+      cwd: dirname(fileURLToPath(import.meta.url)),
+      env: {
+        ...process.env,
+        TAU_HOST_DEATH_BWRAP: bwrapPath,
+        TAU_HOST_DEATH_WORK: folder,
+        TAU_HOST_DEATH_MARKER: marker,
+      },
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    let output = '';
+    host.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+      output += chunk;
+    });
+    const beat = join(folder, 'beat.txt');
+    for (const deadline = Date.now() + 30_000; !(existsSync(beat) && statSync(beat).size > 0); ) {
+      if (Date.now() > deadline) {
+        host.kill('SIGKILL');
+        throw new Error(`the fixture never started: ${output}`);
+      }
+      // oxlint-disable-next-line no-await-in-loop -- polls until the writer beats.
+      await delay(50);
+    }
+
+    expect(output).toBe('started\n');
+    if (!linux) {
+      const shellPid = Number(readFileSync(join(folder, 'shell.pid'), 'utf8').trim());
+      const writerPid = Number(readFileSync(join(folder, 'writer.pid'), 'utf8').trim());
+      const groupOf = (pid: number): number =>
+        Number(execFileSync('/bin/ps', ['-o', 'pgid=', '-p', String(pid)], { encoding: 'utf8' }).trim());
+
+      expect(groupOf(writerPid)).not.toBe(groupOf(shellPid));
+    }
+    host.kill('SIGKILL');
+    await new Promise((resolve) => {
+      host.once('exit', resolve);
+    });
+    const survivors = (): string[] =>
+      execFileSync('ps', ['-axww', '-o', 'pid=,command='], { encoding: 'utf8' })
+        .split('\n')
+        .filter((line) => line.includes(marker) && !line.includes('ps -axww'));
+    for (const deadline = Date.now() + 10_000; survivors().length > 0 && Date.now() < deadline; ) {
+      // oxlint-disable-next-line no-await-in-loop -- polls the process table until the sandbox is gone.
+      await delay(100);
+    }
+
+    expect(survivors()).toStrictEqual([]);
+    const { size } = statSync(beat);
+    await delay(1000);
+
+    expect(statSync(beat).size).toBe(size);
   });
 
   if (linux) {

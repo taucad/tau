@@ -14,7 +14,11 @@ export type QualificationCandidateInput = {
   runId: string;
 };
 
-/** Keep Linux staging evidence pinned to a trusted ancestor; other qualification scopes remain exact-source. */
+/**
+ * Keep Linux staging evidence pinned to a trusted ancestor; other qualification scopes remain exact-source. The
+ * Mac-only staging scope stays exact-source because its receipts feed publication, whose provenance requires the
+ * qualification run's head to equal the candidate source.
+ */
 export const assertQualificationSource = (options: {
   sourceCommit: string;
   workflowCommit: string;
@@ -24,9 +28,9 @@ export const assertQualificationSource = (options: {
   if (
     !/^[a-f\d]{40}$/u.test(options.sourceCommit) ||
     !/^[a-f\d]{40}$/u.test(options.workflowCommit) ||
-    !['all', 'linux'].includes(options.scope) ||
+    !['all', 'linux', 'macos'].includes(options.scope) ||
     !['staging', 'production'].includes(options.channel) ||
-    (options.scope === 'linux' && options.channel !== 'staging')
+    (options.scope !== 'all' && options.channel !== 'staging')
   ) {
     throw new Error('Invalid qualification source scope/channel');
   }

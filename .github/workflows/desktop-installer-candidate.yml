@@ -4,17 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: All platforms, or Linux-only staging qualification (not public promotion)
+        description: All platforms, Linux-only staging qualification (not public promotion), or Mac-only staging ZIP/DMG candidate
         required: true
         default: all
         type: choice
-        options: [all, linux]
+        options: [all, linux, macos]
       tag:
         description: Existing desktop release tag built by the trusted archive run
         required: true
         type: string
       release_run_id:
-        description: Exact-tag release-build.yml run; Linux staging verifies its prerequisite jobs
+        description: Exact-tag release-build.yml run; scoped staging verifies only its own prerequisite jobs
         required: true
         type: string
 
@@ -60,7 +60,7 @@ jobs:
           run-id: ${{ inputs.release_run_id }}
           github-token: ${{ github.token }}
           path: out/installer-preflight
-      - name: Require full archive coverage without changing staging defaults
+      - name: Require the selected scope's archive coverage without changing staging defaults
         env:
           DESKTOP_RELEASE_TAG: ${{ steps.identity.outputs.tag }}
           TAU_DESKTOP_SOURCE_SHA: ${{ steps.identity.outputs.source }}
@@ -181,7 +181,7 @@ jobs:
           rm -f "$RUNNER_TEMP/developer-id.p12" "$RUNNER_TEMP/AuthKey.p8"
 
   windows:
-    if: inputs.scope != 'linux'
+    if: inputs.scope == 'all'
     needs: resolve
     runs-on: windows-2025
     timeout-minutes: 90
@@ -265,6 +265,7 @@ jobs:
           retention-days: 30
 
   linux:
+    if: inputs.scope != 'macos'
     needs: resolve
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -332,9 +333,10 @@ jobs:
 
   candidate:
     if: >-
-      always() && !cancelled() && needs.resolve.result == 'success' && needs.linux.result == 'success' &&
-      ((inputs.scope == 'linux' && needs.macos.result == 'skipped' && needs.windows.result == 'skipped') ||
-       (inputs.scope != 'linux' && needs.macos.result == 'success' && needs.windows.result == 'success'))
+      always() && !cancelled() && needs.resolve.result == 'success' &&
+      ((inputs.scope == 'linux' && needs.linux.result == 'success' && needs.macos.result == 'skipped' && needs.windows.result == 'skipped') ||
+       (inputs.scope == 'macos' && needs.macos.result == 'success' && needs.windows.result == 'skipped' && needs.linux.result == 'skipped') ||
+       (inputs.scope == 'all' && needs.macos.result == 'success' && needs.windows.result == 'success' && needs.linux.result == 'success'))
     needs: [resolve, macos, windows, linux]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -370,7 +372,9 @@ jobs:
           };
           visit('out/installer-parts');
           NODE
+      # A Mac-only candidate has no AppImage descriptor or APT snapshot, so it never loads Linux signing material.
       - name: Admit the approved descriptor signing key
+        if: inputs.scope != 'macos'
         env:
           TAU_APPIMAGE_PRIVATE_KEY_FILE: ${{ runner.temp }}/appimage-private.pem
           PRIVATE_KEY: ${{ secrets.TAU_APPIMAGE_PRIVATE_KEY }}
@@ -392,7 +396,11 @@ jobs:
           TAU_UPDATE_ISSUED_AT=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
           export TAU_UPDATE_ISSUED_AT
           pnpm nx run desktop:publish --args=prepare-routes
+      - name: Require exactly both Mac ZIP and DMG pairs in a Mac-only candidate
+        if: inputs.scope == 'macos'
+        run: pnpm nx run desktop:installer-candidate --args=admit-scope
       - name: Prepare the signed qualification APT snapshot
+        if: inputs.scope != 'macos'
         env:
           GNUPGHOME: ${{ runner.temp }}/qualification-apt-keys
           TAU_APT_PRIMARY_FINGERPRINT: ${{ vars.TAU_APT_PRIMARY_FINGERPRINT }}
@@ -407,7 +415,7 @@ jobs:
           pnpm nx run desktop:qualification-apt-snapshot --args=--prepare
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ${{ inputs.scope == 'linux' && 'desktop-linux-installer-candidate' || 'desktop-installer-candidate' }}
+          name: ${{ inputs.scope == 'linux' && 'desktop-linux-installer-candidate' || inputs.scope == 'macos' && 'desktop-macos-installer-candidate' || 'desktop-installer-candidate' }}
           path: out/installer-candidate/*
           if-no-files-found: error
           retention-days: 30

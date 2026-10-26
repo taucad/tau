@@ -18,9 +18,11 @@ import type { DesktopArtifact, DesktopArtifactKind, DesktopArtifactManifest } fr
 import { isNewerVersion } from '#main/updater.js';
 /* oxlint-disable no-restricted-imports -- Adjacent publication helpers are script-owned interfaces. */
 import {
+  assertDesktopCatalogRetainsRoutes,
   createDesktopInstallerCatalog,
   createDesktopRouteDescriptor,
   desktopManifestDigest,
+  desktopPublicationScopes,
   verifyDesktopRouteDescriptor,
 } from './desktop-route-publication.mjs';
 import type { DesktopRouteTrust } from './desktop-route-publication.mjs';
@@ -468,9 +470,11 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
   }
   const catalogPath = resolve(root, 'installers.json');
   if (operation === 'promote-routes') {
+    const scope = z.enum(desktopPublicationScopes).parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
     const receipts = await fetchDesktopQualifiedReceipts(manifest, root, {
       ci: required('TAU_ROUTE_CI_RUN_ID'),
       vm: required('TAU_ROUTE_VM_RUN_ID'),
+      scope,
     });
     const trust = z
       .record(z.string(), z.string())
@@ -480,7 +484,13 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
       receipts,
       trust,
       approval: await readJson(resolve(root, 'promotion-approval.json')),
+      scope,
     });
+    const previousCatalog = await store.read('latest/installers.json');
+    assertDesktopCatalogRetainsRoutes(
+      previousCatalog ? (JSON.parse(new TextDecoder().decode(previousCatalog.bytes)) as unknown) : undefined,
+      catalog,
+    );
     // Immutable assets/descriptors must already be public before any update pointer changes.
     for (const name of [
       ...manifest.artifacts.map((artifact) => artifact.name),

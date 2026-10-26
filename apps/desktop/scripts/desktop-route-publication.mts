@@ -27,9 +27,20 @@ export const desktopManifestDigest = (manifest: DesktopArtifactManifest): string
     .update(JSON.stringify(parseDesktopArtifactManifest(manifest)))
     .digest('hex');
 
+/**
+ * Explicitly selected publication scope. `all` keeps the original admission; `macos` is a staging-only Mac rollout
+ * that must cover both architectures with ZIP and DMG and may not carry any other platform's artifact.
+ */
+export const desktopPublicationScopes = ['all', 'macos'] as const;
+export type DesktopPublicationScope = (typeof desktopPublicationScopes)[number];
+const macosScopeArtifacts = ['darwin-arm64', 'darwin-x64'].flatMap((target) =>
+  ['macos-dmg', 'macos-zip'].map((kind) => `${target}:${kind}`),
+);
+
 /** Determine complete advertised routes; archives alone never qualify a new route. */
 export const desktopCandidateRoutes = (
   manifest: DesktopArtifactManifest,
+  scope: DesktopPublicationScope = 'all',
 ): Array<{ route: keyof typeof catalogKinds; target: DesktopReleaseTarget }> => {
   const result: Array<{ route: keyof typeof catalogKinds; target: DesktopReleaseTarget }> = [];
   for (const target of ['darwin-arm64', 'darwin-x64', 'win32-x64', 'linux-x64'] as const) {
@@ -45,21 +56,40 @@ export const desktopCandidateRoutes = (
       }
     }
   }
+  // Deliberately retained: production publishes only all five routes from one candidate. The Mac-only staging scope
+  // below does not relax it; a later per-platform production cutover must change this rule through reviewed code.
   if (result.length === 0 || (manifest.channel === 'production' && result.length !== 5)) {
     throw new Error('Installer publication requires complete routes (all five in production)');
+  }
+  if (scope === 'macos') {
+    const present = manifest.artifacts.map((artifact) => `${artifact.target}:${artifact.kind}`).sort();
+    if (
+      manifest.channel !== 'staging' ||
+      JSON.stringify(present) !== JSON.stringify([...macosScopeArtifacts].sort()) ||
+      result.length !== 2
+    ) {
+      throw new Error('Mac-only publication requires exactly staging ZIP and DMG for Apple silicon and Intel');
+    }
   }
   return result;
 };
 
-/** Require both real CI and operator VM evidence, including both Mac migration paths. */
-export const qualifyDesktopRoutes = (
+/** Require both real CI and operator VM evidence for the explicitly selected scope's routes. */
+export const qualifyDesktopScopedRoutes = (
   input: unknown,
   proofs: readonly unknown[],
-  trust: DesktopRouteTrust,
+  policy: { trust: DesktopRouteTrust; scope: DesktopPublicationScope },
 ): { manifest: DesktopArtifactManifest; routes: ReturnType<typeof desktopCandidateRoutes> } => {
+  const { trust, scope } = policy;
   const manifest = parseDesktopArtifactManifest(input);
   const receipts = proofs.map((proof) => parseDesktopAcceptanceReceipt(proof, manifest));
-  const routes = desktopCandidateRoutes(manifest);
+  const routes = desktopCandidateRoutes(manifest, z.enum(desktopPublicationScopes).parse(scope));
+  if (
+    scope === 'macos' &&
+    receipts.some((receipt) => !receipt.route.startsWith('macos-') || !receipt.target.startsWith('darwin-'))
+  ) {
+    throw new Error('Mac-only publication cannot admit another platform route');
+  }
   for (const { route, target } of routes) {
     const receiptRoutes: DesktopAcceptanceRoute[] = route === 'macos-zip' ? ['macos-zip', 'macos-dmg'] : [route];
     for (const receiptRoute of receiptRoutes) {
@@ -83,6 +113,13 @@ export const qualifyDesktopRoutes = (
   return { manifest, routes };
 };
 
+/** Require both real CI and operator VM evidence, including both Mac migration paths. */
+export const qualifyDesktopRoutes = (
+  input: unknown,
+  proofs: readonly unknown[],
+  trust: DesktopRouteTrust,
+): ReturnType<typeof qualifyDesktopScopedRoutes> => qualifyDesktopScopedRoutes(input, proofs, { trust, scope: 'all' });
+
 export type DesktopInstallerCatalog = {
   schemaVersion: 1;
   tag: string;
@@ -104,8 +141,12 @@ export const createDesktopInstallerCatalog = (options: {
   receipts: readonly unknown[];
   trust: DesktopRouteTrust;
   approval: unknown;
+  scope?: DesktopPublicationScope;
 }): DesktopInstallerCatalog => {
-  const { manifest, routes } = qualifyDesktopRoutes(options.manifest, options.receipts, options.trust);
+  const { manifest, routes } = qualifyDesktopScopedRoutes(options.manifest, options.receipts, {
+    trust: options.trust,
+    scope: options.scope ?? 'all',
+  });
   z.strictObject({
     schemaVersion: z.literal(1),
     tag: z.literal(manifest.tag),
@@ -135,6 +176,30 @@ export const createDesktopInstallerCatalog = (options: {
         .map(({ kind, name, sha256, size }) => ({ kind, name, sha256, size })),
     })),
   };
+};
+
+/**
+ * A narrower catalog must not silently withdraw a route an earlier promotion advertised: the website would fall back
+ * for that platform while its signed update descriptors and APT metadata stop being renewed. Absent platforms that
+ * were never promoted keep the website's legacy archive choices.
+ */
+export const assertDesktopCatalogRetainsRoutes = (previous: unknown, next: DesktopInstallerCatalog): void => {
+  if (previous === undefined) {
+    return;
+  }
+  const prior = z
+    .object({
+      channel: z.literal(next.channel),
+      routes: z.array(z.object({ route: z.string(), target: z.string() })),
+    })
+    .parse(previous);
+  const kept = new Set(next.routes.map(({ route, target }) => `${route}:${target}`));
+  const dropped = prior.routes.filter(({ route, target }) => !kept.has(`${route}:${target}`));
+  if (dropped.length > 0) {
+    throw new Error(
+      `Installer catalog would withdraw previously promoted routes: ${dropped.map(({ route, target }) => `${target}/${route}`).join(', ')}`,
+    );
+  }
 };
 
 /** Produce a bounded-lived, immutable-candidate descriptor; refresh changes time/signature, never candidate identity. */

@@ -424,9 +424,8 @@ export class FileContentService {
       return pending;
     }
 
-    const generation = this.refreshGuard.begin(path);
     const promise = this.shouldRecompute(options)
-      ? this.computeOutcome(path, generation, options)
+      ? this.computeOutcome(path, this.refreshGuard.begin(path), options)
       : this.observeOutcome(path);
     this.pendingResolves.set(path, promise);
 

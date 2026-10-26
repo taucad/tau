@@ -65,7 +65,8 @@ describe('TurnExecutionCustody durable record projection', () => {
     expect(await turns.executions.hold({ key, executionId: 'one' })).toEqual({ status: 'applied' });
     expect(await turns.executions.hold({ key, executionId: 'one' })).toEqual({ status: 'replayed' });
     expect(await turns.executions.release({ key: { ...key, attempt: 2 }, executionId: 'one' })).toMatchObject({
-      status: 'refused', code: 'TURN_UNKNOWN',
+      status: 'refused',
+      code: 'TURN_UNKNOWN',
     });
     expect(JSON.parse(await filesystem.readFile(path, 'utf8'))).toMatchObject({ executionIds: ['one'] });
   });
@@ -74,10 +75,12 @@ describe('TurnExecutionCustody durable record projection', () => {
     const { filesystem, open } = await fixture();
     const first = open();
     const second = open();
-    expect(await Promise.all([
-      first.turns.executions.hold({ key, executionId: 'one' }),
-      second.turns.executions.hold({ key, executionId: 'two' }),
-    ])).toEqual([{ status: 'applied' }, { status: 'applied' }]);
+    expect(
+      await Promise.all([
+        first.turns.executions.hold({ key, executionId: 'one' }),
+        second.turns.executions.hold({ key, executionId: 'two' }),
+      ]),
+    ).toEqual([{ status: 'applied' }, { status: 'applied' }]);
     expect(JSON.parse(await filesystem.readFile(path, 'utf8'))).toMatchObject({ executionIds: ['one', 'two'] });
   });
 });

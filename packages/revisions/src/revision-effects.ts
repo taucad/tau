@@ -415,17 +415,38 @@ export type RevisionActors = Readonly<{
 }>;
 
 /**
+ * Exact current attempt and opaque native execution identity, supplied only by the trusted host.
+ *
+ * @public
+ */
+export type TurnExecutionInput = Readonly<{ key: TurnAttemptKey; executionId: string }>;
+
+/** The durable result of a trusted host execution hold or release. @public */
+export type TurnExecutionAnswer =
+  | Readonly<{ status: 'applied' | 'replayed' }>
+  | Readonly<{
+      status: 'refused';
+      code: 'TURN_UNKNOWN' | 'REVISIONS_BUSY' | 'REVISIONS_UNAVAILABLE';
+      message: string;
+    }>;
+
+/**
  * What one project's turn-placement adapter reads from the store beside its root (W8 TS-S3).
  *
  * The root drives the attempts; these are the reads it does not expose: the lease directory, a checkout's files, and a
  * finalized settlement's graph facts. It also holds the per-record section in which a root takes over another root's
- * record (RM-R8 narrowed).
+ * record (RM-R8 narrowed), and the trusted host's exact execution holds that retirement must wait for (I7).
  *
  * @public
  */
 export type TurnStore = Readonly<{
   /** Every lease record in `.tau/runs`, read now, never from a cached list (TS-R17). */
   leases: () => Promise<readonly TurnLease[]>;
+  /** Trusted host only: release attests native confirmed stop; replay means absence, never proof of prior acquisition. */
+  executions: Readonly<{
+    hold: (input: TurnExecutionInput) => Promise<TurnExecutionAnswer>;
+    release: (input: TurnExecutionInput) => Promise<TurnExecutionAnswer>;
+  }>;
   /** One checkout and its files, or `undefined` when the project has no checkout with that id. */
   open: (
     checkoutId: string,
@@ -615,6 +636,65 @@ type TransferControl = Readonly<{ cancel: () => void; release: () => void }>;
 /* The actor factory binds the effect owner's transport control to its root.
  * Directly composed roots have no such authority and cannot claim cancellation. */
 const transferControls = new WeakMap<RevisionActors | ProjectRevisionsActor, TransferControl>();
+
+const nonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
+
+/*
+ * One lease record, strictly. A record written before W5 names no attempt (read as 0) and calls its head
+ * `baseRevisionId` (W8 TS-Q5); one written before W8 still carries the retired `authorityEpoch`, which nothing reads.
+ * Anything else malformed, including execution custody, answers `undefined`: a corrupt record is never evidence that
+ * its checkout is free (I7).
+ */
+const parseLeaseRecord = (name: string, text: string): TurnLease | undefined => {
+  let stored: unknown;
+  try {
+    stored = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (typeof stored !== 'object' || stored === null || Array.isArray(stored)) {
+    return undefined;
+  }
+  const record: Readonly<Record<string, unknown>> = { ...stored };
+  const { runId, turnId, chatId, checkoutId, attempt = 0, startedAt, holder, executionIds } = record;
+  const headRevisionId = record['headRevisionId'] ?? record['baseRevisionId'];
+  if (
+    !nonEmptyString(runId) ||
+    !nonEmptyString(turnId) ||
+    !nonEmptyString(chatId) ||
+    !nonEmptyString(checkoutId) ||
+    name !== `${encodeURIComponent(runId)}.json` ||
+    typeof startedAt !== 'number' ||
+    !Number.isFinite(startedAt) ||
+    typeof attempt !== 'number' ||
+    !Number.isSafeInteger(attempt) ||
+    attempt < 0 ||
+    (headRevisionId !== undefined && typeof headRevisionId !== 'string') ||
+    (holder !== undefined && !nonEmptyString(holder))
+  ) {
+    return undefined;
+  }
+  let executions: readonly string[] | undefined;
+  if (executionIds !== undefined) {
+    const ids: readonly unknown[] = Array.isArray(executionIds) ? executionIds : [undefined];
+    const valid = ids.filter((id): id is string => nonEmptyString(id));
+    if (valid.length !== ids.length || new Set(valid).size !== valid.length) {
+      return undefined;
+    }
+    executions = Object.freeze(valid);
+  }
+  return Object.freeze({
+    runId,
+    turnId,
+    chatId,
+    checkoutId,
+    attempt,
+    startedAt,
+    ...(headRevisionId === undefined ? {} : { headRevisionId }),
+    ...(holder === undefined ? {} : { holder }),
+    ...(executions === undefined ? {} : { executionIds: executions }),
+  });
+};
 
 /**
  * Build one project's actor implementations over a port and its checkouts.
@@ -1749,81 +1829,59 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
   };
 
-  /*
-   * Every lease on disk.
-   *
-   * Read leniently, one file at a time: a half-written or foreign record holds
-   * nothing, and must never be able to fail the sweep that reads it.
-   */
+  /* A corrupt custody record cannot become evidence that a checkout is free. */
   const readLeases = async (): Promise<readonly TurnLease[]> => {
     const records = await recordsFileSystem();
     if (!(await records.exists(leaseDirectory))) {
       return [];
     }
     const entries = await records.readdir(leaseDirectory);
-    const files = entries.filter((name) => name.endsWith('.json'));
-    const leases = await Promise.all(
-      files.toSorted().map(async (name): Promise<readonly TurnLease[]> => {
-        try {
-          const stored: unknown = JSON.parse(await records.readFile(`${leaseDirectory}/${name}`, 'utf8'));
-          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- validated field by field below.
-          const lease = stored as Partial<TurnLease> & Readonly<{ baseRevisionId?: string; authorityEpoch?: unknown }>;
-          if (typeof lease.runId !== 'string') {
-            return [];
-          }
-          /* A record written before W5 names no attempt (read as 0) and calls its head `baseRevisionId` (W8 TS-Q5); one
-           * written before W8 still carries the retired `authorityEpoch`, which nothing reads. */
-          const { baseRevisionId, authorityEpoch: _retired, ...rest } = lease;
-          const headRevisionId = lease.headRevisionId ?? baseRevisionId;
-          return [
-            // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the two required fields are checked above; the rest are the record's own.
-            Object.freeze({
-              ...rest,
-              runId: lease.runId,
-              attempt: typeof lease.attempt === 'number' ? lease.attempt : 0,
-              ...(headRevisionId === undefined ? {} : { headRevisionId }),
-            } as TurnLease),
-          ];
-        } catch {
-          return [];
+    const files = entries.filter((name) => name.endsWith('.json')).toSorted();
+    return Promise.all(
+      files.map(async (name): Promise<TurnLease> => {
+        const lease = parseLeaseRecord(name, await records.readFile(`${leaseDirectory}/${name}`, 'utf8'));
+        if (lease === undefined) {
+          throw new RevisionPortError('INVALID_REPOSITORY', `The saved run record ${name} cannot be read safely.`);
         }
+        return lease;
       }),
     );
-    return leases.flat();
   };
 
-  /*
-   * Delete one attempt's lease, unless its record names another attempt or
-   * holder of the run, whose lease it is not (TS-R5, RM-S14). A missing record
-   * counts as retired.
-   */
-  const retireAttempt = async (key: TurnAttemptKey): Promise<void> => {
-    const record = await leaseOf(key.runId);
-    if (record !== undefined && !namesAttempt(record, key)) {
-      return;
-    }
-    await dropLease(key.runId);
-  };
   const leaseOf = async (runId: string): Promise<TurnLease | undefined> => {
     const leases = await readLeases();
     return leases.find((lease) => lease.runId === runId);
   };
-  /* A record written before W5 reads as attempt 0 and names every attempt of its run (TS-Q5). */
+  /* Legacy retirement keeps its attempt-zero compatibility; new holds require exact identity. */
   const namesAttempt = (record: TurnLease, key: TurnAttemptKey): boolean =>
     (record.attempt === 0 || record.attempt === key.attempt) &&
     record.turnId === key.turnId &&
     record.chatId === key.chatId;
-
-  /* Delete one lease. Retiring one that is already gone resolves (R17). */
-  const dropLease = async (runId: string): Promise<void> => {
-    const records = await recordsFileSystem();
-    try {
-      await records.unlink(leasePathOf(runId));
-    } catch {
-      /* A lease that was never written, or that another pass already retired,
-       * is exactly the state the caller wanted. */
+  const hasExecutions = (record: TurnLease | undefined): boolean => (record?.executionIds?.length ?? 0) > 0;
+  const refuseHeldExecutions = (record: TurnLease | undefined): void => {
+    if (hasExecutions(record)) {
+      throw new RevisionPortError(
+        'CHECKOUT_CONFLICT',
+        'Running work still holds these files. Stop it before continuing.',
+      );
     }
   };
+  /* Call only inside the run's record section. Failure to delete is not successful retirement. */
+  const dropLease = async (runId: string): Promise<void> => {
+    refuseHeldExecutions(await leaseOf(runId));
+    const records = await recordsFileSystem();
+    if (await records.exists(leasePathOf(runId))) {
+      await records.unlink(leasePathOf(runId));
+    }
+  };
+  const retireAttempt = async (key: TurnAttemptKey): Promise<void> =>
+    inRecordSection(key.runId, async () => {
+      const record = await leaseOf(key.runId);
+      if (record !== undefined && !namesAttempt(record, key)) {
+        return;
+      }
+      await dropLease(key.runId);
+    });
 
   /*
    * RM-R8 narrowed (W8 H1): this root's liveness mark, taken before its first lease write and held until the root
@@ -1887,6 +1945,38 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const releaseMark = (): void => {
     heldMarks.delete(markOf(rootInstanceId));
     rootStopped.resolve();
+  };
+
+  const changeExecution = async (input: TurnExecutionInput, hold: boolean): Promise<TurnExecutionAnswer> => {
+    try {
+      return await inRecordSection(input.key.runId, async (): Promise<TurnExecutionAnswer> => {
+        const record = await leaseOf(input.key.runId);
+        if (
+          record === undefined ||
+          !namesAttempt(record, input.key) ||
+          record.attempt !== input.key.attempt ||
+          input.executionId.length === 0
+        ) {
+          return { status: 'refused', code: 'TURN_UNKNOWN', message: 'That run attempt is no longer current.' };
+        }
+        if (!(await markFree(record.holder))) {
+          return { status: 'refused', code: 'REVISIONS_BUSY', message: 'Another session still owns this run.' };
+        }
+        const current = record.executionIds ?? [];
+        if (current.includes(input.executionId) === hold) {
+          return { status: 'replayed' };
+        }
+        const executionIds = hold ? [...current, input.executionId] : current.filter((id) => id !== input.executionId);
+        await writeLeaseRecord({ ...record, executionIds });
+        return { status: 'applied' };
+      });
+    } catch (error) {
+      return {
+        status: 'refused',
+        code: 'REVISIONS_UNAVAILABLE',
+        message: error instanceof Error ? error.message : 'The saved run record could not be updated.',
+      };
+    }
   };
 
   /**
@@ -2779,6 +2869,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     settled,
     turns: {
       leases: readLeases,
+      executions: {
+        hold: async (input) => changeExecution(input, true),
+        release: async (input) => changeExecution(input, false),
+      },
       open: async (checkoutId) => {
         const places = await listPlaces();
         const checkout = places.find((candidate) => candidate.id === checkoutId);
@@ -2790,6 +2884,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       claim: async (runId) =>
         inRecordSection(runId, async () => {
           const record = await leaseOf(runId);
+          if (hasExecutions(record)) {
+            return 'held';
+          }
           if (record === undefined || record.holder === rootInstanceId) {
             return 'free';
           }
@@ -2807,7 +2904,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           if (record === undefined || !namesAttempt(record, key)) {
             return 'absent';
           }
-          if (!(await markFree(record.holder))) {
+          if (hasExecutions(record) || !(await markFree(record.holder))) {
             return 'held';
           }
           await dropLease(key.runId);
@@ -3075,7 +3172,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             startedAt: now(),
             holder: rootInstanceId,
           });
-          await writeLeaseRecord(lease);
+          await inRecordSection(input.key.runId, async () => {
+            refuseHeldExecutions(await leaseOf(input.key.runId));
+            await writeLeaseRecord(lease);
+          });
           /* Every lease on this checkout, this attempt's first: the provenance
            * set (AC9), never a retirement list. The others are announced as
            * `leaseHeld` (RM-R16). */
@@ -3333,7 +3433,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       /* A turn's retirement names its attempt and is checked like the turn's own; a run-only one drops the record. */
       retireLease: fromAuthorityPromise<void, Readonly<{ projectId: string; runId: string; key?: TurnAttemptKey }>>(
         async ({ input }) => {
-          await (input.key === undefined ? dropLease(input.runId) : retireAttempt(input.key));
+          await (input.key === undefined
+            ? inRecordSection(input.runId, async () => dropLease(input.runId))
+            : retireAttempt(input.key));
         },
       ),
     },

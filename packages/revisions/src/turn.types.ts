@@ -46,4 +46,6 @@ export type TurnLease = Readonly<{
    * this root's liveness mark is free. Absent on a record written before W8, which any root may adopt (TS-Q5).
    */
   holder?: string;
+  /** Opaque native executions whose confirmed cleanup must precede retirement. Absent on legacy records. */
+  executionIds?: readonly string[];
 }>;

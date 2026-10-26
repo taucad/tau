@@ -501,10 +501,12 @@ export function kclLspCompletion(
   { document, version, isDisposed }: Readonly<{ document: EditorDocument; version: number; isDisposed: () => boolean }>,
 ): Completion {
   return {
-    label: item.label,
+    label: item.filterText ?? item.label,
+    displayLabel: item.filterText && item.filterText !== item.label ? item.label : undefined,
+    sortText: item.sortText,
     detail: item.detail,
     info: typeof item.documentation === 'string' ? item.documentation : item.documentation?.value,
-    boost: 4,
+    boost: item.preselect ? 99 : 4,
     // oxlint-disable-next-line max-params -- CodeMirror completion apply callback contract.
     apply(view, completion, from, to) {
       if (isDisposed() || document.version !== version) {
@@ -648,7 +650,7 @@ function kclExtensions({
           }
           const items = result ? (Array.isArray(result) ? result : result.items) : [];
           const options: Completion[] = items.map((item) => kclLspCompletion(item, { document, version, isDisposed }));
-          const seen = new Set(options.map((option) => option.label));
+          const seen = new Set(items.map((item) => item.label));
           const addSymbols = (candidates: readonly KclSymbol[], boost: number): void => {
             for (const symbol of candidates) {
               if (!seen.has(symbol.name)) {

@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
+import { autocompletion, currentCompletions, selectedCompletion, startCompletion } from '@codemirror/autocomplete';
+import type { Completion } from '@codemirror/autocomplete';
 import type * as LSP from 'vscode-languageserver-protocol';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { EditorDocument } from '#lib/editor-document.js';
@@ -21,6 +23,74 @@ import {
 } from '#lib/kcl-language/kcl-codemirror.js';
 
 describe('KCL completion parity', () => {
+  function completionView(query: string, options: Completion[]): EditorView {
+    return new EditorView({
+      state: EditorState.create({
+        doc: query,
+        selection: { anchor: query.length },
+        extensions: [autocompletion({ override: [() => ({ from: 0, options })] })],
+      }),
+      parent: globalThis.document.body,
+    });
+  }
+
+  it('should match LSP filter text while displaying its label', async () => {
+    const document = new EditorDocument('main.kcl', 'str');
+    const completion = kclLspCompletion(
+      { label: 'length', filterText: 'stringLength' },
+      { document, version: 1, isDisposed: () => false },
+    );
+    const view = completionView('str', [completion]);
+    try {
+      view.focus();
+      expect(startCompletion(view)).toBe(true);
+      await vi.waitFor(() => {
+        expect(currentCompletions(view.state)).toHaveLength(1);
+      });
+      expect(currentCompletions(view.state)[0]).toMatchObject({ label: 'stringLength', displayLabel: 'length' });
+    } finally {
+      view.destroy();
+    }
+  });
+
+  it('should rank equal matches by LSP sort text and honor preselect', async () => {
+    const document = new EditorDocument('main.kcl', 'same');
+    const first = kclLspCompletion(
+      { label: 'sameOne', sortText: 'z' },
+      { document, version: 1, isDisposed: () => false },
+    );
+    const second = kclLspCompletion(
+      { label: 'sameTwo', sortText: 'a' },
+      { document, version: 1, isDisposed: () => false },
+    );
+    const sorted = completionView('same', [first, second]);
+    try {
+      sorted.focus();
+      expect(startCompletion(sorted)).toBe(true);
+      await vi.waitFor(() => {
+        expect(currentCompletions(sorted.state)).toHaveLength(2);
+      });
+      expect(currentCompletions(sorted.state).map((item) => item.label)).toEqual(['sameTwo', 'sameOne']);
+    } finally {
+      sorted.destroy();
+    }
+    const preferred = kclLspCompletion(
+      { label: 'sameOne', sortText: 'z', preselect: true },
+      { document, version: 1, isDisposed: () => false },
+    );
+    const selected = completionView('same', [preferred, second]);
+    try {
+      selected.focus();
+      expect(startCompletion(selected)).toBe(true);
+      await vi.waitFor(() => {
+        expect(currentCompletions(selected.state)).toHaveLength(2);
+      });
+      expect(selectedCompletion(selected.state)?.label).toBe('sameOne');
+    } finally {
+      selected.destroy();
+    }
+  });
+
   it('should apply an LSP snippet field instead of inserting a literal tabstop', () => {
     const document = new EditorDocument('main.kcl', 'fo');
     const item: LSP.CompletionItem = { label: 'foo', insertText: 'foo($1)', insertTextFormat: 2 };

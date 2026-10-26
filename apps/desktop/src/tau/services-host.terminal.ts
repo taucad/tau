@@ -55,6 +55,11 @@ export type TerminalConcernOptions = {
   readonly accessRequestMilliseconds?: number;
   /** How long a fresh port may wait for its `open` frame before it is closed. Milliseconds. */
   readonly openMilliseconds?: number;
+  /**
+   * How long a start waits for main's root allowlist to admit its project before it is refused
+   * `project-not-admitted`. Defaults to {@link terminalAdmissionMilliseconds}.
+   */
+  readonly admissionMilliseconds?: number;
   /** Wall clock, for request expiry. */
   readonly now?: () => number;
 };
@@ -124,6 +129,13 @@ const outputPieces = (text: string): string[] => {
 };
 
 /**
+ * How long a Terminal start waits for main's root allowlist to admit its project, in milliseconds. Main admits a
+ * just-created project to its own registry and connects the pane before the services host's `allowRoots` frame for
+ * that project arrives; a start in that gap waits for the frame instead of being refused.
+ */
+export const terminalAdmissionMilliseconds = 5000;
+
+/**
  * Create the services host's terminal concern.
  *
  * @param options - The shell getter, main's root predicate and diagnostics.
@@ -133,6 +145,32 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
   const { log } = options;
   const accessRequestMilliseconds = options.accessRequestMilliseconds ?? 120_000;
   const openMilliseconds = options.openMilliseconds ?? 30_000;
+  const admissionMilliseconds = options.admissionMilliseconds ?? terminalAdmissionMilliseconds;
+  /** Resolved and replaced each time main's root allowlist changes; a start awaiting admission wakes on it. */
+  let rootsChanged = Promise.withResolvers<void>();
+  /**
+   * Wait until main's allowlist admits `root`, its connection ends, or the admission bound passes.
+   * @returns Whether the root is admitted.
+   */
+  const awaitAdmission = async (root: string, isEnded: () => boolean): Promise<boolean> => {
+    const deadline = now() + admissionMilliseconds;
+    while (!options.isTrustedRoot(root)) {
+      const remaining = deadline - now();
+      if (remaining <= 0 || isEnded()) {
+        return false;
+      }
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      // oxlint-disable-next-line no-await-in-loop -- each wait is for main's next allowlist or the bound.
+      await Promise.race([
+        rootsChanged.promise,
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, remaining);
+        }),
+      ]);
+      clearTimeout(timer);
+    }
+    return true;
+  };
   const now = options.now ?? Date.now;
   /** Live connections by `windowId\0projectRoot`: one PTY per project and window. */
   const live = new Map<string, Connection>();
@@ -148,6 +186,8 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
     readonly projectRoot: string;
     /** A shell runs, or is starting past the start hold, and the connection is not ending. */
     isLive(): boolean;
+    /** A start is waiting for main's allowlist to admit this project for the first time; nothing runs to revoke. */
+    isAwaitingAdmission(): boolean;
     /** Ends the connection with one final frame, or none when the pane is already gone. */
     end(frame: TerminalHostFrame | undefined, reason?: TerminalExitReason): Promise<void>;
   };
@@ -175,6 +215,8 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
     let acknowledgement: PromiseWithResolvers<void> | undefined;
     let pendingAccess: { id: string; access: TerminalAccess; accessExpires: number } | undefined;
     let opening = false;
+    /** Set while a start waits for its project's first admission (see `awaitAdmission`). */
+    let awaitingAdmission = false;
     /** Inside {@link start} past the start hold: a shell is being opened that quit must count. */
     let starting = false;
     let claimed = false;
@@ -219,6 +261,7 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
     const connection: Connection = {
       projectRoot,
       isLive: () => !isEnded() && (session !== undefined || starting),
+      isAwaitingAdmission: () => awaitingAdmission,
       // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the repeated-close contract.
       end(frame, reason) {
         ended ??= (async (): Promise<void> => {
@@ -290,7 +333,14 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
 
     /** Start one shell for this connection; refuses end the connection with the shell service's own words. */
     const openShell = async (size: TerminalSize, access: TerminalAccess | undefined): Promise<void> => {
-      if (!options.isTrustedRoot(projectRoot)) {
+      awaitingAdmission = true;
+      const admitted = await awaitAdmission(projectRoot, isEnded).finally(() => {
+        awaitingAdmission = false;
+      });
+      if (isEnded()) {
+        return;
+      }
+      if (!admitted) {
         await refuse(
           refusal(
             'project-not-admitted',
@@ -522,10 +572,14 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
     serve,
     revokeUntrusted() {
       for (const connection of connections) {
-        if (!options.isTrustedRoot(connection.projectRoot)) {
+        /* A start still awaiting its project's first admission is not a revoked session; it waits on. */
+        if (!options.isTrustedRoot(connection.projectRoot) && !connection.isAwaitingAdmission()) {
           void connection.end(undefined, 'project-changed');
         }
       }
+      const changed = rootsChanged;
+      rootsChanged = Promise.withResolvers<void>();
+      changed.resolve();
     },
     async closeAll() {
       const ending = Promise.allSettled(

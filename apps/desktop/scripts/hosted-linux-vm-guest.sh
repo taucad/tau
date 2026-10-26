@@ -66,9 +66,9 @@ xdpyinfo | head -20 || true
 xdpyinfo >/dev/null
 # A cloud image plus a dummy Xorg driver is not a complete graphics desktop.
 # Require an actual Mesa context before attempting the shipping Electron/WebGL renderer.
-glxinfo -B > /tmp/tau-glxinfo.txt
-cat /tmp/tau-glxinfo.txt
-grep -q 'OpenGL renderer string:' /tmp/tau-glxinfo.txt
+glxinfo_output="$(glxinfo -B)"
+printf '%s\n' "$glxinfo_output"
+grep -q 'OpenGL renderer string:' <<< "$glxinfo_output"
 # The window manager runs as the ordinary guest user, with D-Bus, not as root.
 systemd-run --user --unit=tau-proof-desktop --setenv=DISPLAY=:0 --setenv="XAUTHORITY=$XAUTHORITY" dbus-run-session openbox
 for _attempt in $(seq 1 30); do xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id' && break; sleep 1; done

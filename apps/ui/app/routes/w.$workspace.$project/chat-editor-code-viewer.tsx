@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Extension } from '@codemirror/state';
 import { CodeEditor, markCodeEditorMilestone } from '#components/code/code-editor.client.js';
 import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
@@ -55,18 +55,22 @@ function MountedCodeEditor({
     language: string;
     message: string;
   }>();
-  const [semanticAttempt, setSemanticAttempt] = useState(0);
-
-  useEffect(() => {
+  const activeLanguageLoad = useRef<{ controller: AbortController; dispose?: () => void } | undefined>(undefined);
+  const acquire = useCallback(async (): Promise<void> => {
     if (!environment || !document) {
       return;
     }
+    activeLanguageLoad.current?.controller.abort();
+    activeLanguageLoad.current?.dispose?.();
     const controller = new AbortController();
-    let dispose: (() => void) | undefined;
+    const load: { controller: AbortController; dispose?: () => void } = { controller };
+    activeLanguageLoad.current = load;
     const fail = (error: unknown): void => {
       if (!controller.signal.aborted) {
         console.error('Editor language service failed to start or stopped unexpectedly', error);
-        dispose?.();
+        controller.abort();
+        load.dispose?.();
+        load.dispose = undefined;
         setSemantic(undefined);
         setSemanticFailure({
           document,
@@ -75,34 +79,42 @@ function MountedCodeEditor({
         });
       }
     };
-    const acquire = async (): Promise<void> => {
-      try {
-        const { acquireEditorLanguage } = await import('#lib/editor-language-runtime.js');
-        const lease = await acquireEditorLanguage({
-          languageId: language,
-          document,
-          environment,
-          signal: controller.signal,
-          onFailure: fail,
-        });
-        if (controller.signal.aborted) {
-          lease.dispose();
-          return;
-        }
-        dispose = lease.dispose;
-        setSemanticFailure(undefined);
-        markCodeEditorMilestone('semantics-ready', paneId);
-        setSemantic({ document, language, extensions: lease.extensions });
-      } catch (error) {
-        fail(error);
+    try {
+      const { acquireEditorLanguage } = await import('#lib/editor-language-runtime.js');
+      controller.signal.throwIfAborted();
+      const lease = await acquireEditorLanguage({
+        languageId: language,
+        document,
+        environment,
+        signal: controller.signal,
+        onFailure: fail,
+      });
+      if (controller.signal.aborted) {
+        lease.dispose();
+        return;
       }
-    };
-    void acquire();
+      load.dispose = lease.dispose;
+      setSemanticFailure(undefined);
+      markCodeEditorMilestone('semantics-ready', paneId);
+      setSemantic({ document, language, extensions: lease.extensions });
+    } catch (error) {
+      fail(error);
+    }
+  }, [document, environment, language, paneId]);
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (active) {
+        void acquire();
+      }
+    });
     return () => {
-      controller.abort();
-      dispose?.();
+      active = false;
+      activeLanguageLoad.current?.controller.abort();
+      activeLanguageLoad.current?.dispose?.();
+      activeLanguageLoad.current = undefined;
     };
-  }, [document, environment, language, paneId, semanticAttempt]);
+  }, [acquire]);
 
   return (
     <div className='relative size-full'>
@@ -150,7 +162,7 @@ function MountedCodeEditor({
             variant='outline'
             onClick={() => {
               setSemanticFailure(undefined);
-              setSemanticAttempt((value) => value + 1);
+              void acquire();
             }}
           >
             Retry language tools

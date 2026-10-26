@@ -2,6 +2,7 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, it, vi } from 'vitest';
+import type { Extension } from '@codemirror/state';
 import { EditorDocument } from '#lib/editor-document.js';
 import type { CodeEditorProps } from '#components/code/code-editor.client.js';
 import type { EditorLanguageRequest } from '#lib/editor-language-runtime.js';
@@ -81,4 +82,30 @@ it('keeps the document editable and offers a fresh semantic lease after worker f
   });
   expect(heldDocument.text).toBe('base edited');
   expect(runtime.dispose).toHaveBeenCalled();
+});
+
+it('disposes a semantic lease that resolves after its pane closes', async () => {
+  heldDocument = new EditorDocument('main.ts', 'base');
+  const pending = Promise.withResolvers<{ extensions: Extension; dispose: () => void }>();
+  runtime.acquire.mockReturnValue(pending.promise);
+  const { unmount } = render(
+    <ChatEditorCodeViewer
+      paneId='pane'
+      filePath='main.ts'
+      content='base'
+      language='typescript'
+      onApply={(document, transaction) => document.apply(transaction)}
+      onHistory={(document, kind) => document[kind]('pane')}
+    />,
+  );
+  await waitFor(() => {
+    expect(runtime.acquire).toHaveBeenCalledOnce();
+  });
+
+  unmount();
+  expect(runtime.acquire.mock.calls[0]?.[0]?.signal.aborted).toBe(true);
+  pending.resolve({ extensions: [], dispose: runtime.dispose });
+  await waitFor(() => {
+    expect(runtime.dispose).toHaveBeenCalledOnce();
+  });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import type { Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
@@ -39,52 +39,66 @@ export type CodeEditorBoundaryProps = Omit<CodeEditorProps, 'document' | 'syntax
 export function CodeEditor(props: CodeEditorBoundaryProps): React.ReactNode {
   const [View, setView] = useState<ComponentType<CodeEditorProps>>();
   const [failure, setFailure] = useState<Error>();
-  const [attempt, setAttempt] = useState(0);
   const [syntax, setSyntax] = useState<{ languageId: string; extension: Extension }>();
   const [syntaxFailure, setSyntaxFailure] = useState<Error>();
-  const [syntaxAttempt, setSyntaxAttempt] = useState(0);
+  const runtimeLoadSequence = useRef(0);
+  const syntaxController = useRef<AbortController | undefined>(undefined);
+  const loadRuntime = useCallback(async (): Promise<void> => {
+    const request = ++runtimeLoadSequence.current;
+    try {
+      const { CodeEditorView } = await import('#components/code/code-editor-view.client.js');
+      if (request === runtimeLoadSequence.current) {
+        setFailure(undefined);
+        setView(() => CodeEditorView);
+      }
+    } catch (error) {
+      if (request === runtimeLoadSequence.current) {
+        setFailure(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
+  }, []);
+  const loadSyntax = useCallback(async (languageId: string): Promise<void> => {
+    syntaxController.current?.abort();
+    const controller = new AbortController();
+    syntaxController.current = controller;
+    try {
+      const extension = await loadEditorSyntax(languageId, controller.signal);
+      if (!controller.signal.aborted) {
+        setSyntax({ languageId, extension });
+        setSyntaxFailure(undefined);
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        console.error('Editor syntax failed to load', error);
+        setSyntaxFailure(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
+  }, []);
   useEffect(() => {
     markCodeEditorMilestone('code-pane-admission', props.viewId);
     let active = true;
-    const load = async (): Promise<void> => {
-      try {
-        const { CodeEditorView } = await import('#components/code/code-editor-view.client.js');
-        if (active) {
-          setFailure(undefined);
-          setView(() => CodeEditorView);
-        }
-      } catch (error) {
-        if (active) {
-          setFailure(error instanceof Error ? error : new Error(String(error)));
-        }
+    queueMicrotask(() => {
+      if (active) {
+        void loadRuntime();
       }
-    };
-    void load();
+    });
     return () => {
       active = false;
+      runtimeLoadSequence.current += 1;
     };
-  }, [attempt, props.viewId]);
+  }, [loadRuntime, props.viewId]);
   useEffect(() => {
-    const controller = new AbortController();
-    const load = async (): Promise<void> => {
-      try {
-        const extension = await loadEditorSyntax(props.languageId, controller.signal);
-        if (!controller.signal.aborted) {
-          setSyntax({ languageId: props.languageId, extension });
-          setSyntaxFailure(undefined);
-        }
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          console.error('Editor syntax failed to load', error);
-          setSyntaxFailure(error instanceof Error ? error : new Error(String(error)));
-        }
+    let active = true;
+    queueMicrotask(() => {
+      if (active) {
+        void loadSyntax(props.languageId);
       }
-    };
-    void load();
+    });
     return () => {
-      controller.abort();
+      active = false;
+      syntaxController.current?.abort();
     };
-  }, [props.languageId, syntaxAttempt]);
+  }, [loadSyntax, props.languageId]);
   useEffect(() => {
     if (props.document) {
       markCodeEditorMilestone('document-ready', props.viewId);
@@ -103,7 +117,7 @@ export function CodeEditor(props: CodeEditorBoundaryProps): React.ReactNode {
           variant='outline'
           onClick={() => {
             setFailure(undefined);
-            setAttempt((value) => value + 1);
+            void loadRuntime();
           }}
         >
           Retry editor
@@ -135,7 +149,7 @@ export function CodeEditor(props: CodeEditorBoundaryProps): React.ReactNode {
           variant='outline'
           onClick={() => {
             setSyntaxFailure(undefined);
-            setSyntaxAttempt((value) => value + 1);
+            void loadSyntax(props.languageId);
           }}
         >
           Retry syntax

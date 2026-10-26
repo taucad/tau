@@ -27,6 +27,9 @@ catalogs:
     '@arethetypeswrong/cli':
       specifier: ^0.18.3
       version: 0.18.5
+    '@aurigax-ai/ghostty-web':
+      specifier: 0.3.6
+      version: 0.3.6
     '@aws-sdk/client-s3':
       specifier: ^3.1073.0
       version: 3.1150.0
@@ -571,11 +574,11 @@ catalogs:
       specifier: ^1.7.2
       version: 1.7.2
     geospec:
-      specifier: 0.1.0-beta.9
-      version: 0.1.0-beta.9
+      specifier: 0.4.1-next.322
+      version: 0.4.1-next.322
     geospec-engine:
-      specifier: 0.4.0
-      version: 0.4.0
+      specifier: 0.4.1-next.322
+      version: 0.4.1-next.322
     graphics-debug:
       specifier: 0.0.100
       version: 0.0.100
@@ -691,8 +694,8 @@ catalogs:
       specifier: 2.4.5
       version: 2.4.5
     picovoxel:
-      specifier: 0.1.0
-      version: 0.1.0
+      specifier: 0.2.0
+      version: 0.2.0
     pino-pretty:
       specifier: ^13.1.3
       version: 13.2.0
@@ -1661,10 +1664,10 @@ importers:
         version: 63.0.0(eslint@9.32.0(jiti@2.7.0))
       geospec:
         specifier: 'catalog:'
-        version: 0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(vitest@4.1.11)(xstate@6.0.0-alpha.59)
+        version: 0.4.1-next.322(vitest@4.1.11)
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.4.0
+        version: 0.4.1-next.322
       gray-matter:
         specifier: 'catalog:'
         version: 4.0.3
@@ -1857,10 +1860,10 @@ importers:
         version: link:../../libs/vite
       geospec:
         specifier: 'catalog:'
-        version: 0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(vitest@4.1.11)(xstate@6.0.0-alpha.59)
+        version: 0.4.1-next.322(vitest@4.1.11)
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.4.0
+        version: 0.4.1-next.322
       pino-pretty:
         specifier: 'catalog:'
         version: 13.2.0
@@ -2013,7 +2016,7 @@ importers:
         version: 0.8.3
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.4.0
+        version: 0.4.1-next.322
       libassimp:
         specifier: 'catalog:'
         version: 0.3.0
@@ -2579,10 +2582,10 @@ importers:
         version: 8.18.2
       geospec:
         specifier: 'catalog:'
-        version: 0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(vitest@4.1.11)(xstate@6.0.0-alpha.59)
+        version: 0.4.1-next.322(vitest@4.1.11)
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.4.0
+        version: 0.4.1-next.322
       ws:
         specifier: 'catalog:'
         version: 8.22.0
@@ -2592,6 +2595,9 @@ importers:
 
   apps/ui:
     dependencies:
+      '@aurigax-ai/ghostty-web':
+        specifier: 'catalog:'
+        version: 0.3.6
       '@base-ui/react':
         specifier: 'catalog:'
         version: 1.9.0(@date-fns/tz@1.5.0)(@types/react@19.2.17)(date-fns@4.4.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -2825,10 +2831,10 @@ importers:
         version: 5.3.0
       geospec:
         specifier: 'catalog:'
-        version: 0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(vitest@4.1.11)(xstate@6.0.0-alpha.59)
+        version: 0.4.1-next.322(vitest@4.1.11)
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.4.0
+        version: 0.4.1-next.322
       isbot:
         specifier: 'catalog:'
         version: 5.2.2
@@ -3232,7 +3238,7 @@ importers:
         version: link:../../packages/workbench
       geospec:
         specifier: 'catalog:'
-        version: 0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(vitest@4.1.11)(xstate@6.0.0-alpha.59)
+        version: 0.4.1-next.322(vitest@4.1.11)
     devDependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
@@ -3261,7 +3267,7 @@ importers:
         version: 0.3.4
       picovoxel:
         specifier: 'catalog:'
-        version: 0.1.0(three@0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064))
+        version: 0.2.0(three@0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064))
 
   libs/chat:
     dependencies:
@@ -3434,7 +3440,7 @@ importers:
         version: link:../../packages/runtime-testing
       geospec:
         specifier: 'catalog:'
-        version: 0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(vitest@4.1.11)(xstate@6.0.0-alpha.59)
+        version: 0.4.1-next.322(vitest@4.1.11)
       libcascade:
         specifier: 'catalog:'
         version: 3.1.0
@@ -3443,7 +3449,7 @@ importers:
         version: 3.4.1(@gltf-transform/core@4.5.1)(@gltf-transform/extensions@4.5.1)(@gltf-transform/functions@4.5.1(@types/node@26.6.5))(esbuild-wasm@0.28.2)
       picovoxel:
         specifier: 'catalog:'
-        version: 0.1.0(three@0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064))
+        version: 0.2.0(three@0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064))
       replicad:
         specifier: npm:@taulabs/replicad@1.1.0-taulabs.1
         version: '@taulabs/replicad@1.1.0-taulabs.1'
@@ -3455,10 +3461,11 @@ importers:
         version: 0.35.5(@types/node@24.0.15)
 
   libs/telemetry:
-    devDependencies:
+    dependencies:
       '@taucad/events':
         specifier: workspace:*
         version: link:../events
+    devDependencies:
       '@taucad/types':
         specifier: workspace:*
         version: link:../types
@@ -3760,10 +3767,10 @@ importers:
         version: 3.4.2
       geospec:
         specifier: 'catalog:'
-        version: 0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(vitest@4.1.11)(xstate@6.0.0-alpha.59)
+        version: 0.4.1-next.322(vitest@4.1.11)
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.4.0
+        version: 0.4.1-next.322
       ink:
         specifier: 'catalog:'
         version: 6.8.0(@types/react@19.2.17)(react@19.2.7)
@@ -4120,6 +4127,9 @@ importers:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../runtime
+      '@taucad/telemetry':
+        specifier: workspace:*
+        version: link:../../libs/telemetry
       '@taucad/types':
         specifier: workspace:*
         version: link:../../libs/types
@@ -4134,10 +4144,10 @@ importers:
         version: 8.18.2
       geospec:
         specifier: 'catalog:'
-        version: 0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(vitest@4.1.11)(xstate@6.0.0-alpha.59)
+        version: 0.4.1-next.322(vitest@4.1.11)
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.4.0
+        version: 0.4.1-next.322
       xstate:
         specifier: 'catalog:'
         version: 6.0.0-alpha.59
@@ -4721,7 +4731,7 @@ importers:
         version: link:../../kinematics
       picovoxel:
         specifier: 'catalog:'
-        version: 0.1.0(three@0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064))
+        version: 0.2.0(three@0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064))
     devDependencies:
       '@taucad/esbuild':
         specifier: workspace:*
@@ -5432,7 +5442,7 @@ importers:
         version: link:../plugins/zoo
       geospec:
         specifier: 'catalog:'
-        version: 0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(vitest@4.1.11)(xstate@6.0.0-alpha.59)
+        version: 0.4.1-next.322(vitest@4.1.11)
     devDependencies:
       '@taucad/telemetry':
         specifier: workspace:*
@@ -5732,7 +5742,7 @@ importers:
         version: link:../../libs/types
       geospec:
         specifier: 'catalog:'
-        version: 0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(vitest@4.1.11)(xstate@6.0.0-alpha.59)
+        version: 0.4.1-next.322(vitest@4.1.11)
       replicad:
         specifier: npm:@taulabs/replicad@1.1.0-taulabs.1
         version: '@taulabs/replicad@1.1.0-taulabs.1'
@@ -6136,6 +6146,9 @@ packages:
 
   '@asamuzakjp/css-color@3.2.0':
     resolution: {integrity: sha512-K1A6z8tS3XsmCMM86xoWdn7Fkdn9m6RSVtocUrJYIwZnFVkng/PvkEoWtOWmP+Scc6saYWHWZYbndEEXxl24jw==}
+
+  '@aurigax-ai/ghostty-web@0.3.6':
+    resolution: {integrity: sha512-F2CwHx9F6hS58YKvi3uBCKEScHtQE6zDEuzV+uaggpuc0bk3oF+bxygnlbfip/LMKJZDgvDX/Eqjzh/sCo/uHg==}
 
   '@aws-crypto/sha256-browser@5.2.0':
     resolution: {integrity: sha512-AXfN/lGotSQwu6HNcEsIASo7kWXZ5HYWvfOmSNKDsEqC4OashTp8alTmaz+F7TC2L083SFv5RdB+qU3Vs1kZqw==}
@@ -13588,102 +13601,8 @@ packages:
   '@tanstack/virtual-core@3.19.2':
     resolution: {integrity: sha512-Ch+e8t097FdTfuihfRwBMqz/OfRZKHOH/C213dbM1lXDZ8bv6r330Bcc9k9XCrP6NkoMYy0/ZCHcddOAPihW4w==}
 
-  '@taucad/archive-core@0.1.0-beta.9':
-    resolution: {integrity: sha512-jsUpeWx3UvUIwhs3b0bYA8YXd8uPJ7SJZUpFcuQyyYmmxu52tnDHWNi/y/94AjeEwVOCl+P32TDpp1rZIbXFbw==}
-    engines: {node: '>=24.0.0'}
-
-  '@taucad/bundler-core@0.1.0-beta.9':
-    resolution: {integrity: sha512-8xsRh6r7YHURsq8xva5A1VHCSjEUBJqk6PiUoDa0sDSS4L54i3RVl98SRYQcQnGli0RkoIdbViu6gWyplxSKHw==}
-    engines: {node: '>=24.0.0'}
-    peerDependencies:
-      '@taucad/runtime': ^0.1.0-beta.0
-
-  '@taucad/cache-core@0.1.0-beta.9':
-    resolution: {integrity: sha512-5Bh8EZMIX3LJcC0FnLBCKtbaHxp2ADZrX125O/UGWktUGh1+s4QqvIf/XM9LxCdFYfv3ww/hkx8ymJwaiyp1dw==}
-    engines: {node: '>=24.0.0'}
-
-  '@taucad/esbuild@0.1.0-beta.9':
-    resolution: {integrity: sha512-MFE/AP+aY4x8S3OjESBCpyX1rM21zJ26al5Kq+UWouTaXP0jw8EIH/bIDSOb0ZL68+0v9MUTI/3svGiJbIKW3g==}
-    engines: {node: '>=24.0.0'}
-    peerDependencies:
-      '@taucad/runtime': ^0.1.0-beta.0
-      zod: ^4.1.0
-
-  '@taucad/filesystem@0.1.0-beta.9':
-    resolution: {integrity: sha512-sjbm2SIOiXV5i7AqxgDpt+E6S1p7VMQVAxPi3tTsrKZt1Rnw6YkT6p3Ui5QFibAU0AXs3C6TA+jZglikoB3Uig==}
-    engines: {node: '>=24.0.0'}
-    peerDependencies:
-      '@parcel/watcher': ^2.6.0
-      zod: ^4.1.0
-    peerDependenciesMeta:
-      '@parcel/watcher':
-        optional: true
-
   '@taucad/kcl-wasm-lib@0.1.191':
     resolution: {integrity: sha512-CO6M3oW8j/i2mUYGGUyzIuvL9BfvEUOdc9+joixzO3pRmacq/sn4S3SamfF8h69s465Wd/LtB2/eBVh7+psEcw==}
-
-  '@taucad/kinematics@0.1.0-beta.9':
-    resolution: {integrity: sha512-7H/HBqaYe4lxWSjaBAPew8CWFG26PLmLNzG+RameT4mLJnpiE6NETWyI4DU8EGTT0g3wqH2p1qMmw7Xno3pBbw==}
-    engines: {node: '>=24.0.0'}
-
-  '@taucad/parameters@0.1.0-beta.9':
-    resolution: {integrity: sha512-CS/H6YHq7pmZw45OAunLfn7QMIBbJLHxBn2g+q5JjFJvrYAkdljlvM5pPb4QT7BKfkUcOw5hojrpHHmPT4F/5g==}
-    engines: {node: '>=24.0.0'}
-    peerDependencies:
-      xstate: ^6.0.0-alpha.59
-      zod: ^4.1.0
-    peerDependenciesMeta:
-      xstate:
-        optional: true
-
-  '@taucad/project-core@0.1.0-beta.9':
-    resolution: {integrity: sha512-WGC5MaKu7/6gKkzVFVuIRX8uSjjOwly10Vquzs75YFQH3uMRuw2x5E0bd1fBGeZIUkCq0d54byjgJQKo5iAqLQ==}
-    engines: {node: '>=24.0.0'}
-    peerDependencies:
-      zod: ^4.1.0
-
-  '@taucad/revisions@0.1.0-beta.9':
-    resolution: {integrity: sha512-RN8vZHMFEnCvpml6ryjb+VYKGBct3gfCtXZucAf3nHVlDT5KrgJonko5quOccV1JCqcXB2kpQkIS6kwD+7EM+Q==}
-    engines: {node: '>=24.0.0'}
-    peerDependencies:
-      xstate: ^6.0.0-alpha.59
-      zod: ^4.1.0
-    peerDependenciesMeta:
-      xstate:
-        optional: true
-
-  '@taucad/rpc@0.1.0-beta.9':
-    resolution: {integrity: sha512-1L1NABfxB8AuJjoi0E8SI2AWHNvSZ1QvbJIo62FFVq2OwPpxseTggfiDRlyXlhci5M5rUdDIKFYk5WBnAaC9yg==}
-    engines: {node: '>=24.0.0'}
-    peerDependencies:
-      zod: ^4.1.0
-
-  '@taucad/runtime@0.1.0-beta.9':
-    resolution: {integrity: sha512-FX/DLuN4zgSb2smiL8QzVV5/qoT2ZrqOi7L+pwTo0EkegB8QzytHz5x9wg/0nFcN+bYlW0SWnCB0h1qw9EnsLg==}
-    engines: {node: '>=24.0.0'}
-    peerDependencies:
-      '@parcel/watcher': ^2.6.0
-      electron: '>=37.0.0'
-      next: '>=15.3.0 <17.0.0'
-      vite: ^7.0.0 || ^8.0.0
-      zod: ^4.1.0
-    peerDependenciesMeta:
-      '@parcel/watcher':
-        optional: true
-      electron:
-        optional: true
-      next:
-        optional: true
-      vite:
-        optional: true
-
-  '@taucad/spatial@0.1.0-beta.9':
-    resolution: {integrity: sha512-giC9wtMEoBhJVGbqdLneRbpy+jSX0FyD7VObXmtHs24YcDXGI7RX3LOQ1scxp/vFWjfPMSOGA3vfaRQ/JbaXWw==}
-    engines: {node: '>=24.0.0'}
-
-  '@taucad/units@0.1.0-beta.9':
-    resolution: {integrity: sha512-CMNWfdEXFvHfyrAXw12txD7LPko0S2BWGSGksYXHuqJYRscxfCdKQ5seDwgnreivRmvnreZsFotU5cGsuWkn0A==}
-    engines: {node: '>=24.0.0'}
 
   '@taulabs/langchain-google-common@2.2.0-beta.0':
     resolution: {integrity: sha512-vU/YtcBZUhEXLLzdDWeAHbUvxphKBd5DqRnFqKnM9BKAP2C/mes6m6UevMsK81cNdICQ5hRiWe/VazRyFhLdXQ==}
@@ -18680,56 +18599,32 @@ packages:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
     engines: {node: '>=6.9.0'}
 
-  geospec-engine-darwin-arm64@0.3.1:
-    resolution: {integrity: sha512-8rUigAoKOtLlagWgfK4AOYqH7OU7oNekNphCn0d2IP25CmI264+Af+MfvgmSw07tdJe9OSwkDubioCnU4sYFPQ==}
+  geospec-engine-darwin-arm64@0.4.1-next.322:
+    resolution: {integrity: sha512-PmGxAaadSwu6tU5EUBcooktc8NuW97RfTY4wYTvQ0ggduASiaGROpjjFX6W9DhILu4Bekx2cdkBhbtB0qzE7pg==}
     engines: {node: '>=24.0.0'}
     cpu: [arm64]
     os: [darwin]
 
-  geospec-engine-darwin-arm64@0.4.0:
-    resolution: {integrity: sha512-NVqHSxJXYDE0piEjRrAH3x/KsX/IfH3/n5JMuEfx5tCCDM0r+JCPZuiJqHgHTi3njxIElB90f3cJQ8gk1kP8Rw==}
-    engines: {node: '>=24.0.0'}
-    cpu: [arm64]
-    os: [darwin]
-
-  geospec-engine-linux-arm64-gnu@0.3.1:
-    resolution: {integrity: sha512-OQA6Sw+1EL9GNIN+8TPTth8n30plg01UGaL+qIUDQ+ed5LKkmb54mUQm5qQDgObVGJKV95W2I01xInbdV6MmEw==}
+  geospec-engine-linux-arm64-gnu@0.4.1-next.322:
+    resolution: {integrity: sha512-N4zViXpNzhjcSwCUjhibTTaTvngNw0HIcYDT9Kd+h+aXJuYv4O9mVU6PMUiWKF6dH5Zt0O2ICOqxNRI1AAGcLA==}
     engines: {node: '>=24.0.0'}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  geospec-engine-linux-arm64-gnu@0.4.0:
-    resolution: {integrity: sha512-3UefwAjeBGb1O2cRQrr2EYTnCz7H1g6AOlmaMnBmFG9uIaLfAHhcF0ecGGUUS1HaUaeusqNMz/usHfK6tkXPUQ==}
-    engines: {node: '>=24.0.0'}
-    cpu: [arm64]
-    os: [linux]
-    libc: [glibc]
-
-  geospec-engine-linux-x64-gnu@0.3.1:
-    resolution: {integrity: sha512-CINp6L/VkFPDddSOk+PpTEkiQUJeCJO2uuruGVaCpWp0SaoRdWw8I9hON7kJjsGLTZIZogvyg7R3CZzZKMUO9A==}
+  geospec-engine-linux-x64-gnu@0.4.1-next.322:
+    resolution: {integrity: sha512-lS5BkNUhH4WVFJ0eIVNZ87BoXUf+vGNLbzOmEeKHFaXvQTurG77T66sRMaypSl0E2jzF4WJ78AE39i1gDc4frg==}
     engines: {node: '>=24.0.0'}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  geospec-engine-linux-x64-gnu@0.4.0:
-    resolution: {integrity: sha512-gTgasy3Q2OesveLJndz2zKJrpDjUbGL+RVQkAri95IjbXpuCQnly31b5RVVeAy4Z6OIU6MVc3KZg1YODMoSBww==}
-    engines: {node: '>=24.0.0'}
-    cpu: [x64]
-    os: [linux]
-    libc: [glibc]
-
-  geospec-engine@0.3.1:
-    resolution: {integrity: sha512-In6fQYGK4V+LiNajSjbvfdOLSQE44E/z8TF9wDnHgItev0Dh+gIs9TIRrf0gwfv5y8Ui1lOliUAowleDS1V/Ww==}
+  geospec-engine@0.4.1-next.322:
+    resolution: {integrity: sha512-iNDlBaajhm4yzxB6dBt+LRF2W8vcKy5xgHEr1+gf0cTbcHAIcjCBOz3oufPyMPP++7GlN5B62LXGwxw5BIQddA==}
     engines: {node: '>=24.0.0'}
 
-  geospec-engine@0.4.0:
-    resolution: {integrity: sha512-RkCgoPza8xXMHTyze1syWW9MVY6lCys3p5oTRWwtEU37RpFhzZk36Tn2ZxJpwNbOQOI8Ki3QAczY8zWShCt4EQ==}
-    engines: {node: '>=24.0.0'}
-
-  geospec@0.1.0-beta.9:
-    resolution: {integrity: sha512-0rS5I3j9SRz+xkAt8NGAYK6H+evAepzxxwvm9tUNpxBrW8bYTvPPCx2brYuZ+e61bLxLclarv6aFL0xG9C9aCw==}
+  geospec@0.4.1-next.322:
+    resolution: {integrity: sha512-cdi9btBq7wHhbiQ7CHv3V6o5T90ZJbd43jwXREpyiiNqEVAvabYMA0c6uv98VbnKVO/0Fmy3PkMJYhQ/ykPo2w==}
     engines: {node: '>=24.0.0'}
     hasBin: true
     peerDependencies:
@@ -22304,8 +22199,8 @@ packages:
     resolution: {integrity: sha512-0Z++uU8mvB0EvCPAEUq9BGiPcSravzJ+RPdXfjYlzXffqsogisiKRQqI6ctrSSJ6n985vxrgKtQ5n4sRINcJZg==}
     engines: {node: '>=18.0.0'}
 
-  picovoxel@0.1.0:
-    resolution: {integrity: sha512-X8Q4YlKfIuNc8HbH8KusVUW1T/nz8xJUFjJ2pvh3KTCB8gev24gf0EQZzdB8IDE6px8aGp5z266vm6tTmJ56PQ==}
+  picovoxel@0.2.0:
+    resolution: {integrity: sha512-Ym1mLTOuUEVza3zi/HhNvxSgy9I6s+nIm19q0yi3n9fJjC3lnV5W2C7SRnWiMJxwT8IRun/Gd0XpY0qpK6t3kA==}
     engines: {node: '>=22.14.0'}
     peerDependencies:
       three: '>=0.160'
@@ -26415,6 +26310,8 @@ snapshots:
       '@csstools/css-parser-algorithms': 3.0.5(@csstools/css-tokenizer@3.0.4)
       '@csstools/css-tokenizer': 3.0.4
       lru-cache: 10.4.3
+
+  '@aurigax-ai/ghostty-web@0.3.6': {}
 
   '@aws-crypto/sha256-browser@5.2.0':
     dependencies:
@@ -34720,185 +34617,7 @@ snapshots:
 
   '@tanstack/virtual-core@3.19.2': {}
 
-  '@taucad/archive-core@0.1.0-beta.9': {}
-
-  '@taucad/bundler-core@0.1.0-beta.9(@parcel/watcher@2.6.0)(@taucad/runtime@0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))':
-    dependencies:
-      '@taucad/archive-core': 0.1.0-beta.9
-      '@taucad/filesystem': 0.1.0-beta.9(@parcel/watcher@2.6.0)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      '@taucad/runtime': 0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      cdn-resolve: 2.1.2
-      es-module-lexer: 2.3.2
-      semver: 7.8.5
-    transitivePeerDependencies:
-      - '@parcel/watcher'
-      - zod
-
-  '@taucad/bundler-core@0.1.0-beta.9(@parcel/watcher@2.6.0)(@taucad/runtime@0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))':
-    dependencies:
-      '@taucad/archive-core': 0.1.0-beta.9
-      '@taucad/filesystem': 0.1.0-beta.9(@parcel/watcher@2.6.0)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      '@taucad/runtime': 0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      cdn-resolve: 2.1.2
-      es-module-lexer: 2.3.2
-      semver: 7.8.5
-    transitivePeerDependencies:
-      - '@parcel/watcher'
-      - zod
-
-  '@taucad/cache-core@0.1.0-beta.9': {}
-
-  '@taucad/esbuild@0.1.0-beta.9(@parcel/watcher@2.6.0)(@taucad/runtime@0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))':
-    dependencies:
-      '@taucad/bundler-core': 0.1.0-beta.9(@parcel/watcher@2.6.0)(@taucad/runtime@0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      '@taucad/runtime': 0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      esbuild: 0.28.2
-      esbuild-wasm: 0.28.2
-      zod: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
-    transitivePeerDependencies:
-      - '@parcel/watcher'
-
-  '@taucad/esbuild@0.1.0-beta.9(@parcel/watcher@2.6.0)(@taucad/runtime@0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))':
-    dependencies:
-      '@taucad/bundler-core': 0.1.0-beta.9(@parcel/watcher@2.6.0)(@taucad/runtime@0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      '@taucad/runtime': 0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      esbuild: 0.28.2
-      esbuild-wasm: 0.28.2
-      zod: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
-    transitivePeerDependencies:
-      - '@parcel/watcher'
-
-  '@taucad/filesystem@0.1.0-beta.9(@parcel/watcher@2.6.0)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))':
-    dependencies:
-      '@taucad/kinematics': 0.1.0-beta.9
-      '@taucad/project-core': 0.1.0-beta.9(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      jszip: 3.10.2
-      nanoid: 5.1.16
-      type-fest: 4.41.0
-      xstate: 6.0.0-alpha.59
-      zod: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
-    optionalDependencies:
-      '@parcel/watcher': 2.6.0
-
   '@taucad/kcl-wasm-lib@0.1.191': {}
-
-  '@taucad/kinematics@0.1.0-beta.9':
-    dependencies:
-      '@taucad/spatial': 0.1.0-beta.9
-      '@taucad/units': 0.1.0-beta.9
-
-  '@taucad/parameters@0.1.0-beta.9(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))':
-    dependencies:
-      '@cfworker/json-schema': 4.1.1
-      '@json-structure/sdk': 0.7.0
-      '@taucad/cache-core': 0.1.0-beta.9
-      '@taucad/kinematics': 0.1.0-beta.9
-      '@taucad/project-core': 0.1.0-beta.9(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      '@taucad/units': 0.1.0-beta.9
-      '@types/json-schema': 7.0.15
-      type-fest: 4.41.0
-      zod: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
-    optionalDependencies:
-      xstate: 6.0.0-alpha.59
-
-  '@taucad/project-core@0.1.0-beta.9(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))':
-    dependencies:
-      jose: 6.2.12
-      jszip: 3.10.2
-      xstate: 6.0.0-alpha.59
-      zod: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
-
-  '@taucad/revisions@0.1.0-beta.9(@parcel/watcher@2.6.0)(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))':
-    dependencies:
-      '@taucad/filesystem': 0.1.0-beta.9(@parcel/watcher@2.6.0)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      '@taucad/project-core': 0.1.0-beta.9(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      buffer: 6.0.3
-      isomorphic-git: 1.38.5
-      nanoid: 5.1.16
-      zod: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
-    optionalDependencies:
-      xstate: 6.0.0-alpha.59
-    transitivePeerDependencies:
-      - '@parcel/watcher'
-
-  '@taucad/rpc@0.1.0-beta.9(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))':
-    dependencies:
-      '@msgpack/msgpack': 3.1.3
-      zod: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
-
-  '@taucad/runtime@0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))':
-    dependencies:
-      '@cfworker/json-schema': 4.1.1
-      '@json-structure/sdk': 0.7.0
-      '@msgpack/msgpack': 3.1.3
-      '@standard-schema/spec': 1.1.0
-      '@taucad/archive-core': 0.1.0-beta.9
-      '@taucad/cache-core': 0.1.0-beta.9
-      '@taucad/filesystem': 0.1.0-beta.9(@parcel/watcher@2.6.0)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      '@taucad/kinematics': 0.1.0-beta.9
-      '@taucad/parameters': 0.1.0-beta.9(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      '@taucad/project-core': 0.1.0-beta.9(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      '@taucad/revisions': 0.1.0-beta.9(@parcel/watcher@2.6.0)(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      '@taucad/rpc': 0.1.0-beta.9(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      '@taucad/units': 0.1.0-beta.9
-      '@types/json-schema': 7.0.15
-      cdn-resolve: 2.1.2
-      deepmerge: 4.3.1
-      nanoid: 5.1.16
-      source-map-js: 1.2.2
-      strip-literal: 3.1.0
-      type-fest: 4.41.0
-      ws: 8.22.0
-      zod: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
-    optionalDependencies:
-      '@parcel/watcher': 2.6.0
-      electron: 43.7.9
-      next: 16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1)
-      vite: 8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
-      - xstate
-
-  '@taucad/runtime@0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))':
-    dependencies:
-      '@cfworker/json-schema': 4.1.1
-      '@json-structure/sdk': 0.7.0
-      '@msgpack/msgpack': 3.1.3
-      '@standard-schema/spec': 1.1.0
-      '@taucad/archive-core': 0.1.0-beta.9
-      '@taucad/cache-core': 0.1.0-beta.9
-      '@taucad/filesystem': 0.1.0-beta.9(@parcel/watcher@2.6.0)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      '@taucad/kinematics': 0.1.0-beta.9
-      '@taucad/parameters': 0.1.0-beta.9(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      '@taucad/project-core': 0.1.0-beta.9(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      '@taucad/revisions': 0.1.0-beta.9(@parcel/watcher@2.6.0)(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      '@taucad/rpc': 0.1.0-beta.9(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      '@taucad/units': 0.1.0-beta.9
-      '@types/json-schema': 7.0.15
-      cdn-resolve: 2.1.2
-      deepmerge: 4.3.1
-      nanoid: 5.1.16
-      source-map-js: 1.2.2
-      strip-literal: 3.1.0
-      type-fest: 4.41.0
-      ws: 8.22.0
-      zod: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
-    optionalDependencies:
-      '@parcel/watcher': 2.6.0
-      electron: 43.7.9
-      next: 16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1)
-      vite: 8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
-      - xstate
-
-  '@taucad/spatial@0.1.0-beta.9': {}
-
-  '@taucad/units@0.1.0-beta.9':
-    dependencies:
-      '@lhncbc/ucum-lhc': 7.1.10
 
   '@taulabs/langchain-google-common@2.2.0-beta.0(@langchain/core@1.2.17(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.223.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.12.0(@opentelemetry/api@1.9.1))(openai@7.32.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/signature-v4@5.7.4)(undici@8.11.2)(ws@8.22.0)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.22.0))':
     dependencies:
@@ -40655,69 +40374,28 @@ snapshots:
 
   gensync@1.0.0-beta.2: {}
 
-  geospec-engine-darwin-arm64@0.3.1:
+  geospec-engine-darwin-arm64@0.4.1-next.322:
     optional: true
 
-  geospec-engine-darwin-arm64@0.4.0:
+  geospec-engine-linux-arm64-gnu@0.4.1-next.322:
     optional: true
 
-  geospec-engine-linux-arm64-gnu@0.3.1:
+  geospec-engine-linux-x64-gnu@0.4.1-next.322:
     optional: true
 
-  geospec-engine-linux-arm64-gnu@0.4.0:
-    optional: true
-
-  geospec-engine-linux-x64-gnu@0.3.1:
-    optional: true
-
-  geospec-engine-linux-x64-gnu@0.4.0:
-    optional: true
-
-  geospec-engine@0.3.1:
+  geospec-engine@0.4.1-next.322:
     optionalDependencies:
-      geospec-engine-darwin-arm64: 0.3.1
-      geospec-engine-linux-arm64-gnu: 0.3.1
-      geospec-engine-linux-x64-gnu: 0.3.1
+      geospec-engine-darwin-arm64: 0.4.1-next.322
+      geospec-engine-linux-arm64-gnu: 0.4.1-next.322
+      geospec-engine-linux-x64-gnu: 0.4.1-next.322
 
-  geospec-engine@0.4.0:
-    optionalDependencies:
-      geospec-engine-darwin-arm64: 0.4.0
-      geospec-engine-linux-arm64-gnu: 0.4.0
-      geospec-engine-linux-x64-gnu: 0.4.0
-
-  geospec@0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(vitest@4.1.11)(xstate@6.0.0-alpha.59):
+  geospec@0.4.1-next.322(vitest@4.1.11):
     dependencies:
-      '@taucad/esbuild': 0.1.0-beta.9(@parcel/watcher@2.6.0)(@taucad/runtime@0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      '@taucad/runtime': 0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      geospec-engine: 0.3.1
-      zod: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+      esbuild: 0.28.2
+      geospec-engine: 0.4.1-next.322
+      zod: 4.6.7
     optionalDependencies:
       vitest: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
-    transitivePeerDependencies:
-      - '@parcel/watcher'
-      - bufferutil
-      - electron
-      - next
-      - utf-8-validate
-      - vite
-      - xstate
-
-  geospec@0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(vitest@4.1.11)(xstate@6.0.0-alpha.59):
-    dependencies:
-      '@taucad/esbuild': 0.1.0-beta.9(@parcel/watcher@2.6.0)(@taucad/runtime@0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      '@taucad/runtime': 0.1.0-beta.9(@parcel/watcher@2.6.0)(electron@43.7.9)(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.105.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(xstate@6.0.0-alpha.59)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      geospec-engine: 0.3.1
-      zod: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
-    optionalDependencies:
-      vitest: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
-    transitivePeerDependencies:
-      - '@parcel/watcher'
-      - bufferutil
-      - electron
-      - next
-      - utf-8-validate
-      - vite
-      - xstate
 
   get-amd-module-type@6.0.2:
     dependencies:
@@ -45208,7 +44886,7 @@ snapshots:
 
   picospinner@3.1.2: {}
 
-  picovoxel@0.1.0(three@0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064)):
+  picovoxel@0.2.0(three@0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064)):
     optionalDependencies:
       three: 0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064)
 

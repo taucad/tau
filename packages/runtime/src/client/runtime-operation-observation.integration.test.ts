@@ -35,6 +35,8 @@ const parameters = {
 
 type Faults = Readonly<{
   heap?: number;
+  /** A native kernel's child-tree sample. */
+  childResident?: () => Promise<number | undefined>;
   evaluate?: Error;
   render?: Error;
   export?: Error;
@@ -70,6 +72,7 @@ const createClient = (faults: Faults = {}) => {
       return createKernelSuccess({ parameters });
     },
     ...(faults.heap === undefined ? {} : { observedHeapBytes: () => faults.heap }),
+    ...(faults.childResident === undefined ? {} : { observedChildResidentBytes: faults.childResident }),
     async evaluate() {
       if (faults.evaluate !== undefined) {
         throw faults.evaluate;
@@ -186,6 +189,55 @@ describe('operation observation over the in-process transport', () => {
       expect(byOperation(seen, 'describe')[0]).toMatchObject({ kernel: 'observed-kernel', facts: 'joined' });
       expect(new Set(seen.map(({ operationId }) => operationId)).size).toBe(seen.length);
     } finally {
+      await client.shutdown();
+    }
+  });
+
+  it.each([
+    { label: 'no parameters', supplied: undefined, modified: 0 },
+    { label: 'its default', supplied: { width: 10 }, modified: 0 },
+    { label: 'a changed value', supplied: { width: 12 }, modified: 1 },
+  ])('should count $modified modified leaves when the document opens with $label', async ({ supplied, modified }) => {
+    const client = createClient();
+    const seen: RuntimeOperationObservation[] = [];
+    client.on('operation', (observation) => seen.push(observation));
+    client.observe('facts');
+    const document = client.open({ source, ...(supplied === undefined ? {} : { parameters: supplied }), watch: false });
+    try {
+      await document.evaluation();
+      await vi.waitFor(() => {
+        expect(byOperation(seen, 'evaluate')[0]?.facts).toBe('joined');
+      });
+      expect(byOperation(seen, 'evaluate')[0]?.worker?.parameters).toMatchObject({ declared: 1, modified });
+    } finally {
+      document.close();
+      await client.shutdown();
+    }
+  });
+
+  it('should settle a view the caller closes once the evaluation lands as abandoned, and its replacement as succeeded', async () => {
+    const client = createClient();
+    const seen: RuntimeOperationObservation[] = [];
+    client.on('operation', (observation) => seen.push(observation));
+    client.observe('facts');
+    const document = client.open({ source, watch: false });
+    try {
+      // A view opened before the offer is known, closed and reopened under its id once the evaluation lands.
+      const placeholder = document.view();
+      await document.evaluation();
+      placeholder.close();
+      const view = document.view('primary');
+      await view.rendering();
+      await vi.waitFor(() => {
+        expect(byOperation(seen, 'render').map(({ outcome }) => outcome)).toEqual([
+          { type: 'abandoned', reason: 'closed' },
+          { type: 'succeeded' },
+        ]);
+      });
+      expect(byOperation(seen, 'render')[0]?.worker).toBeUndefined();
+      view.close();
+    } finally {
+      document.close();
       await client.shutdown();
     }
   });
@@ -322,6 +374,47 @@ describe('operation observation over the in-process transport', () => {
     } finally {
       await failing.shutdown();
       await throwing.shutdown();
+    }
+  });
+
+  it("should report a native kernel's child tree at settle on every operation, and sample nothing unobserved", async () => {
+    const bytes = 96 * 1024 * 1024;
+    const childResident = vi.fn(async () => bytes);
+    const unobserved = createClient({ childResident });
+    try {
+      await runOperations(unobserved);
+    } finally {
+      await unobserved.shutdown();
+    }
+    expect(childResident).not.toHaveBeenCalled();
+
+    const client = createClient({ childResident });
+    const seen: RuntimeOperationObservation[] = [];
+    client.on('operation', (observation) => seen.push(observation));
+    client.observe('facts');
+    try {
+      const document = client.open({ source, parameters: { width: 12 }, watch: false });
+      await document.evaluation();
+      const view = document.view('primary');
+      const outcome = await view.rendering();
+      // Observation only: the rendering the recycle policy reads carries no heap from this hook.
+      expect(outcome).toMatchObject({ superseded: false, rendering: { success: true } });
+      expect(outcome.superseded ? undefined : outcome.rendering).not.toHaveProperty('heapBytes');
+      await document.export('bom');
+      view.close();
+      document.close();
+      await vi.waitFor(() => {
+        expect(
+          ['evaluate', 'render', 'export'].every((operation) => byOperation(seen, operation)[0]?.facts === 'joined'),
+        ).toBe(true);
+      });
+      for (const operation of ['evaluate', 'render', 'export']) {
+        expect(byOperation(seen, operation)[0], operation).toMatchObject({
+          worker: { heapBytes: bytes, heapSource: 'child' },
+        });
+      }
+    } finally {
+      await client.shutdown();
     }
   });
 });

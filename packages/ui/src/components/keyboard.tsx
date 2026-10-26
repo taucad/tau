@@ -91,9 +91,11 @@ const defaultOptions: Required<KeybindingOptions> = {
 const nonEditableInputTypes = new Set(['button', 'submit', 'reset', 'checkbox', 'radio']);
 
 /**
- * Selector for scoped containers where 'app'-scoped shortcuts are suppressed.
+ * Selector for scoped containers where 'app'-scoped shortcuts are suppressed. A terminal (`data-slot="terminal"`)
+ * owns ordinary keys such as Ctrl+D and Ctrl+I, so app shortcuts must not take them from the shell.
  */
-const scopedContainerSelector = '[role="dialog"], [role="alertdialog"], [data-slot="command-dialog"]';
+const scopedContainerSelector =
+  '[role="dialog"], [role="alertdialog"], [data-slot="command-dialog"], [data-slot="terminal"]';
 
 // ---------------------------------------------------------------------------
 // Context

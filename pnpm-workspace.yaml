@@ -222,10 +222,10 @@ catalog:
   fastify: ^5.12.5
   geist: ^1.7.2
   # GeoSpec authoring package from taucad/geospec, in the engine's fixed release group: pin the same exact
-  # version as geospec-engine. PLACEHOLDER: replace with the first `next` taucad/geospec ci.yml publishes.
-  geospec: 0.1.0-beta.9
+  # version as geospec-engine.
+  geospec: 0.4.1-next.322
   # GeoSpec engine from taucad/geospec, exact `next` pin; bump through a version PR.
-  geospec-engine: 0.4.0
+  geospec-engine: 0.4.1-next.322
   gray-matter: ^4.0.3
   hast-util-sanitize: ^5.0.2
   husky: ^9.1.7
@@ -311,7 +311,7 @@ catalog:
   zod: 4.4.3
   nanoraster: ^0.7.1
   # Exact: @taucad/picovoxel's kernel version carries this release's build-time digests.
-  picovoxel: 0.1.0
+  picovoxel: 0.2.0
   # Exact: @taucad/smlib's kernel version and compute identity carry this release's WASM.
   '@classcad/smlibwasm': 0.3.4
   n8ao: 1.10.2
@@ -324,6 +324,8 @@ catalog:
   '@anthropic-ai/sandbox-runtime': 0.0.75
   # Terminal PTYs for the desktop shell (W2); N-API, so one build serves Node and Electron.
   node-pty: 1.1.0
+  # The desktop Terminal pane's renderer (W6, D18 as amended 2026-10-24T05:39Z): exact pin, no Tau patch.
+  '@aurigax-ai/ghostty-web': 0.3.6
   '@lhncbc/ucum-lhc': 7.1.10
   '@json-structure/sdk': 0.7.0
   mqtt: 5.15.2

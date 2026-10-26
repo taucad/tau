@@ -65,7 +65,15 @@ export type RuntimeChildWorker = {
   readonly stderr: Readable;
   readonly ended: Promise<{ readonly exitCode?: number; readonly signal?: NodeJS.Signals } | { readonly error: Error }>;
   terminate(): Promise<void>;
+  /** Bytes resident in the worker's process tree, for observation only; absent where no reader exists. */
+  sampleResident?(): Promise<number | undefined>;
 };
+
+/*
+ * Native worker frames this daemon serves beyond launching and piping, named in the child's `start` message. A child
+ * sends one only when its daemon named it, so a child of an older daemon never does.
+ */
+const runtimeChildNativeWorkerFrames = ['native-worker:sample'] as const;
 
 /**
  * What a full re-verification of a native runtime root found: the shape of `NativeRuntimeDamage` in
@@ -194,6 +202,13 @@ const workerControlMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('native-worker:stdin-end'), id: z.string() }),
   z.object({ type: z.literal('native-worker:terminate'), id: z.string() }),
 ]);
+
+/* Observation only: the child asks for one resident sample of a worker's tree and gets `native-worker:resident`. */
+const sampleMessageSchema = z.object({
+  type: z.literal('native-worker:sample'),
+  id: z.string().min(1).max(128),
+  sample: z.string().min(1).max(128),
+});
 
 const isWithin = (root: string, candidate: string): boolean => {
   const path = relative(root, candidate);
@@ -387,6 +402,27 @@ const brokerNativeWorkers = (
     const verifyRequest = verifyMessageSchema.safeParse(message);
     if (verifyRequest.success) {
       verify(verifyRequest.data.id, verifyRequest.data.runtimePath);
+      return;
+    }
+    const sampleRequest = sampleMessageSchema.safeParse(message);
+    if (sampleRequest.success) {
+      const { id, sample } = sampleRequest.data;
+      // async-iife: bootstrap -- the sample is sent to the child; nothing awaits it.
+      void (async () => {
+        let bytes: number | undefined;
+        try {
+          const worker = await workers.get(id);
+          bytes = await worker?.sampleResident?.();
+        } catch {
+          bytes = undefined;
+        }
+        send({
+          type: 'native-worker:resident',
+          id,
+          sample,
+          ...(bytes !== undefined && Number.isSafeInteger(bytes) && bytes >= 0 ? { bytes } : {}),
+        });
+      })();
       return;
     }
     const requested = workerLaunchMessageSchema.safeParse(message);
@@ -704,8 +740,13 @@ export const startRuntimeChild = async (options: {
       new Error(`Tau Host runtime child exited before ready (code ${String(exitCode)}, signal ${String(signal)}).`),
     );
   });
-  /* `native`: this daemon answers the child's closure requests and brokers its workers. */
-  child.send({ type: 'start', authorizationToken, ...(options.native === undefined ? {} : { native: true }) });
+  /* `native`: this daemon answers the child's closure requests and brokers its workers; `nativeWorkerFrames`: the
+   * further native worker frames it serves. */
+  child.send({
+    type: 'start',
+    authorizationToken,
+    ...(options.native === undefined ? {} : { native: true, nativeWorkerFrames: [...runtimeChildNativeWorkerFrames] }),
+  });
 
   const message = await Promise.race([
     ready.promise,

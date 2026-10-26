@@ -7,7 +7,7 @@ import { tauRuntime } from '@taucad/runtime/vite';
 export default defineConfig({
   root: fileURLToPath(new URL('../../..', import.meta.url)),
   cacheDir: '../../node_modules/.cache/monaco-browser',
-  define: { tauCloudBuildEnabled: 'false' },
+  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
   resolve: { dedupe: ['react', 'react-dom'] },
   plugins: [tailwindcss(), tauRuntime()],
   server: { fs: { allow: [fileURLToPath(new URL('../../../../..', import.meta.url))] } },

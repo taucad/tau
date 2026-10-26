@@ -64,6 +64,7 @@ import { ChatMessageToolRevisions } from '#routes/w.$workspace.$project/chat-mes
 import { ChatMessageToolExportGeometry } from '#routes/w.$workspace.$project/chat-message-tool-export-geometry.js';
 import { ChatMessageToolUpdateTodos } from '#routes/w.$workspace.$project/chat-message-tool-update-todos.js';
 import { ChatMessageToolInstallPackages } from '#routes/w.$workspace.$project/chat-message-tool-install-packages.js';
+import { ChatMessageToolShell } from '#routes/w.$workspace.$project/chat-message-tool-shell.js';
 import {
   ChatMessageToolAskQuestions,
   ChatMessageToolExternalOrQuestion,
@@ -564,6 +565,10 @@ function renderAssistantPart(
 
     case 'tool-check_job': {
       return <ChatMessageToolExternal key={part.toolCallId} part={genericToolPart(part, toolName.checkJob)} />;
+    }
+
+    case 'tool-shell': {
+      return <ChatMessageToolShell key={part.toolCallId} part={part} />;
     }
 
     default: {

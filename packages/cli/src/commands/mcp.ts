@@ -17,6 +17,7 @@ import {
 } from '@taucad/host';
 import type { LocalMachines } from '@taucad/host';
 import { createHostToolRegistry } from '@taucad/host/agent-tools';
+import { machineOperationReporter } from '@taucad/host/telemetry';
 import type { HostSystemSkillBundle } from '@taucad/host/agent-tools';
 import { systemSkillBundles } from '@taucad/skills/resources';
 import type { AnyRuntimeDefinition, RuntimeClient } from '@taucad/runtime';
@@ -30,6 +31,7 @@ import { exitNow } from '#exit-now.js';
 import { installedVersion } from '#installed-version.js';
 import { exitCodeFor } from '#output.js';
 import { resolveProjectRoot } from '#project-root.js';
+import { cliRuntimeTelemetry } from '#runtime-telemetry.js';
 import type * as NativeKernels from '#native-kernels.js';
 import type { DescribedRuntime } from '#native-kernels.js';
 import type { RuntimeWorkerData } from '#runtime.worker.js';
@@ -328,13 +330,17 @@ export const mcpCommand = defineCommand({
       /* One realm per project (kernel-realm-shared-state blueprint, I8): each
        * project's kernels run in their own thread, which loads every kernel
        * module there — never in this process, never before `initialize`. */
+      /* Reports only as a Tau Cloud host. */
+      const telemetry = cliRuntimeTelemetry('mcp', packageJson.version);
+      /* Each client's subscription ends with it, so a replaced client is not held by the reporter. */
+      const unobserve = new WeakMap<ProjectRuntimeClient, () => void>();
       const openClient = async (projectPath: string): Promise<ProjectRuntimeClient> => {
         const [{ createRuntimeClient }, { nodeWorkerTransport }, { fromNodeFs }] = await Promise.all([
           import('@taucad/runtime'),
           import('@taucad/runtime/transport/node'),
           import('@taucad/runtime/filesystem/node'),
         ]);
-        return createRuntimeClient<AnyRuntimeDefinition>({
+        const client = createRuntimeClient<AnyRuntimeDefinition>({
           transport: nodeWorkerTransport({
             workerCtor: RuntimeThread,
             url: new URL(
@@ -347,6 +353,10 @@ export const mcpCommand = defineCommand({
           }),
           operationTimeout,
         });
+        if (telemetry !== undefined) {
+          unobserve.set(client, telemetry.observe(client, 'agent'));
+        }
+        return client;
       };
       /* A client whose thread exited is terminated, and replaced on its project's next call. The viewer's watched
        * documents (one per shown source) live in that thread: the idle release below ends them with it, and each of
@@ -354,7 +364,12 @@ export const mcpCommand = defineCommand({
       const clients = keyedResource<string, ProjectRuntimeClient>(
         openClient,
         async (client) => {
-          await client.shutdown();
+          try {
+            await client.shutdown();
+          } finally {
+            unobserve.get(client)?.();
+            unobserve.delete(client);
+          }
         },
         (client) => client.lifecycleState !== 'terminated',
       );
@@ -429,6 +444,7 @@ export const mcpCommand = defineCommand({
             requireProject: started.source !== 'working directory',
             providers: await defaultMachineProviders(),
             actorId: 'tau-mcp',
+            ...(telemetry === undefined ? {} : { onOperation: machineOperationReporter(telemetry) }),
             onWarning: ({ message }) => {
               process.stderr.write(`tau mcp: ${message}\n`);
             },
@@ -558,6 +574,7 @@ export const mcpCommand = defineCommand({
           const opened = await preparation;
           await opened.dispose();
         }
+        await telemetry?.shutdown();
       };
       await Promise.race([close().catch(() => undefined), sleep(shutdownGrace)]);
       /* Not `process.exit`: a kernel's WebAssembly tier-up still compiling on V8's threads would hold it for seconds,

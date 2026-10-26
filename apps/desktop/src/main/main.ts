@@ -111,6 +111,7 @@ import { createOpenFileQueue } from '#main/open-files.js';
 import { readGeneratedImage } from '#main/generated-image.js';
 import { createBambuStudioService } from '#main/bambu-studio-service.js';
 import { readWindowState, writeWindowState } from '#main/window-state.js';
+import { isRendererTelemetryConsent, writeRendererTelemetryConsent } from '#main/telemetry-consent.js';
 import { prepareOtaProbe } from '#main/ota-probe.js';
 import { initializeDesktopErrorReporting } from '#main/error-reporting.js';
 import { prepareRouteQualificationProbe } from '#main/route-qualification-probe.js';
@@ -124,6 +125,7 @@ import { createDesktopKernelPreparer } from '#tau/native-preparation.js';
 import { desktopNativeKernelIds, startNativeStore } from '#tau/native-store.js';
 import {
   appIconThemeChannel,
+  telemetryConsentChannel,
   openDirectoryChannel,
   directoryGrantChannels,
   revealPathChannel,
@@ -884,6 +886,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
       ...esbuildEnvironment,
       ...compileCacheEnvironment(app.getPath('userData')),
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      /* The shell's never-grantable app data, and on Linux the Tau-owned bubblewrap it runs (desktop shell W4). */
+      TAU_DESKTOP_USER_DATA_DIR: app.getPath('userData'), // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+      TAU_DESKTOP_SHELL_BWRAP: linuxInstallation(desktopChannel, process.env['APPIMAGE'] !== undefined).bwrap,
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
     createChannel: () => new MessageChannelMain(),
@@ -1333,6 +1339,18 @@ const bootstrapElectronApp = async (): Promise<void> => {
   ipcMain.handle('tau:auth:sign-out', async (event) => {
     if (trusted(event.senderFrame)) {
       await auth.signOut();
+    }
+  });
+  /* AR-W4-03c: main follows the renderer's resolved consent; persisted for the next launch's main producers. */
+  const telemetryConsentPath = join(app.getPath('userData'), 'telemetry-consent.json');
+  ipcMain.on(telemetryConsentChannel, (event, consent: unknown) => {
+    if (!trusted(event.senderFrame) || !isRendererTelemetryConsent(consent)) {
+      return;
+    }
+    try {
+      writeRendererTelemetryConsent(telemetryConsentPath, consent);
+    } catch (error) {
+      log.log('warn', 'telemetry-consent.write-failed', { message: String(error) });
     }
   });
   ipcMain.on(appIconThemeChannel, (event, theme: unknown) => {

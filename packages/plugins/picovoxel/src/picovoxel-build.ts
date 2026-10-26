@@ -10,8 +10,8 @@
  * @internal
  */
 export const picovoxelBuild = {
-  version: '0.1.0',
-  serial: 'eb7b254f50a2c7d37e46fb0169fd9890c1a366eeed78272c2ced10cbd1c26b01',
-  multi: '8da3345c22f2d0945aef294151520da5df004ac4dd67114bf1ce07a503f0f444',
-  scripts: 'e19aa9a77efb2c44cb0aa359ba7e3b64d2a022dbf98b2a4abf0126122aac9d7c',
+  version: '0.2.0',
+  serial: '97a9dd03b125b1b1d43425e1338c48d1f8580886959562442ee8f529a89996d5',
+  multi: 'ea4ec47415a684141d2219cd4b0a44c4a3e251b2a1ac148ea6b63c4da7aaca85',
+  scripts: '837e863542777a68f7c051a118736cd38cc9564f04e5ac195cf1b8a3effe083c',
 } as const;

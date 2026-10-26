@@ -150,9 +150,10 @@ const inside = (path: string, root: string): boolean => {
 /**
  * The sandbox-runtime configuration for one launch.
  *
- * Reads are denied under homes, volumes and shared temporary storage, then re-allowed for the launch's readable and
- * writable roots; `denied`, with the baseline set, stays denied for reads and writes inside them. Writes are allowed
- * only in the writable roots, and the runtime's own broad default write roots are denied back off. The network
+ * Reads are denied under homes, volumes and shared temporary storage, then re-allowed for the launch's readable,
+ * writable and read-only roots; `denied`, with the baseline set, stays denied for reads and writes inside them. Writes
+ * are allowed only in the writable roots, the read-only roots inside them are denied back to reads, and the runtime's
+ * own broad default write roots are denied back off. The network
  * allows exactly the granted names through the launch's own proxy.
  *
  * @public
@@ -186,6 +187,7 @@ export const shellSandboxProfile = (
     ...launch.filesystem.denied,
     ...shellBaselineDenied({ platform: process.platform, home: options.home ?? homedir(), environment: process.env }),
   ]);
+  const readOnly = launch.filesystem.readOnly ?? [];
   const { domains } = launch.network;
   return {
     network: { allowedDomains: [...domains], deniedDomains: domains.length > 0 ? [] : ['*'], strictAllowlist: true },
@@ -194,11 +196,12 @@ export const shellSandboxProfile = (
       allowRead: physicalVariants([
         ...launch.filesystem.readable,
         ...launch.filesystem.writable,
+        ...readOnly,
         ...sandboxRuntimeReadRoots(),
         ...(runtimeDirectory === undefined ? [] : [runtimeDirectory]),
       ]),
       allowWrite: physicalVariants(launch.filesystem.writable),
-      denyWrite: [...new Set([...deniedWriteRoots(), ...denied])],
+      denyWrite: [...new Set([...deniedWriteRoots(), ...denied, ...deniedVariants(readOnly)])],
     },
     allowPty: false,
     ripgrep: { command: options.ripgrepPath ?? 'rg' },
@@ -696,13 +699,16 @@ const admit = (launch: ShellLaunch, options: SandboxShellProviderOptions): Shell
   if (refused.length > 0) {
     return unsupported('environment', `the shell may not receive ${refused.join(', ')}.`);
   }
-  const { readable, writable, denied } = launch.filesystem;
-  const paths = [launch.executablePath, launch.workingDirectory, ...readable, ...writable, ...denied];
+  const { readable, writable, denied, readOnly = [] } = launch.filesystem;
+  const paths = [launch.executablePath, launch.workingDirectory, ...readable, ...writable, ...readOnly, ...denied];
   if (paths.some((path) => !isAbsolute(path) || path.includes('\0'))) {
     return unsupported('filesystem-mask', 'every launch path must be absolute.');
   }
   if (writable.some((root) => denied.some((deny) => inside(root, deny)))) {
     return unsupported('filesystem-mask', 'a writable root lies inside a denied path, so it could not be written.');
+  }
+  if (writable.some((root) => readOnly.some((path) => inside(root, path)))) {
+    return unsupported('filesystem-mask', 'a writable root lies inside a read-only path, so it could not be written.');
   }
   if (launch.network.domains.some((domain) => !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/u.test(domain))) {
     return unsupported('network-isolation', 'network grants name exact lowercase host names only.');

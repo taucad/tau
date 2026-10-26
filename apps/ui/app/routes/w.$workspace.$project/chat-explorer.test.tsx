@@ -900,7 +900,10 @@ describe('Model pane adapter capabilities', () => {
     renderExplorerTree();
 
     const preview = await screen.findByRole('button', { name: 'Preview planetary_housing' });
-    expect(preview.parentElement).toHaveClass('h-22');
+    // The test DOM (jsdom) does no layout, so the fixed-px sizing is read from its classes: an 80 px preview in a row exactly that
+    // tall plus its padding, which enlarged text does not grow.
+    expect(preview.parentElement).toHaveClass('h-[calc(80px+--spacing(2))]');
+    expect(preview).toHaveClass('size-[80px]');
     await userEvent.setup().click(preview);
     expect(mocks.openPartGallery).toHaveBeenCalledWith({
       graphicsRef,

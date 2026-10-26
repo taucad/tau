@@ -356,7 +356,7 @@ test.describe('Section view overlap cap shading', () => {
 
       await target.navigate(`/__e2e/example-fixture?locator=jscad.section-overlap-fixture&graphicsBackend=${backend}`);
       await target.expectVisible(selectors.getByCss('canvas[data-engine]'), 60_000);
-      await target.expectGraphicsBackend(backend);
+      await target.expectPresentedGraphicsBackend(backend);
       await target.expectGeometryFramed();
 
       await driveOverlapSectionView(0);

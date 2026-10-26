@@ -68,6 +68,7 @@ const staticFamilies = new Map<string, ActivityFamily>([
   ['tool-get_kernel_result', 'render'],
   ['tool-screenshot', 'screenshot'],
   ['tool-test_model', 'test'],
+  ['tool-shell', 'execute'],
 ]);
 
 const nativeFamilies = new Map<string, ActivityFamily>([
@@ -90,6 +91,7 @@ const nativeFamilies = new Map<string, ActivityFamily>([
   ['get_kernel_result', 'render'],
   ['screenshot', 'screenshot'],
   ['test_model', 'test'],
+  ['shell', 'execute'],
 ]);
 
 const externalFamilies = new Map<string, ActivityFamily>([

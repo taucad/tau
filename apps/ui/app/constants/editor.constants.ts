@@ -50,6 +50,7 @@ export const mobilePanelIds = [
   'jobs',
   'kernel',
   'console',
+  'terminal',
 ] as const;
 
 // ============================================================================

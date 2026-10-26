@@ -41,9 +41,10 @@ export const headlessImageBackend: HeadlessImageBackend = {
   renderSvg: async (content, format, options) =>
     format === 'webp' ? renderSvgWebp(content, options) : renderSvgPng(content, options),
   async createImageClient() {
-    const [{ createRuntimeClient }, { webWorkerTransport }] = await Promise.all([
+    const [{ createRuntimeClient }, { webWorkerTransport }, { observeRuntimeClient }] = await Promise.all([
       import('@taucad/runtime/client'),
       import('@taucad/runtime/transport/web'),
+      import('#telemetry/runtime-telemetry.js'),
     ]);
     const client = createRuntimeClient<typeof imageRuntime>({
       transport: webWorkerTransport({
@@ -55,10 +56,13 @@ export const headlessImageBackend: HeadlessImageBackend = {
         fileSystem: fromMemoryFs(),
       }),
     });
+    /* Runtime observability (FR-14): capture attempts, attached before `connect()`. */
+    const stopObserving = observeRuntimeClient(client, 'capture');
     const adapter: Awaited<ReturnType<HeadlessImageBackend['createImageClient']>> = {
       connect: async () => client.connect(),
       terminate: () => {
         client.terminate();
+        stopObserving();
       },
       on: (event, handler) => client.on(event, handler),
       transcode: async (input) => {

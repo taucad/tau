@@ -89,6 +89,18 @@ const daemonClosureResolver = (): NativeClosureResolver => {
   };
 };
 
+/**
+ * The further native worker frames the daemon serves, as its `start` message names them, such as the
+ * observation-only resident sample. A daemon that names none serves none.
+ *
+ * @param message - The `start` message.
+ * @returns The frame names.
+ */
+const nativeWorkerFramesOf = (message: Readonly<{ type: unknown; nativeWorkerFrames?: unknown }>): string[] => {
+  const frames = message.nativeWorkerFrames;
+  return Array.isArray(frames) ? frames.filter((frame) => typeof frame === 'string') : [];
+};
+
 let host: HostRuntimeHandle | undefined;
 let messageChain = Promise.resolve();
 
@@ -127,7 +139,9 @@ const handleMessage = async (message: unknown): Promise<void> => {
    * worker exited before its handshake (D8, X35). Without it, every native kernel refuses as not prepared. */
   const native = 'native' in message && message.native === true;
   if (native) {
-    installNativeWorkerLauncher(createRuntimeChildWorkerLauncher());
+    installNativeWorkerLauncher(
+      createRuntimeChildWorkerLauncher(undefined, { nativeWorkerFrames: nativeWorkerFramesOf(message) }),
+    );
     installNativeRuntimeVerifier(createRuntimeChildRuntimeVerifier());
   }
   installNativeClosureResolver(native ? daemonClosureResolver() : inspectionResolver([]));

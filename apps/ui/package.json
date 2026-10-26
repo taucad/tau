@@ -7,9 +7,14 @@
   "imports": {
     "#package.json": "./package.json",
     "#scripts/*": "./scripts/*",
+    "#components/terminal/aurigax-ghostty-web": {
+      "types": "./app/components/terminal/aurigax-ghostty-web.d.ts",
+      "default": "@aurigax-ai/ghostty-web"
+    },
     "#*": "./app/*"
   },
   "dependencies": {
+    "@aurigax-ai/ghostty-web": "catalog:",
     "@base-ui/react": "catalog:",
     "@better-auth-ui/core": "catalog:",
     "@better-auth-ui/react": "catalog:",

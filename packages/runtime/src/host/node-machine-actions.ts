@@ -23,7 +23,7 @@ import type {
   MachineHoldDescriptor,
 } from '#machines/machine-actions.js';
 import { identity } from '#host/node-machine-context.js';
-import type { NodeMachineHostContext } from '#host/node-machine-context.js';
+import type { MachineOperationTelemetry, NodeMachineHostContext } from '#host/node-machine-context.js';
 import {
   applyOperationResult,
   confirmationWindow,
@@ -115,6 +115,10 @@ const standardFamilies: ReadonlyMap<string, Readonly<{ authority: MachineAuthori
 const sameActor = (left: HostActor, right: HostActor): boolean => left.kind === right.kind && left.id === right.id;
 
 const caller = (requester: MachineRequester): 'person' | 'agent' => (requester.kind === 'agent' ? 'agent' : 'person');
+
+/** The code a receipt carries, when it carries one. */
+const receiptCode = (receipt: MachineOperationReceipt): string | undefined =>
+  receipt.status === 'rejected' ? receipt.code : undefined;
 
 /**
  * The floor the host admits a descriptor under: never below its standard family's, except where the host's own
@@ -235,9 +239,30 @@ export const createNodeMachineOperations = (
       observedAt: now(),
     });
 
+  /** Runtime telemetry: one call per new operation; a telemetry fault never reaches the machine path. */
+  const told = (
+    ran: Omit<MachineOperationTelemetry, 'duration' | 'requester'> & { requestedBy?: MachineRequester | undefined },
+    startedAt: number,
+  ): void => {
+    if (context.onOperation === undefined) {
+      return;
+    }
+    const { requestedBy, ...rest } = ran;
+    try {
+      context.onOperation({
+        ...rest,
+        requester: requestedBy === undefined ? 'person' : caller(requestedBy),
+        duration: Math.max(0, performance.now() - startedAt),
+      });
+    } catch {
+      /* Telemetry never throws into the journal. */
+    }
+  };
+
   const run = async <Kind extends MachineOperationKind>(
     input: NodeMachineRunInput<Kind>,
   ): Promise<MachineReceipt<Kind>> => {
+    const startedAt = performance.now();
     const operationId = identity.parse(input.operationId);
     const machineId = identity.parse(input.machineId);
     const inputDigest = await operationInputDigest({ machineId, kind: input.kind, intent: input.intent });
@@ -259,12 +284,21 @@ export const createNodeMachineOperations = (
           existing.planned.machineId !== machineId ||
           existing.planned.kind !== input.kind)
       ) {
-        return ofKind(
-          refusedReceipt(input, {
+        const conflict = refusedReceipt(input, {
+          code: 'MACHINE_OPERATION_ID_CONFLICT',
+          message: 'This operation id was already used for something else.',
+        });
+        told(
+          {
+            provider: machines.get(machineId)?.record.providerId ?? '',
+            kind: input.kind,
+            status: 'refused',
             code: 'MACHINE_OPERATION_ID_CONFLICT',
-            message: 'This operation id was already used for something else.',
-          }),
+            requestedBy: input.requestedBy,
+          },
+          startedAt,
         );
+        return ofKind(conflict);
       }
       if (existing?.receipt) {
         return ofKind(existing.receipt);
@@ -274,13 +308,36 @@ export const createNodeMachineOperations = (
       }
       const machine = machines.get(machineId);
       if (!machine) {
+        told(
+          {
+            provider: '',
+            kind: input.kind,
+            status: 'refused',
+            code: 'MACHINE_UNAVAILABLE',
+            requestedBy: input.requestedBy,
+          },
+          startedAt,
+        );
         return ofKind(
           refusedReceipt(input, { code: 'MACHINE_UNAVAILABLE', message: 'This machine is not bound here.' }),
         );
       }
       const { record: binding, log } = context.usableMachine(machineId, 'MACHINE_UNAVAILABLE');
+      const refusedBeforePlanning = (receipt: MachineOperationReceipt): MachineReceipt<Kind> => {
+        told(
+          {
+            provider: binding.providerId,
+            kind: input.kind,
+            status: 'refused',
+            ...(receiptCode(receipt) === undefined ? {} : { code: receiptCode(receipt) }),
+            requestedBy: input.requestedBy,
+          },
+          startedAt,
+        );
+        return ofKind(receipt);
+      };
       if ((input.kind === 'action' || input.kind === 'hold') && context.isQuiescing()) {
-        return ofKind(
+        return refusedBeforePlanning(
           refusedReceipt(input, {
             code: 'MACHINE_HOST_CLOSING',
             message: 'Tau is reviewing a quit request. Keep Tau open before starting another action.',
@@ -289,7 +346,7 @@ export const createNodeMachineOperations = (
       }
       const admission = await input.admit();
       if ('refusal' in admission) {
-        return ofKind(refusedReceipt(input, admission.refusal));
+        return refusedBeforePlanning(refusedReceipt(input, admission.refusal));
       }
       input.signal.throwIfAborted();
       input.admitted.assertCurrent();
@@ -360,9 +417,25 @@ export const createNodeMachineOperations = (
           observedAt: now(),
         });
       }
+      const sentReceipt = receipt;
+      const tellSent = (): void => {
+        told(
+          {
+            provider: binding.providerId,
+            kind: input.kind,
+            ...(input.kind === 'action' && admission.action !== undefined ? { action: admission.action.id } : {}),
+            status: sentReceipt.status,
+            ...(receiptCode(sentReceipt) === undefined ? {} : { code: receiptCode(sentReceipt) }),
+            requestedBy: input.requestedBy,
+          },
+          startedAt,
+        );
+      };
       if (receipt.status === 'accepted' && admission.onAccepted === 'open') {
+        tellSent();
         return ofKind(receipt);
       }
+      tellSent();
       await record(operation, {
         state:
           receipt.status === 'rejected'
@@ -967,6 +1040,7 @@ export const createNodeMachineOperations = (
           : { status: 'denied', operationId };
       },
       async stop(input) {
+        const startedAt = performance.now();
         const machineId = identity.parse(input.machineId);
         const asked = identity.parse(input.operationId ?? randomUUID());
         const existing = operations.get(asked);
@@ -1018,6 +1092,16 @@ export const createNodeMachineOperations = (
             }),
           );
         }
+        told(
+          {
+            provider: machines.get(machineId)?.record.providerId ?? '',
+            kind: 'stop',
+            status: session ? receipt.status : 'refused',
+            ...(receiptCode(receipt) === undefined ? {} : { code: receiptCode(receipt) }),
+            requestedBy: requesterOf(input.admitted.actor, input.requestedBy),
+          },
+          startedAt,
+        );
         await releaseHolds(machineId);
         return receipt;
       },

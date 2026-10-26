@@ -1,10 +1,11 @@
 /**
  * The shell grant compiler (blueprint D4, D20, D26; A26): the admitted checkout's view plus exact extra folders and
- * host names, compiled into the provider's readable, writable and denied roots.
+ * host names, compiled into the provider's readable, writable, read-only and denied roots.
  *
  * The never-grantable set is refused at request time as `access-unsupported`, never silently narrowed. Everything the
- * classifier does not leave read-write in the checkout, Tau's app data and every other admitted project root are
- * denied; the provider adds its own baseline (credential stores, startup files, runtime sockets).
+ * classifier leaves read-only in the checkout (its records) stays readable but not writable; everything it hides, Tau's
+ * app data and every other admitted project root are denied; the provider adds its own baseline (credential stores,
+ * startup files, runtime sockets).
  */
 import { lstat, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, posix, relative, sep, win32 } from 'node:path';
@@ -114,17 +115,35 @@ const systemRoots = (host: ShellGrantHost): readonly string[] => {
 };
 
 /**
+ * The checkout's own protected paths (D20, A04, E03): its records, which the shell may read but not write, and its
+ * hidden control paths, which it may not touch. Each is an absolute path the provider masks.
+ *
+ * @public
+ */
+export type ShellProjectProtected = Readonly<{
+  /** Records rows (`agentAccess: 'read-only'`): readable, never written, moved or replaced. */
+  readOnly: readonly string[];
+  /** Hidden rows, unknown `.tau` and top-level names, and nested version-control directories. */
+  denied: readonly string[];
+}>;
+
+/**
  * The checkout's own control and record paths: every registry row the agent may not write, and every existing name
- * the classifier hides or protects, under any spelling the filesystem resolves (D20, A04).
+ * the classifier hides or protects, under any spelling the filesystem resolves (D20, A04). Read-only rows stay
+ * readable (E03); every other protected name is denied.
  *
  * @param root - The checkout's real root.
- * @returns Absolute paths to deny for reads and writes.
+ * @returns The read-only and denied absolute paths.
  */
-export const projectDenied = async (root: string): Promise<readonly string[]> => {
+export const projectProtected = async (root: string): Promise<ShellProjectProtected> => {
   const denied = new Set<string>();
+  const readOnly = new Set<string>();
+  const protect = (path: string, agentAccess: string): void => {
+    (agentAccess === 'read-only' ? readOnly : denied).add(path);
+  };
   for (const row of pathRegistry) {
     if (row.agentAccess !== 'read-write') {
-      denied.add(join(root, ...row.prefix.split('/')));
+      protect(join(root, ...row.prefix.split('/')), row.agentAccess);
     }
   }
   const denyListed = async (directory: string, prefix: string): Promise<string[]> => {
@@ -136,11 +155,11 @@ export const projectDenied = async (root: string): Promise<readonly string[]> =>
     }
     const listed: string[] = [];
     for (const name of names) {
-      const path = `${prefix}${name}`;
-      if (classify(path).agentAccess === 'read-write') {
+      const { agentAccess } = classify(`${prefix}${name}`);
+      if (agentAccess === 'read-write') {
         listed.push(name);
       } else {
-        denied.add(join(directory, name));
+        protect(join(directory, name), agentAccess);
       }
     }
     return listed;
@@ -155,8 +174,19 @@ export const projectDenied = async (root: string): Promise<readonly string[]> =>
   for (const path of await nestedControlDirectories(root)) {
     denied.add(path);
   }
-  return [...denied];
+  return { readOnly: [...readOnly].filter((path) => !denied.has(path)), denied: [...denied] };
 };
+
+/**
+ * Every protected path of a checkout, read-only and denied alike: none of them may be granted (D20).
+ *
+ * @param checkout - The checkout's protected paths.
+ * @returns The paths no grant may name.
+ */
+export const protectedPaths = (checkout: ShellProjectProtected): readonly string[] => [
+  ...checkout.readOnly,
+  ...checkout.denied,
+];
 
 /**
  * Version-control directories below `root`, within a bounded walk that skips `node_modules`. A nested repository's
@@ -218,7 +248,7 @@ const neverGrantable = (host: ShellGrantHost, checkoutDenied: readonly string[])
  *
  * @param access - The request, as the model wrote it.
  * @param host - What the host knows about this device.
- * @param checkoutDenied - The checkout's own denied paths.
+ * @param checkoutDenied - The checkout's own protected paths ({@link protectedPaths}).
  * @returns The resolved grant, or why it is refused.
  */
 export const resolveShellAccess = async (
@@ -350,20 +380,21 @@ const carve = async (
 export type ShellFilesystemPlan = Readonly<{
   readable: readonly string[];
   writable: readonly string[];
+  readOnly: readonly string[];
   denied: readonly string[];
 }>;
 
 /**
  * Compile one launch's filesystem: the checkout and the private session roots writable, granted folders as granted,
- * toolchain roots readable, and everything protected denied.
+ * toolchain roots readable, the checkout's records read-only, and everything else protected denied.
  *
- * @param input - The checkout's real root and its denied paths, the private roots, the grant and the host.
+ * @param input - The checkout's real root and its protected paths, the private roots, the grant and the host.
  * @returns The provider's roots.
  */
 export const compileShellFilesystem = async (
   input: Readonly<{
     checkout: string;
-    checkoutDenied: readonly string[];
+    checkoutProtected: ShellProjectProtected;
     session: readonly string[];
     toolchain: readonly string[];
     access: ShellResolvedAccess;
@@ -386,15 +417,20 @@ export const compileShellFilesystem = async (
   const writeControls = writeControlLists.flat();
   const opened = await carve(host.platform, [...others, ...appData], [...writable, ...readable]);
   const denied = [
-    ...input.checkoutDenied,
+    ...input.checkoutProtected.denied,
     ...opened,
     ...others.flatMap((root) => projectControls(root)),
     ...writeControls,
   ];
+  const deniedPaths = [...new Set(denied)].filter((path) => isAbsolute(path));
   return {
     readable: [...new Set(readable)],
     writable: [...new Set(writable)],
-    denied: [...new Set(denied)].filter((path) => isAbsolute(path)),
+    /* A read-only path under a denied one stays denied: the provider re-allows reads of every read-only root. */
+    readOnly: input.checkoutProtected.readOnly.filter(
+      (path) => isAbsolute(path) && !deniedPaths.some((deny) => within(host.platform, path, deny)),
+    ),
+    denied: deniedPaths,
   };
 };
 

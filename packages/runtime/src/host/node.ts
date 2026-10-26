@@ -18,6 +18,7 @@ import type {
   BoundMachine,
   CompleteNodeMachineBindingInput as ContextCompleteBindingInput,
   ExecutableMachineDefinition,
+  MachineOperationTelemetry as ContextMachineOperationTelemetry,
   NodeMachineHostContext,
   NodeMachineRuntime as ContextMachineRuntime,
   NodeMachineSupervisor,
@@ -78,6 +79,8 @@ export type NodeMachineSerialPortInfo = SerialPortInfo;
 export const createNodeMachineSerial = createSerial;
 /** Trusted native completion of a browser-initiated, non-secret binding ceremony. @public */
 export type CompleteNodeMachineBindingInput = ContextCompleteBindingInput;
+/** One new machine operation, as a host's runtime telemetry reads it; never an id, name, address or parameter. @public */
+export type MachineOperationTelemetry = ContextMachineOperationTelemetry;
 /** Trusted native removal of one committed binding, e.g. to roll back a binding whose credential could not be saved. @public */
 export type RemoveNodeMachineBindingInput = ContextRemoveBindingInput;
 
@@ -99,6 +102,8 @@ export type CreateNodeMachineHostInput = Readonly<{
   runtime?: NodeMachineRuntime;
   /** Custom admitted operations for hosts that own an equivalent binding implementation. */
   operations?: MachineChannelHostOperations;
+  /** Runtime telemetry: told once per new machine operation of every kind, never on a replayed receipt. */
+  onOperation?: (operation: MachineOperationTelemetry) => void;
   onError(error: unknown): void;
 }>;
 
@@ -666,6 +671,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
   }
   const ownedDirectory = directory;
   const context: NodeMachineHostContext = {
+    onOperation: input.onOperation,
     runtime: input.runtime,
     providerSources,
     unavailableProviders: new Set(providers.filter(({ unavailable }) => unavailable).map(({ id }) => id)),

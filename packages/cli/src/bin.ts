@@ -110,6 +110,10 @@ const subCommands: Record<string, CommandDef> = {
     const { hostCommand } = await import('./commands/host.js');
     return hostCommand as CommandDef;
   }),
+  telemetry: lazyCommand('telemetry', 'Show or change whether Tau shares usage and diagnostics counts', async () => {
+    const { telemetryCommand } = await import('./commands/telemetry.js');
+    return telemetryCommand as CommandDef;
+  }),
   ui: lazyCommand('ui', 'Check a deployed Tau UI against its build', async () => {
     const { uiCommand } = await import('./commands/ui.js');
     return uiCommand as CommandDef;

@@ -42,6 +42,7 @@ export {
 } from '#filesystem-bridge-protocol.js';
 
 export type {
+  FileSystemBridgeHashFiles,
   FileSystemBridgeHello,
   FileSystemBridgeRootedCalls,
   FileSystemBridgeScopedReads,

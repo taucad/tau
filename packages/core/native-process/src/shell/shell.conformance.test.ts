@@ -327,6 +327,41 @@ describe.runIf(enabled)('shell conformance', () => {
     ).toStrictEqual(before);
   });
 
+  conformance(
+    'C10',
+    'a read-only path inside a writable root reads but cannot be written, moved or replaced',
+    async () => {
+      const records = join(work, 'records');
+      const record = join(records, 'chat.json');
+      mkdirSync(records, { recursive: true });
+      writeFileSync(record, 'RECORD-ORIGINAL\n');
+      const filesystem = { readable: [readonly, home], writable: [work], readOnly: [records], denied: [secret] };
+      const positive = await run('cat records/chat.json && printf WROTE > beside.txt', { filesystem });
+
+      expect(positive.exitCode, positive.stderr).toBe(0);
+      expect(positive.stdout).toBe('RECORD-ORIGINAL\n');
+      expect(readFileSync(join(work, 'beside.txt'), 'utf8')).toBe('WROTE');
+
+      const before = digestOf(record);
+      const refused = [
+        'printf X > records/chat.json',
+        'printf X > records/new.json',
+        'rm records/chat.json',
+        'mv records/chat.json moved.json',
+        'mv records records-moved',
+        'rm -rf records',
+      ];
+      const outcomes = await Promise.all(refused.map(async (probe) => run(probe, { filesystem })));
+
+      expect(outcomes.map((outcome) => outcome.exitCode !== 0)).toStrictEqual(refused.map(() => true));
+      expect(digestOf(record)).toBe(before);
+      /* A move out of a read-only mount falls back to copy-then-unlink: the copy a read allows may land, the unlink
+       * never does, so the record stays where it was. */
+      expect(existsSync(join(records, 'new.json'))).toBe(false);
+      expect(existsSync(join(work, 'records-moved'))).toBe(false);
+    },
+  );
+
   conformance('C03', 'startup hooks are refused and the shell sees only the environment it was given', async () => {
     const positive = await run('printf %s "$GIVEN"', {
       environment: { PATH: '/usr/bin:/bin', HOME: work, LANG: 'C', GIVEN: 'GIVEN-VALUE' },

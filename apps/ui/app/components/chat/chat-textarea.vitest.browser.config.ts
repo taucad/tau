@@ -12,7 +12,7 @@ const emulationSessions = new WeakMap<Page, CDPSession>();
 /** Real-browser composer spacing acceptance with the shipped styles. */
 export default defineConfig({
   root: fileURLToPath(new URL('../../..', import.meta.url)),
-  define: { tauCloudBuildEnabled: 'false' },
+  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
   plugins: [tailwindcss(), tauRuntime()],
   resolve: { alias: uiResolveAlias },
   optimizeDeps: {

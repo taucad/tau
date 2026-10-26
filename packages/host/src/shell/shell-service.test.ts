@@ -209,7 +209,7 @@ describe('the launch Tau compiles (D4, D20, D26, A05)', () => {
     await symlink(outside, join(project, '.tau', 'machines'));
     const { service, provider } = harness();
     await service.run(call({ command: 'true' }));
-    const filesystem = provider.launches[0]!.filesystem;
+    const { filesystem } = provider.launches[0]!;
     expect(filesystem.masked).toContain(await realpath(alias));
     expect(filesystem.writable).toContain(await realpath(join(alias, 'Parameters')));
     expect(filesystem.writable).not.toContain(join(project, '.tau', 'machines'));

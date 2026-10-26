@@ -112,6 +112,9 @@ export const bindMaskedDirectories = (
           ...explicit([...filesystem.readable, ...filesystem.writable, ...(filesystem.readOnly ?? [])]),
         ])})`,
         `(deny file-write* ${subtract(explicit(filesystem.writable))})`,
+        // Seatbelt prefers an operation-specific rule over a wildcard regardless of order, and the runtime
+        // re-allows create and unlink beneath every write root. Name both so the mask outranks that allow.
+        `(deny file-write-create file-write-unlink ${subtract(explicit(filesystem.writable))})`,
       ];
     })
     .join('\n');

@@ -72,6 +72,7 @@ describe('macOS masked directory profile composition', () => {
     const [reads, writes] = appended.split('(deny file-write*');
     expect(reads).toContain('(require-not (subpath "/project/.tau/chats"))');
     expect(writes).not.toContain('/project/.tau/chats');
+    expect(writes).toContain('(deny file-write-create file-write-unlink (require-all (regex');
     expect(appended).toContain('[tT][aA][uU][. ]*(:[^/]*)?');
     expect(argv[2]).not.toContain('Reserved directory');
   });

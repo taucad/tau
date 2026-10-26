@@ -317,6 +317,8 @@ type MeasurePointerSnapshot = {
    * pick tree), so its targets may be incomplete: settles once one of those has, for the snapshot to be taken again.
    */
   readonly whenReady?: Promise<void>;
+  /** The mesh under the pointer while its feature graph is still being prepared: a press there waits on it first. */
+  readonly pendingSurface?: THREE.Mesh;
 };
 
 export function MeasureTool(): React.JSX.Element {
@@ -491,6 +493,16 @@ export function MeasureTool(): React.JSX.Element {
   const graphClient = useCallback(() => {
     graphClientRef.current ??= createMeasurementFeatureWorkerClient();
     return graphClientRef.current;
+  }, []);
+  /**
+   * Has the graph of the mesh under a waiting press built next, ahead of the meshes a hover queued before it.
+   *
+   * @param snapshot - The press's pointer snapshot.
+   */
+  const prioritizePressSurface = useCallback((snapshot: MeasurePointerSnapshot): void => {
+    if (snapshot.pendingSurface) {
+      graphClientRef.current?.prioritize(snapshot.pendingSurface);
+    }
   }, []);
   useEffect(() => {
     graphSourceRef.current = graphSource;
@@ -817,6 +829,10 @@ export function MeasureTool(): React.JSX.Element {
           closest?.position ?? (measureMode === 'point' || !measureSnapEnabled ? firstIntersection?.point : undefined),
         target: closest,
         whenReady: preparing.length > 0 ? settleAny(preparing) : undefined,
+        pendingSurface:
+          firstIntersection?.object instanceof THREE.Mesh && !getCachedMeshMeasurementFeatures(firstIntersection.object)
+            ? firstIntersection.object
+            : undefined,
       };
     },
     [
@@ -1655,6 +1671,9 @@ export function MeasureTool(): React.JSX.Element {
         event.pointerType === 'touch',
       );
       pressPreparingRef.current = pointerSnapshot.hasActiveSnapTarget ? undefined : pointerSnapshot.whenReady;
+      if (pressPreparingRef.current) {
+        prioritizePressSurface(pointerSnapshot);
+      }
       measureInputActor.send({
         type: 'pointerDown',
         button: event.button,
@@ -1721,6 +1740,7 @@ export function MeasureTool(): React.JSX.Element {
       const { result } = measureInputActor.getSnapshot().context;
       measureInputActor.send({ type: 'clearResult' });
       if (isPressAwaitingTargets) {
+        prioritizePressSurface(pointerSnapshot);
         deferPress({
           coordinates: { clientX: event.clientX, clientY: event.clientY },
           isTouch: event.pointerType === 'touch',
@@ -1775,6 +1795,7 @@ export function MeasureTool(): React.JSX.Element {
       if (!snapshot.hasActiveSnapTarget && snapshot.whenReady) {
         if (waits < maxDeferredPressWaits && pointerGraphFailuresRef.current === press.failures) {
           // Something else under it was still being prepared (a pick tree after the graph): wait for that too.
+          prioritizePressSurface(snapshot);
           deferPress({ ...press, preparing: snapshot.whenReady, waits: waits + 1 });
         }
         return;
@@ -1864,6 +1885,7 @@ export function MeasureTool(): React.JSX.Element {
     deferPress,
     getRootState,
     pointerTarget,
+    prioritizePressSurface,
     isMeasureActive,
     graphicsActor,
     measureInputActor,

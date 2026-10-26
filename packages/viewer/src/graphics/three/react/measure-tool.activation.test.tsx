@@ -20,6 +20,8 @@ const worker = vi.hoisted(() => ({
   pending: [] as Array<Readonly<{ mesh: unknown; answer: () => void }>>,
   /** Every feature graph request it received. */
   requests: 0,
+  /** The meshes the tool asked it to prepare ahead of its queue, in order. */
+  prioritized: [] as unknown[],
   /** Whether it fails every request at once, as a worker that cannot start does. */
   failing: false,
   /** Whether it answers every request at once with no graph, as a client whose mesh went stale does. */
@@ -49,6 +51,9 @@ vi.mock('#graphics/three/utils/measurement-features-worker-client.js', () => ({
           });
         })
       );
+    },
+    prioritize: (mesh) => {
+      worker.prioritized.push(mesh);
     },
     dispose: () => undefined,
   }),
@@ -224,6 +229,7 @@ describe('MeasureTool activation', () => {
     frames.clear();
     worker.pending.length = 0;
     worker.requests = 0;
+    worker.prioritized.length = 0;
     worker.failing = false;
     worker.empty = false;
     vi.restoreAllMocks();
@@ -285,6 +291,21 @@ describe('MeasureTool activation', () => {
     await answerWorker(model);
 
     expect(actor.getSnapshot().context.measurements).toMatchObject([{ operation: 'edge-length', status: 'current' }]);
+  });
+
+  it('has the worker prepare the mesh under a waiting click ahead of the others it queued', async () => {
+    act(() => {
+      actor.send({ type: 'setMeasureActive', payload: true });
+    });
+    // The face just inside the front top edge, so the ray hits the model while both meshes' graphs are queued.
+    dispatch('pointerdown', pixelOf(0, -0.9, 1));
+    dispatch('pointerup', pixelOf(0, -0.9, 1));
+    expect(worker.pending.map(({ mesh }) => mesh)).toEqual(expect.arrayContaining([model, sideMesh]));
+
+    expect(worker.prioritized).toContain(model);
+    expect(worker.prioritized).not.toContain(sideMesh);
+    await answerWorker(model);
+    expect(actor.getSnapshot().context.measurements).toMatchObject([{ status: 'current' }]);
   });
 
   it('keeps a waiting click through a re-render of the tool', async () => {

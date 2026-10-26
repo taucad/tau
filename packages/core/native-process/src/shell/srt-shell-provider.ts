@@ -189,11 +189,13 @@ export const shellSandboxProfile = (
     ...shellBaselineDenied({ platform: process.platform, home: options.home ?? homedir(), environment: process.env }),
   ]);
   const readOnly = launch.filesystem.readOnly ?? [];
+  const masked = process.platform === 'linux' ? deniedVariants(launch.filesystem.masked ?? []) : [];
+  const absentMasked = masked.filter((path) => !existsSync(path));
   const { domains } = launch.network;
   return {
     network: { allowedDomains: [...domains], deniedDomains: domains.length > 0 ? [] : ['*'], strictAllowlist: true },
     filesystem: {
-      denyRead: [...new Set([...deniedReadRoots(), ...denied, ...deniedVariants(launch.filesystem.masked ?? [])])],
+      denyRead: [...new Set([...deniedReadRoots(), ...denied, ...masked])],
       allowRead: physicalVariants([
         ...launch.filesystem.readable,
         ...launch.filesystem.writable,
@@ -202,7 +204,7 @@ export const shellSandboxProfile = (
         ...(runtimeDirectory === undefined ? [] : [runtimeDirectory]),
       ]),
       allowWrite: physicalVariants(launch.filesystem.writable),
-      denyWrite: [...new Set([...deniedWriteRoots(), ...denied, ...deniedVariants(readOnly)])],
+      denyWrite: [...new Set([...deniedWriteRoots(), ...denied, ...deniedVariants(readOnly), ...absentMasked])],
     },
     allowPty: false,
     ripgrep: { command: options.ripgrepPath ?? 'rg' },

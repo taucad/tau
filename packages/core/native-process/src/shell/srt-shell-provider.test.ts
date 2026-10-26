@@ -273,6 +273,23 @@ describe.runIf(process.platform === 'linux')('createSandboxShellProvider termina
 });
 
 describe('shellSandboxProfile', () => {
+  it('should keep absent Linux containers uncreatable without applying macOS literal read denies', () => {
+    const root = fixtureRoot();
+    const missing = join(root, '.tau');
+    const profile = shellSandboxProfile({
+      filesystem: { readable: [], writable: [root], denied: [], masked: [missing] },
+      network: { domains: [] },
+    });
+    const filesystem = profile['filesystem'] as { denyRead: string[]; denyWrite: string[] };
+    if (process.platform === 'linux') {
+      expect(filesystem.denyRead).toContain(missing);
+      expect(filesystem.denyWrite).toContain(missing);
+    } else {
+      expect(filesystem.denyRead).not.toContain(missing);
+      expect(filesystem.denyWrite).not.toContain(missing);
+    }
+  });
+
   it('should allow exactly the granted names and deny every other destination', () => {
     const profile = shellSandboxProfile({
       filesystem: { readable: [], writable: [], denied: [] },

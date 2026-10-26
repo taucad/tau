@@ -21,6 +21,9 @@ export const AttributeKey = {
   AGENT_LOOKUP_OUTCOME: 'lookup.outcome',
   AGENT_RUN_STATUS: 'run.status',
   AGENT_ASSERTION_RESULT: 'result',
+  /* Hosted Remote Storage: where git ran (`in_process` | `forwarded`) and how tau-storage was chosen (`off` | `rendezvous`). */
+  GIT_EXECUTION: 'tau.git.execution',
+  GIT_AFFINITY: 'tau.git.affinity',
   KERNEL_ID: 'kernel.id',
   KERNEL_STATUS: 'kernel.status',
   EXPORT_FORMAT: 'export.format',

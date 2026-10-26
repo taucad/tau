@@ -9,6 +9,7 @@ import type { RedisService } from '#redis/redis.service.js';
 import { attachHostDevice } from '#auth/auth.guard.js';
 import { gitRequestsPerUserPerWindow, gitRequestsPerWindow, quotaRefusalMarker } from '#api/git/git.constants.js';
 import { GitController, receivePackOutcome, syncOutcomeOf } from '#api/git/git.controller.js';
+import type { GitExecution } from '#api/git/forwarding/git-execution.js';
 import type { GitLfsService } from '#api/git/git-lfs.service.js';
 import type { GitAccess, GitRepositoryService } from '#api/git/git.service.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
@@ -330,13 +331,18 @@ describe('GitController sync telemetry', () => {
     syncPackBytes: { record: vi.fn() },
     syncRefusals: { add: vi.fn() },
   });
-  const controllerWith = (repositories: Partial<GitRepositoryService>, recorded: ReturnType<typeof metrics>) =>
+  const controllerWith = (
+    repositories: Partial<GitRepositoryService>,
+    recorded: ReturnType<typeof metrics>,
+    execution?: Pick<GitExecution, 'mode' | 'affinity'>,
+  ) =>
     new GitController(
       { get: () => 'https://api.tau.test' } as unknown as ConfigService<Environment, true>,
       repositories as GitRepositoryService,
       {} as unknown as GitLfsService,
       new PublicationRateLimiterService(countingRedis()),
       recorded as unknown as MetricsService,
+      execution,
     );
   const access = {
     projectId: 'proj_d1',
@@ -389,10 +395,44 @@ describe('GitController sync telemetry', () => {
       expect(recorded.syncOperationDuration.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
         'tau.sync.operation': 'advertise',
         outcome: 'ok',
+        'tau.git.execution': 'in_process',
+        'tau.git.affinity': 'off',
       });
       expect(recorded.syncRefusals.add).not.toHaveBeenCalled();
     },
   );
+
+  /* Hosted Remote Storage DV1: in-process, forwarded and rendezvous latencies are told apart on the histogram alone. */
+  it.each([
+    [{ mode: 'in_process', affinity: 'off' }],
+    [{ mode: 'forwarded', affinity: 'off' }],
+    [{ mode: 'forwarded', affinity: 'rendezvous' }],
+  ] as const)('labels push latency with where git ran (%o), and keeps the count unlabelled', async (execution) => {
+    const recorded = metrics();
+    const controller = controllerWith(
+      {
+        authorize: async () => access as unknown as GitAccess,
+        receivePack: async () => Buffer.from('000eunpack ok\n0017ok refs/heads/main\n0000'),
+      },
+      recorded,
+      execution,
+    );
+
+    const { reply: stub } = replyStub();
+    const reply = { header: stub.header, raw: { once: vi.fn() } } as unknown as FastifyReply;
+    await controller.receivePack('proj_d1.git', 'user-owner', push, reply);
+
+    expect(recorded.syncOperations.add).toHaveBeenCalledExactlyOnceWith(1, {
+      'tau.sync.operation': 'push',
+      outcome: 'ok',
+    });
+    expect(recorded.syncOperationDuration.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
+      'tau.sync.operation': 'push',
+      outcome: 'ok',
+      'tau.git.execution': execution.mode,
+      'tau.git.affinity': execution.affinity,
+    });
+  });
 
   it('counts a push refused for quota at the advertisement as quota_refused', async () => {
     const recorded = metrics();

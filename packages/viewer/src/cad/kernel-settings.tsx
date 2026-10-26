@@ -36,12 +36,8 @@ type NumberField = Readonly<{
   exclusiveMinimum: number | undefined;
   exclusiveMaximum: number | undefined;
   step: number;
-  /**
-   * What the row shows while the setting is unset: its default, else its first example. A kernel that resolves an
-   * unset value itself (PicoGK's and PicoVoxel's `meshAdaptivity`) names that value as an example, not a default, so
-   * an edit elsewhere never sends it.
-   */
-  unsetValue: number | undefined;
+  /** What the row shows with no value: the default, else the schema's first example (an option the kernel resolves). */
+  shown: number;
 }>;
 
 type BooleanField = Readonly<{ kind: 'boolean'; path: readonly string[]; label: string }>;
@@ -140,7 +136,7 @@ const toField = (
     exclusiveMinimum,
     exclusiveMaximum,
     step,
-    unsetValue: asNumber(node.default) ?? asNumber(fallback) ?? firstExample(node),
+    shown: defaultValue,
   };
 };
 
@@ -305,7 +301,7 @@ export function KernelSettings({
   const renderNumber = (field: NumberField, value: unknown, onValue: (next: number) => void): React.JSX.Element => (
     <DropdownMenuSliderItem
       key={field.path.join('.')}
-      value={Number(value ?? field.unsetValue ?? field.min)}
+      value={Number(value ?? field.shown)}
       min={field.min}
       max={field.max}
       hasMinimum={field.hasMinimum}

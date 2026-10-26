@@ -58,6 +58,8 @@ export type CadContext = {
   renderPhase: string | undefined;
   telemetryEntries: TelemetrySpanRecord[];
   operationTimeout: number;
+  /** The kernel's evaluate options this unit asks for, such as a mesh adaptivity; `{}` takes the kernel's defaults. */
+  evaluateOptions: Record<string, unknown>;
   kernelClient?: AppRuntimeClient;
   /** Allocated ownership, not connected readiness. */
   connectingClient?: AppRuntimeClient;
@@ -143,6 +145,8 @@ type CadEvent =
     }
   | { type: 'stateChanged'; state: 'idle' | 'busy' | 'error'; detail?: string }
   | { type: 'setOperationTimeout'; operationTimeout: number }
+  /** Replaces the evaluate options and re-evaluates the open document with them. */
+  | { type: 'setEvaluateOptions'; evaluateOptions: Record<string, unknown> }
   /** A viewer shows or hides lines; `undefined` when it stops presenting this unit. */
   | { type: 'setViewerEdges'; viewerId: string; shown: boolean | undefined }
   | { type: 'capabilitiesUpdated'; capabilities: AppCapabilitiesManifest }
@@ -252,6 +256,7 @@ type RenderModelInput = {
   requestId: number;
   entryPath: string | undefined;
   parameterRender: ParameterRender | undefined;
+  evaluateOptions: Record<string, unknown>;
 };
 
 /**
@@ -465,6 +470,7 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input, s
     const document = input.client.open({
       source: { path: input.entryPath },
       ...openingParameters(input.parameterRender),
+      ...(Object.keys(input.evaluateOptions).length > 0 ? { evaluateOptions: input.evaluateOptions } : {}),
       watch: true,
     });
     let defaultView: ViewSubscription | undefined;
@@ -799,6 +805,8 @@ const renderRequestPatch = (context: CadContext, event: RenderTrigger): CadPatch
       return {
         ...bumped,
         entryPath: event.entryPath,
+        // Evaluate options belong to the entry's kernel; another entry starts from its defaults.
+        ...(event.entryPath === context.entryPath ? {} : { evaluateOptions: {} }),
         codeIssues: [],
         latestRenderingOutcome: undefined,
         parameterManifest: undefined,
@@ -819,6 +827,8 @@ const renderRequestPatch = (context: CadContext, event: RenderTrigger): CadPatch
       return {
         ...bumped,
         entryPath: event.entryPath,
+        // Evaluate options belong to the entry's kernel; another entry starts from its defaults.
+        ...(event.entryPath === context.entryPath ? {} : { evaluateOptions: {} }),
         // The staged bytes belong to the entry that was open; the new entry re-supplies its own.
         parameterRender: undefined,
         latestRenderingOutcome: undefined,
@@ -914,7 +924,13 @@ const runtimeSignals = {
   capabilitiesUpdated: ({ event }: CadArgs<'capabilitiesUpdated'>) => ({
     context: { capabilities: event.capabilities },
   }),
-  activeKernelChanged: ({ event }: CadArgs<'activeKernelChanged'>) => ({ context: { activeKernelId: event.kernelId } }),
+  activeKernelChanged: ({ context, event }: CadArgs<'activeKernelChanged'>) => ({
+    context: {
+      activeKernelId: event.kernelId,
+      // Another kernel's evaluate options mean nothing to this one.
+      ...(event.kernelId === context.activeKernelId ? {} : { evaluateOptions: {} }),
+    },
+  }),
 };
 
 /** Results and issues a unit with a kernel records in every state after connecting. */
@@ -1053,6 +1069,7 @@ export const cadMachine = setup({
     renderPhase: undefined,
     telemetryEntries: [],
     operationTimeout: input.operationTimeout ?? defaultOperationTimeout,
+    evaluateOptions: {},
     kernelClient: undefined,
     document: undefined,
     defaultView: undefined,
@@ -1156,6 +1173,18 @@ export const cadMachine = setup({
         client?.setOperationTimeout(event.operationTimeout);
       });
       return { context: { operationTimeout: event.operationTimeout } };
+    },
+    setEvaluateOptions: ({ context, event }, enq) => {
+      const { document } = context;
+      // A document not open yet takes them when it opens.
+      enq(async () => {
+        try {
+          await document?.update({ evaluateOptions: event.evaluateOptions });
+        } catch {
+          // A refused or superseded update reports through the evaluation; nothing to do here.
+        }
+      });
+      return { context: { evaluateOptions: event.evaluateOptions } };
     },
   },
   initial: 'connecting',
@@ -1344,6 +1373,7 @@ export const cadMachine = setup({
               edgesWanted: () => cadEdgesWanted(self.getSnapshot().context.edgeViewers),
               entryPath: context.entryPath,
               parameterRender: context.parameterRender,
+              evaluateOptions: context.evaluateOptions,
               document: context.document,
               machineRef: self,
               requestId: context.openAttempt,
@@ -1479,6 +1509,9 @@ export const selectCadEntryIssues =
     snapshot.context.kernelIssues.get(entryPath);
 
 export const selectCadOperationTimeout = (snapshot: CadSnapshot): number => snapshot.context.operationTimeout;
+/** The kernel evaluate options the unit asks for. */
+export const selectCadEvaluateOptions = (snapshot: CadSnapshot): Record<string, unknown> =>
+  snapshot.context.evaluateOptions;
 
 export const selectCadRendering = (snapshot: CadSnapshot): Rendering | undefined => snapshot.context.rendering;
 export const selectCadEvaluation = (snapshot: CadSnapshot): Evaluation | undefined => snapshot.context.evaluation;

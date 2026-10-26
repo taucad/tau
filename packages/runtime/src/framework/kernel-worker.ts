@@ -1738,6 +1738,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                     transient,
                     views: this.getDocumentViewOffers(owner, artifact.evaluationSlot?.offers),
                     exports: this.getDocumentExportOffers(owner, artifact.evaluationSlot?.offers),
+                    ...this.getDocumentEvaluateOptionsOffer(owner),
                     issues: result.issues,
                     sourceRevision: sourceRevisionForArtifact(artifact, described.sourceRevision),
                   },
@@ -1920,6 +1921,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     );
   }
 
+  /** The kernel's evaluate options as an evaluation offers them; none by default. */
+  protected getDocumentEvaluateOptionsOffer(_owner: OperationOwner): {
+    evaluateOptions?: { schema: JSONSchema7; defaults: Record<string, unknown> };
+  } {
+    return {};
+  }
+
   /** Metadata for the selected kernel's offered views. */
   protected getDocumentViewOffers(_owner: OperationOwner, _offers?: KernelOffers): readonly ViewOffer[] {
     return [];
@@ -2074,32 +2082,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               computeOperationId = randomUuid();
               this.trackProjectionRelease(computeOperationId);
               try {
-                const viewBuild = await this.materializeViewBuild(artifact, selection.view, view.options);
-                controller.signal.throwIfAborted();
-                projected = viewBuild.success
-                  ? await this.runMeshPhase({
-                      computeOperationId,
-                      owner: artifact.owner,
-                      identity:
-                        viewBuild.artifact === artifact
-                          ? identity
-                          : { ...viewBuild.artifact.identity, dependencies, dependencyHash: projectionHash },
-                      selection,
-                      renderOptions: view.options,
-                      requestedContent: view.content,
-                      resolvedMiddleware: meshMiddleware,
-                      createResult: {
-                        success: true,
-                        data: undefined,
-                        issues: [
-                          ...(viewBuild.artifact === artifact
-                            ? evaluation.result.issues
-                            : viewBuild.artifact.result.issues),
-                        ],
-                      },
-                      renderArtifact: viewBuild.artifact,
-                    })
-                  : createKernelError(viewBuild.issues);
+                projected = await this.runMeshPhase({
+                  computeOperationId,
+                  owner: artifact.owner,
+                  identity,
+                  selection,
+                  renderOptions: view.options,
+                  requestedContent: view.content,
+                  resolvedMiddleware: meshMiddleware,
+                  createResult: {
+                    success: true,
+                    data: undefined,
+                    issues: [...evaluation.result.issues],
+                  },
+                  renderArtifact: artifact,
+                });
               } finally {
                 this.activeDocumentNativeOperation = undefined;
               }
@@ -5855,90 +5852,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
-   * The build a document view renders. A view's options may set the kernel's evaluate options too: when the ones it
-   * sets build differently from the document's evaluation, the view renders its own build of the same source and
-   * parameters, keyed like any build by its construction options, so two values never share a handle. Otherwise,
-   * and for a view that sets none, it renders the evaluation's build.
-   *
-   * @param artifact - The document evaluation the view belongs to.
-   * @param view - The selected view, whose own option keys never count as evaluate options.
-   * @param viewOptions - The view's whole option bag.
-   * @returns The build to render, or the issues that refused it.
-   */
-  private async materializeViewBuild(
-    artifact: MaterializedRender,
-    view: string,
-    viewOptions: Record<string, unknown>,
-  ): Promise<{ success: true; artifact: MaterializedRender } | { success: false; issues: KernelIssue[] }> {
-    const { owner, identity } = artifact;
-    const createSchema = owner.binding?.kernelId
-      ? this.kernelCreateOptionsZodSchemaMap.get(owner.binding.kernelId)
-      : undefined;
-    const evaluateKeys = createSchema ? Object.keys(createSchema.shape) : [];
-    if (!evaluateKeys.some((key) => Object.hasOwn(viewOptions, key))) {
-      return { success: true, artifact };
-    }
-    const viewKeys = new Set(this.getViewOptionKeys(owner, view));
-    const overrides = pickRecordProperties(
-      viewOptions,
-      evaluateKeys.filter((key) => !viewKeys.has(key)),
-    );
-    if (Object.keys(overrides).length === 0) {
-      return { success: true, artifact };
-    }
-    const options = { ...identity.renderOptions, ...overrides };
-    const key = await this.computeNativeHandleKey({
-      owner,
-      parameters: identity.parameters,
-      renderOptions: options,
-      content: identity.content,
-    });
-    if (!key.success) {
-      return key;
-    }
-    if (this.artifactMatchesNativeBuild(artifact, owner, key.key)) {
-      return { success: true, artifact };
-    }
-    const described = await this.getParametersInLane(identity.file, { owner });
-    if (!described.success) {
-      return { success: false, issues: described.issues };
-    }
-    const manifest = described.data;
-    if (manifest.legacyProjection.status !== 'usable') {
-      return {
-        success: false,
-        issues: [
-          {
-            message: 'Parameter schema cannot be represented by the active Draft-7 execution path',
-            code: 'RUNTIME',
-            type: 'kernel',
-            severity: 'error',
-            details: manifest.legacyProjection.diagnostics,
-          },
-        ],
-      };
-    }
-    const parameterSchema = manifest.legacyProjection.schema;
-    const { artifact: built } = await this.withDocumentNativeAbort('render', async () =>
-      this.materializeRender(
-        {
-          file: identity.file,
-          parameters: identity.parameters,
-          parameterDefaults: manifest.defaults,
-          parameterManifest: manifest,
-          parameterSchema,
-          options,
-          content: identity.content,
-        },
-        { owner },
-      ),
-    );
-    return built.result.success
-      ? { success: true, artifact: built }
-      : { success: false, issues: [...built.result.issues] };
-  }
-
-  /**
    * The artifact's retained handle when the kernel reports that its build is exactly what the export's construction
    * options would build, for example a fallback to the export's mesh. Only a live or serialized handle qualifies, and
    * every other native-handle dependency must still match, so a miss builds for the export as before.
@@ -6522,6 +6435,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     zodSchema: z.ZodType,
     label: string,
   ): { schema: JSONSchema7; defaults: Record<string, unknown> } {
+    // Offers derive the same kernel schemas on every evaluation; a schema's derivation never changes.
+    const cached = this.derivedJsonSchemas.get(zodSchema);
+    if (cached) {
+      return cached;
+    }
     let schema: JSONSchema7;
     try {
       // Spreading drops Zod's non-enumerable `~standard` key: the manifest is wire data, so it is plain JSON here.
@@ -6537,11 +6455,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
 
     const defaults = inputDefaults(schema);
-    return {
-      schema,
-      defaults: zodSchema.safeParse(defaults).success ? defaults : {},
-    };
+    const derived = { schema, defaults: zodSchema.safeParse(defaults).success ? defaults : {} };
+    this.derivedJsonSchemas.set(zodSchema, derived);
+    return derived;
   }
+
+  private readonly derivedJsonSchemas = new WeakMap<
+    z.ZodType,
+    { schema: JSONSchema7; defaults: Record<string, unknown> }
+  >();
 
   /**
    * Build the capabilities manifest from loaded kernel metadata and transcoder edges.
@@ -8035,18 +7957,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       );
     }
     return { success: true, options: renderOptions ?? {} };
-  }
-
-  /**
-   * Option keys a view declares itself. A view's options carry its kernel's evaluate options too; a key the view
-   * declares stays the view's, so it never selects a build.
-   *
-   * @param _owner - The view's owner.
-   * @param _view - The selected view.
-   * @returns The view's own option keys.
-   */
-  protected getViewOptionKeys(_owner: OperationOwner, _view: string): readonly string[] {
-    return [];
   }
 
   protected getNativeRenderContentKeys(owner: OperationOwner, _view?: string): readonly RuntimeContentKey[] {

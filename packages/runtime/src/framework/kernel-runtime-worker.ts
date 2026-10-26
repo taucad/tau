@@ -16,6 +16,7 @@
 
 // oxlint-disable-next-line import-x/no-unassigned-import -- side-effect: stubs `document` before any bundler modulepreload code runs
 import '#framework/worker-preload-polyfill.js';
+import type { JSONSchema7 } from '@taucad/json-schema';
 import type {
   CreateGeometryResult,
   ExportGeometryResult,
@@ -135,41 +136,6 @@ const describeUnhandledExtension = (entryPath: string, kernels: readonly KernelP
   const listed = handled.slice(0, listedExtensionLimit).join(', ');
   const registered = handled.length > listedExtensionLimit ? `${listed}, …` : `${listed || 'none'}.`;
   return `No kernel handles "${extension}". Registered kernels handle: ${registered} Install a plugin that declares this extension and add it to the runtime definition.`;
-};
-
-type OfferedOptions = NonNullable<ViewOffer['options']>;
-
-/**
- * A view's offered options with the kernel's evaluate options beside its own. Authoring keeps their keys disjoint
- * (`defineKernelV2`), so one object schema holds both; evaluate options without a property offer nothing.
- *
- * @param view - The view's own options, when it declares a schema.
- * @param evaluate - The kernel's evaluate options, when it declares a schema.
- * @returns The options to offer, or `undefined` when there are none.
- */
-const withEvaluateOptions = (
-  view: OfferedOptions | undefined,
-  evaluate: OfferedOptions | undefined,
-): OfferedOptions | undefined => {
-  const evaluateProperties = evaluate?.schema.properties;
-  if (!evaluate || !evaluateProperties || Object.keys(evaluateProperties).length === 0) {
-    return view;
-  }
-  if (!view) {
-    return evaluate;
-  }
-  if (view.schema.type !== 'object' || !view.schema.properties) {
-    return view;
-  }
-  const required = [...(evaluate.schema.required ?? []), ...(view.schema.required ?? [])];
-  return {
-    schema: {
-      ...view.schema,
-      properties: { ...evaluateProperties, ...view.schema.properties },
-      ...(required.length === 0 ? {} : { required }),
-    },
-    defaults: { ...evaluate.defaults, ...view.defaults },
-  };
 };
 
 /** Multi-kernel runtime worker that dynamically selects and delegates to loaded kernel definitions. */
@@ -557,44 +523,36 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     return this.getKernelForOwner(owner)?.definition.render !== undefined;
   }
 
+  protected override getDocumentEvaluateOptionsOffer(owner: OperationOwner): {
+    evaluateOptions?: { schema: JSONSchema7; defaults: Record<string, unknown> };
+  } {
+    const kernel = this.getKernelForOwner(owner);
+    const schema = kernel?.definition.evaluateOptionsSchema;
+    return schema && Object.keys(schema.shape).length > 0
+      ? { evaluateOptions: this.deriveJsonSchema(schema, `evaluate:${kernel.entry.id}`) }
+      : {};
+  }
+
   protected override getDocumentViewOffers(owner: OperationOwner, offers?: KernelOffers): readonly ViewOffer[] {
     const kernel = this.getKernelForOwner(owner);
     if (!kernel) {
       return [];
     }
-    // A view's options also carry the kernel's evaluate options: a view that sets one renders its own build.
-    const evaluateSchema = kernel.definition.evaluateOptionsSchema;
-    const evaluateOptions = evaluateSchema
-      ? this.deriveJsonSchema(evaluateSchema, `evaluate:${kernel.entry.id}`)
-      : undefined;
     return (offers?.views ?? Object.keys(kernel.definition.views)).map((id) => {
       const declaration = Object.hasOwn(kernel.definition.views, id) ? kernel.definition.views[id] : undefined;
       if (!declaration) {
         throw new TypeError(`Kernel ${kernel.entry.id} offered unknown view ${id}.`);
       }
-      const options = withEvaluateOptions(
-        declaration.optionsSchema
-          ? this.deriveJsonSchema(declaration.optionsSchema, `view:${kernel.entry.id}:${id}`)
-          : undefined,
-        evaluateOptions,
-      );
       return {
         id,
         title: declaration.title,
         mimeType: declaration.mimeType,
         ...(offers?.instances && Object.hasOwn(offers.instances, id) ? { instances: offers.instances[id] } : {}),
-        ...(options ? { options } : {}),
+        ...(declaration.optionsSchema
+          ? { options: this.deriveJsonSchema(declaration.optionsSchema, `view:${kernel.entry.id}:${id}`) }
+          : {}),
       };
     });
-  }
-
-  protected override getViewOptionKeys(owner: OperationOwner, view: string): readonly string[] {
-    const kernel = this.getKernelForOwner(owner);
-    const schema =
-      kernel && Object.hasOwn(kernel.definition.views, view) ? kernel.definition.views[view]?.optionsSchema : undefined;
-    return schema
-      ? Object.keys(this.deriveJsonSchema(schema, `view:${kernel?.entry.id ?? ''}:${view}`).schema.properties ?? {})
-      : [];
   }
 
   protected override getDocumentExportOffers(owner: OperationOwner, offers?: KernelOffers): readonly ExportOffer[] {

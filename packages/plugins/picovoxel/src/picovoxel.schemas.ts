@@ -14,7 +14,7 @@ import { gltfExportConventionSchema } from '@taucad/runtime/kernel';
 import { getIsolationStatus } from '@taucad/runtime/cross-origin-isolation';
 
 import { picovoxelBuild } from '#picovoxel-build.js';
-import { picovoxelDefaultAdaptivity, picovoxelPreviewAdaptivity } from '#picovoxel-meshing.js';
+import { picovoxelDefaultAdaptivity } from '#picovoxel-meshing.js';
 
 /** The two lanes Tau exposes. `'open'` and `'auto'` stay out of Tau: every Tau session claims a lane. @public */
 export const picovoxelLanes = ['fast', 'exact'] as const;
@@ -145,10 +145,9 @@ export const picovoxelRegionSchema = z
 export type PicovoxelRegion = z.output<typeof picovoxelRegionSchema>;
 
 /**
- * Construction options for renders. A view that sets none renders the document's build, whose default lane is
- * `'fast'`; a view may set them (the viewer's Kernel settings offer `meshAdaptivity` and `meshRelax`), and the
- * runtime then renders it from a build of its own. An unset `meshAdaptivity` resolves here, per lane and installed
- * release, so the parsed options (the build's cache key) name the mesh the build makes: an exact or uniform render
+ * Construction options for renders. The viewer never sends render options, so this default decides
+ * its lane: `'fast'`. An unset `meshAdaptivity` resolves here, per lane and installed release, so the
+ * parsed options (the build's cache key) name the mesh the build makes: an exact or uniform render
  * keys like the export that replays it.
  *
  * @public
@@ -166,11 +165,10 @@ export const picovoxelRenderSchema = z
       .min(0)
       .lt(1)
       .optional()
-      .meta({
-        description:
-          "OpenVDB mesh adaptivity in [0, 1) for the displayed Voxels parts: 0 is the uniform mesh; higher values merge flat regions into fewer, larger triangles. Only lane 'fast' meshes adaptively and it never changes the voxels. Unset, it is 0.25 (Balanced) on lane 'fast' of a PicoVoxel release whose toMesh takes options, and 0 on lane 'exact' and under PicoVoxel 0.1.0. Exports take their own meshAdaptivity, 0 unless set.",
-        examples: [picovoxelPreviewAdaptivity],
-      }),
+      .meta({ examples: [0.25] })
+      .describe(
+        "OpenVDB mesh adaptivity in [0, 1) for the displayed Voxels parts: 0 is the uniform mesh; higher values merge flat regions into fewer, larger triangles. Only lane 'fast' meshes adaptively, it never changes the voxels, and an export meshes at its own meshAdaptivity, 0 unless it sets one. Unset, it is 0.25 (Balanced) on lane 'fast' of a PicoVoxel release whose toMesh takes options, and 0 on lane 'exact' and under PicoVoxel 0.1.0.",
+      ),
     meshRelax: z
       .boolean()
       .default(false)
@@ -196,12 +194,12 @@ const exportLaneSchema = z.object({
     .lt(1)
     .default(0)
     .describe(
-      "OpenVDB mesh adaptivity in [0, 1) for the exported mesh. Default 0, the uniform mesh, whatever the view shows. Above 0 the mesh is fast-lane geometry: it needs lane 'fast', so only STL takes it (stamped LANE=fast); an exact export that asks for it is refused.",
+      "OpenVDB mesh adaptivity in [0, 1) for the exported mesh. 0 (default) is the uniform mesh. Above 0 flat regions merge into fewer, larger triangles; only lane 'fast' meshes adaptively (lane 'exact' refuses it), and a PicoVoxel release whose toMesh takes no options refuses it too.",
     ),
   meshRelax: z
     .boolean()
     .default(false)
-    .describe('Relax disoriented triangles of an adaptive exported mesh (meshAdaptivity above 0). Default false.'),
+    .describe('Relax disoriented triangles of an adaptive export (meshAdaptivity above 0). Default false.'),
 });
 
 const vector3Schema = z.tuple([z.number(), z.number(), z.number()]);

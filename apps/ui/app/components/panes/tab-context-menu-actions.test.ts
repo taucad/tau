@@ -1,5 +1,14 @@
+import { renderHook } from '@testing-library/react';
+import type { DockviewPanelApi } from 'dockview-react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { copyPathToClipboard } from '#components/panes/tab-context-menu-actions.js';
+import {
+  closeAllPanelsInGroup,
+  closeOtherPanels,
+  closePanelsToTheLeft,
+  closePanelsToTheRight,
+  copyPathToClipboard,
+} from '#components/panes/tab-context-menu-actions.js';
+import { useDockviewTerminalCloseHost } from '#components/terminal/terminal-close.js';
 
 const mocks = vi.hoisted(() => ({ error: vi.fn() }));
 
@@ -45,5 +54,40 @@ describe('copyPathToClipboard', () => {
     expect(mocks.error).toHaveBeenCalledWith('Failed to copy path', {
       description: expect.stringContaining(message) as string,
     });
+  });
+});
+
+describe('bulk close with a running Terminal (T15)', () => {
+  /* One group: a.scad, the Terminal, b.scad. The Terminal holds its close for the person's choice. */
+  const createGroup = () => {
+    const panels: Array<{ id: string; api: DockviewPanelApi }> = [];
+    const group = { panels };
+    for (const id of ['a.scad', 'workbench:terminal', 'b.scad']) {
+      panels.push({
+        id,
+        api: { id, group, close: vi.fn(), setActive: vi.fn() } as unknown as DockviewPanelApi,
+      });
+    }
+    const terminal = panels[1]!.api;
+    const request = vi.fn(() => true);
+    const { result } = renderHook(() => useDockviewTerminalCloseHost(terminal, vi.fn()));
+    result.current.register(request);
+    const closed = (): string[] =>
+      panels.filter((panel) => vi.mocked(panel.api.close).mock.calls.length > 0).map((panel) => panel.id);
+    return { panels, terminal, request, closed };
+  };
+
+  it.each([
+    { name: 'Close All', action: closeAllPanelsInGroup, from: 0, expected: ['a.scad', 'b.scad'] },
+    { name: 'Close Others', action: closeOtherPanels, from: 0, expected: ['b.scad'] },
+    { name: 'Close to the Right', action: closePanelsToTheRight, from: 0, expected: ['b.scad'] },
+    { name: 'Close to the Left', action: closePanelsToTheLeft, from: 2, expected: ['a.scad'] },
+  ])('$name closes the other tabs and leaves the Terminal to ask', ({ action, from, expected }) => {
+    const { panels, terminal, request, closed } = createGroup();
+    action(panels[from]!.api);
+    expect(request).toHaveBeenCalledOnce();
+    expect(terminal.close).not.toHaveBeenCalled();
+    expect(terminal.setActive).toHaveBeenCalledOnce();
+    expect(closed()).toEqual(expected);
   });
 });

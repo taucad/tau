@@ -11,13 +11,20 @@ import { getLiveViewOptions, setLiveViewOptions } from '#workbench-records/live-
 
 type ViewRecord = ReturnType<typeof workbenchRecords.view.schema.parse>;
 
-const mockState = vi.hoisted(() => ({
-  evaluation: undefined as Evaluation | undefined,
-  record: undefined as ViewRecord | undefined,
-  edit: vi.fn(),
-}));
+const mockState = vi.hoisted(() => {
+  const evaluateOptions: Record<string, unknown> = {};
+  return {
+    evaluation: undefined as Evaluation | undefined,
+    evaluateOptions,
+    record: undefined as ViewRecord | undefined,
+    edit: vi.fn(),
+  };
+});
 
-vi.mock('@xstate/react', () => ({ useSelector: () => mockState.evaluation }));
+vi.mock('@xstate/react', () => ({
+  useSelector: (_actor: unknown, selector: { name: string }) =>
+    selector.name === 'selectCadEvaluateOptions' ? mockState.evaluateOptions : mockState.evaluation,
+}));
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ viewRecords: new Map(mockState.record ? [['pane-1', mockState.record]] : []) }),
 }));
@@ -51,30 +58,6 @@ const tessellation: NonNullable<ViewOffer['options']> = {
   defaults: { tessellation: { linearTolerance: 0.02, angularTolerance: 20 } },
 };
 const model: ViewOffer = { id: 'model', title: 'Model', mimeType: 'model/gltf-binary', options: tessellation };
-
-/** The mesh options a voxel kernel's view offers: the runtime adds its evaluate options to the view's own. */
-const meshing: NonNullable<NonNullable<ViewOffer['options']>['schema']['properties']> = {
-  meshAdaptivity: { examples: [0.25], type: 'number', minimum: 0, exclusiveMaximum: 1 },
-  meshRelax: { default: false, type: 'boolean' },
-};
-const voxelOffers: Record<'picogk' | 'picovoxel', NonNullable<ViewOffer['options']>> = {
-  picogk: { schema: { type: 'object', properties: meshing }, defaults: { meshRelax: false } },
-  picovoxel: {
-    schema: {
-      type: 'object',
-      properties: {
-        lane: { default: 'fast', type: 'string', enum: ['fast', 'exact'] },
-        region: {
-          type: 'object',
-          properties: { min: { type: 'array' }, max: { type: 'array' } },
-          required: ['min', 'max'],
-        },
-        ...meshing,
-      },
-    },
-    defaults: { lane: 'fast', meshRelax: false },
-  },
-};
 const cadActor = mock<ActorRefFrom<typeof cadMachine>>();
 
 const offer = (views: readonly ViewOffer[]): void => {
@@ -97,6 +80,44 @@ const savedRecord = (): ViewRecord => {
 };
 
 describe('viewer kernel settings', () => {
+  it('shows evaluate options at their usual value and re-evaluates with an edit once it rests', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    cadActor.send.mockClear();
+    mockState.evaluation = {
+      id: 'e1',
+      success: true,
+      transient: false,
+      views: [{ id: 'model', title: 'Model', mimeType: 'model/gltf-binary' }],
+      exports: [],
+      issues: [],
+      evaluateOptions: {
+        schema: {
+          type: 'object',
+          properties: {
+            meshAdaptivity: { type: 'number', minimum: 0, exclusiveMaximum: 1, examples: [0.25] },
+            meshRelax: { type: 'boolean', default: false },
+          },
+        },
+        defaults: { meshRelax: false },
+      },
+    };
+    render(<SettingsMenu />);
+    fireEvent.click(screen.getByRole('menuitem', { name: /Kernel settings/ }));
+    expect(screen.getByRole('menuitem', { name: /^Mesh adaptivity, 0\.25/ })).toBeInTheDocument();
+
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: /^Mesh adaptivity/ }), { key: 'ArrowLeft' });
+    expect(cadActor.send).not.toHaveBeenCalled();
+    act(() => {
+      vi.advanceTimersByTime(viewOptionsSaveDelay);
+    });
+    const sent = cadActor.send.mock.lastCall?.[0];
+    expect(sent?.type).toBe('setEvaluateOptions');
+    if (sent?.type === 'setEvaluateOptions') {
+      expect(sent.evaluateOptions['meshAdaptivity']).toBeCloseTo(0.24, 5);
+    }
+    mockState.evaluation = undefined;
+  });
+
   afterEach(() => {
     vi.useRealTimers();
     setLiveViewOptions('pane-1', undefined);
@@ -205,33 +226,4 @@ describe('viewer kernel settings', () => {
     expect(mockState.edit).toHaveBeenCalledTimes(1);
     expect(savedRecord().kernelViews).toEqual([{ id: 'model', options: tessellation.defaults }]);
   });
-
-  it.each(['picogk', 'picovoxel'] as const)(
-    'offers %s mesh adaptivity at its Balanced value and relax, and leaves an untouched adaptivity unset',
-    (kernel) => {
-      const options = voxelOffers[kernel];
-      offer([{ id: 'model', title: 'Model', mimeType: 'model/gltf-binary', options }]);
-      render(<SettingsMenu />);
-      fireEvent.click(screen.getByRole('menuitem', { name: /Kernel settings/ }));
-      // Only the number and switch rows show; the lane and the crop box stay out of the menu.
-      expect(screen.getByRole('menuitem', { name: 'Mesh adaptivity, 0.25' })).toBeInTheDocument();
-      expect(screen.getByRole('switch', { name: 'Mesh relax' })).toHaveAttribute('aria-checked', 'false');
-      expect(screen.queryByRole('menuitem', { name: /^Lane/ })).not.toBeInTheDocument();
-      expect(screen.queryByRole('group', { name: 'Region' })).not.toBeInTheDocument();
-
-      // Relaxing sends the view's whole options without an adaptivity: the kernel keeps resolving its default.
-      fireEvent.click(screen.getByRole('menuitem', { name: /^Mesh relax/ }));
-      expect(getLiveViewOptions('pane-1')).toEqual({
-        viewId: 'model',
-        options: { ...options.defaults, meshRelax: true },
-      });
-
-      // A step from the shown Balanced value sends an explicit adaptivity.
-      fireEvent.keyDown(screen.getByRole('menuitem', { name: /^Mesh adaptivity/ }), { key: 'ArrowRight' });
-      expect(getLiveViewOptions('pane-1')).toEqual({
-        viewId: 'model',
-        options: { ...options.defaults, meshRelax: true, meshAdaptivity: 0.26 },
-      });
-    },
-  );
 });

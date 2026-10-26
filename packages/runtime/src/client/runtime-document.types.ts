@@ -38,7 +38,16 @@ export type ExportOffer<Id extends string = string> = Readonly<{
 /** One admitted evaluation; a failed evaluation never silently retains an older export source. @public */
 export type Evaluation<ViewId extends string = string, ExportId extends string = string> = Readonly<
   (
-    | { success: true; views: ReadonlyArray<ViewOffer<ViewId>>; exports: ReadonlyArray<ExportOffer<ExportId>> }
+    | {
+        success: true;
+        views: ReadonlyArray<ViewOffer<ViewId>>;
+        exports: ReadonlyArray<ExportOffer<ExportId>>;
+        /**
+         * The kernel's evaluate options, which every view of this evaluation shares; absent when it takes none. A host
+         * changes them with `update({ evaluateOptions })`, which re-evaluates the document.
+         */
+        evaluateOptions?: Readonly<{ schema: JSONSchema7; defaults: Readonly<Record<string, unknown>> }>;
+      }
     | { success: false }
   ) & {
     id: string;
@@ -168,18 +177,11 @@ type ExportDeclarationFor<K, Id extends string> = K extends unknown
     : never
   : never;
 type SchemaInput<D> = D extends { readonly optionsSchema: infer Schema extends z.ZodType } ? z.input<Schema> : never;
-type OptionFieldOf<Input> = [Input] extends [never]
+type OptionField<D> = [SchemaInput<D>] extends [never]
   ? { readonly options?: never }
-  : Readonly<Record<never, never>> extends Input
-    ? { readonly options?: Input }
-    : { readonly options: Input };
-type OptionField<D> = OptionFieldOf<SchemaInput<D>>;
-/** A view's own options, and any of its kernel's evaluate options: a view that sets one renders its own build. */
-type ViewOptionsInput<K, D> = [KernelEvaluateOptions<K>] extends [never]
-  ? SchemaInput<D>
-  : [SchemaInput<D>] extends [never]
-    ? Partial<KernelEvaluateOptions<K>>
-    : SchemaInput<D> & Partial<KernelEvaluateOptions<K>>;
+  : Readonly<Record<never, never>> extends SchemaInput<D>
+    ? { readonly options?: SchemaInput<D> }
+    : { readonly options: SchemaInput<D> };
 type ContentKeys<D> = D extends { readonly content: infer C } ? ContentKeysOf<C> : never;
 type MiddlewareViewKeys<
   Middleware extends readonly MiddlewarePlugin[],
@@ -207,7 +209,7 @@ type ViewRequestFor<K, Middleware extends readonly MiddlewarePlugin[], Id extend
   ViewDeclarationFor<K, Id> extends infer D
     ? D extends unknown
       ? Readonly<
-          OptionFieldOf<ViewOptionsInput<K, D>> &
+          OptionField<D> &
             (D extends { readonly instances: true } ? { instance?: string | null } : { instance?: never }) &
             ContentRequestFor<Extract<ContentKeys<D> | MiddlewareViewKeys<Middleware, MediaOf<D>>, RuntimeContentKey>>
         >

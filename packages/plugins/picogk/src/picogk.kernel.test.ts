@@ -6,7 +6,6 @@ import { NodeIO, WebIO } from '@gltf-transform/core';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { createMockFileSystem, createMockKernelRuntime, expectKernelProjectionOrder } from '@taucad/runtime-testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { z } from 'zod';
 
 import { picogkKernel } from '#picogk.kernel.js';
 import { picogkExportSchemas, picogkOptionsSchema, picogkRenderSchema } from '#picogk.schemas.js';
@@ -409,29 +408,23 @@ describe('PicoGK kernel', () => {
     expect(built.handle.tessellation).not.toHaveProperty('relax');
   });
 
-  it('reports the meshing a view delivered as the export build, and an explicit or report-less one as nothing', () => {
+  it('reports the meshing a handle holds as its export build, and a report-less snapshot as nothing', () => {
     const glb = new Uint8Array(4);
     const tessellation = { triangles: 1, vertices: 3, elapsed: 1 };
-    const effective = (
-      handle: Parameters<NonNullable<typeof definition.effectiveOptions>>[0]['handle'],
-      options = picogkRenderSchema.parse({ meshRelax: true }),
-    ) => definition.effectiveOptions!({ handle, options }, runtime, context());
+    const options = picogkRenderSchema.parse({ meshRelax: true });
+    const effective = (handle: Parameters<NonNullable<typeof definition.effectiveOptions>>[0]['handle']) =>
+      definition.effectiveOptions!({ handle, options }, runtime, context());
     expect(effective({ glb, tessellation })).toEqual({ meshAdaptivity: 0, meshRelax: false });
-    // A default view meshed at Balanced is the build an explicit export of the same meshing asks for.
     expect(effective({ glb, tessellation: { ...tessellation, adaptivity: 0.25, relax: true } })).toEqual({
       meshAdaptivity: 0.25,
       meshRelax: true,
     });
-    expect(
-      effective(
-        { glb, tessellation: { ...tessellation, adaptivity: 0.5, relax: false } },
-        picogkRenderSchema.parse({ meshAdaptivity: 0.5 }),
-      ),
-    ).toBeUndefined();
     expect(effective({ glb })).toBeUndefined();
-    // The default export's construction options are exactly the reported uniform ones.
-    expect(picogkExportSchemas.glb.pick({ meshAdaptivity: true, meshRelax: true }).parse({})).toEqual(
-      effective({ glb, tessellation }),
+    // A default export's construction options are exactly a uniform handle's, and an adaptive export's an adaptive one's.
+    const exportMeshing = picogkExportSchemas.glb.pick({ meshAdaptivity: true, meshRelax: true });
+    expect(exportMeshing.parse({})).toEqual(effective({ glb, tessellation }));
+    expect(exportMeshing.parse({ meshAdaptivity: 0.25, meshRelax: true })).toEqual(
+      effective({ glb, tessellation: { ...tessellation, adaptivity: 0.25, relax: true } }),
     );
   });
 
@@ -463,15 +456,11 @@ describe('PicoGK kernel', () => {
     });
   });
 
-  it('leaves view adaptivity unset by default and meshes every export uniformly unless it asks otherwise', () => {
+  it('leaves view adaptivity unset by default and meshes every export uniformly unless it asks', () => {
     expect(picogkRenderSchema.parse({})).toEqual({ meshRelax: false });
     expect(picogkRenderSchema.parse({ meshAdaptivity: 0 })).toEqual({ meshAdaptivity: 0, meshRelax: false });
     expect(picogkRenderSchema.safeParse({ meshAdaptivity: 1 }).success).toBe(false);
     expect(picogkRenderSchema.safeParse({ meshAdaptivity: -0.1 }).success).toBe(false);
-    // The offered schema shows Balanced as the unset value without making it a default.
-    expect(z.toJSONSchema(picogkRenderSchema, { io: 'input' }).properties?.['meshAdaptivity']).toMatchObject({
-      examples: [0.25],
-    });
     for (const schema of [picogkExportSchemas.glb, picogkExportSchemas.gltf]) {
       expect(schema.parse({})).toMatchObject({ meshAdaptivity: 0, meshRelax: false });
       expect(schema.parse({ meshAdaptivity: 0.5, meshRelax: true })).toMatchObject({

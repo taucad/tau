@@ -86,6 +86,7 @@ const evaluation = discriminatedWireUnion('success', [
       transient: z.boolean(),
       views: z.array(viewOffer).readonly(),
       exports: z.array(exportOffer).readonly(),
+      evaluateOptions: options.optional(),
       issues,
       ...provenance,
     })

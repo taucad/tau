@@ -125,13 +125,17 @@ unsupported.
 
 One preset, `default`, selecting `kernels.default`.
 
-## Mesh adaptivity
-
-PicoGK meshes Voxels with OpenVDB. `meshAdaptivity` (0 to below 1) merges flat regions into fewer, larger triangles; `meshRelax` (default `false`) relaxes disoriented triangles of an adaptive mesh. A view that sets no `meshAdaptivity` asks for 0.25 (Balanced): a PicoGK runtime that meshes adaptively applies it, an older one answers with the uniform mesh, and an explicit value above 0 on such a runtime is refused with `meshing-unsupported`. A view may set both (the viewer's Kernel settings offer them), and the runtime renders it from a build of its own. GLB and glTF exports take their own `meshAdaptivity` and `meshRelax`, defaulting to 0 and `false`, so a default export is the uniform mesh, byte for byte as before, whatever the view shows.
-
 ## Project files
 
 `@taucad/picogk/project/*` holds the files a new PicoGK project carries, so it runs outside Tau with the .NET 10 SDK on macOS arm64 or Windows x64 (`dotnet restore --locked-mode`, then `dotnet run`, which opens PicoGK's viewer): `project.csproj`, which Tau writes as `<Name>.csproj` and which references upstream PicoGK 2.3.0 from NuGet, and its `packages.lock.json`. The project's `main.cs` is the program, so no separate entry file is needed. When a root `.csproj` references PicoGK at another version, evaluation succeeds with a `LIBRARY_VERSION_MISMATCH` warning located at the reference.
+
+## Display meshing
+
+`meshAdaptivity` (0 to below 1) and `meshRelax` (default `false`) are evaluate options, so the viewer's
+settings menu shows them and a change re-evaluates the model. Unset, a view meshes at 0.25 (Balanced) where the
+prepared runtime meshes adaptively, and uniformly where it does not; the tessellation report says which. Exports
+take the same two options and mesh uniformly (0) unless they set one, so `export('glb', { meshAdaptivity: 0.25 })`
+writes the adaptive mesh. An export whose meshing matches the view's reuses the view's build; any other rebuilds.
 
 ## Large models
 

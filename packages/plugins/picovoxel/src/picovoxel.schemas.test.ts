@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { z } from 'zod';
 import type * as IsolationModule from '@taucad/runtime/cross-origin-isolation';
 import type { IsolationStatus } from '@taucad/runtime/cross-origin-isolation';
 
@@ -129,7 +128,7 @@ describe('lane schemas', () => {
     });
   });
 
-  it('should resolve an unset view adaptivity, keep an explicit one and default every export to the uniform mesh', () => {
+  it('should resolve an unset view adaptivity, keep an explicit one and mesh every export uniformly unless it asks', () => {
     expect(picovoxelRenderSchema.parse({ lane: 'exact', meshAdaptivity: 0.5 })).toMatchObject({ meshAdaptivity: 0.5 });
     expect(picovoxelRenderSchema.parse({ meshAdaptivity: 0.5, meshRelax: true })).toMatchObject({
       meshAdaptivity: 0.5,
@@ -138,14 +137,9 @@ describe('lane schemas', () => {
     for (const meshAdaptivity of [-0.1, 1]) {
       expect(picovoxelRenderSchema.safeParse({ meshAdaptivity }).success).toBe(false);
     }
-    // The offered schema shows Balanced as the unset value without making it a default.
-    expect(z.toJSONSchema(picovoxelRenderSchema, { io: 'input' }).properties?.['meshAdaptivity']).toMatchObject({
-      examples: [0.25],
-    });
     for (const schema of Object.values(picovoxelExportSchemas)) {
       expect(schema.parse({})).toMatchObject({ meshAdaptivity: 0, meshRelax: false });
-      expect(schema.parse({ lane: 'fast', meshAdaptivity: 0.5, meshRelax: true })).toMatchObject({
-        lane: 'fast',
+      expect(schema.parse({ meshAdaptivity: 0.5, meshRelax: true })).toMatchObject({
         meshAdaptivity: 0.5,
         meshRelax: true,
       });

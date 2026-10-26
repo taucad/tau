@@ -19,7 +19,7 @@ const withoutAdaptiveMeshing: ReadonlySet<string> = new Set(['0.1.0']);
 
 /**
  * Balanced adaptivity: what a fast-lane preview of a release that meshes adaptively would mesh at when the
- * view sets no `meshAdaptivity`. An explicit value always wins, and an export meshes at 0 unless it sets one.
+ * view sets no `meshAdaptivity`. An explicit value always wins, and an export meshes at its own value, 0 by default.
  */
 export const picovoxelPreviewAdaptivity = 0.25;
 
@@ -77,7 +77,7 @@ export const resolvePicovoxelMeshing = (
   if (lane === 'exact') {
     return {
       refusal: {
-        message: `PicoVoxel meshes the exact lane uniformly: adaptive meshing (meshAdaptivity ${String(meshAdaptivity)}) changes the bytes the exact lane reproduces. Use lane: 'fast' for an adaptive view or STL export (stamped LANE=fast), or meshAdaptivity: 0.`,
+        message: `PicoVoxel meshes the exact lane uniformly: adaptive meshing (meshAdaptivity ${String(meshAdaptivity)}) changes the bytes the exact lane reproduces. Use lane: 'fast' for an adaptive view, or meshAdaptivity: 0.`,
         code: 'REPRESENTATION_UNSUPPORTED',
         type: 'runtime',
         severity: 'error',

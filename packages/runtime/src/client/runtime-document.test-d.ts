@@ -267,11 +267,6 @@ describe('typed runtime document', () => {
     });
     opened.view();
     opened.view('diagram', { options: { scale: 2 } });
-    // A view may set its kernel's evaluate options beside its own.
-    opened.view('preview', { options: { precision: 0.5 } });
-    opened.view('diagram', { options: { scale: 2, precision: 0.5 } });
-    // @ts-expect-error -- a view's evaluate options keep the evaluate schema.
-    opened.view('preview', { options: { precision: 'fine' } });
     // @ts-expect-error -- secondary diagram view still requires its own options.
     opened.view('diagram');
     expectTypeOf(opened.export('bom', { options: { delimiter: ',' } })).toEqualTypeOf<Promise<ExportResult<'bom'>>>();

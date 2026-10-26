@@ -88,29 +88,45 @@ export const bindMaskedDirectories = (
     return undefined;
   }
   const regexEscape = (path: string): string => path.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`);
+  // Volumes on macOS are normally case-insensitive, so a path may be spelled in any letter case. Fold every ASCII
+  // letter of the parent and the reserved name; on a case-sensitive volume this only over-protects.
+  const fold = (text: string): string =>
+    [...text]
+      .map((character) =>
+        /[A-Za-z]/u.test(character) ? `[${character.toLowerCase()}${character.toUpperCase()}]` : regexEscape(character),
+      )
+      .join('');
   const rules = masked
     .flatMap((root) => {
-      // Registry-reserved names are ASCII. Match their case and trailing dot/space/colon spellings without
-      // interpreting arbitrary path bytes as SBPL or regex syntax. Parent paths retain their physical spelling.
-      const name = [...basename(root)]
-        .map((character) =>
-          /[A-Za-z]/u.test(character)
-            ? `[${character.toLowerCase()}${character.toUpperCase()}]`
-            : regexEscape(character),
-        )
-        .join('');
-      const region = `(regex ${JSON.stringify(`^${regexEscape(dirname(root))}/${name}[. ]*(:[^/]*)?(/.*)?$`)})`;
+      // Registry-reserved names are ASCII. Match their trailing dot/space/colon spellings without interpreting
+      // arbitrary path bytes as SBPL or regex syntax.
+      const container = `^${fold(dirname(root))}/${fold(basename(root))}[. ]*(:[^/]*)?`;
+      const region = `(regex ${JSON.stringify(`${container}(/.*)?$`)})`;
+      const itself = `(regex ${JSON.stringify(`${container}$`)})`;
+      const within = (paths: readonly string[]): string[] =>
+        paths.filter((path) => path !== root && inside(path, root));
       const explicit = (paths: readonly string[]): string[] =>
-        paths.filter((path) => path !== root && inside(path, root)).map((path) => `(subpath ${JSON.stringify(path)})`);
+        within(paths).map((path) => `(subpath ${JSON.stringify(path)})`);
+      const opened = [...filesystem.readable, ...filesystem.writable, ...(filesystem.readOnly ?? [])];
+      // Directories between the container and an opened child, which a lookup of that child must stat.
+      const between = within(opened).flatMap((path) => {
+        const steps: string[] = [];
+        for (let step = dirname(path); step !== root && inside(step, root); step = dirname(step)) {
+          steps.push(`(literal ${JSON.stringify(step)})`);
+        }
+        return steps;
+      });
       const subtract = (filters: readonly string[]): string =>
         filters.length === 0
           ? region
           : `(require-all ${region} ${[...new Set(filters)].map((filter) => `(require-not ${filter})`).join(' ')})`;
       return [
-        `(deny file-read* ${subtract([
-          `(literal ${JSON.stringify(root)})`,
-          ...explicit([...filesystem.readable, ...filesystem.writable, ...(filesystem.readOnly ?? [])]),
-        ])})`,
+        `(deny file-read* ${subtract([itself, ...between, ...explicit(opened)])})`,
+        // The container stays traversable, but listing it would disclose every hidden name.
+        `(deny file-read-data ${itself})`,
+        // The runtime allows directory metadata everywhere with an operation-specific rule, which outranks the
+        // wildcard above; hidden directories must not even be stat-able.
+        `(deny file-read-metadata ${subtract([itself, ...between, ...explicit(opened)])})`,
         `(deny file-write* ${subtract(explicit(filesystem.writable))})`,
         // Seatbelt prefers an operation-specific rule over a wildcard regardless of order, and the runtime
         // re-allows create and unlink beneath every write root. Name both so the mask outranks that allow.

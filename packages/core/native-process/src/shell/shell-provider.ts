@@ -36,6 +36,9 @@ export type ShellFilesystem = Readonly<{
    * Absent containers require a canonical immediate parent and remain uncreatable on Linux.
    * Linux rebinds existing children: file roots cannot be created if absent, deleted or atomically replaced,
    * and absent directory roots are omitted. Unknown temporary children never reach the host filesystem.
+   * On both platforms a file root cannot be atomically replaced through a temporary sibling inside the
+   * container, because that sibling is an unknown child. Listing the container shows only the opened
+   * children on Linux and is refused on macOS.
    */
   masked?: readonly string[] | undefined;
 }>;

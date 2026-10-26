@@ -476,6 +476,61 @@ describe.runIf(enabled)('shell conformance', () => {
     expect(existsSync(reserved)).toBe(false);
   });
 
+  conformance(
+    'C16',
+    'entries hidden only by a reserved container stay unreadable, unlisted and unlinkable',
+    async () => {
+      const project = join(work, 'region-probes');
+      const reserved = join(project, '.tau');
+      const authored = join(reserved, 'parameters');
+      const agents = join(reserved, 'AGENTS.md');
+      const regionOnly = join(reserved, 'region-only');
+      const hiddenDirectory = join(reserved, 'hidden-dir');
+      mkdirSync(authored, { recursive: true });
+      mkdirSync(hiddenDirectory);
+      writeFileSync(agents, 'AUTHORED');
+      writeFileSync(regionOnly, 'REGION-CANARY');
+      writeFileSync(join(hiddenDirectory, 'inner'), 'HIDDEN-DIR-CANARY');
+      const filesystem = {
+        readable: [readonly, home],
+        writable: [project, authored, agents],
+        denied: [secret],
+        masked: [reserved],
+      };
+      const positive = await run(
+        'cat .tau/AGENTS.md && ls .tau/parameters && cd .tau/parameters && printf CHILD > value && cd ../.. && realpath .tau/parameters',
+        { filesystem, workingDirectory: project },
+      );
+      expect(positive.exitCode, positive.stderr).toBe(0);
+      expect(positive.stdout).toContain('AUTHORED');
+      expect(readFileSync(join(authored, 'value'), 'utf8')).toBe('CHILD');
+      // Each probe names a different way to observe an entry the mask alone hides; the macOS one spells the
+      // checkout in upper case, which a case-insensitive volume resolves to the same directory.
+      const probes = [
+        'cat .tau/region-only',
+        'ls -a .tau',
+        'ln .tau/region-only linked && cat linked',
+        'ls -ld .tau/hidden-dir',
+        'ls .tau/hidden-dir; cat .tau/hidden-dir/inner',
+        '[ -e .tau/region-only ] && echo VISIBLE-FILE; [ -e .tau/hidden-dir ] && echo VISIBLE-DIR; true',
+        'U=$(pwd | tr a-z A-Z); printf UNKNOWN > "$U/.tau/future"; cat "$U/.tau/region-only"; ls -a "$U/.tau"; ls -ld "$U/.tau/hidden-dir"',
+      ];
+      const outcomes = await Promise.all(
+        probes.map(async (command) => ({
+          command,
+          ...(await run(command, { filesystem, workingDirectory: project })),
+        })),
+      );
+      const leaks = outcomes
+        .filter(({ stdout }) => /REGION-CANARY|HIDDEN-DIR-CANARY|region-only|hidden-dir|VISIBLE/u.test(stdout))
+        .map(({ command, stdout }) => ({ command, stdout }));
+      expect(leaks).toEqual([]);
+      expect(existsSync(join(project, 'linked'))).toBe(false);
+      expect(existsSync(join(reserved, 'future'))).toBe(false);
+      expect(readFileSync(regionOnly, 'utf8')).toBe('REGION-CANARY');
+    },
+  );
+
   conformance('C03', 'startup hooks are refused and the shell sees only the environment it was given', async () => {
     const positive = await run('printf %s "$GIVEN"', {
       environment: { PATH: '/usr/bin:/bin', HOME: work, LANG: 'C', GIVEN: 'GIVEN-VALUE' },

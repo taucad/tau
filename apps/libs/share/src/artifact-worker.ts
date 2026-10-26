@@ -19,6 +19,7 @@ type WorkerResponse =
   | { readonly id: number; readonly success: false; readonly code?: string; readonly message: string };
 
 /** Every share failure code, so a worker reply's code is checked rather than trusted. */
+/* eslint-disable @typescript-eslint/naming-convention -- keys are the ShareErrorCode wire values. */
 const shareErrorCodes = {
   SHARE_ARTIFACT_INVALID: true,
   SHARE_ARTIFACT_LIMIT: true,
@@ -30,6 +31,7 @@ const shareErrorCodes = {
   SHARE_PASSWORD_REQUIRED: true,
   SHARE_PROVIDER_UNKNOWN: true,
 } as const satisfies Record<ShareErrorCode, true>;
+/* eslint-enable @typescript-eslint/naming-convention -- end of the wire-value keys. */
 
 const isShareErrorCode = (code: string | undefined): code is ShareErrorCode =>
   code !== undefined && Object.hasOwn(shareErrorCodes, code);

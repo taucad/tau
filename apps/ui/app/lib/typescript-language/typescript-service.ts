@@ -16,6 +16,29 @@ export type CreateTypeScriptServiceOptions = Readonly<{
   onWorkerFailure?: (error: Error) => void;
 }>;
 
+async function projectStaticPackageNames(
+  readProjectFile: CreateTypeScriptServiceOptions['readProjectFile'],
+): Promise<string[]> {
+  try {
+    const text = await readProjectFile?.('package.json');
+    if (!text) {
+      return [];
+    }
+    const manifest: unknown = JSON.parse(text);
+    if (typeof manifest !== 'object' || manifest === null || Array.isArray(manifest)) {
+      return [];
+    }
+    const dependencies: unknown = (manifest as Record<string, unknown>)['dependencies'];
+    if (typeof dependencies !== 'object' || dependencies === null || Array.isArray(dependencies)) {
+      return [];
+    }
+    return Object.entries(dependencies).flatMap(([name, version]) => (typeof version === 'string' ? [name] : []));
+  } catch {
+    // A missing or malformed package manifest must not prevent plain editing.
+    return [];
+  }
+}
+
 export type TypeScriptWorkerPort = Pick<
   TypeScriptWorkerClient,
   'open' | 'change' | 'close' | 'setExtraLib' | 'removeExtraLib' | 'request' | 'dispose'
@@ -211,7 +234,8 @@ export async function createTypeScriptService(options: CreateTypeScriptServiceOp
     onFatal: options.onWorkerFailure,
   });
   try {
-    const staticTypes = await loadKernelStaticTypes(options.dependencyReader, options.staticPackageNames ?? []);
+    const packageNames = options.staticPackageNames ?? (await projectStaticPackageNames(options.readProjectFile));
+    const staticTypes = await loadKernelStaticTypes(options.dependencyReader, packageNames);
     const acquisition = new TypeAcquisitionController({
       client,
       staticTypes,

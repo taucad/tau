@@ -1,8 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
 import { EditorDocument } from '#lib/editor-document.js';
 import { TypeAcquisitionController } from '#lib/typescript-language/type-acquisition.js';
-import { TypeScriptService } from '#lib/typescript-language/typescript-service.js';
+import { createTypeScriptService, TypeScriptService } from '#lib/typescript-language/typescript-service.js';
 import type { TypeScriptWorkerPort } from '#lib/typescript-language/typescript-service.js';
+
+const setExtraLib = vi.hoisted(() => vi.fn(async (_uri: string, _text: string) => undefined));
+vi.mock('@taucad/lsp/typescript-worker/client', () => ({
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Mock the exported worker class name.
+  TypeScriptWorkerClient: class {
+    public readonly setExtraLib = setExtraLib;
+    public dispose(): void {
+      /* No worker in this service boot test. */
+    }
+  },
+}));
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let release = (): void => {
@@ -94,4 +105,67 @@ describe('TypeScriptService document lifecycle', () => {
     expect(client.close).toHaveBeenLastCalledWith('file:///new.ts');
     service.dispose();
   });
+});
+
+describe('TypeScript service static declarations', () => {
+  it('loads the selected project dependency ambient declarations without an import', async () => {
+    setExtraLib.mockClear();
+    const files = new Map([
+      ['/node_modules/tscircuit/package.json', '{"name":"tscircuit","types":"index.d.ts"}'],
+      [
+        '/node_modules/tscircuit/index.d.ts',
+        'declare global { namespace JSX { interface IntrinsicElements { board: object } } }',
+      ],
+      ['/node_modules/unrelated/index.d.ts', 'declare global { interface Window { unrelated: true } }'],
+    ]);
+    function readFile(path: string, options: 'utf8'): Promise<string>;
+    function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
+    async function readFile(path: string, options?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
+      const content = files.get(path);
+      if (content === undefined) {
+        throw new Error(`Missing ${path}`);
+      }
+      return options === 'utf8' ? content : new TextEncoder().encode(content);
+    }
+    const dependencyReader = {
+      readdir: vi.fn(async (path: string) =>
+        path === '/node_modules/tscircuit' ? ['index.d.ts', 'package.json'] : ['index.d.ts'],
+      ),
+      readFile,
+    };
+    const service = await createTypeScriptService({
+      dependencyReader,
+      dynamicTypes: false,
+      readProjectFile: async (path) =>
+        path === 'package.json'
+          ? JSON.stringify({ dependencies: { tscircuit: 'npm:@tscircuit/core@0.0.1844' } })
+          : undefined,
+    });
+    expect(setExtraLib).toHaveBeenCalledWith(
+      'file:///node_modules/tscircuit/index.d.ts',
+      expect.stringContaining('namespace JSX'),
+    );
+    expect(dependencyReader.readdir).toHaveBeenCalledWith('/node_modules/tscircuit');
+    expect(dependencyReader.readdir.mock.calls.every(([path]) => path.startsWith('/node_modules/tscircuit'))).toBe(
+      true,
+    );
+    expect(setExtraLib).not.toHaveBeenCalledWith('file:///node_modules/unrelated/index.d.ts', expect.anything());
+    service.dispose();
+  });
+
+  it.each([undefined, '{invalid', '{"dependencies":[]}'])(
+    'keeps plain editing available with package.json %s',
+    async (manifest) => {
+      setExtraLib.mockClear();
+      const dependencyReader = { readdir: vi.fn(), readFile: vi.fn() };
+      const service = await createTypeScriptService({
+        dependencyReader,
+        dynamicTypes: false,
+        readProjectFile: async () => manifest,
+      });
+      expect(dependencyReader.readdir).not.toHaveBeenCalled();
+      expect(setExtraLib).not.toHaveBeenCalled();
+      service.dispose();
+    },
+  );
 });

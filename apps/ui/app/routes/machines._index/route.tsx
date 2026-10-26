@@ -180,6 +180,7 @@ function ConnectedMachines({ client }: { readonly client: MachineClient }): Reac
           ) : (
             <PanelEmptyState
               icon={Printer}
+              titleLevel={2}
               title={snapshot.entries.length === 0 ? 'No machines connected' : 'No matching machines'}
               description={
                 snapshot.entries.length === 0
@@ -229,6 +230,7 @@ export default function MachinesRoute(): React.JSX.Element {
       <PageHeader title='Machines' />
       <PanelEmptyState
         icon={Printer}
+        titleLevel={2}
         title={machines.reason === 'not-granted' ? 'Machine access is not granted' : 'Open Machines in Tau desktop'}
         description='The desktop app connects to machines on this computer. Your project files stay available here.'
       >

@@ -62,6 +62,16 @@ const expectNoShellBar = async (): Promise<void> => {
   expect(bar.height).toBeUndefined();
 };
 
+/** The page's `h1`s and its document title: one heading that names the page, and a title that is not the bare app's. */
+const expectPageNamed = async (heading: string, title: string): Promise<void> => {
+  const named = await target.evaluate(() => ({
+    headingOnes: [...document.querySelectorAll('h1')].map((element) => element.textContent.trim()),
+    title: document.title,
+  }));
+  expect.soft(named.headingOnes, 'exactly one h1, naming the page').toEqual([heading]);
+  expect.soft(named.title, 'a page-specific document title').toBe(title);
+};
+
 const box = async (locator: Locator): Promise<{ x: number; y: number; width: number; height: number }> => {
   const found = await target.boundingBox(locator);
   if (!found) {
@@ -148,7 +158,7 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
     await expectShellBar('Projects', viewport.width);
   });
 
-  test('PG-PROJ-5: a copied project folder shows as needing attention, with Use this folder', async () => {
+  test('PG-PROJ-5: a copied project folder shows as needing attention, and Use this folder opens it', async () => {
     await openTouchPhone(viewport);
     await seedProjects();
     // A copy of a project folder keeps its identity: the library's duplicate-folder conflict, on this device's OPFS.
@@ -192,6 +202,15 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
     const action = await box(useThisFolder);
     expect(action.height).toBeGreaterThanOrEqual(24);
     expect(action.x + action.width).toBeLessThanOrEqual(viewport.width);
+
+    // Choosing the copy rebinds the project to it; no other route may still claim that folder.
+    await target.click(useThisFolder, { touch: true });
+    await target.expectVisible(
+      selectors.getByText(`Tau now opens ${seededProjects[0]} from this folder`, { exact: true }),
+      30_000,
+    );
+    await target.expectCount(selectors.getByText(/^Could not open /u), 0);
+    await target.expectVisible(selectors.getByRole('link', { name: `Open ${seededProjects[0]}`, exact: true }));
   });
 
   test('PG-COM-2: a community search with no match names it and Clear filters restores every example', async () => {
@@ -219,14 +238,19 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
     expect(Object.fromEntries(new URL(await target.currentUrl()).searchParams)).toEqual({});
   });
 
-  test('PG-PARTS-2: Parts, turned off in this build, explains itself and opens settings', async () => {
+  test('PG-PARTS-2: Parts, turned off in this build, says it is unavailable without pointing to a setting', async () => {
     await openTouchPhone(viewport, '/parts');
-    await target.expectVisible(selectors.getByText('Parts is turned off', { exact: true }), 60_000);
+    // The state's title is one level under the page's h1 (heading order).
+    const off = selectors.getByRole('heading', { level: 2, name: 'Parts is turned off', exact: true });
+    await target.expectVisible(off, 60_000);
+    await target.expectVisible(
+      selectors.getByText('Parts is not available in this version of Tau yet.', { exact: true }),
+    );
+    // No setting turns the flag on (`showInExperimental` is false), so the page offers none.
+    await target.expectCount(selectors.getByRole('button', { name: 'Open settings', exact: true }), 0);
     const audit = await auditPhonePage(`parts-off-${size(viewport)}`);
     expectPageRules(audit, 'parts turned off');
     await expectShellBar('Parts', viewport.width);
-    await target.click(selectors.getByRole('button', { name: 'Open settings', exact: true }), { touch: true });
-    await target.expectUrl(/[?&]settings=experimental(?:&|$)/u);
   });
 
   test('PG-AUTH-1: sign-in says when the session cannot be checked, then offers its forms', async () => {
@@ -239,18 +263,20 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
     await target.expectVisible(selectors.getByRole('button', { name: 'Retry', exact: true }));
     expectPageRules(await auditPhonePage(`auth-session-${size(viewport)}`), 'session check failed');
     await expectNoShellBar();
+    await expectPageNamed('Sign in', 'Sign in · Tau');
 
     await target.click(proceed, { touch: true });
     const email = selectors.getByRole('textbox', { name: 'Email' });
     await target.expectVisible(email, 30_000);
     await target.expectVisible(selectors.getByLabelText('Password', { exact: true }));
-    await target.expectVisible(selectors.getByRole('button', { name: 'Sign In', exact: true }));
+    await target.expectVisible(selectors.getByRole('button', { name: 'Sign in', exact: true }));
     // Named by the text they show (WCAG 2.5.3), so a voice user can say what they read.
     await target.expectVisible(selectors.getByRole('button', { name: 'Continue with GitHub', exact: true }));
     expect.soft(await target.evaluate(() => document.querySelectorAll('main').length), 'one main landmark').toBe(1);
     expectPageRules(await auditPhonePage(`auth-sign-in-${size(viewport)}`), 'sign-in form');
     await expectNoShellBar();
-    for (const field of [email, selectors.getByRole('button', { name: 'Sign In', exact: true })]) {
+    await expectPageNamed('Sign in', 'Sign in · Tau');
+    for (const field of [email, selectors.getByRole('button', { name: 'Sign in', exact: true })]) {
       // oxlint-disable-next-line no-await-in-loop -- one field at a time.
       const fieldBox = await box(field);
       expect(fieldBox.x).toBeGreaterThanOrEqual(0);
@@ -262,6 +288,9 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
     await target.expectVisible(selectors.getByRole('textbox', { name: 'Email' }), 60_000);
     expect.soft(await target.evaluate(() => document.querySelectorAll('main').length), 'one main landmark').toBe(1);
     expectPageRules(await auditPhonePage(`auth-forgot-password-${size(viewport)}`), 'forgot-password form');
+    await expectPageNamed('Forgot password', 'Forgot password · Tau');
+    // The way back says what every other sign-in entry says (I6).
+    await target.expectVisible(selectors.getByRole('link', { name: 'Sign in', exact: true }));
   });
 
   test('PG-INV-1: a signed-out invitation asks to sign in and keeps the link to come back', async () => {
@@ -274,8 +303,13 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
     expect(await target.getAttribute(signIn, 'href')).toBe(
       `/auth/sign-in?redirectTo=${encodeURIComponent('/invitations/e2e-invitation-token')}`,
     );
+    // Tau Desktop runs on computers: a touch phone is not offered it, nor its 16px "always open" checkbox.
+    const openInDesktop = selectors.getByRole('button', { name: 'Open in Tau Desktop', exact: true });
+    await target.expectHidden(openInDesktop);
+    await target.expectHidden(selectors.getByRole('checkbox', { name: 'Always open Tau links in the desktop app' }));
     const audit = await auditPhonePage(`invitation-signed-out-${size(viewport)}`);
     expectPageRules(audit, 'invitation signed out');
+    expect.soft(audit.undersized, 'no target under 24px, by the strict reading').toEqual([]);
     await expectShellBar('Project invitation', viewport.width);
     const signInBox = await box(signIn);
     expect(signInBox.height).toBeGreaterThanOrEqual(24);
@@ -366,7 +400,8 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
     await openTouchPhone(viewport, '/community');
     await target.expectVisible(selectors.getByRole('heading', { level: 1, name: 'Community' }), 60_000);
     await target.navigate('/no-such-page');
-    await target.expectVisible(selectors.getByRole('heading', { level: 2, name: 'Page Not Found' }), 60_000);
+    await target.expectVisible(selectors.getByRole('heading', { level: 1, name: 'Page not found' }), 60_000);
+    await expectPageNamed('Page not found', 'Page not found · Tau');
     const goBack = selectors.getByRole('button', { name: 'Go Back', exact: true });
     const goHome = selectors.getByRole('link', { name: 'Go Home', exact: true });
     await target.expectVisible(goBack);
@@ -386,6 +421,16 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
     await target.click(selectors.getByRole('link', { name: 'Go Home', exact: true }), { touch: true });
     await target.expectUrl(/\/$/u);
   });
+});
+
+/** D12: the phone-only hiding leaves desktop web as it was, so a laptop still meets the offer beside the invitation. */
+test('a signed-out invitation on a laptop still offers Tau Desktop', async () => {
+  await target.commands.uiOpenTarget();
+  await target.setViewport({ width: 1280, height: 800 });
+  await target.navigate('/invitations/e2e-invitation-token');
+  await target.expectVisible(selectors.getByText('Sign in to accept this invitation', { exact: true }), 60_000);
+  await target.expectVisible(selectors.getByRole('button', { name: 'Open in Tau Desktop', exact: true }));
+  await target.expectVisible(selectors.getByRole('checkbox', { name: 'Always open Tau links in the desktop app' }));
 });
 
 /**
@@ -459,6 +504,9 @@ describe('a password-protected shared link on a phone', () => {
         await target.evaluate(() => (globalThis as { __tauPasswordDisabled?: boolean[] }).__tauPasswordDisabled),
       ).toEqual([true, false]);
       expect(await target.getAttribute(field, 'aria-invalid')).toBe('true');
+      // PG-SHARE-2: the try was announced busy (the button's spinner is aria-hidden), and is not busy now.
+      expect(await readBusyStatuses()).toContain('Open project');
+      expect(await target.getAttribute(open, 'aria-busy')).toBe('false');
       expectPageRules(await auditPhonePage(`share-wrong-password-${size(viewport)}`), 'wrong password');
 
       await target.fill(field, sharePassword);

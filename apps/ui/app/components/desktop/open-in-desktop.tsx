@@ -78,6 +78,16 @@ const writeAlwaysOpen = (value: boolean): void => {
   }
 };
 
+/**
+ * Tau Desktop runs on computers, so a touch phone or tablet is never offered it: each stage's card carries
+ * `pointer-coarse:hidden` from the first paint, and this keeps a saved preference from handing off where the card is
+ * hidden. (On a phone the 16 px checkbox also passed I3 only through WCAG 2.5.8's spacing exception.)
+ *
+ * @returns Whether the primary pointer is coarse.
+ */
+const isCoarsePointer = (): boolean =>
+  typeof globalThis.matchMedia === 'function' && globalThis.matchMedia('(pointer: coarse)').matches;
+
 /** What the offer is showing, in the order a person meets it. */
 type OfferStage = 'offer' | 'opening' | 'not-opened' | 'dismissed';
 
@@ -128,7 +138,7 @@ export function OpenInDesktop({ continueLabel }: OpenInDesktopProps): React.JSX.
   }, [deepLink, location.pathname, location.search, location.hash]);
 
   useEffect(() => {
-    if (deepLink === undefined || attempted.current || !readAlwaysOpen()) {
+    if (deepLink === undefined || attempted.current || !readAlwaysOpen() || isCoarsePointer()) {
       return;
     }
     attempted.current = true;
@@ -142,7 +152,7 @@ export function OpenInDesktop({ continueLabel }: OpenInDesktopProps): React.JSX.
 
   if (stage === 'opening') {
     return (
-      <Card className='w-full max-w-sm' role='status' aria-busy='true'>
+      <Card className='w-full max-w-sm pointer-coarse:hidden' role='status' aria-busy='true'>
         <CardHeader>
           <div className='mb-2 flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary'>
             <Spinner className='size-5' />
@@ -169,7 +179,7 @@ export function OpenInDesktop({ continueLabel }: OpenInDesktopProps): React.JSX.
 
   if (stage === 'not-opened') {
     return (
-      <Card className='w-full max-w-sm'>
+      <Card className='w-full max-w-sm pointer-coarse:hidden'>
         <CardHeader>
           <div className='mb-2 flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary'>
             <CircleAlert className='size-5' aria-hidden='true' />
@@ -207,7 +217,7 @@ export function OpenInDesktop({ continueLabel }: OpenInDesktopProps): React.JSX.
   }
 
   return (
-    <Card className='w-full max-w-sm'>
+    <Card className='w-full max-w-sm pointer-coarse:hidden'>
       <CardContent className='flex flex-col gap-2'>
         <Button className='w-full' onClick={handOff}>
           <ExternalLink aria-hidden='true' />

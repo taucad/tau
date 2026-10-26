@@ -128,6 +128,29 @@ describe('OpenInDesktop', () => {
     expect(screen.getByRole('button', { name: 'Tau Desktop didn’t open' })).toBeInTheDocument();
   });
 
+  /* Tau Desktop runs on computers: a touch phone never sees the offer, and its saved preference never fires there. */
+  it('hides every stage on a coarse pointer', async () => {
+    mountAt('/invitations/tok_abcdef');
+    expect(screen.getByRole('button', { name: 'Open in Tau Desktop' }).closest('[data-slot=card]')).toHaveClass(
+      'pointer-coarse:hidden',
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Open in Tau Desktop' }));
+    expect(screen.getByText('Opening Tau Desktop').closest('[data-slot=card]')).toHaveClass('pointer-coarse:hidden');
+    await userEvent.click(screen.getByRole('button', { name: 'Tau Desktop didn’t open' }));
+    expect(screen.getByRole('button', { name: 'Try again' }).closest('[data-slot=card]')).toHaveClass(
+      'pointer-coarse:hidden',
+    );
+  });
+
+  it('keeps a saved preference from handing off on a coarse pointer', () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(pointer: coarse)' }));
+    globalThis.localStorage.setItem('tau.open-links-in-desktop', 'true');
+    mountAt('/invitations/tok_abcdef');
+
+    expect(assign).not.toHaveBeenCalled();
+    expect(screen.queryByText('Opening Tau Desktop')).not.toBeInTheDocument();
+  });
+
   it('hands off nothing on load while the preference is unset', () => {
     mountAt('/invitations/tok_abcdef');
 

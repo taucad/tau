@@ -327,6 +327,8 @@ export type CheckedEntryResult =
  * Move one file or directory in one native rename. `preconditions` name the source file (or every regular
  * file below a source directory, which must match the directory's membership exactly) and the destination,
  * `null` when it must be absent. Same-directory and cross-directory moves inside the root are both atomic.
+ * A move whose walk passes {@link checkedRenameLimits}' entries, or whose preconditions and observed bytes pass
+ * its bytes, is refused with `EXDEV` before anything moves, so `mv` falls back to copying.
  * @public
  */
 export type CheckedRename = Readonly<{
@@ -360,7 +362,18 @@ export type NodeFsRootScope = Readonly<
   }
 >;
 
-/** One admitted canonical root; the claim always covers the whole root. `signal` cancels a queued run. @public */
+/**
+ * The memory and time bound of one checked rename while the whole-root claim is held (PO-Q7): entries the source
+ * walk may visit, preconditions it may name, and bytes it may hold across preconditions and observations.
+ * @public
+ */
+export const checkedRenameLimits = Object.freeze({ entries: 4096, bytes: 64 * 1024 * 1024 });
+
+/**
+ * One admitted canonical root, exactly as `realpath` spells it; any other spelling is refused with
+ * `AUTHORITY_ROOT_NOT_CANONICAL`. The claim always covers the whole root. `signal` cancels a queued run.
+ * @public
+ */
 export type NodeFsRootRunInput = Readonly<{ root: string; signal?: AbortSignal }>;
 
 /** Run one operation while the root's OS writer and whole-root resource claim are held. @public */
@@ -391,8 +404,8 @@ const scopeClosedError = (): Error =>
 const serverInactiveError = (): Error =>
   codedError('Node filesystem server is no longer accepting requests.', 'AUTHORITY_HOST_INACTIVE');
 
-/** Live flag of the operation whose async context a call runs in; cleared when that operation settles. */
-const heldClaims = new AsyncLocalStorage<{ live: boolean }>();
+/** Live flag of the operation whose async context a call runs in, and its server; cleared when it settles. */
+const heldClaims = new AsyncLocalStorage<{ live: boolean; server: AbortController }>();
 
 const bytesOf = (value: Uint8Array<ArrayBuffer> | string): Uint8Array<ArrayBuffer> =>
   typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value);
@@ -432,13 +445,68 @@ type ExpectedState = Exclude<EntryState, 'directory'>;
 const matches = (actual: EntryState, expected: ExpectedState): boolean =>
   actual === null ? expected === null : actual !== 'directory' && expected !== null && sameBytes(actual, expected);
 
-// Every regular file below one directory, by root-relative path.
-const regularFilesBelow = async (provider: NodeFsProvider, directory: string): Promise<string[]> => {
+const renameTooLarge = (from: string): Error =>
+  Object.assign(
+    codedError(
+      `EXDEV: rename '${from}' exceeds the checked rename bound of ${String(checkedRenameLimits.entries)} entries or ${String(checkedRenameLimits.bytes)} bytes`,
+      'EXDEV',
+    ),
+    { applicationState: 'known-not-applied' },
+  );
+
+/** Bytes a checked rename may still hold; exceeding it refuses the whole rename before anything moves. */
+type RenameBudget = { bytes: number; readonly from: string };
+
+const spend = (budget: RenameBudget, bytes: number): void => {
+  budget.bytes -= bytes;
+  if (budget.bytes < 0) {
+    throw renameTooLarge(budget.from);
+  }
+};
+
+// Observe one entry, refusing before a read that would pass the rename's byte budget.
+const observeBounded = async (
+  provider: NodeFsProvider,
+  rootedPath: string,
+  budget: RenameBudget,
+): Promise<EntryState> => {
+  let stats: Awaited<ReturnType<NodeFsProvider['stat']>>;
+  try {
+    stats = await provider.stat(rootedPath);
+  } catch (error) {
+    if (errnoCode(error) === 'ENOENT' || errnoCode(error) === 'ENOTDIR') {
+      return null;
+    }
+    throw error;
+  }
+  if (stats.type === 'dir') {
+    return 'directory';
+  }
+  spend(budget, stats.size);
+  const bytes = await provider.readFile(rootedPath);
+  // A file that grew between stat and read is charged for what was read.
+  spend(budget, Math.max(0, bytes.byteLength - stats.size));
+  return bytes;
+};
+
+// Every regular file below one directory, by root-relative path, visiting at most the entry bound.
+const regularFilesBelow = async (
+  provider: NodeFsProvider,
+  directory: string,
+  signal: AbortSignal | undefined,
+): Promise<string[]> => {
   const files: string[] = [];
   const pending = [directory];
+  let visited = 0;
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    // A close or cancellation stops the walk between directories, so it never holds the writer unbounded.
+    signal?.throwIfAborted();
     // oxlint-disable-next-line no-await-in-loop -- One directory at a time keeps the walk's memory bounded.
     const entries = await provider.readdirEntries(next);
+    visited += entries.length;
+    if (visited > checkedRenameLimits.entries) {
+      throw renameTooLarge(directory);
+    }
     for (const entry of entries) {
       const child = next === '' ? entry.name : `${next}/${entry.name}`;
       if (entry.kind === 'dir') {
@@ -491,9 +559,16 @@ const renameChecked = async (
   if (input.from === '' || input.to === '' || isDescendant(input.from, input.to)) {
     throw codedError(`EINVAL: invalid argument, rename '${input.from}' -> '${input.to}'`, 'EINVAL');
   }
+  if (input.preconditions.length > checkedRenameLimits.entries + 1) {
+    throw renameTooLarge(input.from);
+  }
   const expected = expectationsOf(input.preconditions, 'rename');
   if (!expected.has(input.to)) {
     throw new TypeError('Checked renames require a destination precondition.');
+  }
+  const budget: RenameBudget = { bytes: checkedRenameLimits.bytes, from: input.from };
+  for (const bytes of expected.values()) {
+    spend(budget, bytes?.byteLength ?? 0);
   }
   await writer.assertCurrent();
   const source = await observeEntry(provider, input.from);
@@ -503,10 +578,10 @@ const renameChecked = async (
       conflicts.push({ path: input.from, actual: 'directory' });
     }
     // Membership: every regular file below the source is named, and nothing named is missing.
-    for (const file of await regularFilesBelow(provider, input.from)) {
+    for (const file of await regularFilesBelow(provider, input.from, input.signal)) {
       if (!expected.has(file)) {
         // oxlint-disable-next-line no-await-in-loop -- Conflicts report current bytes in a stable order.
-        conflicts.push({ path: file, actual: await observeEntry(provider, file) });
+        conflicts.push({ path: file, actual: await observeBounded(provider, file, budget) });
       }
     }
   } else if (!expected.has(input.from)) {
@@ -516,7 +591,7 @@ const renameChecked = async (
     [...expected].map(async ([candidate, bytes]) => ({
       candidate,
       bytes,
-      actual: await observeEntry(provider, candidate),
+      actual: await observeBounded(provider, candidate, budget),
     })),
   );
   for (const { candidate, bytes, actual } of observed) {
@@ -991,6 +1066,13 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
         inFlight.delete(pending);
       }
     };
+    // A mutation starts only while the scope's signal is live; one already started completes.
+    const mutate = async <T>(methodSignal: AbortSignal | undefined, work: () => Promise<T>): Promise<T> =>
+      call(async () => {
+        signal.throwIfAborted();
+        methodSignal?.throwIfAborted();
+        return work();
+      });
     const scope: NodeFsRootScope = {
       signal,
       // oxlint-disable-next-line typescript/promise-function-async -- Overloads forward to the provider's own.
@@ -1006,18 +1088,19 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
         )) as NodeFsRootScope['stat'],
       exists: async (rootedPath) => call(async () => provider.exists(rootedPath)),
       writeFileChecked: async ({ signal: writeSignal, ...input }): Promise<CheckedFileWriteResult> =>
-        call(async () => {
-          writeSignal?.throwIfAborted();
-          return writeNodeFileCheckedWithAuthority(provider, input, writer);
-        }),
+        mutate(writeSignal, async () => writeNodeFileCheckedWithAuthority(provider, input, writer)),
       deleteFileChecked: async ({ signal: deleteSignal, ...input }): Promise<CheckedFileWriteResult> =>
-        call(async () => {
-          deleteSignal?.throwIfAborted();
-          return deleteNodeFileCheckedWithAuthority(provider, input, writer);
-        }),
-      renameChecked: async (input) => call(async () => renameChecked(provider, writer, input)),
-      mkdirChecked: async (input) => call(async () => mkdirChecked(provider, writer, input)),
-      rmdirChecked: async (input) => call(async () => rmdirChecked(provider, writer, input)),
+        mutate(deleteSignal, async () => deleteNodeFileCheckedWithAuthority(provider, input, writer)),
+      // The rename's walk also stops on the scope signal, so closing never waits on an unbounded move.
+      renameChecked: async (input) =>
+        mutate(input.signal, async () =>
+          renameChecked(provider, writer, {
+            ...input,
+            signal: input.signal === undefined ? signal : AbortSignal.any([signal, input.signal]),
+          }),
+        ),
+      mkdirChecked: async (input) => mutate(input.signal, async () => mkdirChecked(provider, writer, input)),
+      rmdirChecked: async (input) => mutate(input.signal, async () => rmdirChecked(provider, writer, input)),
     };
     return {
       scope,
@@ -1050,12 +1133,19 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
     const { root } = input;
     const signal = input.signal === undefined ? closing.signal : AbortSignal.any([closing.signal, input.signal]);
     const claimed = (async () => {
+      // The claim and writer bind the canonical root, so the provider must resolve through that same spelling.
+      if ((await realpath(root)) !== root) {
+        throw codedError(
+          `Filesystem root claims require the canonical root spelling; '${root}' is not it.`,
+          'AUTHORITY_ROOT_NOT_CANONICAL',
+        );
+      }
       const provider = await providerFor(root);
       return authorityClaimRunners.get(authority)!(
         { root, paths: [''] },
         async (writer) => {
           const held = scopeFor({ root, provider, writer, signal });
-          const context = { live: true };
+          const context = { live: true, server: closing };
           try {
             return await heldClaims.run(context, async () => operation(held.scope));
           } finally {
@@ -1125,6 +1215,16 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
     // Deliberately non-async: repeated close calls must receive the same settlement promise.
     // oxlint-disable-next-line typescript/promise-function-async -- Promise identity exposes one quiescence result.
     close: () => {
+      // Closing waits for every run, including the caller's own, so a close inside a run could never settle.
+      const held = heldClaims.getStore();
+      if (held?.live === true && held.server === closing) {
+        return Promise.reject(
+          codedError(
+            'This filesystem server cannot close from inside one of its own root claims. Close it after the run settles.',
+            'AUTHORITY_CLOSE_IN_CLAIM',
+          ),
+        );
+      }
       disposal ??= dispose();
       return disposal;
     },

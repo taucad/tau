@@ -429,11 +429,12 @@ const rowClassifications: readonly PathClassification[] = Object.freeze(
 /**
  * Spellings whose fold can differ from the path as written.
  *
- * Cheap enough to run on every classified path: a lowercase path with no `:`,
- * and no trailing dot or space on any segment, already *is* its fold, and only
- * the paths this admits pay for one below.
+ * Cheap enough to run on every classified path: a lowercase printable-ASCII path
+ * with no `:`, and no trailing dot or space on any segment, already *is* its
+ * fold, and only the paths this admits pay for one below. Any other character
+ * may fold under Unicode case folding (`ſ`, the Kelvin sign), so it folds.
  */
-const mayFold = /[A-Z:]|[. ](?:\/|$)/u;
+const mayFold = /[A-Z:]|[^ -~]|[. ](?:\/|$)/u;
 
 /**
  * One path as the filesystem underneath will fold it.
@@ -445,7 +446,10 @@ const mayFold = /[A-Z:]|[. ](?:\/|$)/u;
  * comparison calls them the user's content (G0-1, G0-5, G0b-3). The same defence
  * `portable-tree.ts` applies to a revision tree, spelled the same way.
  * Normalization is in it for that reason rather than because it can change an
- * answer: every prefix is ASCII, which normalization never rewrites.
+ * answer: every prefix is ASCII, which normalization never rewrites. Case folds
+ * through upper then lower case, the full Unicode folding that ext4 casefold,
+ * APFS and NTFS approximate: `ſ` (U+017F) becomes `s` and the Kelvin sign `k`,
+ * which a lower-case mapping alone leaves for `ſ`.
  *
  * A `:` is legal in a name a person types, so the stream suffix is dropped here
  * rather than rejected by the canonicaliser: `notes: draft.md` stays the user's
@@ -459,6 +463,7 @@ const mayFold = /[A-Z:]|[. ](?:\/|$)/u;
 const foldSpelling = (relative: string): string =>
   relative
     .normalize('NFC')
+    .toUpperCase()
     .toLowerCase()
     .replaceAll(/:[^/]*(?=\/|$)/gu, '')
     .replaceAll(/[. ]+(?=\/|$)/gu, '');

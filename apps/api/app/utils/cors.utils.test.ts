@@ -1,3 +1,5 @@
+import cors from '@fastify/cors';
+import fastify from 'fastify';
 import { describe, it, expect, vi } from 'vitest';
 import {
   createCorsOriginValidator,
@@ -15,8 +17,33 @@ it('should expose the durable chat run identity and bearer session token to cros
     'x-tau-operation-id',
     'set-auth-token',
     'retry-after',
+    'request-id',
   ]);
   expect(corsBaseConfiguration.allowedHeaders).toContain('x-tau-attempt-id');
+});
+
+/* SB13: the browser tags the error a failed call raises with this id, which the API's own Sentry event carries as
+ * `request_id`; a header CORS does not expose reads as absent in the page. */
+it('should let a cross-origin page read the request id of a failed response', async () => {
+  const app = fastify();
+  try {
+    await app.register(cors, { ...corsBaseConfiguration, origin: true });
+    app.get('/v1/failure', async (_request, reply) =>
+      reply.header(httpHeader.requestId, 'req_fixture').status(500).send({ requestId: 'req_fixture' }),
+    );
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/failure',
+      headers: { origin: 'https://taucad.dev' },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.headers[httpHeader.requestId]).toBe('req_fixture');
+    expect(String(response.headers['access-control-expose-headers']).split(/,\s*/u)).toContain(httpHeader.requestId);
+  } finally {
+    await app.close();
+  }
 });
 
 /**

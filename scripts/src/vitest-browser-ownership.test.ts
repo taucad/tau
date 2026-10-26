@@ -165,6 +165,8 @@ describe('Vitest Browser test-runner ownership', () => {
       // The hosted staging observability gate owns isolated browser contexts and cross-document failure
       // scenarios, which Browser Mode's iframe cannot host.
       'apps/ui-e2e/src/observability.staging.test.ts',
+      // Its P2 SSR and API-correlation acceptance drives a staging page whose API call fails (A12).
+      'apps/ui-e2e/src/observability-ssr.staging.test.ts',
       // Composer and pane-resize acceptance emulate a coarse pointer through the browser session.
       'apps/ui/app/components/chat/chat-textarea.vitest.browser.config.ts',
       'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',

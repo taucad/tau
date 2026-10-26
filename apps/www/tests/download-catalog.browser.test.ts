@@ -4,11 +4,14 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router';
 import { createServer } from 'vite';
-import type { Browser, Page } from 'playwright';
 import { content as download } from '#app/routes/download.js';
 import { loadPlaywright } from '#tools/tooling.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { projection } from '#www/download-catalog.fixture.js';
+
+// Driver types come through the tooling boundary, which owns the only runtime driver import.
+type Browser = Awaited<ReturnType<Awaited<ReturnType<typeof loadPlaywright>>['chromium']['launch']>>;
+type Page = Awaited<ReturnType<Browser['newPage']>>;
 
 const appRoot = new URL('../', import.meta.url).pathname;
 

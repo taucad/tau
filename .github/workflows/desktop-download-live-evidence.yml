@@ -1,6 +1,6 @@
 # Live download evidence (macOS DMG default, blueprint M6 "Live end-to-end"): open the real deployed download page in
-# Chromium on a native Apple silicon runner, screenshot it, record every visible Mac button label and link, click the
-# Apple silicon and Intel buttons and qualify the files the browser actually saved against the published
+# Google Chrome on a native Apple silicon runner, screenshot it, record every visible Mac button label and link, click
+# the Apple silicon and Intel buttons and qualify the files the browser actually saved against the published
 # `latest/installers.json`: byte count, SHA-256, `hdiutil verify`, Gatekeeper's primary-signature assessment,
 # `stapler validate`, and `codesign --verify` on the mounted app. Quarantine is recorded and never removed. The ZIP
 # alternatives and both Mac updater feeds are fetched in full and hashed. `expect: zip` records today's archive-first
@@ -51,11 +51,13 @@ jobs:
         with:
           save-pnpm-store: 'false'
 
-      - name: Install Chromium for the browser evidence
-        run: pnpm exec playwright install chromium
+      # The runner image's installed Google Chrome is the browser a visitor downloads with; nothing is installed.
+      - name: Require Google Chrome
+        run: test -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
       - name: Open the page, click the Mac buttons and qualify the downloads
         env:
+          CHROME_CHANNEL: chrome
           PAGE_URL: ${{ inputs.page_url }}
           EXPECT: ${{ inputs.expect }}
           EVIDENCE_DIR: ${{ runner.temp }}/desktop-download-live-evidence

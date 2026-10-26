@@ -3,7 +3,7 @@
  * click the Apple silicon and Intel buttons, and qualify the bytes the browser actually saved against the published
  * installer catalog. Disk images keep the browser's quarantine attribute and pass through Apple's own tools.
  *
- * Usage: PAGE_URL=https://taucad.dev/download/ EXPECT=dmg EVIDENCE_DIR=out/evidence node apps/www/scripts/download-live-evidence.ts
+ * Usage: CHROME_CHANNEL=chrome PAGE_URL=https://taucad.dev/download/ EXPECT=dmg EVIDENCE_DIR=out/evidence node apps/www/scripts/download-live-evidence.ts
  *
  * `EXPECT=zip` records today's archive-first page as a baseline and requires its Mac buttons to say ZIP truthfully.
  * The summary (`summary.json`) lists every failure; the process exits non-zero when there is one.
@@ -16,10 +16,14 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import process from 'node:process';
 import { promisify } from 'node:util';
-import type { Page } from 'playwright';
 import { loadPlaywright } from '#tools/tooling.js';
 
 const run = promisify(execFile);
+
+// Driver types come through the tooling boundary, which owns the only runtime driver import.
+type Page = Awaited<
+  ReturnType<Awaited<ReturnType<Awaited<ReturnType<typeof loadPlaywright>>['chromium']['launch']>>['newPage']>
+>;
 
 const pageUrl = new URL(process.env['PAGE_URL'] ?? 'https://taucad.dev/download/');
 const expected = process.env['EXPECT'] ?? 'dmg';
@@ -215,7 +219,8 @@ const compareWithCatalog = ({
 };
 
 const { chromium } = await loadPlaywright();
-const browser = await chromium.launch({ channel: 'chromium', headless: true });
+// The workflow uses the runner's installed Google Chrome (`CHROME_CHANNEL=chrome`), the browser a visitor uses.
+const browser = await chromium.launch({ channel: process.env['CHROME_CHANNEL'] ?? 'chromium', headless: true });
 const downloadDirectory = await mkdtemp(join(tmpdir(), 'tau-live-downloads-'));
 const evidence: Record<string, unknown> = {};
 try {

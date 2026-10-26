@@ -1,10 +1,12 @@
-/** Admit the complete native host matrix; CLI publication requires an exact-source main dispatch. */
+/** Admit the complete native host matrix; CLI aggregation binds candidate source separately from its trusted main dispatch. */
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { parseDesktopAcceptanceReceipt, parseDesktopArtifactManifest } from '#shared/desktop-release.js';
 import type { DesktopAcceptanceReceipt } from '#shared/desktop-release.js';
+// oxlint-disable-next-line no-restricted-imports -- Share the installed runner's trusted source admission.
+import { assertQualificationSource } from './qualification-candidates.mjs';
 
 const rows = [
   ['macos-zip-arm64', 'macos-zip', 'darwin-arm64'],
@@ -114,10 +116,17 @@ const main = async (): Promise<void> => {
   if (JSON.stringify([...directories].sort()) !== JSON.stringify(expected)) {
     throw new Error('Qualification artifact directories differ from the complete host matrix');
   }
+  const candidate = parseDesktopArtifactManifest(await readJson('out/qualification-candidate/desktop-artifacts.json'));
+  assertQualificationSource({
+    sourceCommit: candidate.sourceCommit,
+    workflowCommit: required('GITHUB_SHA'),
+    scope,
+    channel: required('TAU_QUALIFICATION_CHANNEL'),
+  });
   const result = collectQualificationRows({
     scope,
-    candidate: await readJson('out/qualification-candidate/desktop-artifacts.json'),
-    sourceCommit: required('GITHUB_SHA'),
+    candidate,
+    sourceCommit: candidate.sourceCommit,
     channel: required('TAU_QUALIFICATION_CHANNEL'),
     runId: required('GITHUB_RUN_ID'),
     trustIdentities: {

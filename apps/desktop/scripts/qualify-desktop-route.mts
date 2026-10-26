@@ -140,6 +140,7 @@ const main = async (): Promise<void> => {
     ],
     directory: root,
     sourceCommit: required('GITHUB_SHA'),
+    scope: process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all',
   });
   const { channel } = candidates[2].manifest;
   if (channel !== required('TAU_QUALIFICATION_CHANNEL')) {

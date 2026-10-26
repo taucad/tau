@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 /** Purpose: Exercise matrix admission with synthetic in-memory receipts; never write qualification artifacts. */
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   desktopAcceptanceRoutes,
@@ -12,6 +15,8 @@ import {
 import type { DesktopAcceptanceReceipt, DesktopArtifactKind, DesktopReleaseTarget } from '#shared/desktop-release.js';
 /* oxlint-disable-next-line no-restricted-imports -- Exercise the actual aggregation admission boundary. */
 import { collectQualificationRows } from './collect-qualification-rows.mjs';
+// oxlint-disable-next-line no-restricted-imports -- Exercise actual git ancestry admission without fabricated receipts.
+import { assertQualificationSource } from './qualification-candidates.mjs';
 
 const specifications = [
   ['macos-zip-arm64', 'macos-zip', 'darwin-arm64', 'Darwin 25.0.0'],
@@ -240,3 +245,46 @@ assert.match(cli.stderr, /trusted main dispatch/u);
 console.log(
   'PASS synthetic nine-host admission, seven canonical receipts, strict source/route/signer/OS/run binding and main guard; no evidence files written',
 );
+
+const repository = mkdtempSync(join(tmpdir(), 'tau-qualification-source-'));
+const previousDirectory = process.cwd();
+try {
+  process.chdir(repository);
+  const git = (...args: string[]): string =>
+    execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  git('init');
+  git('config', 'user.name', 'Qualification fixture');
+  git('config', 'user.email', 'qualification@example.invalid');
+  git('-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'baseline');
+  const baseline = git('rev-parse', 'HEAD');
+  git('-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'protected main advanced');
+  const workflowCommit = git('rev-parse', 'HEAD');
+  const admitted = { sourceCommit: baseline, workflowCommit, scope: 'linux', channel: 'staging' };
+  assertQualificationSource(admitted);
+  assertQualificationSource({ ...admitted, sourceCommit: workflowCommit });
+  assertQualificationSource({ ...admitted, sourceCommit: workflowCommit, scope: 'all', channel: 'production' });
+  assert.throws(() => {
+    assertQualificationSource({ ...admitted, scope: 'all' });
+  }, /exact source/u);
+  assert.throws(() => {
+    assertQualificationSource({ ...admitted, channel: 'production' });
+  }, /scope\/channel/u);
+  assert.throws(() => {
+    assertQualificationSource({ ...admitted, scope: 'unknown' });
+  }, /scope\/channel/u);
+  assert.throws(() => {
+    assertQualificationSource({ ...admitted, sourceCommit: '--all' });
+  }, /scope\/channel/u);
+  assert.throws(() => {
+    assertQualificationSource({ ...admitted, workflowCommit: baseline, sourceCommit: workflowCommit });
+  });
+  git('checkout', '--detach', baseline);
+  git('-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'unmerged sibling');
+  assert.throws(() => {
+    assertQualificationSource({ ...admitted, sourceCommit: git('rev-parse', 'HEAD') });
+  });
+} finally {
+  process.chdir(previousDirectory);
+  rmSync(repository, { recursive: true, force: true });
+}
+console.log('PASS real Git ancestry, Linux staging pinning and unchanged all-platform/production exact-source guards');

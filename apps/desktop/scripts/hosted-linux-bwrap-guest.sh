@@ -18,6 +18,20 @@ sudo grep -Fx 'tau-staging-bwrap (unconfined)' /sys/kernel/security/apparmor/pro
 cmp /usr/bin/bwrap /opt/tau-staging/sandbox/bwrap
 /opt/tau-staging/sandbox/bwrap "${probe[@]}"
 printf 'PASS: unprivileged bwrap --unshare-user --unshare-net through /opt/tau-staging/sandbox/bwrap\n'
+helper=/opt/tau-staging/releases/1.0.1/resources/app.asar.unpacked/node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp/x64/apply-seccomp
+[[ -x "$helper" ]]
+/opt/tau-staging/sandbox/bwrap --unshare-user --unshare-net --ro-bind / / "$helper" /bin/true
+/opt/tau-staging/sandbox/bwrap --unshare-user --unshare-net --ro-bind / / "$helper" /usr/bin/python3 -c '
+import errno, socket
+try:
+    socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+except OSError as error:
+    assert error.errno == errno.EPERM, error
+else:
+    raise AssertionError("packaged seccomp helper allowed an AF_UNIX socket")
+'
+printf 'PASS: ASAR-unpacked installed helper executes and refuses AF_UNIX sockets\n'
+
 # Negative control: identical bytes at an unprofiled path stay restricted under the stock policy.
 control="$(mktemp -d "$HOME/bwrap-control.XXXXXX")"
 cp /opt/tau-staging/sandbox/bwrap "$control/bwrap"

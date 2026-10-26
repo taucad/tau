@@ -60,10 +60,7 @@ jobs:
               summary.write('Hosted KVM capability only; no stock guest or signed app tested.\n```json\n' + json.dumps(result) + '\n```\n')
           PYTHON
       - uses: ./.github/actions/setup-nx
-      - name: Linux native helper sandbox prerequisite
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y bubblewrap
-      - name: Shared ASAR runtime payloads and native helper confinement
+      - name: Shared ASAR runtime payloads and executable permissions
         run: pnpm nx run desktop:test-desktop-package
       - name: Native filesystem authority exclusion and mutations
         env:

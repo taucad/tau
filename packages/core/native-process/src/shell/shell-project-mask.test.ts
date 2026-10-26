@@ -31,9 +31,15 @@ describe('masked container admission', () => {
     expect(maskProblem(filesystem)).toBeUndefined();
     expect(maskProblem({ ...filesystem, denied: [...filesystem.denied, filesystem.writable[1]!] })).toContain('denied');
   });
-  it('should refuse an absent container', () => {
+  it('should admit an absent container only beneath a canonical immediate parent', () => {
     const filesystem = fixture();
-    expect(maskProblem({ ...filesystem, masked: [join(filesystem.masked![0]!, 'missing')] })).toContain('missing');
+    expect(maskProblem({ ...filesystem, masked: [join(filesystem.masked![0]!, 'missing')] })).toBeUndefined();
+    expect(maskProblem({ ...filesystem, masked: [join(filesystem.masked![0]!, 'missing', 'nested')] })).toContain(
+      'unavailable',
+    );
+    const alias = join(filesystem.writable[0]!, 'alias');
+    symlinkSync(filesystem.masked![0]!, alias);
+    expect(maskProblem({ ...filesystem, masked: [join(alias, 'missing')] })).toContain('canonical');
   });
   it('should refuse a child alias resolving outside its container', () => {
     const filesystem = fixture();
@@ -48,7 +54,7 @@ describe('masked container admission', () => {
 });
 
 describe('macOS masked directory profile composition', () => {
-  it('should append exact child creation grants after the default deny', () => {
+  it('should narrow read and write masks without appending allowances', () => {
     const filesystem: ShellFilesystem = {
       readable: [],
       writable: ['/project', '/project/.tau/parameters'],
@@ -58,10 +64,15 @@ describe('macOS masked directory profile composition', () => {
     };
     const argv = ['/bin/sh', '-c', "exec /usr/bin/sandbox-exec -p '(version 1)\n(allow file-write*)' /bin/bash"];
     const bound = bindMaskedDirectories(argv, filesystem)!;
-    expect(bound[2]).toContain(String.raw`(deny file-write-create (regex "^/project/\\.tau/[^/]+$"))`);
-    expect(bound[2]).toContain('(allow file-write-create (literal "/project/.tau/parameters"))');
-    expect(bound[2]).not.toContain('(literal "/project/.tau/chats")');
-    expect(bound[2]!.indexOf('(deny file-write-create')).toBeGreaterThan(bound[2]!.indexOf('(allow file-write*)'));
+    const appended = bound[2]!.slice(bound[2]!.indexOf('; Reserved directory'));
+    expect(appended).toContain('(deny file-read*');
+    expect(appended).toContain('(deny file-write*');
+    expect(appended).not.toContain('(allow ');
+    expect(appended).toContain('(require-not (subpath "/project/.tau/parameters"))');
+    const [reads, writes] = appended.split('(deny file-write*');
+    expect(reads).toContain('(require-not (subpath "/project/.tau/chats"))');
+    expect(writes).not.toContain('/project/.tau/chats');
+    expect(appended).toContain('[tT][aA][uU][. ]*(:[^/]*)?');
     expect(argv[2]).not.toContain('Reserved directory');
   });
   it('should refuse an unrecognized sandbox vector', () => {

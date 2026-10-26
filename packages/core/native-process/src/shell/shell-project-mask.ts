@@ -1,5 +1,5 @@
 import { lstatSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute, relative } from 'node:path';
+import { basename, dirname, isAbsolute, relative } from 'node:path';
 
 import type { ShellFilesystem } from '#shell/shell-provider.js';
 
@@ -17,11 +17,17 @@ export const maskProblem = (filesystem: ShellFilesystem): string | undefined => 
       return 'every masked container must be an absolute path.';
     }
     try {
-      if (!lstatSync(root).isDirectory() || realpathSync(root) !== root) {
+      const info = lstatSync(root, { throwIfNoEntry: false });
+      if (info === undefined) {
+        const parent = dirname(root);
+        if (!lstatSync(parent).isDirectory() || realpathSync(parent) !== parent) {
+          return 'an absent masked container must have a canonical directory parent.';
+        }
+      } else if (!info.isDirectory() || realpathSync(root) !== root) {
         return 'a masked container must be a real directory without symbolic-link ancestors.';
       }
     } catch {
-      return 'a masked container is missing; restore the project directory before trying a new command.';
+      return 'a masked container or its immediate parent is unavailable.';
     }
     if (
       filesystem.denied.some((deny) => inside(root, deny)) ||
@@ -48,7 +54,11 @@ export const maskProblem = (filesystem: ShellFilesystem): string | undefined => 
   return undefined;
 };
 
-/** Append creation restrictions after the runtime's broader writable-root rules. @internal */
+/**
+ * Append deny-only masks after the runtime's rules. Explicit child grants are subtracted from these masks,
+ * never re-allowed after an existing runtime denial. The reserved container's folded spellings stay closed.
+ * @internal
+ */
 export const bindMaskedDirectories = (
   argv: readonly string[],
   filesystem: ShellFilesystem,
@@ -79,12 +89,31 @@ export const bindMaskedDirectories = (
   }
   const regexEscape = (path: string): string => path.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`);
   const rules = masked
-    .flatMap((root) => [
-      `(deny file-write-create (regex ${JSON.stringify(`^${regexEscape(root)}/[^/]+$`)}))`,
-      ...filesystem.writable
-        .filter((path) => dirname(path) === root && !filesystem.denied.some((deny) => inside(path, deny)))
-        .map((path) => `(allow file-write-create (literal ${JSON.stringify(path)}))`),
-    ])
+    .flatMap((root) => {
+      // Registry-reserved names are ASCII. Match their case and trailing dot/space/colon spellings without
+      // interpreting arbitrary path bytes as SBPL or regex syntax. Parent paths retain their physical spelling.
+      const name = [...basename(root)]
+        .map((character) =>
+          /[A-Za-z]/u.test(character)
+            ? `[${character.toLowerCase()}${character.toUpperCase()}]`
+            : regexEscape(character),
+        )
+        .join('');
+      const region = `(regex ${JSON.stringify(`^${regexEscape(dirname(root))}/${name}[. ]*(:[^/]*)?(/.*)?$`)})`;
+      const explicit = (paths: readonly string[]): string[] =>
+        paths.filter((path) => path !== root && inside(path, root)).map((path) => `(subpath ${JSON.stringify(path)})`);
+      const subtract = (filters: readonly string[]): string =>
+        filters.length === 0
+          ? region
+          : `(require-all ${region} ${[...new Set(filters)].map((filter) => `(require-not ${filter})`).join(' ')})`;
+      return [
+        `(deny file-read* ${subtract([
+          `(literal ${JSON.stringify(root)})`,
+          ...explicit([...filesystem.readable, ...filesystem.writable, ...(filesystem.readOnly ?? [])]),
+        ])})`,
+        `(deny file-write* ${subtract(explicit(filesystem.writable))})`,
+      ];
+    })
     .join('\n');
   // The profile is already shell-quoted by SRT; escape only the appended text into that same quoted argument.
   const appended = `\n; Reserved directory creation boundary\n${rules}\n`.replaceAll("'", `'"'"'`);

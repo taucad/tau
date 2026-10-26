@@ -182,6 +182,22 @@ try {
         Object.defineProperty(navigator, 'userAgent', { value: hostPlatform });
       }, platform);
       const downloadPage = await downloadContext.newPage();
+      const assertDownloadIcons = async (): Promise<void> => {
+        const icons = await downloadPage.getByRole('link', { name: /^Download for /u }).evaluateAll((links) =>
+          links.map((link) => ({
+            label: link.textContent,
+            color: getComputedStyle(link).color,
+            fills: [...link.querySelectorAll('svg path')].map((path) => getComputedStyle(path).fill),
+          })),
+        );
+        assert.ok(icons.length > 0, `${platform} has download links`);
+        for (const icon of icons) {
+          assert.ok(icon.fills.length > 0, `${platform} ${icon.label} has a logo`);
+          for (const fill of icon.fills) {
+            assert.equal(fill, icon.color, `${platform} ${icon.label} logo matches its label`);
+          }
+        }
+      };
       const errors: string[] = [];
       downloadPage.on('pageerror', (error) => errors.push(error.message));
       await downloadPage.goto(origin);
@@ -189,12 +205,20 @@ try {
         .locator('[data-placement="hero"]')
         .filter({ hasText: `Download for ${label}` })
         .waitFor();
+      await assertDownloadIcons();
       await downloadPage.locator('[data-placement="hero"]').click();
       await downloadPage.waitForURL(`${origin}/download/`);
       const primaryDownload = downloadPage.locator('[data-host-download="direct"]');
       await primaryDownload.filter({ hasText: `Download for ${label}` }).waitFor();
       assert.equal(await primaryDownload.getAttribute('href'), `https://downloads.tau.new/latest/${file}`);
       assert.equal(await downloadPage.locator('[data-mac-intel]').isVisible(), intel);
+      await assertDownloadIcons();
+      await primaryDownload.hover();
+      await primaryDownload.focus();
+      await assertDownloadIcons();
+      await downloadPage.goto(`${origin}/pricing/`);
+      await downloadPage.getByRole('link', { name: `Download for ${label}` }).waitFor();
+      await assertDownloadIcons();
       await downloadPage.getByRole('link', { name: 'Tau home' }).first().click();
       await downloadPage.waitForURL(`${origin}/`);
       await downloadPage

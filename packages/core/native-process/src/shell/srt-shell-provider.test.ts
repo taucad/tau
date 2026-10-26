@@ -273,6 +273,48 @@ describe.runIf(process.platform === 'linux')('createSandboxShellProvider termina
 });
 
 describe('shellSandboxProfile', () => {
+  it('should keep absent Linux containers uncreatable without applying macOS literal read denies', () => {
+    const root = fixtureRoot();
+    const missing = join(root, '.tau');
+    const profile = shellSandboxProfile({
+      filesystem: { readable: [], writable: [root], denied: [], masked: [missing] },
+      network: { domains: [] },
+    });
+    const filesystem = profile['filesystem'] as { denyRead: string[]; denyWrite: string[] };
+    if (process.platform === 'linux') {
+      expect(filesystem.denyRead).toContain(missing);
+      expect(filesystem.denyWrite).not.toContain(missing);
+      expect(filesystem.denyWrite).toContain(join(missing, '.tau-mask-boundary'));
+    } else {
+      expect(filesystem.denyRead).not.toContain(missing);
+      expect(filesystem.denyWrite).not.toContain(missing);
+    }
+  });
+
+  it.runIf(process.platform === 'linux')('should pin authored descendants without rebinding a masked container', () => {
+    const root = fixtureRoot();
+    const masked = join(root, '.tau');
+    const authored = join(masked, 'parameters');
+    const nested = join(authored, 'nested');
+    mkdirSync(nested, { recursive: true });
+    const denied = join(nested, 'private');
+    const profile = shellSandboxProfile({
+      filesystem: {
+        readable: [],
+        writable: [root, authored],
+        readOnly: [join(masked, 'chats')],
+        denied: [denied],
+        masked: [masked],
+      },
+      network: { domains: [] },
+    });
+    const filesystem = profile['filesystem'] as { allowWrite: string[]; denyRead: string[]; denyWrite: string[] };
+    expect(filesystem.allowWrite).not.toContain(masked);
+    expect(filesystem.allowWrite).toEqual(expect.arrayContaining([root, authored, nested]));
+    expect(filesystem.denyRead).toEqual(expect.arrayContaining([masked, denied]));
+    expect(filesystem.denyWrite).toContain(denied);
+  });
+
   it('should allow exactly the granted names and deny every other destination', () => {
     const profile = shellSandboxProfile({
       filesystem: { readable: [], writable: [], denied: [] },
@@ -356,7 +398,10 @@ describe('shellSandboxProfile read-only roots', () => {
     expect(profile.filesystem['allowRead']).toStrictEqual(
       expect.arrayContaining(['/srv/project', '/srv/project/.tau/chats', '/srv/project/exports']),
     );
-    expect(profile.filesystem['allowWrite']).toStrictEqual(['/srv/project']);
+    /* On Linux the ancestors between the writable root and a protected path are bound onto themselves (E04). */
+    expect(profile.filesystem['allowWrite']).toStrictEqual(
+      process.platform === 'linux' ? ['/srv/project', '/srv/project/.tau'] : ['/srv/project'],
+    );
     expect(profile.filesystem['denyWrite']).toStrictEqual(
       expect.arrayContaining(['/srv/project/.tau/chats', '/srv/project/exports', '/srv/project/.git']),
     );

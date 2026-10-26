@@ -1,4 +1,5 @@
-import { execFileSync, fork } from 'node:child_process';
+import { fork, spawnSync } from 'node:child_process';
+import type { SpawnSyncReturns } from 'node:child_process';
 import { access, mkdir, mkdtemp, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -58,6 +59,37 @@ const nextMessage = async (child: ReturnType<typeof fork>): Promise<unknown> =>
       reject(new Error(`fixture exited early: ${String(code)} ${String(signal)}`));
     });
   });
+
+/**
+ * Runs the disposable SMB fixture without stdin and retains stderr with elapsed time and exit status.
+ * Prefers PowerShell 7 to reduce cold host startup within the fixture's 20-second bound; falls back to
+ * Windows PowerShell only when PowerShell 7 is unavailable.
+ */
+const runNetworkFixture = (fixture: string, action: 'cleanup' | 'setup', environment: NodeJS.ProcessEnv): string => {
+  const started = performance.now();
+  const run = (shell: string): SpawnSyncReturns<string> =>
+    spawnSync(shell, ['-NoProfile', '-NonInteractive', '-File', fixture, action], {
+      env: environment,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 20_000,
+      windowsHide: true,
+    });
+  let shell = 'pwsh.exe';
+  let result = run(shell);
+  if ((result.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
+    shell = 'powershell.exe';
+    result = run(shell);
+  }
+  /** Milliseconds. */
+  const elapsed = Math.round(performance.now() - started);
+  const diagnostics = `${action} via ${shell} after ${elapsed} ms (status ${String(result.status)}, signal ${String(result.signal)})\n${result.stderr}`;
+  if (result.error !== undefined || result.status !== 0) {
+    throw new Error(`Disposable SMB fixture ${diagnostics}`, { cause: result.error });
+  }
+  console.info(`Disposable SMB fixture ${diagnostics}`);
+  return result.stdout;
+};
 
 const acquireEventually = async (authorityRoot: string): Promise<NodeAuthorityWriter> => {
   let lastError: unknown;
@@ -260,13 +292,7 @@ describe.runIf(['darwin', 'linux', 'win32'].includes(process.platform))('Node au
       };
       let drive: string | undefined;
       try {
-        const setup: unknown = JSON.parse(
-          execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', fixture, 'setup'], {
-            env: environment,
-            encoding: 'utf8',
-            timeout: 20_000,
-          }),
-        );
+        const setup: unknown = JSON.parse(runNetworkFixture(fixture, 'setup', environment));
         if (typeof setup !== 'object' || setup === null || !('status' in setup)) {
           throw new TypeError('Invalid disposable network fixture result');
         }
@@ -294,11 +320,8 @@ describe.runIf(['darwin', 'linux', 'win32'].includes(process.platform))('Node au
           code: 'AUTHORITY_LOCK_UNAVAILABLE',
         });
       } finally {
-        execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', fixture, 'cleanup'], {
-          // eslint-disable-next-line @typescript-eslint/naming-convention -- Child fixture environment boundary.
-          env: { ...environment, TAU_AUTHORITY_TEST_DRIVE: drive },
-          timeout: 20_000,
-        });
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Child fixture environment boundary.
+        runNetworkFixture(fixture, 'cleanup', { ...environment, TAU_AUTHORITY_TEST_DRIVE: drive });
       }
     },
     50_000,

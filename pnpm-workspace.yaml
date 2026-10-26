@@ -253,7 +253,7 @@ catalog:
   next-themes: ^0.4.6
   nx: 22.7.12
   '@taulabs/openrscad-engine': 0.11.0-beta.4
-  oxfmt: ^0.36.0
+  oxfmt: 0.39.0
   oxlint: ^1.80.0
   oxlint-tsgolint: ^0.16.0
   oxc-transform-react: 0.148.0
@@ -486,7 +486,7 @@ overrides:
   nx@22.7.12>axios: 1.20.0
   nx@22.7.12>brace-expansion: 5.0.12
   nx@22.7.12>smol-toml: 1.9.1
-  oxfmt@0.36.0>tinypool: 2.1.2
+  oxfmt@0.39.0>tinypool: 2.1.2
   rehype-katex>katex: 0.18.2
   replicad: 'catalog:'
   replicad-opencascadejs: 'catalog:'

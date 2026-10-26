@@ -36,10 +36,10 @@ function createTestFs(overrides?: { readonly readFile?: (path: string) => Promis
 class GenericMockWorker {
   public postMessageCalls: unknown[] = [];
   public terminated = false;
+  public readonly stallMethods = new Set<string>();
 
   private messageListeners: MessageListener[] = [];
   private readonly errorListeners: MessageListener[] = [];
-  public readonly stallMethods = new Set<string>();
 
   public addEventListener(type: string, listener: MessageListener): void {
     if (type === 'message') {

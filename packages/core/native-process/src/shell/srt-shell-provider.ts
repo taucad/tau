@@ -158,9 +158,9 @@ const inside = (path: string, root: string): boolean => {
  * @returns A complete sandbox-runtime configuration.
  */
 /**
- * The spellings of each denied path the runtime can mask. Bubblewrap masks a path by mounting over it, which it cannot
- * do through a symbolic link anywhere in the spelling: not at the leaf, and not at an ancestor either (`/var/run` is a
- * link to `/run` on current distributions, so it refuses `/var/run/docker.sock`). On Linux a spelling whose physical
+ * The spellings of each denied path the runtime can mask. Bubblewrap masks a file by binding `/dev/null` over it, and
+ * it refuses that bind through a symbolic link, whether at the leaf or at an ancestor (`/var/run` is a link to `/run`
+ * on current distributions, so it refuses `/var/run/docker.sock`). On Linux a spelling whose physical
  * path differs is therefore dropped, but only when that physical spelling is itself in the set, so the target stays
  * masked; a path that cannot be resolved keeps its literal spelling. Seatbelt matches both spellings, so macOS keeps
  * them.

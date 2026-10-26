@@ -64,6 +64,29 @@ it('matches the shell-authored cube volume', async () => {
 });
 `;
 
+/**
+ * On a failed turn, print how far the scripted model got: the gateway's tool results so far, any typed tool failure,
+ * and the desktop log's last warnings and errors. Reporting only; it never changes a verdict.
+ */
+const reportTurnDiagnostics = async (desktop: DesktopSession, gateway: GatewayFixture | undefined): Promise<void> => {
+  const requests = gateway?.gatewayRequests ?? [];
+  const log = await readFile(desktop.logPath, 'utf8').catch((error: unknown) => `unreadable: ${String(error)}`);
+  const problems = log
+    .split('\n')
+    .filter((line) => /\b(?:WARN|ERROR|FATAL)\b/u.test(line))
+    .slice(-40)
+    .map((line) => line.slice(0, 600));
+  console.info(
+    'TURN DIAGNOSTICS',
+    JSON.stringify({
+      gatewayRequests: requests.length,
+      toolResults: gatewayToolResults(requests.slice(-1)).map(({ name, text }) => ({ name, text: text.slice(0, 400) })),
+      failedToolResults: failedGatewayToolResults(requests.slice(-1)),
+      problems,
+    }),
+  );
+};
+
 let session: DesktopSession | undefined;
 let fixture: GatewayFixture | undefined;
 let seededEmail: string | undefined;
@@ -71,6 +94,7 @@ let seededEmail: string | undefined;
 afterEach(async (context) => {
   if (context.task.result?.state === 'fail' && session) {
     await reportShellDiagnostics(session);
+    await reportTurnDiagnostics(session, fixture);
   }
   await session?.close();
   session = undefined;

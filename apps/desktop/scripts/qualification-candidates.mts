@@ -28,7 +28,7 @@ export const assertQualificationSource = (options: {
   if (
     !/^[a-f\d]{40}$/u.test(options.sourceCommit) ||
     !/^[a-f\d]{40}$/u.test(options.workflowCommit) ||
-    !['all', 'linux', 'macos'].includes(options.scope) ||
+    !['all', 'linux', 'macos', 'windows'].includes(options.scope) ||
     !['staging', 'production'].includes(options.channel) ||
     (options.scope !== 'all' && options.channel !== 'staging')
   ) {

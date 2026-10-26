@@ -2,19 +2,101 @@
 /** Purpose: Exercise Windows driver execution guards and real artifact-byte admission without granting installer authority. */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseDesktopArtifactManifest } from '#shared/desktop-release.js';
 /* oxlint-disable no-restricted-imports -- Native driver admission tests use actual fixture bytes. */
 import {
   windowsQualificationPackageSchema,
+  admitWindowsConsumerDestination,
   createWindowsQualificationDriver,
   verifyWindowsQualificationArtifact,
 } from './qualification-windows.mjs';
 import { createQualificationReinstallGuard, QualificationUnavailable } from './qualification-platform-types.mjs';
+import {
+  assertWindowsConsumerHost,
+  assertWindowsConsumerManual,
+  windowsConsumerHostDigest,
+} from './qualification-evidence.mjs';
 /* oxlint-enable no-restricted-imports */
 const main = async (): Promise<void> => {
+  const consumer = {
+    runner: 'stock-windows',
+    identity: 'a'.repeat(64),
+    osVersion: 'Microsoft Windows 11 Pro 10.0.26100',
+    productType: 1,
+    build: 26_100,
+    nativeMachine: 34_404,
+    processMachine: 0,
+    elevated: 0,
+    elevationType: 1,
+    administrator: false,
+    uacEnabled: 1,
+    defender: { service: true, antivirus: true, realTime: true, mode: 'Normal' },
+    existing: [],
+  };
+  assert.deepEqual(assertWindowsConsumerHost(consumer), consumer);
+  for (const change of [
+    { nativeMachine: 43_620 },
+    { processMachine: 34_404 },
+    { elevationType: 3 },
+    { elevationType: 2 },
+    { administrator: true },
+    { elevated: 1 },
+    { productType: 3 },
+    { build: 19_045 },
+    { osVersion: 'Microsoft Windows Server 2025' },
+    { uacEnabled: 0 },
+    { uacEnabled: null },
+    { defender: null },
+    { defender: { ...consumer.defender, realTime: false } },
+    { defender: { ...consumer.defender, mode: 'Passive' } },
+    { existing: ['prior-profile'] },
+  ]) {
+    assert.throws(() => assertWindowsConsumerHost({ ...consumer, ...change }));
+  }
+  const binding = {
+    nonce: '123e4567-e89b-42d3-a456-426614174000',
+    hostSha256: windowsConsumerHostDigest(consumer),
+    stage: 'initial',
+    artifactSha256: 'b'.repeat(64),
+    requestedAt: 1000,
+  } as const;
+  const manual = {
+    ...binding,
+    observedAt: 1100,
+    observer: 'operator',
+    launchedFrom: 'explorer',
+    defaultDestination: true,
+    freshCapturesForRequest: true,
+    smartScreen: { checkAppsAndFiles: 'enabled', result: 'not-shown', publisher: null },
+    uac: 'not-shown',
+    installer: 'completed',
+    screenshots: [
+      { kind: 'security-settings', name: 'security.png', capturedAt: 1050, sha256: 'c'.repeat(64), size: 10 },
+      { kind: 'installer-result', name: 'installed.png', capturedAt: 1050, sha256: 'd'.repeat(64), size: 10 },
+    ],
+  };
+  assert.deepEqual(assertWindowsConsumerManual(manual, binding, 'Publisher'), manual);
+  for (const change of [
+    { nonce: '123e4567-e89b-42d3-a456-426614174001' },
+    { hostSha256: 'e'.repeat(64) },
+    { stage: 'reinstall' },
+    { artifactSha256: 'e'.repeat(64) },
+    { observedAt: 999 },
+    { screenshots: manual.screenshots.map((entry) => ({ ...entry, capturedAt: 999 })) },
+    { freshCapturesForRequest: false },
+    { defaultDestination: false },
+    { screenshots: [] },
+    { installer: 'unknown' },
+    { uac: 'credentials-requested' },
+    { smartScreen: { ...manual.smartScreen, checkAppsAndFiles: 'unknown' } },
+    { smartScreen: { ...manual.smartScreen, result: 'blocked' } },
+    { smartScreen: { ...manual.smartScreen, result: 'warning-approved', publisher: 'Other' } },
+  ]) {
+    assert.throws(() => assertWindowsConsumerManual({ ...manual, ...change }, binding, 'Publisher'));
+  }
   // Exact desktopManifestFields production contract omits channel and false environmentOverrides.
   const packageMetadata = {
     version: '1.0.1',
@@ -45,6 +127,14 @@ const main = async (): Promise<void> => {
   const originalGuard = process.env['TAU_QUALIFICATION_DISPOSABLE_HOST'];
   delete process.env['TAU_QUALIFICATION_DISPOSABLE_HOST'];
   try {
+    const programs = join(root, 'missing-programs');
+    assert.equal(await admitWindowsConsumerDestination(programs, false), join(programs, 'tau-desktop'));
+    await assert.rejects(admitWindowsConsumerDestination(programs, true), /retained installer/u);
+    await mkdir(join(programs, 'tau-desktop'), { recursive: true });
+    await assert.rejects(admitWindowsConsumerDestination(programs, false), /destination exists/u);
+    await symlink(programs, join(root, 'redirect'), 'dir');
+    await rm(join(programs, 'tau-desktop'), { recursive: true });
+    await assert.rejects(admitWindowsConsumerDestination(join(root, 'redirect'), false), /parent redirects/u);
     assert.throws(
       () => createWindowsQualificationDriver({ mode: 'fixture', installationPath: join(root, 'installed') }),
       QualificationUnavailable,

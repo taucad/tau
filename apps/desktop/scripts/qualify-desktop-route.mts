@@ -17,7 +17,7 @@ import { fetchQualificationCandidates } from './qualification-candidates.mjs';
 import { qualificationArtifactObjects, qualificationFeed } from './qualification-feeds.mjs';
 import { startQualificationMirrorProcess } from './qualification-mirror-process.mjs';
 import { assertDisposableQualificationHost, prepareQualificationTls } from './qualification-tls.mjs';
-import { createWindowsQualificationDriver } from './qualification-windows.mjs';
+import { createWindowsQualificationDriver, observeWindowsConsumerHost } from './qualification-windows.mjs';
 import { createLinuxAptQualificationDriver } from './qualification-linux.mjs';
 import { prepareQualificationAptEnrollment } from './qualification-apt-enrollment.mjs';
 import type { QualificationAptEnrollment } from './qualification-apt-enrollment.mjs';
@@ -29,6 +29,7 @@ import { downloadWithBrowser } from './qualification-browser-download.mjs';
 import { discoverQualificationProcesses } from './qualification-processes.mjs';
 import {
   assertMacosCleanHost,
+  assertWindowsConsumerHost,
   collectQualificationReceipt,
   macosCleanHostApplication,
   qualificationProbeObservationSchema,
@@ -137,10 +138,10 @@ const main = async (): Promise<void> => {
   if (process.platform === 'linux' && (!process.env['DISPLAY'] || process.env['XDG_SESSION_TYPE'] !== 'x11')) {
     throw new Error('Qualification requires the declared graphical X11 session');
   }
-  // Clean-host (vm) acceptance is a Mac-only staging run on a SIP/Gatekeeper-enabled host; it is never inferred.
+  // Consumer acceptance requires native observations before the run creates its profile.
   const acceptanceKind = z.enum(['ci', 'vm']).parse(process.env['TAU_DESKTOP_ACCEPTANCE_KIND'] ?? 'ci');
   const cleanHost =
-    acceptanceKind === 'vm'
+    acceptanceKind === 'vm' && route.startsWith('macos-')
       ? await (async () => {
           if (!route.startsWith('macos-') || process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] !== 'macos') {
             throw new Error('Clean-host acceptance is a Mac-scoped run only');
@@ -152,12 +153,25 @@ const main = async (): Promise<void> => {
           );
         })()
       : undefined;
+  const windowsHost =
+    acceptanceKind === 'vm' && route === 'windows-nsis'
+      ? assertWindowsConsumerHost(observeWindowsConsumerHost(required('RUNNER_NAME')))
+      : undefined;
+  if (
+    acceptanceKind === 'vm' &&
+    (((!cleanHost && !windowsHost) || (windowsHost && process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] !== 'windows')) ??
+      required('TAU_QUALIFICATION_CHANNEL') !== 'staging')
+  ) {
+    throw new Error('Consumer acceptance requires its staging platform scope');
+  }
   const root = resolve(required('TAU_QUALIFICATION_DIRECTORY'));
   await mkdir(root, { recursive: false });
   let cleanHostRun: { host: NonNullable<typeof cleanHost>; directory: string } | undefined;
-  if (cleanHost) {
+  if (cleanHost ?? windowsHost) {
     await mkdir(join(root, 'clean-host'), { recursive: false });
-    cleanHostRun = { host: cleanHost, directory: await realpath(join(root, 'clean-host')) };
+    if (cleanHost) {
+      cleanHostRun = { host: cleanHost, directory: await realpath(join(root, 'clean-host')) };
+    }
   }
   const candidates = await fetchQualificationCandidates({
     runIds: [
@@ -208,6 +222,7 @@ const main = async (): Promise<void> => {
   let driver: QualificationPlatformDriver & {
     launch?(stage: 'initial' | 'reinstall', args: readonly string[], env: Record<string, string>): Promise<number>;
     acceptance?(): NonNullable<QualificationEvidence['acceptance']>;
+    windowsAcceptance?(): NonNullable<QualificationEvidence['windowsAcceptance']>;
   };
   let apt: QualificationAptEnrollment | undefined;
   let aptDriver: LinuxAptQualificationDriver | undefined;
@@ -273,6 +288,17 @@ const main = async (): Promise<void> => {
             mode: 'release',
             installationPath,
             publisher: required('TAU_WINDOWS_PUBLISHER'),
+            ...(windowsHost
+              ? {
+                  cleanHost: {
+                    host: windowsHost,
+                    nonce,
+                    directory: join(root, 'clean-host'),
+                    origin: transport.origin,
+                    download: downloadWithBrowser,
+                  },
+                }
+              : {}),
           })
         : (aptDriver = createLinuxAptQualificationDriver({
             mode: 'release',
@@ -706,8 +732,9 @@ const main = async (): Promise<void> => {
       ...(apt ? { scheduler } : {}),
       mirrorRequests: transport.requests.map((request) => ({ ...request, at: Date.parse(request.at) })),
       logs: `https://github.com/taucad/tau/actions/runs/${required('GITHUB_RUN_ID')}`,
-      suite: cleanHost ? 'clean-host-route-a-b-c-v1' : 'installed-route-a-b-c-v1',
+      suite: (cleanHost ?? windowsHost) ? 'clean-host-route-a-b-c-v1' : 'installed-route-a-b-c-v1',
       ...(driver.acceptance ? { acceptance: driver.acceptance() } : {}),
+      ...(driver.windowsAcceptance ? { windowsAcceptance: driver.windowsAcceptance() } : {}),
       trustIdentity:
         route === 'windows-nsis'
           ? required('TAU_WINDOWS_PUBLISHER')

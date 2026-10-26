@@ -467,7 +467,10 @@ export class EditorDocumentSession {
       return;
     }
     const base = this.#bases.get(path);
-    if (base && document.text !== decodeTextFile(base) && !sameBytes(base, bytes)) {
+    if (base && document.text !== decodeTextFile(base)) {
+      if (sameBytes(base, bytes)) {
+        return;
+      }
       const pending = { base, settled: Promise.withResolvers<void>() };
       this.#rebases.set(path, pending);
       this.#rebaseOnto(path, { kind: 'text', content: bytes }, true);

@@ -147,6 +147,26 @@ describe('EditorDocumentSession lifecycle', () => {
     session.dispose();
   });
 
+  it('keeps dirty text and undo when a pre-save edit receives an unchanged-base refresh', async () => {
+    const { content, contentChange, outcomeChange, outcomes } = fixture();
+    const session = new EditorDocumentSession({ contentService: content, projectId: 'p' });
+    const document = await session.acquire('main.ts');
+    session.apply('main.ts', { origin: 'view', expectedVersion: 1, changes: [{ from: 0, to: 4, insert: 'mine' }] });
+
+    contentChange({ type: 'written', path: 'main.ts', data: bytes('base'), source: 'machine' });
+    outcomeChange({ path: 'main.ts', result: text('base') });
+    expect(document?.text).toBe('mine');
+    document?.undo();
+    expect(document?.text).toBe('base');
+    document?.redo();
+    expect(document?.text).toBe('mine');
+
+    await session.save('main.ts');
+    expect(vi.mocked(content.saveEditor).mock.calls[0]?.[2]).toEqual(bytes('base'));
+    expect(outcomes.get('main.ts')).toEqual(text('mine'));
+    session.dispose();
+  });
+
   it('keeps the original checked base and dirty text when fresh authority arrives after a failed save', async () => {
     const { content, outcomes, outcomeChange } = fixture();
     vi.mocked(content.saveEditor).mockRejectedValueOnce(new Error('offline'));

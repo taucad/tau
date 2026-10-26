@@ -182,12 +182,18 @@ describe('electron-vite main externalization', () => {
     const { include } = await resolveProcessExternals();
     const manifest = JSON.parse(readFileSync(join(appRoot, 'package.json'), 'utf8')) as {
       readonly dependencies?: Readonly<Record<string, string>>;
+      readonly optionalDependencies?: Readonly<Record<string, string>>;
     };
 
     /* Every externalized package must be a declared dependency: the unpackaged
      * build resolves them from `apps/desktop/node_modules`, and an undeclared
      * one kills the kernel host at boot (`nanoraster/options`, 2026-09-07). */
-    expect(Object.keys(manifest.dependencies ?? {})).toEqual(expect.arrayContaining([...include]));
+    expect(Object.keys({ ...manifest.dependencies, ...manifest.optionalDependencies })).toEqual(
+      expect.arrayContaining([...include]),
+    );
+    /* node-pty builds from source on Linux; a host without a toolchain still installs, and its Terminal answers
+     * sandbox-unavailable, while every package script refuses to stage a target without its addon. */
+    expect(manifest.optionalDependencies?.['node-pty']).toBe('catalog:');
   });
 
   it.runIf(process.platform === 'darwin' && process.arch === 'arm64')(

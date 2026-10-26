@@ -61,7 +61,6 @@
     "geospec-engine": "catalog:",
     "libassimp": "catalog:",
     "nanoraster": "catalog:",
-    "node-pty": "catalog:",
     "pino-pretty": "catalog:",
     "uint8array-extras": "catalog:",
     "xstate": "catalog:",
@@ -81,5 +80,8 @@
     "electron-vite": "catalog:electron-vite8",
     "vite": "catalog:electron-vite8",
     "vitest": "catalog:"
+  },
+  "optionalDependencies": {
+    "node-pty": "catalog:"
   }
 }

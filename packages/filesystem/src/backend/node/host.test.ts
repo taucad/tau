@@ -7,12 +7,22 @@
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  truncateSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { NodeFsChannel, NodeFsProviderClient } from '#backend/node/client.js';
-import { NodeFsAuthorityHost, serveNodeFsProvider } from '#backend/node/host.js';
+import { checkedRenameLimits, NodeFsAuthorityHost, serveNodeFsProvider } from '#backend/node/host.js';
 import type { NodeFsRootScope, NodeFsServer } from '#backend/node/host.js';
 import { tauPathPolicy } from '#path-registry.js';
 
@@ -27,22 +37,26 @@ afterEach(async () => {
 
 type Served = {
   readonly root: string;
+  /** A symbolic link to `root`, admitted too, so a refusal of it is the canonical-root check and not admission. */
+  readonly alias: string;
   readonly server: NodeFsServer;
   readonly editor: NodeFsProviderClient;
   admit(value: boolean): void;
 };
 
 const serve = (options: { authority?: boolean } = {}): Served => {
-  const sandbox = mkdtempSync(join(tmpdir(), 'tau-node-host-'));
+  const sandbox = realpathSync(mkdtempSync(join(tmpdir(), 'tau-node-host-')));
   const root = join(sandbox, 'root');
+  const alias = join(sandbox, 'alias');
   const authorityRoot = join(sandbox, 'authority');
   mkdirSync(root);
   mkdirSync(authorityRoot);
+  symlinkSync(root, alias);
   let admitted = true;
   const { port1, port2 } = new MessageChannel();
   const server = serveNodeFsProvider(port2, {
     policy: tauPathPolicy,
-    allowRoot: (candidate) => admitted && candidate === root,
+    allowRoot: (candidate) => admitted && (candidate === root || candidate === alias),
     ...(options.authority === false
       ? {}
       : {
@@ -61,6 +75,7 @@ const serve = (options: { authority?: boolean } = {}): Served => {
   });
   return {
     root,
+    alias,
     server,
     editor: new NodeFsProviderClient(channel, root),
     admit: (value) => {
@@ -252,6 +267,69 @@ describe('NodeFsServer.run', () => {
     expect(existsSync(join(root, 'parts'))).toBe(false);
   });
 
+  it('should refuse a root that is not its canonical spelling before the operation starts', async () => {
+    const { alias, root, server } = serve();
+    let started = false;
+    await expect(
+      server.run({ root: alias }, async () => {
+        started = true;
+      }),
+    ).rejects.toMatchObject({ code: 'AUTHORITY_ROOT_NOT_CANONICAL' });
+    expect(started).toBe(false);
+    await expect(server.run({ root }, async () => 'canonical')).resolves.toBe('canonical');
+  });
+
+  it('should refuse close from inside its own run instead of waiting on itself', async () => {
+    const { root, server } = serve();
+    await expect(server.run({ root }, async () => server.close())).rejects.toMatchObject({
+      code: 'AUTHORITY_CLOSE_IN_CLAIM',
+    });
+    // The refusal leaves the server serving; a close after the run settles still drains it.
+    await expect(server.run({ root }, async () => 'still serving')).resolves.toBe('still serving');
+    await server.close();
+    await expect(server.run({ root }, async () => undefined)).rejects.toMatchObject({
+      code: 'AUTHORITY_HOST_INACTIVE',
+    });
+  });
+
+  it('should start no new mutation once the scope signal aborts while reads still answer', async () => {
+    const { root, server } = serve();
+    writeFileSync(join(root, 'part.ts'), 'part');
+    const entered = Promise.withResolvers<NodeFsRootScope>();
+    const release = Promise.withResolvers<void>();
+    const claim = server.run({ root }, async (scope) => {
+      entered.resolve(scope);
+      await release.promise;
+      const write = scope.writeFileChecked({
+        path: 'late.ts',
+        data: 'late',
+        preconditions: [{ path: 'late.ts', expected: null }],
+      });
+      await expect(write).rejects.toMatchObject({ code: 'AUTHORITY_HOST_INACTIVE' });
+      await expect(scope.mkdirChecked({ path: 'late' })).rejects.toMatchObject({ code: 'AUTHORITY_HOST_INACTIVE' });
+      await expect(
+        scope.renameChecked({
+          from: 'part.ts',
+          to: 'moved.ts',
+          preconditions: [
+            { path: 'part.ts', expected: 'part' },
+            { path: 'moved.ts', expected: null },
+          ],
+        }),
+      ).rejects.toMatchObject({ code: 'AUTHORITY_HOST_INACTIVE' });
+      return scope.readFile('part.ts', 'utf8');
+    });
+    const scope = await entered.promise;
+    const closing = server.close();
+    expect(scope.signal.aborted).toBe(true);
+    release.resolve();
+    await expect(claim).resolves.toBe('part');
+    await closing;
+    expect(existsSync(join(root, 'late.ts'))).toBe(false);
+    expect(existsSync(join(root, 'late'))).toBe(false);
+    expect(existsSync(join(root, 'moved.ts'))).toBe(false);
+  });
+
   it('should apply a checked replacement above the 8 MiB wire budget in-process only', async () => {
     const { root, server, editor } = serve();
     const baseline = new Uint8Array(12 * 1024 * 1024).fill(1);
@@ -377,6 +455,49 @@ describe('NodeFsRootScope checked entry operations', () => {
     expect(moved).toEqual({ status: 'applied' });
     expect(readFileSync(join(root, 'archive', 'parts', 'nested', 'b.ts'), 'utf8')).toBe('b');
     expect(existsSync(join(root, 'parts'))).toBe(false);
+  });
+
+  it('should refuse with EXDEV a move whose walk or bytes pass the checked rename bound', async () => {
+    const served = serve();
+    const { root } = served;
+    mkdirSync(join(root, 'many'));
+    for (let index = 0; index <= checkedRenameLimits.entries; index++) {
+      writeFileSync(join(root, 'many', `f${String(index)}`), '');
+    }
+    const preconditions = (directory: string, names: readonly string[]) => [
+      ...names.map((name) => ({ path: `${directory}/${name}`, expected: '' })),
+      { path: `moved-${directory}`, expected: null },
+    ];
+    const everything = Array.from({ length: checkedRenameLimits.entries + 1 }, (_, index) => `f${String(index)}`);
+    // Walk: more entries than the bound below the source, whatever the caller names.
+    await inScope(served, async (scope) => {
+      await expect(
+        scope.renameChecked({ from: 'many', to: 'moved-many', preconditions: preconditions('many', []) }),
+      ).rejects.toMatchObject({ code: 'EXDEV', applicationState: 'known-not-applied' });
+      // Preconditions: more named paths than the bound, refused before any observation.
+      await expect(
+        scope.renameChecked({ from: 'many', to: 'moved-many', preconditions: preconditions('many', everything) }),
+      ).rejects.toMatchObject({ code: 'EXDEV' });
+    });
+    expect(existsSync(join(root, 'moved-many'))).toBe(false);
+    // Bytes: a sparse file past the byte bound is refused from its size, before any read.
+    mkdirSync(join(root, 'large'));
+    writeFileSync(join(root, 'large', 'model.step'), '');
+    truncateSync(join(root, 'large', 'model.step'), checkedRenameLimits.bytes + 1);
+    await inScope(served, async (scope) => {
+      await expect(
+        scope.renameChecked({
+          from: 'large',
+          to: 'moved-large',
+          preconditions: preconditions('large', ['model.step']),
+        }),
+      ).rejects.toMatchObject({ code: 'EXDEV' });
+      await expect(
+        scope.renameChecked({ from: 'large', to: 'moved-large', preconditions: preconditions('large', []) }),
+      ).rejects.toMatchObject({ code: 'EXDEV' });
+    });
+    expect(existsSync(join(root, 'moved-large'))).toBe(false);
+    expect(existsSync(join(root, 'large', 'model.step'))).toBe(true);
   });
 
   it('should refuse a rename into its own subtree before touching disk', async () => {

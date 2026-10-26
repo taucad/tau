@@ -46,7 +46,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { z } from 'zod';
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
 
 import { createTauAgentHost } from '@taucad/agent-host';
 import type { InterruptRequest, JsonValue } from '@taucad/agent-host';
@@ -752,7 +752,12 @@ describe.runIf(enabled)('shell qualification', () => {
       ].join('\n');
       const symlinkEscape = `ln -s ${unrelated} out/link && printf ESCAPED > out/link/through-link.txt`;
       const bomb =
-        "python3 -c \"import sys\nwith open('bomb.bin', 'wb') as f:\n    while True: f.write(bytes(1 << 20))\"";
+        "python3 -c \"import time\nwith open('bomb.bin', 'wb') as f:\n    while True:\n        f.write(bytes(1 << 20))\n        f.flush()\n        time.sleep(0.01)\"";
+      const bombPath = join(project, 'data', 'bomb.bin');
+      onTestFinished(() => {
+        /* A failed row must not leave the guest's tmpfs full for every row after it. */
+        rmSync(bombPath, { force: true });
+      });
       const { outputs } = await drive('t07', [
         shellCall('t07-inspect', { command: inspect, cwd: 'data' }),
         shellCall('t07-symlink', { command: symlinkEscape, cwd: 'data' }),
@@ -769,10 +774,10 @@ describe.runIf(enabled)('shell qualification', () => {
       /* Judged outside: nothing landed beside the canary, through either path. */
       expect(readdirSync(unrelated).toSorted()).toStrictEqual(unrelatedBefore);
       expect(outputs[2]?.status).toBe('timed-out');
-      const { size } = statSync(join(project, 'data', 'bomb.bin'));
+      const { size } = statSync(bombPath);
+      expect(size).toBeGreaterThan(0);
       await delay(1000);
-      expect(statSync(join(project, 'data', 'bomb.bin')).size).toBe(size);
-      rmSync(join(project, 'data', 'bomb.bin'));
+      expect(statSync(bombPath).size).toBe(size);
     },
   );
 

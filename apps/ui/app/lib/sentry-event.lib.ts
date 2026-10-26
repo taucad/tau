@@ -3,6 +3,7 @@ import { defaultStackParser } from '@sentry/react';
 import type { ErrorEvent, StackFrame } from '@sentry/react';
 import { randomUuid } from '@taucad/utils/id';
 import { ENV } from '#environment.config.js';
+import { apiRequestIdTags } from '#lib/api-request-id.js';
 import { readBuildId } from '#lib/build-identity.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { applyTauEventContext } from '#lib/sentry-context.lib.js';
@@ -307,7 +308,7 @@ const buildEnvelope = ({ dsn, error, tags, stackLimit, fingerprint }: EnvelopeIn
     level: 'error',
     ...(release === undefined ? {} : { release }),
     ...(environment === undefined ? {} : { environment }),
-    tags: { ...tags, delivery: 'without-sdk' },
+    tags: { ...apiRequestIdTags(error), ...tags, delivery: 'without-sdk' },
     exception: {
       values: [
         {

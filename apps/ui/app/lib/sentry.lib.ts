@@ -3,6 +3,7 @@ import type { Breadcrumb, ErrorEvent, EventHint } from '@sentry/react';
 import { isAbortError } from '@taucad/utils/error';
 import { ENV } from '#environment.config.js';
 import { setActivityBreadcrumbSink } from '#lib/activity-breadcrumbs.js';
+import { apiRequestIdTags } from '#lib/api-request-id.js';
 import { readBuildId } from '#lib/build-identity.js';
 import { applyTauEventContext } from '#lib/sentry-context.lib.js';
 import {
@@ -35,7 +36,8 @@ export const isUnhandledAbortRejection = (event: ErrorEvent, hint: EventHint | u
   (event.exception?.values?.some((value) => value.mechanism?.type === unhandledRejectionMechanism) ?? false);
 
 /**
- * The `beforeSend` hook: drop an unhandled abort rejection, scrub everything else.
+ * The `beforeSend` hook: drop an unhandled abort rejection, tag an API failure with its `api_request_id` (SB13),
+ * scrub everything else.
  *
  * @param event - The event the SDK is about to send.
  * @param hint - The SDK's hint for the event.
@@ -43,8 +45,13 @@ export const isUnhandledAbortRejection = (event: ErrorEvent, hint: EventHint | u
  * @public
  */
 // oxlint-disable-next-line typescript/no-restricted-types -- Sentry's beforeSend drops an event by returning null.
-export const beforeSendSentryEvent = (event: ErrorEvent, hint?: EventHint): ErrorEvent | null =>
-  isUnhandledAbortRejection(event, hint) ? null : scrubSentryEvent(event);
+export const beforeSendSentryEvent = (event: ErrorEvent, hint?: EventHint): ErrorEvent | null => {
+  if (isUnhandledAbortRejection(event, hint)) {
+    return null;
+  }
+  const apiTags = apiRequestIdTags(hint?.originalException);
+  return scrubSentryEvent(Object.keys(apiTags).length > 0 ? { ...event, tags: { ...event.tags, ...apiTags } } : event);
+};
 
 /**
  * The `beforeSend` hook with version-skew tagging (TAU-UI-6).

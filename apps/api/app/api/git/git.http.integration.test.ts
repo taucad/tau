@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- decorators are not constructors; git-lfs wire fields are snake_case */
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { createServer, request as httpRequest } from 'node:http';
+import { request as httpRequest } from 'node:http';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -21,7 +21,6 @@ import { APP_FILTER, APP_PIPE, HttpAdapterHost } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
-import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { FastifyInstance } from 'fastify';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { AuthGuard } from '#auth/auth.guard.js';
@@ -57,6 +56,7 @@ import { hydrateLease } from '#api/git/store/lease.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import type { RepositoryStore, StoredObject } from '#api/git/store/port.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { createGitTestListener } from '#api/git/git-test-listener.js';
 
 /**
  * The Tau Hosted Remote end to end over the repository store (W4).
@@ -82,19 +82,6 @@ const callers = {
 const roleRank: Record<ProjectRole, number> = { read: 0, write: 1, owner: 2 };
 
 let configuredApiUrl = '';
-
-/** A port nothing is listening on yet, so the API can be configured for it. */
-const reservePort = async (): Promise<number> =>
-  new Promise((resolve) => {
-    const probe = createServer();
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address();
-      const port = typeof address === 'string' || address === null ? 0 : address.port;
-      probe.close(() => {
-        resolve(port);
-      });
-    });
-  });
 
 /** Mutable fixture state the stubs read. */
 const state = {
@@ -214,6 +201,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
   let hop: StorageHop;
   let worker: StorageGitService;
   let storage: ObjectStorageService;
+  const cleanup: Array<() => Promise<void>> = [];
 
   const remoteFor = (token: string): string =>
     `http://tau:${token}@${new URL(configuredApiUrl).host}/v1/git/${projectId}.git`;
@@ -231,8 +219,10 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
 
   beforeAll(async () => {
     workspace = await mkdtemp(path.join(tmpdir(), 'tau-git-work-'));
-    const port = await reservePort();
-    configuredApiUrl = `http://127.0.0.1:${String(port)}`;
+    cleanup.push(async () => rm(workspace, { recursive: true, force: true }));
+    const listener = await createGitTestListener();
+    cleanup.push(listener.close);
+    configuredApiUrl = listener.origin;
     process.env.TAU_API_URL = configuredApiUrl;
 
     /* One statement shape per reader, because the derivation path and the plan
@@ -335,6 +325,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
           provide: gitExecutorKey,
           useFactory: async (store: RepositoryStore) => {
             hop = await startStorageHop({ store, post: async (receipt) => repositories.applyReceipt(receipt) });
+            cleanup.push(async () => hop.close());
             worker = hop.worker;
             return hop.forwarder;
           },
@@ -393,15 +384,24 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
       .useClass(GitTestAuthGuard)
       .compile();
 
-    app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter({ bodyLimit: 256 * 1024 * 1024 }));
+    let closeApplication = async (): Promise<void> => moduleRef.close();
+    cleanup.push(async () => closeApplication());
+    app = moduleRef.createNestApplication<NestFastifyApplication>(listener.adapter);
+    closeApplication = async () => app.close();
     app.enableCors({ ...corsBaseConfiguration, origin: true });
     app.enableVersioning({ type: VersioningType.URI });
     await app.init();
     await app.getHttpAdapter().getInstance().ready();
-    await app.listen(new URL(configuredApiUrl).port, '127.0.0.1');
 
     storage = app.get(ObjectStorageService);
     assertDestructiveTestBucketAllowed(storage.bucketFor('private'), 'the Tau Hosted Remote HTTP suite');
+    cleanup.push(async () =>
+      storage.deleteEntirePrefixForPurgeJob({
+        namespace: 'tenants',
+        keyPrefix: `${ownerId}/`,
+        tier: 'private',
+      }),
+    );
 
     repositories = app.get(GitRepositoryService);
     vi.spyOn(repositories, 'readOwnerUsage').mockImplementation(async () => {
@@ -450,14 +450,18 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
   }, 120_000);
 
   afterAll(async () => {
-    await app.close();
-    await hop.close();
-    await storage.deleteEntirePrefixForPurgeJob({
-      namespace: 'tenants',
-      keyPrefix: `${ownerId}/`,
-      tier: 'private',
-    });
-    await rm(workspace, { recursive: true, force: true });
+    const errors: unknown[] = [];
+    for (const close of cleanup.reverse()) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- release dependent fixtures in reverse acquisition order, even after a failure.
+        await close();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length > 0) {
+      throw new AggregateError(errors, 'Failed to clean up the git HTTP suite');
+    }
   }, 60_000);
 
   it('serves a stock `git clone`, `git push` and `git fetch` with nothing on disk between them', async () => {

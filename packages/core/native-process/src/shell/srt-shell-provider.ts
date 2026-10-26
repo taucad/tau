@@ -7,6 +7,8 @@
  * stopped and the supervisor has released the runtime.
  */
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { channel } from 'node:diagnostics_channel';
 import type { ChildProcess } from 'node:child_process';
 import { closeSync, existsSync, lstatSync, mkdtempSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
@@ -406,7 +408,33 @@ type ByteQueue = Readonly<{
   iterable: AsyncIterable<Uint8Array<ArrayBuffer>>;
 }>;
 
-const byteQueue = (pause: () => void, resume: () => void): ByteQueue => {
+// Private diagnostics: numeric queue occupancy only, never command text or output bytes.
+const queueDiagnostics = channel('taucad.native-process.shell.byte-queue');
+type QueueIdentity = Readonly<{ commandId: string; stream: 'stdout' | 'stderr' | 'pty' }>;
+
+const byteQueue = (pause: () => void, resume: () => void, identity: QueueIdentity): ByteQueue => {
+  const queueId = randomUUID();
+  let queuedBytes = 0;
+  let peakBytes = 0;
+  let peakChunks = 0;
+  let pauses = 0;
+  let resumes = 0;
+  const report = (): void => {
+    if (queueDiagnostics.hasSubscribers) {
+      queueDiagnostics.publish(
+        Object.freeze({
+          ...identity,
+          queueId,
+          queuedBytes,
+          queuedChunks: chunks.length,
+          peakBytes,
+          peakChunks,
+          pauses,
+          resumes,
+        }),
+      );
+    }
+  };
   const chunks: Array<Uint8Array<ArrayBuffer>> = [];
   let ended = false;
   let paused = false;
@@ -419,16 +447,22 @@ const byteQueue = (pause: () => void, resume: () => void): ByteQueue => {
     });
   const end = (): void => {
     ended = true;
+    report();
     wake?.();
   };
   return {
     push: (chunk) => {
       lastChunk = Date.now();
       chunks.push(chunk);
+      queuedBytes += chunk.byteLength;
+      peakBytes = Math.max(peakBytes, queuedBytes);
+      peakChunks = Math.max(peakChunks, chunks.length);
       if (chunks.length >= highWater && !paused) {
         paused = true;
+        pauses += 1;
         pause();
       }
+      report();
       wake?.();
     },
     end,
@@ -447,10 +481,13 @@ const byteQueue = (pause: () => void, resume: () => void): ByteQueue => {
         for (;;) {
           const chunk = chunks.shift();
           if (chunk !== undefined) {
+            queuedBytes -= chunk.byteLength;
             if (paused && chunks.length < highWater / 2) {
               paused = false;
+              resumes += 1;
               resume();
             }
+            report();
             yield chunk;
           } else if (ended) {
             return;
@@ -466,10 +503,11 @@ const byteQueue = (pause: () => void, resume: () => void): ByteQueue => {
 };
 
 /** Queue a readable child stream. */
-const queueStream = (stream: NodeJS.ReadableStream & { destroy: () => void }): ByteQueue => {
+const queueStream = (stream: NodeJS.ReadableStream & { destroy: () => void }, identity: QueueIdentity): ByteQueue => {
   const queue = byteQueue(
     () => stream.pause(),
     () => stream.resume(),
+    identity,
   );
   stream.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
     queue.push(chunk);
@@ -581,8 +619,8 @@ const startPipes = (argv: readonly string[], launch: ShellLaunch, supervisor: Su
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  const stdout = queueStream(child.stdout);
-  const stderr = queueStream(child.stderr);
+  const stdout = queueStream(child.stdout, { commandId: launch.commandId, stream: 'stdout' });
+  const stderr = queueStream(child.stderr, { commandId: launch.commandId, stream: 'stderr' });
   const settled = settle(
     {
       pid: child.pid ?? -1,
@@ -625,7 +663,7 @@ const startLinuxTerminal = (
   });
   closeSync(pty.slave);
   const master = new ReadStream(pty.master);
-  const queue = queueStream(master);
+  const queue = queueStream(master, { commandId: launch.commandId, stream: 'pty' });
   const settled = settle(
     {
       pid: child.pid ?? -1,
@@ -668,6 +706,7 @@ const startMacTerminal = ({ argv, launch, size, supervisor }: TerminalStart, bin
     () => {
       terminal.resume();
     },
+    { commandId: launch.commandId, stream: 'pty' },
   );
   terminal.onData((data) => {
     queue.push(typeof data === 'string' ? Buffer.from(data, 'utf8') : data);

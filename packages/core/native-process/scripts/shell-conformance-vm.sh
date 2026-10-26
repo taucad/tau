@@ -29,13 +29,23 @@ work="$(mktemp -d "$RUNNER_TEMP/tau-shell-vm.XXXXXX")"
 output="$REPO_ROOT/out/test-results/shell-conformance/$row"
 mkdir -p "$output"
 qemu_pid=''
+ready=false
 cleanup() {
+  local exit_code=$?
+  # Even a setup/test failure must retain the app identities and any completed trace/JSON receipts.
+  if [[ "$ready" == true ]]; then
+    timeout --kill-after=10s 90s ssh "${ssh_options[@]}" tau@127.0.0.1 \
+      'cd ~/tau; paths=(out/test-results/shell-application); for path in out/test-results/desktop-shell out/test-results/desktop-e2e; do if [[ -d "$path" ]]; then paths+=("$path"); fi; done; tar -czf - "${paths[@]}"' \
+      > "$output/application-evidence.tar.gz" || exit_code=1
+  fi
+  if [[ -f "$work/serial.log" ]]; then cp "$work/serial.log" "$output/serial.log"; fi
   if [[ -n "$qemu_pid" ]]; then
     kill "$qemu_pid" 2>/dev/null || true
     wait "$qemu_pid" 2>/dev/null || true
   fi
   sudo setfacl -x "u:$(id -un)" /dev/kvm || true
   rm -rf -- "$work"
+  exit "$exit_code"
 }
 trap cleanup EXIT
 trap 'exit 1' INT TERM
@@ -47,7 +57,7 @@ sudo setfacl -m "u:$(id -un):rw" /dev/kvm
 curl --fail --location --proto '=https' --proto-redir '=https' --retry 3 "$url" -o "$work/base.qcow2"
 printf '%s  %s\n' "$digest" "$work/base.qcow2" | "$algorithm" --check
 printf '%s\n%s %s\n' "$url" "$algorithm" "$digest" > "$output/image.txt"
-qemu-img create -f qcow2 -F qcow2 -b "$work/base.qcow2" "$work/guest.qcow2" 32G
+qemu-img create -f qcow2 -F qcow2 -b "$work/base.qcow2" "$work/guest.qcow2" 64G
 ssh-keygen -q -t ed25519 -N '' -f "$work/client"
 ssh-keygen -q -t ed25519 -N '' -f "$work/host"
 printf '[127.0.0.1]:2222 %s\n' "$(cat "$work/host.pub")" > "$work/known_hosts"
@@ -97,6 +107,13 @@ done
 node_root="$(dirname "$(dirname "$(command -v node)")")"
 tar -C "$node_root" -cf - . | ssh "${ssh_options[@]}" tau@127.0.0.1 'tar -xf - -C ~/node'
 (cd "$REPO_ROOT" && git ls-files -z | tar --null -T - -cf -) | ssh "${ssh_options[@]}" tau@127.0.0.1 'tar -xf - -C ~/tau'
+# Bind the exact host build to this source identity and verify every copied byte before any application test.
+(cd "$REPO_ROOT" && test -s apps/desktop/dist/main/index.js && test -s apps/ui/desktop/build/client/index.html && \
+  find apps/desktop/dist apps/ui/desktop/build -type f -print0 | sort -z | xargs -0 sha256sum) \
+  > "$output/application-build.sha256"
+(cd "$REPO_ROOT" && tar -cf - apps/desktop/dist apps/ui/desktop/build) | \
+  ssh "${ssh_options[@]}" tau@127.0.0.1 'tar -xf - -C ~/tau'
+ssh "${ssh_options[@]}" tau@127.0.0.1 'cat > ~/tau/application-build.sha256' < "$output/application-build.sha256"
 # Only identity values for the receipt cross into the guest, each constrained to its shape first.
 [[ "${GITHUB_SHA:-}" =~ ^[a-f0-9]{40}$ && "${GITHUB_RUN_ID:-}" =~ ^[0-9]+$ && "${GITHUB_REPOSITORY:-}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
 status=0
@@ -107,5 +124,6 @@ ssh "${ssh_options[@]}" tau@127.0.0.1 \
 ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/shell-conformance-receipt.json' > "$output/receipt.json" || true
 ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/shell-service-conformance-receipt.json' > "$output/service-receipt.json" || true
 ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/terminal-conformance-receipt.json' > "$output/terminal-receipt.json" || true
+ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/shell-qualification-receipt.json' > "$output/qualification-receipt.json" || true
 printf '%s\n' "$status" > "$output/exit-code.txt"
 exit "$status"

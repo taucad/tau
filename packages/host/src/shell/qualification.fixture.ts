@@ -50,7 +50,7 @@ export const controlledEndpoint = async (): Promise<
       response.writeHead(302, { location: `http://${otherName}/redirected`, connection: 'close' }).end();
       return;
     }
-    response.writeHead(200, { 'content-type': 'text/plain', connection: 'close' }).end(`ENDPOINT:${path}`);
+    response.writeHead(200, { 'content-type': 'text/plain', connection: 'close' }).end(`ENDPOINT:${path}\n`);
   });
   await new Promise<void>((resolve) => {
     server.listen(0, '127.0.0.1', resolve);

@@ -355,8 +355,12 @@ const unixCanary = async (path: string): Promise<Readonly<{ server: Server; conn
     connections += 1;
     socket.end('CANARY\n');
   });
-  await new Promise<void>((resolve) => {
-    server.listen(path, resolve);
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(path, () => {
+      server.off('error', reject);
+      resolve();
+    });
   });
   return { server, connections: () => connections };
 };
@@ -371,7 +375,8 @@ describe.runIf(enabled)('shell qualification', () => {
     if (linux && !existsSync(bwrapPath)) {
       throw new Error(`no bubblewrap at ${bwrapPath}; a qualification row never falls back to another one.`);
     }
-    root = realpathSync(mkdtempSync(join(tmpdir(), 'tau-shell-qualification-')));
+    /* A short prefix keeps E06's project socket within macOS's 104-byte Unix socket path under the runner's TMPDIR. */
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'tq-')));
     project = join(root, 'projects', 'bracket');
     second = join(root, 'projects', 'second');
     candidate = join(root, 'candidates', 'bracket-candidate');
@@ -972,9 +977,13 @@ describe.runIf(enabled)('shell qualification', () => {
       expect(counting.widened(supplier)).toStrictEqual([]);
 
       /* A person's Stop while a command runs: the command ends, the run ends, and nothing keeps running. */
-      const stopped = await agentHostOver('t16-stop', [shellCall('t16-stopped', { command: `sleep 30 # ${marker}` })], {
-        counting,
-      });
+      const stopped = await agentHostOver(
+        't16-stop',
+        [shellCall('t16-stopped', { command: `exec -a ${marker} sleep 30` })],
+        {
+          counting,
+        },
+      );
       try {
         const turn = stopped.admit();
         expect(await eventually(() => processesWith(marker).length > 0, 20_000)).toBe(true);
@@ -1245,13 +1254,15 @@ describe.runIf(enabled)('shell qualification', () => {
           DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
         },
       });
-      const descriptors = linux ? 'ls /proc/self/fd' : 'ls /dev/fd';
+      /* The shell's own open descriptors, tested without opening any: a listing would add its own directory handles. */
+      const table = linux ? '/proc/self/fd' : '/dev/fd';
+      const descriptors = `for fd in {3..255}; do [[ -e ${table}/$fd ]] && printf '%s ' "$fd"; done; echo`;
       const output = ok(
         await shell.run({
           toolCallId: 'e05-environment',
           runId: 'run-e05',
           signal: new AbortController().signal,
-          input: { command: `env; echo FDS; ${descriptors} | sort -n | tr '\\n' ' '` },
+          input: { command: `env; echo FDS; ${descriptors}` },
         }),
       );
 
@@ -1281,14 +1292,8 @@ describe.runIf(enabled)('shell qualification', () => {
       ]) {
         expect(existsSync(join(project, hook)), hook).toBe(false);
       }
-      /* Only the standard streams, plus the descriptor the listing itself opens. */
-      expect(
-        fds
-          .trim()
-          .split(' ')
-          .map(Number)
-          .filter((fd) => fd > 3),
-      ).toStrictEqual([]);
+      /* Only the standard streams. */
+      expect(fds.trim()).toBe('');
     },
   );
 

@@ -2,14 +2,21 @@ import { readFile, readdir, writeFile, stat } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { expect } from 'vitest';
-import type { Page } from 'playwright';
+import type { Locator, Page } from 'playwright';
 import type { DesktopSession } from '#support/desktop-app.js';
+
+/**
+ * The Terminal pane's own region. The workbench group around it is also a region named for its active tab, so the
+ * pane is the Terminal region inside that group.
+ */
+export const terminalRegion = (page: Page): Locator =>
+  page.getByRole('region', { name: 'Terminal', exact: true }).getByRole('region', { name: 'Terminal', exact: true });
 
 /** Open the production workbench surface through its ordinary menu. */
 export const openTerminalPane = async (page: Page): Promise<void> => {
   await page.getByRole('button', { name: 'Open workbench tab', exact: true }).first().click();
   await page.getByRole('menuitem', { name: 'Terminal', exact: true }).click();
-  await page.getByRole('region', { name: 'Terminal', exact: true }).waitFor();
+  await terminalRegion(page).waitFor();
 };
 
 /** Create an offline project through the same form a person uses. */

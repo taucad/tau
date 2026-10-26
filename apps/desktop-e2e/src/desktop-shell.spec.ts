@@ -16,6 +16,7 @@ import {
   expectTerminalWriterStopped,
   survivingTerminalWriter,
   terminalWordPosition,
+  terminalRegion,
 } from '#support/shell-qualification.js';
 
 let session: DesktopSession | undefined;
@@ -176,7 +177,7 @@ describe('production Electron Terminal keyboard qualification', () => {
     await page.keyboard.type('printf replayed > close-replay.txt');
     await page.locator('.dv-tab[data-tab-panel-id="workbench:terminal"]').click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Close', exact: true }).click();
-    await page.getByRole('region', { name: 'Terminal', exact: true }).waitFor({ state: 'detached' });
+    await terminalRegion(page).waitFor({ state: 'detached' });
     await expectTerminalWriterStopped(writer);
     await openTerminalPane(page);
     await page.getByRole('button', { name: 'Start Terminal', exact: true }).click();

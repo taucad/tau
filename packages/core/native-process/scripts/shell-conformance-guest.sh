@@ -43,8 +43,9 @@ sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommen
   xvfb xauth dbus-x11 dbus-user-session xdg-utils libsecret-1-0 libgtk-3-0t64 libnss3 libasound2t64 libatk-bridge2.0-0t64 libcups2t64 \
   libdrm2 libgbm1 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libx11-xcb1 libxss1 \
   libvulkan1 mesa-vulkan-drivers vulkan-tools docker.io
-case "$ID" in ubuntu) compose_package=docker-compose-v2 ;; debian) compose_package=docker-compose ;; esac
-sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$compose_package"
+# Debian ships the Docker client separately and only recommends it; Ubuntu's docker.io carries it.
+case "$ID" in ubuntu) docker_client_packages=(docker-compose-v2) ;; debian) docker_client_packages=(docker-cli docker-compose) ;; esac
+sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${docker_client_packages[@]}"
 sudo systemctl enable --now docker
 sudo usermod -aG docker tau
 # Named E06 services are real guest services, not absent endpoints mistaken for containment.
@@ -72,7 +73,7 @@ sha256sum --check application-build.sha256 > "$evidence/application-build-verifi
 # Use the actual selector directory, not a path through its executable.
 export PATH="$(dirname "$bwrap"):$HOME/node/bin:/usr/local/bin:/usr/bin:/bin"
 for dependency in bash rg socat bwrap git node pnpm xvfb-run docker; do
-  command -v "$dependency" >> "$evidence/runtime-paths.txt"
+  command -v "$dependency" >> "$evidence/runtime-paths.txt" || { printf 'Missing prerequisite: %s\n' "$dependency" >&2; exit 1; }
 done
 { node --version; pnpm --version; bash --version; bwrap --version; rg --version; git --version; } > "$evidence/runtime-versions.txt"
 node --input-type=module -e '

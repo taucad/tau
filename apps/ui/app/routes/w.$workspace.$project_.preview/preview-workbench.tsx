@@ -18,6 +18,7 @@ import { ProjectExportAction } from '#routes/w.$workspace.$project/project-expor
 import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
 import { ProjectSettingsDialog } from '#routes/w.$workspace.$project_.preview/project-settings-dialog.js';
 import { usePreviewProject } from '#routes/w.$workspace.$project_.preview/preview-project-context.js';
+import { PreviewPhoneTopBar } from '#routes/w.$workspace.$project_.preview/preview-phone-top-bar.js';
 import { toast } from '#components/ui/sonner.js';
 
 /** Owned previews retain their rooted files and native-kernel selection, with a transient workbench arrangement. */
@@ -72,46 +73,50 @@ export function OwnedPreviewWorkbench(): React.JSX.Element {
     });
   }, [fileManager, project]);
   const renderTopbar = useCallback(
-    (workbenchTrigger?: React.ReactNode) => (
-      <header
-        data-slot='owned-preview-topbar'
-        className='flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b px-2 py-2 @min-[640px]/preview:h-12 @min-[640px]/preview:flex-nowrap @min-[640px]/preview:gap-4 @min-[640px]/preview:px-4 @min-[640px]/preview:py-0'
-      >
-        <Button asChild size='sm' variant='ghost' className='@max-[768px]/preview:size-8 @max-[768px]/preview:px-0'>
-          <Link to='/projects' aria-label='Projects'>
-            <ArrowLeft className='size-3.5 @min-[768px]/preview:mr-1.5' aria-hidden />
-            <span className='hidden @min-[768px]/preview:inline'>Projects</span>
-          </Link>
-        </Button>
-        <h1 className='order-last w-full min-w-0 truncate text-center text-sm font-medium @min-[640px]/preview:order-none @min-[640px]/preview:w-auto @min-[640px]/preview:flex-1'>
-          {project?.name}
-        </h1>
-        <div className='flex shrink-0 items-center gap-1 @min-[640px]/preview:gap-2'>
-          {workbenchTrigger}
-          <Button
-            size='sm'
-            variant='ghost'
-            aria-label='Download source'
-            className='@max-[768px]/preview:size-8 @max-[768px]/preview:px-0'
-            onClick={downloadSource}
-          >
-            <Download className='size-3.5 @min-[768px]/preview:mr-1.5' aria-hidden />
-            <span className='hidden @min-[768px]/preview:inline'>Download source</span>
-          </Button>
-          <ProjectExportAction
-            className='h-8 px-2.5 text-xs @max-[768px]/preview:size-8 @max-[768px]/preview:px-0'
-            labelClassName='hidden @min-[768px]/preview:inline'
-          />
-          <ProjectSettingsDialog />
-          <Button asChild size='sm' variant='outline'>
-            <Link to={editorUrl}>
-              <FileCode className='size-3.5' aria-hidden />
-              Edit
+    (workbenchTrigger?: React.ReactNode) =>
+      // The layout hands a Workbench trigger only while it is compact: the bar is then the 48px phone bar (HDR-12).
+      workbenchTrigger === undefined ? (
+        <header
+          data-slot='owned-preview-topbar'
+          className='flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b px-2 py-2 @min-[640px]/preview:h-12 @min-[640px]/preview:flex-nowrap @min-[640px]/preview:gap-4 @min-[640px]/preview:px-4 @min-[640px]/preview:py-0'
+        >
+          <Button asChild size='sm' variant='ghost' className='@max-[768px]/preview:size-8 @max-[768px]/preview:px-0'>
+            <Link to='/projects' aria-label='Projects'>
+              <ArrowLeft className='size-3.5 @min-[768px]/preview:mr-1.5' aria-hidden />
+              <span className='hidden @min-[768px]/preview:inline'>Projects</span>
             </Link>
           </Button>
-        </div>
-      </header>
-    ),
+          <h1 className='order-last w-full min-w-0 truncate text-center text-sm font-medium @min-[640px]/preview:order-none @min-[640px]/preview:w-auto @min-[640px]/preview:flex-1'>
+            {project?.name}
+          </h1>
+          <div className='flex shrink-0 items-center gap-1 @min-[640px]/preview:gap-2'>
+            {workbenchTrigger}
+            <Button
+              size='sm'
+              variant='ghost'
+              aria-label='Download source'
+              className='@max-[768px]/preview:size-8 @max-[768px]/preview:px-0'
+              onClick={downloadSource}
+            >
+              <Download className='size-3.5 @min-[768px]/preview:mr-1.5' aria-hidden />
+              <span className='hidden @min-[768px]/preview:inline'>Download source</span>
+            </Button>
+            <ProjectExportAction
+              className='h-8 px-2.5 text-xs @max-[768px]/preview:size-8 @max-[768px]/preview:px-0'
+              labelClassName='hidden @min-[768px]/preview:inline'
+            />
+            <ProjectSettingsDialog />
+            <Button asChild size='sm' variant='outline'>
+              <Link to={editorUrl}>
+                <FileCode className='size-3.5' aria-hidden />
+                Edit
+              </Link>
+            </Button>
+          </div>
+        </header>
+      ) : (
+        <PreviewPhoneTopBar projectName={project?.name} editorUrl={editorUrl} onDownloadSource={downloadSource} />
+      ),
     [downloadSource, editorUrl, project?.name],
   );
   if (error) {
@@ -133,5 +138,11 @@ export function OwnedPreviewWorkbench(): React.JSX.Element {
       </div>
     );
   }
-  return <PreviewWorkbenchLayout renderTopbar={renderTopbar} />;
+  return (
+    // The route draws its own bar (`enablePageHeader: false`), so it keeps the shell's inset under the closed
+    // sidebar's titlebar controls from `md` up, as the shell gives a headerless page.
+    <div className='size-full md:group-data-[sidebar-open=false]/app-shell:pt-9'>
+      <PreviewWorkbenchLayout renderTopbar={renderTopbar} />
+    </div>
+  );
 }

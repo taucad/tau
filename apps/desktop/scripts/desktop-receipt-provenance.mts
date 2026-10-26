@@ -106,6 +106,14 @@ export const fetchDesktopQualifiedReceipts = async (
       if (receipt.environment.kind !== environment) {
         throw new Error('Receipt kind differs from trusted producer');
       }
+      // The Mac clean-host producer writes only its own suite, with host facts the receipt parser already required.
+      if (
+        environment === 'vm' &&
+        scope === 'macos' &&
+        (receipt.suite !== 'clean-host-route-a-b-c-v1' || !receipt.environment.host)
+      ) {
+        throw new Error('Clean-host receipt lacks its producer suite or host facts');
+      }
       receipts.push(receipt);
     }
   }

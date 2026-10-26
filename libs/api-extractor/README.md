@@ -9,17 +9,15 @@ The root package intentionally stays asset-light. Use the dedicated subpaths:
 
 ## GeoSpec Authoring Types
 
-GeoSpec declarations are generated from `packages/geospec/src` into `src/generated/geospec/geospec.bundled.json`. The generated bundle is package-shaped so Monaco can mount it exactly like a local package:
+`geospec` is published from taucad/geospec and installed here at its pnpm catalog pin. Its declarations are generated from the installed package's `dist/**/*.d.mts` into `src/generated/geospec/geospec.bundled.json`, keyed under `.d.ts` names. The generated bundle is package-shaped so Monaco can mount it exactly like a local package:
 
 - `/node_modules/geospec/package.json`
 - `/node_modules/geospec/index.d.ts`
 - `/node_modules/geospec/mesh/index.d.ts`
 - `/node_modules/geospec/model/index.d.ts`
 - `/node_modules/geospec/runner/index.d.ts`
-- `/node_modules/geospec/step/index.d.ts`
-- `/node_modules/geospec/brep/index.d.ts`
 
-Regenerate the GeoSpec bundle any time a public GeoSpec matcher, loader, option type, or subpath changes:
+Regenerate the GeoSpec bundle whenever the `geospec` catalog pin changes:
 
 ```bash
 pnpm nx run api-extractor:extract-geospec
@@ -31,7 +29,7 @@ Then verify the authoring surface:
 pnpm nx test api-extractor --watch=false
 ```
 
-The regression tests assert that generated declarations expose current BRep and STEP APIs, including `loadModel({ format: 'step' })`, `loadStep`, `toBeValidBrep`, exact measurement matchers, feature matchers, and distance matchers. If an agent reads `node_modules/geospec/*.d.ts`, it should see the same public API that package consumers see.
+The regression tests assert that generated declarations expose every public subpath of the installed package, including `loadModel({ format: 'step' })`, `toBeValidBrep`, exact measurement matchers and feature matchers. If an agent reads `node_modules/geospec/*.d.ts`, it should see the same public API that package consumers see.
 
 ## Kernel Type Bundles
 
@@ -63,5 +61,5 @@ GeoSpec stays in `authoring-types` rather than `kernel-types` because it is a te
 - Keep generated JSON in source control; the browser editor depends on it at build time.
 - Add a public subpath to the raw extractor map and its projection regression tests.
 - Prefer package-shaped declarations for authoring APIs so `package.json#exports` matches real Node/package resolution.
-- Do not hand-write app-local GeoSpec declarations. Generate them from `packages/geospec/src`.
+- Do not hand-write app-local GeoSpec declarations. Generate them from the installed `geospec` package.
 - Do not add runtime assets to the root `@taucad/api-extractor` entrypoint.

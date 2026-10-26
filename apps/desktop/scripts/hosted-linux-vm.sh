@@ -61,7 +61,12 @@ sudo setfacl -m "u:$(id -un):rw" /dev/kvm
 curl --fail --location --proto '=https' --proto-redir '=https' --retry 3 "$url" -o "$work/base.qcow2"
 printf '%s  %s\n' "$digest" "$work/base.qcow2" | "$algorithm" --check
 printf '%s\n%s %s\n' "$url" "$algorithm" "$digest" > "$output/image.txt"
-qemu-img create -f qcow2 -F qcow2 -b "$work/base.qcow2" "$work/guest.qcow2" 24G
+# Qualification retains three signed archives, unpacked candidates, dependencies and runtime generations.
+# The sparse overlay grows only as used; the original 24 GiB guest exhausted native payload headroom.
+guest_size=24G
+if [[ "$mode" == qualification ]]; then guest_size=48G; fi
+df -h "$work"
+qemu-img create -f qcow2 -F qcow2 -b "$work/base.qcow2" "$work/guest.qcow2" "$guest_size"
 ssh-keygen -q -t ed25519 -N '' -f "$work/client"
 ssh-keygen -q -t ed25519 -N '' -f "$work/host"
 printf '[127.0.0.1]:2222 %s\n' "$(cat "$work/host.pub")" > "$work/known_hosts"

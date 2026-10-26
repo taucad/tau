@@ -408,18 +408,23 @@ describe('PicoGK kernel', () => {
     expect(built.handle.tessellation).not.toHaveProperty('relax');
   });
 
-  it('reports a uniform mesh as the export build, and an adaptive mesh or a report-less snapshot as nothing', () => {
+  it('reports the meshing a handle holds as its export build, and a report-less snapshot as nothing', () => {
     const glb = new Uint8Array(4);
     const tessellation = { triangles: 1, vertices: 3, elapsed: 1 };
     const options = picogkRenderSchema.parse({ meshRelax: true });
     const effective = (handle: Parameters<NonNullable<typeof definition.effectiveOptions>>[0]['handle']) =>
       definition.effectiveOptions!({ handle, options }, runtime, context());
     expect(effective({ glb, tessellation })).toEqual({ meshAdaptivity: 0, meshRelax: false });
-    expect(effective({ glb, tessellation: { ...tessellation, adaptivity: 0.25, relax: false } })).toBeUndefined();
+    expect(effective({ glb, tessellation: { ...tessellation, adaptivity: 0.25, relax: true } })).toEqual({
+      meshAdaptivity: 0.25,
+      meshRelax: true,
+    });
     expect(effective({ glb })).toBeUndefined();
-    // The export's construction options are exactly the reported ones.
-    expect(picogkExportSchemas.glb.pick({ meshAdaptivity: true, meshRelax: true }).parse({})).toEqual(
-      effective({ glb, tessellation }),
+    // A default export's construction options are exactly a uniform handle's, and an adaptive export's an adaptive one's.
+    const exportMeshing = picogkExportSchemas.glb.pick({ meshAdaptivity: true, meshRelax: true });
+    expect(exportMeshing.parse({})).toEqual(effective({ glb, tessellation }));
+    expect(exportMeshing.parse({ meshAdaptivity: 0.25, meshRelax: true })).toEqual(
+      effective({ glb, tessellation: { ...tessellation, adaptivity: 0.25, relax: true } }),
     );
   });
 
@@ -451,15 +456,19 @@ describe('PicoGK kernel', () => {
     });
   });
 
-  it('leaves view adaptivity unset by default and pins uniform meshing for every export', () => {
+  it('leaves view adaptivity unset by default and meshes every export uniformly unless it asks', () => {
     expect(picogkRenderSchema.parse({})).toEqual({ meshRelax: false });
     expect(picogkRenderSchema.parse({ meshAdaptivity: 0 })).toEqual({ meshAdaptivity: 0, meshRelax: false });
     expect(picogkRenderSchema.safeParse({ meshAdaptivity: 1 }).success).toBe(false);
     expect(picogkRenderSchema.safeParse({ meshAdaptivity: -0.1 }).success).toBe(false);
     for (const schema of [picogkExportSchemas.glb, picogkExportSchemas.gltf]) {
       expect(schema.parse({})).toMatchObject({ meshAdaptivity: 0, meshRelax: false });
-      expect(schema.safeParse({ meshAdaptivity: 0.5 }).success).toBe(false);
-      expect(schema.safeParse({ meshRelax: true }).success).toBe(false);
+      expect(schema.parse({ meshAdaptivity: 0.5, meshRelax: true })).toMatchObject({
+        meshAdaptivity: 0.5,
+        meshRelax: true,
+      });
+      expect(schema.safeParse({ meshAdaptivity: 1 }).success).toBe(false);
+      expect(schema.safeParse({ meshAdaptivity: -0.1 }).success).toBe(false);
     }
   });
 

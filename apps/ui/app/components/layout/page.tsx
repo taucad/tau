@@ -48,8 +48,13 @@ const sidebarKeyboardResizeStep = 16;
 const headerOffsetClasses = 'mt-(--header-height) h-[calc(100dvh-var(--header-height)-1px)]';
 // A phone-only bar offsets the page below `md` only; from `md` up the page keeps the headerless layout.
 const phoneHeaderOffsetClasses = 'max-md:mt-(--header-height) max-md:h-[calc(100dvh-var(--header-height)-1px)]';
-// Without a header, the closed sidebar's titlebar controls overlay the page top from `md` up.
-const desktopTitlebarInset = 'md:group-data-[sidebar-open=false]/app-shell:pt-9';
+/**
+ * Without a header, the closed sidebar's titlebar controls overlay the page top from `md` up; a page that draws its
+ * own bar (`enablePageHeader: false`) keeps this inset as the shell gives a headerless page.
+ *
+ * @public
+ */
+export const desktopTitlebarInset = 'md:group-data-[sidebar-open=false]/app-shell:pt-9';
 
 /*
  * Each history entry keeps its place in the shell's scroller. React Router's
@@ -153,6 +158,39 @@ const phoneBarClasses = (
     : { header: undefined, cluster: undefined, breadcrumbItem: 'last:block' };
 
 /**
+ * The phone top bar's back-to-parent crumb ("‹ Projects", named "Back to Projects"), one 40px target whose label
+ * truncates. Every phone bar that returns to a parent draws this one, so the words and the target stay the same (I6).
+ *
+ * @param props - The parent's path and title, and the caller's placement classes.
+ * @returns The crumb.
+ * @public
+ */
+export function PageParentCrumb({
+  to,
+  label,
+  className,
+}: {
+  readonly to: string;
+  readonly label: string;
+  readonly className?: string;
+}): React.JSX.Element {
+  return (
+    <Button
+      asChild
+      variant='ghost'
+      size='lg'
+      className={cn('min-w-0 gap-0.5', className)}
+      data-slot='page-parent-crumb'
+    >
+      <Link to={to} aria-label={`Back to ${label}`}>
+        <ChevronLeft aria-hidden />
+        <span className='max-w-28 min-w-0 truncate'>{label}</span>
+      </Link>
+    </Button>
+  );
+}
+
+/**
  * The phone top bar's back-to-parent crumb ("‹ Projects", named "Back to Projects")
  * and page title. From `md` up the breadcrumb trail orients instead.
  */
@@ -165,20 +203,7 @@ function PhonePageTitle({
 }): React.JSX.Element {
   return (
     <>
-      {parent ? (
-        <Button
-          asChild
-          variant='ghost'
-          size='lg'
-          className='min-w-0 shrink-0 gap-0.5 md:hidden'
-          data-slot='page-parent-crumb'
-        >
-          <Link to={parent.to} aria-label={`Back to ${parent.label}`}>
-            <ChevronLeft aria-hidden />
-            <span className='max-w-28 truncate'>{parent.label}</span>
-          </Link>
-        </Button>
-      ) : null}
+      {parent ? <PageParentCrumb to={parent.to} label={parent.label} className='shrink-0 md:hidden' /> : null}
       {/* Not a heading, and hidden from assistive tech: the page's `PageHeader` keeps the one `<h1>` that names the page. */}
       <p aria-hidden data-slot='page-title' className='min-w-0 flex-1 truncate px-1 text-sm font-medium md:hidden'>
         {title}

@@ -11,6 +11,7 @@ import {
 import type { ChatLedger, LogRowBody } from '#log/chat-ledger.js';
 import { classifyLogRow } from '#log/event-schema.js';
 import { projectLogRow } from '#log/projection-facts.js';
+import { abandonedTurnOf } from '#log/event-types.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 
 /** Rows of one term, `e01` with epoch 1, numbered from 0 in order. */
@@ -559,5 +560,26 @@ describe('intentional cancellation retention', () => {
     const ledger = foldChatLedger(emptyChatLedger, rows);
     expect(ledger.runs['run-1']).toMatchObject({ attempt: 2, lifecycle: 'running', appendState: 'open' });
     expect(ledger.runs['run-1']?.failure).toBeUndefined();
+  });
+});
+
+describe('a copy of an external agent’s turn (XD3)', () => {
+  /* The copy keeps its marker for the handoff; the ledger reads it as the run's turn said, never as an external run. */
+  it('should read the copy as the run’s committed turn without making the run external', () => {
+    const words = {
+      id: 'turn-1',
+      role: 'user',
+      content: 'Hello.',
+      metadata: {
+        tauInternal: { kind: 'external-agent', runKind: 'acp', agentId: 'claude', acpPromptedRequestId: 'run-1:1' },
+      },
+    } as const;
+    const ledger = foldChatLedger(
+      emptyChatLedger,
+      term([{ type: 'message.appended', message: abandonedTurnOf(words) }]),
+    );
+
+    expect(ledger.runs['run-1']).toMatchObject({ kind: 'tau', committed: true });
+    expect(ledger.runs['run-1']?.externalPrompted).toBeUndefined();
   });
 });

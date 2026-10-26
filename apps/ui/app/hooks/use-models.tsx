@@ -136,7 +136,10 @@ export const useModels = () => {
     [storedExecution, lastTauExecution, catalog],
   );
 
-  /** Remember the execution a chat chose or ran on as the next new chat's, whatever its agent. */
+  /**
+   * Remember the execution a chat chose or ran on as the next new chat's, whatever its agent. The cookie is this
+   * device's own default, so it keeps a device-relative host as chosen; only a chat record drops one (XD2).
+   */
   const rememberExecution = useCallback(
     (execution: CadAgentExecution): void => {
       setStoredExecution(execution);

@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { MetaFunction } from 'react-router';
+import type { Handle } from '#types/matches.types.js';
 import { formatConfigurations } from '@taucad/types/constants';
 import { asKnownArtifact } from '@taucad/runtime';
 import { Cpu, Download, Upload, RotateCcw } from 'lucide-react';
@@ -41,6 +42,8 @@ import { createConverterClient } from '#runtime/converter-client-options.js';
 import { beginConverterOperation, createActiveConverterClient } from '#routes/convert/converter-client-lifecycle.js';
 
 export const meta: MetaFunction = () => [{ title: 'Convert · Tau' }];
+
+export const handle: Handle = { title: 'Convert' };
 
 type UploadedFileInfo = {
   name: string;
@@ -106,7 +109,8 @@ export const ConverterViewer = memo(function ({
 
   return (
     <div data-viewer-frame className='fullscreen:bg-background absolute inset-0'>
-      <div role='img' aria-label={`Preview of ${fileName}`} className='absolute inset-0'>
+      {/* A labelled region, not an image: the viewer holds its own controls (the view cube, diagnostics). */}
+      <section aria-label={`Preview of ${fileName}`} className='absolute inset-0'>
         <CadViewer
           enableZoom
           enablePan
@@ -120,7 +124,7 @@ export const ConverterViewer = memo(function ({
           artifact={artifact}
           artifactHash={hash}
         />
-      </div>
+      </section>
 
       {/* Keep the viewer bar clear of the export panel, with safe centring on narrow screens. */}
       <div className='in-fullscreen:right-2 @container/viewer pointer-events-none absolute right-2 bottom-2 left-2 z-10 flex flex-col items-center-safe md:right-84'>

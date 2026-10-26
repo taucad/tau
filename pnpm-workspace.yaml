@@ -221,8 +221,11 @@ catalog:
   fast-check: ^4.9.0
   fastify: ^5.12.5
   geist: ^1.7.2
+  # GeoSpec authoring package from taucad/geospec, in the engine's fixed release group: pin the same exact
+  # version as geospec-engine.
+  geospec: 0.4.1-next.322
   # GeoSpec engine from taucad/geospec, exact `next` pin; bump through a version PR.
-  geospec-engine: 0.4.0
+  geospec-engine: 0.4.1-next.322
   gray-matter: ^4.0.3
   hast-util-sanitize: ^5.0.2
   husky: ^9.1.7
@@ -308,7 +311,7 @@ catalog:
   zod: 4.4.3
   nanoraster: ^0.7.1
   # Exact: @taucad/picovoxel's kernel version carries this release's build-time digests.
-  picovoxel: 0.2.0
+  picovoxel: 0.2.1
   # Exact: @taucad/smlib's kernel version and compute identity carry this release's WASM.
   '@classcad/smlibwasm': 0.3.4
   n8ao: 1.10.2

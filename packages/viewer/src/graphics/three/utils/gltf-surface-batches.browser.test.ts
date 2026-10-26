@@ -380,6 +380,7 @@ describe.each(['webgl', 'webgpu'] as const)('surface batching actual %s', (backe
         large.dispose();
         await render();
         expect(instanceLifetime().destroyed).toBe(instanceLifetime().allocated);
+        const beforeWarm = instanceLifetime().allocated;
         const warmRoot = new Group();
         scene.add(warmRoot);
         const warmMembers = Array.from({ length: 100 }, () => {
@@ -397,7 +398,10 @@ describe.each(['webgl', 'webgpu'] as const)('surface batching actual %s', (backe
         warm.dispose();
         await render();
         expect(instanceLifetime().destroyed).toBe(instanceLifetime().allocated);
-        expect(instanceLifetime()).toEqual({ allocated: 12, destroyed: 12 });
+        // Three r184 prepares one matrix binding in compileAsync and another for the first
+        // render. Check that bounded pair and complete retirement, not a total
+        // coupled to earlier appearance/material recompilations in this fixture.
+        expect(instanceLifetime()).toEqual({ allocated: beforeWarm + 2, destroyed: beforeWarm + 2 });
         expect(geometryDispose).not.toHaveBeenCalled();
         expect(materialDispose).not.toHaveBeenCalled();
         geometryDispose.mockRestore();

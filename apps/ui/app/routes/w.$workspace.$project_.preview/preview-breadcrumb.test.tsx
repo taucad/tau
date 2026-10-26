@@ -11,4 +11,8 @@ describe('owned Preview shell', () => {
     expect(handle.breadcrumb).toBeUndefined();
     expect(handle.providers).toBeDefined();
   });
+
+  it('draws its own top bar, so the shell reserves no second header strip above it on phones (HDR-12)', () => {
+    expect(handle.enablePageHeader).toBe(false);
+  });
 });

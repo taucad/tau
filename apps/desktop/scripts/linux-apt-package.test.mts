@@ -31,7 +31,7 @@ const installProvider = async (version: number): Promise<void> => {
   });
   await writeFile(
     join(provider, 'DEBIAN/control'),
-    `Package: tau-test-system-dependencies\nVersion: ${version}\nArchitecture: amd64\nMaintainer: Test <test@example.invalid>\nDescription: Inert dependency stand-ins for isolated package lifecycle tests\nProvides: libc6 (= 999), libgtk-3-0, libnss3, libasound2t64, libgbm1, libdrm2, libx11-6, libxcomposite1, libxdamage1, libxrandr2, libxkbcommon0, libsecret-1-0, libatk1.0-0, libatk-bridge2.0-0, libcups2, bubblewrap, xdg-utils, libfuse2t64, fuse3\n`,
+    `Package: tau-test-system-dependencies\nVersion: ${version}\nArchitecture: amd64\nMaintainer: Test <test@example.invalid>\nDescription: Inert dependency stand-ins for isolated package lifecycle tests\nProvides: libc6 (= 999), libgtk-3-0, libnss3, libasound2t64, libgbm1, libdrm2, libx11-6, libxcomposite1, libxdamage1, libxrandr2, libxkbcommon0, libsecret-1-0, libatk1.0-0, libatk-bridge2.0-0, libcups2, bubblewrap, ripgrep, socat, xdg-utils, libfuse2t64, fuse3\n`,
   );
   command('dpkg-deb', ['--root-owner-group', '--build', provider, join(root, `provider-${version}.deb`)]);
   command('dpkg', ['-i', join(root, `provider-${version}.deb`)]);
@@ -111,6 +111,9 @@ const build = async (version: string, full = false) => {
   });
 };
 const first = await build('1.0.1');
+const runtimeDependencies = command('dpkg-deb', ['-f', first[0]!, 'Depends']);
+assert.match(runtimeDependencies, /(?:^|, )ripgrep(?:,|$)/u);
+assert.match(runtimeDependencies, /(?:^|, )socat(?:,|$)/u);
 const control = join(root, 'selector-control');
 command('dpkg-deb', ['--control', first[1]!, control]);
 assert.equal(await readFile(join(control, 'triggers'), 'utf8'), 'interest-noawait /usr/bin/bwrap\n');

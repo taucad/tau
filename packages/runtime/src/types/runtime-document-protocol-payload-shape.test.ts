@@ -246,7 +246,7 @@ describe('document protocol payload-shape coverage (C18)', () => {
     ).toBe(false);
   });
 
-  it('preserves a rendered mesh tessellation report and rejects negative counts', () => {
+  it('preserves a rendered mesh tessellation report, with its adaptive meshing, and rejects invalid values', () => {
     const rendered = {
       subscriptionId: 'view',
       requestId: 'request',
@@ -257,7 +257,16 @@ describe('document protocol payload-shape coverage (C18)', () => {
       artifact: {
         mimeType: 'model/gltf-binary',
         content: 'glb',
-        tessellation: { triangles: 12, vertices: 8, elapsed: 1.5, voxelSize: 0.5, activeVoxels: 64, memoryBytes: 4096 },
+        tessellation: {
+          triangles: 12,
+          vertices: 8,
+          elapsed: 1.5,
+          voxelSize: 0.5,
+          activeVoxels: 64,
+          memoryBytes: 4096,
+          adaptivity: 0.25,
+          relax: false,
+        },
       },
       hash: 'model-hash',
       transient: false,
@@ -273,6 +282,14 @@ describe('document protocol payload-shape coverage (C18)', () => {
         artifact: { ...rendered.artifact, tessellation: { triangles: -1, vertices: 8, elapsed: 1 } },
       }).success,
     ).toBe(false);
+    for (const adaptivity of [0, 1]) {
+      expect(
+        wire.notifies.rendered.safeParse({
+          ...rendered,
+          artifact: { ...rendered.artifact, tessellation: { ...rendered.artifact.tessellation, adaptivity } },
+        }).success,
+      ).toBe(false);
+    }
   });
 
   it('preserves the requested form, effective tolerances and downgrade count of an OCCT mesh', () => {

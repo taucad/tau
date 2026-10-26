@@ -72,7 +72,8 @@ describe('Try again after a run that failed before recording its turn', () => {
     await vi.waitFor(async () => {
       expect(await host.snapshot('chat-retry')).toMatchObject({ runId: 'run-2', state: 'failed' });
     });
-    expect(reduceEventLog(await readLog(file)).map((message) => message.id)).not.toContain('turn-2');
+    /* XD3: the run settled failed before committing its turn, so its failed row says the person's words as data. */
+    expect(reduceEventLog(await readLog(file)).map((message) => message.id)).toEqual(['turn-1', 'retry-0', 'turn-2']);
     encoder.overflow = false;
 
     /* The page's transcript names the assistant reply by its run id, not by the log's provider message ids, so the

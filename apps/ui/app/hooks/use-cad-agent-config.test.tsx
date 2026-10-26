@@ -98,8 +98,6 @@ const directoryHarness = vi.hoisted(() => ({
   /** Targets each listing answers, shifted one per call so a retry can differ. */
   listings: [] as Array<readonly unknown[]>,
   calls: 0,
-  /** Whether this build is Tau Desktop, the one build that can reach a `desktop` placement. */
-  desktopTarget: true,
   /** Whether the last listing lost a source, as the real module records it. */
   incomplete: false,
 }));
@@ -111,10 +109,7 @@ vi.mock('#lib/agent-host-placement.js', () => ({
   },
   hostDirectoryOutage: () => directoryHarness.outage,
   hostPlacementsIncomplete: () => directoryHarness.incomplete,
-  loopbackHostIdPrefix: 'loopback:',
   onLoopbackAgentHostsChanged: () => () => undefined,
-  unreachablePlacementReason: (hostId?: string) =>
-    hostId === 'desktop' && !directoryHarness.desktopTarget ? 'This chat runs in the Tau desktop app.' : undefined,
 }));
 
 const noop = (): void => undefined;
@@ -188,7 +183,6 @@ beforeEach(() => {
   directoryHarness.listings.length = 0;
   directoryHarness.calls = 0;
   directoryHarness.incomplete = false;
-  directoryHarness.desktopTarget = true;
   capabilityHarness.supported = true;
   capabilityHarness.readError = undefined;
   bridgeHarness.open.mockReturnValue({ port: new MessageChannel().port1, dispose: vi.fn() });
@@ -345,13 +339,13 @@ describe('useCadAgentConfig', () => {
     });
   });
 
-  it('should refuse a persisted desktop placement on the web at once instead of waiting out discovery', async () => {
-    /* TAU-UI-5: a chat placed on Tau Desktop, opened on the web. Nothing will ever publish `desktop` here. */
-    directoryHarness.desktopTarget = false;
-
-    await expect(awaitAgentHostAvailability({ projectId: 'project-test', hostId: 'desktop' }, 60_000)).resolves.toEqual(
-      { status: 'unavailable', reason: 'This chat runs in the Tau desktop app.' },
-    );
+  it('should judge a desktop placement by its discovery, never refuse it by build', async () => {
+    /* XD2: a Tau chat's stored `desktop` placement is local placement on every device, so admission never asks for
+     * it off-desktop; an external agent's refusal is decided from its execution before this wait. */
+    await expect(awaitAgentHostAvailability({ projectId: 'project-test', hostId: 'desktop' }, 10)).resolves.toEqual({
+      status: 'unavailable',
+      reason: 'Timed out while looking for that agent host.',
+    });
   });
 
   it('does not refuse this computer over a pairing directory it never appears in', async () => {

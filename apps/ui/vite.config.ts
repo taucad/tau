@@ -139,6 +139,7 @@ const desktopSourceOverrides = new Map([
   ['#services/browser-geospec-worker.js', '#services/browser-geospec-worker.desktop.js'],
   ['#workers/measurement-exact.transport.js', '#workers/measurement-exact.transport.desktop.js'],
   ['#components/cookie-preferences.js', '#components/cookie-preferences.desktop.js'],
+  ['#hooks/use-cookie-consent.js', '#hooks/use-cookie-consent.desktop.js'],
 ]);
 
 const selfHostSourceOverrides = new Map([

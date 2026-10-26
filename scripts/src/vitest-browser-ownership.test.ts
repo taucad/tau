@@ -149,6 +149,9 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/desktop-e2e/src/support/two-client/git-faults.test.ts',
       'apps/desktop-e2e/src/support/two-client/git-faults.ts',
       'apps/desktop-e2e/src/two-client.spec.ts',
+      // Clean-host Mac acceptance downloads candidate bytes in a real browser so macOS applies its own quarantine,
+      // which Browser Mode cannot host.
+      'apps/desktop/scripts/qualification-browser-download.mts',
       'apps/docs/scripts/verify-browser.mts',
       'apps/react-e2e/browser-command.ts',
       'apps/react-e2e/scripts/benchmark-bundler-products.mts',
@@ -200,10 +203,12 @@ describe('Vitest Browser test-runner ownership', () => {
     // The S31 and S32 native-dependency spikes install the three engines they measure.
     // The UI asset-integrity workflow and its gate's usage note install the three engines the gate measures.
     // The hosted staging observability workflow installs Chromium and WebKit for its isolated contexts.
+    // The clean-host Mac acceptance workflow installs the Chromium its browser download uses.
     expect(installFiles.sort()).toEqual(
       [
         '.agents/skills/create-repo/templates/ci.yml',
         '.github/workflows/ci.yml',
+        '.github/workflows/desktop-route-vm-acceptance.yml',
         '.github/workflows/e2e-nightly.yml',
         '.github/workflows/observability-staging.yml',
         '.github/workflows/preview-packages.yml',

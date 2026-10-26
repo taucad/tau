@@ -228,6 +228,62 @@ describe('desktop installed acceptance receipt', () => {
     );
   });
 
+  const cleanHost = {
+    platform: 'darwin',
+    runner: 'local-mac-1',
+    productVersion: '26.0.1',
+    nativeArch: 'arm64',
+    translated: false,
+    sip: 'enabled',
+    gatekeeper: 'enabled',
+    quarantine: {
+      downloaded: '0083;6720a1b2;Chromium;4D3F1C2B-0000-4000-8000-000000000001',
+      installed: '0083;6720a1b2;Chromium;4D3F1C2B-0000-4000-8000-000000000001',
+    },
+    assessment: 'Notarized Developer ID',
+    staple: 'validated-offline',
+    installedPath: '/Applications/Tau.app',
+    launch: 'open',
+  } as const;
+  const vmEnvironment = { os: 'Darwin 25.0.0', arch: 'arm64', kind: 'vm', sandbox: 'enabled' } as const;
+
+  it('should admit a Mac clean-host receipt only with its observed host facts', () => {
+    const proof = { ...receipt(), environment: { ...vmEnvironment, host: cleanHost } };
+    expect(parseDesktopAcceptanceReceipt(proof, manifest()).environment.host).toEqual(cleanHost);
+    expect(() => parseDesktopAcceptanceReceipt({ ...receipt(), environment: vmEnvironment }, manifest())).toThrow(
+      new TypeError('Clean-host receipt facts disagree with its environment'),
+    );
+  });
+
+  it.each([
+    { sip: 'disabled' },
+    { gatekeeper: 'disabled' },
+    { translated: true },
+    { quarantine: { ...cleanHost.quarantine, installed: '' } },
+    { quarantine: { downloaded: 'absent', installed: cleanHost.quarantine.installed } },
+    { assessment: 'Developer ID' },
+    { installedPath: '/Users/runner/Applications/Tau.app' },
+    { launch: 'spawn' },
+  ])('should reject a clean-host receipt whose host facts are not the shipping defaults: %j', (change) => {
+    const proof = { ...receipt(), environment: { ...vmEnvironment, host: { ...cleanHost, ...change } } };
+    expect(() => parseDesktopAcceptanceReceipt(proof, manifest())).toThrow(z.ZodError);
+  });
+
+  it('should reject clean-host facts on a CI receipt or another architecture', () => {
+    expect(() =>
+      parseDesktopAcceptanceReceipt(
+        { ...receipt(), environment: { ...receipt().environment, host: cleanHost } },
+        manifest(),
+      ),
+    ).toThrow(new TypeError('Clean-host receipt facts disagree with its environment'));
+    expect(() =>
+      parseDesktopAcceptanceReceipt(
+        { ...receipt(), environment: { ...vmEnvironment, host: { ...cleanHost, nativeArch: 'x64' } } },
+        manifest(),
+      ),
+    ).toThrow(new TypeError('Clean-host receipt facts disagree with its environment'));
+  });
+
   it('should bind both APT packages and reject a selector-only proof', () => {
     const artifacts = [artifact('linux-deb-runtime', 'linux-x64'), artifact('linux-deb-selector', 'linux-x64')];
     const proof = {

@@ -322,6 +322,7 @@ const awaitingPanel: Readonly<Record<string, string>> = {
   tau_sync_sweeps_total: 'OB9',
   tau_sync_client_attempts_total: 'OB9',
   tau_sync_client_lag: 'OB9',
+  tau_sync_client_attempt_duration: 'OB9',
   tau_sync_client_pending: 'OB9',
   // DA2 (#1032) shipped these without panels; OB2's storage-critical rows read them.
   tau_sync_refusals_total: 'OB2',
@@ -1019,6 +1020,12 @@ describe('Runtime observability dashboards and rules (T13, T32)', () => {
       .map(({ rule }) => rule.uid);
     expect(unpaused).toEqual([]);
     expect(rulesIn(grafanaRoot).find(({ rule }) => rule.uid === 'telemetry-heartbeat')?.rule.isPaused).toBe(true);
+  });
+
+  it('should repeat the heartbeat weekly, since Tau Cloud renders a missing repeat_interval as the 24 h info default', () => {
+    expect(
+      rulesIn(grafanaRoot).find(({ rule }) => rule.uid === 'telemetry-heartbeat')?.rule.labels?.['repeat_interval'],
+    ).toBe('7d');
   });
 });
 

@@ -225,14 +225,12 @@ const canonicalChatReport = (report: GeoSpecCanonicalClaimReport): NativeGeoSpec
   ...(report.evidence === undefined ? {} : { evidence: report.evidence }),
 });
 
-// The accepted C2 box is 10 × 20 × 30 mm. Reuse its exact GLB, not a new tessellation.
+// The accepted C2 box is 10 × 20 × 30 mm. Reuse its exact GLB, not a new tessellation: the
+// bytes of taucad/geospec's frozen host-test input with this digest.
 const nativeFixtureHash = '1321806f5b10c87126bece80cee96cf867c6c131db655a9f28558a39a086616d';
 
 const runCanonicalGeoSpecChat = async (fault?: 'missing' | 'corrupt'): Promise<void> => {
-  const fixtureBase64 = await target.commands.readFile(
-    `../../packages/geospec/host-tests/fixtures/data/${nativeFixtureHash}`,
-    'base64',
-  );
+  const fixtureBase64 = await target.commands.readFile('../../apps/ui-e2e/fixtures/geospec-c2-box.glb', 'base64');
   const fixtureBytes = base64ToUint8Array(fixtureBase64);
   const fixtureDigest = new Uint8Array(await crypto.subtle.digest('SHA-256', fixtureBytes));
   expect([...fixtureDigest].map((byte) => byte.toString(16).padStart(2, '0')).join('')).toBe(nativeFixtureHash);

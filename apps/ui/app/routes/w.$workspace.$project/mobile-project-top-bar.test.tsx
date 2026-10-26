@@ -372,6 +372,49 @@ describe('MobileProjectTopBar', () => {
     expect(line.querySelector('[data-slot=status-line-icon]')).toHaveClass('text-warning');
   });
 
+  it('moves Revisions first in the project sheet as the conflict’s decision, once, and opens it (HDR-05, I4, I5)', async () => {
+    revisionStatusHarness.status = status({ attention: 1, conflicts: [conflict] });
+    render(<MobileProjectTopBar />, { wrapper });
+    expect(within(topBar()).getAllByRole('button')).toHaveLength(3);
+
+    fireEvent.click(titleButton());
+    const sheet = await screen.findByRole('dialog', { name: projectName });
+    const first = within(sheet)
+      .getAllByRole('button')
+      .find((button) => button.dataset['slot'] === 'project-sheet-row');
+    expect(first).toHaveAccessibleName('Revisions');
+    expect(first).toHaveAccessibleDescription('Needs your decision on main');
+    expect(first?.closest('ul')).toHaveAccessibleName('Decision');
+    // One way to Revisions on the sheet (I4).
+    expect(within(sheet).getAllByRole('button', { name: 'Revisions' })).toHaveLength(1);
+    fireEvent.click(first!);
+    expect(openPanel).toHaveBeenLastCalledWith('revisions');
+    expect(titleButton()).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('keeps the decision first while a more urgent fact holds the status line (I5)', async () => {
+    // An unconfirmed save outranks the conflict on the line; the decision still waits.
+    revisionStatusHarness.status = status({ attention: 2, conflicts: [conflict] });
+    render(<MobileProjectTopBar />, { wrapper });
+    expect(titleButton()).toHaveTextContent('Save not confirmed');
+    fireEvent.click(titleButton());
+    const sheet = await screen.findByRole('dialog', { name: projectName });
+    const decision = within(sheet).getByRole('list', { name: 'Decision' });
+    expect(within(decision).getByRole('button', { name: 'Revisions' })).toHaveAccessibleDescription(
+      'Needs your decision on main',
+    );
+  });
+
+  it('keeps Revisions in the project list while nothing conflicts', async () => {
+    render(<MobileProjectTopBar />, { wrapper });
+    fireEvent.click(titleButton());
+    const sheet = await screen.findByRole('dialog', { name: projectName });
+    expect(within(sheet).queryByRole('list', { name: 'Decision' })).toBeNull();
+    expect(
+      within(within(sheet).getByRole('list', { name: 'Project' })).getByRole('button', { name: 'Revisions' }),
+    ).toBeInTheDocument();
+  });
+
   it('says Follow chat as a fact and puts the verb in the project sheet (HDR-06)', async () => {
     onBranch();
     render(<MobileProjectTopBar />, { wrapper });

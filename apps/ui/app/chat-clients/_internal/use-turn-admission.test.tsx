@@ -7,13 +7,16 @@ import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js'
 
 const harness = vi.hoisted(() => {
   const state: { catalog: ModelCatalog } = { catalog: { status: 'loading' } };
-  return Object.assign(state, { creditPreflight: vi.fn() });
+  return Object.assign(state, {
+    creditPreflight: vi.fn(),
+    awaitAvailability: vi.fn(async () => ({ status: 'available', durability: 'exclusive-append' })),
+  });
 });
 
 const row = (id: string) => ({ id, name: id, provider: { id: 'anthropic', name: 'Anthropic' } });
 
 vi.mock('#hooks/use-cad-agent-config.js', () => ({
-  awaitAgentHostAvailability: async () => ({ status: 'available', durability: 'exclusive-append' }),
+  awaitAgentHostAvailability: harness.awaitAvailability,
 }));
 vi.mock('#hooks/use-credit-preflight.js', () => ({ useCreditPreflight: () => harness.creditPreflight }));
 vi.mock('#hooks/active-chat-provider.js', () => ({ useActiveChatSession: () => ({ activeChatId: 'chat_1' }) }));
@@ -21,6 +24,9 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: (
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'proj_1' }) }));
 vi.mock('#lib/agent-host-placement.js', () => ({
   daemonPlacementOf: (execution: { hostId?: string }) => execution.hostId,
+  /* The web build: an external agent pinned to Tau Desktop has nowhere to run here. */
+  unplaceableExecutionReason: (execution: { kind: string; hostId?: string }) =>
+    execution.kind === 'acp' && execution.hostId === 'desktop' ? 'Codex runs in the Tau desktop app.' : undefined,
 }));
 vi.mock('#hooks/use-models.js', () => ({
   useModels: () => ({
@@ -72,6 +78,15 @@ describe('useTurnAdmission', () => {
 
   it('should admit an external agent without consulting the Tau catalog', async () => {
     harness.catalog = { status: 'unavailable' };
-    await expect(admit({ kind: 'acp', hostId: 'desktop', agentId: 'codex' })).resolves.toEqual({ hostId: 'desktop' });
+    await expect(admit({ kind: 'acp', hostId: 'origin', agentId: 'codex' })).resolves.toEqual({ hostId: 'origin' });
+  });
+
+  it('should refuse an external agent this device cannot place at once, without waiting for its host', async () => {
+    await expect(admit({ kind: 'acp', hostId: 'desktop', agentId: 'codex' })).rejects.toMatchObject({
+      code: 'CHAT_PLACEMENT_UNAVAILABLE',
+      message: 'Codex runs in the Tau desktop app.',
+    });
+    expect(harness.awaitAvailability).not.toHaveBeenCalled();
+    expect(harness.creditPreflight).not.toHaveBeenCalled();
   });
 });

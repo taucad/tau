@@ -30,7 +30,6 @@
     "/experiments/**",
     "/packages/runtime/occt-reports/**",
     "/packages/plugins/*/agent/cad-*/**",
-    "/packages/geospec/agent/geospec-authoring/**",
     // Approved Workbench doctrine and skill are byte-pinned by bundle tests.
     "/packages/workbench/agent/doctrine.md",
     "/packages/workbench/agent/workbench/SKILL.md",

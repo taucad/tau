@@ -39,6 +39,7 @@ const routes: RouteConfigEntry[] = await flatRoutes({
 
     // Server proxies and resource routes: no server exists behind `app://tau`.
     '../../app/routes/api.ph.$/**',
+    '../../app/routes/api.monitoring/**',
     '../../app/routes/assets.$/**',
     '../../app/routes/health.build.ts',
     '../../app/routes/health.live.ts',

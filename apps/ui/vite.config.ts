@@ -47,6 +47,9 @@ const toOriginOrRaw = (value: string | undefined): string | undefined => {
   }
 };
 
+/** Netlify sets `CONTEXT` for builds only; the error tracker's `deploy_context` tag (`resolveDeployContext`). */
+const buildDeployContext = (environment: NodeJS.ProcessEnv): string => environment['CONTEXT'] ?? '';
+
 const resolveBuildFrontendUrl = (environment: NodeJS.ProcessEnv): string | undefined => {
   if (environment['TAU_FRONTEND_URL']) {
     return undefined;
@@ -475,6 +478,7 @@ export default defineConfig(({ command, mode }) => {
             ),
           }),
       tauBuildFrontendUrl: JSON.stringify(buildFrontendUrl ?? ''),
+      tauBuildDeployContext: JSON.stringify(buildDeployContext(process.env)),
       ...(isProductionBuild ? {} : buildIdDefine),
       tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
       /* Telemetry's own Cloud-host signal, beside the billing gate and never derived from it; tests stub the module. */

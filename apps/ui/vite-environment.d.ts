@@ -1,6 +1,8 @@
 // oxlint-disable typescript/no-extraneous-class -- Monaco's factory export uses a PascalCase property name
 // oxlint-disable max-params -- Monaco's factory export uses a PascalCase property name
 declare const tauBuildFrontendUrl: string;
+/** Netlify `CONTEXT` of the web build (`''` elsewhere); read only through `resolveDeployContext` in `environment.config`. */
+declare const tauBuildDeployContext: string;
 declare const tauBuildId: number;
 declare const tauCloudBuildEnabled: boolean;
 /** Runtime telemetry's Cloud-host build signal (`TAU_TELEMETRY_HOST=cloud`); read only through `#cloud/telemetry-host`. */

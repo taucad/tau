@@ -2,13 +2,17 @@ import * as Sentry from '@sentry/react';
 import type { Breadcrumb, ErrorEvent, EventHint } from '@sentry/react';
 import { isAbortError } from '@taucad/utils/error';
 import { ENV } from '#environment.config.js';
+import { setActivityBreadcrumbSink } from '#lib/activity-breadcrumbs.js';
 import { readBuildId } from '#lib/build-identity.js';
+import { applyTauEventContext } from '#lib/sentry-context.lib.js';
 import {
   decorateForStaleBuild,
   scrubSentryEvent,
   scrubUrl,
   sentryEnvironment,
   sentryRelease,
+  sentryTunnelPath,
+  usesSentryTunnel,
 } from '#lib/sentry-event.lib.js';
 import { classifyStaleBuildFailure, isStaleModuleError } from '#lib/stale-build-recovery.js';
 import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
@@ -98,7 +102,20 @@ const describeLogged = (value: unknown): string => {
 };
 
 /**
- * Scrub the URLs navigation and fetch breadcrumbs record, and reduce a console
+ * Drop the element text a DOM breadcrumb's selector quotes (`[aria-label="…"]`, `[title="…"]`,
+ * `[alt="…"]`, `[name="…"]` and the like), keeping the selector itself: tags, ids, classes and the
+ * attribute names (principle 6).
+ *
+ * @param selector - The selector the SDK built for the element.
+ * @returns The selector without quoted values.
+ * @public
+ */
+export const scrubSelectorText = (selector: string): string =>
+  selector.replaceAll(/\[([\w:-]+)=(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\]]*)\]/gu, '[$1]');
+
+/**
+ * Scrub the URLs navigation and fetch breadcrumbs record, drop element text from click and input
+ * breadcrumbs ({@link scrubSelectorText}), and reduce a console
  * breadcrumb to bounded text.
  *
  * The SDK keeps the last 100 breadcrumbs, and a console breadcrumb held each
@@ -110,6 +127,9 @@ const describeLogged = (value: unknown): string => {
  * @public
  */
 export const scrubSentryBreadcrumb = (breadcrumb: Breadcrumb): Breadcrumb => {
+  if ((breadcrumb.category === 'ui.click' || breadcrumb.category === 'ui.input') && breadcrumb.message !== undefined) {
+    return { ...breadcrumb, message: scrubSelectorText(breadcrumb.message) };
+  }
   if (breadcrumb.category === 'console') {
     const logged: unknown = breadcrumb.data?.['arguments'];
     return {
@@ -142,7 +162,9 @@ export const scrubSentryBreadcrumb = (breadcrumb: Breadcrumb): Breadcrumb => {
  * Start browser error reporting (launch gate OBS-7) when the host injected `SENTRY_DSN`.
  *
  * Errors only: no tracing, no replay, no session tracking and no default PII. Unlike PostHog it writes nothing to
- * the visitor's device, which is why it does not wait for cookie consent.
+ * the visitor's device, which is why it does not wait for cookie consent. On the web, envelopes go through the
+ * same-origin tunnel (`sentryTunnelPath`, SB5); desktop posts to the DSN directly. Every event gets the Tau
+ * context (`applyTauEventContext`, SB1) before `beforeSend` scrubs it, and activity breadcrumbs reach the trail.
  */
 export const initSentry = (): void => {
   const dsn = ENV.SENTRY_DSN;
@@ -154,9 +176,15 @@ export const initSentry = (): void => {
     environment: sentryEnvironment(),
     release: sentryRelease(readBuildId()),
     sendDefaultPii: false,
+    ...(usesSentryTunnel() ? { tunnel: sentryTunnelPath } : {}),
     integrations: (defaults) => defaults.filter((integration) => integration.name !== 'BrowserSession'),
     beforeSend: createBeforeSend(classifyStaleBuildFailure),
     beforeBreadcrumb: scrubSentryBreadcrumb,
+  });
+  // Error events only: the processor never touches a transaction or feedback.
+  Sentry.addEventProcessor((event) => (event.type === undefined ? applyTauEventContext(event) : event));
+  setActivityBreadcrumbSink((message) => {
+    Sentry.addBreadcrumb({ category: 'tau.activity', message, level: 'info' });
   });
 };
 
@@ -181,6 +209,7 @@ export const captureUiError = (error: unknown): void => {
  * @public
  */
 export const stopSentry = (): void => {
+  setActivityBreadcrumbSink(undefined);
   const client = Sentry.getClient();
   if (client === undefined) {
     return;

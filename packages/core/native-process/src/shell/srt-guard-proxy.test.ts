@@ -108,6 +108,10 @@ describe('startGuardProxy', () => {
     const guard = await startGuardProxy(resolvingTo('93.184.215.14'));
     disposables.push(guard);
     const upstream = createServer((socket) => {
+      // The probe closes after CONNECT's response, before consuming the upstream payload.
+      socket.on('error', (error: NodeJS.ErrnoException) => {
+        expect(error.code).toBe('ECONNRESET');
+      });
       socket.end('pong');
     });
     await new Promise<void>((resolve) => {
@@ -120,6 +124,10 @@ describe('startGuardProxy', () => {
 
   it('should tunnel to a checked address, IPv4 first, past one that does not answer', async () => {
     const upstream = createServer((socket) => {
+      // The probe closes after CONNECT's response, before consuming the upstream payload.
+      socket.on('error', (error: NodeJS.ErrnoException) => {
+        expect(error.code).toBe('ECONNRESET');
+      });
       socket.end('pong');
     });
     await new Promise<void>((resolve) => {

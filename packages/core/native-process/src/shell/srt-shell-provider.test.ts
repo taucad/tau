@@ -220,6 +220,54 @@ describe.runIf(posix)('createSandboxShellProvider plumbing', () => {
   });
 });
 
+/* I7 lifecycle: an uncertain cleanup is a visible failure that keeps custody, never a returned exit. */
+describe.runIf(posix)('createSandboxShellProvider uncertain cleanup', () => {
+  const launchWith = async (
+    table: NonNullable<Parameters<typeof createSandboxShellProvider>[0]>['processTable'],
+    command: string,
+  ): Promise<ShellPipesProcess> => {
+    const outcome = await createSandboxShellProvider({ supervisor, processTable: table }).launch(
+      launchOf({ arguments: ['--noprofile', '--norc', '-c', command] }),
+    );
+    if (outcome.status !== 'started') {
+      throw new Error(`expected a started launch, got ${JSON.stringify(outcome)}`);
+    }
+    return pipesOf(outcome.process);
+  };
+
+  it('should reject settlement and still end its output when the process table cannot be read', async () => {
+    const shell = await launchWith(async () => {
+      throw new Error('table unavailable');
+    }, 'echo done');
+    const output = text(shell.stdout);
+
+    await expect(shell.exited).rejects.toThrow('could not confirm');
+    expect(await output).toBe('done\n');
+  });
+
+  it('should reject settlement when an owned process survives termination', async () => {
+    const root = { pid: 0 };
+    const lying = await createSandboxShellProvider({
+      supervisor,
+      processTable: async () => {
+        const rows = await processTable();
+        return [
+          ...rows.filter((row) => row.pid !== root.pid),
+          { pid: root.pid, ppid: 1, pgid: root.pid, zombie: false },
+        ];
+      },
+    }).launch(launchOf({ arguments: ['--noprofile', '--norc', '-c', 'echo $$; exit 0'] }));
+    if (lying.status !== 'started') {
+      throw new Error('expected a started launch');
+    }
+    const pipes = pipesOf(lying.process);
+    const printed = await text(pipes.stdout);
+    root.pid = Number(printed.trim());
+
+    await expect(pipes.exited).rejects.toThrow(/survived|could not confirm/u);
+  }, 20_000);
+});
+
 describe.runIf(process.platform === 'linux')('createSandboxShellProvider terminal', () => {
   it('should give the shell its own controlling terminal with job control, resize and Ctrl-C', async () => {
     const shell = await started(

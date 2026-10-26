@@ -12,6 +12,7 @@ import { desktopBridge, isDesktopTarget, nodeHomeRoot, onDesktopHostHandOff } fr
 import type { DesktopBridge, DesktopHostHandOff } from '#filesystem/desktop-bridge.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { getComputeReuseMode } from '#lib/compute-reuse-preference.js';
+import { loopbackHostIdPrefix } from '#utils/chat-execution.js';
 
 /**
  * The transport ladder for a daemon-placed Tau turn (`agent-host-transports-and-offline.md`, F4).
@@ -45,35 +46,31 @@ export type AgentHostPlacementRung = 'in-process' | 1 | 2 | 5;
 export const localAgentHostId = (): TauAgentHostId | undefined => (isDesktopTarget ? 'desktop' : undefined);
 
 /**
- * Why one placement cannot be reached from this build, or `undefined` when it can.
- *
- * A chat's placement is persisted with it, so a chat placed on Tau Desktop and
- * then opened on the web still names `hostId: 'desktop'` — a launcher this
- * build does not have. It is refused with this reason, never dialled, and never
- * quietly downgraded to this page's worker.
- *
- * @param hostId - The placement's host id, or `undefined` for this page's worker.
- * @returns The refusal's user-facing reason, or `undefined` when the placement is reachable.
- * @public
- */
-export const unreachablePlacementReason = (hostId: TauAgentHostId | undefined): string | undefined =>
-  hostId === 'desktop' && !isDesktopTarget
-    ? 'This chat runs in the Tau desktop app. Open the project there to continue it, or pick another agent.'
-    : undefined;
-
-/**
  * The daemon one execution is placed on, or `undefined` for this page's own
  * worker.
  *
+ * The chat owns intent; the device owns placement. A Tau execution with no
+ * host, or one that names `desktop` on a build without that launcher, takes
+ * this build's local placement: Tau Desktop's in-process launcher there, this
+ * page's worker on the web. A chat record never carries a device-relative host
+ * (`portableExecutionOf`), so a host here is a paired device, or a daemon this
+ * device chose for the chat (`withChatPlacement`, `chatPlacementOf`).
+ *
  * An external agent is *always* daemon-placed (`acpAgentExecutionSchema`
- * requires a `hostId`); a Tau turn falls back to this build's local launcher.
+ * requires a `hostId`) and keeps the host it names; see
+ * {@link unplaceableExecutionReason} for the build that cannot reach it.
  *
  * @param execution - The turn's execution.
  * @returns The host id, or `undefined` for the browser worker.
  * @public
  */
-export const daemonPlacementOf = (execution: CadAgentExecution): TauAgentHostId | undefined =>
-  execution.kind === 'tau' ? (execution.hostId ?? localAgentHostId()) : execution.hostId;
+export const daemonPlacementOf = (execution: CadAgentExecution): TauAgentHostId | undefined => {
+  if (execution.kind !== 'tau') {
+    return execution.hostId;
+  }
+  const { hostId } = execution;
+  return hostId === undefined || (hostId === 'desktop' && !isDesktopTarget) ? localAgentHostId() : hostId;
+};
 
 /** Descriptors by agent id, as of the last discovery pass. */
 const discoveredAgents = new Map<string, ExternalAgentDescriptor>();
@@ -115,9 +112,6 @@ export const agentPlacementOf = (execution: CadAgentExecution): 'browser' | 'des
 export const externalAgentDisplayName = (agentId: string): string =>
   discoveredAgents.get(agentId)?.displayName ?? agentId;
 
-/** Host ids of a loopback daemon reached by URL (rung 5) start with this, followed by its origin. @public */
-export const loopbackHostIdPrefix = 'loopback:';
-
 /**
  * The rung one host id is placed on.
  *
@@ -147,7 +141,9 @@ export type AgentHostPlacementErrorCode =
   /** Launcher 2: main never posted a port, which is how it refuses an ungranted root. */
   | 'DESKTOP_ROOT_NOT_GRANTED'
   /** The desktop build has no browser agent worker to construct; nothing to grant or retry. */
-  | 'BROWSER_HOST_UNAVAILABLE';
+  | 'BROWSER_HOST_UNAVAILABLE'
+  /** An external agent pinned to a host this device cannot reach; see {@link unplaceableExecutionReason}. */
+  | 'HOST_NOT_ON_THIS_DEVICE';
 
 /** A placement that could not be established, carrying which rung gave up. @public */
 export class AgentHostPlacementError extends Error {
@@ -352,7 +348,15 @@ type LoopbackAdmission = { readonly origin: string; readonly session: string };
 
 /** Loopback daemons this page holds a session for, by host id. */
 const loopbackAdmissions = new Map<TauAgentHostId, LoopbackAdmission>();
+/** Test-only: forget what this page's origin answered. @internal */
+export const resetOriginAgentHostAnswer = (): void => {
+  originHostsAgent = undefined;
+  originLastFound = undefined;
+};
+
 const loopbackChanges = new Topic<void>({ name: 'agentHostPlacement.loopbackChanges' });
+/* The origin's discovery answered differently from its last answer. */
+const originChanges = new Topic<void>({ name: 'agentHostPlacement.originChanges' });
 /* Per tab: a reload keeps the daemon, a new tab is handed one of its own. */
 const loopbackStorageKey = 'tau:loopback-agent-hosts';
 let loopbackRestored = false;
@@ -408,6 +412,28 @@ export const onLoopbackAgentHostsChanged = (listener: () => void): (() => void) 
     listener();
   });
 
+/**
+ * Listen for anything that changes which device-relative placements this tab reaches (XD2): a loopback daemon handed
+ * to it, or the origin's discovery answering differently from before (a daemon found after a failed ask, or gone). A
+ * placement held because its reach was unknown or out is checked again on each.
+ *
+ * @param listener - Called after each change.
+ * @returns Unsubscribe.
+ * @public
+ */
+export const onPlacementReachabilityChanged = (listener: () => void): (() => void) => {
+  const stopLoopback = loopbackChanges.subscribe(() => {
+    listener();
+  });
+  const stopOrigin = originChanges.subscribe(() => {
+    listener();
+  });
+  return () => {
+    stopLoopback();
+    stopOrigin();
+  };
+};
+
 /** Test-only reset of the loopback admissions. @internal */
 export const resetLoopbackAgentHosts = (): void => {
   loopbackAdmissions.clear();
@@ -417,6 +443,253 @@ export const resetLoopbackAgentHosts = (): void => {
   } catch {
     // Nothing stored.
   }
+};
+
+/**
+ * Whether this page's origin can never be a daemon: the web build is served by
+ * the static web host (`TAU_ORIGIN_AGENT_HOST`), and no daemon serves Tau
+ * Desktop's window. Any other page asks its origin (`discoverOriginAgentHost`).
+ */
+const originNeverHostsAgent = (): boolean => import.meta.env.TAU_ORIGIN_AGENT_HOST === 'absent' || isDesktopTarget;
+
+/**
+ * Whether a host id names a host this tab can reach, as far as it can tell without asking the network: Tau Desktop's
+ * launcher on the desktop build, the daemon that served this page on a page a daemon may have served, a loopback
+ * daemon this tab holds a session for, and any portable (paired) host. {@link isPlacementOnThisDevice} also asks the
+ * origin.
+ *
+ * @param hostId - The host id.
+ * @returns Whether this tab may reach it.
+ * @public
+ */
+export const isDeviceRelativeHostReachable = (hostId: TauAgentHostId): boolean => {
+  if (hostId === 'desktop') {
+    return isDesktopTarget;
+  }
+  if (hostId === 'origin') {
+    return !originNeverHostsAgent();
+  }
+  if (hostId.startsWith(loopbackHostIdPrefix)) {
+    restoreLoopbackAdmissions();
+    return loopbackAdmissions.has(hostId);
+  }
+  return true;
+};
+
+/**
+ * Whether this page's origin is a daemon, as last asked. A daemon is a daemon for the page's life; "no daemon" may be
+ * a request that failed (the page cannot tell them apart), so it is asked again after {@link originAnswerReuse}.
+ */
+type OriginAsk = {
+  /** The origin's descriptor, or `undefined` when it serves no agent; rejects as the discovery did. */
+  descriptor: Promise<TauHostDescriptor | undefined>;
+  /** Whether it serves an agent; a failed ask reads as no. */
+  answer: Promise<boolean>;
+  readonly askedAt: number;
+  /** The answer once it is in: read without waiting by {@link isPlacementOnThisDeviceNow}. */
+  settled?: boolean;
+  /** The answer before this ask and when it was asked, read while this one is in flight. */
+  readonly last?: Readonly<{ found: boolean; askedAt: number }>;
+};
+let originHostsAgent: OriginAsk | undefined;
+/** The origin daemon's descriptor as it last answered one: what a later ask that fails or finds none answers. */
+let originLastFound: TauHostDescriptor | undefined;
+
+/**
+ * Whether the recorded ask answers without asking again: a found daemon stays found for the page's life, an ask in
+ * flight is shared, and a "no daemon" answer stands for {@link originAnswerReuse}.
+ *
+ * @param asked - The recorded ask.
+ * @returns Whether to reuse it.
+ */
+const reusable = (asked: OriginAsk | undefined): asked is OriginAsk =>
+  asked !== undefined &&
+  (asked.settled === undefined || asked.settled || Date.now() - asked.askedAt < originAnswerReuse);
+
+/**
+ * The origin's descriptor for a listing (round 27): asked again at each listing, as before XD2, so a daemon's label,
+ * workspace and external agents are as it answers now; an ask in flight is shared, and a fresh "no daemon" answer
+ * stands for its reuse interval. Only "found" is kept for the page's life: an ask that fails or finds none after a
+ * daemon answered lists that daemon as it last answered ({@link askOrigin}).
+ *
+ * @param discover - How to ask; {@link discoverOriginAgentHost} unless a test stands in.
+ * @returns The descriptor, or `undefined` when the origin serves no agent.
+ */
+const originForListing = async (discover?: typeof discoverOriginAgentHost): Promise<TauHostDescriptor | undefined> => {
+  const asked = originHostsAgent;
+  return reusable(asked) && asked.settled !== true ? asked.descriptor : askOrigin(discover).descriptor;
+};
+
+/**
+ * Ask this page's origin whether it is a daemon, and record the answer: the one recorder of the origin's reach, which
+ * the listing, a chat's load and the composer's notice all read. A held placement is checked again when an answer
+ * differs from the last one.
+ *
+ * @param discover - How to ask; {@link discoverOriginAgentHost} unless a test stands in.
+ * @returns The ask, recorded before it is awaited, so concurrent readers share it.
+ */
+const askOrigin = (discover: typeof discoverOriginAgentHost = discoverOriginAgentHost): OriginAsk => {
+  const before = originHostsAgent;
+  const last = before?.settled === undefined ? before?.last : { found: before.settled, askedAt: before.askedAt };
+  const previous = last?.found;
+  const asking: OriginAsk = {
+    descriptor: Promise.resolve(undefined),
+    answer: Promise.resolve(false),
+    askedAt: Date.now(),
+    ...(last === undefined ? {} : { last }),
+  };
+  const settle = (found: boolean): void => {
+    asking.settled = found;
+    if (found !== previous) {
+      originChanges.emit();
+    }
+  };
+  /* A daemon found once stays found: an ask that fails or finds none answers its last descriptor (round 27). */
+  asking.descriptor = (async (): Promise<TauHostDescriptor | undefined> => {
+    try {
+      const found = await discover();
+      if (found !== undefined) {
+        originLastFound = found;
+      }
+      const answered = found ?? originLastFound;
+      settle(answered !== undefined);
+      return answered;
+    } catch (error) {
+      if (originLastFound !== undefined) {
+        settle(true);
+        return originLastFound;
+      }
+      settle(false);
+      throw error;
+    }
+  })();
+  asking.answer = (async (): Promise<boolean> => {
+    try {
+      return (await asking.descriptor) !== undefined;
+    } catch {
+      return false;
+    }
+  })();
+  originHostsAgent = asking;
+  return asking;
+};
+/** How long a "no daemon" answer about this page's origin stands before it is asked again, in milliseconds. */
+const originAnswerReuse = 30_000;
+
+/**
+ * The guards both reach answers share: a host that is not device-relative is not this device's placement, one this tab
+ * cannot reach is out, and a loopback daemon this tab holds a session for is in. `undefined` leaves the answer to the
+ * origin's discovery.
+ *
+ * @param hostId - The placement's host id.
+ * @returns The answer, or `undefined` for `origin` on a page a daemon may have served.
+ */
+const placementReachWithoutOrigin = (hostId: TauAgentHostId): boolean | undefined => {
+  if (hostId !== 'origin' && !hostId.startsWith(loopbackHostIdPrefix)) {
+    return false;
+  }
+  if (!isDeviceRelativeHostReachable(hostId)) {
+    return false;
+  }
+  return hostId === 'origin' ? undefined : true;
+};
+
+/**
+ * {@link isPlacementOnThisDevice} as far as this tab knows without asking: the origin's last answer, kept while it is
+ * asked again, and `undefined` only before its discovery has ever answered, so a caller applies the placement and lets
+ * admission wait for it instead of waiting here (XD2).
+ *
+ * @param hostId - The placement's host id.
+ * @returns Whether this tab reaches it, or `undefined` when only the network can say.
+ * @public
+ */
+export const isPlacementOnThisDeviceNow = (hostId: TauAgentHostId): boolean | undefined => {
+  const known = placementReachWithoutOrigin(hostId);
+  if (known !== undefined) {
+    return known;
+  }
+  /*
+   * A found daemon is found for the page's life, even while it is asked again. A "no daemon" declines only while it is
+   * fresh: past the reuse interval it reads as unknown, so a placement is kept and the origin asked again, never
+   * declined on an old answer.
+   */
+  const asked = originHostsAgent;
+  const answer = asked?.settled === undefined ? asked?.last : { found: asked.settled, askedAt: asked.askedAt };
+  if (answer === undefined) {
+    return undefined;
+  }
+  return answer.found || Date.now() - answer.askedAt < originAnswerReuse ? answer.found : undefined;
+};
+
+/**
+ * Whether a device-relative placement names a host this tab can reach, here and now (XD2): `origin` on a page a
+ * daemon serves, a `loopback:` daemon this tab holds a session for. This device's placement for a chat is applied
+ * only where this answers `true`; anywhere else the chat runs locally and the composer says why, and a legacy chat
+ * record's placement is adopted only where it does.
+ *
+ * @param hostId - The placement.
+ * @returns Whether this tab can reach it.
+ * @public
+ */
+export const isPlacementOnThisDevice = async (hostId: TauAgentHostId): Promise<boolean> => {
+  const known = placementReachWithoutOrigin(hostId);
+  if (known !== undefined) {
+    return known;
+  }
+  const asked = originHostsAgent;
+  /* Decided without waiting, so callers that find a stale answer at once share the one new ask (single flight). */
+  return reusable(asked) ? asked.answer : askOrigin().answer;
+};
+
+/**
+ * Why this tab runs a chat locally rather than on this device's placement for it (XD2), naming the choice that
+ * reaches it.
+ *
+ * @param hostId - The held placement.
+ * @returns The reason.
+ * @public
+ */
+export const heldPlacementReason = (hostId: TauAgentHostId): string =>
+  hostId.startsWith(loopbackHostIdPrefix)
+    ? 'This chat runs on a Tau host this tab has not been handed, so Tau runs here. Run `tau open --desktop` to hand it over.'
+    : 'This chat runs on the Tau host that served its page, which this page cannot reach, so Tau runs here. Open the chat from that host to run it there.';
+
+/**
+ * Why one execution cannot be placed on this device, or `undefined` when it can.
+ *
+ * A Tau execution always can: every device-relative host it carries means
+ * local placement here. An external agent cannot when this device already
+ * knows nothing will ever publish its host here, so the chat keeps its pin and
+ * the turn is refused at once instead of after the availability wait, never
+ * moved to Tau (`bricked-acp-chat-browser-recovery.md`):
+ * - pinned to Tau Desktop, on the web: its CLI is a process on that computer;
+ * - pinned to the daemon that served its page (`origin`), on a page no daemon
+ *   serves;
+ * - pinned to a loopback daemon this tab holds no session for. The tab can
+ *   still be handed one, so this answer changes with
+ *   {@link onLoopbackAgentHostsChanged}.
+ *
+ * Each reason names where the agent runs and the choice that continues here.
+ *
+ * @param execution - The turn's execution.
+ * @returns The refusal's user-facing reason, or `undefined` when the execution is placeable.
+ * @public
+ */
+export const unplaceableExecutionReason = (execution: CadAgentExecution): string | undefined => {
+  if (execution.kind !== 'acp') {
+    return undefined;
+  }
+  const name = externalAgentDisplayName(execution.agentId);
+  const { hostId } = execution;
+  if (isDeviceRelativeHostReachable(hostId)) {
+    return undefined;
+  }
+  if (hostId === 'desktop') {
+    return `${name} runs in Tau Desktop. Open this chat there, or choose Tau to continue here.`;
+  }
+  return hostId === 'origin'
+    ? `${name} runs on the Tau host that served this chat's page. Open this chat from that host, or choose Tau to continue here.`
+    : `${name} runs on a Tau host this tab has not been handed. Run \`tau open --desktop\` to hand it over, or choose Tau to continue here.`;
 };
 
 const loopbackTarget = (
@@ -589,7 +862,8 @@ export const listAgentHostPlacements = async (
   const bridge = (options.bridge ?? desktopBridge)();
   restoreLoopbackAdmissions();
   const [origin, paired, desktopAgents, loopbackTargets] = await Promise.all([
-    (options.discoverOrigin ?? discoverOriginAgentHost)(),
+    /* Recorded as it is asked, and shared: a daemon already found, or an ask in flight, answers without asking again. */
+    originForListing(options.discoverOrigin),
     (options.listHosts ?? listRemoteHosts)().catch((error: unknown) => {
       directoryOutage = error instanceof Error ? error.message : 'Tau could not reach your paired computers.';
       return [];

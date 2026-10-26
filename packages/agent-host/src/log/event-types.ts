@@ -153,6 +153,67 @@ export type ProviderMessage =
   | ToolInputProviderMessage
   | ToolOutputProviderMessage;
 
+/**
+ * Whether a message is the person's own words: a user message that carries no Tau-internal kind, or an external
+ * agent's turn (whose marker only names the session it went to). A user message Tau makes for its own bookkeeping — an
+ * approval answer, client memory, a stream checkpoint, an external tool's result, a billing invocation — is not.
+ *
+ * @param message - One message of a transcript.
+ * @returns Whether it is what the person said.
+ * @public
+ */
+export const isPersonsMessage = (message: ProviderMessage): boolean => {
+  if (message.role !== 'user') {
+    return false;
+  }
+  const kind = message.metadata?.tauInternal?.['kind'];
+  return kind === undefined || kind === 'external-agent' || kind === abandonedTurnKind;
+};
+
+/**
+ * The Tau-internal kind of a person's message that joins the history as data because its run settled before it
+ * committed the turn (XD3): the run failed, or another device found it abandoned. The ledger reads the run's turn as
+ * committed, and the history keeps one copy however many devices append it. A message that already carries a kind (an
+ * external agent's turn) keeps it, and is marked `abandoned` beside it instead.
+ *
+ * @internal
+ */
+export const abandonedTurnKind = 'abandoned-turn';
+
+/**
+ * The person's message of a run that settles before committing its turn, as the row that says it (XD3).
+ *
+ * An external agent's turn keeps its marker, the session it names included, so the handoff still credits that session
+ * with it; the copy is told apart by `abandoned`.
+ *
+ * @param message - The message the run was admitted with, or its newest envelope.
+ * @returns The same message, marked {@link abandonedTurnKind} or, when it has a kind, `abandoned`.
+ * @internal
+ */
+export const abandonedTurnOf = (message: UserProviderMessage): UserProviderMessage => {
+  const internal = message.metadata?.tauInternal;
+  return {
+    ...message,
+    metadata: {
+      ...message.metadata,
+      tauInternal:
+        internal?.['kind'] === undefined ? { ...internal, kind: abandonedTurnKind } : { ...internal, abandoned: true },
+    },
+  };
+};
+
+/**
+ * Whether a message is a person's turn appended as its run settled ({@link abandonedTurnOf}).
+ *
+ * @param message - One message of a transcript.
+ * @returns Whether it is marked {@link abandonedTurnKind}, or `abandoned`.
+ * @internal
+ */
+export const isAbandonedTurn = (message: ProviderMessage): boolean =>
+  message.role === 'user' &&
+  (message.metadata?.tauInternal?.['kind'] === abandonedTurnKind ||
+    message.metadata?.tauInternal?.['abandoned'] === true);
+
 /** Catalog provider identities accepted by the portable host. @public */
 export const modelProviderKinds = [
   'openai',
@@ -461,6 +522,20 @@ export type RunLifecycleEvent = LogEventBase & {
   readonly stopReason?: string | undefined;
 };
 
+/**
+ * A live run's liveness signal (XD3, cross-device run fence): the device that holds the run appends one while the run
+ * is admitted, running, or paused and held by an open session there, at most once per `runHeartbeatMilliseconds`, so
+ * its newest `recordedAt` keeps advancing and the chat's ref keeps changing for every other device to see.
+ *
+ * It carries nothing else and changes nothing: no run bookkeeping, no history, no projection reads it. Only the fence
+ * reads its `recordedAt`, through the run's newest row.
+ *
+ * @public
+ */
+export type RunHeartbeatEvent = LogEventBase & {
+  readonly type: 'run.heartbeat';
+};
+
 /** Records one Tau-gateway invocation identity before any provider request. @public */
 export type ModelInvocationPreparedEvent = LogEventBase & {
   readonly type: 'model.invocation-prepared';
@@ -535,6 +610,7 @@ export type AgentLogEvent =
   | TurnConflictedLogEvent
   | TurnFailedLogEvent
   | RunLifecycleEvent
+  | RunHeartbeatEvent
   | ModelInvocationPreparedEvent
   | ModelInvocationBoundEvent
   | ModelInvocationSettledEvent

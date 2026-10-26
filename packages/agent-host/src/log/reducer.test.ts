@@ -3,7 +3,8 @@ import { emptyChatLedger, foldChatLedger, gateRows, stampRows } from '#log/chat-
 import { createEventLogReducer, reduceEventLog } from '#log/reducer.js';
 import { parseReplayEventLogBytes } from '#log/serialization.js';
 import { projectLogRow } from '#log/projection-facts.js';
-import type { AgentLogEvent, JsonValue, MessageAppendedEvent } from '#log/event-types.js';
+import { abandonedTurnOf } from '#log/event-types.js';
+import type { AgentLogEvent, JsonValue, MessageAppendedEvent, UserProviderMessage } from '#log/event-types.js';
 
 const hash = 'b'.repeat(64);
 
@@ -198,5 +199,64 @@ describe('model.invocation-settled (CL-S12, CL-A21)', () => {
     // A zero-charge settled row resolves it, and the re-prepare lands (RV1-F4).
     const released = foldChatLedger(open, [settled(2, 'released')]);
     expect(gateRows(released, next)).toMatchObject({ ok: true });
+  });
+});
+
+/*
+ * XD3, round 17: a person's turn the history first took from a copy (`abandonedTurnOf`) stays said. A rewind that
+ * removed it never lets the run's own row of that turn, merged after it, bring it back or break the history
+ * (`t9_copy_then_turn_ever` in ChatLedger.lean).
+ */
+describe('a person’s turn taken from a copy, then rewound', () => {
+  const at = (
+    sequence: number,
+    leaderEpoch: string,
+  ): Readonly<{ version: 1; leaderEpoch: string; sequence: number; recordedAt: string; runId: string }> => ({
+    version: 1,
+    leaderEpoch,
+    sequence,
+    recordedAt: '2026-10-24T00:00:00.000Z',
+    runId: 'run-abandoned',
+  });
+  const turn: UserProviderMessage = { id: 'user-abandoned', role: 'user', content: 'the person’s words' };
+  const copy: AgentLogEvent = { ...at(0, 'e01'), type: 'message.appended', message: abandonedTurnOf(turn) };
+  const rewind: AgentLogEvent = { ...at(0, 'e02'), type: 'history.rewound', trigger: 'retry', retainedMessageIds: [] };
+
+  it.each([
+    ['its own append', { ...at(0, 'e03'), type: 'message.appended', message: turn } satisfies AgentLogEvent],
+    [
+      'its own commit',
+      {
+        ...at(0, 'e03'),
+        type: 'turn.history-projection-committed',
+        retainedMessageIds: ['user-abandoned'],
+        message: turn,
+        context: { version: 1, systemPrompt: '', initialMessages: [], postCompactionMessages: [] },
+      } satisfies AgentLogEvent,
+    ],
+    [
+      'another copy',
+      { ...at(0, 'e03'), type: 'message.appended', message: abandonedTurnOf(turn) } satisfies AgentLogEvent,
+    ],
+  ])('should keep the turn removed when %s merges after the rewind', (_label, again) => {
+    const history = createEventLogReducer('history');
+    for (const event of [copy, rewind, again]) {
+      expect(history.replay(event).anomaly).toBeUndefined();
+    }
+
+    expect(history.historyIntact()).toBe(true);
+    expect(history.messages()).toEqual([]);
+  });
+
+  /* A Retry of a turn that failed before it was recorded re-admits the person's message under a new run. */
+  it('should take a later run’s row of the turn as the message again', () => {
+    const history = createEventLogReducer('history');
+    const retry: AgentLogEvent = { ...at(0, 'e03'), runId: 'run-retry', type: 'message.appended', message: turn };
+    for (const event of [copy, rewind, retry]) {
+      expect(history.replay(event).anomaly).toBeUndefined();
+    }
+
+    expect(history.historyIntact()).toBe(true);
+    expect(history.messages()).toEqual([turn]);
   });
 });

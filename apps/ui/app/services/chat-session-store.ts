@@ -38,7 +38,7 @@ import type { ObservationRead, ObservationWatch } from '@taucad/fs-client/observ
 import type { WatchEvent } from '@taucad/filesystem';
 import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic } from 'xstate';
-import type { CadAgentExecution, Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
+import type { CadAgentExecution, Chat as ChatEntity, MyUIMessage, TauAgentHostId } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 import { chatRecordsPath } from '@taucad/revisions';
@@ -66,7 +66,9 @@ import {
 } from '#hooks/composer-record.js';
 import type { ComposerRecordRef } from '#hooks/composer-record.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
+import { readChatPlacementsShared, writeChatPlacement } from '#db/chat-placements.js';
 import type { ComposerRecord, ComposerRecordClient } from '#db/composer-record-store.js';
+import { chatPlacementOf, portableExecutionOf, withChatPlacement } from '#utils/chat-execution.js';
 import { createChatAttachmentStore } from '#db/attachment-store.js';
 import { attachmentReferenceOf } from '#utils/attachment.utils.js';
 import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
@@ -101,6 +103,7 @@ import type {
   ChatProjectionReadAnswer,
   ChatRunPhase as ProjectedRunPhase,
 } from '#machines/chat-projection.logic.js';
+import { chatPulledAtFileName, pulledQuietOf, segmentDeviceIdOf } from '@taucad/agent-host';
 import type { RowKey } from '@taucad/agent-host';
 import type { HostCommand } from '@taucad/agent-host/wire';
 import { sdkWatch } from '#chat-clients/_internal/sdk-watch.js';
@@ -182,8 +185,40 @@ export type ChatSessionDeps = {
    * `/.tau/composers` records and each project's `.tau/chats` attachments from
    * any route (D1, D13).
    */
-  client: ComposerRecordClient;
+  client: ComposerRecordClient & SegmentStatClient;
+  /**
+   * The device-relative placement a chat record written before placement moved to the device still names (XD2), when
+   * `accept` holds for it: this device adopts it into its own placements record. The chat record keeps it (no device
+   * can prove the host is its own) until a write of the chat's execution supersedes it.
+   */
+  adoptLegacyChatPlacement?:
+    | ((
+        chatId: string,
+        projectId: string | undefined,
+        accept: (hostId: TauAgentHostId) => Promise<boolean>,
+      ) => Promise<TauAgentHostId | undefined>)
+    | undefined;
+  /** Whether a device-relative placement names a host this device can reach now. Absent: none can. */
+  isPlacementOnThisDevice?: ((hostId: TauAgentHostId) => Promise<boolean>) | undefined;
+  /**
+   * {@link ChatSessionDeps.isPlacementOnThisDevice} as far as it is known without waiting: `undefined` while it would
+   * have to ask the network. A chat's load then holds the placement and applies it once the answer comes. Absent: the
+   * load waits for the answer.
+   */
+  isPlacementOnThisDeviceNow?: ((hostId: TauAgentHostId) => boolean | undefined) | undefined;
+  /**
+   * Hear when what this tab can reach may have changed (a loopback daemon handed to it later), so a held placement is
+   * checked again. Returns an unsubscribe.
+   */
+  onPlacementReachabilityChanged?: ((listener: () => void) => () => void) | undefined;
   queueLock?: QueueLock;
+  /**
+   * Ask a project's revisions to pull its remote now (XD3, round 18): another device's run on one of its chats awaits
+   * a pull to show whether it stayed quiet. Answers whether this device can pull the chat at all, as the placement's
+   * pull answers it (round 27): `false` where it was refused `CHAT_NOT_SHARED`. Absent: nothing is asked, and the run
+   * holds until a pull happens anyway.
+   */
+  pullRemote?: ((projectId: string, chatId: string) => Promise<boolean>) | undefined;
   /** Acknowledged observation through the root owning the chat records. */
   watchRecordFile?: (
     path: string,
@@ -192,14 +227,33 @@ export type ChatSessionDeps = {
   ) => ObservationWatch;
 };
 
+/** This device's placement for a chat when this tab can reach it now, else `undefined`: local placement (XD2). */
+const reachablePlacement = async (
+  deps: Pick<ChatSessionDeps, 'isPlacementOnThisDevice'>,
+  placement: TauAgentHostId | undefined,
+): Promise<TauAgentHostId | undefined> => {
+  if (placement === undefined) {
+    return undefined;
+  }
+  const reachable = await deps.isPlacementOnThisDevice?.(placement).catch(() => false);
+  return reachable === true ? placement : undefined;
+};
+
+/** A chat row with this device's placement put back on its execution. */
+const placeChat = (chat: ChatEntity, placement: TauAgentHostId | undefined): ChatEntity => {
+  const activeExecution = withChatPlacement(chat.activeExecution, placement);
+  return activeExecution === chat.activeExecution ? chat : { ...chat, activeExecution };
+};
+
 export type ChatSession = {
   readonly chatId: string;
   readonly chat: Chat<MyUIMessage>;
   readonly persistenceActorRef: Actor<typeof chatPersistenceMachine>;
   readonly draftActorRef: Actor<typeof draftMachine>;
   /**
-   * This chat's composer record on this device (D2): draft, edits, tool choice
-   * and mode. A surface mounts `useComposerRecordToasts` on it.
+   * This chat's composer record on this device (D2): draft, edits, tool choice,
+   * mode and this device's placement for the chat (XD2). A surface mounts
+   * `useComposerRecordToasts` on it.
    */
   readonly composerRecordRef: ComposerRecordRef;
   readonly messageQueueRef: ChatMessageQueueActor;
@@ -638,6 +692,26 @@ type ProjectHostConnector = Readonly<{
   stoppability?: (chatId: string) => Promise<'stoppable' | 'other-build' | 'background-window'>;
 }>;
 
+/** A client that may say when a file last changed on this device (the worker filesystem's head-only stat). */
+type SegmentStatClient = Readonly<{
+  stat?:
+    | ((path: string, options: Readonly<{ content: 'head' }>) => Promise<Readonly<{ mtimeMs?: number | undefined }>>)
+    | undefined;
+}>;
+
+/**
+ * When a segment last changed on this device, its modification time (XD3, round 17): the agent host's reader reads the
+ * same file's, so the page and the fence measure another device's run from the one time. None without a stat or a
+ * modification time; the run is then measured from when this page first read it.
+ */
+const receivedAtOf = async (client: SegmentStatClient, path: string): Promise<Readonly<{ receivedAt?: number }>> => {
+  const mtimeMs = await client
+    .stat?.(path, { content: 'head' })
+    .then((stat) => stat.mtimeMs)
+    .catch(() => undefined);
+  return mtimeMs === undefined || mtimeMs <= 0 ? {} : { receivedAt: mtimeMs };
+};
+
 export class ChatSessionStore {
   readonly #sessions = new Map<string, InternalSession>();
   readonly #observed = new Map<string, ObservedChat>();
@@ -794,6 +868,26 @@ export class ChatSessionStore {
    * call on every render — closures are read through `this.#deps` at call
    * time, so swapping never tears in-flight work.
    */
+  /**
+   * Ask the chat's project to pull its remote now (XD3, round 18), for another device's run on the chat that awaits a
+   * pull (`selectRunElsewhereAwaitsPull`). What the pull brings reaches the projection as any sync does, and so does
+   * its answer (round 27): where this device cannot pull the chat, no pull can show the run abandoned, so it no longer
+   * holds the chat (`selectRunElsewhere`), as the host's fence reads the same answer. A pull that fails is no evidence
+   * that this device cannot pull.
+   *
+   * @param chatId - The chat.
+   * @returns Once the pull has answered.
+   */
+  public async requestRemotePull(chatId: string): Promise<void> {
+    const projectId = this.#sessions.get(chatId)?.projectId ?? this.#observed.get(chatId)?.projectId;
+    const pull = this.#deps.pullRemote;
+    if (projectId === undefined || pull === undefined) {
+      return;
+    }
+    const pulls = await pull(projectId, chatId).catch(() => true);
+    this.#projections.get(chatId)?.send({ type: 'pulls', pulls });
+  }
+
   public setDependencies(deps: ChatSessionDeps): void {
     const replaced = deps.client !== this.#deps.client || deps.watchRecordFile !== this.#deps.watchRecordFile;
     this.#deps = deps;
@@ -923,20 +1017,40 @@ export class ChatSessionStore {
     };
   }
 
-  /** Resolve a listed chat's persisted placement without acquiring its SDK session. @public */
+  /**
+   * Resolve a listed chat's execution as this device places it, without acquiring its SDK session.
+   *
+   * @public
+   */
   public async getChatExecution(chatId: string): Promise<CadAgentExecution | undefined> {
-    const projectId = this.#sessions.get(chatId)?.projectId ?? this.#observed.get(chatId)?.projectId;
-    const chat = await this.#deps.getChat(chatId, projectId);
-    return chat?.activeExecution;
+    const settings = await this.getChatHostSettings(chatId);
+    return settings?.activeExecution;
   }
 
-  /** Read a listed chat's host bootstrap choices without acquiring an SDK session. @public */
+  /**
+   * Read a listed chat's host bootstrap choices without acquiring an SDK session.
+   *
+   * The execution is the chat record's, with this device's own placement for the chat (its composer record) put
+   * back on it, so the read connector observes the host this device runs the chat on.
+   *
+   * @public
+   */
   public async getChatHostSettings(
     chatId: string,
   ): Promise<Pick<ChatEntity, 'activeExecution' | 'activeKernel'> | undefined> {
-    const projectId = this.#sessions.get(chatId)?.projectId ?? this.#observed.get(chatId)?.projectId;
+    const session = this.#sessions.get(chatId);
+    const projectId = session?.projectId ?? this.#observed.get(chatId)?.projectId;
     const chat = await this.#deps.getChat(chatId, projectId);
-    return chat === undefined ? undefined : { activeExecution: chat.activeExecution, activeKernel: chat.activeKernel };
+    if (chat === undefined) {
+      return undefined;
+    }
+    /* An open session's placement is the newest: its composer record write may not have landed yet. */
+    const live = session?.persistenceActorRef.getSnapshot().context;
+    const placement =
+      live?.activeChatId === chatId && !live.isLoadingChat && live.loadError === undefined
+        ? chatPlacementOf(live.activeExecution)
+        : await this.#storedPlacement(chat.resourceId, chatId);
+    return { activeExecution: withChatPlacement(chat.activeExecution, placement), activeKernel: chat.activeKernel };
   }
 
   /** Cancel the log's current run, including an unopened listed chat; no SDK session is acquired. @public */
@@ -2243,8 +2357,18 @@ export class ChatSessionStore {
             }
             const paths = event.type === 'rename' ? [event.oldPath, event.newPath] : [event.path];
             // This is the foreign segment directory, not the owned events.jsonl
-            // writer or chat.json metadata. Ancestor deletion/rename also refolds it.
-            if (paths.some((path) => path.endsWith('.jsonl') || directory.endsWith(`/${path}`) || directory === path)) {
+            // writer or chat.json metadata. Ancestor deletion/rename also refolds it,
+            // and so does a pull that brought nothing new (XD3, round 18).
+            if (
+              paths.some(
+                (path) =>
+                  path.endsWith('.jsonl') ||
+                  path.endsWith(`/${chatPulledAtFileName}`) ||
+                  path === chatPulledAtFileName ||
+                  directory.endsWith(`/${path}`) ||
+                  directory === path,
+              )
+            ) {
               invalidate();
             }
           },
@@ -3642,13 +3766,93 @@ export class ChatSessionStore {
 
     const readChatRow = async (id: string): Promise<ChatEntity | undefined> => depsRef().getChat(id, projectId);
 
+    /*
+     * XD2: a record written before placement moved to the device can name a device-relative host (`origin`, a
+     * `loopback:` daemon). It is relative to a device no tab can prove it is, so it is never removed from the synced
+     * record by adopting it: each device that reaches a host of that name adopts it into its own placements record,
+     * and the record keeps it until a write of the chat's execution supersedes it. Read from the record
+     * the load already read, and asked without the network: only a host known unreachable is declined.
+     */
+    const legacyPlacementOf = async (storedChat: ChatEntity): Promise<TauAgentHostId | undefined> => {
+      const deps = depsRef();
+      try {
+        return await deps.adoptLegacyChatPlacement?.(storedChat.id, projectId, async (hostId) =>
+          deps.isPlacementOnThisDeviceNow === undefined
+            ? (await deps.isPlacementOnThisDevice?.(hostId)) === true
+            : deps.isPlacementOnThisDeviceNow(hostId) !== false,
+        );
+      } catch {
+        /* Local placement is always reachable: a legacy pin that cannot be read reads as local. */
+        return undefined;
+      }
+    };
+    const adoptInto = async (chatId: string, placement: TauAgentHostId): Promise<void> => {
+      await writeChatPlacement({ client: depsRef().client, projectId, chatId, placement });
+    };
+    /* Assigned once the persistence actor exists; the load only calls it after its first await. */
+    let settleAfterLoad: (placement: TauAgentHostId, adopting: string | undefined) => Promise<void> = async () =>
+      undefined;
+    const placementOnOpen = async (
+      storedChat: ChatEntity,
+    ): Promise<Readonly<{ placement: TauAgentHostId | undefined; adopting: boolean }>> => {
+      const placements = await readChatPlacementsShared(depsRef().client, projectId);
+      const placement = placements[storedChat.id];
+      if (placement !== undefined) {
+        return { placement, adopting: false };
+      }
+      const legacy = await legacyPlacementOf(storedChat);
+      return { placement: legacy, adopting: legacy !== undefined };
+    };
+    /*
+     * The placement this tab runs the chat on at load, never waiting on the network. Known reachable: applied (and an
+     * adopted legacy host written to this device's placements record). Known unreachable: this device's own placement
+     * is held and the chat runs locally; a legacy host is another device's, and the chat simply runs locally. Not
+     * known yet (the origin's discovery still out): applied, so admission waits for that host rather than running
+     * here, and settled once the answer comes.
+     */
+    const placementAtLoad = async (
+      chatId: string,
+      placement: TauAgentHostId | undefined,
+      adopting: boolean,
+    ): Promise<Readonly<{ applied: TauAgentHostId | undefined; held: TauAgentHostId | undefined }>> => {
+      const deps = depsRef();
+      if (placement === undefined) {
+        return { applied: undefined, held: undefined };
+      }
+      const known =
+        deps.isPlacementOnThisDeviceNow === undefined
+          ? (await reachablePlacement(deps, placement)) === placement
+          : deps.isPlacementOnThisDeviceNow(placement);
+      if (known === undefined) {
+        void settleAfterLoad(placement, adopting ? chatId : undefined);
+        return { applied: placement, held: undefined };
+      }
+      if (known) {
+        if (adopting) {
+          void adoptInto(chatId, placement);
+        }
+        return { applied: placement, held: undefined };
+      }
+      return { applied: undefined, held: adopting ? undefined : placement };
+    };
     const persistenceActorRef = createActor(
       chatPersistenceMachine.provide({
         actors: {
           loadChatActor: createAsyncLogic({
             run: async ({ input, signal }) => {
-              const loadedChat = await readChatRow(input.chatId);
+              const storedChat = await readChatRow(input.chatId);
+              /* The chat record never holds this device's placement (XD2): its placements record does. */
+              const opened = storedChat === undefined ? undefined : await placementOnOpen(storedChat);
+              /* A placement this tab cannot reach is held, not applied: the chat runs locally and the composer says so.
+               * The persistence context holds it from here; it is the one copy. */
+              const { applied: reachable, held: heldPlacement } = await placementAtLoad(
+                input.chatId,
+                opened?.placement,
+                opened?.adopting === true,
+              );
               signal.throwIfAborted();
+              /* The persistence context holds the execution this device runs the chat on (XD2). */
+              const loadedChat = storedChat === undefined ? undefined : placeChat(storedChat, reachable);
               if (this.#sessions.get(input.chatId) !== session) {
                 return { chat: undefined };
               }
@@ -3720,11 +3924,11 @@ export class ChatSessionStore {
                 session.seedMessage = lastMessage;
                 void this.#refreshRemoteSegmentsSafely(input.chatId, session.projectId);
                 this.startPendingSeed(input.chatId);
-                return { chat: { ...loadedChat, error: undefined } };
+                return { chat: { ...loadedChat, error: undefined }, heldPlacement };
               }
 
               session.draftActorRef.send({ type: 'initializeFromChat' });
-              return { chat: loadedChat };
+              return { chat: loadedChat, heldPlacement };
             },
           }),
           persistErrorActor: createAsyncLogic({
@@ -3737,9 +3941,24 @@ export class ChatSessionStore {
               await depsRef().patchChat(input.chatId, 'error', undefined);
             },
           }),
+          /* The chat owns intent; the device owns placement (XD2). `chat.json` takes the portable execution, and a
+           * placement that names a host only on this device is this chat's composer record on this device. Every
+           * change of where the chat runs comes here, a pick or this tab's reach (round 19): only a pick is written,
+           * and every change moves the log observer and marks the queued commands. */
           persistActiveExecutionActor: createAsyncLogic({
             run: async ({ input, signal }) => {
-              await depsRef().patchChat(input.chatId, 'activeExecution', input.activeExecution);
+              /*
+               * Written on every change, never compared with a cached copy: another tab may have changed the record. A
+               * local choice in a tab that could not reach this device's placement leaves it for the tab that can.
+               */
+              if (input.persist) {
+                const placement = chatPlacementOf(input.activeExecution);
+                if (placement !== undefined || input.heldPlacement === undefined) {
+                  await writeChatPlacement({ client: depsRef().client, projectId, chatId: input.chatId, placement });
+                }
+                /* The chat store writes it portable: a device-relative host never reaches the synced record. */
+                await depsRef().patchChat(input.chatId, 'activeExecution', input.activeExecution);
+              }
               signal.throwIfAborted();
               if (this.#sessions.get(input.chatId) !== session) {
                 return;
@@ -3866,6 +4085,59 @@ export class ChatSessionStore {
     persistenceActorRef.start();
     draftActorRef.start();
     composerRecordRef.start();
+    /* A held placement becomes this tab's once it can reach it, as when a loopback daemon is handed to it (XD2). */
+    const heldNow = (): TauAgentHostId | undefined => persistenceActorRef.getSnapshot().context.heldPlacement;
+    /* A placement applied at load before its reach was known: kept (and an adopted legacy host recorded) once the
+     * answer says this tab reaches it; otherwise this device's own placement is held and a legacy one let go. */
+    settleAfterLoad = async (placement: TauAgentHostId, adopting: string | undefined): Promise<void> => {
+      const reachable = (await reachablePlacement(depsRef(), placement)) === placement;
+      await waitFor(persistenceActorRef, (snapshot) => !snapshot.context.isLoadingChat).catch(() => undefined);
+      /* Either answer applies only while the chat still runs on that placement: a pick made meanwhile wins. */
+      const { activeExecution } = persistenceActorRef.getSnapshot().context;
+      if (chatPlacementOf(activeExecution) !== placement) {
+        return;
+      }
+      if (reachable) {
+        if (adopting !== undefined) {
+          await adoptInto(adopting, placement);
+        }
+        return;
+      }
+      persistenceActorRef.send({
+        type: 'placementUnreachable',
+        execution: portableExecutionOf(activeExecution)!,
+        ...(adopting === undefined ? { heldPlacement: placement } : {}),
+      });
+    };
+    const applyHeldPlacement = async (held: TauAgentHostId): Promise<void> => {
+      if ((await reachablePlacement(depsRef(), held)) !== held || heldNow() !== held) {
+        return;
+      }
+      const placed = withChatPlacement(persistenceActorRef.getSnapshot().context.activeExecution, held);
+      if (placed !== undefined) {
+        persistenceActorRef.send({ type: 'placementReachable', execution: placed });
+      }
+    };
+    const unsubscribeReachability = depsRef().onPlacementReachabilityChanged?.(() => {
+      const held = heldNow();
+      if (held !== undefined) {
+        void applyHeldPlacement(held);
+      }
+    });
+    /*
+     * A reach change heard before a placement was held found nothing to apply: each time one becomes held, it is
+     * checked against reach as it is now, so a change during the load or its settling is never lost.
+     */
+    let lastHeld = heldNow();
+    const heldSubscription = persistenceActorRef.subscribe((snapshot) => {
+      const held = snapshot.context.heldPlacement;
+      if (held !== lastHeld) {
+        lastHeld = held;
+        if (held !== undefined) {
+          void applyHeldPlacement(held);
+        }
+      }
+    });
 
     // oxlint-disable-next-line eslint/prefer-const -- assigned after `session.dispose` captures it so immediate actor emissions cannot observe a partial session.
     let lifecycleSubscription: { unsubscribe: () => void } | undefined;
@@ -3922,6 +4194,8 @@ export class ChatSessionStore {
       status: chat.status,
       turnSubscriptions: [],
       dispose: () => {
+        unsubscribeReachability?.();
+        heldSubscription.unsubscribe();
         messageQueueRef.stop();
         session.presentationHold = undefined;
         session.observationRelease?.();
@@ -4130,6 +4404,23 @@ export class ChatSessionStore {
     });
   }
 
+  /**
+   * A project's placements, read once for every chat a pass asks about and read again after any placement write
+   * (`readChatPlacementsShared`).
+   *
+   * @param projectId - The project.
+   * @returns Each chat id → its placement on this device.
+   */
+  async #placementsOf(projectId: string): Promise<Readonly<Record<string, TauAgentHostId>>> {
+    return readChatPlacementsShared(this.#deps.client, projectId);
+  }
+
+  /** This device's stored placement for a chat, when this tab reaches it (XD2). */
+  async #storedPlacement(projectId: string, chatId: string): Promise<TauAgentHostId | undefined> {
+    const placements = await this.#placementsOf(projectId);
+    return reachablePlacement(this.#deps, placements[chatId]);
+  }
+
   async #readRemoteSegments(chatId: string, projectId: string, fence?: ObservationRead): Promise<void> {
     if (this.#observed.get(chatId)?.projectId !== projectId && this.#sessions.get(chatId)?.projectId !== projectId) {
       return;
@@ -4147,13 +4438,30 @@ export class ChatSessionStore {
       }
       entries = [];
     }
+    /* The device a segment names, as every agent host reads it (`segmentDeviceIdOf`): the run elsewhere is that device. */
+    const named = entries.flatMap((name) => {
+      const deviceId = segmentDeviceIdOf(name);
+      return deviceId === undefined ? [] : [{ name, deviceId }];
+    });
+    /*
+     * This device's record of its pulls of the chat, as the agent host's reader reads it (XD3, rounds 18 and 19): read
+     * before the segments, since sync records a pull only once the segments it brought are written, and its quiet
+     * counts only for a segment of the very size it names.
+     */
+    const record = entries.includes(chatPulledAtFileName)
+      ? await client.readFile(`${directory}/${chatPulledAtFileName}`).catch(() => undefined)
+      : undefined;
     const segments = await Promise.all(
-      entries
-        .filter((name) => /^[^/]+\.jsonl$/.test(name))
-        .map(async (name) => ({
-          deviceId: name,
-          bytes: await this.#readForeignSegment(`${directory}/${name}`, client),
-        })),
+      named.map(async ({ name, deviceId }) => {
+        const bytes = await this.#readForeignSegment(`${directory}/${name}`, client);
+        const pulledQuiet = pulledQuietOf(record, name, bytes.byteLength);
+        return {
+          deviceId,
+          bytes,
+          ...(await receivedAtOf(client, `${directory}/${name}`)),
+          ...(pulledQuiet === undefined ? {} : { pulledQuiet }),
+        };
+      }),
     );
     if (
       this.#remoteReadVersions.get(chatId) === version &&
@@ -4163,7 +4471,7 @@ export class ChatSessionStore {
     ) {
       this.#remoteReadCompletedVersions.set(chatId, version);
       const before = this.#projectionContext(chatId);
-      this.#projectionOf(chatId).send({ type: 'remote', segments });
+      this.#projectionOf(chatId).send({ type: 'remote', segments, at: Date.now() });
       // A rescan that finds the same foreign history leaves the reducer unchanged, yet it is what makes the local
       // log displayable again: a turn logged while it was out was held back, and nothing else would present it.
       if (this.#projectionContext(chatId) === before) {

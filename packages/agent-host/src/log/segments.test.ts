@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeLogSegments } from '#log/segments.js';
+import { mergeLogSegments, mergeSegmentsUpTo, parseLogSegments } from '#log/segments.js';
 import { serializeLogEvent } from '#log/serialization.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 
@@ -31,6 +31,50 @@ const ids = (events: readonly AgentLogEvent[]): readonly string[] =>
   events.map((event) => (event.type === 'message.appended' ? event.message.id : event.type));
 
 describe('mergeLogSegments', () => {
+  /*
+   * A device whose id changed leaves its old segment beside the new one, which holds the same rows and more. The merge
+   * reads rows and writers, never segment ids: one machine holding both files and another holding only the new one
+   * agree (`t7_prefix_segment`).
+   */
+  it('should merge one order whether a device’s rows are read from one segment or from two that overlap', () => {
+    const first = record({ leaderEpoch: 'epoch-1', sequence: 0, recordedAt: '2026-09-13T06:05:00.000Z', text: 'one' });
+    /* The device's clock stepped back between its terms: its file order still holds. */
+    const second = record({ leaderEpoch: 'epoch-2', sequence: 0, recordedAt: '2026-09-13T06:00:00.000Z', text: 'two' });
+    const other = record({
+      leaderEpoch: 'epoch-o',
+      sequence: 0,
+      recordedAt: '2026-09-13T06:02:00.000Z',
+      text: 'other',
+    });
+
+    const holdingBoth = ids(
+      mergeLogSegments([
+        segment('device-1', [first]),
+        segment('device-2', [first, second]),
+        segment('device-o', [other]),
+      ]),
+    );
+    const holdingOne = ids(mergeLogSegments([segment('device-2', [first, second]), segment('device-o', [other])]));
+
+    expect(holdingBoth).toEqual(holdingOne);
+    expect(holdingOne.indexOf('epoch-1-0')).toBeLessThan(holdingOne.indexOf('epoch-2-0'));
+  });
+
+  /*
+   * A writer merges its own rows under no device id (the empty string), and every other device sees them under the
+   * writer's id. Two terms that start in the same millisecond still merge in one order on both devices.
+   */
+  it('should merge the same rows in one order on each device, whatever id it reads its own rows under', () => {
+    const at = '2026-09-13T06:00:00.000Z';
+    const phone = [record({ leaderEpoch: 'epoch-z-phone', sequence: 0, recordedAt: at, text: 'phone' })];
+    const desktop = [record({ leaderEpoch: 'epoch-a-desktop', sequence: 0, recordedAt: at, text: 'desktop' })];
+
+    const onPhone = ids(mergeLogSegments([segment('', phone), segment('device-desktop', desktop)]));
+    const onDesktop = ids(mergeLogSegments([segment('', desktop), segment('device-phone', phone)]));
+
+    expect(onPhone).toEqual(onDesktop);
+  });
+
   it('orders two devices by when each leadership term started and loses no record', () => {
     const deviceA = segment('device-a', [
       record({ leaderEpoch: 'epoch-a', sequence: 0, recordedAt: '2026-09-13T06:00:00.000Z', text: 'a0' }),
@@ -43,6 +87,34 @@ describe('mergeLogSegments', () => {
 
     expect(ids(mergeLogSegments([deviceB, deviceA]))).toEqual(['epoch-a-0', 'epoch-a-1', 'epoch-b-0', 'epoch-b-1']);
     expect(mergeLogSegments([deviceA, deviceB])).toHaveLength(4);
+  });
+
+  /*
+   * XD1 handoff: a phone turn, a desktop turn, then a second phone turn. Under one long-lived phone term the second
+   * phone turn merges ahead of the desktop's, because terms merge whole; a writer therefore opens a new term for a
+   * turn another device's turn came before, and then the merge keeps the order the turns happened in.
+   */
+  it('merges a second phone turn after the desktop turn between them only when it opens a new term', () => {
+    const desktop = segment('device-desktop', [
+      record({ leaderEpoch: 'epoch-desktop', sequence: 0, recordedAt: '2026-09-13T06:05:00.000Z', text: 'desktop' }),
+    ]);
+    const first = record({
+      leaderEpoch: 'epoch-phone',
+      sequence: 0,
+      recordedAt: '2026-09-13T06:00:00.000Z',
+      text: 'p',
+    });
+    const longLived = segment('device-phone', [
+      first,
+      record({ leaderEpoch: 'epoch-phone', sequence: 1, recordedAt: '2026-09-13T06:10:00.000Z', text: 'again' }),
+    ]);
+    const rehomed = segment('device-phone', [
+      first,
+      record({ leaderEpoch: 'epoch-phone-2', sequence: 0, recordedAt: '2026-09-13T06:10:00.000Z', text: 'again' }),
+    ]);
+
+    expect(ids(mergeLogSegments([longLived, desktop]))).toEqual(['epoch-phone-0', 'epoch-phone-1', 'epoch-desktop-0']);
+    expect(ids(mergeLogSegments([rehomed, desktop]))).toEqual(['epoch-phone-0', 'epoch-desktop-0', 'epoch-phone-2-0']);
   });
 
   /* A term is a run one writer owned: splitting it would invent an interleave
@@ -85,6 +157,27 @@ describe('mergeLogSegments', () => {
       record({ leaderEpoch: 'epoch-2', sequence: 0, recordedAt: '2026-09-13T06:00:00.000Z', text: 'second' }),
     ]);
     expect(ids(mergeLogSegments([jumped]))).toEqual(['epoch-1-0', 'epoch-2-0']);
+  });
+
+  /* Round 16 (`t7_bounded_prefix`): the terms a reader keeps at a bound are a prefix of the whole merge. */
+  it('should keep, at a bound, the prefix of the merge whose terms start by then, and name the rest', () => {
+    const early = record({ leaderEpoch: 'epoch-1', sequence: 0, recordedAt: '2026-09-13T06:00:00.000Z', text: 'a' });
+    const late = record({ leaderEpoch: 'epoch-2', sequence: 0, recordedAt: '2026-09-14T06:00:00.000Z', text: 'b' });
+    /* The same device's next term in file order, clamped to the late term's start though its own clock reads earlier. */
+    const after = record({ leaderEpoch: 'epoch-3', sequence: 0, recordedAt: '2026-09-13T07:00:00.000Z', text: 'c' });
+    const other = record({ leaderEpoch: 'epoch-o', sequence: 0, recordedAt: '2026-09-13T06:30:00.000Z', text: 'o' });
+    const segments = parseLogSegments([segment('device-1', [early, late, after]), segment('device-o', [other])]);
+
+    const bounded = mergeSegmentsUpTo(segments, Date.parse('2026-09-13T12:00:00.000Z'));
+    const whole = mergeLogSegments([segment('device-1', [early, late, after]), segment('device-o', [other])]);
+
+    expect(ids(bounded.rows)).toEqual(['epoch-1-0', 'epoch-o-0']);
+    expect(ids(whole).slice(0, bounded.rows.length)).toEqual(ids(bounded.rows));
+    expect(bounded.newestStart).toBe(Date.parse('2026-09-13T06:30:00.000Z'));
+    expect(bounded.later).toEqual([
+      { leaderEpoch: 'epoch-2', startedAt: Date.parse('2026-09-14T06:00:00.000Z') },
+      { leaderEpoch: 'epoch-3', startedAt: Date.parse('2026-09-14T06:00:00.000Z') },
+    ]);
   });
 
   it('reads a chat no device has written yet as no records', () => {

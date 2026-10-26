@@ -24,6 +24,7 @@ import type {
   TurnPlacementFact,
   TurnPlacementGrant,
   TurnPlacementPort,
+  TurnPublishInput,
   TurnReconcileInput,
 } from '#waist/ports.js';
 
@@ -86,6 +87,18 @@ type TurnPlacementProtocol = {
       result: Awaited<ReturnType<TurnPlacementPort['acknowledge']>>;
       wireResult: unknown;
     };
+    readonly publish: {
+      args: TurnPublishInput;
+      wireArgs: unknown;
+      result: Awaited<ReturnType<NonNullable<TurnPlacementPort['publish']>>>;
+      wireResult: unknown;
+    };
+    readonly pull: {
+      args: TurnPublishInput;
+      wireArgs: unknown;
+      result: Awaited<ReturnType<NonNullable<TurnPlacementPort['pull']>>>;
+      wireResult: unknown;
+    };
   };
   readonly notifies: Record<never, never>;
   readonly listens: {
@@ -103,6 +116,8 @@ const requests = {
   abandon: attemptSchema,
   reconcile: z.strictObject({ requestId: text, chatId: text.optional() }),
   acknowledge: attemptSchema,
+  publish: z.strictObject({ requestId: text, chatId: text }),
+  pull: z.strictObject({ requestId: text, chatId: text }),
 } as const;
 
 /* Answers and facts are the session's own; the client checks only what it routes on. */
@@ -116,7 +131,7 @@ const call = { args: z.unknown(), result: answerSchema };
 
 const turnPlacementProtocolSchemas = {
   hello: z.strictObject({ projectId: text }),
-  calls: { admit: call, complete: call, abandon: call, reconcile: call, acknowledge: call },
+  calls: { admit: call, complete: call, abandon: call, reconcile: call, acknowledge: call, publish: call, pull: call },
   notifies: {},
   listens: { settlements: { args: z.unknown(), event: factSchema } },
 };
@@ -131,6 +146,13 @@ const unreadable = (verb: string, issues: string): Error =>
   Object.assign(new Error(`The placement session could not read a ${verb} request: ${issues}`), {
     code: 'FRAME_UNREADABLE' satisfies RefusalCode,
   });
+
+/** The answer a server gives a verb it does not have: `unreadable(name, missingVerb)`, from every build since W6. */
+const missingVerb = 'no such verb';
+const isMissingVerb = (error: unknown): boolean =>
+  error instanceof Error &&
+  (error as { readonly code?: unknown }).code === 'FRAME_UNREADABLE' &&
+  error.message.endsWith(`: ${missingVerb}`);
 
 /** Options for {@link serveTurnPlacementChannel}. @public */
 export type ServeTurnPlacementChannelOptions = Readonly<{
@@ -204,8 +226,25 @@ export const serveTurnPlacementChannel = (options: ServeTurnPlacementChannelOpti
         case 'acknowledge': {
           return session.acknowledge(parse('acknowledge', args));
         }
+        case 'publish': {
+          const input = parse('publish', args);
+          /* A session with no publish verb records no chat ref, so no other device reads the chat (XD3). */
+          return (
+            session.publish?.(input) ?? {
+              requestId: input.requestId,
+              status: 'refused',
+              code: 'CHAT_NOT_SHARED',
+              message: 'This placement session records no chat ref for other devices.',
+            }
+          );
+        }
+        case 'pull': {
+          const input = parse('pull', args);
+          /* A session with no pull verb pulls only when it opens, pushes or hears the remote move. */
+          return session.pull?.(input) ?? { requestId: input.requestId, status: 'applied' };
+        }
         default: {
-          throw unreadable(name, 'no such verb');
+          throw unreadable(name, missingVerb);
         }
       }
     },
@@ -289,6 +328,33 @@ export const connectTurnPlacementChannel = (options: ConnectTurnPlacementChannel
     abandon: async (input) => channel.call('abandon', input),
     reconcile: async (input) => channel.call('reconcile', input),
     acknowledge: async (input) => channel.call('acknowledge', input),
+    publish: async (input) => {
+      try {
+        return await channel.call('publish', input);
+      } catch (error) {
+        /* A placement server older than XD3 has no publish verb: it records no chat ref, so the chat is not shared. */
+        if (isMissingVerb(error)) {
+          return {
+            requestId: input.requestId,
+            status: 'refused',
+            code: 'CHAT_NOT_SHARED',
+            message: 'This placement session records no chat ref for other devices.',
+          };
+        }
+        throw error;
+      }
+    },
+    pull: async (input) => {
+      try {
+        return await channel.call('pull', input);
+      } catch (error) {
+        /* A placement server older than round 18 has no pull verb: it pulls on its own schedule. */
+        if (isMissingVerb(error)) {
+          return { requestId: input.requestId, status: 'applied' };
+        }
+        throw error;
+      }
+    },
     settlements: ({ signal }) => channel.listen('settlements', undefined, signal),
     close: (reason) => {
       channel.close(reason);

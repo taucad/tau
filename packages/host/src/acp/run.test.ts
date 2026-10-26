@@ -6,11 +6,11 @@ import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ContentBlock } from '@agentclientprotocol/sdk';
-import type { ExternalAgentTurn, UserProviderMessage } from '@taucad/agent-host';
+import type { ExternalAgentTurn, ProviderMessage, UserProviderMessage } from '@taucad/agent-host';
 
 import { createCallbackLogic } from 'xstate';
 
-import { createAcpExternalAgentPort } from '#acp/run.js';
+import { createAcpExternalAgentPort, handoffBlocks } from '#acp/run.js';
 import type { AcpConnectionCommand, AcpConnectionInput } from '#acp/acp-session.machine.js';
 import type { AcpAdapter } from '#acp/registry.js';
 
@@ -192,5 +192,171 @@ describe('ACP attachment materialisation (D23)', () => {
     });
 
     expect(blocks).toEqual([{ type: 'image', data: 'bGVnYWN5', mimeType: 'image/png' }]);
+  });
+});
+
+describe('the chat handoff an ACP prompt carries', () => {
+  const marked = (
+    id: string,
+    content: string,
+    session: Readonly<{ acpSessionId?: string; hostId?: string; deviceId?: string }> = {},
+  ): ProviderMessage => ({
+    id,
+    role: 'user',
+    content,
+    metadata: {
+      tauInternal: {
+        kind: 'external-agent',
+        agentId: 'codex',
+        runKind: 'acp',
+        ...session,
+      },
+    },
+  });
+  const said = (id: string, role: 'user' | 'assistant', text: string): ProviderMessage =>
+    role === 'user' ? { id, role, content: text } : { id, role, content: [{ type: 'text', text }] };
+  const turnOf = (transcript: readonly ProviderMessage[], message: ProviderMessage): ExternalAgentTurn =>
+    ({ agentId: 'codex', message, transcript }) as unknown as ExternalAgentTurn;
+  const textOf = (blocks: readonly ContentBlock[]): string =>
+    blocks.map((block) => (block.type === 'resource' && 'text' in block.resource ? block.resource.text : '')).join('');
+
+  /* Only a session's opening turn has to name it: its later turns' markers continue the most recent named session. */
+  it('should carry only the foreign turn after a session ran turns 1–3 with bare markers on 2 and 3', () => {
+    const current = marked('turn-4', 'fourth');
+    const transcript = [
+      marked('turn-1', 'first', { acpSessionId: 'session-1' }),
+      said('answer-1', 'assistant', 'one'),
+      marked('turn-2', 'second'),
+      said('answer-2', 'assistant', 'two'),
+      marked('turn-3', 'third'),
+      said('answer-3', 'assistant', 'three'),
+      said('phone-1', 'user', 'from the phone'),
+      said('phone-answer-1', 'assistant', 'phone answer'),
+      current,
+    ];
+
+    const text = textOf(handoffBlocks(turnOf(transcript, current), 'session-1'));
+
+    expect(text).toContain('from the phone');
+    expect(text).toContain('phone answer');
+    expect(text).not.toContain('second');
+    expect(text).not.toContain('three');
+  });
+
+  /* Two devices' sessions of one agent interleave: a bare marker continues its own host's named session. */
+  it('should credit a bare marker to its own host’s session when devices interleave', () => {
+    const current = marked('turn-a2', 'a again', { hostId: 'host-a' });
+    const transcript = [
+      marked('turn-b1', 'b opens', { acpSessionId: 'session-b', hostId: 'host-b' }),
+      said('answer-b1', 'assistant', 'b one'),
+      marked('turn-a1', 'a opens', { acpSessionId: 'session-a', hostId: 'host-a' }),
+      said('answer-a1', 'assistant', 'a one'),
+      marked('turn-b2', 'b continues', { hostId: 'host-b' }),
+      said('answer-b2', 'assistant', 'b two'),
+      current,
+    ];
+
+    const text = textOf(handoffBlocks(turnOf(transcript, current), 'session-a'));
+
+    expect(text).toContain('b continues');
+    expect(text).toContain('b two');
+    expect(text).not.toContain('a opens');
+  });
+
+  /*
+   * Two desktops share the host id `desktop`: a bare marker continues the session its own device named, never the one
+   * another device named last under the same host id.
+   */
+  it.each([
+    { session: 'session-2', carried: ['d1 again', 'one again'], seen: ['d2 opens'] },
+    /* Its third turn's handoff carried the second: it has seen everything up to there. */
+    { session: 'session-1', carried: [], seen: ['d2 opens', 'd1 again'] },
+  ])('should credit a bare marker to its own device when two desktops share a host id ($session)', (expected) => {
+    const desktop = (deviceId: string, acpSessionId?: string) => ({
+      hostId: 'desktop',
+      deviceId,
+      ...(acpSessionId === undefined ? {} : { acpSessionId }),
+    });
+    const current = marked('turn-4', 'next', desktop('device-2'));
+    const transcript = [
+      marked('turn-1', 'd1 opens', desktop('device-1', 'session-1')),
+      said('answer-1', 'assistant', 'one'),
+      marked('turn-2', 'd2 opens', desktop('device-2', 'session-2')),
+      said('answer-2', 'assistant', 'two'),
+      marked('turn-3', 'd1 again', desktop('device-1')),
+      said('answer-3', 'assistant', 'one again'),
+      current,
+    ];
+
+    const text = textOf(handoffBlocks(turnOf(transcript, current), expected.session));
+
+    for (const words of expected.carried) {
+      expect(text).toContain(words);
+    }
+    for (const words of expected.seen) {
+      expect(text).not.toContain(words);
+    }
+  });
+
+  /* Only the person's words are carried as theirs: user messages Tau makes for itself never read as "**user**". */
+  it.each(['approval-answer', 'client-memory', 'stream-checkpoint', 'external-tool', 'billing-invocation'])(
+    'should leave out a Tau-internal user message of kind %s',
+    (kind) => {
+      const current = marked('turn-2', 'next');
+      const transcript = [
+        said('phone-1', 'user', 'from the phone'),
+        { id: 'internal-1', role: 'user', content: `internal ${kind}`, metadata: { tauInternal: { kind } } },
+        said('phone-answer-1', 'assistant', 'phone answer'),
+        current,
+      ] satisfies ProviderMessage[];
+
+      const text = textOf(handoffBlocks(turnOf(transcript, current), undefined));
+
+      expect(text).toContain('from the phone');
+      expect(text).toContain('phone answer');
+      expect(text).not.toContain(`internal ${kind}`);
+    },
+  );
+
+  /* The bound is on the block as sent: its header and the separators between messages count. */
+  it('should keep the whole block within 24,000 characters for many short messages', () => {
+    const current = marked('turn-next', 'next');
+    const transcript = [
+      ...Array.from({ length: 4000 }, (_, index) =>
+        said(`short-${String(index)}`, index % 2 === 0 ? 'user' : 'assistant', 'ok'),
+      ),
+      current,
+    ];
+
+    const text = textOf(handoffBlocks(turnOf(transcript, current), undefined));
+
+    expect(text.length).toBeGreaterThan(20_000);
+    expect(text.length).toBeLessThanOrEqual(24_000);
+  });
+
+  /* A session whose own turns compaction or a rewind removed still saw the chat up to there: nothing is resent. */
+  it('should send nothing for a reattached session whose own turns the history no longer holds', () => {
+    const current = marked('turn-9', 'next');
+    const transcript = [
+      said('summary', 'assistant', 'summary of earlier turns'),
+      said('phone-1', 'user', 'old phone'),
+      current,
+    ];
+
+    expect(handoffBlocks(turnOf(transcript, current), 'session-gone')).toEqual([]);
+  });
+
+  /* The block is bounded whatever the newest message's size: its tail is kept, and says it was cut. */
+  it('should cut an oversized newest message to the budget, keeping its tail', () => {
+    const current = marked('turn-2', 'next');
+    const huge = `${'x'.repeat(40_000)}THE END`;
+    const transcript = [said('phone-1', 'user', huge), current];
+
+    const text = textOf(handoffBlocks(turnOf(transcript, current), undefined));
+
+    expect(text.length).toBeLessThan(25_000);
+    expect(text).toContain('THE END');
+    expect(text).toContain('[earlier text cut]');
+    expect(text).toContain('**user**: [earlier text cut]');
   });
 });

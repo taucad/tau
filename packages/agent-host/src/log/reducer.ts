@@ -4,6 +4,7 @@ import type { ReadRow, ReplayReadRow } from '#log/serialization.js';
 import { createEventSequence } from '#log/event-sequence.js';
 import type { SequenceAnomaly } from '#log/event-sequence.js';
 import type { AgentLogEvent, ProviderMessage } from '#log/event-types.js';
+import { isAbandonedTurn, isPersonsMessage } from '#log/event-types.js';
 
 type ReducerRow = { readonly event: AgentLogEvent; readonly opaque: boolean };
 
@@ -72,8 +73,51 @@ type EventLogTransition =
 /** What replaying one row of history found; the row is kept either way (CL-R6). @internal */
 export type ReplayAnomaly = SequenceAnomaly | { readonly kind: 'history'; readonly message: string };
 
-/** Incremental reducer used to validate a transition before it reaches storage. @internal */
-export const createEventLogReducer = (): {
+/**
+ * Which rules a reducer applies (CL-R5, CL-R6).
+ *
+ * - `log`: one device's log, folded whole: its term rules and its message history.
+ * - `terms`: only the term rules, over this device's own rows. The integer epoch is monotone within one device's log
+ *   only, so these rules never span a merge.
+ * - `history`: only the message rules, over rows another reader already ordered and de-duplicated, such as
+ *   `mergeLogSegments`'s union of every device's segment.
+ *
+ * @internal
+ */
+export type EventLogReducerMode = 'log' | 'terms' | 'history';
+
+/**
+ * A sequence that holds no term rules (`history` mode).
+ *
+ * @returns A sequence that finds every row new and in order.
+ */
+const unsequenced = (): ReturnType<typeof createEventSequence> => ({
+  check: () => ({ duplicate: false, fingerprint: '' }),
+  commit: () => undefined,
+  replay: () => ({ duplicate: false }),
+  replayOwned: () => ({ duplicate: false }),
+});
+
+/**
+ * Incremental reducer used to validate a transition before it reaches storage.
+ *
+ * @param mode - The rules it applies; `log` (both) when absent.
+ * @returns The reducer.
+ * @internal
+ */
+export const createEventLogReducer = (
+  mode: EventLogReducerMode = 'log',
+  options: Readonly<{
+    /**
+     * Whether a message is gone: no row this history could ever read introduces it. A row naming a message this history
+     * does not hold drops that name when it is gone, instead of rejecting the history. A chat log's rows can name
+     * another device's messages (XD1); once that device's segment is gone, those names have nothing to apply to, and
+     * the rest of the history still folds. A name that is not gone, such as one a later row introduces, still rejects
+     * it (`HISTORY_INVALID`). Absent: nothing is gone.
+     */
+    gone?: ((messageId: string) => boolean) | undefined;
+  }> = {},
+): {
   prepare(candidate: AgentLogEvent): EventLogTransition;
   /**
    * Fold one row of history as an opening reader does: never throws. A broken term rule or a history the message
@@ -89,27 +133,80 @@ export const createEventLogReducer = (): {
   /** `false` once a history row was rejected at replay. */
   historyIntact(): boolean;
 } => {
-  const sequence = createEventSequence();
+  const sequence = mode === 'history' ? unsequenced() : createEventSequence();
+  const historyRules = mode !== 'terms';
   const knownMessageIds = new Set<string>();
   const preparedInvocations = new Set<string>();
   const invocationBindings = new Map<string, string>();
   const settledInvocations = new Set<string>();
   let messages: ProviderMessage[] = [];
   let intact = true;
+  const { gone } = options;
+  const tracksPresent = gone !== undefined;
+  /** The ids the history holds now, kept only when gone names are dropped: each lookup is then constant. */
+  const present = new Set<string>();
+  /** Keep {@link present} in step after a change that drops or reorders messages. */
+  const reindex = (): void => {
+    if (tracksPresent) {
+      present.clear();
+      for (const message of messages) {
+        present.add(message.id);
+      }
+    }
+  };
+  const appendMessage = (message: ProviderMessage): void => {
+    messages.push(message);
+    if (tracksPresent) {
+      present.add(message.id);
+    }
+  };
+  /**
+   * The person's turns this history first took as a copy (`abandonedTurnOf`), by run and message id. Never cleared, a
+   * rewind's included: a run's turn said once stays said. Another run's row of the same message (a Retry re-admits the
+   * person's message once a rewind removed it) is not that run's turn said again.
+   */
+  const copiedTurns = new Set<string>();
+  const copiedKey = (runId: string, messageId: string): string => JSON.stringify([runId, messageId]);
+  /**
+   * Whether a person's message is a turn this history already said (XD3): a copy of one it holds, or any row of a turn
+   * it first took from a copy. A device that goes on past an abandoned run says its turn under its own term, and the
+   * run's device may later settle the run and bring its own row of that turn, merging after the copy when its clock ran
+   * far ahead. Either way it is one message, never a second, and a rewind that removed it since does not bring it back
+   * (`t9_copy_then_turn`, `t9_copy_then_turn_ever` in ChatLedger.lean); a later run's row of it does
+   * (`t9_retry_after_rewind`).
+   */
+  const turnSaidAgain = (runId: string, message: ProviderMessage): boolean =>
+    (copiedTurns.has(copiedKey(runId, message.id)) && isPersonsMessage(message)) ||
+    (knownMessageIds.has(message.id) && isAbandonedTurn(message));
+  /** The ids a row names, less those this history does not hold and that are gone. */
+  const held = (messageIds: readonly string[]): readonly string[] =>
+    gone === undefined ? messageIds : messageIds.filter((id) => present.has(id) || !gone(id));
 
   /** The history rules for one known row: returns its effect, or throws `HISTORY_INVALID`. */
   const transitionOf = (event: AgentLogEvent): (() => void) => {
     let apply: () => void;
     switch (event.type) {
       case 'message.appended': {
+        /* A person's turn appended as its run settled is the same message from every device that appends it (XD3). */
+        if (turnSaidAgain(event.runId, event.message)) {
+          apply = () => undefined;
+          break;
+        }
         assertNewMessageId(knownMessageIds, event.message);
         apply = () => {
           knownMessageIds.add(event.message.id);
-          messages.push(event.message);
+          if (isAbandonedTurn(event.message)) {
+            copiedTurns.add(copiedKey(event.runId, event.message.id));
+          }
+          appendMessage(event.message);
         };
         break;
       }
       case 'message.envelope-replaced': {
+        if (held([event.messageId]).length === 0) {
+          apply = () => undefined;
+          break;
+        }
         const index = messageIndex(messages, event.messageId);
         assertSameEnvelopeIdentity(messages[index]!, event.replacement, event.messageId);
         apply = () => {
@@ -122,34 +219,41 @@ export const createEventLogReducer = (): {
         if (evictedIds.size !== event.evictedMessageIds.length) {
           failHistory('A compaction event cannot evict the same message id twice.');
         }
-        const indexes = indexesFor(messages, event.evictedMessageIds);
+        const indexes = indexesFor(messages, held(event.evictedMessageIds));
         assertNewMessageId(knownMessageIds, event.summary);
-        const insertionIndex = Math.min(...indexes);
+        const insertionIndex = indexes.length === 0 ? messages.length : Math.min(...indexes);
         apply = () => {
           messages = messages.filter((message) => !evictedIds.has(message.id));
           messages.splice(insertionIndex, 0, event.summary);
+          reindex();
           knownMessageIds.add(event.summary.id);
         };
         break;
       }
       case 'history.rewound': {
-        if (event.retainedMessageIds.length > messages.length) {
+        const retainedMessageIds = held(event.retainedMessageIds);
+        if (retainedMessageIds.length > messages.length) {
           failHistory('A history rewind cannot retain more messages than current history contains.');
         }
-        for (let index = 0; index < event.retainedMessageIds.length; index++) {
-          if (messages[index]!.id !== event.retainedMessageIds[index]) {
+        for (const [index, id] of retainedMessageIds.entries()) {
+          if (messages[index]!.id !== id) {
             failHistory('A history rewind must retain an unchanged, ordered history prefix.');
           }
         }
         apply = () => {
-          for (const removed of messages.slice(event.retainedMessageIds.length)) {
+          for (const removed of messages.slice(retainedMessageIds.length)) {
             knownMessageIds.delete(removed.id);
           }
-          messages = messages.slice(0, event.retainedMessageIds.length);
+          messages = messages.slice(0, retainedMessageIds.length);
+          reindex();
         };
         break;
       }
       case 'snapshot-context.refreshed': {
+        if (held([event.messageId]).length === 0) {
+          apply = () => undefined;
+          break;
+        }
         const index = messageIndex(messages, event.messageId);
         apply = () => {
           messages[index] = { ...messages[index]!, content: event.content };
@@ -157,18 +261,25 @@ export const createEventLogReducer = (): {
         break;
       }
       case 'turn.history-projection-committed': {
-        if (event.retainedMessageIds.length > messages.length) {
+        /* The run's own commit of a turn another device already said for it changes nothing: the history went on past it. */
+        if (turnSaidAgain(event.runId, event.message)) {
+          apply = () => undefined;
+          break;
+        }
+        const retainedMessageIds = held(event.retainedMessageIds);
+        if (retainedMessageIds.length > messages.length) {
           failHistory('A start-of-turn projection cannot retain more messages than current history contains.');
         }
-        for (let index = 0; index < event.retainedMessageIds.length; index++) {
-          if (messages[index]!.id !== event.retainedMessageIds[index]) {
+        for (const [index, id] of retainedMessageIds.entries()) {
+          if (messages[index]!.id !== id) {
             failHistory('A start-of-turn projection must retain an unchanged, ordered history prefix.');
           }
         }
         assertNewMessageId(knownMessageIds, event.message);
-        const projected = [...messages.slice(0, event.retainedMessageIds.length), event.message];
+        const projected = [...messages.slice(0, retainedMessageIds.length), event.message];
         apply = () => {
           messages = projected;
+          reindex();
           knownMessageIds.add(event.message.id);
         };
         break;
@@ -181,7 +292,7 @@ export const createEventLogReducer = (): {
         assertNewMessageId(knownMessageIds, event.message);
         apply = () => {
           knownMessageIds.add(event.message.id);
-          messages.push(event.message);
+          appendMessage(event.message);
         };
         break;
       }
@@ -191,7 +302,8 @@ export const createEventLogReducer = (): {
       case 'turn.finalized':
       case 'turn.conflicted':
       case 'turn.failed':
-      case 'run.lifecycle': {
+      case 'run.lifecycle':
+      case 'run.heartbeat': {
         apply = () => undefined;
         break;
       }
@@ -247,7 +359,7 @@ export const createEventLogReducer = (): {
     if (sequenceCheck.duplicate) {
       return { duplicate: true };
     }
-    const apply = opaque ? () => undefined : transitionOf(event);
+    const apply = opaque || !historyRules ? () => undefined : transitionOf(event);
     return {
       duplicate: false,
       event,
@@ -262,6 +374,9 @@ export const createEventLogReducer = (): {
     { event, opaque }: ReadRow,
     replayed: ReturnType<typeof sequence.replay>,
   ): { readonly duplicate: boolean; readonly anomaly?: ReplayAnomaly } => {
+    if (!historyRules) {
+      return replayed;
+    }
     if (!replayed.duplicate && opaque && historyRowTypes.has(event.type)) {
       intact = false;
     }

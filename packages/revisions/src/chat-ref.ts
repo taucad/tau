@@ -66,6 +66,23 @@ export const chatLogFileName = 'events.jsonl';
 export const chatSegmentPath = (deviceId: string): string => `events/${deviceId}.jsonl`;
 
 /**
+ * This device's record of its pulls of one chat (XD3, rounds 18 and 19): a first line with the device clock of the last
+ * recorded pull, read before it listed the remote's refs, then one line per other device's segment,
+ * `<file name> <size> <quiet>`: the segment's size here after that pull, and how long, in milliseconds, pulls have found
+ * it that size. Written once a pull projected the chat; it sits beside the other devices' segments and never rides
+ * the ref's tree.
+ *
+ * It is the cross-device run fence's evidence that another device went quiet: that device's run is abandoned only once
+ * the quiet recorded for its segment, at the size the reader holds, passes the staleness bound. A clock on this device
+ * alone, or a segment's age, says nothing about what the remote held meanwhile: a device that slept for hours has old
+ * segments and has not seen the live run another device kept writing. Nor is quiet one clock reading against another
+ * ({@link pullRecordAfter}), so a clock that jumps cannot make it.
+ *
+ * @public
+ */
+export const chatPulledAtPath = 'events/pulled-at';
+
+/**
  * Whether a tree path is one of this host's own segments, under any actor form.
  *
  * @param context - The segment name this write uses, and every one this host has used.
@@ -223,6 +240,11 @@ export type ProjectChatsInput = ChatRefContext &
      * one whose record then conflicts, whose segments were still written (CH1).
      */
     onWritten?: (chatId: string) => void;
+    /**
+     * When the pull read the remote's refs, before it listed them, on this device's clock: every chat it projects that
+     * holds another device's segment records the pull ({@link pullRecordAfter}). Absent, nothing is recorded.
+     */
+    pulledAt?: number | undefined;
   }>;
 
 const textDecoder = new TextDecoder();
@@ -685,7 +707,7 @@ const assertChatTree = (tree: ImmutableRevisionTree): void => {
  * (A38's "coalesce at the seam"), so a projection that re-ran changes nothing.
  *
  * @param options - The checkout, chat directory, entries, and cancellation signal.
- * @returns Whether any byte on disk changed.
+ * @returns Each entry's path, its size on disk after the write, and whether its bytes there changed.
  */
 const writeEntries = async (
   options: Readonly<{
@@ -694,7 +716,7 @@ const writeEntries = async (
     entries: ReadonlyArray<Readonly<{ path: string; content: Uint8Array<ArrayBuffer> }>>;
     signal?: AbortSignal;
   }>,
-): Promise<boolean> => {
+): Promise<ReadonlyArray<readonly [path: string, size: number, written: boolean]>> => {
   const { filesystem, directory, entries, signal } = options;
   const writes = await Promise.allSettled(
     entries.map(async (entry) => {
@@ -705,19 +727,19 @@ const writeEntries = async (
         current !== undefined && entry.path.startsWith('events/')
           ? appendUnion(current, entry.content, entry.path)
           : entry.content;
-      if (current !== undefined && equalBytes(current, content)) {
-        return false;
+      const written = current === undefined || !equalBytes(current, content);
+      if (written) {
+        signal?.throwIfAborted();
+        await filesystem.writeFile(target, content);
       }
-      signal?.throwIfAborted();
-      await filesystem.writeFile(target, content);
-      return true;
+      return [entry.path, content.byteLength, written] as const;
     }),
   );
   const rejected = writes.find((result) => result.status === 'rejected');
   if (rejected !== undefined) {
     throw rejected.reason instanceof Error ? rejected.reason : new Error(String(rejected.reason));
   }
-  return writes.filter((result) => result.status === 'fulfilled').some((result) => result.value);
+  return writes.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
 };
 
 const chatProvenance = (input: WriteChatRefInput, now: number): RevisionProvenance =>
@@ -935,6 +957,38 @@ const projectedRecord = (
   }
 };
 
+/** The most of one gap between recorded pulls that counts as quiet: two pull requests' minute (round 19). */
+const pullQuietGapMilliseconds = 120_000;
+/** A pull that finds every segment as recorded under this long after the recorded one records nothing (round 19). */
+const pullRecordMilliseconds = 30_000;
+
+/**
+ * A chat's pull record after one more pull ({@link chatPulledAtPath}; `notePull` in the agent host's ChatLedger.lean,
+ * T11). Each segment's quiet grows by the gap since the recorded pull while its size stays, else starts at zero. The gap
+ * is counted at most {@link pullQuietGapMilliseconds}, and as nothing when the clock reads earlier than the recorded
+ * pull, so a backward clock jump only shortens quiet and a forward one adds at most that much. A pull under
+ * {@link pullRecordMilliseconds} after the recorded one that finds every segment as recorded writes nothing, so pulls
+ * write little and a pull asked for once a minute is always recorded.
+ *
+ * @param prior - The record's text, empty when there is none.
+ * @param at - When the pull read the remote's refs, on this device's clock.
+ * @param segments - Each other device's segment here after the pull, as `<file name> <size>`.
+ * @returns The record to write, or `undefined` to leave it.
+ * @internal
+ */
+export const pullRecordAfter = (prior: string, at: number, segments: readonly string[]): string | undefined => {
+  const [clock = '', ...lines] = prior.split('\n');
+  const gap = at - Number(clock);
+  const quiet = new Map(
+    lines.map((line) => [line.slice(0, line.lastIndexOf(' ')), Number(line.slice(line.lastIndexOf(' ') + 1))]),
+  );
+  if (gap >= 0 && gap < pullRecordMilliseconds && segments.every((segment) => quiet.has(segment))) {
+    return undefined;
+  }
+  const counted = gap < 0 ? 0 : Math.min(gap, pullQuietGapMilliseconds);
+  return [at, ...segments.map((segment) => `${segment} ${quiet.get(segment)! + counted || 0}`)].join('\n');
+};
+
 /**
  * Write every fetched chat ref's tree into the checkout's `.tau/chats/**`.
  *
@@ -979,7 +1033,7 @@ export const projectChats = async (input: ProjectChatsInput): Promise<readonly s
       [base?.get(chatRecordFileName), own?.get(chatRecordFileName)],
       incomingRecord,
     );
-    const written = await writeEntries({
+    const entries = await writeEntries({
       filesystem: input.filesystem,
       directory,
       entries: [
@@ -998,8 +1052,24 @@ export const projectChats = async (input: ProjectChatsInput): Promise<readonly s
       signal: input.signal,
     });
     input.signal?.throwIfAborted();
+    /* Each other device's segment here after the pull, as its record names it (round 19). */
+    const segments = entries.flatMap(([path, size]) =>
+      path.startsWith('events/') ? [`${path.slice(7)} ${String(size)}`] : [],
+    );
+    const record = `${directory}/${chatPulledAtPath}`;
+    const next =
+      input.pulledAt === undefined || segments.length === 0
+        ? undefined
+        : pullRecordAfter(
+            textDecoder.decode(await readFileOrUndefined(input.filesystem, record)),
+            input.pulledAt,
+            segments,
+          );
+    if (next !== undefined) {
+      await input.filesystem.writeFile(record, new TextEncoder().encode(next));
+    }
     const removed = purged && (await removePurgedChatBytes(input.filesystem, chatId));
-    const changed = written || removed;
+    const changed = entries.some((entry) => entry[2]) || removed;
     if (changed) {
       input.onWritten?.(chatId);
     }

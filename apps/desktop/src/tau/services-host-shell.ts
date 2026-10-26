@@ -11,7 +11,6 @@
  * @module
  */
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { probeHostShell } from '@taucad/host';
 import type {
@@ -70,18 +69,21 @@ export type DesktopShell = Readonly<{
 }>;
 
 /**
- * The supervisor the shell provider starts per launch. In the bundled app it is `shell-supervisor.js` beside this
- * utility's own bundle (`electron.vite.config.ts`); from source the provider's own default applies.
+ * Resolve the supervisor beside the launched utility entry, even when this module lives in a shared bundle chunk.
+ * Source execution retains the provider's default supervisor.
  *
- * @returns The supervisor, or `undefined` for the provider's default.
+ * @returns The bundled supervisor, or `undefined` during source execution.
  */
-const bundledSupervisor = (): SandboxShellProviderOptions['supervisor'] =>
-  import.meta.url.endsWith('.ts')
-    ? undefined
-    : {
-        executablePath: process.execPath,
-        arguments: [join(dirname(fileURLToPath(import.meta.url)), 'shell-supervisor.js')],
-      };
+export const bundledShellSupervisor = (): SandboxShellProviderOptions['supervisor'] => {
+  if (import.meta.url.endsWith('.ts')) {
+    return undefined;
+  }
+  const entry = process.argv[1];
+  if (!entry) {
+    throw new Error('The desktop shell utility has no launched entry path');
+  }
+  return { executablePath: process.execPath, arguments: [join(dirname(entry), 'shell-supervisor.js')] };
+};
 
 /**
  * The one provider for this platform, chosen once (D3). macOS ships its Terminal with the PTY rows unverified (operator
@@ -93,7 +95,7 @@ const bundledSupervisor = (): SandboxShellProviderOptions['supervisor'] =>
 export const desktopShellProvider = (
   options: Pick<DesktopShellOptions, 'bwrapPath' | 'home'> & Readonly<{ platform: NodeJS.Platform }>,
 ): ShellProvider | undefined => {
-  const supervisor = bundledSupervisor();
+  const supervisor = bundledShellSupervisor();
   const shared = {
     ...(supervisor === undefined ? {} : { supervisor }),
     ...(options.home === undefined ? {} : { home: options.home }),

@@ -646,6 +646,15 @@ export class MetricsService {
     advice: { explicitBucketBoundaries: [...TauMetrics.syncClientLag.buckets] },
   });
 
+  public readonly syncClientAttemptDuration = this.clientMeter.createHistogram(
+    TauMetrics.syncClientAttemptDuration.name,
+    {
+      description: TauMetrics.syncClientAttemptDuration.description,
+      unit: TauMetrics.syncClientAttemptDuration.unit,
+      advice: { explicitBucketBoundaries: [...TauMetrics.syncClientAttemptDuration.buckets] },
+    },
+  );
+
   public readonly syncClientPending = this.clientMeter.createHistogram(TauMetrics.syncClientPending.name, {
     description: TauMetrics.syncClientPending.description,
     unit: TauMetrics.syncClientPending.unit,
@@ -671,6 +680,9 @@ export type WsUpgradeRejection = z.infer<typeof TauMetrics.wsUpgradeRejections.a
 
 /** Attributes of one `tau.sync.operations` increment. */
 export type SyncOperationAttributes = z.infer<typeof TauMetrics.syncOperations.attributes>;
+
+/** Attributes of one `tau.sync.operation.duration` sample: the operation's, plus where git ran. */
+export type SyncOperationDurationAttributes = z.infer<typeof TauMetrics.syncOperationDuration.attributes>;
 
 /** Attributes of one `tau.sync.refusals` increment. */
 export type SyncRefusalAttributes = z.infer<typeof TauMetrics.syncRefusals.attributes>;

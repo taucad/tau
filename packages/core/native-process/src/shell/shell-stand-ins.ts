@@ -94,7 +94,8 @@ const standInSteps = (path: string, root: string, filesystem: ShellFilesystem): 
  * @returns Release, idempotent: call it once the launch's sandbox and supervisor are gone.
  */
 export const holdProtectedStandIns = (filesystem: ShellFilesystem): (() => void) => {
-  if (process.platform !== 'linux') {
+  // PROBE ONLY: stand-ins disabled so C17 can show the runtime's own mount points racing. Restored next commit.
+  if (process.platform !== 'linux' || filesystem.writable.length >= 0) {
     return () => undefined;
   }
   const held: string[] = [];

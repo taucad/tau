@@ -1,11 +1,20 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { wrapCommandWithSandboxMacOS } from '@anthropic-ai/sandbox-runtime/dist/sandbox/macos-sandbox-utils.js';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { bindMaskedDirectories, maskProblem } from '#shell/shell-project-mask.js';
+import { bindMaskedDirectories, holdProtectedStandIns, maskProblem } from '#shell/shell-project-mask.js';
 import type { ShellFilesystem } from '#shell/shell-provider.js';
 
 const roots: string[] = [];
@@ -133,5 +142,73 @@ describe('macOS masked directory profile composition', () => {
 
   it('should refuse an unrecognized sandbox vector', () => {
     expect(bindMaskedDirectories(['/bin/bash', '-c', 'true'], fixture())).toBeUndefined();
+  });
+});
+
+describe.runIf(process.platform === 'linux')('Linux protected-path stand-ins', () => {
+  const absent = (): ShellFilesystem & { root: string } => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'tau-stand-in-')));
+    roots.push(root);
+    const reserved = join(root, '.tau');
+    return {
+      root,
+      readable: [],
+      writable: [root],
+      readOnly: [join(reserved, 'chats')],
+      denied: [join(reserved, 'binding.json'), join(root, '.git')],
+      masked: [reserved],
+    };
+  };
+
+  it('should keep a stand-in shared by overlapping launches until the last of them releases it', () => {
+    const filesystem = absent();
+    const reserved = join(filesystem.root, '.tau');
+    const control = join(filesystem.root, '.git');
+    const releaseFirst = holdProtectedStandIns(filesystem);
+    // The container is an empty directory and the control path an empty file: what the runtime would mount on.
+    expect(lstatSync(reserved).isDirectory()).toBe(true);
+    expect(lstatSync(control).size).toBe(0);
+    // Nothing is made inside a stand-in container: the runtime's mask covers it whole.
+    expect(existsSync(join(reserved, 'binding.json'))).toBe(false);
+    const releaseSecond = holdProtectedStandIns(filesystem);
+    // The first launch ending while the second is still configured or running leaves the stand-ins in place.
+    releaseFirst();
+    releaseFirst();
+    expect(existsSync(reserved)).toBe(true);
+    expect(existsSync(control)).toBe(true);
+    releaseSecond();
+    expect(existsSync(reserved)).toBe(false);
+    expect(existsSync(control)).toBe(false);
+  });
+
+  it('should leave real data written into a stand-in and never create inside an existing container', () => {
+    const filesystem = absent();
+    const reserved = join(filesystem.root, '.tau');
+    const release = holdProtectedStandIns(filesystem);
+    writeFileSync(join(reserved, 'state.json'), 'REAL');
+    release();
+    expect(existsSync(join(reserved, 'state.json'))).toBe(true);
+    // The container now exists, so its protected children are left to the mask.
+    const again = holdProtectedStandIns(filesystem);
+    expect(existsSync(join(reserved, 'binding.json'))).toBe(false);
+    expect(existsSync(join(reserved, 'chats'))).toBe(false);
+    again();
+    expect(existsSync(join(filesystem.root, '.git'))).toBe(false);
+  });
+
+  it('should not make a stand-in outside a writable root or beneath a symbolic link', () => {
+    const filesystem = absent();
+    const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), 'tau-stand-in-elsewhere-')));
+    roots.push(elsewhere);
+    symlinkSync(elsewhere, join(filesystem.root, 'linked'));
+    const release = holdProtectedStandIns({
+      ...filesystem,
+      denied: [join(elsewhere, '.git'), join(filesystem.root, 'linked', 'hidden')],
+      readOnly: [],
+      masked: [],
+    });
+    expect(existsSync(join(elsewhere, '.git'))).toBe(false);
+    expect(existsSync(join(elsewhere, 'hidden'))).toBe(false);
+    release();
   });
 });

@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 
 import { deniedReadRoots, deniedWriteRoots, physicalVariants, sandboxRuntimeReadRoots } from '#native-sandbox.js';
 import { terminateOwnedProcesses, trackDescendants } from '#shell/process-tree.js';
-import { bindMaskedDirectories, maskProblem } from '#shell/shell-project-mask.js';
+import { bindMaskedDirectories, holdProtectedStandIns, maskProblem } from '#shell/shell-project-mask.js';
 import { shellBaselineDenied } from '#shell/shell-baseline.js';
 import { refusedShellEnvironment } from '#shell/shell-environment.js';
 import type {
@@ -781,18 +781,37 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
         return { status: 'sandbox-unavailable', message: 'node-pty has no POSIX binding on this host.' };
       }
     }
-    const runtimeDirectory = createRuntimeDirectory();
-    const supervisor = await startSupervisor(
-      {
-        profile: shellSandboxProfile(launch, options, runtimeDirectory),
-        command: shellSandboxCommand(launch),
-        workingDirectory: launch.workingDirectory,
-        commandId: launch.commandId,
-        guard: launch.network.domains.length > 0,
+    // Absent protected paths get shared stand-ins before the profile observes the filesystem, released only once this
+    // launch's supervisor is gone (see holdProtectedStandIns).
+    const releaseStandIns = holdProtectedStandIns(launch.filesystem);
+    let started: Supervisor;
+    try {
+      const runtimeDirectory = createRuntimeDirectory();
+      started = await startSupervisor(
+        {
+          profile: shellSandboxProfile(launch, options, runtimeDirectory),
+          command: shellSandboxCommand(launch),
+          workingDirectory: launch.workingDirectory,
+          commandId: launch.commandId,
+          guard: launch.network.domains.length > 0,
+        },
+        options,
+        runtimeDirectory,
+      );
+    } catch (error) {
+      releaseStandIns();
+      throw error;
+    }
+    const supervisor: Supervisor = {
+      ...started,
+      close: async () => {
+        try {
+          await started.close();
+        } finally {
+          releaseStandIns();
+        }
       },
-      options,
-      runtimeDirectory,
-    );
+    };
     if (supervisor.reply.status !== 'ready') {
       await supervisor.close();
       return { status: 'sandbox-unavailable', message: supervisor.reply.message };

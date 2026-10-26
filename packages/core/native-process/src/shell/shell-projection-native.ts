@@ -153,6 +153,8 @@ export const openShellProjectionMount = (
   const pending = new Set<Promise<void>>();
   // Per-request cancellation: an interrupted caller gets EINTR at once and its handler's signal aborts.
   const requests = new Map<number, AbortController>();
+  const earlyInterrupts = new Set<number>();
+  let lastRequest = 0;
   const failures: unknown[] = [];
   let disposal: Promise<void> | undefined;
   const close = (reason: Error): void => {
@@ -182,10 +184,21 @@ export const openShellProjectionMount = (
       failures.push(error);
     }
   };
-  // The kernel interrupts only a request libfuse already dispatched on its single loop thread, so the request always
-  // reaches this queue first. Only its handler may answer: replying EINTR here could hide a committed mutation.
+  // Registering libfuse's interrupt callback may synchronously deliver an already queued interrupt before its
+  // request. Native request ids are increasing; notices for settled or rejected older requests can be discarded.
+  // Only the handler may answer: replying EINTR here could hide a committed mutation.
   const interrupt = (id: number): void => {
-    requests.get(id)?.abort(new Error('Projection request interrupted.'));
+    const request = requests.get(id);
+    if (request !== undefined) {
+      request.abort(new Error('Projection request interrupted.'));
+    } else if (id > lastRequest) {
+      // The bridge admits at most 128 requests. Refuse an inconsistent stream instead of growing without bound.
+      if (earlyInterrupts.size >= 128 && !earlyInterrupts.has(id)) {
+        failed();
+        return;
+      }
+      earlyInterrupts.add(id);
+    }
   };
   // Lifetime accounting has no kernel reply: a handler that refuses or fails it leaves the owner's counts unknown.
   const account = async (request: ShellProjectionRequest): Promise<void> => {
@@ -218,6 +231,15 @@ export const openShellProjectionMount = (
     let reply: ShellProjectionReply;
     const local = new AbortController();
     requests.set(request.id, local);
+    lastRequest = request.id;
+    if (earlyInterrupts.has(request.id)) {
+      local.abort(new Error('Projection request interrupted.'));
+    }
+    for (const id of earlyInterrupts) {
+      if (id <= lastRequest) {
+        earlyInterrupts.delete(id);
+      }
+    }
     try {
       reply = await options.handle(request, AbortSignal.any([controller.signal, local.signal]));
     } catch (error) {

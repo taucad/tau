@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- loader environment variables retain their operating-system names. */
 // @vitest-environment node
 import { spawn, execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import {
   copyFile,
@@ -20,11 +21,12 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
+import type * as NodeFileSystem from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 
 import { openShellProjectionMount } from '#shell/shell-projection-native.js';
@@ -40,6 +42,94 @@ const enabled = process.env['TAU_SHELL_PROJECTION_CONFORMANCE'] === '1';
 const binary = fileURLToPath(new URL('../../dist/native/linux-x64/shell-projection.node', import.meta.url));
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+
+describe('projection callback ordering (adapter fault injection, no native mount)', () => {
+  it('should retain an interrupt delivered before its request without cancelling the following request', async () => {
+    // Adapter ordering fault injection only. The G4 test below separately exercises real kernel interruption.
+    const mountpoint = await mkdtemp(join(tmpdir(), 'tau-projection-order-'));
+    const library = join(mountpoint, 'libfuse3.so.4');
+    const fixtureBinary = join(mountpoint, 'shell-projection.node');
+    const fixtureBytes = 'adapter fixture only';
+    const digest = createHash('sha256').update(fixtureBytes).digest('hex');
+    await writeFile(library, fixtureBytes);
+    await writeFile(fixtureBinary, fixtureBytes);
+    await writeFile(
+      join(mountpoint, 'provenance.json'),
+      JSON.stringify({
+        binary: digest,
+        library: digest,
+        libfuse: '3.17.2',
+        abi: 'linux-x64-napi8-fuse35',
+      }),
+    );
+    let deliver: ((request: ShellProjectionRequest | { id: number; operation: 'interrupt' }) => void) | undefined;
+    const replies = new Map<number, ShellProjectionReply>();
+    const finished = Promise.withResolvers<void>();
+    vi.resetModules();
+    vi.stubGlobal('process', { ...process, platform: 'linux', arch: 'x64' });
+    vi.doMock('node:fs', async (importOriginal) => ({
+      ...(await importOriginal<typeof NodeFileSystem>()),
+      readFileSync: (path: string, encoding?: BufferEncoding) =>
+        path === '/proc/self/mountinfo' ? '' : readFileSync(path, encoding),
+    }));
+    vi.doMock('node:module', () => ({
+      createRequire: () => () => ({
+        libraryIdentity: () => ({ path: library, version: '3.17.2' }),
+        mount: (_path: string, callback: typeof deliver) => {
+          deliver = callback;
+          return {};
+        },
+        reply: (_mount: Record<string, unknown>, id: number, reply: ShellProjectionReply) => {
+          replies.set(id, reply);
+          if (replies.size === 2) {
+            finished.resolve();
+          }
+          return true;
+        },
+        close: () => undefined,
+      }),
+    }));
+    let mount: AsyncDisposable | undefined;
+    try {
+      const isolated = await import('#shell/shell-projection-native.js');
+      mount = isolated.openShellProjectionMount({
+        binary: fixtureBinary,
+        mountpoint,
+        handle: async (_request, signal) => {
+          signal.throwIfAborted();
+          return { bytes: encoder.encode('live') };
+        },
+      });
+      const request: ShellProjectionRequest = {
+        id: 1,
+        operation: 'read',
+        inode: 2n,
+        handle: 2n,
+        destinationParent: 0n,
+        lookupCount: 0n,
+        offset: 0,
+        length: 4,
+        flags: 0,
+        mode: 0,
+        attributes: 0,
+      };
+      expect(deliver).toBeTypeOf('function');
+      deliver?.({ id: 1, operation: 'interrupt' });
+      deliver?.(request);
+      deliver?.({ ...request, id: 2 });
+      await finished.promise;
+      expect(replies.get(1)).toEqual({ error: 4 });
+      expect(replies.get(2)).toEqual({ bytes: encoder.encode('live') });
+    } finally {
+      await mount?.[Symbol.asyncDispose]();
+      vi.doUnmock('node:module');
+      vi.doUnmock('node:fs');
+      vi.unstubAllGlobals();
+      vi.resetModules();
+      await rm(mountpoint, { recursive: true, force: true });
+    }
+  });
+});
 
 describe.runIf(enabled)('private projection native transport', () => {
   it('preserves renamed inode handles and rejects writes above a synchronous capacity bound', async () => {

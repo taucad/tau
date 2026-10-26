@@ -498,6 +498,6 @@ const summary = {
   passed: failures.length === 0,
 };
 await writeFile(join(output, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
-// The step summary carries the verdict and the failures without the artifact.
-console.log(JSON.stringify({ passed: summary.passed, expect: expected, catalog: summary.catalog, failures }, null, 2));
+// Log the full public evidence so reviewers can inspect it without downloading the artifact.
+console.log(JSON.stringify(summary, null, 2));
 process.exitCode = failures.length === 0 ? 0 : 1;

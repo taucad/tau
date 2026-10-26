@@ -105,7 +105,13 @@ for (const difference of [
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
   { head_repository: { full_name: 'fork/tau' } },
   { event: 'push' },
+  { event: 'workflow_run' },
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
+  { head_branch: 'claude/vm-acceptance' },
   { status: 'in_progress' },
+  { conclusion: 'failure' },
+  { path: '.github/workflows/qualify-desktop-macos.yml' },
+  { path: '.github/workflows/local-macos.yml' },
 ]) {
   assert.throws(() =>
     verifyDesktopReceiptProvenance({ ...vmRun, ...difference }, macVm, { environment: 'vm', manifest, scope: 'macos' }),
@@ -121,6 +127,12 @@ for (const difference of [
 ]) {
   assert.throws(() =>
     verifyDesktopReceiptProvenance(vmRun, { ...macVm, ...difference }, { environment: 'vm', manifest, scope: 'macos' }),
+  );
+}
+// Partial-architecture and per-row clean-host artifacts are never admitted as the Mac clean-host receipt set.
+for (const name of ['desktop-route-row-macos-dmg-arm64', 'desktop-route-vm-receipts', 'desktop-macos-ci-receipts']) {
+  assert.throws(() =>
+    verifyDesktopReceiptProvenance(vmRun, { ...macVm, name }, { environment: 'vm', manifest, scope: 'macos' }),
   );
 }
 console.log('Trusted workflow and artifact provenance checks passed');

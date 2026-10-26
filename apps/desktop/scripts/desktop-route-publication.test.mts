@@ -67,6 +67,24 @@ const receipt = (environment: 'ci' | 'vm') => ({
   logs: 'artifact://test-evidence',
 });
 const receipts = [receipt('ci'), receipt('vm')];
+/** Observed host facts every Mac clean-host receipt carries. */
+const cleanHost = (nativeArch: 'arm64' | 'x64') => ({
+  platform: 'darwin',
+  runner: 'local-mac-1',
+  productVersion: '26.0.1',
+  nativeArch,
+  translated: false,
+  sip: 'enabled',
+  gatekeeper: 'enabled',
+  quarantine: {
+    downloaded: '0083;6720a1b2;Chromium;4D3F1C2B-0000-4000-8000-000000000001',
+    installed: '0083;6720a1b2;Chromium;4D3F1C2B-0000-4000-8000-000000000001',
+  },
+  assessment: 'Notarized Developer ID',
+  staple: 'validated-offline',
+  installedPath: '/Applications/Tau.app',
+  launch: 'open',
+});
 const trust = { 'windows-nsis': 'CN=Expected publisher' };
 const approval = {
   schemaVersion: 1,
@@ -222,6 +240,9 @@ const productionReceipts = requirements.flatMap((requirement) =>
       arch: requirement.target.endsWith('arm64') ? 'arm64' : 'x64',
       kind: environment,
       sandbox: 'enabled',
+      ...(environment === 'vm' && requirement.target.startsWith('darwin-')
+        ? { host: cleanHost(requirement.target.endsWith('arm64') ? 'arm64' : 'x64') }
+        : {}),
     },
     trust: { kind: 'release', identity: productionTrust[requirement.route as keyof typeof productionTrust] },
   })),
@@ -302,6 +323,12 @@ const macReceipt = (
     arch: target === 'darwin-arm64' ? 'arm64' : 'x64',
     kind: environment,
     sandbox: 'enabled',
+    // A Mac clean-host receipt always carries its observed host facts.
+    ...(environment === 'vm'
+      ? {
+          host: cleanHost(target === 'darwin-arm64' ? 'arm64' : 'x64'),
+        }
+      : {}),
   },
   trust: { kind: 'release', identity: macTrust[route] },
 });

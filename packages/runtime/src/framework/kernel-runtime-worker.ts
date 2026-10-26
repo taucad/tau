@@ -16,6 +16,7 @@
 
 // oxlint-disable-next-line import-x/no-unassigned-import -- side-effect: stubs `document` before any bundler modulepreload code runs
 import '#framework/worker-preload-polyfill.js';
+import type { JSONSchema7 } from '@taucad/json-schema';
 import type {
   CreateGeometryResult,
   ExportGeometryResult,
@@ -520,6 +521,16 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
   protected override kernelHasMeshPhaseForOwner(owner: OperationOwner): boolean {
     return this.getKernelForOwner(owner)?.definition.render !== undefined;
+  }
+
+  protected override getDocumentEvaluateOptionsOffer(owner: OperationOwner): {
+    evaluateOptions?: { schema: JSONSchema7; defaults: Record<string, unknown> };
+  } {
+    const kernel = this.getKernelForOwner(owner);
+    const schema = kernel?.definition.evaluateOptionsSchema;
+    return schema && Object.keys(schema.shape).length > 0
+      ? { evaluateOptions: this.deriveJsonSchema(schema, `evaluate:${kernel.entry.id}`) }
+      : {};
   }
 
   protected override getDocumentViewOffers(owner: OperationOwner, offers?: KernelOffers): readonly ViewOffer[] {

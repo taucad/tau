@@ -200,6 +200,9 @@ for (const width of [320, 600]) {
           expect(right).toBeCloseTo(8, 1);
           expect(bottom).toBeCloseTo(right, 1);
         }
+        const addBounds = screen.getByRole('button', { name: 'Add' }).getBoundingClientRect();
+        const actionBounds = action.getBoundingClientRect();
+        expect((addBounds.top + addBounds.bottom) / 2).toBeCloseTo((actionBounds.top + actionBounds.bottom) / 2);
         expect(container.scrollWidth).toBe(container.clientWidth);
         if (mode === 'main' && ['empty', 'mixed attachments', 'blocked attachment', 'context chip'].includes(name)) {
           await page.screenshot({

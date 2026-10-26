@@ -1,0 +1,77 @@
+name: Staging observability
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [CI, Deploy UI to Netlify]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  deployed:
+    name: Confirm a successful staging deploy
+    runs-on: ubuntu-24.04
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' ||
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.head_branch == 'main' &&
+      (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')
+    outputs:
+      ready: ${{ steps.deploy.outputs.ready }}
+    steps:
+      - name: Check staging deploy job
+        id: deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          else
+            # Reusable deploy names are prefixed by the calling job. A skipped
+            # unaffected UI deploy must not start an observability check.
+            ready=$(gh api --paginate --slurp "repos/$GH_REPO/actions/runs/$RUN_ID/jobs" | jq 'any(.[].jobs[]; (.name | endswith("Deploy UI to staging")) and .conclusion == "success" and any(.steps[]; .name == "Record this staging deploy" and .conclusion == "success"))')
+            if [ "$ready" = true ]; then
+              echo 'ready=true' >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+  harness:
+    name: P1 harness availability (signal acceptance pending)
+    needs: deployed
+    if: needs.deployed.outputs.ready == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: staging
+    steps:
+      - name: Checkout trusted main revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+      - name: Install Chromium and WebKit
+        run: pnpm exec playwright install --with-deps chromium webkit
+      - name: Validate polling helpers
+        run: pnpm nx run ui-e2e:test:observability-helpers
+      - name: Check deployed harness
+        env:
+          # Read-only event token belongs only to this staging environment step.
+          SENTRY_E2E_READ_TOKEN: ${{ secrets.SENTRY_E2E_READ_TOKEN }}
+          # Manual runs inspect the current deployment without assuming main has deployed.
+          TAU_OBSERVABILITY_DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || '' }}
+        run: |
+          if [ -z "$SENTRY_E2E_READ_TOKEN" ]; then
+            echo '::error::Configure SENTRY_E2E_READ_TOKEN in the staging environment.'
+            exit 1
+          fi
+          pnpm nx run ui-e2e:test:e2e:observability-staging

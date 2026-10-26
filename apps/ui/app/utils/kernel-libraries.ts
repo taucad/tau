@@ -13,7 +13,7 @@ export const kernelLibraries: Partial<Record<KernelProvider, Readonly<Record<str
   opencascadejs: { libcascade: '3.1.0' },
   jscad: { '@jscad/modeling': '2.13.0' },
   manifold: { 'manifold-3d': '3.4.1' },
-  picovoxel: { picovoxel: '0.2.0' },
+  picovoxel: { picovoxel: '0.2.1' },
   smlib: { '@classcad/smlibwasm': '0.3.4' },
   tscircuit: {
     // The connectivity-map floating Biome range can select releases before their platform binaries exist.

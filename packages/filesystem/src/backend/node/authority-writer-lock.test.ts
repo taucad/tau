@@ -61,11 +61,9 @@ const nextMessage = async (child: ReturnType<typeof fork>): Promise<unknown> =>
   });
 
 /**
- * Runs the disposable SMB fixture with no stdin, so nothing it starts can wait on a prompt, and keeps its
- * stderr phase lines: on success they are logged as measured setup time, and on a timeout or failure they
- * name the last phase the fixture reached. PowerShell 7 is preferred because a cold Windows PowerShell 5.1
- * launch alone measured 5.5 s of a 14.7 s setup on windows-2025 (and exceeded the 20 s bound on three of
- * four runs), while the SMB share and mapping work itself took about 1.5 s.
+ * Runs the disposable SMB fixture without stdin and retains stderr with elapsed time and exit status.
+ * Prefers PowerShell 7 to reduce cold host startup within the fixture's 20-second bound; falls back to
+ * Windows PowerShell only when PowerShell 7 is unavailable.
  */
 const runNetworkFixture = (fixture: string, action: 'cleanup' | 'setup', environment: NodeJS.ProcessEnv): string => {
   const started = performance.now();

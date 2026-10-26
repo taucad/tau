@@ -417,7 +417,7 @@ describe('T3 — tau open --desktop hands the served folder to Tau Desktop (X54)
       const fragment = new URLSearchParams(link.hash.slice(1));
       const origin = fragment.get('tau-host') ?? '';
       const code = fragment.get('tau-code') ?? '';
-      expect(`${link.origin}${link.pathname}${link.search}`).toBe('https://tau.new/');
+      expect(`${link.origin}${link.pathname}${link.search}`).toBe('https://tau.new/projects');
       expect(origin).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/u);
       const redeem = async (from: string): Promise<Response> =>
         fetch(new URL('/.well-known/tau-host/session', origin), {

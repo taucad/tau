@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useContext, useEffect, useState, useSyncExternalStore } from 'react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ChatInterfaceMobile } from '#routes/w.$workspace.$project/chat-interface-mobile.js';
+import { TerminalCloseContext } from '#components/terminal/terminal-close.js';
 import { mobileDrawerOpenSnapPoint, mobileDrawerPeekSnapPoint } from '#constants/editor.constants.js';
 import type { WorkbenchPanelId } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { mobilePanelByWorkbenchPanel } from '#routes/w.$workspace.$project/project-workspace-context.js';
@@ -108,24 +109,62 @@ vi.mock('#routes/w.$workspace.$project/chat-agents.js', () => ({ AgentsPanelBody
 vi.mock('#routes/w.$workspace.$project/chat-jobs.js', () => ({ JobsPanelBody: () => <p>Job list</p> }));
 vi.mock('#routes/w.$workspace.$project/chat-kernel.js', () => ({ TelemetryPanelContent: () => <p>Kernel spans</p> }));
 vi.mock('#routes/w.$workspace.$project/chat-console.js', () => ({ ChatConsole: () => <p>Console log</p> }));
-const terminal = vi.hoisted(() => ({ mounted: vi.fn(), closed: vi.fn() }));
+const terminal = vi.hoisted(() => ({ mounted: vi.fn(), closed: vi.fn(), running: false }));
+/* Stands in for the pane's side of the close host: a running session holds the close and offers the choices. */
 vi.mock('#components/terminal/terminal-pane.js', () => ({
   ProjectTerminalPane: () => {
     const [input, setInput] = useState('');
+    const [isAsking, setIsAsking] = useState(false);
+    const host = useContext(TerminalCloseContext);
     useEffect(() => {
       terminal.mounted();
       return terminal.closed;
     }, []);
+    useEffect(
+      () =>
+        host?.register(() => {
+          if (!terminal.running) {
+            return false;
+          }
+          setIsAsking(true);
+          return true;
+        }),
+      [host],
+    );
     return (
-      <label>
-        Shell session
-        <input
-          value={input}
-          onChange={(event) => {
-            setInput(event.target.value);
-          }}
-        />
-      </label>
+      <>
+        <label>
+          Shell session
+          <input
+            value={input}
+            onChange={(event) => {
+              setInput(event.target.value);
+            }}
+          />
+        </label>
+        {isAsking ? (
+          <div role='alertdialog' aria-label='Close the Terminal?'>
+            <button
+              type='button'
+              onClick={() => {
+                setIsAsking(false);
+                host?.hide();
+              }}
+            >
+              Hide
+            </button>
+            <button
+              type='button'
+              onClick={() => {
+                setIsAsking(false);
+                host?.close();
+              }}
+            >
+              Close and stop
+            </button>
+          </div>
+        ) : null}
+      </>
     );
   },
 }));
@@ -222,6 +261,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   terminal.mounted.mockClear();
   terminal.closed.mockClear();
+  terminal.running = false;
 });
 
 /* Vaul returns a closed drawer to its first snap point on a 500ms timer that outlives the test that closed it. Let the
@@ -299,6 +339,43 @@ describe('ChatInterfaceMobile', () => {
     });
     unmount();
     expect(terminal.closed).toHaveBeenCalledTimes(2);
+  });
+
+  it('should ask a running Terminal before its named Close removes it, keeping it on Hide (T15)', async () => {
+    renderShell();
+    act(() => {
+      selectSurface('terminal');
+    });
+    const input = await screen.findByRole('textbox', { name: 'Shell session' });
+    fireEvent.change(input, { target: { value: 'running shell state' } });
+    terminal.running = true;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close Terminal' }));
+    expect(terminal.closed).not.toHaveBeenCalled();
+    expect(state.drawerOpen).toBe(true);
+    const decision = screen.getByRole('alertdialog', { name: 'Close the Terminal?' });
+
+    fireEvent.click(within(decision).getByRole('button', { name: 'Hide' }));
+    expect(state.drawerOpen).toBe(false);
+    expect(terminal.closed).not.toHaveBeenCalled();
+    act(() => {
+      selectSurface('terminal');
+    });
+    expect(await screen.findByRole('textbox', { name: 'Shell session' })).toHaveValue('running shell state');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close Terminal' }));
+    fireEvent.click(
+      within(screen.getByRole('alertdialog', { name: 'Close the Terminal?' })).getByRole('button', {
+        name: 'Close and stop',
+      }),
+    );
+    expect(terminal.closed).toHaveBeenCalledOnce();
+    expect(state.drawerOpen).toBe(false);
+    act(() => {
+      selectSurface('terminal');
+    });
+    expect(await screen.findByRole('textbox', { name: 'Shell session' })).toHaveValue('');
+    expect(terminal.mounted).toHaveBeenCalledTimes(2);
   });
 
   it('should name the open surface by its title, with no tab panel left pointing at a missing tab', async () => {

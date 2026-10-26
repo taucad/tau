@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { XIcon } from 'lucide-react';
 import { ChatHistory } from '#routes/w.$workspace.$project/chat-history.js';
@@ -27,6 +27,8 @@ import {
 import { useFeature } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectSidebarRow } from '#hooks/use-sidebar-status.js';
+import { TerminalCloseContext } from '#components/terminal/terminal-close.js';
+import type { TerminalCloseHost } from '#components/terminal/terminal-close.js';
 import { MobileProjectTopBar } from '#routes/w.$workspace.$project/mobile-project-top-bar.js';
 
 /* B-27, D-UI-16: every panel but the chat is its own chunk, loaded when its surface
@@ -509,14 +511,35 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
       terminalHost.remove();
     };
   }, [terminalHost, terminalSlot]);
-  const closeTerminal = useCallback(
-    (open: boolean) => {
-      if (!open) {
+  // The named Close asks a running Terminal first; hiding the sheet keeps the portal, and with it the session.
+  const terminalCloseRequest = useRef<(() => boolean) | undefined>(undefined);
+  const terminalCloseHost = useMemo<TerminalCloseHost>(
+    () => ({
+      close() {
         setTerminalHost(undefined);
         handleDrawerChange(false);
+      },
+      hide() {
+        handleDrawerChange(false);
+      },
+      register(request) {
+        terminalCloseRequest.current = request;
+        return () => {
+          if (terminalCloseRequest.current === request) {
+            terminalCloseRequest.current = undefined;
+          }
+        };
+      },
+    }),
+    [handleDrawerChange],
+  );
+  const closeTerminal = useCallback(
+    (open: boolean) => {
+      if (!open && !terminalCloseRequest.current?.()) {
+        terminalCloseHost.close();
       }
     },
-    [handleDrawerChange],
+    [terminalCloseHost],
   );
 
   // A surface the person chooses takes focus; one restored from storage or opened by the app does not.
@@ -673,7 +696,9 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
         {terminalHost
           ? createPortal(
               <MobilePane id='terminal' onOpenChange={closeTerminal}>
-                <ProjectTerminalPane />
+                <TerminalCloseContext.Provider value={terminalCloseHost}>
+                  <ProjectTerminalPane />
+                </TerminalCloseContext.Provider>
               </MobilePane>,
               terminalHost,
             )

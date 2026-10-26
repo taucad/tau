@@ -6,6 +6,8 @@ on:
       - '.github/workflows/desktop-linux-vm-proof.yml'
       - 'apps/desktop/scripts/hosted-linux-*.sh'
       - 'apps/desktop/scripts/hosted-linux-bwrap-fixture.mts'
+      - 'apps/desktop/scripts/runtime-stage.mts'
+      - 'apps/desktop/scripts/desktop-package.test.mts'
       - 'apps/desktop/scripts/linux-apt-package.mts'
       - 'apps/desktop/src/shared/linux-installation.ts'
       - 'apps/desktop/scripts/qualification-electron-writer.test.mts'

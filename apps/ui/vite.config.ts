@@ -607,9 +607,11 @@ export default defineConfig(({ command, mode }) => {
     },
     build: {
       /*
-       * Source maps: client uses `react-router build --sourcemapClient hidden`
-       * (apps/ui/project.json). Omit server maps by not passing `--sourcemapServer`
-       * so the SSR `sourcemap` option stays unset (Rolldown rejects boolean `false`).
+       * Source maps: `ui:build` passes `--sourcemapClient hidden --sourcemapServer hidden`
+       * (apps/ui/project.json; Rolldown rejects boolean `false` for the SSR `sourcemap`).
+       * Server maps are moved out of `build/server` into `build/server-sourcemaps` and never
+       * ship in the function; `ui:sourcemaps` uploads them to Sentry and deletes them (SSR bundle
+       * policy rule 5).
        */
       /*
        * SVGs are forced out of the base64 inline path so the icon sprite

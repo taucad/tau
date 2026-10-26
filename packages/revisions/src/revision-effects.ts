@@ -3415,6 +3415,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         if (port.removeCheckout === undefined) {
           throw new RevisionPortError('UNSUPPORTED_OPERATION', 'This project has no open files to close.');
         }
+        /* Final effect-level check: a stale registry lease list cannot discard a checkout that holds execution (I7). */
+        const leases = await readLeases();
+        refuseHeldExecutions(leases.find((lease) => lease.checkoutId === input.id && hasExecutions(lease)));
         const place = await placeOf(input.id);
         const headTreeId = await treeIdOf(await headOf(place));
         if (headTreeId !== (await checkoutTreeId(place.id, await captureFresh(place)))) {

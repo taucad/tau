@@ -1,15 +1,14 @@
 /* oxlint-disable new-cap -- three/tsl `Fn`/`If`/`Loop`/`Break` are shader graph factories */
+import { logarithmicGeometryDepth } from '#graphics/three/logarithmic-depth.js';
 import { squarePixelStripCoverage } from '#graphics/three/materials/line-coverage.js';
 import { namedUniformArray } from '#graphics/three/materials/named-uniform-array.js';
 import { triangleWorldDerivatives } from '#graphics/three/materials/triangle-derivatives.node.js';
 import { Color, DoubleSide, REVISION, WebGPUCoordinateSystem } from 'three';
-import type { PerspectiveCamera, Vector4 } from 'three';
+import type { Vector4 } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import type { Node, NodeBuilder } from 'three/webgpu';
 import {
   Break,
-  cameraFar,
-  cameraNear,
   cameraProjectionMatrix,
   cameraViewMatrix,
   expression,
@@ -27,8 +26,6 @@ import {
   uniform,
   vec2,
   vec4,
-  viewZToLogarithmicDepth,
-  viewZToOrthographicDepth,
 } from 'three/tsl';
 import {
   maxSectionCapOutlineFaces,
@@ -90,8 +87,6 @@ const outlineNodes = (faces: SectionCapOutlineFaces): SectionCapOutlineNodes => 
   const coverage = outline.x;
   // The crossing's depth in the renderer's own convention; a fragment with no crossing keeps its own.
   const depth = Fn((builder: NodeBuilder) => {
-    const perspective =
-      (builder as NodeBuilder & { camera?: Partial<PerspectiveCamera> }).camera?.isPerspectiveCamera === true;
     // Reprojecting interpolated world position can round to a different depth
     // than the rasterizer. Preserve geometric depth unless the rim actually
     // moves to a cap-plane crossing; no extra coplanar bias belongs on the line.
@@ -102,20 +97,14 @@ const outlineNodes = (faces: SectionCapOutlineFaces): SectionCapOutlineNodes => 
       throw new Error('Requalify section-outline raster depth for this Three revision');
     }
     const original = builder.renderer.logarithmicDepthBuffer
-      ? perspective
-        ? viewZToLogarithmicDepth(positionView.z, cameraNear, cameraFar)
-        : viewZToOrthographicDepth(positionView.z, cameraNear, cameraFar)
+      ? logarithmicGeometryDepth(positionView.z)
       : (expression(`${fragmentCoordinate.slice(0, -2)}z`, 'float') as unknown as Node<'float'>);
     const result = original.toVar();
     If(outline.y.lessThan(0), () => {
       const ray = select(forward.w.greaterThan(0.5), forward.xyz, positionWorld.sub(eye.xyz));
       const view = cameraViewMatrix.mul(vec4(positionWorld.add(ray.mul(outline.y)), 1)).toVar();
       if (builder.renderer.logarithmicDepthBuffer) {
-        result.assign(
-          perspective
-            ? viewZToLogarithmicDepth(view.z, cameraNear, cameraFar)
-            : viewZToOrthographicDepth(view.z, cameraNear, cameraFar),
-        );
+        result.assign(logarithmicGeometryDepth(view.z));
       } else {
         const clip = cameraProjectionMatrix.mul(view).toVar();
         const ndc = clip.z.div(clip.w);

@@ -3,6 +3,7 @@ import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { Box } from 'lucide-react';
 import { WorkbenchTab } from '@taucad/workbench-panes/components/workbench-tab';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
+import { closePanel, holdsPanelClose } from '#components/terminal/terminal-close.js';
 
 export type DockviewTabProps = IDockviewPanelHeaderProps & {
   /**
@@ -67,6 +68,8 @@ export function DockviewTabIcon({
  * `role="tab"` is a nested interactive, so keyboard and assistive technology
  * close through Dockview's tablist Delete/Backspace handler, which the tab
  * advertises with `aria-keyshortcuts`, and through the tab's context menu.
+ * Every close goes through `closePanel`, so a running Terminal asks before it
+ * is removed.
  */
 export function DockviewTab(properties: DockviewTabProps): React.JSX.Element {
   const { api, icon, leadingIcon = 'extension' } = properties;
@@ -124,7 +127,7 @@ export function DockviewTab(properties: DockviewTabProps): React.JSX.Element {
       }
 
       event.preventDefault();
-      api.close();
+      closePanel(api);
     };
 
     close.addEventListener('pointerdown', handlePointerDown);
@@ -133,6 +136,35 @@ export function DockviewTab(properties: DockviewTabProps): React.JSX.Element {
     return () => {
       close.removeEventListener('pointerdown', handlePointerDown);
       close.removeEventListener('click', handleClick);
+    };
+  }, [api]);
+
+  /*
+   * Dockview's Delete/Backspace handler sits on the tablist and closes without
+   * a cancellable event. A pane that holds the close stops the key at the tab,
+   * before it bubbles there; any other tab keeps Dockview's own close and its
+   * roving focus.
+   */
+  useEffect(() => {
+    const tab = closeRef.current?.closest<HTMLElement>('.dv-tab');
+    if (!tab) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.target !== tab || (event.key !== 'Delete' && event.key !== 'Backspace')) {
+        return;
+      }
+      if (holdsPanelClose(api)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+
+    tab.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      tab.removeEventListener('keydown', handleKeyDown);
     };
   }, [api]);
 

@@ -7,10 +7,11 @@
  * - Extra access is approved here, in pane chrome Tau draws, against the request id the host minted. Output is
  *   terminal data on a canvas; it can describe a decision but never make one (I9).
  * - The session lives while the pane is mounted, hidden or not, and ends when the pane closes, the project changes
- *   or the Terminal stops being available.
+ *   or the Terminal stops being available. Closing a pane whose session runs asks first: Keep open, Hide or Close
+ *   and stop (T15). A project change ends it unconditionally, and a new project's Terminal starts only on a press.
  */
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { SquareTerminal } from 'lucide-react';
 import { terminalAccessSchema, terminalLimits } from '@taucad/types/desktop-terminal';
 import type {
@@ -31,6 +32,8 @@ import { useTerminalAvailability } from '#components/terminal/terminal-availabil
 import type { TerminalAvailability } from '#components/terminal/terminal-availability.js';
 import type { TerminalRendererOptions, TerminalRendererView } from '#components/terminal/terminal-renderer.js';
 import { outputSlices } from '#components/terminal/terminal-output-text.js';
+import { TerminalCloseContext, TerminalCloseDecision } from '#components/terminal/terminal-close.js';
+import type { TerminalCloseChoice } from '#components/terminal/terminal-close.js';
 import { highContrastQuery, highContrastRatio, readTerminalTheme } from '#components/terminal/terminal-theme.js';
 
 /** Loads the renderer; the default imports it lazily so no other surface pays for it. @public */
@@ -241,6 +244,8 @@ export function TerminalPane({
   const [isRequestingAccess, setIsRequestingAccess] = useState(false);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const [findTerm, setFindTerm] = useState<string | undefined>(undefined);
+  const [isConfirmingClose, setIsConfirmingClose] = useState(false);
+  const closeHost = useContext(TerminalCloseContext);
   const [screenReaderMode, setScreenReaderMode] = useCookie(cookieName.terminalScreenReader, true);
   const hostRef = useRef<HTMLDivElement>(null);
   const chromeRef = useRef<HTMLDivElement>(null);
@@ -254,6 +259,12 @@ export function TerminalPane({
   const screenReaderModeRef = useRef(screenReaderMode);
   /* The project root and bridge the current or last session was started against. */
   const targetRef = useRef<{ projectRoot: string; bridge: DesktopTerminalBridge } | undefined>(undefined);
+
+  /* The phase a close request reads; a request arrives from outside React, after the render it acts on. */
+  const phaseRef = useRef<PaneState['phase']>(state.phase);
+  useLayoutEffect(() => {
+    phaseRef.current = state.phase;
+  }, [state.phase]);
 
   const projectRoot = availability.status === 'available' ? availability.projectRoot : undefined;
   const bridge = availability.status === 'available' ? availability.bridge : undefined;
@@ -278,8 +289,46 @@ export function TerminalPane({
       setState({ phase: 'idle' });
       setAccessRequest(undefined);
       setIsRequestingAccess(false);
+      setIsConfirmingClose(false);
     },
     [projectRoot, bridge, teardown],
+  );
+
+  /* A running session holds the host's close for the person's choice; any other phase closes at once. */
+  useEffect(
+    () =>
+      closeHost?.register(() => {
+        if (phaseRef.current !== 'running') {
+          return false;
+        }
+        setIsConfirmingClose(true);
+        return true;
+      }),
+    [closeHost],
+  );
+
+  const chooseClose = useCallback(
+    (choice: TerminalCloseChoice) => {
+      setIsConfirmingClose(false);
+      switch (choice) {
+        case 'keep': {
+          viewRef.current?.focus();
+          break;
+        }
+        case 'hide': {
+          closeHost?.hide();
+          break;
+        }
+        case 'stop': {
+          targetRef.current = undefined;
+          teardown();
+          setState({ phase: 'idle' });
+          closeHost?.close();
+          break;
+        }
+      }
+    },
+    [closeHost, teardown],
   );
 
   useEffect(() => {
@@ -325,6 +374,7 @@ export function TerminalPane({
     targetRef.current = { projectRoot, bridge };
     const generation = generationRef.current;
     setState({ phase: 'starting' });
+    setIsConfirmingClose(false);
     setAccessRequest(undefined);
     setNotice(undefined);
     let view: TerminalRendererView;
@@ -389,6 +439,8 @@ export function TerminalPane({
           break;
         }
         case 'exited': {
+          /* The close question is about a running session; once it ends, closing needs no answer. */
+          setIsConfirmingClose(false);
           setAccessRequest(undefined);
           if (frame.reason === 'replaced') {
             /* The fresh session's `opened` follows; clear the old screen so its output is not mistaken for the new
@@ -414,6 +466,7 @@ export function TerminalPane({
             break;
           }
           sessionRef.current = undefined;
+          setIsConfirmingClose(false);
           /* A refusal ends a pending restart too, so a later exit never starts a session on its own (D21). */
           restartRef.current = false;
           setAccessRequest(undefined);
@@ -542,6 +595,9 @@ export function TerminalPane({
         </Button>
         {isLive ? <span className='sr-only'>Press Shift+Escape in the terminal to come back here.</span> : null}
       </div>
+      {isConfirmingClose && state.phase === 'running' ? (
+        <TerminalCloseDecision projectLabel={state.projectLabel} onChoose={chooseClose} />
+      ) : null}
       {notice ? (
         <p role='status' className='border-b px-3 py-2 text-xs text-muted-foreground'>
           {notice}

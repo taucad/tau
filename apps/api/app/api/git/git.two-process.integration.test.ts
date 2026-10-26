@@ -311,13 +311,13 @@ describe('two API processes and two storage workers over one object store (S2, D
       first.app.get(ObjectStorageService).bucketFor('private'),
       'the two-worker git suite',
     );
-    cleanup.push(async () =>
-      first.app.get(ObjectStorageService).deleteEntirePrefixForPurgeJob({
+    cleanup.push(async () => {
+      await first.app.get(ObjectStorageService).deleteEntirePrefixForPurgeJob({
         namespace: 'tenants',
         keyPrefix: `${ownerId}/`,
         tier: 'private',
-      }),
-    );
+      });
+    });
   }, 120_000);
 
   afterAll(async () => {

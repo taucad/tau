@@ -395,13 +395,13 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
 
     storage = app.get(ObjectStorageService);
     assertDestructiveTestBucketAllowed(storage.bucketFor('private'), 'the Tau Hosted Remote HTTP suite');
-    cleanup.push(async () =>
-      storage.deleteEntirePrefixForPurgeJob({
+    cleanup.push(async () => {
+      await storage.deleteEntirePrefixForPurgeJob({
         namespace: 'tenants',
         keyPrefix: `${ownerId}/`,
         tier: 'private',
-      }),
-    );
+      });
+    });
 
     repositories = app.get(GitRepositoryService);
     vi.spyOn(repositories, 'readOwnerUsage').mockImplementation(async () => {

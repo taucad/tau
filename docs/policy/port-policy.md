@@ -211,7 +211,7 @@ ports:
 
 Processes inside a container keep listening on the container interfaces. Binding the process to the container's `127.0.0.1` drops the published port and other containers. Sibling containers use the Compose DNS name (`postgres`, `redis`, `minio`), not `host.docker.internal`, because a loopback host port is not reachable through the host gateway.
 
-`infra/docker-compose.test.sh` rejects a bare mapping in the two local Compose files. GitHub Actions `services.ports` entries stay `host:container` on the ephemeral runner. Production listeners, including the API's `0.0.0.0` bind inside Fly, are outside this rule. The UI's explicit `--host` LAN mode stays available for device testing.
+`infra/docker-compose.test.sh` rejects a published port in the two local Compose files whose host address is not `127.0.0.1`, including a bare mapping, a double-quoted mapping, and an explicit `0.0.0.0`. GitHub Actions `services.ports` entries stay `host:container` on the ephemeral runner. Production listeners, including the API's `0.0.0.0` bind inside Fly, are outside this rule. The UI's explicit `--host` LAN mode stays available for device testing.
 
 ## Anti-Patterns
 

@@ -8,6 +8,7 @@
 #include <fuse_lowlevel.h>
 #include <errno.h>
 #include <dlfcn.h>
+#include <linux/fs.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -21,9 +22,9 @@
 #define MAX_SAFE 9007199254740991ULL
 
 enum operation { LOOKUP, GETATTR, OPEN, READ, WRITE, CREATE, MKDIR, SETATTR,
-  RENAME, UNLINK, RMDIR, READDIR, RELEASE, FLUSH, FSYNC, FORGET };
+  RENAME, UNLINK, RMDIR, READDIR, RELEASE, FLUSH, FSYNC, FORGET, READLINK, INTERRUPT };
 static const char *names[] = {"lookup","getattr","open","read","write","create","mkdir","setattr",
-  "rename","unlink","rmdir","readdir","release","flush","fsync","forget"};
+  "rename","unlink","rmdir","readdir","release","flush","fsync","forget","readlink","interrupt"};
 struct pending { fuse_req_t request; uint64_t id; enum operation operation; size_t size; off_t offset; struct pending *next; };
 struct mount_state {
   struct fuse_session *session;
@@ -48,6 +49,7 @@ struct message {
   off_t offset;
   size_t size;
   unsigned flags, mode, attributes;
+  double modified;
   char *name, *other;
   unsigned char *data;
 };
@@ -84,6 +86,12 @@ static void call_javascript(napi_env env,napi_value callback,void *context,void 
   napi_value input,global,result;
   napi_create_object(env,&input);
   property(env,input,"id",number(env,(double)message->id));
+  if (message->operation==INTERRUPT) {
+    text_property(env,input,"operation",names[INTERRUPT]);
+    napi_value global,result;napi_get_global(env,&global);
+    if (napi_call_function(env,global,callback,1,&input,&result)!=napi_ok) {napi_value exception;napi_get_and_clear_last_exception(env,&exception);}
+    free_message(message);return;
+  }
   text_property(env,input,"operation",names[message->operation]);
   property(env,input,"inode",integer(env,message->inode));
   property(env,input,"handle",integer(env,message->handle));
@@ -94,6 +102,7 @@ static void call_javascript(napi_env env,napi_value callback,void *context,void 
   property(env,input,"flags",number(env,message->flags));
   property(env,input,"mode",number(env,message->mode));
   property(env,input,"attributes",number(env,message->attributes));
+  if (message->operation==SETATTR) property(env,input,"modified",number(env,message->modified));
   text_property(env,input,"name",message->name);
   text_property(env,input,"destinationName",message->other);
   if (message->data) {
@@ -132,6 +141,16 @@ static void report_failure(napi_env env,napi_value callback,void *context,void *
   if(napi_call_function(env,global,callback,0,NULL,&result)!=napi_ok)
     napi_fatal_error("shell-projection",NAPI_AUTO_LENGTH,"Projection failure callback failed",NAPI_AUTO_LENGTH);
 }
+/* Called with libfuse's request lock held: never reply here. The wrapper aborts that request's signal and its
+ * handler answers, with EINTR when it committed nothing. */
+static void interrupted(fuse_req_t request,void *data) {
+  struct mount_state *mount=fuse_req_userdata(request);
+  struct message *message=calloc(1,sizeof(*message));
+  if (!message) return;
+  *message=(struct message){.mount=mount,.operation=INTERRUPT,.id=(uint64_t)(uintptr_t)data};
+  if (napi_call_threadsafe_function(mount->callback,message,napi_tsfn_nonblocking)!=napi_ok) free_message(message);
+}
+static double modified_at=0;
 static void dispatch(fuse_req_t request,enum operation operation,fuse_ino_t inode,
   struct fuse_file_info *info,const char *name,const char *other,fuse_ino_t destination,
   off_t offset,size_t size,const char *data,unsigned mode,unsigned flags,unsigned attributes,uint64_t lookups) {
@@ -144,7 +163,8 @@ static void dispatch(fuse_req_t request,enum operation operation,fuse_ino_t inod
   struct message *message=calloc(1,sizeof(*message));
   if (!pending || !message) { free(pending); free(message); rejected(request,operation,ENOMEM,mount); return; }
   *message=(struct message){.mount=mount,.operation=operation,.inode=inode,.handle=info?info->fh:0,
-    .destination=destination,.offset=offset,.size=size,.mode=mode,.flags=flags,.attributes=attributes,.lookups=lookups};
+    .destination=destination,.offset=offset,.size=size,.mode=mode,.flags=flags,.attributes=attributes,.lookups=lookups,
+    .modified=operation==SETATTR?modified_at:0};
   if (name) message->name=strdup(name);
   if (other) message->other=strdup(other);
   if (data && size) { message->data=malloc(size); if (message->data) memcpy(message->data,data,size); }
@@ -159,8 +179,12 @@ static void dispatch(fuse_req_t request,enum operation operation,fuse_ino_t inod
   *pending=(struct pending){.request=request,.id=message->id,.operation=operation,.size=size,.offset=offset,.next=mount->pending};
   mount->pending=pending; mount->count++;
   pthread_mutex_unlock(&mount->mutex);
+  uint64_t id=message->id;
+  /* Register before delivery: once posted, the owner's reply may free the request. An interrupt that wins this race
+   * reaches the wrapper before its request and is answered from the still-pending entry. */
+  if (operation!=FORGET && operation!=RELEASE) fuse_req_interrupt_func(request,interrupted,(void *)(uintptr_t)id);
   if (napi_call_threadsafe_function(mount->callback,message,napi_tsfn_nonblocking)!=napi_ok) {
-    pending=take_pending(mount,message->id);
+    pending=take_pending(mount,id);
     if (pending) { rejected(request,operation,EBUSY,mount); free(pending); }
     free_message(message);
   }
@@ -172,13 +196,28 @@ static void read_bytes(fuse_req_t r,fuse_ino_t i,size_t n,off_t o,struct fuse_fi
 static void write_bytes(fuse_req_t r,fuse_ino_t i,const char *b,size_t n,off_t o,struct fuse_file_info *f) { dispatch(r,WRITE,i,f,NULL,NULL,0,o,n,b,0,(unsigned)f->flags,0,0); }
 static void created(fuse_req_t r,fuse_ino_t p,const char *n,mode_t m,struct fuse_file_info *f) { dispatch(r,CREATE,p,f,n,NULL,0,0,0,NULL,m,(unsigned)f->flags,0,0); }
 static void directory(fuse_req_t r,fuse_ino_t p,const char *n,mode_t m) { dispatch(r,MKDIR,p,NULL,n,NULL,0,0,0,NULL,m,0,0,0); }
-static void setattr(fuse_req_t r,fuse_ino_t i,struct stat *a,int mask,struct fuse_file_info *f) { dispatch(r,SETATTR,i,f,NULL,NULL,0,(mask&FUSE_SET_ATTR_SIZE)?a->st_size:0,0,NULL,(mask&FUSE_SET_ATTR_MODE)?a->st_mode:0,0,(unsigned)mask,0); }
-static void renamed(fuse_req_t r,fuse_ino_t p,const char *n,fuse_ino_t q,const char *m,unsigned flags) { dispatch(r,RENAME,p,NULL,n,m,q,0,0,NULL,0,flags,0,0); }
+static void setattr(fuse_req_t r,fuse_ino_t i,struct stat *a,int mask,struct fuse_file_info *f) {
+  /* The session loop is single-threaded, so this handoff into the copied message cannot race. */
+  modified_at=(mask&FUSE_SET_ATTR_MTIME_NOW)?-1:(mask&FUSE_SET_ATTR_MTIME)?(double)a->st_mtim.tv_sec*1000+(double)a->st_mtim.tv_nsec/1e6:0;
+  dispatch(r,SETATTR,i,f,NULL,NULL,0,(mask&FUSE_SET_ATTR_SIZE)?a->st_size:0,0,NULL,(mask&FUSE_SET_ATTR_MODE)?a->st_mode:0,0,(unsigned)mask,0); }
+/* Only RENAME_NOREPLACE and RENAME_EXCHANGE reach the owner; whiteouts and unknown flags never do. */
+static void renamed(fuse_req_t r,fuse_ino_t p,const char *n,fuse_ino_t q,const char *m,unsigned flags) {
+  if ((flags&~(unsigned)(RENAME_NOREPLACE|RENAME_EXCHANGE)) || flags==(unsigned)(RENAME_NOREPLACE|RENAME_EXCHANGE)) {
+    fuse_reply_err(r,EINVAL); return;
+  }
+  dispatch(r,RENAME,p,NULL,n,m,q,0,0,NULL,0,flags,0,0);
+}
 static void removed(fuse_req_t r,fuse_ino_t p,const char *n) { dispatch(r,UNLINK,p,NULL,n,NULL,0,0,0,NULL,0,0,0,0); }
 static void removed_directory(fuse_req_t r,fuse_ino_t p,const char *n) { dispatch(r,RMDIR,p,NULL,n,NULL,0,0,0,NULL,0,0,0,0); }
 static void listing(fuse_req_t r,fuse_ino_t i,size_t n,off_t o,struct fuse_file_info *f) { dispatch(r,READDIR,i,f,NULL,NULL,0,o,n,NULL,0,0,0,0); }
 static void released(fuse_req_t r,fuse_ino_t i,struct fuse_file_info *f) { dispatch(r,RELEASE,i,f,NULL,NULL,0,0,0,NULL,0,0,0,0); }
-static void flushed(fuse_req_t r,fuse_ino_t i,struct fuse_file_info *f) { dispatch(r,FLUSH,i,f,NULL,NULL,0,0,0,NULL,0,0,0,0); }
+/* Writes are write-through and acknowledged synchronously, so close() has nothing to flush. Answering here keeps
+ * a close-on-exec descriptor from blocking a child's exec on the owner's thread (the exec FLUSH deadlock). */
+static void flushed(fuse_req_t r,fuse_ino_t i,struct fuse_file_info *f) { (void)i;(void)f;fuse_reply_err(r,0); }
+static void read_link(fuse_req_t r,fuse_ino_t i) { dispatch(r,READLINK,i,NULL,NULL,NULL,0,0,0,NULL,0,0,0,0); }
+/* No hard link or new symlink is ever created through the projection; the rooted authority has no such operation. */
+static void linked(fuse_req_t r,fuse_ino_t i,fuse_ino_t p,const char *n) { (void)i;(void)p;(void)n;fuse_reply_err(r,EPERM); }
+static void symlinked(fuse_req_t r,const char *t,fuse_ino_t p,const char *n) { (void)t;(void)p;(void)n;fuse_reply_err(r,EPERM); }
 static void synced(fuse_req_t r,fuse_ino_t i,int data,struct fuse_file_info *f) { dispatch(r,FSYNC,i,f,NULL,NULL,0,0,0,NULL,0,(unsigned)data,0,0); }
 static void forgotten(fuse_req_t r,fuse_ino_t i,uint64_t count) { dispatch(r,FORGET,i,NULL,NULL,NULL,0,0,0,NULL,0,0,0,count); }
 static void initialized(void *data,struct fuse_conn_info *connection) {
@@ -188,7 +227,8 @@ static void initialized(void *data,struct fuse_conn_info *connection) {
 }
 static const struct fuse_lowlevel_ops operations={.init=initialized,.lookup=lookup,.getattr=getattr,.open=opened,
   .read=read_bytes,.write=write_bytes,.create=created,.mkdir=directory,.setattr=setattr,.rename=renamed,
-  .unlink=removed,.rmdir=removed_directory,.readdir=listing,.release=released,.flush=flushed,.fsync=synced,.forget=forgotten};
+  .unlink=removed,.rmdir=removed_directory,.readdir=listing,.release=released,.flush=flushed,.fsync=synced,.forget=forgotten,
+  .readlink=read_link,.link=linked,.symlink=symlinked};
 
 static bool get_number(napi_env e,napi_value o,const char *key,uint64_t *out) {
   napi_value v; double value;
@@ -204,10 +244,19 @@ static bool stat_reply(napi_env e,napi_value o,struct fuse_entry_param *entry) {
   napi_value value; uint64_t mode,size,links,ino;
   if (napi_get_named_property(e,o,"entry",&value)!=napi_ok || !get_integer(e,value,"inode",&ino) || !ino ||
       !get_number(e,value,"mode",&mode) || !get_number(e,value,"size",&size) || !get_number(e,value,"links",&links) ||
-      links>UINT32_MAX || ((mode&S_IFMT)!=S_IFREG && (mode&S_IFMT)!=S_IFDIR)) return false;
+      links>UINT32_MAX || ((mode&S_IFMT)!=S_IFREG && (mode&S_IFMT)!=S_IFDIR && (mode&S_IFMT)!=S_IFLNK)) return false;
   memset(entry,0,sizeof(*entry)); entry->ino=ino;entry->generation=1;
   entry->attr.st_ino=ino;entry->attr.st_mode=(mode&S_IFMT)|(mode&0777);entry->attr.st_size=(off_t)size;
   entry->attr.st_nlink=links;entry->attr.st_uid=getuid();entry->attr.st_gid=getgid();
+  entry->attr.st_blksize=4096;entry->attr.st_blocks=(blkcnt_t)((size+511)/512);
+  napi_value time;double milliseconds;bool has_time=false;
+  napi_has_named_property(e,value,"modified",&has_time);
+  if (has_time) {
+    if (napi_get_named_property(e,value,"modified",&time)!=napi_ok || napi_get_value_double(e,time,&milliseconds)!=napi_ok ||
+        !(milliseconds>=0 && milliseconds<=8.64e15)) return false;
+    struct timespec stamp={.tv_sec=(time_t)(milliseconds/1000),.tv_nsec=(long)((milliseconds-(double)(time_t)(milliseconds/1000)*1000)*1e6)};
+    entry->attr.st_mtim=stamp;entry->attr.st_ctim=stamp;entry->attr.st_atim=stamp;
+  }
   /* Zero entry/attribute timeouts force a fresh lookup of incoming generations. */
   return true;
 }
@@ -267,12 +316,23 @@ static napi_value reply(napi_env env,napi_callback_info info) {
           if(napi_get_element(env,rows,i,&row)!=napi_ok || !get_integer(env,row,"inode",&ino) || !get_number(env,row,"mode",&mode) ||
              napi_get_named_property(env,row,"name",&name)!=napi_ok || napi_get_value_string_utf8(env,name,NULL,0,&size)!=napi_ok || size>MAX_NAME ||
              napi_get_value_string_utf8(env,name,text,sizeof(text),&size)!=napi_ok || strchr(text,'/')) {valid=false;break;}
+          /* A row's cookie is the offset the next readdir resumes from; it defaults to the row's position. */
+          uint64_t cookie=(uint64_t)pending->offset+i+1;bool has_cookie=false;
+          napi_has_named_property(env,row,"cookie",&has_cookie);
+          if(has_cookie && (!get_number(env,row,"cookie",&cookie) || cookie==0 || cookie>INT64_MAX)) {valid=false;break;}
           struct stat stat={.st_ino=ino,.st_mode=(mode_t)mode};
-          size_t needed=fuse_add_direntry(pending->request,buffer+used,pending->size-used,text,&stat,pending->offset+i+1);
+          size_t needed=fuse_add_direntry(pending->request,buffer+used,pending->size-used,text,&stat,(off_t)cookie);
           if(needed>pending->size-used)break;used+=needed;
         }
         if(valid)fuse_reply_buf(pending->request,buffer,used);else fuse_reply_err(pending->request,EIO);
         free(buffer);break;
+      }
+      case READLINK: {
+        napi_value target;size_t size;char text[4096];
+        if(napi_get_named_property(env,args[2],"target",&target)!=napi_ok || napi_get_value_string_utf8(env,target,NULL,0,&size)!=napi_ok ||
+           size==0 || size>=sizeof(text) || napi_get_value_string_utf8(env,target,text,sizeof(text),&size)!=napi_ok)fuse_reply_err(pending->request,EIO);
+        else fuse_reply_readlink(pending->request,text);
+        break;
       }
       default:fuse_reply_err(pending->request,0);break;
     }
@@ -327,7 +387,8 @@ static napi_value mount_projection(napi_env env,napi_callback_info info) {
     stop(mount);napi_throw_error(env,NULL,"Projection failure channel setup failed.");return NULL;
   }
   mount->callbacks++;
-  char *arguments[]={"tau-shell-projection","-o","default_permissions,nosuid,nodev"};
+  /* auto_unmount: fusermount3 removes the mount when this process dies, so a dead owner never leaves a stale mount. */
+  char *arguments[]={"tau-shell-projection","-o","default_permissions,nosuid,nodev,auto_unmount"};
   struct fuse_args args=FUSE_ARGS_INIT(3,arguments);
   mount->session=fuse_session_new(&args,&operations,sizeof(operations),mount);fuse_opt_free_args(&args);
   if(!mount->session || fuse_session_mount(mount->session,path)!=0) {
@@ -342,7 +403,7 @@ static napi_value library_identity(napi_env env,napi_callback_info info) {
   if(!dladdr((void *)fuse_session_new_versioned,&expected)) {
     napi_throw_error(env,NULL,"Cannot resolve projection library.");return NULL;
   }
-  const void *symbols[]={(void *)fuse_add_direntry,(void *)fuse_opt_free_args,(void *)fuse_reply_attr,(void *)fuse_reply_buf,(void *)fuse_reply_create,(void *)fuse_reply_entry,(void *)fuse_reply_err,(void *)fuse_reply_none,(void *)fuse_reply_open,(void *)fuse_reply_write,(void *)fuse_req_userdata,(void *)fuse_session_destroy,(void *)fuse_session_exit,(void *)fuse_session_loop,(void *)fuse_session_mount,(void *)fuse_session_new_versioned,(void *)fuse_session_unmount,(void *)fuse_pkgversion};
+  const void *symbols[]={(void *)fuse_add_direntry,(void *)fuse_opt_free_args,(void *)fuse_reply_attr,(void *)fuse_reply_buf,(void *)fuse_reply_create,(void *)fuse_reply_entry,(void *)fuse_reply_err,(void *)fuse_reply_none,(void *)fuse_reply_open,(void *)fuse_reply_readlink,(void *)fuse_reply_write,(void *)fuse_req_interrupt_func,(void *)fuse_req_userdata,(void *)fuse_session_destroy,(void *)fuse_session_exit,(void *)fuse_session_loop,(void *)fuse_session_mount,(void *)fuse_session_new_versioned,(void *)fuse_session_unmount,(void *)fuse_pkgversion};
   for(size_t i=0;i<sizeof(symbols)/sizeof(symbols[0]);i++) {
     if(!dladdr(symbols[i],&actual) || actual.dli_fbase!=expected.dli_fbase) {
       napi_throw_error(env,NULL,"Projection library symbols resolve to different modules.");return NULL;

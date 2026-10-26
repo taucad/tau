@@ -20,9 +20,9 @@ export type ShellProjectionRequest = Readonly<{
     | 'rmdir'
     | 'readdir'
     | 'release'
-    | 'flush'
     | 'fsync'
-    | 'forget';
+    | 'forget'
+    | 'readlink';
   inode: bigint;
   handle: bigint;
   destinationParent: bigint;
@@ -32,13 +32,23 @@ export type ShellProjectionRequest = Readonly<{
   flags: number;
   mode: number;
   attributes: number;
+  /** Requested modification time for `setattr`: epoch milliseconds, -1 for now, 0 when unchanged. */
+  modified?: number;
   name?: string;
   destinationName?: string;
   data?: Uint8Array<ArrayBuffer>;
 }>;
 
 /** The host's classified inode description. No native backing paths cross this seam. @internal */
-export type ShellProjectionEntry = Readonly<{ inode: bigint; mode: number; size: number; links: number }>;
+export type ShellProjectionEntry = Readonly<{
+  inode: bigint;
+  /** Regular file, directory or symbolic link; every other kind is refused natively. */
+  mode: number;
+  size: number;
+  links: number;
+  /** Epoch milliseconds reported as modification, change and access time. */
+  modified?: number;
+}>;
 
 /** Replies are validated by the native bridge before they reach the kernel. @internal */
 export type ShellProjectionReply = Readonly<{
@@ -47,15 +57,25 @@ export type ShellProjectionReply = Readonly<{
   handle?: bigint;
   bytes?: Uint8Array<ArrayBuffer>;
   written?: number;
-  entries?: ReadonlyArray<Readonly<{ name: string; inode: bigint; mode: number }>>;
+  /** A directory page. Each row's cookie is the offset the next page resumes from; it defaults to its position. */
+  entries?: ReadonlyArray<Readonly<{ name: string; inode: bigint; mode: number; cookie?: number }>>;
+  /** A symbolic link's stored target, returned verbatim and never resolved by the bridge. */
+  target?: string;
 }>;
+
+/** Native-only notice that the kernel interrupted a pending request. */
+type ShellProjectionInterrupt = Readonly<{ id: number; operation: 'interrupt' }>;
 
 declare const nativeMountBrand: unique symbol;
 /** Opaque native mount handle; only the binding that returned it can read it. */
 type NativeMount = Readonly<{ [nativeMountBrand]: true }>;
 
 type NativeBinding = Readonly<{
-  mount: (path: string, callback: (request: ShellProjectionRequest) => void, failure: () => void) => NativeMount;
+  mount: (
+    path: string,
+    callback: (request: ShellProjectionInterrupt | ShellProjectionRequest) => void,
+    failure: () => void,
+  ) => NativeMount;
   libraryIdentity: () => Readonly<{ path: string; version: string }>;
   reply: (mount: NativeMount, id: number, result: ShellProjectionReply) => boolean;
   close: (mount: NativeMount) => void;
@@ -69,7 +89,9 @@ export type ShellProjectionMount = AsyncDisposable;
  *
  * This bridge supplies no inode store, classifier, mutation authority or durable custody. Its host must retain
  * those resources until disposal settles. Native writeback caching is disabled; requests and copied byte buffers
- * are bounded. Incoming versions require new inode identities, not overwriting an existing mapped inode.
+ * are bounded. Incoming versions require new inode identities, not overwriting an existing mapped inode. A kernel
+ * interrupt aborts only that request's handler signal. FLUSH is answered natively, hard links and new symbolic links
+ * are refused natively, and only the NOREPLACE and EXCHANGE rename flags reach the handler.
  *
  * @internal
  * @param options - Exact reviewed binary, private mountpoint and authority-owned request handler.
@@ -112,6 +134,8 @@ export const openShellProjectionMount = (
   const mountpoint = realpathSync(options.mountpoint);
   const controller = new AbortController();
   const pending = new Set<Promise<void>>();
+  // Per-request cancellation: an interrupted caller gets EINTR at once and its handler's signal aborts.
+  const requests = new Map<number, AbortController>();
   const failures: unknown[] = [];
   let disposal: Promise<void> | undefined;
   const close = (reason: Error): void => {
@@ -141,15 +165,26 @@ export const openShellProjectionMount = (
       failures.push(error);
     }
   };
+  // The kernel interrupts only a request libfuse already dispatched on its single loop thread, so the request always
+  // reaches this queue first. Only its handler may answer: replying EINTR here could hide a committed mutation.
+  const interrupt = (id: number): void => {
+    requests.get(id)?.abort(new Error('Projection request interrupted.'));
+  };
   const settle = async (request: ShellProjectionRequest): Promise<void> => {
     let reply: ShellProjectionReply;
+    const local = new AbortController();
+    requests.set(request.id, local);
     try {
-      reply = await options.handle(request, controller.signal);
+      reply = await options.handle(request, AbortSignal.any([controller.signal, local.signal]));
     } catch (error) {
-      if (!controller.signal.aborted) {
+      // Owner contract: a handler rejects after its interrupt only when it committed nothing, so the caller sees EINTR.
+      const cancelled = local.signal.aborted && !controller.signal.aborted;
+      if (!controller.signal.aborted && !cancelled) {
         failures.push(error);
       }
-      reply = { error: 5 }; // EIO: callback failure never becomes successful native I/O.
+      reply = { error: cancelled ? 4 : 5 }; // EIO: callback failure never becomes successful native I/O.
+    } finally {
+      requests.delete(request.id);
     }
     if (
       (request.operation === 'forget' || request.operation === 'release') &&
@@ -166,6 +201,10 @@ export const openShellProjectionMount = (
   const mount = binding.mount(
     mountpoint,
     (request) => {
+      if (request.operation === 'interrupt') {
+        interrupt(request.id);
+        return;
+      }
       const operation = settle(request);
       pending.add(operation);
       const remove = async (): Promise<void> => {

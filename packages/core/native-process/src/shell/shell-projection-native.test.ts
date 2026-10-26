@@ -2,12 +2,30 @@
 // @vitest-environment node
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { copyFile, mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import {
+  copyFile,
+  link,
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  readdir,
+  readlink,
+  rename,
+  rm,
+  stat,
+  symlink,
+  utimes,
+  writeFile,
+} from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 
 import { openShellProjectionMount } from '#shell/shell-projection-native.js';
 import type {
@@ -97,7 +115,6 @@ describe.runIf(enabled)('private projection native transport', () => {
           return { error: 95 };
         }
         case 'forget':
-        case 'flush':
         case 'release':
         case 'fsync': {
           return {};
@@ -294,6 +311,516 @@ catch(error) { process.stdout.write(error.message); }`;
       );
     } finally {
       await rm(directory, { recursive: true });
+    }
+  }, 15_000);
+});
+
+/** A minimal owner over never-reused inode identities. It is a transport fixture, not the rooted authority. */
+const createOwner = (): Readonly<{
+  names: Map<string, bigint>;
+  contents: Map<bigint, Uint8Array<ArrayBuffer>>;
+  links: Map<bigint, string>;
+  modified: Map<bigint, number>;
+  requests: ShellProjectionRequest[];
+  handle: (request: ShellProjectionRequest, signal: AbortSignal) => Promise<ShellProjectionReply>;
+  override: Map<string, (request: ShellProjectionRequest, signal: AbortSignal) => Promise<ShellProjectionReply>>;
+}> => {
+  const names = new Map<string, bigint>();
+  const contents = new Map<bigint, Uint8Array<ArrayBuffer>>();
+  const links = new Map<bigint, string>();
+  const modified = new Map<bigint, number>();
+  const requests: ShellProjectionRequest[] = [];
+  const override = new Map<
+    string,
+    (request: ShellProjectionRequest, signal: AbortSignal) => Promise<ShellProjectionReply>
+  >();
+  const entry = (inode: bigint): ShellProjectionEntry => {
+    const target = links.get(inode);
+    const at = modified.get(inode);
+    return {
+      inode,
+      mode: inode === 1n ? 0o4_0700 : target === undefined ? 0o10_0600 : 0o12_0777,
+      size: target?.length ?? contents.get(inode)?.length ?? 0,
+      links: 1,
+      ...(at === undefined ? {} : { modified: at }),
+    };
+  };
+  const renamed = (request: ShellProjectionRequest): ShellProjectionReply => {
+    const source = names.get(request.name ?? '');
+    const destination = names.get(request.destinationName ?? '');
+    if (source === undefined) {
+      return { error: 2 };
+    }
+    if (request.flags === 1 && destination !== undefined) {
+      return { error: 17 };
+    }
+    if (request.flags === 2) {
+      if (destination === undefined) {
+        return { error: 2 };
+      }
+      names.set(request.name ?? '', destination);
+      names.set(request.destinationName ?? '', source);
+      return {};
+    }
+    names.delete(request.name ?? '');
+    names.set(request.destinationName ?? '', source);
+    return {};
+  };
+  const handle = async (request: ShellProjectionRequest, signal: AbortSignal): Promise<ShellProjectionReply> => {
+    requests.push(request);
+    const special = override.get(request.operation);
+    if (special !== undefined) {
+      return special(request, signal);
+    }
+    switch (request.operation) {
+      case 'lookup': {
+        const inode = names.get(request.name ?? '');
+        return inode === undefined ? { error: 2 } : { entry: entry(inode) };
+      }
+      case 'getattr': {
+        return { entry: entry(request.inode) };
+      }
+      case 'setattr': {
+        if (request.modified !== undefined && request.modified > 0) {
+          modified.set(request.inode, request.modified);
+        }
+        return { entry: entry(request.inode) };
+      }
+      case 'open': {
+        return { handle: request.inode };
+      }
+      case 'read': {
+        return {
+          bytes:
+            contents.get(request.inode)?.slice(request.offset, request.offset + request.length) ?? new Uint8Array(0),
+        };
+      }
+      case 'write': {
+        const old = contents.get(request.inode) ?? new Uint8Array(0);
+        const next = new Uint8Array(Math.max(old.length, request.offset + request.length));
+        next.set(old);
+        next.set(request.data ?? [], request.offset);
+        contents.set(request.inode, next);
+        return { written: request.length };
+      }
+      case 'readlink': {
+        const target = links.get(request.inode);
+        return target === undefined ? { error: 22 } : { target };
+      }
+      case 'rename': {
+        return renamed(request);
+      }
+      case 'readdir': {
+        // Cookies are stable and sparse (seven apart), so resuming proves the bridge honours them, not positions.
+        const rows = [...names.entries()]
+          .map(([name, inode], index) => ({ name, inode, mode: entry(inode).mode, cookie: (index + 1) * 7 }))
+          .filter((row) => row.cookie > request.offset);
+        return { entries: rows };
+      }
+      case 'forget':
+      case 'release':
+      case 'fsync': {
+        return {};
+      }
+      default: {
+        return { error: 38 };
+      }
+    }
+  };
+  return { names, contents, links, modified, requests, handle, override };
+};
+
+const mounted = (mountpoint: string): boolean =>
+  readFileSync('/proc/self/mountinfo', 'utf8')
+    .split('\n')
+    .some((line) => line.split(' ')[4] === mountpoint);
+
+const python = (script: string, ...parameters: string[]): ChildProcessWithoutNullStreams =>
+  spawn('python3', ['-I', '-c', script, ...parameters], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+const lines = (child: ChildProcessWithoutNullStreams): (() => Promise<string>) => {
+  const queue: string[] = [];
+  const waiting: Array<(line: string) => void> = [];
+  let buffered = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk: string) => {
+    buffered += chunk;
+    let index = buffered.indexOf('\n');
+    while (index !== -1) {
+      const line = buffered.slice(0, index);
+      buffered = buffered.slice(index + 1);
+      const next = waiting.shift();
+      if (next === undefined) {
+        queue.push(line);
+      } else {
+        next(line);
+      }
+      index = buffered.indexOf('\n');
+    }
+  });
+  return async () => {
+    const line = queue.shift();
+    return (
+      line ??
+      new Promise<string>((resolve) => {
+        waiting.push(resolve);
+      })
+    );
+  };
+};
+
+/** Resolves with the child's exit code, or undefined when a signal ended it. */
+const exited = async (child: ChildProcessWithoutNullStreams): Promise<number | undefined> => {
+  if (child.exitCode !== null) {
+    return child.exitCode;
+  }
+  if (child.signalCode !== null) {
+    return undefined;
+  }
+  return new Promise((resolve) => {
+    child.once('exit', (code) => {
+      resolve(code ?? undefined);
+    });
+  });
+};
+const aborted = async (signal: AbortSignal): Promise<void> =>
+  new Promise((resolve) => {
+    signal.addEventListener(
+      'abort',
+      () => {
+        resolve();
+      },
+      { once: true },
+    );
+  });
+
+describe.runIf(enabled)('private projection D8 core-correctness gates', () => {
+  const withMount = async (
+    run: (mountpoint: string, owner: ReturnType<typeof createOwner>) => Promise<void>,
+    prepare: (owner: ReturnType<typeof createOwner>) => void = () => undefined,
+  ): Promise<void> => {
+    const mountpoint = await mkdtemp(join(tmpdir(), 'tau-projection-gate-'));
+    const owner = createOwner();
+    prepare(owner);
+    const mount = openShellProjectionMount({ binary, mountpoint, handle: owner.handle });
+    try {
+      await run(mountpoint, owner);
+    } finally {
+      await mount[Symbol.asyncDispose]();
+      await rm(mountpoint, { recursive: true });
+    }
+  };
+
+  it('G1 returns stored link targets verbatim and refuses new hard and symbolic links natively', async () => {
+    await withMount(
+      async (mountpoint, owner) => {
+        expect(await readlink(join(mountpoint, 'link'))).toBe('file');
+        const linkStat = await lstat(join(mountpoint, 'link'));
+        expect(linkStat.isSymbolicLink()).toBe(true);
+        expect(await readFile(join(mountpoint, 'link'), 'utf8')).toBe('body');
+        await expect(symlink('file', join(mountpoint, 'made'))).rejects.toMatchObject({ code: 'EPERM' });
+        await expect(link(join(mountpoint, 'file'), join(mountpoint, 'hard'))).rejects.toMatchObject({ code: 'EPERM' });
+        expect([...owner.names.keys()].sort()).toStrictEqual(['file', 'link']);
+      },
+      (owner) => {
+        owner.names.set('file', 2n);
+        owner.names.set('link', 3n);
+        owner.contents.set(2n, encoder.encode('body'));
+        owner.links.set(3n, 'file');
+      },
+    );
+  }, 15_000);
+
+  it('G1 reports owner timestamps and block counts, and forwards requested modification times', async () => {
+    const at = Date.UTC(2020, 0, 2, 3, 4, 5, 678);
+    await withMount(
+      async (mountpoint, owner) => {
+        const before = await stat(join(mountpoint, 'file'));
+        expect(before.mtimeMs).toBe(at);
+        expect(before.size).toBe(1500);
+        expect(before.blocks).toBe(3);
+        expect(before.blksize).toBe(4096);
+        const later = new Date(Date.UTC(2021, 5, 6, 7, 8, 9));
+        await utimes(join(mountpoint, 'file'), later, later);
+        expect(owner.requests.find((request) => request.operation === 'setattr')?.modified).toBe(later.getTime());
+        const after = await stat(join(mountpoint, 'file'));
+        expect(after.mtimeMs).toBe(later.getTime());
+      },
+      (owner) => {
+        owner.names.set('file', 2n);
+        owner.contents.set(2n, new Uint8Array(1500));
+        owner.modified.set(2n, at);
+      },
+    );
+  }, 15_000);
+
+  it('G1 pages a large directory by owner cookies with every entry exactly once', async () => {
+    const count = 1500;
+    await withMount(
+      async (mountpoint, owner) => {
+        const listed = await readdir(mountpoint);
+        expect(listed).toHaveLength(count);
+        expect(new Set(listed).size).toBe(count);
+        const pages = owner.requests.filter((request) => request.operation === 'readdir');
+        expect(pages.length).toBeGreaterThan(2);
+        // Every resume offset is a cookie the owner issued (a multiple of seven), never a bridge-made position.
+        expect(pages.every((request) => request.offset % 7 === 0)).toBe(true);
+      },
+      (owner) => {
+        for (let index = 0; index < count; index++) {
+          owner.names.set(`entry-${String(index).padStart(5, '0')}-${'x'.repeat(40)}`, BigInt(index + 2));
+        }
+      },
+    );
+  }, 30_000);
+
+  it('G1 forwards NOREPLACE and EXCHANGE renames and keeps whiteout and combined flags from the owner', async () => {
+    await withMount(
+      async (mountpoint, owner) => {
+        const child = python(
+          `
+import ctypes, sys
+libc = ctypes.CDLL(None, use_errno=True)
+root = sys.argv[1]
+for source, target, flags in [("a", "b", 1), ("a", "b", 2), ("a", "c", 1), ("c", "d", 4), ("c", "d", 3)]:
+    rc = libc.renameat2(-100, (root + "/" + source).encode(), -100, (root + "/" + target).encode(), flags)
+    print(0 if rc == 0 else ctypes.get_errno(), flush=True)
+`,
+          mountpoint,
+        );
+        const next = lines(child);
+        const results = [await next(), await next(), await next(), await next(), await next()];
+        await exited(child);
+        // NOREPLACE onto a name the fresh lookup finds is EEXIST; EXCHANGE swaps; NOREPLACE onto a free name renames.
+        // WHITEOUT is EPERM from the VFS without CAP_MKNOD, else EINVAL natively; NOREPLACE|EXCHANGE is EINVAL from the
+        // VFS. The native refusal of both is defence in depth: no unprivileged caller reaches it.
+        expect(results).toStrictEqual(['17', '0', '0', expect.stringMatching(/^(?:1|22)$/u), '22']);
+        expect(owner.names.has('a')).toBe(false);
+        expect(owner.names.get('b')).toBe(2n);
+        expect(owner.names.get('c')).toBe(3n);
+        expect(owner.names.has('d')).toBe(false);
+        const flags = owner.requests
+          .filter((request) => request.operation === 'rename')
+          .map((request) => request.flags);
+        expect(flags).toStrictEqual([2, 1]);
+      },
+      (owner) => {
+        owner.names.set('a', 2n);
+        owner.names.set('b', 3n);
+      },
+    );
+  }, 15_000);
+
+  it('G2 writes a shared mapping through to its inode and keeps it on that inode across a new generation', async () => {
+    await withMount(
+      async (mountpoint, owner) => {
+        const child = python(
+          `
+import mmap, os, sys
+path = sys.argv[1]
+fd = os.open(path, os.O_RDWR)
+view = mmap.mmap(fd, 8, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE)
+view[0:3] = b"XYZ"
+view.flush()
+print("flushed", flush=True)
+sys.stdin.readline()
+view[3:4] = b"Q"
+view.flush()
+with open(path, "rb") as fresh:
+    print(fresh.read().decode(), flush=True)
+print(view[:].decode(), flush=True)
+view.close()
+os.close(fd)
+`,
+          join(mountpoint, 'file'),
+        );
+        const next = lines(child);
+        expect(await next()).toBe('flushed');
+        expect(decoder.decode(owner.contents.get(2n)).slice(0, 8)).toBe('XYZdefgh');
+        // The owner publishes an incoming version as a fresh inode; the old identity is never reused.
+        owner.contents.set(5n, encoder.encode('NEWVERSN'));
+        owner.names.set('file', 5n);
+        child.stdin.write('swap\n');
+        expect(await next()).toBe('NEWVERSN');
+        expect(await next()).toBe('XYZQefgh');
+        expect(await exited(child)).toBe(0);
+        expect(decoder.decode(owner.contents.get(2n)).slice(0, 8)).toBe('XYZQefgh');
+        expect(decoder.decode(owner.contents.get(5n))).toBe('NEWVERSN');
+        expect(owner.requests.some((request) => request.operation === 'write' && request.inode === 5n)).toBe(false);
+      },
+      (owner) => {
+        owner.names.set('file', 2n);
+        owner.contents.set(2n, encoder.encode('abcdefgh'));
+      },
+    );
+  }, 15_000);
+
+  // The owner runs in a child process: if FLUSH ever needs its thread again, uv_spawn blocks that thread while the
+  // exec closes the inherited descriptor, and only the external timeout can end the test.
+  const ownerProcess = (body: string, mountpoint: string): ChildProcessWithoutNullStreams => {
+    const wrapper = fileURLToPath(new URL('shell-projection-native.ts', import.meta.url));
+    const script = `import {openShellProjectionMount} from ${JSON.stringify(wrapper)};
+import {open} from 'node:fs/promises'; import {spawn} from 'node:child_process';
+const [binary, mountpoint] = process.argv.slice(1);
+const handle = async (request) => {
+  switch (request.operation) {
+    case 'lookup': return request.name === 'file' ? {entry:{inode:2n,mode:0o100600,size:4,links:1}} : {error:2};
+    case 'getattr': return {entry:{inode:request.inode,mode:request.inode===1n?0o40700:0o100600,size:4,links:1}};
+    case 'open': return {handle:2n};
+    case 'read': return {bytes:new TextEncoder().encode('data')};
+    default: return {};
+  }
+};
+const mount = openShellProjectionMount({binary, mountpoint, handle});
+${body}`;
+    return spawn(process.execPath, ['--input-type=module', '-e', script, binary, mountpoint], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }) as unknown as ChildProcessWithoutNullStreams;
+  };
+
+  it('G3 spawns a child while the owner holds a close-on-exec projection descriptor', async () => {
+    const mountpoint = await mkdtemp(join(tmpdir(), 'tau-projection-exec-'));
+    const child = ownerProcess(
+      `const held = await open(mountpoint + '/file', 'r');
+const spawned = spawn('/bin/true', {stdio:'ignore'});
+await new Promise((resolve, reject) => { spawned.once('exit', resolve); spawned.once('error', reject); });
+process.stdout.write('spawned\\n');
+await held.close(); await mount[Symbol.asyncDispose](); process.stdout.write('closed\\n');`,
+      mountpoint,
+    );
+    const timer = setTimeout(() => child.kill('SIGKILL'), 10_000);
+    try {
+      const next = lines(child);
+      expect(await Promise.race([next(), exited(child).then((code) => `exit ${String(code)}`)])).toBe('spawned');
+      expect(await next()).toBe('closed');
+      expect(await exited(child)).toBe(0);
+    } finally {
+      clearTimeout(timer);
+      child.kill('SIGKILL');
+      await exited(child);
+      await rm(mountpoint, { recursive: true });
+    }
+  }, 20_000);
+
+  it('G4 aborts only the interrupted request and answers its caller with EINTR', async () => {
+    const reading = Promise.withResolvers<void>();
+    let reason: unknown;
+    let other: AbortSignal | undefined;
+    await withMount(
+      async (mountpoint, owner) => {
+        owner.override.set('read', async (request, signal) => {
+          if (request.inode === 3n) {
+            other = signal;
+            return { bytes: encoder.encode('free') };
+          }
+          reading.resolve();
+          await aborted(signal);
+          reason = signal.reason;
+          throw signal.reason as Error;
+        });
+        const child = python(
+          `
+import os, signal, sys
+class Stop(Exception): pass
+def stop(*_): raise Stop()
+signal.signal(signal.SIGUSR1, stop)
+fd = os.open(sys.argv[1], os.O_RDONLY)
+print("ready", flush=True)
+try:
+    os.pread(fd, 1, 0)
+    print("read", flush=True)
+except Stop:
+    print("interrupted", flush=True)
+`,
+          join(mountpoint, 'blocked'),
+        );
+        const next = lines(child);
+        expect(await next()).toBe('ready');
+        await reading.promise;
+        expect(await readFile(join(mountpoint, 'free'), 'utf8')).toBe('free');
+        child.kill('SIGUSR1');
+        expect(await next()).toBe('interrupted');
+        expect(await exited(child)).toBe(0);
+        expect((reason as Error).message).toBe('Projection request interrupted.');
+        expect(other?.aborted).toBe(false);
+      },
+      (owner) => {
+        owner.names.set('blocked', 2n);
+        owner.names.set('free', 3n);
+        owner.contents.set(2n, encoder.encode('slow'));
+        owner.contents.set(3n, encoder.encode('free'));
+      },
+    );
+  }, 15_000);
+
+  it('G4 shares one disposal between concurrent closers while a request is in flight', async () => {
+    const mountpoint = await mkdtemp(join(tmpdir(), 'tau-projection-dispose-'));
+    const owner = createOwner();
+    owner.names.set('file', 2n);
+    owner.contents.set(2n, encoder.encode('slow'));
+    const reading = Promise.withResolvers<void>();
+    owner.override.set('read', async (_request, signal) => {
+      reading.resolve();
+      await aborted(signal);
+      return { error: 5 };
+    });
+    const mount = openShellProjectionMount({ binary, mountpoint, handle: owner.handle });
+    const child = python(
+      `
+import os, sys
+fd = os.open(sys.argv[1], os.O_RDONLY)
+print("ready", flush=True)
+try:
+    os.pread(fd, 1, 0)
+    print("read", flush=True)
+except OSError as error:
+    print(error.errno, flush=True)
+`,
+      join(mountpoint, 'file'),
+    );
+    try {
+      const next = lines(child);
+      expect(await next()).toBe('ready');
+      await reading.promise;
+      await Promise.all([mount[Symbol.asyncDispose](), mount[Symbol.asyncDispose]()]);
+      expect(mounted(mountpoint)).toBe(false);
+      // The in-flight caller fails closed (EIO, ECONNABORTED or ENOTCONN once the connection is gone), never succeeds.
+      expect(['5', '103', '107']).toContain(await next());
+      await mount[Symbol.asyncDispose]();
+    } finally {
+      child.kill('SIGKILL');
+      await exited(child);
+      await Promise.resolve(mount[Symbol.asyncDispose]()).catch(() => undefined);
+      await rm(mountpoint, { recursive: true });
+    }
+  }, 15_000);
+
+  it('G4 removes the mount when its owner process dies without disposing', async () => {
+    const mountpoint = await mkdtemp(join(tmpdir(), 'tau-projection-death-'));
+    const child = ownerProcess(`process.stdout.write('ready\\n'); setInterval(() => undefined, 1000);`, mountpoint);
+    try {
+      const next = lines(child);
+      expect(await next()).toBe('ready');
+      expect(mounted(mountpoint)).toBe(true);
+      child.kill('SIGKILL');
+      await exited(child);
+      const deadline = Date.now() + 5000;
+      const gone = async (): Promise<void> => {
+        if (mounted(mountpoint) && Date.now() < deadline) {
+          await new Promise((resolve) => {
+            setTimeout(resolve, 50);
+          });
+          return gone();
+        }
+      };
+      await gone();
+      expect(mounted(mountpoint)).toBe(false);
+    } finally {
+      child.kill('SIGKILL');
+      if (mounted(mountpoint)) {
+        await execute('fusermount3', ['-u', '-z', mountpoint]).catch(() => undefined);
+      }
+      await rm(mountpoint, { recursive: true });
     }
   }, 15_000);
 });

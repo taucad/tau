@@ -288,6 +288,8 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
   } finally {
     Reflect.deleteProperty(document, 'addEventListener');
   }
+  // AurigaX owns the visible canvas cursor; its contenteditable host must not draw a second browser caret.
+  mount.style.caretColor = 'transparent';
   mount.setAttribute('aria-label', 'Terminal');
   mount.setAttribute('aria-description', 'Press Shift+Escape to leave the terminal.');
 

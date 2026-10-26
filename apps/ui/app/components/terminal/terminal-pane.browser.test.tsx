@@ -1,11 +1,14 @@
+import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import '#styles/global.css';
 import axe from 'axe-core';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { page } from 'vitest/browser';
+import { act, cleanup, render as renderReact, screen } from '@testing-library/react';
+import { page, userEvent } from 'vitest/browser';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DesktopTerminalBridge, TerminalHostFrame } from '@taucad/types/desktop-terminal';
 import { TerminalPane } from '#components/terminal/terminal-pane.js';
 import type { TerminalAvailability } from '#components/terminal/terminal-availability.js';
+
+const render = (ui: React.ReactNode) => renderReact(ui, { wrapper: KeyboardProvider });
 
 /** A bridge that records the pane's calls and lets the test speak for the host. */
 const createBridge = (): { bridge: DesktopTerminalBridge; emit: (frame: TerminalHostFrame) => void } => {
@@ -72,20 +75,24 @@ describe.each(['light', 'dark'])('Terminal pane screens (%s)', (theme) => {
     return container;
   };
 
-  it('starts nothing until a person presses Start, then runs a shell session with a request card', async () => {
+  it('autostarts a shell session with a request card', async () => {
     const { bridge, emit } = createBridge();
+    const open = vi.spyOn(bridge, 'open');
     const container = mount({ status: 'available', projectRoot: '/home/me/Tau/bracket', bridge });
     await audit(container);
     await shot('01-start', theme);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start Terminal' }));
     await vi.waitFor(() => {
+      expect(open).toHaveBeenCalledOnce();
       expect(container.querySelector('canvas')).not.toBeNull();
     });
     emit({
       type: 'opened',
       session: { id: 's1', projectLabel: 'bracket', access: { read: [], write: [], domains: [] } },
     });
+    for (const name of ['Screen reader mode', 'Find', 'Restart', 'Request access']) {
+      expect(screen.queryByRole('button', { name })).toBeNull();
+    }
     emit({ type: 'output', data: session, offset: session.length });
     await new Promise((resolve) => {
       setTimeout(resolve, 400);
@@ -110,9 +117,10 @@ describe.each(['light', 'dark'])('Terminal pane screens (%s)', (theme) => {
 
   it('shows a typed host refusal with its recovery', async () => {
     const { bridge, emit } = createBridge();
+    const open = vi.spyOn(bridge, 'open');
     const container = mount({ status: 'available', projectRoot: 'C:\\Users\\me\\Tau\\bracket', bridge });
-    fireEvent.click(screen.getByRole('button', { name: 'Start Terminal' }));
     await vi.waitFor(() => {
+      expect(open).toHaveBeenCalledOnce();
       expect(container.querySelector('canvas')).not.toBeNull();
     });
     emit({
@@ -135,4 +143,39 @@ describe.each(['light', 'dark'])('Terminal pane screens (%s)', (theme) => {
     await audit(container);
     await shot('06-unavailable', theme);
   });
+});
+
+it('keeps a narrow Terminal headerless with one caret and keyboard access actions', async () => {
+  await page.viewport(375, 600);
+  const { bridge, emit } = createBridge();
+  const open = vi.spyOn(bridge, 'open');
+  const { container } = render(
+    <div className='bg-background text-foreground' style={{ width: 375, height: 580 }}>
+      <TerminalPane availability={{ status: 'available', projectRoot: '/home/me/Tau/bracket', bridge }} />
+    </div>,
+  );
+  await vi.waitFor(() => {
+    expect(open).toHaveBeenCalledOnce();
+    expect(container.querySelector('canvas')).not.toBeNull();
+  });
+  emit({
+    type: 'opened',
+    session: { id: 'narrow', projectLabel: 'bracket', access: { read: [], write: [], domains: [] } },
+  });
+  emit({ type: 'output', data: 'prompt> ', offset: 8 });
+  const input = screen.getByRole('textbox', { name: 'Terminal' });
+  expect(input).toHaveFocus();
+  // oxlint-disable-next-line tau-lint/no-hardcoded-color -- Chromium serializes the required transparent native caret as RGBA.
+  expect(getComputedStyle(input).caretColor).toBe('rgba(0, 0, 0, 0)');
+  expect(container.querySelector('[data-slot="terminal-chrome"]')).toBeNull();
+  expect(screen.queryByText('Screen reader mode')).toBeNull();
+  await audit(container);
+  await shot('07-narrow-headerless', 'light');
+  await userEvent.keyboard('{Shift>}{F10}{/Shift}');
+  await page.getByRole('menuitem', { name: 'Request access' }).click();
+  expect(screen.getByLabelText('Folders to read')).toHaveFocus();
+  expect(screen.getByRole('form', { name: 'Request Terminal access' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Allow and restart' })).toBeNull();
+  await audit(container);
+  await shot('08-narrow-request-access', 'light');
 });

@@ -1,7 +1,8 @@
+import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import '#styles/global.css';
 import 'dockview-react/dist/styles/dockview.css';
 import axe from 'axe-core';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render as renderReact, screen, within } from '@testing-library/react';
 import type { DockviewApi, IDockviewPanelProps } from 'dockview-react';
 import { page, userEvent } from 'vitest/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -11,6 +12,8 @@ import { Dockview } from '#components/panes/dockview.js';
 import { DockviewTab } from '#components/panes/dockview-tab.js';
 import { TerminalPane } from '#components/terminal/terminal-pane.js';
 import { TerminalCloseContext, useDockviewTerminalCloseHost } from '#components/terminal/terminal-close.js';
+
+const render = (ui: React.ReactNode) => renderReact(ui, { wrapper: KeyboardProvider });
 
 /* T15 in Chromium against the real Dockview: its native tablist Delete/Backspace handler and close glyph. */
 
@@ -51,6 +54,7 @@ const shot = async (name: string, theme: string): Promise<void> => {
 afterEach(() => {
   cleanup();
   document.documentElement.classList.remove('dark');
+  emit = undefined;
   close.mockClear();
   hide.mockClear();
 });
@@ -77,8 +81,8 @@ const mount = async (theme: string, width: number): Promise<{ api: DockviewApi; 
   await vi.waitFor(() => {
     expect(api).toBeDefined();
   });
-  fireEvent.click(await screen.findByRole('button', { name: 'Start Terminal' }));
   await vi.waitFor(() => {
+    expect(emit).toBeDefined();
     expect(container.querySelector('canvas')).not.toBeNull();
   });
   act(() => {

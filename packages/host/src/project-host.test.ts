@@ -3,8 +3,9 @@
  * project id, a private checkouts directory, a GeoSpec runner and no external agents.
  */
 
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import type * as Os from 'node:os';
 import { join } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
 
@@ -25,6 +26,7 @@ import * as agentTools from '#agent-tools.js';
 import { closeParameterActor } from '#parameter-actors.js';
 import { createProjectHost, createProjectHostActor, openProjectHost } from '#project-host.js';
 import type { ProjectFileSystem, ProjectHost, ProjectHostOptions, ProjectHostRuntimeClient } from '#project-host.js';
+import { hostDeviceId } from '#revisions.js';
 import type { TurnCheckout } from '#revisions.js';
 
 const registrySpy = vi.spyOn(agentTools, 'createHostToolRegistry');
@@ -46,7 +48,7 @@ const seams = vi.hoisted(() => ({
   /* The parameter actor the next creation returns instead of the real one. */
   parameterActor: undefined as undefined | (() => ParameterSetActor),
   /* The options the last launcher was built with. */
-  launcherOptions: undefined as undefined | { turnPlacement?: unknown },
+  launcherOptions: undefined as undefined | { turnPlacement?: unknown; deviceId?: unknown },
 }));
 
 vi.mock('@taucad/parameters/set-machine', async (importOriginal) => {
@@ -175,7 +177,7 @@ afterEach(async () => {
 /** One authority over a sandbox, admitting the project and whatever the host admits. */
 const nodeFileSystem = async (sandbox: string, workspaceRoot: string): Promise<ProjectFileSystem> => {
   const authorityDirectory = join(sandbox, 'authority');
-  await mkdir(authorityDirectory);
+  await mkdir(authorityDirectory, { recursive: true });
   const authority = new NodeFsAuthorityHost({
     authorityDirectory: () => authorityDirectory,
     authorityIdentity: () => 'project-host-test',
@@ -224,9 +226,12 @@ const unresolvedRuntime = (): ProjectHostRuntimeClient => ({
 /** A project host's options, composed as the desktop utility composes them. */
 const desktopProjectHostOptions = async (
   extra: Pick<ProjectHostOptions, 'turnPlacement'> = {},
+  existing?: string,
 ): Promise<ProjectHostOptions> => {
-  const sandbox = await mkdtemp(join(tmpdir(), 'tau-project-host-'));
-  cleanups.push(async () => rm(sandbox, { recursive: true, force: true }));
+  const sandbox = existing ?? (await mkdtemp(join(tmpdir(), 'tau-project-host-')));
+  if (existing === undefined) {
+    cleanups.push(async () => rm(sandbox, { recursive: true, force: true }));
+  }
   const workspaceRoot = join(sandbox, 'home', 'bracket');
   await mkdir(workspaceRoot, { recursive: true });
   const fileSystem = await nodeFileSystem(sandbox, workspaceRoot);
@@ -891,6 +896,85 @@ describe('createProjectHost', () => {
     await vi.waitFor(() => {
       expect(reconcile).toHaveBeenCalledOnce();
     });
+  });
+
+  /** The device the last launcher stamps on an external turn's marker, as the launcher would read it. */
+  const stampedDevice = async (): Promise<unknown> => {
+    const deviceId = seams.launcherOptions?.deviceId;
+    return typeof deviceId === 'function' ? (deviceId as () => Promise<unknown>)() : deviceId;
+  };
+  /** The record devices this project's chat segments sync under, from the record set's own device file. */
+  const segmentDevices = async (workspaceRoot: string): Promise<readonly string[]> => {
+    const file = JSON.parse(await readFile(join(workspaceRoot, '.git', 'ops-devices.json'), 'utf8')) as {
+      devices: Record<string, string>;
+    };
+    return Object.values(file.devices);
+  };
+  const uuid = /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/;
+
+  /* XD1: an external session is this device's when its marker names the id this host's chat segment syncs under. Two
+   * machines can share a hostname and an account; their record devices still differ. */
+  it('should stamp two hosts that share a machine name and account with their own record devices', async () => {
+    const one = await desktopProjectHostOptions();
+    const project = createProjectHost(one);
+    cleanups.push(async () => project.close());
+    const firstDevice = await stampedDevice();
+    const two = await desktopProjectHostOptions();
+    const other = createProjectHost(two);
+    cleanups.push(async () => other.close());
+    const secondDevice = await stampedDevice();
+
+    expect(firstDevice).not.toBe(secondDevice);
+    expect(await segmentDevices(one.workspaceRoot)).toEqual([firstDevice]);
+    expect(await segmentDevices(two.workspaceRoot)).toEqual([secondDevice]);
+  });
+
+  /* EQ10(a): the machine's name and its account never leave the host in a synced chat row. */
+  it('should stamp no machine name or account on an external marker', async () => {
+    await desktopProjectHost();
+
+    const stamped = await stampedDevice();
+    expect(stamped).not.toBe(hostDeviceId);
+    expect(stamped).toMatch(uuid);
+  });
+
+  /* A renamed machine (a `.local` suffix, a DHCP name) is still the same device, and keeps its own sessions. */
+  it('should stamp the same device after the machine is renamed', async () => {
+    const sandbox = await mkdtemp(join(tmpdir(), 'tau-project-host-'));
+    cleanups.push(async () => rm(sandbox, { recursive: true, force: true }));
+    const before = createProjectHost(await desktopProjectHostOptions({}, sandbox));
+    const beforeDevice = await stampedDevice();
+    await before.close();
+
+    vi.resetModules();
+    vi.doMock('node:os', async (importOriginal) => ({
+      ...(await importOriginal<typeof Os>()),
+      hostname: () => 'renamed-machine.local',
+    }));
+    /* The launcher again, over the fresh modules, so its chat store and the host's are one module's. */
+    vi.doMock('@taucad/agent-host/launcher', async (importOriginal) => {
+      const actual = await importOriginal<typeof Launcher>();
+      return {
+        ...actual,
+        createAgentLauncher: (launcherOptions: Parameters<typeof actual.createAgentLauncher>[0]): AgentLauncher => {
+          seams.launcherOptions = launcherOptions;
+          return actual.createAgentLauncher(launcherOptions);
+        },
+      };
+    });
+    cleanups.push(async () => {
+      vi.doUnmock('node:os');
+      vi.doUnmock('@taucad/agent-host/launcher');
+      vi.resetModules();
+    });
+    const renamed = await import('#project-host.js');
+    const options = await desktopProjectHostOptions({}, sandbox);
+    const after = renamed.createProjectHost(options);
+    cleanups.push(async () => after.close());
+    const afterDevice = await stampedDevice();
+
+    expect(afterDevice).toBe(beforeDevice);
+    expect(await segmentDevices(options.workspaceRoot)).toEqual([afterDevice]);
   });
 
   /* RH-A22: the desktop built its registry without parameter actors, so it offered no parameter tools. */

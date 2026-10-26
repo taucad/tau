@@ -17,7 +17,6 @@ vi.mock('#filesystem/desktop-bridge.js', () => ({
 vi.mock('#lib/agent-host-placement.js', () => ({
   desktopWorkspaceRoot: async () => '/projects/widget',
   openAgentHostChannel: desktop.open,
-  unreachablePlacementReason: () => undefined,
 }));
 vi.mock('#services/agent-host-client.js', () => ({ probeBrowserAgentHostCapability: vi.fn() }));
 

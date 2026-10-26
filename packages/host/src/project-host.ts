@@ -315,6 +315,20 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
 
   const launcher = createAgentLauncher({
     chats: createNodeChatStore({ workspaceRoot }),
+    /*
+     * The record device this project's chat segments sync under, read once the store has opened: an external turn's
+     * session is this device's, whatever its host id. Never the machine's name, which a rename changes, two machines
+     * can share, and a synced row must not carry (EQ10(a)). A store that cannot say answers none, and the host then
+     * refuses an external start retryably and resumes a run only on its own session (round 27): it never stamps none.
+     */
+    deviceId: async () => {
+      try {
+        await revisions.opened();
+        return await revisions.chatDevice();
+      } catch {
+        return undefined;
+      }
+    },
     modelTransport: options.modelTransport,
     credential: options.credential,
     systemPrompt: options.systemPrompt,

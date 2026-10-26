@@ -1,4 +1,8 @@
-import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile, readdir } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
+import { build } from 'vite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -142,5 +146,44 @@ describe('desktopShellProvider', () => {
   it('builds the sandbox provider on Linux and macOS', () => {
     expect(desktopShellProvider({ platform: 'linux', bwrapPath: '/opt/tau/sandbox/bwrap' })?.name).toMatch(/^srt-/u);
     expect(desktopShellProvider({ platform: 'darwin' })?.name).toMatch(/^srt-/u);
+  });
+});
+
+describe('bundled shell supervisor', () => {
+  it('starts the sibling supervisor from a real split utility bundle', async () => {
+    const entry = join(base, 'entry.js');
+    const supervisor = join(base, 'supervisor.js');
+    const output = join(base, 'dist');
+    const source = fileURLToPath(new URL('services-host-shell.ts', import.meta.url));
+    await writeFile(join(base, 'package.json'), JSON.stringify({ type: 'module' }));
+    await writeFile(
+      entry,
+      `const { bundledShellSupervisor } = await import(${JSON.stringify(source)}); console.log(JSON.stringify(bundledShellSupervisor()));`,
+    );
+    // This executable is only a path oracle; it does not emulate or qualify a sandbox provider.
+    await writeFile(supervisor, "console.log('sibling-supervisor-started');");
+    await build({
+      configFile: false,
+      root: base,
+      logLevel: 'silent',
+      build: {
+        target: 'node24',
+        outDir: output,
+        minify: false,
+        rolldownOptions: {
+          input: { 'services-host': entry, 'shell-supervisor': supervisor },
+          external: [/^node:/u, '@taucad/host', '@taucad/native-process-core/shell'],
+          treeshake: { moduleSideEffects: false },
+          output: { entryFileNames: '[name].js', chunkFileNames: 'chunks/[name].js' },
+        },
+      },
+    });
+    expect(await readdir(join(output, 'chunks'))).toContain('services-host-shell.js');
+    const execute = promisify(execFile);
+    const resolved = await execute(process.execPath, [join(output, 'services-host.js')]);
+    const expected = { executablePath: process.execPath, arguments: [join(output, 'shell-supervisor.js')] };
+    expect(JSON.parse(resolved.stdout)).toEqual(expected);
+    const started = await execute(expected.executablePath, expected.arguments);
+    expect(started.stdout.trim()).toBe('sibling-supervisor-started');
   });
 });

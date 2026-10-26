@@ -69,6 +69,7 @@ type Fact =
 type Fenced = 'SESSION_FENCED';
 type AdmitCode =
   | 'CHECKOUT_UNKNOWN'
+  | 'BRANCH_UNAVAILABLE'
   | 'CHECKOUT_CONFLICT'
   | 'BASE_CUT_FAILED'
   | 'TURN_ALREADY_LEASED'
@@ -76,7 +77,7 @@ type AdmitCode =
   | Fenced;
 
 /**
- * One placement session over a project's revision root: the six verbs of agent-host's `TurnPlacementPort`, plus the
+ * One placement session over a project's revision root: the verbs of agent-host's `TurnPlacementPort`, plus the
  * session fence its binding calls when a newer session opens.
  *
  * @public
@@ -94,6 +95,18 @@ export type TurnPlacementAdapter<Tools> = Readonly<{
   ) => Promise<Answer<Readonly<{ held: readonly Held[] }>, 'REVISIONS_UNAVAILABLE' | Fenced>>;
   settlements: (input: Readonly<{ signal: AbortSignal }>) => AsyncIterable<Fact>;
   acknowledge: (input: Request) => Promise<Answer<Nothing, 'LEASE_HELD_ELSEWHERE' | 'REVISIONS_BUSY' | Fenced>>;
+  /** Record a chat's ref now, after its host wrote a live run's heartbeat (XD3). */
+  publish: (
+    input: Readonly<{ requestId: string; chatId: string }>,
+  ) => Promise<Answer<Nothing, Fenced | 'CHAT_NOT_SHARED'>>;
+  /**
+   * Pull the project's remote now (XD3): another device's run on a chat has been quiet here a while, and only pulls can
+   * show whether it stayed quiet there for the staleness bound. Answered once asked, not once pulled. Refused
+   * `CHAT_NOT_SHARED` where this device cannot pull the chat (round 27): no remote, chat sync off, or no record identity.
+   */
+  pull: (
+    input: Readonly<{ requestId: string; chatId: string }>,
+  ) => Promise<Answer<Nothing, Fenced | 'CHAT_NOT_SHARED'>>;
   /**
    * End this session (TS-R6): its later requests are refused `SESSION_FENCED`, its tools are revoked once their
    * accepted writes land, and its `settlements` listens end. The root keeps every turn actor.
@@ -108,7 +121,7 @@ export type TurnPlacementAdapter<Tools> = Readonly<{
  */
 export type TurnPlacementPortOptions<Tools> = Readonly<{
   /** The project's revisions from `createProjectRevisionsActor`: its root, and the store reads beside it. */
-  revisions: Pick<ProjectRevisions, 'actor' | 'turns'>;
+  revisions: Pick<ProjectRevisions, 'actor' | 'turns'> & Partial<Pick<ProjectRevisions, 'pullsChats'>>;
   /**
    * Turn the attempt's view of its checkout into what this binding hands its host: a tool registry on Node, a
    * transferable bridge port in the file-manager worker. The adapter owns the view and revokes it.
@@ -127,7 +140,21 @@ export type TurnPlacementPortOptions<Tools> = Readonly<{
    * completion cut (the agent's last writes). A host whose feed is not complete omits it.
    */
   settle?: (() => Promise<void>) | undefined;
+  /**
+   * How long an admission waits for the checkout of a branch this device has only as a ref to open (XD4), in
+   * milliseconds; past it the admission is refused `REVISIONS_UNAVAILABLE` (`wait`). Default
+   * {@link checkoutOpenMilliseconds}.
+   */
+  checkoutOpenBound?: number | undefined;
 }>;
+
+/**
+ * How long an admission waits for a branch's checkout to open before it refuses retryably: thirty seconds (XD4). An add
+ * the root never answers would otherwise hold the chat's admission for ever.
+ *
+ * @public
+ */
+export const checkoutOpenMilliseconds = 30_000;
 
 /** A root answer the adapter waits on, per attempt. */
 type Heard =
@@ -296,6 +323,9 @@ const admitMessage = (code: AdmitCode, checkoutId: string, reason: string): stri
   switch (code) {
     case 'CHECKOUT_UNKNOWN': {
       return `Checkout ${checkoutId} no longer exists in this project, so the agent did not start. Choose another checkout for this chat.`;
+    }
+    case 'BRANCH_UNAVAILABLE': {
+      return 'This chat works on a branch this device does not have yet, so the agent did not start. Send again once this project has synced, or choose another branch for this chat.';
     }
     case 'CHECKOUT_CONFLICT': {
       return `Checkout ${checkoutId} cannot take this turn: ${reason} Resolve the checkout, then send again.`;
@@ -616,11 +646,149 @@ export const createTurnPlacementPort = <Tools>(
       return code;
     }
     if (code === 'CHECKOUT_CONFLICT' || code === 'LEASE_UNAVAILABLE') {
-      /* Today's `CHECKOUT_CONFLICT` also means "the id names no checkout"; that half has its own code (TS-S0 Q4). */
+      /*
+       * Today's `CHECKOUT_CONFLICT` also means "the id names no checkout"; that half has its own code (TS-S0 Q4).
+       * `placeIntent` answers every id this device cannot place before the root; one that vanished since is gone.
+       */
       const known = actor.getSnapshot().context.checkouts.some((checkout) => checkout.id === checkoutId);
       return checkoutId !== undefined && !known ? 'CHECKOUT_UNKNOWN' : 'CHECKOUT_CONFLICT';
     }
     return 'REVISIONS_UNAVAILABLE';
+  };
+
+  /*
+   * XD4: open a linked checkout of `branch` through the registry, its one writer (P3), and answer with its id. Another
+   * admission that opened it first is the same answer. Nothing is branched: an unborn branch has no head to open.
+   */
+  const materialize = async (
+    key: TurnAttemptKey,
+    branch: string,
+  ): Promise<Readonly<{ checkoutId: string }> | Readonly<{ refused: string }>> => {
+    const holding = (): string | undefined =>
+      actor.getSnapshot().context.checkouts.find((checkout) => checkout.branch === branch)?.id;
+    /* Named by the attempt, so no other session's add over this root shares it (RM-R11). */
+    const requestId = `turn-placement:checkout:${attemptIdOf(key)}`;
+    const failed = Promise.withResolvers<Readonly<{ reason: string; code: string | undefined }>>();
+    const subscription = actor.on('checkoutFailed', (event) => {
+      if (event.requestId === requestId) {
+        failed.resolve({ reason: event.reason, code: event.code });
+      }
+    });
+    const done = new AbortController();
+    const bound = options.checkoutOpenBound ?? checkoutOpenMilliseconds;
+    const expired = Promise.withResolvers<undefined>();
+    const timer = setTimeout(() => {
+      expired.resolve(undefined);
+    }, bound); // Bound: checkoutOpenMilliseconds.
+    /* A bound never keeps a host's process open at shutdown (Node's timers). */
+    (timer as { unref?: () => void }).unref?.();
+    try {
+      actor.send({ type: 'addCheckout', requestId, branch, from: '' });
+      /* The registry answers every add by its id (RM-R11); a stopped root ends the wait too. */
+      const opened = async (): Promise<string | undefined> => {
+        try {
+          await waitFor(actor, () => holding() !== undefined, { signal: done.signal });
+          return undefined;
+        } catch {
+          return 'The project closed before the branch was opened.';
+        }
+      };
+      type Outcome =
+        | Readonly<{ kind: 'opened'; reason: string | undefined }>
+        | Readonly<{ kind: 'failed'; reason: string; code: string | undefined }>
+        | Readonly<{ kind: 'expired'; reason?: undefined }>;
+      const waiting = opened();
+      const first = await Promise.race<Outcome>([
+        waiting.then((reason): Outcome => ({ kind: 'opened', reason })),
+        failed.promise.then((failure): Outcome => ({ kind: 'failed', ...failure })),
+        expired.promise.then((): Outcome => ({ kind: 'expired' })),
+      ]);
+      /* Another admission's add of the same branch won (`CHECKOUT_CONFLICT`): its checkout reaches this root's view
+       * just after the refusal, so this one waits for it, within the same bound. */
+      const settled =
+        first.kind === 'failed' && first.code === 'CHECKOUT_CONFLICT' && holding() === undefined
+          ? await Promise.race([waiting.then(() => first), expired.promise.then(() => first)])
+          : first;
+      const checkoutId = holding();
+      if (checkoutId !== undefined) {
+        return { checkoutId };
+      }
+      return {
+        refused:
+          settled.kind === 'expired'
+            ? `Branch ${branch} was not opened within ${String(bound)} ms.`
+            : (settled.reason ?? `Branch ${branch} could not be opened.`),
+      };
+    } finally {
+      clearTimeout(timer);
+      done.abort();
+      subscription.unsubscribe();
+    }
+  };
+
+  /*
+   * XD4: whether a branch this device lacks may still arrive: only a project that syncs with a remote can bring one.
+   * Without that evidence a missing branch is gone for good, and waiting on it would hold the chat forever. Round 28:
+   * the evidence is a remotes read that settled on none (`none`), never a read still running or one that failed, whose
+   * `kind` is `'none'` too: a read failure is never taken for no remote.
+   */
+  const branchMayArrive = (): boolean => {
+    const remote = actor.getSnapshot().children.remote?.getSnapshot();
+    return remote !== undefined && remote.value !== 'none';
+  };
+
+  /*
+   * XD4: where the placement intent is on this device. A checkout id derives from its branch, so the branch is the
+   * portable fact and the checkout device state: an id this device has no checkout for runs on the checkout that holds
+   * its branch, or on one opened for it. Never on a checkout this device removed, or one of a branch it saw removed:
+   * that intent is refused for good (`CHECKOUT_UNKNOWN`), never opened again. An id no local branch derives, or one
+   * that derives an unborn branch no checkout holds, waits (`BRANCH_UNAVAILABLE`) only while a remote may still bring
+   * the branch; otherwise it is `CHECKOUT_UNKNOWN`. A device that cannot read its branches or its removal record
+   * refuses retryably (`REVISIONS_UNAVAILABLE`): a read failure is never taken for a removal.
+   */
+  const placeIntent = async (
+    key: TurnAttemptKey,
+    intent: string | undefined,
+  ): Promise<Readonly<{ checkoutId: string | undefined }> | Readonly<{ refused: string; code: AdmitCode }>> => {
+    if (intent === undefined) {
+      return { checkoutId: undefined };
+    }
+    try {
+      await registryAnswered();
+    } catch {
+      return { refused: 'The checkout registry did not answer.', code: 'REVISIONS_UNAVAILABLE' };
+    }
+    const { checkouts } = actor.getSnapshot().context;
+    if (checkouts.some((checkout) => checkout.id === intent)) {
+      return { checkoutId: intent };
+    }
+    /* A device that cannot read its branches, or its record of removed checkouts, cannot tell yet: it refuses for now.
+     * Only a recorded removal refuses for good. */
+    let derived: Awaited<ReturnType<typeof turns.branchOf>>;
+    try {
+      derived = await turns.branchOf(intent);
+    } catch {
+      return { refused: 'The branches could not be read.', code: 'REVISIONS_UNAVAILABLE' };
+    }
+    const missing: Readonly<{ refused: string; code: AdmitCode }> = {
+      refused: '',
+      code: branchMayArrive() ? 'BRANCH_UNAVAILABLE' : 'CHECKOUT_UNKNOWN',
+    };
+    if (derived === 'removed') {
+      return { refused: '', code: 'CHECKOUT_UNKNOWN' };
+    }
+    if (derived === undefined) {
+      return missing;
+    }
+    const holder = checkouts.find((checkout) => checkout.branch === derived.branch);
+    if (holder !== undefined) {
+      return { checkoutId: holder.id };
+    }
+    if (derived.unborn) {
+      return missing;
+    }
+    const opened = await materialize(key, derived.branch);
+    return 'refused' in opened ? { ...opened, code: 'REVISIONS_UNAVAILABLE' } : opened;
   };
 
   /*
@@ -697,9 +865,24 @@ export const createTurnPlacementPort = <Tools>(
           message: admitMessage('TURN_ALREADY_LEASED', '', ''),
         });
       }
-      /* TS-R12: the person's choice, else the chat record's checkout; the root falls back to the live one. */
-      const intent = checkoutId ?? (await recordedCheckout(key.chatId));
-      await options.settle?.();
+      /* TS-R12: the person's choice, else the chat record's checkout; the root falls back to the live one. A replay
+       * (TS-R2) does no placement work: the root answers it from the attempt it already holds. */
+      const intended = replay ? undefined : (checkoutId ?? (await recordedCheckout(key.chatId)));
+      const placed = replay ? { checkoutId: undefined } : await placeIntent(key, intended);
+      if (isFenced()) {
+        return fencedAnswer(requestId);
+      }
+      if ('refused' in placed) {
+        return refused({
+          requestId,
+          code: placed.code,
+          message: admitMessage(placed.code, intended ?? '', placed.refused),
+        });
+      }
+      const intent = placed.checkoutId;
+      if (!replay) {
+        await options.settle?.();
+      }
       const heard = listen(key, (event) => (event.type === 'placed' || event.type === 'refused' ? event : undefined));
       actor.send({ type: 'admitTurn', key, ...(intent === undefined ? {} : { checkoutId: intent }) });
       const event = await heard.answer;
@@ -728,6 +911,9 @@ export const createTurnPlacementPort = <Tools>(
           ...(placement.unplaced === undefined ? {} : { details: { revisionId: placement.unplaced } }),
         });
       }
+      /* XD3: the admission row is durable before M1 places the attempt, so sync records it in the chat's ref now and
+       * another device refuses a second run before this one streams; the host's heartbeats keep it current (`publish`). */
+      recordsChanged();
       return { requestId, status: replay ? 'replayed' : 'applied', placement };
     },
 
@@ -916,6 +1102,42 @@ export const createTurnPlacementPort = <Tools>(
         });
       }
       recordsChanged();
+      return { requestId, status: 'applied' };
+    },
+
+    /* XD3: the host wrote a live run's heartbeat; record the chat's ref so another device sees it. A record whose chat
+     * bytes did not change writes no commit, and the sync debounce coalesces it with any other push. */
+    publish: async ({ requestId }) => {
+      if (fenced) {
+        return fencedAnswer(requestId);
+      }
+      /* No remote, no other device to tell: the host then writes no heartbeat, which older builds read as opaque. */
+      if (!branchMayArrive()) {
+        return refused({
+          requestId,
+          code: 'CHAT_NOT_SHARED',
+          message: 'This project syncs with no remote, so no other device reads its chats.',
+        });
+      }
+      recordsChanged();
+      return { requestId, status: 'applied' };
+    },
+
+    /* Round 27: a device that cannot pull the chat says so, so its host stops waiting for pulls that cannot come. */
+    pull: async ({ requestId }) => {
+      if (fenced) {
+        return fencedAnswer(requestId);
+      }
+      /* Round 27: and only where its root says it pulls this project's chats (a root without the answer does). An
+       * answer that fails rejects the pull, which its host reads as no evidence that this device cannot pull. */
+      if (!branchMayArrive() || (await options.revisions.pullsChats?.()) === false) {
+        return refused({
+          requestId,
+          code: 'CHAT_NOT_SHARED',
+          message: 'This device does not pull this project’s chats.',
+        });
+      }
+      actor.send({ type: 'sync', event: { type: 'remoteMoved', generation: 0, refs: [] } });
       return { requestId, status: 'applied' };
     },
 

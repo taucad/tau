@@ -8,6 +8,7 @@ import {
   HttpCode,
   HttpException,
   HttpStatus,
+  Inject,
   NotFoundException,
   Optional,
   Param,
@@ -45,9 +46,15 @@ import { GitRepositoryService } from '#api/git/git.service.js';
 import { gitRetryAfterSeconds } from '#api/git/git-refusals.js';
 import type { AffectedPublication } from '#api/git/git.service.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
-import { TauMetrics } from '@taucad/telemetry';
+import { gitExecutionKey } from '#api/git/forwarding/git-execution.js';
+import type { GitExecution } from '#api/git/forwarding/git-execution.js';
+import { AttributeKey, TauMetrics } from '@taucad/telemetry';
 import { MetricsService } from '#telemetry/metrics.js';
-import type { SyncOperationAttributes, SyncRefusalAttributes } from '#telemetry/metrics.js';
+import type {
+  SyncOperationAttributes,
+  SyncOperationDurationAttributes,
+  SyncRefusalAttributes,
+} from '#telemetry/metrics.js';
 
 type SyncOperation = SyncOperationAttributes['tau.sync.operation'];
 type SyncOutcome = SyncOperationAttributes['outcome'];
@@ -181,14 +188,26 @@ export class GitController {
    */
   readonly #apiUrl: string;
 
+  /**
+   * Where git ran and how tau-storage was chosen, fixed at boot: the labels that
+   * tell the in-process, forwarded and rendezvous latencies apart on
+   * `tau.sync.operation.duration`.
+   */
+  readonly #execution: Pick<SyncOperationDurationAttributes, 'tau.git.execution' | 'tau.git.affinity'>;
+
   public constructor(
     configService: ConfigService<Environment, true>,
     private readonly repositories: GitRepositoryService,
     private readonly lfs: GitLfsService,
     private readonly rateLimiter: PublicationRateLimiterService,
     @Optional() private readonly metrics: MetricsService = new MetricsService(),
+    @Optional() @Inject(gitExecutionKey) execution?: Pick<GitExecution, 'mode' | 'affinity'>,
   ) {
     this.#apiUrl = configService.get('TAU_API_URL', { infer: true }).replace(/\/+$/u, '');
+    this.#execution = {
+      [AttributeKey.GIT_EXECUTION]: execution?.mode ?? 'in_process',
+      [AttributeKey.GIT_AFFINITY]: execution?.affinity ?? 'off',
+    };
   }
 
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- NestJS parameter decorators bind independent request facets; bundling them would obscure the route contract
@@ -558,11 +577,14 @@ export class GitController {
     return abort.signal;
   }
 
-  /** One sync request's count and latency, recorded once where its answer is decided. */
+  /** One sync request's count and latency, recorded once where its answer is decided; the latency says where git ran. */
   private recordSync(operation: SyncOperation, outcome: SyncOutcome, startedAt: number): void {
     const attributes = { 'tau.sync.operation': operation, outcome } satisfies SyncOperationAttributes;
     this.metrics.syncOperations.add(1, attributes);
-    this.metrics.syncOperationDuration.record((performance.now() - startedAt) / 1000, attributes);
+    this.metrics.syncOperationDuration.record((performance.now() - startedAt) / 1000, {
+      ...attributes,
+      ...this.#execution,
+    } satisfies SyncOperationDurationAttributes);
   }
 
   /** A sync request that threw: its typed refusal, if it was one, then its count and latency. */

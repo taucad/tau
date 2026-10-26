@@ -8,6 +8,8 @@ export type EventLogErrorCode =
   | 'LOG_CLOSED'
   | 'LOG_FENCED'
   | 'LOG_POISONED'
+  /** Another device's segment of the chat exists but could not be read, so whether it holds a live run is unknown. */
+  | 'SEGMENTS_UNREADABLE'
   | 'STORAGE_NOT_WRITABLE'
   | 'STORAGE_SHORT_READ'
   | 'STORAGE_SHORT_WRITE'

@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => {
     onScreenshotAction: undefined as ((item: ContextSuggestionItem) => void) | undefined,
     actionItems: [] as ContextSuggestionItem[],
     notice: 'Section cutaways narrower than 180° are not shown in captures.',
+    logicOptions: undefined as { readonly isSubmitDisabled?: boolean } | undefined,
+    runElsewhere: undefined as { readonly runId: string } | undefined,
   };
 });
 
@@ -39,12 +41,15 @@ vi.mock('@xstate/react', () => ({
     selector(actor?.getSnapshot()),
 }));
 vi.mock('#components/chat/chat-textarea-types.js', () => ({
-  useChatTextareaLogic: () => ({
-    imageInputSupported: true,
-    handleAddImage: mocks.handleAddImage,
-    rejectUnsupportedImageInput: vi.fn(),
-    focusInput: vi.fn(),
-  }),
+  useChatTextareaLogic: (options: { readonly isSubmitDisabled?: boolean }) => {
+    mocks.logicOptions = options;
+    return {
+      imageInputSupported: true,
+      handleAddImage: mocks.handleAddImage,
+      rejectUnsupportedImageInput: vi.fn(),
+      focusInput: vi.fn(),
+    };
+  },
 }));
 vi.mock('#components/chat/chat-textarea-desktop.js', () => ({
   ChatTextareaDesktop: ({
@@ -86,7 +91,11 @@ vi.mock('#hooks/use-chat.js', () => ({
   useDraftActions: () => ({ setDraftText: vi.fn(), setEditDraftText: vi.fn() }),
 }));
 vi.mock('#hooks/active-chat-provider.js', () => ({
-  useChatComposer: () => ({ session: undefined, execution: { execution: { kind: 'native' } } }),
+  useChatComposer: () => ({
+    session: undefined,
+    execution: { execution: { kind: 'native' } },
+    runElsewhere: mocks.runElsewhere,
+  }),
 }));
 vi.mock('#hooks/use-chat-session.js', () => ({ useChatSessionSnapshot: () => undefined }));
 vi.mock('#services/agent-host-event-projection.js', () => ({ latestAcpSessionData: () => undefined }));
@@ -177,5 +186,26 @@ describe('ChatTextarea screenshots', () => {
     const claim = projectRef.send.mock.calls.find(([event]) => event.type === 'claimGeometryUnit')?.[0];
     expect(claim).toMatchObject({ entryPath: 'other.ts' });
     expect(projectRef.send).toHaveBeenCalledWith({ type: 'releaseGeometryUnit', claimId: claim?.claimId });
+  });
+});
+
+/* XD3: another device runs this chat, so its host would refuse a send; the composer holds it until that run ends. */
+describe('ChatTextarea while another device runs the chat', () => {
+  beforeEach(() => {
+    mocks.runElsewhere = undefined;
+  });
+
+  it('should hold the send while another device runs the chat', () => {
+    mocks.runElsewhere = { runId: 'run-desktop' };
+
+    render(<ChatTextarea onSubmit={vi.fn()} />);
+
+    expect(mocks.logicOptions?.isSubmitDisabled).toBe(true);
+  });
+
+  it('should leave the send to the caller otherwise', () => {
+    render(<ChatTextarea onSubmit={vi.fn()} />);
+
+    expect(mocks.logicOptions?.isSubmitDisabled).toBe(false);
   });
 });

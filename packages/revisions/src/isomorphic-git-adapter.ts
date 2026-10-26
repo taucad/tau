@@ -50,7 +50,8 @@ import type { RevisionProvenance } from '#revision-authority.js';
 import { decodeCommit, decodeTag, encodeCommit, encodeTag } from '#git-objects.js';
 import type { DecodedCommit } from '#git-objects.js';
 import { encodeGitIndex } from '#git-index.js';
-import { concatBytes, digestHex } from '#object-hash.js';
+import { checkoutIdOfBranch } from '#checkout-id.js';
+import { concatBytes } from '#object-hash.js';
 import type { ObjectFormat } from '#object-hash.js';
 import {
   deriveChangeId,
@@ -565,8 +566,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    * W17), so a port that could only name branches could not address half of what
    * its own `push` moves. */
   const refOf = (name: string): string => (name.startsWith('refs/') ? name : `${branchRefPrefix}/${name}`);
-  const checkoutIdOf = (branch: string): string =>
-    digestHex(objectFormat, new TextEncoder().encode(`tau-checkout\0${branch}`)).slice(0, 16);
+  const checkoutIdOf = (branch: string): string => checkoutIdOfBranch(objectFormat, branch);
 
   const readRaw = async (
     oid: string,

@@ -16,11 +16,62 @@ import {
   applyKclWorkspaceEdit,
   jumpToDefinition,
   KclBackend,
+  kclExtensions,
   kclHoverFallback,
   kclImportAt,
   kclLspCompletion,
   symbolCompletion,
 } from '#lib/kcl-language/kcl-codemirror.js';
+
+describe('KCL pending worker requests', () => {
+  it('observes a rejected semantic refresh and keeps the editor usable', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const failure = Promise.withResolvers<LSP.SemanticTokens | undefined>();
+    const client = mock<KclLspClient>();
+    client.textDocumentSemanticTokensFull.mockReturnValue(failure.promise);
+    client.textDocumentFoldingRange.mockResolvedValue([]);
+    const document = new EditorDocument('main.kcl', 'one');
+    const environment: EditorLanguageEnvironment = {
+      session: mock<EditorLanguageEnvironment['session']>(),
+      diagnostics: new EditorDiagnostics(),
+      fileManagerRef: mock<EditorLanguageEnvironment['fileManagerRef']>(),
+      contentService: mock<EditorLanguageEnvironment['contentService']>(),
+      treeService: mock<EditorLanguageEnvironment['treeService']>(),
+      fileManager: mock<EditorLanguageEnvironment['fileManager']>(),
+      navigate: vi.fn(),
+    };
+    const backend = new KclBackend(environment, client);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: document.text,
+        extensions: kclExtensions({
+          backend,
+          document,
+          environment,
+          isDisposed: () => false,
+        }),
+      }),
+      parent: globalThis.document.body,
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(100);
+      failure.reject(new Error('worker crashed'));
+      await vi.waitFor(() => {
+        expect(warn).toHaveBeenCalledWith('[kcl] language service operation failed', expect.any(Error));
+      });
+      expect(error).not.toHaveBeenCalled();
+      view.dispatch({ changes: { from: 3, insert: ' two' } });
+      expect(view.state.doc.toString()).toBe('one two');
+    } finally {
+      view.destroy();
+      warn.mockRestore();
+      error.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe('KCL completion parity', () => {
   function completionView(query: string, options: Completion[]): EditorView {

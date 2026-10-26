@@ -135,6 +135,23 @@ function mappedDiagnostics(
   }));
 }
 
+async function observeKclOperation(
+  operation: Promise<unknown>,
+  document: EditorDocument,
+  isDisposed: () => boolean,
+): Promise<void> {
+  const { version } = document;
+  try {
+    await operation;
+  } catch (error) {
+    if (isDisposed() || document.version !== version) {
+      return;
+    }
+    // oxlint-disable-next-line no-console -- Report a live LSP action failure while preserving the text editor.
+    console.warn('[kcl] language service operation failed', error);
+  }
+}
+
 export class KclBackend {
   readonly #client: KclLspClient;
   readonly #symbols = new KclSymbolService();
@@ -526,7 +543,7 @@ export function kclLspCompletion(
   };
 }
 
-function kclExtensions({
+export function kclExtensions({
   backend,
   document,
   environment,
@@ -612,7 +629,7 @@ function kclExtensions({
             clearTimeout(this.#timer);
           }
           this.#timer = setTimeout(() => {
-            void this.load();
+            void observeKclOperation(this.load(), document, isDisposed);
           }, 100);
         }
         private async load(): Promise<void> {
@@ -714,15 +731,21 @@ function kclExtensions({
     ViewPlugin.fromClass(
       class {
         readonly #unsubscribe: () => void;
+        #destroyed = false;
         public constructor(view: EditorView) {
           this.#unsubscribe = environment.diagnostics.subscribe((event) => {
             if (event.uri === document.uri) {
               view.dispatch(setDiagnostics(view.state, mappedDiagnostics(document, environment)));
             }
           });
-          view.dispatch(setDiagnostics(view.state, mappedDiagnostics(document, environment)));
+          queueMicrotask(() => {
+            if (!this.#destroyed && !isDisposed()) {
+              view.dispatch(setDiagnostics(view.state, mappedDiagnostics(document, environment)));
+            }
+          });
         }
         public destroy(): void {
+          this.#destroyed = true;
           this.#unsubscribe();
         }
       },
@@ -731,35 +754,43 @@ function kclExtensions({
       {
         key: 'F12',
         run(view) {
-          void jumpToDefinition(view, client, { document, environment, symbols });
+          void observeKclOperation(
+            jumpToDefinition(view, client, { document, environment, symbols }),
+            document,
+            isDisposed,
+          );
           return true;
         },
       },
       {
         key: 'Shift-Alt-f',
         run(view) {
-          void formatDocument(view, client, document);
+          void observeKclOperation(formatDocument(view, client, document), document, isDisposed);
           return true;
         },
       },
       {
         key: 'F2',
         run(view) {
-          void renameSymbol(view, client, { document, environment });
+          void observeKclOperation(renameSymbol(view, client, { document, environment }), document, isDisposed);
           return true;
         },
       },
       {
         key: 'Ctrl-Shift-Space',
         run(view) {
-          void showSignature(view, client, { document, effect: signatureEffect });
+          void observeKclOperation(
+            showSignature(view, client, { document, effect: signatureEffect }),
+            document,
+            isDisposed,
+          );
           return true;
         },
       },
       {
         key: 'Mod-.',
         run(view) {
-          void showCodeActions(view, client, { document, environment });
+          void observeKclOperation(showCodeActions(view, client, { document, environment }), document, isDisposed);
           return true;
         },
       },

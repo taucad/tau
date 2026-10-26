@@ -14,6 +14,7 @@ const worker = vi.hoisted(() => ({
 }));
 
 vi.mock('#lib/kcl-language/lsp/kcl-lsp-client.js', () => ({
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Mock the exported LSP client class name.
   KclLspClient: class {
     readonly #onError: (error: Error) => void;
     public constructor(options: { onError?: (error: Error) => void }) {

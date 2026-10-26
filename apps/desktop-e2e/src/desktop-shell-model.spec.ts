@@ -64,6 +64,9 @@ it('matches the shell-authored cube volume', async () => {
 });
 `;
 
+/** The last step the row reached, printed with the turn diagnostics on failure. */
+let phase = 'launch';
+
 /**
  * On a failed turn, print how far the scripted model got: the gateway's tool results so far, any typed tool failure,
  * and the desktop log's last warnings and errors. Reporting only; it never changes a verdict.
@@ -79,6 +82,11 @@ const reportTurnDiagnostics = async (desktop: DesktopSession, gateway: GatewayFi
   console.info(
     'TURN DIAGNOSTICS',
     JSON.stringify({
+      phase,
+      finalTextShown: await desktop.page
+        .getByText(gatewayFixtureFinalText, { exact: true })
+        .count()
+        .catch(() => -1),
       gatewayRequests: requests.length,
       toolResults: gatewayToolResults(requests.slice(-1)).map(({ name, text }) => ({ name, text: text.slice(0, 400) })),
       failedToolResults: failedGatewayToolResults(requests.slice(-1)),
@@ -124,6 +132,7 @@ it('should evaluate, test, capture and export shell-authored bytes through one r
       { name: 'export_model', input: { targetFile: 'main.scad', to: 'glb' } },
     ],
   });
+  phase = 'launch';
   session = await launchDesktopApp({ token });
   const { page } = session;
   await fixture.routeThrough(page);
@@ -133,6 +142,7 @@ it('should evaluate, test, capture and export shell-authored bytes through one r
     await selectKernel(page, 'OpenSCAD');
     await connectPickedFolder(session);
     await selectChatModel(page, gatewayFixtureModelName);
+    phase = 'tool results';
     const slug = await submitPrompt(
       page,
       'Use shell to change the cube to 10 mm, evaluate it, test its volume, capture it and export GLB.',
@@ -141,6 +151,7 @@ it('should evaluate, test, capture and export shell-authored bytes through one r
     await expect
       .poll(() => gatewayToolResults(fixture!.gatewayRequests.slice(-1)).length, { timeout: 600_000 })
       .toBe(7);
+    phase = 'final text';
     expect(failedGatewayToolResults(fixture.gatewayRequests.slice(-1))).toEqual([]);
     await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }), 600_000);
     const root = join(session.pickedDirectory, slug);
@@ -187,6 +198,7 @@ it('should evaluate, test, capture and export shell-authored bytes through one r
     for (const size of sizes) {
       expect(size).toBeCloseTo(0.01, 6);
     }
+    phase = 'captured image';
     await page.getByRole('button', { name: 'Captured images', exact: true }).click();
     await page.getByRole('button', { name: /Captured 1 screenshot of main\.scad/u }).click();
     const image = page.getByRole('img', { name: 'isometric view', exact: true });
@@ -214,9 +226,11 @@ it('should evaluate, test, capture and export shell-authored bytes through one r
         }),
       )
       .toBeGreaterThan(4);
+    phase = 'revision marker';
     const marker = page.locator('[role="status"][aria-label="Turn revision status"]');
     await expect.poll(async () => marker.allTextContents()).toEqual([expect.stringMatching(/^Rev \d+ saved/u)]);
     const eventsPath = join(root, '.tau/chats', activeChatId(page), 'events.jsonl');
+    phase = 'durable settlement';
     const settlements = await finalizedTurns(eventsPath);
     expect(settlements).toHaveLength(1);
     const settlement = settlements[0]!;

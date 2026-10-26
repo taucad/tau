@@ -1,8 +1,23 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, open, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { NodeFsRootRun, NodeFsRootScope } from '@taucad/filesystem/backend/node';
 import { classify } from '@taucad/filesystem/path-registry';
 import { publishShellProjectionEntry, publishShellProjectionFile } from '#shell/shell-projection.js';
+
+const isMissing = (error: unknown): boolean => error instanceof Error && 'code' in error && error.code === 'ENOENT';
+
+/**
+ * Persist directory entries before acknowledging a recoverable conflict.
+ * @param directory - Private journal directory whose entries must reach stable storage.
+ */
+const syncDirectory = async (directory: string): Promise<void> => {
+  const handle = await open(directory, 'r');
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+};
 
 /** One kernel request as the private transport delivers it; only the fields the owner reads. @internal */
 export type ShellProjectionOwnerRequest = Readonly<{
@@ -219,9 +234,10 @@ export const openShellProjectionOwner = async (
       };
       const directory = join(options.journalDirectory, String(conflict.sequence));
       await mkdir(directory, { mode: 0o700 });
-      await writeFile(join(directory, 'shell'), shell ?? empty(), { mode: 0o600 });
+      await writeFile(join(directory, 'shell'), shell ?? empty(), { mode: 0o600, flush: true });
       await writeFile(join(directory, 'authority'), authority instanceof Uint8Array ? authority : empty(), {
         mode: 0o600,
+        flush: true,
       });
       await writeFile(
         join(directory, 'record.json'),
@@ -230,8 +246,10 @@ export const openShellProjectionOwner = async (
           shell: shell === null ? 'absent' : 'bytes',
           authority: authority instanceof Uint8Array ? 'bytes' : (authority ?? 'absent'),
         }),
-        { mode: 0o600 },
+        { mode: 0o600, flush: true },
       );
+      await syncDirectory(directory);
+      await syncDirectory(options.journalDirectory);
       journal.push(conflict);
       journalBytes += size;
       return errno.stale;
@@ -245,7 +263,10 @@ export const openShellProjectionOwner = async (
         let authority: ShellProjectionBytes = null;
         try {
           authority = new Uint8Array(await scope.readFile(generation.origin));
-        } catch {
+        } catch (error) {
+          if (!isMissing(error)) {
+            throw error;
+          }
           authority = null;
         }
         return record(generation, { path: generation.origin, shell: projected, authority });
@@ -277,30 +298,33 @@ export const openShellProjectionOwner = async (
       }
       const current = names.get(path);
       const generation = current === undefined ? undefined : generations.get(current);
-      if (generation?.directory === true) {
-        return current ?? errno.noent;
-      }
       let authority: ShellProjectionBytes;
       try {
         const status = await scope.stat(path);
         if (status.type === 'dir') {
+          if (generation?.directory === true && current !== undefined) {
+            return current;
+          }
           if (current !== undefined) {
             retire(current);
           }
           return mint(path, true, empty());
         }
         authority = new Uint8Array(await scope.readFile(path));
-      } catch {
+      } catch (error) {
+        if (!isMissing(error)) {
+          throw error;
+        }
         authority = null;
-      }
-      if (current !== undefined && generation !== undefined && equal(authority, generation.baseline)) {
-        return current;
       }
       if (authority === null) {
         if (current !== undefined) {
           retire(current, true);
         }
         return errno.noent;
+      }
+      if (current !== undefined && generation !== undefined && equal(authority, generation.baseline)) {
+        return current;
       }
       if (!fits(authority.length)) {
         return errno.nospace;

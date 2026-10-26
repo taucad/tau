@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +11,7 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { openShellProjectionOwner } from '#shell/shell-projection-owner.js';
 import type {
   ShellProjectionConflict,
+  ShellProjectionOwner,
   ShellProjectionOwnerReply,
   ShellProjectionOwnerRequest,
 } from '#shell/shell-projection-owner.js';
@@ -165,7 +166,139 @@ const mountOwner = async (quotaBytes: number) => {
   return { ask, editor, owner, root, journalDirectory };
 };
 
+/** Exercise the actual authority and owner on disk without loading the Linux transport. */
+const withAuthorityOwner = async (
+  operation: (fixture: {
+    owner: ShellProjectionOwner;
+    editor: NodeFsProviderClient;
+    root: string;
+    journalDirectory: string;
+  }) => Promise<void>,
+): Promise<void> => {
+  const sandbox = await realpath(await mkdtemp(join(tmpdir(), 'tau-owner-authority-')));
+  const root = join(sandbox, 'project');
+  const authority = join(sandbox, 'authority');
+  const journalDirectory = join(sandbox, 'journal');
+  await mkdir(join(root, 'docs'), { recursive: true });
+  await mkdir(authority);
+  await writeFile(join(root, 'notes.md'), 'v1');
+  const { port1, port2 } = new MessageChannel();
+  const server = serveNodeFsProvider(port2, {
+    policy: tauPathPolicy,
+    allowRoot: (candidate) => candidate === root,
+    authority: new NodeFsAuthorityHost({ authorityDirectory: () => authority, authorityIdentity: () => root }),
+  });
+  const channel = new NodeFsChannel(port1);
+  try {
+    const owner = await openShellProjectionOwner({ run: server.run, root, quotaBytes: 1024 * 1024, journalDirectory });
+    await operation({ owner, editor: new NodeFsProviderClient(channel, root), root, journalDirectory });
+  } finally {
+    channel.close();
+    await server.close();
+    port2.close();
+    await rm(sandbox, { recursive: true, force: true });
+  }
+};
+
+const ownerRequest = (
+  input: Pick<ShellProjectionOwnerRequest, 'operation' | 'inode'> & Partial<ShellProjectionOwnerRequest>,
+): ShellProjectionOwnerRequest => ({
+  destinationParent: 0n,
+  lookupCount: 0n,
+  offset: 0,
+  length: 0,
+  flags: 0,
+  attributes: 0,
+  ...input,
+});
+
+describe('projection owner through the real authority without FUSE', () => {
+  it('should observe removed directories and a file replacing a directory', async () => {
+    await withAuthorityOwner(async ({ owner, editor }) => {
+      const lookup = ownerRequest({ operation: 'lookup', inode: 1n, name: 'docs' });
+      const before = await owner.handle(lookup);
+      expect(before.entry?.mode).toBe(0o4_0700);
+      await editor.rmdir('docs');
+      expect(await owner.handle(lookup)).toEqual({ error: 2 });
+      await editor.writeFile('docs', 'replacement');
+      const after = await owner.handle(lookup);
+      expect(after.entry?.mode).toBe(0o10_0600);
+      expect(after.entry?.inode).not.toBe(before.entry?.inode);
+      expect(after.entry?.size).toBe(11);
+    });
+  });
+
+  it('should preserve a read error without retiring the known generation', async () => {
+    await withAuthorityOwner(async ({ owner, root }) => {
+      const lookup = ownerRequest({ operation: 'lookup', inode: 1n, name: 'notes.md' });
+      const before = await owner.handle(lookup);
+      await chmod(join(root, 'notes.md'), 0);
+      try {
+        await expect(owner.handle(lookup)).rejects.toMatchObject({ code: 'EACCES' });
+      } finally {
+        await chmod(join(root, 'notes.md'), 0o600);
+      }
+      expect(await owner.handle(lookup)).toEqual(before);
+    });
+  });
+
+  it('should retain both conflicting versions on disk before returning ESTALE', async () => {
+    await withAuthorityOwner(async ({ owner, editor, root, journalDirectory }) => {
+      const before = await owner.handle(ownerRequest({ operation: 'lookup', inode: 1n, name: 'notes.md' }));
+      expect(before.entry).toBeDefined();
+      const { inode } = before.entry!;
+      await editor.writeFile('notes.md', 'editor');
+      const data = new TextEncoder().encode('shell');
+      expect(await owner.handle(ownerRequest({ operation: 'write', inode, data, length: data.length }))).toEqual({
+        error: 116,
+        invalidate: [inode],
+      });
+      expect(await readFile(join(root, 'notes.md'), 'utf8')).toBe('editor');
+      expect(await readFile(join(journalDirectory, '1', 'shell'), 'utf8')).toBe('shell');
+      expect(await readFile(join(journalDirectory, '1', 'authority'), 'utf8')).toBe('editor');
+      expect(JSON.parse(await readFile(join(journalDirectory, '1', 'record.json'), 'utf8'))).toEqual({
+        path: 'notes.md',
+        shell: 'bytes',
+        authority: 'bytes',
+      });
+    });
+  });
+});
+
 describe.runIf(enabled)('projection owner through the FUSE path', () => {
+  it('should preserve an authority read failure rather than report the file as absent', async () => {
+    const { owner, root, ask } = await mountOwner(1024 * 1024);
+    await chmod(join(root, 'notes.md'), 0);
+    try {
+      await expect(
+        owner.handle({
+          operation: 'lookup',
+          inode: 1n,
+          destinationParent: 0n,
+          lookupCount: 0n,
+          offset: 0,
+          length: 0,
+          flags: 0,
+          attributes: 0,
+          name: 'notes.md',
+        }),
+      ).rejects.toMatchObject({ code: 'EACCES' });
+    } finally {
+      await chmod(join(root, 'notes.md'), 0o600);
+    }
+    expect(await ask('cat notes.md')).toBe('v1');
+  }, 30_000);
+
+  it('should retire deleted directory names and replace directory generations with editor files', async () => {
+    const { ask, editor } = await mountOwner(1024 * 1024);
+    expect(await ask('ls docs')).toBe('');
+    await editor.rmdir('docs');
+    const listing = await ask('ls .');
+    expect(listing.split(' ')).not.toContain('docs');
+    await editor.writeFile('docs', 'replacement file');
+    expect(await ask('cat docs')).toBe('replacement file');
+  }, 30_000);
+
   it('converges editor saves as new generations while open descriptors keep theirs', async () => {
     const { ask, editor } = await mountOwner(1024 * 1024);
     expect(await ask('open held notes.md ro')).toBe('ok');

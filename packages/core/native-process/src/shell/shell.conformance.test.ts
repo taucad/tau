@@ -563,6 +563,68 @@ describe.runIf(enabled)('shell conformance', () => {
     },
   );
 
+  conformance(
+    'C17',
+    'an absent reserved path shared by overlapping launches stays covered until the last of them ends',
+    async () => {
+      const project = join(work, 'shared-absent');
+      const sync = join(work, 'shared-sync');
+      mkdirSync(project);
+      mkdirSync(sync);
+      const reserved = join(project, '.tau');
+      const control = join(project, '.git');
+      const filesystem = {
+        readable: [readonly, home],
+        writable: [project, sync],
+        readOnly: [join(reserved, 'chats')],
+        denied: [secret, join(reserved, 'binding.json'), control],
+        masked: [reserved],
+      };
+      const signal = (name: string): string => join(sync, name);
+      const waitFor = (name: string): string => `while [ ! -f ${signal(name)} ]; do sleep 0.02; done`;
+      const until = async (name: string): Promise<void> => {
+        for (let attempt = 0; attempt < 1500 && !existsSync(signal(name)); attempt++) {
+          // oxlint-disable-next-line no-await-in-loop -- a bounded wait for the sandbox's own signal file.
+          await delay(20);
+        }
+        expect(existsSync(signal(name)), name).toBe(true);
+      };
+      // The first launch stays up while the second is configured, then ends before the second writes.
+      const first = run(`printf ready > ${signal('first-ready')}; ${waitFor('first-release')}; printf FIRST`, {
+        filesystem,
+        workingDirectory: project,
+        commandId: 'conformance#c17-first',
+      });
+      await until('first-ready');
+      const second = run(
+        [
+          `printf ready > ${signal('second-ready')}`,
+          waitFor('second-write'),
+          'mkdir -p .tau 2>/dev/null && printf LEAK > .tau/leak 2>/dev/null',
+          'printf LEAK > .tau/binding.json 2>/dev/null',
+          'printf LEAK > .git 2>/dev/null',
+          'printf SECOND',
+        ].join('; '),
+        { filesystem, workingDirectory: project, commandId: 'conformance#c17-second' },
+      );
+      await until('second-ready');
+      writeFileSync(signal('first-release'), '');
+      const ended = await first;
+      expect(ended.exitCode, ended.stderr).toBe(0);
+      expect(ended.stdout).toBe('FIRST');
+      writeFileSync(signal('second-write'), '');
+      const written = await second;
+      expect(written.exitCode, written.stderr).toBe(0);
+      expect(written.stdout).toBe('SECOND');
+      expect(existsSync(join(reserved, 'leak'))).toBe(false);
+      expect(existsSync(join(reserved, 'binding.json'))).toBe(false);
+      expect(existsSync(control) ? readFileSync(control, 'utf8') : 'absent').not.toContain('LEAK');
+      // Nothing either launch relied on is left behind on the host.
+      expect(existsSync(reserved)).toBe(false);
+      expect(existsSync(control)).toBe(false);
+    },
+  );
+
   conformance('C03', 'startup hooks are refused and the shell sees only the environment it was given', async () => {
     const positive = await run('printf %s "$GIVEN"', {
       environment: { PATH: '/usr/bin:/bin', HOME: work, LANG: 'C', GIVEN: 'GIVEN-VALUE' },

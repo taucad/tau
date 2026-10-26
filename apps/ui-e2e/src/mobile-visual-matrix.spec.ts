@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
@@ -37,6 +37,44 @@ const portraitViewports = [
   { width: 390, height: 844 },
 ] as const;
 const themes = ['Light', 'Dark', 'Black', 'High Contrast'] as const;
+
+/** Retain navigation, layout and renderer evidence before the failed case's target closes. */
+afterEach(async (context) => {
+  if (context.task.result?.state !== 'fail') {
+    return;
+  }
+  const name = `mobile-matrix-failure-${context.task.id}`;
+  const page = await target.evaluate(() => ({
+    href: location.href,
+    readyState: document.readyState,
+    visibilityState: document.visibilityState,
+    navigation: performance.getEntriesByType('navigation').map((entry) => ({
+      name: entry.name,
+      startTime: entry.startTime,
+      duration: entry.duration,
+    })),
+    dialogs: [...document.querySelectorAll('[role="dialog"]')].map((dialog) => ({
+      label: dialog.getAttribute('aria-label'),
+      rect: {
+        x: dialog.getBoundingClientRect().x,
+        y: dialog.getBoundingClientRect().y,
+        width: dialog.getBoundingClientRect().width,
+        height: dialog.getBoundingClientRect().height,
+      },
+      text: dialog.textContent.slice(0, 2000),
+    })),
+    animations: document.getAnimations().map((animation) => ({
+      state: animation.playState,
+      timing: animation.effect?.getComputedTiming(),
+    })),
+  }));
+  const diagnostics = await target.commands.uiCaptureTargetDiagnostics();
+  await target.writeArtifact(
+    `${name}.json`,
+    JSON.stringify({ test: context.task.name, page, ...diagnostics, screenshot: undefined }, null, 2),
+  );
+  await target.screenshot(undefined, `${name}.png`);
+});
 
 const topBar = (): Locator => selectors.getByCss('[data-slot="mobile-project-top-bar"]');
 const titleButton = (): Locator => selectors.getByCss('[data-slot="project-title-button"]');
@@ -602,9 +640,11 @@ const openDialogs = async (): Promise<number> =>
   );
 
 const chooseTheme = async (theme: (typeof themes)[number]): Promise<void> => {
-  const url = new URL(await target.currentUrl());
-  url.searchParams.set('settings', 'general');
-  await target.navigate(`${url.pathname}${url.search}`);
+  await target.click(selectors.getByRole('button', { name: 'Open sidebar', exact: true }), { touch: true });
+  const sidebar = selectors.getByRole('dialog', { name: 'Sidebar' });
+  await target.expectVisible(sidebar);
+  await target.click(sidebar.getByRole('button', { name: 'Account', exact: true }), { touch: true });
+  await target.click(selectors.getByRole('menuitem', { name: 'Settings', exact: true }), { touch: true });
   const settings = selectors.getByRole('dialog', { name: /^settings$/iu });
   await target.expectVisible(settings, 60_000);
   const themeButton = selectors.getByRole('button', { name: /^(?:light|dark|black|high contrast|system)$/iu });

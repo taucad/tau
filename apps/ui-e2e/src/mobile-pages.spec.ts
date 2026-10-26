@@ -3,7 +3,7 @@ import { describe, expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import { phoneViewports } from '#support/phone-shell.js';
+import { openFromAll, phoneViewports, surface } from '#support/phone-shell.js';
 import type { PhoneViewport } from '#support/phone-shell.js';
 import {
   auditPhonePage,
@@ -177,10 +177,20 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
         }
       };
       const root = await navigator.storage.getDirectory();
+      const original = await root.getDirectoryHandle('project-navigation-a');
+      const originalMarker = await original.getFileHandle('chosen-folder.md', { create: true });
+      const originalWriter = await originalMarker.createWritable();
+      await originalWriter.write('# Original folder content');
+      await originalWriter.close();
       await copy(
         await root.getDirectoryHandle('project-navigation-a'),
         await root.getDirectoryHandle('project-navigation-a-copy', { create: true }),
       );
+      const copied = await root.getDirectoryHandle('project-navigation-a-copy');
+      const copiedMarker = await copied.getFileHandle('chosen-folder.md');
+      const copiedWriter = await copiedMarker.createWritable();
+      await copiedWriter.write('# Chosen copy content');
+      await copiedWriter.close();
     });
     await target.navigate('/projects');
     const conflicts = selectors.getByRole('group', { name: 'Project conflicts' });
@@ -211,6 +221,13 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
     );
     await target.expectCount(selectors.getByText(/^Could not open /u), 0);
     await target.expectVisible(selectors.getByRole('link', { name: `Open ${seededProjects[0]}`, exact: true }));
+    await target.click(selectors.getByRole('link', { name: `Open ${seededProjects[0]}`, exact: true }), { touch: true });
+    await target.expectUrl(/\/w\/[^/]+\/project-navigation-a-copy(?:[/?#]|$)/u, 60_000);
+    await waitForStageReady();
+    await openFromAll('Files');
+    await target.click(surface('Files').getByText('chosen-folder.md', { exact: true }), { touch: true });
+    await target.expectVisible(selectors.getByRole('heading', { name: 'Chosen copy content', exact: true }), 60_000);
+    await target.expectCount(selectors.getByRole('heading', { name: 'Original folder content', exact: true }), 0);
   });
 
   test('PG-COM-2: a community search with no match names it and Clear filters restores every example', async () => {

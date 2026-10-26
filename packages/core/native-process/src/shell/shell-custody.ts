@@ -408,6 +408,31 @@ export const createShellCustody = (
       });
     }
   };
+  /*
+   * This owner still holds the lock: a preparation that never launched, a launch whose handoff failed, or a stopped
+   * claim being replayed. Holding the lock is exclusive custody, so an armed record is confirmed stopped here too.
+   */
+  const recoverOwned = async (executionId: string, observed: CustodyRecord): Promise<ShellRecovery> => {
+    try {
+      const { record, ownership } = await current(executionId);
+      if (record.phase === 'stopped') {
+        return { ...metadata(record), status: 'stopped' };
+      }
+      await validateRoots(record);
+      if (record.phase === 'armed') {
+        await confirmArmedStopped(record);
+      }
+      const stopped: CustodyRecord = { ...record, phase: 'stopped' };
+      await persist(stopped, ownership);
+      return { ...metadata(stopped), status: 'stopped' };
+    } catch (error) {
+      return {
+        ...metadata(observed),
+        status: 'blocked',
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
   const ensureOpen = (): void => {
     if (state.closed) {
       throw new Error('Shell custody provider is closed.');
@@ -494,11 +519,11 @@ export const createShellCustody = (
         return Promise.all(
           [...new Set(executionIds)].map(async (executionId): Promise<ShellRecovery> => {
             const record = await read(executionId);
+            if (held.has(executionId)) {
+              return recoverOwned(executionId, record);
+            }
             let ownership: HeldCustody | undefined;
             try {
-              if (held.has(executionId)) {
-                throw new Error('Shell execution is already owned.');
-              }
               ownership = {
                 lock: await acquireCustodyLock({ directory: await directory(), executionId }),
                 token: randomUUID(),

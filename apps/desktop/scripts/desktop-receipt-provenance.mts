@@ -58,19 +58,26 @@ export const verifyDesktopReceiptProvenance = (
   return { id: artifact.id, digest: artifact.digest.slice('sha256:'.length) };
 };
 
-/** The fixed producer workflows are qualification gates, not assembly fixtures; absent producers fail closed. */
+/**
+ * The fixed producer workflows are qualification gates, not assembly fixtures; absent producers fail closed. Only a
+ * staging Mac-only publication may omit the VM run, recording clean-host acceptance as pending; a VM run that is named
+ * is authenticated exactly as before.
+ */
 export const fetchDesktopQualifiedReceipts = async (
   manifest: DesktopArtifactManifest,
   root: string,
-  runs: { ci: string; vm: string; scope?: DesktopPublicationScope },
+  runs: { ci: string; vm?: string | undefined; scope?: DesktopPublicationScope },
 ): Promise<unknown[]> => {
   const scope = runs.scope ?? 'all';
+  if (runs.vm === undefined && (scope !== 'macos' || manifest.channel !== 'staging')) {
+    throw new Error('Clean-host VM acceptance run is required outside staging Mac-only publication');
+  }
   const api = (path: string): Uint8Array<ArrayBuffer> =>
     Uint8Array.from(
       execFileSync('gh', ['api', `repos/taucad/tau/${path}`], { maxBuffer: 8 * 1024 * 1024, timeout: 60_000 }),
     );
   const receipts: unknown[] = [];
-  for (const environment of ['ci', 'vm'] as const) {
+  for (const environment of runs.vm === undefined ? (['ci'] as const) : (['ci', 'vm'] as const)) {
     const id = z
       .string()
       .regex(/^[1-9]\d*$/u)
@@ -105,6 +112,14 @@ export const fetchDesktopQualifiedReceipts = async (
       const receipt = parseDesktopAcceptanceReceipt(input, manifest);
       if (receipt.environment.kind !== environment) {
         throw new Error('Receipt kind differs from trusted producer');
+      }
+      // The Mac clean-host producer writes only its own suite, with host facts the receipt parser already required.
+      if (
+        environment === 'vm' &&
+        scope === 'macos' &&
+        (receipt.suite !== 'clean-host-route-a-b-c-v1' || !receipt.environment.host)
+      ) {
+        throw new Error('Clean-host receipt lacks its producer suite or host facts');
       }
       receipts.push(receipt);
     }

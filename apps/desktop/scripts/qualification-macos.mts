@@ -10,6 +10,14 @@ import { z } from 'zod';
 import { parseDesktopArtifactManifest } from '#shared/desktop-release.js';
 /* oxlint-disable no-restricted-imports -- Native qualification scripts share the external collector contract. */
 import { createQualificationReinstallGuard, QualificationUnavailable } from './qualification-platform-types.mjs';
+import { assertMacosCleanHost, macosCleanHostApplication } from './qualification-evidence.mjs';
+import type {
+  MacosCleanHost,
+  MacosCleanInstall,
+  MacosCleanLaunch,
+  QualificationCleanHostAcceptance,
+} from './qualification-evidence.mjs';
+import { launchMacosApplication, readMacosQuarantine } from './qualification-macos-host.mjs';
 import type {
   QualificationCandidate,
   QualificationDriverOptions,
@@ -108,26 +116,68 @@ const metadataSchema = z.object({
 /** Admission mirrors desktopManifestFields: production and disabled overrides are omitted. */
 export const macosQualificationPackageSchema = metadataSchema;
 
+/** Clean-host mode: candidate bytes arrive through a real browser and the app is installed into /Applications. */
+export type MacosCleanHostOptions = {
+  host: MacosCleanHost;
+  /** Loopback mirror origin that serves the exact candidate artifacts. */
+  origin: string;
+  /** Run-owned directory for browser downloads and extraction. */
+  directory: string;
+  download(options: { url: string; directory: string; name: string }): Promise<{ path: string; browser: string }>;
+};
+/** Copy or move without ever stripping the quarantine attribute. */
+const installedQuarantine = (path: string): string => {
+  const value = readMacosQuarantine(path);
+  if (!value) {
+    throw new Error('Clean-host installation lost com.apple.quarantine');
+  }
+  return value;
+};
+/** Network-denied stapler run: the stapled ticket alone must validate. */
+const offlineStaple = (path: string): string =>
+  command('/usr/bin/sandbox-exec', [
+    '-p',
+    '(version 1)(allow default)(deny network*)',
+    '/usr/bin/xcrun',
+    'stapler',
+    'validate',
+    path,
+  ]);
+
 /** Initial installation only; later observations never replace the installed application. */
 export const createMacosQualificationDriver = (
   options: QualificationDriverOptions & {
     architecture: 'arm64' | 'x64';
     teamId: string;
     installFormat: 'zip' | 'dmg';
+    cleanHost?: MacosCleanHostOptions;
   },
-): QualificationPlatformDriver => {
+): QualificationPlatformDriver & {
+  launch?(stage: MacosCleanLaunch['stage'], args: readonly string[], env: Record<string, string>): Promise<number>;
+  acceptance?(): QualificationCleanHostAcceptance;
+} => {
   host(options.architecture);
   const application = resolve(options.installationPath);
   const parent = dirname(application);
   const applications = join(homedir(), 'Applications');
-  if (
+  const { cleanHost } = options;
+  if (cleanHost) {
+    if (options.mode !== 'release' || application !== macosCleanHostApplication) {
+      throw new Error('Clean-host acceptance installs a release candidate at /Applications/Tau.app only');
+    }
+    assertMacosCleanHost(cleanHost.host, options.architecture);
+  } else if (
     basename(application) !== 'Tau.app' ||
     dirname(parent) !== applications ||
-    !/^tau-qualification-[a-f\d-]{36}$/u.test(basename(parent)) ||
-    !/^[A-Z\d]{10}$/u.test(options.teamId)
+    !/^tau-qualification-[a-f\d-]{36}$/u.test(basename(parent))
   ) {
     throw new Error('Mac qualification requires an isolated UUID application directory and exact Apple team');
   }
+  if (!/^[A-Z\d]{10}$/u.test(options.teamId)) {
+    throw new Error('Mac qualification requires an isolated UUID application directory and exact Apple team');
+  }
+  const installs: MacosCleanInstall[] = [];
+  const launches: MacosCleanLaunch[] = [];
   const lifecycle = createQualificationReinstallGuard();
   let initialInstalled = false;
   let created = false;
@@ -216,8 +266,95 @@ export const createMacosQualificationDriver = (
       },
     };
   };
+  /** Browser download, quarantine-preserving mount/copy or extract/move into /Applications, then Gatekeeper and offline staple. */
+  const installCleanHost = async (
+    candidate: QualificationCandidate,
+    settings: MacosCleanHostOptions,
+  ): Promise<string> => {
+    const format = options.installFormat;
+    await verifyMacosQualificationArtifact(candidate, options.architecture, format);
+    const manifest = parseDesktopArtifactManifest(candidate.manifest);
+    const artifact = manifest.artifacts.find(
+      (entry) => entry.kind === `macos-${format}` && entry.target === `darwin-${options.architecture}`,
+    )!;
+    const existing = await lstat(application).catch((error: unknown) => {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        return undefined;
+      }
+      throw error;
+    });
+    if (existing) {
+      throw new Error('Clean-host acceptance refuses an existing /Applications/Tau.app');
+    }
+    const directory = await realpath(await mkdtemp(join(settings.directory, 'download-')));
+    const url = `${settings.origin}/releases/${encodeURIComponent(manifest.tag)}/${artifact.name}`;
+    const downloaded = await settings.download({ url, directory, name: artifact.name });
+    const info = await lstat(downloaded.path);
+    const downloadSha256 = await hashFile(downloaded.path);
+    if (info.size !== artifact.size || downloadSha256 !== artifact.sha256) {
+      throw new Error('Browser-downloaded bytes differ from the candidate manifest');
+    }
+    const downloadQuarantine = readMacosQuarantine(downloaded.path);
+    if (!downloadQuarantine) {
+      throw new Error('Browser download lacks com.apple.quarantine; this host cannot produce clean-host evidence');
+    }
+    let ejected: boolean | undefined;
+    if (format === 'zip') {
+      // Archive Utility-equivalent extraction: ditto propagates the archive's quarantine to every extracted file.
+      extractZip(downloaded.path, join(directory, 'extracted'));
+      command('/bin/mv', [join(directory, 'extracted', 'Tau.app'), application]);
+    } else {
+      verifyTrust(downloaded.path, true);
+      const mount = await realpath(await mkdtemp(join(directory, 'volume-')));
+      let mounted = false;
+      try {
+        command('/usr/bin/hdiutil', ['attach', '-readonly', '-nobrowse', '-mountpoint', mount, downloaded.path]);
+        mounted = true;
+        // Drag-equivalent copy: ditto keeps extended attributes, including quarantine, by default.
+        command('/usr/bin/ditto', [join(mount, 'Tau.app'), application]);
+      } finally {
+        if (mounted) {
+          command('/usr/bin/hdiutil', ['detach', mount]);
+          ejected = !command('/sbin/mount', []).includes(` on ${mount} `);
+        }
+      }
+    }
+    created = true;
+    const quarantine = installedQuarantine(application);
+    const assessment = command('/usr/sbin/spctl', ['-a', '-vv', '-t', 'exec', application]);
+    if (!/: accepted$/mu.test(assessment) || !/^source=Notarized Developer ID$/mu.test(assessment)) {
+      throw new Error('Gatekeeper did not accept the installed app as Notarized Developer ID');
+    }
+    installs.push({
+      stage: installs.length === 0 ? 'initial' : 'reinstall',
+      format,
+      artifact: { name: artifact.name, sha256: artifact.sha256, size: artifact.size },
+      download: {
+        browser: downloaded.browser,
+        url,
+        sha256: downloadSha256,
+        size: info.size,
+        quarantine: downloadQuarantine,
+      },
+      installedPath: application,
+      installedQuarantine: quarantine,
+      ...(ejected === undefined ? {} : { ejected }),
+      assessment,
+      staple: offlineStaple(application),
+    });
+    await rm(directory, { recursive: true, force: true });
+    return downloaded.path;
+  };
   const installCandidate = async (candidate: QualificationCandidate): Promise<QualificationInstallation> => {
     host(options.architecture);
+    if (cleanHost) {
+      await installCleanHost(candidate, cleanHost);
+      lifecycle.installed();
+      const artifact = parseDesktopArtifactManifest(candidate.manifest).artifacts.find(
+        (entry) => entry.kind === `macos-${options.installFormat}` && entry.target === `darwin-${options.architecture}`,
+      )!;
+      return { ...(await observe(candidate)), artifactSha256: artifact.sha256 };
+    }
     const artifact = await verifyMacosQualificationArtifact(candidate, options.architecture, options.installFormat);
     await mkdir(applications, { recursive: true });
     if ((await realpath(applications)) !== applications) {
@@ -248,6 +385,22 @@ export const createMacosQualificationDriver = (
   };
   return {
     observe,
+    ...(cleanHost
+      ? {
+          async launch(stage: MacosCleanLaunch['stage'], args: readonly string[], env: Record<string, string>) {
+            host(options.architecture);
+            const launched = await launchMacosApplication({ stage, args, env });
+            launches.push(launched);
+            return launched.pid;
+          },
+          acceptance: (): QualificationCleanHostAcceptance => ({
+            kind: 'vm',
+            host: cleanHost.host,
+            installs: [...installs],
+            launches: [...launches],
+          }),
+        }
+      : {}),
     async install(candidate) {
       if (initialInstalled) {
         throw new Error('Mac driver installs initial baseline only');
@@ -334,10 +487,18 @@ int main(int argc,char **argv) { if(argc!=2) return 2; pid_t pid=(pid_t)strtol(a
           }
         }),
       );
-      if (!created || (await realpath(parent)) !== parent) {
-        throw new Error('Mac removal lacks owned installation');
+      if (cleanHost) {
+        // Only the app this run installed; /Applications itself is never owned.
+        if (!created || (await realpath(application)) !== application) {
+          throw new Error('Mac removal lacks owned installation');
+        }
+        await rm(application, { recursive: true });
+      } else {
+        if (!created || (await realpath(parent)) !== parent) {
+          throw new Error('Mac removal lacks owned installation');
+        }
+        await rm(parent, { recursive: true });
       }
-      await rm(parent, { recursive: true });
       created = false;
       await Promise.all(
         preservedFiles.map(async (file) => {

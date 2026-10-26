@@ -1,10 +1,11 @@
-/** Convert independently collected native observations into one CI receipt; fixture data never qualifies a release. */
+/** Convert independently collected native observations into one CI or clean-host receipt; fixture data never qualifies a release. */
 import { z } from 'zod';
 import { linuxInstallation } from '#shared/linux-installation.js';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import {
   desktopAcceptanceRoutes,
+  macosQuarantinePattern,
   parseDesktopAcceptanceReceipt,
   parseDesktopArtifactManifest,
 } from '#shared/desktop-release.js';
@@ -68,6 +69,63 @@ export const qualificationRendererObservationSchema = z.strictObject({
   saveObservedAt: z.number().positive(),
 });
 export type QualificationRendererObservation = z.infer<typeof qualificationRendererObservationSchema>;
+/** Raw host observations taken before the clean-host run touches the machine. */
+export const macosCleanHostSchema = z.strictObject({
+  runner: z.string().min(1),
+  productVersion: z.string(),
+  /** `uname -m`. */
+  machine: z.string(),
+  /** `sysctl -n hw.optional.arm64`, or `absent` when the OID does not exist. */
+  arm64: z.string(),
+  /** `sysctl -n sysctl.proc_translated`, or `absent` when the OID does not exist. */
+  translated: z.string(),
+  /** `csrutil status`. */
+  sip: z.string(),
+  /** `spctl --status`. */
+  gatekeeper: z.string(),
+  /** Prior Tau installations or profiles found at start; a clean host has none. */
+  existing: z.array(z.string()),
+});
+export type MacosCleanHost = z.infer<typeof macosCleanHostSchema>;
+/** One browser-downloaded, quarantined installation into /Applications. */
+export const macosCleanInstallSchema = z.strictObject({
+  stage: z.enum(['initial', 'reinstall']),
+  format: z.enum(['zip', 'dmg']),
+  artifact: z.strictObject({ name: z.string().min(1), sha256: digest, size: z.number().int().positive() }),
+  download: z.strictObject({
+    browser: z.string().min(1),
+    url: z.url(),
+    sha256: digest,
+    size: z.number().int().positive(),
+    quarantine: z.string(),
+  }),
+  installedPath: z.string(),
+  installedQuarantine: z.string(),
+  /** DMG only: the image was detached after the copy, so the app never runs from the mounted volume. */
+  ejected: z.boolean().optional(),
+  /** `spctl -a -vv -t exec` on the installed app. */
+  assessment: z.string(),
+  /** `stapler validate` on the installed app with network denied. */
+  staple: z.string(),
+});
+export type MacosCleanInstall = z.infer<typeof macosCleanInstallSchema>;
+/** One LaunchServices launch of the installed app through `open`, answering Gatekeeper's first-launch prompt as a user would. */
+export const macosCleanLaunchSchema = z.strictObject({
+  stage: z.enum(['initial', 'reinstall']),
+  via: z.literal('open'),
+  application: z.string(),
+  pid: z.number().int().positive(),
+  prompt: z.enum(['approved', 'absent']),
+  quarantineBefore: z.string(),
+  quarantineAfter: z.string(),
+});
+export type MacosCleanLaunch = z.infer<typeof macosCleanLaunchSchema>;
+export type QualificationCleanHostAcceptance = {
+  kind: 'vm';
+  host: MacosCleanHost;
+  installs: readonly MacosCleanInstall[];
+  launches: readonly MacosCleanLaunch[];
+};
 export type QualificationStageEvidence = {
   candidate: DesktopArtifactManifest;
   installed: QualificationInstallation;
@@ -111,11 +169,123 @@ export type QualificationEvidence = {
   logs: string;
   suite: string;
   trustIdentity: string;
+  /** Present only for a clean-host run; its receipt is `kind: 'vm'` and carries the observed host facts. */
+  acceptance?: QualificationCleanHostAcceptance;
 };
 const requireEvidence = (condition: boolean, message: string): void => {
   if (!condition) {
     throw new Error(`Qualification undecided: ${message}`);
   }
+};
+export const macosCleanHostApplication = '/Applications/Tau.app';
+const macosSipEnabled = 'System Integrity Protection status: enabled.';
+const macosGatekeeperEnabled = 'assessments enabled';
+
+/** Shared with the driver's preflight so a run on an unqualified host stops before it installs anything. */
+export const assertMacosCleanHost = (input: MacosCleanHost, architecture: 'arm64' | 'x64'): MacosCleanHost => {
+  const host = macosCleanHostSchema.parse(input);
+  requireEvidence(host.sip.trim() === macosSipEnabled, 'clean host requires System Integrity Protection enabled');
+  requireEvidence(host.gatekeeper.trim() === macosGatekeeperEnabled, 'clean host requires Gatekeeper assessments');
+  requireEvidence(
+    architecture === 'arm64'
+      ? host.machine.trim() === 'arm64' && host.arm64.trim() === '1' && host.translated.trim() === '0'
+      : host.machine.trim() === 'x86_64' &&
+          ['0', 'absent'].includes(host.arm64.trim()) &&
+          ['0', 'absent'].includes(host.translated.trim()),
+    'clean host is not the native architecture (Rosetta or mismatched hardware)',
+  );
+  requireEvidence(/^\d+(?:\.\d+){1,2}$/u.test(host.productVersion.trim()), 'macOS product version missing');
+  requireEvidence(host.existing.length === 0, 'clean host already has a Tau installation or profile');
+  return host;
+};
+const quarantined = (value: string): boolean => macosQuarantinePattern.test(value.trim());
+
+/** Every clean-host fact the receipt claims is re-derived here from raw observations; nothing is caller-asserted. */
+const cleanHostReceiptFacts = (
+  input: QualificationEvidence,
+  acceptance: QualificationCleanHostAcceptance,
+): NonNullable<DesktopAcceptanceReceipt['environment']['host']> => {
+  requireEvidence(
+    input.route.startsWith('macos-') && input.target.startsWith('darwin-'),
+    'clean-host acceptance is defined for Mac routes only',
+  );
+  const architecture = input.target === 'darwin-arm64' ? 'arm64' : 'x64';
+  const host = assertMacosCleanHost(acceptance.host, architecture);
+  const [a, , c] = input.stages;
+  const format = input.route === 'macos-dmg' ? 'dmg' : 'zip';
+  const installs = acceptance.installs.map((entry) => macosCleanInstallSchema.parse(entry));
+  const launches = acceptance.launches.map((entry) => macosCleanLaunchSchema.parse(entry));
+  requireEvidence(
+    installs.length === 2 && installs[0]?.stage === 'initial' && installs[1]?.stage === 'reinstall',
+    'clean-host initial and reinstall installations required',
+  );
+  for (const [install, stage] of [
+    [installs[0]!, a],
+    [installs[1]!, c],
+  ] as const) {
+    const artifact = stage.candidate.artifacts.find(
+      (entry) => entry.target === input.target && entry.kind === `macos-${format}`,
+    );
+    requireEvidence(
+      install.format === format &&
+        artifact !== undefined &&
+        install.artifact.name === artifact.name &&
+        install.artifact.sha256 === artifact.sha256 &&
+        install.artifact.size === artifact.size &&
+        install.download.sha256 === artifact.sha256 &&
+        install.download.size === artifact.size &&
+        new URL(install.download.url).pathname ===
+          `/releases/${encodeURIComponent(stage.candidate.tag)}/${artifact.name}`,
+      'browser download is not the exact candidate artifact',
+    );
+    requireEvidence(quarantined(install.download.quarantine), 'browser download lacks com.apple.quarantine');
+    requireEvidence(
+      install.installedPath === macosCleanHostApplication && quarantined(install.installedQuarantine),
+      'installed application lost quarantine or is outside /Applications',
+    );
+    requireEvidence(format === 'zip' || install.ejected === true, 'disk image was not ejected before launch');
+    requireEvidence(
+      /: accepted$/mu.test(install.assessment) && /^source=Notarized Developer ID$/mu.test(install.assessment),
+      'Gatekeeper did not accept the installed app as Notarized Developer ID',
+    );
+    requireEvidence(/The validate action worked!/u.test(install.staple), 'offline stapled ticket validation missing');
+  }
+  requireEvidence(
+    launches.length === 2 &&
+      launches[0]?.stage === 'initial' &&
+      launches[0].pid === a.probe.pid &&
+      launches[1]?.stage === 'reinstall' &&
+      launches[1].pid === input.lifecycle.reinstall.mainPid &&
+      launches.every(
+        (launch) => launch.application === macosCleanHostApplication && quarantined(launch.quarantineBefore),
+      ),
+    'installed app was not launched quarantined from /Applications through LaunchServices',
+  );
+  for (const stage of input.stages) {
+    requireEvidence(
+      stage.installed.executablePath === `${macosCleanHostApplication}/Contents/MacOS/Tau` &&
+        (stage.security.measurements['sip'] ?? '').trim() === macosSipEnabled &&
+        (stage.security.measurements['gatekeeper'] ?? '').trim() === macosGatekeeperEnabled,
+      'clean-host security defaults changed during the run',
+    );
+  }
+  return {
+    platform: 'darwin',
+    runner: host.runner,
+    productVersion: host.productVersion.trim(),
+    nativeArch: architecture,
+    translated: false,
+    sip: 'enabled',
+    gatekeeper: 'enabled',
+    quarantine: {
+      downloaded: installs[0]!.download.quarantine.trim(),
+      installed: installs[0]!.installedQuarantine.trim(),
+    },
+    assessment: 'Notarized Developer ID',
+    staple: 'validated-offline',
+    installedPath: macosCleanHostApplication,
+    launch: 'open',
+  };
 };
 const equalInstallation = (left: QualificationInstallation, right: QualificationInstallation): boolean =>
   left.route === right.route &&
@@ -519,6 +689,7 @@ export const collectQualificationReceipt = (input: QualificationEvidence): Deskt
     (artifact) => artifact.target === input.target && kinds.includes(artifact.kind),
   );
   requireEvidence(baseline !== undefined, 'baseline artifact missing');
+  const host = input.acceptance ? cleanHostReceiptFacts(input, input.acceptance) : undefined;
   return parseDesktopAcceptanceReceipt(
     {
       schemaVersion: 1,
@@ -535,8 +706,9 @@ export const collectQualificationReceipt = (input: QualificationEvidence): Deskt
       environment: {
         os: c.security.osVersion,
         arch: input.target.endsWith('arm64') ? 'arm64' : 'x64',
-        kind: 'ci',
+        kind: host ? 'vm' : 'ci',
         sandbox: 'enabled',
+        ...(host ? { host } : {}),
       },
       trust: { kind: 'release', identity: input.trustIdentity },
       checks: { cleanInstall: true, upgrade: true, dataPreserved: true },

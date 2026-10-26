@@ -210,6 +210,27 @@ export const desktopAcceptanceRoutes = {
 } as const satisfies Record<string, readonly DesktopArtifactKind[]>;
 export type DesktopAcceptanceRoute = keyof typeof desktopAcceptanceRoutes;
 
+/** The macOS quarantine xattr: hex flags; hex time; non-empty agent; event id. */
+export const macosQuarantinePattern = /^[\da-f]{4};[\da-f]{8,16};[^;\n]+;[^;\n]*$/iu;
+/** Clean-host facts a Mac `vm` receipt carries; absent defaults (SIP, Gatekeeper, quarantine) are never admitted. */
+const macosCleanHostReceiptSchema = z.strictObject({
+  platform: z.literal('darwin'),
+  runner: z.string().min(1),
+  productVersion: z.string().regex(/^\d+(?:\.\d+){1,2}$/u),
+  nativeArch: z.enum(['arm64', 'x64']),
+  translated: z.literal(false),
+  sip: z.literal('enabled'),
+  gatekeeper: z.literal('enabled'),
+  quarantine: z.strictObject({
+    downloaded: z.string().regex(macosQuarantinePattern),
+    installed: z.string().regex(macosQuarantinePattern),
+  }),
+  assessment: z.literal('Notarized Developer ID'),
+  staple: z.literal('validated-offline'),
+  installedPath: z.literal('/Applications/Tau.app'),
+  launch: z.literal('open'),
+});
+
 const receiptSchema = z.strictObject({
   schemaVersion: z.literal(1),
   status: z.literal('passed'),
@@ -227,6 +248,7 @@ const receiptSchema = z.strictObject({
     arch: z.enum(['arm64', 'x64']),
     kind: z.enum(['ci', 'vm']),
     sandbox: z.literal('enabled'),
+    host: macosCleanHostReceiptSchema.optional(),
   }),
   trust: z.strictObject({ kind: z.enum(['test', 'release']), identity: z.string().min(1) }),
   checks: z.strictObject({ cleanInstall: z.literal(true), upgrade: z.literal(true), dataPreserved: z.literal(true) }),
@@ -248,6 +270,14 @@ export const parseDesktopAcceptanceReceipt = (input: unknown, candidate: unknown
     !receipt.target.endsWith(`-${receipt.environment.arch}`)
   ) {
     throw new TypeError('Acceptance receipt identity disagrees with candidate');
+  }
+  const { host } = receipt.environment;
+  // A Mac clean-host receipt must carry its observed host facts; CI receipts and other platforms never claim them.
+  if (
+    (receipt.environment.kind === 'vm' && receipt.target.startsWith('darwin-') && !host) ||
+    (host && (receipt.environment.kind !== 'vm' || `darwin-${host.nativeArch}` !== receipt.target))
+  ) {
+    throw new TypeError('Clean-host receipt facts disagree with its environment');
   }
   const baseline = receipt.baseline.version.split('.').map(Number);
   const next = receipt.version.split('.').map(Number);

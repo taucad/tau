@@ -195,6 +195,7 @@ describe('@taucad/filesystem node backend containment', () => {
       'node:crypto',
       'node:fs',
       'node:fs/promises',
+      'node:net',
       'node:path',
     ]);
   });

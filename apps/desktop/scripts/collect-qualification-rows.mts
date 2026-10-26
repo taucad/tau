@@ -28,6 +28,8 @@ const scopeRows = (scope: QualificationScope) =>
   scope === 'all' ? rows : rows.filter(([, route]) => route.startsWith(scope === 'linux' ? 'linux-' : 'macos-'));
 const inputSchema = z.strictObject({
   scope: z.enum(scopes).default('all'),
+  /** `vm` collects clean-host acceptance rows from the Mac-only staging producer; never inferred from receipts. */
+  kind: z.enum(['ci', 'vm']).default('ci'),
   candidate: z.unknown(),
   sourceCommit: z.string().regex(/^[a-f\d]{40}$/u),
   channel: z.enum(['staging', 'production']),
@@ -67,6 +69,9 @@ export const collectQualificationRows = (
   if (request.scope !== 'all' && manifest.channel !== 'staging') {
     throw new Error('Platform-scoped evidence is staging qualification only');
   }
+  if (request.kind === 'vm' && (request.scope !== 'macos' || manifest.channel !== 'staging')) {
+    throw new Error('Clean-host receipts come only from the Mac-scoped staging producer');
+  }
   if (request.scope === 'macos') {
     // The final candidate must be exactly the Mac-only candidate that publication will later admit.
     desktopCandidateRoutes(manifest, 'macos');
@@ -86,11 +91,12 @@ export const collectQualificationRows = (
     if (
       receipt.route !== route ||
       receipt.target !== target ||
-      receipt.environment.kind !== 'ci' ||
+      receipt.environment.kind !== request.kind ||
+      (request.kind === 'vm') !== (receipt.environment.host !== undefined) ||
       receipt.trust.kind !== 'release' ||
       !request.trustIdentities[route] ||
       receipt.trust.identity !== request.trustIdentities[route] ||
-      receipt.suite !== 'installed-route-a-b-c-v1' ||
+      receipt.suite !== (request.kind === 'vm' ? 'clean-host-route-a-b-c-v1' : 'installed-route-a-b-c-v1') ||
       receipt.logs !== `https://github.com/taucad/tau/actions/runs/${request.runId}`
     ) {
       throw new Error('Native row identity, signer or workflow evidence differs');
@@ -136,6 +142,7 @@ const main = async (): Promise<void> => {
   });
   const result = collectQualificationRows({
     scope,
+    kind: z.enum(['ci', 'vm']).parse(process.env['TAU_DESKTOP_ACCEPTANCE_KIND'] ?? 'ci'),
     candidate,
     sourceCommit: candidate.sourceCommit,
     channel: required('TAU_QUALIFICATION_CHANNEL'),

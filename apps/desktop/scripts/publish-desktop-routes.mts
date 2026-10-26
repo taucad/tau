@@ -471,9 +471,12 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
   const catalogPath = resolve(root, 'installers.json');
   if (operation === 'promote-routes') {
     const scope = z.enum(desktopPublicationScopes).parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
+    // An omitted VM run is admitted only for staging Mac-only scope, and the catalog then says `vm: 'pending'`.
+    const vmRun = process.env['TAU_ROUTE_VM_RUN_ID'];
     const receipts = await fetchDesktopQualifiedReceipts(manifest, root, {
       ci: required('TAU_ROUTE_CI_RUN_ID'),
-      vm: required('TAU_ROUTE_VM_RUN_ID'),
+      // The dispatch form passes an empty string when the input is left blank.
+      vm: vmRun === '' ? undefined : vmRun,
       scope,
     });
     const trust = z

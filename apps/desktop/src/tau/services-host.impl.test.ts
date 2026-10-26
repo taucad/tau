@@ -443,7 +443,7 @@ public static class Params
   it('should serve the runtime filesystem when main names a trusted root by its physical path', async () => {
     const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-physical-root-'));
     const alias = `${sandbox}-alias`;
-    await symlink(sandbox, alias);
+    await symlink(sandbox, alias, process.platform === 'win32' ? 'junction' : 'dir');
     /* Main admits the spelling the person granted and names the project by its
      * realpath when it mints the kernel's filesystem port. */
     const physical = realpathSync.native(alias);
@@ -620,10 +620,14 @@ describe('createServicesHost — filesystem authority lifetime', () => {
       ]);
       expect([first.status, second.status].sort()).toEqual(['applied', 'conflict']);
 
+      await expect(acquireNodeAuthorityWriter({ authorityRoot: authorityDirectory })).rejects.toMatchObject({
+        code: 'AUTHORITY_ALREADY_OWNED',
+      });
       const quiescence = host.quiesce();
       expect(host.quiesce()).toBe(quiescence);
       await quiescence;
-      expect(existsSync(join(authorityDirectory, 'authority.writer.lock'))).toBe(true);
+      const replacement = await acquireNodeAuthorityWriter({ authorityRoot: authorityDirectory });
+      await replacement.release();
       expect(existsSync(join(root, 'authority.writer.lock'))).toBe(false);
     } finally {
       firstChannel.close();
@@ -673,10 +677,11 @@ describe('createServicesHost — filesystem authority lifetime', () => {
     const alias = `${sandbox}-alias`;
     const authorityDirectory = join(sandbox, 'filesystem-authority');
     await mkdir(authorityDirectory);
-    await symlink(sandbox, alias);
+    await symlink(sandbox, alias, process.platform === 'win32' ? 'junction' : 'dir');
     const writer = await acquireNodeAuthorityWriter({ authorityRoot: authorityDirectory });
     await writer.release();
-    expect(existsSync(join(authorityDirectory, 'authority.writer.lock'))).toBe(true);
+    // Metadata confidentiality is independent of the platform's native ownership endpoint.
+    await writeFile(join(authorityDirectory, 'authority.writer.lock'), 'private authority metadata');
     const host = createServicesHost({ authorityDirectory, log: vi.fn() });
     const connections = [new MessageChannel(), new MessageChannel()];
     host.handleMessage(frame({ type: 'allowRoots', roots: [sandbox, alias] }));

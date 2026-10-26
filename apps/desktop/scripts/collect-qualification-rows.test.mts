@@ -288,6 +288,70 @@ for (const index of mac.rows.keys()) {
   alterMac((receipt) => ({ ...receipt, target: receipt.target === 'darwin-arm64' ? 'darwin-x64' : 'darwin-arm64' }));
   alterMac((receipt) => ({ ...receipt, logs: 'https://github.com/fork/tau/actions/runs/1234' }));
 }
+// Clean-host (vm) rows: only the Mac-scoped staging producer, each with observed host facts and the clean-host suite.
+const cleanHost = (arch: 'arm64' | 'x64') => ({
+  platform: 'darwin',
+  runner: 'local-mac-1',
+  productVersion: '26.0.1',
+  nativeArch: arch,
+  translated: false,
+  sip: 'enabled',
+  gatekeeper: 'enabled',
+  quarantine: {
+    downloaded: '0083;6720a1b2;Chromium;4D3F1C2B-0000-4000-8000-000000000001',
+    installed: '0083;6720a1b2;Chromium;4D3F1C2B-0000-4000-8000-000000000001',
+  },
+  assessment: 'Notarized Developer ID',
+  staple: 'validated-offline',
+  installedPath: '/Applications/Tau.app',
+  launch: 'open',
+});
+const vm = {
+  ...mac,
+  kind: 'vm',
+  rows: mac.rows.map((row) => ({
+    ...row,
+    receipts: row.receipts.map((receipt) => ({
+      ...receipt,
+      suite: 'clean-host-route-a-b-c-v1',
+      environment: { ...receipt.environment, kind: 'vm', host: cleanHost(receipt.environment.arch) },
+    })),
+  })),
+};
+const vmResult = collectQualificationRows(vm);
+assert.ok(vmResult.receipts.every((receipt) => receipt.environment.kind === 'vm' && receipt.environment.host));
+const rejectVm = (change: (value: typeof vm) => unknown): void => {
+  assert.throws(() => collectQualificationRows(change({ ...vm, rows: [...vm.rows] })));
+};
+rejectVm((value) => ({ ...value, scope: 'all' }));
+rejectVm((value) => ({ ...value, channel: 'production' }));
+// A CI receipt can never be collected as clean-host evidence, nor a clean-host receipt as CI.
+rejectVm((value) => ({ ...value, rows: mac.rows }));
+rejectVm((value) => ({ ...value, kind: 'ci' }));
+rejectVm((value) => ({ ...value, rows: value.rows.filter((row) => row.id.endsWith('-arm64')) }));
+for (const index of vm.rows.keys()) {
+  const alterVm = (change: (receipt: DesktopAcceptanceReceipt) => unknown): void => {
+    rejectVm((value) => ({
+      ...value,
+      rows: value.rows.map((row, rowIndex) =>
+        rowIndex === index ? { ...row, receipts: [change(row.receipts[0] as DesktopAcceptanceReceipt)] } : row,
+      ),
+    }));
+  };
+  alterVm((receipt) => ({ ...receipt, suite: 'installed-route-a-b-c-v1' }));
+  alterVm((receipt) => {
+    const { host: _host, ...environment } = receipt.environment;
+    return { ...receipt, environment };
+  });
+  alterVm((receipt) => ({
+    ...receipt,
+    environment: { ...receipt.environment, host: { ...receipt.environment.host, sip: 'disabled' } },
+  }));
+  alterVm((receipt) => ({
+    ...receipt,
+    environment: { ...receipt.environment, host: { ...receipt.environment.host, gatekeeper: 'disabled' } },
+  }));
+}
 const cli = spawnSync(
   process.execPath,
   ['--import', '@oxc-node/core/register', fileURLToPath(new URL('collect-qualification-rows.mts', import.meta.url))],

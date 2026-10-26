@@ -344,18 +344,6 @@ const config: KnipConfig = {
       // `authority-writer-lock.test.ts` forks these by path.
       entry: ['src/backend/node/*.fixture.ts'],
     },
-    'packages/geospec': {
-      entry: [
-        // `test-m3-verdicts` runs both under `node --test`.
-        'host-tests/{m2-browser,m3-corpus}/verdict-host.mjs',
-        // `test-installed-vitest` runs these configs from the consumer that
-        // `scripts:prepare-geospec-test-consumer` stages from this directory.
-        'host-tests/{f1-public-a1,m3-corpus}/vitest.config.mjs',
-      ],
-      // Fixture model sources: the runtime CLI evaluates them to regenerate the committed
-      // STEP corpus, and each fixture manifest records its script as provenance.
-      ignore: ['fixtures/scripts/*/**'],
-    },
     'packages/host': {
       // `runtime-child-render.integration.test.ts` spawns it by path.
       entry: ['src/fixtures/render-child-probe.ts'],

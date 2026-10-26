@@ -17,10 +17,12 @@ import {
 import type { DesktopArtifactKind } from '#shared/desktop-release.js';
 /* oxlint-disable no-restricted-imports -- Test the publication gate itself. */
 import {
+  assertDesktopCatalogRetainsRoutes,
   createDesktopInstallerCatalog,
   createDesktopRouteDescriptor,
   desktopManifestDigest,
   qualifyDesktopRoutes,
+  qualifyDesktopScopedRoutes,
 } from './desktop-route-publication.mjs';
 /* oxlint-enable no-restricted-imports */
 
@@ -255,3 +257,178 @@ assert.throws(() =>
     productionTrust,
   ),
 );
+
+// Mac-only staging scope: both architectures, ZIP and DMG, each with exactly one CI and one VM release receipt.
+const macTargets = ['darwin-arm64', 'darwin-x64'] as const;
+const macWire = (target: (typeof macTargets)[number], kind: 'macos-zip' | 'macos-dmg', sha: string) => {
+  const definition = desktopArtifactKinds[kind];
+  return {
+    kind,
+    target,
+    format: definition.format,
+    roles: [...definition.roles],
+    name: desktopArtifactName({ ...identity, kind, arch: target === 'darwin-arm64' ? 'arm64' : 'x64' }),
+    sha256: sha.repeat(64),
+    sha512: Buffer.alloc(64, 2).toString('base64'),
+    size: 456,
+  };
+};
+const macManifest = parseDesktopArtifactManifest({
+  schemaVersion: 1,
+  tag,
+  ...identity,
+  sourceCommit: manifest.sourceCommit,
+  artifacts: [
+    macWire('darwin-arm64', 'macos-zip', '1'),
+    macWire('darwin-arm64', 'macos-dmg', '2'),
+    macWire('darwin-x64', 'macos-zip', '3'),
+    macWire('darwin-x64', 'macos-dmg', '4'),
+  ],
+});
+const macTrust = { 'macos-zip': 'TEAM123456', 'macos-dmg': 'TEAM123456' };
+const macReceipt = (
+  route: 'macos-zip' | 'macos-dmg',
+  target: (typeof macTargets)[number],
+  environment: 'ci' | 'vm',
+) => ({
+  ...receipt(environment),
+  route,
+  target,
+  artifacts: macManifest.artifacts
+    .filter((artifact) => artifact.target === target && (route === 'macos-dmg' || artifact.kind === 'macos-zip'))
+    .map(({ name, sha256 }) => ({ name, sha256 })),
+  environment: {
+    os: 'Darwin 25.0.0',
+    arch: target === 'darwin-arm64' ? 'arm64' : 'x64',
+    kind: environment,
+    sandbox: 'enabled',
+  },
+  trust: { kind: 'release', identity: macTrust[route] },
+});
+const macReceipts = macTargets.flatMap((target) =>
+  (['macos-zip', 'macos-dmg'] as const).flatMap((route) =>
+    (['ci', 'vm'] as const).map((environment) => macReceipt(route, target, environment)),
+  ),
+);
+type MacProof = (typeof macReceipts)[number];
+const macApproval = { ...approval, manifestSha256: desktopManifestDigest(macManifest) };
+const macCatalog = createDesktopInstallerCatalog({
+  manifest: macManifest,
+  receipts: macReceipts,
+  trust: macTrust,
+  approval: macApproval,
+  scope: 'macos',
+});
+assert.deepEqual(
+  macCatalog.routes.map(({ route, target }) => `${target}/${route}`),
+  ['darwin-arm64/macos-zip', 'darwin-x64/macos-zip'],
+);
+assert.deepEqual(
+  macCatalog.routes.map((route) => route.artifacts.map(({ kind }) => kind)),
+  [
+    ['macos-zip', 'macos-dmg'],
+    ['macos-zip', 'macos-dmg'],
+  ],
+);
+// The `all` scope keeps its original staging-subset admission for the same evidence.
+assert.equal(qualifyDesktopRoutes(macManifest, macReceipts, macTrust).routes.length, 2);
+const rejectMac = (
+  proofs: readonly unknown[],
+  change: { candidate?: unknown; trust?: Record<string, string>; scope?: string } = {},
+): void => {
+  assert.throws(() =>
+    qualifyDesktopScopedRoutes(change.candidate ?? macManifest, proofs, {
+      trust: change.trust ?? macTrust,
+      scope: (change.scope ?? 'macos') as 'macos',
+    }),
+  );
+};
+// Every CI or VM receipt is individually required; single-architecture evidence is refused.
+for (const index of macReceipts.keys()) {
+  rejectMac(macReceipts.filter((_, other) => other !== index));
+}
+for (const remove of [
+  (proof: MacProof) => proof.environment.kind === 'vm',
+  (proof: MacProof) => proof.environment.kind === 'ci',
+  (proof: MacProof) => proof.target === 'darwin-x64',
+  (proof: MacProof) => proof.target === 'darwin-arm64',
+  (proof: MacProof) => proof.route === 'macos-dmg',
+]) {
+  rejectMac(macReceipts.filter((proof) => !remove(proof)));
+}
+rejectMac([...macReceipts, macReceipts[0]]);
+// Wrong channel, source, version, signer or digest on any receipt is refused.
+for (const change of [
+  (proof: MacProof) => ({ ...proof, channel: 'production' }),
+  (proof: MacProof) => ({ ...proof, sourceCommit: 'f'.repeat(40) }),
+  (proof: MacProof) => ({ ...proof, version: '1.1.3' }),
+  (proof: MacProof) => ({ ...proof, installed: { ...proof.installed, version: '1.1.3' } }),
+  (proof: MacProof) => ({ ...proof, trust: { kind: 'release', identity: 'OTHERTEAM1' } }),
+  (proof: MacProof) => ({ ...proof, trust: { kind: 'test', identity: proof.trust.identity } }),
+  (proof: MacProof) => ({ ...proof, artifacts: proof.artifacts.map((item) => ({ ...item, sha256: 'e'.repeat(64) })) }),
+  (proof: MacProof) => ({ ...proof, target: proof.target === 'darwin-arm64' ? 'darwin-x64' : 'darwin-arm64' }),
+]) {
+  for (const index of macReceipts.keys()) {
+    rejectMac(macReceipts.map((proof, other) => (other === index ? change(proof) : proof)));
+  }
+}
+rejectMac(macReceipts, { trust: { ...macTrust, 'macos-dmg': 'OTHERTEAM1' } });
+rejectMac(macReceipts, { trust: { 'macos-zip': macTrust['macos-zip'] } });
+rejectMac(macReceipts, { scope: 'linux' });
+// A single-architecture candidate cannot be published as the Mac-only rollout.
+rejectMac(
+  macReceipts.filter((proof) => proof.target === 'darwin-arm64'),
+  {
+    candidate: {
+      ...macManifest,
+      artifacts: macManifest.artifacts.filter((artifact) => artifact.target === 'darwin-arm64'),
+    },
+  },
+);
+// ZIP without its DMG is not the Mac-only rollout, even though the `all` scope may admit it.
+const zipOnly = {
+  ...macManifest,
+  artifacts: macManifest.artifacts.filter((artifact) => artifact.kind === 'macos-zip'),
+};
+rejectMac(
+  macReceipts.filter((proof) => proof.route === 'macos-zip'),
+  { candidate: zipOnly },
+);
+// The Mac-only scope cannot select a Windows or Linux route, even with complete evidence for it.
+const mixed = parseDesktopArtifactManifest({
+  ...macManifest,
+  artifacts: [...macManifest.artifacts, wireArtifact('windows-nsis'), wireArtifact('windows-zip')],
+});
+const mixedReceipts = [
+  ...macReceipts,
+  { ...receipt('ci'), artifacts: [{ name: mixed.artifacts[4]!.name, sha256: mixed.artifacts[4]!.sha256 }] },
+  { ...receipt('vm'), artifacts: [{ name: mixed.artifacts[4]!.name, sha256: mixed.artifacts[4]!.sha256 }] },
+];
+assert.equal(qualifyDesktopRoutes(mixed, mixedReceipts, { ...macTrust, ...trust }).routes.length, 3);
+rejectMac(mixedReceipts, { candidate: mixed, trust: { ...macTrust, ...trust } });
+rejectMac(mixedReceipts, { trust: { ...macTrust, ...trust } });
+// Production keeps the deliberate all-five-route rule; a Mac-only production candidate never parses or qualifies.
+assert.throws(() =>
+  qualifyDesktopScopedRoutes(
+    { ...macManifest, tag: productionTag, ...productionIdentity },
+    macReceipts.map((proof) => ({ ...proof, tag: productionTag, ...productionIdentity })),
+    { trust: macTrust, scope: 'macos' },
+  ),
+);
+// A narrower catalog cannot withdraw routes a previous promotion advertised; never-promoted platforms stay legacy.
+assertDesktopCatalogRetainsRoutes(undefined, macCatalog);
+assertDesktopCatalogRetainsRoutes(macCatalog, macCatalog);
+assertDesktopCatalogRetainsRoutes({ ...macCatalog, routes: macCatalog.routes.slice(0, 1) }, macCatalog);
+assert.throws(() => {
+  assertDesktopCatalogRetainsRoutes(
+    { ...macCatalog, routes: [...macCatalog.routes, { ...catalog.routes[0]!, target: 'win32-x64' }] },
+    macCatalog,
+  );
+}, /withdraw previously promoted routes: win32-x64\/windows-nsis/u);
+assert.throws(() => {
+  assertDesktopCatalogRetainsRoutes({ ...macCatalog, channel: 'production' }, macCatalog);
+});
+assert.throws(() => {
+  assertDesktopCatalogRetainsRoutes({ tag }, macCatalog);
+});
+console.log('Mac-only scope, CI/VM receipt, architecture and catalog retention checks passed');

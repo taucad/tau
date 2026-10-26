@@ -11,6 +11,11 @@ on:
         type: choice
         options: [promote-routes, renew-routes]
         required: true
+      scope:
+        description: All qualified routes, or a Mac-only staging ZIP/DMG catalog (promotion only)
+        type: choice
+        options: [all, macos]
+        default: all
       tag:
         description: Exact candidate tag (promotion only)
         type: string
@@ -69,6 +74,8 @@ jobs:
       TAU_INSTALLER_CANDIDATE_RUN_ID: ${{ inputs.candidate-run-id }}
       TAU_ROUTE_CI_RUN_ID: ${{ inputs.ci-run-id }}
       TAU_ROUTE_VM_RUN_ID: ${{ inputs.vm-run-id }}
+      # Scheduled renewal has no inputs and renews the completed catalog whatever scope promoted it.
+      TAU_DESKTOP_QUALIFICATION_SCOPE: ${{ inputs.scope || 'all' }}
     steps:
       - name: Select requested channel
         id: selected
@@ -89,20 +96,23 @@ jobs:
       - name: Load protected signing inputs
         if: steps.selected.outputs.run == 'true'
         env:
-          APPIMAGE_PRIVATE_KEY: ${{ secrets.TAU_APPIMAGE_PRIVATE_KEY }}
-          APPIMAGE_PUBLIC_KEYS: ${{ vars.TAU_APPIMAGE_PUBLIC_KEYS }}
-          APT_PRIVATE_KEY_BASE64: ${{ secrets.TAU_APT_PRIVATE_KEY_BASE64 }}
+          APPIMAGE_PRIVATE_KEY: ${{ inputs.scope != 'macos' && secrets.TAU_APPIMAGE_PRIVATE_KEY || '' }}
+          APPIMAGE_PUBLIC_KEYS: ${{ inputs.scope != 'macos' && vars.TAU_APPIMAGE_PUBLIC_KEYS || '' }}
+          APT_PRIVATE_KEY_BASE64: ${{ inputs.scope != 'macos' && secrets.TAU_APT_PRIVATE_KEY_BASE64 || '' }}
           ROUTE_TRUST: ${{ vars.TAU_ROUTE_TRUST }}
         run: |
           set -euo pipefail
           umask 077
           mkdir -p "$RUNNER_TEMP/desktop-signing" out/desktop
-          printf '%s' "$APPIMAGE_PRIVATE_KEY" > "$RUNNER_TEMP/desktop-signing/appimage.pem"
-          printf '%s' "$APPIMAGE_PUBLIC_KEYS" > "$RUNNER_TEMP/desktop-signing/public-keys.json"
           printf '%s' "$ROUTE_TRUST" > "$RUNNER_TEMP/desktop-signing/route-trust.json"
           mkdir -m 700 "$RUNNER_TEMP/desktop-signing/gnupg"
-          if [ -n "$APT_PRIVATE_KEY_BASE64" ]; then
-            printf '%s' "$APT_PRIVATE_KEY_BASE64" | base64 --decode | gpg --homedir "$RUNNER_TEMP/desktop-signing/gnupg" --batch --import
+          # A Mac-only promotion admits no AppImage or APT route, so Linux signing material is never materialized.
+          if [ "$TAU_DESKTOP_QUALIFICATION_SCOPE" != macos ]; then
+            printf '%s' "$APPIMAGE_PRIVATE_KEY" > "$RUNNER_TEMP/desktop-signing/appimage.pem"
+            printf '%s' "$APPIMAGE_PUBLIC_KEYS" > "$RUNNER_TEMP/desktop-signing/public-keys.json"
+            if [ -n "$APT_PRIVATE_KEY_BASE64" ]; then
+              printf '%s' "$APT_PRIVATE_KEY_BASE64" | base64 --decode | gpg --homedir "$RUNNER_TEMP/desktop-signing/gnupg" --batch --import
+            fi
           fi
           {
             echo "TAU_APPIMAGE_PRIVATE_KEY_FILE=$RUNNER_TEMP/desktop-signing/appimage.pem"

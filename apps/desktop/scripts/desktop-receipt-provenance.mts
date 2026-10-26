@@ -6,18 +6,28 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { parseDesktopAcceptanceReceipt } from '#shared/desktop-release.js';
 import type { DesktopArtifactManifest } from '#shared/desktop-release.js';
+// oxlint-disable-next-line no-restricted-imports -- Publication scope is owned by the adjacent admission gate.
+import type { DesktopPublicationScope } from './desktop-route-publication.mjs';
+/** Fixed trusted producer workflows; each publication scope admits only its own receipt artifact names. */
 const producer = {
-  ci: { path: '.github/workflows/desktop-route-qualification.yml', artifact: 'desktop-route-ci-receipts' },
-  vm: { path: '.github/workflows/desktop-route-vm-acceptance.yml', artifact: 'desktop-route-vm-receipts' },
+  ci: {
+    path: '.github/workflows/desktop-route-qualification.yml',
+    artifact: { all: 'desktop-route-ci-receipts', macos: 'desktop-macos-ci-receipts' },
+  },
+  vm: {
+    path: '.github/workflows/desktop-route-vm-acceptance.yml',
+    artifact: { all: 'desktop-route-vm-receipts', macos: 'desktop-macos-vm-receipts' },
+  },
 } as const;
 
 /** Run and artifact provenance is checked before parsing its receipt archive. */
 export const verifyDesktopReceiptProvenance = (
   runInput: unknown,
   artifactInput: unknown,
-  options: { environment: 'ci' | 'vm'; manifest: DesktopArtifactManifest },
+  options: { environment: 'ci' | 'vm'; manifest: DesktopArtifactManifest; scope?: DesktopPublicationScope },
 ): { id: number; digest: string } => {
   const { environment, manifest } = options;
+  const scope = options.scope ?? 'all';
   const run = z
     .object({
       id: z.number().int().positive(),
@@ -38,7 +48,7 @@ export const verifyDesktopReceiptProvenance = (
   const artifact = z
     .object({
       id: z.number().int().positive(),
-      name: z.literal(producer[environment].artifact),
+      name: z.literal(producer[environment].artifact[scope]),
       expired: z.literal(false),
       digest: z.string().regex(/^sha256:[a-f\d]{64}$/u),
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
@@ -52,8 +62,9 @@ export const verifyDesktopReceiptProvenance = (
 export const fetchDesktopQualifiedReceipts = async (
   manifest: DesktopArtifactManifest,
   root: string,
-  runs: { ci: string; vm: string },
+  runs: { ci: string; vm: string; scope?: DesktopPublicationScope },
 ): Promise<unknown[]> => {
+  const scope = runs.scope ?? 'all';
   const api = (path: string): Uint8Array<ArrayBuffer> =>
     Uint8Array.from(
       execFileSync('gh', ['api', `repos/taucad/tau/${path}`], { maxBuffer: 8 * 1024 * 1024, timeout: 60_000 }),
@@ -68,11 +79,11 @@ export const fetchDesktopQualifiedReceipts = async (
     const artifacts = z
       .object({ artifacts: z.array(z.object({ name: z.string() }).loose()) })
       .parse(JSON.parse(new TextDecoder().decode(api(`actions/runs/${id}/artifacts?per_page=100`))));
-    const matches = artifacts.artifacts.filter((entry) => entry.name === producer[environment].artifact);
+    const matches = artifacts.artifacts.filter((entry) => entry.name === producer[environment].artifact[scope]);
     if (matches.length !== 1) {
       throw new Error('Missing or ambiguous trusted qualification artifact');
     }
-    const admitted = verifyDesktopReceiptProvenance(run, matches[0], { environment, manifest });
+    const admitted = verifyDesktopReceiptProvenance(run, matches[0], { environment, manifest, scope });
     const archive = api(`actions/artifacts/${admitted.id}/zip`);
     if (createHash('sha256').update(archive).digest('hex') !== admitted.digest) {
       throw new Error('GitHub receipt archive digest differs');

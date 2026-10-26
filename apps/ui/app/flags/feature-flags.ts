@@ -33,6 +33,34 @@ function getDefaultStorage(): MinimalStorage | undefined {
 }
 
 /**
+ * Old writes saved the entire resolved map, including the former WebGPU=false default.
+ * That format cannot distinguish an opt-out from an incidental snapshot. Refresh that
+ * one legacy preference once; versioned explicit choices continue to win thereafter.
+ */
+function readOverrides(store: MinimalReadStorage): Partial<FeatureFlags> {
+  try {
+    const parsed: unknown = JSON.parse(store.getItem(featureFlagStorageKey) ?? '{}');
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return {};
+    }
+    const record = parsed as Record<string, unknown>;
+    const overrides: Partial<FeatureFlags> = {};
+    for (const name of featureFlagNames) {
+      if (!flagRegistry[name].showInExperimental || (name === 'webGpu' && record['webGpuPreferenceVersion'] !== 1)) {
+        continue;
+      }
+      const value = record[name];
+      if (typeof value === 'boolean') {
+        overrides[name] = value;
+      }
+    }
+    return overrides;
+  } catch {
+    return {};
+  }
+}
+
+/**
  * Parse raw localStorage JSON through the zod schema.
  * Invalid / missing keys silently fall back to their registered defaults.
  */
@@ -43,19 +71,7 @@ export function resolveFlags(storage?: MinimalReadStorage): FeatureFlags {
       return featureFlagDefaults;
     }
 
-    const raw = store.getItem(featureFlagStorageKey);
-    if (!raw) {
-      return featureFlagDefaults;
-    }
-
-    const parsed: unknown = JSON.parse(raw);
-    const resolved = featureFlagsSchema.parse(typeof parsed === 'object' && parsed !== null ? parsed : {});
-    for (const name of featureFlagNames) {
-      if (!flagRegistry[name].showInExperimental) {
-        resolved[name] = featureFlagDefaults[name];
-      }
-    }
-    return resolved;
+    return featureFlagsSchema.parse(readOverrides(store));
   } catch {
     return featureFlagDefaults;
   }
@@ -100,8 +116,8 @@ export function setFlagOverrides(overrides: Partial<FeatureFlags>, storage?: Min
     return;
   }
 
-  const existing = resolveFlags(store);
+  const existing = readOverrides(store);
   const merged = { ...existing, ...overrides };
-  store.setItem(featureFlagStorageKey, JSON.stringify(merged));
+  store.setItem(featureFlagStorageKey, JSON.stringify({ ...merged, webGpuPreferenceVersion: 1 }));
   resetFlagCache();
 }

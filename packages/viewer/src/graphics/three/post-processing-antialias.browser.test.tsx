@@ -21,8 +21,9 @@ import {
   OrthographicCamera,
   Vector4,
 } from 'three';
-import { WebGPUBackend, WebGLBackend, WebGPURenderer } from 'three/webgpu';
+import { WebGPUBackend, WebGLBackend } from 'three/webgpu';
 import { screenUV, select, uniform } from 'three/tsl';
+import type * as backendContextModule from '#graphics/three/three-graphics-backend-context.jsx';
 import type * as fxaaModule from '#graphics/three/fxaa.js';
 import { createActor, createAsyncLogic } from 'xstate';
 import { afterEach, expect, inject, it, vi } from 'vitest';
@@ -32,7 +33,6 @@ import { GraphicsProvider, useCameraRig, useViewCameraFraming } from '#hooks/use
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { ThreeCanvasInstance } from '#graphics/three/three-canvas-instance.jsx';
 import { isViewportWebGpu } from '#graphics/three/viewport-cad-renderer.js';
-import { syncGltfSurfaceDepthBias } from '#graphics/three/materials/gltf-surface-depth-bias.js';
 import { resolveSectionPieces } from '#graphics/section-cuts.js';
 import { writeSectionClip } from '#graphics/three/materials/section-clip.js';
 import {
@@ -45,6 +45,7 @@ import {
   compositeEmphasisPixels,
   measureEmphasisPixels,
 } from '#graphics/three/materials/model-emphasis-pixels.test-utils.js';
+import { applyGltfSurfaceDepthBias } from '#graphics/three/materials/gltf-surface-depth-bias.js';
 import { useSectionClip } from '#graphics/three/react/section-clipping-group.jsx';
 import { createSectionStencilCaps } from '#graphics/three/utils/section-stencil-caps.js';
 import type * as rendererModule from '#graphics/three/renderer.js';
@@ -64,6 +65,16 @@ const referenceMode = vi.hoisted(() => ({
   validationErrors: [] as string[],
   removeObservers: [] as Array<() => void>,
 }));
+
+// The production provider now selects shared nodes unconditionally. This suite also
+// keeps the classic appearance reference; route its effects by the actual renderer.
+vi.mock('#graphics/three/three-graphics-backend-context.jsx', async (importOriginal) => {
+  const actual = await importOriginal<typeof backendContextModule>();
+  return {
+    ...actual,
+    useThreeGraphicsBackend: () => (isViewportWebGpu(useThree().gl) ? 'webgpu' : 'webgl'),
+  };
+});
 
 // The alternative skips surface AA only; actual line/material and overlay paths are unchanged.
 vi.mock('#graphics/three/fxaa.js', async (importOriginal) => {
@@ -142,23 +153,19 @@ vi.mock('#graphics/three/renderer.js', async (importOriginal) => {
     createRenderer: async (...args: Parameters<typeof actual.createRenderer>) => {
       if (referenceMode.forceNodeWebGl2) {
         const target = args[2];
-        const renderer = new WebGPURenderer({
+        return actual.createRenderer('viewport', 'webgl', {
           canvas: 'canvas' in target ? target.canvas : target,
-          // eslint-disable-next-line @typescript-eslint/naming-convention -- Three constructor option.
-          forceWebGL: true,
-          antialias: false,
-          samples: 0,
-          alpha: true,
-          stencil: true,
+          nodePipeline: true,
         });
-        await renderer.init();
-        renderer.setRenderObjectFunction((...draw) => {
-          syncGltfSurfaceDepthBias.call(draw[4], renderer);
-          renderer.renderObject(...draw);
-        });
-        return renderer;
       }
-      const renderer = await actual.createRenderer(...args);
+      // Keep the historical classic reference explicit after the production rollout made
+      // WebGL requests select the node family. Never feed GLSL-only fixtures to node WebGL2.
+      const [useCase, backend, target] = args;
+      const renderer = await actual.createRenderer(
+        useCase,
+        backend,
+        backend === 'webgl' && 'canvas' in target ? { ...target, nodePipeline: false } : target,
+      );
       if (isViewportWebGpu(renderer) && renderer.backend instanceof WebGPUBackend) {
         const { device } = renderer.backend as typeof renderer.backend & {
           device: EventTarget;
@@ -319,8 +326,7 @@ it.each(
         },
         { timeout: 45_000 },
       );
-      // Production viewports use node materials on both execution backends.
-      expect(isViewportWebGpu(state!.gl)).toBe(true);
+      expect(isViewportWebGpu(state!.gl)).toBe(execution !== 'webgl');
       if (isViewportWebGpu(state!.gl)) {
         expect(state!.gl.backend).toBeInstanceOf(execution === 'webgpu' ? WebGPUBackend : WebGLBackend);
       }
@@ -565,8 +571,7 @@ it.each(
     }
     expect(changedPixels, 'Motion must change the rendered image').toBeGreaterThan(10);
     expect(state!.camera.type).toBe(fov === 0 ? 'OrthographicCamera' : 'PerspectiveCamera');
-    // Production viewports use node materials on both execution backends.
-    expect(isViewportWebGpu(state!.gl)).toBe(true);
+    expect(isViewportWebGpu(state!.gl)).toBe(execution !== 'webgl');
     if (isViewportWebGpu(state!.gl)) {
       expect(state!.gl.backend).toBeInstanceOf(execution === 'webgpu' ? WebGPUBackend : WebGLBackend);
     }
@@ -708,8 +713,7 @@ it.each((['webgl', 'webgpu'] as const).flatMap((backend) => ['front', 'behind'].
       await pending;
       const { width } = state!.gl.domElement;
       const centre = [...pixels!.subarray((64 * width + 64) * 4, (64 * width + 64) * 4 + 3)];
-      // Production viewports use node materials on both execution backends.
-      expect(isViewportWebGpu(state!.gl)).toBe(true);
+      expect(isViewportWebGpu(state!.gl)).toBe(backend !== 'webgl');
       expect(centre, JSON.stringify({ backend, cap, centre })).toEqual(cap === 'front' ? [255, 0, 0] : [0, 0, 255]);
       const outside = [...pixels!.subarray((64 * width + 8) * 4, (64 * width + 8) * 4 + 3)];
       expect(outside).toEqual(cap === 'front' ? [0, 255, 0] : [0, 0, 255]);
@@ -908,8 +912,7 @@ it.each(
           retired = true;
         }
         expect(state!.camera.type).toBe('OrthographicCamera');
-        // Production viewports use node materials on both execution backends.
-        expect(isViewportWebGpu(state!.gl)).toBe(true);
+        expect(isViewportWebGpu(state!.gl)).toBe(execution !== 'webgl');
         if (isViewportWebGpu(state!.gl)) {
           expect(state!.gl.backend).toBeInstanceOf(execution === 'webgpu' ? WebGPUBackend : WebGLBackend);
         }
@@ -1521,6 +1524,9 @@ it.each([false, true].flatMap((forceNodeWebGl2) => [256, 2560].map((width) => ({
               <mesh
                 ref={(mesh) => {
                   source = mesh ?? undefined;
+                  if (mesh && !Array.isArray(mesh.material)) {
+                    applyGltfSurfaceDepthBias(mesh.material, 'webgpu');
+                  }
                 }}
               >
                 <sphereGeometry args={[0.5, 24, 16]} />
@@ -1529,6 +1535,9 @@ it.each([false, true].flatMap((forceNodeWebGl2) => [256, 2560].map((width) => ({
               <mesh
                 ref={(mesh) => {
                   occluder = mesh ?? undefined;
+                  if (mesh && !Array.isArray(mesh.material)) {
+                    applyGltfSurfaceDepthBias(mesh.material, 'webgpu');
+                  }
                 }}
                 position={[0.4, 0, 0.8]}
               >

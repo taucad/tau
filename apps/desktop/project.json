@@ -321,7 +321,7 @@
       "executor": "nx:run-commands",
       "cache": true,
       "metadata": {
-        "description": "Renderer ownership gate: fails when the renderer bundle carries kernel, converter or host payloads (only KCL and Clipper WASM are allowed). Every package target depends on it. Cached on the bytes it checks, the renderer build and the main and preload bundles; `dist/dev-electron`, the branded Electron that `dev` and `serve` create, is left out of the key."
+        "description": "Renderer ownership gate: fails when the renderer bundle carries kernel, converter or host payloads (only the KCL editor, Clipper section-cap and Terminal ghostty-vt WASM are allowed, one copy each, with producer provenance). Every package target depends on it. Cached on the bytes it checks, the renderer build and the main and preload bundles; `dist/dev-electron`, the branded Electron that `dev` and `serve` create, is left out of the key."
       },
       "dependsOn": ["build"],
       "inputs": [

@@ -251,6 +251,9 @@ const settleAny = async (waits: ReadonlyArray<Promise<unknown>>): Promise<void> 
  */
 const maxDeferredPressWaits = 64;
 
+/** How far, in CSS pixels, a press may travel and still be a click or tap that waits on its targets, not a drag. */
+const deferredPressSlopPx = { mouse: 4, touch: 10 } as const;
+
 /** Pointer events whose position is where the pointer still rests over the event source. */
 const restingPointerEventTypes: ReadonlySet<string> = new Set([
   'pointermove',
@@ -297,6 +300,11 @@ type DeferredMeasurePress = Readonly<{
   preparing: Promise<void>;
   generation: number;
   waits: number;
+  /** The camera it was released under: its screen position means nothing under another. */
+  cameraWorld: THREE.Matrix4;
+  cameraProjection: THREE.Matrix4;
+  /** Feature graph requests that had failed when it was released: after another fails, it stops waiting. */
+  failures: number;
 }>;
 
 type MeasurePointerSnapshot = {
@@ -388,6 +396,12 @@ export function MeasureTool(): React.JSX.Element {
   const deferredPressGenerationRef = useRef(0);
   /** What the press found pending at pointer down, for its release to wait on. */
   const pressPreparingRef = useRef<Promise<void> | undefined>(undefined);
+  /** Where the current press went down, so a release that dragged away is never taken for a click. */
+  const pressOriginRef = useRef<(MeasurePointerCoordinates & { pointerId: number }) | undefined>(undefined);
+  /** Pointer feature graph requests that failed, so a waiting press stops when the worker keeps failing. */
+  const pointerGraphFailuresRef = useRef(0);
+  /** The hover seed is taken once per activation, on the first listener bind, never on a later rebind. */
+  const hoverSeedPendingRef = useRef(true);
   /**
    * Lands a press whose targets are ready, with the listeners' current state (mode, operation, start); unset while
    * Measure is off. A ref, so a re-render while the press waits does not drop it.
@@ -612,6 +626,7 @@ export function MeasureTool(): React.JSX.Element {
           if (graphSourceRef.current !== graphSource) {
             return;
           }
+          pointerGraphFailuresRef.current++;
           const { context } = graphicsActor.getSnapshot();
           if (
             presentedKey === geometryKeyRef.current &&
@@ -1197,6 +1212,7 @@ export function MeasureTool(): React.JSX.Element {
     wasMeasureActiveRef.current = isMeasureActive;
     if (!isMeasureActive && wasActive) {
       deferredPressGenerationRef.current++;
+      hoverSeedPendingRef.current = true;
       exactAbortRef.current?.abort();
       exactRequestRef.current++;
       graphicsActor.send({
@@ -1213,6 +1229,11 @@ export function MeasureTool(): React.JSX.Element {
       selectedTargetRef.current = undefined;
     }
   }, [graphicsActor, isMeasureActive]);
+
+  // A start placed or cancelled (Escape) while a press waits: the press belonged to the measurement before it.
+  useEffect(() => {
+    deferredPressGenerationRef.current++;
+  }, [currentStart]);
 
   useEffect(() => {
     exactAbortRef.current?.abort();
@@ -1592,6 +1613,8 @@ export function MeasureTool(): React.JSX.Element {
   useEffect(() => {
     if (isMeasureActive && cameraMoving && !wasCameraMovingRef.current) {
       measureInputActor.send({ type: 'cameraMoved' });
+      // A press waiting on its targets was made under the camera that just moved.
+      deferredPressGenerationRef.current++;
     }
 
     wasCameraMovingRef.current = cameraMoving;
@@ -1614,6 +1637,7 @@ export function MeasureTool(): React.JSX.Element {
 
     const handlePointerDown = (event: PointerEvent): void => {
       deferredPressGenerationRef.current++;
+      pressOriginRef.current = { clientX: event.clientX, clientY: event.clientY, pointerId: event.pointerId };
       activePointerIdsRef.current.add(event.pointerId);
       lastPointerRef.current = { clientX: event.clientX, clientY: event.clientY };
       if (!lockedTargetIdRef.current && chosenCandidateIdRef.current) {
@@ -1662,10 +1686,22 @@ export function MeasureTool(): React.JSX.Element {
       const press = measureInputActor.getSnapshot().context;
       const preparing = (hasActiveSnapTarget ? undefined : pointerSnapshot.whenReady) ?? pressPreparingRef.current;
       pressPreparingRef.current = undefined;
+      const origin = pressOriginRef.current;
+      pressOriginRef.current = undefined;
+      const slop = event.pointerType === 'touch' ? deferredPressSlopPx.touch : deferredPressSlopPx.mouse;
+      const stayedPut =
+        origin !== undefined &&
+        origin.pointerId === event.pointerId &&
+        Math.hypot(event.clientX - origin.clientX, event.clientY - origin.clientY) <= slop;
+      // Read now, not from the render: the camera reports a drag before the tool re-renders with `cameraMoving`.
+      const { cameraInteractionHadMovement, suppressNextModelPointerClick } = graphicsActor.getSnapshot().context;
       // A primary click or tap that found no snap target while targets under it were still being prepared: it is not a
-      // miss yet, nor a bare surface point where the prepared graph would snap it.
+      // miss yet, nor a bare surface point where the prepared graph would snap it. A drag (an orbit) is neither.
       const isPressAwaitingTargets =
         preparing !== undefined &&
+        stayedPut &&
+        !cameraInteractionHadMovement &&
+        !suppressNextModelPointerClick &&
         press.isPointerDown &&
         (press.pointerId === undefined || press.pointerId === event.pointerId) &&
         event.button === 0 &&
@@ -1691,6 +1727,9 @@ export function MeasureTool(): React.JSX.Element {
           preparing,
           generation: deferredPressGenerationRef.current,
           waits: 1,
+          cameraWorld: cameraRef.current.matrixWorld.clone(),
+          cameraProjection: cameraRef.current.projectionMatrix.clone(),
+          failures: pointerGraphFailuresRef.current,
         });
         return;
       }
@@ -1711,6 +1750,12 @@ export function MeasureTool(): React.JSX.Element {
       commitTarget(pointerSnapshot);
     };
 
+    const clearHover = (): void => {
+      pointerMoveCoalescerRef.current?.cancel();
+      lastPointerRef.current = undefined;
+      hoverRef.current = noMeasureHover;
+      dispatchHoverState({ type: 'clear' });
+    };
     /**
      * Takes a waiting press's snapshot again once its targets are prepared, and lands it as its release would have.
      *
@@ -1718,18 +1763,24 @@ export function MeasureTool(): React.JSX.Element {
      */
     landDeferredPressRef.current = (press: DeferredMeasurePress): void => {
       const { coordinates, isTouch, waits } = press;
+      const liveCamera = cameraRef.current;
+      if (
+        !liveCamera.matrixWorld.equals(press.cameraWorld) ||
+        !liveCamera.projectionMatrix.equals(press.cameraProjection)
+      ) {
+        // Zoomed, framed or turned by the view cube while it waited: the press's screen position is somewhere else now.
+        return;
+      }
       const snapshot = updatePointerSnapshot(coordinates, isTouch);
-      if (!snapshot.hasActiveSnapTarget && snapshot.whenReady && waits < maxDeferredPressWaits) {
-        // Something else under it was still being prepared (a pick tree after the graph): wait for that too.
-        deferPress({ ...press, preparing: snapshot.whenReady, waits: waits + 1 });
+      if (!snapshot.hasActiveSnapTarget && snapshot.whenReady) {
+        if (waits < maxDeferredPressWaits && pointerGraphFailuresRef.current === press.failures) {
+          // Something else under it was still being prepared (a pick tree after the graph): wait for that too.
+          deferPress({ ...press, preparing: snapshot.whenReady, waits: waits + 1 });
+        }
         return;
       }
       if (!snapshot.hasTarget && !snapshot.hasActiveSnapTarget) {
         return;
-      }
-      if (lastPointerRef.current && lastPointerRef.current !== coordinates) {
-        // The pointer may have moved on while the press waited: hover from where it is now.
-        pointerMoveCoalescerRef.current?.schedule(lastPointerRef.current);
       }
       if (isTouch) {
         if (snapshot.target) {
@@ -1739,21 +1790,21 @@ export function MeasureTool(): React.JSX.Element {
       }
       const point = snapshot.point ? [...fromThreeRenderPoint({ renderFrame, point: snapshot.point })] : undefined;
       if (
-        !point ||
-        (currentStartRef.current !== undefined &&
-          new THREE.Vector3(...currentStartRef.current).distanceTo(new THREE.Vector3(...point)) === 0)
+        point &&
+        (currentStartRef.current === undefined ||
+          new THREE.Vector3(...currentStartRef.current).distanceTo(new THREE.Vector3(...point)) !== 0)
       ) {
-        return;
+        commitTarget(snapshot);
       }
-      commitTarget(snapshot);
+      if (!lastPointerRef.current) {
+        // The pointer left while the press waited: the snapshot above hovered where it was released.
+        clearHover();
+      } else if (lastPointerRef.current !== coordinates) {
+        // The pointer moved on while the press waited: hover from where it is now.
+        pointerMoveCoalescerRef.current?.schedule(lastPointerRef.current);
+      }
     };
 
-    const clearHover = (): void => {
-      pointerMoveCoalescerRef.current?.cancel();
-      lastPointerRef.current = undefined;
-      hoverRef.current = noMeasureHover;
-      dispatchHoverState({ type: 'clear' });
-    };
     const handlePointerCancel = (event: PointerEvent): void => {
       activePointerIdsRef.current.delete(event.pointerId);
       measureInputActor.send({ type: 'pointerCancel', pointerId: event.pointerId });
@@ -1780,15 +1831,24 @@ export function MeasureTool(): React.JSX.Element {
     // The tool mounts when Measure turns on (lazily, on its first use), after the pointer may already have moved over
     // the model: that move reached only R3F's event source, and a pointer held still sends no other. Hover from where
     // it rests, so the first hover or click after turning Measure on is not lost.
-    if (!lastPointerRef.current) {
-      const resting = restingPointerOver(getRootState().internal.lastEvent.current ?? undefined, pointerTarget);
-      if (resting) {
-        lastPointerRef.current = resting;
-        pointerMoveCoalescerRef.current?.schedule(resting);
+    let seed: MeasurePointerCoordinates | undefined;
+    if (hoverSeedPendingRef.current) {
+      hoverSeedPendingRef.current = false;
+      if (!lastPointerRef.current) {
+        seed = restingPointerOver(getRootState().internal.lastEvent.current ?? undefined, pointerTarget);
+        if (seed) {
+          lastPointerRef.current = seed;
+          pointerMoveCoalescerRef.current?.schedule(seed);
+        }
       }
     }
 
     return () => {
+      if (seed && lastPointerRef.current === seed && hoverRef.current === noMeasureHover) {
+        // Rebound before the seed's frame drew it (StrictMode replays effects): the next bind seeds again.
+        hoverSeedPendingRef.current = true;
+        lastPointerRef.current = undefined;
+      }
       landDeferredPressRef.current = undefined;
       pointerTarget.removeEventListener('pointermove', handlePointerMove);
       pointerTarget.removeEventListener('pointerdown', handlePointerDown);

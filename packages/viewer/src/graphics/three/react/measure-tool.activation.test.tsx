@@ -1,6 +1,6 @@
 import { act } from '@testing-library/react';
 import { createRoot, events as createPointerEvents, extend } from '@react-three/fiber';
-import type { ReconcilerRoot } from '@react-three/fiber';
+import type { ConstructorRepresentation, ReconcilerRoot, RootState } from '@react-three/fiber';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { createActor, createAsyncLogic } from 'xstate';
@@ -8,6 +8,7 @@ import type { Actor } from 'xstate';
 import { GraphicsProvider, useGraphicsSelector } from '#hooks/use-graphics.jsx';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { MeasureTool, restingPointerOver } from '#graphics/three/react/measure-tool.jsx';
+import { hasSceneTag, sceneTag } from '#graphics/three/utils/scene-tags.js';
 import {
   getCachedMeshMeasurementFeatures,
   getMeshMeasurementFeatures,
@@ -17,22 +18,38 @@ import type { MeasurementFeatureWorkerClient } from '#graphics/three/utils/measu
 const worker = vi.hoisted(() => ({
   /** Feature graph requests the worker has not answered yet; a test answers them. */
   pending: [] as Array<Readonly<{ mesh: unknown; answer: () => void }>>,
+  /** Every feature graph request it received. */
+  requests: 0,
+  /** Whether it fails every request at once, as a worker that cannot start does. */
+  failing: false,
+  /** Whether it answers every request at once with no graph, as a client whose mesh went stale does. */
+  empty: false,
 }));
 
 // The worker answers when the test says, with the graph it would have built.
 vi.mock('#graphics/three/utils/measurement-features-worker-client.js', () => ({
   createMeasurementFeatureWorkerClient: (): MeasurementFeatureWorkerClient => ({
     ready: getCachedMeshMeasurementFeatures,
-    prepare: async (mesh) =>
-      getCachedMeshMeasurementFeatures(mesh) ??
-      new Promise((resolve) => {
-        worker.pending.push({
-          mesh,
-          answer: () => {
-            resolve(getMeshMeasurementFeatures(mesh));
-          },
-        });
-      }),
+    prepare: async (mesh) => {
+      worker.requests++;
+      if (worker.failing) {
+        throw new Error('Measurement feature worker failed.');
+      }
+      if (worker.empty) {
+        return undefined;
+      }
+      return (
+        getCachedMeshMeasurementFeatures(mesh) ??
+        new Promise((resolve) => {
+          worker.pending.push({
+            mesh,
+            answer: () => {
+              resolve(getMeshMeasurementFeatures(mesh));
+            },
+          });
+        })
+      );
+    },
     dispose: () => undefined,
   }),
 }));
@@ -53,10 +70,15 @@ function createStubWebGlRenderer(canvas: HTMLCanvasElement): THREE.WebGLRenderer
   return renderer;
 }
 
-/** Mounts the tool only while Measure is on, as the viewer's controls do (it loads lazily on first use). */
+/**
+ * Mounts the tool as the viewer's controls do: while Measure is on or a pinned measurement shows (it loads lazily on
+ * first use).
+ */
 function MeasureWhileActive(): React.ReactNode {
-  const isMeasureActive = useGraphicsSelector((state) => state.context.isMeasureActive);
-  return isMeasureActive ? <MeasureTool /> : null;
+  const shouldMount = useGraphicsSelector(
+    (state) => state.context.isMeasureActive || state.context.measurements.some((measurement) => measurement.isPinned),
+  );
+  return shouldMount ? <MeasureTool /> : null;
 }
 
 describe('MeasureTool activation', () => {
@@ -105,10 +127,33 @@ describe('MeasureTool activation', () => {
   };
 
   beforeAll(() => {
-    extend(THREE as unknown as Parameters<typeof extend>[0]);
+    // Three's constructors: the catalogue R3F renders intrinsic elements from.
+    extend(
+      Object.fromEntries(
+        Object.entries(THREE).filter(
+          (entry): entry is [string, ConstructorRepresentation] => typeof entry[1] === 'function',
+        ),
+      ),
+    );
   });
 
+  let getState: () => RootState;
+
+  /** Measurement marks in the scene: snap indicators, points and lines. */
+  const measurementMarks = (): number => {
+    let count = 0;
+    getState().scene.traverse((object) => {
+      if (object instanceof THREE.Mesh && hasSceneTag(object, sceneTag.measurementUi)) {
+        count++;
+      }
+    });
+    return count;
+  };
+
   beforeEach(async () => {
+    camera.position.set(0, 0, 10);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld();
     let nextFrame = 0;
     vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
       nextFrame += 1;
@@ -159,13 +204,14 @@ describe('MeasureTool activation', () => {
           state.events.connect?.(parent);
         },
       });
-      root.render(
+      const store = root.render(
         <GraphicsProvider graphicsRef={actor}>
           <primitive object={model} />
           <primitive object={sideMesh} />
           <MeasureWhileActive />
         </GraphicsProvider>,
       );
+      getState = store.getState;
     });
   });
 
@@ -177,6 +223,9 @@ describe('MeasureTool activation', () => {
     parent.remove();
     frames.clear();
     worker.pending.length = 0;
+    worker.requests = 0;
+    worker.failing = false;
+    worker.empty = false;
     vi.restoreAllMocks();
   });
 
@@ -272,6 +321,212 @@ describe('MeasureTool activation', () => {
     expect(actor.getSnapshot().context.measurements).toEqual([]);
   });
 
+  /** Turns Measure on and clicks the model's front top edge before the worker has answered for it. */
+  const clickWhilePreparing = (): void => {
+    act(() => {
+      actor.send({ type: 'setMeasureActive', payload: true });
+    });
+    dispatch('pointerdown', pixelOf(0, -1, 1));
+    dispatch('pointerup', pixelOf(0, -1, 1));
+  };
+
+  it('drops a waiting click when Measure turns off and on while a pinned measurement keeps the tool mounted', async () => {
+    act(() => {
+      actor.send({ type: 'setMeasureActive', payload: true });
+      actor.send({
+        type: 'completeFeatureMeasurement',
+        record: { frameId: 'tau:root', startPoint: [5, 3, 0], endPoint: [5, 4, 0], distance: 1, status: 'current' },
+      });
+    });
+    const [pinned] = actor.getSnapshot().context.measurements;
+    act(() => {
+      actor.send({ type: 'toggleMeasurementPinned', id: pinned!.id });
+    });
+    clickWhilePreparing();
+    act(() => {
+      actor.send({ type: 'setMeasureActive', payload: false });
+    });
+    act(() => {
+      actor.send({ type: 'setMeasureActive', payload: true });
+    });
+
+    await answerWorker();
+
+    expect(actor.getSnapshot().context.measurements.map(({ id }) => id)).toEqual([pinned!.id]);
+  });
+
+  it('drops a waiting click when the model is replaced', async () => {
+    clickWhilePreparing();
+    act(() => {
+      actor.send({
+        type: 'updateArtifact',
+        artifact: { mimeType: 'model/gltf-binary', content: new Uint8Array([1]) },
+        hash: 'replacement',
+      });
+    });
+
+    await answerWorker();
+
+    expect(actor.getSnapshot().context.measurements).toEqual([]);
+  });
+
+  it('drops a waiting click when its start is cancelled', async () => {
+    act(() => {
+      actor.send({ type: 'setMeasureActive', payload: true });
+      actor.send({ type: 'setMeasureMode', mode: 'point' });
+    });
+    // After the tool mounted, which cancels any start left from another source.
+    act(() => {
+      actor.send({ type: 'startMeasurement', payload: [5, 3, 0] });
+    });
+    expect(actor.getSnapshot().context.currentMeasurementStart).toEqual([5, 3, 0]);
+    dispatch('pointerdown', pixelOf(-0.98, -0.98, 1));
+    dispatch('pointerup', pixelOf(-0.98, -0.98, 1));
+    // Escape cancels the start the click would have completed.
+    act(() => {
+      actor.send({ type: 'cancelCurrentMeasurement' });
+    });
+
+    await answerWorker();
+
+    expect(actor.getSnapshot().context.measurements).toEqual([]);
+    expect(actor.getSnapshot().context.currentMeasurementStart).toBeUndefined();
+  });
+
+  it('never lands an orbit that started on the model as a click', async () => {
+    act(() => {
+      actor.send({ type: 'setMeasureActive', payload: true });
+    });
+    dispatch('pointerdown', pixelOf(0, -1, 1));
+    // The camera controls report the drag before the tool has re-rendered with it.
+    actor.send({ type: 'controlsInteractionStart' });
+    actor.send({ type: 'controlsInteractionMoved' });
+    dispatch('pointerup', pixelOf(0, -1, 1));
+
+    await answerWorker();
+
+    expect(actor.getSnapshot().context.measurements).toEqual([]);
+  });
+
+  it('never lands a press that went down while the camera was still moving', async () => {
+    act(() => {
+      actor.send({ type: 'setMeasureActive', payload: true });
+    });
+    act(() => {
+      actor.send({ type: 'controlsInteractionStart' });
+      actor.send({ type: 'controlsInteractionMoved' });
+    });
+    dispatch('pointerdown', pixelOf(0, -1, 1));
+    // The drag ends and its click guard is cleared before the release, so only the press's own record says it moved.
+    act(() => {
+      actor.send({ type: 'controlsInteractionEnd' });
+      actor.send({ type: 'clearModelPointerClickGuard' });
+    });
+    dispatch('pointerup', pixelOf(0, -1, 1));
+
+    await answerWorker();
+
+    expect(actor.getSnapshot().context.measurements).toEqual([]);
+  });
+
+  it('never lands a press that dragged away from where it went down', async () => {
+    act(() => {
+      actor.send({ type: 'setMeasureActive', payload: true });
+    });
+    const [x, y] = pixelOf(0, -1, 1);
+    dispatch('pointerdown', [x - 30, y]);
+    dispatch('pointerup', [x, y]);
+
+    await answerWorker();
+
+    expect(actor.getSnapshot().context.measurements).toEqual([]);
+  });
+
+  it('drops a waiting click when the camera changes before its targets are ready', async () => {
+    clickWhilePreparing();
+    // A wheel zoom or a view-cube turn moves the camera without a press of its own.
+    camera.position.set(0, 0, 6);
+    camera.updateMatrixWorld();
+
+    await answerWorker();
+
+    expect(actor.getSnapshot().context.measurements).toEqual([]);
+  });
+
+  it('stops waiting once the worker fails, asking it a bounded number of times', async () => {
+    worker.failing = true;
+    clickWhilePreparing();
+    await answerWorker();
+    const requestsAfterFailure = worker.requests;
+    await answerWorker();
+
+    expect(worker.requests).toBe(requestsAfterFailure);
+    expect(worker.requests).toBeLessThanOrEqual(6);
+    expect(actor.getSnapshot().context.measurements).toEqual([]);
+  });
+
+  it('stops waiting after a bounded number of steps when the worker never answers with a graph', async () => {
+    worker.empty = true;
+    clickWhilePreparing();
+    await answerWorker();
+    await answerWorker();
+    const requestsAfterSettling = worker.requests;
+    await answerWorker();
+
+    expect(worker.requests).toBe(requestsAfterSettling);
+    expect(worker.requests).toBeLessThanOrEqual(2 * 66);
+    expect(actor.getSnapshot().context.measurements).toEqual([]);
+  });
+
+  it('drops a waiting click when a camera drag starts while it waits', async () => {
+    clickWhilePreparing();
+    act(() => {
+      actor.send({ type: 'controlsInteractionStart' });
+      actor.send({ type: 'controlsInteractionMoved' });
+    });
+
+    await answerWorker();
+
+    expect(actor.getSnapshot().context.measurements).toEqual([]);
+  });
+
+  it('clears the hover a landed click drew when the pointer left while it waited', async () => {
+    clickWhilePreparing();
+    dispatch('pointerleave', pixelOf(0, -1, 1));
+
+    await answerWorker();
+
+    expect(actor.getSnapshot().context.measurements).toHaveLength(1);
+    runFrames();
+    const marksAfterLanding = measurementMarks();
+    // Leaving again clears any hover; the landed measurement's own marks stay.
+    dispatch('pointerleave', pixelOf(0, -1, 1));
+    runFrames();
+    expect(measurementMarks()).toBe(marksAfterLanding);
+  });
+
+  it('does not bring a hover back after a window blur when the tool rebinds', () => {
+    getMeshMeasurementFeatures(model);
+    dispatch('pointermove', pixelOf(0, -1, 1));
+    act(() => {
+      actor.send({ type: 'setMeasureActive', payload: true });
+    });
+    runFrames();
+    expect(measurementMarks()).toBeGreaterThan(0);
+    act(() => {
+      globalThis.dispatchEvent(new Event('blur'));
+    });
+    expect(measurementMarks()).toEqual(0);
+    // A camera drag starts: the tool rebinds its listeners.
+    act(() => {
+      actor.send({ type: 'controlsInteractionStart' });
+      actor.send({ type: 'controlsInteractionMoved' });
+    });
+    runFrames();
+
+    expect(measurementMarks()).toEqual(0);
+  });
+
   it('previews a tap made while the feature graph is still being prepared once the graph is ready', async () => {
     act(() => {
       actor.send({ type: 'setMeasureActive', payload: true });
@@ -306,7 +561,8 @@ describe('MeasureTool activation', () => {
 
   it('does not hover after the pointer left the model before Measure turned on', () => {
     dispatch('pointermove', pixelOf(0, -1, 1));
-    dispatch('pointerleave', [900, 300]);
+    // A leave carries the last in-bounds position: only the region's hover state says the pointer is gone.
+    dispatch('pointerleave', pixelOf(0, -1, 1));
     act(() => {
       actor.send({ type: 'setMeasureActive', payload: true });
     });

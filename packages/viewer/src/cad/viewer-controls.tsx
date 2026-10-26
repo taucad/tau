@@ -286,10 +286,13 @@ function ViewerControlsBody({
   const controlsRef = useRef<HTMLDivElement>(null);
   const isLeadingStacked = useStackedLeading(barRef, leadingRef, controlsRef);
   const barMaxHeight = useViewerBarMaxHeight(barRef);
-  const barStyle = {
-    maxHeight: isMobile ? barMaxHeight : undefined,
-    '--viewer-controls-max-height': barMaxHeight === undefined ? undefined : `${barMaxHeight}px`,
-  };
+  const barStyle =
+    barMaxHeight === undefined
+      ? undefined
+      : {
+          maxHeight: isMobile ? barMaxHeight : undefined,
+          '--viewer-controls-max-height': `${barMaxHeight}px`,
+        };
   const is2dGeometry = useGraphicsSelector((state) => state.context.artifact?.mimeType === 'image/svg+xml');
   const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
   const isMeasureActive = useGraphicsSelector((state) => state.context.isMeasureActive);

@@ -87,6 +87,69 @@ const serve = (options: { authority?: boolean } = {}): Served => {
 const text = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
 
 describe('NodeFsServer.run', () => {
+  it('should allow independent authorities while refusing re-entry and close of an ancestor claim', async () => {
+    const first = serve();
+    const second = serve();
+    writeFileSync(join(second.root, 'part.ts'), 'independent');
+    const result = await first.server.run({ root: first.root }, async () =>
+      second.server.run({ root: second.root }, async (scope) => {
+        await expect(first.server.run({ root: first.root }, async () => undefined)).rejects.toMatchObject({
+          code: 'AUTHORITY_CLAIM_NESTED',
+        });
+        await expect(first.server.close()).rejects.toMatchObject({ code: 'AUTHORITY_CLOSE_IN_CLAIM' });
+        return scope.readFile('part.ts', 'utf8');
+      }),
+    );
+    expect(result).toBe('independent');
+  });
+
+  it('should refuse mutation through a parent alias with different access while preserving authored aliases', async () => {
+    const { root, server } = serve();
+    mkdirSync(join(root, '.tau', 'chats'), { recursive: true });
+    mkdirSync(join(root, 'authored'));
+    symlinkSync(join(root, '.tau'), join(root, 'docs'));
+    symlinkSync(join(root, 'authored'), join(root, 'notes'));
+    writeFileSync(join(root, '.tau', 'chats', 'record'), 'protected');
+    writeFileSync(join(root, 'source'), 'source');
+    await server.run({ root }, async (scope) => {
+      await expect(
+        scope.writeFileChecked({
+          path: 'docs/chats/record',
+          data: 'changed',
+          preconditions: [{ path: 'docs/chats/record', expected: 'protected' }],
+        }),
+      ).rejects.toMatchObject({ code: 'ELOOP' });
+      await expect(
+        scope.deleteFileChecked({
+          path: 'docs/chats/record',
+          preconditions: [{ path: 'docs/chats/record', expected: 'protected' }],
+        }),
+      ).rejects.toMatchObject({ code: 'ELOOP' });
+      await expect(scope.mkdirChecked({ path: 'docs/chats/new' })).rejects.toMatchObject({ code: 'ELOOP' });
+      await expect(
+        scope.renameChecked({
+          from: 'source',
+          to: 'docs/chats/new',
+          preconditions: [
+            { path: 'source', expected: 'source' },
+            { path: 'docs/chats/new', expected: null },
+          ],
+        }),
+      ).rejects.toMatchObject({ code: 'ELOOP' });
+      await expect(
+        scope.writeFileChecked({
+          path: 'notes/new',
+          data: 'allowed',
+          preconditions: [{ path: 'notes/new', expected: null }],
+        }),
+      ).resolves.toMatchObject({ status: 'applied' });
+    });
+    expect(readFileSync(join(root, '.tau', 'chats', 'record'), 'utf8')).toBe('protected');
+    expect(readFileSync(join(root, 'source'), 'utf8')).toBe('source');
+    expect(existsSync(join(root, '.tau', 'chats', 'new'))).toBe(false);
+    expect(readFileSync(join(root, 'authored', 'new'), 'utf8')).toBe('allowed');
+  });
+
   it('should refuse a claim on a server composed without an authority before the operation starts', async () => {
     const { root, server } = serve({ authority: false });
     let started = false;

@@ -404,8 +404,10 @@ const scopeClosedError = (): Error =>
 const serverInactiveError = (): Error =>
   codedError('Node filesystem server is no longer accepting requests.', 'AUTHORITY_HOST_INACTIVE');
 
-/** Live flag of the operation whose async context a call runs in, and its server; cleared when it settles. */
-const heldClaims = new AsyncLocalStorage<{ live: boolean; server: AbortController }>();
+/** Ancestor claims stay visible through operations on independent servers; live flags clear at settlement. */
+const heldClaims = new AsyncLocalStorage<
+  ReadonlyArray<{ live: boolean; server: AbortController; authority: NodeFsAuthorityHost }>
+>();
 
 const bytesOf = (value: Uint8Array<ArrayBuffer> | string): Uint8Array<ArrayBuffer> =>
   typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value);
@@ -1067,8 +1069,24 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
       }
     };
     // A mutation starts only while the scope's signal is live; one already started completes.
-    const mutate = async <T>(methodSignal: AbortSignal | undefined, work: () => Promise<T>): Promise<T> =>
+    const mutate = async <T>(
+      methodSignal: AbortSignal | undefined,
+      paths: readonly string[],
+      work: () => Promise<T>,
+    ): Promise<T> =>
       call(async () => {
+        signal.throwIfAborted();
+        methodSignal?.throwIfAborted();
+        for (const rootedPath of paths) {
+          signal.throwIfAborted();
+          methodSignal?.throwIfAborted();
+          // oxlint-disable-next-line no-await-in-loop -- Validate every mutation spelling under the held claim before any write.
+          const physical = await canonicalResource(root, rootedPath);
+          const realRelative = path.relative(root, physical.exact).split(path.sep).join('/');
+          if (options.policy.classify(rootedPath).agentAccess !== options.policy.classify(realRelative).agentAccess) {
+            throw codedError('Refusing a mutation through a symbolic link with different path access.', 'ELOOP');
+          }
+        }
         signal.throwIfAborted();
         methodSignal?.throwIfAborted();
         return work();
@@ -1088,19 +1106,28 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
         )) as NodeFsRootScope['stat'],
       exists: async (rootedPath) => call(async () => provider.exists(rootedPath)),
       writeFileChecked: async ({ signal: writeSignal, ...input }): Promise<CheckedFileWriteResult> =>
-        mutate(writeSignal, async () => writeNodeFileCheckedWithAuthority(provider, input, writer)),
+        mutate(writeSignal, [input.path], async () => writeNodeFileCheckedWithAuthority(provider, input, writer)),
       deleteFileChecked: async ({ signal: deleteSignal, ...input }): Promise<CheckedFileWriteResult> =>
-        mutate(deleteSignal, async () => deleteNodeFileCheckedWithAuthority(provider, input, writer)),
+        mutate(deleteSignal, [input.path], async () => deleteNodeFileCheckedWithAuthority(provider, input, writer)),
       // The rename's walk also stops on the scope signal, so closing never waits on an unbounded move.
-      renameChecked: async (input) =>
-        mutate(input.signal, async () =>
-          renameChecked(provider, writer, {
-            ...input,
-            signal: input.signal === undefined ? signal : AbortSignal.any([signal, input.signal]),
-          }),
-        ),
-      mkdirChecked: async (input) => mutate(input.signal, async () => mkdirChecked(provider, writer, input)),
-      rmdirChecked: async (input) => mutate(input.signal, async () => rmdirChecked(provider, writer, input)),
+      renameChecked: async (input) => {
+        if (input.preconditions.length > checkedRenameLimits.entries + 1) {
+          throw renameTooLarge(input.from);
+        }
+        return mutate(
+          input.signal,
+          [input.from, input.to, ...input.preconditions.map((condition) => condition.path)],
+          async () =>
+            renameChecked(provider, writer, {
+              ...input,
+              signal: input.signal === undefined ? signal : AbortSignal.any([signal, input.signal]),
+            }),
+        );
+      },
+      mkdirChecked: async (input) =>
+        mutate(input.signal, [input.path], async () => mkdirChecked(provider, writer, input)),
+      rmdirChecked: async (input) =>
+        mutate(input.signal, [input.path], async () => rmdirChecked(provider, writer, input)),
     };
     return {
       scope,
@@ -1113,7 +1140,11 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
   };
 
   const run: NodeFsRootRun = async (input, operation) => {
-    if (heldClaims.getStore()?.live === true) {
+    if (
+      heldClaims
+        .getStore()
+        ?.some((claim) => claim.live && (claim.server === closing || claim.authority === options.authority)) === true
+    ) {
       throw codedError(
         'A filesystem root claim is already held by this operation. Use its scope instead of calling run again.',
         'AUTHORITY_CLAIM_NESTED',
@@ -1145,9 +1176,9 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
         { root, paths: [''] },
         async (writer) => {
           const held = scopeFor({ root, provider, writer, signal });
-          const context = { live: true, server: closing };
+          const context = { live: true, server: closing, authority };
           try {
-            return await heldClaims.run(context, async () => operation(held.scope));
+            return await heldClaims.run([...(heldClaims.getStore() ?? []), context], async () => operation(held.scope));
           } finally {
             context.live = false;
             await held.settle();
@@ -1217,7 +1248,7 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
     close: () => {
       // Closing waits for every run, including the caller's own, so a close inside a run could never settle.
       const held = heldClaims.getStore();
-      if (held?.live === true && held.server === closing) {
+      if (held?.some((claim) => claim.live && claim.server === closing) === true) {
         return Promise.reject(
           codedError(
             'This filesystem server cannot close from inside one of its own root claims. Close it after the run settles.',

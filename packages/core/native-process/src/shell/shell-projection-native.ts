@@ -61,6 +61,11 @@ export type ShellProjectionReply = Readonly<{
   entries?: ReadonlyArray<Readonly<{ name: string; inode: bigint; mode: number; cookie?: number }>>;
   /** A symbolic link's stored target, returned verbatim and never resolved by the bridge. */
   target?: string;
+  /**
+   * Inodes whose cached pages and shared mappings the kernel drops after this reply is sent (at most 64), so a
+   * descriptor or mapping never keeps bytes the owner refused. Sent from a bridge thread, never this one.
+   */
+  invalidate?: readonly bigint[];
 }>;
 
 /** Native-only notice that the kernel interrupted a pending request. */

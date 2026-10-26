@@ -687,6 +687,64 @@ for source, target, flags in [("a", "b", 1), ("a", "b", 2), ("a", "c", 1), ("c",
     );
   }, 15_000);
 
+  it.each([
+    ['drops', true],
+    ['without invalidation keeps', false],
+  ] as const)(
+    'F4 %s the shared mapping of a write the owner refused (the second row is the negative control)',
+    async (_label, invalidating) => {
+      await withMount(
+        async (mountpoint, owner) => {
+          owner.override.set('write', async (request) =>
+            invalidating ? { error: 116, invalidate: [request.inode] } : { error: 116 },
+          );
+          const child = python(
+            `
+import mmap, os, sys, time
+fd = os.open(sys.argv[1], os.O_RDWR)
+os.pread(fd, 8, 0)
+def settle(read, expected):
+    deadline = time.monotonic() + 2
+    value = read()
+    while value != expected and time.monotonic() < deadline:
+        time.sleep(0.02)
+        value = read()
+    return value
+try:
+    os.pwrite(fd, b"XYZ", 0)
+    print("written", flush=True)
+except OSError as error:
+    print("errno %d" % error.errno, flush=True)
+print(settle(lambda: os.pread(fd, 8, 0).decode(), "abcdefgh"), flush=True)
+view = mmap.mmap(fd, 8, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE)
+view[0:3] = b"QRS"
+try:
+    view.flush()
+    print("flushed", flush=True)
+except OSError as error:
+    print("errno %d" % error.errno, flush=True)
+print(settle(lambda: view[:8].decode(), "abcdefgh"), flush=True)
+view.close()
+os.close(fd)
+`,
+            join(mountpoint, 'file'),
+          );
+          const next = lines(child);
+          const results = [await next(), await next(), await next(), await next()];
+          expect(await exited(child)).toBe(0);
+          // A refused pwrite never reaches the cache; a refused mapping writeback stays in the mapping until dropped.
+          expect(results).toStrictEqual(['errno 116', 'abcdefgh', 'errno 116', invalidating ? 'abcdefgh' : 'QRSdefgh']);
+          expect(decoder.decode(owner.contents.get(2n))).toBe('abcdefgh');
+        },
+        (owner) => {
+          owner.names.set('file', 2n);
+          owner.contents.set(2n, encoder.encode('abcdefgh'));
+        },
+      );
+    },
+    15_000,
+  );
+
   it('G2 writes a shared mapping through to its inode and keeps it on that inode across a new generation', async () => {
     await withMount(
       async (mountpoint, owner) => {

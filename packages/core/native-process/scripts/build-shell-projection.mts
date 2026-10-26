@@ -2,14 +2,16 @@
 /**
  * Build the private Linux projection bridge from explicitly verified local dependencies.
  * Required arguments: --node-headers, --fuse-headers, --fuse-library, --fuse-sha256.
- * Optional argument: --compiler (default cc). No network or dependency installation occurs.
+ * Optional arguments: --compiler (default cc), and --glibc-baseline (default 2.39, the oldest glibc among blueprint
+ * D9's Linux targets: Ubuntu 24.04 ships 2.39, Debian 13 2.41). The bridge and its library are refused when
+ * `objdump -T` shows a glibc symbol version newer than the baseline. No network or dependency installation occurs.
  * Usage: node scripts/build-shell-projection.mts --node-headers <include/node> --fuse-headers <include/fuse3>
  *        --fuse-library <libfuse3.so.4> --fuse-sha256 <sha256>
  * Exit: 0 built; 1 invalid input/build failure. Outputs are unqualified until native/package gates pass.
  */
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,6 +24,33 @@ const headerDigests = {
   'fuse_log.h': 'e475189634542134d6500a663a2bab2f1f577cd27c431725d522530f8154f2c7',
 };
 const digest = (path: string): string => createHash('sha256').update(readFileSync(path)).digest('hex');
+/** The oldest glibc among D9's Linux targets (Ubuntu 24.04). */
+const defaultGlibcBaseline = '2.39';
+const versionParts = (version: string): number[] => version.split('.').map(Number);
+const newer = (left: string, right: string): boolean => {
+  const [a, b] = [versionParts(left), versionParts(right)];
+  for (let index = 0; index < Math.max(a.length, b.length); index++) {
+    if ((a[index] ?? 0) !== (b[index] ?? 0)) {
+      return (a[index] ?? 0) > (b[index] ?? 0);
+    }
+  }
+  return false;
+};
+/** The newest glibc symbol version one shared object requires, from its dynamic symbol table. */
+const newestGlibc = (path: string): string => {
+  const table = execFileSync('objdump', ['-T', path], { encoding: 'utf8' });
+  const versions = [...table.matchAll(/\(GLIBC_(\d+(?:\.\d+)+)\)/gu)].map((match) => match[1]!);
+  if (versions.length === 0) {
+    throw new Error(`objdump -T found no glibc symbol versions in ${path}.`);
+  }
+  let newest = versions[0]!;
+  for (const version of versions) {
+    if (newer(version, newest)) {
+      newest = version;
+    }
+  }
+  return newest;
+};
 const main = (): void => {
   if (process.platform !== 'linux' || process.arch !== 'x64') {
     throw new Error('This projection bridge build currently requires Linux x64.');
@@ -33,7 +62,14 @@ const main = (): void => {
     const value = arguments_[index + 1];
     if (
       name === undefined ||
-      !['--node-headers', '--fuse-headers', '--fuse-library', '--fuse-sha256', '--compiler'].includes(name) ||
+      ![
+        '--node-headers',
+        '--fuse-headers',
+        '--fuse-library',
+        '--fuse-sha256',
+        '--compiler',
+        '--glibc-baseline',
+      ].includes(name) ||
       !value ||
       values.has(name)
     ) {
@@ -76,11 +112,17 @@ const main = (): void => {
       throw new Error(`Unexpected libfuse configuration: ${name}`);
     }
   }
+  const glibcBaseline = values.get('--glibc-baseline') ?? defaultGlibcBaseline;
+  if (!/^\d+(?:\.\d+)+$/u.test(glibcBaseline)) {
+    throw new Error('The glibc baseline must be a dotted version such as 2.39.');
+  }
   readFileSync(join(nodeHeaders, 'node_api.h'));
   const output = join(packageRoot, 'dist/native/linux-x64');
   mkdirSync(output, { recursive: true });
   const source = join(packageRoot, 'native/shell-projection-fuse.c');
   const binary = join(output, 'shell-projection.node');
+  // Built beside the output and moved in only once its ABI passes, so a refused build leaves no bridge behind.
+  const staged = join(output, 'shell-projection.node.staged');
   const compiler = values.get('--compiler') ?? 'cc';
   execFileSync(
     compiler,
@@ -103,10 +145,22 @@ const main = (): void => {
       library,
       '-Wl,-rpath,$ORIGIN',
       '-o',
-      binary,
+      staged,
     ],
     { stdio: 'inherit' },
   );
+  const glibc = { baseline: glibcBaseline, binary: newestGlibc(staged), library: newestGlibc(library) };
+  for (const [name, version] of [
+    ['bridge', glibc.binary],
+    ['libfuse', glibc.library],
+  ] as const) {
+    if (newer(version, glibcBaseline)) {
+      rmSync(staged, { force: true });
+      throw new Error(`The ${name} requires GLIBC_${version}, newer than the D9 baseline GLIBC_${glibcBaseline}.`);
+    }
+  }
+  rmSync(binary, { force: true });
+  renameSync(staged, binary);
   copyFileSync(library, join(output, 'libfuse3.so.4'));
   writeFileSync(
     join(output, 'provenance.json'),
@@ -117,12 +171,14 @@ const main = (): void => {
         library: libraryDigest,
         headers: headerDigests,
         abi: 'linux-x64-napi8-fuse35',
+        glibc,
         libfuse: '3.17.2',
         commit: 'db2a1652f0351162a4f39d9f15f1e8ff036f7a6a',
         node: process.version,
         compiler: execFileSync(compiler, ['--version'], { encoding: 'utf8' }).split('\n')[0],
         qualified: false,
-        license: 'Dynamically linked libfuse; preserve upstream LGPL notices/source before distribution.',
+        license:
+          'Dynamically linked libfuse 3.17.2 (LGPL-2.1, apps/www/content/legal/open-source.md); preserve upstream source before distribution.',
       },
       null,
       2,

@@ -50,6 +50,12 @@ struct mount_state {
   /* Unreported lifetime notifications, and whether one batch message is already queued for them. */
   struct lifetime lifetime;
   bool lifetime_posted;
+  /* Page-cache invalidations the owner asked for after a reply, sent by their own thread: the kernel may hold the
+   * page locks of a write until a later request of the same write is answered, so the JS thread never sends one. */
+  pthread_t invalidator;
+  pthread_cond_t invalidations_ready;
+  uint64_t *invalidations; size_t invalidation_used, invalidation_capacity;
+  bool invalidator_started, invalidator_stopping;
   unsigned callbacks;
   napi_ref owner;
   napi_env env;
@@ -144,6 +150,7 @@ static void text_property(napi_env env,napi_value object,const char *name,const 
   napi_value value; napi_create_string_utf8(env,text,NAPI_AUTO_LENGTH,&value); property(env,object,name,value);
 }
 static void fail_mount(struct mount_state *mount);
+static void queue_invalidation(struct mount_state *mount,uint64_t inode);
 static void deliver_lifetime(napi_env env,napi_value callback,struct mount_state *mount) {
   pthread_mutex_lock(&mount->mutex);
   struct lifetime batch=mount->lifetime; mount->lifetime=(struct lifetime){0}; mount->lifetime_posted=false;
@@ -462,29 +469,81 @@ static napi_value reply(napi_env env,napi_callback_info info) {
       default:fuse_reply_err(pending->request,0);break;
     }
   }
+  /* Inodes whose cached pages may hold bytes the owner did not accept; they are dropped after this reply. */
+  bool has_invalidate=false;napi_value list;uint32_t invalid_count=0;bool is_array=false;
+  napi_has_named_property(env,args[2],"invalidate",&has_invalidate);
+  if (has_invalidate && napi_get_named_property(env,args[2],"invalidate",&list)==napi_ok && napi_is_array(env,list,&is_array)==napi_ok &&
+      is_array && napi_get_array_length(env,list,&invalid_count)==napi_ok && invalid_count<=64) {
+    for (uint32_t i=0;i<invalid_count;i++) {
+      napi_value item;uint64_t inode;bool lossless;
+      if (napi_get_element(env,list,i,&item)==napi_ok && napi_get_value_bigint_uint64(env,item,&inode,&lossless)==napi_ok && lossless && inode)
+        queue_invalidation(mount,inode);
+      else fail_mount(mount);
+    }
+  } else if (has_invalidate) fail_mount(mount);
   free(pending);schedule_lifetime(mount);return result;
 }
 
+static void *invalidate_pages(void *data) {
+  struct mount_state *mount=data;
+  pthread_mutex_lock(&mount->mutex);
+  for (;;) {
+    while (!mount->invalidator_stopping && !mount->invalidation_used) pthread_cond_wait(&mount->invalidations_ready,&mount->mutex);
+    if (mount->invalidator_stopping) break;
+    uint64_t *batch=mount->invalidations; size_t count=mount->invalidation_used;
+    mount->invalidations=NULL; mount->invalidation_used=0; mount->invalidation_capacity=0;
+    pthread_mutex_unlock(&mount->mutex);
+    /* ENOENT means the kernel holds no cache for that inode; nothing else is actionable after a reply. */
+    for (size_t i=0;i<count;i++) fuse_lowlevel_notify_inval_inode(mount->session,(fuse_ino_t)batch[i],0,0);
+    free(batch);
+    pthread_mutex_lock(&mount->mutex);
+  }
+  pthread_mutex_unlock(&mount->mutex);
+  return NULL;
+}
+/* Queue one inode's page cache for invalidation; a failed allocation fails the mount rather than serve stale pages. */
+static void queue_invalidation(struct mount_state *mount,uint64_t inode) {
+  pthread_mutex_lock(&mount->mutex);
+  bool queued=mount->closing || !mount->invalidator_started;
+  if (!queued) {
+    if (mount->invalidation_used==mount->invalidation_capacity) {
+      size_t capacity=mount->invalidation_capacity?mount->invalidation_capacity*2:16;
+      uint64_t *grown=realloc(mount->invalidations,capacity*sizeof(*grown));
+      if (grown) { mount->invalidations=grown; mount->invalidation_capacity=capacity; }
+    }
+    if (mount->invalidation_used<mount->invalidation_capacity) {
+      mount->invalidations[mount->invalidation_used++]=inode; queued=true;
+      pthread_cond_signal(&mount->invalidations_ready);
+    }
+  }
+  pthread_mutex_unlock(&mount->mutex);
+  if (!queued) fail_mount(mount);
+}
 static void *loop(void *data) { struct mount_state *mount=data;fuse_session_loop(mount->session);fail_mount(mount);return NULL; }
 static void stop(struct mount_state *mount) {
   pthread_mutex_lock(&mount->mutex);
   if(mount->closing){pthread_mutex_unlock(&mount->mutex);return;}
   mount->closing=true;
   struct pending *pending=mount->pending;mount->pending=NULL;mount->count=0;
+  mount->invalidator_stopping=true;pthread_cond_signal(&mount->invalidations_ready);
   pthread_mutex_unlock(&mount->mutex);
   while(pending){struct pending *next=pending->next;failure(pending->request,pending->operation,EIO);free(pending);pending=next;}
   if(mount->session) {
     fuse_session_exit(mount->session);fuse_session_unmount(mount->session);
     if(mount->started)pthread_join(mount->thread,NULL);
+    /* Unmount aborted the connection, so a notification blocked in the kernel has returned. */
+    if(mount->invalidator_started)pthread_join(mount->invalidator,NULL);
     fuse_session_destroy(mount->session);mount->session=NULL;
   }
   if(mount->callback)napi_release_threadsafe_function(mount->callback,napi_tsfn_abort);
   if(mount->failure_callback)napi_release_threadsafe_function(mount->failure_callback,napi_tsfn_abort);
   /* After the loop has joined nothing records more; the owner reconciles unreported references after unmount. */
-  pthread_mutex_lock(&mount->mutex);free_lifetime(&mount->lifetime);pthread_mutex_unlock(&mount->mutex);
+  pthread_mutex_lock(&mount->mutex);free_lifetime(&mount->lifetime);
+  free(mount->invalidations);mount->invalidations=NULL;mount->invalidation_used=mount->invalidation_capacity=0;
+  pthread_mutex_unlock(&mount->mutex);
 }
 static void cleanup(void *data) {stop(data);}
-static void finalized(napi_env env,void *data,void *hint) {(void)env;(void)hint;struct mount_state *mount=data;pthread_mutex_destroy(&mount->mutex);free(mount);}
+static void finalized(napi_env env,void *data,void *hint) {(void)env;(void)hint;struct mount_state *mount=data;pthread_cond_destroy(&mount->invalidations_ready);pthread_mutex_destroy(&mount->mutex);free(mount);}
 static void callback_finished(napi_env env,void *data,void *hint) {(void)hint;struct mount_state *mount=data;if(--mount->callbacks==0 && env && mount->owner)napi_delete_reference(env,mount->owner);}
 static napi_value close_mount(napi_env env,napi_callback_info info) {
   size_t count=1;napi_value value,result;napi_get_cb_info(env,info,&count,&value,NULL,NULL);
@@ -503,7 +562,7 @@ static napi_value mount_projection(napi_env env,napi_callback_info info) {
     napi_throw_type_error(env,NULL,"Projection mount requires an absolute mountpoint and callback.");return NULL;
   }
   struct mount_state *mount=calloc(1,sizeof(*mount));if(!mount){napi_throw_error(env,NULL,"Projection allocation failed.");return NULL;}
-  pthread_mutex_init(&mount->mutex,NULL);mount->env=env;
+  pthread_mutex_init(&mount->mutex,NULL);pthread_cond_init(&mount->invalidations_ready,NULL);mount->env=env;
   napi_create_object(env,&object);napi_type_tag_object(env,object,&mount_tag);napi_wrap(env,object,mount,finalized,NULL,NULL);
   napi_create_reference(env,object,1,&mount->owner);napi_create_string_utf8(env,"Tau shell projection",NAPI_AUTO_LENGTH,&label);
   /* Queue: one message per pending request, at most one interrupt each, and one reserved lifetime batch. */
@@ -523,7 +582,10 @@ static napi_value mount_projection(napi_env env,napi_callback_info info) {
     stop(mount);napi_throw_error(env,NULL,"Projection mount unavailable.");return NULL;
   }
   if(pthread_create(&mount->thread,NULL,loop,mount)!=0){stop(mount);napi_throw_error(env,NULL,"Projection loop unavailable.");return NULL;}
-  mount->started=true;napi_add_env_cleanup_hook(env,cleanup,mount);return object;
+  mount->started=true;
+  if(pthread_create(&mount->invalidator,NULL,invalidate_pages,mount)!=0){stop(mount);napi_throw_error(env,NULL,"Projection invalidation unavailable.");return NULL;}
+  pthread_mutex_lock(&mount->mutex);mount->invalidator_started=true;pthread_mutex_unlock(&mount->mutex);
+  napi_add_env_cleanup_hook(env,cleanup,mount);return object;
 }
 static napi_value library_identity(napi_env env,napi_callback_info info) {
   (void)info;
@@ -531,7 +593,7 @@ static napi_value library_identity(napi_env env,napi_callback_info info) {
   if(!dladdr((void *)fuse_session_new_versioned,&expected)) {
     napi_throw_error(env,NULL,"Cannot resolve projection library.");return NULL;
   }
-  const void *symbols[]={(void *)fuse_add_direntry,(void *)fuse_opt_free_args,(void *)fuse_reply_attr,(void *)fuse_reply_buf,(void *)fuse_reply_create,(void *)fuse_reply_entry,(void *)fuse_reply_err,(void *)fuse_reply_none,(void *)fuse_reply_open,(void *)fuse_reply_readlink,(void *)fuse_reply_write,(void *)fuse_req_interrupt_func,(void *)fuse_req_userdata,(void *)fuse_session_destroy,(void *)fuse_session_exit,(void *)fuse_session_loop,(void *)fuse_session_mount,(void *)fuse_session_new_versioned,(void *)fuse_session_unmount,(void *)fuse_pkgversion};
+  const void *symbols[]={(void *)fuse_add_direntry,(void *)fuse_lowlevel_notify_inval_inode,(void *)fuse_opt_free_args,(void *)fuse_reply_attr,(void *)fuse_reply_buf,(void *)fuse_reply_create,(void *)fuse_reply_entry,(void *)fuse_reply_err,(void *)fuse_reply_none,(void *)fuse_reply_open,(void *)fuse_reply_readlink,(void *)fuse_reply_write,(void *)fuse_req_interrupt_func,(void *)fuse_req_userdata,(void *)fuse_session_destroy,(void *)fuse_session_exit,(void *)fuse_session_loop,(void *)fuse_session_mount,(void *)fuse_session_new_versioned,(void *)fuse_session_unmount,(void *)fuse_pkgversion};
   for(size_t i=0;i<sizeof(symbols)/sizeof(symbols[0]);i++) {
     if(!dladdr(symbols[i],&actual) || actual.dli_fbase!=expected.dli_fbase) {
       napi_throw_error(env,NULL,"Projection library symbols resolve to different modules.");return NULL;

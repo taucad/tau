@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { EditorState } from '@codemirror/state';
-import type { EditorView } from '@codemirror/view';
+import { EditorView } from '@codemirror/view';
 import type * as LSP from 'vscode-languageserver-protocol';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { EditorDocument } from '#lib/editor-document.js';
@@ -16,7 +16,56 @@ import {
   KclBackend,
   kclHoverFallback,
   kclImportAt,
+  kclLspCompletion,
+  symbolCompletion,
 } from '#lib/kcl-language/kcl-codemirror.js';
+
+describe('KCL completion parity', () => {
+  it('should apply an LSP snippet field instead of inserting a literal tabstop', () => {
+    const document = new EditorDocument('main.kcl', 'fo');
+    const item: LSP.CompletionItem = { label: 'foo', insertText: 'foo($1)', insertTextFormat: 2 };
+    const completion = kclLspCompletion(item, { document, version: document.version, isDisposed: () => false });
+    const view = new EditorView({ state: EditorState.create({ doc: 'fo' }), parent: globalThis.document.body });
+    try {
+      expect(typeof completion.apply).toBe('function');
+      if (typeof completion.apply === 'function') {
+        completion.apply(view, completion, 0, 2);
+      }
+      expect(view.state.doc.toString()).toBe('foo()');
+      expect(view.state.selection.main.head).toBe(4);
+    } finally {
+      view.destroy();
+    }
+  });
+
+  it('should retain function and parameter insertion text with signature details', () => {
+    const functionSymbol = mock<KclSymbol>({
+      name: 'shape',
+      kind: 'function',
+      importPath: undefined,
+      returnType: 'Solid',
+      parameters: [{ name: 'length', type: 'number', isLabeled: true, hasDefault: false, range: { start: 0, end: 0 } }],
+    });
+    const functionCompletion = symbolCompletion(functionSymbol, 2);
+    expect(functionCompletion.detail).toBe('fn shape(length: number) -> Solid');
+    const view = new EditorView({ state: EditorState.create({ doc: '' }), parent: globalThis.document.body });
+    try {
+      expect(typeof functionCompletion.apply).toBe('function');
+      if (typeof functionCompletion.apply === 'function') {
+        functionCompletion.apply(view, functionCompletion, 0, 0);
+      }
+      expect(view.state.doc.toString()).toBe('shape(length = )');
+      expect(view.state.selection.main.head).toBe('shape(length = '.length);
+    } finally {
+      view.destroy();
+    }
+    const parameter = symbolCompletion(
+      mock<KclSymbol>({ name: 'length', kind: 'parameter', containingFunction: 'shape', value: undefined }),
+      2,
+    );
+    expect(parameter.apply).toBe('length = ');
+  });
+});
 
 describe('KCL LSP document lifecycle', () => {
   it('opens once for split views, advances versions, closes after the last view, and stops changes', async () => {

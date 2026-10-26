@@ -1,6 +1,6 @@
 import { StateEffect, StateField } from '@codemirror/state';
 import type { Extension, StateEffectType } from '@codemirror/state';
-import { autocompletion } from '@codemirror/autocomplete';
+import { autocompletion, snippet } from '@codemirror/autocomplete';
 import type { Completion } from '@codemirror/autocomplete';
 import { Decoration, EditorView, hoverTooltip, keymap, showDialog, showTooltip, ViewPlugin } from '@codemirror/view';
 import type { Tooltip } from '@codemirror/view';
@@ -21,7 +21,9 @@ import type { EditorWorkspaceEdit } from '#lib/editor-workspace-edits.js';
 import { KclLspClient } from '#lib/kcl-language/lsp/kcl-lsp-client.js';
 import { semanticTokenTypes } from '#lib/kcl-language/lsp/kcl-lsp-types.js';
 import { KclSymbolService, formatModuleHover, formatSymbolHover } from '#lib/kcl-language/lsp/kcl-symbol-service.js';
+import type { KclSymbol } from '#lib/kcl-language/lsp/kcl-symbol-service.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
+import { lspSnippetToCodeMirror } from '#lib/lsp-completion-snippet.js';
 
 type OpenDocument = { count: number; text: string; unsubscribe: () => void };
 type EditBasis = ReadonlyMap<string, Readonly<{ version: number; text: string }>>;
@@ -454,6 +456,74 @@ async function initializeBackend(backend: KclBackend): Promise<KclBackend> {
   return backend;
 }
 
+/** Keep the prior symbol completion text, signature and snippet behavior. */
+export function symbolCompletion(symbol: KclSymbol, boost: number): Completion {
+  if (symbol.kind === 'function') {
+    const parameters = symbol.parameters ?? [];
+    const signature = parameters
+      .map((parameter) => `${parameter.name}${parameter.hasDefault ? '?' : ''}: ${parameter.type ?? 'unknown'}`)
+      .join(', ');
+    const suffix = symbol.returnType ? ` -> ${symbol.returnType}` : '';
+    const fields = parameters.map((parameter, index) => `${parameter.name} = \${${index + 1}}`).join(', ');
+    return {
+      label: symbol.name,
+      type: 'function',
+      detail: `fn ${symbol.name}(${signature})${suffix}`,
+      info: formatSymbolHover(symbol, { isAlias: Boolean(symbol.importPath), importPath: symbol.importPath }).join(
+        '\n',
+      ),
+      boost,
+      apply: snippet(`${symbol.name}(${fields})`),
+    };
+  }
+  if (symbol.kind === 'parameter') {
+    return {
+      label: symbol.name,
+      type: 'property',
+      detail: `(param) ${symbol.name}: ${symbol.value ? 'value' : 'unknown'}`,
+      info: symbol.containingFunction ? `Parameter of ${symbol.containingFunction}` : undefined,
+      boost,
+      apply: `${symbol.name} = `,
+    };
+  }
+  return {
+    label: symbol.name,
+    type: 'variable',
+    detail: symbol.kind,
+    info: formatSymbolHover(symbol, { isAlias: Boolean(symbol.importPath), importPath: symbol.importPath }).join('\n'),
+    boost,
+  };
+}
+
+/** Map one KCL LSP completion to CodeMirror with its request-time version guard. */
+export function kclLspCompletion(
+  item: LSP.CompletionItem,
+  { document, version, isDisposed }: Readonly<{ document: EditorDocument; version: number; isDisposed: () => boolean }>,
+): Completion {
+  return {
+    label: item.label,
+    detail: item.detail,
+    info: typeof item.documentation === 'string' ? item.documentation : item.documentation?.value,
+    boost: 4,
+    // oxlint-disable-next-line max-params -- CodeMirror completion apply callback contract.
+    apply(view, completion, from, to) {
+      if (isDisposed() || document.version !== version) {
+        return;
+      }
+      const edit = item.textEdit;
+      const range = edit && 'range' in edit ? edit.range : undefined;
+      const start = range ? offsetAt(document.text, range.start) : from;
+      const end = range ? offsetAt(document.text, range.end) : to;
+      const insertText = edit ? edit.newText : (item.insertText ?? item.label);
+      if (item.insertTextFormat === 2) {
+        snippet(lspSnippetToCodeMirror(insertText))(view, completion, start, end);
+      } else {
+        view.dispatch({ changes: { from: start, to: end, insert: insertText } });
+      }
+    },
+  };
+}
+
 function kclExtensions({
   backend,
   document,
@@ -577,49 +647,25 @@ function kclExtensions({
             return null;
           }
           const items = result ? (Array.isArray(result) ? result : result.items) : [];
-          const options: Completion[] = items.map((item) => ({
-            label: item.label,
-            detail: item.detail,
-            info: typeof item.documentation === 'string' ? item.documentation : item.documentation?.value,
-            // oxlint-disable-next-line max-params -- CodeMirror completion apply callback contract.
-            apply(view, _completion, from, to) {
-              if (isDisposed() || document.version !== version) {
-                return;
+          const options: Completion[] = items.map((item) => kclLspCompletion(item, { document, version, isDisposed }));
+          const seen = new Set(options.map((option) => option.label));
+          const addSymbols = (candidates: readonly KclSymbol[], boost: number): void => {
+            for (const symbol of candidates) {
+              if (!seen.has(symbol.name)) {
+                seen.add(symbol.name);
+                options.push(symbolCompletion(symbol, boost));
               }
-              const edit = item.textEdit;
-              const range = edit && 'range' in edit ? edit.range : undefined;
-              view.dispatch({
-                changes: {
-                  from: range ? offsetAt(document.text, range.start) : from,
-                  to: range ? offsetAt(document.text, range.end) : to,
-                  insert: edit ? edit.newText : (item.insertText ?? item.label),
-                },
-              });
-            },
-          }));
-          const local = symbols.getCompletableSymbols(document.uri).map(
-            (symbol): Completion => ({
-              label: symbol.name,
-              type: symbol.kind === 'function' ? 'function' : 'variable',
-              detail: symbol.kind,
-              info: formatSymbolHover(symbol).join('\n'),
-            }),
-          );
+            }
+          };
+          if (symbols.hasStdlib) {
+            addSymbols(symbols.getStdlibSymbols(), 3);
+          }
+          addSymbols(symbols.getCompletableSymbols(document.uri), 2);
           const imported = await symbols.getImportedSymbolsForCompletion(document.uri, client.getFileManager());
           if (isDisposed() || document.version !== version) {
             return null;
           }
-          options.push(
-            ...local,
-            ...imported.map(
-              (symbol): Completion => ({
-                label: symbol.name,
-                type: symbol.kind === 'function' ? 'function' : 'variable',
-                detail: 'import',
-                info: formatSymbolHover(symbol, { isAlias: true, importPath: symbol.importPath }).join('\n'),
-              }),
-            ),
-          );
+          addSymbols(imported, 1);
           return { from: context.matchBefore(/[\w$]*/)?.from ?? context.pos, options };
         },
       ],

@@ -196,6 +196,28 @@ describe.runIf(process.platform === 'linux')('Linux protected-path stand-ins', (
     expect(existsSync(join(filesystem.root, '.git'))).toBe(false);
   });
 
+  it('should stand in for an absent directory row as a directory, never a file', () => {
+    const filesystem = absent();
+    const runs = join(filesystem.root, '.tau', 'runs');
+    const control = join(filesystem.root, '.git');
+    const release = holdProtectedStandIns({
+      ...filesystem,
+      masked: [],
+      readOnly: [runs],
+      directories: [runs, control],
+    });
+    expect(lstatSync(control).isDirectory()).toBe(true);
+    // `.tau` itself is the first absent step; the directory row below it waits for the mask or a real directory.
+    expect(lstatSync(join(filesystem.root, '.tau')).isDirectory()).toBe(true);
+    release();
+    mkdirSync(join(filesystem.root, '.tau', 'parameters'), { recursive: true });
+    const again = holdProtectedStandIns({ ...filesystem, masked: [], readOnly: [runs], directories: [runs, control] });
+    expect(lstatSync(runs).isDirectory()).toBe(true);
+    expect(lstatSync(join(filesystem.root, '.tau', 'binding.json')).isFile()).toBe(true);
+    again();
+    expect(existsSync(runs)).toBe(false);
+  });
+
   it('should not make a stand-in outside a writable root or beneath a symbolic link', () => {
     const filesystem = absent();
     const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), 'tau-stand-in-elsewhere-')));

@@ -184,7 +184,9 @@ const standInStep = (path: string, root: string, filesystem: ShellFilesystem): s
     }
     const info = lstatSync(step, { throwIfNoEntry: false });
     if (info === undefined) {
-      const directory = step !== path;
+      // An intermediate component, or a protected path the registry declares a directory, is an empty directory:
+      // what Tau itself would create there. Only a file row is stood in for by an empty file.
+      const directory = step !== path || (filesystem.directories ?? []).includes(path);
       try {
         if (directory) {
           mkdirSync(step);
@@ -217,8 +219,8 @@ const standInStep = (path: string, root: string, filesystem: ShellFilesystem): s
  * deletes it on exit, even while another launch's sandbox is mounted on it: that sandbox's mask detaches, and a launch
  * configured against the vanished entry binds a source that is gone. A stand-in instead exists from before any launch
  * that relies on it is configured until the last of them has ended, so the runtime never creates or deletes it, and
- * it is the same empty directory (an intermediate component) or empty file (the protected path itself) the runtime
- * would mount on. Paths under an existing protected directory, a symbolic link, a file, or an existing masked container
+ * it is an empty directory for an intermediate component or a directory row and an empty file only for a file row,
+ * so the product never finds a file where it reads a directory. Paths under an existing protected directory, a symbolic link, a file, or an existing masked container
  * outside its writable children are left alone: those are already covered, and the host never writes there.
  *
  * @internal

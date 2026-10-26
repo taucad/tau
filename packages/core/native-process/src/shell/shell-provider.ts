@@ -44,6 +44,11 @@ export type ShellFilesystem = Readonly<{
    * name can be confirmed to exist, though never read, listed or stat-ed.
    */
   masked?: readonly string[] | undefined;
+  /**
+   * The protected paths that are directories when present (the path registry's directory rows), so a Linux launch
+   * stands in for an absent one with an empty directory rather than a file.
+   */
+  directories?: readonly string[] | undefined;
 }>;
 
 /** Terminal dimensions, in cells. @public */

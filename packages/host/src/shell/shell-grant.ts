@@ -125,6 +125,8 @@ export type ShellProjectProtected = Readonly<{
   readOnly: readonly string[];
   /** Hidden rows, unknown `.tau` and top-level names, and nested version-control directories. */
   denied: readonly string[];
+  /** The registry's directory rows among them, which are directories whenever they exist. */
+  directories: readonly string[];
 }>;
 
 /**
@@ -141,9 +143,14 @@ export const projectProtected = async (root: string): Promise<ShellProjectProtec
   const protect = (path: string, agentAccess: string): void => {
     (agentAccess === 'read-only' ? readOnly : denied).add(path);
   };
+  const directories = new Set<string>();
   for (const row of pathRegistry) {
     if (row.agentAccess !== 'read-write') {
-      protect(join(root, ...row.prefix.split('/')), row.agentAccess);
+      const path = join(root, ...row.prefix.split('/'));
+      protect(path, row.agentAccess);
+      if (row.directory) {
+        directories.add(path);
+      }
     }
   }
   const denyListed = async (directory: string, prefix: string): Promise<string[]> => {
@@ -174,7 +181,11 @@ export const projectProtected = async (root: string): Promise<ShellProjectProtec
   for (const path of await nestedControlDirectories(root)) {
     denied.add(path);
   }
-  return { readOnly: [...readOnly].filter((path) => !denied.has(path)), denied: [...denied] };
+  return {
+    readOnly: [...readOnly].filter((path) => !denied.has(path)),
+    denied: [...denied],
+    directories: [...directories],
+  };
 };
 
 /**
@@ -383,6 +394,8 @@ export type ShellFilesystemPlan = Readonly<{
   readOnly: readonly string[];
   denied: readonly string[];
   masked: readonly string[];
+  /** Protected paths that are directories when present, so an absent one is never stood in for by a file. */
+  directories: readonly string[];
 }>;
 
 /**
@@ -471,6 +484,7 @@ export const compileShellFilesystem = async (
       (path) => isAbsolute(path) && !deniedPaths.some((deny) => within(host.platform, path, deny)),
     ),
     denied: deniedPaths,
+    directories: [...new Set([...input.checkoutProtected.directories, ...writeControls])],
   };
 };
 

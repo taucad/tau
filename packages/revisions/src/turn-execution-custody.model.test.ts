@@ -1,7 +1,7 @@
 /**
- * TurnExecutionCustody projection onto real protected lease records. This slice
- * covers Hold, stale ReleaseExecution, RecoverRetire and the effect-level
- * checkout Discard check; machine closing-turn admission remains a separate gate.
+ * TurnExecutionCustody projection onto real protected lease records: Hold,
+ * stale ReleaseExecution, RecoverRetire, the effect-level checkout Discard
+ * check, and Complete racing Hold through the real turn-placement adapter.
  */
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -11,7 +11,8 @@ import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { createActor } from 'xstate';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
-import { createRevisionActors } from '#revision-effects.js';
+import { createProjectRevisionsActor, createRevisionActors } from '#revision-effects.js';
+import { createTurnPlacementPort } from '#turn-placement.js';
 import type { RevisionActors } from '#revision-effects.js';
 
 const roots: string[] = [];
@@ -142,5 +143,97 @@ describe('TurnExecutionCustody checkout discard projection', () => {
     expect(retained?.some((checkout) => checkout.id === checkoutId)).toBe(true);
     expect(await owner.turns.executions.release({ key, executionId: 'one' })).toEqual({ status: 'applied' });
     await discard();
+  }, 30_000);
+});
+
+describe('TurnExecutionCustody close racing an in-flight hold', () => {
+  it('should never close an attempt behind a hold whose record write is still in flight', async () => {
+    const { filesystem } = await fixture();
+    const gate = Promise.withResolvers<void>();
+    const writing = Promise.withResolvers<void>();
+    let gating = false;
+    const gated = new Proxy(filesystem, {
+      get: (target, name) => {
+        const value: unknown = Reflect.get(target, name);
+        if (name === 'writeFile') {
+          return async (...args: Parameters<typeof target.writeFile>) => {
+            if (gating) {
+              writing.resolve();
+              await gate.promise;
+            }
+            return target.writeFile(...args);
+          };
+        }
+        return typeof value === 'function' ? (value as (...parameters: unknown[]) => unknown).bind(target) : value;
+      },
+    });
+    const port = createIsomorphicGitRevisionPort({ filesystem });
+    const owner = createRevisionActors({ port, projectId: 'race', filesystem: async () => gated });
+    owners.push(owner);
+    // A first hold and release teaches this root the run, so the close below answers from memory.
+    expect(await owner.turns.executions.hold({ key, executionId: 'zero' })).toEqual({ status: 'applied' });
+    expect(await owner.turns.executions.release({ key, executionId: 'zero' })).toEqual({ status: 'applied' });
+
+    gating = true;
+    const holding = owner.turns.executions.hold({ key, executionId: 'one' });
+    await writing.promise;
+    expect(await owner.turns.executions.close(key)).toBe('held');
+    gating = false;
+    gate.resolve();
+    expect(await holding).toEqual({ status: 'applied' });
+
+    expect(await owner.turns.executions.close(key)).toBe('held');
+    expect(await owner.turns.executions.release({ key, executionId: 'one' })).toEqual({ status: 'applied' });
+    expect(await owner.turns.executions.close(key)).toBe('closed');
+    expect(await owner.turns.executions.hold({ key, executionId: 'two' })).toMatchObject({
+      status: 'refused',
+      code: 'REVISIONS_BUSY',
+    });
+  });
+});
+
+describe('TurnExecutionCustody completion admission projection', () => {
+  it('should refuse settlement while held and refuse a hold once completion has begun', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-custody-complete-'));
+    roots.push(root);
+    const filesystem = new NodeFsProvider(root);
+    const port = createIsomorphicGitRevisionPort({
+      filesystem,
+      checkouts: { projectId: 'project-1', root: () => filesystem },
+    });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const revisions = createProjectRevisionsActor({ port, projectId: 'project-1', filesystem: () => filesystem });
+    revisions.actor.start();
+    const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
+    try {
+      const admitted = await placement.admit({ requestId: 'admit', key });
+      expect(admitted.status).toBe('applied');
+      expect(await revisions.turns.executions.hold({ key, executionId: 'one' })).toEqual({ status: 'applied' });
+
+      // Complete while held: a bounded refusal that keeps the lease and announces nothing.
+      expect(await placement.complete({ requestId: 'complete-1', key, cut: true })).toMatchObject({
+        status: 'refused',
+        code: 'CUT_FAILED',
+      });
+      expect(await filesystem.exists(path)).toBe(true);
+      expect(await placement.complete({ requestId: 'complete-2', key, cut: false })).toMatchObject({
+        status: 'refused',
+        code: 'CUT_FAILED',
+      });
+
+      // Confirmed stop releases the hold; completion then settles, and no later hold can slip in behind it.
+      expect(await revisions.turns.executions.release({ key, executionId: 'one' })).toEqual({ status: 'applied' });
+      expect(await placement.complete({ requestId: 'complete-3', key, cut: true })).toMatchObject({
+        status: 'applied',
+      });
+      expect(await revisions.turns.executions.hold({ key, executionId: 'two' })).toMatchObject({
+        status: 'refused',
+        code: 'REVISIONS_BUSY',
+      });
+    } finally {
+      await placement.fence();
+      revisions.actor.stop();
+      await revisions.settled();
+    }
   }, 30_000);
 });

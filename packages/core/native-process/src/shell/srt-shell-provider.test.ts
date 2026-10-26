@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
 // @vitest-environment node
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { processTable } from '#shell/process-tree.js';
+import { holdProtectedStandIns } from '#shell/shell-stand-ins.js';
 import type { ShellLaunch, ShellPipesProcess, ShellProcess } from '#shell/shell-provider.js';
 import {
   bindOwnPty,
@@ -400,5 +401,62 @@ describe('bindOwnPty', () => {
 
   it('should refuse a vector without exactly one Seatbelt profile', () => {
     expect(bindOwnPty(['/bin/sh', '-c', 'bwrap -- /bin/sh'])).toBeUndefined();
+  });
+});
+
+describe.runIf(process.platform === 'linux')('Linux runtime working directory and stand-ins', () => {
+  it('should start the supervisor in its private runtime directory, never the host working directory', async () => {
+    const outcome = await createSandboxShellProvider({ supervisor }).launch(
+      launchOf({ arguments: ['--noprofile', '--norc', '-c', 'echo TAU_FIXTURE_CWD'] }),
+    );
+
+    expect(outcome.status).toBe('sandbox-unavailable');
+    const message = outcome.status === 'sandbox-unavailable' ? outcome.message : '';
+    expect(message).toMatch(/^cwd=.*\/tau-shell-runtime-[^/]+$/u);
+    expect(message).not.toBe(`cwd=${process.cwd()}`);
+  });
+
+  it('should refuse a launch whose writable root holds the host working directory', async () => {
+    const outcome = await createSandboxShellProvider({ supervisor }).launch(
+      launchOf({
+        arguments: ['--noprofile', '--norc', '-c', 'true'],
+        filesystem: { readable: [], writable: [process.cwd()], denied: [] },
+      }),
+    );
+
+    expect(outcome.status).toBe('sandbox-unavailable');
+    expect(outcome.status === 'sandbox-unavailable' ? outcome.message : '').toContain('writable root');
+  });
+
+  it('should leave the runtime no absent protected path inside a writable root to mount for itself', () => {
+    const root = fixtureRoot();
+    const home = join(root, 'home');
+    mkdirSync(home);
+    // A writable private home puts the baseline denies inside a writable root, next to the checkout's own rows.
+    const profile = shellSandboxProfile(
+      {
+        filesystem: {
+          readable: [],
+          writable: [root],
+          readOnly: [join(root, 'project', '.tau', 'runs')],
+          denied: [join(root, 'project', '.git'), join(root, 'project', '.tau', 'binding.json')],
+        },
+        network: { domains: [] },
+      },
+      { home },
+    ) as { filesystem: { denyWrite: string[]; allowWrite: string[] } };
+    const inside = profile.filesystem.denyWrite.filter((path) =>
+      profile.filesystem.allowWrite.some((writable) => path !== writable && path.startsWith(`${writable}/`)),
+    );
+    expect(inside).toStrictEqual(expect.arrayContaining([join(home, '.ssh'), join(root, 'project', '.git')]));
+
+    const release = holdProtectedStandIns(profile.filesystem);
+    try {
+      // Every entry of the runtime's own deny list inside a writable root is now present: no runtime mount point.
+      expect(inside.filter((path) => !existsSync(path))).toStrictEqual([]);
+    } finally {
+      release();
+    }
+    expect(inside.filter((path) => existsSync(path))).toStrictEqual([]);
   });
 });

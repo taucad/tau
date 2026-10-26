@@ -125,7 +125,11 @@ describe.runIf(enabled)('shell service conformance', () => {
     writeFileSync(join(unrelated, 'canary.txt'), 'UNRELATED\n');
     checkouts.set('run-conformance', { cwd: project, admission: 'admission-conformance' });
     const probe = await probeHostShell({
-      provider: createSandboxShellProvider({ bwrapPath, home }),
+      provider: createSandboxShellProvider({
+        bwrapPath,
+        home,
+        custody: { directory: join(appData, 'shell-custody'), sessionDirectory: sessions },
+      }),
       checkouts,
       permissionModeOf: async () => mode,
       appDataRoots: [appData],
@@ -310,10 +314,18 @@ describe.runIf(enabled)('shell service conformance', () => {
     const logPath = join(root, `${label}-events.jsonl`);
     const runId = `run-${label}`;
     const chatId = `chat-${label}`;
-    const real = createSandboxShellProvider({ bwrapPath, home });
+    const real = createSandboxShellProvider({
+      bwrapPath,
+      home,
+      custody: { directory: join(appData, 'shell-custody'), sessionDirectory: sessions },
+    });
     const launches: Array<Readonly<{ readable: readonly string[]; log: string }>> = [];
     const provider: ShellProvider = {
       name: real.name,
+      prepare: real.prepare,
+      inventory: real.inventory,
+      recover: real.recover,
+      release: real.release,
       launch: async (launch) => {
         launches.push({
           readable: launch.filesystem.readable,

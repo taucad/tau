@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { accessSync, constants, realpathSync } from 'node:fs';
 import { endianness, homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -79,11 +79,31 @@ export const deniedReadRoots = (): string[] =>
  * @returns The vendored seccomp directory on Linux; nothing elsewhere.
  */
 export const sandboxRuntimeReadRoots = (): string[] => {
-  if (process.platform !== 'linux') {
-    return [];
+  const helper = sandboxRuntimeSeccomp();
+  return helper === undefined ? [] : [dirname(dirname(helper.applyPath))];
+};
+
+/**
+ * Resolve the executable on the real filesystem, not Electron's virtual ASAR filesystem.
+ * Desktop packaging unpacks the seccomp directory; both bubblewrap mounts and the shell
+ * invocation must use that same physical path. Missing payloads remain sandbox failures.
+ *
+ * @internal
+ * @param entry - Resolved sandbox-runtime entry; defaults to the installed dependency.
+ * @param platform - Host operating system.
+ * @param architecture - Host CPU architecture.
+ * @returns The Linux helper configuration; absent on other platforms.
+ */
+export const sandboxRuntimeSeccomp = (
+  entry = fileURLToPath(import.meta.resolve('@anthropic-ai/sandbox-runtime')),
+  platform: NodeJS.Platform = process.platform,
+  architecture: string = process.arch,
+): { applyPath: string } | undefined => {
+  if (platform !== 'linux') {
+    return undefined;
   }
-  const entry = fileURLToPath(import.meta.resolve('@anthropic-ai/sandbox-runtime'));
-  return [join(dirname(dirname(entry)), 'vendor', 'seccomp')];
+  const physicalEntry = entry.replace(/\.asar(?=[/\\])/u, '.asar.unpacked');
+  return { applyPath: join(dirname(dirname(physicalEntry)), 'vendor', 'seccomp', architecture, 'apply-seccomp') };
 };
 
 /**
@@ -107,6 +127,7 @@ export const deniedWriteRoots = (): string[] => getDefaultWritePaths().filter((p
  * @public
  */
 export type NativeSandboxProfile = {
+  seccomp?: { applyPath: string };
   network: { allowedDomains: string[]; deniedDomains: string[]; strictAllowlist: boolean };
   filesystem: { denyRead: string[]; allowRead: string[]; allowWrite: string[]; denyWrite: string[] };
 };
@@ -133,6 +154,7 @@ export type NativeSandboxProfile = {
 export const nativeSandboxPolicy = (
   launch?: Pick<NativeSandboxLaunch, 'readablePaths' | 'writablePath'>,
 ): NativeSandboxProfile => ({
+  seccomp: sandboxRuntimeSeccomp(),
   network: { allowedDomains: [], deniedDomains: ['*'], strictAllowlist: true },
   filesystem: {
     denyRead: deniedReadRoots(),
@@ -216,7 +238,11 @@ const ensureInitialized = async (): Promise<void> => {
     if (dependencies.errors.length > 0) {
       throw new NativeRuntimeUnavailableError(dependencies.errors.join('; '));
     }
-    await SandboxManager.initialize(nativeSandboxPolicy());
+    const profile = nativeSandboxPolicy();
+    if (profile.seccomp) {
+      accessSync(profile.seccomp.applyPath, constants.X_OK);
+    }
+    await SandboxManager.initialize(profile);
   })();
   const attempt = initialization;
   try {

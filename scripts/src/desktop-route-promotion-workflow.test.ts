@@ -244,3 +244,4 @@ describe('desktop installer publication channel gates', () => {
     }
   });
 });
+/* eslint-enable @typescript-eslint/naming-convention -- End exact external names. */

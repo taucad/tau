@@ -128,3 +128,4 @@ for (const [event, operation] of [
   assert.match(prepare.stderr, /Installer publication is disabled for production/u);
 }
 console.log('Per-channel installer publication gate checks passed');
+/* eslint-enable @typescript-eslint/naming-convention -- End exact external names. */

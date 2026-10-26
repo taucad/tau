@@ -446,6 +446,11 @@ export type TurnStore = Readonly<{
   executions: Readonly<{
     hold: (input: TurnExecutionInput) => Promise<TurnExecutionAnswer>;
     release: (input: TurnExecutionInput) => Promise<TurnExecutionAnswer>;
+    /**
+     * Turn placement only, before a completion settles: `held` while any execution is held; otherwise `closed`, and
+     * every later hold of the attempt is refused. Serialized with holds in the run's record section (I7).
+     */
+    close: (key: TurnAttemptKey) => Promise<'closed' | 'held' | 'unavailable'>;
   }>;
   /** One checkout and its files, or `undefined` when the project has no checkout with that id. */
   open: (
@@ -1866,6 +1871,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       );
     }
   };
+  /*
+   * The executions this root last wrote for each run (I7). A hold counts before its bytes land and a release only
+   * after, so `closeExecutions` can answer from memory without waiting on the store; a failed write forgets the run,
+   * which sends the next close back to the durable record.
+   */
+  const knownExecutions = new Map<string, readonly string[]>();
   /* Call only inside the run's record section. Failure to delete is not successful retirement. */
   const dropLease = async (runId: string): Promise<void> => {
     refuseHeldExecutions(await leaseOf(runId));
@@ -1873,6 +1884,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if (await records.exists(leasePathOf(runId))) {
       await records.unlink(leasePathOf(runId));
     }
+    knownExecutions.set(runId, []);
   };
   const retireAttempt = async (key: TurnAttemptKey): Promise<void> =>
     inRecordSection(key.runId, async () => {
@@ -1939,17 +1951,54 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     });
   };
   const writeLeaseRecord = async (lease: TurnLease): Promise<void> => {
-    const records = await recordsFileSystem();
-    await records.writeFile(leasePathOf(lease.runId), `${JSON.stringify(lease, undefined, 2)}\n`);
+    const next = lease.executionIds ?? [];
+    knownExecutions.set(lease.runId, [...new Set([...(knownExecutions.get(lease.runId) ?? []), ...next])]);
+    try {
+      const records = await recordsFileSystem();
+      await records.writeFile(leasePathOf(lease.runId), `${JSON.stringify(lease, undefined, 2)}\n`);
+    } catch (error) {
+      knownExecutions.delete(lease.runId);
+      throw error;
+    }
+    knownExecutions.set(lease.runId, next);
   };
   const releaseMark = (): void => {
     heldMarks.delete(markOf(rootInstanceId));
     rootStopped.resolve();
   };
 
+  /* Attempts whose completion began in this root: a hold can no longer slip in behind their settlement (I7). */
+  const closingAttempts = new Set<string>();
+  const closingIdOf = (key: TurnAttemptKey): string => JSON.stringify([key.chatId, key.turnId, key.runId, key.attempt]);
+  const closeExecutions = async (key: TurnAttemptKey): Promise<'closed' | 'held' | 'unavailable'> => {
+    /* Answered in one synchronous step, so no hold can land between the check and the closing mark. */
+    const known = knownExecutions.get(key.runId);
+    if (known !== undefined) {
+      if (known.length > 0) {
+        return 'held';
+      }
+      closingAttempts.add(closingIdOf(key));
+      return 'closed';
+    }
+    try {
+      return await inRecordSection(key.runId, async () => {
+        const record = await leaseOf(key.runId);
+        if (record !== undefined && namesAttempt(record, key) && hasExecutions(record)) {
+          return 'held';
+        }
+        closingAttempts.add(closingIdOf(key));
+        return 'closed';
+      });
+    } catch {
+      return 'unavailable';
+    }
+  };
   const changeExecution = async (input: TurnExecutionInput, hold: boolean): Promise<TurnExecutionAnswer> => {
     try {
       return await inRecordSection(input.key.runId, async (): Promise<TurnExecutionAnswer> => {
+        if (hold && closingAttempts.has(closingIdOf(input.key))) {
+          return { status: 'refused', code: 'REVISIONS_BUSY', message: 'This turn is closing; no command can start.' };
+        }
         const record = await leaseOf(input.key.runId);
         if (
           record === undefined ||
@@ -1965,6 +2014,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const current = record.executionIds ?? [];
         if (current.includes(input.executionId) === hold) {
           return { status: 'replayed' };
+        }
+        /* Checked again with no await before the write records the hold, because a close answers from memory. */
+        if (hold && closingAttempts.has(closingIdOf(input.key))) {
+          return { status: 'refused', code: 'REVISIONS_BUSY', message: 'This turn is closing; no command can start.' };
         }
         const executionIds = hold ? [...current, input.executionId] : current.filter((id) => id !== input.executionId);
         await writeLeaseRecord({ ...record, executionIds });
@@ -2872,6 +2925,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       executions: {
         hold: async (input) => changeExecution(input, true),
         release: async (input) => changeExecution(input, false),
+        close: closeExecutions,
       },
       open: async (checkoutId) => {
         const places = await listPlaces();

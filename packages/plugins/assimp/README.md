@@ -10,7 +10,7 @@ Assimp-backed import and export toolkit for @taucad/runtime
 
 ## Why @taucad/assimp?
 
-- **30 import extensions** — FBX, OBJ, DAE, 3DS, 3MF, PLY, STL, USD, X3D, IFC and more, meshed into glTF.
+- **24 import extensions** — FBX, OBJ, DAE, 3MF, PLY, STL, USD, IFC and more, meshed into glTF.
 - **26 conversion routes** — GLB and glTF each reach 13 non-identity targets derived from libassimp's static catalog.
 - **Strong export options** — strict, target-specific Zod schemas are generated from libassimp's public descriptors.
 - **One call composes it** — `assimp({ preset: 'all' })` registers both capabilities with `defineRuntime`.

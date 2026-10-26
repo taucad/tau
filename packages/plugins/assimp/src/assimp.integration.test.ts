@@ -330,7 +330,7 @@ const expectNativePlyRoundTrip = async (
     expect(converted.files).toHaveLength(1);
     await expectTriangleGeometry(new Uint8Array(converted.files[0]!.bytes));
   } finally {
-    assimp.dispose();
+    await assimp.dispose();
   }
 };
 

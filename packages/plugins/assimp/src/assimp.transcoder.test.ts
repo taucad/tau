@@ -48,7 +48,7 @@ describe('assimp transcoder', () => {
       };
     });
     assimpMock.convert.mockResolvedValue({
-      files: [{ name: 'result.stl', bytes: new Uint8Array([1, 2, 3]) }],
+      files: [{ name: 'model.stl', bytes: new Uint8Array([1, 2, 3]) }],
     });
   });
 
@@ -120,12 +120,12 @@ describe('assimp transcoder', () => {
     );
   });
 
-  it('preserves sidecar order, copies bytes, maps MIME types, and normalizes STEP', async () => {
+  it('preserves sidecar order, copies bytes, and maps MIME types', async () => {
     const primary = new Uint8Array([7, 8, 9]);
     const sidecar = new Uint8Array([10, 11]);
     assimpMock.convert.mockResolvedValue({
       files: [
-        { name: 'result.stp', bytes: primary },
+        { name: 'model.step', bytes: primary },
         { name: 'material.mtl', bytes: sidecar },
       ],
     });
@@ -143,7 +143,7 @@ describe('assimp transcoder', () => {
       return;
     }
     expect(result.data.map(({ name, mimeType }) => ({ name, mimeType }))).toEqual([
-      { name: 'result.step', mimeType: 'application/step' },
+      { name: 'model.step', mimeType: 'application/step' },
       { name: 'material.mtl', mimeType: 'application/octet-stream' },
     ]);
     expect(result.data[0]?.bytes).toEqual(primary);

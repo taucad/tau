@@ -432,12 +432,14 @@ print("done", flush=True)
     }
   }, 60_000);
 
-  it('rejects missing, substituted, and competing same-SONAME library resolution before mounting', async () => {
+  it('should reject missing or substituted libraries and select the adjacent library ahead of LD_LIBRARY_PATH', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'tau-projection-loader-'));
     const artifact = join(directory, 'artifact');
     const competitor = join(directory, 'competitor');
+    const mountpoint = join(directory, 'mount');
     await mkdir(artifact);
     await mkdir(competitor);
+    await mkdir(mountpoint);
     const source = fileURLToPath(new URL('../../dist/native/linux-x64/', import.meta.url));
     const wrapper = fileURLToPath(new URL('shell-projection-native.ts', import.meta.url));
     const target = join(artifact, 'shell-projection.node');
@@ -448,7 +450,7 @@ try { const mount = openShellProjectionMount({binary:process.argv[1],mountpoint:
 await mount[Symbol.asyncDispose](); process.stdout.write('mounted'); }
 catch(error) { process.stdout.write(error.message); }`;
     const run = async (environment: NodeJS.ProcessEnv = process.env): Promise<string> => {
-      const result = await execute(process.execPath, ['--input-type=module', '-e', script, target, directory], {
+      const result = await execute(process.execPath, ['--input-type=module', '-e', script, target, mountpoint], {
         env: environment,
       });
       return result.stdout;
@@ -459,9 +461,10 @@ catch(error) { process.stdout.write(error.message); }`;
       expect(await run()).toContain('does not match');
       await copyFile(join(source, 'libfuse3.so.4'), join(artifact, 'libfuse3.so.4'));
       await copyFile(join(source, 'libfuse3.so.4'), join(competitor, 'libfuse3.so.4'));
-      expect(await run({ ...process.env, LD_LIBRARY_PATH: competitor })).toContain(
-        'did not load its reviewed adjacent library',
-      );
+      const dynamic = await execute('readelf', ['-d', target]);
+      expect(dynamic.stdout).toMatch(/\(RPATH\).*\$ORIGIN/u);
+      expect(dynamic.stdout).not.toContain('(RUNPATH)');
+      expect(await run({ ...process.env, LD_LIBRARY_PATH: competitor })).toBe('mounted');
       expect(await run({ ...process.env, LD_PRELOAD: join(competitor, 'libfuse3.so.4') })).toContain(
         'did not load its reviewed adjacent library',
       );

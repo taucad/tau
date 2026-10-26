@@ -143,6 +143,9 @@ const main = (): void => {
       fuseHeaders,
       source,
       library,
+      // DT_RPATH takes precedence over LD_LIBRARY_PATH; RUNPATH permits a competing SONAME's constructors
+      // to execute before the wrapper can verify libraryIdentity(). Keep the reviewed adjacent library first.
+      '-Wl,--disable-new-dtags',
       '-Wl,-rpath,$ORIGIN',
       '-o',
       staged,

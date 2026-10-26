@@ -193,9 +193,9 @@ export type HostShell = Readonly<{
   openTerminal: (request: TerminalSessionRequest) => Promise<TerminalSessionOutcome>;
   /**
    * Retry startup recovery against the projects open now ({@link ShellServiceOptions.projectExecutions}). A project
-   * host calls it once it can answer for its runs; nothing else needs it.
+   * host calls it once it can answer for its runs; nothing else needs it. Absent on a shell with no custody to recover.
    */
-  reconcile: () => Promise<void>;
+  reconcile?: (() => Promise<void>) | undefined;
 }>;
 
 /** @public */

@@ -328,7 +328,7 @@ describe('shell service execution custody', () => {
           ],
         ]),
     });
-    await service.reconcile();
+    await service.reconcile?.();
 
     expect(released).toEqual(['agent']);
     expect(provider.released).toEqual(['agent']);
@@ -351,7 +351,7 @@ describe('shell service execution custody', () => {
       },
       projects: () => [{ owns: async (root) => root === project, held: async () => new Map() }],
     });
-    await service.reconcile();
+    await service.reconcile?.();
 
     expect(provider.released).toEqual(['orphan']);
     expect(await service.run(call('run-1', 'echo ok'))).toMatchObject({ status: 'completed' });
@@ -380,7 +380,7 @@ describe('shell service execution custody', () => {
         },
       ],
     });
-    await service.reconcile();
+    await service.reconcile?.();
 
     expect(provider.released).toEqual([]);
     expect(await service.run(call('run-1', 'echo no'))).toMatchObject({ status: 'not-started' });

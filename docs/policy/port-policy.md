@@ -3,7 +3,7 @@ title: 'Port Allocation Policy'
 description: 'Canonical port assignments for all Tau services across dev, test, production, and infrastructure contexts to prevent collisions and browser-unsafe port errors.'
 status: active
 created: '2026-03-18'
-updated: '2026-09-30'
+updated: '2026-10-26'
 related:
   - docs/research/observability-architecture.md
 ---
@@ -39,7 +39,6 @@ All port assignments must match the table below. Never introduce a new port with
 | 9090  | Prometheus                        | Infra    | `infra/docker-compose.yml`                                         |
 | 9464  | OTEL Prometheus metrics exporter  | Dev/Prod | `apps/api/app/telemetry/otel.ts`, `apps/api/fly.prod.toml`         |
 | 11434 | Ollama (local LLM)                | Dev      | `apps/api/app/api/providers/provider.service.ts`                   |
-| 42114 | SearXNG search                    | Infra    | `infra/search/docker-compose.yml`                                  |
 
 Named localhost previews share the Portless proxy. Their backend ports are allocated by
 Portless from 4000–4999 and passed through `PORT`; do not reserve a fixed port per guide.

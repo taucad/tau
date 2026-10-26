@@ -88,35 +88,33 @@ function useStackedLeading(
   return stacked;
 }
 
-/** The gap a phone bar keeps from the top of the viewer frame, matching the stage's inset below it. */
-const phoneTopInsetPx = 8;
+/** The gap a constrained bar keeps from the top of the viewer frame, matching the stage's inset below it. */
+const barTopInsetPx = 8;
 
 /**
- * The tallest a phone's bar may grow: from its bottom edge up to the viewer frame's top inset, less whatever sits
+ * The tallest a constrained bar may grow: from its bottom edge up to the viewer frame's top inset, less whatever sits
  * above it in the stage's controls slot. The slot is anchored to the frame's bottom and has no height of its own, so
  * `max-h-full` alone cannot bound the bar; the measured height lets the tool rows scroll inside the stage instead of
  * running off its top.
  * @param barRef - The element whose height is bounded, in the stage's controls slot.
- * @param isEnabled - Whether the viewport is a phone's.
- * @returns The bar's maximum height in pixels; undefined on desktop and outside a viewer frame.
+ * @returns The bar's maximum height in pixels; undefined outside a viewer frame.
  */
-function usePhoneBarMaxHeight(
+function useViewerBarMaxHeight(
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- required by React
   barRef: React.RefObject<HTMLElement | null>,
-  isEnabled: boolean,
 ): number | undefined {
   const [maxHeight, setMaxHeight] = useState<number>();
   useLayoutEffect(() => {
     const bar = barRef.current;
     const frame = bar?.closest<HTMLElement>('[data-viewer-frame]');
     const slot = bar?.parentElement;
-    if (!isEnabled || !bar || !frame || !slot || typeof ResizeObserver === 'undefined') {
+    if (!bar || !frame || !slot || typeof ResizeObserver === 'undefined') {
       setMaxHeight(undefined);
       return;
     }
     const measure = (): void => {
       const above = bar.getBoundingClientRect().top - slot.getBoundingClientRect().top;
-      const space = bar.getBoundingClientRect().bottom - frame.getBoundingClientRect().top - phoneTopInsetPx - above;
+      const space = bar.getBoundingClientRect().bottom - frame.getBoundingClientRect().top - barTopInsetPx - above;
       setMaxHeight(Math.max(0, Math.floor(space)));
     };
     measure();
@@ -126,7 +124,7 @@ function usePhoneBarMaxHeight(
     return () => {
       observer.disconnect();
     };
-  }, [barRef, isEnabled]);
+  }, [barRef]);
   return maxHeight;
 }
 
@@ -161,15 +159,17 @@ function ToolRow({ tool, name, icon, above, children, onDone }: ToolRowProps): R
       className='flex max-w-full flex-col gap-1 border-b pb-1'
     >
       {above}
-      {/* A phone's row wraps within the sheet; a desktop row holds its width so the bar never shrinks below it. */}
-      <div className={cn('flex min-h-7 items-center gap-1', isMobile && 'flex-wrap')}>
+      {/* Narrow panes wrap whole option groups and Done in reading order, with room for every target. */}
+      <div className={cn('flex min-h-7 items-center gap-1 @max-[20rem]/viewer:flex-wrap', isMobile && 'flex-wrap')}>
         <span className='flex shrink-0 items-center gap-1 px-1 text-xs font-medium'>
           {icon}
           {/* Below 520 px the name gives way to its glyph, as the toggles' labels do, so the row fits. */}
           <span className='hidden @min-[520px]/viewer:inline'>{name}</span>
         </span>
         <Hairline className='mx-1' />
-        {children}
+        <div className='contents @max-[20rem]/viewer:block @max-[20rem]/viewer:min-w-0 @max-[20rem]/viewer:basis-full'>
+          {children}
+        </div>
         <Button
           variant='secondary'
           size={isTouch ? 'touch' : 'xs'}
@@ -250,9 +250,14 @@ function barLayout(isMobile: boolean, isTouch: boolean): { bar: string; toolRows
       // rows instead of squeezing them out; the controls line holds its height (`shrink-0`).
       // A desktop pane narrower than its controls line (from 768px with the sidebar and a lane open, D12) wraps the
       // line as a phone does instead of running it past the pane's edge.
-      isMobile ? 'max-h-full min-h-0 min-w-0 *:min-h-0' : 'min-w-min @max-[20rem]/viewer:min-w-0',
+      isMobile
+        ? 'max-h-full min-h-0 min-w-0 *:min-h-0'
+        : 'min-w-min @max-[20rem]/viewer:max-h-(--viewer-controls-max-height) @max-[20rem]/viewer:min-h-0 @max-[20rem]/viewer:min-w-0 @max-[20rem]/viewer:*:min-h-0',
     ),
-    toolRows: cn('flex flex-col gap-1', isMobile && 'min-h-0 overflow-y-auto'),
+    toolRows: cn(
+      'flex flex-col gap-1 @max-[20rem]/viewer:min-h-0 @max-[20rem]/viewer:overflow-y-auto',
+      isMobile && 'min-h-0 overflow-y-auto',
+    ),
     controls: cn(
       'flex items-center',
       isMobile && 'max-w-full flex-wrap justify-center',
@@ -280,7 +285,11 @@ function ViewerControlsBody({
   const leadingRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
   const isLeadingStacked = useStackedLeading(barRef, leadingRef, controlsRef);
-  const phoneBarMaxHeight = usePhoneBarMaxHeight(barRef, isMobile);
+  const barMaxHeight = useViewerBarMaxHeight(barRef);
+  const barStyle = {
+    maxHeight: isMobile ? barMaxHeight : undefined,
+    '--viewer-controls-max-height': barMaxHeight === undefined ? undefined : `${barMaxHeight}px`,
+  };
   const is2dGeometry = useGraphicsSelector((state) => state.context.artifact?.mimeType === 'image/svg+xml');
   const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
   const isMeasureActive = useGraphicsSelector((state) => state.context.isMeasureActive);
@@ -307,12 +316,7 @@ function ViewerControlsBody({
   }, []);
 
   return (
-    <div
-      ref={barRef}
-      data-slot='viewer-controls'
-      className={layout.bar}
-      style={phoneBarMaxHeight === undefined ? undefined : { maxHeight: phoneBarMaxHeight }}
-    >
+    <div ref={barRef} data-slot='viewer-controls' className={layout.bar} style={barStyle}>
       {!is2dGeometry && (isSectionViewActive || isMeasureActive) ? (
         <div data-slot='viewer-tool-rows' className={layout.toolRows}>
           {isSectionViewActive ? (

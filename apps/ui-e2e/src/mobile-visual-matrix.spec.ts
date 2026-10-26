@@ -99,14 +99,30 @@ const auditLayer = async (): Promise<LayerAudit> =>
       element.getBoundingClientRect().width > 1 &&
       element.getBoundingClientRect().height > 1;
     /** The vertical clip its scrollers give it, and the first ancestor that cuts it off sideways. */
-    const clipOf = (element: HTMLElement, box: DOMRect): { top: number; bottom: number; sideways?: string } => {
-      const clip: { top: number; bottom: number; sideways?: string } = { top: 0, bottom: height };
+    const clipOf = (
+      element: HTMLElement,
+      box: DOMRect,
+    ): { top: number; bottom: number; sideways?: string; vertical?: string } => {
+      const clip: { top: number; bottom: number; sideways?: string; vertical?: string } = { top: 0, bottom: height };
+      // Feasible top-edge positions after scrolling each ancestor, intersected with every intervening clip.
+      // A hidden/clip ancestor contributes no movement; an outer scroller cannot repair clipping inside it.
+      let reachableTop = box.top;
+      let reachableBottom = box.top;
       for (let parent = element.parentElement; parent; parent = parent.parentElement) {
         const style = getComputedStyle(parent);
         const parentBox = parent.getBoundingClientRect();
         if (style.overflowY !== 'visible') {
           clip.top = Math.max(clip.top, parentBox.top);
           clip.bottom = Math.min(clip.bottom, parentBox.bottom);
+          if (/auto|scroll/u.test(style.overflowY)) {
+            reachableTop -= Math.max(0, parent.scrollHeight - parent.clientHeight - parent.scrollTop);
+            reachableBottom += parent.scrollTop;
+          }
+          reachableTop = Math.max(reachableTop, parentBox.top);
+          reachableBottom = Math.min(reachableBottom, parentBox.bottom - box.height);
+          if (reachableTop > reachableBottom + 0.5 && clip.vertical === undefined) {
+            clip.vertical = `${describe(element)} is cut off vertically by ${describe(parent)} without scroll recovery`;
+          }
         }
         const cutSideways = box.left < parentBox.left - 0.5 || box.right > parentBox.right + 0.5;
         /* A sideways scroller lets a person scroll the rest in, as a vertical one does, so long as the action fits it
@@ -117,6 +133,12 @@ const auditLayer = async (): Promise<LayerAudit> =>
         if (style.overflowX !== 'visible' && !scrollsSideways && clip.sideways === undefined && cutSideways) {
           clip.sideways = `${describe(element)} is cut off sideways by ${describe(parent)}`;
         }
+      }
+      if (
+        Math.max(reachableTop, 0) > Math.min(reachableBottom, height - box.height) + 0.5 &&
+        clip.vertical === undefined
+      ) {
+        clip.vertical = `${describe(element)} leaves the viewport vertically without scroll recovery`;
       }
       return clip;
     };
@@ -147,8 +169,11 @@ const auditLayer = async (): Promise<LayerAudit> =>
         continue;
       }
       const clip = clipOf(element, box);
-      // Scrolled out of its scroller (or below the fold) is not on screen; scrolled part-way, a person scrolls it in.
+      // Exclude a clipped control only when scrolling can actually bring the whole target into view.
       if (box.top < clip.top - 0.5 || box.bottom > clip.bottom + 0.5) {
+        if (clip.vertical) {
+          problems.push(clip.vertical);
+        }
         continue;
       }
       const tap = tapAt(element, box);
@@ -564,6 +589,30 @@ const chooseTheme = async (theme: (typeof themes)[number]): Promise<void> => {
   await motionSettled();
 };
 
+test.each(['hidden', 'clip', 'auto', 'scroll'] as const)(
+  'audits vertically clipped controls with overflow %s',
+  async (overflow) => {
+    await target.setViewport({ width: 360, height: 780 });
+    await target.evaluate((overflowY) => {
+      document.body.replaceChildren();
+      const clip = document.createElement('div');
+      clip.style.cssText = 'position:fixed;top:40px;left:40px;width:100px;height:48px';
+      clip.style.overflowY = overflowY;
+      const button = document.createElement('button');
+      button.textContent = 'Clipped action';
+      button.style.cssText = 'display:block;width:80px;height:40px;margin-top:32px';
+      clip.append(button);
+      document.body.append(clip);
+    }, overflow);
+    const audit = await auditLayer();
+    if (overflow === 'auto' || overflow === 'scroll') {
+      expect(audit.problems).toEqual([]);
+    } else {
+      expect(audit.problems).toEqual(expect.arrayContaining([expect.stringContaining('Clipped action')]));
+    }
+  },
+);
+
 describe('the phone shell across portrait widths', () => {
   test.each(portraitViewports)(
     'keeps the stage, Half, All and the project sheet whole at $width×$height',
@@ -660,6 +709,70 @@ const expectCoarseDesktop = async (state: string): Promise<void> => {
 };
 
 describe('the desktop composition under a coarse pointer', () => {
+  test.each([
+    { width: 768, height: 1024 },
+    { width: 844, height: 390 },
+  ])('keeps active tools reachable in a narrow desktop viewer at $width×$height', async (viewport) => {
+    await target.commands.uiOpenTarget({ hasTouch: true });
+    await prepareComposerPage();
+    await target.setViewport(viewport);
+    await target.navigate(seedRoute);
+    await target.expectUrl(/\/w\/[^/]+\/[^/?]+/u, 120_000);
+    await waitForStageReady();
+    await motionSettled();
+    await expectCoarseDesktop('narrow desktop before tools');
+    const sidebarTrigger = selectors.getByRole('button', { name: 'Toggle Sidebar' }).first();
+    await target.focus(sidebarTrigger);
+    for (let step = 0; step < (viewport.width === 768 ? 4 : 8); step++) {
+      // oxlint-disable-next-line no-await-in-loop -- resize through the sidebar's real keyboard control.
+      await target.press(sidebarTrigger, 'ArrowRight');
+    }
+    await motionSettled();
+    const sectionToggle = viewerControls().getByRole('button', { name: 'Section view', exact: true });
+    await expect
+      .poll(async () => target.getAttribute(sectionToggle, 'aria-disabled'), { timeout: 60_000 })
+      .not.toBe('true');
+    await target.click(sectionToggle, { touch: true });
+    await target.click(viewerControls().getByRole('button', { name: 'Measure', exact: true }), { touch: true });
+    await target.expectVisible(selectors.getByRole('group', { name: 'Measuring options' }));
+    await target.expectVisible(selectors.getByRole('group', { name: 'Section view options' }));
+    await motionSettled();
+    const toolBounds = await target.evaluateLocator(viewerControls(), (element) => {
+      const frame = element.closest('[data-viewer-frame]')!;
+      const bounds = (node: Element): Box => {
+        const { left, top, right, bottom, width, height } = node.getBoundingClientRect();
+        return { left, top, right, bottom, width, height };
+      };
+      return {
+        frame: bounds(frame),
+        bar: bounds(element.closest('[data-slot="viewer-controls"]')!),
+        controls: [...frame.querySelectorAll('button')].map((button) => ({
+          name: button.getAttribute('aria-label') ?? button.textContent,
+          box: bounds(button),
+        })),
+      };
+    });
+    expect(toolBounds.frame.width).toBeGreaterThanOrEqual(198);
+    expect(toolBounds.frame.width).toBeLessThanOrEqual(212);
+    expect(toolBounds.frame.right).toBeLessThanOrEqual(viewport.width);
+    expect(toolBounds.bar.top).toBeGreaterThanOrEqual(toolBounds.frame.top);
+    expect(toolBounds.bar.bottom).toBeLessThanOrEqual(toolBounds.frame.bottom);
+    await target.screenshot(undefined, `mobile-matrix-active-tools-${String(viewport.width)}.png`);
+    await expectWholeLayer(`narrow desktop with active tools ${JSON.stringify(toolBounds)}`);
+    await target.focus(selectors.getByRole('button', { name: 'Done with measure' }));
+    await expectWholeLayer('narrow desktop with the last tool action focused');
+    await target.screenshot(undefined, `mobile-matrix-active-tools-scrolled-${String(viewport.width)}.png`);
+    await target.click(selectors.getByRole('button', { name: 'Done with measure' }), { touch: true });
+    await target.expectCount(selectors.getByRole('group', { name: 'Measuring options' }), 0);
+    await target.click(selectors.getByRole('button', { name: 'Done with section' }), { touch: true });
+    await target.expectCount(selectors.getByRole('group', { name: 'Section view options' }), 0);
+    const actions = selectors.getByRole('group', { name: 'Workbench actions', exact: true });
+    await target.click(actions.getByRole('button', { name: 'Share', exact: true }), { touch: true });
+    await target.expectVisible(selectors.getByRole('region', { name: 'Share project', exact: true }));
+    await target.click(actions.getByRole('button', { name: 'Export', exact: true }), { touch: true });
+    await target.expectVisible(selectors.getByRole('region', { name: 'Export', exact: true }));
+  });
+
   test('keeps a 1024×1366 touch tablet on the desktop layout with the coarse rules (D12)', async () => {
     await target.commands.uiOpenTarget({ hasTouch: true });
     await prepareComposerPage();

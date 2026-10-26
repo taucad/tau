@@ -159,6 +159,9 @@ describe('Vitest Browser test-runner ownership', () => {
       // The TAU-UI-6 deploy-skew check serves two deploys from Node and switches them under one page across a
       // document reload, which Browser Mode's iframe cannot host.
       'apps/ui-e2e/src/stale-deploy-recovery.test.ts',
+      // The hosted staging observability gate owns isolated browser contexts and cross-document failure
+      // scenarios, which Browser Mode's iframe cannot host.
+      'apps/ui-e2e/src/observability.staging.test.ts',
       // Composer and pane-resize acceptance emulate a coarse pointer through the browser session.
       'apps/ui/app/components/chat/chat-textarea.vitest.browser.config.ts',
       'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',
@@ -196,11 +199,13 @@ describe('Vitest Browser test-runner ownership', () => {
     // for check-pack-install's browser checks.
     // The S31 and S32 native-dependency spikes install the three engines they measure.
     // The UI asset-integrity workflow and its gate's usage note install the three engines the gate measures.
+    // The hosted staging observability workflow installs Chromium and WebKit for its isolated contexts.
     expect(installFiles.sort()).toEqual(
       [
         '.agents/skills/create-repo/templates/ci.yml',
         '.github/workflows/ci.yml',
         '.github/workflows/e2e-nightly.yml',
+        '.github/workflows/observability-staging.yml',
         '.github/workflows/preview-packages.yml',
         '.github/workflows/publish.yml',
         '.github/workflows/spike-publish-dry-run.yml',

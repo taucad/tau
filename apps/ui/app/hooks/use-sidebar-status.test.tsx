@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
 import type { Chat } from '@taucad/chat';
+import * as chatConstants from '@taucad/chat/constants';
 import type { RevisionStatusProjection } from '@taucad/revisions';
 import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
@@ -1233,7 +1234,7 @@ const compiledHooks = await (async () => {
   const modules: Record<string, unknown> = {
     react: await import('react'),
     'react/compiler-runtime': await import('react/compiler-runtime'),
-    '@taucad/chat/constants': await import('@taucad/chat/constants'),
+    '@taucad/chat/constants': chatConstants,
     '#machines/sessions.machine.js': await import('#machines/sessions.machine.js'),
     '#services/sessions-store.js': await import('#services/sessions-store.js'),
     '#hooks/use-revision-status.js': await import('#hooks/use-revision-status.js'),

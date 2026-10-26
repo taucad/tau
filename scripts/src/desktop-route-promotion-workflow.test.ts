@@ -3,6 +3,8 @@ import { join, resolve } from 'node:path';
 import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
 
+/* eslint-disable @typescript-eslint/naming-convention -- GitHub expression functions, contexts and repository variable names are exact external names. */
+
 /**
  * Evaluates the publication job's real gate, matrix and environment expressions
  * for each combination of the per-channel repository variables, so that enabling

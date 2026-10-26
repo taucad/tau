@@ -78,6 +78,7 @@ assert.throws(() => {
   verifyDesktopPublicationToken(token(), jwks, { ...expected, operation: 'renew-routes', now });
 });
 
+/* eslint-disable @typescript-eslint/naming-convention -- Process environment keys and GitHub repository variable names are exact external names. */
 // Each channel is gated only by its own variable; the retired repository-wide switch enables nothing.
 const stagingOnly = {
   DESKTOP_INSTALLER_PUBLICATION_STAGING: 'true',

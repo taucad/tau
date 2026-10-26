@@ -36,6 +36,9 @@ const defaultBranch = 'main';
 /** The shared vocabulary's sentence for an unconfirmed write, which the status line keeps verbatim. */
 const saveNotConfirmed = 'Save not confirmed';
 
+/** The status line's word for a conflict (D3). */
+const conflictWord = 'Conflict';
+
 /** The shared vocabulary's clause for a viewer who may not write. */
 const viewOnly = 'View only';
 
@@ -90,7 +93,7 @@ export const selectProjectStatusLine = ({
       return { icon: CircleAlert, tone: 'text-feature', isBusy: false, word: saveNotConfirmed };
     }
     if (facts.icon === GitMerge) {
-      return { icon: GitMerge, tone: facts.tone, isBusy: false, word: 'Conflict' };
+      return { icon: GitMerge, tone: facts.tone, isBusy: false, word: conflictWord };
     }
     if (issues?.state === 'unconfirmed') {
       return { icon: CircleAlert, tone: 'text-feature', isBusy: false, word: saveNotConfirmed };
@@ -341,6 +344,19 @@ function ProjectSheet({
           </Tooltip>
         </div>
         <div className='min-h-0 overflow-y-auto pb-3'>
+          {/* I5: a conflict is a decision, so the sheet offers it first and opens Revisions, where it is made. */}
+          {status.line.word === conflictWord ? (
+            <ul aria-label='Decision' className='border-t py-1'>
+              <SheetRow
+                icon={GitMerge}
+                label='Resolve conflict'
+                meta={status.facts.sentence}
+                onSelect={() => {
+                  open('revisions');
+                }}
+              />
+            </ul>
+          ) : null}
           {status.followChat === undefined ? null : (
             <ul aria-label='Chat' className='border-t py-1'>
               <SheetRow

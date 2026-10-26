@@ -372,6 +372,30 @@ describe('MobileProjectTopBar', () => {
     expect(line.querySelector('[data-slot=status-line-icon]')).toHaveClass('text-warning');
   });
 
+  it('offers a conflict’s decision first in the project sheet and opens Revisions to make it (HDR-05, I5)', async () => {
+    revisionStatusHarness.status = status({ attention: 1, conflicts: [conflict] });
+    render(<MobileProjectTopBar />, { wrapper });
+    expect(within(topBar()).getAllByRole('button')).toHaveLength(3);
+
+    fireEvent.click(titleButton());
+    const sheet = await screen.findByRole('dialog', { name: projectName });
+    const first = within(sheet)
+      .getAllByRole('button')
+      .find((button) => button.dataset['slot'] === 'project-sheet-row');
+    expect(first).toHaveAccessibleName('Resolve conflict');
+    expect(first).toHaveAccessibleDescription('Needs your decision on main');
+    fireEvent.click(first!);
+    expect(openPanel).toHaveBeenLastCalledWith('revisions');
+    expect(titleButton()).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('offers no decision while nothing conflicts', async () => {
+    render(<MobileProjectTopBar />, { wrapper });
+    fireEvent.click(titleButton());
+    const sheet = await screen.findByRole('dialog', { name: projectName });
+    expect(within(sheet).queryByRole('button', { name: 'Resolve conflict' })).toBeNull();
+  });
+
   it('says Follow chat as a fact and puts the verb in the project sheet (HDR-06)', async () => {
     onBranch();
     render(<MobileProjectTopBar />, { wrapper });

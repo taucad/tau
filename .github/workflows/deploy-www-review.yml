@@ -80,6 +80,7 @@ jobs:
           NODE_OPTIONS: --import tsx
           NX_PREFER_NODE_STRIP_TYPES: 'true'
           WWW_LAUNCH: 'true'
+          WWW_INSTALLER_CATALOG: 'true'
           WWW_ORIGIN: https://tau.new
         run: pnpm nx build www
 

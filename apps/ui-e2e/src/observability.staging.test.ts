@@ -18,16 +18,6 @@ describe('P1 deployed staging observability harness', () => {
     expect(Boolean(process.env['SENTRY_E2E_READ_TOKEN']), 'Configure staging SENTRY_E2E_READ_TOKEN').toBe(true);
   });
 
-  it('should return 404 for the harness on production', async () => {
-    const api = await request.newContext();
-    try {
-      const response = await api.get(new URL(harnessPath, productionOrigin).href, { maxRedirects: 0 });
-      expect(response.status()).toBe(404);
-    } finally {
-      await api.dispose();
-    }
-  });
-
   for (const [browserName, browserType] of [
     ['chromium', chromium],
     ['webkit', webkit],
@@ -97,6 +87,20 @@ describe('P1 deployed staging observability harness', () => {
       }, 60_000);
     }
   }
+});
+
+describe('P4 production acceptance — OPEN until authorized deploy', () => {
+  // Operator ruling 2026-10-26: defer only this legacy production URL check to P4.
+  // Remove .skip after the authorized production deploy; a skipped check is not acceptance.
+  it.skip('should return 404 for the harness on production', async () => {
+    const api = await request.newContext();
+    try {
+      const response = await api.get(new URL(harnessPath, productionOrigin).href, { maxRedirects: 0 });
+      expect(response.status()).toBe(404);
+    } finally {
+      await api.dispose();
+    }
+  });
 });
 
 // Explicit migration gates: enable with real signal assertions when their owners land.

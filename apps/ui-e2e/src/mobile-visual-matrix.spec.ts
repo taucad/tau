@@ -311,7 +311,17 @@ const motionSettled = async (): Promise<void> =>
 
 /** Wait for a rendered stage with geometry, rather than an empty first frame. */
 const waitForModelReady = async (): Promise<void> => {
-  await waitForStageReady();
+  try {
+    await waitForStageReady();
+  } catch (error) {
+    await target.screenshot(undefined, 'mobile-matrix-stage-not-ready.png');
+    const diagnostics = await target.commands.uiCaptureTargetDiagnostics();
+    await target.writeArtifact(
+      'mobile-matrix-stage-not-ready.json',
+      JSON.stringify({ ...diagnostics, screenshot: undefined }, null, 2),
+    );
+    throw error;
+  }
   await expect
     .poll(
       async () =>
@@ -750,12 +760,9 @@ test('switches model files through phone Files actions without desktop tabs', as
     );
     // oxlint-disable-next-line no-await-in-loop -- choose the real viewer action, not a programmatic projection edit.
     await target.click(selectors.getByRole('menuitem', { name: 'Open in Viewer', exact: true }), { touch: true });
-    // oxlint-disable-next-line no-await-in-loop -- returning to Model exposes the selected viewer for geometry readiness.
-    await tapDestination('Model');
-    // oxlint-disable-next-line no-await-in-loop -- hidden tab metadata identifies which retained view the action selected.
-    const title = file === 'touch-parameters.js' ? `public/models/${file}` : file;
+    const title = `public/models/${file}`;
     const selectedTab = selectors.getByCss(`.dv-tab.dv-active-tab[aria-label="${title}"]`);
-    // oxlint-disable-next-line no-await-in-loop -- the initial tab carries its entry path, new tabs their basename.
+    // oxlint-disable-next-line no-await-in-loop -- the tab component's accessible name carries the full entry path.
     await target.expectCount(selectedTab, 1);
     // oxlint-disable-next-line no-await-in-loop -- verify the selected view's durable file identity as well as its title.
     const selectedView = await target.getAttribute(selectedTab, 'data-tab-panel-id');
@@ -769,6 +776,8 @@ test('switches model files through phone Files actions without desktop tabs', as
       .toBe(`public/models/${file}`);
     // oxlint-disable-next-line no-await-in-loop -- the selected file must produce geometry before judging it.
     await waitForModelReady();
+    // oxlint-disable-next-line no-await-in-loop -- return to Model after the newly selected canvas is ready for input.
+    await tapDestination('Model');
     // oxlint-disable-next-line no-await-in-loop -- every selected model retains the phone composition.
     await expectStage(portraitViewports[1]);
   }
@@ -840,6 +849,8 @@ test('reselects same-file saved views through All after reload without changing 
       .getByRole('button', { name: `${name} · touch-parameters.js`, exact: true });
     // oxlint-disable-next-line no-await-in-loop -- every target must be visible and named before it is used.
     await target.expectVisible(choice);
+    // oxlint-disable-next-line no-await-in-loop -- audit the settled drawer, as the other All cases do.
+    await motionSettled();
     // oxlint-disable-next-line no-await-in-loop -- the distinguishing name must be visible, not only accessible.
     const visibleName = await target.evaluateLocator(choice, (button) => {
       const label = button.querySelector('span')!;
@@ -864,7 +875,9 @@ test('reselects same-file saved views through All after reload without changing 
       await target.click(choice, { touch: true });
     }
     // oxlint-disable-next-line no-await-in-loop -- selection closes All and restores the Model destination.
-    await target.expectCount(allSheet(), 0);
+    await target.waitFor(() => document.querySelector('[role="dialog"][data-vaul-drawer]') === null, undefined, {
+      timeout: 10_000,
+    });
     if (keyboard) {
       // oxlint-disable-next-line no-await-in-loop -- dismissal must restore a visible focus destination.
       await expect

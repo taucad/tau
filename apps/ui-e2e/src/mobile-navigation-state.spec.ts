@@ -71,13 +71,6 @@ test.each(phoneViewports)(
     expect(await target.getAttribute(navButton('Parameters'), 'aria-current')).toBe('page');
     await expect.poll(detent).toBe(detents.half);
     await target.expectAttribute(grabber(), 'aria-valuetext', 'Half');
-    // Left at the peek, it reopens at half too: no detent is stored.
-    await moveSheet('Home', detents.peek);
-    await target.expectAttribute(grabber(), 'aria-valuetext', 'Peek');
-    await target.reload();
-    await target.expectVisible(surface('Parameters'), 60_000);
-    await expect.poll(detent).toBe(detents.half);
-    await target.expectAttribute(grabber(), 'aria-valuetext', 'Half');
 
     // Another project: its own state, never the surface this one had open.
     await followSidebarLink('Project Navigation B');
@@ -109,6 +102,24 @@ test.each(phoneViewports)(
     await target.expectVisible(projectTitle('Project Navigation B'), 60_000);
     await expect.poll(async () => target.getAttribute(navButton('Model'), 'aria-current')).toBe('page');
     await target.expectCount(openSheet(), 0);
+  },
+);
+
+test.each(phoneViewports)(
+  'reopens a surface left at the peek at half after a reload at $width×$height',
+  async (viewport) => {
+    await openPhone(viewport, '/__e2e/project-navigation');
+    await target.expectVisible(projectTitle('Project Navigation A'), 60_000);
+    await tapDestination('Parameters');
+    await target.expectVisible(surface('Parameters'), 60_000);
+    await moveSheet('Home', detents.peek);
+    await target.expectAttribute(grabber(), 'aria-valuetext', 'Peek');
+
+    // No detent is stored: the surface comes back at the height every reopen takes.
+    await target.reload();
+    await target.expectVisible(surface('Parameters'), 60_000);
+    await expect.poll(detent).toBe(detents.half);
+    await target.expectAttribute(grabber(), 'aria-valuetext', 'Half');
   },
 );
 

@@ -34,6 +34,7 @@ import type { TerminalRendererOptions, TerminalRendererView } from '#components/
 import { outputSlices } from '#components/terminal/terminal-output-text.js';
 import { TerminalCloseContext, TerminalCloseDecision } from '#components/terminal/terminal-close.js';
 import type { TerminalCloseChoice } from '#components/terminal/terminal-close.js';
+import { TerminalNavigationGuard } from '#components/terminal/terminal-navigation-guard.js';
 import { highContrastQuery, highContrastRatio, readTerminalTheme } from '#components/terminal/terminal-theme.js';
 
 /** Loads the renderer; the default imports it lazily so no other surface pays for it. @public */
@@ -235,9 +236,12 @@ function TerminalAccessForm({
 export function TerminalPane({
   availability,
   loadRenderer = loadTerminalRenderer,
+  onRunningChange,
 }: {
   readonly availability: TerminalAvailability;
   readonly loadRenderer?: TerminalRendererLoader;
+  /** Told the running session's project label, and `undefined` once no session runs. */
+  readonly onRunningChange?: (projectLabel: string | undefined) => void;
 }): React.JSX.Element {
   const [state, setState] = useState<PaneState>({ phase: 'idle' });
   const [accessRequest, setAccessRequest] = useState<AccessRequest | undefined>(undefined);
@@ -265,6 +269,10 @@ export function TerminalPane({
   useLayoutEffect(() => {
     phaseRef.current = state.phase;
   }, [state.phase]);
+  const runningLabel = state.phase === 'running' ? state.projectLabel : undefined;
+  useEffect(() => {
+    onRunningChange?.(runningLabel);
+  }, [onRunningChange, runningLabel]);
 
   const projectRoot = availability.status === 'available' ? availability.projectRoot : undefined;
   const bridge = availability.status === 'available' ? availability.bridge : undefined;
@@ -671,7 +679,7 @@ export function TerminalPane({
 
 /**
  * The Terminal pane for the current project, gated by the shared predicate. The Workbench catalog and the narrow
- * layout both mount this.
+ * layout both mount this. While its session runs, leaving the project asks first.
  *
  * @param props - The workbench profile; a shared or public view omits the Terminal.
  * @returns The pane.
@@ -683,5 +691,14 @@ export function ProjectTerminalPane({
   readonly profile?: 'editor' | 'shared';
 }): React.JSX.Element {
   const { projectId } = useProject();
-  return <TerminalPane availability={useTerminalAvailability(projectId, profile)} />;
+  const [runningLabel, setRunningLabel] = useState<string | undefined>(undefined);
+  return (
+    <>
+      <TerminalPane availability={useTerminalAvailability(projectId, profile)} onRunningChange={setRunningLabel} />
+      {/* Only a running session holds the router's blocker (T15). */}
+      {runningLabel === undefined ? null : (
+        <TerminalNavigationGuard projectId={projectId} projectLabel={runningLabel} />
+      )}
+    </>
+  );
 }

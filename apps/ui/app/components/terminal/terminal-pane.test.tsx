@@ -483,6 +483,24 @@ describe('TerminalPane close (T15)', () => {
   });
 });
 
+describe('TerminalPane running report (T15)', () => {
+  it('reports a running session, and its end, so the navigation guard exists only meanwhile', async () => {
+    const onRunningChange = vi.fn<(projectLabel: string | undefined) => void>();
+    render(
+      <TerminalPane
+        availability={available(harness)}
+        loadRenderer={harness.loadRenderer}
+        onRunningChange={onRunningChange}
+      />,
+    );
+    expect(onRunningChange.mock.calls).toEqual([[undefined]]);
+    await startTerminal();
+    expect(onRunningChange).toHaveBeenLastCalledWith('project-1');
+    harness.emit({ type: 'exited', exitCode: 0, signal: null, reason: 'shell-exited' });
+    expect(onRunningChange).toHaveBeenLastCalledWith(undefined);
+  });
+});
+
 describe('TerminalPane project change (T15)', () => {
   it('keeps the old session out of the new project and starts the new one clean, with nothing replayed', async () => {
     const first = harness;

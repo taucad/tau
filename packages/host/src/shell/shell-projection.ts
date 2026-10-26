@@ -1,4 +1,4 @@
-import type { RootedFileSystem } from '@taucad/filesystem';
+import type { NodeFsRootScope } from '@taucad/filesystem/backend/node';
 import { classify } from '@taucad/filesystem/path-registry';
 import type { CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 import { assertRootedPath } from '@taucad/utils/path';
@@ -18,21 +18,23 @@ export type ShellProjectionPublication =
   | Readonly<{ status: 'settled'; observation: ShellProjectionFile; result: CheckedFileWriteResult }>;
 
 /**
- * Publish one captured regular-file change through its admitted rooted authority.
+ * Publish one captured regular-file change through the held root claim of its admitted checkout.
  *
  * This is only the outbound reconciliation primitive. It neither observes disk nor launches a shell. The owner
  * must capture a stable regular file, retain its journal and checkout custody, and stop publication when that
  * admission is revoked. A conflict preserves the captured bytes and never retries against a newer baseline.
  * Directory moves, symlinks, inbound updates, quotas and recovery are deliberately not implemented here.
+ * The scope comes from the served filesystem owner's `run`, never from a wire client: a wire mutation of the
+ * same root awaited inside a held claim waits on that claim forever (PO-Q5).
  *
  * @internal
- * @param authority - The existing checked mutation methods of the exact admitted checkout.
+ * @param scope - The held claim's checked mutation methods for the exact admitted checkout.
  * @param observation - The last acknowledged bytes and newly captured shell bytes for one root-relative file.
  * @param options - Maximum combined bytes retained for this publication and cancellation.
  * @returns The authority's conflict or commit result alongside owned copies of the observation.
  */
 export const publishShellProjectionFile = async (
-  authority: Pick<RootedFileSystem, 'writeFileChecked' | 'deleteFileChecked'>,
+  scope: Pick<NodeFsRootScope, 'writeFileChecked' | 'deleteFileChecked'>,
   observation: ShellProjectionFile,
   options: Readonly<{ maximumBytes: number; signal: AbortSignal }>,
 ): Promise<ShellProjectionPublication> => {
@@ -65,7 +67,7 @@ export const publishShellProjectionFile = async (
   };
   const result =
     owned.projected === null
-      ? await authority.deleteFileChecked(input)
-      : await authority.writeFileChecked({ ...input, data: owned.projected });
+      ? await scope.deleteFileChecked(input)
+      : await scope.writeFileChecked({ ...input, data: owned.projected });
   return { status: 'settled', observation: owned, result };
 };

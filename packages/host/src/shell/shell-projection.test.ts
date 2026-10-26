@@ -1,11 +1,22 @@
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { NodeFsAuthorityHost, serveNodeFsProvider } from '@taucad/filesystem/backend/node';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { publishShellProjectionFile } from '#shell/shell-projection.js';
+import type { ShellProjectionFile } from '#shell/shell-projection.js';
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -15,6 +26,10 @@ afterEach(async () => {
   }
 });
 
+/**
+ * One served checkout. Publication goes only through the server's held root claim; the wire client
+ * stands in for a concurrent editor and for test setup, never for the projection owner (PO-Q5).
+ */
 const connect = () => {
   const sandbox = mkdtempSync(join(tmpdir(), 'tau-shell-projection-'));
   const root = join(sandbox, 'project');
@@ -22,79 +37,75 @@ const connect = () => {
   mkdirSync(root);
   mkdirSync(authorityRoot);
   const { port1, port2 } = new MessageChannel();
-  const stop = serveNodeFsProvider(port2, {
+  const server = serveNodeFsProvider(port2, {
     policy: tauPathPolicy,
     allowRoot: (candidate) => candidate === root,
     authority: new NodeFsAuthorityHost({ authorityDirectory: () => authorityRoot, authorityIdentity: () => root }),
   });
   const channel = new NodeFsChannel(port1);
-  const authority = new NodeFsProviderClient(channel, root);
+  const editor = new NodeFsProviderClient(channel, root);
   cleanups.push(async () => {
     channel.close();
-    await stop();
+    await server.close();
     port2.close();
     rmSync(sandbox, { recursive: true, force: true });
   });
-  return { authority, root };
+  const publish = async (
+    observation: ShellProjectionFile,
+    options: Readonly<{ maximumBytes?: number; signal?: AbortSignal }> = {},
+  ) => {
+    const signal = options.signal ?? new AbortController().signal;
+    return server.run({ root, signal }, async (scope) =>
+      publishShellProjectionFile(scope, observation, {
+        maximumBytes: options.maximumBytes ?? 1024,
+        signal: AbortSignal.any([signal, scope.signal]),
+      }),
+    );
+  };
+  return { editor, publish, root, server };
 };
-
-const options = () => ({ maximumBytes: 1024, signal: new AbortController().signal });
 
 describe('shell projection outbound publication', () => {
   it('should allow only one concurrent publication against the same baseline', async () => {
-    const { authority } = connect();
-    await authority.writeFile('part.ts', 'baseline');
+    const { editor, publish } = connect();
+    await editor.writeFile('part.ts', 'baseline');
     const results = await Promise.all(
-      ['first', 'second'].map(async (projected) =>
-        publishShellProjectionFile(authority, { path: 'part.ts', baseline: 'baseline', projected }, options()),
-      ),
+      ['first', 'second'].map(async (projected) => publish({ path: 'part.ts', baseline: 'baseline', projected })),
     );
     expect(
       results
         .map((result) => (result.status === 'settled' ? result.result.status : result.status))
         .sort((left, right) => left.localeCompare(right)),
     ).toEqual(['applied', 'conflict']);
-    expect(['first', 'second']).toContain(await authority.readFile('part.ts', 'utf8'));
+    expect(['first', 'second']).toContain(await editor.readFile('part.ts', 'utf8'));
   });
 
   it('should let the rooted authority refuse an authored-looking symlink into protected records', async () => {
-    const { authority, root } = connect();
+    const { publish, root } = connect();
     mkdirSync(join(root, '.git'));
     writeFileSync(join(root, '.git', 'config'), 'protected');
     symlinkSync(join(root, '.git', 'config'), join(root, 'part.ts'));
-    await expect(
-      publishShellProjectionFile(authority, { path: 'part.ts', baseline: 'protected', projected: 'edit' }, options()),
-    ).rejects.toMatchObject({ code: 'ELOOP' });
+    await expect(publish({ path: 'part.ts', baseline: 'protected', projected: 'edit' })).rejects.toMatchObject({
+      code: 'ELOOP',
+    });
     expect(readFileSync(join(root, '.git', 'config'), 'utf8')).toBe('protected');
   });
 
-  it('should publish authored creation and deletion through the real rooted authority', async () => {
-    const { authority } = connect();
-    const created = await publishShellProjectionFile(
-      authority,
-      { path: '.tau/parameters/part.json', baseline: null, projected: '{}' },
-      options(),
-    );
+  it('should publish authored creation and deletion through the held root claim', async () => {
+    const { editor, publish } = connect();
+    const created = await publish({ path: '.tau/parameters/part.json', baseline: null, projected: '{}' });
     expect(created).toMatchObject({ status: 'settled', result: { status: 'applied' } });
-    expect(await authority.readFile('.tau/parameters/part.json', 'utf8')).toBe('{}');
-    const removed = await publishShellProjectionFile(
-      authority,
-      { path: '.tau/parameters/part.json', baseline: '{}', projected: null },
-      options(),
-    );
+    expect(await editor.readFile('.tau/parameters/part.json', 'utf8')).toBe('{}');
+    const removed = await publish({ path: '.tau/parameters/part.json', baseline: '{}', projected: null });
     expect(removed).toMatchObject({ status: 'settled', result: { status: 'applied' } });
-    expect(await authority.exists('.tau/parameters/part.json')).toBe(false);
+    expect(await editor.exists('.tau/parameters/part.json')).toBe(false);
   });
 
   it.each(['shell edit', null])('should preserve a newer editor save against projected %s', async (projected) => {
-    const { authority, root } = connect();
-    await authority.writeFile('part.ts', 'baseline');
-    await authority.writeFile('part.ts', 'newer editor save');
-    const result = await publishShellProjectionFile(
-      authority,
-      { path: 'part.ts', baseline: 'baseline', projected },
-      options(),
-    );
+    const { editor, publish, root } = connect();
+    await editor.writeFile('part.ts', 'baseline');
+    await editor.writeFile('part.ts', 'newer editor save');
+    const result = await publish({ path: 'part.ts', baseline: 'baseline', projected });
     expect(result).toMatchObject({
       status: 'settled',
       observation: { baseline: 'baseline', projected },
@@ -106,54 +117,100 @@ describe('shell projection outbound publication', () => {
   it.each(['.TAU/unknown', '.tau./unknown', '.tau:alias/unknown', '.git/config', '.tau/chats/item.json'])(
     'should refuse protected spelling %s before it reaches backing storage',
     async (path) => {
-      const { authority, root } = connect();
-      expect(
-        await publishShellProjectionFile(authority, { path, baseline: null, projected: 'secret' }, options()),
-      ).toEqual({ status: 'refused', reason: 'protected-path' });
+      const { publish, root } = connect();
+      expect(await publish({ path, baseline: null, projected: 'secret' })).toEqual({
+        status: 'refused',
+        reason: 'protected-path',
+      });
       expect(existsSync(join(root, path))).toBe(false);
     },
   );
 
-  it('should reject an oversize publication without changing backing bytes', async () => {
-    const { authority, root } = connect();
+  it('should reject a publication above the per-root bound without changing backing bytes', async () => {
+    const { publish, root } = connect();
     writeFileSync(join(root, 'part.ts'), 'baseline');
     expect(
-      await publishShellProjectionFile(
-        authority,
-        { path: 'part.ts', baseline: 'baseline', projected: 'large shell edit' },
-        { ...options(), maximumBytes: 8 },
-      ),
+      await publish({ path: 'part.ts', baseline: 'baseline', projected: 'large shell edit' }, { maximumBytes: 8 }),
     ).toEqual({ status: 'refused', reason: 'size-limit' });
     expect(readFileSync(join(root, 'part.ts'), 'utf8')).toBe('baseline');
   });
 
+  it('should publish a replacement above the 8 MiB wire budget inside the per-root bound', async () => {
+    const { publish, root } = connect();
+    const baseline = new Uint8Array(12 * 1024 * 1024).fill(1);
+    writeFileSync(join(root, 'model.step'), baseline);
+    const projected = new Uint8Array(12 * 1024 * 1024).fill(2);
+    expect(
+      await publish({ path: 'model.step', baseline, projected }, { maximumBytes: 64 * 1024 * 1024 }),
+    ).toMatchObject({ status: 'settled', result: { status: 'applied' } });
+    expect(readFileSync(join(root, 'model.step')).every((byte) => byte === 2)).toBe(true);
+  });
+
   it('should copy captured bytes before an asynchronous authority mutation', async () => {
-    const { authority } = connect();
+    const { editor, root, server } = connect();
     const projected = new TextEncoder().encode('captured');
-    const publication = publishShellProjectionFile(
-      authority,
-      { path: 'part.ts', baseline: null, projected },
-      options(),
-    );
-    projected.fill(0);
-    expect(await publication).toMatchObject({ status: 'settled', result: { status: 'applied' } });
-    expect(await authority.readFile('part.ts', 'utf8')).toBe('captured');
+    const result = await server.run({ root }, async (scope) => {
+      const publication = publishShellProjectionFile(
+        scope,
+        { path: 'part.ts', baseline: null, projected },
+        { maximumBytes: 1024, signal: scope.signal },
+      );
+      projected.fill(0);
+      return publication;
+    });
+    expect(result).toMatchObject({ status: 'settled', result: { status: 'applied' } });
+    expect(await editor.readFile('part.ts', 'utf8')).toBe('captured');
   });
 
   it('should reject noncanonical paths and cancelled publication', async () => {
-    const { authority } = connect();
-    await expect(
-      publishShellProjectionFile(authority, { path: '../other/part.ts', baseline: null, projected: 'edit' }, options()),
-    ).rejects.toMatchObject({ code: 'PATH_OUTSIDE_ROOT' });
+    const { editor, publish } = connect();
+    await expect(publish({ path: '../other/part.ts', baseline: null, projected: 'edit' })).rejects.toMatchObject({
+      code: 'PATH_OUTSIDE_ROOT',
+    });
     const controller = new AbortController();
     controller.abort(new Error('checkout closed'));
     await expect(
-      publishShellProjectionFile(
-        authority,
-        { path: 'part.ts', baseline: null, projected: 'edit' },
-        { ...options(), signal: controller.signal },
-      ),
+      publish({ path: 'part.ts', baseline: null, projected: 'edit' }, { signal: controller.signal }),
     ).rejects.toThrow('checkout closed');
-    expect(await authority.exists('part.ts')).toBe(false);
+    expect(await editor.exists('part.ts')).toBe(false);
+  });
+
+  it('should stop publishing when the served owner closes', async () => {
+    const { publish, server } = connect();
+    await server.close();
+    await expect(publish({ path: 'part.ts', baseline: null, projected: 'edit' })).rejects.toMatchObject({
+      code: 'AUTHORITY_HOST_INACTIVE',
+    });
+  });
+});
+
+describe('shell projection activation boundary', () => {
+  const sourceRoot = fileURLToPath(new URL('../', import.meta.url));
+  const sources = (directory: string): string[] =>
+    readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        return sources(path);
+      }
+      return /\.tsx?$/u.test(entry.name) && !/\.test(?:-d)?\.tsx?$/u.test(entry.name) ? [path] : [];
+    });
+
+  it('should take only the held scope and import no wire client (PO-Q5)', () => {
+    const source = readFileSync(join(sourceRoot, 'shell', 'shell-projection.ts'), 'utf8');
+    const imports = [...source.matchAll(/^import\s[^;]*?from\s+'([^']+)';/gmu)].map((match) => match[0]);
+    expect(imports.filter((line) => !line.startsWith('import type'))).toEqual([
+      "import { classify } from '@taucad/filesystem/path-registry';",
+      "import { assertRootedPath } from '@taucad/utils/path';",
+    ]);
+    expect(source).not.toMatch(/NodeFsProviderClient|NodeFsChannel|@taucad\/filesystem\/backend'/u);
+  });
+
+  it('should stay unactivated: no production module imports the projection', () => {
+    const importers = sources(sourceRoot).filter(
+      (path) =>
+        !path.endsWith(join('shell', 'shell-projection.ts')) &&
+        /shell\/shell-projection(?:\.js)?'/u.test(readFileSync(path, 'utf8')),
+    );
+    expect(importers).toEqual([]);
   });
 });

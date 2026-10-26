@@ -236,9 +236,9 @@ export function ViewerStage({
         aria-label={regionLabel}
         aria-busy={isBusy || undefined}
         tabIndex={partMenu === undefined ? undefined : 0}
-        /* `isolate` keeps what the canvas stacks inside it (the orientation cube is z-index 1000) under the viewer bar: on
-           a short stage, such as a phone's at Half, the cube's box reaches the bar and would take its taps. */
-        className='relative isolate min-h-0 flex-1 overflow-hidden focus-visible:focus-outline'
+        /* The orientation cube's library stacks it at z-index 1000. Under the viewer bar (z-10) instead: on a short
+           stage, such as a phone's at Half, the cube's box reaches the bar and would take its taps. */
+        className='relative min-h-0 flex-1 overflow-hidden focus-visible:focus-outline [&>.viewport-gizmo-cube]:z-[5]!'
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
         onPointerCancel={handlePointerLeave}

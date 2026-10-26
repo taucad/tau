@@ -178,7 +178,7 @@ export function DockviewTab(properties: DockviewTabProps): React.JSX.Element {
       className='dv-default-tab'
       contentClassName='dv-default-tab-content mr-0!'
       titleClassName='dockview-tab-title'
-      closeClassName='dv-default-tab-action size-4.5! rounded-[calc(var(--dv-tab-border-radius)-0.25rem)]! bg-transparent p-0! hover:bg-nested-action-hover!'
+      closeClassName='dv-default-tab-action size-4.5! pointer-coarse:size-6! rounded-[calc(var(--dv-tab-border-radius)-0.25rem)]! bg-transparent p-0! hover:bg-nested-action-hover!'
     />
   );
 }

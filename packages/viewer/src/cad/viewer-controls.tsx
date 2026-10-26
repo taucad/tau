@@ -235,7 +235,8 @@ export function ViewerControls(props: ViewerControlsProps): React.JSX.Element {
 
 /**
  * The bar's layout classes. On a phone the bar fits the space it is given, wraps its controls and scrolls its tool
- * rows; a desktop pane's bar never shrinks below its rows, so a narrow strip keeps them whole.
+ * rows; a desktop pane's bar never shrinks below its rows, so a narrow strip keeps them whole, but a pane under 20rem
+ * wraps its controls line rather than cut off its last controls.
  * @param isMobile - Whether the viewport is a phone's.
  * @param isTouch - Whether the controls take touch targets.
  * @returns The classes of the bar, its tool rows and its controls line.
@@ -247,14 +248,17 @@ function barLayout(isMobile: boolean, isTouch: boolean): { bar: string; toolRows
       // `max-h-full` is the fallback for a phone bar outside a viewer frame, in a parent of bounded height; inside a
       // frame the measured max height replaces it. Every section may shrink, so the issues list scrolls beside the tool
       // rows instead of squeezing them out; the controls line holds its height (`shrink-0`).
-      isMobile ? 'max-h-full min-h-0 min-w-0 *:min-h-0' : 'min-w-min',
+      // A desktop pane narrower than its controls line (from 768px with the sidebar and a lane open, D12) wraps the
+      // line as a phone does instead of running it past the pane's edge.
+      isMobile ? 'max-h-full min-h-0 min-w-0 *:min-h-0' : 'min-w-min @max-[20rem]/viewer:min-w-0',
     ),
     toolRows: cn('flex flex-col gap-1', isMobile && 'min-h-0 overflow-y-auto'),
     controls: cn(
       'flex items-center',
       isMobile && 'max-w-full flex-wrap justify-center',
+      !isMobile && '@max-[20rem]/viewer:max-w-full @max-[20rem]/viewer:flex-wrap @max-[20rem]/viewer:justify-center',
       isTouch ? 'gap-0' : 'gap-1',
-      !isMobile && !isTouch && 'h-7',
+      !isMobile && !isTouch && 'h-7 @max-[20rem]/viewer:h-auto',
     ),
   };
 }

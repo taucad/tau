@@ -104,9 +104,11 @@ export const dockviewStyleOverrides = cn(
 
   // ── Adaptive horizontal tab geometry ──
   // Share available width equally from 160px down to a 112px floor, then scroll.
+  // The floor never exceeds the strip: at large text sizes a lone tab shrinks to fit rather than
+  // pushing its close glyph past the strip's edge (T5, 200% text).
   // Width stays auto-basis so Dockview's !important zero-width drag states still win.
   '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab]:w-40',
-  '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab]:min-w-28',
+  '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab]:min-w-[min(7rem,100%)]',
   '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab]:max-w-40',
   '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab]:grow',
   '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab]:!shrink',

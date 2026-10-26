@@ -14,6 +14,8 @@ import type { EditorNavigationTarget } from '#lib/editor-language-environment.js
 import { Theme, ThemeProvider } from '#hooks/use-theme.js';
 import type { EditorView } from '@codemirror/view';
 
+const isMac = navigator.platform.includes('Mac');
+
 afterEach(() => {
   cleanup();
   document.documentElement.className = '';
@@ -53,8 +55,12 @@ it('shares accepted text and undo across split views without sharing focus', asy
   const sourceDocument = new EditorDocument('main.ts', 'alpha');
   const { container } = render(
     <div className='flex h-72'>
-      <div className='w-1/2'><CodeEditor document={sourceDocument} viewId='left' languageId='typescript' /></div>
-      <div className='w-1/2'><CodeEditor document={sourceDocument} viewId='right' languageId='typescript' /></div>
+      <div className='w-1/2'>
+        <CodeEditor document={sourceDocument} viewId='left' languageId='typescript' />
+      </div>
+      <div className='w-1/2'>
+        <CodeEditor document={sourceDocument} viewId='right' languageId='typescript' />
+      </div>
     </div>,
   );
   await expect.poll(() => container.querySelectorAll('.cm-content').length).toBe(2);
@@ -63,14 +69,18 @@ it('shares accepted text and undo across split views without sharing focus', asy
   await expect.poll(() => sourceDocument.text).toBe('alpha beta');
   await expect.poll(() => container.querySelectorAll('.cm-content')[1]?.textContent).toContain('alpha beta');
   await editors.nth(1).click();
-  await userEvent.keyboard('{Meta>}z{/Meta}');
+  await userEvent.keyboard(isMac ? '{Meta>}z{/Meta}' : '{Control>}z{/Control}');
   await expect.poll(() => sourceDocument.text).toBe('alpha');
   await expect.poll(() => container.querySelectorAll('.cm-content')[0]?.textContent).toContain('alpha');
 });
 
 it('opens editor context actions and its search panel', async () => {
   const sourceDocument = new EditorDocument('main.ts', 'const value = 1;');
-  const { container } = render(<div className='h-72'><CodeEditor document={sourceDocument} viewId='pane-menu' languageId='typescript' /></div>);
+  const { container } = render(
+    <div className='h-72'>
+      <CodeEditor document={sourceDocument} viewId='pane-menu' languageId='typescript' />
+    </div>,
+  );
   await expect.poll(() => container.querySelector('.cm-content')).toBeTruthy();
   fireEvent.contextMenu(container.querySelector('.cm-content')!);
   await page.getByRole('menuitem', { name: 'Find and Replace' }).click();
@@ -80,17 +90,21 @@ it('opens editor context actions and its search panel', async () => {
 it('keeps a rejected read-only view transaction out of its document', async () => {
   const sourceDocument = new EditorDocument('__typescript_lib__/lib.es5.d.ts', 'interface Number {}');
   let view: EditorView | undefined;
-  const { container } = render(<div className='h-72'>
-    <CodeEditor
-      document={sourceDocument}
-      viewId='declaration'
-      languageId='typescript'
-      readOnly
-      onApply={() => undefined}
-      onHistory={() => undefined}
-      onMount={(mounted) => { view = mounted; }}
-    />
-  </div>);
+  const { container } = render(
+    <div className='h-72'>
+      <CodeEditor
+        document={sourceDocument}
+        viewId='declaration'
+        languageId='typescript'
+        readOnly
+        onApply={() => undefined}
+        onHistory={() => undefined}
+        onMount={(mounted) => {
+          view = mounted;
+        }}
+      />
+    </div>,
+  );
   await expect.poll(() => view).toBeDefined();
   view!.dispatch({ changes: { from: 0, to: 0, insert: 'corruption' } });
   expect(sourceDocument.text).toBe('interface Number {}');
@@ -112,11 +126,23 @@ it('opens a real TypeScript standard-library definition as read-only source', as
     const extensions = createTypeScriptExtensions({
       document: sourceDocument,
       service,
-      navigate: async (next) => { target = next; },
+      navigate: async (next) => {
+        target = next;
+      },
     });
-    const { container, rerender } = render(<div className='h-72'>
-      <CodeEditor document={sourceDocument} viewId='definition-source' languageId='typescript' extensions={extensions} onMount={(mounted) => { view = mounted; }} />
-    </div>);
+    const { container, rerender } = render(
+      <div className='h-72'>
+        <CodeEditor
+          document={sourceDocument}
+          viewId='definition-source'
+          languageId='typescript'
+          extensions={extensions}
+          onMount={(mounted) => {
+            view = mounted;
+          }}
+        />
+      </div>,
+    );
     await expect.poll(() => view).toBeDefined();
     view!.dispatch({ selection: { anchor: sourceDocument.text.indexOf('toFixed') } });
     view!.focus();
@@ -124,7 +150,13 @@ it('opens a real TypeScript standard-library definition as read-only source', as
     await expect.poll(() => target?.declaration?.text).toContain('toFixed');
     expect(target?.uri).toMatch(/^file:\/\/\/(?:__typescript_lib__|cdn-types)\//u);
     const declarationDocument = new EditorDocument(target!.uri.replace('file:///', ''), target!.declaration!.text);
-    rerender(<VirtualDeclarationDialog declaration={{ uri: target!.uri, document: declarationDocument, line: target!.line, column: target!.column }} onClose={() => undefined} restoreFocus={() => undefined} />);
+    rerender(
+      <VirtualDeclarationDialog
+        declaration={{ uri: target!.uri, document: declarationDocument, line: target!.line, column: target!.column }}
+        onClose={() => undefined}
+        restoreFocus={() => undefined}
+      />,
+    );
     await expect.poll(() => document.querySelector('[role="dialog"] .cm-content')).toBeTruthy();
     const declarationView = document.querySelector('[role="dialog"] .cm-content');
     expect(declarationView).toHaveAttribute('contenteditable', 'false');
@@ -151,9 +183,18 @@ it('colors JSON keys by seven nesting levels and cycles brace colors', async () 
   }
   const sourceDocument = new EditorDocument('nested.json', source);
   let view: EditorView | undefined;
-  const { container } = render(<div style={{ position: 'fixed', top: 0, left: 0, width: 800, height: 480 }}>
-    <CodeEditor document={sourceDocument} viewId='json-depth' languageId='json' onMount={(mounted) => { view = mounted; }} />
-  </div>);
+  const { container } = render(
+    <div style={{ position: 'fixed', top: 0, left: 0, width: 800, height: 480 }}>
+      <CodeEditor
+        document={sourceDocument}
+        viewId='json-depth'
+        languageId='json'
+        onMount={(mounted) => {
+          view = mounted;
+        }}
+      />
+    </div>,
+  );
   await expect.poll(() => view?.plugin(jsonDepthHighlighting)).toBeDefined();
   await expect.poll(() => view?.plugin(jsonDepthHighlighting)?.decorations.size).toBeGreaterThan(0);
   await expect.poll(() => container.querySelectorAll('.cm-json-key-depth0').length).toBe(2);
@@ -194,7 +235,10 @@ it('releases views and TypeScript mirrors across twenty open/switch/close cycles
     import('#lib/typescript-language/create-typescript-extensions.js'),
   ]);
   const content = mock<FileContentService>();
-  const source = Array.from({ length: 80 }, (_, index) => `const value${String(index)}: number = ${String(index)};`).join('\n');
+  const source = Array.from(
+    { length: 80 },
+    (_, index) => `const value${String(index)}: number = ${String(index)};`,
+  ).join('\n');
   content.resolve.mockResolvedValue({ kind: 'text', content: new TextEncoder().encode(source) });
   content.onDidContentChange.mockReturnValue(() => undefined);
   content.onDidChangeOutcome.mockReturnValue(() => undefined);
@@ -204,18 +248,20 @@ it('releases views and TypeScript mirrors across twenty open/switch/close cycles
   const closed = vi.spyOn(service.client, 'close');
   const originalSubscribe = EditorDocument.prototype.subscribe;
   let subscriptions = 0;
-  const subscriptionSpy = vi.spyOn(EditorDocument.prototype, 'subscribe').mockImplementation(function (this: EditorDocument, listener, options) {
-    subscriptions += 1;
-    const stop = originalSubscribe.call(this, listener, options);
-    let active = true;
-    return () => {
-      if (active) {
-        active = false;
-        subscriptions -= 1;
-        stop();
-      }
-    };
-  });
+  const subscriptionSpy = vi
+    .spyOn(EditorDocument.prototype, 'subscribe')
+    .mockImplementation(function (this: EditorDocument, listener, options) {
+      subscriptions += 1;
+      const stop = originalSubscribe.call(this, listener, options);
+      let active = true;
+      return () => {
+        if (active) {
+          active = false;
+          subscriptions -= 1;
+          stop();
+        }
+      };
+    });
   let mounted = 0;
   const paths = new Set<string>();
   try {
@@ -235,20 +281,29 @@ it('releases views and TypeScript mirrors across twenty open/switch/close cycles
       const extensions = createTypeScriptExtensions({ document: shared, service, navigate: async () => undefined });
       const views: EditorView[] = [];
       // eslint-disable-next-line no-loop-func -- The rendered views close before the next cycle starts.
-      const editor = (viewId: string): React.JSX.Element => <div style={{ width: 390, height: 120 }}>
-        <CodeEditor
-          document={shared}
-          viewId={viewId}
-          languageId='typescript'
-          extensions={extensions}
-          onMount={(view) => {
-            views.push(view);
-            mounted += 1;
-            return () => { mounted -= 1; };
-          }}
-        />
-      </div>;
-      const { container, unmount } = render(<div className='flex'>{editor(split ? 'left' : `pane-${String(cycle)}`)}{split && editor('right')}</div>);
+      const editor = (viewId: string): React.JSX.Element => (
+        <div style={{ width: 390, height: 120 }}>
+          <CodeEditor
+            document={shared}
+            viewId={viewId}
+            languageId='typescript'
+            extensions={extensions}
+            onMount={(view) => {
+              views.push(view);
+              mounted += 1;
+              return () => {
+                mounted -= 1;
+              };
+            }}
+          />
+        </div>
+      );
+      const { container, unmount } = render(
+        <div className='flex'>
+          {editor(split ? 'left' : `pane-${String(cycle)}`)}
+          {split && editor('right')}
+        </div>,
+      );
       await expect.poll(() => container.querySelectorAll('.cm-editor[data-view-id]').length).toBe(split ? 2 : 1);
       if (cycle === 0) {
         const [left, right] = views;
@@ -282,7 +337,9 @@ it('releases views and TypeScript mirrors across twenty open/switch/close cycles
     /* eslint-enable no-await-in-loop -- Sequential lifecycle loop ends here. */
     expect(opened).toHaveBeenCalledTimes(20);
     expect(closed).toHaveBeenCalledTimes(20);
-    expect([...paths].filter((path) => session.get(path) !== undefined).length).toBeLessThanOrEqual(maxBackgroundDocuments);
+    expect([...paths].filter((path) => session.get(path) !== undefined).length).toBeLessThanOrEqual(
+      maxBackgroundDocuments,
+    );
   } finally {
     subscriptionSpy.mockRestore();
     session.dispose();
@@ -290,59 +347,83 @@ it('releases views and TypeScript mirrors across twenty open/switch/close cycles
   }
 }, 120_000);
 
-it.each([Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST])('renders real TypeScript widgets in %s', async (theme) => {
-  const [{ createTypeScriptService }, { createTypeScriptExtensions }] = await Promise.all([
-    import('#lib/typescript-language/typescript-service.js'),
-    import('#lib/typescript-language/create-typescript-extensions.js'),
-  ]);
-  await page.viewport(1000, 700);
-  document.documentElement.className = theme === Theme.BLACK || theme === Theme.HIGH_CONTRAST ? `dark ${theme}` : theme;
-  const source = 'function greet(name: string): string { return name; }\nconst value: number = "wrong";\nvalue.toF\ngreet(';
-  const sourceDocument = new EditorDocument('widgets.ts', source);
-  const service = await createTypeScriptService({ dynamicTypes: false });
-  let view: EditorView | undefined;
-  try {
-    await service.attach(sourceDocument);
-    const extensions = createTypeScriptExtensions({ document: sourceDocument, service, navigate: async () => undefined });
-    const { container } = render(<ThemeProvider specifiedTheme={theme} themeAction='/'>
-      <div style={{ position: 'fixed', top: 0, left: 0, width: 800, height: 480 }}>
-        <CodeEditor document={sourceDocument} viewId={`widgets-${theme}`} languageId='typescript' extensions={extensions} onMount={(mounted) => { view = mounted; }} />
-      </div>
-    </ThemeProvider>);
-    await expect.poll(() => view).toBeDefined();
-    await expect.poll(() => container.querySelector('.cm-lintRange-error')).toBeTruthy();
-    await page.screenshot();
+it.each([Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST])(
+  'renders real TypeScript widgets in %s',
+  async (theme) => {
+    const [{ createTypeScriptService }, { createTypeScriptExtensions }] = await Promise.all([
+      import('#lib/typescript-language/typescript-service.js'),
+      import('#lib/typescript-language/create-typescript-extensions.js'),
+    ]);
+    await page.viewport(1000, 700);
+    document.documentElement.className =
+      theme === Theme.BLACK || theme === Theme.HIGH_CONTRAST ? `dark ${theme}` : theme;
+    const source =
+      'function greet(name: string): string { return name; }\nconst value: number = "wrong";\nvalue.toF\ngreet(';
+    const sourceDocument = new EditorDocument('widgets.ts', source);
+    const service = await createTypeScriptService({ dynamicTypes: false });
+    let view: EditorView | undefined;
+    try {
+      await service.attach(sourceDocument);
+      const extensions = createTypeScriptExtensions({
+        document: sourceDocument,
+        service,
+        navigate: async () => undefined,
+      });
+      const { container } = render(
+        <ThemeProvider specifiedTheme={theme} themeAction='/'>
+          <div style={{ position: 'fixed', top: 0, left: 0, width: 800, height: 480 }}>
+            <CodeEditor
+              document={sourceDocument}
+              viewId={`widgets-${theme}`}
+              languageId='typescript'
+              extensions={extensions}
+              onMount={(mounted) => {
+                view = mounted;
+              }}
+            />
+          </div>
+        </ThemeProvider>,
+      );
+      await expect.poll(() => view).toBeDefined();
+      await expect.poll(() => container.querySelector('.cm-lintRange-error')).toBeTruthy();
+      await page.screenshot();
 
-    view!.dispatch({ selection: { anchor: source.indexOf('toF') + 3 } });
-    view!.focus();
-    startCompletion(view!);
-    await expect.poll(() => document.querySelector('.cm-tooltip-autocomplete')?.textContent).toContain('toFixed');
-    await page.screenshot();
-    const completionLabel = [...document.querySelectorAll('.cm-completionLabel')].find((element) => element.textContent === 'toFixed');
-    expect(completionLabel).toBeTruthy();
-    await userEvent.hover(completionLabel!);
-    await expect.poll(() => document.querySelector('.cm-completionInfo')?.textContent).toBeTruthy();
-    await page.screenshot();
-    fireEvent.keyDown(view!.contentDOM, { key: 'Escape', code: 'Escape' });
+      view!.dispatch({ selection: { anchor: source.indexOf('toF') + 3 } });
+      view!.focus();
+      startCompletion(view!);
+      await expect.poll(() => document.querySelector('.cm-tooltip-autocomplete')?.textContent).toContain('toFixed');
+      await page.screenshot();
+      const completionLabel = [...document.querySelectorAll('.cm-completionLabel')].find(
+        (element) => element.textContent === 'toFixed',
+      );
+      expect(completionLabel).toBeTruthy();
+      await userEvent.hover(completionLabel!);
+      await expect.poll(() => document.querySelector('.cm-completionInfo')?.textContent).toBeTruthy();
+      await page.screenshot();
+      fireEvent.keyDown(view!.contentDOM, { key: 'Escape', code: 'Escape' });
 
-    const valueToken = [...view!.contentDOM.querySelectorAll('span')].find((element) => element.textContent === 'value');
-    expect(valueToken).toBeTruthy();
-    await userEvent.hover(valueToken!);
-    await expect.poll(() => document.querySelector('.cm-typescript-hover')?.textContent).toBeTruthy();
-    await page.screenshot();
+      const valueToken = [...view!.contentDOM.querySelectorAll('span')].find(
+        (element) => element.textContent === 'value',
+      );
+      expect(valueToken).toBeTruthy();
+      await userEvent.hover(valueToken!);
+      await expect.poll(() => document.querySelector('.cm-typescript-hover')?.textContent).toBeTruthy();
+      await page.screenshot();
 
-    view!.dispatch({ selection: { anchor: source.lastIndexOf('greet(') + 'greet('.length } });
-    view!.focus();
-    fireEvent.keyDown(view!.contentDOM, { key: ' ', code: 'Space', metaKey: true, shiftKey: true });
-    await expect.poll(() => document.querySelector('.cm-typescript-signature')?.textContent).toContain('name');
-    await page.screenshot();
+      view!.dispatch({ selection: { anchor: source.lastIndexOf('greet(') + 'greet('.length } });
+      view!.focus();
+      fireEvent.keyDown(view!.contentDOM, { key: ' ', code: 'Space', metaKey: isMac, ctrlKey: !isMac, shiftKey: true });
+      await expect.poll(() => document.querySelector('.cm-typescript-signature')?.textContent).toContain('name');
+      await page.screenshot();
 
-    view!.dispatch({ selection: { anchor: source.indexOf('value:') + 2 } });
-    view!.focus();
-    fireEvent.keyDown(view!.contentDOM, { key: 'F2', code: 'F2' });
-    await expect.poll(() => document.querySelector('.cm-dialog input')).toBeTruthy();
-    await page.screenshot();
-  } finally {
-    service.dispose();
-  }
-}, 120_000);
+      view!.dispatch({ selection: { anchor: source.indexOf('value:') + 2 } });
+      view!.focus();
+      fireEvent.keyDown(view!.contentDOM, { key: 'F2', code: 'F2' });
+      await expect.poll(() => document.querySelector('.cm-dialog input')).toBeTruthy();
+      await page.screenshot();
+    } finally {
+      service.dispose();
+    }
+  },
+  120_000,
+);

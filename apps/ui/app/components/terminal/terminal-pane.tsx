@@ -437,6 +437,10 @@ export function TerminalPane({
       return;
     }
     viewRef.current = view;
+    /* Counts the shells this port has served. An access replacement keeps the port but starts the host's offsets
+     * again at zero, so output of the replaced shell that paints afterwards acknowledges nothing: its offset would be
+     * beyond the new shell's, which the host refuses as an invalid frame and ends the Terminal. */
+    let shell = 0;
     const onFrame = (frame: TerminalHostFrame): void => {
       if (generation !== generationRef.current) {
         return;
@@ -449,8 +453,9 @@ export function TerminalPane({
         }
         case 'output': {
           const { offset } = frame;
+          const painting = shell;
           view.write(frame.data, () => {
-            if (generation === generationRef.current) {
+            if (generation === generationRef.current && painting === shell) {
               sessionRef.current?.ack(offset);
             }
           });
@@ -466,6 +471,7 @@ export function TerminalPane({
           setIsConfirmingClose(false);
           setAccessRequest(undefined);
           if (frame.reason === 'replaced') {
+            shell += 1;
             /* The fresh session's `opened` follows; clear the old screen so its output is not mistaken for the new
              * shell's (RIS, which AurigaX handles in the engine). */
             view.write('\u001Bc', () => undefined);

@@ -167,6 +167,20 @@ describe('TerminalPane', () => {
     expect(harness.session.calls.ack).toEqual([[7]]);
   });
 
+  it('acknowledges nothing of a replaced shell that paints after the replacement opened', async () => {
+    render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
+    await startTerminal();
+    harness.emit({ type: 'output', data: 'old shell output\r\n', offset: 18 });
+    harness.emit({ type: 'exited', exitCode: null, signal: 'SIGTERM', reason: 'replaced' });
+    harness.emit(opened);
+    harness.emit({ type: 'output', data: '$ ', offset: 2 });
+    for (const { painted } of harness.view.writes) {
+      painted();
+    }
+    /* The new shell's offsets start at zero: 18 would be past them, and the host would end the Terminal. */
+    expect(harness.session.calls.ack).toEqual([[2]]);
+  });
+
   it('sends typed input and splits a paste larger than one input frame', async () => {
     render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
     await startTerminal();

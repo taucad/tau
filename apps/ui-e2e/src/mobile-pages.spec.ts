@@ -42,16 +42,18 @@ const expectPageRules = (audit: PhonePageAudit, state: string): void => {
   expect.soft(audit.overflow, `${state}: horizontal overflow`).toEqual(noOverflow);
 };
 
-/** The shell's 48px phone bar: the sidebar trigger, and the route's title when it names one. */
-const expectShellBar = async (title: string | undefined, width: number): Promise<void> => {
+/**
+ * The shell's 48px phone bar: the sidebar trigger, the route's title when it names one, and the back crumb when the
+ * route is nested (`undefined` for a top-level route, which must show none).
+ */
+const expectShellBar = async (title: string | undefined, width: number, crumb?: string): Promise<void> => {
   const bar = await readPhoneBar();
   expect.soft(bar.height, 'a 48px top bar').toBe(48);
   expect.soft(bar.overflow, 'the bar does not scroll sideways').toBe(0);
   expect.soft(bar.trigger, 'a 40px sidebar trigger').toBeGreaterThanOrEqual(40);
   expect.soft(bar.title, 'the bar title').toBe(title);
-  if (bar.crumb) {
-    expect.soft(bar.crumb.right, 'the crumb fits the bar').toBeLessThanOrEqual(width);
-  }
+  expect.soft(bar.crumb?.label, 'the back crumb').toBe(crumb);
+  expect.soft(bar.crumb?.right ?? 0, 'the crumb fits the bar').toBeLessThanOrEqual(width);
 };
 
 /** Whether the page paints no shell bar: full-screen pages (sign-in, shared links) bring their own. */
@@ -193,7 +195,13 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
   });
 
   test('PG-COM-2: a community search with no match names it and Clear filters restores every example', async () => {
-    await openTouchPhone(viewport, '/community?q=zzzqqq&kernel=openscad');
+    // The unfiltered count, read off the page, is what Clear filters must bring back.
+    const status = selectors.getByRole('status').filter({ hasText: /^\d+ examples?$/u });
+    await openTouchPhone(viewport, '/community');
+    await target.expectVisible(status, 60_000);
+    const unfiltered = await target.textContent(status);
+    expect(unfiltered).toMatch(/^\d+ examples?$/u);
+    await target.navigate('/community?q=zzzqqq&kernel=openscad');
     const empty = selectors.getByText('No examples match “zzzqqq”', { exact: true });
     await target.expectVisible(empty, 60_000);
     const clear = selectors.getByRole('button', { name: 'Clear filters', exact: true });
@@ -207,7 +215,7 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
 
     await target.click(clear, { touch: true });
     await target.expectHidden(empty);
-    await target.expectVisible(selectors.getByText('20 examples', { exact: true }));
+    await target.expectText(status, unfiltered ?? '');
     expect(Object.fromEntries(new URL(await target.currentUrl()).searchParams)).toEqual({});
   });
 
@@ -310,12 +318,12 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
     await openTouchPhone(viewport, '/convert');
     const openModel = selectors.getByRole('button', { name: /^Open model/u });
     await target.expectVisible(openModel, 60_000);
-    // The converter worker must be up before the drop zone takes a file.
+    // The drop zone is a native button, disabled until the converter worker is up; the audit and the file wait for it.
     await expect
-      .poll(async () => target.evaluateLocator(openModel, (zone) => zone.getAttribute('aria-disabled')), {
+      .poll(async () => target.evaluateLocator(openModel, (zone) => (zone as HTMLButtonElement).disabled), {
         timeout: 60_000,
       })
-      .not.toBe('true');
+      .toBe(false);
     expectPageRules(await auditPhonePage(`convert-${size(viewport)}`), 'convert');
     await expectShellBar('Convert', viewport.width);
 
@@ -435,9 +443,12 @@ describe('a password-protected shared link on a phone', () => {
       await target.evaluateLocator(field, (input) => {
         const disabledStates: boolean[] = [];
         Object.defineProperty(globalThis, '__tauPasswordDisabled', { value: disabledStates, configurable: true });
-        new MutationObserver(() => {
-          disabledStates.push((input as HTMLInputElement).disabled);
-        }).observe(input, { attributes: true, attributeFilter: ['disabled'] });
+        // One entry per change, from its old value, so a batched disable and enable still records both.
+        new MutationObserver((records) => {
+          for (const record of records) {
+            disabledStates.push(record.oldValue === null);
+          }
+        }).observe(input, { attributes: true, attributeFilter: ['disabled'], attributeOldValue: true });
       });
       await target.click(open, { touch: true });
       await target.expectVisible(

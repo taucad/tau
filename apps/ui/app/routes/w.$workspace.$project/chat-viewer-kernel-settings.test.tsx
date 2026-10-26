@@ -51,6 +51,30 @@ const tessellation: NonNullable<ViewOffer['options']> = {
   defaults: { tessellation: { linearTolerance: 0.02, angularTolerance: 20 } },
 };
 const model: ViewOffer = { id: 'model', title: 'Model', mimeType: 'model/gltf-binary', options: tessellation };
+
+/** The mesh options a voxel kernel's view offers: the runtime adds its evaluate options to the view's own. */
+const meshing: NonNullable<NonNullable<ViewOffer['options']>['schema']['properties']> = {
+  meshAdaptivity: { examples: [0.25], type: 'number', minimum: 0, exclusiveMaximum: 1 },
+  meshRelax: { default: false, type: 'boolean' },
+};
+const voxelOffers: Record<'picogk' | 'picovoxel', NonNullable<ViewOffer['options']>> = {
+  picogk: { schema: { type: 'object', properties: meshing }, defaults: { meshRelax: false } },
+  picovoxel: {
+    schema: {
+      type: 'object',
+      properties: {
+        lane: { default: 'fast', type: 'string', enum: ['fast', 'exact'] },
+        region: {
+          type: 'object',
+          properties: { min: { type: 'array' }, max: { type: 'array' } },
+          required: ['min', 'max'],
+        },
+        ...meshing,
+      },
+    },
+    defaults: { lane: 'fast', meshRelax: false },
+  },
+};
 const cadActor = mock<ActorRefFrom<typeof cadMachine>>();
 
 const offer = (views: readonly ViewOffer[]): void => {
@@ -181,4 +205,33 @@ describe('viewer kernel settings', () => {
     expect(mockState.edit).toHaveBeenCalledTimes(1);
     expect(savedRecord().kernelViews).toEqual([{ id: 'model', options: tessellation.defaults }]);
   });
+
+  it.each(['picogk', 'picovoxel'] as const)(
+    'offers %s mesh adaptivity at its Balanced value and relax, and leaves an untouched adaptivity unset',
+    (kernel) => {
+      const options = voxelOffers[kernel];
+      offer([{ id: 'model', title: 'Model', mimeType: 'model/gltf-binary', options }]);
+      render(<SettingsMenu />);
+      fireEvent.click(screen.getByRole('menuitem', { name: /Kernel settings/ }));
+      // Only the number and switch rows show; the lane and the crop box stay out of the menu.
+      expect(screen.getByRole('menuitem', { name: 'Mesh adaptivity, 0.25' })).toBeInTheDocument();
+      expect(screen.getByRole('switch', { name: 'Mesh relax' })).toHaveAttribute('aria-checked', 'false');
+      expect(screen.queryByRole('menuitem', { name: /^Lane/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: 'Region' })).not.toBeInTheDocument();
+
+      // Relaxing sends the view's whole options without an adaptivity: the kernel keeps resolving its default.
+      fireEvent.click(screen.getByRole('menuitem', { name: /^Mesh relax/ }));
+      expect(getLiveViewOptions('pane-1')).toEqual({
+        viewId: 'model',
+        options: { ...options.defaults, meshRelax: true },
+      });
+
+      // A step from the shown Balanced value sends an explicit adaptivity.
+      fireEvent.keyDown(screen.getByRole('menuitem', { name: /^Mesh adaptivity/ }), { key: 'ArrowRight' });
+      expect(getLiveViewOptions('pane-1')).toEqual({
+        viewId: 'model',
+        options: { ...options.defaults, meshRelax: true, meshAdaptivity: 0.26 },
+      });
+    },
+  );
 });

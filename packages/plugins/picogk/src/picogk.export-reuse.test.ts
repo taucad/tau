@@ -149,11 +149,15 @@ const kernelOptions = {
 /**
  * Open one document, render its model view, then export it as GLB, as a host does after a preview.
  *
- * @param evaluateOptions - The view's construction options; unset is the Balanced default.
+ * @param evaluateOptions - The document's construction options; unset is the Balanced default.
+ * @param requests - The view's own options, as the viewer's Kernel settings send them, and the export's options.
+ * @param requests.view - The model view's options.
+ * @param requests.export - The GLB export's options.
  * @returns The view's GLB and the exported GLB.
  */
 const previewThenExport = async (
   evaluateOptions?: Record<string, unknown>,
+  requests: { readonly view?: Record<string, unknown>; readonly export?: Record<string, unknown> } = {},
 ): Promise<{ view: Uint8Array<ArrayBuffer>; exported: Uint8Array<ArrayBuffer> }> => {
   const client = createTestRuntimeClient({
     runtime: defineRuntime({ kernels: [picogkKernel({ closure: kernelOptions })] }),
@@ -165,15 +169,18 @@ const previewThenExport = async (
       watch: false,
       ...(evaluateOptions ? { evaluateOptions } : {}),
     });
-    const outcome = await document.view('model').rendering();
+    const outcome = await document.view('model', requests.view ? { options: requests.view } : {}).rendering();
     if (outcome.superseded) {
       throw new Error('Unexpected superseded PicoGK render');
+    }
+    if (!outcome.rendering.success) {
+      throw new Error(`PicoGK view failed: ${JSON.stringify(outcome.rendering.issues)}`);
     }
     const view = extractGltfFromResult(outcome.rendering);
     if (!view) {
       throw new Error('PicoGK render returned no GLB');
     }
-    const exported = await document.export('glb');
+    const exported = await document.export('glb', requests.export ? { options: requests.export } : {});
     if (!exported.success) {
       throw new Error(`PicoGK export failed: ${JSON.stringify(exported.issues)}`);
     }
@@ -230,5 +237,92 @@ describe('PicoGK export after a preview', () => {
     await previewThenExport({ meshAdaptivity: 0 });
 
     expect(worker.builds).toEqual([{}]);
+  });
+
+  it('renders a view whose settings set adaptivity from a build of its own, and still exports uniformly', async () => {
+    worker.capable = true;
+    const expected = await freshUniformExport();
+
+    const { view, exported } = await previewThenExport(undefined, { view: { meshAdaptivity: 0.5, meshRelax: true } });
+
+    // The document's evaluation meshes at Balanced, the view's own build at its setting, the export uniformly.
+    expect(worker.builds).toEqual([
+      { meshing: { adaptivity: 0.25, relax: false } },
+      { meshing: { adaptivity: 0.5, relax: true } },
+      {},
+    ]);
+    expect(exported).toEqual(expected);
+    const uniform = await previewThenExport({ meshAdaptivity: 0 });
+    expect(view).not.toEqual(uniform.view);
+  });
+
+  it('renders a view that sets the uniform mesh from its own build, which the default export then reuses', async () => {
+    worker.capable = true;
+    const uniform = await previewThenExport({ meshAdaptivity: 0 });
+    worker.builds.length = 0;
+
+    const { view, exported } = await previewThenExport(undefined, { view: { meshAdaptivity: 0 } });
+
+    expect(worker.builds).toEqual([{ meshing: { adaptivity: 0.25, relax: false } }, {}]);
+    expect(view).toEqual(uniform.view);
+    expect(exported).toEqual(uniform.exported);
+  });
+
+  it('exports at an explicit adaptivity, reusing a default view the worker meshed at exactly that', async () => {
+    worker.capable = true;
+    const { exported: expected } = await previewThenExport(
+      { meshAdaptivity: 0.25 },
+      { export: { meshAdaptivity: 0.25 } },
+    );
+    worker.builds.length = 0;
+
+    const { exported } = await previewThenExport(undefined, { export: { meshAdaptivity: 0.25 } });
+
+    expect(worker.builds).toEqual([{ meshing: { adaptivity: 0.25, relax: false } }]);
+    expect(exported).toEqual(expected);
+    const uniform = await previewThenExport();
+    expect(exported).not.toEqual(uniform.exported);
+  });
+
+  it('builds an adaptive export of its own when the view meshed otherwise', async () => {
+    worker.capable = true;
+
+    await previewThenExport(undefined, { export: { meshAdaptivity: 0.5, meshRelax: true } });
+
+    expect(worker.builds).toEqual([
+      { meshing: { adaptivity: 0.25, relax: false } },
+      { meshing: { adaptivity: 0.5, relax: true } },
+    ]);
+  });
+
+  it('offers meshAdaptivity and meshRelax on the model view, with Balanced shown but left unset', async () => {
+    const client = createTestRuntimeClient({
+      runtime: defineRuntime({ kernels: [picogkKernel({ closure: kernelOptions })] }),
+      files: { 'main.cs': 'class Model {}' },
+    });
+    try {
+      const outcome = await client.open({ source: { path: 'main.cs' }, watch: false }).evaluation();
+      const evaluation = outcome.superseded ? undefined : outcome.evaluation;
+      const options = evaluation?.success ? evaluation.views[0]?.options : undefined;
+      expect(options?.schema.properties).toMatchObject({
+        meshAdaptivity: { type: 'number', minimum: 0, exclusiveMaximum: 1, examples: [0.25] },
+        meshRelax: { type: 'boolean', default: false },
+      });
+      expect(options?.defaults).toEqual({ meshRelax: false });
+      // The export offers its own meshing, defaulting to the uniform mesh.
+      const glb = evaluation?.success ? evaluation.exports.find(({ id }) => id === 'glb')?.options : undefined;
+      expect(glb?.defaults).toMatchObject({ meshAdaptivity: 0, meshRelax: false });
+    } finally {
+      await client.shutdown();
+    }
+  });
+
+  it('refuses an explicit adaptive view or export on a worker without adaptive meshing', async () => {
+    await expect(previewThenExport(undefined, { view: { meshAdaptivity: 0.5 } })).rejects.toThrow(
+      /meshing-unsupported/,
+    );
+    await expect(previewThenExport(undefined, { export: { meshAdaptivity: 0.5 } })).rejects.toThrow(
+      /meshing-unsupported/,
+    );
   });
 });

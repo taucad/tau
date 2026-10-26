@@ -42,7 +42,7 @@ export const tessellationReportSchema = z
     downgraded: count.optional(),
   })
   .describe(
-    'Cost of the default view mesh: triangles, vertices and milliseconds to produce it; voxel kernels add voxelSize (mm), activeVoxels and memoryBytes, and adaptivity with relax only when the mesh is adaptive (absent means the uniform mesh; a PicoGK view that sets no meshAdaptivity asks for 0.25 and reports the mesh its runtime delivered, while a PicoVoxel view that sets none meshes at 0.25 on the fast lane and at 0 on the exact lane or under PicoVoxel 0.1.0; exports always mesh at 0). Tolerance-meshed kernels add the requested preset or explicit, the effective linearTolerance (mm) and angularTolerance (degrees), and downgraded coarser steps taken to fit the triangle budget.',
+    'Cost of the default view mesh: triangles, vertices and milliseconds to produce it; voxel kernels add voxelSize (mm), activeVoxels and memoryBytes, and adaptivity with relax only when the mesh is adaptive (absent means the uniform mesh; a PicoGK view that sets no meshAdaptivity asks for 0.25 and reports the mesh its runtime delivered, while a PicoVoxel view that sets none meshes at 0.25 on the fast lane and at 0 on the exact lane or under PicoVoxel 0.1.0; exports mesh at 0 unless they set meshAdaptivity). Tolerance-meshed kernels add the requested preset or explicit, the effective linearTolerance (mm) and angularTolerance (degrees), and downgraded coarser steps taken to fit the triangle budget.',
   );
 
 const millimetrePointSchema = z.object({ x: z.number(), y: z.number(), z: z.number() }).strict();

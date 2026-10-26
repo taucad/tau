@@ -1691,6 +1691,148 @@ describe('v2 kernel boundary with the current client', () => {
     }
   });
 
+  it('should offer evaluate options on a view and render a view that sets them from its own build', async () => {
+    const evaluate = vi.fn(async ({ options }: { options: { fidelity?: number } }) => ({
+      handle: { fidelity: options.fidelity },
+      views: ['view'] as const,
+      exports: ['data'] as const,
+    }));
+    const render = vi.fn(async ({ handle }: { handle: { fidelity?: number } }) => ({
+      content: `<svg xmlns="http://www.w3.org/2000/svg" data-fidelity="${String(handle.fidelity)}"/>`,
+    }));
+    const exportFiles = vi.fn(async ({ handle }: { handle: { fidelity?: number } }) => ({
+      files: [
+        { name: 'data.csv', mimeType: 'text/csv', bytes: new TextEncoder().encode(String(handle.fidelity)) },
+      ] as const,
+    }));
+    const kernel = defineKernelV2({
+      id: 'v2-view-build',
+      extensions: ['circuit'] as const,
+      name: 'View build',
+      version: '1.0.0',
+      evaluateOptionsSchema: z.object({ fidelity: z.number().min(0).lt(1).optional() }),
+      views: {
+        view: { title: 'View', mimeType: 'image/svg+xml', optionsSchema: z.object({ scale: z.number().default(1) }) },
+      },
+      exports: { data: { title: 'Data', mimeType: 'text/csv', extension: 'csv' } },
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      evaluate,
+      render,
+      export: exportFiles,
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    try {
+      const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
+      const rendered: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
+      worker.onEvaluated = (event) => {
+        evaluated.push(event);
+      };
+      worker.onRendered = (event) => {
+        rendered.push(event);
+      };
+      const svgOf = (subscriptionId: string): string | undefined => {
+        const rendering = rendered.findLast((event) => event.subscriptionId === subscriptionId);
+        if (!rendering?.success) {
+          return undefined;
+        }
+        const { content } = rendering.artifact as { content: string | Uint8Array<ArrayBuffer> };
+        return typeof content === 'string' ? content : new TextDecoder().decode(content);
+      };
+      worker.handleOpenDocument({
+        documentId: 'view-build-doc',
+        intent: 1,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        evaluateOptions: { fidelity: 0.25 },
+        watch: false,
+      });
+      worker.handleOpenView({
+        documentId: 'view-build-doc',
+        subscriptionId: 'plain',
+        requestId: 'plain-render',
+        view: 'view',
+        options: {},
+      });
+      await vi.waitFor(() => {
+        expect(rendered).toHaveLength(1);
+      });
+      // The view offers the kernel's evaluate options beside its own; only its own carry a default.
+      const offered = evaluated[0]?.success ? evaluated[0].views[0]?.options : undefined;
+      expect(Object.keys(offered?.schema.properties ?? {})).toEqual(['fidelity', 'scale']);
+      expect(offered?.defaults).toEqual({ scale: 1 });
+
+      // A view that sets the evaluation's own value renders the evaluation's build.
+      worker.handleOpenView({
+        documentId: 'view-build-doc',
+        subscriptionId: 'same',
+        requestId: 'same-render',
+        view: 'view',
+        options: { fidelity: 0.25, scale: 2 },
+      });
+      await vi.waitFor(() => {
+        expect(svgOf('same')).toContain('data-fidelity="0.25"');
+      });
+      expect(evaluate).toHaveBeenCalledTimes(1);
+
+      // Another value builds for that view alone; the view hook sees only its own options.
+      worker.handleOpenView({
+        documentId: 'view-build-doc',
+        subscriptionId: 'finer',
+        requestId: 'finer-render',
+        view: 'view',
+        options: { fidelity: 0.5, scale: 3 },
+      });
+      await vi.waitFor(() => {
+        expect(svgOf('finer')).toContain('data-fidelity="0.5"');
+      });
+      expect(evaluate).toHaveBeenCalledTimes(2);
+      expect(evaluate).toHaveBeenLastCalledWith(
+        expect.objectContaining({ options: { fidelity: 0.5 } }),
+        expect.any(Object),
+        expect.any(Object),
+      );
+      expect(render).toHaveBeenLastCalledWith(
+        expect.objectContaining({ handle: { fidelity: 0.5 }, options: { scale: 3 } }),
+        expect.any(Object),
+        expect.any(Object),
+      );
+
+      // A value the evaluate schema refuses fails that view, naming the option.
+      worker.handleUpdateView({ subscriptionId: 'finer', requestId: 'refused-render', options: { fidelity: 2 } });
+      await vi.waitFor(() => {
+        const last = rendered.findLast((event) => event.subscriptionId === 'finer');
+        expect(last?.success).toBe(false);
+        expect(last?.success === false ? last.issues[0]?.code : undefined).toBe('EVALUATE_OPTIONS_INVALID');
+      });
+
+      // The document's export still builds from the document's options, never from a view's.
+      const exported = await worker.exportDocument({
+        documentId: 'view-build-doc',
+        operationId: 'view-build-export',
+        target: 'data',
+        options: {},
+      });
+      expect(exported.success, JSON.stringify(exported.issues)).toBe(true);
+      expect(exportFiles).toHaveBeenLastCalledWith(
+        expect.objectContaining({ handle: { fidelity: 0.25 } }),
+        expect.any(Object),
+        expect.any(Object),
+      );
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
   it.each([
     [{ views: 'a' }, 'invalid views'],
     [{ exports: 'bom' }, 'invalid exports'],

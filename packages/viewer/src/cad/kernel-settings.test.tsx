@@ -159,3 +159,30 @@ describe('kernel settings for a preset-or-explicit union', () => {
     });
   });
 });
+
+describe('kernel settings for a number the kernel resolves when unset', () => {
+  const schema = {
+    type: 'object',
+    properties: {
+      meshAdaptivity: { examples: [0.25], type: 'number', minimum: 0, exclusiveMaximum: 1 },
+      meshRelax: { default: false, type: 'boolean' },
+    },
+  };
+
+  it('shows the example while unset, without making it a default an edit elsewhere sends', () => {
+    const groups = kernelSettingsGroups(schema, { meshRelax: false });
+    expect(groups).toEqual([
+      {
+        label: undefined,
+        fields: [
+          expect.objectContaining({ kind: 'number', path: ['meshAdaptivity'], unsetValue: 0.25, min: 0, max: 0.99 }),
+          { kind: 'boolean', path: ['meshRelax'], label: 'Mesh relax' },
+        ],
+      },
+    ]);
+    expect(withSetting({ values: {}, defaults: { meshRelax: false } }, ['meshRelax'], true)).toEqual({
+      meshRelax: true,
+    });
+    expect(countChangedSettings(groups, {}, { meshRelax: false })).toBe(0);
+  });
+});

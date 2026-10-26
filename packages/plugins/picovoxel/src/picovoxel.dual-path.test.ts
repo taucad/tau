@@ -77,7 +77,10 @@ const render = async (client: Client, lane?: 'fast' | 'exact') => {
   return outcome.rendering;
 };
 
-const exportStl = async (client: Client, exportOptions?: { lane: 'fast' | 'exact' }) => {
+const exportStl = async (
+  client: Client,
+  exportOptions?: { lane: 'fast' | 'exact'; meshAdaptivity?: number; meshRelax?: boolean },
+) => {
   const result = await documentFor(client).export('stl', exportOptions ? { options: exportOptions } : {});
   if (!result.success) {
     throw new Error(result.issues.map(({ message }) => message).join('; '));
@@ -275,7 +278,7 @@ describe('PicoVoxel dual path through the runtime', () => {
   }, 120_000);
 
   it('should replay the adaptive fast viewer build uniformly for an explicitly fast STL export', async () => {
-    // An unset view adaptivity is Balanced (0.25) on the fast lane, and exports always mesh at 0,
+    // An unset view adaptivity is Balanced (0.25) on the fast lane, and exports mesh at 0 by default,
     // so the fast export keys a uniform fast build of its own.
     const client = createClient();
     try {
@@ -301,6 +304,83 @@ describe('PicoVoxel dual path through the runtime', () => {
 
       expect(sessions.lanes).toEqual(['fast']);
       expect(header(fast)).toBe('PicoGK UNITS=mm LANE=fast');
+    } finally {
+      await client.shutdown();
+    }
+  }, 120_000);
+
+  it('should offer meshAdaptivity and meshRelax on the model view and export the uniform mesh by default', async () => {
+    const client = createClient();
+    try {
+      const outcome = await documentFor(client).evaluation();
+      const evaluation = outcome.superseded ? undefined : outcome.evaluation;
+      const options = evaluation?.success ? evaluation.views[0]?.options : undefined;
+      expect(options?.schema.properties).toMatchObject({
+        meshAdaptivity: { type: 'number', minimum: 0, exclusiveMaximum: 1, examples: [0.25] },
+        meshRelax: { type: 'boolean', default: false },
+      });
+      // The lane's default rides along so a settings edit keeps the fast lane; adaptivity stays unset.
+      expect(options?.defaults).toEqual({ lane: 'fast', meshRelax: false });
+      for (const offer of evaluation?.success ? evaluation.exports : []) {
+        expect(offer.options?.defaults).toMatchObject({ lane: 'exact', meshAdaptivity: 0, meshRelax: false });
+      }
+    } finally {
+      await client.shutdown();
+    }
+  }, 120_000);
+
+  it('should render a view whose settings set adaptivity from a fast build of its own', async () => {
+    const client = createClient();
+    const document = documentFor(client);
+    try {
+      const view = async (options: Record<string, unknown>) => {
+        const subscription = document.view('model', { options });
+        const outcome = await subscription.rendering();
+        subscription.close();
+        if (outcome.superseded || !outcome.rendering.success) {
+          throw new Error('PicoVoxel render failed');
+        }
+        return outcome.rendering.artifact;
+      };
+      const balanced = await view({});
+      const uniform = await view({ meshAdaptivity: 0 });
+      const coarse = await view({ meshAdaptivity: 0.6, meshRelax: true });
+
+      // The document's Balanced build, then one fast build per other setting.
+      expect(sessions.lanes).toEqual(['fast', 'fast', 'fast']);
+      expect(balanced.tessellation).toMatchObject({ adaptivity: 0.25, relax: false });
+      expect(uniform.tessellation).not.toHaveProperty('adaptivity');
+      expect(coarse.tessellation).toMatchObject({ adaptivity: 0.6, relax: true });
+      expect(coarse.tessellation!.triangles).toBeLessThan(uniform.tessellation!.triangles);
+    } finally {
+      await client.shutdown();
+    }
+  }, 120_000);
+
+  it('should export an adaptive STL only on the fast lane, stamped LANE=fast, and keep the default uniform', async () => {
+    const client = createClient();
+    try {
+      const exact = await exportStl(client);
+      const uniformFast = await exportStl(client, { lane: 'fast' });
+      const adaptiveFast = await exportStl(client, { lane: 'fast', meshAdaptivity: 0.6 });
+
+      expect(header(exact)).toBe('PicoGK UNITS=mm');
+      expect(header(adaptiveFast)).toBe('PicoGK UNITS=mm LANE=fast');
+      // Binary STL: an 80-byte header, then the triangle count.
+      const triangles = (bytes: Uint8Array<ArrayBuffer>) =>
+        new DataView(bytes.buffer, bytes.byteOffset).getUint32(80, true);
+      expect(triangles(adaptiveFast)).toBeLessThan(triangles(uniformFast));
+      // The exact lane never meshes adaptively: an exact export that asks for it is refused, naming the remedy.
+      const refused = await documentFor(client).export('stl', { options: { meshAdaptivity: 0.6 } });
+      expect(refused).toMatchObject({
+        success: false,
+        issues: [
+          {
+            code: 'REPRESENTATION_UNSUPPORTED',
+            details: { refusal: 'PICOVOXEL_MESHING_EXACT_LANE', meshAdaptivity: 0.6 },
+          },
+        ],
+      });
     } finally {
       await client.shutdown();
     }

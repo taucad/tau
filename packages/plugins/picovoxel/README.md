@@ -177,12 +177,20 @@ serial build, so exact output is identical in every host.
   in-line triangles to stitch merged cells to their neighbours, and dropping them would open cracks.
 
 The render options `meshAdaptivity` (0 to below 1) and `meshRelax` (default `false`) ask for an adaptive
-display mesh in the fast lane; exports always mesh at 0. An exact render that asks for adaptivity is
+display mesh in the fast lane. A view may set them (the viewer's Kernel settings offer both), and the
+runtime renders that view from a build of its own. An exact render that asks for adaptivity is
 refused with a typed `REPRESENTATION_UNSUPPORTED` issue. PicoVoxel 0.1.0, whose `toMesh()` takes no
 options, refuses every adaptive request with `KERNEL_CAPABILITY_MISSING`; the pinned 0.2.0 meshes them.
 An unset `meshAdaptivity` never refuses: it meshes uniformly on the exact lane and under 0.1.0, and at
 0.25 (Balanced) on the fast lane of a release whose `toMesh()` takes options, as the pinned 0.2.0 does.
 An explicitly fast STL export of such a view therefore replays a uniform fast build of its own.
+
+Exports take their own `meshAdaptivity` (default 0, the uniform mesh, whatever the view shows) and
+`meshRelax` (default `false`). Above 0 the mesh is fast-lane geometry: PicoVoxel 0.2.0 marks an adaptive
+mesh `fast` and refuses it in an exact session (`PICO_LANE_LOOSENED`), so Tau refuses an exact export
+that asks for it with `PICOVOXEL_MESHING_EXACT_LANE` before it builds. An STL export with
+`lane: 'fast'` takes it and is stamped `LANE=fast`, as every fast STL is; GLB and glTF refuse the fast
+lane, so they always export the uniform exact mesh. Default exports are unchanged byte for byte.
 
 ### Runtime lifetime
 

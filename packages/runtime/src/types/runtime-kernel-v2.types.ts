@@ -526,6 +526,8 @@ export function defineKernelV2<
   for (const [viewId, view] of Object.entries(views)) {
     assertDeclaration(id, { kind: 'view', id: viewId }, view);
     const viewOptionsSchema = view.optionsSchema;
+    // A view's options also carry the evaluate options (a view that sets one renders its own build), so every key
+    // must name one of the two.
     if (definition.evaluateOptionsSchema && viewOptionsSchema) {
       const inputKeys = inputOptionKeys(viewOptionsSchema);
       const evaluateKeys = inputOptionKeys(definition.evaluateOptionsSchema);

@@ -294,7 +294,15 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
   });
 
   test('PG-INV-1: a signed-out invitation asks to sign in and keeps the link to come back', async () => {
-    await openTouchPhone(viewport, '/invitations/e2e-invitation-token');
+    await openTouchPhone(viewport);
+    await target.addInitScript(() => {
+      Object.defineProperties(navigator, {
+        userAgent: { value: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130.0.0.0 Mobile Safari/537.36' },
+        userAgentData: { value: undefined },
+        platform: { value: 'Linux armv8l' },
+      });
+    });
+    await target.navigate('/invitations/e2e-invitation-token');
     const notice = selectors.getByText('Sign in to accept this invitation', { exact: true });
     // The session check retries before it settles as signed out.
     await target.expectVisible(notice, 60_000);
@@ -423,14 +431,27 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
   });
 });
 
-/** D12: the phone-only hiding leaves desktop web as it was, so a laptop still meets the offer beside the invitation. */
-test('a signed-out invitation on a laptop still offers Tau Desktop', async () => {
-  await target.commands.uiOpenTarget();
+/** D12: a supported desktop OS keeps the offer even on a touch-first tablet. */
+test.each([false, true])('a signed-out invitation on Windows offers Tau Desktop with touch=%s', async (hasTouch) => {
+  await target.commands.uiOpenTarget({ hasTouch });
+  await target.addInitScript(() => {
+    Object.defineProperties(navigator, {
+      userAgent: { value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36' },
+      userAgentData: { value: undefined },
+      platform: { value: 'Win32' },
+    });
+  });
   await target.setViewport({ width: 1280, height: 800 });
   await target.navigate('/invitations/e2e-invitation-token');
   await target.expectVisible(selectors.getByText('Sign in to accept this invitation', { exact: true }), 60_000);
   await target.expectVisible(selectors.getByRole('button', { name: 'Open in Tau Desktop', exact: true }));
-  await target.expectVisible(selectors.getByRole('checkbox', { name: 'Always open Tau links in the desktop app' }));
+  const preference = selectors.getByRole('checkbox', { name: 'Always open Tau links in the desktop app' });
+  await target.expectVisible(preference);
+  if (hasTouch) {
+    const bounds = await box(preference);
+    expect(bounds.width).toBeGreaterThanOrEqual(24);
+    expect(bounds.height).toBeGreaterThanOrEqual(24);
+  }
 });
 
 /**

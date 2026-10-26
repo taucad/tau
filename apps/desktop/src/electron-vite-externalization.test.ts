@@ -191,7 +191,7 @@ describe('electron-vite main externalization', () => {
     expect(Object.keys({ ...manifest.dependencies, ...manifest.optionalDependencies })).toEqual(
       expect.arrayContaining([...include]),
     );
-    /* node-pty builds from source on Linux; a host without a toolchain still installs, and its Terminal answers
+    /* Node-pty builds from source on Linux; a host without a toolchain still installs, and its Terminal answers
      * sandbox-unavailable, while every package script refuses to stage a target without its addon. */
     expect(manifest.optionalDependencies?.['node-pty']).toBe('catalog:');
   });

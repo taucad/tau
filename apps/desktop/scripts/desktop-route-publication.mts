@@ -74,12 +74,26 @@ export const desktopCandidateRoutes = (
   return result;
 };
 
-/** Require both real CI and operator VM evidence for the explicitly selected scope's routes. */
+/**
+ * Clean-host (operator VM) acceptance state of one admitted route. `pending` is admitted only for a staging Mac-only
+ * publication, whose operator has ruled that CI evidence suffices until clean-host testing is done by hand; it is
+ * published as such and never presented as clean-host qualified.
+ */
+export type DesktopCleanHostQualification = 'passed' | 'pending';
+
+/**
+ * Require real CI evidence for every route of the explicitly selected scope, and operator VM evidence for every route
+ * except where a staging Mac-only publication explicitly records clean-host acceptance as pending. A VM receipt that is
+ * present must still be complete, unambiguous and release-trusted; it is never silently ignored.
+ */
 export const qualifyDesktopScopedRoutes = (
   input: unknown,
   proofs: readonly unknown[],
   policy: { trust: DesktopRouteTrust; scope: DesktopPublicationScope },
-): { manifest: DesktopArtifactManifest; routes: ReturnType<typeof desktopCandidateRoutes> } => {
+): {
+  manifest: DesktopArtifactManifest;
+  routes: Array<ReturnType<typeof desktopCandidateRoutes>[number] & { cleanHost: DesktopCleanHostQualification }>;
+} => {
   const { trust, scope } = policy;
   const manifest = parseDesktopArtifactManifest(input);
   const receipts = proofs.map((proof) => parseDesktopAcceptanceReceipt(proof, manifest));
@@ -90,30 +104,48 @@ export const qualifyDesktopScopedRoutes = (
   ) {
     throw new Error('Mac-only publication cannot admit another platform route');
   }
-  for (const { route, target } of routes) {
-    const receiptRoutes: DesktopAcceptanceRoute[] = route === 'macos-zip' ? ['macos-zip', 'macos-dmg'] : [route];
-    for (const receiptRoute of receiptRoutes) {
-      const identity = trust[receiptRoute];
-      if (!identity?.trim()) {
-        throw new Error(`Missing protected release identity for ${receiptRoute}`);
-      }
-      for (const environment of ['ci', 'vm'] as const) {
+  // `desktopCandidateRoutes` already refuses the Mac-only scope outside staging; restate it where VM is relaxed.
+  const cleanHostMayBePending = scope === 'macos' && manifest.channel === 'staging';
+  return {
+    manifest,
+    routes: routes.map(({ route, target }) => {
+      const receiptRoutes: DesktopAcceptanceRoute[] = route === 'macos-zip' ? ['macos-zip', 'macos-dmg'] : [route];
+      const qualified = (environment: 'ci' | 'vm', receiptRoute: DesktopAcceptanceRoute): boolean => {
         const matches = receipts.filter(
           (receipt) =>
             receipt.route === receiptRoute && receipt.target === target && receipt.environment.kind === environment,
         );
-        if (matches.length !== 1 || matches[0]!.trust.kind !== 'release' || matches[0]!.trust.identity !== identity) {
+        if (matches.length === 0 && environment === 'vm' && cleanHostMayBePending) {
+          return false;
+        }
+        if (
+          matches.length !== 1 ||
+          matches[0]!.trust.kind !== 'release' ||
+          matches[0]!.trust.identity !== trust[receiptRoute]
+        ) {
           throw new Error(
             `Missing or ambiguous release-qualified ${environment} receipt for ${target}/${receiptRoute}`,
           );
         }
+        return true;
+      };
+      for (const receiptRoute of receiptRoutes) {
+        if (!trust[receiptRoute]?.trim()) {
+          throw new Error(`Missing protected release identity for ${receiptRoute}`);
+        }
+        qualified('ci', receiptRoute);
       }
-    }
-  }
-  return { manifest, routes };
+      const vm = receiptRoutes.map((receiptRoute) => qualified('vm', receiptRoute));
+      // One catalog route pairs ZIP and DMG; clean-host acceptance of only one of them is not a coherent state.
+      if (vm.some((passed) => passed !== vm[0])) {
+        throw new Error(`Partial clean-host receipts for ${target}/${route}`);
+      }
+      return { route, target, cleanHost: vm[0] ? 'passed' : 'pending' };
+    }),
+  };
 };
 
-/** Require both real CI and operator VM evidence, including both Mac migration paths. */
+/** Require both real CI and operator VM evidence for every route, including both Mac migration paths. */
 export const qualifyDesktopRoutes = (
   input: unknown,
   proofs: readonly unknown[],
@@ -130,7 +162,11 @@ export type DesktopInstallerCatalog = {
   routes: Array<{
     route: keyof typeof catalogKinds;
     target: DesktopReleaseTarget;
-    qualification: { ci: true; vm: true; trust: 'release' };
+    /**
+     * `vm: true` is clean-host (operator VM) acceptance; `vm: 'pending'` marks a staging Mac route admitted on CI
+     * evidence alone, which consumers must neither treat as clean-host qualified nor accept in production.
+     */
+    qualification: { ci: true; vm: true | 'pending'; trust: 'release' };
     artifacts: Array<{ kind: DesktopArtifactKind; name: string; sha256: string; size: number }>;
   }>;
 };
@@ -163,10 +199,10 @@ export const createDesktopInstallerCatalog = (options: {
     version: manifest.version,
     sourceCommit: manifest.sourceCommit,
     promoted: true,
-    routes: routes.map(({ route, target }) => ({
+    routes: routes.map(({ route, target, cleanHost }) => ({
       route,
       target,
-      qualification: { ci: true, vm: true, trust: 'release' },
+      qualification: { ci: true, vm: cleanHost === 'passed' ? true : 'pending', trust: 'release' },
       artifacts: manifest.artifacts
         .filter(
           (artifact) =>

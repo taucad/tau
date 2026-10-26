@@ -271,6 +271,42 @@ describe('shipping installer catalog browser behavior', () => {
     await close();
   }, 60_000);
 
+  it('offers staging Mac DMGs admitted on CI evidence while saying clean-Mac install testing is pending', async () => {
+    const pending = macOnlyStaging();
+    for (const route of pending.routes) {
+      route.qualification = { ci: true, vm: 'pending', trust: 'release' };
+    }
+    const { page, close } = await open({ origin: 'https://taucad.dev', catalog: pending });
+    const after = await surface(page);
+    expectTruthfulMacLabels(after.links, 'DMG');
+    expect(await page.locator('a[data-host-download="direct"]').getAttribute('href')).toBe(
+      'https://downloads.taucad.dev/releases/desktop-staging%400.1.0-staging.455/Tau-macos-arm64.dmg',
+    );
+    const details = await page
+      .locator('[data-download-detail="host"], [data-download-detail="mac"], [data-download-detail="macIntel"]')
+      .evaluateAll((nodes) => nodes.map((node) => node.textContent));
+    expect(details.length).toBeGreaterThanOrEqual(3);
+    for (const detail of details) {
+      expect(detail).toMatch(/DMG installer · clean-Mac install testing pending · ZIP: Tau-macos-(?:arm64|x64)\.zip$/u);
+    }
+    expect(after.text).not.toMatch(/clean-Mac install (?:tested|passed|verified)|qualified/iu);
+    await close();
+  }, 60_000);
+
+  it('keeps production on truthful ZIP links when any Mac route has clean-host testing pending', async () => {
+    const pending = projection();
+    pending.routes[1]!.qualification = { ci: true, vm: 'pending', trust: 'release' };
+    const { page, requests, before, close } = await open({ catalog: pending });
+    expect(requests).toHaveLength(1);
+    const after = await surface(page);
+    expect(after).toEqual(before);
+    expectTruthfulMacLabels(after.links, 'ZIP');
+    expect(after.text).not.toContain('DMG');
+    expect(after.text).not.toContain('pending');
+    expect(await page.locator('[data-qualified-downloads]').isHidden()).toBe(true);
+    await close();
+  }, 60_000);
+
   it.each([
     ['a failed request', 503],
     ['a network failure', 'network-failure'],

@@ -135,6 +135,77 @@ describe('qualified desktop download catalog', () => {
       }),
     ).toThrow(/every supported route/u);
   });
+  it('offers staging Mac disk images admitted on CI evidence and says clean-host testing is pending', () => {
+    const value = projection();
+    const staging = (routes: unknown[]) => ({
+      ...value,
+      tag: 'desktop-staging@0.1.0-staging.455',
+      version: '1.4.55',
+      channel: 'staging',
+      routes,
+    });
+    const pending = value.routes.slice(0, 2).map((route) => ({
+      ...route,
+      qualification: { ci: true, vm: 'pending', trust: 'release' },
+    }));
+    const catalog = createDesktopDownloadCatalog({
+      enabled: true,
+      channel: 'staging',
+      qualification: staging(pending),
+    })!;
+    expect(catalog.map((choice) => [choice.platform, choice.primaryKind, choice.cleanHost])).toEqual([
+      ['mac', 'macos-dmg', 'pending'],
+      ['macIntel', 'macos-dmg', 'pending'],
+    ]);
+    expect(catalog.map((choice) => choice.detail)).toEqual([
+      'Apple silicon · DMG installer · clean-Mac install testing pending',
+      'Intel Mac · DMG installer · clean-Mac install testing pending',
+    ]);
+    expect(catalog.every((choice) => choice.href.endsWith('.dmg'))).toBe(true);
+    // One route may be clean-host qualified while the other is pending; each says only what it has.
+    const mixed = createDesktopDownloadCatalog({
+      enabled: true,
+      channel: 'staging',
+      qualification: staging([value.routes[0]!, pending[1]!]),
+    })!;
+    expect(mixed.map((choice) => [choice.cleanHost, choice.detail.includes('pending')])).toEqual([
+      ['passed', false],
+      ['pending', true],
+    ]);
+    expect(
+      select(projection())!.every((choice) => choice.cleanHost === 'passed' && !choice.detail.includes('pending')),
+    ).toBe(true);
+    // Production never admits pending clean-host acceptance, for any route.
+    for (const index of value.routes.keys()) {
+      const production = projection();
+      production.routes[index]!.qualification = { ci: true, vm: 'pending', trust: 'release' };
+      expect(() => select(production)).toThrow(/release qualification/u);
+    }
+    // Staging admits it only on Mac routes, and only as the exact `pending` marker with release CI evidence.
+    for (const index of [2, 3, 4]) {
+      const route = { ...value.routes[index]!, qualification: { ci: true, vm: 'pending', trust: 'release' } };
+      expect(() =>
+        createDesktopDownloadCatalog({ enabled: true, channel: 'staging', qualification: staging([route]) }),
+      ).toThrow(/release qualification/u);
+    }
+    for (const qualification of [
+      { ci: true, vm: false, trust: 'release' },
+      { ci: true, vm: 'skipped', trust: 'release' },
+      { ci: true, vm: 'Pending', trust: 'release' },
+      { ci: false, vm: 'pending', trust: 'release' },
+      { ci: 'pending', vm: 'pending', trust: 'release' },
+      { ci: true, vm: 'pending', trust: 'test' },
+      { ci: true, vm: 'pending', trust: 'release', cleanHost: 'passed' },
+    ]) {
+      expect(() =>
+        createDesktopDownloadCatalog({
+          enabled: true,
+          channel: 'staging',
+          qualification: staging([{ ...pending[0]!, qualification }, pending[1]!]),
+        }),
+      ).toThrow();
+    }
+  });
   it('rejects a Mac route whose disk image is missing or replaced by another kind', () => {
     for (const artifacts of [
       [projection().routes[0]!.artifacts[1]!],

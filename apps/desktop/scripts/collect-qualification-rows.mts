@@ -21,14 +21,14 @@ const rows = [
   ['debian-apt-x11', 'linux-apt', 'linux-x64'],
   ['debian-appimage-x11', 'linux-appimage', 'linux-x64'],
 ] as const;
-const scopes = ['all', 'linux', 'macos'] as const;
+const scopes = ['all', 'linux', 'macos', 'windows'] as const;
 type QualificationScope = (typeof scopes)[number];
 /** Rows each explicit scope must produce; a scoped run can neither omit nor add another platform's host. */
 const scopeRows = (scope: QualificationScope) =>
-  scope === 'all' ? rows : rows.filter(([, route]) => route.startsWith(scope === 'linux' ? 'linux-' : 'macos-'));
+  scope === 'all' ? rows : rows.filter(([, route]) => route.startsWith(`${scope}-`));
 const inputSchema = z.strictObject({
   scope: z.enum(scopes).default('all'),
-  /** `vm` collects clean-host acceptance rows from the Mac-only staging producer; never inferred from receipts. */
+  /** `vm` collects clean-host acceptance rows from the Mac- or Windows-scoped staging producer; never inferred from receipts. */
   kind: z.enum(['ci', 'vm']).default('ci'),
   candidate: z.unknown(),
   sourceCommit: z.string().regex(/^[a-f\d]{40}$/u),
@@ -69,8 +69,11 @@ export const collectQualificationRows = (
   if (request.scope !== 'all' && manifest.channel !== 'staging') {
     throw new Error('Platform-scoped evidence is staging qualification only');
   }
-  if (request.kind === 'vm' && (request.scope !== 'macos' || manifest.channel !== 'staging')) {
-    throw new Error('Clean-host receipts come only from the Mac-scoped staging producer');
+  if (request.kind === 'vm' && (!['macos', 'windows'].includes(request.scope) || manifest.channel !== 'staging')) {
+    throw new Error('Clean-host receipts come only from a Mac- or Windows-scoped staging producer');
+  }
+  if (request.scope === 'windows' && request.kind !== 'vm') {
+    throw new Error('Windows scope requires consumer VM evidence');
   }
   if (request.scope === 'macos') {
     // The final candidate must be exactly the Mac-only candidate that publication will later admit.
@@ -149,14 +152,14 @@ const main = async (): Promise<void> => {
     runId: required('GITHUB_RUN_ID'),
     // Only the selected platforms' protected identities are read; a Mac-only run needs no Linux or Windows trust.
     trustIdentities: {
-      ...(scope === 'linux'
+      ...(scope === 'linux' || scope === 'windows'
         ? {}
         : {
             'macos-zip': required('APPLE_TEAM_ID'),
             'macos-dmg': required('APPLE_TEAM_ID'),
           }),
-      ...(scope === 'all' ? { 'windows-nsis': required('TAU_WINDOWS_PUBLISHER') } : {}),
-      ...(scope === 'macos'
+      ...(scope === 'all' || scope === 'windows' ? { 'windows-nsis': required('TAU_WINDOWS_PUBLISHER') } : {}),
+      ...(scope === 'macos' || scope === 'windows'
         ? {}
         : {
             'linux-apt': `${required('TAU_APT_PRIMARY_FINGERPRINT')}/${required('TAU_APT_SIGNING_FINGERPRINT')}`,

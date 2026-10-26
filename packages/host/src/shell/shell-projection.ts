@@ -1,4 +1,4 @@
-import type { NodeFsRootScope } from '@taucad/filesystem/backend/node';
+import type { CheckedEntryResult, NodeFsRootScope } from '@taucad/filesystem/backend/node';
 import { classify } from '@taucad/filesystem/path-registry';
 import type { CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 import { assertRootedPath } from '@taucad/utils/path';
@@ -70,4 +70,67 @@ export const publishShellProjectionFile = async (
       ? await scope.deleteFileChecked(input)
       : await scope.writeFileChecked({ ...input, data: owned.projected });
   return { status: 'settled', observation: owned, result };
+};
+
+/** One captured directory or rename change, root-relative. A rename names every entry below a moved directory. @internal */
+export type ShellProjectionEntryChange =
+  | Readonly<{ kind: 'mkdir' | 'rmdir'; path: string }>
+  | Readonly<{
+      kind: 'rename';
+      from: string;
+      to: string;
+      preconditions: readonly FileWritePrecondition[];
+      /** Every file and directory below a moved directory, relative to it; empty for a file. */
+      descendants: readonly string[];
+    }>;
+
+/** The caller retains this change until durable reconciliation acknowledges it. @internal */
+export type ShellProjectionEntryPublication =
+  | Readonly<{ status: 'refused'; reason: 'protected-path' }>
+  | Readonly<{ status: 'settled'; result: CheckedEntryResult }>;
+
+/**
+ * Publish one captured directory creation, removal or rename through the held root claim.
+ *
+ * The rooted scope applies no path registry of its own, so every name this change creates, removes or moves is
+ * classified here first, as the filesystem folds it (PP3). A rename is checked at both ends for itself and for
+ * every descendant, so moving an ordinary directory onto a reserved spelling cannot carry children past the check.
+ *
+ * @internal
+ * @param scope - The held claim's checked entry methods for the exact admitted checkout.
+ * @param change - The captured change, with root-relative paths.
+ * @param options - Cancellation.
+ * @returns The authority's conflict or commit result, or the refusal that left disk untouched.
+ */
+export const publishShellProjectionEntry = async (
+  scope: Pick<NodeFsRootScope, 'mkdirChecked' | 'rmdirChecked' | 'renameChecked'>,
+  change: ShellProjectionEntryChange,
+  options: Readonly<{ signal: AbortSignal }>,
+): Promise<ShellProjectionEntryPublication> => {
+  options.signal.throwIfAborted();
+  const named =
+    change.kind === 'rename'
+      ? [
+          change.from,
+          change.to,
+          ...change.descendants.flatMap((entry) => [`${change.from}/${entry}`, `${change.to}/${entry}`]),
+        ]
+      : [change.path];
+  for (const path of named) {
+    assertRootedPath(path);
+    if (path === '') {
+      throw new TypeError('A shell projection entry must name a path inside its checkout.');
+    }
+  }
+  if (named.some((path) => classify(path).agentAccess !== 'read-write')) {
+    return { status: 'refused', reason: 'protected-path' };
+  }
+  const { signal } = options;
+  const result =
+    change.kind === 'rename'
+      ? await scope.renameChecked({ from: change.from, to: change.to, preconditions: change.preconditions, signal })
+      : change.kind === 'mkdir'
+        ? await scope.mkdirChecked({ path: change.path, signal })
+        : await scope.rmdirChecked({ path: change.path, signal });
+  return { status: 'settled', result };
 };

@@ -15,8 +15,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { NodeFsAuthorityHost, serveNodeFsProvider } from '@taucad/filesystem/backend/node';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
-import { publishShellProjectionFile } from '#shell/shell-projection.js';
-import type { ShellProjectionFile } from '#shell/shell-projection.js';
+import { publishShellProjectionEntry, publishShellProjectionFile } from '#shell/shell-projection.js';
+import type { ShellProjectionEntryChange, ShellProjectionFile } from '#shell/shell-projection.js';
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -62,7 +62,9 @@ const connect = () => {
       }),
     );
   };
-  return { editor, publish, root, server };
+  const publishEntry = async (change: ShellProjectionEntryChange) =>
+    server.run({ root }, async (scope) => publishShellProjectionEntry(scope, change, { signal: scope.signal }));
+  return { editor, publish, publishEntry, root, server };
 };
 
 describe('shell projection outbound publication', () => {
@@ -125,6 +127,74 @@ describe('shell projection outbound publication', () => {
       expect(existsSync(join(root, path))).toBe(false);
     },
   );
+
+  it.each(['.TAU/chats', '.tau./runs', '.tau:alias/export', 'vendor/.Git', '.tau/lo\u212Afile.json', '.TAU/future'])(
+    'should refuse creating protected directory spelling %s',
+    async (path) => {
+      const { editor, publishEntry, root } = connect();
+      await editor.mkdir(path.split('/').slice(0, -1).join('/') || '.', { recursive: true });
+      expect(await publishEntry({ kind: 'mkdir', path })).toEqual({ status: 'refused', reason: 'protected-path' });
+      expect(existsSync(join(root, path))).toBe(false);
+    },
+  );
+
+  it('should refuse a rename whose destination or moved descendant folds onto a reserved path', async () => {
+    const { editor, publishEntry, root } = connect();
+    await editor.writeFile('notes.md', 'n');
+    await editor.writeFile('d/chats', 'c');
+    const file = { kind: 'rename', from: 'notes.md', to: '.tau./runs', descendants: [] } as const;
+    const preconditions = [
+      { path: 'notes.md', expected: 'n' },
+      { path: '.tau./runs', expected: null },
+    ];
+    expect(await publishEntry({ ...file, preconditions })).toEqual({ status: 'refused', reason: 'protected-path' });
+    // `.TAU.` itself is an ordinary name; only the child it would carry, `.TAU./chats`, folds onto a reserved row.
+    const directory = {
+      kind: 'rename',
+      from: 'd',
+      to: '.TAU.',
+      descendants: ['chats'],
+      preconditions: [
+        { path: 'd/chats', expected: 'c' },
+        { path: '.TAU.', expected: null },
+      ],
+    } as const;
+    expect(await publishEntry(directory)).toEqual({ status: 'refused', reason: 'protected-path' });
+    expect(readFileSync(join(root, 'notes.md'), 'utf8')).toBe('n');
+    expect(readFileSync(join(root, 'd/chats'), 'utf8')).toBe('c');
+  });
+
+  it('should publish ordinary directory creation, rename and removal through the held claim', async () => {
+    const { editor, publishEntry, root } = connect();
+    await editor.writeFile('a.md', 'a');
+    expect(await publishEntry({ kind: 'mkdir', path: 'docs' })).toEqual({
+      status: 'settled',
+      result: { status: 'applied' },
+    });
+    const preconditions = [
+      { path: 'a.md', expected: 'a' },
+      { path: 'docs/a.md', expected: null },
+    ];
+    expect(
+      await publishEntry({ kind: 'rename', from: 'a.md', to: 'docs/a.md', descendants: [], preconditions }),
+    ).toEqual({ status: 'settled', result: { status: 'applied' } });
+    expect(readFileSync(join(root, 'docs/a.md'), 'utf8')).toBe('a');
+    expect(await publishEntry({ kind: 'mkdir', path: 'empty' })).toMatchObject({ status: 'settled' });
+    expect(await publishEntry({ kind: 'rmdir', path: 'empty' })).toMatchObject({ result: { status: 'applied' } });
+    expect(existsSync(join(root, 'empty'))).toBe(false);
+  });
+
+  it('should reject a noncanonical entry path and a cancelled entry publication', async () => {
+    const { server, root } = connect();
+    await server.run({ root }, async (scope) => {
+      await expect(
+        publishShellProjectionEntry(scope, { kind: 'mkdir', path: '' }, { signal: scope.signal }),
+      ).rejects.toThrow(TypeError);
+      await expect(
+        publishShellProjectionEntry(scope, { kind: 'mkdir', path: 'x' }, { signal: AbortSignal.abort() }),
+      ).rejects.toThrow();
+    });
+  });
 
   it('should reject a publication above the per-root bound without changing backing bytes', async () => {
     const { publish, root } = connect();

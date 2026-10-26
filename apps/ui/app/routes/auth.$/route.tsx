@@ -159,7 +159,8 @@ export default function AuthPage(): React.JSX.Element {
   }
   return (
     <AuthEmailDraftProvider>
-      <div className='grid min-h-svh lg:grid-cols-2'>
+      {/* The form is the page's main content; the sign-in check above is a `<main>` too. */}
+      <main className='grid min-h-svh lg:grid-cols-2'>
         <div className={cn('flex flex-col gap-4 p-6 md:p-10', desktopTarget && 'gap-0 p-0 md:p-0')}>
           <div
             className={cn(
@@ -195,7 +196,7 @@ export default function AuthPage(): React.JSX.Element {
         <div className='relative hidden lg:block'>
           <DesignStory />
         </div>
-      </div>
+      </main>
     </AuthEmailDraftProvider>
   );
 }

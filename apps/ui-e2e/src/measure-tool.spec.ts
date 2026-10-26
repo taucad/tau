@@ -500,30 +500,33 @@ test('resolves CAD occurrence minimum through the browser AP242 worker', async (
   expect(distanceBetween(result.startPoint, result.endPoint)).toBeCloseTo(result.distance, 6);
 });
 
-test('measures the chess board frame width as a mesh extent', async () => {
-  await openMeasureFixture('webgl', 'openscad.cyber-chess-set');
-  await target.evaluate(() => {
-    const api = (globalThis as unknown as MeasureBridgeWindow).__TAU_SECTION_VIEW_TEST__;
-    if (!api) {
-      throw new Error('Section view e2e bridge is not installed.');
-    }
-    api.setCamera({ position: [0, 0, 0.75], target: [0, 0, 0.01], fov: 38, zoom: 1 });
-  });
-  await target.delay(900);
-  await enableMeasure();
-  await toggleTargetControls();
-  await chooseByTyping('Feature filter', 'Bodies');
-  await chooseByTyping('Measurement operation', 'X extent');
-  await toggleTargetControls();
-  await clickWorldPoint([0.119, 0, 0.012]);
-  await expect
-    .poll(async () => {
-      const state = await measureState();
-      return state.measurements[0];
-    })
-    .toMatchObject({ operation: 'extent-x', quality: 'mesh', status: 'current' });
-  const completed = await measureState();
-  // The main.scad steel frame is cube([244, 244, 8]) with a 224 mm square cutout.
-  expect(completed.measurements[0]!.distance).toBeCloseTo(0.244, 6);
-  await target.screenshot(selectors.getByCss(previewCanvasSelector), 'measure-chess-frame-244mm.png');
-});
+test.each(['webgl', 'webgpu'] as const)(
+  'measures the chess board frame width as a mesh extent (%s)',
+  async (backend) => {
+    await openMeasureFixture(backend, 'openscad.cyber-chess-set');
+    await target.evaluate(() => {
+      const api = (globalThis as unknown as MeasureBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+      if (!api) {
+        throw new Error('Section view e2e bridge is not installed.');
+      }
+      api.setCamera({ position: [0, 0, 0.75], target: [0, 0, 0.01], fov: 38, zoom: 1 });
+    });
+    await target.delay(900);
+    await enableMeasure();
+    await toggleTargetControls();
+    await chooseByTyping('Feature filter', 'Bodies');
+    await chooseByTyping('Measurement operation', 'X extent');
+    await toggleTargetControls();
+    await clickWorldPoint([0.119, 0, 0.012]);
+    await expect
+      .poll(async () => {
+        const state = await measureState();
+        return state.measurements[0];
+      })
+      .toMatchObject({ operation: 'extent-x', quality: 'mesh', status: 'current' });
+    const completed = await measureState();
+    // The main.scad steel frame is cube([244, 244, 8]) with a 224 mm square cutout.
+    expect(completed.measurements[0]!.distance).toBeCloseTo(0.244, 6);
+    await target.screenshot(selectors.getByCss(previewCanvasSelector), `measure-chess-frame-244mm-${backend}.png`);
+  },
+);

@@ -1,11 +1,11 @@
 // @vitest-environment node
-import { mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { acquireCustodyLock } from '#shell/shell-custody.js';
+import { acquireCustodyLock, createShellCustody } from '#shell/shell-custody.js';
 
 const executionId = '11111111-1111-4111-8111-111111111111';
 
@@ -40,6 +40,88 @@ describe.runIf(process.platform === 'linux')('shell custody lock identity', () =
     } finally {
       await owner.release();
       await rm(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe.runIf(process.platform === 'linux')('durable shell custody intent', () => {
+  it('should skip a live owner, retain stopped custody through root deletion, and permit one recovery owner', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'tau-custody-record-'));
+    const directory = join(base, 'records');
+    const sessionDirectory = join(base, 'sessions');
+    await mkdir(sessionDirectory);
+    const privateRoot = await mkdtemp(join(sessionDirectory, 'tau-shell-'));
+    const resourceRoot = join(base, 'project');
+    await mkdir(resourceRoot);
+    const first = createShellCustody({ directory, sessionDirectory });
+    const second = createShellCustody({ directory, sessionDirectory });
+    const third = createShellCustody({ directory, sessionDirectory });
+    try {
+      const prepared = await first.prepare({ privateRoot, resource: { key: 'project/checkout', root: resourceRoot } });
+      expect(await second.inventory()).toEqual([
+        { ...prepared, privateRoot, resource: { key: 'project/checkout', root: resourceRoot } },
+      ]);
+      expect(await second.recover({ executionIds: [prepared.executionId] })).toEqual([
+        expect.objectContaining({ ...prepared, status: 'blocked' }),
+      ]);
+      await first.close();
+      const competing = await Promise.all([
+        second.recover({ executionIds: [prepared.executionId] }),
+        third.recover({ executionIds: [prepared.executionId] }),
+      ]);
+      expect(
+        competing
+          .flat()
+          .map((answer) => answer.status)
+          .sort(),
+      ).toEqual(['blocked', 'stopped']);
+      const recovered = competing[0][0]!.status === 'stopped' ? second : third;
+      await expect(recovered.release(prepared)).rejects.toThrow('private root');
+      await rm(privateRoot, { recursive: true });
+      await recovered.release(prepared);
+      expect(await recovered.inventory()).toEqual([]);
+    } finally {
+      await Promise.all([first.close(), second.close(), third.close()]);
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it('should retain custody when the project resource root has been replaced', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'tau-custody-resource-'));
+    const directory = join(base, 'records');
+    const privateRoot = await mkdtemp(join(base, 'tau-shell-'));
+    const resourceRoot = join(base, 'project');
+    await mkdir(resourceRoot);
+    const first = createShellCustody({ directory, sessionDirectory: base });
+    const recovery = createShellCustody({ directory, sessionDirectory: base });
+    try {
+      const prepared = await first.prepare({ privateRoot, resource: { key: 'project/checkout', root: resourceRoot } });
+      await first.close();
+      await rename(resourceRoot, `${resourceRoot}.original`);
+      await mkdir(resourceRoot);
+      const answers = await recovery.recover({ executionIds: [prepared.executionId] });
+      expect(answers).toEqual([expect.objectContaining({ ...prepared, status: 'blocked' })]);
+      expect(answers[0]?.status === 'blocked' ? answers[0].message : '').toContain('resource root identity changed');
+      expect(await recovery.inventory()).toHaveLength(1);
+      await expect(recovery.release(prepared)).rejects.toThrow('not owned');
+    } finally {
+      await first.close();
+      await recovery.close();
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it('should reject incomplete inventory rather than silently discard malformed custody', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'tau-custody-corrupt-'));
+    const directory = join(base, 'records');
+    await mkdir(directory);
+    const custody = createShellCustody({ directory, sessionDirectory: base });
+    try {
+      await writeFile(join(directory, `${executionId}.json`), '{');
+      await expect(custody.inventory()).rejects.toThrow();
+    } finally {
+      await custody.close();
+      await rm(base, { recursive: true, force: true });
     }
   });
 });

@@ -1,7 +1,13 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, open, realpath } from 'node:fs/promises';
-import { join } from 'node:path';
+import { lstat, mkdir, open, readFile, readdir, realpath, rename, rm } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
+
+import { z } from 'zod';
+
+import { processTable } from '#shell/process-tree.js';
+import type { PreparedShell, ShellExecution, ShellRecovery, ShellResource } from '#shell/shell-provider.js';
 
 /** One execution's kernel lock. Only the credential-free supervisor inherits its descriptor. */
 export type CustodyLock = Readonly<{
@@ -30,8 +36,9 @@ export const acquireCustodyLock = async (
   const path = join(directory, `${input.executionId}.lock`);
   const descriptor = await open(path, constants.O_CREAT + constants.O_RDWR + constants.O_NOFOLLOW, 0o600);
   try {
-    const identity = await descriptor.stat();
-    if (!identity.isFile() || identity.nlink !== 1 || identity.uid !== process.getuid?.()) {
+    const identity = await descriptor.stat({ bigint: true });
+    const uid = process.getuid?.();
+    if (!identity.isFile() || identity.nlink !== 1n || uid === undefined || identity.uid !== BigInt(uid)) {
       throw new Error('Shell custody lock is not an owned regular file.');
     }
     const command = process.platform === 'linux' ? '/usr/bin/flock' : '/usr/bin/perl';
@@ -87,7 +94,7 @@ export const acquireCustodyLock = async (
       if (!isCurrent()) {
         throw new Error('Shell custody ownership is no longer current.');
       }
-      const visible = await lstat(path);
+      const visible = await lstat(path, { bigint: true });
       if (!isCurrent() || !visible.isFile() || visible.dev !== identity.dev || visible.ino !== identity.ino) {
         throw new Error('Shell custody ownership is no longer current.');
       }
@@ -97,4 +104,330 @@ export const acquireCustodyLock = async (
     await descriptor.close();
     throw error;
   }
+};
+
+const physicalIdentity = z.strictObject({ device: z.string(), inode: z.string() });
+const processIdentity = z.strictObject({ pid: z.number().int().min(2), started: z.string().min(1) });
+const recordSchema = z.strictObject({
+  version: z.literal(1),
+  executionId: z.uuid(),
+  phase: z.enum(['prepared', 'armed', 'stopped']),
+  privateRoot: z.string().min(1),
+  privateIdentity: physicalIdentity,
+  resource: z.strictObject({ key: z.string().min(1), root: z.string().min(1) }).optional(),
+  resourceIdentity: physicalIdentity.optional(),
+  boot: z.string().min(1),
+  owner: processIdentity.extend({ token: z.uuid() }),
+  supervisor: processIdentity.optional(),
+  root: processIdentity.optional(),
+  descendants: z.array(processIdentity),
+});
+type CustodyRecord = z.infer<typeof recordSchema>;
+type HeldCustody = Readonly<{ lock: CustodyLock; token: string }>;
+
+/** Existing native custody owner; a stopped recovery keeps its lock until release or close. */
+export type ShellCustody = Readonly<{
+  prepare: (input: Readonly<{ privateRoot: string; resource: ShellResource | undefined }>) => Promise<PreparedShell>;
+  inventory: () => Promise<readonly ShellExecution[]>;
+  recover: (input: Readonly<{ executionIds: readonly string[] }>) => Promise<readonly ShellRecovery[]>;
+  release: (input: PreparedShell) => Promise<void>;
+  close: () => Promise<void>;
+}>;
+
+const missing = (error: unknown): boolean => error instanceof Error && 'code' in error && error.code === 'ENOENT';
+const metadata = (record: CustodyRecord): ShellExecution => ({
+  executionId: record.executionId,
+  privateRoot: record.privateRoot,
+  resource: record.resource,
+});
+const identityOf = async (path: string): Promise<z.infer<typeof physicalIdentity>> => {
+  const stats = await lstat(path, { bigint: true });
+  const uid = process.getuid?.();
+  if (!stats.isDirectory() || uid === undefined || stats.uid !== BigInt(uid)) {
+    throw new Error('Shell custody root must be an owned physical directory.');
+  }
+  return { device: String(stats.dev), inode: String(stats.ino) };
+};
+const bootIdentity = async (): Promise<string> => {
+  if (process.platform === 'linux') {
+    const boot = await readFile('/proc/sys/kernel/random/boot_id', 'utf8');
+    return boot.trim();
+  }
+  if (process.platform !== 'darwin') {
+    throw new Error('Shell custody boot identity is unavailable.');
+  }
+  return new Promise((resolve, reject) => {
+    execFile(
+      '/usr/sbin/sysctl',
+      ['-n', 'kern.boottime'],
+      {
+        timeout: 1000,
+        killSignal: 'SIGKILL',
+        maxBuffer: 4096,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- native environment names.
+        env: { PATH: '/usr/bin:/bin', LC_ALL: 'C' },
+      },
+      (error, stdout) => {
+        if (error !== null) {
+          reject(new Error('Shell custody boot observation failed.', { cause: error }));
+        } else if (/sec = \d+/u.test(stdout)) {
+          resolve(stdout.trim());
+        } else {
+          reject(new Error('Shell custody boot identity is unrecognised.'));
+        }
+      },
+    );
+  });
+};
+const selfIdentity = async (): Promise<z.infer<typeof processIdentity>> => {
+  const rows = await processTable();
+  const row = rows.find((candidate) => candidate.pid === process.pid);
+  if (row?.started === undefined) {
+    throw new Error('Shell custody owner creation identity is unavailable.');
+  }
+  return { pid: process.pid, started: row.started };
+};
+
+/**
+ * Own the existing shell provider's native execution receipts, outside command grants.
+ *
+ * @param options - Configured custody namespace and the shell service's private-session parent.
+ * @returns The provider-local owner; stopped results retain native locks across returned promises.
+ */
+export const createShellCustody = (
+  options: Readonly<{ directory: string; sessionDirectory: string }>,
+): ShellCustody => {
+  const held = new Map<string, HeldCustody>();
+  let pending: Promise<unknown> = Promise.resolve();
+  const state = { closed: false };
+  const serialized = async <Result>(operation: () => Promise<Result>): Promise<Result> => {
+    const previous = pending;
+    const result = (async (): Promise<Result> => {
+      await previous;
+      return operation();
+    })();
+    pending = (async (): Promise<void> => {
+      try {
+        await result;
+      } catch {
+        /* A refused call cannot poison later recovery. */
+      }
+    })();
+    return result;
+  };
+  const directory = async (): Promise<string> => {
+    await mkdir(options.directory, { recursive: true, mode: 0o700 });
+    const canonical = await realpath(options.directory);
+    await identityOf(canonical);
+    return canonical;
+  };
+  const recordPath = async (executionId: string): Promise<string> => {
+    if (!z.uuid().safeParse(executionId).success) {
+      throw new Error('Invalid shell custody execution identity.');
+    }
+    return join(await directory(), `${executionId}.json`);
+  };
+  const read = async (executionId: string): Promise<CustodyRecord> => {
+    const path = await recordPath(executionId);
+    const stats = await lstat(path);
+    if (!stats.isFile() || stats.nlink !== 1 || stats.uid !== process.getuid?.()) {
+      throw new Error('Shell custody record is not an owned regular file.');
+    }
+    const record = recordSchema.parse(JSON.parse(await readFile(path, 'utf8')));
+    if (
+      record.executionId !== executionId ||
+      (record.resource === undefined) !== (record.resourceIdentity === undefined)
+    ) {
+      throw new Error('Shell custody record identity is inconsistent.');
+    }
+    if (
+      (record.phase === 'prepared' && (record.root !== undefined || record.descendants.length > 0)) ||
+      (record.phase === 'armed' && (record.root === undefined || record.supervisor === undefined))
+    ) {
+      throw new Error('Shell custody phase and process identities are inconsistent.');
+    }
+    const parent = await realpath(options.sessionDirectory);
+    if (dirname(record.privateRoot) !== parent || !basename(record.privateRoot).startsWith('tau-shell-')) {
+      throw new Error('Shell custody private root is outside the configured session parent.');
+    }
+    return record;
+  };
+  const syncDirectory = async (): Promise<void> => {
+    const handle = await open(await directory(), constants.O_RDONLY);
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  };
+  const persist = async (record: CustodyRecord, ownership: HeldCustody): Promise<void> => {
+    await ownership.lock.assertCurrent();
+    const target = await recordPath(record.executionId);
+    const temporary = `${target}.${randomUUID()}.tmp`;
+    const handle = await open(temporary, 'wx', 0o600);
+    try {
+      await handle.writeFile(JSON.stringify(record));
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    try {
+      await ownership.lock.assertCurrent();
+      await rename(temporary, target);
+      await syncDirectory();
+    } finally {
+      await rm(temporary, { force: true });
+    }
+  };
+  const current = async (executionId: string): Promise<Readonly<{ record: CustodyRecord; ownership: HeldCustody }>> => {
+    const ownership = held.get(executionId);
+    if (ownership === undefined) {
+      throw new Error('Shell execution is not owned by this provider.');
+    }
+    await ownership.lock.assertCurrent();
+    const record = await read(executionId);
+    if (record.owner.token !== ownership.token) {
+      throw new Error('Shell custody ownership is no longer current.');
+    }
+    return { record, ownership };
+  };
+  const validateRoots = async (record: CustodyRecord): Promise<void> => {
+    try {
+      const observed = await identityOf(record.privateRoot);
+      if (observed.device !== record.privateIdentity.device || observed.inode !== record.privateIdentity.inode) {
+        throw new Error('Shell custody private root identity changed.');
+      }
+    } catch (error) {
+      if (!missing(error)) {
+        throw error;
+      }
+    }
+    if (record.resource !== undefined && record.resourceIdentity !== undefined) {
+      const observed = await identityOf(record.resource.root);
+      if (observed.device !== record.resourceIdentity.device || observed.inode !== record.resourceIdentity.inode) {
+        throw new Error('Shell custody resource root identity changed.');
+      }
+    }
+  };
+  const ensureOpen = (): void => {
+    if (state.closed) {
+      throw new Error('Shell custody provider is closed.');
+    }
+  };
+  return {
+    prepare: async (input) =>
+      serialized(async () => {
+        ensureOpen();
+        const parent = await realpath(options.sessionDirectory);
+        const privateRoot = await realpath(input.privateRoot);
+        if (dirname(privateRoot) !== parent || !basename(privateRoot).startsWith('tau-shell-')) {
+          throw new Error('Shell custody private root is outside the configured session parent.');
+        }
+        const privateIdentity = await identityOf(privateRoot);
+        const resource =
+          input.resource === undefined
+            ? undefined
+            : { key: input.resource.key, root: await realpath(input.resource.root) };
+        const resourceIdentity = resource === undefined ? undefined : await identityOf(resource.root);
+        const executionId = randomUUID();
+        const ownership = {
+          lock: await acquireCustodyLock({ directory: await directory(), executionId }),
+          token: randomUUID(),
+        };
+        held.set(executionId, ownership);
+        try {
+          const record = recordSchema.parse({
+            version: 1,
+            executionId,
+            phase: 'prepared',
+            privateRoot,
+            privateIdentity,
+            ...(resource === undefined ? {} : { resource, resourceIdentity }),
+            boot: await bootIdentity(),
+            owner: { ...(await selfIdentity()), token: ownership.token },
+            descendants: [],
+          });
+          await persist(record, ownership);
+          return { executionId };
+        } catch (error) {
+          held.delete(executionId);
+          await ownership.lock.release();
+          throw error;
+        }
+      }),
+    inventory: async () =>
+      serialized(async () => {
+        ensureOpen();
+        const entries = await readdir(await directory());
+        const names = entries.filter((name) => name.endsWith('.json')).toSorted();
+        return Promise.all(names.map(async (name) => metadata(await read(name.slice(0, -5)))));
+      }),
+    recover: async ({ executionIds }) =>
+      serialized(async () => {
+        ensureOpen();
+        return Promise.all(
+          [...new Set(executionIds)].map(async (executionId): Promise<ShellRecovery> => {
+            const record = await read(executionId);
+            let ownership: HeldCustody | undefined;
+            try {
+              if (held.has(executionId)) {
+                throw new Error('Shell execution is already owned.');
+              }
+              ownership = {
+                lock: await acquireCustodyLock({ directory: await directory(), executionId }),
+                token: randomUUID(),
+              };
+              const latest = await read(executionId);
+              await validateRoots(latest);
+              // Armed recovery is wired with the supervisor protocol; uncertainty cannot clear custody.
+              if (latest.phase === 'armed') {
+                throw new Error('Armed shell execution requires confirmed native cleanup.');
+              }
+              const stopped: CustodyRecord = {
+                ...latest,
+                phase: 'stopped',
+                owner: { ...(await selfIdentity()), token: ownership.token },
+              };
+              await persist(stopped, ownership);
+              held.set(executionId, ownership);
+              return { ...metadata(stopped), status: 'stopped' };
+            } catch (error) {
+              await ownership?.lock.release();
+              return {
+                ...metadata(record),
+                status: 'blocked',
+                message: error instanceof Error ? error.message : String(error),
+              };
+            }
+          }),
+        );
+      }),
+    release: async ({ executionId }) =>
+      serialized(async () => {
+        ensureOpen();
+        const { record, ownership } = await current(executionId);
+        if (record.phase !== 'stopped') {
+          throw new Error('Shell execution has no confirmed stopped receipt.');
+        }
+        try {
+          await lstat(record.privateRoot);
+          throw new Error('Shell custody private root must be deleted before release.');
+        } catch (error) {
+          if (!missing(error)) {
+            throw error;
+          }
+        }
+        await ownership.lock.assertCurrent();
+        await rm(await recordPath(executionId));
+        await syncDirectory();
+        held.delete(executionId);
+        await ownership.lock.release();
+      }),
+    close: async () =>
+      serialized(async () => {
+        state.closed = true;
+        await Promise.all([...held.values()].map(async (ownership) => ownership.lock.release()));
+        held.clear();
+      }),
+  };
 };

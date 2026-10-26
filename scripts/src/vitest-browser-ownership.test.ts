@@ -268,6 +268,7 @@ describe('Vitest Browser test-runner ownership', () => {
     const configs = vitestPlaywrightConfigs();
     expect(configs.map(([path]) => path).sort()).toEqual(
       [
+        'apps/libs/lsp/src/typescript-worker/vitest.browser.config.ts',
         'apps/react-e2e/vitest.bundlers.config.ts',
         'apps/react-e2e/vitest.config.ts',
         'apps/ui-e2e/vitest.config.ts',

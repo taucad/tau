@@ -1,6 +1,6 @@
 {
   "name": "@taucad/tau-source",
-  "description": "Code CAD in the browser. Tau-authored source is Apache-2.0.",
+  "description": "The AI-Native CAD Platform",
   "homepage": "https://github.com/taucad/tau",
   "license": "Apache-2.0",
   "private": true,

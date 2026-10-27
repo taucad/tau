@@ -89,8 +89,7 @@ const LandingPage = (): React.JSX.Element => {
             </h1>
             <div className='mt-8 grid gap-8 lg:grid-cols-12 lg:items-end'>
               <p className='max-w-2xl text-lg leading-8 text-muted-foreground lg:col-span-7'>
-                Tau is code CAD in the browser. Open an example, check geometry with GeoSpec, and export. Tau-authored
-                source is Apache-2.0. OpenCascade, through libcascade, is LGPL-2.1.
+                Tau is code CAD in the browser. Open an example, check geometry with GeoSpec, and export.
               </p>
               <div className='flex flex-wrap items-center gap-3 lg:col-span-5 lg:justify-end'>
                 <Button

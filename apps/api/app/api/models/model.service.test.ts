@@ -42,7 +42,7 @@ const cappedModelIds = [
   'moonshot-kimi-k3',
 ] as const;
 
-/** Every model Tau sends a PDF to; each is on a proven Anthropic or OpenAI codec (blueprint D20, Finding 13). */
+/** Every model Tau sends a PDF to. Vertex rows are included because the gateway rewrites their completions file part into an image_url PDF data URI. */
 const pdfInputModelIds = [
   'anthropic-claude-fable-5.1',
   'anthropic-claude-fable-5',
@@ -60,6 +60,11 @@ const pdfInputModelIds = [
   'openai-gpt-5.6-terra',
   'openai-gpt-5.6-luna',
   'openai-gpt-5.5',
+  'google-gemini-4-argon',
+  'google-gemini-3.1-pro',
+  'google-gemini-3.8-flash',
+  'google-gemini-3.5-flash-lite',
+  'google-gemini-3.5-flash',
 ];
 
 const getCloudCatalogEntries = () => Object.values(modelList).flatMap((modelsBySlug) => Object.values(modelsBySlug));
@@ -180,7 +185,7 @@ describe('modelList', () => {
     }
   });
 
-  it('declares PDF input on exactly the proven Anthropic and OpenAI codec models', () => {
+  it('declares PDF input on exactly the proven Anthropic, OpenAI, and Vertex models', () => {
     const pdfModelIds = getCloudCatalogEntries()
       .filter((model) => modelSupportsInput(model.support, 'pdf'))
       .map((model) => model.id);
@@ -188,14 +193,12 @@ describe('modelList', () => {
     expect(pdfModelIds).toEqual(pdfInputModelIds);
   });
 
-  it('never declares PDF input outside a proven codec, a vision model, or on Vertex AI', () => {
+  it('never declares PDF input outside a proven codec or a vision model', () => {
     const wireByRouteId = new Map(gatewayModelRoutes().map((route) => [route.routeId, route]));
 
     for (const model of getCloudCatalogEntries().filter((entry) => modelSupportsInput(entry.support, 'pdf'))) {
       // Provider PDF support rasterises pages, so it is only offered on a vision-capable model.
       expect(modelSupportsInput(model.support, 'image'), model.id).toBe(true);
-      // Vertex AI stays ungated until the live document check in the blueprint's manual row 12 passes.
-      expect(model.provider.id, model.id).not.toBe('vertexai');
       if (isModelListEntryEnabled(model)) {
         expect(wireByRouteId.get(model.id)?.wire, model.id).toBeOneOf([
           'anthropic',
@@ -337,7 +340,7 @@ describe('ModelService', () => {
     expect(modelList.openai['gpt-6-astra']?.recommended).toBe(true);
   });
 
-  it('should list Gemini 4 Argon with image input and selectable reasoning', async () => {
+  it('should list Gemini 4 Argon with image and PDF input and selectable reasoning', async () => {
     const listedModels = await createModelService().getModels();
     const argon = listedModels.find((model) => model.id === 'google-gemini-4-argon');
 
@@ -347,7 +350,7 @@ describe('ModelService', () => {
       support: {
         tools: true,
         toolChoice: false,
-        modalities: { input: ['text', 'image'], output: ['text'] },
+        modalities: { input: ['text', 'image', 'pdf'], output: ['text'] },
         reasoning: { levels: ['low', 'medium', 'high'] },
       },
     });

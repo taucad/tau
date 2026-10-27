@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ReactRouter from 'react-router';
 import type * as StaleBuildRecovery from '#lib/stale-build-recovery.js';
@@ -140,6 +140,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  sessionStorage.removeItem('tau.chat-observation-quarantine');
   mocks.verdict = 'unknown';
   vi.clearAllMocks();
   vi.restoreAllMocks();
@@ -385,4 +386,34 @@ describe('ErrorPage', () => {
     });
     expect(mocks.recoverFromStaleBuild).not.toHaveBeenCalled();
   });
+
+  it('should open home instead of replaying the crashing route when a chat is already observed', () => {
+    mocks.routeError = new Error(
+      'Chat 00000000-0000-4000-8000-000000000000 is already observed in project proj_cqfNAOB65eDYLOe1Y0h8H.',
+    );
+    render(
+      <MemoryRouter initialEntries={['/w/home/bracket', '/w/disk/bracket']} initialIndex={1}>
+        <ErrorPage />
+        <ObservedPath />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go Back' }));
+
+    expect(screen.getByTestId('observed-path').textContent).toBe('/');
+    expect(sessionStorage.getItem('tau.chat-observation-quarantine')).toContain('00000000-0000-4000-8000-000000000000');
+  });
+
+  it('should remember the conflicting chat before reload so the next launch skips it', () => {
+    renderPage(new Error('Chat chat_shared is already observed in project proj_a.'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reload Page' }));
+
+    expect(sessionStorage.getItem('tau.chat-observation-quarantine')).toContain('chat_shared');
+  });
 });
+
+function ObservedPath(): React.JSX.Element {
+  const location = useLocation();
+  return <div data-testid='observed-path'>{location.pathname}</div>;
+}

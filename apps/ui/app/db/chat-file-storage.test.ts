@@ -1150,7 +1150,8 @@ describe('chat file store — log ownership boundary', () => {
     await write(`/projects/${workspace}/.tau/chats/${probeChatId}/events.jsonl`, '');
     await write(`/projects/${workspace}/.tau/chats/${probeChatId}/events/device-b.jsonl`, '');
 
-    expect((await store.getChatRecordsForResource(home)).map((chat) => chat.id)).toEqual([chatId]);
+    const homeRecords = await store.getChatRecordsForResource(home);
+    expect(homeRecords.map((chat) => chat.id)).toEqual([chatId]);
     expect(await store.getChatRecordsForResource(workspace)).toEqual([]);
     expect(await store.getChat(probeChatId)).toBeUndefined();
   });

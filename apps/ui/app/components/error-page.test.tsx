@@ -7,6 +7,7 @@ import type * as StaleBuildRecovery from '#lib/stale-build-recovery.js';
 import type * as BuildSkew from '#filesystem/build-skew.js';
 import type { ServerVerdict } from '#filesystem/build-skew.js';
 import type { ReloadState, StaleBuildOutcome } from '#lib/stale-build-recovery.js';
+import { ChatSessionStore } from '#services/chat-session-store.js';
 
 const mocks = vi.hoisted(() => ({
   routeError: undefined as unknown,
@@ -410,6 +411,13 @@ describe('ErrorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reload Page' }));
 
     expect(sessionStorage.getItem('tau.chat-observation-quarantine')).toContain('chat_shared');
+    const store = new ChatSessionStore();
+    const releaseHome = store.observe('chat_shared', 'proj_a');
+    const releaseWorkspace = store.observe('chat_shared', 'proj_b');
+    expect(store.observedChatIdsOf('proj_a')).toEqual([]);
+    expect(store.observedChatIdsOf('proj_b')).toEqual([]);
+    releaseHome();
+    releaseWorkspace();
   });
 });
 

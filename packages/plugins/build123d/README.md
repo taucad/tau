@@ -135,7 +135,7 @@ Apache-2.0 — see [LICENSE](./LICENSE). Bundled third-party payloads keep their
 
 ## Links
 
-- [Documentation](https://tau.new/docs/runtime)
+- [Documentation](https://docs.tau.new/runtime)
 - [Source](https://github.com/taucad/tau/tree/main/packages/plugins/build123d)
 - [Changelog](https://github.com/taucad/tau/blob/main/packages/plugins/build123d/CHANGELOG.md)
 - [Issues](https://github.com/taucad/tau/issues)

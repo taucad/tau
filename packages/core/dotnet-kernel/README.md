@@ -184,7 +184,7 @@ Apache-2.0. See [LICENSE](./LICENSE).
 
 ## Links
 
-- [Documentation](https://tau.new/docs/runtime)
+- [Documentation](https://docs.tau.new/runtime)
 - [Source](https://github.com/taucad/tau/tree/main/packages/core/dotnet-kernel)
 - [Changelog](https://github.com/taucad/tau/blob/main/packages/core/dotnet-kernel/CHANGELOG.md)
 - [Issues](https://github.com/taucad/tau/issues)

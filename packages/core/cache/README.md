@@ -98,7 +98,7 @@ Apache-2.0 — see [LICENSE](./LICENSE).
 
 ## Links
 
-- [Documentation](https://tau.new/docs/runtime)
+- [Documentation](https://docs.tau.new/runtime)
 - [Source](https://github.com/taucad/tau/tree/main/packages/core/cache)
 - [Changelog](https://github.com/taucad/tau/blob/main/packages/core/cache/CHANGELOG.md)
 - [Issues](https://github.com/taucad/tau/issues)

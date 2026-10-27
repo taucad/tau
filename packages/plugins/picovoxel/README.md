@@ -280,7 +280,7 @@ Apache-2.0 — see [LICENSE](./LICENSE). The `picovoxel` dependency is Apache-2.
 
 ## Links
 
-- [Documentation](https://tau.new/docs/runtime)
+- [Documentation](https://docs.tau.new/runtime)
 - [Source](https://github.com/taucad/tau/tree/main/packages/plugins/picovoxel)
 - [Changelog](https://github.com/taucad/tau/blob/main/packages/plugins/picovoxel/CHANGELOG.md)
 - [Issues](https://github.com/taucad/tau/issues)

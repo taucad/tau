@@ -3,6 +3,18 @@
     "kind": "reference",
     "geometry": "3d",
     "kernel": "build123d",
+    "name": "bearing-pillow-block",
+    "mainFile": "main.py",
+    "files": [
+      "DESIGN.md",
+      "main.py",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "reference",
+    "geometry": "3d",
+    "kernel": "build123d",
     "name": "planetary-gear-system",
     "mainFile": "main.py",
     "files": [
@@ -91,6 +103,18 @@
     "kind": "model",
     "geometry": "3d",
     "kernel": "jscad",
+    "name": "pebble-soap-dish",
+    "mainFile": "main.ts",
+    "files": [
+      "DESIGN.md",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "jscad",
     "name": "planetary-gear-system",
     "mainFile": "main.ts",
     "files": [
@@ -158,6 +182,18 @@
     "kind": "model",
     "geometry": "3d",
     "kernel": "manifold",
+    "name": "honeycomb-grille",
+    "mainFile": "main.ts",
+    "files": [
+      "DESIGN.md",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "manifold",
     "name": "manifold-logo",
     "mainFile": "main.ts",
     "files": [
@@ -177,6 +213,18 @@
       "Makefile",
       "main.cpp",
       "v8-engine-brep-native"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "opencascade",
+    "name": "hose-adapter",
+    "mainFile": "main.ts",
+    "files": [
+      "DESIGN.md",
+      "main.ts",
+      "tau.json"
     ]
   },
   {
@@ -350,11 +398,35 @@
   {
     "kind": "model",
     "geometry": "3d",
+    "kernel": "openscad",
+    "name": "parts-bin",
+    "mainFile": "main.scad",
+    "files": [
+      "DESIGN.md",
+      "main.scad",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
     "kernel": "picogk",
     "name": "boolean-shell",
     "mainFile": "main.cs",
     "files": [
       "main.cs"
+    ]
+  },
+  {
+    "kind": "reference",
+    "geometry": "3d",
+    "kernel": "picogk",
+    "name": "gyroid-heat-exchanger",
+    "mainFile": "main.cs",
+    "files": [
+      "DESIGN.md",
+      "main.cs",
+      "tau.json"
     ]
   },
   {
@@ -526,6 +598,18 @@
     "files": [
       "README.md",
       "gear.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "gyroid-lantern",
+    "mainFile": "main.ts",
+    "files": [
+      "DESIGN.md",
       "main.ts",
       "tau.json"
     ]
@@ -1210,6 +1294,9 @@
     "name": "logo-keychain",
     "mainFile": "main.ts",
     "files": [
+      "assets.d.ts",
+      "assets/Geist-Bold.ttf",
+      "assets/Geist-LICENSE.txt",
       "assets/logo.svg",
       "logo-keychain.geospec.ts",
       "main.ts",
@@ -1436,6 +1523,18 @@
     "kind": "model",
     "geometry": "3d",
     "kernel": "replicad",
+    "name": "usb-sensor-shell",
+    "mainFile": "main.ts",
+    "files": [
+      "DESIGN.md",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "replicad",
     "name": "v8-engine",
     "mainFile": "main.ts",
     "files": [
@@ -1562,6 +1661,18 @@
     "kind": "model",
     "geometry": "3d",
     "kernel": "smlib",
+    "name": "coat-hook",
+    "mainFile": "main.ts",
+    "files": [
+      "DESIGN.md",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "smlib",
     "name": "hinged-box",
     "mainFile": "main.ts",
     "files": [
@@ -1638,6 +1749,30 @@
     "mainFile": "main.tsx",
     "files": [
       "main.tsx",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "tscircuit",
+    "name": "usb-sensor-breakout",
+    "mainFile": "main.tsx",
+    "files": [
+      "DESIGN.md",
+      "main.tsx",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "reference",
+    "geometry": "3d",
+    "kernel": "zoo",
+    "name": "vented-panel",
+    "mainFile": "main.kcl",
+    "files": [
+      "DESIGN.md",
+      "main.kcl",
       "tau.json"
     ]
   }

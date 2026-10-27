@@ -1,0 +1,11 @@
+{
+  "$schema": "https://tau.new/schemas/tau-v1.json",
+  "name": "Sensor Shell",
+  "description": "Filleted snap-fit shell for the 42 mm by 26 mm USB-C sensor breakout. Replicad keeps the wall, the plug lid and the connector slot as exact BRep, so the pair still exports STEP.",
+  "tags": ["enclosure", "3d-printing", "brep", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts"
+    }
+  }
+}

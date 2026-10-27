@@ -1,0 +1,11 @@
+{
+  "$schema": "https://tau.new/schemas/tau-v1.json",
+  "name": "Gyroid Heat Exchanger",
+  "description": "A gyroid core between two header caps, with offset ports. PicoGK runs that implicit on native OpenVDB, which is the resolution a browser voxel budget will not hold. Unverified in this draft: the kernel is macOS arm64.",
+  "tags": ["lattice", "implicit", "picogk", "reference"],
+  "assets": {
+    "main": {
+      "entryPath": "main.cs"
+    }
+  }
+}

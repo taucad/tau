@@ -1,0 +1,11 @@
+{
+  "$schema": "https://tau.new/schemas/tau-v1.json",
+  "name": "Parts Bin",
+  "description": "A rounded parts bin with a finger scoop, written as a handful of customizer dimensions. OpenSCAD's constructive solid geometry is the direct descendant of the Thingiverse parameter list.",
+  "tags": ["organizer", "3d-printing", "csg", "openscad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.scad"
+    }
+  }
+}

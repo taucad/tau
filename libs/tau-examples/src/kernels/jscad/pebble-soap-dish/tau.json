@@ -1,0 +1,11 @@
+{
+  "$schema": "https://tau.new/schemas/tau-v1.json",
+  "name": "Pebble Soap Dish",
+  "description": "An organic soap dish formed as the hull of a ring of spheres, then hollowed. JSCAD's hull builds that pebble in one step; a fillet stack on a box does not.",
+  "tags": ["household", "3d-printing", "csg", "jscad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts"
+    }
+  }
+}

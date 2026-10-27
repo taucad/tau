@@ -1,0 +1,11 @@
+{
+  "$schema": "https://tau.new/schemas/tau-v1.json",
+  "name": "Bearing Pillow Block",
+  "description": "A filleted foot with a slip-fit 608 bore and two M4 holes. build123d is native OpenCascade in Python: the bore stays a cylinder and the part exports STEP. Unverified on this draft — build123d is not in the example-thumbnail runtime.",
+  "tags": ["bearing", "cnc", "brep", "build123d", "reference"],
+  "assets": {
+    "main": {
+      "entryPath": "main.py"
+    }
+  }
+}

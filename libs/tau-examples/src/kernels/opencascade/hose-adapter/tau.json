@@ -1,0 +1,11 @@
+{
+  "$schema": "https://tau.new/schemas/tau-v1.json",
+  "name": "Hose Adapter",
+  "description": "A round shop-vac inlet lofted through a sideways middle section into a rounded rectangular tool port. OpenCascade's ThruSections keeps that changing profile as one exact solid with a constant wall.",
+  "tags": ["loft", "3d-printing", "brep", "opencascade"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts"
+    }
+  }
+}

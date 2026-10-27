@@ -1,0 +1,11 @@
+{
+  "$schema": "https://tau.new/schemas/tau-v1.json",
+  "name": "USB-C Sensor Breakout",
+  "description": "A 42 mm by 26 mm USB-C breakout: mid-mount connector, SOIC-8, decoupling capacitor, indicator LED and an I2C header. tscircuit is the only kernel here that is a circuit, a board and a 3D body from one TSX tree.",
+  "tags": ["electronics", "pcb", "usb", "tscircuit"],
+  "assets": {
+    "main": {
+      "entryPath": "main.tsx"
+    }
+  }
+}

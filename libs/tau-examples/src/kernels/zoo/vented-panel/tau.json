@@ -1,0 +1,11 @@
+{
+  "$schema": "https://tau.new/schemas/tau-v1.json",
+  "name": "Vented Panel",
+  "description": "A filleted plate with a parametric hole grid. Zoo's KCL engine runs that pattern on a cloud GPU, past the point where a WASM kernel runs out of tab. Unverified in this draft: Zoo is Pro and is not in the example runtime.",
+  "tags": ["panel", "pattern", "kcl", "zoo", "reference"],
+  "assets": {
+    "main": {
+      "entryPath": "main.kcl"
+    }
+  }
+}

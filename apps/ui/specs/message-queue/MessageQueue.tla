@@ -56,6 +56,8 @@
 \* ask interval no longer disables submit, as the host's fence reads it; queue paths unchanged.
 \* QueuePlacement.tla separately checks host-local lost-ACK recovery and scoped
 \* legacy receipt rebasing; this module retains its single-host FIFO scope.
+\* Skipping observation of the registration probe, or of a chat this tab already
+\* crashed on, never enqueues, prepares or acknowledges; queue paths unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

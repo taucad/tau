@@ -6,7 +6,7 @@ export const pages: Array<{ path: string; title: string; description: string; er
     path: '/',
     title: 'Tau — Design. Verify. Make.',
     description:
-      'Design a useful part, verify its geometry and export for machining, 3D printing or fabrication. Editable parametric CAD, open source and free in your browser.',
+      'Open the planetary gearbox, change one number and export STL. Tau is code-CAD: check geometry with GeoSpec, then take the file into machining or 3D printing.',
   },
   {
     path: '/product/',
@@ -58,8 +58,9 @@ export const pages: Array<{ path: string; title: string; description: string; er
   },
   {
     path: '/download/',
-    title: 'Get Tau — In your browser today · Tau',
-    description: 'Tau runs in your browser today. Tau Desktop is in development; no installer is published yet.',
+    title: 'Get Tau — Browser, plugin and desktop · Tau',
+    description:
+      'Open the planetary gearbox in the browser, install the Claude Code or Codex plugin, or download Tau Desktop for Mac, Windows or Linux.',
   },
   {
     path: '/blog/',

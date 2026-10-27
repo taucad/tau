@@ -1,6 +1,8 @@
 /** Public copy only. Commercial and capability provenance lives in README.md. */
 export const sourceUrl = 'https://github.com/taucad/tau';
 export const exampleUrl = `${sourceUrl}/tree/199c8079d5ee42f8c5771fc2cb02bf2791cc3bdf/libs/tau-examples/src/kernels/replicad/planetary-gear-system`;
+/** Public Replicad builtin the primary call to action opens. STL export is that kernel’s own. */
+export const exampleModelPath = '/s/builtin~replicad.planetary-gear-system';
 export const discordUrl = 'https://discord.gg/6pfSAN3t7A';
 export const salesEmail = 'sales@tau.new';
 
@@ -22,7 +24,7 @@ export const principles: Array<{
   {
     id: 'design',
     title: 'Start with a purpose.',
-    body: 'A mount that fits. A housing that protects. Describe the job, then shape the part with editable code and dimensions you control.',
+    body: 'A mount that fits. A housing that protects. Name the job, then shape the part with editable code and dimensions you control.',
     detail: 'Your idea → editable CAD',
   },
   {
@@ -34,7 +36,7 @@ export const principles: Array<{
   {
     id: 'make',
     title: 'Put it to work.',
-    body: 'Export STEP for your machining workflow, or STL and 3MF for 3D printing. Make the part, assemble it and try it where it belongs.',
+    body: 'Export the file that kernel writes: STEP from a boundary-representation kernel, or STL and 3MF where that kernel provides them. Make the part, assemble it and try it where it belongs.',
     detail: 'Machine · print · assemble',
   },
 ];
@@ -53,10 +55,11 @@ export const storyChapters = [
   },
   {
     id: 'prompt',
-    label: 'Prompt',
-    title: 'Say it in a sentence.',
-    body: 'Describe the mechanism the way you would to a colleague. Tau turns the request into a plan of named parts.',
-    detail: '“Create a planetary gearbox with a 4:1 reduction, three planets and socket screws on top.”',
+    label: 'Code',
+    title: 'The model is code.',
+    body: 'The gearbox is a Replicad program. You write it, or an agent writes it from a request. Tau runs that code and shows the solids.',
+    detail: 'Replicad · main.ts',
+    note: 'The request asks for code. The solid comes from that code.',
   },
   {
     id: 'agents',
@@ -110,7 +113,7 @@ export const storyChapters = [
   },
 ];
 
-/** Geometry engines from libs/types kernel constants. Desktop entries are labelled as such. */
+/** Geometry engines from libs/types kernel constants. Desktop-only entries name the host. */
 export const ecosystem = [
   {
     title: 'Geometry engines',
@@ -122,10 +125,12 @@ export const ecosystem = [
       ['Manifold', 'Browser'],
       ['OpenCascade', 'Browser'],
       ['PicoVoxel', 'Browser'],
+      ['SMLib', 'Browser'],
       ['tscircuit', 'Browser'],
       ['Zoo KCL', 'Cloud · Pro'],
       ['Build123d', 'Desktop and plugin · native runtime'],
-      ['PicoGK', 'Desktop and plugin · native runtime'],
+      ['SMLibPy', 'Desktop and plugin · native runtime'],
+      ['PicoGK', 'Desktop · macOS Apple silicon only'],
     ],
   },
   {
@@ -220,7 +225,7 @@ export const visionChapters: Array<[string, string, string]> = [
   [
     'Today',
     'Design. Verify. Make.',
-    'Describe a useful part, shape it in editable CAD and check its geometry. Export files to take the design into machining, printing or your wider fabrication workflow.',
+    'Write a useful part in editable CAD code, or open an example and change it. Check its geometry. Export files for machining, printing or your fabrication workflow.',
   ],
   [
     'Foundation',
@@ -257,13 +262,13 @@ export const plans: Array<{
     billingPeriod: 'forever',
     features: [
       ['All AI models, paid with credits'],
-      ['All open-source CAD kernels'],
+      ['Local CAD kernels, in the browser and in Tau Desktop'],
       ['Unlimited local geometry checks'],
-      ['Export to every supported format'],
+      ['Export the formats that kernel writes'],
       ['Public share links'],
       ['Back up to GitHub'],
     ],
-    cta: ['Start designing', '/projects/new'] as const,
+    cta: ['Open the gearbox', exampleModelPath] as const,
   },
   {
     id: 'pro',
@@ -308,7 +313,7 @@ export const pricingFaq: Array<[string, string]> = [
   ],
   [
     'Can I buy credits without Pro?',
-    'Yes. Credits cost US$1 per 100, with top-ups from US$5 to US$5,000 before applicable tax. Purchased credits do not expire.',
+    'Yes. Credits are 100 per US$1, with top-ups from US$5 to US$5,000 before applicable tax. Purchased credits do not expire.',
   ],
   [
     'What does Tau Cloud backup & sync include?',

@@ -69,11 +69,11 @@ export const kernelConfigurations = [
     dimensions: [3],
     language: 'csharp',
     ecosystem: 'nuget',
-    description: 'Native C# voxel CAD for computational engineering',
+    description: 'C# voxel CAD, macOS arm64 only',
     mainFile: 'main.cs',
     backendProvider: 'picogk',
     longDescription:
-      'A native C# computational-engineering workflow backed by PicoGK and OpenVDB. Author strongly typed voxel models with live desktop rendering and mesh export.',
+      'A native C# workflow backed by PicoGK and OpenVDB. It runs on macOS arm64 in Tau Desktop and the CLI. It is not a browser kernel.',
     emptyCode: `using System.ComponentModel.DataAnnotations;
 using PicoGK;
 
@@ -133,7 +133,7 @@ export default function main(pico: Pico, params = defaultParams): Voxels[] {
     mainFile: 'main.py',
     backendProvider: 'build123d',
     longDescription:
-      'A best-in-class Python CAD API backed by native OpenCascade. Build precise parametric parts and assemblies with direct STEP export and topology-aware rendering in the Tau desktop app.',
+      'A Python CAD API backed by native OpenCascade. Build precise parametric parts and assemblies with direct STEP export and topology-aware rendering in the Tau desktop app. Not a browser kernel.',
     emptyCode: `from dataclasses import dataclass
 from build123d import Shape
 
@@ -239,20 +239,20 @@ export default function main(p = defaultParams) {}
     dimensions: [3],
     language: 'kcl',
     ecosystem: 'kcl',
-    description: 'Server-side engine for heavy models',
+    description: 'Pro plan, metered in credits',
     mainFile: 'main.kcl',
     backendProvider: 'zoo',
     longDescription:
-      "Geometry runs on Zoo's GPU-accelerated engine in the cloud rather than in your browser, so model complexity is bounded by the server, not by the tab. Best for large assemblies and detailed parts that stall a WASM kernel, with precise parametric geometry and STEP export.",
+      "Pro and metered. Geometry runs on Zoo's cloud engine, and a run spends credits (100 per US$1). Model size is bounded by the server, not the tab. Precise parametric geometry and STEP export.",
     emptyCode: `@settings(defaultLengthUnit = mm, kclVersion = 3.0)
 `,
     recommended: 'Large Assemblies & Complex Parts',
     tags: ['GPU-Accelerated', 'Cloud Engine', 'Large Assemblies', 'Parametric', 'KCL'],
     features: [
-      'GPU-accelerated cloud execution',
+      'Pro plan, metered in credits',
+      'Cloud execution',
       'Scales past browser memory limits',
       'Precise parametric geometry',
-      'Modern KCL syntax',
       'STL/STEP export',
     ],
   },

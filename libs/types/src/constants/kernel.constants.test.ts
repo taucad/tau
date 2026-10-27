@@ -62,7 +62,7 @@ describe('kernel configuration identity', () => {
     expect(picogk).toMatchObject({ language: 'csharp', mainFile: 'main.cs', requiresRuntimeKernelId: 'picogk' });
     expect(picovoxel).toMatchObject({ language: 'typescript', mainFile: 'main.ts', backendProvider: 'picogk' });
     expect(picovoxel).not.toHaveProperty('requiresRuntimeKernelId');
-    expect(picogk?.description).toBe('Native C# voxel CAD for computational engineering');
+    expect(picogk?.description).toBe('C# voxel CAD, macOS arm64 only');
     expect(picovoxel?.description).toBe('TypeScript voxel and implicit CAD that runs in the browser');
     expect(ids.indexOf('picovoxel')).toBe(ids.indexOf('picogk') + 1);
   });

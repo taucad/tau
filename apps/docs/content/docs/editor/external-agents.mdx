@@ -14,13 +14,13 @@ An external agent is a coding CLI you already have installed. Tau starts it, giv
 | ----------- | ---------------------------------------------- | -------- | ----------- |
 | Codex       | `@agentclientprotocol/codex-acp` 1.7.0         | `codex`  | 0.148.0     |
 | Claude Code | `@agentclientprotocol/claude-agent-acp` 0.70.0 | `claude` | 2.1.232     |
-| Grok Build  | Native ACP (no adapter package)                | `grok`   | 1.0.41      |
+| Grok Build  | Native ACP (no adapter package)                | `grok`   | 1.0.52      |
 
 An older CLI is refused before the turn starts, naming the version it found. Codex and Claude Code are qualified with live turns; Grok Build's are not yet.
 
 Tau runs your own `codex` or `claude` from `PATH`; sign Claude Code in with `claude auth login`.
 
-For Grok Build, follow the [official installation instructions](https://docs.x.ai/build/overview), then run `grok login` on the host machine. Tau starts `grok --no-auto-update agent stdio` using that local login. Its native ACP handshake has been verified without credentials.
+For Grok Build, follow the [official installation instructions](https://docs.x.ai/build/overview), then run `grok login` on the host machine. Tau starts `grok --no-auto-update agent --no-leader stdio` using that local login. Its ACP handshake is verified without credentials.
 
 Agents run on a Tau Host: Tau Desktop, or `tau serve` paired with the browser. A browser tab with no host refuses the turn rather than quietly answering it with Tau.
 

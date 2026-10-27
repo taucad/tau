@@ -3,7 +3,7 @@ title: 'Port Allocation Policy'
 description: 'Canonical port assignments for all Tau services across dev, test, production, and infrastructure contexts to prevent collisions and browser-unsafe port errors.'
 status: active
 created: '2026-03-18'
-updated: '2026-10-26'
+updated: '2026-10-27'
 related:
   - docs/research/observability-architecture.md
 ---
@@ -161,7 +161,8 @@ When adding new services, allocate from the appropriate range:
 | 5000–5999   | Reserved (avoid — macOS AirPlay, common OS conflicts) |
 | 6000–6099   | Reserved (avoid — X11, browser-blocked)               |
 | 6100–6999   | Observability, Redis                                  |
-| 9000–9999   | Metrics exporters                                     |
+| 9000–9001   | MinIO API and console                                 |
+| 9002–9999   | Metrics exporters                                     |
 | 10000–19999 | External tool defaults (Ollama, etc.)                 |
 | 40000–49999 | Auxiliary infra                                       |
 

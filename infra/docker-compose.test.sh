@@ -7,7 +7,8 @@ COMPOSE_FILE="${ROOT}/infra/docker-compose.yml"
 
 # Every published host port must name 127.0.0.1. A bare host:container mapping and an
 # explicit 0.0.0.0 (or any other host address) listen beyond loopback. Short syntax and
-# the long `host_ip` form are both checked, including single- and double-quoted values.
+# the long `host_ip` form are both checked, including single- and double-quoted values
+# and a flow sequence that continues onto later lines.
 require_loopback_ports() {
   local file=$1
   local unbound
@@ -57,21 +58,42 @@ function check_flow(n, raw,   inner, i, nitems) {
   nitems = split(inner, items, /,/)
   for (i = 1; i <= nitems; i++) check_short(n, items[i])
 }
-BEGIN { in_ports = 0; long_open = 0; problems = "" }
+function open_flow(n, raw) {
+  flow_line = n
+  flow_text = trim(raw)
+  if (index(raw, "]") > 0) {
+    check_flow(flow_line, flow_text)
+    flow_open = 0
+    in_ports = 0
+  } else {
+    flow_open = 1
+  }
+}
+BEGIN { in_ports = 0; long_open = 0; flow_open = 0; flow_text = ""; flow_line = 0; problems = "" }
 {
   line = $0
+  if (flow_open) {
+    flow_text = flow_text " " trim(line)
+    if (index(line, "]") > 0) {
+      check_flow(flow_line, flow_text)
+      flow_open = 0
+      in_ports = 0
+    }
+    next
+  }
   if (in_ports && long_open && line ~ /^[[:space:]]*-[[:space:]]/) flush_long()
   if (match(line, /^[[:space:]]*ports:[[:space:]]*/)) {
     flush_long()
     in_ports = 1
     rest = trim(substr(line, RLENGTH + 1))
-    if (rest ~ /^\[/) {
-      check_flow(NR, rest)
-      in_ports = 0
-    }
+    if (rest ~ /^\[/) open_flow(NR, rest)
     next
   }
   if (!in_ports) next
+  if (line ~ /^[[:space:]]*\[/) {
+    open_flow(NR, line)
+    next
+  }
   if (line ~ /^[[:space:]]*$/ || line ~ /^[[:space:]]*#/) next
   if (line ~ /^[[:space:]]*[A-Za-z0-9_-]+:[[:space:]]*/ && line !~ /^[[:space:]]*-/) {
     if (long_open && line ~ /^[[:space:]]+(target|published|host_ip|protocol|mode|name|app_protocol):/) {
@@ -114,6 +136,7 @@ BEGIN { in_ports = 0; long_open = 0; problems = "" }
 }
 END {
   flush_long()
+  if (flow_open) fail(flow_line, "unclosed flow-style ports sequence")
   printf "%s", problems
 }
 AWK

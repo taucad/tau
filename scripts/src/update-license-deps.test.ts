@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { selectThirdPartyPackages } from '#update-license-deps.mts';
+import { selectThirdPartyPackages, toPackageInfo } from '#update-license-deps.mts';
 
 const repositoryRoot = '/repo';
 
@@ -45,5 +45,20 @@ describe('selectThirdPartyPackages', () => {
 
   it('does not leak the resolved directory into the manifest entries', () => {
     expect(selectThirdPartyPackages(scanned, repositoryRoot)[0]).not.toHaveProperty('directory');
+  });
+});
+
+describe('toPackageInfo', () => {
+  it('normalizes a git userinfo GitHub URL to https', () => {
+    const manifest = { name: 'eventsource', version: '3.0.7', license: 'MIT' };
+    expect(
+      toPackageInfo({ ...manifest, repository: 'https://git@github.com/EventSource/eventsource' })?.repository,
+    ).toBe('https://github.com/EventSource/eventsource');
+    expect(toPackageInfo({ ...manifest, repository: 'git@github.com/EventSource/eventsource' })?.repository).toBe(
+      'https://github.com/EventSource/eventsource',
+    );
+    expect(toPackageInfo({ ...manifest, repository: 'git@github.com:EventSource/eventsource.git' })?.repository).toBe(
+      'https://github.com/EventSource/eventsource',
+    );
   });
 });

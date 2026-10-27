@@ -4,7 +4,9 @@ All Tau-authored source in the current repository is licensed under Apache-2.0. 
 internal libraries, tools, examples, published packages, and the `geospec` authoring substrate.
 
 Each workspace package carries its own `license` field in `package.json` and same-directory `LICENSE` file.
-Third-party code and dependencies retain their own licences and notices.
+Third-party code and dependencies retain their own licences and notices. Open CASCADE Technology, used
+through [libcascade](https://github.com/taucad/opencascade.js), is LGPL-2.1-only with the Open CASCADE
+exception. That grant is not Apache-2.0, and this repository's Apache licence does not replace it.
 
 ## Repository-wide grant
 

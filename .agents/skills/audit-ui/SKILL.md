@@ -20,7 +20,7 @@ Audit four route classes on **both** staging (`taucad.dev`) and production (`tau
 | Route class         | Staging URL                                       | Production URL                                 |
 | ------------------- | ------------------------------------------------- | ---------------------------------------------- |
 | Marketing home      | `https://taucad.dev/`                             | `https://tau.new/`                             |
-| Docs (Fumadocs)     | `https://taucad.dev/docs/runtime/`                | `https://tau.new/docs/runtime/`                |
+| Docs (Fumadocs)     | `https://taucad.dev/docs/runtime/`                | `https://docs.tau.new/runtime/`                |
 | Editor (cold start) | `https://taucad.dev/projects/new?kernel=replicad` | `https://tau.new/projects/new?kernel=replicad` |
 | Community / index   | `https://taucad.dev/projects/community`           | `https://tau.new/projects/community`           |
 
@@ -81,7 +81,7 @@ for url in \
   https://taucad.dev/docs/runtime/ \
   https://taucad.dev/projects/new \
   https://tau.new/ \
-  https://tau.new/docs/runtime/ \
+  https://docs.tau.new/runtime/ \
   https://tau.new/projects/new; do
   echo "=== $url ==="
   curl -sI "$url" | head -40

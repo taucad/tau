@@ -164,6 +164,22 @@ describe('modelList', () => {
     });
   });
 
+  it('should offer PDF input on every Gemini catalog model', () => {
+    const geminiModelIds = [
+      'google-gemini-4-argon',
+      'google-gemini-3.1-pro',
+      'google-gemini-3.8-flash',
+      'google-gemini-3.5-flash-lite',
+      'google-gemini-3.5-flash',
+    ];
+
+    for (const id of geminiModelIds) {
+      const model = getCloudCatalogEntries().find((entry) => entry.id === id);
+      expect(modelSupportsInput(model?.support, 'pdf'), id).toBe(true);
+      expect(modelSupportsInput(model?.support, 'image'), id).toBe(true);
+    }
+  });
+
   it('declares PDF input on exactly the proven Anthropic and OpenAI codec models', () => {
     const pdfModelIds = getCloudCatalogEntries()
       .filter((model) => modelSupportsInput(model.support, 'pdf'))

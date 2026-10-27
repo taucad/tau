@@ -7,7 +7,8 @@
  * kernel approximates and a STEP file can still machine.
  */
 import { drawRoundedRectangle, makeBox } from 'replicad';
-import type { Shape3D, ShapeConfig } from 'replicad';
+import type { Shape3D } from 'replicad';
+import type { Material, Model } from '@taucad/replicad/model';
 
 /** Board outline this shell is drawn around, in millimetres. */
 export const boardSize = { length: 42, width: 26, thickness: 1.6 };
@@ -76,7 +77,7 @@ const soften = (shape: Shape3D, radius: number): Shape3D => {
   }
 };
 
-const charcoal = {
+const charcoal: Material = {
   pbrMetallicRoughness: {
     baseColorFactor: [0.14, 0.15, 0.16, 1],
     metallicFactor: 0,
@@ -84,7 +85,7 @@ const charcoal = {
   },
 };
 
-const graphite = {
+const graphite: Material = {
   pbrMetallicRoughness: {
     baseColorFactor: [0.28, 0.3, 0.32, 1],
     metallicFactor: 0.05,
@@ -97,7 +98,7 @@ const graphite = {
  * @param params - Wall, cavity and opening sizes. The board outline is fixed.
  * @returns The shell and the lid as named solids.
  */
-export default function main(params: Params = defaultParams): ShapeConfig[] {
+export default function main(params: Params = defaultParams): Model {
   requirePositive(params);
   const innerLength = boardSize.length + 2 * params.clearance;
   const innerWidth = boardSize.width + 2 * params.clearance;
@@ -152,8 +153,10 @@ export default function main(params: Params = defaultParams): ShapeConfig[] {
     params.floor,
   ]);
 
-  return [
-    { name: 'Shell', shape: shell, material: charcoal },
-    { name: 'Lid', shape: lid, material: graphite },
-  ];
+  return {
+    shapes: [
+      { name: 'Shell', shape: shell, material: charcoal },
+      { name: 'Lid', shape: lid, material: graphite },
+    ],
+  };
 }

@@ -10,12 +10,14 @@ import {
   Align,
   Circle,
   Cylinder,
+  Part,
   Pos,
   Rectangle,
   Spline,
   Z,
   extrude,
 } from '@classcad/smlibwasm';
+import type { Shell } from '@classcad/smlibwasm';
 import type { Material, Model } from '@taucad/smlib/model';
 
 export const defaultParams = {
@@ -40,6 +42,8 @@ export const defaultParams = {
 };
 
 type Params = typeof defaultParams;
+
+const isPart = (shape: Part | Shell): shape is Part => shape instanceof Part;
 
 const brass: Material = {
   pbrMetallicRoughness: {
@@ -89,12 +93,18 @@ const requireHook = (params: Params): void => {
 export default function main(params: Params = defaultParams): Model {
   requireHook(params);
   const standing = [Align.CENTER, Align.CENTER, Align.MIN] as const;
-  let plate = extrude(
+  // `extrude` is typed as `Part | Shell`. A closed rectangle is a solid, and
+  // the hole and rim operations exist only on `Part`.
+  const plateBody = extrude(
     Rectangle(params.plateWidth, params.plateHeight, {
       fillet: params.cornerRadius,
     }),
     params.plateThickness,
   );
+  if (!isPart(plateBody)) {
+    throw new Error('The wall plate extrusion is not a solid.');
+  }
+  let plate = plateBody;
   const drill = Cylinder(params.screwDiameter / 2, params.plateThickness + 2, {
     align: standing,
   });

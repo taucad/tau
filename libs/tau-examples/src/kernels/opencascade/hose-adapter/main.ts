@@ -112,13 +112,19 @@ export default function main(params: Params = defaultParams): TopoDS_Shape {
     return maker.Wire();
   };
 
-  const roundedRectWire = (
-    width: number,
-    height: number,
-    radius: number,
-    x: number,
-    z: number,
-  ): TopoDS_Wire => {
+  const roundedRectWire = ({
+    width,
+    height,
+    radius,
+    x,
+    z,
+  }: {
+    width: number;
+    height: number;
+    radius: number;
+    x: number;
+    z: number;
+  }): TopoDS_Wire => {
     const hx = width / 2;
     const hy = height / 2;
     const r = Math.min(radius, Math.min(hx, hy) - 0.4);
@@ -176,38 +182,50 @@ export default function main(params: Params = defaultParams): TopoDS_Shape {
   // The inlet uses the same eight-edge wire as the outlet, with the corner
   // radius taken almost to a semicircle, so it reads as a round port.
   const outer = loft([
-    roundedRectWire(inletDiameter, inletDiameter, inletDiameter / 2, 0, 0),
-    roundedRectWire(midWidth, midHeight, midRadius, bend, length / 2),
-    roundedRectWire(
-      outletWidth,
-      outletHeight,
-      outletCorner,
-      bend * 0.45,
-      length,
-    ),
+    roundedRectWire({
+      width: inletDiameter,
+      height: inletDiameter,
+      radius: inletDiameter / 2,
+      x: 0,
+      z: 0,
+    }),
+    roundedRectWire({
+      width: midWidth,
+      height: midHeight,
+      radius: midRadius,
+      x: bend,
+      z: length / 2,
+    }),
+    roundedRectWire({
+      width: outletWidth,
+      height: outletHeight,
+      radius: outletCorner,
+      x: bend * 0.45,
+      z: length,
+    }),
   ]);
   const inner = loft([
-    roundedRectWire(
-      inletDiameter - 2 * wall,
-      inletDiameter - 2 * wall,
-      inletDiameter / 2,
-      0,
-      -1,
-    ),
-    roundedRectWire(
-      midWidth - 2 * wall,
-      midHeight - 2 * wall,
-      Math.max(midRadius - wall, 0.8),
-      bend,
-      length / 2,
-    ),
-    roundedRectWire(
-      outletWidth - 2 * wall,
-      outletHeight - 2 * wall,
-      Math.max(outletCorner - wall, 0.8),
-      bend * 0.45,
-      length + 1,
-    ),
+    roundedRectWire({
+      width: inletDiameter - 2 * wall,
+      height: inletDiameter - 2 * wall,
+      radius: inletDiameter / 2,
+      x: 0,
+      z: -1,
+    }),
+    roundedRectWire({
+      width: midWidth - 2 * wall,
+      height: midHeight - 2 * wall,
+      radius: Math.max(midRadius - wall, 0.8),
+      x: bend,
+      z: length / 2,
+    }),
+    roundedRectWire({
+      width: outletWidth - 2 * wall,
+      height: outletHeight - 2 * wall,
+      radius: Math.max(outletCorner - wall, 0.8),
+      x: bend * 0.45,
+      z: length + 1,
+    }),
   ]);
   const progress = own(new Message_ProgressRange());
   const cut = own(new BRepAlgoAPI_Cut(outer, inner, progress));

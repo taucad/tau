@@ -90,13 +90,13 @@ describe('AppSidebar', () => {
     renderSidebar();
 
     expect(getNavLink('Projects')).toHaveAttribute('href', '/projects');
-    for (const name of ['Community', 'Convert', 'Import', 'Usage']) {
+    for (const name of ['Examples', 'Convert', 'Import', 'Usage']) {
       expect(getNavLink(name)).toBeUndefined();
     }
 
     await userEvent.click(screen.getByRole('button', { name: 'More' }));
 
-    expect(await screen.findByRole('menuitem', { name: 'Community' })).toHaveAttribute('href', '/community');
+    expect(await screen.findByRole('menuitem', { name: 'Examples' })).toHaveAttribute('href', '/community');
     expect(screen.getByRole('menuitem', { name: 'Convert' })).toHaveAttribute('href', '/convert');
     expect(screen.getByRole('menuitem', { name: 'Import' })).toHaveAttribute('href', '/import');
     expect(screen.getByRole('menuitem', { name: 'Usage' })).toHaveAttribute('href', '/usage');

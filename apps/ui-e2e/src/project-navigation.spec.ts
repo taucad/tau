@@ -559,7 +559,7 @@ test('project and chat rows reveal their actions over a dissolving name', async 
      * this used to read — moved into the user dropdown in `be3d0eb6e`, and
      * `Project Library` has never been a committed label. */
     const projectsNav = navButtons.find((button) => button.textContent.trim() === 'Projects');
-    const community = navButtons.find((button) => button.textContent.trim() === 'Community');
+    const community = navButtons.find((button) => button.textContent.trim() === 'Examples');
     if (!search || !newProject || !projects || !platform || !project || !projectsNav || !community) {
       throw new Error('Sidebar controls were not ready.');
     }

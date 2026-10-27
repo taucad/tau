@@ -5,7 +5,8 @@
   "tags": ["vent", "3d-printing", "booleans", "manifold"],
   "assets": {
     "main": {
-      "entryPath": "main.ts"
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
     }
   }
 }

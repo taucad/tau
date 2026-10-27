@@ -5,7 +5,8 @@
   "tags": ["household", "3d-printing", "csg", "jscad"],
   "assets": {
     "main": {
-      "entryPath": "main.ts"
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
     }
   }
 }

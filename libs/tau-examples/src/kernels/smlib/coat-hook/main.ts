@@ -100,9 +100,11 @@ export default function main(params: Params = defaultParams): Model {
   });
   plate = plate.cut(Pos(0, params.screwSpacing / 2, -1).mul(drill));
   plate = plate.cut(Pos(0, -params.screwSpacing / 2, -1).mul(drill));
+  // The plan corners are already arcs. Vertical edges of that extrusion are
+  // smooth seams, and SMLib refuses to fillet them. Soften the top rim only.
   plate = plate.fillet(
-    plate.edges().parallelTo(Z),
-    Math.min(1.2, params.plateThickness / 3),
+    plate.edges().maxBy(Z),
+    Math.min(0.8, params.plateThickness / 4),
   );
 
   const path = Spline(

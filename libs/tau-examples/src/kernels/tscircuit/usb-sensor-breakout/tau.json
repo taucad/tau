@@ -5,7 +5,8 @@
   "tags": ["electronics", "pcb", "usb", "tscircuit"],
   "assets": {
     "main": {
-      "entryPath": "main.tsx"
+      "entryPath": "main.tsx",
+      "thumbnail": "thumbnail.webp"
     }
   }
 }

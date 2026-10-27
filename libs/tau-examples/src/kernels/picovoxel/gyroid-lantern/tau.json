@@ -5,7 +5,8 @@
   "tags": ["lattice", "3d-printing", "implicit", "picovoxel"],
   "assets": {
     "main": {
-      "entryPath": "main.ts"
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
     }
   }
 }

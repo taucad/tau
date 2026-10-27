@@ -5,7 +5,8 @@
   "tags": ["organizer", "3d-printing", "csg", "openscad"],
   "assets": {
     "main": {
-      "entryPath": "main.scad"
+      "entryPath": "main.scad",
+      "thumbnail": "thumbnail.webp"
     }
   }
 }

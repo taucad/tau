@@ -5,7 +5,8 @@
   "tags": ["enclosure", "3d-printing", "brep", "replicad"],
   "assets": {
     "main": {
-      "entryPath": "main.ts"
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
     }
   }
 }

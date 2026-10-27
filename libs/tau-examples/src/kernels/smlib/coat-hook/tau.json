@@ -5,7 +5,8 @@
   "tags": ["household", "sweep", "nurbs", "smlib"],
   "assets": {
     "main": {
-      "entryPath": "main.ts"
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
     }
   }
 }

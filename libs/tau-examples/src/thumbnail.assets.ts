@@ -18,107 +18,109 @@ import thumbnail11 from './kernels/jscad/section-overlap-heavy-v8-fixture/thumbn
 import thumbnail12 from './kernels/jscad/section-picking-fixture/thumbnail.webp?url';
 import thumbnail13 from './kernels/manifold/honeycomb-grille/thumbnail.webp?url';
 import thumbnail14 from './kernels/manifold/manifold-logo/thumbnail.webp?url';
-import thumbnail15 from './kernels/opencascade/v8-engine-brep/thumbnail.webp?url';
-import thumbnail16 from './kernels/openscad/arq5-racing-quadcopter/thumbnail.webp?url';
-import thumbnail17 from './kernels/openscad/cyber-chess-set/thumbnail.webp?url';
-import thumbnail18 from './kernels/openscad/dollhouse/thumbnail.webp?url';
-import thumbnail19 from './kernels/openscad/fluted-vase/thumbnail.webp?url';
-import thumbnail20 from './kernels/openscad/kitchen-sink/thumbnail.webp?url';
-import thumbnail21 from './kernels/openscad/parts-bin/thumbnail.webp?url';
-import thumbnail22 from './kernels/picogk/boolean-shell/thumbnail.webp?url';
-import thumbnail23 from './kernels/picogk/multifile-asset/thumbnail.webp?url';
-import thumbnail24 from './kernels/picogk/parameterized-sphere/thumbnail.webp?url';
-import thumbnail25 from './kernels/picogk/turbofan/thumbnail.webp?url';
-import thumbnail26 from './kernels/picovoxel/base-box/thumbnail.webp?url';
-import thumbnail27 from './kernels/picovoxel/base-cylinder/thumbnail.webp?url';
-import thumbnail28 from './kernels/picovoxel/base-lens/thumbnail.webp?url';
-import thumbnail29 from './kernels/picovoxel/base-pipe/thumbnail.webp?url';
-import thumbnail30 from './kernels/picovoxel/base-pipe-segment/thumbnail.webp?url';
-import thumbnail31 from './kernels/picovoxel/base-ring/thumbnail.webp?url';
-import thumbnail32 from './kernels/picovoxel/base-sphere/thumbnail.webp?url';
-import thumbnail33 from './kernels/picovoxel/basic-lattices/thumbnail.webp?url';
-import thumbnail34 from './kernels/picovoxel/boolean-showcase/thumbnail.webp?url';
-import thumbnail35 from './kernels/picovoxel/gear/thumbnail.webp?url';
-import thumbnail36 from './kernels/picovoxel/gyroid-lantern/thumbnail.webp?url';
-import thumbnail37 from './kernels/picovoxel/gyroid-sdf/thumbnail.webp?url';
-import thumbnail38 from './kernels/picovoxel/helix-heat-x/thumbnail.webp?url';
-import thumbnail39 from './kernels/picovoxel/hello-world/thumbnail.webp?url';
-import thumbnail40 from './kernels/picovoxel/implicit-gyroid-genus/thumbnail.webp?url';
-import thumbnail41 from './kernels/picovoxel/implicit-gyroid-sphere/thumbnail.webp?url';
-import thumbnail42 from './kernels/picovoxel/implicit-logic-split/thumbnail.webp?url';
-import thumbnail43 from './kernels/picovoxel/implicit-modular/thumbnail.webp?url';
-import thumbnail44 from './kernels/picovoxel/implicit-radial/thumbnail.webp?url';
-import thumbnail45 from './kernels/picovoxel/implicit-random/thumbnail.webp?url';
-import thumbnail46 from './kernels/picovoxel/implicit-regular/thumbnail.webp?url';
-import thumbnail47 from './kernels/picovoxel/implicit-super-ellipsoid/thumbnail.webp?url';
-import thumbnail48 from './kernels/picovoxel/lattice-conformal/thumbnail.webp?url';
-import thumbnail49 from './kernels/picovoxel/lattice-manifold/thumbnail.webp?url';
-import thumbnail50 from './kernels/picovoxel/lattice-pipe/thumbnail.webp?url';
-import thumbnail51 from './kernels/picovoxel/lattice-regular/thumbnail.webp?url';
-import thumbnail52 from './kernels/picovoxel/lead-screw-stage/thumbnail.webp?url';
-import thumbnail53 from './kernels/picovoxel/material-sensor/thumbnail.webp?url';
-import thumbnail54 from './kernels/picovoxel/mesh-painter/thumbnail.webp?url';
-import thumbnail55 from './kernels/picovoxel/mesh-trafo/thumbnail.webp?url';
-import thumbnail56 from './kernels/picovoxel/over-offset/thumbnail.webp?url';
-import thumbnail57 from './kernels/picovoxel/quasicrystal/thumbnail.webp?url';
-import thumbnail58 from './kernels/picovoxel/rover-wheel/thumbnail.webp?url';
-import thumbnail59 from './kernels/picovoxel/simple-fluid-simulation/thumbnail.webp?url';
-import thumbnail60 from './kernels/picovoxel/sphere-minus-beams/thumbnail.webp?url';
-import thumbnail61 from './kernels/picovoxel/torus-knot-round-trip/thumbnail.webp?url';
-import thumbnail62 from './kernels/replicad/bambu-plate/thumbnail.webp?url';
-import thumbnail63 from './kernels/replicad/bench-vise/thumbnail.webp?url';
-import thumbnail64 from './kernels/replicad/birdhouse/thumbnail.webp?url';
-import thumbnail65 from './kernels/replicad/bottle/thumbnail.webp?url';
-import thumbnail66 from './kernels/replicad/bundler-feature-matrix/thumbnail.webp?url';
-import thumbnail67 from './kernels/replicad/card-holder/thumbnail.webp?url';
-import thumbnail68 from './kernels/replicad/chair/thumbnail.webp?url';
-import thumbnail69 from './kernels/replicad/copper-lampshade/thumbnail.webp?url';
-import thumbnail70 from './kernels/replicad/cycloidal-gear/thumbnail.webp?url';
-import thumbnail71 from './kernels/replicad/decorated-box/thumbnail.webp?url';
-import thumbnail72 from './kernels/replicad/drinking-glass/thumbnail.webp?url';
-import thumbnail73 from './kernels/replicad/flower-attachment-section-outline-fixture/thumbnail.webp?url';
-import thumbnail74 from './kernels/replicad/gridfinity-box/thumbnail.webp?url';
-import thumbnail75 from './kernels/replicad/heat-exchanger/thumbnail.webp?url';
-import thumbnail76 from './kernels/replicad/helical-gear/thumbnail.webp?url';
-import thumbnail77 from './kernels/replicad/hex-screwdriver/thumbnail.webp?url';
-import thumbnail78 from './kernels/replicad/hollow-box/thumbnail.webp?url';
-import thumbnail79 from './kernels/replicad/ibeam/thumbnail.webp?url';
-import thumbnail80 from './kernels/replicad/jscad-logo/thumbnail.webp?url';
-import thumbnail81 from './kernels/replicad/kestrel-240-quadcopter/thumbnail.webp?url';
-import thumbnail82 from './kernels/replicad/lego/thumbnail.webp?url';
-import thumbnail83 from './kernels/replicad/libassimp-logo/thumbnail.webp?url';
-import thumbnail84 from './kernels/replicad/logo/thumbnail.webp?url';
-import thumbnail85 from './kernels/replicad/logo-keychain/thumbnail.webp?url';
-import thumbnail86 from './kernels/replicad/nanoraster-logo/thumbnail.webp?url';
-import thumbnail87 from './kernels/replicad/picovoxel-logo/thumbnail.webp?url';
-import thumbnail88 from './kernels/replicad/planetary-gear-system/thumbnail.webp?url';
-import thumbnail89 from './kernels/replicad/pot-plant/thumbnail.webp?url';
-import thumbnail90 from './kernels/replicad/projection-test/thumbnail.webp?url';
-import thumbnail91 from './kernels/replicad/rao-nozzle/thumbnail.webp?url';
-import thumbnail92 from './kernels/replicad/replicad-logo/thumbnail.webp?url';
-import thumbnail93 from './kernels/replicad/simple-tray/thumbnail.webp?url';
-import thumbnail94 from './kernels/replicad/six-axis-arm/thumbnail.webp?url';
-import thumbnail95 from './kernels/replicad/spur-gearbox/thumbnail.webp?url';
-import thumbnail96 from './kernels/replicad/staircase/thumbnail.webp?url';
-import thumbnail97 from './kernels/replicad/standing-fan/thumbnail.webp?url';
-import thumbnail98 from './kernels/replicad/stress-test/thumbnail.webp?url';
-import thumbnail99 from './kernels/replicad/t-slot-rail/thumbnail.webp?url';
-import thumbnail100 from './kernels/replicad/table/thumbnail.webp?url';
-import thumbnail101 from './kernels/replicad/tau-wordmark/thumbnail.webp?url';
-import thumbnail102 from './kernels/replicad/tray/thumbnail.webp?url';
-import thumbnail103 from './kernels/replicad/turbofan/thumbnail.webp?url';
-import thumbnail104 from './kernels/replicad/usb-sensor-shell/thumbnail.webp?url';
-import thumbnail105 from './kernels/replicad/v8-engine/thumbnail.webp?url';
-import thumbnail106 from './kernels/replicad/vase/thumbnail.webp?url';
-import thumbnail107 from './kernels/replicad/wavy-vase/thumbnail.webp?url';
-import thumbnail108 from './kernels/replicad/wedge-door-stopper/thumbnail.webp?url';
-import thumbnail109 from './kernels/replicad/wheelbarrow/thumbnail.webp?url';
-import thumbnail110 from './kernels/replicad/worm-gear-system/thumbnail.webp?url';
-import thumbnail111 from './kernels/smlib/hinged-box/thumbnail.webp?url';
-import thumbnail112 from './kernels/smlib/parametric-plate/thumbnail.webp?url';
-import thumbnail113 from './kernels/smlib/pbr-materials/thumbnail.webp?url';
-import thumbnail114 from './kernels/tscircuit/led-board/thumbnail.webp?url';
-import thumbnail115 from './kernels/tscircuit/usb-sensor-breakout/thumbnail.webp?url';
+import thumbnail15 from './kernels/opencascade/hose-adapter/thumbnail.webp?url';
+import thumbnail16 from './kernels/opencascade/v8-engine-brep/thumbnail.webp?url';
+import thumbnail17 from './kernels/openscad/arq5-racing-quadcopter/thumbnail.webp?url';
+import thumbnail18 from './kernels/openscad/cyber-chess-set/thumbnail.webp?url';
+import thumbnail19 from './kernels/openscad/dollhouse/thumbnail.webp?url';
+import thumbnail20 from './kernels/openscad/fluted-vase/thumbnail.webp?url';
+import thumbnail21 from './kernels/openscad/kitchen-sink/thumbnail.webp?url';
+import thumbnail22 from './kernels/openscad/parts-bin/thumbnail.webp?url';
+import thumbnail23 from './kernels/picogk/boolean-shell/thumbnail.webp?url';
+import thumbnail24 from './kernels/picogk/multifile-asset/thumbnail.webp?url';
+import thumbnail25 from './kernels/picogk/parameterized-sphere/thumbnail.webp?url';
+import thumbnail26 from './kernels/picogk/turbofan/thumbnail.webp?url';
+import thumbnail27 from './kernels/picovoxel/base-box/thumbnail.webp?url';
+import thumbnail28 from './kernels/picovoxel/base-cylinder/thumbnail.webp?url';
+import thumbnail29 from './kernels/picovoxel/base-lens/thumbnail.webp?url';
+import thumbnail30 from './kernels/picovoxel/base-pipe/thumbnail.webp?url';
+import thumbnail31 from './kernels/picovoxel/base-pipe-segment/thumbnail.webp?url';
+import thumbnail32 from './kernels/picovoxel/base-ring/thumbnail.webp?url';
+import thumbnail33 from './kernels/picovoxel/base-sphere/thumbnail.webp?url';
+import thumbnail34 from './kernels/picovoxel/basic-lattices/thumbnail.webp?url';
+import thumbnail35 from './kernels/picovoxel/boolean-showcase/thumbnail.webp?url';
+import thumbnail36 from './kernels/picovoxel/gear/thumbnail.webp?url';
+import thumbnail37 from './kernels/picovoxel/gyroid-lantern/thumbnail.webp?url';
+import thumbnail38 from './kernels/picovoxel/gyroid-sdf/thumbnail.webp?url';
+import thumbnail39 from './kernels/picovoxel/helix-heat-x/thumbnail.webp?url';
+import thumbnail40 from './kernels/picovoxel/hello-world/thumbnail.webp?url';
+import thumbnail41 from './kernels/picovoxel/implicit-gyroid-genus/thumbnail.webp?url';
+import thumbnail42 from './kernels/picovoxel/implicit-gyroid-sphere/thumbnail.webp?url';
+import thumbnail43 from './kernels/picovoxel/implicit-logic-split/thumbnail.webp?url';
+import thumbnail44 from './kernels/picovoxel/implicit-modular/thumbnail.webp?url';
+import thumbnail45 from './kernels/picovoxel/implicit-radial/thumbnail.webp?url';
+import thumbnail46 from './kernels/picovoxel/implicit-random/thumbnail.webp?url';
+import thumbnail47 from './kernels/picovoxel/implicit-regular/thumbnail.webp?url';
+import thumbnail48 from './kernels/picovoxel/implicit-super-ellipsoid/thumbnail.webp?url';
+import thumbnail49 from './kernels/picovoxel/lattice-conformal/thumbnail.webp?url';
+import thumbnail50 from './kernels/picovoxel/lattice-manifold/thumbnail.webp?url';
+import thumbnail51 from './kernels/picovoxel/lattice-pipe/thumbnail.webp?url';
+import thumbnail52 from './kernels/picovoxel/lattice-regular/thumbnail.webp?url';
+import thumbnail53 from './kernels/picovoxel/lead-screw-stage/thumbnail.webp?url';
+import thumbnail54 from './kernels/picovoxel/material-sensor/thumbnail.webp?url';
+import thumbnail55 from './kernels/picovoxel/mesh-painter/thumbnail.webp?url';
+import thumbnail56 from './kernels/picovoxel/mesh-trafo/thumbnail.webp?url';
+import thumbnail57 from './kernels/picovoxel/over-offset/thumbnail.webp?url';
+import thumbnail58 from './kernels/picovoxel/quasicrystal/thumbnail.webp?url';
+import thumbnail59 from './kernels/picovoxel/rover-wheel/thumbnail.webp?url';
+import thumbnail60 from './kernels/picovoxel/simple-fluid-simulation/thumbnail.webp?url';
+import thumbnail61 from './kernels/picovoxel/sphere-minus-beams/thumbnail.webp?url';
+import thumbnail62 from './kernels/picovoxel/torus-knot-round-trip/thumbnail.webp?url';
+import thumbnail63 from './kernels/replicad/bambu-plate/thumbnail.webp?url';
+import thumbnail64 from './kernels/replicad/bench-vise/thumbnail.webp?url';
+import thumbnail65 from './kernels/replicad/birdhouse/thumbnail.webp?url';
+import thumbnail66 from './kernels/replicad/bottle/thumbnail.webp?url';
+import thumbnail67 from './kernels/replicad/bundler-feature-matrix/thumbnail.webp?url';
+import thumbnail68 from './kernels/replicad/card-holder/thumbnail.webp?url';
+import thumbnail69 from './kernels/replicad/chair/thumbnail.webp?url';
+import thumbnail70 from './kernels/replicad/copper-lampshade/thumbnail.webp?url';
+import thumbnail71 from './kernels/replicad/cycloidal-gear/thumbnail.webp?url';
+import thumbnail72 from './kernels/replicad/decorated-box/thumbnail.webp?url';
+import thumbnail73 from './kernels/replicad/drinking-glass/thumbnail.webp?url';
+import thumbnail74 from './kernels/replicad/flower-attachment-section-outline-fixture/thumbnail.webp?url';
+import thumbnail75 from './kernels/replicad/gridfinity-box/thumbnail.webp?url';
+import thumbnail76 from './kernels/replicad/heat-exchanger/thumbnail.webp?url';
+import thumbnail77 from './kernels/replicad/helical-gear/thumbnail.webp?url';
+import thumbnail78 from './kernels/replicad/hex-screwdriver/thumbnail.webp?url';
+import thumbnail79 from './kernels/replicad/hollow-box/thumbnail.webp?url';
+import thumbnail80 from './kernels/replicad/ibeam/thumbnail.webp?url';
+import thumbnail81 from './kernels/replicad/jscad-logo/thumbnail.webp?url';
+import thumbnail82 from './kernels/replicad/kestrel-240-quadcopter/thumbnail.webp?url';
+import thumbnail83 from './kernels/replicad/lego/thumbnail.webp?url';
+import thumbnail84 from './kernels/replicad/libassimp-logo/thumbnail.webp?url';
+import thumbnail85 from './kernels/replicad/logo/thumbnail.webp?url';
+import thumbnail86 from './kernels/replicad/logo-keychain/thumbnail.webp?url';
+import thumbnail87 from './kernels/replicad/nanoraster-logo/thumbnail.webp?url';
+import thumbnail88 from './kernels/replicad/picovoxel-logo/thumbnail.webp?url';
+import thumbnail89 from './kernels/replicad/planetary-gear-system/thumbnail.webp?url';
+import thumbnail90 from './kernels/replicad/pot-plant/thumbnail.webp?url';
+import thumbnail91 from './kernels/replicad/projection-test/thumbnail.webp?url';
+import thumbnail92 from './kernels/replicad/rao-nozzle/thumbnail.webp?url';
+import thumbnail93 from './kernels/replicad/replicad-logo/thumbnail.webp?url';
+import thumbnail94 from './kernels/replicad/simple-tray/thumbnail.webp?url';
+import thumbnail95 from './kernels/replicad/six-axis-arm/thumbnail.webp?url';
+import thumbnail96 from './kernels/replicad/spur-gearbox/thumbnail.webp?url';
+import thumbnail97 from './kernels/replicad/staircase/thumbnail.webp?url';
+import thumbnail98 from './kernels/replicad/standing-fan/thumbnail.webp?url';
+import thumbnail99 from './kernels/replicad/stress-test/thumbnail.webp?url';
+import thumbnail100 from './kernels/replicad/t-slot-rail/thumbnail.webp?url';
+import thumbnail101 from './kernels/replicad/table/thumbnail.webp?url';
+import thumbnail102 from './kernels/replicad/tau-wordmark/thumbnail.webp?url';
+import thumbnail103 from './kernels/replicad/tray/thumbnail.webp?url';
+import thumbnail104 from './kernels/replicad/turbofan/thumbnail.webp?url';
+import thumbnail105 from './kernels/replicad/usb-sensor-shell/thumbnail.webp?url';
+import thumbnail106 from './kernels/replicad/v8-engine/thumbnail.webp?url';
+import thumbnail107 from './kernels/replicad/vase/thumbnail.webp?url';
+import thumbnail108 from './kernels/replicad/wavy-vase/thumbnail.webp?url';
+import thumbnail109 from './kernels/replicad/wedge-door-stopper/thumbnail.webp?url';
+import thumbnail110 from './kernels/replicad/wheelbarrow/thumbnail.webp?url';
+import thumbnail111 from './kernels/replicad/worm-gear-system/thumbnail.webp?url';
+import thumbnail112 from './kernels/smlib/coat-hook/thumbnail.webp?url';
+import thumbnail113 from './kernels/smlib/hinged-box/thumbnail.webp?url';
+import thumbnail114 from './kernels/smlib/parametric-plate/thumbnail.webp?url';
+import thumbnail115 from './kernels/smlib/pbr-materials/thumbnail.webp?url';
+import thumbnail116 from './kernels/tscircuit/led-board/thumbnail.webp?url';
+import thumbnail117 from './kernels/tscircuit/usb-sensor-breakout/thumbnail.webp?url';
 
 /** Static thumbnail URLs keyed by `<kernel>/<example>`. @public */
 export const thumbnailAssets = {
@@ -137,107 +139,109 @@ export const thumbnailAssets = {
   'jscad/section-picking-fixture': thumbnail12,
   'manifold/honeycomb-grille': thumbnail13,
   'manifold/manifold-logo': thumbnail14,
-  'opencascade/v8-engine-brep': thumbnail15,
-  'openscad/arq5-racing-quadcopter': thumbnail16,
-  'openscad/cyber-chess-set': thumbnail17,
-  'openscad/dollhouse': thumbnail18,
-  'openscad/fluted-vase': thumbnail19,
-  'openscad/kitchen-sink': thumbnail20,
-  'openscad/parts-bin': thumbnail21,
-  'picogk/boolean-shell': thumbnail22,
-  'picogk/multifile-asset': thumbnail23,
-  'picogk/parameterized-sphere': thumbnail24,
-  'picogk/turbofan': thumbnail25,
-  'picovoxel/base-box': thumbnail26,
-  'picovoxel/base-cylinder': thumbnail27,
-  'picovoxel/base-lens': thumbnail28,
-  'picovoxel/base-pipe': thumbnail29,
-  'picovoxel/base-pipe-segment': thumbnail30,
-  'picovoxel/base-ring': thumbnail31,
-  'picovoxel/base-sphere': thumbnail32,
-  'picovoxel/basic-lattices': thumbnail33,
-  'picovoxel/boolean-showcase': thumbnail34,
-  'picovoxel/gear': thumbnail35,
-  'picovoxel/gyroid-lantern': thumbnail36,
-  'picovoxel/gyroid-sdf': thumbnail37,
-  'picovoxel/helix-heat-x': thumbnail38,
-  'picovoxel/hello-world': thumbnail39,
-  'picovoxel/implicit-gyroid-genus': thumbnail40,
-  'picovoxel/implicit-gyroid-sphere': thumbnail41,
-  'picovoxel/implicit-logic-split': thumbnail42,
-  'picovoxel/implicit-modular': thumbnail43,
-  'picovoxel/implicit-radial': thumbnail44,
-  'picovoxel/implicit-random': thumbnail45,
-  'picovoxel/implicit-regular': thumbnail46,
-  'picovoxel/implicit-super-ellipsoid': thumbnail47,
-  'picovoxel/lattice-conformal': thumbnail48,
-  'picovoxel/lattice-manifold': thumbnail49,
-  'picovoxel/lattice-pipe': thumbnail50,
-  'picovoxel/lattice-regular': thumbnail51,
-  'picovoxel/lead-screw-stage': thumbnail52,
-  'picovoxel/material-sensor': thumbnail53,
-  'picovoxel/mesh-painter': thumbnail54,
-  'picovoxel/mesh-trafo': thumbnail55,
-  'picovoxel/over-offset': thumbnail56,
-  'picovoxel/quasicrystal': thumbnail57,
-  'picovoxel/rover-wheel': thumbnail58,
-  'picovoxel/simple-fluid-simulation': thumbnail59,
-  'picovoxel/sphere-minus-beams': thumbnail60,
-  'picovoxel/torus-knot-round-trip': thumbnail61,
-  'replicad/bambu-plate': thumbnail62,
-  'replicad/bench-vise': thumbnail63,
-  'replicad/birdhouse': thumbnail64,
-  'replicad/bottle': thumbnail65,
-  'replicad/bundler-feature-matrix': thumbnail66,
-  'replicad/card-holder': thumbnail67,
-  'replicad/chair': thumbnail68,
-  'replicad/copper-lampshade': thumbnail69,
-  'replicad/cycloidal-gear': thumbnail70,
-  'replicad/decorated-box': thumbnail71,
-  'replicad/drinking-glass': thumbnail72,
-  'replicad/flower-attachment-section-outline-fixture': thumbnail73,
-  'replicad/gridfinity-box': thumbnail74,
-  'replicad/heat-exchanger': thumbnail75,
-  'replicad/helical-gear': thumbnail76,
-  'replicad/hex-screwdriver': thumbnail77,
-  'replicad/hollow-box': thumbnail78,
-  'replicad/ibeam': thumbnail79,
-  'replicad/jscad-logo': thumbnail80,
-  'replicad/kestrel-240-quadcopter': thumbnail81,
-  'replicad/lego': thumbnail82,
-  'replicad/libassimp-logo': thumbnail83,
-  'replicad/logo': thumbnail84,
-  'replicad/logo-keychain': thumbnail85,
-  'replicad/nanoraster-logo': thumbnail86,
-  'replicad/picovoxel-logo': thumbnail87,
-  'replicad/planetary-gear-system': thumbnail88,
-  'replicad/pot-plant': thumbnail89,
-  'replicad/projection-test': thumbnail90,
-  'replicad/rao-nozzle': thumbnail91,
-  'replicad/replicad-logo': thumbnail92,
-  'replicad/simple-tray': thumbnail93,
-  'replicad/six-axis-arm': thumbnail94,
-  'replicad/spur-gearbox': thumbnail95,
-  'replicad/staircase': thumbnail96,
-  'replicad/standing-fan': thumbnail97,
-  'replicad/stress-test': thumbnail98,
-  'replicad/t-slot-rail': thumbnail99,
-  'replicad/table': thumbnail100,
-  'replicad/tau-wordmark': thumbnail101,
-  'replicad/tray': thumbnail102,
-  'replicad/turbofan': thumbnail103,
-  'replicad/usb-sensor-shell': thumbnail104,
-  'replicad/v8-engine': thumbnail105,
-  'replicad/vase': thumbnail106,
-  'replicad/wavy-vase': thumbnail107,
-  'replicad/wedge-door-stopper': thumbnail108,
-  'replicad/wheelbarrow': thumbnail109,
-  'replicad/worm-gear-system': thumbnail110,
-  'smlib/hinged-box': thumbnail111,
-  'smlib/parametric-plate': thumbnail112,
-  'smlib/pbr-materials': thumbnail113,
-  'tscircuit/led-board': thumbnail114,
-  'tscircuit/usb-sensor-breakout': thumbnail115,
+  'opencascade/hose-adapter': thumbnail15,
+  'opencascade/v8-engine-brep': thumbnail16,
+  'openscad/arq5-racing-quadcopter': thumbnail17,
+  'openscad/cyber-chess-set': thumbnail18,
+  'openscad/dollhouse': thumbnail19,
+  'openscad/fluted-vase': thumbnail20,
+  'openscad/kitchen-sink': thumbnail21,
+  'openscad/parts-bin': thumbnail22,
+  'picogk/boolean-shell': thumbnail23,
+  'picogk/multifile-asset': thumbnail24,
+  'picogk/parameterized-sphere': thumbnail25,
+  'picogk/turbofan': thumbnail26,
+  'picovoxel/base-box': thumbnail27,
+  'picovoxel/base-cylinder': thumbnail28,
+  'picovoxel/base-lens': thumbnail29,
+  'picovoxel/base-pipe': thumbnail30,
+  'picovoxel/base-pipe-segment': thumbnail31,
+  'picovoxel/base-ring': thumbnail32,
+  'picovoxel/base-sphere': thumbnail33,
+  'picovoxel/basic-lattices': thumbnail34,
+  'picovoxel/boolean-showcase': thumbnail35,
+  'picovoxel/gear': thumbnail36,
+  'picovoxel/gyroid-lantern': thumbnail37,
+  'picovoxel/gyroid-sdf': thumbnail38,
+  'picovoxel/helix-heat-x': thumbnail39,
+  'picovoxel/hello-world': thumbnail40,
+  'picovoxel/implicit-gyroid-genus': thumbnail41,
+  'picovoxel/implicit-gyroid-sphere': thumbnail42,
+  'picovoxel/implicit-logic-split': thumbnail43,
+  'picovoxel/implicit-modular': thumbnail44,
+  'picovoxel/implicit-radial': thumbnail45,
+  'picovoxel/implicit-random': thumbnail46,
+  'picovoxel/implicit-regular': thumbnail47,
+  'picovoxel/implicit-super-ellipsoid': thumbnail48,
+  'picovoxel/lattice-conformal': thumbnail49,
+  'picovoxel/lattice-manifold': thumbnail50,
+  'picovoxel/lattice-pipe': thumbnail51,
+  'picovoxel/lattice-regular': thumbnail52,
+  'picovoxel/lead-screw-stage': thumbnail53,
+  'picovoxel/material-sensor': thumbnail54,
+  'picovoxel/mesh-painter': thumbnail55,
+  'picovoxel/mesh-trafo': thumbnail56,
+  'picovoxel/over-offset': thumbnail57,
+  'picovoxel/quasicrystal': thumbnail58,
+  'picovoxel/rover-wheel': thumbnail59,
+  'picovoxel/simple-fluid-simulation': thumbnail60,
+  'picovoxel/sphere-minus-beams': thumbnail61,
+  'picovoxel/torus-knot-round-trip': thumbnail62,
+  'replicad/bambu-plate': thumbnail63,
+  'replicad/bench-vise': thumbnail64,
+  'replicad/birdhouse': thumbnail65,
+  'replicad/bottle': thumbnail66,
+  'replicad/bundler-feature-matrix': thumbnail67,
+  'replicad/card-holder': thumbnail68,
+  'replicad/chair': thumbnail69,
+  'replicad/copper-lampshade': thumbnail70,
+  'replicad/cycloidal-gear': thumbnail71,
+  'replicad/decorated-box': thumbnail72,
+  'replicad/drinking-glass': thumbnail73,
+  'replicad/flower-attachment-section-outline-fixture': thumbnail74,
+  'replicad/gridfinity-box': thumbnail75,
+  'replicad/heat-exchanger': thumbnail76,
+  'replicad/helical-gear': thumbnail77,
+  'replicad/hex-screwdriver': thumbnail78,
+  'replicad/hollow-box': thumbnail79,
+  'replicad/ibeam': thumbnail80,
+  'replicad/jscad-logo': thumbnail81,
+  'replicad/kestrel-240-quadcopter': thumbnail82,
+  'replicad/lego': thumbnail83,
+  'replicad/libassimp-logo': thumbnail84,
+  'replicad/logo': thumbnail85,
+  'replicad/logo-keychain': thumbnail86,
+  'replicad/nanoraster-logo': thumbnail87,
+  'replicad/picovoxel-logo': thumbnail88,
+  'replicad/planetary-gear-system': thumbnail89,
+  'replicad/pot-plant': thumbnail90,
+  'replicad/projection-test': thumbnail91,
+  'replicad/rao-nozzle': thumbnail92,
+  'replicad/replicad-logo': thumbnail93,
+  'replicad/simple-tray': thumbnail94,
+  'replicad/six-axis-arm': thumbnail95,
+  'replicad/spur-gearbox': thumbnail96,
+  'replicad/staircase': thumbnail97,
+  'replicad/standing-fan': thumbnail98,
+  'replicad/stress-test': thumbnail99,
+  'replicad/t-slot-rail': thumbnail100,
+  'replicad/table': thumbnail101,
+  'replicad/tau-wordmark': thumbnail102,
+  'replicad/tray': thumbnail103,
+  'replicad/turbofan': thumbnail104,
+  'replicad/usb-sensor-shell': thumbnail105,
+  'replicad/v8-engine': thumbnail106,
+  'replicad/vase': thumbnail107,
+  'replicad/wavy-vase': thumbnail108,
+  'replicad/wedge-door-stopper': thumbnail109,
+  'replicad/wheelbarrow': thumbnail110,
+  'replicad/worm-gear-system': thumbnail111,
+  'smlib/coat-hook': thumbnail112,
+  'smlib/hinged-box': thumbnail113,
+  'smlib/parametric-plate': thumbnail114,
+  'smlib/pbr-materials': thumbnail115,
+  'tscircuit/led-board': thumbnail116,
+  'tscircuit/usb-sensor-breakout': thumbnail117,
 } as const;
 
 /** Key of a generated example thumbnail asset. @public */

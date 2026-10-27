@@ -193,7 +193,7 @@ function SiteShell() {
           </nav>
         </div>
         <div className='band footer-bottom'>
-          <span className='cell'>© 2026 Tau · Tau-authored code is Apache-2.0</span>
+          <span className='cell'>© 2026 Tau · Apache-2.0</span>
           <Button variant='ghost' data-consent-open hidden>
             Cookie preferences
           </Button>

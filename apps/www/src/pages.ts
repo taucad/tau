@@ -6,7 +6,7 @@ export const pages: Array<{ path: string; title: string; description: string; er
     path: '/',
     title: 'Tau — Design. Verify. Make.',
     description:
-      'Open the planetary gearbox, change one number and export STL. Tau is code-CAD: check geometry with GeoSpec, then take the file into machining or 3D printing.',
+      'Open the planetary gearbox, change one number and export STL. Tau is open-source code-CAD: check geometry with GeoSpec, then take the file into machining or 3D printing.',
   },
   {
     path: '/product/',

@@ -375,8 +375,8 @@ export const ecosystemGrid = (): React.JSX.Element => (
         working together.
       </h2>
       <p>
-        Choose the engine that suits the part and the model that suits the job. Tau-authored code is Apache-2.0.
-        OpenCascade, used by Replicad and the OpenCascade kernel, is LGPL-2.1.
+        Choose the engine that suits the part and the model that suits the job. Apache-2.0 source you can read, run and
+        build on.
       </p>
     </header>
     {ecosystem.map((group) => (
@@ -396,7 +396,7 @@ export const ecosystemGrid = (): React.JSX.Element => (
       </div>
     ))}
     <div className='cell eco-foot'>
-      <p>Tau-authored code is Apache-2.0. OpenCascade is LGPL-2.1.</p>
+      <p>Open source. Apache-2.0. Yours to build on.</p>
       <SiteLink className='text-link' href={sourceUrl}>
         Explore the source {out}
       </SiteLink>

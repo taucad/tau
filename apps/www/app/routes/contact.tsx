@@ -35,7 +35,7 @@ export const content = (): React.JSX.Element => (
       </article>
       <article className='cell'>
         <h2>Issues & source</h2>
-        <p>Found a bug or want to contribute? Tau-authored code is Apache-2.0. OpenCascade is LGPL-2.1.</p>
+        <p>Found a bug or want to contribute? Tau is Apache-2.0 open source.</p>
         <SiteLink className='text-link' href={`${sourceUrl}/issues`}>
           Open an issue {out}
         </SiteLink>

@@ -113,7 +113,7 @@ Start `node apps/www/scripts/serve.ts`, then run `node apps/www/scripts/browser-
 
 ## Claims
 
-Tau Cloud backup and sync are presented as available on Pro (10 GB) and Enterprise (100 GB). Free shows GitHub backup only, because free-tier sync is held off in production. Hosted verification and Enterprise signed evidence/CI keep their “Coming soon” labels. The download page links the four archive URLs; hosting those files is separate from this copy. The blog stays empty until a human writes and reviews an article. Tau-authored code is Apache-2.0. OpenCascade is LGPL-2.1, so the site does not call the complete codebase Apache-2.0. GeoSpec checks geometry. It is not FEA or a manufacturing-readiness check. PicoGK native is Tau Desktop on macOS Apple silicon only. SMLib runs in the browser.
+Tau Cloud backup and sync are presented as available on Pro (10 GB) and Enterprise (100 GB). Free shows GitHub backup only, because free-tier sync is held off in production. Hosted verification and Enterprise signed evidence/CI keep their “Coming soon” labels. The download page links the four archive URLs; hosting those files is separate from this copy. The blog stays empty until a human writes and reviews an article. GeoSpec checks geometry. It is not FEA or a manufacturing-readiness check. PicoGK native is Tau Desktop on macOS Apple silicon only. SMLib runs in the browser.
 
 ## Lint
 

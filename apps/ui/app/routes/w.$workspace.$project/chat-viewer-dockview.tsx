@@ -22,7 +22,8 @@ import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 import { graphicsSettingsForView, newViewRecord } from '@taucad/workbench-panes/records/view-record';
 import { viewTabTitle } from '#workbench-records/view-titles.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { createStaticDataSource } from '@taucad/workbench-panes/files/file-selector';
+import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
+import { useOptionalFileManager } from '#hooks/use-file-manager.js';
 import type { FileSelectorDataSource } from '@taucad/workbench-panes/files/file-selector';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { useProject } from '#hooks/use-project.js';
@@ -295,33 +296,83 @@ export type ViewerSelectableFile = Pick<FileEntry, 'name' | 'path'> & { readonly
 
 export const viewerExcludedSourceSuffixes = ['.geospec.ts', '.geospec.js'] as const;
 
+const isProjectViewerEntry = (entry: Pick<FileEntry, 'provenance'>): boolean =>
+  entry.provenance === undefined || entry.provenance.source === 'project';
+
+const isViewerSourcePath = (path: string, capabilities: Pick<CapabilitiesManifest, 'registrations'>): boolean =>
+  !viewerExcludedSourceSuffixes.some((suffix) => path.toLowerCase().endsWith(suffix)) &&
+  capabilities.registrations.some(
+    (registration) => registration.kind === 'kernel' && sourcePathMatchesExtensions(path, registration.extensions),
+  );
+
 export const listViewerSelectableFiles = (
   fileTree: ReadonlyMap<string, FileEntry>,
   capabilities: Pick<CapabilitiesManifest, 'registrations'>,
 ): ViewerSelectableFile[] =>
   [...fileTree.values()]
-    .filter((entry) => entry.type === 'file')
-    /* The viewer renders the project's own geometry; a read-only overlay or a
-     * dependency is never a render target (Exclusion Matrix). A row no view
-     * stamped keeps its place so nothing disappears when provenance is absent. */
-    .filter((entry) => entry.provenance === undefined || entry.provenance.source === 'project')
-    .filter((entry) => {
-      const path = entry.path.toLowerCase();
-      return !viewerExcludedSourceSuffixes.some((suffix) => path.endsWith(suffix));
-    })
-    .filter((entry) =>
-      capabilities.registrations.some(
-        (registration) =>
-          registration.kind === 'kernel' && sourcePathMatchesExtensions(entry.path, registration.extensions),
-      ),
+    .filter(
+      (entry) => entry.type === 'file' && isProjectViewerEntry(entry) && isViewerSourcePath(entry.path, capabilities),
     )
     .map(({ name, path, size }) => ({ name, path, size }))
     .sort((a, b) => a.path.localeCompare(b.path));
 
-function useViewerSelectableFiles(): ViewerSelectableFile[] | undefined {
+/** Browse and search the project's authority, including directories the visible tree has never expanded. */
+export function createViewerFileDataSource(
+  tree: Pick<FileTreeService, 'listDirectory' | 'searchFiles' | 'getTreeSnapshot'> | undefined,
+  capabilities: Pick<CapabilitiesManifest, 'registrations'> | undefined,
+  revision = 0,
+): FileSelectorDataSource & { readonly revision: number } {
+  return {
+    revision,
+    async loadDirectory(path) {
+      if (!tree || !capabilities) {
+        return [];
+      }
+      const entries = await tree.listDirectory(path);
+      const snapshot = tree.getTreeSnapshot();
+      return entries.filter(
+        (entry) =>
+          isProjectViewerEntry(snapshot.get(entry.path) ?? {}) &&
+          (entry.isFolder || isViewerSourcePath(entry.path, capabilities)),
+      );
+    },
+    async searchFiles(query) {
+      if (!tree || !capabilities) {
+        return [];
+      }
+      const entries = await tree.searchFiles(query, { maxResults: 100, includeDirectories: false });
+      if (entries.length === 100) {
+        throw new Error('Refine your search or browse folders to see supported files.');
+      }
+      return entries
+        .filter(
+          (entry) =>
+            entry.type === 'file' && isProjectViewerEntry(entry) && isViewerSourcePath(entry.path, capabilities),
+        )
+        .map(({ name, path, size }) => ({ name, path, size, isFolder: false }));
+    },
+  };
+}
+
+function useViewerCapabilities() {
   const { geometryUnits, mainEntryPath } = useProject();
+  return useSelector(geometryUnits.get(mainEntryPath), (state) => state?.context.capabilities);
+}
+
+function useViewerFileDataSource(): FileSelectorDataSource {
+  const tree = useOptionalFileManager()?.treeService;
+  const capabilities = useViewerCapabilities();
+  const revision = useSyncExternalStore(
+    useCallback((listener: () => void) => tree?.subscribeTree(listener) ?? (() => undefined), [tree]),
+    useCallback(() => tree?.completeTreeVersion ?? 0, [tree]),
+    () => 0,
+  );
+  return useMemo(() => createViewerFileDataSource(tree, capabilities, revision), [tree, capabilities, revision]);
+}
+
+function useViewerSelectableFiles(): ViewerSelectableFile[] | undefined {
   const fileTree = useFileTreeMap();
-  const capabilities = useSelector(geometryUnits.get(mainEntryPath), (state) => state?.context.capabilities);
+  const capabilities = useViewerCapabilities();
 
   return useMemo(
     () => (capabilities ? listViewerSelectableFiles(fileTree, capabilities) : undefined),
@@ -482,8 +533,7 @@ export const createInheritedGraphicsSettings = (
 };
 
 function ViewerLeftActions(properties: IDockviewHeaderActionsProps): React.JSX.Element {
-  const files = useViewerSelectableFiles();
-  const fileSelectorDataSource = useMemo(() => createStaticDataSource(files ?? []), [files]);
+  const fileSelectorDataSource = useViewerFileDataSource();
 
   return (
     <DockviewLeftActions
@@ -575,8 +625,7 @@ export const ViewerDockview = memo(function ({
     }),
     [profile],
   );
-  const files = useViewerSelectableFiles();
-  const fileDataSource = useMemo(() => createStaticDataSource(files ?? []), [files]);
+  const fileDataSource = useViewerFileDataSource();
   const [api, setApi] = useState<DockviewApi>();
   useEffect(() => {
     onApiChange?.(api);

@@ -22,23 +22,7 @@ const fixtureRoot = path.resolve(import.meta.dirname, 'fixtures/grafana-contract
  * Names a dashboard may query ahead of the PR that declares them, as `name: 'owner/repo#PR'`. Each
  * entry goes when that PR merges; the tests fail until it does, and when no dashboard queries it.
  */
-const pendingDeclaration: Readonly<Record<string, string>> = {
-  // W14 OB3's storage accounting scheduler declares these; OB9's usage, cost and capacity rows and OB10's
-  // accounting, R2, ceiling and pooler rules read them. Remove each entry when OB3 (taucad/tau#1176) merges.
-  tau_storage_usage_bytes: 'taucad/tau#1176',
-  tau_storage_usage_repositories: 'taucad/tau#1176',
-  tau_git_repository_size_distribution: 'taucad/tau#1176',
-  tau_git_repository_ceiling_proximity: 'taucad/tau#1176',
-  tau_storage_quota_owners: 'taucad/tau#1176',
-  tau_db_connections: 'taucad/tau#1176',
-  tau_db_connection_budget: 'taucad/tau#1176',
-  tau_r2_requests: 'taucad/tau#1176',
-  tau_r2_stored_bytes: 'taucad/tau#1176',
-  tau_r2_objects: 'taucad/tau#1176',
-  tau_r2_bandwidth_bytes: 'taucad/tau#1176',
-  tau_storage_accounting_passes_total: 'taucad/tau#1176',
-  tau_storage_accounting_last_success: 'taucad/tau#1176',
-};
+const pendingDeclaration: Readonly<Record<string, string>> = {};
 
 /**
  * The API's per-process instruments live in its OTel bootstrap rather than the registry (they observe

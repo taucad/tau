@@ -7,7 +7,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(170);
+    expect(metrics).toHaveLength(183);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -40,6 +40,54 @@ describe('TauMetrics', () => {
       tau_git_hot_project_commit_rate: { type: 'gauge', unit: '{commit}/s' },
       tau_git_hot_project_writers: { type: 'gauge', unit: '{writer}' },
     });
+  });
+
+  /* W14 OB3: the storage accounting scheduler's series, exported as the catalogue (N43–N55) lists them. */
+  it('should declare the storage accounting instruments by their catalogue names', () => {
+    const exported = Object.fromEntries(
+      [
+        TauMetrics.storageUsageBytes,
+        TauMetrics.storageUsageRepositories,
+        TauMetrics.gitRepositorySizeDistribution,
+        TauMetrics.gitRepositoryCeilingProximity,
+        TauMetrics.storageQuotaOwners,
+        TauMetrics.databaseConnections,
+        TauMetrics.databaseConnectionBudget,
+        TauMetrics.r2Requests,
+        TauMetrics.r2StoredBytes,
+        TauMetrics.r2Objects,
+        TauMetrics.r2BandwidthBytes,
+        TauMetrics.storageAccountingPasses,
+        TauMetrics.storageAccountingLastSuccess,
+      ].map((metric) => [toPrometheusName(metric.name, metric.type), { type: metric.type, unit: metric.unit }]),
+    );
+    expect(exported).toEqual({
+      tau_storage_usage_bytes: { type: 'gauge', unit: 'By' },
+      tau_storage_usage_repositories: { type: 'gauge', unit: '{repository}' },
+      tau_git_repository_size_distribution: {
+        type: 'gauge',
+        unit: '{repository}',
+      },
+      tau_git_repository_ceiling_proximity: {
+        type: 'gauge',
+        unit: '{repository}',
+      },
+      tau_storage_quota_owners: { type: 'gauge', unit: '{owner}' },
+      tau_db_connections: { type: 'gauge', unit: '{connection}' },
+      tau_db_connection_budget: { type: 'gauge', unit: '{connection}' },
+      tau_r2_requests: { type: 'gauge', unit: '{request}' },
+      tau_r2_stored_bytes: { type: 'gauge', unit: 'By' },
+      tau_r2_objects: { type: 'gauge', unit: '{object}' },
+      tau_r2_bandwidth_bytes: { type: 'gauge', unit: 'By' },
+      tau_storage_accounting_passes_total: { type: 'counter', unit: '{pass}' },
+      tau_storage_accounting_last_success: { type: 'gauge', unit: 's' },
+    });
+  });
+
+  it('should bound the R2 bucket label to roles, so a bucket name never becomes a label value', () => {
+    const bucket = TauMetrics.r2StoredBytes.attributes.shape['tau.r2.bucket'];
+    expect(bucket.options).toEqual(['public', 'private', 'other']);
+    expect(bucket.safeParse('tau-content-staging').success).toBe(false);
   });
 
   /* W13 Finding 8 / W14 OB6: the B2 copier's series, exactly as the catalogue and its rules name them. */

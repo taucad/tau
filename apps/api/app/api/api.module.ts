@@ -20,6 +20,7 @@ import { PublicationsModule } from '#api/publications/publications.module.js';
 import { DurableEventsModule } from '#api/durable-events/durable-events.module.js';
 import { JobsModule } from '#api/jobs/jobs.module.js';
 import { RepositoriesModule } from '#api/repositories/repositories.module.js';
+import { StorageAccountingModule } from '#api/storage-accounting/storage-accounting.module.js';
 import { GithubModule } from '#api/github/github.module.js';
 import { ModelInvocationModule } from '#api/llm/model-invocation.module.js';
 import { VoiceModule } from '#api/voice/voice.module.js';
@@ -50,6 +51,7 @@ export class ApiModule {
         ProviderModule,
         PublicationsModule,
         RepositoriesModule,
+        StorageAccountingModule,
         TelemetryIngestModule,
         VoiceModule,
         ...(import.meta.env.DEV ? [TestApiModule] : []),

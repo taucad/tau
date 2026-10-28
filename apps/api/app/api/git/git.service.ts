@@ -168,7 +168,7 @@ export type GitAccess = {
  * @param entitlements - The owner's commercial entitlements.
  * @returns The allowance in bytes.
  */
-const storageLimitOf = (entitlements: CommercialEntitlements): number =>
+export const storageLimitOf = (entitlements: CommercialEntitlements): number =>
   entitlements.canSyncFiles
     ? (entitlements.storageLimitBytes ??
       (entitlements.tier === undefined ? storageLimitBytesByTier.pro : storageLimitBytesByTier[entitlements.tier]))

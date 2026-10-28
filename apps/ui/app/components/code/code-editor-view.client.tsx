@@ -1,4 +1,7 @@
+import { editorSurfaceTheme } from '#components/code/editor-surface-theme.js';
+import '@vscode/codicons/dist/codicon.css';
 import '#components/code/code-editor.css';
+import { renderCompletionIcon } from '#components/code/editor-completion-icon.js';
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { EditorState, Compartment, Prec } from '@codemirror/state';
 import type { ViewUpdate } from '@codemirror/view';
@@ -155,7 +158,10 @@ const editorTheme = EditorView.theme({
   },
   '.cm-conflict-mine': { backgroundColor: 'color-mix(in oklch, var(--success) 20%, transparent)' },
   '.cm-conflict-theirs': { backgroundColor: 'color-mix(in oklch, var(--feature) 20%, transparent)' },
-  '.cm-lineNumbers .cm-gutterElement': { minWidth: '3.5em', paddingRight: '0.75em' },
+  '.cm-lineNumbers .cm-gutterElement': { minWidth: '4ch', padding: '0 var(--spacing)' },
+  '.cm-gutter-lint': { width: '0' },
+  '.cm-gutter-lint:has(.cm-lint-marker)': { width: '1em' },
+  '.cm-gutter-lint .cm-gutterElement': { padding: '0' },
 });
 
 const tokenColors = HighlightStyle.define([
@@ -249,6 +255,7 @@ export function CodeEditorView({
         doc: document.text,
         extensions: [
           editorTheme,
+          editorSurfaceTheme,
           EditorView.contentAttributes.of({ 'aria-label': 'Code editor' }),
           EditorView.theme({ '&': { fontSize: isMobile ? '16px' : '14px' }, '.cm-content': { lineHeight: '1.5' } }),
           showLineNumbers ? lineNumbers() : [],
@@ -264,7 +271,7 @@ export function CodeEditorView({
           bracketMatching(),
           foldGutter(),
           closeBrackets(),
-          autocompletion(),
+          autocompletion({ icons: false, addToOptions: [{ render: renderCompletionIcon, position: 20 }] }),
           highlightSelectionMatches(),
           lintGutter(),
           diagnostics ? linter(() => diagnostics.get(document.uri).get('kernel') ?? [], { delay: 100 }) : [],
@@ -350,7 +357,7 @@ export function CodeEditorView({
     view.dom.dataset['viewId'] = viewId;
     restoreViewPosition(document, viewId, view);
     markCodeEditorMilestone('editor-mounted', viewId);
-    overlay.className = `${view.dom.className} ph-no-capture`;
+    overlay.className = `${view.dom.className} cm-overlays ph-no-capture`;
     const unsubscribe = document.subscribe((event: DocumentChange) => {
       if (event.origin === 'view' && event.viewId === viewId) {
         return;

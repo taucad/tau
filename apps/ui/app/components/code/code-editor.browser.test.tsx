@@ -1,9 +1,14 @@
+import { StateEffect } from '@codemirror/state';
+import { showTooltip } from '@codemirror/view';
+import { openLintPanel, setDiagnostics } from '@codemirror/lint';
+import { gotoLine, openSearchPanel } from '@codemirror/search';
+import { renderTypeScriptDocumentation } from '#components/code/editor-documentation.js';
 import '#styles/global.css';
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import { mock } from 'vitest-mock-extended';
-import { startCompletion } from '@codemirror/autocomplete';
+import { autocompletion, closeCompletion, startCompletion } from '@codemirror/autocomplete';
 import { CodeEditor } from '#components/code/code-editor.client.js';
 import { VirtualDeclarationDialog } from '#components/code/virtual-declaration-dialog.js';
 import { jsonDepthHighlighting } from '#components/code/json-depth-highlighting.js';
@@ -571,3 +576,97 @@ it.each([Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST])(
   },
   120_000,
 );
+
+it.each(
+  [Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST].flatMap((theme) => [
+    { theme, width: 1000 },
+    { theme, width: 390 },
+  ]),
+)('styles detached editor surfaces in $theme at $width', async ({ theme, width }) => {
+  await page.viewport(width, 700);
+  document.documentElement.className = theme === Theme.BLACK || theme === Theme.HIGH_CONTRAST ? `dark ${theme}` : theme;
+  let editor: EditorView | undefined;
+  const sourceDocument = new EditorDocument('surface.ts', 'rotate');
+  const documentation = () =>
+    renderTypeScriptDocumentation(
+      [
+        { text: 'function ', kind: 'keyword' },
+        { text: 'rotate', kind: 'functionName' },
+        { text: '(angle: number): Shape', kind: 'text' },
+      ],
+      '**Rotate** a shape with an `angle`.\n\n- Preserves the source\n- Returns a new shape\n\n[Reference](https://example.com)\n\n<script>alert(1)</script>[unsafe](javascript:alert(1))',
+    );
+  const { container } = render(
+    <div style={{ height: 500 }}>
+      <CodeEditor
+        document={sourceDocument}
+        viewId='surfaces'
+        languageId='typescript'
+        onMount={(view) => {
+          editor = view;
+        }}
+        extensions={[
+          autocompletion({
+            override: [
+              () => ({
+                from: 0,
+                options: [
+                  { label: 'rotate', type: 'function', detail: '(angle: number)', info: documentation },
+                  { label: 'rotation', type: 'property' },
+                  { label: 'Rotation', type: 'class' },
+                ],
+              }),
+            ],
+          }),
+        ]}
+      />
+    </div>,
+  );
+  await expect.poll(() => editor).toBeDefined();
+  const view = editor!;
+  const gutter = container.querySelector('.cm-gutters')!;
+  expect(gutter.getBoundingClientRect().width).toBeLessThan(width < 600 ? 72 : 65);
+  view.focus();
+  view.dispatch({ selection: { anchor: 6 } });
+  startCompletion(view);
+  await expect.poll(() => document.querySelector('.cm-tooltip-autocomplete')).not.toBeNull();
+  await expect.poll(() => document.querySelector('.cm-completionInfo strong')?.textContent).toBe('Rotate');
+  const popup = document.querySelector('.cm-tooltip-autocomplete')!;
+  expect(container.contains(popup)).toBe(false);
+  const selected = popup.querySelector('[aria-selected]')!;
+  const style = getComputedStyle(selected);
+  expect(contrastRatio(style.color, style.backgroundColor)).toBeGreaterThanOrEqual(4.5);
+  const icon = popup.querySelector('.codicon-symbol-method')!;
+  await document.fonts.load('16px codicon');
+  expect(document.fonts.check('16px codicon')).toBe(true);
+  expect(getComputedStyle(icon, ':before').content).not.toBe('none');
+  expect(getComputedStyle(icon).getPropertyValue('--cm-function').trim()).not.toBe('');
+  expect(document.querySelector('.cm-documentation script')).toBeNull();
+  expect(document.querySelector('.cm-documentation a[href^="javascript:"]')).toBeNull();
+  await page.screenshot();
+  expect(popup.getBoundingClientRect().right).toBeLessThanOrEqual(width);
+  closeCompletion(view);
+  view.dispatch({
+    effects: StateEffect.appendConfig.of(
+      showTooltip.of({ pos: 0, above: false, create: () => ({ dom: documentation() }) }),
+    ),
+  });
+  await expect.poll(() => document.querySelector('.cm-tooltip .cm-signature-keyword')).not.toBeNull();
+  await page.screenshot();
+  view.dispatch(
+    setDiagnostics(view.state, [
+      {
+        from: 0,
+        to: 6,
+        severity: 'warning',
+        message: 'Check the angle',
+        actions: [{ name: 'Fix angle', apply: () => undefined }],
+      },
+    ]),
+  );
+  openLintPanel(view);
+  openSearchPanel(view);
+  gotoLine(view);
+  await expect.poll(() => container.querySelector('.cm-panel-lint')).not.toBeNull();
+  await page.screenshot();
+});

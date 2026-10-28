@@ -1,3 +1,4 @@
+import { editorCompletionInfo, renderEditorDocumentation } from '#components/code/editor-documentation.js';
 import type { Extension } from '@codemirror/state';
 import { autocompletion, snippetCompletion } from '@codemirror/autocomplete';
 import type { Completion } from '@codemirror/autocomplete';
@@ -126,7 +127,7 @@ function builtInCompletions(): Completion[] {
       label: symbol.name,
       type: 'function',
       detail: 'module',
-      info: symbol.description,
+      info: editorCompletionInfo(symbol.description),
     });
   });
   const functions = openscadFunctions.map((symbol) => {
@@ -135,13 +136,13 @@ function builtInCompletions(): Completion[] {
       label: symbol.name,
       type: 'function',
       detail: symbol.returnType,
-      info: symbol.description,
+      info: editorCompletionInfo(symbol.description),
     });
   });
   const constants = openscadConstants.map((symbol) => ({
     label: symbol.name,
     type: 'variable',
-    info: symbol.description,
+    info: editorCompletionInfo(symbol.description),
   }));
   return [...modules, ...functions, ...constants];
 }
@@ -349,8 +350,7 @@ export async function acquireOpenScadLanguage({
         pos: word.from,
         end: word.to,
         create() {
-          const dom = globalThis.document.createElement('div');
-          dom.textContent = content;
+          const dom = renderEditorDocumentation(content);
           return { dom };
         },
       };

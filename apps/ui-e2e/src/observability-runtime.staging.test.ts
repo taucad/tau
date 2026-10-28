@@ -151,6 +151,15 @@ const triggerAndAwaitDelivery = async ({
   const browser = await browserType.launch({ headless: true });
   try {
     const context = await browser.newContext({ ...device });
+    // As in the analytics consent fixture, let PostHog capture this automated browser's events.
+    // Its bot filter otherwise suppresses every event, making the no-$exception check inconclusive.
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { configurable: true, value: false });
+      Object.defineProperty(navigator, 'userAgent', {
+        configurable: true,
+        value: navigator.userAgent.replace('HeadlessChrome', 'Chrome'),
+      });
+    });
     await context.addCookies([
       { name: 'tau-entry', value: 'app', url: stagingOrigin },
       {

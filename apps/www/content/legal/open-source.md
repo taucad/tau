@@ -31,7 +31,7 @@ including how it builds and links OCCT, is at [github.com/taucad/geospec](https:
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 810 packages, with the license each declares.
+The web and desktop apps include the following 842 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -94,6 +94,22 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@better-fetch/fetch](https://github.com/better-auth/better-fetch) | 1.3.2 | MIT |
 | [@cfworker/json-schema](https://github.com/cfworker/cfworker) | 4.1.1 | MIT |
 | [@classcad/smlibwasm](https://github.com/awv-informatik/smlibpy) | 0.3.4 | MIT AND Apache-2.0 AND OFL-1.1 |
+| [@codemirror/autocomplete](https://code.haverbeke.berlin/codemirror/autocomplete) | 6.20.4 | MIT |
+| [@codemirror/commands](https://code.haverbeke.berlin/codemirror/commands) | 6.11.1 | MIT |
+| [@codemirror/lang-css](https://github.com/codemirror/lang-css) | 6.3.1 | MIT |
+| [@codemirror/lang-html](https://code.haverbeke.berlin/codemirror/lang-html) | 6.4.12 | MIT |
+| [@codemirror/lang-javascript](https://github.com/codemirror/lang-javascript) | 6.2.5 | MIT |
+| [@codemirror/lang-json](https://github.com/codemirror/lang-json) | 6.0.2 | MIT |
+| [@codemirror/lang-markdown](https://code.haverbeke.berlin/codemirror/lang-markdown) | 6.5.2 | MIT |
+| [@codemirror/lang-python](https://github.com/codemirror/lang-python) | 6.2.1 | MIT |
+| [@codemirror/lang-yaml](https://github.com/codemirror/lang-yaml) | 6.1.3 | MIT |
+| [@codemirror/language](https://code.haverbeke.berlin/codemirror/language) | 6.13.1 | MIT |
+| [@codemirror/legacy-modes](https://code.haverbeke.berlin/codemirror/legacy-modes) | 6.5.5 | MIT |
+| [@codemirror/lint](https://code.haverbeke.berlin/codemirror/lint) | 6.9.7 | MIT |
+| [@codemirror/search](https://code.haverbeke.berlin/codemirror/search) | 6.7.2 | MIT |
+| [@codemirror/state](https://code.haverbeke.berlin/codemirror/state) | 6.7.6 | MIT |
+| [@codemirror/streamparser](https://code.haverbeke.berlin/codemirror/streamparser) | 6.0.0 | MIT |
+| [@codemirror/view](https://code.haverbeke.berlin/codemirror/view) | 6.43.15 | MIT |
 | [@cspotcode/source-map-support](https://github.com/cspotcode/node-source-map-support) | 0.8.1 | MIT |
 | [@date-fns/tz](https://github.com/date-fns/date-fns) | 1.5.0 | MIT |
 | [@dimforge/rapier3d-compat](https://github.com/dimforge/rapier.js) | 0.12.0 | Apache-2.0 |
@@ -121,7 +137,18 @@ Their copyright notices and full license texts ship inside each package and are 
 | @jscadui/3mf-export | 0.5.0 | MIT |
 | [@json-structure/sdk](https://github.com/json-structure/sdk) | 0.7.0 | MIT |
 | [@kittycad/lib](https://github.com/KittyCAD/kittycad.ts) | 2.0.48 | MIT |
+| [@lezer/common](https://code.haverbeke.berlin/lezer/common) | 1.5.4 | MIT |
+| [@lezer/css](https://code.haverbeke.berlin/lezer/css) | 1.3.9 | MIT |
+| [@lezer/highlight](https://code.haverbeke.berlin/lezer/highlight) | 1.2.5 | MIT |
+| [@lezer/html](https://github.com/lezer-parser/html) | 1.3.13 | MIT |
+| [@lezer/javascript](https://code.haverbeke.berlin/lezer/javascript) | 1.5.6 | MIT |
+| [@lezer/json](https://github.com/lezer-parser/json) | 1.0.3 | MIT |
+| [@lezer/lr](https://code.haverbeke.berlin/lezer/lr) | 1.4.11 | MIT |
+| [@lezer/markdown](https://code.haverbeke.berlin/lezer/markdown) | 1.8.1 | MIT |
+| [@lezer/python](https://code.haverbeke.berlin/lezer/python) | 1.1.19 | MIT |
+| [@lezer/yaml](https://github.com/lezer-parser/yaml) | 1.0.4 | MIT |
 | [@lhncbc/ucum-lhc](https://github.com/lhncbc/ucum-lhc) | 7.1.10 | SEE LICENSE IN LICENSE.md |
+| [@marijn/find-cluster-break](https://code.haverbeke.berlin/marijn/find-cluster-break) | 1.0.4 | MIT |
 | @mediapipe/tasks-vision | 0.10.17 | Apache-2.0 |
 | [@mjackson/node-fetch-server](https://github.com/mjackson/remix-the-web) | 0.2.0 | MIT |
 | [@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk) | 1.32.1 | MIT |
@@ -306,6 +333,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@use-gesture/core](https://github.com/pmndrs/use-gesture) | 10.3.1 | MIT |
 | [@use-gesture/react](https://github.com/pmndrs/use-gesture) | 10.3.1 | MIT |
 | [@vercel/oidc](https://github.com/vercel/vercel) | 3.2.0 | Apache-2.0 |
+| [@vscode/l10n](https://github.com/Microsoft/vscode-l10n) | 0.0.18 | MIT |
 | [@x0k/json-schema-merge](https://github.com/x0k/json-schema-merge) | 1.1.0 | MIT |
 | [@zkochan/js-yaml](https://github.com/nodeca/js-yaml) | 0.0.7 | MIT |
 | [abort-controller](https://github.com/mysticatea/abort-controller) | 3.0.0 | MIT |
@@ -387,6 +415,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [cors](https://github.com/expressjs/cors) | 2.8.6 | MIT |
 | [crc-32](https://github.com/SheetJS/js-crc32) | 1.2.2 | Apache-2.0 |
 | [create-require](https://github.com/nuxt-contrib/create-require) | 1.1.1 | MIT |
+| [crelt](https://code.haverbeke.berlin/marijn/crelt) | 1.0.7 | MIT |
 | [cross-env](https://github.com/kentcdodds/cross-env) | 7.0.3 | MIT |
 | [cross-spawn](https://github.com/moxystudio/node-cross-spawn) | 7.0.6 | MIT |
 | [csv-parse](https://github.com/adaltas/node-csv) | 7.0.3 | MIT |
@@ -561,6 +590,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [json-schema-to-ts](https://github.com/ThomasAribart/json-schema-to-ts) | 3.1.1 | MIT |
 | [json-schema-traverse](https://github.com/epoberezkin/json-schema-traverse) | 1.0.0 | MIT |
 | [json-schema-typed](https://github.com/RemyRylan/json-schema-typed) | 8.0.2 | BSD-2-Clause |
+| [jsonc-parser](https://github.com/microsoft/node-jsonc-parser) | 3.3.1 | MIT |
 | [jsonfile](https://github.com/jprichardson/node-jsonfile) | 2.4.0 | MIT |
 | [jsonfile](https://github.com/jprichardson/node-jsonfile) | 6.2.1 | MIT |
 | [jsonpointer](https://github.com/janl/node-jsonpointer) | 5.0.1 | MIT |
@@ -586,7 +616,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [make-error](https://github.com/JsCommunity/make-error) | 1.3.6 | ISC |
 | [manifold-3d](https://github.com/elalish/manifold) | 3.4.1 | Apache-2.0 |
 | [markdown-to-jsx](https://github.com/quantizor/markdown-to-jsx) | 9.10.3 | MIT |
-| [marked](https://github.com/markedjs/marked) | 14.0.0 | MIT |
 | [math-intrinsics](https://github.com/es-shims/math-intrinsics) | 1.1.0 | MIT |
 | [mdast-util-to-hast](https://github.com/syntax-tree/mdast-util-to-hast) | 13.2.1 | MIT |
 | [media-typer](https://github.com/jshttp/media-typer) | 1.1.1 | MIT |
@@ -607,7 +636,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [minimist](https://github.com/minimistjs/minimist) | 1.2.8 | MIT |
 | [minimisted](https://github.com/kt3k/minimisted) | 2.0.1 | MIT |
 | [module-details-from-path](https://github.com/watson/module-details-from-path) | 1.0.4 | MIT |
-| [monaco-editor](https://github.com/microsoft/monaco-editor) | 0.55.1 | MIT |
 | [mqtt](https://github.com/mqttjs/MQTT.js) | 5.15.2 | MIT |
 | [mqtt-packet](https://github.com/mqttjs/mqtt-packet) | 9.0.2 | MIT |
 | [ms](https://github.com/vercel/ms) | 2.1.3 | MIT |
@@ -761,6 +789,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [strip-json-comments](https://github.com/sindresorhus/strip-json-comments) | 5.0.3 | MIT |
 | [strip-literal](https://github.com/antfu/strip-literal) | 3.1.0 | MIT |
 | [strnum](https://github.com/NaturalIntelligence/strnum) | 2.5.1 | MIT |
+| [style-mod](https://code.haverbeke.berlin/marijn/style-mod) | 4.1.4 | MIT |
 | [suspend-react](https://github.com/pmndrs/suspend-react) | 0.1.3 | MIT |
 | [tagged-tag](https://github.com/sindresorhus/tagged-tag) | 1.0.0 | MIT |
 | [tailwind-merge](https://github.com/dcastil/tailwind-merge) | 3.7.0 | MIT |
@@ -813,10 +842,13 @@ Their copyright notices and full license texts ship inside each package and are 
 | [vfile](https://github.com/vfile/vfile) | 6.0.3 | MIT |
 | [vfile-message](https://github.com/vfile/vfile-message) | 4.0.3 | MIT |
 | [victory-vendor](https://github.com/FormidableLabs/victory) | 37.3.6 | MIT AND ISC |
+| [vscode-json-languageservice](https://github.com/Microsoft/vscode-json-languageservice) | 5.7.2 | MIT |
 | [vscode-jsonrpc](https://github.com/Microsoft/vscode-languageserver-node) | 9.0.3 | MIT |
 | [vscode-languageserver-protocol](https://github.com/Microsoft/vscode-languageserver-node) | 3.18.4 | MIT |
+| [vscode-languageserver-textdocument](https://github.com/Microsoft/vscode-languageserver-node) | 1.0.16 | MIT |
 | [vscode-languageserver-types](https://github.com/Microsoft/vscode-languageserver-node) | 3.18.4 | MIT |
 | [vscode-uri](https://github.com/microsoft/vscode-uri) | 3.1.0 | MIT |
+| [w3c-keyname](https://github.com/marijnh/w3c-keyname) | 2.2.8 | MIT |
 | [web-streams-polyfill](https://github.com/MattiasBuelens/web-streams-polyfill) | 3.3.3 | MIT |
 | webgl-constants | 1.1.1 | Not declared |
 | [webgl-sdf-generator](https://github.com/lojjic/webgl-sdf-generator) | 1.1.1 | MIT |

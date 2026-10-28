@@ -4,7 +4,6 @@ import type { DynamicModule } from '@nestjs/common';
 import { HostsModule } from '#api/hosts/hosts.module.js';
 import { ChatModule } from '#api/chat/chat.module.js';
 import { CollaborationModule } from '#api/collaboration/collaboration.module.js';
-import { CodeCompletionModule } from '#api/code-completion/code-completion.module.js';
 import { GitModule } from '#api/git/git.module.js';
 import { HealthModule } from '#api/health/health.module.js';
 import { LlmModule } from '#api/llm/llm.module.js';
@@ -37,7 +36,6 @@ export class ApiModule {
         WebSocketModule,
         HostsModule,
         ChatModule,
-        CodeCompletionModule,
         CollaborationModule,
         DurableEventsModule,
         GitModule,

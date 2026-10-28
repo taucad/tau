@@ -2,6 +2,7 @@ import { AlertCircle, ArrowLeft, LoaderCircle, RefreshCcw } from 'lucide-react';
 import { lazy, Suspense, useEffect, useSyncExternalStore } from 'react';
 import { isRouteErrorResponse, useNavigate, useRouteError } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
+import { chatObservationConflict, quarantineChatObservation } from '#lib/chat-observation-guard.js';
 import { PageNotFound } from '#components/page-not-found.js';
 import { reportUiError } from '#lib/error-reporting.js';
 import { isWeakKey } from '#lib/weak-key.js';
@@ -54,6 +55,7 @@ const serverOutcome = (): StaleBuildOutcome | undefined => undefined;
 export function ErrorPage(): React.JSX.Element {
   const error = useRouteError();
   const navigate = useNavigate();
+  const observationConflict = chatObservationConflict(error);
   const isModuleLoadFailure = isStaleModuleError(error);
   /* TAU-UI-6: the recovery owns a module load failure, its outcome and its report; this page only
    * shows it, decided once, with the live verdict below choosing the prompt or the error. */
@@ -69,6 +71,13 @@ export function ErrorPage(): React.JSX.Element {
   const isExplained = isModuleLoadFailure && showsUpdatePrompt(staleOutcome, verdict);
   // This screen is the reload prompt while it shows; the floating banner would only repeat it.
   useReloadPromptOwner(isExplained);
+
+  const conflictingChatId = observationConflict?.chatId;
+  useEffect(() => {
+    if (conflictingChatId !== undefined) {
+      quarantineChatObservation(conflictingChatId);
+    }
+  }, [conflictingChatId]);
 
   useEffect(() => {
     if (isModuleLoadFailure) {
@@ -89,10 +98,18 @@ export function ErrorPage(): React.JSX.Element {
   }, [error, isModuleLoadFailure]);
 
   const goBack = (): void => {
+    if (observationConflict !== undefined) {
+      quarantineChatObservation(observationConflict.chatId);
+      void navigate('/', { replace: true });
+      return;
+    }
     void navigate(-1);
   };
 
   const refreshPage = (): void => {
+    if (observationConflict !== undefined) {
+      quarantineChatObservation(observationConflict.chatId);
+    }
     globalThis.location.reload();
   };
 

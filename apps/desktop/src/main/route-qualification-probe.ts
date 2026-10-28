@@ -72,9 +72,57 @@ const readJson = (path: string): unknown => {
   }
   return JSON.parse(readFileSync(path, 'utf8'));
 };
+/**
+ * How long a record replacement waits out a reader, in milliseconds. Windows refuses to rename over a file another
+ * process has open (`EPERM`, `EACCES` or `EBUSY`), and the external driver polls `route-qualification.ready.json`
+ * while the next stage rewrites it. A reader holds the file for one bounded read, far below this bound.
+ */
+export const qualificationRecordReplaceBoundMilliseconds = 2000;
+/** The pause between Windows replacement attempts, in milliseconds. */
+const qualificationRecordReplacePauseMilliseconds = 20;
+const sharingViolations = new Set(['EPERM', 'EACCES', 'EBUSY']);
+const pauseSynchronously = (milliseconds: number): void => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+};
+
+/**
+ * Atomically replace `target` with `source`. On Windows a sharing violation from a concurrent reader is retried until
+ * {@link qualificationRecordReplaceBoundMilliseconds}; any other error, any other platform, or the bound throws.
+ * @param source - The written temporary file.
+ * @param target - The record it replaces.
+ * @param seams - Injectable rename, platform, clock and pause, for tests.
+ */
+export const replaceQualificationRecord = (
+  source: string,
+  target: string,
+  seams: Readonly<{
+    rename?: (from: string, to: string) => void;
+    platform?: NodeJS.Platform;
+    now?: () => number;
+    pause?: (milliseconds: number) => void;
+  }> = {},
+): void => {
+  const rename = seams.rename ?? renameSync;
+  const now = seams.now ?? Date.now;
+  const pause = seams.pause ?? pauseSynchronously;
+  const deadline = now() + qualificationRecordReplaceBoundMilliseconds;
+  for (;;) {
+    try {
+      rename(source, target);
+      return;
+    } catch (error) {
+      const { code } = error as NodeJS.ErrnoException;
+      if ((seams.platform ?? process.platform) !== 'win32' || !sharingViolations.has(code ?? '') || now() >= deadline) {
+        throw error;
+      }
+    }
+    pause(qualificationRecordReplacePauseMilliseconds);
+  }
+};
+
 const writeJson = (path: string, value: unknown): void => {
   writeFileSync(`${path}.tmp`, JSON.stringify(value), { mode: 0o600 });
-  renameSync(`${path}.tmp`, path);
+  replaceQualificationRecord(`${path}.tmp`, path);
 };
 
 /** Activate solely through a nonce-bound CLI or an existing disposable-profile run. */

@@ -1,3 +1,4 @@
+import { chatComposerTrayHeaderClassName } from '#components/chat/chat-input-styles.js';
 import { useCallback, useMemo, useState } from 'react';
 import { ChevronRight, Circle, CircleCheck, LoaderCircle, ListChecks } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -108,13 +109,9 @@ export function ChatTodoList(): React.JSX.Element | undefined {
   const summary = `${String(done)} of ${String(items.length)} done${current ? ` · ${current.title}` : ''}`;
 
   return (
-    <Collapsible open={isOpen} className='group/tray-section not-first:border-t' onOpenChange={handleOpenChange}>
+    <Collapsible open={isOpen} className='group/tray-section' onOpenChange={handleOpenChange}>
       <CollapsibleTrigger asChild>
-        <Button
-          variant='ghost'
-          size='xs'
-          className='relative flex h-auto min-h-8 w-full min-w-0 items-center justify-start gap-1.5 rounded-none px-2 py-1.5 text-left font-normal text-muted-foreground group-first/tray-section:rounded-t-lg hover:bg-accent/50 hover:text-foreground focus-visible:z-10'
-        >
+        <Button variant='ghost' size='xs' className={cn(chatComposerTrayHeaderClassName, 'text-muted-foreground')}>
           <ListChecks aria-hidden='true' className='size-3.5 shrink-0' />
           <span className='sr-only'>Tasks: </span>
           <span className='flex min-w-0 flex-1 gap-1 text-xs' title={summary}>

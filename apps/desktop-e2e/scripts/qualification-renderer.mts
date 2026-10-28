@@ -295,7 +295,7 @@ const main = async (): Promise<void> => {
           }
           const renderer: unknown = gl.getParameter(debug.UNMASKED_RENDERER_WEBGL);
           if (typeof renderer !== 'string') {
-            throw new Error('Viewer WebGL2 renderer identity is not a string');
+            throw new TypeError('Viewer WebGL2 renderer identity is not a string');
           }
           return renderer;
         });

@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { cp, mkdir, mkdtemp, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { build } from 'esbuild';
@@ -84,7 +84,10 @@ const assert = require('node:assert/strict');
 const { mkdirSync, symlinkSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
 app.setPath('userData', join(__dirname, 'profile'));
+// The software probe closes its window before the utility assertions; only explicit completion may quit.
+app.on('window-all-closed', () => {});
 const children = [];
+let softwareRenderer;
 const message = child => new Promise((resolve, reject) => {
   const timer = setTimeout(() => reject(new Error('Utility response deadline')), 15000);
   child.once('message', value => { clearTimeout(timer); resolve(value); });
@@ -108,6 +111,7 @@ app.whenReady().then(async () => {
         stockGpuAcceptance:'open'}));
       assert.equal(graphics.webgl2, true);
       assert.match(graphics.renderer, /SwiftShader/i);
+      softwareRenderer = graphics.renderer;
       assert.equal(window.webContents.getLastWebPreferences().sandbox, true);
     } finally {
       window.destroy();
@@ -142,9 +146,12 @@ app.whenReady().then(async () => {
   writeFileSync(join(__dirname, 'outside'), 'inert');
   symlinkSync(join(__dirname, 'outside'), join(unsafe, 'authority.writer.lock'));
   assert.equal((await message(launch(unsafe))).code, 'AUTHORITY_LOCK_UNAVAILABLE');
-  console.log(JSON.stringify({status:'passed', platform:process.platform, electron:first.electron,
+  const completed = {status:'passed', platform:process.platform, electron:first.electron,
     dependencyLookups:first.lookups,
-    utilityExclusion:true, physicalAliasExclusion:true, sigkillRecovery:true, explicitRelease:true, symlinkRefusal:true}));
+    ...(softwareRenderer ? {softwareRenderer} : {}),
+    utilityExclusion:true, physicalAliasExclusion:true, sigkillRecovery:true, explicitRelease:true, symlinkRefusal:true};
+  writeFileSync(join(__dirname, 'completed.json'), JSON.stringify(completed), {flag:'wx'});
+  console.log(JSON.stringify(completed));
 }).then(() => {
   for (const child of children) if (child.pid) child.kill();
   app.exit(0);
@@ -185,6 +192,20 @@ app.whenReady().then(async () => {
   });
   assert.ifError(result.error);
   assert.equal(result.status, 0, 'Real Electron utility ownership qualification failed');
+  const completed = z
+    .object({
+      status: z.literal('passed'),
+      utilityExclusion: z.literal(true),
+      physicalAliasExclusion: z.literal(true),
+      sigkillRecovery: z.literal(true),
+      explicitRelease: z.literal(true),
+      symlinkRefusal: z.literal(true),
+      softwareRenderer: z.string().optional(),
+    })
+    .parse(JSON.parse(await readFile(join(root, 'completed.json'), 'utf8')));
+  if (process.env['TAU_QUALIFICATION_GRAPHICS'] === 'isolated-software') {
+    assert.match(completed.softwareRenderer ?? '', /SwiftShader/iu);
+  }
 } finally {
   if (installationStarted) {
     runQualificationApt('remove', ['tau-staging', 'tau-staging-runtime-1.0.1']);

@@ -35,7 +35,7 @@ const harness = (options?: {
   readonly budget?: number;
   readonly closeNever?: boolean;
   /** Hold the real close flush until the test releases it. */
-  readonly closeFlush?: Promise<void>;
+  readonly closeFlush?: Promise<void> | (() => Promise<void>);
   /** Hold a producer refusal until navigation has requested the closing project again. */
   readonly producerFlush?: Promise<void>;
   /** The producer flush refuses, as it does while an editor's conflict is being recorded. */
@@ -72,7 +72,7 @@ const harness = (options?: {
       }),
       flushSync: fromSafeAsync<void, { projectId: string; boundMilliseconds: number }>(async ({ input }) => {
         closeSteps.push(`flush:${input.projectId}`);
-        await options?.closeFlush;
+        await (typeof options?.closeFlush === 'function' ? options.closeFlush() : options?.closeFlush);
         if (options?.closeNever === true) {
           await new Promise<void>(() => {
             /* Never settles: the session that cannot finish closing. */
@@ -281,6 +281,54 @@ describe('sessionsMachine', async () => {
     expect(actor.getSnapshot().context.pendingOpen).toBeUndefined();
     expect(emitted.filter((event) => event.type === 'budgetRefused')).toEqual([]);
     actor.stop();
+  });
+
+  it('should retain a failed close and queued reopen until an explicit close retry succeeds', async () => {
+    const closeFlush = Promise.withResolvers<void>();
+    const flush = vi
+      .fn<() => Promise<void>>()
+      .mockImplementationOnce(async () => closeFlush.promise)
+      .mockResolvedValue(undefined);
+    const guard = guardActors({
+      ignore: { sessions: sessionsIgnoredEvents, 'project-session': projectSessionIgnoredEvents },
+    });
+    const { actor, started, stopped, emitted } = harness({
+      budget: 1,
+      closeFlush: flush,
+      inspect: guard.inspect,
+    });
+    try {
+      await openIdle(actor, 'projA');
+      const firstRef = actor.getSnapshot().context.refs['projA'];
+      actor.send({ type: 'releaseMemory' });
+      await settle();
+      expect(actor.getSnapshot().context.status['projA']?.state).toBe('closing');
+      actor.send({ type: 'open', projectId: 'projA' });
+      closeFlush.reject(new Error('Sync flush failed'));
+      await settle();
+
+      expect(actor.getSnapshot().context.status['projA']?.state).toBe('failed');
+      expect(actor.getSnapshot().context.refs['projA']).toBe(firstRef);
+      expect(started).toEqual(['projA']);
+      expect(stopped).toEqual([]);
+      expect(flush).toHaveBeenCalledTimes(1);
+      expect(actor.getSnapshot().context.pendingOpen).toBe('projA');
+      expect(emitted.filter((event) => event.type === 'budgetRefused')).toEqual([
+        { type: 'budgetRefused', projectId: 'projA', suggestions: ['projA'] },
+      ]);
+
+      actor.send({ type: 'close', projectId: 'projA', reason: 'user' });
+      await settle();
+      expect(flush).toHaveBeenCalledTimes(2);
+      expect(stopped).toEqual(['projA']);
+      expect(started).toEqual(['projA', 'projA']);
+      expect(Object.keys(actor.getSnapshot().context.refs)).toEqual(['projA']);
+      expect(actor.getSnapshot().context.refs['projA']).not.toBe(firstRef);
+      expect(actor.getSnapshot().context.status['projA']?.state).toBe('live');
+      expect(actor.getSnapshot().context.pendingOpen).toBeUndefined();
+    } finally {
+      actor.stop();
+    }
   });
 
   it('drains a closing project at quit without starting its queued reopen', async () => {

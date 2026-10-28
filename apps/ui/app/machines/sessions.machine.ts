@@ -280,7 +280,7 @@ export const sessionsMachine = setup({
        * holding for it becomes the refusal the person answers (I28). */
       const closeRefused =
         context.status[event.projectId]?.state === 'closing' && (event.state === 'live' || event.state === 'failed');
-      const reopenRetained = closeRefused && context.pendingOpen === event.projectId;
+      const reopenRetained = closeRefused && event.state === 'live' && context.pendingOpen === event.projectId;
       if (context.pendingOpen !== undefined && closeRefused && !reopenRetained) {
         enq.emit({ type: 'budgetRefused', projectId: context.pendingOpen, suggestions: Object.keys(context.refs) });
       }

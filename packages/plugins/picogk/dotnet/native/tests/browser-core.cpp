@@ -31,6 +31,13 @@ static int32_t sphere(void* token,const PKVector3* p,float* value) {
     }
     *value=std::sqrt(p->X*p->X+p->Y*p->Y+p->Z*p->Z)-10.f;return 0;
 }
+static int32_t gyroid(void*,const PKVector3* p,float* value) {
+    // Same float frequency and double arithmetic as unchanged ShapeKernel C#.
+    const float frequency=(2.f*3.14159265358979323846f)/3.f;
+    const double x=frequency*double(p->X),y=frequency*double(p->Y),z=frequency*double(p->Z);
+    *value=float(std::abs(std::sin(x)*std::cos(y)+std::sin(y)*std::cos(z)+std::sin(z)*std::cos(x))-.5);
+    return 0;
+}
 static int32_t scalar(void* token,const PKVector3*,float) { auto& c=*static_cast<Context*>(token);++c.calls;return c.fail?1:0; }
 static int32_t vector(void* token,const PKVector3*,const PKVector3*) { auto& c=*static_cast<Context*>(token);++c.calls;return c.fail?1:0; }
 static int32_t normals(void* token,uint32_t count,const float* input,float* values,uint8_t* keep) {
@@ -50,6 +57,11 @@ int main() try {
     check(PicoDotNet_RenderImplicit(lib,vox,&bounds,&context,sphere)==0&&context.calls>1&&context.nested,"nested callback");
     auto mesh=Mesh_hCreateFromVoxels(lib,vox);const auto hash=digest(lib,mesh);
     check(hash==0xb8aa4cfd3b2b77f9ULL,"historical raw sphere pin");
+    const auto gyroidVox=Voxels_hCreateCopy(lib,vox);
+    check(PicoDotNet_IntersectImplicit(lib,gyroidVox,&context,gyroid)==0,"gyroid intersection");
+    const auto gyroidMesh=Mesh_hCreateFromVoxels(lib,gyroidVox);
+    check(digest(lib,gyroidMesh)==0x2b43725651c3733aULL,"historical exact gyroid pin");
+    Mesh_Destroy(lib,gyroidMesh);Voxels_Destroy(lib,gyroidVox);
     uint64_t snapshot=0,generation=0;int32_t positions=0,indices=0;PKColorFloat color{};
     check(TauCapture_Acquire(lib,0,mesh,&snapshot,&generation,&positions,&indices,&color)==0,"capture acquire");
     std::vector<float> before(positions),after(positions);std::vector<uint32_t> ib(indices),ia(indices);
@@ -74,8 +86,8 @@ int main() try {
     check(TauDotNet_CreateSurfaceNormals(lib,vox,.5f,&failure,normals,&normalField,&normalMeta)==-4&&!normalField&&!normalMeta,"normal error ownership");
     const auto file=VdbFile_hCreate(lib);
     VdbFile_nAddVoxels(lib,file,"sphere",vox);VdbFile_nAddScalarField(lib,file,"scalar",field);VdbFile_nAddVectorField(lib,file,"vector",vec);
-    check(VdbFile_bSaveToFile(lib,file,"/witness.vdb"),"VDB write");VdbFile_Destroy(lib,file);
-    const auto restored=VdbFile_hCreateFromFile(lib,"/witness.vdb");check(restored&&VdbFile_nFieldCount(lib,restored)==3,"VDB roundtrip");
+    check(VdbFile_bSaveToFile(lib,file,"witness.vdb"),"VDB write");VdbFile_Destroy(lib,file);
+    const auto restored=VdbFile_hCreateFromFile(lib,"witness.vdb");check(restored&&VdbFile_nFieldCount(lib,restored)==3,"VDB roundtrip");
     int scalarIndex=-1;
     for(int i=0;i<VdbFile_nFieldCount(lib,restored);++i){char name[PKINFOSTRINGLEN]{};VdbFile_GetFieldName(lib,restored,i,name);if(std::strcmp(name,"scalar")==0)scalarIndex=i;}
     check(scalarIndex>=0,"VDB scalar name");
@@ -83,5 +95,5 @@ int main() try {
     check(ScalarField_bGetValue(lib,restoredScalar,&zero,&scalarValue)&&scalarValue==3.25f,"VDB scalar value");
     ScalarField_Destroy(lib,restoredScalar);VdbFile_Destroy(lib,restored);
     VectorField_Destroy(lib,vec);ScalarField_Destroy(lib,field);Voxels_Destroy(lib,vox);Library_DestroyInstance(lib);
-    std::puts("{\"rawPin\":\"b8aa4cfd3b2b77f9\",\"capture\":\"passed\",\"callbacks\":\"passed\",\"normals\":\"passed\",\"vdb\":\"passed\"}");
+    std::puts("{\"rawPin\":\"b8aa4cfd3b2b77f9\",\"gyroidPin\":\"2b43725651c3733a\",\"capture\":\"passed\",\"callbacks\":\"passed\",\"normals\":\"passed\",\"vdb\":\"passed\"}");
 } catch(const std::exception& error) { std::fprintf(stderr,"%s\n",error.what());return 1; }

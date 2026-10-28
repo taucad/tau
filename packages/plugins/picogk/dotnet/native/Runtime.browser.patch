@@ -4561,7 +4561,7 @@
      }
      
      Voxels( VoxelSize oVoxSize,
-@@ -149,133 +170,250 @@
+@@ -149,133 +170,241 @@
              const Mesh& oMesh,
              float fRadius)
      {
@@ -4806,24 +4806,15 @@
 +
 +        TauRequireCsgTransforms(left, right);
 +
-+        // Keep the exact mutating CSG algorithm, including inactive signed tiles.
-+        // csg*Copy's signed flood fill can erase disconnected inactive negative regions.
++        // Use the same operations as copy-then-mutate. The hand-written DeepCopy
++        // operator traversal diverges on the HeatX fixture.
 +        openvdb::tools::composite::validateLevelSet(left.m_roGrid->tree(), "A");
 +        openvdb::tools::composite::validateLevelSet(right.m_roGrid->tree(), "B");
 +        auto grid = deepCopyTypedGrid<FloatGrid>(left.m_roGrid);
-+        using Tree = FloatGrid::TreeType;
-+        openvdb::tree::DynamicNodeManager<Tree> nodes(grid->tree());
-+        if (operation == 0) {
-+            openvdb::tools::CsgUnionOp<Tree> op(right.m_roGrid->constTree(), openvdb::DeepCopy());
-+            nodes.foreachTopDown(op);
-+        } else if (operation == 1) {
-+            openvdb::tools::CsgDifferenceOp<Tree> op(right.m_roGrid->constTree(), openvdb::DeepCopy());
-+            nodes.foreachTopDown(op);
-+        } else {
-+            openvdb::tools::CsgIntersectionOp<Tree> op(right.m_roGrid->constTree(), openvdb::DeepCopy());
-+            nodes.foreachTopDown(op);
-+        }
-+        openvdb::tools::pruneLevelSet(grid->tree());
++        auto operand = deepCopyTypedGrid<FloatGrid>(right.m_roGrid);
++        if (operation == 0) openvdb::tools::csgUnion(*grid, *operand);
++        else if (operation == 1) openvdb::tools::csgDifference(*grid, *operand);
++        else openvdb::tools::csgIntersection(*grid, *operand);
 +        auto result = std::make_shared<Voxels>(std::move(grid), left.m_nSdfNarrowBand);
 +        // This unpublished grid has no external aliases; it is a trusted fresh revision.
 +        result->m_tauState->cacheable = true;
@@ -4911,7 +4902,7 @@
          PKTRACE(Voxels_Offset);
          
          // Create a clean level set with the extended size narrow band
-@@ -292,6 +430,8 @@
+@@ -292,6 +421,8 @@
      void DoubleOffset(  float fSize1,
                          float fSize2)
      {
@@ -4920,7 +4911,7 @@
          PKTRACE(Voxels_DoubleOffset);
          
          // Create a clean level set with the extended size narrow band
-@@ -309,6 +449,8 @@
+@@ -309,6 +440,8 @@
      
      void TripleOffset(float fSize)
      {
@@ -4929,7 +4920,7 @@
          PKTRACE(Voxels_TripleOffset);
          
          // Create a clean level set with the extended size narrow band
-@@ -331,40 +473,63 @@
+@@ -331,40 +464,63 @@
  
      void RenderMesh(const Mesh& oMesh)
      {
@@ -5013,7 +5004,7 @@
          
          Coord xyzMin = oVoxelSize().xyzToVoxels(oBBox.vecMin);
          Coord xyzMax = oVoxelSize().xyzToVoxels(oBBox.vecMax);
-@@ -376,32 +541,59 @@
+@@ -376,32 +532,59 @@
              Vector3 vecSample = oVoxelSize().vecToMM(Coord(x,y,z));
              openvdb::Coord xyz(x,y,z);
              
@@ -5058,7 +5049,7 @@
 +              throw std::invalid_argument("unsupported implicit intersection grid transform");
 +          oBBox = TauActiveBounds(m_roGrid, m_tauState);
 +          if (oBBox.empty()) return;
-+          narrowBand = m_nSdfNarrowBand;
++          narrowBand = static_cast<int>(fBackgroundMM()); // Preserve upstream implicit temporary-field semantics.
 +          voxelSize = oVoxelSize();
 +          transform = m_roGrid->transform().copy();
 +          counters = m_tauState->counters; }
@@ -5088,7 +5079,7 @@
          
          oVox.RenderImplicit(oBBoxMM, pfn);
          
-@@ -409,15 +601,29 @@
+@@ -409,15 +592,29 @@
          // implict grid, and use our grid just as the mask
          // Not sure if this is really necessary, but the
          // implicit grid is "perfect"
@@ -5126,7 +5117,7 @@
      Mesh::Ptr roAsMesh(float fAdaptivity = 0.0f, bool bRelax = false) const
      {
          PKTRACE(Voxels_roAsMesh);
-@@ -554,125 +760,345 @@
+@@ -554,125 +751,345 @@
          roMesh->FinalizeBulk(oBBox);
          return roMesh;
      }
@@ -5572,7 +5563,7 @@
          
          return (oAccess.getValue(xyz) <= 0.0f);
      }
-@@ -680,8 +1106,10 @@
+@@ -680,8 +1097,10 @@
      inline void GetSurfaceNormal(   Vector3 vecPt,
                                      Vector3* pvecNormal)
      {
@@ -5584,7 +5575,7 @@
      
          oStencil.moveTo(    openvdb::Coord( xyz.X,
                                              xyz.Y,
-@@ -698,20 +1126,28 @@
+@@ -698,20 +1117,28 @@
      inline bool bFindClosestPointOnSurface( Vector3 vecSearch,
                                              Vector3* pvecSurfacePoint)
      {
@@ -5621,7 +5612,7 @@
          bool bStartInside = oAccess.getValue(   
                                  openvdb::Coord( xyzSearch.X,
                                                  xyzSearch.Y,
-@@ -745,31 +1181,53 @@
+@@ -745,31 +1172,53 @@
                                      const Vector3& vecDirection,
                                      Vector3* pvecSurfacePoint)
      {
@@ -5700,7 +5691,7 @@
      void GetVoxelDimensions(    int32_t* pnXMin,
                                  int32_t* pnYMin,
                                  int32_t* pnZMin,
-@@ -777,7 +1235,9 @@
+@@ -777,7 +1226,9 @@
                                  int32_t* pnYSize,
                                  int32_t* pnZSize) const
      {
@@ -5711,7 +5702,7 @@
          
          *pnXMin     = oBBox.min().x();
          *pnYMin     = oBBox.min().y();
-@@ -790,7 +1250,9 @@
+@@ -790,7 +1241,9 @@
      void GetZSlice( int32_t nZSlice,
                      float* pfBuffer)
      {
@@ -5722,7 +5713,7 @@
          openvdb::Coord xyz(0, 0, nZSlice + oBBox.min().z());
          
          auto oAccess = m_roGrid->getConstAccessor();
-@@ -807,7 +1269,9 @@
+@@ -807,7 +1260,9 @@
      void GetXSlice( int32_t nXSlice,
                      float* pfBuffer)
      {
@@ -5733,7 +5724,7 @@
          openvdb::Coord xyz(nXSlice + oBBox.min().x(), 0, 0);
          
          auto oAccess = m_roGrid->getConstAccessor();
-@@ -824,7 +1288,9 @@
+@@ -824,7 +1279,9 @@
      void GetYSlice( int32_t nYSlice,
                      float* pfBuffer)
      {
@@ -5744,7 +5735,7 @@
          openvdb::Coord xyz(0, nYSlice + oBBox.min().y(), 0);
          
          auto oAccess = m_roGrid->getConstAccessor();
-@@ -841,7 +1307,9 @@
+@@ -841,7 +1298,9 @@
      void GetInterpolatedZSlice( float fZSlice,
                                  float* pfBuffer)
      {
@@ -5755,7 +5746,7 @@
          
          auto oAccess = m_roGrid->getConstAccessor();
          
-@@ -857,135 +1325,60 @@
+@@ -857,135 +1316,60 @@
          }
      }
      
@@ -5931,7 +5922,7 @@
      /// Rebuilds the grid after possibly destructive changes to the signed distances
      void RebuildGrid(float fDistanceMM = 0.0f)
      {
-@@ -1043,27 +1436,96 @@
+@@ -1043,27 +1427,96 @@
          }
      }
      
@@ -6049,7 +6040,7 @@
      template <class TAccessor>
      inline bool bBresenhamSphereHitTest(    bool bReferenceInside,
                                              Coord xyzCenter,
-@@ -1074,47 +1536,83 @@
+@@ -1074,47 +1527,83 @@
                                              bool* pbOutsideActiveBounds)
      {
          *pbOutsideActiveBounds = true;
@@ -6163,7 +6154,7 @@
          poAccess->setValue(xyz, std::clamp( fValue,
                                              -fBackground,
                                              fBackground));
-@@ -1125,20 +1623,17 @@
+@@ -1125,20 +1614,17 @@
      
      static bool bHasValidPicoGKTransform(const FloatGrid::Ptr roGrid)
      {

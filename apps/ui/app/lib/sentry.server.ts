@@ -56,6 +56,14 @@ const harnessTags = (url: URL): Readonly<Record<string, string>> => {
  * @public
  */
 export const scrubServerSentryEvent = (event: ErrorEvent): ErrorEvent => {
+  // Sentry derives its reserved `runtime` tag from this context, overriding scope tags.
+  // Keep the execution boundary queryable as `runtime:ssr` and the Node engine separately.
+  const runtime = event.contexts?.['runtime'];
+  event.contexts = {
+    ...event.contexts,
+    ...(runtime && runtime['name'] !== 'ssr' ? { nodeEngine: { ...runtime, type: 'default' } } : {}),
+    runtime: { name: 'ssr' },
+  };
   if (event.request) {
     const { url, method, headers } = event.request;
     const userAgent = headers?.['User-Agent'] ?? headers?.['user-agent'];

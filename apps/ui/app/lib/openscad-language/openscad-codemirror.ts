@@ -247,7 +247,9 @@ export async function definitionFor(
   return undefined;
 }
 
-export function hoverTextFor(text: string, path: string, word: Word): string | undefined {
+type HoverContent = Readonly<{ text: string; literal: boolean }>;
+
+export function hoverTextFor(text: string, path: string, word: Word): HoverContent | undefined {
   const line = text.slice(text.lastIndexOf('\n', word.from - 1) + 1).split('\n', 1)[0] ?? '';
   const group = /\/\*\s*\[([^\]]+)]\s*\*\//.exec(line)?.[1];
   if (isCommentAt(text, word.from) && (!group || group !== word.text)) {
@@ -258,22 +260,28 @@ export function hoverTextFor(text: string, path: string, word: Word): string | u
   );
   const parsed = parseOpenScad(path, text, false);
   const local = parsed.modules[word.text] ?? parsed.functions[word.text];
-  return group ? `Group — ${group}` : (symbol?.description ?? local?.signature);
+  if (group) {
+    return { text: `Group — ${group}`, literal: true };
+  }
+  if (symbol?.description !== undefined) {
+    return { text: symbol.description, literal: false };
+  }
+  return local ? { text: local.signature, literal: true } : undefined;
 }
 
 export async function importedHoverTextFor(
   document: EditorDocument,
   environment: EditorLanguageEnvironment,
   word: string,
-): Promise<string | undefined> {
+): Promise<HoverContent | undefined> {
   for (const imported of await importedFiles(document, environment)) {
     const parsed = parseOpenScad(imported.uri, imported.text, true);
     const declaration = parsed.modules[word] ?? parsed.functions[word];
     if (declaration) {
-      return declaration.signature;
+      return { text: declaration.signature, literal: true };
     }
     if (imported.mode === 'include' && parsed.vars.includes(word)) {
-      return `Variable ${word}`;
+      return { text: `Variable ${word}`, literal: true };
     }
   }
   return undefined;
@@ -350,7 +358,12 @@ export async function acquireOpenScadLanguage({
         pos: word.from,
         end: word.to,
         create() {
-          const dom = renderEditorDocumentation(content);
+          const dom = renderEditorDocumentation(content.literal ? '' : content.text);
+          if (content.literal) {
+            const signature = dom.ownerDocument.createElement('pre');
+            signature.textContent = content.text;
+            dom.append(signature);
+          }
           return { dom };
         },
       };

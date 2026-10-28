@@ -102,12 +102,12 @@ app.whenReady().then(async () => {
     const window = new BrowserWindow({show:false, webPreferences:{sandbox:true, contextIsolation:true, nodeIntegration:false}});
     try {
       await window.loadURL('data:text/html,<canvas></canvas>');
-      assert.equal(await window.webContents.executeJavaScript("document.querySelector('canvas').getContext('webgl2') !== null"), true);
-      const gpu = await app.getGPUInfo('complete');
-      assert.match(gpu.auxAttributes.glRenderer, /SwiftShader/i);
-      console.log(JSON.stringify({kind:'isolated-software-ci-preflight', webgl2:true,
-        renderer:gpu.auxAttributes.glRenderer, rendererSandbox:window.webContents.getLastWebPreferences().sandbox,
+      const graphics = await window.webContents.executeJavaScript("(() => { const gl = document.querySelector('canvas').getContext('webgl2'); const debug = gl?.getExtension('WEBGL_debug_renderer_info'); return {webgl2:gl !== null, renderer:debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : ''}; })()");
+      console.log(JSON.stringify({kind:'isolated-software-ci-preflight', ...graphics,
+        rendererSandbox:window.webContents.getLastWebPreferences().sandbox,
         stockGpuAcceptance:'open'}));
+      assert.equal(graphics.webgl2, true);
+      assert.match(graphics.renderer, /SwiftShader/i);
       assert.equal(window.webContents.getLastWebPreferences().sandbox, true);
     } finally {
       window.destroy();

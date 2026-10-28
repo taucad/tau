@@ -662,7 +662,9 @@ const main = (): void => {
     stage.renderer.softwareRenderer = 'ANGLE (Google, Vulkan SwiftShader Device)';
     stage.security.processes[0]!.commandLine += ' --use-angle=swiftshader --enable-unsafe-swiftshader';
   }
-  assert.equal(validateSoftwareCiEvidence(software), undefined);
+  assert.doesNotThrow(() => {
+    validateSoftwareCiEvidence(software);
+  });
   assert.throws(() => collectQualificationReceipt(software), /software runs cannot qualify releases/u);
   software.mode = 'release';
   assert.throws(() => collectQualificationReceipt(software), /stock GPU acceptance/u);
@@ -671,25 +673,35 @@ const main = (): void => {
   }
   assert.throws(() => collectQualificationReceipt(software), /stock GPU acceptance/u);
   software.mode = 'software-ci';
-  assert.throws(() => validateSoftwareCiEvidence(software), /SwiftShader observations/u);
+  assert.throws(() => {
+    validateSoftwareCiEvidence(software);
+  }, /SwiftShader observations/u);
   for (const stage of software.stages) {
     stage.renderer.softwareRenderer = 'SwiftShader';
   }
   software.stages[0].security.processes[0]!.commandLine += ' --disable-gpu-sandbox';
-  assert.throws(() => validateSoftwareCiEvidence(software), /sandbox bypass/u);
+  assert.throws(() => {
+    validateSoftwareCiEvidence(software);
+  }, /sandbox bypass/u);
   software.stages[0].security.processes[0]!.commandLine = software.stages[0].security.processes[0]!.commandLine.replace(
     ' --disable-gpu-sandbox',
     '',
   );
   software.stages[0].renderer.projectSha256 = hash(999);
-  assert.throws(() => validateSoftwareCiEvidence(software), /project/u);
+  assert.throws(() => {
+    validateSoftwareCiEvidence(software);
+  }, /project/u);
   const wrongPlatform = fixture();
   wrongPlatform.mode = 'software-ci';
-  assert.throws(() => validateSoftwareCiEvidence(wrongPlatform), /Linux staging/u);
+  assert.throws(() => {
+    validateSoftwareCiEvidence(wrongPlatform);
+  }, /Linux staging/u);
   const productionSoftware = platformFixture('linux-appimage');
   productionSoftware.mode = 'software-ci';
   productionSoftware.stages[0].candidate.channel = 'production';
-  assert.throws(() => validateSoftwareCiEvidence(productionSoftware), /Linux staging/u);
+  assert.throws(() => {
+    validateSoftwareCiEvidence(productionSoftware);
+  }, /Linux staging/u);
   apt.scheduler![0]!.scheduler['invocation'] = apt.scheduler![0]!.scheduler['beforeInvocation']!;
   assert.throws(() => collectQualificationReceipt(apt), /real unattended scheduler/u);
   const cycle = fixture();

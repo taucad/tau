@@ -281,17 +281,26 @@ const main = async (): Promise<void> => {
     await page.screenshot({ path: `${output}.png`, fullPage: true });
     let softwareRenderer: string | undefined;
     if (process.env['TAU_QUALIFICATION_GRAPHICS'] === 'isolated-software') {
-      const session = await browser.newBrowserCDPSession();
-      try {
-        const info = z
-          .object({ gpu: z.object({ auxAttributes: z.object({ glRenderer: z.string().min(1) }) }) })
-          .parse(await session.send('SystemInfo.getInfo'));
-        softwareRenderer = info.gpu.auxAttributes.glRenderer;
-        if (!/SwiftShader/iu.test(softwareRenderer)) {
-          throw new Error('Isolated software CI did not observe the SwiftShader GPU backend');
-        }
-      } finally {
-        await session.detach();
+      softwareRenderer = await page
+        .getByTestId('cad-viewer-canvas-region')
+        .locator('canvas')
+        .evaluate((canvas) => {
+          if (!(canvas instanceof HTMLCanvasElement)) {
+            throw new Error('Viewer canvas is not an HTML canvas');
+          }
+          const gl = canvas.getContext('webgl2');
+          const debug = gl?.getExtension('WEBGL_debug_renderer_info');
+          if (!gl || !debug) {
+            throw new Error('Viewer WebGL2 renderer identity unavailable');
+          }
+          const renderer: unknown = gl.getParameter(debug.UNMASKED_RENDERER_WEBGL);
+          if (typeof renderer !== 'string') {
+            throw new Error('Viewer WebGL2 renderer identity is not a string');
+          }
+          return renderer;
+        });
+      if (!/SwiftShader/iu.test(softwareRenderer)) {
+        throw new Error('Isolated software CI did not observe the SwiftShader viewer backend');
       }
     }
     await writeFile(

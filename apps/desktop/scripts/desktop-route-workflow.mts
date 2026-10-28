@@ -6,8 +6,15 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { desktopReleaseIdentity, parseDesktopArtifactManifest } from '#shared/desktop-release.js';
 /* oxlint-disable no-restricted-imports -- Adjacent release workflow helpers share one explicit publication boundary. */
-import { desktopManifestDigest } from './desktop-route-publication.mjs';
-import { requireDesktopPublicationAuthority } from './desktop-publication-authority.mjs';
+import {
+  desktopCandidateRoutes,
+  desktopManifestDigest,
+  desktopPublicationScopes,
+} from './desktop-route-publication.mjs';
+import {
+  requireDesktopInstallerPublicationEnabled,
+  requireDesktopPublicationAuthority,
+} from './desktop-publication-authority.mjs';
 import { publishDesktopRoutes } from './publish-desktop-routes.mjs';
 /* oxlint-enable no-restricted-imports */
 const main = async (): Promise<void> => {
@@ -16,7 +23,14 @@ const main = async (): Promise<void> => {
     process.env['GITHUB_EVENT_NAME'] === 'schedule'
       ? 'renew-routes'
       : z.enum(['promote-routes', 'renew-routes']).parse(process.env['REQUESTED_OPERATION']);
+  // The channel's own gate, checked before identity, downloads or immutable mirroring.
+  requireDesktopInstallerPublicationEnabled(channel);
   await requireDesktopPublicationAuthority(channel, operation);
+  // Selects the candidate and receipt artifact names; the Mac-only scope never publishes production.
+  const scope = z.enum(desktopPublicationScopes).parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
+  if (scope === 'macos' && (channel !== 'staging' || operation !== 'promote-routes')) {
+    throw new Error('Mac-only publication is a staging promotion only');
+  }
   const root = resolve(z.string().min(1).parse(process.env['DESKTOP_ASSETS_DIR']));
   const base = channel === 'production' ? 'https://downloads.tau.new' : 'https://downloads.taucad.dev';
   const download = async (path: string): Promise<string> => {
@@ -90,6 +104,8 @@ const main = async (): Promise<void> => {
     if (desktopManifestDigest(manifest) !== approved) {
       throw new Error('Operator approved a different manifest');
     }
+    // Refuse a candidate outside the selected scope before any immutable object is mirrored.
+    desktopCandidateRoutes(manifest, scope);
     await writeFile(
       resolve(root, 'promotion-approval.json'),
       JSON.stringify({

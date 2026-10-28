@@ -3,7 +3,7 @@ title: 'Graphics Backend Policy'
 description: 'Dual WebGL/WebGPU Three.js rendering, portable shaders, resource ownership, interaction, backend evidence, and kernel mesh resolution'
 status: active
 created: '2026-05-07'
-updated: '2026-10-25'
+updated: '2026-10-26'
 related:
   - docs/policy/compatibility-policy.md
   - docs/research/viewer-webgpu-selector-removal.md
@@ -67,7 +67,9 @@ Overlays retain the same CAD semantics on both backends; final appearance parity
 
 ### 5. Preserve depth ordering
 
-The WebGPU viewport enables reversed depth. Register `reversedDepthTransparentSort` so transparent objects remain back-to-front under reversed clip-space Z.
+The native WebGPU viewport enables reversed floating-point depth. Node WebGL2 uses logarithmic perspective depth and linear orthographic depth; select the convention from the current camera without specializing a shared shader to its first camera. AO reconstruction, copied depth and cap crossings must consume the same convention. Keep the geometric clipping interval unchanged when adapting AO reconstruction.
+
+Register `reversedDepthTransparentSort` so transparent objects remain back-to-front under reversed clip-space Z.
 
 GLTF lines retain their geometric depth. Resolve coplanar separation on the owning triangle material with bounded polygon offset; never pull a line toward the camera in view, clip, or depth space. Size the slope term to half the drawn edge stroke in device pixels, plus half a pixel where the depth is evaluated at fragment centres: the off-spine fragments of a coplanar edge need nothing more, and any larger margin shows hidden edges that end on a face boundary as ticks past its contour. On WebGL the shader term is the whole separation; leave the rasterizer offset at zero, because the orthographic log-depth path writes `gl_FragCoord.z`, which can already carry it.
 

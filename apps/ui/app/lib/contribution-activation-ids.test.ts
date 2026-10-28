@@ -1,96 +1,115 @@
-/**
- * Table-driven assertion that every language contribution declares its
- * `activationLanguageIds` explicitly. Catches regressions where a contribution
- * silently relies on the `[languageId]` fallback (which masks intent and makes
- * multi-id families easy to break).
- */
-import { describe, it, expect } from 'vitest';
-import { codeLanguages } from '@taucad/types/constants';
-import type { LanguageContribution } from '#lib/monaco-language-registry.js';
-import { jsContribution } from '#lib/javascript-contribution.js';
-import { tsContribution } from '#lib/typescript-contribution.js';
-import { kclContribution } from '#lib/kcl-language/kcl-register-language.js';
-import { openscadContribution } from '#lib/openscad-language/openscad-register-language.js';
-import { stepfileContribution } from '#lib/stepfile-language/stepfile-register-language.js';
-import { stlContribution } from '#lib/stl-language/stl-register-language.js';
-import { usdContribution } from '#lib/usd-language/usd-register-language.js';
-import { sysmlContribution } from '#lib/sysml-language/sysml-register-language.js';
-import { markdownContribution } from '#lib/markdown-language/markdown-register-language.js';
-import { bashContribution } from '#lib/bash-language/bash-register-language.js';
-import { pythonContribution } from '#lib/python-language/python-register-language.js';
-import { csharpContribution } from '#lib/csharp-language/csharp-register-language.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import type { Extension } from '@codemirror/state';
+import { EditorDocument } from '#lib/editor-document.js';
+import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
+import { acquireEditorLanguage } from '#lib/editor-language-runtime.js';
 
-const contributions: ReadonlyArray<{
-  readonly name: string;
-  readonly contribution: LanguageContribution;
-  readonly expectedIds: readonly string[];
-}> = [
-  {
-    name: 'tsContribution',
-    contribution: tsContribution,
-    expectedIds: ['typescript', 'typescriptreact'],
-  },
-  {
-    name: 'jsContribution',
-    contribution: jsContribution,
-    expectedIds: ['javascript', 'javascriptreact'],
-  },
-  {
-    name: 'kclContribution',
-    contribution: kclContribution,
-    expectedIds: [codeLanguages.kcl],
-  },
-  {
-    name: 'openscadContribution',
-    contribution: openscadContribution,
-    expectedIds: [codeLanguages.openscad],
-  },
-  {
-    name: 'stepfileContribution',
-    contribution: stepfileContribution,
-    expectedIds: [codeLanguages.stepfile],
-  },
-  {
-    name: 'stlContribution',
-    contribution: stlContribution,
-    expectedIds: [codeLanguages.stl],
-  },
-  {
-    name: 'usdContribution',
-    contribution: usdContribution,
-    expectedIds: [codeLanguages.usd],
-  },
-  {
-    name: 'sysmlContribution',
-    contribution: sysmlContribution,
-    expectedIds: [codeLanguages.sysml],
-  },
-  {
-    name: 'markdownContribution',
-    contribution: markdownContribution,
-    expectedIds: [codeLanguages.markdown],
-  },
-  {
-    name: 'bashContribution',
-    contribution: bashContribution,
-    expectedIds: [codeLanguages.bash],
-  },
-  {
-    name: 'pythonContribution',
-    contribution: pythonContribution,
-    expectedIds: [codeLanguages.python],
-  },
-  {
-    name: 'csharpContribution',
-    contribution: csharpContribution,
-    expectedIds: [codeLanguages.csharp],
-  },
-];
+const calls = vi.hoisted(() => ({
+  kcl: vi.fn(),
+  openscad: vi.fn(),
+  json: vi.fn(),
+  dispose: vi.fn(),
+}));
 
-describe('LanguageContribution.activationLanguageIds', () => {
-  for (const { name, contribution, expectedIds } of contributions) {
-    it(`${name} declares activationLanguageIds = ${JSON.stringify(expectedIds)}`, () => {
-      expect(contribution.activationLanguageIds).toEqual(expectedIds);
+vi.mock('#lib/kcl-language/kcl-codemirror.js', () => ({ acquireKclLanguage: calls.kcl }));
+vi.mock('#lib/openscad-language/openscad-codemirror.js', () => ({ acquireOpenScadLanguage: calls.openscad }));
+vi.mock('#lib/json-language/json-codemirror.js', () => ({ acquireJsonLanguage: calls.json }));
+
+describe('semantic language activation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    for (const factory of [calls.kcl, calls.openscad, calls.json]) {
+      factory.mockResolvedValue({ extensions: [], dispose: calls.dispose });
+    }
+  });
+
+  it.each([
+    ['main.kcl', 'kcl', 'kcl'],
+    ['main.scad', 'openscad', 'openscad'],
+    ['tau.json', 'json', 'json'],
+    ['config.jsonc', 'jsonc', 'json'],
+  ])('loads only %s semantic service after pane acquisition', async (path, languageId, family) => {
+    const document = new EditorDocument(path, '');
+    const lease = await acquireEditorLanguage({
+      languageId,
+      document,
+      environment: mock<EditorLanguageEnvironment>(),
+      signal: new AbortController().signal,
     });
-  }
+    expect(calls.kcl).toHaveBeenCalledTimes(family === 'kcl' ? 1 : 0);
+    expect(calls.openscad).toHaveBeenCalledTimes(family === 'openscad' ? 1 : 0);
+    expect(calls.json).toHaveBeenCalledTimes(family === 'json' ? 1 : 0);
+    lease.dispose();
+    lease.dispose();
+    expect(calls.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves JSONL syntax-only and refuses activation after abort', async () => {
+    const environment = mock<EditorLanguageEnvironment>();
+    const jsonl = await acquireEditorLanguage({
+      languageId: 'jsonl',
+      document: new EditorDocument('rows.jsonl', ''),
+      environment,
+      signal: new AbortController().signal,
+    });
+    expect(jsonl.extensions).toEqual([]);
+    expect(calls.json).not.toHaveBeenCalled();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      acquireEditorLanguage({
+        languageId: 'kcl',
+        document: new EditorDocument('main.kcl', ''),
+        environment,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow();
+    expect(calls.kcl).not.toHaveBeenCalled();
+  });
+
+  it('disposes a factory lease when abort arrives during acquisition', async () => {
+    const deferred = Promise.withResolvers<{ extensions: Extension[]; dispose(): void }>();
+    calls.kcl.mockReturnValueOnce(deferred.promise);
+    const controller = new AbortController();
+    const acquiring = acquireEditorLanguage({
+      languageId: 'kcl',
+      document: new EditorDocument('main.kcl', ''),
+      environment: mock<EditorLanguageEnvironment>(),
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => {
+      expect(calls.kcl).toHaveBeenCalledTimes(1);
+    });
+    controller.abort();
+    deferred.resolve({ extensions: [], dispose: calls.dispose });
+    await expect(acquiring).rejects.toThrow();
+    expect(calls.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases a live language exactly once on abort or explicit dispose', async () => {
+    const controller = new AbortController();
+    const lease = await acquireEditorLanguage({
+      languageId: 'kcl',
+      document: new EditorDocument('main.kcl', ''),
+      environment: mock<EditorLanguageEnvironment>(),
+      signal: controller.signal,
+    });
+    controller.abort();
+    lease.dispose();
+    expect(calls.dispose).toHaveBeenCalledTimes(1);
+
+    vi.clearAllMocks();
+    calls.kcl.mockResolvedValue({ extensions: [], dispose: calls.dispose });
+    const second = new AbortController();
+    const another = await acquireEditorLanguage({
+      languageId: 'kcl',
+      document: new EditorDocument('other.kcl', ''),
+      environment: mock<EditorLanguageEnvironment>(),
+      signal: second.signal,
+    });
+    another.dispose();
+    second.abort();
+    expect(calls.dispose).toHaveBeenCalledTimes(1);
+  });
 });

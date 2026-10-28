@@ -31,18 +31,17 @@ The fixed release group is every `tag:type:package` project that is not private:
 | `@taucad/units`           | Portable unit parsing, conversion, and quantity semantics |
 | `@taucad/cli`             | Headless CAD export CLI                                   |
 | `@taucad/react`           | React bindings for the runtime                            |
-| `geospec`                 | GeoSpec authoring contract; leaves at W4b                 |
 | `@taucad/openrscad`       | OpenRSCAD runtime plugin                                  |
 | `packages/plugins/*`      | Publishable runtime capability toolkits                   |
 | `packages/core/*`         | Publishable shared implementation packages                |
 
 The following private libraries are outside the fixed Nx release group: `@taucad/events`, `@taucad/fs-bridge`, `@taucad/json-schema`, `@taucad/memory`, `@taucad/types`, and `@taucad/utils`. All six are runtime bundle candidates. `@taucad/filesystem` and `@taucad/rpc` publish separately and remain external runtime dependencies; RPC is also an `@taucad/agent-host` dependency (host-agnostic R3, W4 SC-S4). The former `@taucad/vm` library is no longer one of them: its sources live inside `@taucad/esbuild`, which owns and publishes them directly. Public `@taucad/units`, plugin, and core packages remain external dependencies and publish in the same fixed train.
 
-### GeoSpec Engine Train
+### GeoSpec Train
 
-The native GeoSpec engine is not in this train. `geospec-engine` on npm and PyPI and its `geospec-engine-<platform>` NAPI packages are built, versioned and published by `taucad/geospec` on its own semver train: Version Plans there, a `next` prerelease for every `main` commit, `latest` from its bot-owned release pull request, and npm OIDC trusted publishing from that repository's `ci.yml` with environment `npm-publish`. Tau consumes it by the `geospec-engine` catalog pin and never adds it to this repository's `nx release` configuration.
+The GeoSpec packages are not in this train. `geospec`, `geospec-engine` on npm and PyPI and its `geospec-engine-<platform>` NAPI packages are built, versioned and published by `taucad/geospec` on its own semver train, with `geospec` and the engine in one fixed release group: Version Plans there, a `next` prerelease for every `main` commit, `latest` from its bot-owned release pull request, and npm OIDC trusted publishing from that repository's `ci.yml` with environment `npm-publish`. Tau consumes them by the `geospec` and `geospec-engine` catalog pins, bumped together, and never adds them to this repository's `nx release` configuration.
 
-One GeoSpec package stays in this train for now. `geospec` remains a Tau package, published by Tau's `publish.yml`, until the stage-2 move (W4b) takes it to `taucad/geospec`; this policy is amended again when it leaves. `@taucad/geospec-engine` left the train when the GeoSpec seam consolidation (W2) removed it: its CLI is `geospec run` with Tau's exporter from `@taucad/cli/geospec`, it is no longer published, and the operator deprecates it on npm.
+`geospec` left the train with the stage-2 move (W4b), which took the package and its history to `taucad/geospec`. Tau no longer builds or publishes it, its `geospec-authoring` skill bundle is generated there, and Tau's editor type map for it is generated from the installed package. `@taucad/geospec-engine` left the train when the GeoSpec seam consolidation (W2) removed it: its CLI is `geospec run` with Tau's exporter from `@taucad/cli/geospec`, it is no longer published, and the operator deprecates it on npm.
 
 `@taucad/runtime/types` is the public owner for runtime contract types. JSON Schema inference remains an implementation library with no public runtime veneer or subpath. `@taucad/units` owns the portable public units API.
 
@@ -324,3 +323,4 @@ The deployable applications (projects tagged `release:app`: `ui`, `api` and `des
 | 2026-10 | Pre-1.0 plans and a promotion script for the npm train  | The beta trains bypass version plans and leave `latest` on placeholders and a fork; `major` plans would have released the group as 1.0.0 (charter D28)    |
 | 2026-10 | GeoSpec engine on its own train in `taucad/geospec`     | GeoSpec charter D15: the native engine releases on its own semver and `next` cadence; `geospec` stays until W4b and `@taucad/geospec-engine` until W2     |
 | 2026-10 | Remove `@taucad/geospec-engine` from the train          | W2 WP6: callers run `geospec run` and `tau test` with `@taucad/cli`'s exporter; the package is deleted and the operator deprecates it on npm              |
+| 2026-10 | Move `geospec` to `taucad/geospec`                      | W4b: the authoring package versions and publishes with the engine it runs on; Tau consumes both by catalog pin                                            |

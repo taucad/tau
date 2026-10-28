@@ -1,6 +1,6 @@
 import { SiteLink } from '#www/site-link.js';
 import { appOrigin } from '#www/environment.js';
-import { desktopDownloads, desktopDownloadHref, desktopDownloadLabel } from '#www/downloads.js';
+import { desktopDownloads, desktopDownloadHref, desktopFileLabel } from '#www/downloads.js';
 import { sourceUrl } from '#www/content.js';
 import { out, down, intro } from '#www/page-components.js';
 import { MarketingPage } from '#app/marketing-page.js';
@@ -12,7 +12,7 @@ function DownloadLabel({ platform }: { platform: keyof typeof desktopDownloads }
     <span
       className='inline-flex items-center gap-2'
       // oxlint-disable-next-line react/no-danger -- Only checked-in brand SVGs and product constants form this markup.
-      dangerouslySetInnerHTML={{ __html: desktopDownloadLabel(platform) }}
+      dangerouslySetInnerHTML={{ __html: desktopFileLabel(platform) }}
     />
   );
 }
@@ -51,13 +51,12 @@ export const content = (): React.JSX.Element => (
               href={desktopDownloadHref('macIntel')}
               data-event='download'
               data-placement='download'
-              aria-label='Download for Intel Mac'
               data-download-platform='macIntel'
             >
               <DownloadLabel platform='macIntel' />
             </SiteLink>
             <p className='fine' data-download-detail='macIntel'>
-              Intel Mac · ZIP download
+              {desktopDownloads.macIntel.detail}
             </p>
           </div>
         </div>

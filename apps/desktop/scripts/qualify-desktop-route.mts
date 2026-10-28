@@ -13,19 +13,27 @@ import { z } from 'zod';
 import { linuxInstallation } from '#shared/linux-installation.js';
 import { promisify } from 'node:util';
 import { defaultPayloadStore } from '@taucad/host';
-import { fetchQualificationCandidates } from './qualification-candidates.mjs';
+import { assertQualificationConsumerScope, fetchQualificationCandidates } from './qualification-candidates.mjs';
 import { qualificationArtifactObjects, qualificationFeed } from './qualification-feeds.mjs';
 import { startQualificationMirrorProcess } from './qualification-mirror-process.mjs';
 import { assertDisposableQualificationHost, prepareQualificationTls } from './qualification-tls.mjs';
-import { createWindowsQualificationDriver } from './qualification-windows.mjs';
+import { createWindowsQualificationDriver, observeWindowsConsumerHost } from './qualification-windows.mjs';
 import { createLinuxAptQualificationDriver } from './qualification-linux.mjs';
 import { prepareQualificationAptEnrollment } from './qualification-apt-enrollment.mjs';
 import type { QualificationAptEnrollment } from './qualification-apt-enrollment.mjs';
 import type { LinuxAptQualificationDriver } from './qualification-linux.mjs';
 import type { QualificationMirrorObject } from './qualification-mirror.mjs';
 import { createMacosQualificationDriver } from './qualification-macos.mjs';
+import { observeMacosCleanHost } from './qualification-macos-host.mjs';
+import { downloadWithBrowser } from './qualification-browser-download.mjs';
 import { discoverQualificationProcesses } from './qualification-processes.mjs';
-import { collectQualificationReceipt, qualificationProbeObservationSchema } from './qualification-evidence.mjs';
+import {
+  assertMacosCleanHost,
+  assertWindowsConsumerHost,
+  collectQualificationReceipt,
+  macosCleanHostApplication,
+  qualificationProbeObservationSchema,
+} from './qualification-evidence.mjs';
 import type { QualificationEvidence, QualificationStageEvidence } from './qualification-evidence.mjs';
 import type { QualificationCandidate, QualificationPlatformDriver } from './qualification-platform-types.mjs';
 
@@ -130,8 +138,43 @@ const main = async (): Promise<void> => {
   if (process.platform === 'linux' && (!process.env['DISPLAY'] || process.env['XDG_SESSION_TYPE'] !== 'x11')) {
     throw new Error('Qualification requires the declared graphical X11 session');
   }
+  // Consumer acceptance requires native observations before the run creates its profile.
+  const acceptanceKind = z.enum(['ci', 'vm']).parse(process.env['TAU_DESKTOP_ACCEPTANCE_KIND'] ?? 'ci');
+  assertQualificationConsumerScope({
+    kind: acceptanceKind,
+    route,
+    scope: process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'],
+    channel: required('TAU_QUALIFICATION_CHANNEL'),
+  });
+  const cleanHost =
+    acceptanceKind === 'vm' && route.startsWith('macos-')
+      ? await (async () => {
+          if (!route.startsWith('macos-') || process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] !== 'macos') {
+            throw new Error('Clean-host acceptance is a Mac-scoped run only');
+          }
+          // Observed before this run creates its profile, so prior Tau state cannot be mistaken for this run's.
+          return assertMacosCleanHost(
+            await observeMacosCleanHost(required('RUNNER_NAME')),
+            process.arch === 'arm64' ? 'arm64' : 'x64',
+          );
+        })()
+      : undefined;
+  const windowsHost =
+    acceptanceKind === 'vm' && route === 'windows-nsis'
+      ? assertWindowsConsumerHost(observeWindowsConsumerHost(required('RUNNER_NAME')))
+      : undefined;
+  if (acceptanceKind === 'vm' && !cleanHost && !windowsHost) {
+    throw new Error('Consumer acceptance requires its staging platform scope');
+  }
   const root = resolve(required('TAU_QUALIFICATION_DIRECTORY'));
   await mkdir(root, { recursive: false });
+  let cleanHostRun: { host: NonNullable<typeof cleanHost>; directory: string } | undefined;
+  if (cleanHost ?? windowsHost) {
+    await mkdir(join(root, 'clean-host'), { recursive: false });
+    if (cleanHost) {
+      cleanHostRun = { host: cleanHost, directory: await realpath(join(root, 'clean-host')) };
+    }
+  }
   const candidates = await fetchQualificationCandidates({
     runIds: [
       required('TAU_QUALIFICATION_RUN_A'),
@@ -165,18 +208,24 @@ const main = async (): Promise<void> => {
     throw new Error('First-use qualification requires an initially cold payload store');
   }
   const nonce = randomUUID();
-  const installationPath = route.startsWith('macos-')
-    ? join(homedir(), 'Applications', `tau-qualification-${nonce}`, 'Tau.app')
-    : route === 'windows-nsis'
-      ? join(required('LOCALAPPDATA'), 'Programs', `tau-qualification-${nonce}`)
-      : linuxInstallation(channel, route === 'linux-appimage').launcher;
+  const installationPath = cleanHost
+    ? macosCleanHostApplication
+    : route.startsWith('macos-')
+      ? join(homedir(), 'Applications', `tau-qualification-${nonce}`, 'Tau.app')
+      : route === 'windows-nsis'
+        ? join(required('LOCALAPPDATA'), 'Programs', `tau-qualification-${nonce}`)
+        : linuxInstallation(channel, route === 'linux-appimage').launcher;
   const candidate = (index: number): QualificationCandidate => ({ ...candidates[index]!, route });
   let tls: Awaited<ReturnType<typeof prepareQualificationTls>> | undefined;
   let mirror: Awaited<ReturnType<typeof startQualificationMirrorProcess>> | undefined;
   const failures: unknown[] = [];
   let acceptedReceipt: ReturnType<typeof collectQualificationReceipt> | undefined;
   const feeds: Array<Awaited<ReturnType<typeof qualificationFeed>>> = [];
-  let driver: QualificationPlatformDriver;
+  let driver: QualificationPlatformDriver & {
+    launch?(stage: 'initial' | 'reinstall', args: readonly string[], env: Record<string, string>): Promise<number>;
+    acceptance?(): NonNullable<QualificationEvidence['acceptance']>;
+    windowsAcceptance?(): NonNullable<QualificationEvidence['windowsAcceptance']>;
+  };
   let apt: QualificationAptEnrollment | undefined;
   let aptDriver: LinuxAptQualificationDriver | undefined;
   const scheduler: Array<NonNullable<QualificationEvidence['scheduler']>[number]> = [];
@@ -232,12 +281,26 @@ const main = async (): Promise<void> => {
           architecture: process.arch === 'arm64' ? 'arm64' : 'x64',
           teamId: required('APPLE_TEAM_ID'),
           installFormat: route === 'macos-dmg' ? 'dmg' : 'zip',
+          ...(cleanHostRun
+            ? { cleanHost: { ...cleanHostRun, origin: transport.origin, download: downloadWithBrowser } }
+            : {}),
         })
       : route === 'windows-nsis'
         ? createWindowsQualificationDriver({
             mode: 'release',
             installationPath,
             publisher: required('TAU_WINDOWS_PUBLISHER'),
+            ...(windowsHost
+              ? {
+                  cleanHost: {
+                    host: windowsHost,
+                    nonce,
+                    directory: join(root, 'clean-host'),
+                    origin: transport.origin,
+                    download: downloadWithBrowser,
+                  },
+                }
+              : {}),
           })
         : (aptDriver = createLinuxAptQualificationDriver({
             mode: 'release',
@@ -297,6 +360,13 @@ const main = async (): Promise<void> => {
           return 0;
         },
       );
+      if (driver.launch) {
+        // Clean host: LaunchServices launch from /Applications, honouring Gatekeeper's first-launch decision.
+        await driver.launch('initial', [`--tau-route-qualification=${nonce}`], {
+          TAU_DESKTOP_UPDATE_FEED: transport.origin,
+        });
+        return;
+      }
       const child = spawn(
         route === 'linux-apt' || route === 'linux-appimage' ? installationPath : installedA.executablePath,
         [`--tau-route-qualification=${nonce}`],
@@ -594,18 +664,26 @@ const main = async (): Promise<void> => {
     const reinstalled = await driver.reinstall(candidate(2), preserved);
     await rm(join(profile, 'DevToolsActivePort'), { force: true });
     offset = await stat(join(profile, 'logs/desktop.log')).then((info) => info.size);
-    const resumed = spawn(
-      route === 'linux-apt' || route === 'linux-appimage' ? installationPath : reinstalled.executablePath,
-      ['--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0'],
-      { env: { ...process.env, TAU_DESKTOP_UPDATES: 'off' }, stdio: 'ignore' },
-    );
-    await new Promise<void>((resolve, reject) => {
-      resumed.once('spawn', resolve);
-      resumed.once('error', reject);
-    });
-    if (!resumed.pid) {
+    const resumedArgs = ['--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0'];
+    let resumedPid: number | undefined;
+    if (driver.launch) {
+      resumedPid = await driver.launch('reinstall', resumedArgs, { TAU_DESKTOP_UPDATES: 'off' });
+    } else {
+      const resumed = spawn(
+        route === 'linux-apt' || route === 'linux-appimage' ? installationPath : reinstalled.executablePath,
+        resumedArgs,
+        { env: { ...process.env, TAU_DESKTOP_UPDATES: 'off' }, stdio: 'ignore' },
+      );
+      await new Promise<void>((resolve, reject) => {
+        resumed.once('spawn', resolve);
+        resumed.once('error', reject);
+      });
+      resumedPid = resumed.pid;
+    }
+    if (!resumedPid) {
       throw new Error('Reinstalled process has no PID');
     }
+    const resumed = { pid: resumedPid };
     currentPid = resumed.pid;
     await waitFor(
       async () => {
@@ -625,7 +703,7 @@ const main = async (): Promise<void> => {
       throw new Error('Reinstalled saved project evidence missing');
     }
     await render('c', resumed.pid, 'reinstall-quit');
-    await waitFor(async () => (alive(resumed.pid!) ? undefined : true), 'Reinstalled app did not quit', 60_000);
+    await waitFor(async () => (alive(resumed.pid) ? undefined : true), 'Reinstalled app did not quit', 60_000);
     const reinstalledFiles = await Promise.all(
       preserved.map(async (file) => ({ path: file.path, sha256: await digest(file.path) })),
     );
@@ -656,7 +734,9 @@ const main = async (): Promise<void> => {
       ...(apt ? { scheduler } : {}),
       mirrorRequests: transport.requests.map((request) => ({ ...request, at: Date.parse(request.at) })),
       logs: `https://github.com/taucad/tau/actions/runs/${required('GITHUB_RUN_ID')}`,
-      suite: 'installed-route-a-b-c-v1',
+      suite: (cleanHost ?? windowsHost) ? 'clean-host-route-a-b-c-v1' : 'installed-route-a-b-c-v1',
+      ...(driver.acceptance ? { acceptance: driver.acceptance() } : {}),
+      ...(driver.windowsAcceptance ? { windowsAcceptance: driver.windowsAcceptance() } : {}),
       trustIdentity:
         route === 'windows-nsis'
           ? required('TAU_WINDOWS_PUBLISHER')

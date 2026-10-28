@@ -1,4 +1,6 @@
 // @vitest-environment node
+import type { MeshStandardNodeMaterial } from 'three/webgpu';
+import { float } from 'three/tsl';
 import { describe, expect, it, vi } from 'vitest';
 import { BoxGeometry, Group, Mesh, MeshBasicMaterial, MeshMatcapMaterial, MeshStandardMaterial, Plane } from 'three';
 import type { Material, WebGLProgramParametersWithUniforms, WebGLRenderer } from 'three';
@@ -14,6 +16,12 @@ import {
   applyModelMaterialAppearance,
   getOrCaptureModelMaterialAppearance,
 } from '#graphics/three/materials/model-component-appearance.js';
+import { installLogarithmicGeometryDepth } from '#graphics/three/logarithmic-depth.js';
+import {
+  createGltfSurfaceBatches,
+  qualifyGltfSurfaceMaterial,
+  sealGltfSurfaceMaterial,
+} from '#graphics/three/utils/gltf-surface-batches.js';
 import { createSectionClip, installSectionClip } from '#graphics/three/materials/section-clip.js';
 
 type ShaderProbe = {
@@ -28,6 +36,33 @@ const compile = (material: MeshStandardMaterial, fragmentShader = '#include <log
 };
 
 describe('GLTF surface depth bias', () => {
+  it('keeps equivalent logarithmic surfaces in one batch after their first draw', () => {
+    const root = new Group();
+    const geometry = new BoxGeometry();
+    const meshes = Array.from({ length: 3 }, () => {
+      const material = new MeshStandardMaterial();
+      qualifyGltfSurfaceMaterial(material);
+      applyGltfSurfaceDepthBias(material, 'webgpu');
+      sealGltfSurfaceMaterial(material);
+      installLogarithmicGeometryDepth(material);
+      syncGltfSurfaceDepthBias.call(material, { getPixelRatio: () => 2, logarithmicDepthBuffer: true });
+      const mesh = new Mesh(geometry, material);
+      root.add(mesh);
+      return mesh;
+    });
+    const batches = createGltfSurfaceBatches(root, meshes);
+    try {
+      batches.sync();
+      expect(batches.group.children).toHaveLength(1);
+    } finally {
+      batches.dispose();
+      geometry.dispose();
+      for (const mesh of meshes) {
+        mesh.material.dispose();
+      }
+    }
+  });
+
   it.each(['webgl', 'webgpu'] as const)(
     'should refresh final appearance without dirtying repeated states on %s',
     (backend) => {
@@ -125,6 +160,33 @@ describe('GLTF surface depth bias', () => {
     }
     material.polygonOffsetFactor = 77;
     expect(getGltfSurfaceDepthBiasCohort(material, material.customProgramCacheKey())).toBeUndefined();
+  });
+
+  it('retains one logarithmic depth node per opaque material and restores authored depth when transparent', () => {
+    const originalDepth = float(0.5);
+    const material = Object.assign(new MeshStandardMaterial(), {
+      depthNode: originalDepth as MeshStandardNodeMaterial['depthNode'],
+    });
+    applyGltfSurfaceDepthBias(material, 'webgpu');
+    const renderer = { getPixelRatio: () => 2, logarithmicDepthBuffer: true };
+    const cohort = getGltfSurfaceDepthBiasCohort(material, material.customProgramCacheKey());
+    syncGltfSurfaceDepthBias.call(material, renderer);
+    const depth = material.depthNode;
+    const { version } = material;
+    expect(depth).not.toBe(originalDepth);
+    expect(material.polygonOffsetFactor).toBe(0);
+    expect(material.polygonOffsetUnits).toBe(0);
+    syncGltfSurfaceDepthBias.call(material, renderer);
+    expect(material.depthNode).toBe(depth);
+    expect(material.version).toBe(version);
+    expect(getGltfSurfaceDepthBiasCohort(material, material.customProgramCacheKey())).toEqual(cohort);
+    material.transparent = true;
+    refreshGltfSurfaceDepthBias(material);
+    expect(material.depthNode).toBe(originalDepth);
+    material.transparent = false;
+    refreshGltfSurfaceDepthBias(material);
+    syncGltfSurfaceDepthBias.call(material, renderer);
+    expect(material.depthNode).toBe(depth);
   });
 
   it('shares one render hook across biased materials so they stay batchable', () => {

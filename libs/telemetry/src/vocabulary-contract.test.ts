@@ -45,9 +45,15 @@ describe('ingest vocabularies', () => {
   });
 
   it('should list every built-in skill bundle slug shipped through @taucad/skills', () => {
-    const manifests = globSync(['packages/*/agent/skills.json', 'packages/plugins/*/agent/skills.json'], {
-      cwd: workspaceRoot,
-    });
+    // `geospec-authoring` ships in the installed `geospec` package, published from taucad/geospec.
+    const manifests = globSync(
+      [
+        'packages/*/agent/skills.json',
+        'packages/plugins/*/agent/skills.json',
+        'node_modules/geospec/agent/skills.json',
+      ],
+      { cwd: workspaceRoot },
+    );
     const slugs = manifests.flatMap((file) =>
       (JSON.parse(source(file)) as { bundles: Array<{ slug: string }> }).bundles.map(({ slug }) => slug),
     );

@@ -107,7 +107,7 @@
     "@taucad/zoo": "workspace:*",
     "citty": "catalog:",
     "consola": "catalog:",
-    "geospec": "workspace:*",
+    "geospec": "catalog:",
     "geospec-engine": "catalog:",
     "ink": "catalog:",
     "proper-lockfile": "catalog:",

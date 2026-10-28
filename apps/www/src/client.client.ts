@@ -1,10 +1,9 @@
-import { detectDesktopPlatform, desktopDownloads, desktopDownloadHref, desktopDownloadLabel } from '#www/downloads.js';
-import { initializeInstallerCatalog } from '#www/download-catalog.client.js';
+import { initializeHostDownload, initializeInstallerCatalog } from '#www/download-catalog.client.js';
 import type * as Live from '#www/live.js';
 import { readStoryProgress } from '#www/story-progress.js';
 import { randomUuid } from '@taucad/utils/id';
 import { sanitizeEvent, campaignCodes } from '#www/analytics.js';
-import { environmentHref, stagingDesktopNote } from '#www/environment.js';
+import { environmentHref } from '#www/environment.js';
 import { consentChannelName, readConsentCookie, writeConsent } from '@taucad/consent';
 import type { ConsentDecision } from '@taucad/consent';
 
@@ -54,33 +53,7 @@ export function initializePage(signal: AbortSignal): () => void {
   for (const link of document.querySelectorAll('a[href^="https://"]')) {
     link.setAttribute('href', environmentHref(link.getAttribute('href') ?? '', location.hostname));
   }
-  const hostPlatform = detectDesktopPlatform(navigator);
-  if (hostPlatform) {
-    const download = desktopDownloads[hostPlatform];
-    for (const link of document.querySelectorAll('[data-host-download]')) {
-      link.innerHTML = desktopDownloadLabel(hostPlatform);
-      if (link instanceof HTMLElement && link.dataset['hostDownload'] === 'direct') {
-        link.setAttribute('href', environmentHref(desktopDownloadHref(hostPlatform), location.hostname));
-      }
-    }
-    const intelDownload = document.querySelector('[data-mac-intel]');
-    if (intelDownload instanceof HTMLElement) {
-      intelDownload.hidden = hostPlatform !== 'mac';
-    }
-    const detail = document.querySelector('[data-download-detail]');
-    const instructions = document.querySelector('[data-install-instructions]');
-    const note = document.querySelector('[data-platform-note]');
-    if (detail) {
-      detail.textContent = download.detail;
-    }
-    if (instructions) {
-      instructions.textContent = download.install;
-    }
-    if (note) {
-      note.textContent =
-        (hostPlatform === 'mac' ? stagingDesktopNote(location.hostname) : undefined) ?? download.updates;
-    }
-  }
+  initializeHostDownload(location.hostname);
 
   // async-iife: bootstrap -- The page signal owns the bounded optional catalog enhancement.
   void initializeInstallerCatalog(signal);

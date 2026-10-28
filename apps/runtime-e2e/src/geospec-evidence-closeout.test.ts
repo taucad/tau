@@ -18,10 +18,7 @@ describe('GeoSpec evidence to LLM closeout', () => {
     const root = await mkdtemp(join(tmpdir(), 'geospec-evidence-closeout-'));
     const examplesRoot = resolve(import.meta.dirname, '../../../libs/tau-examples');
     const step = join(root, 'assembly.step');
-    await copyFile(
-      resolve(import.meta.dirname, '../../../packages/geospec/src/runner/node/__fixtures__/two-cube-assembly.step'),
-      step,
-    );
+    await copyFile(resolve(import.meta.dirname, '../fixtures/two-cube-assembly.step'), step);
     const file = 'evidence.geospec.ts';
     await writeFile(
       join(root, file),

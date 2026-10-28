@@ -11,6 +11,8 @@ export type ShutdownMachineContext = {
   readonly purpose: 'quit' | 'restart';
   readonly attemptId: string;
   readonly machines: readonly StreamingMachine[] | undefined;
+  /** Human Terminal sessions the utility serves (T15); `undefined` when it could not say. */
+  readonly terminals: number | undefined;
   readonly forceMachines: boolean;
   readonly error: string | undefined;
   readonly settlement: 'renderer' | 'utility';
@@ -35,6 +37,7 @@ export type ShutdownMachineEvent =
       readonly attemptId: string;
       readonly result: ShutdownResult;
       readonly machines?: readonly StreamingMachine[];
+      readonly terminals?: number;
       readonly error?: string;
       readonly retryable?: boolean;
     };
@@ -106,6 +109,7 @@ export const shutdownMachine = setup({
     purpose: 'quit',
     attemptId: '',
     machines: undefined,
+    terminals: undefined,
     forceMachines: false,
     error: undefined,
     retryable: true,
@@ -122,6 +126,7 @@ export const shutdownMachine = setup({
             purpose: event.purpose ?? 'quit',
             attemptId: `${context.identity}:${String(context.sequence + 1)}`,
             machines: undefined,
+            terminals: undefined,
             forceMachines: false,
             error: undefined,
             retryable: true,
@@ -137,7 +142,7 @@ export const shutdownMachine = setup({
           event.attemptId === context.attemptId
             ? {
                 target: event.result === 'clear' ? 'renderer' : 'reviewing',
-                context: { machines: event.machines, error: event.error },
+                context: { machines: event.machines, terminals: event.terminals, error: event.error },
               }
             : {},
       },
@@ -147,7 +152,17 @@ export const shutdownMachine = setup({
       on: {
         done: ({ context, event }) =>
           event.attemptId === context.attemptId
-            ? { target: event.result === 'view' ? 'viewing' : event.result === 'force' ? 'confirming' : 'cancelling' }
+            ? {
+                /* `confirmed`: only running Terminals were reviewed, and the person chose to stop them (T15). */
+                target:
+                  event.result === 'view'
+                    ? 'viewing'
+                    : event.result === 'force'
+                      ? 'confirming'
+                      : event.result === 'confirmed'
+                        ? 'renderer'
+                        : 'cancelling',
+              }
             : {},
       },
     },

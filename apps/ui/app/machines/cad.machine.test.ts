@@ -13,7 +13,12 @@ import { z } from 'zod';
 import { createMockRuntimeClient, createMockRuntimeDocument } from '@taucad/runtime-testing';
 import { defaultOperationTimeout } from '#constants/editor.constants.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
-import { cadMachine, disposeCadRuntime, selectCadFailureIssues } from '#machines/cad.machine.js';
+import {
+  cadMachine,
+  disposeCadRuntime,
+  selectCadEvaluateOptions,
+  selectCadFailureIssues,
+} from '#machines/cad.machine.js';
 import type { CadContext } from '#machines/cad.machine.js';
 import type { AppRuntimeClient, KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 
@@ -483,6 +488,25 @@ describe('cadMachine watched document', () => {
     expect(f.client.setOperationTimeout).toHaveBeenCalledWith(defaultOperationTimeout);
     f.actor.send({ type: 'setOperationTimeout', operationTimeout: 12_000 });
     expect(f.client.setOperationTimeout).toHaveBeenCalledWith(12_000);
+    f.actor.stop();
+  });
+
+  it('re-evaluates the open document with new evaluate options and reopens with them', async () => {
+    const f = await opened(fixture());
+    f.actor.send({ type: 'setEvaluateOptions', evaluateOptions: { meshAdaptivity: 0 } });
+    expect(f.runtime.document.update).toHaveBeenCalledWith({ evaluateOptions: { meshAdaptivity: 0 } });
+    expect(selectCadEvaluateOptions(f.actor.getSnapshot())).toEqual({ meshAdaptivity: 0 });
+    f.runtime.emitRendered(f.runtime.rendering);
+    await waitFor(f.actor, (snapshot) => snapshot.value === 'idle');
+    f.actor.send({ type: 'parkRuntime' });
+    await waitFor(f.actor, (snapshot) => snapshot.value === 'parked');
+    vi.mocked(f.client.open).mockReturnValue(createMockRuntimeDocument().document);
+    f.actor.send({ type: 'resumeRuntime' });
+    await vi.waitFor(() => {
+      expect(f.client.open).toHaveBeenLastCalledWith(
+        expect.objectContaining({ evaluateOptions: { meshAdaptivity: 0 } }),
+      );
+    });
     f.actor.stop();
   });
 

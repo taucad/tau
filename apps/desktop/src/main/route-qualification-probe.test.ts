@@ -3,7 +3,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, symlinkSync, realpath
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { prepareRouteQualificationProbe } from '#main/route-qualification-probe.js';
+import {
+  prepareRouteQualificationProbe,
+  qualificationRecordReplaceBoundMilliseconds,
+  replaceQualificationRecord,
+} from '#main/route-qualification-probe.js';
 import type { RouteQualificationRequest } from '#main/route-qualification-probe.js';
 
 const roots: string[] = [];
@@ -195,5 +199,73 @@ describe('installed route qualification diagnostics', () => {
     expect(() => prepareRouteQualificationProbe({ ...options, arguments: [], ...request.b, pid: 102 })).toThrow(
       'stage advanced',
     );
+  });
+});
+
+describe('qualification record replacement', () => {
+  const sharingViolation = (code: string): Error => Object.assign(new Error(code), { code });
+  const clock = () => {
+    let time = 0;
+    return {
+      now: () => time,
+      pause: (milliseconds: number) => {
+        time += milliseconds;
+      },
+    };
+  };
+
+  it('should wait out a Windows reader holding the record, then replace it', () => {
+    const { now, pause } = clock();
+    const attempts: string[] = [];
+    replaceQualificationRecord('ready.json.tmp', 'ready.json', {
+      platform: 'win32',
+      now,
+      pause,
+      rename(from, to) {
+        attempts.push(`${from}>${to}`);
+        if (attempts.length < 3) {
+          throw sharingViolation(attempts.length === 1 ? 'EPERM' : 'EBUSY');
+        }
+      },
+    });
+    expect(attempts).toStrictEqual(Array.from({ length: 3 }, () => 'ready.json.tmp>ready.json'));
+  });
+
+  it('should stop at the bound when the record stays held', () => {
+    const { now, pause } = clock();
+    let attempts = 0;
+    expect(() => {
+      replaceQualificationRecord('ready.json.tmp', 'ready.json', {
+        platform: 'win32',
+        now,
+        pause,
+        rename() {
+          attempts += 1;
+          throw sharingViolation('EACCES');
+        },
+      });
+    }).toThrow('EACCES');
+    expect(now()).toBeGreaterThanOrEqual(qualificationRecordReplaceBoundMilliseconds);
+    expect(attempts).toBeGreaterThan(1);
+  });
+
+  it('should not retry off Windows or for another error', () => {
+    for (const [platform, code] of [
+      ['linux', 'EPERM'],
+      ['darwin', 'EBUSY'],
+      ['win32', 'ENOENT'],
+    ] as const) {
+      let attempts = 0;
+      expect(() => {
+        replaceQualificationRecord('ready.json.tmp', 'ready.json', {
+          platform,
+          rename() {
+            attempts += 1;
+            throw sharingViolation(code);
+          },
+        });
+      }).toThrow(code);
+      expect(attempts).toBe(1);
+    }
   });
 });

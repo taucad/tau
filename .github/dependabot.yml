@@ -154,19 +154,3 @@ updates:
     labels:
       - 'dependencies'
       - 'automated'
-
-  - package-ecosystem: 'docker-compose'
-    directory: '/infra/search'
-    schedule:
-      interval: 'weekly'
-      day: 'monday'
-      time: '11:00'
-      timezone: 'Etc/UTC'
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: 'chore(search)'
-      include: 'scope'
-    labels:
-      - 'dependencies'
-      - 'search'
-      - 'automated'

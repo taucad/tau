@@ -14,6 +14,16 @@ export const panelMinSizeViewer = 416;
 export const panelMinSizeWorkbench = 320;
 
 /**
+ * Minimum width for the Viewer when the workspace cannot hold an auxiliary lane beside the full viewer minimum, as from
+ * 768px with the sidebar open or on a landscape phone (D12). The lanes then fit the workspace instead of running past
+ * the viewport's edge.
+ */
+export const panelMinSizeViewerTight = 200;
+
+/** Below this workspace width the Viewer takes {@link panelMinSizeViewerTight}: the widest lane beside the full viewer. */
+export const tightWorkspaceWidth = Math.max(panelMinSizeChat, panelMinSizeWorkbench) + panelMinSizeViewer;
+
+/**
  * The phone sheet's lowest detent (peek). A height rather than a fraction, so the surface's title row and the chat
  * composer fit above the workbench nav on the shortest phone (320×640) as on the tallest.
  */

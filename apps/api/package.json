@@ -35,7 +35,7 @@
     "@taucad/esbuild": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/vite": "workspace:*",
-    "geospec": "workspace:*",
+    "geospec": "catalog:",
     "geospec-engine": "catalog:",
     "pino-pretty": "catalog:"
   },

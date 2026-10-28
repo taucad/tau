@@ -3,6 +3,7 @@ import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import { prepareComposerPage, readHomeJson } from '#support/chat-attachments.js';
+import { answerIfAsked } from '#support/revision-session.js';
 import { waitForStageReady } from '#support/viewer-stage.js';
 
 /**
@@ -390,5 +391,92 @@ test.each([
     await target.click(projectSheet().getByRole('button', { name: 'Follow chat', exact: true }), { touch: true });
     await expectStatus(`Saved · on ${branch}`, 60_000);
     await target.screenshot(undefined, `mobile-status-on-branch-${String(viewport.width)}.png`);
+  },
+);
+
+/** The Revisions surface's Branches row for `name`, by its own *Actions for* button. */
+const branchRow = (name: string): Locator =>
+  selectors
+    .getByRole('region', { name: 'Revisions', exact: true })
+    .getByRole('list', { name: 'Branches', exact: true })
+    .getByRole('listitem')
+    .filter({ has: selectors.getByRole('button', { name: `Actions for ${name}`, exact: true }) });
+
+/** Put the workbench on `name` from its Branches row, answering the guard when it asks. */
+const switchTo = async (name: string): Promise<void> => {
+  await openFromProjectSheet('Revisions');
+  await target.click(selectors.getByRole('button', { name: `Switch to ${name}`, exact: true }), { touch: true });
+  await answerIfAsked(
+    'Switch branch',
+    selectors
+      .getByRole('region', { name: 'Revisions', exact: true })
+      .getByCss(`ul[aria-label="Branches"] > li[aria-current="true"]`)
+      .filter({ has: selectors.getByRole('button', { name: `Actions for ${name}`, exact: true }) }),
+  );
+};
+
+test.each([
+  { width: 320, height: 640 },
+  { width: 390, height: 844 },
+])(
+  'says Conflict for a merge that waits on a decision, keeps three controls, and the sheet offers it at $width×$height (HDR-05, S7)',
+  async (viewport) => {
+    const branch = 'fillet-exploration';
+    await openTouchPhone(viewport, '/__e2e/project-file-tree?main=touch-parameters');
+    // A base both lines share, then the same parameter changed differently on each: a merge must ask (S7).
+    await editWidth('31');
+    await saveRevisionFromSheet();
+    await expectStatus('Saved', 120_000);
+    await openFromProjectSheet('Revisions');
+    await target.click(revisionsStrip().getByRole('button', { name: 'New branch' }), { touch: true });
+    await target.fill(selectors.getByRole('textbox', { name: 'Name for the new branch' }), branch);
+    await target.click(selectors.getByRole('button', { name: 'Create branch' }), { touch: true });
+    await target.expectVisible(branchRow(branch), 60_000);
+    await switchTo(branch);
+    await expectStatus(`Saved · on ${branch}`, 60_000);
+    await editWidth('41');
+    await saveRevisionFromSheet();
+    await expectStatus(`Saved · on ${branch}`, 120_000);
+    await switchTo('main');
+    await editWidth('51');
+    await saveRevisionFromSheet();
+    await expectStatus('Saved', 120_000);
+
+    await openFromProjectSheet('Revisions');
+    await target.click(branchRow(branch).getByRole('button', { name: `Actions for ${branch}`, exact: true }), {
+      touch: true,
+    });
+    await target.click(selectors.getByRole('menuitem', { name: `Merge ${branch} into main`, exact: true }), {
+      touch: true,
+    });
+    const files = selectors.getByRole('list', { name: `Files to resolve in ${branch}` });
+    await answerIfAsked('Merge branch', files, 120_000);
+
+    // D3: one word, and the colour is the glyph's alone (I4: the line stays muted).
+    await expectStatus('Conflict', 60_000);
+    const glyph = titleButton().getByCss('[data-slot="status-line-icon"]');
+    await target.expectAttribute(glyph, 'aria-label', 'Warning');
+    await target.expectClass(glyph, /\btext-warning\b/u);
+    await target.expectClass(titleButton().getByCss('[data-slot="status-line"]'), /\btext-muted-foreground\b/u);
+    // Still three controls: the decision has no trigger of its own in the bar (D2, I4).
+    await target.expectCount(topBar().getByRole('button'), 3);
+    const conflictBar = await readBar();
+    expect(conflictBar.documentOverflow).toBeLessThanOrEqual(0);
+    await target.screenshot(undefined, `mobile-status-conflict-${String(viewport.width)}.png`);
+
+    // The project sheet moves Revisions first as the decision, once, and it opens where the decision is made (I4, I5).
+    await target.click(titleButton(), { touch: true });
+    await target.expectVisible(projectSheet());
+    const decide = projectSheet()
+      .getByRole('list', { name: 'Decision', exact: true })
+      .getByRole('button', { name: 'Revisions', exact: true });
+    await target.expectVisible(decide, 30_000);
+    await target.expectCount(projectSheet().getByRole('button', { name: 'Revisions', exact: true }), 1);
+    await target.expectAccessibleDescription(decide, 'Needs your decision on main');
+    await target.screenshot(undefined, `mobile-project-sheet-conflict-${String(viewport.width)}.png`);
+    await target.click(decide, { touch: true });
+    await target.expectCount(projectSheet(), 0);
+    await target.expectVisible(files, 60_000);
+    await target.expectCount(files.getByRole('button', { name: /^Keep .+ in /u }), 2);
   },
 );

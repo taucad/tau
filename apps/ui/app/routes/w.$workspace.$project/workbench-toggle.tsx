@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { DockviewApi, IDockviewPanel } from 'dockview-react';
+import { useEffect, useRef, useState } from 'react';
+import type { DockviewApi } from 'dockview-react';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
-import { DockviewTabsComboBox } from '#components/panes/dockview-tab-overflow-picker.js';
+import { DockviewTabsComboBox, useDockviewPanels } from '#components/panes/dockview-tab-overflow-picker.js';
 import type { DockviewTabIconRenderer } from '#components/panes/dockview-tab.js';
 import { WorkbenchToggleButton } from '@taucad/workbench-panes/components/workbench-toggle';
 
@@ -35,44 +35,6 @@ const isInTriangle = (point: Point, [a, b, c]: readonly [Point, Point, Point]): 
   return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
 };
 
-/** Subscribe to tab identity, not pixel-only Dockview layout notifications. */
-const usePanels = (api: DockviewApi | undefined): readonly IDockviewPanel[] => {
-  const subscribe = useCallback(
-    (onChange: () => void) => {
-      if (!api) {
-        return () => undefined;
-      }
-      const disposables = [
-        api.onDidAddPanel(onChange),
-        api.onDidRemovePanel(onChange),
-        api.onDidActivePanelChange(onChange),
-        api.onDidLayoutFromJSON(onChange),
-        api.onDidLayoutChange(onChange),
-      ];
-      return () => {
-        for (const disposable of disposables) {
-          disposable.dispose();
-        }
-      };
-    },
-    [api],
-  );
-  const snapshot = useCallback(
-    () =>
-      JSON.stringify([
-        api?.activePanel?.id,
-        api?.panels.map((panel) => {
-          const filePath: unknown = panel.params?.['filePath'];
-          const entryPath: unknown = panel.params?.['entryPath'];
-          return [panel.id, panel.api.title, filePath, entryPath];
-        }),
-      ]),
-    [api],
-  );
-  useSyncExternalStore(subscribe, snapshot, snapshot);
-  return api?.panels ?? [];
-};
-
 /**
  * The workspace's top-right Workbench control, after Codex's side-panel button.
  * Clicking toggles the lane. While the lane is closed the button shows how many
@@ -81,7 +43,7 @@ const usePanels = (api: DockviewApi | undefined): readonly IDockviewPanel[] => {
  * toggles: the tabs are on screen.
  */
 export function WorkbenchToggle({ isOpen, onOpenChange, api, getIcon }: WorkbenchToggleProperties): React.JSX.Element {
-  const panels = usePanels(api);
+  const panels = useDockviewPanels(api);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const isHoverOpen = useRef(false);
   // After a click or Escape the menu stays shut until the pointer leaves and returns.

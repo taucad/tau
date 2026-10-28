@@ -5,8 +5,10 @@ import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { parseDesktopAcceptanceReceipt, parseDesktopArtifactManifest } from '#shared/desktop-release.js';
 import type { DesktopAcceptanceReceipt } from '#shared/desktop-release.js';
-// oxlint-disable-next-line no-restricted-imports -- Share the installed runner's trusted source admission.
+/* oxlint-disable no-restricted-imports -- Share the installed runner's trusted source admission and the publication gate's exact Mac-only candidate shape. */
+import { desktopCandidateRoutes } from './desktop-route-publication.mjs';
 import { assertQualificationSource } from './qualification-candidates.mjs';
+/* oxlint-enable no-restricted-imports */
 
 const rows = [
   ['macos-zip-arm64', 'macos-zip', 'darwin-arm64'],
@@ -19,8 +21,15 @@ const rows = [
   ['debian-apt-x11', 'linux-apt', 'linux-x64'],
   ['debian-appimage-x11', 'linux-appimage', 'linux-x64'],
 ] as const;
+const scopes = ['all', 'linux', 'macos', 'windows'] as const;
+type QualificationScope = (typeof scopes)[number];
+/** Rows each explicit scope must produce; a scoped run can neither omit nor add another platform's host. */
+const scopeRows = (scope: QualificationScope) =>
+  scope === 'all' ? rows : rows.filter(([, route]) => route.startsWith(`${scope}-`));
 const inputSchema = z.strictObject({
-  scope: z.enum(['all', 'linux']).default('all'),
+  scope: z.enum(scopes).default('all'),
+  /** `vm` collects clean-host acceptance rows from the Mac- or Windows-scoped staging producer; never inferred from receipts. */
+  kind: z.enum(['ci', 'vm']).default('ci'),
   candidate: z.unknown(),
   sourceCommit: z.string().regex(/^[a-f\d]{40}$/u),
   channel: z.enum(['staging', 'production']),
@@ -29,8 +38,8 @@ const inputSchema = z.strictObject({
     'macos-zip': z.string().min(1).optional(),
     'macos-dmg': z.string().min(1).optional(),
     'windows-nsis': z.string().min(1).optional(),
-    'linux-apt': z.string().min(1),
-    'linux-appimage': z.string().min(1),
+    'linux-apt': z.string().min(1).optional(),
+    'linux-appimage': z.string().min(1).optional(),
   }),
   rows: z.array(z.strictObject({ id: z.string(), receipts: z.unknown() })),
 });
@@ -57,10 +66,20 @@ export const collectQualificationRows = (
   if (manifest.sourceCommit !== request.sourceCommit || manifest.channel !== request.channel) {
     throw new Error('Final candidate differs from workflow source/channel');
   }
-  if (request.scope === 'linux' && manifest.channel !== 'staging') {
-    throw new Error('Linux-only evidence is staging qualification only');
+  if (request.scope !== 'all' && manifest.channel !== 'staging') {
+    throw new Error('Platform-scoped evidence is staging qualification only');
   }
-  const selectedRows = request.scope === 'linux' ? rows.filter((row) => row[2] === 'linux-x64') : rows;
+  if (request.kind === 'vm' && (!['macos', 'windows'].includes(request.scope) || manifest.channel !== 'staging')) {
+    throw new Error('Clean-host receipts come only from a Mac- or Windows-scoped staging producer');
+  }
+  if (request.scope === 'windows' && request.kind !== 'vm') {
+    throw new Error('Windows scope requires consumer VM evidence');
+  }
+  if (request.scope === 'macos') {
+    // The final candidate must be exactly the Mac-only candidate that publication will later admit.
+    desktopCandidateRoutes(manifest, 'macos');
+  }
+  const selectedRows = scopeRows(request.scope);
   const expected = selectedRows.map(([id]) => id).sort();
   const actual = request.rows.map(({ id }) => id).sort();
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -75,11 +94,12 @@ export const collectQualificationRows = (
     if (
       receipt.route !== route ||
       receipt.target !== target ||
-      receipt.environment.kind !== 'ci' ||
+      receipt.environment.kind !== request.kind ||
+      (request.kind === 'vm') !== (receipt.environment.host !== undefined) ||
       receipt.trust.kind !== 'release' ||
       !request.trustIdentities[route] ||
       receipt.trust.identity !== request.trustIdentities[route] ||
-      receipt.suite !== 'installed-route-a-b-c-v1' ||
+      receipt.suite !== (request.kind === 'vm' ? 'clean-host-route-a-b-c-v1' : 'installed-route-a-b-c-v1') ||
       receipt.logs !== `https://github.com/taucad/tau/actions/runs/${request.runId}`
     ) {
       throw new Error('Native row identity, signer or workflow evidence differs');
@@ -108,8 +128,8 @@ const main = async (): Promise<void> => {
   if (process.env['GITHUB_REF'] !== 'refs/heads/main' || process.env['GITHUB_EVENT_NAME'] !== 'workflow_dispatch') {
     throw new Error('Receipt aggregation requires the trusted main dispatch');
   }
-  const scope = z.enum(['all', 'linux']).parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
-  const selectedRows = scope === 'linux' ? rows.filter((row) => row[2] === 'linux-x64') : rows;
+  const scope = z.enum(scopes).parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
+  const selectedRows = scopeRows(scope);
   const root = 'out/qualification-rows';
   const directories = await readdir(root);
   const expected = selectedRows.map(([id]) => `desktop-route-row-${id}`).sort();
@@ -125,20 +145,26 @@ const main = async (): Promise<void> => {
   });
   const result = collectQualificationRows({
     scope,
+    kind: z.enum(['ci', 'vm']).parse(process.env['TAU_DESKTOP_ACCEPTANCE_KIND'] ?? 'ci'),
     candidate,
     sourceCommit: candidate.sourceCommit,
     channel: required('TAU_QUALIFICATION_CHANNEL'),
     runId: required('GITHUB_RUN_ID'),
+    // Only the selected platforms' protected identities are read; a Mac-only run needs no Linux or Windows trust.
     trustIdentities: {
-      ...(scope === 'all'
-        ? {
+      ...(scope === 'linux' || scope === 'windows'
+        ? {}
+        : {
             'macos-zip': required('APPLE_TEAM_ID'),
             'macos-dmg': required('APPLE_TEAM_ID'),
-            'windows-nsis': required('TAU_WINDOWS_PUBLISHER'),
-          }
-        : {}),
-      'linux-apt': `${required('TAU_APT_PRIMARY_FINGERPRINT')}/${required('TAU_APT_SIGNING_FINGERPRINT')}`,
-      'linux-appimage': required('TAU_APPIMAGE_KEY_ID'),
+          }),
+      ...(scope === 'all' || scope === 'windows' ? { 'windows-nsis': required('TAU_WINDOWS_PUBLISHER') } : {}),
+      ...(scope === 'macos' || scope === 'windows'
+        ? {}
+        : {
+            'linux-apt': `${required('TAU_APT_PRIMARY_FINGERPRINT')}/${required('TAU_APT_SIGNING_FINGERPRINT')}`,
+            'linux-appimage': required('TAU_APPIMAGE_KEY_ID'),
+          }),
     },
     rows: await Promise.all(
       directories.map(async (directory) => ({

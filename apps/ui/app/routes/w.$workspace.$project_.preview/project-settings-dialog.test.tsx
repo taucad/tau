@@ -57,4 +57,19 @@ describe('ProjectSettingsDialog', () => {
       expect(toastSuccess).toHaveBeenCalledWith('Moved Project one to Trash');
     });
   });
+  it('opens from another control with no trigger of its own, and reports its close to its owner', async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    const returnFocus = vi.fn();
+    render(
+      <TooltipProvider>
+        <ProjectSettingsDialog controlled={{ open: true, onOpenChange, returnFocus }} />
+      </TooltipProvider>,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Project settings' })).toBeNull();
+    const dialog = screen.getByRole('dialog', { name: 'Project Settings' });
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
 });

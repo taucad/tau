@@ -16,7 +16,7 @@ systemd-detect-virt | grep -x kvm
 sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   xserver-xorg-core xserver-xorg-video-dummy openbox xauth x11-utils x11-apps x11-xserver-utils xclip \
-  dbus-x11 apparmor apparmor-utils libfuse2t64 fuse3
+  dbus-x11 apparmor apparmor-utils libfuse2t64 fuse3 libgl1-mesa-dri libglx-mesa0 libegl-mesa0 mesa-utils
 command -v fusermount
 sudo aa-status
 [[ "$(cat /sys/module/apparmor/parameters/enabled)" == Y ]]
@@ -64,6 +64,11 @@ sudo systemd-run --unit=tau-proof-xorg /usr/lib/xorg/Xorg :0 -config /tmp/tau-xo
 for _attempt in $(seq 1 30); do xdpyinfo >/dev/null 2>&1 && break; sleep 1; done
 xdpyinfo | head -20 || true
 xdpyinfo >/dev/null
+# A cloud image plus a dummy Xorg driver is not a complete graphics desktop.
+# Require an actual Mesa context before attempting the shipping Electron/WebGL renderer.
+glxinfo_output="$(glxinfo -B)"
+printf '%s\n' "$glxinfo_output"
+grep -q 'OpenGL renderer string:' <<< "$glxinfo_output"
 # The window manager runs as the ordinary guest user, with D-Bus, not as root.
 systemd-run --user --unit=tau-proof-desktop --setenv=DISPLAY=:0 --setenv="XAUTHORITY=$XAUTHORITY" dbus-run-session openbox
 for _attempt in $(seq 1 30); do xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id' && break; sleep 1; done

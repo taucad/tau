@@ -21,9 +21,10 @@ export const content = (): React.JSX.Element => (
     <article className='cell prose'>
       <h2>Optional analytics</h2>
       <p>
-        Analytics is off by default. You can allow optional analytics or continue without it; the same choice applies to
-        the Tau web app on this domain, where it covers PostHog product analytics including session recording. Declining
-        does not change the site’s content.
+        Analytics is off by default. You can allow optional analytics or continue without it. The same choice is stored
+        in a cookie the Tau web app on this domain reads, where it covers PostHog product analytics including session
+        recording. This site sends page counts only when its collector is configured. Declining does not change the
+        site’s content.
       </p>
       <p>
         We do not use session replay, automatic click capture, fingerprinting, account identifiers or form contents.

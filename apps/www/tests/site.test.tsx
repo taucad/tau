@@ -214,8 +214,12 @@ test('should render reviewed articles as escaped text and remove the empty blog 
 test('should render download CTAs and every archive before JavaScript', () => {
   const html = renderToStaticMarkup(<MemoryRouter>{home()}</MemoryRouter>);
   const heroLink = /<a\b[^>]*data-placement="hero"[^>]*>/u.exec(html)?.[0];
-  expect(heroLink).toContain('href="/download/"');
-  expect(heroLink).toContain('data-host-download="page"');
+  expect(heroLink).toContain('href="https://tau.new/s/builtin~replicad.planetary-gear-system"');
+  expect(heroLink).not.toContain('data-host-download');
+  expect(html).toContain('data-placement="hero-plugin"');
+  expect(html).toContain('href="/llms.txt"');
+  expect(html).toContain('data-placement="hero-download"');
+  expect(html).toContain('data-host-download="page"');
   expect(html).toContain('Download Tau');
   const agentPrompt = /<div class="agent-prompt">.*?<\/div>/u.exec(html)?.[0];
   expect(agentPrompt).toContain('Install the Tau plugin from https://tau.new/llms.txt</code>');

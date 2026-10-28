@@ -44,8 +44,8 @@ Verified baseline: `faecc9ac8f456b7fa5639fc0eb146012e3e499c8` on remote `geospec
 
 - Product: `apps/ui/app/routes/_index/`, `apps/libs/planetary-gearbox/` and `libs/tau-examples/src/kernels/replicad/planetary-gear-system/`. Distinguish current geometry checks from physical validation and future manufacturing workflows.
 - Prices and customer terms: current `apps/libs/billing/src/tau-plan-catalog.ts`, cross-checked against founder-ratified private commercial authority. No supplier economics are included in public output.
-- Routes: `/projects`, `/projects/new`, `/auth/sign-in`, `/auth/sign-up`, `/?settings=billing` (the billing settings that `/settings/billing` redirects to), verified in the app source; `/legal/*` is served by this site.
-- Downloads: release assets could not be verified; no platform installer or download event is invented.
+- Routes: `/projects`, `/projects/new`, `/auth/sign-in`, `/auth/sign-up`, `/?settings=billing` (the billing settings that `/settings/billing` redirects to), verified in the app source. The primary call to action is the public builtin `/s/builtin~replicad.planetary-gear-system`. `/legal/*` is served by this site.
+- Downloads: the page links the four archive URLs under `https://downloads.tau.new/latest/`. Those URLs returned HTTP 404 on 27 October 2026. Publishing the files is an infrastructure task. This copy does not invent other URLs.
 - Media: authored Tau example thumbnails and actual workspace screenshot. The live scene and stills derive from the committed 34-part Replicad model; motion does not imply a physical simulation. Verification shows one recorded GeoSpec run of the example spec, with inconclusive results labelled as such. Source license: Tau-authored Apache-2.0; preserve third-party terms.
 
 ## Legal documents
@@ -113,7 +113,7 @@ Start `node apps/www/scripts/serve.ts`, then run `node apps/www/scripts/browser-
 
 ## Claims
 
-Tau Cloud backup and sync are presented as available on Pro (10 GB) and Enterprise (100 GB) from `apps/libs/billing`; Free shows GitHub backup only, because free-tier sync is held off in production. Hosted verification and Enterprise signed evidence/CI keep their “Coming soon” labels. Tau Desktop is “in development” with no download link, because no installer is published. The blog stays empty until a human writes and reviews an article.
+Tau Cloud backup and sync are presented as available on Pro (10 GB) and Enterprise (100 GB). Free shows GitHub backup only, because free-tier sync is held off in production. Hosted verification and Enterprise signed evidence/CI keep their “Coming soon” labels. The download page links the four archive URLs; hosting those files is separate from this copy. The blog stays empty until a human writes and reviews an article. GeoSpec checks geometry. It is not FEA or a manufacturing-readiness check. PicoGK native is Tau Desktop on macOS Apple silicon only. SMLib runs in the browser.
 
 ## Lint
 

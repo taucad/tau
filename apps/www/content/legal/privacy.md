@@ -161,7 +161,7 @@ We may use your prompts and generated designs to improve our AI features. This i
 
 - **PostHog (Cloud)**: Web product analytics and session replay after consent, and desktop app product analytics (USA). [Privacy Policy](https://posthog.com/privacy)
 - **Sentry (Functional Software, Inc.)**: Error and crash reporting for the web app, desktop app and API (USA). [Privacy Policy](https://sentry.io/privacy/)
-- **LangSmith**: AI feature monitoring. [Privacy Policy](https://www.langchain.com/privacy)
+- **LangSmith**: AI feature monitoring. [Privacy Policy](https://www.langchain.com/privacy-policy)
 
 ### 9.4 Payment Processing
 

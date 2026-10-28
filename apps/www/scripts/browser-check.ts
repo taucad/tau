@@ -217,11 +217,12 @@ try {
       downloadPage.on('pageerror', (error) => errors.push(error.message));
       await downloadPage.goto(origin);
       await downloadPage
-        .locator('[data-placement="hero"]')
+        .locator('[data-host-download="page"]')
         .filter({ hasText: `Download for ${label}` })
+        .first()
         .waitFor();
       await assertDownloadIcons();
-      await downloadPage.locator('[data-placement="hero"]').click();
+      await downloadPage.locator('[data-host-download="page"]').first().click();
       await downloadPage.waitForURL(`${origin}/download/`);
       const primaryDownload = downloadPage.locator('[data-host-download="direct"]');
       await primaryDownload.filter({ hasText: direct }).waitFor();
@@ -237,8 +238,9 @@ try {
       await downloadPage.getByRole('link', { name: 'Tau home' }).first().click();
       await downloadPage.waitForURL(`${origin}/`);
       await downloadPage
-        .locator('[data-placement="hero"]')
+        .locator('[data-host-download="page"]')
         .filter({ hasText: `Download for ${label}` })
+        .first()
         .waitFor();
       assert.deepEqual(errors, []);
       await downloadContext.close();
@@ -305,7 +307,7 @@ try {
   });
   await page.goto(origin + '/?token=secret-bearer&utm_campaign=person@example.com');
   assert.equal(events.length, 0);
-  await page.getByRole('button', { name: 'Allow analytics', exact: true }).click();
+  await page.getByRole('button', { name: 'Allow app analytics', exact: true }).click();
   await page.waitForTimeout(100);
   assert.equal(events.length, 1);
   assert.ok(events[0]);
@@ -321,7 +323,7 @@ try {
     encodeURIComponent(JSON.stringify({ status: 'accepted', version: 1 })),
   );
   await page.getByRole('button', { name: 'Cookie preferences' }).click();
-  await page.getByRole('button', { name: 'Allow analytics', exact: true }).click();
+  await page.getByRole('button', { name: 'Allow app analytics', exact: true }).click();
   await page.waitForTimeout(100);
   assert.equal(events.length, 1);
   await page.locator('a[data-placement="header"]').evaluate((element) => {

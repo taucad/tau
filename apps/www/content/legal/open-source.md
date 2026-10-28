@@ -488,7 +488,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [event-target-shim](https://github.com/mysticatea/event-target-shim) | 5.0.1 | MIT |
 | [eventemitter3](https://github.com/primus/eventemitter3) | 5.0.4 | MIT |
 | [events](https://github.com/Gozala/events) | 3.3.0 | MIT |
-| [eventsource](https://git@github.com/EventSource/eventsource) | 3.0.7 | MIT |
+| [eventsource](https://github.com/EventSource/eventsource) | 3.0.7 | MIT |
 | [eventsource-parser](https://github.com/rexxars/eventsource-parser) | 3.1.0 | MIT |
 | [express](https://github.com/expressjs/express) | 5.3.0 | MIT |
 | [express-rate-limit](https://github.com/express-rate-limit/express-rate-limit) | 8.7.1 | MIT |

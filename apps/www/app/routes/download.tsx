@@ -1,7 +1,7 @@
 import { SiteLink } from '#www/site-link.js';
 import { appOrigin } from '#www/environment.js';
 import { desktopDownloads, desktopDownloadHref, desktopFileLabel } from '#www/downloads.js';
-import { sourceUrl } from '#www/content.js';
+import { exampleModelPath, sourceUrl } from '#www/content.js';
 import { out, down, intro } from '#www/page-components.js';
 import { MarketingPage } from '#app/marketing-page.js';
 import { loader as loadMarketingPage } from '#app/route-loader.server.js';
@@ -100,8 +100,13 @@ export const content = (): React.JSX.Element => (
             ))}
           </div>
         </div>
-        <SiteLink className='text-link' href={`${appOrigin}/projects`} data-event='cta' data-placement='download-web'>
-          Open in browser {out}
+        <SiteLink
+          className='text-link'
+          href={`${appOrigin}${exampleModelPath}`}
+          data-event='cta'
+          data-placement='download-web'
+        >
+          Open the gearbox in the browser {out}
         </SiteLink>
       </article>
     </div>

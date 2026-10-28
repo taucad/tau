@@ -1,6 +1,7 @@
 import { SiteLink } from '#www/site-link.js';
 import {
   down,
+  out,
   cta,
   kicker,
   heroStage,
@@ -14,6 +15,7 @@ import {
 } from '#www/page-components.js';
 import { Button } from '@taucad/ui/components/button';
 import { appOrigin } from '#www/environment.js';
+import { exampleModelPath } from '#www/content.js';
 import { MarketingPage } from '#app/marketing-page.js';
 import { loader as loadMarketingPage } from '#app/route-loader.server.js';
 export const loader: typeof loadMarketingPage = loadMarketingPage;
@@ -22,16 +24,28 @@ export const content = (): React.JSX.Element => (
   <>
     <section className='band hero' aria-labelledby='hero-title'>
       <div className='cell hero-copy'>
-        {kicker('AI-native CAD')}
+        {kicker('Code-CAD · Replicad and OpenSCAD')}
         <h1 id='hero-title'>
           <span className='w w1'>Design</span> <span className='w w2'>Verify</span> <span className='w w3'>Make.</span>
         </h1>
         <p className='lead'>
-          Describe the part you need. Tau creates editable parametric CAD and checks its geometry against your
-          requirements. Export for machining or 3D printing, then make it, assemble it and put it to work.
+          Open this planetary gearbox, change one number and export STL. The solid comes from Replicad code you write,
+          or that Claude Code or Codex writes for you.
         </p>
         <div className='actions'>
-          {cta('Download Tau', '/download/', 'hero')}
+          {cta('Open the gearbox', exampleModelPath, 'hero')}
+          <SiteLink className='text-link' href='/llms.txt' data-event='cta' data-placement='hero-plugin'>
+            Install the agent plugin {out}
+          </SiteLink>
+          <SiteLink
+            className='text-link'
+            href='/download/'
+            data-event='cta'
+            data-placement='hero-download'
+            data-host-download='page'
+          >
+            Download Tau
+          </SiteLink>
           <SiteLink className='text-link' href='#story'>
             Watch it come together {down}
           </SiteLink>
@@ -65,13 +79,13 @@ export const content = (): React.JSX.Element => (
       <header className='cell section-head split'>
         {kicker('Your design, in view')}
         <h2 id='product-title'>
-          From a conversation
+          The code, the parameters
           <br />
-          to a useful part.
+          and the solid.
         </h2>
         <p>
-          Talk through what the part needs to do. Shape it, check it and keep each revision as you work toward something
-          you can make and use.{' '}
+          The workspace shows the source, the named parameters and the model. An agent can edit that code. The part
+          comes from the code.{' '}
           <SiteLink className='text-link' href='/product/'>
             Inside the workspace →
           </SiteLink>

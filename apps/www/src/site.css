@@ -396,7 +396,7 @@ main > .band:not(.band ~ .band)::before {
   align-items: center;
   gap: 0.75rem 1.5rem;
 }
-/* The prompt sits close under the download, and the hero keeps its 1440 × 900 fit. */
+/* The prompt sits close under the actions, and the hero keeps its 1440 × 900 fit. */
 .agent-prompt {
   display: flex;
   flex-wrap: wrap;

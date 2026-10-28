@@ -1,4 +1,5 @@
 import { cta, intro, principleStrip, workspaceFigure, ecosystemGrid, closing } from '#www/page-components.js';
+import { exampleModelPath } from '#www/content.js';
 import { MarketingPage } from '#app/marketing-page.js';
 import { loader as loadMarketingPage } from '#app/route-loader.server.js';
 export const loader: typeof loadMarketingPage = loadMarketingPage;
@@ -16,7 +17,7 @@ export const content = (): React.JSX.Element => (
           </>
         ),
         body: 'Work from what the part needs to do. Editable CAD, dimensions you control and geometric checks help you prepare a design for the workshop.',
-        aside: <div className='actions'>{cta('Start designing', '/projects/new', 'product')}</div>,
+        aside: <div className='actions'>{cta('Open the gearbox', exampleModelPath, 'product')}</div>,
       })}
       <div className='cell'>{workspaceFigure('eager')}</div>
     </section>
@@ -24,8 +25,8 @@ export const content = (): React.JSX.Element => (
     <section className='band feature-grid' aria-label='Workspace capabilities'>
       {[
         [
-          'Describe your intent',
-          'Describe where the part will fit and what it needs to do, or write the CAD code yourself. Work with the agent on a design you can inspect and edit.',
+          'Start from code',
+          'Write the CAD code yourself, or open an example and change it. An agent can edit that code. You can read every line.',
         ],
         [
           'Change the parameters',
@@ -37,7 +38,7 @@ export const content = (): React.JSX.Element => (
         ],
         [
           'Carry it into the workshop',
-          'Export STEP for your CAM tools or manufacturer, and STL or 3MF for a slicer. Keep the source and revision history to refine the design after making and using the part.',
+          'Export the file that kernel writes: STEP from a boundary-representation kernel, STL or 3MF where that kernel provides them. Keep the source and revision history to refine the design after making and using the part.',
         ],
       ].map(([title, body]) => (
         <article key={title} className='cell'>

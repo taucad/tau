@@ -5,7 +5,16 @@ import { SiteLink } from '#www/site-link.js';
 import { Badge } from '@taucad/ui/components/badge';
 import type { ReactNode } from 'react';
 import { appOrigin, docsOrigin } from '#www/environment.js';
-import { ecosystem, exampleUrl, plans, principles, sourceUrl, storyChapters, useCases } from '#www/content.js';
+import {
+  ecosystem,
+  exampleModelPath,
+  exampleUrl,
+  plans,
+  principles,
+  sourceUrl,
+  storyChapters,
+  useCases,
+} from '#www/content.js';
 import { heroDrafting } from '#www/hero-view.js';
 import { diagrams } from '#www/principle-diagrams.js';
 import { geospecRun as evidence } from '@taucad/planetary-gearbox';
@@ -154,9 +163,9 @@ const storyOverlays = () => {
       </div>
       <div className='overlay o-prompt' data-for='1' aria-hidden='true'>
         <div className='composer'>
-          <span className='kicker'>New project</span>
+          <span className='kicker'>Agent request</span>
           <p>Create a planetary gearbox with a 4:1 reduction, three planets and socket screws on top.</p>
-          <span className='send'>Send</span>
+          <span className='send'>Writes main.ts</span>
         </div>
       </div>
       <div className='overlay o-agents' data-for='2 3' aria-hidden='true'>
@@ -347,7 +356,7 @@ export const workspaceFigure = (loading: 'lazy' | 'eager' = 'lazy'): React.JSX.E
         width='3680'
         height='2384'
         loading={loading}
-        alt='The Tau workspace: an AI conversation, editable design files, the planetary gearbox in the viewport and its parameters'
+        alt='The Tau workspace: source files, parameters, the planetary gearbox in the viewport, and a chat beside the code'
       />
     </picture>
     <figcaption>
@@ -488,9 +497,21 @@ export const closing = (
       {kicker('Design. Verify. Make.')}
       <h2 id='closing-title'>{title}</h2>
       <div className='actions'>
-        {cta('Download Tau', '/download/', 'closing')}
+        {cta('Open the gearbox', exampleModelPath, 'closing')}
+        <SiteLink className='text-link' href='/llms.txt' data-event='cta' data-placement='closing-plugin'>
+          Install the agent plugin
+        </SiteLink>
+        <SiteLink
+          className='text-link'
+          href='/download/'
+          data-event='cta'
+          data-placement='closing-download'
+          data-host-download='page'
+        >
+          Download Tau
+        </SiteLink>
         <SiteLink className='text-link' href={`${docsOrigin}/`}>
-          Read the docs {out}
+          Read the embedder docs {out}
         </SiteLink>
       </div>
     </div>

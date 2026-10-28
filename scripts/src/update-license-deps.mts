@@ -64,8 +64,10 @@ function normalizeGithubUrl(url: string): string {
     .replace(/\.git$/, '')
     // Convert ssh://git@ to https://
     .replace(/^ssh:\/\/git@/, 'https://')
-    // Convert git@github.com:owner/repo to https://github.com/owner/repo
-    .replace(/^git@github\.com:/, 'https://github.com/')
+    // Convert git@github.com:owner/repo and git@github.com/owner/repo to https://github.com/owner/repo
+    .replace(/^git@github\.com[/:]/, 'https://github.com/')
+    // Convert a repository field that already prefixed https:// onto the git userinfo form
+    .replace(/^https:\/\/git@github\.com\//, 'https://github.com/')
     // Convert github:owner/repo to https://github.com/owner/repo
     .replace(/^github:/, 'https://github.com/')
     // Fix URLs with colon instead of slash after github.com (e.g., https://github.com:owner/repo)

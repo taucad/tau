@@ -12,7 +12,7 @@ import {
   isRouteErrorResponse,
 } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
-import { navigation, sourceUrl, discordUrl } from '#www/content.js';
+import { navigation, sourceUrl, discordUrl, exampleModelPath } from '#www/content.js';
 import { wordmark } from '#www/wordmark.js';
 import { bootEntry } from '#www/entry.js';
 import { randomUuid } from '@taucad/utils/id';
@@ -72,7 +72,7 @@ function Navigation({ label }: { label: string }) {
           {name}
         </Link>
       ))}
-      <a href='https://docs.tau.new/'>Docs ↗</a>
+      <a href='https://docs.tau.new/'>Embedder docs ↗</a>
       {label === 'Mobile navigation' ? <a href={`${appOrigin}/auth/sign-in`}>Sign in ↗</a> : null}
     </nav>
   );
@@ -121,8 +121,8 @@ function SiteShell() {
               Sign in
             </a>
             <Button asChild size='sm'>
-              <a href='https://tau.new/projects/new' data-event='cta' data-placement='header'>
-                Start designing ↗
+              <a href={`${appOrigin}${exampleModelPath}`} data-event='cta' data-placement='header'>
+                Open the gearbox ↗
               </a>
             </Button>
             <details className='mobile-menu'>
@@ -171,7 +171,7 @@ function SiteShell() {
           </nav>
           <nav className='cell' aria-label='Resources'>
             <h2>Resources</h2>
-            <a href='https://docs.tau.new/'>Documentation ↗</a>
+            <a href='https://docs.tau.new/'>Embedder docs ↗</a>
             <a href={sourceUrl}>GitHub ↗</a>
             <a href={discordUrl}>Discord ↗</a>
           </nav>
@@ -201,16 +201,17 @@ function SiteShell() {
       </footer>
       <aside className='consent' aria-label='Optional analytics' hidden>
         <p>
-          <strong>Help us improve Tau?</strong>
+          <strong>Allow analytics in the Tau app?</strong>
           <br />
-          Allow optional PostHog analytics in the Tau app, including session recording, and basic page counts on this
-          site. <Link to='/legal/cookies/'>Cookie policy</Link>
+          This choice is stored in a cookie. Allowing it turns on PostHog analytics in the Tau app, including session
+          recording. This site sends its own page counts only when a collector is configured.{' '}
+          <Link to='/legal/cookies/'>Cookie policy</Link>
         </p>
         <div className='actions'>
           <Button variant='outline' data-consent='declined'>
             Continue without
           </Button>
-          <Button data-consent='accepted'>Allow analytics</Button>
+          <Button data-consent='accepted'>Allow app analytics</Button>
         </div>
       </aside>
     </>

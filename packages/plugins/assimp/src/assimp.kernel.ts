@@ -58,7 +58,7 @@ export const assimpKernel = defineKernel({
   id: 'assimp',
   extensions: [...extensions],
   name: 'AssimpKernel',
-  version: '0.1.1',
+  version: '0.1.2',
   views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
   exports: {
     glb: { title: 'glTF binary', mimeType: 'model/gltf-binary', extension: 'glb', optionsSchema: glbOptionsSchema },

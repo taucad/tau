@@ -47,7 +47,7 @@ const assimpTranscoderOptionsSchema = z
 export const assimpTranscoder = defineTranscoder({
   id: 'assimp',
   name: 'AssimpTranscoder',
-  version: '0.1.0',
+  version: '0.1.1',
   edges,
   optionsSchema: assimpTranscoderOptionsSchema,
 

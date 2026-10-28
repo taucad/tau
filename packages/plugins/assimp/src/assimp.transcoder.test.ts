@@ -52,16 +52,16 @@ describe('assimp transcoder', () => {
     });
   });
 
-  it('derives exactly the 26 policy routes from libassimp', async () => {
+  it('derives exactly the 22 policy routes from libassimp', async () => {
     const resolved = await definition();
     const expected = libassimpExporter.conversionEdges.filter(
       ({ from, to }) => (from === 'glb' || from === 'gltf') && to !== 'assjson',
     );
 
     expect(resolved.edges.map(({ from, to }) => ({ from, to }))).toEqual(expected);
-    expect(resolved.edges).toHaveLength(26);
-    expect(resolved.edges.filter(({ from }) => from === 'glb')).toHaveLength(13);
-    expect(resolved.edges.filter(({ from }) => from === 'gltf')).toHaveLength(13);
+    expect(resolved.edges).toHaveLength(22);
+    expect(resolved.edges.filter(({ from }) => from === 'glb')).toHaveLength(11);
+    expect(resolved.edges.filter(({ from }) => from === 'gltf')).toHaveLength(11);
     for (const edge of resolved.edges) {
       expect(edge.fidelity).toBe('mesh');
       expect(edge.optionsSchema).toBe(assimpEdgeSchemas[edge.to as keyof typeof assimpEdgeSchemas]);

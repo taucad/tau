@@ -794,7 +794,15 @@ export class StorageGitService extends GitLeaseHost {
       });
     };
     try {
-      const result = await commitLease(args);
+      const result = await commitLease({
+        ...args,
+        onPhase: (phase, seconds) => {
+          this.metrics.gitCommitDuration.record(seconds, {
+            'tau.git.commit.phase': phase,
+            'tau.git.commit.kind': 'push',
+          });
+        },
+      });
       if (result.committed) {
         attempt('committed');
         this.metrics.gitRepositorySize.record(manifestPackBytes(result.manifest));

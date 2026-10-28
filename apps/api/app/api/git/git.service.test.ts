@@ -2332,10 +2332,15 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
       outcome: 'committed',
       'tau.git.commit.kind': 'push',
     });
-    expect(on('gitCommitDuration').record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
-      'tau.git.commit.phase': 'total',
-      'tau.git.commit.kind': 'push',
-    });
+    /* Each commitLease phase as it ends, then the whole commit. A ref removal stores no pack, so it never compacts. */
+    const phases = ['prepare', 'hash', 'object_puts', 'manifest_write', 'total'];
+    expect(on('gitCommitDuration').record).toHaveBeenCalledTimes(phases.length);
+    for (const [index, phase] of phases.entries()) {
+      expect(on('gitCommitDuration').record).toHaveBeenNthCalledWith(index + 1, expect.any(Number), {
+        'tau.git.commit.phase': phase,
+        'tau.git.commit.kind': 'push',
+      });
+    }
     const read = await store.readManifest(locator);
     const stored = decodeManifest(read?.manifest ?? new Uint8Array()).packs.reduce(
       (total, pack) => total + pack.bytes,

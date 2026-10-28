@@ -2,10 +2,16 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Logger } from '@nestjs/common';
 import { createReadStream } from 'node:fs';
-import { open, readdir, stat } from 'node:fs/promises';
+import { open, readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { CommitToken, ManifestBytes, RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
+import type {
+  CommitToken,
+  ManifestBytes,
+  ObjectBody,
+  RepositoryLocator,
+  RepositoryStore,
+} from '#api/git/store/port.js';
 import { compactLease, shouldCompact } from '#api/git/store/compaction.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import type { FaultInjector } from '#api/git/store/fault-points.js';
@@ -95,6 +101,32 @@ export type CommitLeaseArguments = {
   /** Epoch milliseconds. Past it the push is abandoned without a manifest write (NI5). */
   deadlineAt?: number;
   faults?: FaultInjector;
+  /** Told how long each phase took, in seconds, as it ends — failed or not (W14 OB2). */
+  onPhase?: CommitPhaseObserver;
+};
+
+/**
+ * The parts of one commit, in the order they run. `compaction` runs only on a
+ * compacting commit and `manifest_read` only when the conditional write did
+ * not certainly win; `object_puts` is one concurrent round however many
+ * objects the commit stores.
+ */
+export type CommitPhase = 'prepare' | 'compaction' | 'hash' | 'object_puts' | 'manifest_write' | 'manifest_read';
+
+export type CommitPhaseObserver = (phase: CommitPhase, seconds: number) => void;
+
+/** Runs `run` as `phase`, reporting its duration whether it resolves or throws. */
+const timed = async <T>(
+  observer: CommitPhaseObserver | undefined,
+  phase: CommitPhase,
+  run: () => Promise<T>,
+): Promise<T> => {
+  const startedAt = performance.now();
+  try {
+    return await run();
+  } finally {
+    observer?.(phase, (performance.now() - startedAt) / 1000);
+  }
 };
 
 /**
@@ -243,49 +275,46 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
     }
   };
 
-  const references = await readLeaseReferences(lease.directory);
-  if (sameReferences(references, lease.manifest?.refs ?? {})) {
+  const prepared = await timed(args.onPhase, 'prepare', async () => {
+    const references = await readLeaseReferences(lease.directory);
+    if (sameReferences(references, lease.manifest?.refs ?? {})) {
+      return undefined;
+    }
+    await assertCommittable(lease);
+    const inLease = await packFilesIn(lease.directory);
+    return { references, arrived: inLease.filter((name) => !lease.hydratedPackFiles.has(name)) };
+  });
+  if (prepared === undefined) {
     return { committed: false, reason: 'no-ref-change' };
   }
-
-  await assertCommittable(lease);
+  const { references } = prepared;
 
   const hydrated = lease.manifest?.packs ?? [];
-  const inLease = await packFilesIn(lease.directory);
-  const arrived = inLease.filter((name) => !lease.hydratedPackFiles.has(name));
-
   const { compacted, keptPack, toUpload, retainedLive } = await planPacks({
     lease,
     hydrated,
-    arrived,
+    arrived: prepared.arrived,
     packBound,
     ...(args.faults === undefined ? {} : { faults: args.faults }),
+    ...(args.onPhase === undefined ? {} : { onPhase: args.onPhase }),
   });
   const uploads = await Promise.all(
     toUpload.map(async (name) => {
       const file = path.join(lease.directory, 'objects/pack', name);
       const stats = await stat(file);
-      return { name, bytes: stats.size, file };
+      return { name, bytes: stats.size, file, key: uploadKeyFor(name) };
     }),
   );
   assertWithinCeiling(retainedLive, uploads, byteCeiling);
 
-  const uploaded: ManifestPack[] = [];
-  for (const upload of uploads) {
-    assertDeadline();
-    // oxlint-disable-next-line no-await-in-loop -- one pack at a time bounds worker memory
-    const pack = await uploadPack(store, lease.locator, upload);
-    uploaded.push(pack);
-  }
-  // Retirement is recorded before the manifest that drops these packs, so no
-  // committed manifest ever leaves a live-until-now pack without its marker.
-  await markRetired({
-    store,
-    locator: lease.locator,
-    packKeys: hydrated.filter((pack) => compacted && pack.key !== keptPack?.key).map((pack) => pack.key),
-    at,
-  });
-
+  // Every upload key is chosen before anything is sent, so the successor
+  // manifest — and the push-log segment it may spill — is known up front and
+  // its objects can all go out in one round.
+  const uploaded: ManifestPack[] = uploads.map((upload) => ({
+    key: upload.key,
+    bytes: upload.bytes,
+    indexStored: true,
+  }));
   const next = succeedManifest(
     lease.manifest,
     {
@@ -296,7 +325,50 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
     },
     at,
   );
-  await writeSpilledPushLog({ store, locator: lease.locator, base: lease.manifest, next });
+
+  // Each pack goes up with the index beside it (D33): the stored index removes
+  // the 5.0–9.0 s `index-pack` term from every later hydrate for 0.17 % more
+  // bytes. A hydrate that fetches it no longer runs `index-pack`, which was also
+  // the only check of pack bytes on the way in, so corrupt bytes surface as a
+  // git error on first read instead — the trade W1's port makes, since git
+  // verifies what it reads.
+  assertDeadline();
+  const files = await timed(args.onPhase, 'hash', async () =>
+    Promise.all(
+      uploads
+        .flatMap((upload) => [
+          { key: upload.key, file: upload.file },
+          { key: indexKeyFor(upload.key), file: `${upload.file.slice(0, -'.pack'.length)}.idx` },
+        ])
+        .map(async ({ key, file }) => ({ key, ...(await readyFile(file)) })),
+    ),
+  );
+  assertDeadline();
+  await timed(args.onPhase, 'object_puts', async () =>
+    putAll([
+      ...files.map(
+        (ready) => async (signal: AbortSignal) =>
+          store.putObject(
+            lease.locator,
+            ready.key,
+            ready.body,
+            { contentLength: ready.contentLength, sha256: ready.sha256 },
+            signal,
+          ),
+      ),
+      // Retirement is recorded before the manifest that drops these packs, so no
+      // committed manifest ever leaves a live-until-now pack without its marker.
+      async () =>
+        markRetired({
+          store,
+          locator: lease.locator,
+          packKeys: hydrated.filter((pack) => compacted && pack.key !== keptPack?.key).map((pack) => pack.key),
+          at,
+        }),
+      async (signal: AbortSignal) =>
+        writeSpilledPushLog({ store, locator: lease.locator, base: lease.manifest, next, signal }),
+    ]),
+  );
   await args.faults?.('after-pack-upload');
 
   if (lease.manifest !== undefined) {
@@ -313,6 +385,7 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
     next,
     expected: lease.token,
     hydrated: lease.manifest,
+    ...(args.onPhase === undefined ? {} : { onPhase: args.onPhase }),
   });
   await args.faults?.('after-manifest-commit');
 
@@ -374,6 +447,7 @@ const planPacks = async (args: {
   arrived: readonly string[];
   packBound: number;
   faults?: FaultInjector;
+  onPhase?: CommitPhaseObserver;
 }): Promise<{
   compacted: boolean;
   keptPack: ManifestPack | undefined;
@@ -386,7 +460,7 @@ const planPacks = async (args: {
 
   const keptPack = [...args.hydrated].sort((left, right) => right.bytes - left.bytes)[0];
   const keptFile = keptPack === undefined ? undefined : leasePackFile(keptPack.key);
-  await compactLease(args.lease, keptFile);
+  await timed(args.onPhase, 'compaction', async () => compactLease(args.lease, keptFile));
   await args.faults?.('mid-compaction');
 
   // Every pack in the lease is now this commit's except the one `--keep-pack`
@@ -399,32 +473,6 @@ const planPacks = async (args: {
     toUpload: remaining.filter((name) => name !== keptFile),
     retainedLive: keptPack === undefined ? [] : [keptPack],
   };
-};
-
-/**
- * Uploads one pack and the index beside it (D33). The stored index removes the
- * 5.0–9.0 s `index-pack` term from every later hydrate for 0.17 % more bytes.
- *
- * Consequence worth stating: a hydrate that fetches a stored index no longer
- * runs `index-pack`, which was also the only thing verifying pack bytes on the
- * way in. Corrupt pack bytes now surface as a git error on first read rather
- * than at hydration. W1's port makes the same trade for the same reason — git
- * verifies what it reads — and D33 adopts it.
- */
-const uploadPack = async (
-  store: RepositoryStore,
-  locator: RepositoryLocator,
-  upload: { name: string; bytes: number; file: string },
-): Promise<ManifestPack> => {
-  const key = uploadKeyFor(upload.name);
-  await putFile({ store, locator, key, file: upload.file });
-  await putFile({
-    store,
-    locator,
-    key: indexKeyFor(key),
-    file: `${upload.file.slice(0, -'.pack'.length)}.idx`,
-  });
-  return { key, bytes: upload.bytes, indexStored: true };
 };
 
 /** Read size for hashing a lease file: one buffer, reused for every read. */
@@ -454,10 +502,22 @@ const sha256OfFile = async (file: string): Promise<string> => {
 };
 
 /**
- * Uploads one lease file in two streamed passes (DA4): hash it, then send it
- * with that digest. Memory is a read chunk, not the file: a pack at the D20
- * ceiling is a gigabyte, and the 1 GB API VM cannot hold one beside the push
- * that produced it.
+ * A lease file at or below this size is read once: hashed and sent from the
+ * same bytes. A commit uploads one pack and its index (`receive-pack` leaves
+ * one pack per push, and a compaction rolls everything but the kept pack into
+ * one), so it holds at most two such files — 8 MiB — and the bound DA4 keeps,
+ * memory that does not grow with the pack, holds.
+ */
+const inMemoryObjectBytes = 4 * 1024 * 1024;
+
+/**
+ * A lease file ready to send: its digest and the body the adapter reads.
+ *
+ * A small file is read once into memory, so the digest and the upload come
+ * from the same bytes and the adapter can resend them itself. A larger one is
+ * hashed through one reused buffer and then streamed in a second pass (DA4):
+ * memory is a read chunk, not the file — a pack at the D20 ceiling is a
+ * gigabyte, and the 1 GB VM cannot hold one beside the push that produced it.
  *
  * The digest still guards the bytes. The adapter sends it as
  * `x-amz-checksum-sha256` and the backend refuses a body that does not match
@@ -465,16 +525,59 @@ const sha256OfFile = async (file: string): Promise<string> => {
  * digest it does not have; above the single-part ceiling the adapter checks
  * the same digest itself before it completes the upload.
  */
-const putFile = async (args: {
-  store: RepositoryStore;
-  locator: RepositoryLocator;
-  key: string;
-  file: string;
-}): Promise<void> => {
-  const { store, locator, key, file } = args;
+const readyFile = async (file: string): Promise<{ body: ObjectBody; contentLength: number; sha256: string }> => {
   const { size } = await stat(file);
-  const sha256 = await sha256OfFile(file);
-  await store.putObject(locator, key, async () => createReadStream(file), { contentLength: size, sha256 });
+  if (size <= inMemoryObjectBytes) {
+    const bytes = new Uint8Array(await readFile(file));
+    return {
+      body: bytes,
+      contentLength: bytes.byteLength,
+      sha256: createHash('sha256').update(bytes).digest('base64'),
+    };
+  }
+  return { body: async () => createReadStream(file), contentLength: size, sha256: await sha256OfFile(file) };
+};
+
+/**
+ * Most object puts one commit has in flight. A push stores two objects, a
+ * spilled segment one more, and a compaction up to `livePackBound` markers
+ * besides, so this is one round for every commit the bound allows.
+ */
+const objectPutConcurrency = 12;
+
+/**
+ * Runs every put, at most {@link objectPutConcurrency} at once, and resolves
+ * only once all of them are durable.
+ *
+ * On the first failure the rest are told to stop and nothing new starts, but
+ * this still waits for every put already sent to settle — settled rather than
+ * raced, as the hydrate's reads are — so the caller never disposes the lease
+ * under a stream still reading it, and the error it rethrows is that first
+ * failure's own, unwrapped, so the refusal the client sees is classified
+ * exactly as a one-at-a-time upload would have been. The manifest write that
+ * follows is therefore never reached with any named object missing.
+ */
+const putAll = async (puts: ReadonlyArray<(signal: AbortSignal) => Promise<void>>): Promise<void> => {
+  const controller = new AbortController();
+  let failure: { reason: unknown } | undefined;
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (failure === undefined && next < puts.length) {
+      const put = puts[next];
+      next += 1;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- each worker sends one put at a time; the workers run together
+        await put?.(controller.signal);
+      } catch (error) {
+        failure ??= { reason: error };
+        controller.abort();
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(objectPutConcurrency, puts.length) }, worker));
+  if (failure !== undefined) {
+    throw failure.reason;
+  }
 };
 
 /**
@@ -530,29 +633,30 @@ const writeManifest = async (args: {
   next: Manifest;
   expected: CommitToken | 'absent';
   hydrated: Manifest | undefined;
+  onPhase?: CommitPhaseObserver;
 }): Promise<CommitToken> => {
   const { store, locator, expected, hydrated } = args;
   const bytes = encodeManifest(args.next);
 
-  for (let attempt = 1; attempt <= manifestWriteAttempts; attempt += 1) {
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- a retry is by definition sequential
-      const result = await store.commitManifest(locator, bytes, expected);
-      if (result !== 'lost') {
-        return result;
+  const won = await timed(args.onPhase, 'manifest_write', async () => {
+    for (let attempt = 1; attempt <= manifestWriteAttempts; attempt += 1) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- a retry is by definition sequential
+        const result = await store.commitManifest(locator, bytes, expected);
+        return result === 'lost' ? undefined : result;
+      } catch (error) {
+        if (isRateLimited(error) && attempt < manifestWriteAttempts) {
+          // oxlint-disable-next-line no-await-in-loop -- same reason
+          await delay(200 * 3 ** (attempt - 1));
+          continue;
+        }
+        return undefined;
       }
-      break;
-    } catch (error) {
-      if (isRateLimited(error) && attempt < manifestWriteAttempts) {
-        // oxlint-disable-next-line no-await-in-loop -- same reason
-        await delay(200 * 3 ** (attempt - 1));
-        continue;
-      }
-      break;
     }
-  }
+    return undefined;
+  });
 
-  return reconcile({ store, locator, bytes, hydrated });
+  return won ?? timed(args.onPhase, 'manifest_read', async () => reconcile({ store, locator, bytes, hydrated }));
 };
 
 /**

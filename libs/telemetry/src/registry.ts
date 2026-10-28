@@ -1128,13 +1128,31 @@ export const TauMetrics = {
     }),
   }),
 
+  /**
+   * One commit's latency, whole (`total`) and by phase, as `commitLease` runs them: `prepare`
+   * (ref read, loose-object count, connectivity check), `compaction` (repack, compacting commits
+   * only), `hash` (digests of the pack and index), `object_puts` (pack, index, retirement markers
+   * and spilled push-log segment in one concurrent round), `manifest_write` (the conditional write
+   * and its rate-limit retries) and `manifest_read` (the re-read of a write that did not certainly
+   * win). Buckets resolve 0.25–5 s, where staging pushes commit (2026-10-28: every commit fell in
+   * the old (2,5] bucket).
+   */
   gitCommitDuration: defineHistogram({
     name: 'tau.git.commit.duration',
     unit: 's',
-    description: 'Manifest commit latency by phase (manifest read, manifest write, or the whole commit) and kind',
-    buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30],
+    description:
+      'Commit latency by phase (prepare, compaction, hash, object puts, manifest write/read, or total) and kind',
+    buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 2.5, 3, 4, 5, 7.5, 10, 30],
     attributes: z.object({
-      'tau.git.commit.phase': z.enum(['manifest_read', 'manifest_write', 'total']),
+      'tau.git.commit.phase': z.enum([
+        'prepare',
+        'compaction',
+        'hash',
+        'object_puts',
+        'manifest_write',
+        'manifest_read',
+        'total',
+      ]),
       'tau.git.commit.kind': z.enum(['push', 'fence', 'compaction', 'batch']),
     }),
   }),

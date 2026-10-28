@@ -305,6 +305,19 @@ describe('TauMetrics', () => {
         'tau.git.commit.kind': 'push',
       }).success,
     ).toBe(true);
+    /* Push-latency Task 1: each commitLease phase is a series, and the buckets resolve where commits land. */
+    expect(
+      ['prepare', 'compaction', 'hash', 'object_puts', 'manifest_write', 'manifest_read'].map(
+        (phase) =>
+          TauMetrics.gitCommitDuration.attributes.safeParse({
+            'tau.git.commit.phase': phase,
+            'tau.git.commit.kind': 'push',
+          }).success,
+      ),
+    ).toStrictEqual([true, true, true, true, true, true]);
+    expect(TauMetrics.gitCommitDuration.buckets.filter((bound) => bound >= 0.25 && bound <= 5)).toStrictEqual([
+      0.25, 0.5, 0.75, 1, 1.5, 2, 2.5, 3, 4, 5,
+    ]);
     expect(Object.keys(TauMetrics.gitRepositorySize.attributes.shape)).toEqual([]);
     expect(TauMetrics.gitRepositorySize.buckets.at(0)).toBe(64 * 1024);
     expect(TauMetrics.gitRepositorySize.buckets.at(-1)).toBe(1024 ** 3);

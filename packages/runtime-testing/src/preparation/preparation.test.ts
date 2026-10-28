@@ -341,22 +341,29 @@ describe('startPayloadMirror', () => {
     const closure = await closureOf();
     const mirror = await mirrorOf(closure);
     const python = `blobs/sha256/${closure.payloads[0]!.sha256}`;
-    mirror.override(python, { redirect: `${mirror.url}blobs/sha256/${'0'.repeat(64)}` });
-    mirror.override('tau-seed.json', { status: 500 });
+    const redirectDestination = `blobs/sha256/${'0'.repeat(64)}`;
+    mirror.override(python, { redirect: `${mirror.url}${redirectDestination}` });
+    mirror.override('overridden', { status: 500 });
 
     const head = await fetch(`${mirror.url}blobs/sha256/${closure.payloads[1]!.sha256}`, { method: 'HEAD' });
     const missing = await fetch(`${mirror.url}blobs/sha256/${sha256Hex(utf8('absent'))}`);
     const unserved = await fetch(`${mirror.url}../etc/passwd`);
-    const index = await fetch(`${mirror.url}tau-seed.json`);
+    const overridden = await fetch(`${mirror.url}overridden`);
     const failure = hostOf(closure, { mirror: { baseUrl: mirror.url, noFallback: true } }).prepare({
       package: closure.package,
       signal: AbortSignal.timeout(30_000),
     });
 
     expect(head.headers.get('content-length')).toBe(String(closure.payloads[1]!.bytes.byteLength));
-    expect([missing.status, unserved.status, index.status]).toEqual([404, 404, 500]);
-    await expect(failure).rejects.toMatchObject({ code: 'DOWNLOAD_FAILED' });
+    expect([missing.status, unserved.status, overridden.status]).toEqual([404, 404, 500]);
+    await expect(failure).rejects.toBeInstanceOf(PreparationError);
+    await expect(failure).rejects.toThrow('Could not download python');
+    await expect(failure).rejects.toMatchObject({
+      code: 'DOWNLOAD_FAILED',
+      cause: { reason: 'redirect' },
+    });
     expect(mirror.requests).toContainEqual({ method: 'GET', path: python, status: 302 });
+    expect(mirror.requests.some(({ path }) => path === redirectDestination)).toBe(false);
     await mirror.close();
     await mirror[Symbol.asyncDispose]();
   });

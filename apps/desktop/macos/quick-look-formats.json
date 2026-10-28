@@ -116,23 +116,6 @@
       }
     },
     {
-      "extensions": ["3ds"],
-      "identifier": "com.taucad.3d-studio",
-      "declaration": "exported",
-      "aliases": ["com.shapr3d.3d-studio.3ds"],
-      "description": "3D Studio model",
-      "mimeTypes": ["model/3ds", "application/x-3ds"],
-      "sidecars": true,
-      "systemPreview": false,
-      "utiOwner": "TAUCAD LIMITED",
-      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
-      "fixture": {
-        "entry": "apps/desktop/macos/fixtures/3ds/rotating-cube.3ds",
-        "files": ["apps/desktop/macos/fixtures/3ds/rotating-cube.3ds"],
-        "expectedGeometry": { "minimumTriangles": 12, "bounds": "finite-nonzero" }
-      }
-    },
-    {
       "extensions": ["3mf"],
       "identifier": "com.taucad.3mf",
       "declaration": "exported",
@@ -505,56 +488,6 @@
         "entry": "apps/desktop/macos/fixtures/usdz/cube.usdz",
         "files": ["apps/desktop/macos/fixtures/usdz/cube.usdz"],
         "expectedGeometry": { "minimumTriangles": 12, "bounds": "finite-nonzero" }
-      }
-    },
-    {
-      "extensions": ["wrl"],
-      "identifier": "com.taucad.vrml",
-      "declaration": "exported",
-      "aliases": ["com.shapr3d.vrml.wrl"],
-      "description": "VRML world",
-      "mimeTypes": ["model/vrml", "x-world/x-vrml"],
-      "sidecars": true,
-      "systemPreview": false,
-      "utiOwner": "TAUCAD LIMITED",
-      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
-      "fixture": {
-        "entry": "apps/desktop/macos/fixtures/wrl/hello.wrl",
-        "files": ["apps/desktop/macos/fixtures/wrl/hello.wrl"],
-        "expectedGeometry": { "minimumTriangles": 1, "bounds": "finite-nonzero" }
-      }
-    },
-    {
-      "extensions": ["x"],
-      "identifier": "com.taucad.directx-model",
-      "declaration": "exported",
-      "description": "DirectX model",
-      "mimeTypes": ["model/vnd.directx"],
-      "sidecars": true,
-      "systemPreview": false,
-      "utiOwner": "TAUCAD LIMITED",
-      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
-      "fixture": {
-        "entry": "apps/desktop/macos/fixtures/x/cube.x",
-        "files": ["apps/desktop/macos/fixtures/x/cube.x"],
-        "expectedGeometry": { "minimumTriangles": 12, "bounds": "finite-nonzero" }
-      }
-    },
-    {
-      "extensions": ["x3d", "x3db", "x3dv"],
-      "identifier": "com.taucad.x3d",
-      "declaration": "exported",
-      "aliases": ["com.shapr3d.x3d.x3d", "com.shapr3d.x3d.x3db", "com.shapr3d.x3d.x3dv"],
-      "description": "Extensible 3D model",
-      "mimeTypes": ["model/x3d+xml", "model/x3d+binary", "model/x3d+vrml"],
-      "sidecars": true,
-      "systemPreview": false,
-      "utiOwner": "TAUCAD LIMITED",
-      "utiSource": "Tau fallback registration; no standards-owner UTI is available",
-      "fixture": {
-        "entry": "apps/desktop/macos/fixtures/x3d/HelloWorld.x3d",
-        "files": ["apps/desktop/macos/fixtures/x3d/HelloWorld.x3d", "apps/desktop/macos/fixtures/x3d/earth-topo.png"],
-        "expectedGeometry": { "minimumTriangles": 1, "bounds": "finite-nonzero" }
       }
     },
     {

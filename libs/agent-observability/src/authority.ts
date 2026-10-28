@@ -49,6 +49,7 @@ export const authorizeEvidence = ({
     return { allowed: false, code: 'SCOPE' };
   }
   if (
+    !Object.hasOwn(authority.purposes, purpose) ||
     !authority.purposes[purpose] ||
     ((purpose === 'summary' || purpose === 'content') && evidence.payload.plane !== purpose)
   ) {

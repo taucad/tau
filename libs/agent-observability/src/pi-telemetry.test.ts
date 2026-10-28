@@ -249,3 +249,14 @@ it('should freeze permissions and recover bounded admission after normal settlem
   await fixture.context.startSpan({ name: 'success' }, () => 1);
   expect(fixture.exporter.getFinishedSpans()).toHaveLength(telemetryLimits.depth + 1);
 });
+
+it('should preserve error status while suppressing inherited error-name lookups', async () => {
+  await using fixture = await telemetryFixture(piTelemetryPolicy);
+  await fixture.context.startSpan({ name: 'pi.ai.request' }, (span) => {
+    span.setStatus({ status: 'error', error: { name: 'constructor', message: 'PRIVATE' } });
+  });
+  const spans = await fixture.getSpans();
+  expect(spans[0]?.status).toEqual({ status: 'error' });
+  expect(fixture.adapter.stats().failures).toBe(0);
+  expect(JSON.stringify(spans)).not.toContain('PRIVATE');
+});

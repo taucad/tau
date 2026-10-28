@@ -24,6 +24,6 @@ Limits: 128 active spans, depth 16, 32 attributes, 64 events, 16 links, 16 array
 
 ## Verification and integration scope
 
-`pnpm nx test agent-observability --watch=false` runs the upstream 14-case adapter conformance suite, privacy/identity/authority/fault tests and a real synthetic Pi Models request. `pnpm nx test:e2e agent-observability` runs all 33 Tau-owned contract, authority, fault, privacy and Models cases in Chromium. The 14 upstream conformance cases stay in Node because their test runner imports `node:assert/strict`. Typecheck, lint, build and size are Nx targets.
+`pnpm nx test agent-observability --watch=false` runs the upstream 14-case adapter conformance suite, privacy/identity/authority/fault tests and a real synthetic Pi Models request. `pnpm nx test:e2e agent-observability` runs all 35 Tau-owned contract, authority, fault, privacy and Models cases in Chromium. The 14 upstream conformance cases stay in Node because their test runner imports `node:assert/strict`. Typecheck, lint, build and size are Nx targets.
 
 T03 implements and qualifies this contract/adapter. Product host/API capture, authenticated storage/delivery, Langfuse mapping and production activation remain later blueprint tasks. See [the research blueprint](../../docs/research/tau-agent-observability-research-blueprint.md).

@@ -221,6 +221,7 @@ export const createPiTelemetry = (
           const allowed =
             status.status === 'error' &&
             status.error &&
+            Object.hasOwn(policy.errors, status.error.name) &&
             policy.errors[status.error.name]?.includes(status.error.message);
           if (allowed && status.status === 'error' && status.error) {
             recorded.setAttributes({ 'error.type': status.error.name });
@@ -284,7 +285,10 @@ export const createPiTelemetry = (
             explicit.value = true;
             // Retain only exact reviewed error strings, never arbitrary provider error text.
             status =
-              next.status === 'error' && next.error && policy.errors[next.error.name]?.includes(next.error.message)
+              next.status === 'error' &&
+              next.error &&
+              Object.hasOwn(policy.errors, next.error.name) &&
+              policy.errors[next.error.name]?.includes(next.error.message)
                 ? { status: 'error', error: { name: next.error.name, message: next.error.message } }
                 : { status: next.status };
           });

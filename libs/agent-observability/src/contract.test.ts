@@ -382,3 +382,13 @@ it('should refuse a valid retention proof borrowed from a different source fact'
     authorizeEvidence({ evidence, authority: { ...current, retentionProofs: proofs }, purpose: 'summary' }),
   ).toEqual({ allowed: false, code: 'PROVENANCE' });
 });
+
+it('should reject inherited purpose names at the runtime boundary', () => {
+  const evidence = fixture();
+  const current = authority(evidence);
+  // @ts-expect-error JavaScript callers can bypass the compile-time closed purpose vocabulary.
+  expect(authorizeEvidence({ evidence, authority: current, purpose: 'toString' })).toEqual({
+    allowed: false,
+    code: 'PURPOSE',
+  });
+});

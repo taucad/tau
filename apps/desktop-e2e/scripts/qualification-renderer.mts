@@ -279,6 +279,21 @@ const main = async (): Promise<void> => {
       throw new Error('Installed renderer produced no fresh admitted Build123d payload record');
     }
     await page.screenshot({ path: `${output}.png`, fullPage: true });
+    let softwareRenderer: string | undefined;
+    if (process.env['TAU_QUALIFICATION_GRAPHICS'] === 'isolated-software') {
+      const session = await browser.newBrowserCDPSession();
+      try {
+        const info = z
+          .object({ gpu: z.object({ auxAttributes: z.object({ glRenderer: z.string().min(1) }) }) })
+          .parse(await session.send('SystemInfo.getInfo'));
+        softwareRenderer = info.gpu.auxAttributes.glRenderer;
+        if (!/SwiftShader/iu.test(softwareRenderer)) {
+          throw new Error('Isolated software CI did not observe the SwiftShader GPU backend');
+        }
+      } finally {
+        await session.detach();
+      }
+    }
     await writeFile(
       output,
       JSON.stringify(
@@ -291,6 +306,7 @@ const main = async (): Promise<void> => {
           exported,
           logOffset,
           observedAt: new Date().toISOString(),
+          ...(softwareRenderer ? { softwareRenderer } : {}),
         },
         undefined,
         2,

@@ -79,7 +79,7 @@ import(${JSON.stringify(import.meta.resolve('@anthropic-ai/sandbox-runtime'))}).
   await writeFile(
     join(root, 'main.cjs'),
     `
-const { app, utilityProcess } = require('electron');
+const { app, utilityProcess, BrowserWindow } = require('electron');
 const assert = require('node:assert/strict');
 const { mkdirSync, symlinkSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
@@ -98,6 +98,21 @@ const launch = root => {
   return child;
 };
 app.whenReady().then(async () => {
+  if (process.env.TAU_QUALIFICATION_GRAPHICS === 'isolated-software') {
+    const window = new BrowserWindow({show:false, webPreferences:{sandbox:true, contextIsolation:true, nodeIntegration:false}});
+    try {
+      await window.loadURL('data:text/html,<canvas></canvas>');
+      assert.equal(await window.webContents.executeJavaScript("document.querySelector('canvas').getContext('webgl2') !== null"), true);
+      const gpu = await app.getGPUInfo('complete');
+      assert.match(gpu.auxAttributes.glRenderer, /SwiftShader/i);
+      console.log(JSON.stringify({kind:'isolated-software-ci-preflight', webgl2:true,
+        renderer:gpu.auxAttributes.glRenderer, rendererSandbox:window.webContents.getLastWebPreferences().sandbox,
+        stockGpuAcceptance:'open'}));
+      assert.equal(window.webContents.getLastWebPreferences().sandbox, true);
+    } finally {
+      window.destroy();
+    }
+  }
   const authority = join(__dirname, 'authority with spaces');
   const alias = join(__dirname, 'alias');
   mkdirSync(authority);
@@ -160,7 +175,11 @@ app.whenReady().then(async () => {
   runQualificationApt('install', [...packages]);
   const installed = await stat('/opt/tau-staging/releases/1.0.1/Tau');
   assert.equal(installed.uid, 0);
-  const result = spawnSync('/usr/bin/tau-staging', [join(root, 'main.cjs')], {
+  const graphicsArguments =
+    process.env['TAU_QUALIFICATION_GRAPHICS'] === 'isolated-software'
+      ? ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']
+      : [];
+  const result = spawnSync('/usr/bin/tau-staging', [join(root, 'main.cjs'), ...graphicsArguments], {
     stdio: 'inherit',
     timeout: 90_000,
   });

@@ -118,6 +118,7 @@ async function enableMeasure(): Promise<void> {
       { message: 'measure mode should activate' },
     )
     .toBe(true);
+  await target.expectVisible(selectors.getByRole('group', { name: 'Measuring options', exact: true }));
   const active = await measureState();
   expect(active.snapDistancePx).toBe(10);
 }

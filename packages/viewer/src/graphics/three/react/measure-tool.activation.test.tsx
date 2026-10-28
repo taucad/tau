@@ -1,4 +1,5 @@
 import { act } from '@testing-library/react';
+import { lazy, Suspense } from 'react';
 import { createRoot, events as createPointerEvents, extend } from '@react-three/fiber';
 import type { ConstructorRepresentation, ReconcilerRoot, RootState } from '@react-three/fiber';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -253,6 +254,64 @@ describe('MeasureTool activation', () => {
       });
     });
   };
+
+  it('should remain unready across a delayed tool load and cancellation, then accept a press before graphs are ready', async () => {
+    const loading = Promise.withResolvers<{ default: typeof MeasureTool }>();
+    const DeferredMeasureTool = lazy(async () => loading.promise);
+    function DeferredWhileActive(): React.ReactNode {
+      const active = useGraphicsSelector((state) => state.context.isMeasureActive);
+      return <Suspense fallback={null}>{active ? <DeferredMeasureTool /> : null}</Suspense>;
+    }
+    await act(async () => {
+      root.render(
+        <GraphicsProvider graphicsRef={actor}>
+          <primitive object={model} />
+          <primitive object={sideMesh} />
+          <DeferredWhileActive />
+        </GraphicsProvider>,
+      );
+    });
+    act(() => {
+      actor.send({ type: 'setMeasureActive', payload: true });
+    });
+    expect(actor.getSnapshot().context.isMeasureInputReady).toBe(false);
+    dispatch('pointerdown', pixelOf(0, -1, 1));
+    dispatch('pointerup', pixelOf(0, -1, 1));
+    expect(actor.getSnapshot().context.measurements).toHaveLength(0);
+    act(() => {
+      actor.send({ type: 'setMeasureActive', payload: false });
+    });
+    await act(async () => {
+      loading.resolve({ default: MeasureTool });
+    });
+    expect(actor.getSnapshot().context.isMeasureInputReady).toBe(false);
+
+    await act(async () => {
+      actor.send({ type: 'setMeasureActive', payload: true });
+    });
+    expect(actor.getSnapshot().context.isMeasureInputReady).toBe(true);
+    expect(getCachedMeshMeasurementFeatures(model)).toBeUndefined();
+    dispatch('pointerdown', pixelOf(0, -1, 1));
+    dispatch('pointerup', pixelOf(0, -1, 1));
+    expect(actor.getSnapshot().context.measurements).toHaveLength(0);
+    await answerWorker();
+    expect(actor.getSnapshot().context.measurements).toHaveLength(1);
+    expect(actor.getSnapshot().context.measurements[0]).toMatchObject({ operation: 'edge-length', distance: 2 });
+    await act(async () => {
+      root.render(
+        <GraphicsProvider graphicsRef={actor}>
+          <primitive object={model} />
+          <primitive object={sideMesh} />
+        </GraphicsProvider>,
+      );
+    });
+    expect(actor.getSnapshot().context.isMeasureActive).toBe(true);
+    expect(actor.getSnapshot().context.isMeasureInputReady).toBe(false);
+    act(() => {
+      actor.send({ type: 'setMeasureActive', payload: false });
+    });
+    expect(actor.getSnapshot().context.isMeasureInputReady).toBe(false);
+  });
 
   it('hovers from where the pointer rests when Measure turns on after the pointer moved over the model', () => {
     // A ready feature graph, as after the worker prepared the mesh: only the tool's mount timing is under test.

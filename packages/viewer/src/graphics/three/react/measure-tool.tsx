@@ -1868,6 +1868,7 @@ export function MeasureTool(): React.JSX.Element {
     pointerTarget.addEventListener('pointerleave', clearHover);
     window.addEventListener('blur', handleWindowBlur);
     pointerTarget.addEventListener('contextmenu', handleContextMenu);
+    graphicsActor.send({ type: 'setMeasureInputReady', ready: true });
     // The tool mounts when Measure turns on (lazily, on its first use), after the pointer may already have moved over
     // the model: that move reached only R3F's event source, and a pointer held still sends no other. Hover from where
     // it rests, so the first hover or click after turning Measure on is not lost.
@@ -1884,6 +1885,7 @@ export function MeasureTool(): React.JSX.Element {
     }
 
     return () => {
+      graphicsActor.send({ type: 'setMeasureInputReady', ready: false });
       if (seed && lastPointerRef.current === seed && hoverRef.current === noMeasureHover) {
         // Rebound before the seed's frame drew it (StrictMode replays effects): the next bind seeds again.
         hoverSeedPendingRef.current = true;

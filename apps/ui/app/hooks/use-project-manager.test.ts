@@ -1092,6 +1092,100 @@ describe('useProjectManager.createProject', () => {
     expect(mockSetProjectCreationLocation).not.toHaveBeenCalled();
   });
 
+  it('should use the completed bootstrap scan for the first project listing', async () => {
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(result.current.getProjectListing()).resolves.toMatchObject({
+      projects: [{ projectId: fakeProject.id, manifest: projectToManifest(fakeProject) }],
+    });
+
+    expect(mockGetPendingProjectOperations).toHaveBeenCalledOnce();
+    expect(mockListProjectManifests).toHaveBeenCalledOnce();
+  });
+
+  it('should share the completed bootstrap scan between concurrent initial listing callers', async () => {
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    const [first, second] = await Promise.all([
+      result.current.getProjectListing(),
+      result.current.getProjectListing({ includeDeleted: true }),
+    ]);
+
+    expect(first.projects).toHaveLength(1);
+    expect(second.projects).toHaveLength(1);
+    expect(mockGetPendingProjectOperations).toHaveBeenCalledOnce();
+    expect(mockListProjectManifests).toHaveBeenCalledOnce();
+  });
+
+  it('should retry an initial listing when a manifest change supersedes bootstrap discovery', async () => {
+    const scanStarted = Promise.withResolvers<void>();
+    const releaseScan = Promise.withResolvers<void>();
+    mockListProjectManifests
+      .mockImplementationOnce(async () => {
+        scanStarted.resolve();
+        await releaseScan.promise;
+        return validProjectDiscovery;
+      })
+      .mockResolvedValue({ roots: validProjectDiscovery.roots, entries: [] });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    const listing = result.current.getProjectListing();
+    try {
+      await scanStarted.promise;
+      act(() => {
+        emitWorkerChange('fileDeleted', '/test-project/tau.json');
+      });
+    } finally {
+      releaseScan.resolve();
+    }
+
+    await expect(listing).resolves.toMatchObject({ projects: [] });
+    expect(mockListProjectManifests).toHaveBeenCalledTimes(2);
+  });
+
+  it('should retry a listing when a manifest change occurs during library enrichment', async () => {
+    const enrichmentStarted = Promise.withResolvers<void>();
+    const releaseEnrichment = Promise.withResolvers<void>();
+    mockListProjectManifests
+      .mockResolvedValueOnce(validProjectDiscovery)
+      .mockResolvedValue({ roots: validProjectDiscovery.roots, entries: [] });
+    mockGetProjectLibraryStates.mockImplementationOnce(async (projectIds) => {
+      enrichmentStarted.resolve();
+      await releaseEnrichment.promise;
+      return projectIds.map((projectId) => ({ projectId, lastActivityAt: 10 }));
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    const listing = result.current.getProjectListing();
+    try {
+      await enrichmentStarted.promise;
+      act(() => {
+        emitWorkerChange('fileDeleted', '/test-project/tau.json');
+      });
+    } finally {
+      releaseEnrichment.resolve();
+    }
+
+    await expect(listing).resolves.toMatchObject({ projects: [] });
+    expect(mockListProjectManifests).toHaveBeenCalledTimes(2);
+  });
+
+  it('should retry bootstrap after a failed pending-operation read', async () => {
+    mockGetPendingProjectOperations.mockRejectedValueOnce(new Error('journal unavailable'));
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(result.current.getProjectListing()).rejects.toThrow('journal unavailable');
+    await expect(result.current.getProjectListing()).resolves.toMatchObject({
+      projects: [{ projectId: fakeProject.id }],
+    });
+
+    expect(mockGetPendingProjectOperations).toHaveBeenCalledTimes(2);
+    expect(mockListProjectManifests).toHaveBeenCalledOnce();
+  });
+
   it('reuses bootstrap discovery for route access and refreshes after a manifest change', async () => {
     mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
@@ -2452,23 +2546,33 @@ describe('useProjectManager.createProject', () => {
     expect(mockListProjectManifests).toHaveBeenCalledOnce();
   });
 
-  it('skips orphan collection when the durable route configuration changed mid-pass', async () => {
+  it('should skip orphan collection from a pass superseded by a durable route configuration change', async () => {
     const configured = {
       projectId: fakeProject.id,
       backend: 'opfs',
       providerBasePath: fakeLocator.relativeDirectory,
     } as const;
-    mockGetAllProjectFileSystemConfigs.mockImplementation(async () => {
-      projectRootConfigurationListener?.();
-      return [configured];
-    });
-    mockListProjectManifests.mockResolvedValue({
-      roots: [{ status: 'complete', root: { backend: 'opfs' } }],
-      entries: [],
-    });
+    mockGetAllProjectFileSystemConfigs
+      .mockImplementationOnce(async () => {
+        projectRootConfigurationListener?.();
+        return [configured];
+      })
+      .mockResolvedValue([configured]);
+    mockListProjectManifests
+      .mockResolvedValueOnce({
+        roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+        entries: [],
+      })
+      .mockResolvedValue(validProjectDiscovery);
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
-    await result.current.getProjectListing();
+    await act(async () => {
+      await expect(result.current.getProjectListing()).resolves.toMatchObject({
+        projects: [{ projectId: fakeProject.id }],
+      });
+    });
+    expect(mockListProjectManifests).toHaveBeenCalledTimes(2);
+    expect(mockGetAllProjectFileSystemConfigs).toHaveBeenCalledTimes(2);
     expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
     expect(mockDeleteProjectResources).not.toHaveBeenCalled();
   });
@@ -2600,6 +2704,20 @@ describe('useProjectManager.createProject', () => {
     await result.current.getProjectListing();
     await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({ status: 'missing' });
     expect(mockListProjectManifests).toHaveBeenCalledTimes(2);
+  });
+
+  it('should refresh once for concurrent listings after bootstrap has settled', async () => {
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({ status: 'ready' });
+
+    const [first, second] = await Promise.all([result.current.getProjectListing(), result.current.getProjectListing()]);
+    expect(first.projects).toHaveLength(1);
+    expect(second.projects).toHaveLength(1);
+    expect(mockListProjectManifests).toHaveBeenCalledTimes(2);
+
+    await result.current.getProjectListing();
+    expect(mockListProjectManifests).toHaveBeenCalledTimes(3);
   });
 
   it.each([

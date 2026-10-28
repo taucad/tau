@@ -19,6 +19,8 @@ import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { fileManagerWorkerName } from '#machines/file-manager-worker-name.js';
 import type { WorkspaceRootSkip } from '#filesystem/handle-store.js';
 import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
+import { readLocalProjectOpenPerformance } from '#lib/project-open-performance.js';
+import type { ProjectOpenPerformance } from '#lib/project-open-performance.js';
 import { normalizePath } from '@taucad/utils/path';
 import { FileContentBudget } from '@taucad/fs-client/file-content-budget';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
@@ -192,6 +194,8 @@ type FileManagerContext = {
   restarted: boolean;
   onExternalPollTelemetry: ((aggregate: ExternalPollTelemetry) => void) | undefined;
   onRootSkipped: ((skip: WorkspaceRootSkip) => void) | undefined;
+  /** Explicit local diagnostic recorder; absent in ordinary project opens. */
+  openPerformance: ProjectOpenPerformance | undefined;
 };
 
 // ============ Lifecycle Actors ============
@@ -363,9 +367,12 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     worker.addEventListener('message', onWorkerEnvelope);
 
     if (!context.sharedWorker) {
+      const span = context.openPerformance?.begin('worker.connect');
       try {
         await Promise.race([waitForWorkerReady(worker, signal), crashSignal]);
+        span?.finish('ok');
       } catch (error) {
+        span?.finish(signal.aborted ? 'cancelled' : 'error');
         worker.removeEventListener('error', onWorkerError);
         worker.removeEventListener('messageerror', onWorkerMessageError);
         worker.removeEventListener('message', onWorkerEnvelope);
@@ -620,9 +627,23 @@ const initializeServicesActor = fromSafeAsync<
     }
     // A project registered after worker boot answers ROOT_UNAVAILABLE until
     // configureProjectRoots runs; its tree stays unresolved rather than failing start-up.
-    await viewProxy.ready;
+    const authoritySpan = context.openPerformance?.begin('authority.ready');
+    try {
+      await viewProxy.ready;
+      authoritySpan?.finish(viewProxy.hello.payload.state === 'unavailable' ? 'unavailable' : 'ok');
+    } catch (error) {
+      authoritySpan?.finish(signal.aborted ? 'cancelled' : 'error');
+      throw error;
+    }
     if (viewProxy.hello.payload.state !== 'unavailable') {
-      await initializedTreeService.listDirectory('', { signal });
+      const listingSpan = context.openPerformance?.begin('tree.list');
+      try {
+        const entries = await initializedTreeService.listDirectory('', { signal });
+        listingSpan?.finish('ok', { directoryEntries: entries.length });
+      } catch (error) {
+        listingSpan?.finish(signal.aborted ? 'cancelled' : 'error');
+        throw error;
+      }
     }
 
     signal.throwIfAborted();
@@ -705,6 +726,8 @@ type FileManagerInput = {
   onExternalPollTelemetry?: (aggregate: ExternalPollTelemetry) => void;
   /** Telemetry sink for workspaces the route snapshot had to skip (R13). */
   onRootSkipped?: (skip: WorkspaceRootSkip) => void;
+  /** Explicit local diagnostic recorder for passive User Timing spans. */
+  openPerformance?: ProjectOpenPerformance;
 };
 
 type FileManagerEnqueue = EnqueueObject<FileManagerEvent, EventObject, SystemRegistry, typeof fileManagerActors>;
@@ -865,6 +888,7 @@ export const fileManagerMachine = setup({
     restarted: false,
     onExternalPollTelemetry: input.onExternalPollTelemetry,
     onRootSkipped: input.onRootSkipped,
+    openPerformance: input.openPerformance ?? readLocalProjectOpenPerformance(),
   }),
   initial: 'initializing',
   exit: ({ context }, enq) => {

@@ -37,6 +37,18 @@
           }
         }
       ]
+    },
+    {
+      "uid": "seeded-fly-unbound",
+      "data": [
+        {
+          "refId": "A",
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum(fly_instance_up{}) < 2"
+          }
+        }
+      ]
     }
   ]
 }

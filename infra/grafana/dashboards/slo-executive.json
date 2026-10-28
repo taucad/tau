@@ -394,7 +394,9 @@
       "targets": [
         {
           "expr": "avg_over_time((max(tau_mirror_copy_lag_seconds{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"}) <= bool 900)[30d:1m]) * 100",
-          "refId": "A"
+          "refId": "A",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {

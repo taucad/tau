@@ -24,20 +24,20 @@ const fixtureRoot = path.resolve(import.meta.dirname, 'fixtures/grafana-contract
  */
 const pendingDeclaration: Readonly<Record<string, string>> = {
   // W14 OB3's storage accounting scheduler declares these; OB9's usage, cost and capacity rows and OB10's
-  // accounting, R2, ceiling and pooler rules read them. Remove each entry when OB3 merges.
-  tau_storage_usage_bytes: 'taucad/tau OB3 (claude/storage-accounting)',
-  tau_storage_usage_repositories: 'taucad/tau OB3 (claude/storage-accounting)',
-  tau_git_repository_size_distribution: 'taucad/tau OB3 (claude/storage-accounting)',
-  tau_git_repository_ceiling_proximity: 'taucad/tau OB3 (claude/storage-accounting)',
-  tau_storage_quota_owners: 'taucad/tau OB3 (claude/storage-accounting)',
-  tau_db_connections: 'taucad/tau OB3 (claude/storage-accounting)',
-  tau_db_connection_budget: 'taucad/tau OB3 (claude/storage-accounting)',
-  tau_r2_requests: 'taucad/tau OB3 (claude/storage-accounting)',
-  tau_r2_stored_bytes: 'taucad/tau OB3 (claude/storage-accounting)',
-  tau_r2_objects: 'taucad/tau OB3 (claude/storage-accounting)',
-  tau_r2_bandwidth_bytes: 'taucad/tau OB3 (claude/storage-accounting)',
-  tau_storage_accounting_passes_total: 'taucad/tau OB3 (claude/storage-accounting)',
-  tau_storage_accounting_last_success: 'taucad/tau OB3 (claude/storage-accounting)',
+  // accounting, R2, ceiling and pooler rules read them. Remove each entry when OB3 (taucad/tau#1176) merges.
+  tau_storage_usage_bytes: 'taucad/tau#1176',
+  tau_storage_usage_repositories: 'taucad/tau#1176',
+  tau_git_repository_size_distribution: 'taucad/tau#1176',
+  tau_git_repository_ceiling_proximity: 'taucad/tau#1176',
+  tau_storage_quota_owners: 'taucad/tau#1176',
+  tau_db_connections: 'taucad/tau#1176',
+  tau_db_connection_budget: 'taucad/tau#1176',
+  tau_r2_requests: 'taucad/tau#1176',
+  tau_r2_stored_bytes: 'taucad/tau#1176',
+  tau_r2_objects: 'taucad/tau#1176',
+  tau_r2_bandwidth_bytes: 'taucad/tau#1176',
+  tau_storage_accounting_passes_total: 'taucad/tau#1176',
+  tau_storage_accounting_last_success: 'taucad/tau#1176',
 };
 
 /**
@@ -850,9 +850,19 @@ const selectorSourceProblems = (root: string): string[] => [
     .filter(({ kind }) => kind === 'rule')
     .flatMap(({ query, file }) =>
       [...query.matchAll(/(?<metric>[A-Za-z_:][\w:]*)?\s*\{(?<body>[^{}]*)\}/gu)]
-        .filter(({ groups }) => !/^(?:grafana|fly)_/u.test(groups?.['metric'] ?? ''))
+        .filter(({ groups }) => !(groups?.['metric'] ?? '').startsWith('grafana_'))
         .flatMap(({ groups }) => {
           const matchers = selectorMatchers(groups?.['body'] ?? '');
+          if ((groups?.['metric'] ?? '').startsWith('fly_')) {
+            // Fly's series carry no service_name, so the app placeholder alone keeps one app's Machines.
+            const apps = matchers.filter(({ label }) => label === 'app');
+            const placeholders: readonly string[] = Object.values(appPlaceholders.rule);
+            return apps.length === 1 && apps[0]!.op === '=~' && placeholders.includes(apps[0]!.value)
+              ? []
+              : [
+                  `${file}: ${groups?.['metric'] ?? ''}{${groups?.['body'] ?? ''}} needs exactly one app matcher from ${placeholders.map((value) => `app=~"${value}"`).join(', ')}`,
+                ];
+          }
           const app = matchers.find(({ label, op }) => label === 'app' && op === '=~');
           const service = ruleServices[app?.value ?? appPlaceholders.rule.api] ?? appNames.api;
           return matchers.some(({ label, op, value }) => label === 'service_name' && op === '=' && value === service)
@@ -938,6 +948,7 @@ describe('Runtime observability dashboards and rules (T13, T32)', () => {
       "dashboards/runtime-product.json: names fly_app_name, which bypasses Tau Cloud's rewrite",
       'alerts/runtime-unbound.json: tau_telemetry_ingest_entries_total{app=~".*",disposition="recorded"} lacks service_name="tau-api"',
       'alerts/runtime-unbound.json: tau_mirror_copy_lag_seconds{app=~".*mirror.*",service_name="tau-api"} lacks service_name="tau-mirror"',
+      'alerts/runtime-unbound.json: fly_instance_up{} needs exactly one app matcher from app=~".*", app=~".*storage.*", app=~".*mirror.*"',
     ]);
     expect(populationProblems(path.join(seeded, 'dashboards/runtime-product.json'))).toEqual([
       'population must default to signed-in (has "$__all")',

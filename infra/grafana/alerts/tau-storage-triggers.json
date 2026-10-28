@@ -15,7 +15,7 @@
           "model": {
             "instant": true,
             "range": false,
-            "expr": "(max(tau_git_hot_project_commit_rate{app=~\".*\",service_name=\"tau-api\",rank=\"1\"}) or max(tau_git_hot_project_commit_rate{app=~\".*storage.*\",service_name=\"tau-storage\",rank=\"1\"})) * (histogram_quantile(0.5, sum by (le) (rate(tau_git_commit_duration_bucket{app=~\".*\",service_name=\"tau-api\",tau_git_commit_phase=\"manifest_read\"}[1h]) or rate(tau_git_commit_duration_bucket{app=~\".*storage.*\",service_name=\"tau-storage\",tau_git_commit_phase=\"manifest_read\"}[1h]))) + histogram_quantile(0.5, sum by (le) (rate(tau_git_commit_duration_bucket{app=~\".*\",service_name=\"tau-api\",tau_git_commit_phase=\"manifest_write\"}[1h]) or rate(tau_git_commit_duration_bucket{app=~\".*storage.*\",service_name=\"tau-storage\",tau_git_commit_phase=\"manifest_write\"}[1h])))) > 0.5",
+            "expr": "max(tau_git_hot_project_commit_rate{app=~\".*\",service_name=\"tau-api\",rank=\"1\"} or tau_git_hot_project_commit_rate{app=~\".*storage.*\",service_name=\"tau-storage\",rank=\"1\"}) * (histogram_quantile(0.5, sum by (le) (rate(tau_git_commit_duration_bucket{app=~\".*\",service_name=\"tau-api\",tau_git_commit_phase=\"manifest_read\"}[1h]) or rate(tau_git_commit_duration_bucket{app=~\".*storage.*\",service_name=\"tau-storage\",tau_git_commit_phase=\"manifest_read\"}[1h]))) + histogram_quantile(0.5, sum by (le) (rate(tau_git_commit_duration_bucket{app=~\".*\",service_name=\"tau-api\",tau_git_commit_phase=\"manifest_write\"}[1h]) or rate(tau_git_commit_duration_bucket{app=~\".*storage.*\",service_name=\"tau-storage\",tau_git_commit_phase=\"manifest_write\"}[1h])))) > 0.5",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "project_commit_ceiling"
@@ -123,7 +123,7 @@
           "model": {
             "instant": true,
             "range": false,
-            "expr": "((max(tau_git_hot_project_writers{app=~\".*\",service_name=\"tau-api\",rank=\"1\"}) or max(tau_git_hot_project_writers{app=~\".*storage.*\",service_name=\"tau-storage\",rank=\"1\"})) > 20) and on() ((max(tau_git_hot_project_commit_rate{app=~\".*\",service_name=\"tau-api\",rank=\"1\"}) or max(tau_git_hot_project_commit_rate{app=~\".*storage.*\",service_name=\"tau-storage\",rank=\"1\"})) >= 1 / 60)",
+            "expr": "(max(tau_git_hot_project_writers{app=~\".*\",service_name=\"tau-api\",rank=\"1\"} or tau_git_hot_project_writers{app=~\".*storage.*\",service_name=\"tau-storage\",rank=\"1\"}) > 20) and on() (max(tau_git_hot_project_commit_rate{app=~\".*\",service_name=\"tau-api\",rank=\"1\"} or tau_git_hot_project_commit_rate{app=~\".*storage.*\",service_name=\"tau-storage\",rank=\"1\"}) >= 1 / 60)",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "concurrent_writers"

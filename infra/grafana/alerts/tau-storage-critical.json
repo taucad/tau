@@ -73,7 +73,7 @@
           "model": {
             "instant": true,
             "range": false,
-            "expr": "sum(fly_instance_up{app=~\".*storage.*\"}) < 2",
+            "expr": "(sum(fly_instance_up{app=~\".*storage.*\"}) or on() (count(last_over_time(fly_instance_up{app=~\".*storage.*\"}[1d])) * 0)) < 2",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "workers_below_floor"
@@ -85,7 +85,7 @@
       "for": "5m",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/operate/scaling.md",
-        "summary": "Fewer than two tau-storage Machines are up (min_machines_running is 2), so forwarded git has no failover. Silent where Fly reports no tau-storage Machine at all."
+        "summary": "Fewer than two tau-storage Machines are up (min_machines_running is 2), so forwarded git has no failover. A Machine that is down drops out of fly_instance_up, so the sum falls back to 0 while the app reported in the last day; silent where Fly has reported no tau-storage Machine for a day (an environment without the app)."
       },
       "labels": { "severity": "critical", "service": "tau-storage", "component": "git" }
     },
@@ -189,7 +189,7 @@
           "model": {
             "instant": true,
             "range": false,
-            "expr": "(sum(increase(tau_mirror_rounds_total{app=~\".*mirror.*\",service_name=\"tau-mirror\",destination=\"b2\",outcome=\"copied\"}[15m])) == 0) and on() (sum(tau_mirror_backlog_repositories{app=~\".*mirror.*\",service_name=\"tau-mirror\",destination=\"b2\"}) > 0)",
+            "expr": "((sum(increase(tau_mirror_rounds_total{app=~\".*mirror.*\",service_name=\"tau-mirror\",destination=\"b2\",outcome=\"copied\"}[15m])) or on() vector(0)) == 0) and on() (sum(tau_mirror_backlog_repositories{app=~\".*mirror.*\",service_name=\"tau-mirror\",destination=\"b2\"}) > 0)",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "copy_stalled"
@@ -201,7 +201,7 @@
       "for": "5m",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/system/services/second-copy-b2.md",
-        "summary": "Repositories are waiting for the second copy and no copy round copied anything in 15 min."
+        "summary": "Repositories are waiting for the second copy and no copy round copied anything in 15 min. A restarted copier has no outcome=\"copied\" series until its first copy, so that case counts as zero copied."
       },
       "labels": { "severity": "critical", "service": "tau-mirror", "component": "mirror" }
     },
@@ -363,7 +363,7 @@
           "model": {
             "instant": true,
             "range": false,
-            "expr": "sum(increase(tau_mirror_drill_runs_total{app=~\".*mirror.*\",service_name=\"tau-mirror\",outcome=\"fail\"}[8d])) > 0",
+            "expr": "((max_over_time((timestamp(sum(increase(tau_mirror_drill_runs_total{app=~\".*mirror.*\",service_name=\"tau-mirror\",outcome=\"fail\"}[2m])) > 0))[8d:1m]) - 120) > on() max(tau_mirror_drill_last_success_timestamp_seconds{app=~\".*mirror.*\",service_name=\"tau-mirror\"})) or ((max_over_time((timestamp(sum(increase(tau_mirror_drill_runs_total{app=~\".*mirror.*\",service_name=\"tau-mirror\",outcome=\"fail\"}[2m])) > 0))[8d:1m]) - 120) unless on() max(tau_mirror_drill_last_success_timestamp_seconds{app=~\".*mirror.*\",service_name=\"tau-mirror\"}))",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "drill_failed"
@@ -375,7 +375,7 @@
       "for": "0s",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/system/services/second-copy-b2.md",
-        "summary": "A second-copy drill failed in the last 8 days (D23, STO-1). The copier exports drill results from mirror_drill_run rows, so the failure survives the drill Machine's exit."
+        "summary": "The newest second-copy drill failure in the last 8 days is later than the newest passing drill (D23, STO-1), so a later pass clears it. The failure time is the minute the fail counter rose, less 2 min, so a pass within 2 min before a failure can hide it. The copier exports drill results from mirror_drill_run rows, so the failure survives the drill Machine's exit."
       },
       "labels": { "severity": "critical", "service": "tau-mirror", "component": "mirror" }
     }

@@ -207,7 +207,9 @@ Storage capability › Repository size distribution
 Storage capability › Owners by quota band
 Storage capability › Repositories near the 1 GiB ceiling
 
-# Storage log panels show warnings, errors and git.hot_projects lines, which a quiet local run does not write.
+# Storage log panels read only {service_name=~"$service"}, which Tau Cloud rewrites to the API app: the hot-project
+# lines and the storage and mirror warnings come from tau-storage and tau-mirror, so these stay empty when hosted
+# (until the renderer binds a storage log selector) and on a quiet local run.
 Storage capability › Sync and storage warnings and errors (tau-api)
 Storage capability › Hot projects (top-N by rank)
 

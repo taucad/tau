@@ -28,8 +28,9 @@ remap UIDs — they must already exist on the target Grafana instance.
 
 Storage selectors follow binding contract v2 (`../README.md`): one query per app, each carrying that
 app's `service_name` (`tau-api`, `tau-storage`, `tau-mirror`); Fly `fly_*` series carry only the `app`
-matcher. Gauges the accounting scheduler or the hot-project ranks export are identical on every Machine
-and are read with `max`, never `sum`. Not shipped, because nothing emits their series yet (W14 drafts
+matcher. The accounting scheduler's gauges are computed once and shared, so every API Machine exports the
+same figure and they are read with `max`, never `sum`. The hot-project ranks are per Machine (each ranks
+the commits it served), so `max(A or B)` across Machines and apps is a lower bound on the busiest project. Not shipped, because nothing emits their series yet (W14 drafts
 kept for the package that adds them): `storage-migration-integrity` and migration aborts (OB5's migrator),
 worker slot use and disk headroom against the D20 reserve (no `tau_git_capacity_slots`,
 `tau_git_disk_reserve_bytes`), R2 429s per minute (no `tau_storage_attempts_total`), compute lookups and

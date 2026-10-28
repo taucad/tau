@@ -504,7 +504,7 @@
       "description": "Each bar is the current value as a percentage of its trigger threshold (W14 trigger table). The compute-tier (W11), serializer (S3-3) and slot-use (C3) triggers have no emitted metric yet and are not drawn.",
       "targets": [
         {
-          "expr": "(max(tau_git_hot_project_commit_rate{app=~\"$app\",service_name=~\"$service\",rank=\"1\"}) or max(tau_git_hot_project_commit_rate{app=~\"$storage_app\",service_name=\"tau-storage\",rank=\"1\"})) * (histogram_quantile(0.5, sum by (le) (rate(tau_git_commit_duration_bucket{app=~\"$app\",service_name=~\"$service\",tau_git_commit_phase=\"manifest_read\"}[1h]) or rate(tau_git_commit_duration_bucket{app=~\"$storage_app\",service_name=\"tau-storage\",tau_git_commit_phase=\"manifest_read\"}[1h]))) + histogram_quantile(0.5, sum by (le) (rate(tau_git_commit_duration_bucket{app=~\"$app\",service_name=~\"$service\",tau_git_commit_phase=\"manifest_write\"}[1h]) or rate(tau_git_commit_duration_bucket{app=~\"$storage_app\",service_name=\"tau-storage\",tau_git_commit_phase=\"manifest_write\"}[1h])))) / 0.5 * 100",
+          "expr": "max(tau_git_hot_project_commit_rate{app=~\"$app\",service_name=~\"$service\",rank=\"1\"} or tau_git_hot_project_commit_rate{app=~\"$storage_app\",service_name=\"tau-storage\",rank=\"1\"}) * (histogram_quantile(0.5, sum by (le) (rate(tau_git_commit_duration_bucket{app=~\"$app\",service_name=~\"$service\",tau_git_commit_phase=\"manifest_read\"}[1h]) or rate(tau_git_commit_duration_bucket{app=~\"$storage_app\",service_name=\"tau-storage\",tau_git_commit_phase=\"manifest_read\"}[1h]))) + histogram_quantile(0.5, sum by (le) (rate(tau_git_commit_duration_bucket{app=~\"$app\",service_name=~\"$service\",tau_git_commit_phase=\"manifest_write\"}[1h]) or rate(tau_git_commit_duration_bucket{app=~\"$storage_app\",service_name=\"tau-storage\",tau_git_commit_phase=\"manifest_write\"}[1h])))) / 0.5 * 100",
           "legendFormat": "Hottest project commits vs 50% of the measured ceiling (S2-1)",
           "refId": "A"
         },
@@ -514,7 +514,7 @@
           "refId": "B"
         },
         {
-          "expr": "(max(tau_git_hot_project_writers{app=~\"$app\",service_name=~\"$service\",rank=\"1\"}) or max(tau_git_hot_project_writers{app=~\"$storage_app\",service_name=\"tau-storage\",rank=\"1\"})) / 20 * 100",
+          "expr": "max(tau_git_hot_project_writers{app=~\"$app\",service_name=~\"$service\",rank=\"1\"} or tau_git_hot_project_writers{app=~\"$storage_app\",service_name=\"tau-storage\",rank=\"1\"}) / 20 * 100",
           "legendFormat": "Writers on one project vs 20 (S2-3)",
           "refId": "C"
         },
@@ -682,7 +682,7 @@
         "sortOrder": 1,
         "dashboardAlerts": false,
         "alertName": "",
-        "alertInstanceLabelFilter": "{component=~\"git|r2|mirror|storage|migration\"}",
+        "alertInstanceLabelFilter": "{component=~\"git|r2|mirror|storage|migration\",app=~\"$app\"}",
         "stateFilter": { "firing": true, "pending": true, "noData": false, "normal": false, "error": true }
       },
       "gridPos": { "h": 7, "w": 24, "x": 0, "y": 43 },

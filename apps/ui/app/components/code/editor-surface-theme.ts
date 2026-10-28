@@ -47,9 +47,9 @@ export const editorSurfaceTheme = EditorView.theme({
   '.cm-documentation pre': {
     fontFamily: 'var(--font-mono)',
     whiteSpace: 'pre-wrap',
-    padding: 'calc(var(--spacing) * 2)',
-    backgroundColor: 'var(--muted)',
-    borderRadius: 'var(--radius-xs)',
+    padding: '0',
+    backgroundColor: 'transparent',
+    borderRadius: '0',
   },
   '.cm-documentation code': { fontFamily: 'var(--font-mono)', color: 'var(--cm-string)' },
   '.cm-documentation a': { color: 'var(--foreground)', textDecoration: 'underline' },
@@ -68,7 +68,7 @@ export const editorSurfaceTheme = EditorView.theme({
     flexDirection: 'column',
     padding: 'var(--spacing)',
   },
-  '.cm-tooltip button, .cm-panel button, .cm-panel select': {
+  '.cm-tooltip button, .cm-panel:not(.cm-tau-search) button, .cm-panel:not(.cm-tau-search) select': {
     color: 'var(--foreground)',
     backgroundColor: 'var(--secondary)',
     backgroundImage: 'none',
@@ -77,11 +77,11 @@ export const editorSurfaceTheme = EditorView.theme({
     fontSize: 'var(--text-sm)',
     padding: 'var(--spacing) calc(var(--spacing) * 2)',
   },
-  '.cm-tooltip button:hover, .cm-panel button:hover': {
+  '.cm-tooltip button:hover, .cm-panel:not(.cm-tau-search) button:hover': {
     backgroundColor: 'var(--accent)',
     color: 'var(--accent-foreground)',
   },
-  '.cm-tooltip button:focus-visible, .cm-panel button:focus-visible, .cm-panel input:focus-visible, .cm-panel select:focus-visible':
+  '.cm-tooltip button:focus-visible, .cm-panel:not(.cm-tau-search) button:focus-visible, .cm-panel:not(.cm-tau-search) input:focus-visible, .cm-panel:not(.cm-tau-search) select:focus-visible':
     { outline: '2px solid var(--ring)', outlineOffset: '2px' },
   '.cm-panels': {
     color: 'var(--foreground)',
@@ -89,7 +89,7 @@ export const editorSurfaceTheme = EditorView.theme({
     borderColor: 'var(--border)',
     fontFamily: 'var(--font-sans)',
   },
-  '.cm-panel input': {
+  '.cm-panel:not(.cm-tau-search) input': {
     color: 'var(--foreground)',
     backgroundColor: 'var(--background)',
     border: '1px solid var(--muted-foreground)',
@@ -97,8 +97,40 @@ export const editorSurfaceTheme = EditorView.theme({
     fontSize: 'var(--text-base)',
   },
   '.cm-panel label': { fontSize: 'var(--text-sm)' },
-  '.cm-panel input[type=checkbox]': { accentColor: 'var(--primary-action)' },
-  '.cm-panel-lint ul [aria-selected], .cm-panel-lint ul:focus [aria-selected]': {
+  '.cm-panel:not(.cm-tau-search) input[type=checkbox]': { accentColor: 'var(--primary-action)' },
+  '.cm-panel.cm-panel-lint button[name=close], .cm-panel.cm-gotoLine button[name=close]': {
+    minWidth: 'calc(var(--spacing) * 6)',
+    minHeight: 'calc(var(--spacing) * 6)',
+    color: 'var(--foreground)',
+    top: 'var(--spacing)',
+    right: 'var(--spacing)',
+  },
+  '.cm-panel.cm-gotoLine label': {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  '.cm-panel.cm-gotoLine input': { width: '8ch', padding: 'var(--spacing) calc(var(--spacing) * 2)' },
+  '.cm-panel.cm-panel-lint': {
+    paddingRight: 'calc(var(--spacing) * 8)',
+    backgroundColor: 'var(--popover)',
+    color: 'var(--foreground)',
+  },
+  '.cm-panel.cm-panel-lint ul': { padding: 'var(--spacing)', maxHeight: '12rem' },
+  '.cm-panel.cm-panel-lint ul li': {
+    backgroundColor: 'transparent',
+    padding: 'calc(var(--spacing) * 2)',
+    borderRadius: 'var(--radius-xs)',
+  },
+  '.cm-panel.cm-gotoLine': {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+  '.cm-panel.cm-panel-lint ul [aria-selected], .cm-panel.cm-panel-lint ul:focus [aria-selected]': {
     backgroundColor: 'var(--accent)',
     color: 'var(--accent-foreground)',
   },

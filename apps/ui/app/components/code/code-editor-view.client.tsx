@@ -1,3 +1,4 @@
+import { createEditorSearchPanel } from '#components/code/editor-search-panel.js';
 import { editorSurfaceTheme } from '#components/code/editor-surface-theme.js';
 import '@vscode/codicons/dist/codicon.css';
 import '#components/code/code-editor.css';
@@ -33,7 +34,7 @@ import {
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
 import { tags } from '@lezer/highlight';
 import { defaultKeymap, indentWithTab, selectAll, toggleComment } from '@codemirror/commands';
-import { gotoLine, openSearchPanel, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
+import { gotoLine, openSearchPanel, searchKeymap, highlightSelectionMatches, search } from '@codemirror/search';
 import { forceLinting, linter, lintGutter, lintKeymap } from '@codemirror/lint';
 import { cn } from '@taucad/ui/utils/cn';
 import {
@@ -129,32 +130,6 @@ const editorTheme = EditorView.theme({
     backgroundColor: 'var(--background)',
     border: '1px solid var(--border)',
     borderRadius: 'var(--radius-sm)',
-  },
-  '.cm-search .cm-textfield': {
-    color: 'var(--popover-foreground)',
-    backgroundColor: 'var(--background)',
-    border: '1px solid var(--muted-foreground)',
-    borderRadius: 'var(--radius-sm)',
-    fontSize: '1rem',
-    minHeight: '1.5rem',
-  },
-  '.cm-search .cm-textfield::placeholder': { color: 'var(--muted-foreground)' },
-  '.cm-search .cm-button': {
-    color: 'var(--secondary-foreground)',
-    backgroundColor: 'var(--secondary)',
-    backgroundImage: 'none',
-    border: '1px solid var(--muted-foreground)',
-    borderRadius: 'var(--radius-sm)',
-    fontSize: '0.875rem',
-    minHeight: '1.5rem',
-  },
-  '.cm-search label': { fontSize: '0.875rem' },
-  '.cm-search input[type=checkbox]': { accentColor: 'var(--primary-action)' },
-  '.cm-search button[name=close]': {
-    color: 'var(--popover-foreground)',
-    fontSize: '1.125rem',
-    minWidth: '1.5rem',
-    minHeight: '1.5rem',
   },
   '.cm-conflict-mine': { backgroundColor: 'color-mix(in oklch, var(--success) 20%, transparent)' },
   '.cm-conflict-theirs': { backgroundColor: 'color-mix(in oklch, var(--feature) 20%, transparent)' },
@@ -272,6 +247,7 @@ export function CodeEditorView({
           foldGutter(),
           closeBrackets(),
           autocompletion({ icons: false, addToOptions: [{ render: renderCompletionIcon, position: 20 }] }),
+          search({ createPanel: createEditorSearchPanel }),
           highlightSelectionMatches(),
           lintGutter(),
           diagnostics ? linter(() => diagnostics.get(document.uri).get('kernel') ?? [], { delay: 100 }) : [],

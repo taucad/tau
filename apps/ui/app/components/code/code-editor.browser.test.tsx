@@ -176,7 +176,7 @@ it('opens editor context actions and its search panel', async () => {
   fireEvent.contextMenu(container.querySelector('.cm-content')!);
   await expect.element(page.getByRole('menuitem', { name: 'Go to Type Definition' })).not.toBeInTheDocument();
   await page.getByRole('menuitem', { name: 'Find and Replace' }).click();
-  await expect.poll(() => container.querySelector('.cm-search')).toBeTruthy();
+  await expect.element(page.getByRole('search', { name: 'Find and replace' })).toBeVisible();
 });
 
 it.each([Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST])(
@@ -196,25 +196,30 @@ it.each([Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST])(
     await expect.poll(() => container.querySelector('.cm-content')).toBeTruthy();
     fireEvent.contextMenu(container.querySelector('.cm-content')!);
     await page.getByRole('menuitem', { name: 'Find and Replace' }).click();
-    await expect.poll(() => container.querySelector('.cm-search .cm-textfield')).toBeTruthy();
-
-    const panel = container.querySelector<HTMLElement>('.cm-search')!;
-    const input = panel.querySelector<HTMLInputElement>('.cm-textfield')!;
-    const button = panel.querySelector<HTMLButtonElement>('.cm-button')!;
-    const label = panel.querySelector<HTMLLabelElement>('label')!;
+    await expect.element(page.getByRole('textbox', { name: 'Find', exact: true })).toBeVisible();
+    const input = page.getByRole('textbox', { name: 'Find', exact: true }).element();
+    const button = page.getByRole('button', { name: 'Match case', exact: true }).element();
+    const panel = page.getByRole('search', { name: 'Find and replace' }).element();
     const panelBackground = getComputedStyle(container.querySelector('.cm-panels')!).backgroundColor;
-    for (const control of [input, button]) {
-      const style = getComputedStyle(control);
-      expect(contrastRatio(style.color, style.backgroundColor)).toBeGreaterThanOrEqual(4.5);
-      expect(contrastRatio(style.borderTopColor, style.backgroundColor)).toBeGreaterThanOrEqual(3);
-      expect(Number.parseFloat(style.minHeight)).toBeGreaterThanOrEqual(24);
-    }
     const inputStyle = getComputedStyle(input);
-    expect(
-      contrastRatio(getComputedStyle(input, '::placeholder').color, inputStyle.backgroundColor),
-    ).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(inputStyle.color, inputStyle.backgroundColor)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(inputStyle.borderTopColor, inputStyle.backgroundColor)).toBeGreaterThanOrEqual(3);
+    expect(contrastRatio(getComputedStyle(button).color, panelBackground)).toBeGreaterThanOrEqual(4.5);
+    expect(button.getBoundingClientRect().height).toBeGreaterThanOrEqual(24);
+    expect(panel.getBoundingClientRect().right).toBeLessThanOrEqual(390);
     expect(Number.parseFloat(inputStyle.fontSize)).toBeGreaterThanOrEqual(16);
-    expect(contrastRatio(getComputedStyle(label).color, panelBackground)).toBeGreaterThanOrEqual(4.5);
+    await page.getByRole('textbox', { name: 'Find', exact: true }).fill('value');
+    await expect.element(page.getByRole('status')).toHaveTextContent('of 1');
+    await page.getByRole('button', { name: 'Show replace' }).click();
+    await page.getByRole('textbox', { name: 'Replace', exact: true }).fill('length');
+    await page.getByRole('button', { name: 'Replace all', exact: true }).click();
+    await expect.poll(() => sourceDocument.text).toBe('const length = 1;');
+    await expect.element(page.getByRole('status')).toHaveTextContent('No matches');
+    await page.getByRole('button', { name: 'Regular expression', exact: true }).click();
+    await page.getByRole('textbox', { name: 'Find', exact: true }).fill('[');
+    await expect.element(page.getByRole('status')).toHaveTextContent('Invalid expression');
+    await expect.element(page.getByRole('button', { name: 'Next match', exact: true })).toBeDisabled();
+
     await page.screenshot();
   },
 );

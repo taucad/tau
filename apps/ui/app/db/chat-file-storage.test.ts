@@ -1140,6 +1140,22 @@ describe('chat file store — log ownership boundary', () => {
     expect(metadata.find((chat) => chat.id === logOnlyId)?.name).toBe('New chat');
   });
 
+  it('should not list the desktop registration probe as a chat in either project', async () => {
+    const { store, write } = createStoreWithFiles();
+    const probeChatId = '00000000-0000-4000-8000-000000000000';
+    const home = 'proj_home';
+    const workspace = 'proj_workspace';
+    await write(`/projects/${home}/.tau/chats/${probeChatId}/events.jsonl`, '');
+    await write(`/projects/${home}/.tau/chats/${chatId}/events.jsonl`, 'local host events');
+    await write(`/projects/${workspace}/.tau/chats/${probeChatId}/events.jsonl`, '');
+    await write(`/projects/${workspace}/.tau/chats/${probeChatId}/events/device-b.jsonl`, '');
+
+    const homeRecords = await store.getChatRecordsForResource(home);
+    expect(homeRecords.map((chat) => chat.id)).toEqual([chatId]);
+    expect(await store.getChatRecordsForResource(workspace)).toEqual([]);
+    expect(await store.getChat(probeChatId)).toBeUndefined();
+  });
+
   it('reads changed projected metadata on the next listing', async () => {
     const { store, write } = createStoreWithFiles();
     await write(`/projects/${projectId}/.tau/chats/${chatId}/chat.json`, record);

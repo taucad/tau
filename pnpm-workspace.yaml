@@ -223,9 +223,9 @@ catalog:
   geist: ^1.7.2
   # GeoSpec authoring package from taucad/geospec, in the engine's fixed release group: pin the same exact
   # version as geospec-engine.
-  geospec: 0.4.1-next.322
-  # GeoSpec engine from taucad/geospec, exact `next` pin; bump through a version PR.
-  geospec-engine: 0.4.1-next.322
+  geospec: 0.5.0
+  # GeoSpec engine from taucad/geospec, exact stable pin; bump through a version PR.
+  geospec-engine: 0.5.0
   gray-matter: ^4.0.3
   hast-util-sanitize: ^5.0.2
   husky: ^9.1.7

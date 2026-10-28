@@ -296,6 +296,7 @@ function ViewerControlsBody({
   const is2dGeometry = useGraphicsSelector((state) => state.context.artifact?.mimeType === 'image/svg+xml');
   const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
   const isMeasureActive = useGraphicsSelector((state) => state.context.isMeasureActive);
+  const isMeasureInputReady = useGraphicsSelector((state) => state.context.isMeasureInputReady);
   const measurementCount = useGraphicsSelector((state) => state.context.measurements.length);
   const [measurementsExpanded, setMeasurementsExpanded] = useState(false);
   // Counted, so a phrase said twice in a row is a new node and is announced again.
@@ -336,7 +337,7 @@ function ViewerControlsBody({
           {isMeasureActive ? (
             <ToolRow
               tool='measure'
-              name='Measuring'
+              name={isMeasureInputReady ? 'Measuring' : 'Measure'}
               icon={<Ruler className='size-4 -rotate-45 text-viewer-tool-active' />}
               above={
                 measurementsExpanded && measurementCount > 0 ? (
@@ -349,7 +350,18 @@ function ViewerControlsBody({
               }
               onDone={stopMeasure}
             >
-              <MeasureOptions expanded={measurementsExpanded} onExpandedChange={setMeasurementsExpanded} />
+              {isMeasureInputReady ? (
+                <MeasureOptions expanded={measurementsExpanded} onExpandedChange={setMeasurementsExpanded} />
+              ) : (
+                <span
+                  role='status'
+                  aria-label='Preparing measurement'
+                  aria-busy='true'
+                  className='px-1 text-xs text-muted-foreground'
+                >
+                  Preparing measurement…
+                </span>
+              )}
             </ToolRow>
           ) : null}
         </div>

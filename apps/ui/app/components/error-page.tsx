@@ -2,7 +2,6 @@ import { AlertCircle, ArrowLeft, LoaderCircle, RefreshCcw } from 'lucide-react';
 import { lazy, Suspense, useEffect, useSyncExternalStore } from 'react';
 import { isRouteErrorResponse, useNavigate, useRouteError } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
-import { useAnalytics } from '#hooks/use-analytics.js';
 import { chatObservationConflict, quarantineChatObservation } from '#lib/chat-observation-guard.js';
 import { PageNotFound } from '#components/page-not-found.js';
 import { reportUiError } from '#lib/error-reporting.js';
@@ -30,14 +29,6 @@ const CollapsibleCodeBlock = lazy(async () => {
 const serverReloadState = (): ReloadState => 'idle';
 const serverVerdict = (): ServerVerdict => 'unknown';
 
-/**
- * Errors analytics has heard of, kept for the module's life rather than one mount's, so the same
- * error reaching a remounted error page (a re-render of the route, a parent boundary resetting) is
- * counted once; analytics does not deduplicate. The error tracker's report deduplicates itself
- * (`reportUiError`). A module load failure is the recovery's to report.
- */
-const heardByAnalytics = new WeakSet();
-
 /** The `Error` reported for each route error response, so a remount reports the same value again. */
 const reportedForResponse = new WeakMap<WeakKey, Error>();
 
@@ -64,7 +55,6 @@ const serverOutcome = (): StaleBuildOutcome | undefined => undefined;
 export function ErrorPage(): React.JSX.Element {
   const error = useRouteError();
   const navigate = useNavigate();
-  const analytics = useAnalytics();
   const observationConflict = chatObservationConflict(error);
   const isModuleLoadFailure = isStaleModuleError(error);
   /* TAU-UI-6: the recovery owns a module load failure, its outcome and its report; this page only
@@ -95,22 +85,17 @@ export function ErrorPage(): React.JSX.Element {
       void recoverFromStaleBuild(error);
       return;
     }
-    // Don't report 404 errors to analytics - they're expected user behavior
-    if (isRouteErrorResponse(error) && error.status === 404) {
+    // A route error response under 500 (a 404, a refusal) is expected; the error tracker hears the rest, once
+    // (`reportUiError` deduplicates, so a remount or the root's `onCaughtError` reporting it first costs nothing).
+    // A module load failure is the recovery's to report.
+    if (isRouteErrorResponse(error) && error.status < 500) {
       return;
     }
     const captured = toReported(error);
-    if (captured === undefined) {
-      return;
-    }
-    if (!heardByAnalytics.has(captured)) {
-      heardByAnalytics.add(captured);
-      analytics.captureException(captured, { context: { component: 'ErrorPage' } });
-    }
-    if (!isRouteErrorResponse(error) || error.status >= 500) {
+    if (captured !== undefined) {
       void reportUiError(captured);
     }
-  }, [error, analytics, isModuleLoadFailure]);
+  }, [error, isModuleLoadFailure]);
 
   const goBack = (): void => {
     if (observationConflict !== undefined) {

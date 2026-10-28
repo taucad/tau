@@ -7,6 +7,7 @@ import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime';
 import { fromComputeStoreChannel } from '@taucad/runtime/host';
 import { safeDispose } from '@taucad/utils/dispose';
 import FileManagerWorker from '#machines/file-manager.worker.js?worker';
+import { reportWorkerFailures } from '#lib/worker-error-reporting.js';
 import {
   getProjectFileSystemConfig,
   getWorkspace,
@@ -265,7 +266,10 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     let worker = context.sharedWorker;
     if (!worker) {
       const homeBackend = await getHomeStorageBackend();
-      worker = new FileManagerWorker({ name: fileManagerWorkerName(homeBackend) });
+      worker = reportWorkerFailures(
+        new FileManagerWorker({ name: fileManagerWorkerName(homeBackend) }),
+        'file-manager',
+      );
       // A node-backed Home needs its provider host before the worker can mount
       // `/`, so the brokered port is handed over immediately after construction
       // and the worker's module evaluation waits on it. One port per concern:

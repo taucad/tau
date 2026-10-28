@@ -17,6 +17,7 @@ import { store } from '#hooks/use-cookie.js';
 import { readBuildRelease } from '#lib/build-identity.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
+import { reportRuntimeFailures } from '#lib/runtime-failure-reporting.js';
 import { isGlobalPrivacyControlEnabled } from '#lib/global-privacy-control.lib.js';
 import { createPageTelemetry } from '#telemetry/page-telemetry.js';
 import type { ObservedRuntimeClient, PageCaller, PageTelemetry } from '#telemetry/page-telemetry.js';
@@ -108,14 +109,22 @@ export const pageTelemetry = (): PageTelemetry | undefined => {
 };
 
 /**
- * Report every attempt `client` settles under `caller`. Attach before `connect()` so `initialize` is observed.
+ * Report every attempt `client` settles under `caller`. Attach before `connect()` so `initialize` is observed. Its
+ * runtime failures (terminated, timed out, discarded) also go to error reporting, which no telemetry consent gates
+ * (SB4, D1).
  *
  * @param client - The runtime client.
  * @param caller - Who issues its attempts.
- * @returns The unsubscribe; a no-op outside a document.
+ * @returns The unsubscribe; telemetry is a no-op outside a document.
  */
-export const observeRuntimeClient = (client: ObservedRuntimeClient, caller: PageCaller): (() => void) =>
-  pageTelemetry()?.observeRuntimeClient(client, caller) ?? (() => undefined);
+export const observeRuntimeClient = (client: ObservedRuntimeClient, caller: PageCaller): (() => void) => {
+  const stopReporting = reportRuntimeFailures(client);
+  const stopObserving = pageTelemetry()?.observeRuntimeClient(client, caller);
+  return () => {
+    stopReporting();
+    stopObserving?.();
+  };
+};
 
 /**
  * FR-17: record one closed viewer event.

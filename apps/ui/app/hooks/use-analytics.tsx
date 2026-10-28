@@ -3,12 +3,10 @@ import type { ReactNode } from 'react';
 
 export type Analytics = {
   readonly capture: (event: string, properties?: Readonly<Record<string, unknown>>) => void;
-  readonly captureException: (error: unknown, properties?: Readonly<Record<string, unknown>>) => void;
 };
 
 const noopAnalytics: Analytics = {
   capture: () => undefined,
-  captureException: () => undefined,
 };
 
 const AnalyticsContext = createContext<Analytics>(noopAnalytics);

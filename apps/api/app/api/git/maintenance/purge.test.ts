@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -343,22 +343,22 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('tenant purge', () => {
     const eligible = `${prefix}-z`;
     const selected = [...ids, eligible];
     try {
-      for (let offset = 0; offset < ids.length; offset += 500) {
-        // oxlint-disable-next-line no-await-in-loop -- bounded fixture inserts
-        await database
-          .insert(user)
-          .values(
-            ids
-              .slice(offset, offset + 500)
-              .map((id) => ({ id, name: 'Backlog control', email: `${id}@example.invalid` })),
-          );
-      }
-      for (let offset = 0; offset < selected.length; offset += 500) {
-        // oxlint-disable-next-line no-await-in-loop -- bounded fixture inserts
-        await database
-          .insert(storageTombstone)
-          .values(selected.slice(offset, offset + 500).map((ownerId) => ({ ownerId, purgeAfter: new Date(0) })));
-      }
+      // One statement per table: the backlog is the subject, not hundreds of fixture round trips.
+      await database.execute(sql`
+        insert into ${user} (id, name, email)
+        select id, 'Backlog control', id || '@example.invalid'
+        from (
+          select ${prefix}::text || '-' || lpad(index::text, 5, '0') as id
+          from generate_series(0, ${ids.length - 1}::integer) as index
+        ) as backlog
+      `);
+      await database.execute(sql`
+        insert into ${storageTombstone} (owner_id, purge_after)
+        select ${prefix}::text || '-' || lpad(index::text, 5, '0'), to_timestamp(0)
+        from generate_series(0, ${ids.length - 1}::integer) as index
+        union all
+        select ${eligible}::text, to_timestamp(0)
+      `);
       let live = 0;
       let purged = 0;
       for await (const outcome of streamTombstonedTenants({ database, driver, store, ownerIds: selected })) {
@@ -376,13 +376,8 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('tenant purge', () => {
       expect(purgedRow?.purgedAt).toBeInstanceOf(Date);
       expect(liveRow?.purgedAt).toBeNull();
     } finally {
-      for (let offset = 0; offset < selected.length; offset += 500) {
-        const page = selected.slice(offset, offset + 500);
-        // oxlint-disable-next-line no-await-in-loop -- bounded fixture cleanup
-        await database.delete(storageTombstone).where(inArray(storageTombstone.ownerId, page));
-        // oxlint-disable-next-line no-await-in-loop -- bounded fixture cleanup
-        await database.delete(user).where(inArray(user.id, page));
-      }
+      await database.execute(sql`delete from ${storageTombstone} where owner_id like ${prefix}::text || '-%'`);
+      await database.execute(sql`delete from ${user} where id like ${prefix}::text || '-%'`);
     }
   }, 120_000);
 

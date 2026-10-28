@@ -1,8 +1,9 @@
-import { createEvent, fireEvent, render, screen } from '@testing-library/react';
+import { createEvent, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { DockviewApi, DockviewPanelApi, IDockviewPanelHeaderProps } from 'dockview-react';
 import { describe, expect, it, vi } from 'vitest';
 import { DockviewTab } from '#components/panes/dockview-tab.js';
+import { useDockviewTerminalCloseHost } from '#components/terminal/terminal-close.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const createProperties = (title = 'main.scad', params?: Record<string, unknown>): IDockviewPanelHeaderProps => {
@@ -10,6 +11,7 @@ const createProperties = (title = 'main.scad', params?: Record<string, unknown>)
   const api = {
     title,
     close: vi.fn(),
+    setActive: vi.fn(),
     onDidTitleChange: vi.fn(() => ({ dispose: vi.fn() })),
   } as unknown as DockviewPanelApi;
 
@@ -46,6 +48,8 @@ describe('DockviewTab', () => {
       'right-1',
       'z-10',
       'size-4.5!',
+      // A 24px target under a coarse pointer (I3).
+      'pointer-coarse:size-6!',
       'opacity-0',
       'group-hover/tab:opacity-100',
       'pointer-coarse:opacity-100',
@@ -127,5 +131,68 @@ describe('DockviewTab', () => {
 
     fireEvent.click(close);
     expect(properties.api.close).toHaveBeenCalledOnce();
+  });
+
+  describe('with a Terminal that holds its close (T15)', () => {
+    const renderHeldTab = (holds: boolean) => {
+      const properties = createProperties('Terminal', {});
+      const request = vi.fn(() => holds);
+      const { result } = renderHook(() => useDockviewTerminalCloseHost(properties.api, vi.fn()));
+      const unregister = result.current.register(request);
+      /* Dockview's own Delete/Backspace handler sits on the tablist, above the tab. */
+      const tablistKeyDown = vi.fn();
+      const { container } = render(
+        <TooltipProvider>
+          <div role='tablist' onKeyDown={tablistKeyDown}>
+            <div className='dv-tab' role='tab' tabIndex={0}>
+              <DockviewTab {...properties} />
+            </div>
+          </div>
+        </TooltipProvider>,
+      );
+      return {
+        properties,
+        request,
+        unregister,
+        tablistKeyDown,
+        tab: screen.getByRole('tab'),
+        close: container.querySelector<HTMLElement>('.dv-default-tab-action')!,
+      };
+    };
+
+    it('asks the Terminal from the close glyph instead of removing the panel', () => {
+      const { properties, request, close } = renderHeldTab(true);
+      fireEvent.click(close);
+      expect(request).toHaveBeenCalledOnce();
+      expect(properties.api.close).not.toHaveBeenCalled();
+      expect(properties.api.setActive).toHaveBeenCalledOnce();
+    });
+
+    it.each(['Delete', 'Backspace'])('stops %s at the tab before Dockview closes the panel', (key) => {
+      const { request, tab, tablistKeyDown } = renderHeldTab(true);
+      const keyDown = createEvent.keyDown(tab, { key });
+      fireEvent(tab, keyDown);
+      expect(request).toHaveBeenCalledOnce();
+      expect(keyDown.defaultPrevented).toBe(true);
+      expect(tablistKeyDown).not.toHaveBeenCalled();
+    });
+
+    it('leaves the key and the glyph to Dockview when the Terminal has no running session', () => {
+      const { properties, tab, close, tablistKeyDown } = renderHeldTab(false);
+      fireEvent.keyDown(tab, { key: 'Delete' });
+      expect(tablistKeyDown).toHaveBeenCalledOnce();
+      fireEvent.click(close);
+      expect(properties.api.close).toHaveBeenCalledOnce();
+    });
+
+    it('ignores other keys and closes normally once the Terminal unregisters', () => {
+      const { properties, request, tab, close, tablistKeyDown, unregister } = renderHeldTab(true);
+      fireEvent.keyDown(tab, { key: 'Enter' });
+      expect(request).not.toHaveBeenCalled();
+      expect(tablistKeyDown).toHaveBeenCalledOnce();
+      unregister();
+      fireEvent.click(close);
+      expect(properties.api.close).toHaveBeenCalledOnce();
+    });
   });
 });

@@ -10,7 +10,7 @@ import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/wo
 import type { WorkbenchLaneNode } from '@taucad/workbench';
 import { searchParameterName } from '#constants/search-parameter.constants.js';
 import { flagParameter } from '#utils/search-parameter.codecs.js';
-import { holdUnheardReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
+import { holdUnheardFileReveal, holdUnheardReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
 import { isSurfaceShipped } from '#workbench-records/surface-availability.js';
 
 export const projectWorkspaceKeyCombinations = {
@@ -439,7 +439,7 @@ export function ProjectWorkspaceProvider({
     () => {
       openPanel('kinematics');
     },
-    // Monaco binds Ctrl+M on Windows and Linux to "Toggle Tab Key Moves Focus", its way out of the Tab trap.
+    // CodeMirror binds Ctrl+M on Windows and Linux to toggle Tab focus mode.
     { enabled: !isMobile, ignoreInputs: true },
   );
   useKeybinding(
@@ -487,7 +487,7 @@ export function ProjectWorkspaceProvider({
 
   useEffect(() => {
     const subscription = editorRef.on('fileOpened', (event) => {
-      /* Another file opening ends the way back; the preview's own open may report after Monaco loads it.
+      /* Another file opening ends the way back; the preview's own open may report after the code editor loads it.
        * ponytail: reopening the same file from the tree keeps it, until back or another file. */
       setReturnTo((current) => (current === undefined || current.path === event.path ? current : undefined));
       if (event.source !== 'user') {
@@ -506,6 +506,9 @@ export function ProjectWorkspaceProvider({
 
   useEffect(() => {
     // The pane may mount only because of this reveal, after the emit: hold it for that pane's first subscribe.
+    const fileSubscription = editorRef.on('fileRevealRequested', (event) => {
+      holdUnheardFileReveal(editorRef, event);
+    });
     const modelSubscription = editorRef.on('modelComponentRevealRequested', (event) => {
       holdUnheardReveal(editorRef, 'model', event);
       openPanel('model');
@@ -515,6 +518,7 @@ export function ProjectWorkspaceProvider({
       openPanel('kinematics');
     });
     return () => {
+      fileSubscription.unsubscribe();
       modelSubscription.unsubscribe();
       kinematicsSubscription.unsubscribe();
     };

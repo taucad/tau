@@ -1,9 +1,9 @@
+import process from 'node:process';
 import { Module } from '@nestjs/common';
 import type { DynamicModule } from '@nestjs/common';
 import { HostsModule } from '#api/hosts/hosts.module.js';
 import { ChatModule } from '#api/chat/chat.module.js';
 import { CollaborationModule } from '#api/collaboration/collaboration.module.js';
-import { CodeCompletionModule } from '#api/code-completion/code-completion.module.js';
 import { GitModule } from '#api/git/git.module.js';
 import { HealthModule } from '#api/health/health.module.js';
 import { LlmModule } from '#api/llm/llm.module.js';
@@ -13,6 +13,7 @@ import { PrivacyModule } from '#api/privacy/privacy.module.js';
 import { ProjectsModule } from '#api/projects/projects.module.js';
 import { ProviderModule } from '#api/providers/provider.module.js';
 import { TestApiModule } from '#api/test-api/test-api.module.js';
+import { ObservabilityDebugModule } from '#api/observability-debug/observability-debug.module.js';
 import { TelemetryIngestModule } from '#api/telemetry/telemetry.module.js';
 import { WebSocketModule } from '#api/websocket/websocket.module.js';
 import { PublicationsModule } from '#api/publications/publications.module.js';
@@ -35,7 +36,6 @@ export class ApiModule {
         WebSocketModule,
         HostsModule,
         ChatModule,
-        CodeCompletionModule,
         CollaborationModule,
         DurableEventsModule,
         GitModule,
@@ -53,6 +53,8 @@ export class ApiModule {
         TelemetryIngestModule,
         VoiceModule,
         ...(import.meta.env.DEV ? [TestApiModule] : []),
+        // Browser observability A12: the failure route exists only on a Sentry-reporting staging API.
+        ObservabilityDebugModule.forRoot(process.env),
       ],
     };
   }

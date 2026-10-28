@@ -11,7 +11,10 @@ import {
   desktopManifestDigest,
   desktopPublicationScopes,
 } from './desktop-route-publication.mjs';
-import { requireDesktopPublicationAuthority } from './desktop-publication-authority.mjs';
+import {
+  requireDesktopInstallerPublicationEnabled,
+  requireDesktopPublicationAuthority,
+} from './desktop-publication-authority.mjs';
 import { publishDesktopRoutes } from './publish-desktop-routes.mjs';
 /* oxlint-enable no-restricted-imports */
 const main = async (): Promise<void> => {
@@ -20,6 +23,8 @@ const main = async (): Promise<void> => {
     process.env['GITHUB_EVENT_NAME'] === 'schedule'
       ? 'renew-routes'
       : z.enum(['promote-routes', 'renew-routes']).parse(process.env['REQUESTED_OPERATION']);
+  // The channel's own gate, checked before identity, downloads or immutable mirroring.
+  requireDesktopInstallerPublicationEnabled(channel);
   await requireDesktopPublicationAuthority(channel, operation);
   // Selects the candidate and receipt artifact names; the Mac-only scope never publishes production.
   const scope = z.enum(desktopPublicationScopes).parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');

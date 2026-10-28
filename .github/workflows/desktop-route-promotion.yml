@@ -26,7 +26,7 @@ on:
         description: Trusted native qualification run (W9, promotion only)
         type: string
       vm-run-id:
-        description: Trusted operator VM acceptance run (W10, promotion only)
+        description: Trusted operator VM acceptance run (W10, promotion only; may be left empty only for a staging Mac-only promotion, which then publishes its routes as clean-host pending)
         type: string
       manifest-sha256:
         description: Reviewed canonical manifest digest (promotion only)
@@ -40,11 +40,22 @@ permissions:
 
 jobs:
   publication:
-    if: github.ref == 'refs/heads/main' && vars.DESKTOP_INSTALLER_PUBLICATION == 'true'
+    # Each channel has its own repository gate, read before any environment is selected:
+    # a dispatch runs only for an enabled channel, and the nightly schedule renews only enabled channels.
+    if: >-
+      github.ref == 'refs/heads/main' && (
+        (github.event_name == 'schedule' && (vars.DESKTOP_INSTALLER_PUBLICATION_STAGING == 'true' || vars.DESKTOP_INSTALLER_PUBLICATION_PRODUCTION == 'true')) ||
+        (github.event_name == 'workflow_dispatch' && (
+          (inputs.channel == 'staging' && vars.DESKTOP_INSTALLER_PUBLICATION_STAGING == 'true') ||
+          (inputs.channel == 'production' && vars.DESKTOP_INSTALLER_PUBLICATION_PRODUCTION == 'true'))))
     strategy:
       fail-fast: false
       matrix:
-        channel: ${{ github.event_name == 'schedule' && fromJSON('["staging","production"]') || fromJSON(format('["{0}"]', inputs.channel)) }}
+        channel: >-
+          ${{ github.event_name == 'schedule' && fromJSON(format('[{0}{1}{2}]',
+            vars.DESKTOP_INSTALLER_PUBLICATION_STAGING == 'true' && '"staging"' || '',
+            vars.DESKTOP_INSTALLER_PUBLICATION_STAGING == 'true' && vars.DESKTOP_INSTALLER_PUBLICATION_PRODUCTION == 'true' && ',' || '',
+            vars.DESKTOP_INSTALLER_PUBLICATION_PRODUCTION == 'true' && '"production"' || '')) || fromJSON(format('["{0}"]', inputs.channel)) }}
     # The same lock covers promotion, renewal and recovery, across all runs.
     concurrency:
       group: desktop-installer-publication-${{ matrix.channel }}
@@ -62,7 +73,9 @@ jobs:
       pnpm_config_verify_deps_before_run: error
       NX_NO_CLOUD: 'true'
       GH_TOKEN: ${{ github.token }}
-      TAU_ENABLE_INSTALLER_PROMOTION: ${{ vars.DESKTOP_INSTALLER_PUBLICATION }}
+      # The scripts re-check the gate of the channel they publish (desktop-publication-authority.mts).
+      DESKTOP_INSTALLER_PUBLICATION_STAGING: ${{ vars.DESKTOP_INSTALLER_PUBLICATION_STAGING }}
+      DESKTOP_INSTALLER_PUBLICATION_PRODUCTION: ${{ vars.DESKTOP_INSTALLER_PUBLICATION_PRODUCTION }}
       DESKTOP_ASSETS_DIR: out/desktop/installer-publication
       DESKTOP_R2_BUCKET: ${{ vars.DESKTOP_R2_BUCKET }}
       DESKTOP_R2_ENDPOINT: ${{ vars.DESKTOP_R2_ENDPOINT }}

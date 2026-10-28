@@ -2172,3 +2172,138 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     }
   });
 });
+
+describe('Terminal sessions for quit (T15)', () => {
+  /** A transferred port as `MessagePortMain` behaves: `{ data }` envelopes in, frames out. */
+  const terminalPort = () => {
+    const listeners: Record<'message' | 'close', Array<(message: unknown) => void>> = { message: [], close: [] };
+    const received: Array<{ type: string }> = [];
+    return {
+      port: {
+        postMessage(message: { type: string }) {
+          received.push(message);
+        },
+        on(event: 'message' | 'close', listener: (message: unknown) => void) {
+          listeners[event].push(listener);
+        },
+        start: () => undefined,
+        close: () => undefined,
+      },
+      received,
+      send(frame: Record<string, unknown>) {
+        for (const listener of listeners.message) {
+          listener({ data: frame });
+        }
+      },
+      disconnect() {
+        for (const listener of listeners.close) {
+          listener(undefined);
+        }
+      },
+    };
+  };
+
+  it('should answer with live sessions, and hold new starts for a quit attempt until it is called off', async () => {
+    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-terminal-count-'));
+    const root = realpathSync(sandbox);
+    const authorityDirectory = join(root, 'authority');
+    await mkdir(authorityDirectory);
+    const answers: Array<[string, number]> = [];
+    const opened: string[] = [];
+    const shell: TauHost.HostShell = {
+      identity: { platform: 'linux', kind: 'bash', shellVersion: '5.2', shellDigest: 'sha256:0', provider: 'fake' },
+      run: async () => {
+        throw new Error('not under test');
+      },
+      openTerminal: async () => {
+        const exited = Promise.withResolvers<{ exitCode: number }>();
+        opened.push('shell');
+        return {
+          status: 'opened',
+          session: {
+            id: `session-${String(opened.length)}`,
+            access: { read: [], write: [], domains: [] },
+            output: {
+              async *[Symbol.asyncIterator]() {
+                await exited.promise;
+                yield* [];
+              },
+            },
+            write: () => undefined,
+            resize: () => undefined,
+            exited: exited.promise,
+            async [Symbol.asyncDispose]() {
+              exited.resolve({ exitCode: 130 });
+            },
+          },
+        };
+      },
+    };
+    const host = createServicesHost({
+      authorityDirectory,
+      log: vi.fn(),
+      terminalShell: async (): Promise<TauHost.ShellProbe> => ({ status: 'available', shell }),
+      terminalSessionsAnswered: (requestId, sessions) => {
+        answers.push([requestId, sessions]);
+      },
+    });
+    const ask = (requestId: string, attemptId?: string): number | undefined => {
+      host.handleMessage(
+        frame({ type: 'terminal-sessions', requestId, ...(attemptId === undefined ? {} : { attemptId }) }),
+      );
+      return answers.findLast(([id]) => id === requestId)?.[1];
+    };
+    const serve = (windowId: string) => {
+      const port = terminalPort();
+      host.handleMessage(
+        frame({ type: 'concern', concern: 'terminal', context: { projectRoot: root, windowId } }, [
+          port.port as unknown as UtilityPort,
+        ]),
+      );
+      return port;
+    };
+    try {
+      expect(ask('q-0')).toBe(0);
+      host.handleMessage(frame({ type: 'allowRoots', roots: [root] }));
+      const first = serve('window-1');
+      /* A connected pane that has not started a shell is not a session. */
+      expect(ask('q-1')).toBe(0);
+      first.send({ type: 'open', size: { columns: 80, rows: 24 } });
+      await vi.waitFor(() => {
+        expect(first.received.map(({ type }) => type)).toContain('opened');
+      });
+      expect(ask('q-2')).toBe(1);
+      /* A request without an id is not a question and gets no answer. */
+      host.handleMessage(frame({ type: 'terminal-sessions' }));
+      expect(answers).toHaveLength(3);
+
+      /* Quit's question holds new starts: a pane opened now waits, so the count stays what quit asked about. */
+      expect(ask('q-3', 'quit-1')).toBe(1);
+      const late = serve('window-2');
+      late.send({ type: 'open', size: { columns: 80, rows: 24 } });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+      expect(opened).toHaveLength(1);
+      expect(ask('q-4')).toBe(1);
+
+      /* A call-off for another attempt changes nothing; this attempt's call-off lets the start go. */
+      host.handleMessage(frame({ type: 'machines-resume', attemptId: 'quit-0' }));
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+      expect(opened).toHaveLength(1);
+      host.handleMessage(frame({ type: 'machines-resume', attemptId: 'quit-1' }));
+      await vi.waitFor(() => {
+        expect(late.received.map(({ type }) => type)).toContain('opened');
+      });
+      expect(ask('q-5')).toBe(2);
+
+      first.disconnect();
+      late.disconnect();
+      expect(ask('q-6')).toBe(0);
+    } finally {
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  });
+});

@@ -128,7 +128,7 @@ export const isTrustedSender = (frame: SenderFrame | undefined, origins: readonl
  * renderer cannot pull code in.
  *
  * `'wasm-unsafe-eval'` is required by every WebAssembly kernel; `blob:` in
- * `worker-src`/`connect-src` by the runtime's worker delivery and Monaco.
+ * `worker-src`/`connect-src` by the runtime and language-worker delivery.
  * `https://registry.npmjs.org` is where the Packages panel's Install reads
  * packuments and tarballs (every tarball is checked against the lock's integrity).
  * The loopback origins are a `tau serve` daemon handed over by `tau open --desktop`

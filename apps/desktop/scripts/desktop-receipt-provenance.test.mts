@@ -8,7 +8,7 @@ import {
   parseDesktopArtifactManifest,
 } from '#shared/desktop-release.js';
 // oxlint-disable-next-line no-restricted-imports -- Test provenance admission itself.
-import { verifyDesktopReceiptProvenance } from './desktop-receipt-provenance.mjs';
+import { fetchDesktopQualifiedReceipts, verifyDesktopReceiptProvenance } from './desktop-receipt-provenance.mjs';
 const tag = 'desktop-staging@0.1.0-staging.102';
 const identity = desktopReleaseIdentity(tag);
 const { platform: _platform, ...definition } = desktopArtifactKinds['windows-nsis'];
@@ -133,6 +133,21 @@ for (const difference of [
 for (const name of ['desktop-route-row-macos-dmg-arm64', 'desktop-route-vm-receipts', 'desktop-macos-ci-receipts']) {
   assert.throws(() =>
     verifyDesktopReceiptProvenance(vmRun, { ...macVm, name }, { environment: 'vm', manifest, scope: 'macos' }),
+  );
+}
+// Only a staging Mac-only publication may omit the clean-host VM run; every other omission fails before any fetch.
+// The guard reads only the channel, so a production-labelled copy suffices without five-route fixtures.
+const production: typeof manifest = { ...manifest, channel: 'production' };
+for (const [candidate, scope] of [
+  [manifest, 'all'],
+  [manifest, undefined],
+  [production, 'all'],
+  [production, 'macos'],
+] as const) {
+  // oxlint-disable-next-line no-await-in-loop -- Each refusal is independent and must not reach the GitHub API.
+  await assert.rejects(
+    fetchDesktopQualifiedReceipts(candidate, '/nonexistent', { ci: '1', vm: undefined, ...(scope ? { scope } : {}) }),
+    /Clean-host VM acceptance run is required/u,
   );
 }
 console.log('Trusted workflow and artifact provenance checks passed');

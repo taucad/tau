@@ -118,6 +118,7 @@ async function enableMeasure(): Promise<void> {
       { message: 'measure mode should activate' },
     )
     .toBe(true);
+  await target.expectVisible(selectors.getByRole('group', { name: 'Measuring options', exact: true }));
   const active = await measureState();
   expect(active.snapDistancePx).toBe(10);
 }
@@ -355,10 +356,16 @@ for (const backend of ['webgl', 'webgpu'] as const) {
       await chooseByTyping('Measurement mode', 'Points');
       await toggleTargetControls();
       await tapWorldPoint(insetTowardsFaceCenter(nearCorner));
+      // A tap before the model's feature graph is prepared previews its target once the worker answers.
+      await expect
+        .poll(async () => {
+          const state = await measureState();
+          return state.activeCandidateId;
+        })
+        .toBeTruthy();
       const preview = await measureState();
       expect(preview.currentStart).toBeUndefined();
       expect(preview.measurements).toHaveLength(0);
-      expect(preview.activeCandidateId).toBeTruthy();
       await toggleTargetControls();
       await target.click(selectors.getByRole('button', { name: 'Use target', exact: true }));
       await expect
@@ -494,30 +501,33 @@ test('resolves CAD occurrence minimum through the browser AP242 worker', async (
   expect(distanceBetween(result.startPoint, result.endPoint)).toBeCloseTo(result.distance, 6);
 });
 
-test('measures the chess board frame width as a mesh extent', async () => {
-  await openMeasureFixture('webgl', 'openscad.cyber-chess-set');
-  await target.evaluate(() => {
-    const api = (globalThis as unknown as MeasureBridgeWindow).__TAU_SECTION_VIEW_TEST__;
-    if (!api) {
-      throw new Error('Section view e2e bridge is not installed.');
-    }
-    api.setCamera({ position: [0, 0, 0.75], target: [0, 0, 0.01], fov: 38, zoom: 1 });
-  });
-  await target.delay(900);
-  await enableMeasure();
-  await toggleTargetControls();
-  await chooseByTyping('Feature filter', 'Bodies');
-  await chooseByTyping('Measurement operation', 'X extent');
-  await toggleTargetControls();
-  await clickWorldPoint([0.119, 0, 0.012]);
-  await expect
-    .poll(async () => {
-      const state = await measureState();
-      return state.measurements[0];
-    })
-    .toMatchObject({ operation: 'extent-x', quality: 'mesh', status: 'current' });
-  const completed = await measureState();
-  // The main.scad steel frame is cube([244, 244, 8]) with a 224 mm square cutout.
-  expect(completed.measurements[0]!.distance).toBeCloseTo(0.244, 6);
-  await target.screenshot(selectors.getByCss(previewCanvasSelector), 'measure-chess-frame-244mm.png');
-});
+test.each(['webgl', 'webgpu'] as const)(
+  'measures the chess board frame width as a mesh extent (%s)',
+  async (backend) => {
+    await openMeasureFixture(backend, 'openscad.cyber-chess-set');
+    await target.evaluate(() => {
+      const api = (globalThis as unknown as MeasureBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+      if (!api) {
+        throw new Error('Section view e2e bridge is not installed.');
+      }
+      api.setCamera({ position: [0, 0, 0.75], target: [0, 0, 0.01], fov: 38, zoom: 1 });
+    });
+    await target.delay(900);
+    await enableMeasure();
+    await toggleTargetControls();
+    await chooseByTyping('Feature filter', 'Bodies');
+    await chooseByTyping('Measurement operation', 'X extent');
+    await toggleTargetControls();
+    await clickWorldPoint([0.119, 0, 0.012]);
+    await expect
+      .poll(async () => {
+        const state = await measureState();
+        return state.measurements[0];
+      })
+      .toMatchObject({ operation: 'extent-x', quality: 'mesh', status: 'current' });
+    const completed = await measureState();
+    // The main.scad steel frame is cube([244, 244, 8]) with a 224 mm square cutout.
+    expect(completed.measurements[0]!.distance).toBeCloseTo(0.244, 6);
+    await target.screenshot(selectors.getByCss(previewCanvasSelector), `measure-chess-frame-244mm-${backend}.png`);
+  },
+);

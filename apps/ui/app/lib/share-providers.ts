@@ -14,6 +14,7 @@ import { builtinShareProvider, builtinShareProviderDescriptor } from '#lib/built
 import { ENV } from '#environment.config.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { shareOrigin } from '#lib/share-origin.js';
+import { recordApiRequestId } from '#lib/api-request-id.js';
 
 export const shareProviderRegistry = createShareProviderRegistry([
   { descriptor: directShareProviderDescriptor, load: async () => directShareProvider },
@@ -49,26 +50,30 @@ const gistApi = async (path: string, init?: RequestInit): Promise<unknown> => {
     throw new ShareError('SHARE_PROVIDER_UNAVAILABLE', 'GitHub sharing is temporarily unavailable. Try again.');
   }
   const body: unknown = await response.json().catch(() => undefined);
+  const answered = response;
+  // SB13: each refusal carries the request id of the response it answers.
+  const refusal = (code: ShareError['code'], message: string): ShareError =>
+    recordApiRequestId(new ShareError(code, message), answered);
   if (response.status === 401) {
-    throw new ShareError('SHARE_AUTH_REQUIRED', 'Sign in or reconnect GitHub to continue.');
+    throw refusal('SHARE_AUTH_REQUIRED', 'Sign in or reconnect GitHub to continue.');
   }
   if (response.status === 403 && z.object({ code: z.literal('GITHUB_GIST_USE_DISABLED') }).safeParse(body).success) {
-    throw new ShareError(
+    throw refusal(
       'SHARE_PROVIDER_UNAVAILABLE',
       'Gist sharing is off in Tau. Enable it in Security settings before sharing.',
     );
   }
   if (response.status === 403) {
-    throw new ShareError('SHARE_PERMISSION_REQUIRED', 'Check GitHub Gist access in Security settings, then try again.');
+    throw refusal('SHARE_PERMISSION_REQUIRED', 'Check GitHub Gist access in Security settings, then try again.');
   }
   if (response.status === 409) {
-    throw new ShareError(
+    throw refusal(
       'SHARE_PROVIDER_UNAVAILABLE',
       'This Gist changed on GitHub. Reopen the latest publication before changing it.',
     );
   }
   if (!response.ok) {
-    throw new ShareError('SHARE_PROVIDER_UNAVAILABLE', 'GitHub sharing is temporarily unavailable. Try again.');
+    throw refusal('SHARE_PROVIDER_UNAVAILABLE', 'GitHub sharing is temporarily unavailable. Try again.');
   }
   return body;
 };

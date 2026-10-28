@@ -1,5 +1,5 @@
 import { Component, lazy, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { ReactNode } from 'react';
+import type { ErrorInfo, ReactNode } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { Pause, Play } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
@@ -9,6 +9,8 @@ import { storyLanes, storyPrompt, storySteps } from '#components/geometry/splash
 import type { StoryBeat } from '#components/geometry/splash/design-story.constants.js';
 import { geospecRun } from '@taucad/planetary-gearbox';
 import posterUrl from '#components/geometry/gearbox/gearbox-poster.webp?url';
+import { reportUiError } from '#lib/error-reporting.js';
+import { reactErrorDetails } from '#lib/react-root-errors.js';
 
 const StoryCanvas = lazy(async () => {
   const module = await import('#components/geometry/splash/design-story-canvas.js');
@@ -46,7 +48,9 @@ class StoryBoundary extends Component<
     return { failed: true };
   }
   public override state = { failed: false };
-  public override componentDidCatch(): void {
+  public override componentDidCatch(error: unknown, errorInfo: ErrorInfo): void {
+    // SB4: the poster replaces the story, and the failure is reported once with its component stack.
+    void reportUiError(error, { ...reactErrorDetails(errorInfo), tags: { boundary: 'design-story' } });
     this.props.onFailure();
   }
   public override render(): ReactNode {

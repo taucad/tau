@@ -551,6 +551,29 @@ describe('createPreparationHost', () => {
   });
 
   describe('failures', () => {
+    it('should propagate sanitized nested transport codes without sealing a closure', async () => {
+      const { store, registry, reopen } = await scenario();
+      const host = reopen({
+        fetch: async (input, init) => {
+          if ((input instanceof Request ? input.url : String(input)) === originOf('demo')) {
+            throw new TypeError('private transport details', {
+              cause: Object.assign(new Error('private address'), { code: 'ETIMEDOUT' }),
+            });
+          }
+          return registry.fetch(input, init);
+        },
+      });
+      const error = await expectPreparationError(prepare(host), 'DOWNLOAD_FAILED');
+      expect(error.message).toContain('Transport attempt 3/3; codes: ETIMEDOUT');
+      expect(error.message).not.toContain('private transport details');
+      expect(error.message).not.toContain('private address');
+      expect(error.cause).toMatchObject({
+        reason: 'transport',
+        cause: { message: 'Transport attempt 3/3; codes: ETIMEDOUT' },
+      });
+      expect(await entriesOf(join(store, 'closures', 'sha256'))).toEqual([]);
+    });
+
     it('should name the URL and size on DOWNLOAD_FAILED, keep verified blobs and fetch only the missing payload on retry', async () => {
       const { store, registry, bytes, host, events } = await scenario();
       let release = (): void => undefined;

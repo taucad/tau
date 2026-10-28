@@ -55,6 +55,13 @@ export type TargetWorkerFlowEvidence = {
 };
 
 export type TargetSelector = Locator | string;
+/** Safe-area insets in CSS pixels, as `env(safe-area-inset-*)` reports them. */
+export type TargetSafeAreaInsets = {
+  readonly top?: number;
+  readonly right?: number;
+  readonly bottom?: number;
+  readonly left?: number;
+};
 export type TargetViewport = {
   readonly height: number;
   readonly width: number;
@@ -279,6 +286,7 @@ export type UiBrowserCommands = {
   uiEmulateContrast(contrast: 'more' | 'no-preference', surface?: TargetSurface): Promise<void>;
   uiEmulateForcedColors(forcedColors: 'active' | 'none', surface?: TargetSurface): Promise<void>;
   uiEmulateReducedMotion(reducedMotion: 'no-preference' | 'reduce', surface?: TargetSurface): Promise<void>;
+  uiEmulateSafeAreaInsets(insets: TargetSafeAreaInsets | null, surface?: TargetSurface): Promise<void>;
   uiEvaluateTarget(source: string, argument?: unknown, surface?: TargetSurface): Promise<unknown>;
   uiEvaluateTargetLocator(
     selector: string,
@@ -393,6 +401,9 @@ export const emulateReducedMotion = (
   reducedMotion: 'no-preference' | 'reduce',
   surface?: TargetSurface,
 ): Promise<void> => server.commands.uiEmulateReducedMotion(reducedMotion, surface);
+/** Emulate a notched device's safe-area insets, or clear them with `null` (see `uiEmulateSafeAreaInsets`). */
+export const emulateSafeAreaInsets = (insets: TargetSafeAreaInsets | null, surface?: TargetSurface): Promise<void> =>
+  server.commands.uiEmulateSafeAreaInsets(insets, surface);
 export const click = (selector: TargetSelector, options?: TargetClickOptions, surface?: TargetSurface): Promise<void> =>
   server.commands.uiClickTarget(selectorFor(selector), options ?? {}, surface);
 export const fill = (selector: TargetSelector, value: string, surface?: TargetSurface): Promise<void> =>

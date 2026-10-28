@@ -26,7 +26,10 @@ import {
   verifyDesktopRouteDescriptor,
 } from './desktop-route-publication.mjs';
 import type { DesktopRouteTrust } from './desktop-route-publication.mjs';
-import { requireDesktopPublicationAuthority } from './desktop-publication-authority.mjs';
+import {
+  requireDesktopInstallerPublicationEnabled,
+  requireDesktopPublicationAuthority,
+} from './desktop-publication-authority.mjs';
 import { fetchDesktopQualifiedReceipts } from './desktop-receipt-provenance.mjs';
 import {
   desktopAptSnapshotPrefix,
@@ -445,9 +448,7 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
     }
     return;
   }
-  if (process.env['TAU_ENABLE_INSTALLER_PROMOTION'] !== 'true') {
-    throw new Error('Installer promotion is disabled; operator release gate is required');
-  }
+  requireDesktopInstallerPublicationEnabled(manifest.channel);
   if (operation !== 'promote-routes' && operation !== 'renew-routes') {
     throw new Error('Unknown mutable publication operation');
   }
@@ -471,9 +472,12 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
   const catalogPath = resolve(root, 'installers.json');
   if (operation === 'promote-routes') {
     const scope = z.enum(desktopPublicationScopes).parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
+    // An omitted VM run is admitted only for staging Mac-only scope, and the catalog then says `vm: 'pending'`.
+    const vmRun = process.env['TAU_ROUTE_VM_RUN_ID'];
     const receipts = await fetchDesktopQualifiedReceipts(manifest, root, {
       ci: required('TAU_ROUTE_CI_RUN_ID'),
-      vm: required('TAU_ROUTE_VM_RUN_ID'),
+      // The dispatch form passes an empty string when the input is left blank.
+      vm: vmRun === '' ? undefined : vmRun,
       scope,
     });
     const trust = z

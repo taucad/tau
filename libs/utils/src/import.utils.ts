@@ -3,7 +3,7 @@
  *
  * Shared pure functions for import specifier parsing and path resolution.
  * Used by both the runtime worker (esbuild bundling) and the main thread
- * (Monaco navigation, type acquisition).
+ * (editor navigation, type acquisition).
  *
  * All functions are pure -- no filesystem or network access.
  */

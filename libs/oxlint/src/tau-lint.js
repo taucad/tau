@@ -23,7 +23,6 @@ import { noHardcodedColorRule } from './rules/no-hardcoded-color.js';
 import { noTimeUnitSuffixRule } from './rules/no-time-unit-suffix.js';
 import { noBareTimeIdentifierRule } from './rules/no-bare-time-identifier.js';
 import { noAsyncIifeRule } from './rules/no-async-iife.js';
-import { noMonacoCreateModelRule } from './rules/no-monaco-create-model.js';
 import { noBareRandomUuidRule } from './rules/no-bare-random-uuid.js';
 import { noDirectIndexeddbRule } from './rules/no-direct-indexeddb.js';
 import { noBareRpcErrorCodeRule } from './rules/no-bare-rpc-error-code.js';
@@ -69,7 +68,6 @@ const plugin = {
     'no-time-unit-suffix': noTimeUnitSuffixRule,
     'no-bare-time-identifier': noBareTimeIdentifierRule,
     'no-async-iife': noAsyncIifeRule,
-    'no-monaco-create-model': noMonacoCreateModelRule,
     'no-bare-random-uuid': noBareRandomUuidRule,
     'no-direct-indexeddb': noDirectIndexeddbRule,
     'no-bare-rpc-error-code': noBareRpcErrorCodeRule,

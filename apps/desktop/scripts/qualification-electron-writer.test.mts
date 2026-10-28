@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Qualify Linux authority ownership in real Electron utility processes, without renderer/sandbox overrides.
+ * Qualify Linux dependency discovery and authority ownership in real Electron utilities, without security overrides.
  * Usage: pnpm nx run desktop:test-qualification-electron-writer in a disposable graphical Linux guest.
  * Exit codes: 0 native exclusion/release/crash recovery passed; nonzero unavailable host or failed assertion.
  */
@@ -41,7 +41,29 @@ const { parentPort } = require('node:process');
 const { acquireNodeAuthorityWriter } = require('./authority.cjs');
 if (!process.versions.electron || process.type !== 'utility' || !parentPort) throw new Error('Real Electron utility required');
 let keepAlive;
-acquireNodeAuthorityWriter({authorityRoot: process.argv[2]}).then(writer => {
+const lookups = [];
+const childProcess = require('node:child_process');
+const originalSpawnSync = childProcess.spawnSync;
+// Record the original lookup result, not a second probe that may succeed after a transient failure.
+childProcess.spawnSync = (command, args, options) => {
+  const started = Date.now();
+  const result = originalSpawnSync(command, args, options);
+  if (command === 'which') lookups.push({target: args[0], elapsed: Date.now() - started,
+    status: result.status, signal: result.signal, error: result.error?.code ?? null});
+  return result;
+};
+require('node:module').syncBuiltinESMExports();
+import(${JSON.stringify(import.meta.resolve('@anthropic-ai/sandbox-runtime'))}).then(async ({SandboxManager}) => {
+  try {
+    const dependencies = await SandboxManager.checkDependenciesAsync();
+    console.log(JSON.stringify({kind:'sandbox-dependency-lookups', lookups, ...dependencies}));
+    if (dependencies.errors.length) throw new Error(dependencies.errors.join('; '));
+  } finally {
+    childProcess.spawnSync = originalSpawnSync;
+    require('node:module').syncBuiltinESMExports();
+  }
+  return acquireNodeAuthorityWriter({authorityRoot: process.argv[2]});
+}).then(writer => {
   keepAlive = setInterval(() => {}, 1000);
   parentPort.on('message', async ({data}) => {
     if (data !== 'release') throw new Error('Unexpected fixture command');
@@ -50,8 +72,8 @@ acquireNodeAuthorityWriter({authorityRoot: process.argv[2]}).then(writer => {
     clearInterval(keepAlive);
     parentPort.postMessage({status: 'released'});
   });
-  parentPort.postMessage({status: 'owned', electron: process.versions.electron, type: process.type});
-}).catch(error => parentPort.postMessage({status: 'refused', code: error.code, message: error.message}));
+  parentPort.postMessage({status: 'owned', electron: process.versions.electron, type: process.type, lookups});
+}).catch(error => parentPort.postMessage({status: 'refused', code: error.code, message: error.message, lookups}));
 `,
   );
   await writeFile(
@@ -70,6 +92,7 @@ const message = child => new Promise((resolve, reject) => {
 });
 const launch = root => {
   const child = utilityProcess.fork(join(__dirname, 'utility.cjs'), [root], {stdio: 'pipe'});
+  child.stdout.on('data', chunk => process.stdout.write(chunk));
   child.stderr.on('data', chunk => process.stderr.write(chunk));
   children.push(child);
   return child;
@@ -81,8 +104,13 @@ app.whenReady().then(async () => {
   symlinkSync(authority, alias);
   const owner = launch(authority);
   const first = await message(owner);
-  assert.equal(first.status, 'owned');
+  assert.equal(first.status, 'owned', JSON.stringify(first));
   assert.equal(first.type, 'utility');
+  const ripgrep = first.lookups.find(lookup => lookup.target === 'rg');
+  assert.ok(ripgrep, 'Pinned sandbox runtime must actually probe ripgrep');
+  assert.equal(ripgrep.status, 0, JSON.stringify(ripgrep));
+  assert.equal(ripgrep.signal, null);
+  assert.equal(ripgrep.error, null);
   const competitor = await message(launch(alias));
   assert.equal(competitor.code, 'AUTHORITY_ALREADY_OWNED');
   const died = new Promise(resolve => owner.once('exit', resolve));
@@ -100,6 +128,7 @@ app.whenReady().then(async () => {
   symlinkSync(join(__dirname, 'outside'), join(unsafe, 'authority.writer.lock'));
   assert.equal((await message(launch(unsafe))).code, 'AUTHORITY_LOCK_UNAVAILABLE');
   console.log(JSON.stringify({status:'passed', platform:process.platform, electron:first.electron,
+    dependencyLookups:first.lookups,
     utilityExclusion:true, physicalAliasExclusion:true, sigkillRecovery:true, explicitRelease:true, symlinkRefusal:true}));
 }).then(() => {
   for (const child of children) if (child.pid) child.kill();

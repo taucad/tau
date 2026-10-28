@@ -860,6 +860,7 @@ test('reveals the exact nested viewer file when Files has never mounted', async 
     { touch: true },
   );
   await target.click(selectors.getByRole('menuitem', { name: 'Reveal in File Tree', exact: true }), { touch: true });
+  await motionSettled();
   const files = selectors.getByRole('region', { name: 'Files', exact: true });
   await target.expectVisible(files);
   await target.expectAttribute(files.getByRole('treeitem', { name: 'public', exact: true }), 'aria-expanded', 'true');

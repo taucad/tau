@@ -7,7 +7,7 @@ import type { getDefaultWritePaths } from '@anthropic-ai/sandbox-runtime';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { launchInNativeSandbox, NativeRuntimeUnavailableError, nativeSandboxPolicy } from '#index.js';
-import { sandboxRuntimeSeccomp } from '#native-sandbox.js';
+import { sandboxRuntimeJavaAgent, sandboxRuntimeSeccomp } from '#native-sandbox.js';
 
 /** A fresh module registry per file keeps the launcher's one-time initialization observable. */
 const sandbox = vi.hoisted(() => ({
@@ -218,6 +218,15 @@ describe('nativeSandboxPolicy', () => {
 });
 
 describe('packaged sandbox helper', () => {
+  it('resolves the Linux Java agent outside ASAR and preserves ordinary installations', () => {
+    expect(sandboxRuntimeJavaAgent('/tmp/app.asar/node_modules/srt/dist/index.js', 'linux')).toBe(
+      join('/tmp/app.asar.unpacked/node_modules/srt/vendor/java-proxy-agent/srt-proxy-agent.jar'),
+    );
+    expect(sandboxRuntimeJavaAgent('/opt/srt/dist/index.js', 'linux')).toBe(
+      join('/opt/srt/vendor/java-proxy-agent/srt-proxy-agent.jar'),
+    );
+    expect(sandboxRuntimeJavaAgent('/Applications/app.asar/srt/dist/index.js', 'darwin')).toBeUndefined();
+  });
   it('uses the unpacked executable for Linux ASAR packages and leaves ordinary installations intact', () => {
     expect(
       sandboxRuntimeSeccomp(

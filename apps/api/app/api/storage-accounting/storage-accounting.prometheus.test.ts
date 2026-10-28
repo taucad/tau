@@ -41,7 +41,7 @@ const r2Only = (settings: { accountId: string | undefined; token: string | undef
   const source = r2SourceOf({ ...settings, ...buckets });
   return accountingTasks({
     database: mock<DatabaseType>(),
-    resolvePlan: async () => ({ plan: 'pro', limitBytes: 1 }),
+    plans: { tauCloudEnabled: false, environment: undefined, freeTierSync: false },
     r2: source === undefined ? undefined : { ...source, fetch: fetcher },
   }).filter((task) => task.name === 'r2_analytics');
 };

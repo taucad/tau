@@ -303,11 +303,13 @@ export type R2AnalyticsSource = {
  *
  * @param source - The account, token and bucket names.
  * @param now - Epoch milliseconds the windows are cut from.
+ * @param signal - The pass's deadline and shutdown; the request also times out after 30 s.
  * @returns The four R2 gauges' figures.
  */
 export const readR2Analytics = async (
   source: R2AnalyticsSource,
   now: number = Date.now(),
+  signal?: AbortSignal,
 ): Promise<AccountingFigures> => {
   const fetcher = source.fetch ?? fetch;
   const response = await fetcher(graphqlEndpoint, {
@@ -320,7 +322,7 @@ export const readR2Analytics = async (
       query: r2AnalyticsQuery,
       variables: { accountTag: source.accountId, ...r2AnalyticsWindows(now) },
     }),
-    signal: AbortSignal.timeout(30_000),
+    signal: signal === undefined ? AbortSignal.timeout(30_000) : AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
   });
   if (!response.ok) {
     throw new Error(`Cloudflare GraphQL Analytics answered HTTP ${String(response.status)}`);

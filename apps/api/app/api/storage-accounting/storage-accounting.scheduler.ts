@@ -16,6 +16,12 @@ export const accountingTickMilliseconds = 15_000;
 /** The longest a pass holds its task's lock; a failed hourly pass is retried by some Machine after it. */
 const maximumLockMilliseconds = 10 * 60 * 1000;
 
+/** A pass is abandoned this long before its lock lapses, so no second Machine starts one alongside it. */
+const deadlineMarginMilliseconds = 5000;
+
+/** Figures older than this many intervals are no longer exported; their `last_success` still is, and alerts. */
+export const staleIntervals = 3;
+
 /** Shared figures outlive any interval, so a stalled task keeps exporting an old `last_success` that alerts. */
 const snapshotTtlMilliseconds = 7 * 24 * 60 * 60 * 1000;
 
@@ -97,6 +103,45 @@ type ObservableResult = {
 };
 
 /**
+ * Runs a pass until it settles or `signal` aborts, whichever is first. A pass that ignores the signal
+ * is left to finish in the background; its result and error are dropped.
+ *
+ * @param run - The task's pass.
+ * @param signal - The pass's deadline and shutdown.
+ * @returns The pass's figures.
+ */
+const runUntilAborted = async (
+  run: (signal: AbortSignal) => Promise<AccountingFigures>,
+  signal: AbortSignal,
+): Promise<AccountingFigures> => {
+  signal.throwIfAborted();
+  /* Settles either way, so a pass abandoned after an abort never surfaces as an unhandled rejection. */
+  const pass = (async (): Promise<{ figures: AccountingFigures } | { error: unknown }> => {
+    try {
+      return { figures: await run(signal) };
+    } catch (error) {
+      return { error };
+    }
+  })();
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => {
+      reject(new Error('The storage accounting pass was aborted', { cause: signal.reason }));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    const outcome = await Promise.race([pass, aborted]);
+    if ('error' in outcome) {
+      throw outcome.error;
+    }
+    return outcome.figures;
+  } finally {
+    signal.removeEventListener('abort', onAbort!);
+  }
+};
+
+/**
  * The storage accounting scheduler (W14 OB3, Finding 6).
  *
  * Every API Machine runs it, and one runs each pass: whichever first finds a task's shared figures older
@@ -108,16 +153,22 @@ type ObservableResult = {
  * `tau.storage.accounting.passes` as `ok` or `error`; a task its configuration leaves off counts
  * `skipped` once per interval on each Machine. `tau.storage.accounting.last_success` is the time the
  * exported figures were computed, so a task that keeps failing keeps an old value and
- * `storage-accounting-stale` fires; a task that never ran exports none.
+ * `storage-accounting-stale` fires; a task that never ran exports none. Figures older than
+ * {@link staleIntervals} intervals stop being exported, so a stalled task never reads as current.
+ *
+ * Each task runs on its own: the one-minute `db` pass is never queued behind an hourly one. A pass gets a
+ * signal that aborts shortly before its lock lapses and on shutdown; the scheduler stops waiting for it
+ * then, and the task's reads carry their own statement timeout.
  */
 export class StorageAccountingScheduler implements OnApplicationBootstrap, OnModuleDestroy {
   readonly #logger = new Logger(StorageAccountingScheduler.name);
   readonly #snapshots = new Map<StorageAccountingTask, AccountingSnapshot>();
   readonly #skippedAt = new Map<StorageAccountingTask, number>();
+  readonly #inFlight = new Map<StorageAccountingTask, Promise<void>>();
+  readonly #shutdown = new AbortController();
   readonly #now: () => number;
   readonly #tickMilliseconds: number;
   #timer: NodeJS.Timeout | undefined;
-  #ticking: Promise<void> | undefined;
 
   readonly #tasks: readonly AccountingTask[];
   readonly #store: SnapshotStore;
@@ -145,6 +196,7 @@ export class StorageAccountingScheduler implements OnApplicationBootstrap, OnMod
     }
     this.#metrics.storageAccountingLastSuccess.addCallback((result) => {
       for (const [task, snapshot] of this.#snapshots) {
+        /* Kept when the figures are dropped as stale: an old `last_success` is what fires the rule. */
         result.observe(snapshot.computedAt / 1000, {
           'tau.storage.accounting.task': task,
         });
@@ -160,31 +212,34 @@ export class StorageAccountingScheduler implements OnApplicationBootstrap, OnMod
     this.#timer.unref();
   }
 
+  /** Stops ticking and aborts any pass in flight; nothing waits for a pass the API no longer needs. */
   public async onModuleDestroy(): Promise<void> {
     clearInterval(this.#timer);
-    await this.#ticking;
+    this.#shutdown.abort();
+    await Promise.allSettled(this.#inFlight.values());
   }
 
   /**
-   * One tick: for each task, refresh the local figures from the store and, when they are due and this
-   * Machine wins the lock, run the pass. A tick still running when the next starts is not doubled.
+   * One tick: each task not already in flight refreshes its local figures from the store and, when they
+   * are due and this Machine wins the lock, runs its pass. Tasks run independently of one another.
    */
   public async tick(): Promise<void> {
-    if (this.#ticking !== undefined) {
+    if (this.#shutdown.signal.aborted) {
       return;
     }
-    const ticking = (async (): Promise<void> => {
-      try {
-        for (const task of this.#tasks) {
-          // oxlint-disable-next-line no-await-in-loop -- one task at a time keeps the database load flat
-          await this.#tickTask(task);
+    await Promise.all(
+      this.#tasks.map(async (task) => {
+        const running = this.#inFlight.get(task.name);
+        if (running !== undefined) {
+          return;
         }
-      } finally {
-        this.#ticking = undefined;
-      }
-    })();
-    this.#ticking = ticking;
-    return ticking;
+        const pass = this.#tickTask(task).finally(() => {
+          this.#inFlight.delete(task.name);
+        });
+        this.#inFlight.set(task.name, pass);
+        await pass;
+      }),
+    );
   }
 
   async #tickTask(task: AccountingTask): Promise<void> {
@@ -200,6 +255,7 @@ export class StorageAccountingScheduler implements OnApplicationBootstrap, OnMod
       }
       return;
     }
+    const lockMilliseconds = Math.min(task.intervalMilliseconds, maximumLockMilliseconds);
     let shared: AccountingSnapshot | undefined;
     try {
       shared = await this.#store.read(task.name);
@@ -208,7 +264,7 @@ export class StorageAccountingScheduler implements OnApplicationBootstrap, OnMod
       }
       const latest = shared ?? this.#snapshots.get(task.name);
       const due = latest === undefined || now - latest.computedAt >= task.intervalMilliseconds;
-      if (!due || !(await this.#store.claim(task.name, Math.min(task.intervalMilliseconds, maximumLockMilliseconds)))) {
+      if (!due || !(await this.#store.claim(task.name, lockMilliseconds))) {
         return;
       }
     } catch (error) {
@@ -217,15 +273,27 @@ export class StorageAccountingScheduler implements OnApplicationBootstrap, OnMod
       return;
     }
     let figures: AccountingFigures;
+    const deadline = new AbortController();
+    const deadlineTimer = setTimeout(
+      () => {
+        deadline.abort(new Error(`The ${task.name} pass passed its deadline`));
+      },
+      Math.max(lockMilliseconds - deadlineMarginMilliseconds, lockMilliseconds / 2),
+    );
     try {
-      figures = await task.run();
+      figures = await runUntilAborted(task.run, AbortSignal.any([this.#shutdown.signal, deadline.signal]));
     } catch (error) {
+      if (this.#shutdown.signal.aborted) {
+        return;
+      }
       this.#metrics.storageAccountingPasses.add(1, {
         'tau.storage.accounting.task': task.name,
         outcome: 'error',
       });
       this.#logger.warn({ err: error, task: task.name }, 'A storage accounting pass failed');
       return;
+    } finally {
+      clearTimeout(deadlineTimer);
     }
     const snapshot: AccountingSnapshot = { computedAt: this.#now(), figures };
     this.#snapshots.set(task.name, snapshot);
@@ -241,7 +309,12 @@ export class StorageAccountingScheduler implements OnApplicationBootstrap, OnMod
   }
 
   #observe(gauge: AccountingGauge, result: ObservableResult): void {
-    for (const snapshot of this.#snapshots.values()) {
+    const now = this.#now();
+    for (const task of this.#tasks) {
+      const snapshot = this.#snapshots.get(task.name);
+      if (snapshot === undefined || now - snapshot.computedAt > staleIntervals * task.intervalMilliseconds) {
+        continue;
+      }
       for (const observation of snapshot.figures[gauge] ?? []) {
         result.observe(observation.value, observation.attributes as Readonly<Record<string, string>>);
       }

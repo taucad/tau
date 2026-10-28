@@ -1,13 +1,11 @@
 import { Module } from '@nestjs/common';
+import { financialEnvironmentSchema } from '@taucad/billing';
 import { ConfigService } from '@nestjs/config';
 import type { Environment } from '#config/environment.config.js';
 import { DatabaseModule } from '#database/database.module.js';
 import { DatabaseService } from '#database/database.service.js';
 import { RedisService } from '#redis/redis.service.js';
 import { MetricsService } from '#telemetry/metrics.js';
-import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
-import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
-import { storageLimitOf } from '#api/git/git.service.js';
 import { accountingTasks, r2SourceOf } from '#api/storage-accounting/accounting-tasks.js';
 import {
   StorageAccountingScheduler,
@@ -21,25 +19,24 @@ import {
   providers: [
     {
       provide: StorageAccountingScheduler,
-      inject: [DatabaseService, RedisService, MetricsService, ConfigService, commercialEntitlementsKey],
-      // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest resolves five distinct provider tokens.
+      inject: [DatabaseService, RedisService, MetricsService, ConfigService],
+      // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest resolves four distinct provider tokens.
       useFactory(
         database: DatabaseService,
         redis: RedisService,
         metrics: MetricsService,
         config: ConfigService<Environment, true>,
-        entitlements: CommercialEntitlementsService,
       ): StorageAccountingScheduler {
+        const environment = financialEnvironmentSchema.safeParse(config.get('BILLING_ENVIRONMENT', { infer: true }));
         const tasks = accountingTasks({
           database: database.database,
-          /* The plan and allowance `GitRepositoryService.authorize` enforces; a self-host build has no tier
-             and the Pro allowance, so it counts as `pro`. */
-          async resolvePlan(ownerId) {
-            const owner = await entitlements.getEntitlements(ownerId);
-            return {
-              plan: owner.tier ?? 'pro',
-              limitBytes: storageLimitOf(owner),
-            };
+          /* Plans resolve in SQL as `BillingService` projects them, never through Stripe (D23's gate included). */
+          plans: {
+            tauCloudEnabled: config.get('TAU_CLOUD_ENABLED', { infer: true }),
+            environment: environment.success ? environment.data : undefined,
+            freeTierSync:
+              config.get('TAU_FREE_TIER_SYNC_ENABLED', { infer: true }) &&
+              config.get('NODE_ENV', { infer: true }) !== 'production',
           },
           r2: r2SourceOf({
             accountId: config.get('TAU_CLOUDFLARE_ACCOUNT_ID', { infer: true }),

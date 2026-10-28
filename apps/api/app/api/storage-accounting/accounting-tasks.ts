@@ -4,7 +4,7 @@ import { readDatabaseConnections } from '#api/storage-accounting/database-connec
 import { readR2Analytics } from '#api/storage-accounting/r2-analytics.js';
 import type { R2AnalyticsSource } from '#api/storage-accounting/r2-analytics.js';
 import { readUsage } from '#api/storage-accounting/usage.js';
-import type { ResolvePlan } from '#api/storage-accounting/usage.js';
+import type { OwnerPlanSettings } from '#api/storage-accounting/owner-plans.js';
 
 const minute = 60 * 1000;
 const hour = 60 * minute;
@@ -45,15 +45,15 @@ export const r2SourceOf = (settings: {
  * per Machine by the storage worker (OB2's `HotProjects`), and the route freeze gauges read the route
  * table at collection (OB5's `observeFrozenRoutes`), so neither has a periodic pass yet.
  *
- * @param dependencies - The database, the plan resolver and the R2 source, if configured.
+ * @param dependencies - The database, the plan settings and the R2 source, if configured.
  * @returns The tasks in the order a tick runs them.
  */
 export const accountingTasks = (dependencies: {
   readonly database: DatabaseType;
-  readonly resolvePlan: ResolvePlan;
+  readonly plans: OwnerPlanSettings;
   readonly r2: R2AnalyticsSource | undefined;
 }): AccountingTask[] => {
-  const { database, resolvePlan, r2 } = dependencies;
+  const { database, plans, r2 } = dependencies;
   return [
     {
       name: 'db',
@@ -63,12 +63,12 @@ export const accountingTasks = (dependencies: {
     {
       name: 'usage',
       intervalMilliseconds: hour,
-      run: async () => readUsage(database, resolvePlan),
+      run: async (signal) => readUsage(database, plans, signal),
     },
     {
       name: 'r2_analytics',
       intervalMilliseconds: hour,
-      run: r2 === undefined ? undefined : async () => readR2Analytics(r2),
+      run: r2 === undefined ? undefined : async (signal) => readR2Analytics(r2, Date.now(), signal),
     },
   ];
 };

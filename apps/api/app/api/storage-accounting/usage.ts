@@ -5,13 +5,20 @@ import type { DatabaseType } from '#database/database.service.js';
 import { project, projectDeletion, projectGit } from '#database/schema.js';
 import { repositoryByteCeiling } from '#api/git/store/limits.js';
 import type { AccountingFigures, AccountingObservation } from '#api/storage-accounting/accounting-figures.js';
+import { withAccountingTimeout } from '#api/storage-accounting/accounting-transaction.js';
+import { readOwnerPlans } from '#api/storage-accounting/owner-plans.js';
+import type { OwnerPlanSettings } from '#api/storage-accounting/owner-plans.js';
+
+/** The usage pass's reads are whole-table aggregates; a slower one is cancelled, not left to queue. */
+const usageStatementTimeoutMilliseconds = 60_000;
 
 /**
  * Usage by plan, the fleet's repository sizes and quota bands (W14 OB3, catalogue N43–N47), from Tau's
  * own accounting: R2 reports per bucket only, and every owner shares one prefix tree (Finding 6).
  *
- * Two aggregate reads an hour: one row per owner that stores anything, and one row of filtered counts
- * over live repositories. Owner ids stay inside this module; the figures carry only enums.
+ * Two aggregate reads an hour, one row per owner that stores anything and one row of filtered counts over
+ * live repositories, then the owners' plans in batched SQL. Owner ids stay inside this module; the
+ * figures carry only enums.
  */
 
 type StoragePlan = AccountingObservation<'storageUsageRepositories'>['attributes']['tau.plan'];
@@ -122,24 +129,24 @@ export const usageFigures = (owners: readonly OwnerUsage[], sizes: RepositorySiz
   };
 };
 
-/** An owner's plan and allowance, from the commercial entitlements `authorize` reads. */
-export type ResolvePlan = (ownerId: string) => Promise<{ readonly plan: StoragePlan; readonly limitBytes: number }>;
-
-/** Owners whose plans resolve at once; the entitlements read is a few indexed queries each. */
-const planConcurrency = 4;
-
 /**
- * Reads the usage figures: account-wide totals per owner, counted exactly as `readOwnerUsage` counts them
- * (a deleted project's bytes are retained until its purge), and the size counts over live repositories.
+ * Reads the usage figures in one read-only transaction under a statement timeout: account-wide totals
+ * per owner, counted exactly as `readOwnerUsage` counts them (a deleted project's bytes are retained
+ * until its purge), the size counts over live repositories, and the owners' plans in batched SQL.
  *
  * @param database - The Drizzle database.
- * @param resolvePlan - Each owner's plan and allowance.
+ * @param settings - The deployment's plan settings.
+ * @param signal - Aborts between reads when the pass's deadline passes or the API shuts down.
  * @returns The five usage gauges' figures.
  */
-export const readUsage = async (database: DatabaseType, resolvePlan: ResolvePlan): Promise<AccountingFigures> => {
-  const live = isNull(projectDeletion.deletedAt);
-  const [ownerRows, [sizeRow]] = await Promise.all([
-    database
+export const readUsage = async (
+  database: DatabaseType,
+  settings: OwnerPlanSettings,
+  signal?: AbortSignal,
+): Promise<AccountingFigures> =>
+  withAccountingTimeout(database, usageStatementTimeoutMilliseconds, async (transaction) => {
+    const live = isNull(projectDeletion.deletedAt);
+    const ownerRows = await transaction
       .select({
         ownerId: project.ownerId,
         repositoryBytes: sql<string>`coalesce(sum(${projectGit.storageBytes}) filter (where ${live}), 0)`,
@@ -151,8 +158,9 @@ export const readUsage = async (database: DatabaseType, resolvePlan: ResolvePlan
       .leftJoin(projectGit, eq(projectGit.projectId, project.id))
       .leftJoin(projectDeletion, eq(projectDeletion.projectId, project.id))
       .groupBy(project.ownerId)
-      .having(sql`count(${projectGit.projectId}) > 0 or coalesce(sum(${projectDeletion.retainedBytes}), 0) > 0`),
-    database
+      .having(sql`count(${projectGit.projectId}) > 0 or coalesce(sum(${projectDeletion.retainedBytes}), 0) > 0`);
+    signal?.throwIfAborted();
+    const [sizeRow] = await transaction
       .select({
         atOrBelow: sql<number[]>`array[${sql.join(
           sizeBounds.map((bound): SQL => {
@@ -171,26 +179,25 @@ export const readUsage = async (database: DatabaseType, resolvePlan: ResolvePlan
       })
       .from(projectGit)
       .leftJoin(projectDeletion, eq(projectDeletion.projectId, projectGit.projectId))
-      .where(live),
-  ]);
-
-  const owners: OwnerUsage[] = [];
-  for (let start = 0; start < ownerRows.length; start += planConcurrency) {
-    // oxlint-disable-next-line no-await-in-loop -- a few owners at a time keeps the entitlements reads light
-    const batch = await Promise.all(
-      ownerRows.slice(start, start + planConcurrency).map(async (row) => ({
-        ownerId: row.ownerId,
-        ...(await resolvePlan(row.ownerId)),
-        repositoryBytes: Number(row.repositoryBytes),
-        lfsBytes: Number(row.lfsBytes),
-        retainedBytes: Number(row.retainedBytes),
-        repositories: Number(row.repositories),
-      })),
+      .where(live);
+    signal?.throwIfAborted();
+    const plans = await readOwnerPlans(
+      transaction,
+      ownerRows.map((row) => row.ownerId),
+      settings,
     );
-    owners.push(...batch);
-  }
-  return usageFigures(owners, {
-    atOrBelow: (sizeRow?.atOrBelow ?? []).map(Number),
-    atOrAboveCeilingFraction: (sizeRow?.atOrAboveCeilingFraction ?? []).map(Number),
+    signal?.throwIfAborted();
+
+    const owners: OwnerUsage[] = ownerRows.map((row) => ({
+      ownerId: row.ownerId,
+      ...plans.get(row.ownerId)!,
+      repositoryBytes: Number(row.repositoryBytes),
+      lfsBytes: Number(row.lfsBytes),
+      retainedBytes: Number(row.retainedBytes),
+      repositories: Number(row.repositories),
+    }));
+    return usageFigures(owners, {
+      atOrBelow: (sizeRow?.atOrBelow ?? []).map(Number),
+      atOrAboveCeilingFraction: (sizeRow?.atOrAboveCeilingFraction ?? []).map(Number),
+    });
   });
-};

@@ -10,7 +10,7 @@ import * as schema from '#database/schema.js';
 import { SqlLogger } from '#database/database.logger.js';
 import { assertSchemaCompatibility } from '#database/database-migration.js';
 import { mapPostgresErrorToHint } from '#database/postgres-error-hint.utils.js';
-import { databaseApplicationNames } from '#database/application-name.js';
+import { applicationNameOf } from '#database/application-name.js';
 
 export type DatabaseType = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -46,7 +46,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       // climb back to the login identity.
       connection: {
         // `tau.db.connections` tells Tau's processes apart by this (W14 OB3).
-        application_name: databaseApplicationNames.api,
+        application_name: applicationNameOf('api'),
         // Bare integers are milliseconds to PostgreSQL.
         statement_timeout: this.configService.get('DATABASE_STATEMENT_TIMEOUT_MS', { infer: true }),
         lock_timeout: this.configService.get('DATABASE_LOCK_TIMEOUT_MS', { infer: true }),

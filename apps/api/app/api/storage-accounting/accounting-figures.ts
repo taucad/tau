@@ -42,6 +42,9 @@ export type AccountingTask = {
   readonly name: StorageAccountingTask;
   /** How old the shared figures may get before some Machine computes them again. */
   readonly intervalMilliseconds: number;
-  /** Computes the task's figures; `undefined` when configuration leaves the task off. */
-  readonly run: (() => Promise<AccountingFigures>) | undefined;
+  /**
+   * Computes the task's figures; `undefined` when configuration leaves the task off. The signal aborts
+   * when the pass's deadline (shorter than its lock) passes or the API shuts down.
+   */
+  readonly run: ((signal: AbortSignal) => Promise<AccountingFigures>) | undefined;
 };

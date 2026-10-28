@@ -8,7 +8,7 @@ import {
 } from '#api/storage-accounting/storage-accounting.scheduler.js';
 import type { StorageAccountingMetrics } from '#api/storage-accounting/storage-accounting.scheduler.js';
 import type { DatabaseType } from '#database/database.service.js';
-import type { ResolvePlan } from '#api/storage-accounting/usage.js';
+import type { OwnerPlanSettings } from '#api/storage-accounting/owner-plans.js';
 import { mock } from 'vitest-mock-extended';
 
 type Observed = { value: number; attributes: Record<string, unknown> };
@@ -202,7 +202,7 @@ describe('StorageAccountingScheduler (W14 OB3)', () => {
 
 describe('accountingTasks', () => {
   const database = mock<DatabaseType>();
-  const resolvePlan: ResolvePlan = async () => ({ plan: 'pro', limitBytes: 1 });
+  const plans: OwnerPlanSettings = { tauCloudEnabled: false, environment: undefined, freeTierSync: false };
 
   it('should leave the R2 task inert without a Cloudflare token or account', () => {
     for (const settings of [
@@ -216,7 +216,7 @@ describe('accountingTasks', () => {
         privateBucket: 'private',
       });
       expect(source).toBeUndefined();
-      const tasks = accountingTasks({ database, resolvePlan, r2: source });
+      const tasks = accountingTasks({ database, plans, r2: source });
       expect(tasks.find((task) => task.name === 'r2_analytics')?.run).toBeUndefined();
       expect(tasks.find((task) => task.name === 'usage')?.run).toBeDefined();
       expect(tasks.find((task) => task.name === 'db')?.run).toBeDefined();
@@ -239,5 +239,133 @@ describe('accountingTasks', () => {
         private: 'tau-content-private-staging',
       },
     });
+  });
+});
+
+describe('StorageAccountingScheduler passes (W14 OB3 review)', () => {
+  it('should stop exporting figures older than three intervals, and keep their last_success', async () => {
+    let now = 0;
+    let failing = false;
+    const metrics = fakeMetrics();
+    const scheduler = new StorageAccountingScheduler({
+      tasks: [
+        {
+          name: 'usage',
+          intervalMilliseconds: hour,
+          run: async () => {
+            if (failing) {
+              throw new Error('the database went away');
+            }
+            return usageFigures;
+          },
+        },
+      ],
+      store: memorySnapshotStore(() => now),
+      metrics,
+      now: () => now,
+    });
+
+    await scheduler.tick();
+    failing = true;
+    now = 3 * hour;
+    await scheduler.tick();
+    expect(metrics.collect('storageUsageRepositories')).toHaveLength(1);
+
+    now = 3 * hour + 1;
+    expect(metrics.collect('storageUsageRepositories')).toStrictEqual([]);
+    expect(metrics.collect('storageAccountingLastSuccess')).toStrictEqual([
+      { value: 0, attributes: { 'tau.storage.accounting.task': 'usage' } },
+    ]);
+  });
+
+  it('should not hold the one-minute db pass behind a slow hourly pass', async () => {
+    let releaseUsage!: () => void;
+    const usage = vi.fn(
+      async () =>
+        new Promise<AccountingFigures>((resolve) => {
+          releaseUsage = () => {
+            resolve(usageFigures);
+          };
+        }),
+    );
+    const database = vi.fn(async () => ({}));
+    let now = 0;
+    const scheduler = new StorageAccountingScheduler({
+      tasks: [
+        { name: 'usage', intervalMilliseconds: hour, run: usage },
+        { name: 'db', intervalMilliseconds: 60_000, run: database },
+      ],
+      store: memorySnapshotStore(() => now),
+      metrics: fakeMetrics(),
+      now: () => now,
+    });
+
+    const first = scheduler.tick();
+    await vi.waitFor(() => {
+      expect(database).toHaveBeenCalledTimes(1);
+    });
+    now = 60_000;
+    await scheduler.tick();
+    expect(database).toHaveBeenCalledTimes(2);
+    expect(usage).toHaveBeenCalledTimes(1);
+    releaseUsage();
+    await first;
+  });
+
+  it('should abort a pass at its deadline, before its lock lapses, and count it as an error', async () => {
+    const metrics = fakeMetrics();
+    let seen: AbortSignal | undefined;
+    const scheduler = new StorageAccountingScheduler({
+      tasks: [
+        {
+          name: 'usage',
+          intervalMilliseconds: 200,
+          run: async (signal) => {
+            seen = signal;
+            return new Promise<AccountingFigures>(() => {
+              /* Never settles: only the signal ends it. */
+            });
+          },
+        },
+      ],
+      store: memorySnapshotStore(),
+      metrics,
+    });
+
+    await scheduler.tick();
+
+    expect(seen?.aborted).toBe(true);
+    expect(metrics.passes).toStrictEqual([{ task: 'usage', outcome: 'error' }]);
+  });
+
+  it('should abort the pass in flight on shutdown instead of waiting for it', async () => {
+    const metrics = fakeMetrics();
+    let seen: AbortSignal | undefined;
+    const scheduler = new StorageAccountingScheduler({
+      tasks: [
+        {
+          name: 'usage',
+          intervalMilliseconds: hour,
+          run: async (signal) => {
+            seen = signal;
+            return new Promise<AccountingFigures>(() => {
+              /* Never settles: only the signal ends it. */
+            });
+          },
+        },
+      ],
+      store: memorySnapshotStore(),
+      metrics,
+    });
+
+    const tick = scheduler.tick();
+    await vi.waitFor(() => {
+      expect(seen).toBeDefined();
+    });
+    await scheduler.onModuleDestroy();
+    await tick;
+
+    expect(seen?.aborted).toBe(true);
+    expect(metrics.passes).toStrictEqual([]);
   });
 });

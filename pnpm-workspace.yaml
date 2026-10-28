@@ -371,6 +371,8 @@ catalog:
   '@codemirror/legacy-modes': 6.5.5
   '@lezer/highlight': 1.2.5
   vscode-json-languageservice: 5.7.2
+  '@earendil-works/pi-agent-core': 1.4.0
+  '@earendil-works/pi-ai': 1.4.0
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0

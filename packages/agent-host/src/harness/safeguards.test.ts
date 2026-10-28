@@ -1,3 +1,4 @@
+import { normalizeContext } from '@earendil-works/pi-ai';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentMessage, StreamFn } from '@earendil-works/pi-agent-core';
 import { createAgentSafeguards } from '#harness/safeguards.js';
@@ -80,7 +81,7 @@ describe('AgentSafeguards', () => {
     });
     await safeguards.transformContext(repeatedCalls(6, true));
     const base = vi.fn() as unknown as StreamFn;
-    const stream = await safeguards.wrapStreamFn(base)(stubModel, { messages: [] });
+    const stream = await safeguards.wrapStreamFn(base)(stubModel, normalizeContext({ messages: [] }));
 
     expect(base).not.toHaveBeenCalled();
     const result = await stream.result();

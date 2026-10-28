@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Agent } from '@earendil-works/pi-agent-core';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
-import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
+import { createAssistantMessageEventStream, normalizeContext } from '@earendil-works/pi-ai';
 import type { AssistantMessage, Context, Models, UserMessage } from '@earendil-works/pi-ai';
 import { compactionFoldOf, installCompaction } from '#harness/compaction.js';
 import type { CompactionOutcome, CompactionSummarizer } from '#harness/compaction.js';
@@ -241,7 +241,7 @@ describe('Compaction', () => {
     expect(append).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'history.compacted',
-        evictedMessageIds: ['message-1', 'message-2', 'message-3'],
+        evictedMessageIds: ['message-1', 'message-2', 'message-3', 'message-4'],
       }),
     );
     expect(agent.state.messages).toEqual(prepared?.context?.messages);
@@ -531,7 +531,7 @@ describe('Compaction', () => {
     const prepared = await compaction.prepareTurn();
 
     expect(JSON.stringify(prepared)).toContain(
-      'Compaction could not summarize 3 messages spanning 3 turns. The project files are the source of truth for the current work.',
+      'Compaction could not summarize 4 messages spanning 4 turns. The project files are the source of truth for the current work.',
     );
     const compacted = appended.find((event) => event.type === 'history.compacted');
     expect(compacted?.type === 'history.compacted' && compacted.details?.summary).toBe('placeholder');
@@ -561,7 +561,7 @@ describe('Compaction', () => {
       // oxlint-disable-next-line no-await-in-loop -- Each refusal must clear before the next attempt.
       await compaction.prepareTurn();
       // oxlint-disable-next-line no-await-in-loop -- The failure marker is the observable result of that attempt.
-      const stream = await compaction.wrapStreamFn(dispatchedStream)(stubModel, { messages });
+      const stream = await compaction.wrapStreamFn(dispatchedStream)(stubModel, normalizeContext({ messages }));
       // oxlint-disable-next-line no-await-in-loop -- The stream result closes one refusal before the next attempt.
       failures.push(await stream.result());
     }
@@ -604,7 +604,7 @@ describe('Compaction', () => {
       // oxlint-disable-next-line no-await-in-loop -- Each headroom verdict is one circuit-breaker strike.
       await compaction.prepareTurn();
       // oxlint-disable-next-line no-await-in-loop -- The stream exposes that attempt's coded failure.
-      const stream = await compaction.wrapStreamFn(dispatchedStream)(stubModel, { messages });
+      const stream = await compaction.wrapStreamFn(dispatchedStream)(stubModel, normalizeContext({ messages }));
       // oxlint-disable-next-line no-await-in-loop -- The terminal result must settle before the next strike.
       failures.push(await stream.result());
     }
@@ -648,7 +648,7 @@ describe('Compaction', () => {
       // oxlint-disable-next-line no-await-in-loop -- each admission reads what the one before it journaled.
       await compaction.prepareTurn();
       // oxlint-disable-next-line no-await-in-loop -- as above.
-      const stream = await compaction.wrapStreamFn(dispatchedStream)(stubModel, { messages });
+      const stream = await compaction.wrapStreamFn(dispatchedStream)(stubModel, normalizeContext({ messages }));
       // oxlint-disable-next-line no-await-in-loop -- as above.
       failures.push(await stream.result());
     }
@@ -780,9 +780,12 @@ describe('Compaction', () => {
       // oxlint-disable-next-line no-await-in-loop -- Each placeholder refusal is one independent pass.
       await compaction.prepareTurn();
       // oxlint-disable-next-line no-await-in-loop -- The failure marker closes before the next pass.
-      const stream = await compaction.wrapStreamFn(dispatchedStream)(stubModel, {
-        messages: messages as Context['messages'],
-      });
+      const stream = await compaction.wrapStreamFn(dispatchedStream)(
+        stubModel,
+        normalizeContext({
+          messages: messages as Context['messages'],
+        }),
+      );
       // oxlint-disable-next-line no-await-in-loop -- The stream result is the observable breaker verdict.
       results.push(await stream.result());
     }
@@ -1220,7 +1223,10 @@ describe('Compaction', () => {
         return stream;
       }) as unknown as Parameters<typeof compaction.wrapStreamFn>[0];
 
-      const stream = await compaction.wrapStreamFn(base)(stubModel, { messages: messages as Context['messages'] });
+      const stream = await compaction.wrapStreamFn(base)(
+        stubModel,
+        normalizeContext({ messages: messages as Context['messages'] }),
+      );
 
       expect(await stream.result()).toBe(reply);
       expect(base).toHaveBeenCalledTimes(1);
@@ -1282,7 +1288,7 @@ describe('Compaction', () => {
       return stream;
     });
 
-    const stream = await compaction.wrapStreamFn(base)(stubModel, { messages });
+    const stream = await compaction.wrapStreamFn(base)(stubModel, normalizeContext({ messages }));
     const result = await stream.result();
 
     expect(result.stopReason).toBe('stop');
@@ -1338,9 +1344,12 @@ describe('Compaction', () => {
       stream.push({ type: 'error', reason: 'error', error: message });
       return stream;
     }) as unknown as Parameters<typeof compaction.wrapStreamFn>[0];
-    const stream = await compaction.wrapStreamFn(overflow)(stubModel, {
-      messages: firstPrepared as Context['messages'],
-    });
+    const stream = await compaction.wrapStreamFn(overflow)(
+      stubModel,
+      normalizeContext({
+        messages: firstPrepared as Context['messages'],
+      }),
+    );
     const result = await stream.result();
 
     expect(result.errorMessage).toBe('Context is oversized but has no safe history to evict or clear.');
@@ -1467,7 +1476,10 @@ describe('Compaction', () => {
     const base = vi.fn(dispatchedStream) as unknown as Parameters<typeof compaction.wrapStreamFn>[0];
 
     const prepared = await compaction.prepareTurn();
-    const stream = await compaction.wrapStreamFn(base)(stubModel, { messages: prepared as Context['messages'] });
+    const stream = await compaction.wrapStreamFn(base)(
+      stubModel,
+      normalizeContext({ messages: prepared as Context['messages'] }),
+    );
     const result = await stream.result();
 
     expect(summarize).toHaveBeenCalledTimes(1);
@@ -1560,7 +1572,10 @@ describe('Compaction', () => {
     const base = vi.fn(dispatchedStream) as unknown as Parameters<typeof compaction.wrapStreamFn>[0];
 
     const prepared = await compaction.prepareTurn();
-    const stream = await compaction.wrapStreamFn(base)(stubModel, { messages: prepared as Context['messages'] });
+    const stream = await compaction.wrapStreamFn(base)(
+      stubModel,
+      normalizeContext({ messages: prepared as Context['messages'] }),
+    );
     const result = await stream.result();
 
     expect(summarize).not.toHaveBeenCalled();
@@ -1590,7 +1605,10 @@ describe('Compaction', () => {
     const base = vi.fn(dispatchedStream) as unknown as Parameters<typeof compaction.wrapStreamFn>[0];
 
     const prepared = await compaction.prepareTurn();
-    const stream = await compaction.wrapStreamFn(base)(stubModel, { messages: prepared as Context['messages'] });
+    const stream = await compaction.wrapStreamFn(base)(
+      stubModel,
+      normalizeContext({ messages: prepared as Context['messages'] }),
+    );
     const result = await stream.result();
 
     expect(summarize).toHaveBeenCalledTimes(1);

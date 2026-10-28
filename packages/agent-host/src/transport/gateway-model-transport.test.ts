@@ -401,7 +401,7 @@ describe('createGatewayModelTransport', () => {
      * provider deliberately degrades to pi's blanket cacheRetention policy. The
      * request names no reasoning, so it carries no `extra_body` at all. */
     expect(body).toBe(
-      String.raw`{"model":"fixture-model","messages":[{"role":"system","content":"static\n\nworkspace\n\ndynamic"},{"role":"user","content":"hello"}],"stream":true,"stream_options":{"include_usage":true},"store":false,"max_completion_tokens":8192,"tools":[{"type":"function","function":{"name":"read_file","description":"Read a file.","parameters":{"type":"object","properties":{"targetFile":{"type":"string"}},"required":["targetFile"],"additionalProperties":false},"strict":false}}]}`,
+      String.raw`{"model":"fixture-model","messages":[{"role":"system","content":"static\n\nworkspace\n\ndynamic"},{"role":"user","content":"hello"}],"stream":true,"stream_options":{"include_usage":true},"store":false,"max_completion_tokens":8192,"tools":[{"type":"function","function":{"name":"read_file","description":"Read a file.","parameters":{"type":"object","properties":{"targetFile":{"type":"string"}},"required":["targetFile"],"additionalProperties":false}}}]}`,
     );
     expect(events).toEqual([
       { type: 'thinking-start', contentIndex: 0 },
@@ -1199,7 +1199,7 @@ describe('createGatewayModelTransport', () => {
      * request no chat, which is how a `tau serve` workspace calls. */
     expect(seen).toEqual([
       ['accept', 'content-type', 'user-agent', 'x-tau-attempt-id'],
-      ['accept', 'anthropic-beta', 'anthropic-version', 'content-type', 'user-agent', 'x-tau-attempt-id'],
+      ['accept', 'anthropic-version', 'content-type', 'user-agent', 'x-tau-attempt-id'],
     ]);
   });
 
@@ -2399,6 +2399,40 @@ describe('createGatewayModelTransport', () => {
         .map((event) => event.text)
         .join(''),
     ).toBe('partial');
+    expect(events.at(-1)).toEqual({ type: 'completed', stopReason: 'stop' });
+  });
+
+  it('preserves split UTF-8 bytes when releasing complete frames before an unfinished Tau marker', async () => {
+    const text =
+      'data: {"id":"unicode","choices":[{"index":0,"delta":{"content":"é"}}]}\n\n' +
+      'data: {"id":"unicode","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n' +
+      'data: {"type":"tau_gateway"';
+    const bytes = new TextEncoder().encode(text);
+    const split = bytes.indexOf(0xc3) + 1;
+    const transport = createGatewayModelTransportWithModel({
+      baseUrl: 'https://gateway.example',
+      model: { contextWindow: 200_000, maxTokens: 8192 },
+      fetch: vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(bytes.slice(0, split));
+                controller.enqueue(bytes.slice(split));
+                controller.close();
+              },
+            }),
+            { headers: { 'content-type': 'text/event-stream' } },
+          ),
+      ),
+    });
+    const events = await collect(transport.stream(request()));
+    expect(
+      events
+        .filter((event) => event.type === 'text-delta')
+        .map((event) => event.text)
+        .join(''),
+    ).toBe('é');
     expect(events.at(-1)).toEqual({ type: 'completed', stopReason: 'stop' });
   });
 

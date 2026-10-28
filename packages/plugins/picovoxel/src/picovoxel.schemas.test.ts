@@ -128,7 +128,7 @@ describe('lane schemas', () => {
     });
   });
 
-  it('should resolve an unset view adaptivity, keep an explicit one and pin the uniform mesh for every export', () => {
+  it('should resolve an unset view adaptivity, keep an explicit one and mesh every export uniformly unless it asks', () => {
     expect(picovoxelRenderSchema.parse({ lane: 'exact', meshAdaptivity: 0.5 })).toMatchObject({ meshAdaptivity: 0.5 });
     expect(picovoxelRenderSchema.parse({ meshAdaptivity: 0.5, meshRelax: true })).toMatchObject({
       meshAdaptivity: 0.5,
@@ -139,8 +139,13 @@ describe('lane schemas', () => {
     }
     for (const schema of Object.values(picovoxelExportSchemas)) {
       expect(schema.parse({})).toMatchObject({ meshAdaptivity: 0, meshRelax: false });
-      expect(schema.safeParse({ meshAdaptivity: 0.5 }).success).toBe(false);
-      expect(schema.safeParse({ meshRelax: true }).success).toBe(false);
+      expect(schema.parse({ meshAdaptivity: 0.5, meshRelax: true })).toMatchObject({
+        meshAdaptivity: 0.5,
+        meshRelax: true,
+      });
+      for (const meshAdaptivity of [-0.1, 1]) {
+        expect(schema.safeParse({ meshAdaptivity }).success).toBe(false);
+      }
     }
   });
 

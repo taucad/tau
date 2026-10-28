@@ -1,3 +1,4 @@
+import { chatComposerTrayClassName } from '#components/chat/chat-input-styles.js';
 import { ChatMessageQueue } from '#components/chat/chat-message-queue.js';
 import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
@@ -326,7 +327,7 @@ const ExpandedChatHistory = memo(function ({
                 onScrollToBottom={scrollToBottom}
               />
               <ChatMessagePlanning key={activeChatId} className='mb-3 px-3' />
-              <div className='mx-2 -mb-3 flex flex-col rounded-t-2xl border border-b-0 border-border/60 bg-muted/20 pb-3 empty:hidden'>
+              <div className={chatComposerTrayClassName}>
                 <ChatTodoList key={activeChatId} />
                 <ChatMessageQueue key={`${activeChatId}:messages`} />
                 <ChatQuestionQueue key={`${activeChatId}:questions`} onDismissFocus={focusComposer} />

@@ -36,6 +36,8 @@ type NumberField = Readonly<{
   exclusiveMinimum: number | undefined;
   exclusiveMaximum: number | undefined;
   step: number;
+  /** What the row shows with no value: the default, else the schema's first example (an option the kernel resolves). */
+  shown: number;
 }>;
 
 type BooleanField = Readonly<{ kind: 'boolean'; path: readonly string[]; label: string }>;
@@ -134,6 +136,7 @@ const toField = (
     exclusiveMinimum,
     exclusiveMaximum,
     step,
+    shown: defaultValue,
   };
 };
 
@@ -298,7 +301,7 @@ export function KernelSettings({
   const renderNumber = (field: NumberField, value: unknown, onValue: (next: number) => void): React.JSX.Element => (
     <DropdownMenuSliderItem
       key={field.path.join('.')}
-      value={Number(value ?? field.min)}
+      value={Number(value ?? field.shown)}
       min={field.min}
       max={field.max}
       hasMinimum={field.hasMinimum}

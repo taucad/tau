@@ -1,4 +1,5 @@
 import { desktopBridge, isDesktopTarget } from '#filesystem/desktop-bridge.js';
+import { registrationProbeChatId } from '#lib/chat-observation-guard.js';
 import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
 import { probeBrowserAgentHostCapability } from '#services/agent-host-client.js';
 import { generatePrefixedId } from '@taucad/utils/id';
@@ -41,7 +42,7 @@ export const registerProjectAgentHost = async (
       const answer = await client.execute({
         type: 'attach',
         commandId: generatePrefixedId(idPrefix.request),
-        payload: { chatId: '00000000-0000-4000-8000-000000000000' },
+        payload: { chatId: registrationProbeChatId },
       });
       if (answer.status === 'refused') {
         throw Object.assign(new Error(answer.message), { code: answer.code });

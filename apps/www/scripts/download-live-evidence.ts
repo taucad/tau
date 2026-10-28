@@ -6,6 +6,7 @@
  * Usage: CHROME_CHANNEL=chrome PAGE_URL=https://taucad.dev/download/ EXPECT=dmg EVIDENCE_DIR=out/evidence node apps/www/scripts/download-live-evidence.ts
  *
  * `EXPECT=zip` records today's archive-first page as a baseline and requires its Mac buttons to say ZIP truthfully.
+ * `INJECT_CATALOG_404=true EXPECT=zip` drills the staging fallback in fresh browser contexts only.
  * The summary (`summary.json`) lists every failure; the process exits non-zero when there is one.
  */
 import { execFile } from 'node:child_process';
@@ -29,6 +30,14 @@ const pageUrl = new URL(process.env['PAGE_URL'] ?? 'https://taucad.dev/download/
 const expected = process.env['EXPECT'] ?? 'dmg';
 if (expected !== 'dmg' && expected !== 'zip') {
   throw new Error(`EXPECT must be dmg or zip, not ${expected}`);
+}
+const injection = process.env['INJECT_CATALOG_404'] ?? 'false';
+if (injection !== 'true' && injection !== 'false') {
+  throw new Error('INJECT_CATALOG_404 must be true or false');
+}
+const injectCatalog404 = injection === 'true';
+if (injectCatalog404 && (expected !== 'zip' || pageUrl.href !== 'https://taucad.dev/download/')) {
+  throw new Error('INJECT_CATALOG_404 requires EXPECT=zip and PAGE_URL=https://taucad.dev/download/');
 }
 const format = expected === 'dmg' ? 'DMG' : 'ZIP';
 const extension = `.${expected}`;
@@ -169,6 +178,26 @@ await mkdir(output, { recursive: true });
 const capturedAt = new Date().toISOString();
 
 const catalogUrl = `${downloadsOrigin}/latest/installers.json`;
+const injectedRequests: Array<{ viewport: string; url: string; status: number }> = [];
+
+/**
+ * Inject only the staging catalog response; archive downloads and direct evidence reads remain live.
+ * @param page - A fresh browser page, before navigation.
+ * @param viewport - The evidence view receiving the injection.
+ */
+const injectMissingCatalog = async (page: Page, viewport: 'desktop' | 'mobile'): Promise<void> => {
+  if (injectCatalog404) {
+    await page.route(catalogUrl, async (route) => {
+      await route.fulfill({
+        status: 404,
+        contentType: 'text/plain',
+        body: 'Missing catalog (injected browser-only drill)',
+        headers: { 'Access-Control-Allow-Origin': pageUrl.origin },
+      });
+      injectedRequests.push({ viewport, url: route.request().url(), status: 404 });
+    });
+  }
+};
 const catalogResponse = await fetchInFull(catalogUrl, true);
 let catalog: Catalog | undefined;
 if (catalogResponse.status === 200 && catalogResponse.body) {
@@ -224,8 +253,13 @@ const browser = await chromium.launch({ channel: process.env['CHROME_CHANNEL'] ?
 const downloadDirectory = await mkdtemp(join(tmpdir(), 'tau-live-downloads-'));
 const evidence: Record<string, unknown> = {};
 try {
-  const context = await browser.newContext({ acceptDownloads: true, viewport: { width: 1440, height: 900 } });
+  const context = await browser.newContext({
+    acceptDownloads: true,
+    viewport: { width: 1440, height: 900 },
+    serviceWorkers: injectCatalog404 ? 'block' : 'allow',
+  });
   const page = await context.newPage();
+  await injectMissingCatalog(page, 'desktop');
   const consoleErrors: string[] = [];
   page.on('pageerror', (error) => consoleErrors.push(error.message));
   const catalogRequests: Array<{ url: string; status: number }> = [];
@@ -258,6 +292,14 @@ try {
     .evaluateAll((links) =>
       links.map((link) => ({ text: link.textContent.trim(), href: (link as HTMLAnchorElement).href })),
     );
+
+  if (injectCatalog404) {
+    check(
+      injectedRequests.some((request) => request.viewport === 'desktop') &&
+        catalogRequests.some((request) => request.url === catalogUrl && request.status === 404),
+      'The desktop browser did not receive the injected catalog 404; catalog hydration must be enabled',
+    );
+  }
 
   const primary = buttons.filter((button) => !button.role.startsWith('alternative:') && button.visible);
   for (const role of ['host', 'list:mac', 'list:macIntel', 'hero:macIntel']) {
@@ -331,6 +373,12 @@ try {
     check(!failure && path !== undefined, `${architecture} download failed: ${failure}`);
     check(name.endsWith(extension), `${architecture} download saved ${name}, not a ${format}`);
     check(name.includes(`-${architecture}.`), `${architecture} button downloaded ${name}`);
+    if (injectCatalog404) {
+      check(
+        download.url() === `${downloadsOrigin}/latest/Tau-macos-${architecture}.zip`,
+        `${architecture} fallback did not download the live staging ZIP`,
+      );
+    }
     if (!path) {
       continue;
     }
@@ -425,12 +473,22 @@ try {
     updaterFeeds.push({ ...result, body: undefined, feed });
   }
 
-  const mobile = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const mobile = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    serviceWorkers: injectCatalog404 ? 'block' : 'allow',
+  });
   const mobilePage = await mobile.newPage();
+  await injectMissingCatalog(mobilePage, 'mobile');
   await mobilePage.goto(pageUrl.href, { waitUntil: 'networkidle' });
   await mobilePage.screenshot({ path: join(output, 'download-page-mobile.png'), fullPage: true });
   const mobileOverflow = await mobilePage.evaluate(() => document.documentElement.scrollWidth > innerWidth);
   check(!mobileOverflow, 'The download page scrolls horizontally at 390 px');
+  if (injectCatalog404) {
+    check(
+      injectedRequests.some((request) => request.viewport === 'mobile'),
+      'The mobile browser did not receive the injected catalog 404',
+    );
+  }
   await mobile.close();
 
   Object.assign(evidence, {
@@ -470,6 +528,9 @@ const summary = {
   completedAt: new Date().toISOString(),
   pageUrl: pageUrl.href,
   expect: expected,
+  failureInjection: injectCatalog404
+    ? { kind: 'catalog-http-404', scope: 'fresh-browser-only', url: catalogUrl, requests: injectedRequests }
+    : undefined,
   runner: {
     platform: platform(),
     arch: arch(),
@@ -498,6 +559,6 @@ const summary = {
   passed: failures.length === 0,
 };
 await writeFile(join(output, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
-// The step summary carries the verdict and the failures without the artifact.
-console.log(JSON.stringify({ passed: summary.passed, expect: expected, catalog: summary.catalog, failures }, null, 2));
+// Log the full public evidence so reviewers can inspect it without downloading the artifact.
+console.log(JSON.stringify(summary, null, 2));
 process.exitCode = failures.length === 0 ? 0 : 1;

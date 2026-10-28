@@ -782,7 +782,7 @@ describe('ProjectWorkspaceProvider', () => {
       fileReturn?.openFileFrom(preview, 'print');
     });
     expect(send).toHaveBeenCalledWith({ type: 'openFile', path: preview, source: 'user' });
-    // The preview's own open, however late Monaco reports it, keeps the way back.
+    // The preview's own open, however late the code editor reports it, keeps the way back.
     act(() => {
       listeners.get('fileOpened')?.({ type: 'fileOpened', path: preview, source: 'user' });
     });
@@ -827,16 +827,18 @@ describe('ProjectWorkspaceProvider', () => {
     act(() => {
       workspace.connectWorkbench(opener);
     });
-    // Monaco 0.55 types into a role="textbox" EditContext div, or its textarea fallback, and binds Ctrl+M there
-    // on Windows and Linux ("Toggle Tab Key Moves Focus").
-    const editContext = document.createElement('div');
-    editContext.setAttribute('role', 'textbox');
-    editContext.tabIndex = 0;
+    // CodeMirror types into its contenteditable textbox and binds Ctrl+M there
+    // on Windows and Linux to toggle Tab focus mode.
+    const codeContent = document.createElement('div');
+    codeContent.className = 'cm-content';
+    codeContent.contentEditable = 'true';
+    codeContent.setAttribute('role', 'textbox');
+    codeContent.tabIndex = 0;
     const textArea = document.createElement('textarea');
     textArea.setAttribute('role', 'textbox');
-    document.body.append(editContext, textArea);
+    document.body.append(codeContent, textArea);
 
-    for (const input of [editContext, textArea]) {
+    for (const input of [codeContent, textArea]) {
       // `fireEvent` returns false once a listener has prevented the default action.
       expect(fireEvent.keyDown(input, { key: 'm', ctrlKey: true })).toBe(true);
     }
@@ -844,7 +846,7 @@ describe('ProjectWorkspaceProvider', () => {
 
     expect(fireEvent.keyDown(document.body, { key: 'm', ctrlKey: true })).toBe(false);
     expect(opener).toHaveBeenCalledExactlyOnceWith('kinematics');
-    editContext.remove();
+    codeContent.remove();
     textArea.remove();
   });
 });

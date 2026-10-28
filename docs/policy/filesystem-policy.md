@@ -122,7 +122,7 @@ When listing a single directory, `readdir` + parallel `Promise.all(stat(...))` i
 | Layer                    | Cache                          | Eviction                      | Notes                                       |
 | ------------------------ | ------------------------------ | ----------------------------- | ------------------------------------------- |
 | File manager `openFiles` | `Map<path, Uint8Array>`        | Must have max size + TTL      | Stores recently accessed file contents      |
-| Monaco `syncedPaths`     | Internal set                   | TTL 1h, max 200               | Background-synced JS/TS models              |
+| Editor document session  | Background document map        | LRU, max 10 clean documents   | Held, dirty and saving documents stay owned |
 | Kernel geometry cache    | `.tau/cache/geometry/*.bin`    | Max age + max entries         | MessagePack serialized meshes               |
 | Kernel parameter cache   | `.tau/cache/parameters/*.json` | None currently                | JSON parameter snapshots                    |
 | Standalone providers     | Per storage root               | Must be reused, not recreated | `filesystem-authority-policy.md` Rules 8/14 |

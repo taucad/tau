@@ -716,13 +716,30 @@ export const sessionRecordOf = (context: AcpSessionContext, lent: AcpLend): Json
 };
 
 /*
+ * Whether this agent accepts an image prompt block.
+ *
+ * The advertisement is authoritative except for native Grok. Its `initialize`
+ * builds prompt capabilities with only embedded context
+ * (`PromptCapabilities::new().embedded_context(true)` in xai-org/grok-build
+ * `acp_agent.rs`), so `image` stays false. `parse_prompt` still accepts
+ * `ContentBlock::Image`, and `image_describe` sends those bytes to a
+ * vision-capable Grok model; a failed describe fails the turn instead of
+ * dropping the image. Audio is not on that path. The registry already refuses
+ * a Grok CLI older than 1.0.52, which is that reader.
+ */
+const acceptsImage = (context: AcpSessionContext): boolean =>
+  context.facts.agentCapabilities?.promptCapabilities?.image === true || context.adapter.id === 'grok';
+
+/*
  * The prompt blocks this agent can actually receive (V12): media it cannot read
  * is refused, never silently dropped; text resources degrade to text.
  */
 const sendable = (context: AcpSessionContext, blocks: readonly ContentBlock[]): ContentBlock[] | AcpFailure => {
   const promptCapabilities = context.facts.agentCapabilities?.promptCapabilities;
   const media = blocks.find(
-    (block) => (block.type === 'image' || block.type === 'audio') && promptCapabilities?.[block.type] !== true,
+    (block) =>
+      (block.type === 'image' && !acceptsImage(context)) ||
+      (block.type === 'audio' && promptCapabilities?.audio !== true),
   );
   const refuse = (what: string): AcpFailure => ({
     code: 'EXTERNAL_AGENT_CONTENT_UNSUPPORTED',

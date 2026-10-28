@@ -32,18 +32,18 @@ export default function main(pico: Pico): PicovoxelResult {
 const replaceMain = async (code: string) => {
   await openCommand('Open files');
   await target.click(selectors.getByCss('[data-testid="file-tree-item"][data-file-tree-path="main.ts"]'));
-  await target.expectVisible(selectors.getByCss('.monaco-editor:visible .view-lines').last(), 60_000);
+  await target.expectVisible(selectors.getByCss('.cm-editor:visible .cm-content').last(), 60_000);
   // Click inside the editor viewport; a long rendered line can extend beneath adjacent panels.
-  await target.click(selectors.getByCss('.monaco-editor:visible').last(), { position: { x: 80, y: 50 } });
+  await target.click(selectors.getByCss('.cm-editor:visible').last(), { position: { x: 80, y: 50 } });
   await target.keyboardPress('ControlOrMeta+a');
-  // Paste one edit: character-by-character input invokes Monaco's bracket/quote completion.
+  // Paste one edit: character-by-character input invokes CodeMirror's bracket/quote completion.
   await target.evaluate(async (text) => navigator.clipboard.writeText(text), code);
   await target.keyboardPress('ControlOrMeta+v');
   await target.keyboardPress('Escape');
   await expect
     .poll(async () =>
       target.evaluate(() =>
-        [...document.querySelectorAll('.monaco-editor .view-lines')]
+        [...document.querySelectorAll('.cm-editor .cm-content')]
           .map((element) => element.textContent)
           .join('')
           .replaceAll(/\s/gu, ''),

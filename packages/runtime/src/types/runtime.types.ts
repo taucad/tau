@@ -38,7 +38,7 @@ import type { RuntimeContentInput, RuntimeContentKey } from '#types/runtime-cont
 
 /**
  * Classification for stack frame origin.
- * - `user` -- the developer's project code. Visible by default. Used for Monaco error markers.
+ * - `user` -- the developer's project code. Visible by default. Used for editor error markers.
  * - `library` -- third-party CAD libraries the user imported (replicad, @jscad/modeling). Visible by default.
  * - `framework` -- runtime worker infrastructure (Proxy traps, bundler, esbuild). Hidden by default.
  * - `runtime` -- V8/Emscripten/WASM boundary frames, `node:` internals, native code. Hidden by default.

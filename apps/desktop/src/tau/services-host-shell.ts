@@ -38,6 +38,8 @@ export type DesktopShellOptions = Readonly<{
   bwrapPath?: string | undefined;
   platform?: NodeJS.Platform | undefined;
   home?: string | undefined;
+  /** On Linux, the host-owned file journalling protected-path stand-ins, swept at the next start after a crash. */
+  standInJournal?: string | undefined;
   /** Injected for tests; otherwise {@link desktopShellProvider}. */
   provider?: ShellProvider | undefined;
   log?: ((event: string, detail?: unknown, level?: 'info' | 'warn') => void) | undefined;
@@ -93,7 +95,7 @@ export const bundledShellSupervisor = (): SandboxShellProviderOptions['superviso
  * @returns The provider, or `undefined` when this platform has none.
  */
 export const desktopShellProvider = (
-  options: Pick<DesktopShellOptions, 'bwrapPath' | 'home'> & Readonly<{ platform: NodeJS.Platform }>,
+  options: Pick<DesktopShellOptions, 'bwrapPath' | 'home' | 'standInJournal'> & Readonly<{ platform: NodeJS.Platform }>,
 ): ShellProvider | undefined => {
   const supervisor = bundledShellSupervisor();
   const shared = {
@@ -105,6 +107,7 @@ export const desktopShellProvider = (
       return createSandboxShellProvider({
         ...shared,
         ...(options.bwrapPath === undefined ? {} : { bwrapPath: options.bwrapPath }),
+        ...(options.standInJournal === undefined ? {} : { standInJournal: options.standInJournal }),
       });
     }
     case 'darwin': {
@@ -214,7 +217,13 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
   const probe = async (): Promise<ShellProbe> => {
     probing ??= (async (): Promise<ShellProbe> => {
       const provider =
-        options.provider ?? desktopShellProvider({ platform, bwrapPath: options.bwrapPath, home: options.home });
+        options.provider ??
+        desktopShellProvider({
+          platform,
+          bwrapPath: options.bwrapPath,
+          home: options.home,
+          standInJournal: options.standInJournal,
+        });
       const outcome =
         provider === undefined
           ? noProvider(platform)

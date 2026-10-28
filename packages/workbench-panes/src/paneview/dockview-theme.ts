@@ -17,7 +17,7 @@ export const tauDockviewTheme: DockviewTheme = {
  * Complete Tailwind-based theme for Dockview.
  *
  * Uses `[&_selector]:utility` for descendant rules and `[--var:value]` for CSS
- * custom property declarations (like code-editor.client.tsx does for Monaco).
+ * custom property declarations (like code-editor.client.tsx does for the source editor).
  * Pseudo-element overrides use `[&_selector::before]` / `[&_selector::after]`
  * as arbitrary variants so Tailwind does not inject default `content`. The Tau app sets it on its dock's root; a host
  * outside the app sets it on the element around its panes, so their paneviews inherit the same `--dv-*` tokens.
@@ -231,12 +231,12 @@ export const dockviewStyleOverrides = cn(
 
   // ═══════════════════════════════════════════════════════════════════════════
   // CSS CONTAINMENT OVERRIDES
-  // Remove containment that breaks position:fixed for Monaco widgets.
+  // Remove containment that breaks position:fixed for editor tooltips.
   // ═══════════════════════════════════════════════════════════════════════════
 
   // Root: Dockview's .dv-dockview has `contain: layout` which creates a new
   // containing block for position:fixed descendants (per CSS Containment spec).
-  // This causes Monaco's fixedOverflowWidgets to position relative to
+  // Otherwise fixed editor tooltips can position relative to
   // .dv-dockview instead of the viewport, rendering them off-screen.
   '[&_.dv-dockview]:[contain:none]',
 

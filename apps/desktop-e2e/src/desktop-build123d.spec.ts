@@ -660,13 +660,13 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     const sourceItem = fileTreeItemOf(page, 'main.cs');
     await expectVisible(sourceItem, 60_000);
     await sourceItem.click();
-    await expectVisible(page.locator('.monaco-editor'), 60_000);
+    await expectVisible(page.locator('.cm-editor'), 60_000);
     await expect
       .poll(
         async () =>
           page
-            .locator('.monaco-editor .view-line span[class*="mtk"]')
-            .evaluateAll((tokens: HTMLElement[]) => new Set(tokens.map((token) => token.getAttribute('class'))).size),
+            .locator('.cm-editor .cm-line span')
+            .evaluateAll((tokens: HTMLElement[]) => new Set(tokens.map((token) => getComputedStyle(token).color)).size),
         { timeout: 30_000 },
       )
       .toBeGreaterThan(1);

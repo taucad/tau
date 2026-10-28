@@ -87,6 +87,8 @@ export const verifyClosureTree = async (
  * ```typescript
  * import { reverifyClosure } from '@taucad/runtime/preparation/node';
  *
+ * declare const closureRoot: string;
+ *
  * const damaged = await reverifyClosure(closureRoot, AbortSignal.timeout(300_000));
  * ```
  */

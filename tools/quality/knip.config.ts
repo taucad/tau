@@ -216,10 +216,6 @@ const config: KnipConfig = {
         'nanoraster',
       ],
     },
-    'apps/libs/lsp': {
-      // Ambient module declaration for Monaco's TypeScript worker import.
-      entry: ['src/monaco-ts-worker/ts-worker.module.d.ts'],
-    },
     'apps/react-e2e/apps/electron': {
       // electron-vite inputs (main, kernel host, preload) and the renderer's index.html script.
       entry: [
@@ -272,6 +268,9 @@ const config: KnipConfig = {
         // `tau-ui-source-alias` (vite.config.ts) swaps these in for their `#…` facades per build
         // target (cloud, self-host, desktop); knip only follows the facade import.
         'app/**/*.{cloud,self-host,desktop}.{ts,tsx}',
+        // The same resolver substitutes these no-op modules when the staging harness is disabled.
+        'app/lib/observability-harness-disabled.ts',
+        'app/lib/observability-harness-hydration-disabled.ts',
         // Vite alias replacement for `@resvg/resvg-js` in the browser bundle.
         'app/lib/browser-stubs/resvg-js.ts',
         // The deletion component browser suite selects this nested config with --config.

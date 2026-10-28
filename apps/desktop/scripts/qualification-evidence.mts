@@ -67,6 +67,7 @@ export const qualificationRendererObservationSchema = z.strictObject({
     )
     .min(1),
   saveObservedAt: z.number().positive(),
+  softwareRenderer: z.string().min(1).optional(),
 });
 export type QualificationRendererObservation = z.infer<typeof qualificationRendererObservationSchema>;
 /** Raw Windows observations: null means unavailable, never an enabled default. */
@@ -280,7 +281,7 @@ export type QualificationStageEvidence = {
   security: QualificationSecurity;
 };
 export type QualificationEvidence = {
-  mode: 'release' | 'fixture';
+  mode: 'release' | 'fixture' | 'software-ci';
   route: DesktopAcceptanceRoute;
   target: 'darwin-arm64' | 'darwin-x64' | 'win32-x64' | 'linux-x64';
   stages: readonly [QualificationStageEvidence, QualificationStageEvidence, QualificationStageEvidence];
@@ -596,7 +597,10 @@ const checkSecurity = (stage: QualificationStageEvidence, target: QualificationE
     if (!process) {
       continue;
     }
-    requireEvidence(!/--no-sandbox|--disable-setuid-sandbox/u.test(process.commandLine), 'sandbox bypass command line');
+    requireEvidence(
+      !/--no-sandbox|--disable-setuid-sandbox|--disable-gpu-sandbox/u.test(process.commandLine),
+      'sandbox bypass command line',
+    );
     requireEvidence(
       !Object.values(process.measurements).some((value) => value.startsWith('unavailable:')),
       'security measurement unavailable',
@@ -682,8 +686,7 @@ const checkSecurity = (stage: QualificationStageEvidence, target: QualificationE
 };
 
 /** Called by the native runner after independently reading OS processes, installed bytes and retained project files. */
-export const collectQualificationReceipt = (input: QualificationEvidence): DesktopAcceptanceReceipt => {
-  requireEvidence(input.mode === 'release', 'fixture runs cannot qualify releases');
+const validateQualificationEvidence = (input: QualificationEvidence): DesktopAcceptanceReceipt => {
   const [a, b, c] = input.stages;
   const stages = input.stages.map((stage) => ({
     ...stage,
@@ -948,4 +951,39 @@ export const collectQualificationReceipt = (input: QualificationEvidence): Deskt
     },
     c.candidate,
   );
+};
+
+/** Release receipts require stock graphics; isolated software runs never produce acceptance receipts. */
+export const collectQualificationReceipt = (input: QualificationEvidence): DesktopAcceptanceReceipt => {
+  requireEvidence(input.mode === 'release', 'fixture runs and software runs cannot qualify releases');
+  requireEvidence(
+    input.stages.every(
+      (stage) =>
+        !stage.renderer.softwareRenderer &&
+        stage.security.processes.every(
+          (process) =>
+            !/--enable-unsafe-swiftshader|--ignore-gpu-blocklist|--use-angle=swiftshader|--use-gl=swiftshader/u.test(
+              process.commandLine,
+            ),
+        ),
+    ),
+    'software graphics cannot qualify stock GPU acceptance',
+  );
+  return validateQualificationEvidence(input);
+};
+
+/** Validate the same installed upgrade observations, retaining stock GPU acceptance as an open gate. */
+export const validateSoftwareCiEvidence = (input: QualificationEvidence): void => {
+  requireEvidence(
+    input.mode === 'software-ci' &&
+      input.target === 'linux-x64' &&
+      input.route.startsWith('linux-') &&
+      !input.acceptance &&
+      !input.windowsAcceptance &&
+      input.stages.every(
+        (stage) => stage.candidate.channel === 'staging' && /SwiftShader/iu.test(stage.renderer.softwareRenderer ?? ''),
+      ),
+    'isolated software CI requires Linux staging SwiftShader observations',
+  );
+  validateQualificationEvidence(input);
 };

@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { cp, mkdir, mkdtemp, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { build } from 'esbuild';
@@ -79,12 +79,15 @@ import(${JSON.stringify(import.meta.resolve('@anthropic-ai/sandbox-runtime'))}).
   await writeFile(
     join(root, 'main.cjs'),
     `
-const { app, utilityProcess } = require('electron');
+const { app, utilityProcess, BrowserWindow } = require('electron');
 const assert = require('node:assert/strict');
 const { mkdirSync, symlinkSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
 app.setPath('userData', join(__dirname, 'profile'));
+// The software probe closes its window before the utility assertions; only explicit completion may quit.
+app.on('window-all-closed', () => {});
 const children = [];
+let softwareRenderer;
 const message = child => new Promise((resolve, reject) => {
   const timer = setTimeout(() => reject(new Error('Utility response deadline')), 15000);
   child.once('message', value => { clearTimeout(timer); resolve(value); });
@@ -98,6 +101,22 @@ const launch = root => {
   return child;
 };
 app.whenReady().then(async () => {
+  if (process.env.TAU_QUALIFICATION_GRAPHICS === 'isolated-software') {
+    const window = new BrowserWindow({show:false, webPreferences:{sandbox:true, contextIsolation:true, nodeIntegration:false}});
+    try {
+      await window.loadURL('data:text/html,<canvas></canvas>');
+      const graphics = await window.webContents.executeJavaScript("(() => { const gl = document.querySelector('canvas').getContext('webgl2'); const debug = gl?.getExtension('WEBGL_debug_renderer_info'); return {webgl2:gl !== null, renderer:debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : ''}; })()");
+      console.log(JSON.stringify({kind:'isolated-software-ci-preflight', ...graphics,
+        rendererSandbox:window.webContents.getLastWebPreferences().sandbox,
+        stockGpuAcceptance:'open'}));
+      assert.equal(graphics.webgl2, true);
+      assert.match(graphics.renderer, /SwiftShader/i);
+      softwareRenderer = graphics.renderer;
+      assert.equal(window.webContents.getLastWebPreferences().sandbox, true);
+    } finally {
+      window.destroy();
+    }
+  }
   const authority = join(__dirname, 'authority with spaces');
   const alias = join(__dirname, 'alias');
   mkdirSync(authority);
@@ -127,9 +146,12 @@ app.whenReady().then(async () => {
   writeFileSync(join(__dirname, 'outside'), 'inert');
   symlinkSync(join(__dirname, 'outside'), join(unsafe, 'authority.writer.lock'));
   assert.equal((await message(launch(unsafe))).code, 'AUTHORITY_LOCK_UNAVAILABLE');
-  console.log(JSON.stringify({status:'passed', platform:process.platform, electron:first.electron,
+  const completed = {status:'passed', platform:process.platform, electron:first.electron,
     dependencyLookups:first.lookups,
-    utilityExclusion:true, physicalAliasExclusion:true, sigkillRecovery:true, explicitRelease:true, symlinkRefusal:true}));
+    ...(softwareRenderer ? {softwareRenderer} : {}),
+    utilityExclusion:true, physicalAliasExclusion:true, sigkillRecovery:true, explicitRelease:true, symlinkRefusal:true};
+  writeFileSync(join(__dirname, 'completed.json'), JSON.stringify(completed), {flag:'wx'});
+  console.log(JSON.stringify(completed));
 }).then(() => {
   for (const child of children) if (child.pid) child.kill();
   app.exit(0);
@@ -160,12 +182,30 @@ app.whenReady().then(async () => {
   runQualificationApt('install', [...packages]);
   const installed = await stat('/opt/tau-staging/releases/1.0.1/Tau');
   assert.equal(installed.uid, 0);
-  const result = spawnSync('/usr/bin/tau-staging', [join(root, 'main.cjs')], {
+  const graphicsArguments =
+    process.env['TAU_QUALIFICATION_GRAPHICS'] === 'isolated-software'
+      ? ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']
+      : [];
+  const result = spawnSync('/usr/bin/tau-staging', [join(root, 'main.cjs'), ...graphicsArguments], {
     stdio: 'inherit',
     timeout: 90_000,
   });
   assert.ifError(result.error);
   assert.equal(result.status, 0, 'Real Electron utility ownership qualification failed');
+  const completed = z
+    .object({
+      status: z.literal('passed'),
+      utilityExclusion: z.literal(true),
+      physicalAliasExclusion: z.literal(true),
+      sigkillRecovery: z.literal(true),
+      explicitRelease: z.literal(true),
+      symlinkRefusal: z.literal(true),
+      softwareRenderer: z.string().optional(),
+    })
+    .parse(JSON.parse(await readFile(join(root, 'completed.json'), 'utf8')));
+  if (process.env['TAU_QUALIFICATION_GRAPHICS'] === 'isolated-software') {
+    assert.match(completed.softwareRenderer ?? '', /SwiftShader/iu);
+  }
 } finally {
   if (installationStarted) {
     runQualificationApt('remove', ['tau-staging', 'tau-staging-runtime-1.0.1']);

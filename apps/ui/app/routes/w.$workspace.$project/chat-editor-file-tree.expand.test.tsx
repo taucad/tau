@@ -199,8 +199,8 @@ describe('a Files reveal emitted before the tree mounts', () => {
       </TooltipProvider>,
     );
     await waitFor(() => {
-      expect(screen.getByRole('treeitem', { name: 'parts', exact: true })).toHaveAttribute('aria-expanded', 'true');
-      expect(screen.getByRole('treeitem', { name: 'nested', exact: true })).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByRole('treeitem', { name: 'parts' })).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByRole('treeitem', { name: 'nested' })).toHaveAttribute('aria-expanded', 'true');
       expect(screen.getByRole('treeitem', { name: 'wheel.scad' })).toHaveAttribute('aria-selected', 'true');
     });
   });

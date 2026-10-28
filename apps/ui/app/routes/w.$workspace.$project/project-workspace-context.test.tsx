@@ -804,6 +804,7 @@ describe('ProjectWorkspaceProvider', () => {
   });
 
   it('should leave file reveal routing to the sender-selected Workbench owner', () => {
+    state.isMobile = true;
     render(
       <ProjectWorkspaceProvider>
         <Probe />
@@ -813,8 +814,9 @@ describe('ProjectWorkspaceProvider', () => {
     const opener = vi.fn();
     act(() => {
       workspace.connectWorkbench(opener);
-      workspace.openPanel('editor');
+      listeners.get('fileOpened')?.({ type: 'fileOpened', path: 'parts/wheel.ts', source: 'user' });
     });
+    expect(send).toHaveBeenCalledWith({ type: 'setPanelState', panelState: { mobileActiveTab: 'editor' } });
     opener.mockClear();
     send.mockClear();
     act(() => {

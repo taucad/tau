@@ -5,11 +5,12 @@ import { createElement } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { DockviewApi, DockviewDidDropEvent, DockviewGroupPanel } from 'dockview-react';
 import type { CapabilitiesManifest } from '@taucad/runtime';
-import type { FileEntry, CheckedFileWriteResult } from '@taucad/types';
+import type { FileEntry, FileProvenanceSource, CheckedFileWriteResult } from '@taucad/types';
 import { workbenchRecords } from '@taucad/workbench';
 import { tauEditorPanelDragMime, tauFileDragMime } from '@taucad/types/constants';
 import {
   createViewerNewTab,
+  createViewerFileDataSource,
   ensureViewerGroup,
   handleViewerDrop,
   listViewerSelectableFiles,
@@ -327,5 +328,117 @@ describe('handleViewerDrop', () => {
 
     expect(setActive).toHaveBeenCalledOnce();
     expect(addPanel).not.toHaveBeenCalled();
+  });
+});
+
+describe('createViewerFileDataSource', () => {
+  const capabilities = { registrations: [{ kind: 'kernel', id: 'jscad', extensions: ['js'] }] } satisfies Pick<
+    CapabilitiesManifest,
+    'registrations'
+  >;
+  const entry = (path: string, source: FileProvenanceSource = 'project') =>
+    ({
+      type: 'file',
+      path,
+      name: path.split('/').pop() ?? path,
+      size: 12,
+      mtimeMs: 0,
+      contentKind: 'text',
+      lineCount: 1,
+      provenance: { source, versioned: source === 'project', agentAccess: 'read-only' },
+    }) as const;
+
+  it('should search unopened nested directories through the rooted index and retain viewer exclusions', async () => {
+    const nested = entry('public/models/touch-parameters.js');
+    const searchFiles = vi.fn(async () => [
+      nested,
+      entry('public/check.geospec.js'),
+      entry('thumbnail.webp'),
+      entry('node_modules/hidden.js', 'dependencies'),
+      entry('.agents/skills/example.js', 'system-skills'),
+    ]);
+    const listDirectory = vi.fn(async () => []);
+    const source = createViewerFileDataSource(
+      { listDirectory, searchFiles, getTreeSnapshot: () => new Map() },
+      capabilities,
+    );
+    expect(await source.searchFiles('touch-parameters')).toEqual([
+      { name: nested.name, path: nested.path, size: 12, isFolder: false },
+    ]);
+    expect(searchFiles).toHaveBeenCalledExactlyOnceWith('touch-parameters', {
+      maxResults: 100,
+      includeDirectories: false,
+    });
+    expect(listDirectory).not.toHaveBeenCalled();
+  });
+
+  it('should browse one requested directory and apply provenance from its loaded snapshot', async () => {
+    const visible = entry('public/model.js');
+    const overlay = entry('public/overlay.js', 'dependencies');
+    const excluded = entry('public/check.geospec.js');
+    const snapshot = new Map<string, FileEntry>(
+      [visible, overlay, excluded].map((file) => [file.path, { ...file, isLoaded: true }]),
+    );
+    const folder = { name: 'models', path: 'public/models', isFolder: true, size: 0, mtimeMs: 0 } as const;
+    const listed = [
+      folder,
+      ...[visible, overlay, excluded].map(
+        ({ name, path, size, mtimeMs, contentKind, lineCount }) =>
+          ({
+            name,
+            path,
+            size,
+            mtimeMs,
+            contentKind,
+            lineCount,
+            isFolder: false,
+          }) as const,
+      ),
+    ];
+    const listDirectory = vi.fn(async () => listed);
+    const searchFiles = vi.fn(async () => []);
+    const source = createViewerFileDataSource(
+      { listDirectory, searchFiles, getTreeSnapshot: () => snapshot },
+      capabilities,
+    );
+    expect(await source.loadDirectory('public')).toEqual([folder, listed[1]]);
+    expect(listDirectory).toHaveBeenCalledExactlyOnceWith('public');
+    expect(searchFiles).not.toHaveBeenCalled();
+  });
+
+  it('should require refinement when the bounded search cannot establish complete supported results', async () => {
+    const valid = entry('parts/wheel.js');
+    const candidates = [...Array.from({ length: 100 }, (_, index) => entry(`notes/wheel-${index}.txt`)), valid];
+    const source = createViewerFileDataSource(
+      {
+        listDirectory: async () => [{ ...valid, isFolder: false }],
+        searchFiles: async (query, options) =>
+          query === 'wheel.js' ? [valid] : candidates.slice(0, options?.maxResults),
+        getTreeSnapshot: () => new Map(),
+      },
+      capabilities,
+    );
+    await expect(source.searchFiles('wheel')).rejects.toThrow(
+      'Refine your search or browse folders to see supported files.',
+    );
+    expect(await source.searchFiles('wheel.js')).toEqual([
+      { name: 'wheel.js', path: valid.path, size: 12, isFolder: false },
+    ]);
+    expect(await source.loadDirectory('parts')).toEqual([{ ...valid, isFolder: false }]);
+  });
+
+  it('should preserve a directory read failure for the picker retry boundary', async () => {
+    const failure = new Error('Directory unavailable');
+    const source = createViewerFileDataSource(
+      {
+        listDirectory: async () => {
+          throw failure;
+        },
+        searchFiles: async () => [],
+        getTreeSnapshot: () => new Map(),
+      },
+      capabilities,
+    );
+    await expect(source.loadDirectory('public')).rejects.toBe(failure);
   });
 });

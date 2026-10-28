@@ -1760,14 +1760,31 @@ describe('a chat continued on a second device', () => {
 
     /* A forgotten pause holds the chat for a bounded time, then its device stops writing and the fence lets go. */
     it('should stop a paused run’s heartbeats once its hold is over', async () => {
-      const root = await pausedRun({ runHeartbeat: 10, pausedRunHold: 120, publish: sharedPublish });
-      await rowsUntil(root, (found) => heartbeatsAfter(found, 'paused').length >= 2);
-      await sleep(300);
-      const settled = await heartbeatCount(root);
-      await sleep(150);
-
-      expect(await heartbeatCount(root)).toBe(settled);
-      expect(settled).toBeLessThan(20);
+      const clock = new SimulatedClock();
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        const { root } = await pausedRunOn({ clock, runHeartbeat: 10, pausedRunHold: 120, publish: sharedPublish });
+        await rowsUntil(root, (found) => found.some((row) => row.type === 'turn.finalized'));
+        const advance = (milliseconds: number): void => {
+          vi.setSystemTime(Date.now() + milliseconds);
+          clock.increment(milliseconds);
+        };
+        /* Wait for each real filesystem append before advancing the next interval. Worker starvation cannot
+         * consume the whole hold before the first scheduled callback gets CPU time. */
+        for (let count = 1; count <= 2; count++) {
+          advance(20);
+          // oxlint-disable-next-line no-await-in-loop -- each heartbeat must land before the next clock step.
+          await rowsUntil(root, (found) => heartbeatsAfter(found, 'paused').length >= count);
+        }
+        advance(300);
+        const settled = await heartbeatCount(root);
+        advance(150);
+        expect(await heartbeatCount(root)).toBe(settled);
+        expect(settled).toBeGreaterThanOrEqual(2);
+        expect(settled).toBeLessThan(20);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     /* An evicted incarnation's log is closed: no heartbeat reopens it. */

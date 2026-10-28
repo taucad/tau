@@ -555,7 +555,7 @@ describe('createPreparationHost', () => {
       const { store, registry, reopen } = await scenario();
       const host = reopen({
         fetch: async (input, init) => {
-          if (String(input) === originOf('demo')) {
+          if ((input instanceof Request ? input.url : String(input)) === originOf('demo')) {
             throw new TypeError('private transport details', {
               cause: Object.assign(new Error('private address'), { code: 'ETIMEDOUT' }),
             });

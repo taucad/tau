@@ -1,0 +1,20 @@
+# Qualify private PicoGK browser archives without publishing or changing desktop payloads.
+name: PicoGK browser archives
+on:
+  pull_request:
+    branches-ignore: [production]
+    paths:
+      - packages/plugins/picogk/dotnet/**
+      - .github/workflows/picogk-browser-archive.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: picogk-browser-archive-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  archive:
+    uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@f4870c79d6ee2625d4f1e18b48475de3c6cd9357
+    with:
+      picovoxel-ref: f4870c79d6ee2625d4f1e18b48475de3c6cd9357
+      adapter-path: packages/plugins/picogk/dotnet/native

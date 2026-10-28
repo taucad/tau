@@ -190,13 +190,18 @@ describe('nativeSandboxPolicy', () => {
       expect.arrayContaining([homedir(), '/Users', '/home', '/root', '/Volumes', '/mnt', '/media', '/tmp', tmpdir()]),
     );
     expect(policy.filesystem.denyRead).toContain(realpathSync(tmpdir()));
-    // On Linux the runtime's own seccomp helper must stay readable under a denied root.
+    // Linux grants only the two physical vendor helper directories under otherwise denied roots.
     expect(policy.filesystem.allowRead.slice(0, 3)).toEqual([
       '/opt/runtime',
       '/private/workspace',
       '/private/artifacts',
     ]);
-    expect(policy.filesystem.allowRead.slice(3).every((path) => /[/\\]vendor[/\\]seccomp$/u.test(path))).toBe(true);
+    expect(
+      policy.filesystem.allowRead.slice(3).every((path) => /[/\\]vendor[/\\](seccomp|java-proxy-agent)$/u.test(path)),
+    ).toBe(true);
+    expect(new Set(policy.filesystem.allowRead.slice(3).map((path) => path.split(/[/\\]/u).at(-1)))).toEqual(
+      new Set(process.platform === 'linux' ? ['seccomp', 'java-proxy-agent'] : []),
+    );
     expect(policy.filesystem.allowRead.length > 3).toBe(process.platform === 'linux');
     expect(policy.filesystem.allowWrite).toEqual(['/private/artifacts']);
     // The runtime grants these to every command by default; a CAD worker must not inherit them.

@@ -810,7 +810,19 @@ describe('ProjectWorkspaceProvider', () => {
       </ProjectWorkspaceProvider>,
     );
 
-    expect(listeners.has('fileRevealRequested')).toBe(false);
+    const opener = vi.fn();
+    act(() => {
+      workspace.connectWorkbench(opener);
+      workspace.openPanel('editor');
+    });
+    opener.mockClear();
+    send.mockClear();
+    act(() => {
+      listeners.get('fileRevealRequested')?.({ type: 'fileRevealRequested', path: 'parts/wheel.ts' });
+    });
+    expect(listeners.has('fileRevealRequested')).toBe(true);
+    expect(opener).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
     expect(listeners.has('modelComponentRevealRequested')).toBe(true);
   });
 

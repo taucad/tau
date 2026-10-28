@@ -846,6 +846,30 @@ test('keeps both ends of the All focus loop visible at 320px', async () => {
   expect(await reachable(first)).toBe(true);
 });
 
+test('reveals the exact nested viewer file when Files has never mounted', async () => {
+  await openPhoneProject(
+    portraitViewports[1],
+    '/__e2e/project-file-tree?main=touch-parameters&workspace=phone-cold-file-reveal',
+  );
+  await target.expectCount(selectors.getByRole('tree'), 0);
+  await target.click(navButton('All'), { touch: true });
+  await target.click(
+    allSheet()
+      .getByRole('button', { name: /More actions/ })
+      .first(),
+    { touch: true },
+  );
+  await target.click(selectors.getByRole('menuitem', { name: 'Reveal in File Tree', exact: true }), { touch: true });
+  const files = selectors.getByRole('region', { name: 'Files', exact: true });
+  await target.expectVisible(files);
+  await target.expectAttribute(files.getByRole('treeitem', { name: 'public', exact: true }), 'aria-expanded', 'true');
+  await target.expectAttribute(files.getByRole('treeitem', { name: 'models', exact: true }), 'aria-expanded', 'true');
+  const item = files.getByRole('treeitem', { name: 'touch-parameters.js', exact: true });
+  await target.expectAttribute(item, 'aria-selected', 'true');
+  expect(await reachable(item)).toBe(true);
+  await target.screenshot(undefined, 'mobile-matrix-cold-file-reveal-360.png');
+});
+
 test('opens a fresh same-file view and keeps view actions reachable after closing every view', async () => {
   const viewport = portraitViewports[1];
   const workspace = 'phone-view-actions';

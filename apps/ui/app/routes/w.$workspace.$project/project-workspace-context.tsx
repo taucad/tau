@@ -10,7 +10,7 @@ import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/wo
 import type { WorkbenchLaneNode } from '@taucad/workbench';
 import { searchParameterName } from '#constants/search-parameter.constants.js';
 import { flagParameter } from '#utils/search-parameter.codecs.js';
-import { holdUnheardReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
+import { holdUnheardFileReveal, holdUnheardReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
 import { isSurfaceShipped } from '#workbench-records/surface-availability.js';
 
 export const projectWorkspaceKeyCombinations = {
@@ -506,6 +506,9 @@ export function ProjectWorkspaceProvider({
 
   useEffect(() => {
     // The pane may mount only because of this reveal, after the emit: hold it for that pane's first subscribe.
+    const fileSubscription = editorRef.on('fileRevealRequested', (event) => {
+      holdUnheardFileReveal(editorRef, event);
+    });
     const modelSubscription = editorRef.on('modelComponentRevealRequested', (event) => {
       holdUnheardReveal(editorRef, 'model', event);
       openPanel('model');
@@ -515,6 +518,7 @@ export function ProjectWorkspaceProvider({
       openPanel('kinematics');
     });
     return () => {
+      fileSubscription.unsubscribe();
       modelSubscription.unsubscribe();
       kinematicsSubscription.unsubscribe();
     };

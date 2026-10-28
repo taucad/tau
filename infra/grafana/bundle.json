@@ -13,11 +13,15 @@
     "dashboards/runtime-operations.json": "4e83b4053703edb85b260467825a7920903328c59e812a1940e7fd4eb06605da",
     "dashboards/runtime-product.json": "4efc28aebb1353b76f6525af8e2d1899530ded2728a2baa14dd8719496a2d447",
     "dashboards/runtime.json": "3cc9701e351d0c30355cb786776faedcc35e2af08746c7b745b1135788facb44",
-    "dashboards/slo-executive.json": "11ea2521423ee30a22e413b87b3d3f23b32edede4ba3bb154562686e77c8ef8d",
-    "dashboards/system-overview.json": "76c15090dce7ef3cfad2ae92d0ce3846026e220ff099b42d0e1fee6ce09c8f8c",
-    "dashboards/tau-sync.json": "3af2f4a48ed8c22c9d40c3a2c8db20f00720926e07ac4225890c587b6117bcb4",
+    "dashboards/slo-executive.json": "53cd21bb3146a0f9241730f21f1160de96cb5af7ff725dcfaa4d524c7e6b3e5a",
+    "dashboards/storage-critical.json": "309a901f9579ee3719c745a7be77e25aa9a93f4fc30a3da9b0a1a345f23b1079",
+    "dashboards/system-overview.json": "2afdc87e4865404619fc64fa4e54ae3c32f8e91a48110c7ff8c8626499fa3894",
+    "dashboards/tau-sync.json": "922020c9d31e90f2fac51d926ea3480c8fdeecd3e1ec740c52e5af3b7f0037ef",
     "dashboards/websocket-rpc.json": "4b79c58efc8e1ae5215b956e1346d4629a4f83a50215eb1b5ba4fc0fcd05a3fd",
     "alerts/tau-critical.json": "7e1d068831320238c0f118308a13471061ee83120f7b78ccc97ce69abe5ffca1",
+    "alerts/tau-storage-critical.json": "89e18692ffd86db02393ae68d04cd76da78e83c4843d8634b0bb63df47226f41",
+    "alerts/tau-storage-triggers.json": "81051faf4d3c6e77cf3dbaac19755a4c720cc98c0e85f6a5feba639f9aa1cd14",
+    "alerts/tau-storage-warning.json": "c6f17d0428beaf0f30f9d96e0c94b2a6a9001e0d18967a33d15fee8c461a0dd3",
     "alerts/tau-warning.json": "d668a83bcb700d51e37d04dfe260d9515928d42d6d0b11b291006541fe7b9a83"
   }
 }

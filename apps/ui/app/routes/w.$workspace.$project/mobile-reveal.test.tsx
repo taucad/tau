@@ -321,16 +321,18 @@ describe('phone part-menu reveal into a lazy pane', { timeout: 30_000 }, () => {
 
     expect(await screen.findByText('Kinematics revealed main.ts axle', undefined, { timeout: 15_000 })).toBeVisible();
   });
-});
 
-it('should deliver a file reveal after the cold Files chunk mounts', async () => {
-  renderShell();
-  fireEvent.click(screen.getByRole('button', { name: 'Reveal file' }));
-  await waitFor(() => {
-    expect(editor.emitted).toEqual(['fileRevealRequested']);
+  it('should deliver a file reveal after the cold Files chunk mounts', async () => {
+    renderShell();
+    fireEvent.click(screen.getByRole('button', { name: 'Reveal file' }));
+    await waitFor(() => {
+      expect(editor.emitted).toEqual(['fileRevealRequested']);
+    });
+    expect(editor.snapshot.context.panelState.mobileActiveTab).toBe('files');
+    expect(screen.queryByText(/^Files revealed/u)).not.toBeInTheDocument();
+    chunks.files.open();
+    expect(
+      await screen.findByText('Files revealed parts/nested/wheel.ts', undefined, { timeout: 15_000 }),
+    ).toBeVisible();
   });
-  expect(editor.snapshot.context.panelState.mobileActiveTab).toBe('files');
-  expect(screen.queryByText(/^Files revealed/u)).not.toBeInTheDocument();
-  chunks.files.open();
-  expect(await screen.findByText('Files revealed parts/nested/wheel.ts', undefined, { timeout: 15_000 })).toBeVisible();
 });

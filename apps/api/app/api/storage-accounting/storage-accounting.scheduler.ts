@@ -256,13 +256,14 @@ export class StorageAccountingScheduler implements OnApplicationBootstrap, OnMod
       return;
     }
     const lockMilliseconds = Math.min(task.intervalMilliseconds, maximumLockMilliseconds);
-    let shared: AccountingSnapshot | undefined;
     try {
-      shared = await this.#store.read(task.name);
-      if (shared !== undefined) {
+      const shared = await this.#store.read(task.name);
+      const local = this.#snapshots.get(task.name);
+      /* Never step back: a pass whose figures this Machine could not share is newer than the store's. */
+      if (shared !== undefined && (local === undefined || shared.computedAt > local.computedAt)) {
         this.#snapshots.set(task.name, shared);
       }
-      const latest = shared ?? this.#snapshots.get(task.name);
+      const latest = this.#snapshots.get(task.name);
       const due = latest === undefined || now - latest.computedAt >= task.intervalMilliseconds;
       if (!due || !(await this.#store.claim(task.name, lockMilliseconds))) {
         return;

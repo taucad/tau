@@ -176,16 +176,13 @@ const summed = <Attributes extends Readonly<Record<string, string>>>(
  * @param response - Cloudflare's answer to {@link r2AnalyticsQuery}.
  * @param buckets - The environment's public and private bucket names.
  * @returns The four R2 gauges' figures.
+ * @throws When the answer holds no account.
  */
 export const mapR2Analytics = (response: R2AnalyticsResponse, buckets: R2BucketRoles): AccountingFigures => {
   const account = response.data?.viewer.accounts[0];
   if (account === undefined) {
-    return {
-      r2Requests: [],
-      r2StoredBytes: [],
-      r2Objects: [],
-      r2BandwidthBytes: [],
-    };
+    /* No account is a wrong id or a token without access, not an empty account: fail the pass. */
+    throw new Error('Cloudflare GraphQL Analytics returned no account for the R2 query');
   }
 
   const requests = (rows: readonly OperationsRow[], window: R2Window): Array<AccountingObservation<'r2Requests'>> =>

@@ -184,4 +184,13 @@ describe('readR2Analytics', () => {
       readR2Analytics({ accountId: 'acct-1', token: 'token-1', buckets, fetch: fetcher }, Date.now()),
     ).rejects.toThrow(/403/u);
   });
+
+  it('should fail the pass when Cloudflare answers with no account, so last_success does not advance', async () => {
+    const fetcher: typeof fetch = async () => Response.json({ data: { viewer: { accounts: [] } } });
+
+    expect(() => mapR2Analytics({ data: { viewer: { accounts: [] } } }, buckets)).toThrow(/no account/u);
+    await expect(
+      readR2Analytics({ accountId: 'acct-1', token: 'token-1', buckets, fetch: fetcher }, Date.now()),
+    ).rejects.toThrow(/no account/u);
+  });
 });

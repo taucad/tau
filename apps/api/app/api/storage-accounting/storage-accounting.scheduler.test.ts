@@ -368,4 +368,37 @@ describe('StorageAccountingScheduler passes (W14 OB3 review)', () => {
     expect(seen?.aborted).toBe(true);
     expect(metrics.passes).toStrictEqual([]);
   });
+
+  it('should keep a newer local pass when the store could not take it, not step back to the shared one', async () => {
+    let now = 0;
+    const store = memorySnapshotStore(() => now);
+    const write = store.write.bind(store);
+    let writable = true;
+    store.write = async (task, snapshot) => {
+      if (!writable) {
+        throw new Error('READONLY You can’t write against a read only replica.');
+      }
+      await write(task, snapshot);
+    };
+    const metrics = fakeMetrics();
+    const run = vi.fn(async () => usageFigures);
+    const scheduler = new StorageAccountingScheduler({
+      tasks: [{ name: 'usage', intervalMilliseconds: 60_000, run }],
+      store,
+      metrics,
+      now: () => now,
+    });
+
+    await scheduler.tick();
+    writable = false;
+    now = 60_000;
+    await scheduler.tick();
+    now = 61_000;
+    await scheduler.tick();
+
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(metrics.collect('storageAccountingLastSuccess')).toStrictEqual([
+      { value: 60, attributes: { 'tau.storage.accounting.task': 'usage' } },
+    ]);
+  });
 });

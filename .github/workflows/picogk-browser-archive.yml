@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   archive:
-    uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@6441ec547355dfea64d032646f39ef67d59f8f33
+    uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@fd7408e9326c3e9a4fa291fdc10437b17e2ea5dc
     with:
-      picovoxel-ref: 6441ec547355dfea64d032646f39ef67d59f8f33
+      picovoxel-ref: fd7408e9326c3e9a4fa291fdc10437b17e2ea5dc
       adapter-path: packages/plugins/picogk/dotnet/native

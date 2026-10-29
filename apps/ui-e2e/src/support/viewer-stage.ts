@@ -8,6 +8,9 @@
  * tap, screenshot or navigation away.
  */
 
+import { expect } from 'vitest';
+import { page as selectors } from 'vitest/browser';
+import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 
 const stageName = 'CAD canvas';
@@ -28,4 +31,41 @@ export const waitForStageReady = async (): Promise<void> => {
     stageName,
     { timeout: 60_000 },
   );
+};
+
+/** The stage's viewer controls (the first group, on a page with more than one stage). */
+export const viewerControls = (): Locator => selectors.getByRole('group', { name: 'Viewer controls' }).first();
+
+/**
+ * Wait for a rendered stage with geometry rather than an empty first frame: the stage is ready and the model has
+ * geometry, so Section view is enabled.
+ *
+ * @param options - Optional evidence.
+ * @param options.diagnostics - When the stage is not ready, save a screenshot and the target's diagnostics under this
+ *   artifact name before failing.
+ */
+export const waitForModelReady = async (options: Readonly<{ diagnostics?: string }> = {}): Promise<void> => {
+  try {
+    await waitForStageReady();
+  } catch (error) {
+    if (options.diagnostics !== undefined) {
+      await target.screenshot(undefined, `${options.diagnostics}.png`);
+      const diagnostics = await target.commands.uiCaptureTargetDiagnostics();
+      await target.writeArtifact(
+        `${options.diagnostics}.json`,
+        JSON.stringify({ ...diagnostics, screenshot: undefined }, null, 2),
+      );
+    }
+    throw error;
+  }
+  await expect
+    .poll(
+      async () =>
+        target.getAttribute(
+          viewerControls().getByRole('button', { name: 'Section view', exact: true }),
+          'aria-disabled',
+        ),
+      { timeout: 60_000 },
+    )
+    .toBe('false');
 };

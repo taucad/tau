@@ -107,6 +107,7 @@ import type {
   RevisionPushRef,
   RevisionPushRefResult,
   RevisionPushResult,
+  RevisionPushSession,
   SetRevisionRemoteInput,
   RevisionRef,
   RevisionTag,
@@ -1231,6 +1232,59 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     };
   };
 
+  /*
+   * One receive-pack advertisement per sync attempt (F5). A push takes its
+   * session's copy, by URL, and hands it back only when every offered ref was
+   * accepted, with each accepted command applied, so the next push's old values
+   * and haves are what the remote now holds. A refusal or a failure keeps it
+   * taken: whatever made the remote say no may have moved refs this copy cannot
+   * see, so the next push reads a fresh one.
+   */
+  type PushAdvertisement = Readonly<{
+    capabilities: Awaited<ReturnType<typeof getRemoteInfo2>>['capabilities'];
+    advertised: Map<string, string>;
+    /** Read by an earlier push of the session, so another writer may have moved a ref since. */
+    reused?: boolean;
+  }>;
+  const sessionAdvertisements = new WeakMap<RevisionPushSession, Map<string, PushAdvertisement>>();
+  const takeAdvertisement = async (
+    http: ReturnType<typeof boundBy>,
+    url: string,
+    input: RevisionPushInput,
+  ): Promise<PushAdvertisement> => {
+    const kept = input.session === undefined ? undefined : sessionAdvertisements.get(input.session);
+    const taken = kept?.get(url);
+    if (taken !== undefined) {
+      kept?.delete(url);
+      return { ...taken, reused: true };
+    }
+    /* `receive-pack`'s own, which carries the capabilities the request may use
+     * as well as the refs. Seam 1 of 3 (N1), exactly as in `advertisedReferences`. */
+    const read = await getRemoteInfo2({ http, url, forPush: true, protocolVersion: 1 }).catch((error: unknown) => {
+      throw http.refused(error, input.remote);
+    });
+    return {
+      capabilities: read.capabilities,
+      advertised: new Map((read.refs ?? []).map((reference) => [reference.ref, reference.oid])),
+    };
+  };
+  const keepAdvertisement = (session: RevisionPushSession | undefined, url: string, kept: PushAdvertisement): void => {
+    if (session !== undefined) {
+      const byUrl = sessionAdvertisements.get(session) ?? new Map<string, PushAdvertisement>();
+      byUrl.set(url, { capabilities: kept.capabilities, advertised: kept.advertised });
+      sessionAdvertisements.set(session, byUrl);
+    }
+  };
+  /*
+   * The server's own compare-and-set refusing a command: the ref was not at
+   * the old value this push sent. Git's receive-pack says `failed to update
+   * ref` (or `failed to lock`, `cannot lock ref`, `stale info`, and newer Git
+   * `incorrect old value provided`), and an atomic push's other commands
+   * `atomic transaction failed`.
+   */
+  const serverLockRefusal =
+    /failed to (?:update|lock) ref|cannot lock ref|stale info|is at [\da-f]+ but expected|incorrect old value provided|atomic transaction failed/iu;
+
   const requireHttp = (): RevisionHttpClient => {
     if (options.http === undefined) {
       throw new RevisionPortError(
@@ -1874,15 +1928,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           'The repository destination changed. Review it before pushing.',
         );
       }
-      /* The one advertisement (E4): `receive-pack`'s own, which carries the
-       * capabilities the request below may use as well as the refs. Seam 1 of 3
-       * (N1), exactly as in `advertisedReferences`. */
-      const advertisement = await getRemoteInfo2({ http, url, forPush: true, protocolVersion: 1 }).catch(
-        (error: unknown) => {
-          throw http.refused(error, input.remote);
-        },
-      );
-      const advertised = new Map((advertisement.refs ?? []).map((reference) => [reference.ref, reference.oid]));
+      /* The one advertisement (E4), shared by the pushes of this attempt's session (F5). */
+      let advertisement = await takeAdvertisement(http, url, input);
       const ordered = [...input.refs].toSorted(
         (left, right) => Number(left.name === refOf(defaultBranch)) - Number(right.name === refOf(defaultBranch)),
       );
@@ -1892,14 +1939,17 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
        * those are read, because an object fetched from this remote is still a
        * pointer here until somebody opens it. */
       const client = await lfsClient(configuredRemote ?? remoteOf(input.remote, url));
+      /* Uploads can take minutes, so an advertisement read before them is not kept for the session's next push. */
+      let uploaded = false;
       if (client !== undefined) {
         const pointers = await offeredPointers(ordered);
         try {
-          await client.upload({
+          const sent = await client.upload({
             signal: input.signal,
             pointers: [...pointers].map(([oid, { size }]) => ({ oid, size })),
             read: async (oid) => localLfsObject(oid, pointers.get(oid)?.path),
           });
+          uploaded = sent.length > 0;
         } catch (error) {
           /* The server counts in object ids; the person reads paths (D16). */
           if (error instanceof LfsQuotaError) {
@@ -1912,7 +1962,14 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       }
       input.signal?.throwIfAborted();
       const atomic = input.atomic === true;
-      const { results, commands } = await planPush(ordered, advertised, atomic);
+      let { results, commands } = await planPush(ordered, advertisement.advertised, atomic);
+      /* A reused copy that says a ref is already there may only mean another writer moved it
+       * since: nothing would be sent to find out, so `upToDate` is read again before it is reported. */
+      if (advertisement.reused === true && [...results.values()].some((result) => result.status === 'upToDate')) {
+        advertisement = await takeAdvertisement(http, url, { ...input, session: undefined });
+        ({ results, commands } = await planPush(ordered, advertisement.advertised, atomic));
+      }
+      const { advertised } = advertisement;
       if (commands.length > 0) {
         const capabilities = ['report-status', 'side-band-64k', ...(atomic ? ['atomic'] : [])].filter(
           (capability) => capability in advertisement.capabilities,
@@ -1941,17 +1998,25 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         for (const command of commands) {
           const answer = report.refs.get(command.remoteName);
           if (answer?.ok !== true) {
+            /* An old value from an earlier push's advertisement that the server's
+             * compare-and-set refused means another writer moved the ref in
+             * between: the remote moved, which is a lost lease (D39), not raw git text. */
+            const moved = advertisement.reused === true && serverLockRefusal.test(answer?.reason ?? '');
             results.set(
               command.name,
               refused(
                 command.name,
-                answer === undefined
-                  ? 'The remote did not report this ref.'
-                  : remoteRefusalSaid(answer.reason, report.said),
+                moved
+                  ? 'leaseLost'
+                  : answer === undefined
+                    ? 'The remote did not report this ref.'
+                    : remoteRefusalSaid(answer.reason, report.said),
               ),
             );
             continue;
           }
+          /* The kept advertisement now says what the remote holds, for the session's next push. */
+          advertised.set(command.remoteName, command.head);
           /* Where `fetch` would have put it, which is where `git push` puts it. */
           // eslint-disable-next-line no-await-in-loop -- one tracking ref per accepted ref.
           await writeRef({
@@ -1967,7 +2032,11 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           );
         }
       }
-      return Object.freeze({ refs: Object.freeze(input.refs.map((ref) => results.get(ref.name)!)) });
+      const pushed = Object.freeze({ refs: Object.freeze(input.refs.map((ref) => results.get(ref.name)!)) });
+      if (!uploaded && pushed.refs.every((entry) => entry.status !== 'rejected')) {
+        keepAdvertisement(input.session, url, advertisement);
+      }
+      return pushed;
     },
 
     listRemotes: async (): Promise<readonly Remote[]> => {

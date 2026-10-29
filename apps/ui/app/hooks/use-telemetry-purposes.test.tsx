@@ -159,6 +159,27 @@ describe('useTelemetryPurposes', () => {
     expect(result.current.isAllowed('summary')).toBe(false);
   });
 
+  it('refetches the current notice after the server refuses a decision against a stale one', async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(answer())))
+      .mockResolvedValueOnce(new Response('{}', { status: 409 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(answer({ noticeVersion: 'notice-2' }))));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useTelemetryPurposes(), { wrapper });
+    await waitFor(() => {
+      expect(result.current.canDecide).toBe(true);
+    });
+
+    result.current.decide({ purpose: 'summary', granted: true });
+
+    await waitFor(() => {
+      expect(result.current.effective?.noticeVersion).toBe('notice-2');
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(result.current.isAllowed('summary')).toBe(false);
+  });
+
   it('cannot decide while no notice is in force', async () => {
     respond(answer({ noticeVersion: undefined }));
     const { result } = renderHook(() => useTelemetryPurposes(), { wrapper });

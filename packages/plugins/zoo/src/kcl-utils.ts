@@ -12,8 +12,7 @@ import type { Context } from '@taucad/kcl-wasm-lib';
 import type { Models } from '@kittycad/lib';
 import type { RuntimeSpanTracer } from '@taucad/runtime/types';
 import { EngineConnection, MockEngineConnection } from '#engine-connection.js';
-import { OfflineEngineConnection } from '#offline/offline-engine-connection.js';
-import type { OcctLoader } from '#offline/offline-engine-connection.js';
+import type { OcctLoader, OfflineEngineConnection } from '#offline/offline-engine-connection.js';
 import type { WasmModule } from '#zoo-wasm-module.types.js';
 import type { FileSystemManager } from '#filesystem-manager.js';
 import {
@@ -319,7 +318,7 @@ export class KclUtilities {
    * @returns the engine connection, or undefined online or before initialization
    */
   public get offlineConnection(): OfflineEngineConnection | undefined {
-    return this.engineManager instanceof OfflineEngineConnection ? this.engineManager : undefined;
+    return this.mode === 'offline' ? (this.engineManager as OfflineEngineConnection | undefined) : undefined;
   }
 
   /**
@@ -824,6 +823,8 @@ export class KclUtilities {
     }
 
     if (this.mode === 'offline') {
+      // Loaded on demand so online sessions never fetch the libcascade engine.
+      const { OfflineEngineConnection } = await import('#offline/offline-engine-connection.js');
       return new OfflineEngineConnection({
         wasmModule: this.wasmModule,
         fileSystemManager: this.fileSystemManager,

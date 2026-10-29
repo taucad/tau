@@ -7,10 +7,11 @@ import process from 'node:process';
 import { buffer } from 'node:stream/consumers';
 import { setTimeout as delay } from 'node:timers/promises';
 import { afterAll, describe, expect, it } from 'vitest';
-import { commitLease } from '#api/git/store/commit.js';
-import type { CommitPhase } from '#api/git/store/commit.js';
+import { commitLease, compactionCommitter } from '#api/git/store/commit.js';
+import type { CommitPhase, CommitResult } from '#api/git/store/commit.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { hydrateLease } from '#api/git/store/lease.js';
+import type { RepositoryLease } from '#api/git/store/lease.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import { decodeManifest, encodeManifest, indexKeyFor, succeedManifest } from '#api/git/store/manifest.js';
 import type { Manifest } from '#api/git/store/manifest.js';
@@ -200,6 +201,48 @@ const pushAndCommit = async (args: {
     return await commitLease({ store: args.store, lease, committedBy: 'user_commit', ...args.overrides });
   } finally {
     await lease.dispose();
+  }
+};
+
+/**
+ * {@link pushAndCommit} that keeps the lease, as the push path does while a
+ * deferred compaction runs over it after the reply. The caller disposes it.
+ */
+const pushKeepingLease = async (args: {
+  store: RepositoryStore;
+  locator: RepositoryLocator;
+  client: string;
+  overrides?: Partial<Parameters<typeof commitLease>[0]>;
+}): Promise<{ lease: RepositoryLease; outcome: CommitResult }> => {
+  const lease = await hydrateLease({
+    store: args.store,
+    locator: args.locator,
+    parentDirectory: temporary('lease'),
+  });
+  try {
+    git(args.client, 'push', '--quiet', lease.directory, 'main');
+    return {
+      lease,
+      outcome: await commitLease({ store: args.store, lease, committedBy: 'user_commit', ...args.overrides }),
+    };
+  } catch (error) {
+    await lease.dispose();
+    throw error;
+  }
+};
+
+/** Commits `count` pushes of `client`, one revision each, so the repository holds `count` packs. */
+const pushRevisions = async (args: {
+  store: RepositoryStore;
+  locator: RepositoryLocator;
+  client: ReturnType<typeof newClient>;
+  count: number;
+}): Promise<void> => {
+  const { store, locator, client, count } = args;
+  for (let n = 2; n < count + 2; n += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- each push builds on the generation before it
+    await pushAndCommit({ store, locator, client: client.directory });
+    client.revise(n);
   }
 };
 
@@ -577,6 +620,301 @@ describe('commitLease', () => {
       ).rejects.toSatisfy((error) => error instanceof RepositoryStoreError && error.code === 'lost');
 
       expect(phases).toStrictEqual(['prepare', 'hash', 'object_puts', 'manifest_write', 'manifest_read']);
+    }, 60_000);
+  });
+
+  describe('deferred compaction (push latency F2)', () => {
+    it('should commit only the arrived pack past the bound and leave the compaction owed', async () => {
+      const { store, events } = journaledStore();
+      const locator = newLocator();
+      const client = newClient();
+      await pushRevisions({ store, locator, client, count: 3 });
+      events.length = 0;
+      const phases: CommitPhase[] = [];
+
+      const { lease, outcome } = await pushKeepingLease({
+        store,
+        locator,
+        client: client.directory,
+        overrides: { packBound: 2, deferCompaction: true, onPhase: (phase) => phases.push(phase) },
+      });
+      await lease.dispose();
+
+      expect(outcome).toMatchObject({ committed: true, compacted: false });
+      expect(outcome.committed && outcome.compaction).toBeTypeOf('function');
+      expect(phases).not.toContain('compaction');
+      expect(events.filter((event) => event.kind === 'put-end' && event.key.startsWith('retired/'))).toStrictEqual([]);
+      const stored = await readBack(store, locator);
+      expect(stored?.packs).toHaveLength(4);
+    }, 60_000);
+
+    it('should owe nothing at or under the bound, as a commit that would not compact', async () => {
+      const { store } = journaledStore({ putMilliseconds: 1 });
+      const locator = newLocator();
+      const client = newClient();
+      await pushRevisions({ store, locator, client, count: 1 });
+
+      const { lease, outcome } = await pushKeepingLease({
+        store,
+        locator,
+        client: client.directory,
+        overrides: { packBound: 2, deferCompaction: true },
+      });
+      await lease.dispose();
+
+      expect(outcome).toMatchObject({ committed: true, compacted: false });
+      expect(outcome.committed && outcome.compaction).toBeUndefined();
+    }, 60_000);
+
+    it('should compact after the reply under its own conditional write, retiring before the manifest, refs unmoved', async () => {
+      const { store, events } = journaledStore();
+      const locator = newLocator();
+      const client = newClient();
+      await pushRevisions({ store, locator, client, count: 3 });
+      const { lease, outcome } = await pushKeepingLease({
+        store,
+        locator,
+        client: client.directory,
+        overrides: { packBound: 2, deferCompaction: true },
+      });
+      if (!outcome.committed || outcome.compaction === undefined) {
+        throw new Error('the push owed no compaction');
+      }
+      events.length = 0;
+      const phases: CommitPhase[] = [];
+      const compacted = await outcome.compaction({ onPhase: (phase) => phases.push(phase) });
+      await lease.dispose();
+
+      expect(compacted.outcome).toBe('committed');
+      expect(phases).toStrictEqual(['compaction', 'hash', 'object_puts', 'manifest_write']);
+      const stored = await readBack(store, locator);
+      expect(stored?.generation).toBe(outcome.manifest.generation + 1);
+      expect(stored?.refs).toStrictEqual(outcome.manifest.refs);
+      expect(stored?.packs).toHaveLength(2);
+      expect(stored?.pushes.at(-1)).toMatchObject({ committedBy: compactionCommitter, refs: [] });
+      /* Every pack but the kept one is retired, and every marker and new key is durable before the manifest. */
+      const manifestAt = manifestWriteAt(events);
+      const markers = events
+        .slice(0, manifestAt)
+        .filter((event) => event.kind === 'put-end' && event.key.startsWith('retired/'));
+      expect(markers).toHaveLength(outcome.manifest.packs.length - 1);
+      const added = keysNamedBy(stored).filter((key) => !keysNamedBy(outcome.manifest).includes(key));
+      expect(added).toHaveLength(2);
+      expect(added.filter((key) => !putEndedBefore(events, key, manifestAt))).toStrictEqual([]);
+
+      /* The compacted repository is whole: a fresh lease of it checks clean. */
+      const reread = await hydrateLease({ store, locator, parentDirectory: temporary('lease') });
+      try {
+        git(reread.directory, 'fsck', '--strict', '--no-progress');
+        expect(git(reread.directory, 'rev-parse', 'refs/heads/main').trim()).toBe(
+          outcome.manifest.refs['refs/heads/main']?.oid,
+        );
+      } finally {
+        await reread.dispose();
+      }
+    }, 60_000);
+
+    it('should sweep after its own manifest, never deleting a key that manifest names', async () => {
+      const { store } = journaledStore({ putMilliseconds: 1 });
+      const locator = newLocator();
+      const client = newClient();
+      await pushRevisions({ store, locator, client, count: 3 });
+      const { lease, outcome } = await pushKeepingLease({
+        store,
+        locator,
+        client: client.directory,
+        overrides: { packBound: 2, deferCompaction: true },
+      });
+      if (!outcome.committed || outcome.compaction === undefined) {
+        throw new Error('the push owed no compaction');
+      }
+      const compacted = await outcome.compaction();
+      await lease.dispose();
+      if (compacted.outcome !== 'committed') {
+        throw new Error(`the compaction ended ${compacted.outcome}`);
+      }
+
+      const swept = await compacted.sweep();
+      expect(swept?.deleted).toStrictEqual([]);
+      /* The retired packs are inside the retention window: kept, and counted. */
+      expect(swept?.retainedBytes).toBeGreaterThan(0);
+      const named = keysNamedBy(await readBack(store, locator));
+      for (const key of named) {
+        // oxlint-disable-next-line no-await-in-loop -- one read per named key
+        await expect(store.getObject(locator, key)).resolves.toBeDefined();
+      }
+    }, 60_000);
+
+    it("should lose to a push that committed first, leaving that push's manifest and refs", async () => {
+      const { store } = journaledStore({ putMilliseconds: 1 });
+      const locator = newLocator();
+      const client = newClient();
+      await pushRevisions({ store, locator, client, count: 3 });
+      const { lease, outcome } = await pushKeepingLease({
+        store,
+        locator,
+        client: client.directory,
+        overrides: { packBound: 2, deferCompaction: true },
+      });
+      if (!outcome.committed || outcome.compaction === undefined) {
+        throw new Error('the push owed no compaction');
+      }
+      client.revise(10);
+      const next = await pushAndCommit({
+        store,
+        locator,
+        client: client.directory,
+        overrides: { packBound: 2, deferCompaction: true },
+      });
+
+      const compacted = await outcome.compaction();
+      await lease.dispose();
+
+      expect(compacted.outcome).toBe('lost');
+      const stored = await readBack(store, locator);
+      expect(next.committed && stored?.generation).toBe(next.committed ? next.manifest.generation : -1);
+      expect(stored?.refs['refs/heads/main']?.oid).toBe(git(client.directory, 'rev-parse', 'main').trim());
+    }, 60_000);
+
+    it('should make a push that hydrated before it lose its race, as against any other writer', async () => {
+      const { store } = journaledStore({ putMilliseconds: 1 });
+      const locator = newLocator();
+      const client = newClient();
+      await pushRevisions({ store, locator, client, count: 3 });
+      const { lease, outcome } = await pushKeepingLease({
+        store,
+        locator,
+        client: client.directory,
+        overrides: { packBound: 2, deferCompaction: true },
+      });
+      if (!outcome.committed || outcome.compaction === undefined) {
+        throw new Error('the push owed no compaction');
+      }
+      client.revise(10);
+      const racing = await hydrateLease({ store, locator, parentDirectory: temporary('lease') });
+
+      const compacted = await outcome.compaction();
+      await lease.dispose();
+      expect(compacted.outcome).toBe('committed');
+
+      try {
+        git(client.directory, 'push', '--quiet', racing.directory, 'main');
+        await expect(commitLease({ store, lease: racing, committedBy: 'user_commit' })).rejects.toSatisfy(
+          (error) => error instanceof RepositoryStoreError && error.code === 'lost',
+        );
+      } finally {
+        await racing.dispose();
+      }
+      const stored = await readBack(store, locator);
+      expect(stored?.generation).toBe(outcome.manifest.generation + 1);
+    }, 60_000);
+
+    it('should give way before the repack when told to, writing nothing', async () => {
+      const { store, events } = journaledStore({ putMilliseconds: 1 });
+      const locator = newLocator();
+      const client = newClient();
+      await pushRevisions({ store, locator, client, count: 3 });
+      const { lease, outcome } = await pushKeepingLease({
+        store,
+        locator,
+        client: client.directory,
+        overrides: { packBound: 2, deferCompaction: true },
+      });
+      if (!outcome.committed || outcome.compaction === undefined) {
+        throw new Error('the push owed no compaction');
+      }
+      events.length = 0;
+
+      const compacted = await outcome.compaction({ shouldAbandon: () => true });
+      await lease.dispose();
+
+      expect(compacted.outcome).toBe('abandoned');
+      expect(events).toStrictEqual([]);
+      const stored = await readBack(store, locator);
+      expect(stored?.generation).toBe(outcome.manifest.generation);
+    }, 60_000);
+
+    it('should give way before the manifest write when a push arrives mid-compaction, leaving only garbage', async () => {
+      const { store, events } = journaledStore({ putMilliseconds: 1 });
+      const locator = newLocator();
+      const client = newClient();
+      await pushRevisions({ store, locator, client, count: 3 });
+      const { lease, outcome } = await pushKeepingLease({
+        store,
+        locator,
+        client: client.directory,
+        overrides: { packBound: 2, deferCompaction: true },
+      });
+      if (!outcome.committed || outcome.compaction === undefined) {
+        throw new Error('the push owed no compaction');
+      }
+      events.length = 0;
+      let arrived = false;
+
+      const compacted = await outcome.compaction({
+        shouldAbandon: () => arrived,
+        faults: (point) => {
+          if (point === 'after-pack-upload') {
+            arrived = true;
+          }
+        },
+      });
+      await lease.dispose();
+
+      expect(compacted.outcome).toBe('abandoned');
+      expect(events.some((event) => event.kind === 'put-end')).toBe(true);
+      expect(events.filter((event) => event.kind === 'manifest')).toStrictEqual([]);
+      const stored = await readBack(store, locator);
+      expect(stored?.generation).toBe(outcome.manifest.generation);
+    }, 60_000);
+
+    it("should compact inline, in the push's own manifest write, past the deferral limit", async () => {
+      const { store } = journaledStore({ putMilliseconds: 1 });
+      const locator = newLocator();
+      const client = newClient();
+      await pushRevisions({ store, locator, client, count: 3 });
+
+      const { lease, outcome } = await pushKeepingLease({
+        store,
+        locator,
+        client: client.directory,
+        overrides: { packBound: 1, deferCompaction: true, deferredPackLimit: 3 },
+      });
+      await lease.dispose();
+
+      expect(outcome).toMatchObject({ committed: true, compacted: true });
+      expect(outcome.committed && outcome.compaction).toBeUndefined();
+      const stored = await readBack(store, locator);
+      expect(stored?.packs.length).toBeLessThanOrEqual(2);
+    }, 60_000);
+
+    it('should compact inline when only compaction keeps the repository under the byte ceiling', async () => {
+      const { store } = journaledStore({ putMilliseconds: 1 });
+      const locator = newLocator();
+      const client = newClient();
+      await pushRevisions({ store, locator, client, count: 3 });
+      const lease = await hydrateLease({ store, locator, parentDirectory: temporary('lease') });
+      try {
+        git(client.directory, 'push', '--quiet', lease.directory, 'main');
+        const packs = path.join(lease.directory, 'objects/pack');
+        const uncompacted = readdirSync(packs)
+          .filter((name) => name.endsWith('.pack'))
+          .reduce((total, name) => total + statSync(path.join(packs, name)).size, 0);
+
+        const outcome = await commitLease({
+          store,
+          lease,
+          committedBy: 'user_commit',
+          packBound: 2,
+          deferCompaction: true,
+          byteCeiling: uncompacted - 1,
+        });
+
+        expect(outcome).toMatchObject({ committed: true, compacted: true });
+        expect(outcome.committed && outcome.compaction).toBeUndefined();
+      } finally {
+        await lease.dispose();
+      }
     }, 60_000);
   });
 });

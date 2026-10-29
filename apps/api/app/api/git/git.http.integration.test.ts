@@ -7,7 +7,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   ForbiddenException,
   Injectable,
@@ -449,6 +449,14 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     remoteUrl = remoteFor(callers.owner.token);
   }, 120_000);
 
+  /* A push past the pack bound compacts after its reply and reports that
+     generation in a posted receipt, so each test starts once the one before has
+     nothing left running. */
+  afterEach(async () => {
+    await worker.settled();
+    await repositories.settled();
+  });
+
   afterAll(async () => {
     const errors: unknown[] = [];
     for (const close of cleanup.reverse()) {
@@ -660,6 +668,9 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
 
     failGenerationWrites = true;
     const pushed = await runGit(['push', 'origin', 'HEAD:refs/heads/main'], clone);
+    /* A compaction this push left owed reports its generation after the reply; it fails the same way. */
+    await worker.settled();
+    await repositories.settled();
     failGenerationWrites = false;
 
     expect(pushed.code, pushed.stderr).toBe(0);
@@ -1135,7 +1146,8 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
       };
     };
     try {
-      /* One push more than the pack bound compacts at least once, whatever the earlier rows left live. */
+      /* One push more than the pack bound compacts at least once, whatever the earlier rows left live:
+         the last push's compaction has no later push to give way to. */
       for (let revision = 0; revision <= livePackBound; revision += 1) {
         // oxlint-disable-next-line no-await-in-loop -- pushes are sequential by definition
         await writeFile(path.join(clone, 'part.ts'), `export const width = ${String(100 + revision)};\n`, 'utf8');
@@ -1147,7 +1159,13 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
         const pushed = await runGit(['push', 'origin', 'HEAD:refs/heads/main'], clone);
         expect(pushed.code, pushed.stderr).toBe(0);
       }
-      expect(listings, 'no push compacted, so no sweep ran').toBeGreaterThan(0);
+      /* The compaction, and so its sweep, runs after the reply of the push that owed it. */
+      await vi.waitFor(
+        () => {
+          expect(listings, 'no push compacted, so no sweep ran').toBeGreaterThan(0);
+        },
+        { timeout: 30_000 },
+      );
     } finally {
       parked.resolve();
       await worker.settled();

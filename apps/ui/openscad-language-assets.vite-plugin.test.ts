@@ -13,7 +13,7 @@ describe('OpenSCAD language client assets', () => {
     expect(createOpenscadLanguageAssets(path.join(tmpdir(), 'no-openscad-stage')).assets).toBeUndefined();
   });
 
-  it('addresses the staged manifest by its hash and refuses a module that does not match it', () => {
+  it('serves the staged module beside the chunks by its hash and refuses a module that does not match it', () => {
     const stage = mkdtempSync(path.join(tmpdir(), 'openscad-language-ui-'));
     try {
       const module = 'wasm bytes';
@@ -23,9 +23,15 @@ describe('OpenSCAD language client assets', () => {
       });
       writeFileSync(path.join(stage, 'assets-manifest.json'), manifest);
       writeFileSync(path.join(stage, 'tau_openscad_language.wasm'), module);
+      const moduleName = `tau_openscad_language-${hash(module).slice(0, 16)}.wasm`;
+      const served = JSON.stringify({
+        format: 'tau-openscad-language-v1',
+        module: { path: moduleName, sha256: hash(module), byteLength: module.length },
+      });
       expect(createOpenscadLanguageAssets(stage).assets).toEqual({
-        url: `/openscad-language/${hash(manifest).slice(0, 16)}/assets-manifest.json`,
-        sha256: hash(manifest),
+        url: `/assets/openscad-language-${hash(served).slice(0, 16)}.json`,
+        sha256: hash(served),
+        module: { path: moduleName, integrity: `sha384-${createHash('sha384').update(module).digest('base64')}` },
       });
       writeFileSync(path.join(stage, 'tau_openscad_language.wasm'), 'other bytes');
       expect(() => createOpenscadLanguageAssets(stage)).toThrow('does not match its manifest');

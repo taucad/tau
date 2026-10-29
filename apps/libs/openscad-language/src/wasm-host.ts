@@ -31,9 +31,9 @@ export const sha256Hex = async (bytes: Uint8Array<ArrayBuffer>): Promise<string>
 const download = async (
   fetcher: typeof globalThis.fetch,
   url: URL,
-  signal: AbortSignal | undefined,
+  request: Pick<RequestInit, 'signal' | 'integrity'>,
 ): Promise<Uint8Array<ArrayBuffer>> => {
-  const response = await fetcher(url.href, { signal, redirect: 'error' });
+  const response = await fetcher(url.href, { ...request, redirect: 'error' });
   if (!response.ok) {
     throw new Error(`OpenSCAD language asset download failed (${String(response.status)}): ${url.pathname}`);
   }
@@ -49,7 +49,7 @@ export const loadOpenscadManifest = async (
   if (!['http:', 'https:', 'file:'].includes(url.protocol) || url.username || url.password || url.hash) {
     throw new Error('Invalid OpenSCAD language manifest URL.');
   }
-  const bytes = await download(options.fetch ?? globalThis.fetch, url, options.signal);
+  const bytes = await download(options.fetch ?? globalThis.fetch, url, { signal: options.signal });
   if ((await sha256Hex(bytes)) !== options.assets.sha256) {
     throw new Error('OpenSCAD language manifest integrity mismatch.');
   }
@@ -83,7 +83,14 @@ export const wrapOpenscadServer = (instance: WebAssembly.Instance): OpenscadServ
  */
 export const loadOpenscadServer = async (options: LoadOpenscadServerOptions): Promise<OpenscadServerExports> => {
   const { manifest, base } = await loadOpenscadManifest(options);
-  const bytes = await download(options.fetch ?? globalThis.fetch, new URL(manifest.module.path, base), options.signal);
+  const expected = options.assets.module;
+  if (expected && expected.path !== manifest.module.path) {
+    throw new Error('OpenSCAD language manifest names another module.');
+  }
+  const bytes = await download(options.fetch ?? globalThis.fetch, new URL(manifest.module.path, base), {
+    signal: options.signal,
+    integrity: expected?.integrity,
+  });
   if (bytes.length !== manifest.module.byteLength || (await sha256Hex(bytes)) !== manifest.module.sha256) {
     throw new Error('OpenSCAD language module integrity mismatch.');
   }

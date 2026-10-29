@@ -116,7 +116,10 @@ const ensureWasmCompiler = async (): Promise<{ cc: string; ar: string }> => {
 };
 
 const cargo = (args: readonly string[], environment: Readonly<Record<string, string>> = {}): void => {
-  execFileSync('cargo', [...args, ...(ci === 'true' ? ['--locked'] : [])], {
+  // In CI, pin the lockfile: `--locked` is a cargo option, so it goes before any `--` that starts the tool's own options.
+  const separator = args.includes('--') ? args.indexOf('--') : args.length;
+  const locked = ci === 'true' && args[0] !== 'fmt' ? ['--locked'] : [];
+  execFileSync('cargo', [...args.slice(0, separator), ...locked, ...args.slice(separator)], {
     cwd: crateRoot,
     stdio: 'inherit',
     // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables are not camelCase

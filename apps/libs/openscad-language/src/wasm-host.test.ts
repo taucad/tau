@@ -66,6 +66,28 @@ describe('loadOpenscadServer', () => {
       }),
     ).rejects.toThrow('OpenSCAD language module integrity mismatch.');
   });
+
+  it('fetches the module the UI named with its Subresource Integrity', async () => {
+    const bytes = encode(manifest);
+    const requests: Array<RequestInit | undefined> = [];
+    const fetcher = serve({ '/m.json': bytes, '/tau_openscad_language.wasm': new Uint8Array([1, 2, 3]) });
+    const recording: typeof globalThis.fetch = async (input, init) => {
+      requests.push(init);
+      return fetcher(input, init);
+    };
+    const integrity = 'sha384-module';
+    const assets = { url: 'https://tau.test/m.json', sha256: await sha256Hex(bytes) };
+    await expect(
+      loadOpenscadServer({
+        assets: { ...assets, module: { path: 'tau_openscad_language.wasm', integrity } },
+        fetch: recording,
+      }),
+    ).rejects.toThrow('OpenSCAD language module integrity mismatch.');
+    expect(requests.map((request) => request?.integrity)).toEqual([undefined, integrity]);
+    await expect(
+      loadOpenscadServer({ assets: { ...assets, module: { path: 'other.wasm', integrity } }, fetch: recording }),
+    ).rejects.toThrow('OpenSCAD language manifest names another module.');
+  });
 });
 
 describe('wrapOpenscadServer', () => {

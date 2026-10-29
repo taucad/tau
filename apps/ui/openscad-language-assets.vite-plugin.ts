@@ -8,35 +8,48 @@ type Manifest = {
   module?: { path?: string; sha256?: string; byteLength?: number };
 };
 
+type Assets = { url: string; sha256: string; module: { path: string; integrity: string } };
+
 const sha256 = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('hex');
 
 /**
- * Serve the OpenSCAD language server staged by `openscad-language:prepare` under a content-addressed path, and define
- * `tauOpenscadLanguageAssets` with the manifest's URL and identity. Without a stage the define is `undefined` and the
- * editor keeps syntax highlighting only.
+ * Serve the OpenSCAD language server staged by `openscad-language:prepare` next to the client chunks, under
+ * content-addressed names, and define `tauOpenscadLanguageAssets` with the manifest's URL and identity and the module's
+ * Subresource Integrity. The chunk that carries the define names the module, so the asset-integrity plugin registers it
+ * like every other WASM file the UI ships. Without a stage the define is `undefined` and the editor keeps syntax
+ * highlighting only.
  */
-export const createOpenscadLanguageAssets = (
-  stage: string,
-): { assets: { url: string; sha256: string } | undefined; plugin: Plugin } => {
+export const createOpenscadLanguageAssets = (stage: string): { assets: Assets | undefined; plugin: Plugin } => {
   const files = new Map<string, Uint8Array<ArrayBuffer>>();
-  let assets: { url: string; sha256: string } | undefined;
+  let assets: Assets | undefined;
   const manifestPath = path.join(stage, 'assets-manifest.json');
   if (existsSync(manifestPath)) {
-    const manifestBytes = Uint8Array.from(readFileSync(manifestPath));
-    const manifest = JSON.parse(new TextDecoder().decode(manifestBytes)) as Manifest | undefined;
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Manifest | undefined;
     const modulePath = manifest?.module?.path;
     if (manifest?.format !== 'tau-openscad-language-v1' || !modulePath || !/^[\w.-]+\.wasm$/u.test(modulePath)) {
       throw new Error('OpenSCAD language staged manifest is invalid.');
     }
     const moduleBytes = Uint8Array.from(readFileSync(path.join(stage, modulePath)));
-    if (moduleBytes.length !== manifest.module?.byteLength || sha256(moduleBytes) !== manifest.module.sha256) {
+    const moduleSha256 = sha256(moduleBytes);
+    if (moduleBytes.length !== manifest.module?.byteLength || moduleSha256 !== manifest.module.sha256) {
       throw new Error('OpenSCAD language staged module does not match its manifest.');
     }
+    const moduleName = `${path.basename(modulePath, '.wasm')}-${moduleSha256.slice(0, 16)}.wasm`;
+    const manifestBytes = new TextEncoder().encode(
+      JSON.stringify({ ...manifest, module: { ...manifest.module, path: moduleName } }),
+    );
     const identity = sha256(manifestBytes);
-    const directory = `openscad-language/${identity.slice(0, 16)}`;
-    files.set(`${directory}/assets-manifest.json`, manifestBytes);
-    files.set(`${directory}/${modulePath}`, moduleBytes);
-    assets = { url: `/${directory}/assets-manifest.json`, sha256: identity };
+    const manifestName = `openscad-language-${identity.slice(0, 16)}.json`;
+    files.set(`assets/${manifestName}`, manifestBytes);
+    files.set(`assets/${moduleName}`, moduleBytes);
+    assets = {
+      url: `/assets/${manifestName}`,
+      sha256: identity,
+      module: {
+        path: moduleName,
+        integrity: `sha384-${createHash('sha384').update(moduleBytes).digest('base64')}`,
+      },
+    };
   }
   return {
     assets,

@@ -1,8 +1,15 @@
 import type { JSONRPCRequest, JSONRPCResponse } from 'json-rpc-2.0';
 import { z } from 'zod';
 
-/** Content identity of the prepared browser bundle, injected by the UI build. */
-export type OpenscadLanguageAssets = Readonly<{ url: string; sha256: string }>;
+/**
+ * Content identity of the prepared browser bundle, injected by the UI build: the manifest's URL and SHA-256 and, when
+ * served by the UI, the module it names with the Subresource Integrity the browser enforces when fetching it.
+ */
+export type OpenscadLanguageAssets = Readonly<{
+  url: string;
+  sha256: string;
+  module?: Readonly<{ path: string; integrity: string }>;
+}>;
 
 const sha256 = z.string().regex(/^[a-f\d]{64}$/u);
 const assetPath = z

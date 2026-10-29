@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { buffer } from 'node:stream/consumers';
 import { setTimeout as delay } from 'node:timers/promises';
 import { afterAll, describe, expect, it } from 'vitest';
 import { commitLease } from '#api/git/store/commit.js';
@@ -70,18 +71,61 @@ const newClient = (): { directory: string; revise: (n: number) => void } => {
   return { directory, revise };
 };
 
+/** Commits `mebibytes` of incompressible bytes as `name`, so the next pack is at least that large. */
+const writeLarge = (directory: string, name: string, mebibytes: number): void => {
+  writeFileSync(path.join(directory, name), randomBytes(mebibytes * 1024 * 1024));
+  git(directory, 'add', name);
+  git(directory, 'commit', '--quiet', '-m', `add ${name}`);
+};
+
+/**
+ * Deletes the index of the lease's newest pack, standing in for a lease file
+ * that vanished between compaction and hashing. The lease is found from the
+ * pack directory git just wrote; `events` must hold no put yet.
+ */
+const removeNewestIndex = (events: readonly PortEvent[]): string => {
+  expect(events.filter((event) => event.kind === 'put-start')).toStrictEqual([]);
+  const leases = scratch.filter((directory) => path.basename(directory).startsWith('tau-commit-lease-'));
+  const newest = leases.at(-1);
+  if (newest === undefined) {
+    return '';
+  }
+  for (const entry of readdirSync(newest)) {
+    const packs = path.join(newest, entry, 'objects/pack');
+    if (!existsSync(packs)) {
+      continue;
+    }
+    const indexes = readdirSync(packs)
+      .filter((name) => name.endsWith('.idx'))
+      .map((name) => path.join(packs, name))
+      .sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs);
+    const victim = indexes[0];
+    if (victim !== undefined) {
+      rmSync(victim);
+      return victim;
+    }
+  }
+  return '';
+};
+
 type PortEvent =
   | { readonly kind: 'put-start' | 'put-end'; readonly key: string; readonly body: ObjectBody; readonly sha256: string }
-  | { readonly kind: 'put-failed'; readonly key: string }
+  | { readonly kind: 'put-failed' | 'put-aborted'; readonly key: string }
   | { readonly kind: 'manifest' };
 
 /**
  * The memory store, journaled: each object put takes `putMilliseconds` as a
  * remote PUT would, so puts made one after another never overlap, and
- * `failPut` turns a key's put into a rejection after the same delay.
+ * `failPut` turns a key's put into a rejection after the same delay. With
+ * `honourSignal`, a put whose signal aborts mid-flight rejects at once with
+ * the signal's reason, as the S3 adapter's request does.
  */
 const journaledStore = (
-  options: { putMilliseconds?: number; failPut?: (key: string) => Error | undefined } = {},
+  options: {
+    putMilliseconds?: number | ((key: string) => number);
+    failPut?: (key: string) => Error | undefined;
+    honourSignal?: boolean;
+  } = {},
 ): {
   store: RepositoryStore;
   events: PortEvent[];
@@ -99,12 +143,21 @@ const journaledStore = (
       return inner.commitManifest(locator, next, expected);
     },
     // oxlint-disable-next-line max-params -- the port's own signature
-    putObject: async (locator, key, body, putOptions) => {
+    putObject: async (locator, key, body, putOptions, signal) => {
       events.push({ kind: 'put-start', key, body, sha256: putOptions.sha256 });
       tally.inFlight += 1;
       tally.mostInFlight = Math.max(tally.mostInFlight, tally.inFlight);
       try {
-        await delay(options.putMilliseconds ?? 25);
+        const milliseconds =
+          typeof options.putMilliseconds === 'function'
+            ? options.putMilliseconds(key)
+            : (options.putMilliseconds ?? 25);
+        try {
+          await delay(milliseconds, undefined, options.honourSignal === true && signal !== undefined ? { signal } : {});
+        } catch (error) {
+          events.push({ kind: 'put-aborted', key });
+          throw error;
+        }
         const failure = options.failPut?.(key);
         if (failure !== undefined) {
           events.push({ kind: 'put-failed', key });
@@ -289,6 +342,52 @@ describe('commitLease', () => {
         { bytes: true, digestMatches: true },
       ]);
     }, 60_000);
+
+    it('should stream a lease file above 4 MiB and store it under the digest of its bytes', async () => {
+      const { store, events } = journaledStore({ putMilliseconds: 1 });
+      const locator = newLocator();
+      const client = newClient();
+      writeLarge(client.directory, 'large.bin', 5);
+
+      await pushAndCommit({ store, locator, client: client.directory });
+
+      const packPut = events.find((event) => event.kind === 'put-end' && event.key.endsWith('.pack'));
+      expect(packPut?.kind === 'put-end' && typeof packPut.body).toBe('function');
+      const stored = await buffer(await store.getObject(locator, packPut?.kind === 'put-end' ? packPut.key : ''));
+      expect(stored.byteLength).toBeGreaterThan(4 * 1024 * 1024);
+      expect(createHash('sha256').update(stored).digest('base64')).toBe(
+        packPut?.kind === 'put-end' ? packPut.sha256 : '',
+      );
+    }, 60_000);
+
+    it('should hold at most 8 MiB of lease files in memory however many packs one commit uploads', async () => {
+      const { store, events } = journaledStore({ putMilliseconds: 1 });
+      const locator = newLocator();
+      const client = newClient();
+      const lease = await hydrateLease({ store, locator, parentDirectory: temporary('lease') });
+      try {
+        for (const name of ['first.bin', 'second.bin', 'third.bin']) {
+          writeLarge(client.directory, name, 3);
+          git(client.directory, 'push', '--quiet', lease.directory, 'main');
+        }
+        await commitLease({ store, lease, committedBy: 'user_commit' });
+      } finally {
+        await lease.dispose();
+      }
+
+      const sent = events.flatMap((event) =>
+        event.kind === 'put-end' && event.key.startsWith('packs/') ? [event] : [],
+      );
+      expect(sent.filter((event) => event.key.endsWith('.pack'))).toHaveLength(3);
+      const buffered = sent.reduce(
+        (total, event) => total + (event.body instanceof Uint8Array ? event.body.byteLength : 0),
+        0,
+      );
+      expect(buffered).toBeLessThanOrEqual(8 * 1024 * 1024);
+      expect(sent.filter((event) => typeof event.body === 'function').length).toBeGreaterThan(0);
+      const committed = await readBack(store, locator);
+      expect(committed?.packs).toHaveLength(3);
+    }, 120_000);
   });
 
   describe('durability invariant', () => {
@@ -344,6 +443,80 @@ describe('commitLease', () => {
       const named = new Set(keysNamedBy(before));
       expect(uploaded.filter((key) => named.has(key))).toStrictEqual([]);
     }, 60_000);
+
+    it("should stop a slow sibling put and rethrow the failed put's own error once the sibling settled", async () => {
+      const refused = new Error('index put refused');
+      const journaled = journaledStore({
+        honourSignal: true,
+        putMilliseconds: (key) => (key.endsWith('.idx') ? 5 : 5000),
+        failPut: (key) => (key.endsWith('.idx') ? refused : undefined),
+      });
+      const locator = newLocator();
+      const client = newClient();
+      const startedAt = performance.now();
+      const observed = { error: undefined as unknown, inFlight: -1 };
+
+      try {
+        await pushAndCommit({ store: journaled.store, locator, client: client.directory });
+        expect.fail('the commit should have failed');
+      } catch (error) {
+        observed.error = error;
+        observed.inFlight = journaled.tally.inFlight;
+      }
+
+      expect(observed.error).toBe(refused);
+      expect(observed.inFlight).toBe(0);
+      /* The 5 s pack put was aborted rather than awaited to the end. */
+      expect(performance.now() - startedAt).toBeLessThan(4000);
+      expect(
+        journaled.events.flatMap((event) =>
+          event.kind === 'put-failed' || event.kind === 'put-aborted' ? [[event.kind, event.key.slice(-4)]] : [],
+        ),
+      ).toStrictEqual([
+        ['put-failed', '.idx'],
+        ['put-aborted', 'pack'],
+      ]);
+      expect(journaled.tally.manifestWrites).toBe(0);
+      expect(await readBack(journaled.store, locator)).toBeUndefined();
+    }, 60_000);
+
+    it('should write no object and no manifest when a lease file cannot be read for hashing', async () => {
+      const { store, events, tally } = journaledStore({ putMilliseconds: 1 });
+      const locator = newLocator();
+      const client = newClient();
+      for (const n of [2, 3, 4]) {
+        // oxlint-disable-next-line no-await-in-loop -- each push builds on the generation before it
+        await pushAndCommit({ store, locator, client: client.directory });
+        client.revise(n);
+      }
+      writeLarge(client.directory, 'large.bin', 5);
+      const before = await readBack(store, locator);
+      events.length = 0;
+      tally.manifestWrites = 0;
+      let removed = '';
+
+      await expect(
+        pushAndCommit({
+          store,
+          locator,
+          client: client.directory,
+          overrides: {
+            packBound: 2,
+            // The repack's own index goes missing between compaction and hashing.
+            faults: (point) => {
+              if (point === 'mid-compaction') {
+                removed = removeNewestIndex(events);
+              }
+            },
+          },
+        }),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+
+      expect(removed).not.toBe('');
+      expect(events.filter((event) => event.kind !== 'manifest')).toStrictEqual([]);
+      expect(tally.manifestWrites).toBe(0);
+      expect(await readBack(store, locator)).toStrictEqual(before);
+    }, 60_000);
   });
 
   describe('phase timings', () => {
@@ -362,10 +535,8 @@ describe('commitLease', () => {
 
       expect(phases.map(([phase]) => phase)).toStrictEqual(['prepare', 'hash', 'object_puts', 'manifest_write']);
       expect(phases.every(([, seconds]) => Number.isFinite(seconds) && seconds >= 0)).toBe(true);
-      /* Two puts of 100 ms each, sent together: one round, not two. */
-      const puts = phases.find(([phase]) => phase === 'object_puts')?.[1] ?? 0;
-      expect(puts).toBeGreaterThanOrEqual(0.09);
-      expect(puts).toBeLessThan(0.18);
+      /* Two puts of 100 ms each: the round lasts at least one of them. Overlap is asserted on in-flight counts above. */
+      expect(phases.find(([phase]) => phase === 'object_puts')?.[1]).toBeGreaterThanOrEqual(0.09);
     }, 60_000);
 
     it('should report the compaction of a compacting commit as its own phase', async () => {

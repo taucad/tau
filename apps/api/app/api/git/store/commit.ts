@@ -23,7 +23,7 @@ import {
   repositoryByteCeiling,
   retentionWindowMilliseconds,
 } from '#api/git/store/limits.js';
-import { markRetired, sweepRepository } from '#api/git/store/sweep.js';
+import { putRetirementMarker, sweepRepository } from '#api/git/store/sweep.js';
 import type { SweepOutcome } from '#api/git/store/sweep.js';
 import {
   ManifestError,
@@ -334,13 +334,11 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
   // verifies what it reads.
   assertDeadline();
   const files = await timed(args.onPhase, 'hash', async () =>
-    Promise.all(
-      uploads
-        .flatMap((upload) => [
-          { key: upload.key, file: upload.file },
-          { key: indexKeyFor(upload.key), file: `${upload.file.slice(0, -'.pack'.length)}.idx` },
-        ])
-        .map(async ({ key, file }) => ({ key, ...(await readyFile(file)) })),
+    readyFiles(
+      uploads.flatMap((upload) => [
+        { key: upload.key, file: upload.file },
+        { key: indexKeyFor(upload.key), file: `${upload.file.slice(0, -'.pack'.length)}.idx` },
+      ]),
     ),
   );
   assertDeadline();
@@ -358,13 +356,12 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
       ),
       // Retirement is recorded before the manifest that drops these packs, so no
       // committed manifest ever leaves a live-until-now pack without its marker.
-      async () =>
-        markRetired({
-          store,
-          locator: lease.locator,
-          packKeys: hydrated.filter((pack) => compacted && pack.key !== keptPack?.key).map((pack) => pack.key),
-          at,
-        }),
+      ...hydrated
+        .filter((pack) => compacted && pack.key !== keptPack?.key)
+        .map(
+          (pack) => async (signal: AbortSignal) =>
+            putRetirementMarker({ store, locator: lease.locator, packKey: pack.key, at }, signal),
+        ),
       async (signal: AbortSignal) =>
         writeSpilledPushLog({ store, locator: lease.locator, base: lease.manifest, next, signal }),
     ]),
@@ -483,12 +480,13 @@ const hashReadBytes = 1024 * 1024;
  * never in memory whole, and the pass leaves no chunk garbage behind for the
  * upload pass to pile onto.
  */
-const sha256OfFile = async (file: string): Promise<string> => {
+const sha256OfFile = async (file: string, signal?: AbortSignal): Promise<string> => {
   const hash = createHash('sha256');
   const buffer = Buffer.allocUnsafe(hashReadBytes);
   const handle = await open(file, 'r');
   try {
     for (;;) {
+      signal?.throwIfAborted();
       // oxlint-disable-next-line no-await-in-loop -- one buffer, so reads are sequential by construction
       const { bytesRead } = await handle.read(buffer, 0, buffer.byteLength, null);
       if (bytesRead === 0) {
@@ -502,40 +500,78 @@ const sha256OfFile = async (file: string): Promise<string> => {
 };
 
 /**
- * A lease file at or below this size is read once: hashed and sent from the
- * same bytes. A commit uploads one pack and its index (`receive-pack` leaves
- * one pack per push, and a compaction rolls everything but the kept pack into
- * one), so it holds at most two such files — 8 MiB — and the bound DA4 keeps,
- * memory that does not grow with the pack, holds.
+ * A lease file at or below this size may be read once: hashed and sent from
+ * the same bytes, which the adapter can then resend itself.
  */
 const inMemoryObjectBytes = 4 * 1024 * 1024;
 
 /**
- * A lease file ready to send: its digest and the body the adapter reads.
+ * The most lease bytes one commit holds in memory, however many packs it
+ * uploads: a push normally leaves one pack, but a commit can carry up to
+ * `livePackBound` arrived packs, and files past this budget are streamed. This
+ * keeps DA4's bound — memory that does not grow with the pack or the pack
+ * count.
+ */
+const inMemoryCommitBytes = 8 * 1024 * 1024;
+
+type ReadyFile = { key: string; body: ObjectBody; contentLength: number; sha256: string };
+
+/**
+ * The lease files a commit uploads, each with its digest and the body the
+ * adapter reads.
  *
- * A small file is read once into memory, so the digest and the upload come
- * from the same bytes and the adapter can resend them itself. A larger one is
- * hashed through one reused buffer and then streamed in a second pass (DA4):
- * memory is a read chunk, not the file — a pack at the D20 ceiling is a
- * gigabyte, and the 1 GB VM cannot hold one beside the push that produced it.
+ * A small file, while the commit's in-memory budget lasts, is read once into
+ * memory. Any other is hashed through one reused buffer and then streamed in a
+ * second pass (DA4): memory is a read chunk, not the file — a pack at the D20
+ * ceiling is a gigabyte, and the 1 GB VM cannot hold one beside the push that
+ * produced it.
  *
  * The digest still guards the bytes. The adapter sends it as
  * `x-amz-checksum-sha256` and the backend refuses a body that does not match
  * it, so a file that changed between the passes is never stored under a
  * digest it does not have; above the single-part ceiling the adapter checks
  * the same digest itself before it completes the upload.
+ *
+ * Settled like the puts: one file that cannot be read stops the others' reads
+ * and is rethrown only once none is still reading the lease.
  */
-const readyFile = async (file: string): Promise<{ body: ObjectBody; contentLength: number; sha256: string }> => {
-  const { size } = await stat(file);
-  if (size <= inMemoryObjectBytes) {
-    const bytes = new Uint8Array(await readFile(file));
-    return {
-      body: bytes,
-      contentLength: bytes.byteLength,
-      sha256: createHash('sha256').update(bytes).digest('base64'),
-    };
-  }
-  return { body: async () => createReadStream(file), contentLength: size, sha256: await sha256OfFile(file) };
+const readyFiles = async (files: ReadonlyArray<{ key: string; file: string }>): Promise<ReadyFile[]> => {
+  const sizes = await settleAll(
+    files.map(({ file }) => async () => {
+      const stats = await stat(file);
+      return stats.size;
+    }),
+    files.length,
+  );
+  let budget = inMemoryCommitBytes;
+  const plans = files.map((entry, index) => {
+    const size = sizes[index] ?? 0;
+    const buffered = size <= inMemoryObjectBytes && size <= budget;
+    if (buffered) {
+      budget -= size;
+    }
+    return { ...entry, size, buffered };
+  });
+  return settleAll(
+    plans.map((plan) => async (signal: AbortSignal): Promise<ReadyFile> => {
+      if (plan.buffered) {
+        const bytes = new Uint8Array(await readFile(plan.file, { signal }));
+        return {
+          key: plan.key,
+          body: bytes,
+          contentLength: bytes.byteLength,
+          sha256: createHash('sha256').update(bytes).digest('base64'),
+        };
+      }
+      return {
+        key: plan.key,
+        body: async () => createReadStream(plan.file),
+        contentLength: plan.size,
+        sha256: await sha256OfFile(plan.file, signal),
+      };
+    }),
+    plans.length,
+  );
 };
 
 /**
@@ -546,38 +582,54 @@ const readyFile = async (file: string): Promise<{ body: ObjectBody; contentLengt
 const objectPutConcurrency = 12;
 
 /**
- * Runs every put, at most {@link objectPutConcurrency} at once, and resolves
- * only once all of them are durable.
+ * Runs `tasks`, at most `concurrency` at once, and resolves with their results
+ * in order once every one has succeeded.
  *
- * On the first failure the rest are told to stop and nothing new starts, but
- * this still waits for every put already sent to settle — settled rather than
- * raced, as the hydrate's reads are — so the caller never disposes the lease
- * under a stream still reading it, and the error it rethrows is that first
- * failure's own, unwrapped, so the refusal the client sees is classified
- * exactly as a one-at-a-time upload would have been. The manifest write that
- * follows is therefore never reached with any named object missing.
+ * On the first failure the rest are told to stop through the signal and
+ * nothing new starts, but this still waits for every task already started to
+ * settle — settled rather than raced, as the hydrate's reads are — so the
+ * caller never disposes the lease under a read or a stream still using it.
+ * The error it rethrows is that first failure's own, unwrapped, so a refusal
+ * is classified exactly as a one-at-a-time upload would have classified it.
  */
-const putAll = async (puts: ReadonlyArray<(signal: AbortSignal) => Promise<void>>): Promise<void> => {
+const settleAll = async <T>(
+  tasks: ReadonlyArray<(signal: AbortSignal) => Promise<T>>,
+  concurrency: number,
+): Promise<T[]> => {
   const controller = new AbortController();
+  const results: T[] = [];
   let failure: { reason: unknown } | undefined;
   let next = 0;
   const worker = async (): Promise<void> => {
-    while (failure === undefined && next < puts.length) {
-      const put = puts[next];
+    while (failure === undefined && next < tasks.length) {
+      const index = next;
       next += 1;
       try {
-        // oxlint-disable-next-line no-await-in-loop -- each worker sends one put at a time; the workers run together
-        await put?.(controller.signal);
+        // oxlint-disable-next-line no-await-in-loop -- each worker runs one task at a time; the workers run together
+        const result = await tasks[index]?.(controller.signal);
+        if (result !== undefined) {
+          results[index] = result;
+        }
       } catch (error) {
         failure ??= { reason: error };
         controller.abort();
       }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(objectPutConcurrency, puts.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, worker));
   if (failure !== undefined) {
     throw failure.reason;
   }
+  return results;
+};
+
+/**
+ * Every object put of a commit, in one round of at most
+ * {@link objectPutConcurrency}: the manifest write that follows is therefore
+ * never reached with any object it names missing.
+ */
+const putAll = async (puts: ReadonlyArray<(signal: AbortSignal) => Promise<void>>): Promise<void> => {
+  await settleAll(puts, objectPutConcurrency);
 };
 
 /**

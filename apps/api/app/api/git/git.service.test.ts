@@ -2334,6 +2334,20 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
     });
     /* Each commitLease phase as it ends, then the whole commit. A ref removal stores no pack, so it never compacts. */
     const phases = ['prepare', 'hash', 'object_puts', 'manifest_write', 'total'];
+    /* A commit that moves no ref is no attempt, so it records no phase either: phase counts track `total`. */
+    const unchanged = await hydrateLease({ store, locator });
+    try {
+      const commit = Reflect.get(workerOf(service), 'commit') as (
+        grant: unknown,
+        args: { store: RepositoryStore; lease: typeof unchanged; committedBy: string },
+      ) => Promise<{ committed: boolean }>;
+      await expect(
+        commit.call(workerOf(service), mock(), { store, lease: unchanged, committedBy: ownerId }),
+      ).resolves.toMatchObject({ committed: false });
+    } finally {
+      await unchanged.dispose();
+    }
+    expect(on('gitCommitAttempts').add).toHaveBeenCalledOnce();
     expect(on('gitCommitDuration').record).toHaveBeenCalledTimes(phases.length);
     for (const [index, phase] of phases.entries()) {
       expect(on('gitCommitDuration').record).toHaveBeenNthCalledWith(index + 1, expect.any(Number), {

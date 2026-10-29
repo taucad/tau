@@ -176,4 +176,18 @@ describe('toRpcError', () => {
       message: 'Unknown error',
     });
   });
+
+  it('should keep a thrown error retryable when it says so', () => {
+    const error = Object.assign(new Error('models/a.step is still downloading.'), {
+      code: rpcClientErrorCode.operationTimeout,
+      retryable: true,
+    });
+
+    expect(toRpcError(error)).toStrictEqual({
+      success: false,
+      errorCode: rpcClientErrorCode.operationTimeout,
+      message: 'models/a.step is still downloading.',
+      retryable: true,
+    });
+  });
 });

@@ -5,7 +5,7 @@ name = "tau-project"
 version = "0.1.0"
 requires-python = "==3.13.*"
 dependencies = [
-  "smlibpy==0.3.5",
+  "smlibpy==0.6.2",
   "numpy==2.5.2",
 ]
 
@@ -19,5 +19,5 @@ environments = [
 ]
 constraint-dependencies = [
   "numpy==2.5.2",
-  "smlibpy==0.3.5",
+  "smlibpy==0.6.2",
 ]

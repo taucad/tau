@@ -5,6 +5,7 @@ import { evidenceKeys } from '@taucad/agent-observability/identity';
 import type { Database, OwnerLockTransaction } from '#database/owner-lock.js';
 import { lockProjectLifecycle, readProjectDeletion } from '#database/project-lifecycle.js';
 import { agentEvidenceOutbox, agentEvidenceReceipt, agentEvidenceSource } from '#database/schema.js';
+import { lockEvidencePrincipal, readEvidenceErasure } from '#api/agent-observability/evidence-erasure.js';
 
 /** Protection of one source, strictest last. */
 export type SourceProtection = 'free' | 'pro' | 'unknown';
@@ -67,15 +68,16 @@ const toReceipt = (
 /**
  * Admit one parsed, digest-verified evidence document (blueprint T06).
  *
- * The project lifecycle lock and a per-source lock serialize every
- * submission of the same fact, so the checks below hold to commit:
+ * The project lifecycle lock, a per-source lock and the per-account evidence
+ * lock serialize every submission of the same fact against the others and
+ * against erasure, so the checks below hold to commit:
  *
  * - a replay of a held projection answers its existing receipt: `accepted`
  *   while policy still allows it, otherwise `revoked` or `expired`, and never
  *   enqueues it again;
  * - changed source bytes, a changed semantic identity or changed projection
  *   bytes under one identity are a conflict, not another fact;
- * - a deletion-fenced project admits nothing;
+ * - a deletion-fenced project, and an erased account or project, admit nothing;
  * - the receipt, the source protection and the sealed backlog row commit
  *   together, before the caller answers.
  *
@@ -118,6 +120,7 @@ const admitWithin = async (
   const { principal, project } = evidence.scope;
   await lockProjectLifecycle(transaction, project);
   await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${keys.source}, 1))`);
+  await lockEvidencePrincipal(transaction, principal);
 
   const held = await transaction
     .select()
@@ -138,7 +141,10 @@ const admitWithin = async (
   if (!input.allowed.admit) {
     return { kind: 'refused' };
   }
-  if ((await readProjectDeletion(transaction, project)) !== undefined) {
+  if (
+    (await readProjectDeletion(transaction, project)) !== undefined ||
+    (await readEvidenceErasure(transaction, { principalId: principal, projectId: project }))
+  ) {
     return { kind: 'fenced' };
   }
 

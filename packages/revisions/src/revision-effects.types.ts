@@ -1,5 +1,6 @@
 import type { PathPolicy, RootedFileSystem } from '@taucad/filesystem';
 import type { ParameterRecordCodec } from '#algorithms/index.js';
+import type { LargeObjectsReport } from '#project-revisions.types.js';
 import type { PublishPublicationActorInput, PublishPublicationActorOutput } from '#publish.types.js';
 import type { RemoteStorageSupplier } from '#remote.types.js';
 import type { RevisionActor, RevisionTrigger } from '#revision-authority.js';
@@ -145,6 +146,14 @@ export type RevisionActorsOptions = Readonly<{
    * events instead of reporting them as editor changes.
    */
   onApplyingTree?: (checkout: Checkout, paths: readonly string[]) => (() => void) | void;
+  /**
+   * Told how a checkout's large-object placeholders are being filled.
+   *
+   * An open writes the checkout before its large objects arrive (the files
+   * open first, the model waits), then fills each placeholder as its object
+   * lands. Called on every change of that progress, at most a few times a second.
+   */
+  onLargeObjects?: (report: LargeObjectsReport) => void;
   /**
    * Where this project's Tau Cloud repository is.
    *

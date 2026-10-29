@@ -13,6 +13,10 @@ const maximumSyncLagMilliseconds = 24 * 60 * 60 * 1000;
 const maximumSyncPending = 10_000;
 /* A push or pull is aborted at its 15-minute deadline; an hour bounds a skewed client clock. */
 const maximumSyncAttemptMilliseconds = 60 * 60 * 1000;
+/* The batch API's ceiling per call is a thousand objects; no tree read a browser can hold is a hundred times that. */
+const maximumLfsObjects = 100_000;
+/* A tree read holds every byte it returns in memory, so 64 GiB bounds a corrupt report, not a real one. */
+const maximumLfsBytes = 64 * 1024 * 1024 * 1024;
 
 /**
  * Receives batched telemetry from the client runtime (web workers).
@@ -136,6 +140,14 @@ export class TelemetryController {
       }
       case IngestEntryName.SYNC_ATTEMPT: {
         this.recordSyncAttempt(entry);
+        return;
+      }
+      case IngestEntryName.LFS_FETCH: {
+        this.recordLfsFetch(entry);
+        return;
+      }
+      case IngestEntryName.PROJECT_OPEN: {
+        this.recordProjectOpen(entry);
         return;
       }
       default: {
@@ -316,6 +328,34 @@ export class TelemetryController {
     if (pending !== undefined) {
       this.metrics.syncClientPending.record(Math.min(pending, maximumSyncPending), attributes);
     }
+  }
+
+  private recordLfsFetch(entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.LFS_FETCH }>): void {
+    const { placement, networkObjects, networkBytes, localObjects, localBytes } = entry.detail;
+    const attributes = { 'agent.placement': placement };
+    this.metrics.syncClientLfsDuration.record(Math.min(entry.duration, maximumSyncAttemptMilliseconds) / 1000, {
+      ...attributes,
+      cache: localObjects === 0 ? 'cold' : 'partial',
+    });
+    for (const [source, objects, bytes] of [
+      ['network', networkObjects, networkBytes],
+      ['local', localObjects, localBytes],
+    ] as const) {
+      /* A source the read never used mints no series. */
+      if (objects > 0) {
+        this.metrics.syncClientLfsObjects.add(Math.min(objects, maximumLfsObjects), { ...attributes, source });
+        this.metrics.syncClientLfsBytes.add(Math.min(bytes, maximumLfsBytes), { ...attributes, source });
+      }
+    }
+  }
+
+  private recordProjectOpen(entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.PROJECT_OPEN }>): void {
+    const { phase, cache } = entry.detail;
+    /* An open waits on the same pull and transfers as a sync attempt, so the same hour bounds a skewed clock. */
+    this.metrics.projectOpenDuration.record(Math.min(entry.duration, maximumSyncAttemptMilliseconds) / 1000, {
+      phase,
+      cache,
+    });
   }
 }
 

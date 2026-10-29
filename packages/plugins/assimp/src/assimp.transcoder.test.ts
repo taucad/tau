@@ -233,4 +233,85 @@ describe('assimp transcoder', () => {
       issues: [{ message: 'Transcoding failed', code: 'RUNTIME', type: 'runtime', severity: 'error' }],
     });
   });
+
+  describe('hidden export options', () => {
+    const json = (meshes: unknown): Uint8Array<ArrayBuffer> =>
+      new TextEncoder().encode(JSON.stringify({ asset: {}, meshes }));
+    const glb = (meshes: unknown): Uint8Array<ArrayBuffer> => {
+      const body = json(meshes);
+      const padded = new Uint8Array(Math.ceil(body.byteLength / 4) * 4).fill(0x20);
+      padded.set(body);
+      const bytes = new Uint8Array(20 + padded.byteLength);
+      const view = new DataView(bytes.buffer);
+      view.setUint32(0, 0x46_54_6c_67, true);
+      view.setUint32(4, 2, true);
+      view.setUint32(8, bytes.byteLength, true);
+      view.setUint32(12, padded.byteLength, true);
+      view.setUint32(16, 0x4e_4f_53_4a, true);
+      bytes.set(padded, 20);
+      return bytes;
+    };
+    const exported = async (
+      to: 'stl' | '3mf',
+      files: ExportFile[],
+      options: Record<string, unknown> = {},
+    ): Promise<unknown> => {
+      const resolved = await definition();
+      const runtime = createRuntime();
+      const context = await resolved.initialize({ backend: 'auto' }, runtime);
+      await resolved.transcode({ from: 'glb', to, files, options }, runtime, context);
+      const [, convertOptions] = assimpMock.convert.mock.calls.at(-1) as [unknown, { exportOptions: unknown }];
+      return convertOptions.exportOptions;
+    };
+    const points = [{ primitives: [{ mode: 0 }, { mode: 0 }] }];
+
+    it('should send the application name with every 3MF export', async () => {
+      expect(await exported('3mf', [file('model.glb')], { unit: 'inch' })).toEqual({
+        application: 'Tau',
+        unit: 'inch',
+      });
+    });
+
+    it.each([
+      ['a GLB', () => [file('model.glb', glb(points))]],
+      ['a glTF file', () => [file('model.gltf', json(points)), file('model.bin', new Uint8Array([1]))]],
+    ])('should enable point clouds when every primitive in %s draws points', async (_name, files) => {
+      expect(await exported('stl', files(), { binary: false })).toEqual({ binary: false, pointClouds: true });
+    });
+
+    it.each([
+      ['a mesh with faces', [file('model.glb', glb([{ primitives: [{ mode: 0 }, {}] }]))]],
+      ['a model with no meshes', [file('model.glb', glb(undefined))]],
+      ['a mesh with no primitives', [file('model.glb', glb([{}]))]],
+      ['bytes that are not GLB', [file('model.glb', new Uint8Array(24))]],
+      ['a truncated GLB', [file('model.glb', new Uint8Array([1, 2, 3]))]],
+      ['glTF JSON that does not parse', [file('model.gltf', new TextEncoder().encode('{'))]],
+    ])('should leave point clouds off for %s', async (_name, files) => {
+      expect(await exported('stl', files, { binary: true })).toEqual({ binary: true });
+    });
+  });
+
+  it.each([
+    [
+      new libassimpExporter.AssimpError('LIMIT_EXCEEDED', 'USD export: USDC serialisation failed.'),
+      'USD export: USDC serialisation failed. The model is too large to export here. Try a coarser tessellation.',
+    ],
+    [
+      new Error('3MF mesh 0 is not manifold and oriented after geometry conversion'),
+      '3MF mesh 0 is not manifold and oriented after geometry conversion The model has open or inconsistently oriented surfaces. Turn off Require manifold to export it anyway.',
+    ],
+  ])('should say what to change when a failure has a known fix', async (error, message) => {
+    assimpMock.convert.mockRejectedValueOnce(error);
+    const resolved = await definition();
+    const runtime = createRuntime();
+    const context = await resolved.initialize({ backend: 'auto' }, runtime);
+
+    const result = await resolved.transcode(
+      { from: 'glb', to: '3mf', files: [file('model.glb')], options: {} },
+      runtime,
+      context,
+    );
+
+    expect(result.success ? undefined : result.issues[0]?.message).toBe(message);
+  });
 });

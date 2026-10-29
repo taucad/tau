@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import { createRoot, _roots } from '@react-three/fiber';
 import { WebGPURenderer } from 'three/webgpu';
+import { RetiredCanvasError } from '#graphics/three/canvas-three-gl.js';
 import {
   OrthographicCamera,
   PerspectiveCamera,
@@ -211,7 +212,7 @@ describe('createTauR3fGlProp', () => {
     expect(setPixelRatio.mock.calls).toEqual([[2], [1]]);
   });
 
-  it('should report renderer creation failure and never settle so R3F leaves no unhandled rejection', async () => {
+  it('should report renderer creation failure and stay pending until its canvas is retired', async () => {
     const { createTauR3fGlProp } = await import('#graphics/three/canvas-three-gl.js');
     const failure = new Error('Error creating WebGL context.');
     hoisted.createRenderer.mockRejectedValue(failure);
@@ -240,10 +241,17 @@ describe('createTauR3fGlProp', () => {
       return 'pending';
     };
 
+    // Pending while mounted: the owner shows its fallback, and R3F does not also throw the failure from the Canvas.
     expect(await Promise.race([settlement(), stillPending()])).toBe('pending');
     expect(onCreateError).toHaveBeenCalledWith(failure);
     expect(onCreateError).toHaveBeenCalledOnce();
     expect(hoisted.createRenderer).toHaveBeenCalledOnce();
+    // Removing the canvas settles every call with a retirement, never the creation failure, so R3F drops its root.
+    glFactory.bindCanvas(canvas);
+    glFactory.bindCanvas(undefined);
+    await expect(first).rejects.toBeInstanceOf(RetiredCanvasError);
+    await expect(third).rejects.toBeInstanceOf(RetiredCanvasError);
+    expect(onCreateError).toHaveBeenCalledOnce();
 
     const replacement = { setPixelRatio: vi.fn(), getPixelRatio: () => 1 };
     hoisted.createRenderer.mockResolvedValue(replacement);
@@ -265,6 +273,8 @@ describe('createTauR3fGlProp', () => {
       dispose: vi.fn(),
       forceContextLoss,
     };
+    // The factory takes over the renderer's own release methods; keep the originals to observe them.
+    const { dispose } = renderer;
     hoisted.createRenderer.mockResolvedValue(renderer);
     const factory = createTauR3fGlProp('webgl');
     const canvas = document.createElement('canvas');
@@ -274,13 +284,15 @@ describe('createTauR3fGlProp', () => {
     factory.bindCanvas(undefined);
     await Promise.resolve();
 
-    // R3F loses the context only 500 ms after unmount; a quick remount would hold both drawing buffers.
+    // R3F releases the renderer only after its root teardown; a quick remount would hold both drawing buffers.
     expect(factory.isRetired()).toBe(true);
-    expect(renderer.dispose).toHaveBeenCalledOnce();
+    expect(dispose).toHaveBeenCalledOnce();
     expect(forceContextLoss).toHaveBeenCalledOnce();
-    expect(renderer.dispose.mock.invocationCallOrder[0]).toBeLessThan(forceContextLoss.mock.invocationCallOrder[0]!);
-    // R3F's own loss, 500 ms after unmount, must not ask an already lost context again.
+    expect(dispose.mock.invocationCallOrder[0]).toBeLessThan(forceContextLoss.mock.invocationCallOrder[0]!);
+    // R3F's own release at root teardown must not dispose again or ask an already lost context again.
+    renderer.dispose();
     renderer.forceContextLoss();
+    expect(dispose).toHaveBeenCalledOnce();
     expect(forceContextLoss).toHaveBeenCalledOnce();
   });
 
@@ -297,6 +309,8 @@ describe('createTauR3fGlProp', () => {
         events.push('context');
       }),
     };
+    // The factory takes over the renderer's own release methods; keep the originals to observe them.
+    const { dispose } = renderer;
     hoisted.createRenderer.mockResolvedValue(renderer);
     const factory = createTauR3fGlProp('webgl');
     const canvas = document.createElement('canvas');
@@ -307,12 +321,12 @@ describe('createTauR3fGlProp', () => {
     factory.bindCanvas(undefined);
     await Promise.resolve();
     expect(factory.isRetired()).toBe(true);
-    expect(renderer.dispose).not.toHaveBeenCalled();
+    expect(dispose).not.toHaveBeenCalled();
 
     // The parent's passive cleanup runs before descendant environment/target cleanup.
     releaseScene();
     events.push('cube-target');
-    expect(renderer.dispose).not.toHaveBeenCalled();
+    expect(dispose).not.toHaveBeenCalled();
     await Promise.resolve();
     expect(events).toEqual(['cube-target', 'renderer', 'context']);
   });
@@ -324,6 +338,8 @@ describe('createTauR3fGlProp', () => {
       getPixelRatio: () => 1,
       dispose: vi.fn(),
     };
+    // The factory takes over the renderer's own release methods; keep the originals to observe them.
+    const { dispose } = renderer;
     hoisted.createRenderer.mockResolvedValue(renderer);
     const factory = createTauR3fGlProp('webgpu');
     const canvas = document.createElement('canvas');
@@ -334,10 +350,10 @@ describe('createTauR3fGlProp', () => {
     const releaseReplay = factory.retainScene();
     factory.bindCanvas(undefined);
     await Promise.resolve();
-    expect(renderer.dispose).not.toHaveBeenCalled();
+    expect(dispose).not.toHaveBeenCalled();
     releaseReplay();
     await Promise.resolve();
-    expect(renderer.dispose).toHaveBeenCalledOnce();
+    expect(dispose).toHaveBeenCalledOnce();
   });
 
   it('should retire a WebGPU renderer, which has no context to lose, by disposing it', async () => {
@@ -347,6 +363,8 @@ describe('createTauR3fGlProp', () => {
       getPixelRatio: () => 1,
       dispose: vi.fn(),
     };
+    // The factory takes over the renderer's own release methods; keep the originals to observe them.
+    const { dispose } = renderer;
     hoisted.createRenderer.mockResolvedValue(renderer);
     const factory = createTauR3fGlProp('webgpu');
     const canvas = document.createElement('canvas');
@@ -356,7 +374,7 @@ describe('createTauR3fGlProp', () => {
     factory.bindCanvas(undefined);
     await Promise.resolve();
 
-    expect(renderer.dispose).toHaveBeenCalledOnce();
+    expect(dispose).toHaveBeenCalledOnce();
   });
 
   it('should suppress a retired pending failure and allow a fresh factory retry', async () => {
@@ -373,22 +391,15 @@ describe('createTauR3fGlProp', () => {
     const canvas = document.createElement('canvas');
     document.body.append(canvas);
     factory.bindCanvas(canvas);
-    let settled = false;
-    const trackSettlement = async (): Promise<void> => {
-      await factory({ canvas });
-      settled = true;
-    };
-    const pendingSettlement = trackSettlement();
+    const pendingCall = factory({ canvas });
     canvas.remove();
     factory.bindCanvas(undefined);
     rejectCreation!(new Error('retired initialization failed'));
-    await Promise.resolve();
-    await Promise.resolve();
+    // Retirement settles the call so R3F can tear its root down; the creation failure itself is not reported.
+    await expect(pendingCall).rejects.toBeInstanceOf(RetiredCanvasError);
     expect(factory.isRetired()).toBe(true);
     expect(onCreateError).not.toHaveBeenCalled();
-    expect(settled).toBe(false);
-    expect(pendingSettlement).toBeInstanceOf(Promise);
-    void factory({ canvas });
+    await expect(factory({ canvas })).rejects.toBeInstanceOf(RetiredCanvasError);
     expect(hoisted.createRenderer).toHaveBeenCalledOnce();
     const replacement = { setPixelRatio: vi.fn(), getPixelRatio: () => 1 };
     hoisted.createRenderer.mockResolvedValueOnce(replacement);

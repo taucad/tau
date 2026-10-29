@@ -6,6 +6,13 @@ export const stagingOrigin = 'https://taucad.dev';
 export const productionOrigin = 'https://tau.new';
 export const harnessPath = '/__debug/observability';
 
+/**
+ * How long one harness navigation may take. The harness boots the runtime kernel and the PostHog
+ * extension bundles before `load`, which has been measured past Playwright's 30 s default on both
+ * CI and a local run; the suite's other waits already allow 120 s.
+ */
+export const harnessNavigationTimeout = 120_000;
+
 /** One correlation id per failure, browser and consent decision. */
 export function createObservabilityRunId(): string {
   return `e2e-${randomUUID()}`;

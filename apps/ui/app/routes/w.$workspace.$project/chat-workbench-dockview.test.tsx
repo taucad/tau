@@ -53,7 +53,12 @@ vi.mock('#components/code/code-editor-view.client.js', () => {
 });
 vi.mock('#lib/editor-syntax.js', () => ({ loadEditorSyntax: mockLoadEditorSyntax }));
 
-vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
+const largeObjectState = vi.hoisted(() => ({ pending: new Set<string>() }));
+vi.mock('#hooks/use-project-availability.js', () => ({
+  useProjectAvailability: () => 'ready',
+  useModelAvailability: () => 'ready',
+  useLargeObjectPending: (path: string | undefined) => path !== undefined && largeObjectState.pending.has(path),
+}));
 
 vi.mock('#routes/w.$workspace.$project/chat-print.js', () => ({
   PrintPanelBody: ({ isShown }: { readonly isShown?: boolean }) => {
@@ -791,6 +796,30 @@ describe('FileEditor routing', () => {
     expect(screen.getByRole('status')).toHaveTextContent('File updates unavailable');
     await userEvent.setup().click(screen.getByRole('button', { name: 'Retry file updates' }));
     expect(retry).toHaveBeenCalledOnce();
+  });
+
+  /* Open the UI, model waits: a file whose object has not arrived holds its pointer, which is never shown or edited. */
+  it('shows a downloading file as loading, never as its pointer text, and opens it when it lands', () => {
+    const pointer = 'version https://git-lfs.github.com/spec/v1\noid sha256:' + 'a'.repeat(64) + '\nsize 9\n';
+    mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode(pointer) });
+    largeObjectState.pending.add('models/part.step');
+    try {
+      const { unmount } = render(<FileEditor paneId='test-pane' filePath='models/part.step' panelApi={mockPanelApi} />);
+      const placeholder = screen.getByRole('status');
+      expect(placeholder).toHaveAttribute('data-slot', 'large-object-pending');
+      expect(placeholder).toHaveTextContent('Downloading part.step');
+      expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
+      expect(screen.queryByText(/git-lfs/u)).not.toBeInTheDocument();
+
+      largeObjectState.pending.delete('models/part.step');
+      mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('solid part') });
+      /* The real hook repaints on the projection; the mock is re-read by a fresh mount. */
+      unmount();
+      render(<FileEditor paneId='test-pane' filePath='models/part.step' panelApi={mockPanelApi} />);
+      expect(screen.getByTestId('viewer-content').textContent).toBe('solid part');
+    } finally {
+      largeObjectState.pending.clear();
+    }
   });
 
   it('should render the resolved viewer with decoded text content when outcome is text', () => {

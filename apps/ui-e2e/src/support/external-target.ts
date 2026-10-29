@@ -126,6 +126,8 @@ export type TargetState = {
   readonly visible: boolean;
 };
 export type TargetWorker = Readonly<{ identity: string; url: string }>;
+/** A request the page made that failed in the network or answered 4xx/5xx. */
+export type TargetRequestFailure = Readonly<{ url: string; resourceType: string; failure: string }>;
 export type TargetDiagnostics = {
   readonly geospecFault?: { readonly kind: 'missing' | 'corrupt'; readonly url: string; readonly requests: number };
   readonly geospecWasm?: {
@@ -141,6 +143,8 @@ export type TargetDiagnostics = {
   readonly consoleMessages: ReadonlyArray<{
     readonly text: string;
     readonly type: string;
+    /** The source the message names: the script that logged it, or the resource a network error is about. */
+    readonly url?: string;
   }>;
   readonly pageErrors: readonly string[];
   readonly screenshot?: string;
@@ -341,14 +345,17 @@ export type UiBrowserCommands = {
     readonly message: string;
     readonly type?: string;
   }): Promise<void>;
+  uiCollectGarbage(surface?: TargetSurface): Promise<void>;
   uiReadTargetEvents(): Promise<{
     readonly geospecWasm?: TargetDiagnostics['geospecWasm'];
     readonly geospecFault?: TargetDiagnostics['geospecFault'];
     readonly consoleMessages: ReadonlyArray<{
       readonly text: string;
       readonly type: string;
+      readonly url?: string;
     }>;
     readonly pageErrors: readonly string[];
+    readonly requestFailures: readonly TargetRequestFailure[];
   }>;
   uiReloadTarget(surface?: TargetSurface): Promise<void>;
   uiScreenshotTarget(selector?: string | null, artifactName?: string, surface?: TargetSurface): Promise<string>;
@@ -519,6 +526,8 @@ export const workerCatchUpFlow = (
   surface?: TargetSurface,
 ): Promise<readonly TargetWorkerFlowEvidence[]> => server.commands.uiWorkerCatchUpFlow(install, surface);
 
+/** Run a full garbage collection in the page, so weak references read next reach only what it still holds. */
+export const collectGarbage = (surface?: TargetSurface): Promise<void> => server.commands.uiCollectGarbage(surface);
 /** The dedicated workers the page is running, by stable instance identity and script URL (V21). */
 export const workers = (urlSubstring?: string, surface?: TargetSurface): Promise<readonly TargetWorker[]> =>
   server.commands.uiTargetWorkers(urlSubstring, surface);
@@ -548,7 +557,9 @@ export const chooseFile = (
   },
 ): Promise<void> => server.commands.uiChooseTargetFile(selectorFor(trigger), file);
 export const events = (): Promise<
-  Pick<TargetDiagnostics, 'consoleMessages' | 'pageErrors' | 'geospecWasm' | 'geospecFault'>
+  Pick<TargetDiagnostics, 'consoleMessages' | 'pageErrors' | 'geospecWasm' | 'geospecFault'> & {
+    readonly requestFailures: readonly TargetRequestFailure[];
+  }
 > => server.commands.uiReadTargetEvents();
 export const delay = (milliseconds: number): Promise<void> =>
   new Promise((resolve) => {

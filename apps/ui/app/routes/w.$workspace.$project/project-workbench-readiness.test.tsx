@@ -22,7 +22,12 @@ const mocks = vi.hoisted(() => ({
 }));
 const editorSnapshot = { context: { focusedChatId: undefined } };
 const editorRef = { getSnapshot: () => editorSnapshot, subscribe: () => ({ unsubscribe: () => undefined }) };
-vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => mocks.availability }));
+vi.mock('#hooks/use-project-availability.js', () => ({
+  useProjectAvailability: () => mocks.availability,
+  useModelAvailability: () => mocks.availability,
+  useLargeObjectPending: () => false,
+  useLargeObjects: () => undefined,
+}));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ editorRef }) }));
 vi.mock('#hooks/use-machines.js', () => ({ useMachinesFacet: mocks.machines }));
 vi.mock('#hooks/use-machines-approvals.js', () => ({ usePrintApprovalBridge: mocks.approvalBridge }));

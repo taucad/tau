@@ -52,7 +52,11 @@ const { mockEditorRefSend, mockState, syncNow, chatSync } = vi.hoisted(() => ({
   mockState: { current: undefined as unknown },
 }));
 
-vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
+vi.mock('#hooks/use-project-availability.js', () => ({
+  useProjectAvailability: () => 'ready',
+  useModelAvailability: () => 'ready',
+  useLargeObjectPending: () => false,
+}));
 vi.mock('#hooks/use-revision-status.js', () => ({
   useRevisionStatus: () => ({ sync: { chats: chatSync.state } }),
   useRevisionCommands: () => ({ syncNow }),

@@ -1,3 +1,4 @@
+import { type ShapesLike } from './exporters.js';
 export declare const THREE_VERSION = "0.170.0";
 /** The options of `htmlPage`. */
 export interface PageOptions {
@@ -10,7 +11,11 @@ export interface PageOptions {
     /** Draw the B-rep edges (default true). */
     edges?: boolean;
     /** The direction from the model towards the camera, Z up (default [1, -1.25, 0.75]). */
-    view?: readonly [number, number, number];
+    view?: readonly [
+        number,
+        number,
+        number
+    ];
     /** Room around the model when it is framed (default 1.1). */
     margin?: number;
 }
@@ -23,7 +28,11 @@ export interface PageOptions {
  * @param args Parts, sketches, faces, edges, wires, meshes, or lists of them, and last the options
  *   (see `PageOptions`).
  */
-export declare function htmlPage(...args: unknown[]): string;
+export declare function htmlPage(...shapes: ShapesLike[]): string;
+export declare function htmlPage(...args: [
+    ...shapes: ShapesLike[],
+    options: PageOptions
+]): string;
 /** The options of `show`. */
 export interface ShowOptions {
     /** The page title (default "smlibwasm"). */
@@ -49,4 +58,8 @@ export interface ShowOptions {
  * @param args The shapes, and last the options (see `ShowOptions`).
  * @returns The path of the page.
  */
-export declare function show(...args: unknown[]): string;
+export declare function show(...shapes: ShapesLike[]): string;
+export declare function show(...args: [
+    ...shapes: ShapesLike[],
+    options: ShowOptions
+]): string;

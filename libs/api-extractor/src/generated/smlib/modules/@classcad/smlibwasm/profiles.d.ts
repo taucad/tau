@@ -1,4 +1,3 @@
-import { type Complex, Corner, type Seg } from './_planar.js';
 import { type AlignLike } from './align.js';
 import { Axis, Vector, type VectorLike } from './geometry.js';
 import { Sketch, Wire } from './shapes.js';
@@ -30,11 +29,6 @@ export interface Coordinates {
  * segment (the call that drew it) and the numbers that do not fit.
  */
 export declare class Profile {
-    _start: Complex;
-    _segs: readonly Seg[];
-    _labels: readonly string[];
-    _corners: readonly (readonly [number, Corner])[];
-    _heading: number;
     /** `new Profile(start = [0, 0], { heading })`; the start may be left out:
      * `new Profile({ heading: 90 })`. */
     constructor(start?: VectorLike | {
@@ -42,13 +36,6 @@ export declare class Profile {
     }, options?: {
         heading?: number;
     });
-    _new(changes?: {
-        segs?: readonly Seg[];
-        labels?: readonly string[];
-        corners?: readonly (readonly [number, Corner])[];
-        heading?: number;
-    }): Profile;
-    get _cur(): Complex;
     /** Where the pen is. */
     get point(): Vector;
     /** Where the drawing started. */
@@ -57,12 +44,9 @@ export declare class Profile {
     get heading(): number;
     /** The number of segments drawn (Python's `len(profile)`). */
     get length(): number;
-    _scale(...pts: Complex[]): number;
-    _add(seg: Seg, call: string): Profile;
     /** A straight line to a point: `lineTo(30, 5)` or `lineTo([30, 5])`; or to a coordinate, keeping
      * the other one: `lineTo({ x: 30 })` (horizontal), `lineTo({ y: 5 })` (vertical). */
     lineTo(...args: (number | VectorLike | Coordinates)[]): Profile;
-    static _point(args: readonly unknown[], what: string): Complex;
     /** A straight line by an offset from the pen: `lineBy(10, -5)` or `lineBy([10, -5])`. */
     lineBy(dx?: number | VectorLike, dy?: number): Profile;
     /** A straight line along the heading: `length` long (`forward(20)`), or until x reaches a value
@@ -81,7 +65,6 @@ export declare class Profile {
     arcTo(...args: (number | VectorLike | {
         through?: VectorLike | null;
     })[]): Profile;
-    _corner(c: Corner): Profile;
     /** Round the corner at the pen with a tangent arc of `radius`: the corner between the segment
      * just drawn and the next one (at the start point: between the closing segment and the first
      * one). */
@@ -97,7 +80,6 @@ export declare class Profile {
      * half too.
      */
     mirror(axis: Axis): Profile;
-    _resolve(closed: boolean): Seg[];
     /** The region inside the outline, as a Sketch on XY: a straight line goes back to the start if
      * the pen is not there. `align` moves the result (null, the default, leaves the outline where it
      * was drawn). */

@@ -94,7 +94,7 @@ const createAuthorityBridge = (admitted = true) => {
     policy: tauPathPolicy,
     allowRoot: (candidate) => admitted && candidate === root,
     authority,
-  });
+  }).close;
   const nodeChannel = new NodeFsChannel(delayed.port);
   const provider = new NodeFsProviderClient(nodeChannel, root);
   const bridgeBoundary = new MessageChannel();

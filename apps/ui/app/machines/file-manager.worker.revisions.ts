@@ -46,6 +46,7 @@ import type {
   GitRemoteCredential,
   IsomorphicGitCheckoutOptions,
   KeepalivePushOutcome,
+  LargeObjectsReport,
   PublishDraft,
   RevisionDiffEntry,
   RevisionDivergence,
@@ -161,6 +162,8 @@ export type WorkerRevisionCommand =
      with and sent its frame first; `remote.machine` re-validates (D3). */
   | Readonly<{ command: 'authorizeRemote' }>
   | Readonly<{ command: 'syncNow' }>
+  /* The viewer's *Try again* after a large-object transfer failed; the files are already open. */
+  | Readonly<{ command: 'retryLargeObjects' }>
   /**
    * Pull the remote now (XD3, round 18): another device's run on one of this project's chats has been quiet here a
    * while, and only pulls show whether it stayed quiet there. A question since round 27: answered `pulled`, with
@@ -707,6 +710,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   const listeners = new Topic<RevisionStatusProjection>({ name: 'WorkerProjectRevisions' });
   const events = new Topic<WorkerRevisionEvent>({ name: 'WorkerProjectRevisionEvents' });
   const toasts = new Topic<RevisionToast>({ name: 'WorkerProjectRevisionToasts' });
+  /* Each checkout's large-object fill, as the effects last told it; the selected one rides the projection. */
+  const largeObjects = new Map<string, LargeObjectsReport>();
 
   const { actor, settled, turns, recordEditorConflict, readConflict, pullsChats } = createProjectRevisionsActor({
     port: options.port,
@@ -812,15 +817,37 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     onChatsProjected: (chatIds) => {
       events.emit({ type: 'chats.projected', projectId, chatIds });
     },
+    /* Files open before their large objects arrive (the operator's "open the UI, model waits"): the page's viewer waits on this. */
+    onLargeObjects: (report) => {
+      if (report.facet === undefined) {
+        largeObjects.delete(report.checkoutId);
+      } else {
+        largeObjects.set(report.checkoutId, report);
+      }
+      republish();
+    },
   });
 
-  let published: RevisionStatusProjection = selectRevisionStatus(actor.getSnapshot());
+  const statusOf = (snapshot: ReturnType<typeof actor.getSnapshot>): RevisionStatusProjection => {
+    const status = selectRevisionStatus(snapshot);
+    const facet = status.checkoutId === undefined ? undefined : largeObjects.get(status.checkoutId)?.facet;
+    return facet === undefined ? status : { ...status, largeObjects: facet };
+  };
+  let published: RevisionStatusProjection = statusOf(actor.getSnapshot());
+  const republish = (): void => {
+    const next = statusOf(actor.getSnapshot());
+    if (sameRevisionStatus(published, next)) {
+      return;
+    }
+    published = next;
+    listeners.emit(next);
+  };
 
   actor.subscribe((snapshot) => {
     /* Settled changes only: the machine passes through `minting`/`dirty` more
      * often than the projection's own fields move, and a page that re-rendered
      * on every internal transition would paint frames nobody asked for. */
-    const next = selectRevisionStatus(snapshot);
+    const next = statusOf(snapshot);
     if (sameRevisionStatus(published, next)) {
       return;
     }
@@ -912,7 +939,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     observations.clear();
   };
   actor.start();
-  published = selectRevisionStatus(actor.getSnapshot());
+  published = statusOf(actor.getSnapshot());
   /* W36 D1: each settled push or pull, on the existing telemetry ingest. The desktop's disk host reports its own. */
   actor.getSnapshot().children.sync?.on('syncAttempt', (attempt: SyncMachineEmitted & { type: 'syncAttempt' }) => {
     const apiBaseUrl = options.apiBaseUrl?.();
@@ -1313,6 +1340,10 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         }
         case 'syncNow': {
           actor.send({ type: 'syncNow' });
+          return;
+        }
+        case 'retryLargeObjects': {
+          largeObjects.get(selectRevisionStatus(actor.getSnapshot()).checkoutId ?? '')?.retry();
           return;
         }
         case 'recordsChanged': {
@@ -1785,6 +1816,8 @@ export type WorkerRevisionRegistryOptions = Readonly<{
    * review 2 R2, secondary).
    */
   released?: (projectId: string) => void;
+  /** Told each status one project's root publishes, from its first, for the host's open telemetry (STO-25). */
+  observeStatus?: (projectId: string, status: RevisionStatusProjection) => void;
   /** One rooted provider per checkout route. */
   filesystem: (root: string) => RootedFileSystem | Promise<RootedFileSystem>;
   /**
@@ -2030,8 +2063,10 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
           port.postMessage(frame);
         }
       };
+      options.observeStatus?.(projectId, tree.status());
       const subscriptions = [
         tree.subscribe((status) => {
+          options.observeStatus?.(projectId, status);
           publish({ type: 'status', status });
         }),
         tree.subscribeEvents((event) => {

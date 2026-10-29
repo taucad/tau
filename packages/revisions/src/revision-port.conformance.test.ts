@@ -25,6 +25,7 @@ import type { RevisionProvenance, RevisionSummary } from '#revision-authority.js
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { parseChangeId } from '#git-objects.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
+import type { LfsFetchReport } from '#isomorphic-git-adapter.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
 import { lfsPointerFor } from '#lfs.js';
 import { createRevisionHttpClient } from '#http-client.js';
@@ -2018,6 +2019,78 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
       await fixture.close();
       await writer.dispose();
       await reader.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 180_000);
+
+  /* Load-path audit fix 1: opening a project read its large objects one batch
+   * call and one transfer at a time. A store that fetched only pointers now
+   * hydrates the tree in one batch call, and a second read asks the remote
+   * nothing at all. */
+  it('hydrates a fetched tree in one batch call, and reads it again without the remote', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-lfs-hydrate-'));
+    const fixture = await startGitHttpBackend({ root });
+    const writer = await isomorphicHarness();
+    const parts = Array.from({ length: 5 }, (_, part) => {
+      const bytes = new Uint8Array(new ArrayBuffer(1024 * 1024 + part));
+      for (let index = 0; index < bytes.length; index += 1) {
+        bytes[index] = (index * 31 + part) % 256;
+      }
+      return [`models/part-${String(part)}.step`, bytes] as const;
+    });
+    const reports: LfsFetchReport[] = [];
+    try {
+      const port = writer.withTransport();
+      await port.init({ author });
+      const receipt = await port.writeRevision({
+        parents: [],
+        tree: tree({ ...Object.fromEntries(parts), 'main.ts': 'export {};\n' }),
+        provenance: provenance('user'),
+        summary: summary('Five large objects'),
+      });
+      const head = revisionId(receipt.commitId);
+      await port.updateRef({ name: 'main', expectedHead: undefined, head });
+      await port.setRemote({ name: 'tau', url: fixture.url });
+      await port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] });
+
+      const reader = createIsomorphicGitRevisionPort({
+        filesystem: await createMemoryProvider(),
+        http: createRevisionHttpClient({ authorization: () => 'Bearer session-token' }),
+        onLfsFetch: (report) => {
+          reports.push(report);
+        },
+      });
+      await reader.init({ author });
+      await reader.setRemote({ name: 'tau', url: fixture.url });
+      await reader.fetch({ remote: 'tau' });
+
+      const before = fixture.trail().length;
+      const fetched = await reader.readTree(head);
+      for (const [path, bytes] of parts) {
+        expect(fetched?.get(path)).toStrictEqual(bytes);
+      }
+      expect(fetched?.get('main.ts')).toStrictEqual(encoder.encode('export {};\n'));
+      const hydrating = fixture.trail().slice(before);
+      expect(hydrating.filter((entry) => entry.endsWith('/info/lfs/objects/batch'))).toHaveLength(1);
+      expect(hydrating.filter((entry) => entry.startsWith('GET /lfs/'))).toHaveLength(parts.length);
+      expect(reports).toStrictEqual([
+        expect.objectContaining({
+          networkObjects: parts.length,
+          networkBytes: parts.reduce((sum, [, bytes]) => sum + bytes.byteLength, 0),
+          localObjects: 0,
+          localBytes: 0,
+        }),
+      ]);
+
+      // Every object was stored as it arrived: the second read is local.
+      const after = fixture.trail().length;
+      const again = await reader.readTree(head);
+      expect(again?.get(parts[4]![0])).toStrictEqual(parts[4]![1]);
+      expect(fixture.trail()).toHaveLength(after);
+      expect(reports).toHaveLength(1);
+    } finally {
+      await fixture.close();
+      await writer.dispose();
       await rm(root, { force: true, recursive: true });
     }
   }, 180_000);

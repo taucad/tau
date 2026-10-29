@@ -169,7 +169,7 @@ export function QuestionTextAnswer({
           </Tooltip>
         </div>
       </InputGroup>
-      <DictationFeedback transcript={dictation.transcript} error={dictation.error} />
+      <DictationFeedback transcript={dictation.transcript} />
     </div>
   );
 }

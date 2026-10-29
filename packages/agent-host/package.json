@@ -83,6 +83,7 @@
   "dependencies": {
     "@earendil-works/pi-agent-core": "catalog:",
     "@earendil-works/pi-ai": "catalog:",
+    "@earendil-works/pi-telemetry": "catalog:",
     "@msgpack/msgpack": "catalog:",
     "@taucad/filesystem": "workspace:*",
     "@taucad/rpc": "workspace:*",

@@ -297,7 +297,7 @@ export class TelemetryController {
   }
 
   private recordSyncAttempt(entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.SYNC_ATTEMPT }>): void {
-    const { direction, outcome, placement, lagMilliseconds, pending } = entry.detail;
+    const { direction, outcome, placement, lagMilliseconds, lagSince, pending } = entry.detail;
     const attributes = { 'agent.placement': placement };
     this.metrics.syncClientAttempts.add(1, { direction, outcome, ...attributes });
     /* A client clock or a corrupt queue must not stretch the histograms: clamp to an hour, a day and a bounded depth. */
@@ -307,7 +307,11 @@ export class TelemetryController {
       ...attributes,
     });
     if (lagMilliseconds !== undefined) {
-      this.metrics.syncClientLag.record(Math.min(lagMilliseconds, maximumSyncLagMilliseconds) / 1000, attributes);
+      /* A client older than `lagSince` reported lag only from a change or a queued entry. */
+      this.metrics.syncClientLag.record(Math.min(lagMilliseconds, maximumSyncLagMilliseconds) / 1000, {
+        ...attributes,
+        'sync.lag.since': lagSince ?? 'change',
+      });
     }
     if (pending !== undefined) {
       this.metrics.syncClientPending.record(Math.min(pending, maximumSyncPending), attributes);

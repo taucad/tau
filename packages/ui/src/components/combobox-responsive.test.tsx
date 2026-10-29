@@ -4,6 +4,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Fragment } from 'react';
 import { ComboBoxResponsive } from '#components/combobox-responsive.js';
+import type * as DrawerModule from '#components/drawer.js';
 
 const mobileState = vi.hoisted(() => ({ current: false }));
 const drawerState = vi.hoisted(() => ({ isInside: false }));
@@ -25,29 +26,32 @@ vi.mock('#components/popover.js', () => ({
   ),
 }));
 
-vi.mock('#components/drawer.js', async (importOriginal) => ({
+vi.mock('#components/drawer.js', async (importOriginal) => {
   // The real list, so the drawer test sees the rows it divides.
-  DrawerList: (await importOriginal<typeof import('#components/drawer.js')>()).DrawerList,
-  Drawer: ({ children }: { readonly children: React.ReactNode }) => <div data-testid='drawer-root'>{children}</div>,
-  DrawerNestedRoot: ({ children }: { readonly children: React.ReactNode }) => (
-    <div data-testid='drawer-nested-root'>{children}</div>
-  ),
-  DrawerContent: ({ children, className }: { readonly children: React.ReactNode; readonly className?: string }) => (
-    <div data-testid='drawer-content-test' className={className}>
-      {children}
-    </div>
-  ),
-  DrawerDescription: () => null,
-  DrawerTitle: ({ children, className }: { readonly children: React.ReactNode; readonly className?: string }) => (
-    <h2 data-testid='drawer-title-test' className={className}>
-      {children}
-    </h2>
-  ),
-  useIsInsideDrawer: (): boolean => drawerState.isInside,
-  DrawerTrigger: ({ children }: { readonly children: React.ReactNode }) => (
-    <span data-testid='drawer-trigger-inner'>{children}</span>
-  ),
-}));
+  const { DrawerList } = await importOriginal<typeof DrawerModule>();
+  return {
+    DrawerList,
+    Drawer: ({ children }: { readonly children: React.ReactNode }) => <div data-testid='drawer-root'>{children}</div>,
+    DrawerNestedRoot: ({ children }: { readonly children: React.ReactNode }) => (
+      <div data-testid='drawer-nested-root'>{children}</div>
+    ),
+    DrawerContent: ({ children, className }: { readonly children: React.ReactNode; readonly className?: string }) => (
+      <div data-testid='drawer-content-test' className={className}>
+        {children}
+      </div>
+    ),
+    DrawerDescription: () => null,
+    DrawerTitle: ({ children, className }: { readonly children: React.ReactNode; readonly className?: string }) => (
+      <h2 data-testid='drawer-title-test' className={className}>
+        {children}
+      </h2>
+    ),
+    useIsInsideDrawer: (): boolean => drawerState.isInside,
+    DrawerTrigger: ({ children }: { readonly children: React.ReactNode }) => (
+      <span data-testid='drawer-trigger-inner'>{children}</span>
+    ),
+  };
+});
 
 vi.mock('#components/loader.js', () => ({
   Loader: (): React.ReactNode => null,

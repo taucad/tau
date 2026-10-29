@@ -1840,6 +1840,9 @@ importers:
       '@sentry/node':
         specifier: 'catalog:'
         version: 10.75.0(@opentelemetry/core@2.12.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.223.0(@opentelemetry/api@1.9.1))
+      '@taucad/agent-observability':
+        specifier: workspace:*
+        version: link:../../libs/agent-observability
       '@taucad/api-extractor':
         specifier: workspace:*
         version: link:../../libs/api-extractor

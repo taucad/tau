@@ -373,6 +373,7 @@ catalog:
   vscode-json-languageservice: 5.7.2
   compression: 1.8.2
   '@types/compression': ^1.8.1
+  '@vscode/codicons': 0.0.46-24
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0

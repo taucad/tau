@@ -3,7 +3,7 @@
 import process from 'node:process';
 import type * as SentryNode from '@sentry/node';
 import type { NodeOptions } from '@sentry/node';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 const delivery = vi.hoisted(() => ({ events: [] as unknown[] }));
 
@@ -32,6 +32,10 @@ vi.mock('@sentry/node', async (importOriginal) => {
         }),
       }),
   };
+});
+
+beforeEach(() => {
+  vi.resetModules();
 });
 
 afterEach(async () => {
@@ -75,4 +79,25 @@ it('should deliver the SSR runtime context after Node enrichment, retaining engi
   expect(events[0]).not.toHaveProperty('contexts.runtime.version');
   expect(events[0]).not.toHaveProperty('user');
   expect(JSON.stringify(events[0])).not.toMatch(/private|Authorization|Cookie/u);
+});
+
+it('should deliver identical failures from independent SSR requests with their own run ids', async () => {
+  const pending: Array<Promise<unknown>> = [];
+  vi.stubGlobal('Netlify', { context: { waitUntil: (promise: Promise<unknown>) => pending.push(promise) } });
+  const { reportSsrError } = await import('#lib/sentry.server.js');
+  for (const runId of ['first-request', 'second-request']) {
+    const failure = new Error('Identical SSR failure');
+    reportSsrError(failure, {
+      request: new Request(`https://taucad.dev/__debug/observability?e2e_run=${runId}`),
+      routeId: 'routes/[__debug].observability/route',
+      status: 500,
+      channel: 'handle-error',
+    });
+  }
+  await Promise.all(pending);
+  expect(delivery.events).toHaveLength(2);
+  expect(delivery.events).toMatchObject([
+    { tags: { e2e_run: 'first-request' } },
+    { tags: { e2e_run: 'second-request' } },
+  ]);
 });

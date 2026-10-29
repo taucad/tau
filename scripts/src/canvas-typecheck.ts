@@ -24,6 +24,7 @@ const paths: Record<string, string[]> = {
     resolve(repoRoot, 'apps/libs/billing/src/hooks/*.ts'),
     resolve(repoRoot, 'apps/libs/billing/src/hooks/*.tsx'),
   ],
+  '@codemirror/*': [resolve(repoRoot, 'apps/ui/node_modules/@codemirror/*')],
   '@tanstack/*': [resolve(repoRoot, 'apps/ui/node_modules/@tanstack/*')],
   '@taucad/ui/*': [resolve(repoRoot, 'packages/ui/src/*')],
   // Packages the app imports whose exports map to source; the Vite runner resolves them from the app root.

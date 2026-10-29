@@ -64,6 +64,7 @@ self.addEventListener('message', (event: MessageEvent<Request>) => {
           result =
             completions?.items.map((item) => ({
               label: item.label,
+              kind: item.kind,
               detail: item.detail,
               documentation: typeof item.documentation === 'string' ? item.documentation : item.documentation?.value,
               insertText: item.insertText ?? item.label,

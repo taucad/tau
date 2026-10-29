@@ -69,10 +69,15 @@ export const applyErrorDetails = <Reported extends Event>(event: Reported, error
   if (Object.keys(tags).length === 0 && Object.keys(contexts).length === 0 && fingerprint === undefined) {
     return event;
   }
+  const mergedContexts = { ...contexts, ...event.contexts };
+  for (const name of Object.keys(contexts)) {
+    // SDK contexts such as react.version must not erase the reporter's componentStack.
+    mergedContexts[name] = { ...contexts[name], ...event.contexts?.[name] };
+  }
   return {
     ...event,
     tags: { ...tags, ...event.tags },
-    contexts: { ...contexts, ...event.contexts },
+    contexts: mergedContexts,
     ...(event.fingerprint === undefined && fingerprint !== undefined ? { fingerprint: [...fingerprint] } : {}),
   };
 };

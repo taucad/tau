@@ -697,7 +697,12 @@ type ProjectHostConnector = Readonly<{
   stoppability?: (chatId: string) => Promise<'stoppable' | 'other-build' | 'background-window'>;
   /** The page showed a live run's model text at `at` (T10); best effort, and only the project's host reports it. */
   presented?: (chatId: string, runId: string, at: number) => Promise<void>;
+  /** The account rated an ended run at `at` (T12); best effort, and only the project's host reports it. */
+  rated?: (rating: RunRating) => Promise<void>;
 }>;
+
+/** The account's rating of one ended run, on the page's clock (T12). @public */
+export type RunRating = Readonly<{ chatId: string; runId: string; value: 'positive' | 'negative'; at: number }>;
 
 /** A client that may say when a file last changed on this device (the worker filesystem's head-only stat). */
 type SegmentStatClient = Readonly<{
@@ -723,6 +728,8 @@ export class ChatSessionStore {
   readonly #sessions = new Map<string, InternalSession>();
   readonly #observed = new Map<string, ObservedChat>();
   readonly #projectHostConnectors = new Map<string, ProjectHostConnector>();
+  /** The rating this page gave each run, by chat and run; a run is rated once, as its host reports it. */
+  readonly #ratings = new Map<string, RunRating['value']>();
   readonly #remoteReadVersions = new Map<string, number>();
   readonly #remoteReadCompletedVersions = new Map<string, number>();
   readonly #remoteHistoryPresence = new WeakMap<NonNullable<ChatProjection['remote']>['views'], boolean>();
@@ -990,7 +997,7 @@ export class ChatSessionStore {
   public publishProjectHostConnector(
     projectId: string,
     connect: ProjectHostConnector['connect'],
-    extras: Pick<ProjectHostConnector, 'stoppability' | 'presented'> = {},
+    extras: Pick<ProjectHostConnector, 'stoppability' | 'presented' | 'rated'> = {},
   ): () => void {
     const connector = { connect, ...extras };
     this.#projectHostConnectors.set(projectId, connector);
@@ -1062,6 +1069,54 @@ export class ChatSessionStore {
         ? chatPlacementOf(live.activeExecution)
         : await this.#storedPlacement(chat.resourceId, chatId);
     return { activeExecution: withChatPlacement(chat.activeExecution, placement), activeKernel: chat.activeKernel };
+  }
+
+  /**
+   * The ended run that answered a turn, which the account may rate (T12): the turn's last run whose current attempt
+   * appended its end. A live, unread or legacy run that names no turn is not ratable.
+   *
+   * @param chatId - The chat.
+   * @param turnId - The turn's user-message id.
+   * @returns The run id, or `undefined`.
+   * @public
+   */
+  public ratableRun(chatId: string, turnId: string): string | undefined {
+    const projection = this.#projectionContext(chatId);
+    if (projection === undefined || !selectCaughtUp(projection)) {
+      return undefined;
+    }
+    const ended = Object.entries(projection.ledger.runs).filter(
+      ([, run]) => run.turnId === turnId && (run.appendState === 'terminal' || run.appendState === 'settled'),
+    );
+    return ended.at(-1)?.[0];
+  }
+
+  /** The rating this page gave a run, if any. @public */
+  public ratingOf(chatId: string, runId: string): RunRating['value'] | undefined {
+    return this.#ratings.get(`${chatId}\u0000${runId}`);
+  }
+
+  /**
+   * Rate an ended run once (T12). The first rating stands, as the host reports only the first; whether it is recorded
+   * at all is the host's to decide from the account's feedback grant.
+   *
+   * @param chatId - The chat.
+   * @param runId - The run, from {@link ChatSessionStore.ratableRun}.
+   * @param value - The rating.
+   * @returns The rating that stands.
+   * @public
+   */
+  public rateRun(chatId: string, runId: string, value: RunRating['value']): RunRating['value'] {
+    const key = `${chatId}\u0000${runId}`;
+    const standing = this.#ratings.get(key);
+    if (standing !== undefined) {
+      return standing;
+    }
+    this.#ratings.set(key, value);
+    const projectId = this.#sessions.get(chatId)?.projectId ?? this.#observed.get(chatId)?.projectId;
+    const rated = projectId === undefined ? undefined : this.#projectHostConnectors.get(projectId)?.rated;
+    void rated?.({ chatId, runId, value, at: Date.now() });
+    return value;
   }
 
   /** Cancel the log's current run, including an unopened listed chat; no SDK session is acquired. @public */

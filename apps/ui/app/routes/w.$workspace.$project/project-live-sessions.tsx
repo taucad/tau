@@ -40,6 +40,7 @@ import {
   createBrowserAgentHostClient,
   createAgentHostClient,
   noteBrowserRunPresented,
+  noteBrowserRunRated,
   readBrowserRunStoppability,
   retainBrowserAgentHostProject,
 } from '#services/agent-host-client.js';
@@ -333,6 +334,17 @@ function ProjectSessionBinding({
           }
         } catch {
           /* A lost time is only a missing presentation fact. */
+        }
+      },
+      /* As with a presentation, only a browser host reports a rating; a daemon's run is not rated. */
+      rated: async (rating) => {
+        try {
+          const stored = await chatSessions.getChatHostSettings(rating.chatId);
+          if (daemonPlacementOf(stored?.activeExecution ?? choices.current.defaultExecution) === undefined) {
+            await noteBrowserRunRated({ projectId, ...rating });
+          }
+        } catch {
+          /* A lost rating is only a missing feedback fact. */
         }
       },
     });

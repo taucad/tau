@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Metric names use OTEL dot notation. */
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import { toPrometheusName } from '#prometheus.js';
 import { TauMetrics } from '#registry.js';
 
@@ -7,7 +8,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(187);
+    expect(metrics).toHaveLength(194);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -602,6 +603,43 @@ describe('TauMetrics', () => {
     ).toBe(false);
     expect(TauMetrics.agentTurns.attributes.shape).toHaveProperty(['kernel.id']);
     expect(TauMetrics.agentErrors.attributes.shape).not.toHaveProperty(['kernel.id']);
+  });
+
+  /* Tau Agent observability T14: evidence health is counts and bounded codes, never a receipt, trace, project or account. */
+  it('should declare the agent-evidence instruments with label sets of enums alone', () => {
+    const series = [
+      TauMetrics.agentEvidenceAdmissions,
+      TauMetrics.agentEvidenceDeliveries,
+      TauMetrics.agentEvidenceBacklogRows,
+      TauMetrics.agentEvidenceBacklogHeldBytes,
+      TauMetrics.agentEvidenceErasureTraces,
+      TauMetrics.agentEvidenceLifecycleRecords,
+      TauMetrics.agentEvidencePasses,
+    ];
+    expect(
+      Object.fromEntries(series.map((metric) => [toPrometheusName(metric.name, metric.type), metric.type])),
+    ).toEqual({
+      tau_agent_evidence_admissions_total: 'counter',
+      tau_agent_evidence_deliveries_total: 'counter',
+      tau_agent_evidence_backlog_rows: 'gauge',
+      tau_agent_evidence_backlog_held_bytes: 'gauge',
+      tau_agent_evidence_erasure_traces_total: 'counter',
+      tau_agent_evidence_lifecycle_records_total: 'counter',
+      tau_agent_evidence_passes_total: 'counter',
+    });
+    for (const metric of series) {
+      for (const label of Object.values(metric.attributes.shape)) {
+        expect(label).toBeInstanceOf(z.ZodEnum);
+      }
+    }
+    expect(
+      TauMetrics.agentEvidenceAdmissions.attributes.safeParse({
+        'tau.agent_evidence.authority': 'host',
+        'tau.agent_evidence.plane': 'content',
+        outcome: 'fenced',
+      }).success,
+    ).toBe(true);
+    expect(TauMetrics.agentEvidenceDeliveries.attributes.safeParse({ outcome: 'http-503' }).success).toBe(false);
   });
 
   it('should use lowercase dot-delimited names for all metrics', () => {

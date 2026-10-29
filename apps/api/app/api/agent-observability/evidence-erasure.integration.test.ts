@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { mock } from 'vitest-mock-extended';
+import { mock, mockDeep, mockReset } from 'vitest-mock-extended';
 import { canonicalEvidence } from '@taucad/agent-observability/identity';
 import { admitEvidence } from '#api/agent-observability/evidence-admission.js';
 import { prepareSend } from '#api/agent-observability/evidence-delivery.js';
@@ -20,6 +20,7 @@ import { evidenceFixture } from '#api/agent-observability/evidence.test-fixture.
 import type { DatabaseService, DatabaseType } from '#database/database.service.js';
 import * as schema from '#database/schema.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import type { MetricsService } from '#telemetry/metrics.js';
 import { createScratchDatabase } from '#testing/scratch-database.js';
 import type { ScratchDatabase } from '#testing/scratch-database.js';
 import { databaseReachable } from '#testing/database-reachable.js';
@@ -42,7 +43,9 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     await client?.end();
     await scratch?.drop();
   });
+  const metrics = mockDeep<MetricsService>();
   afterEach(() => {
+    mockReset(metrics);
     vi.unstubAllGlobals();
   });
 
@@ -200,6 +203,7 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
         { database } as unknown as DatabaseService,
         config as unknown as ConstructorParameters<typeof EvidenceErasureService>[1],
         new ShutdownService(),
+        metrics,
       );
     };
     const vendor = (handler: (url: URL, init?: RequestInit) => Response) => {
@@ -253,6 +257,12 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
       await drainer.drain(new Date(later + erasureTiming.recheckAfterMilliseconds + 1));
       expect(await journal(erasureId)).toEqual([expect.objectContaining({ state: 'absent', attempts: 2 }) as unknown]);
       expect(await completedAt(erasureId)).not.toBeNull();
+      for (const outcome of ['requested', 'present', 'absent'] as const) {
+        expect(metrics.agentEvidenceErasureTraces.add).toHaveBeenCalledWith(expect.any(Number), { outcome });
+      }
+      expect(metrics.agentEvidenceLifecycleRecords.add).toHaveBeenCalledWith(expect.any(Number), {
+        action: 'erased',
+      });
     });
 
     it('should retry a refused deletion and never read an outage as absence', async () => {
@@ -278,6 +288,11 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
       );
       expect(await journal(erasureId)).toEqual([expect.objectContaining({ state: 'requested' }) as unknown]);
       expect(await completedAt(erasureId)).toBeNull();
+      expect(metrics.agentEvidenceErasureTraces.add).toHaveBeenCalledWith(expect.any(Number), { outcome: 'retry' });
+      expect(metrics.agentEvidenceErasureTraces.add).toHaveBeenCalledWith(1, { outcome: 'recheck' });
+      expect(metrics.agentEvidenceErasureTraces.add).not.toHaveBeenCalledWith(expect.anything(), {
+        outcome: 'absent',
+      });
     });
 
     it('should purge expired payloads and then reap their receipts with no Langfuse configured', async () => {
@@ -311,6 +326,13 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
         .where(eq(schema.agentEvidenceOutbox.receiptId, receiptId));
       expect(row).toBeUndefined();
       expect(fetcher).not.toHaveBeenCalled();
+      expect(metrics.agentEvidenceLifecycleRecords.add).toHaveBeenCalledWith(expect.any(Number), { action: 'purged' });
+      expect(metrics.agentEvidenceLifecycleRecords.add).toHaveBeenCalledWith(expect.any(Number), { action: 'reaped' });
+      /* Every state is sampled each pass, so a drained one reads zero rather than its last value. */
+      expect(metrics.agentEvidenceBacklogRows.record).toHaveBeenCalledTimes(2 * 6);
+      expect(metrics.agentEvidenceBacklogHeldBytes.record).toHaveBeenCalledTimes(2);
+      expect(metrics.agentEvidenceErasureTraces.add).not.toHaveBeenCalled();
+      expect(metrics.agentEvidencePasses.add).toHaveBeenCalledWith(1, { 'tau.worker': 'lifecycle', outcome: 'ok' });
     });
   });
 });

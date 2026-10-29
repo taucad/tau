@@ -16,6 +16,8 @@ import { parseEvidence } from '@taucad/agent-observability/contract';
 import { canonicalEvidence, verifyEvidenceDigest } from '@taucad/agent-observability/identity';
 import { DatabaseService } from '#database/database.service.js';
 import type { Environment } from '#config/environment.config.js';
+import { MetricsService } from '#telemetry/metrics.js';
+import type { AgentEvidenceAdmissionAttributes } from '#telemetry/metrics.js';
 import { Span } from '#telemetry/tracer.service.js';
 import { TelemetryPurposeService } from '#api/telemetry-purposes/telemetry-purpose.service.js';
 import { admitEvidence } from '#api/agent-observability/evidence-admission.js';
@@ -34,6 +36,25 @@ const clockSkewMilliseconds = 5 * 60_000;
 const sqlState = (error: unknown): string | undefined => {
   const code: unknown = typeof error === 'object' && error !== null ? Reflect.get(error, 'code') : undefined;
   return typeof code === 'string' && /^[\dA-Z]{5}$/u.test(code) ? code : undefined;
+};
+
+/** The bounded health outcome of one admission; `granted` tells a stale epoch from a withheld purpose. */
+const admissionOutcome = (
+  outcome: Awaited<ReturnType<typeof admitEvidence>>,
+  granted: boolean,
+): AgentEvidenceAdmissionAttributes['outcome'] => {
+  switch (outcome.kind) {
+    case 'receipt': {
+      const { disposition, duplicate } = outcome.receipt;
+      return disposition === 'accepted' && duplicate ? 'duplicate' : disposition;
+    }
+    case 'refused': {
+      return granted ? 'policy_stale' : 'refused';
+    }
+    default: {
+      return outcome.kind;
+    }
+  }
 };
 
 /**
@@ -55,6 +76,7 @@ export class EvidenceIngressService {
     private readonly databaseService: DatabaseService,
     configService: ConfigService<Environment, true>,
     private readonly telemetryPurposes: TelemetryPurposeService,
+    private readonly metrics: MetricsService,
   ) {
     const encodedKey = configService.get('TAU_OBSERVABILITY_PAYLOAD_KEY', { infer: true });
     if (encodedKey !== undefined) {
@@ -186,6 +208,13 @@ export class EvidenceIngressService {
     const granted = state?.allowed === true;
     const current = authority.effective.epoch === scope.policyEpoch;
     const bytes = new TextEncoder().encode(canonicalEvidence(evidence));
+    const count = (outcome: AgentEvidenceAdmissionAttributes['outcome']): void => {
+      this.metrics.agentEvidenceAdmissions.add(1, {
+        'tau.agent_evidence.authority': evidence.authority === 'host-reported' ? 'host' : 'api',
+        'tau.agent_evidence.plane': plane,
+        outcome,
+      } satisfies AgentEvidenceAdmissionAttributes);
+    };
 
     let outcome: Awaited<ReturnType<typeof admitEvidence>>;
     try {
@@ -206,6 +235,7 @@ export class EvidenceIngressService {
         now,
       });
     } catch (error) {
+      count('error');
       this.logger.warn(
         { name: error instanceof Error ? error.name : typeof error, sqlState: sqlState(error) },
         'Evidence admission failed',
@@ -216,6 +246,7 @@ export class EvidenceIngressService {
       });
     }
 
+    count(admissionOutcome(outcome, granted));
     switch (outcome.kind) {
       case 'receipt': {
         return outcome.receipt;

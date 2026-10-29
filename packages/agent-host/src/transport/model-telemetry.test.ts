@@ -1,7 +1,11 @@
 import { AI_TELEMETRY_SCHEMA } from '@earendil-works/pi-ai';
 import { describe, expect, it, vi } from 'vitest';
 import type { ModelStreamEvent, ModelStreamRequest } from '#waist/ports.js';
-import { createCachedSystemPromptBlocks, createGatewayModelTransport } from '#transport/gateway-model-transport.js';
+import {
+  createCachedSystemPromptBlocks,
+  createGatewayModelTransport,
+  GatewayModelTransportError,
+} from '#transport/gateway-model-transport.js';
 import { modelTelemetryParent, modelTelemetrySubject } from '#transport/model-telemetry.js';
 import type { ModelTelemetryParent, ModelTelemetrySeam, ModelTelemetrySubject } from '#transport/model-telemetry.js';
 import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixture.js';
@@ -33,8 +37,8 @@ const collect = async (stream: AsyncIterable<ModelStreamEvent>): Promise<ModelSt
   return events;
 };
 
-const fixtureResponse = (): Response => {
-  const bytes = new TextEncoder().encode(authoritativeGatewayWireFixtures.toolTurn.join(''));
+const fixtureResponse = (frames: readonly string[] = authoritativeGatewayWireFixtures.toolTurn): Response => {
+  const bytes = new TextEncoder().encode(frames.join(''));
   return new Response(
     new ReadableStream<Uint8Array<ArrayBuffer>>({
       start(controller) {
@@ -338,5 +342,107 @@ describe('native model spans from the gateway transport', () => {
     expect(spans.map((span) => [span.name, span.ended, span.attributes['stop']])).toEqual([
       ['pi.ai.request', true, undefined],
     ]);
+  });
+});
+
+/*
+ * Provider-family parity: the three wires Tau speaks to its gateway. Each must
+ * send the same request whether or not it is observed, write the same shape of
+ * span, and leave retry with the gateway: one invocation, one fetch, one span.
+ */
+describe.each([
+  { wire: 'Anthropic Messages', providerKind: 'anthropic', frames: authoritativeGatewayWireFixtures.anthropicToolTurn },
+  {
+    wire: 'OpenAI Responses',
+    providerKind: 'openai',
+    frames: authoritativeGatewayWireFixtures.openAiResponsesToolTurn,
+  },
+  { wire: 'OpenAI Completions', providerKind: 'vertexai', frames: authoritativeGatewayWireFixtures.toolTurn },
+] as const)('native model spans on the $wire wire', ({ providerKind, frames }) => {
+  const base = {
+    baseUrl: 'https://gateway.example',
+    model: { contextWindow: 200_000, maxTokens: 8192 },
+  } as const;
+  type Sent = { url: string; headers: Record<string, string>; body: string };
+  const capturing = (respond: () => Response) => {
+    const sent: Sent[] = [];
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push({
+        url: input instanceof Request ? input.url : String(input),
+        headers: Object.fromEntries(new Headers(init?.headers).entries()),
+        body: typeof init?.body === 'string' ? init.body : '',
+      });
+      return respond();
+    });
+    return { sent, fetch };
+  };
+  const run = async (respond: () => Response, parent?: ModelTelemetryParent) => {
+    const { sent, fetch } = capturing(respond);
+    const events: ModelStreamEvent[] = [];
+    let failure: unknown;
+    try {
+      for await (const event of createGatewayModelTransport({
+        ...base,
+        fetch,
+        ...(parent === undefined ? {} : { telemetry: { parentFor: () => parent } }),
+      }).stream(request({ providerKind }))) {
+        events.push(event);
+      }
+    } catch (error) {
+      failure = error;
+    }
+    await flush();
+    return { events, sent, failure };
+  };
+
+  it('sends the same request, with the same authentication and framing, when observed', async () => {
+    const { parent } = recordingParent();
+
+    const plain = await run(() => fixtureResponse(frames));
+    const observed = await run(() => fixtureResponse(frames), parent);
+
+    expect(observed.sent).toEqual(plain.sent);
+    expect(observed.events).toEqual(plain.events);
+  });
+
+  it('writes one closed request span for the tool turn, naming the tool but not its arguments', async () => {
+    const { spans, parent } = recordingParent();
+
+    await run(() => fixtureResponse(frames), parent);
+
+    expect(spans.map((span) => [span.name, span.ended, span.attributes['stop']])).toEqual([
+      ['pi.ai.request', true, 'toolUse'],
+    ]);
+    expect(spans[0]?.attributes['usage.output']).toBeGreaterThan(0);
+    expect(
+      spans[0]?.events
+        .filter((event) => event.attributes?.['type'] === 'tool_call')
+        .map((event) => event.attributes?.['tool']),
+    ).toEqual(['read_file']);
+    expect(JSON.stringify(spans)).not.toContain('main.ts');
+  });
+
+  it('leaves retry with the gateway: a refused request is one fetch and one errored span', async () => {
+    const { spans, parent } = recordingParent();
+    const refused = () =>
+      new Response(JSON.stringify({ error: { message: 'SYNTHETIC_REFUSAL_DETAIL' } }), {
+        status: 503,
+        headers: { 'content-type': 'application/json' },
+      });
+
+    const plain = await run(refused);
+    const observed = await run(refused, parent);
+
+    /* The refusal reaches the caller as the same coded gateway error either way. */
+    expect(plain.failure).toBeInstanceOf(GatewayModelTransportError);
+    expect(observed.failure).toEqual(plain.failure);
+    expect(observed.events).toEqual(plain.events);
+    expect(observed.sent).toHaveLength(1);
+    expect(plain.sent).toHaveLength(1);
+    expect(spans.map((span) => [span.name, span.ended, span.attributes['stop']])).toEqual([
+      ['pi.ai.request', true, 'error'],
+    ]);
+    expect(spans[0]?.status).toEqual({ status: 'error', error: { name: 'provider_error', message: 'provider_error' } });
+    expect(JSON.stringify(spans)).not.toContain('SYNTHETIC_REFUSAL_DETAIL');
   });
 });

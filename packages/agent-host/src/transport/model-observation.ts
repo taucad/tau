@@ -265,12 +265,16 @@ export const observeModelStream = async function* (
   };
   try {
     for await (const event of events) {
-      yield event;
+      /* Taken before the yield: Tau's consumer throws its coded gateway error
+       * at a terminal `error` event, so control never comes back here and the
+       * result is only seen again in `finally`. A plain assignment, not
+       * observer code, so it cannot affect the event. */
       if (event.type === 'done') {
         result = event.message;
       } else if (event.type === 'error') {
         result = event.error;
       }
+      yield event;
       guard((target) => target.onEvent?.(event));
     }
   } finally {

@@ -213,7 +213,9 @@
     "grafana-bundle": {
       "executor": "nx:run-commands",
       "cache": false,
-      "options": { "command": "node scripts/src/validate-grafana.ts --write-bundle" }
+      "options": {
+        "command": "node scripts/src/validate-grafana.ts --write-bundle"
+      }
     },
     "validate-grafana": {
       "executor": "nx:run-commands",
@@ -342,6 +344,13 @@
       "cache": false,
       "options": {
         "command": "node --test .agents/skills/codex-lanes/scripts/lanes.test.mjs"
+      }
+    },
+    "plan-ci-tests": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node scripts/src/ci-test-shards.ts"
       }
     }
   }

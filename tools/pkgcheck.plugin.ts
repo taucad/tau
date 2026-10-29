@@ -144,6 +144,8 @@ const createPkgcheckTarget = (
             },
             inputs: [
               ...('production' in namedInputs ? ['default', '^production'] : ['default', '^default']),
+              '{workspaceRoot}/tools/pkgcheck*.ts',
+              '{workspaceRoot}/scripts/src/ci-timing.ts',
               '{projectRoot}/package.json',
               '{projectRoot}/tsdown.config.ts',
               '{projectRoot}/dist/**/*',

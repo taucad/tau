@@ -11,10 +11,12 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { FileEntry } from '@taucad/types';
+import { holdUnheardFileReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
+import { useProject } from '#hooks/use-project.js';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
 
 /** What the row already showed when its listing was asked for. */
@@ -63,9 +65,10 @@ vi.mock('#workbench-records/view-actions.js', () => ({
     remove: async () => true,
   }),
 }));
-vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({ projectRef: actorStub, editorRef: { ...actorStub, send: vi.fn() } }),
-}));
+vi.mock('#hooks/use-project.js', () => {
+  const editorRef = { ...actorStub, send: vi.fn() };
+  return { useProject: () => ({ projectRef: actorStub, editorRef }) };
+});
 vi.mock('#hooks/use-file-manager.js', () => {
   const treeService = {
     subscribeTree: (callback: () => void) => store.subscribe(callback),
@@ -176,5 +179,29 @@ describe('clicking a folder the tree has never listed', () => {
 
     expect(screen.getByRole('treeitem', { name: 'src' })).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('treeitem', { name: 'part.scad' })).toBeInTheDocument();
+  });
+});
+
+describe('a Files reveal emitted before the tree mounts', () => {
+  it('should expand the nested path and select its file on first mount', async () => {
+    store.snapshot = new Map([
+      directory('parts'),
+      directory('parts/nested'),
+      file('parts/nested/wheel.scad'),
+      file('main.scad'),
+    ]);
+    store.loaded = new Set(['', 'parts', 'parts/nested']);
+    const { result } = renderHook(() => useProject());
+    holdUnheardFileReveal(result.current.editorRef, { path: 'parts/nested/wheel.scad' });
+    render(
+      <TooltipProvider>
+        <FileTreePanelBody />
+      </TooltipProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('treeitem', { name: 'parts' })).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByRole('treeitem', { name: 'nested' })).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByRole('treeitem', { name: 'wheel.scad' })).toHaveAttribute('aria-selected', 'true');
+    });
   });
 });

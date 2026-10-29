@@ -49,6 +49,33 @@ const manifest = parseDesktopArtifactManifest({
   sourceCommit: 'b'.repeat(40),
   artifacts: [wireArtifact('windows-nsis'), wireArtifact('windows-zip')],
 });
+/** Synthetic consumer evidence exercises publication admission; it proves no native qualification. */
+const windowsHost = () => ({
+  platform: 'win32',
+  runner: 'synthetic-consumer',
+  nativeArch: 'x64',
+  osBuild: 26_100,
+  account: 'standard-user',
+  uac: 'enabled',
+  defender: 'enabled',
+  download: 'browser-internet-zone',
+  reputationScope: 'qualification-mirror',
+  manualEvidence: ['initial', 'reinstall'].map((stage, index) => ({
+    stage,
+    nonce: '123e4567-e89b-42d3-a456-426614174000',
+    hostSha256: 'e'.repeat(64),
+    artifactSha256: (index === 0 ? 'c' : 'a').repeat(64),
+    observedAt: 200,
+    smartScreen: 'not-shown',
+    screenshots: ['security-settings', 'installer-result'].map((kind) => ({
+      kind,
+      name: `${stage}-${kind}.png`,
+      capturedAt: 150,
+      sha256: 'f'.repeat(64),
+      size: 10,
+    })),
+  })),
+});
 const receipt = (environment: 'ci' | 'vm') => ({
   schemaVersion: 1,
   status: 'passed',
@@ -60,12 +87,24 @@ const receipt = (environment: 'ci' | 'vm') => ({
   artifacts: [{ name: manifest.artifacts[0]!.name, sha256: manifest.artifacts[0]!.sha256 }],
   baseline: { version: '1.1.1', artifactSha256: 'c'.repeat(64) },
   installed: { version: identity.version, executableSha256: 'd'.repeat(64) },
-  environment: { os: 'Windows11', arch: 'x64', kind: environment, sandbox: 'enabled' },
+  environment: {
+    os: 'Windows11',
+    arch: 'x64',
+    kind: environment,
+    sandbox: 'enabled',
+    ...(environment === 'vm' ? { host: windowsHost() } : {}),
+  },
   trust: { kind: 'release', identity: 'CN=Expected publisher' },
   checks: { cleanInstall: true, upgrade: true, dataPreserved: true },
   suite: 'installedA-to-B',
   logs: 'artifact://test-evidence',
 });
+const missingHost = receipt('vm');
+delete missingHost.environment.host;
+assert.throws(
+  () => qualifyDesktopRoutes(manifest, [receipt('ci'), missingHost], { 'windows-nsis': 'CN=Expected publisher' }),
+  /Clean-host receipt facts/u,
+);
 const receipts = [receipt('ci'), receipt('vm')];
 /** Observed host facts every Mac clean-host receipt carries. */
 const cleanHost = (nativeArch: 'arm64' | 'x64') => ({
@@ -240,6 +279,7 @@ const productionReceipts = requirements.flatMap((requirement) =>
       arch: requirement.target.endsWith('arm64') ? 'arm64' : 'x64',
       kind: environment,
       sandbox: 'enabled',
+      ...(environment === 'vm' && requirement.target === 'win32-x64' ? { host: windowsHost() } : {}),
       ...(environment === 'vm' && requirement.target.startsWith('darwin-')
         ? { host: cleanHost(requirement.target.endsWith('arm64') ? 'arm64' : 'x64') }
         : {}),

@@ -29,7 +29,7 @@ import type { LeaseRequest } from '#api/git/lease-host.js';
 import { referencedLfsOids } from '#api/git/lfs-references.js';
 import { frozenRefusal, isServedStore } from '#api/git/routing/route.js';
 import { commitLease, commitTombstone } from '#api/git/store/commit.js';
-import type { CommitResult, MovedRef } from '#api/git/store/commit.js';
+import type { CommitPhase, CommitResult, MovedRef } from '#api/git/store/commit.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import type { FaultInjector } from '#api/git/store/fault-points.js';
 import { isFenceManifest } from '#api/git/store/fence-marker.js';
@@ -786,15 +786,25 @@ export class StorageGitService extends GitLeaseHost {
       throw frozenRefusal();
     }
     const startedAt = performance.now();
+    /* Held until the attempt is counted, so every phase series counts exactly the commits `total` counts:
+       a push that moved no ref, or one refused before its manifest write, records neither. */
+    const phases: Array<[CommitPhase, number]> = [];
     const attempt = (outcome: GitCommitAttemptAttributes['outcome']): void => {
       this.metrics.gitCommitAttempts.add(1, { outcome, 'tau.git.commit.kind': 'push' });
-      this.metrics.gitCommitDuration.record((performance.now() - startedAt) / 1000, {
-        'tau.git.commit.phase': 'total',
-        'tau.git.commit.kind': 'push',
-      });
+      for (const [phase, seconds] of [...phases, ['total', (performance.now() - startedAt) / 1000] as const]) {
+        this.metrics.gitCommitDuration.record(seconds, {
+          'tau.git.commit.phase': phase,
+          'tau.git.commit.kind': 'push',
+        });
+      }
     };
     try {
-      const result = await commitLease(args);
+      const result = await commitLease({
+        ...args,
+        onPhase: (phase, seconds) => {
+          phases.push([phase, seconds]);
+        },
+      });
       if (result.committed) {
         attempt('committed');
         this.metrics.gitRepositorySize.record(manifestPackBytes(result.manifest));

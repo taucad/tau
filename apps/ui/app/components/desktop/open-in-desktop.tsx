@@ -14,7 +14,7 @@
  * worked, through a button that is visible the whole time it is opening.
  */
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { useLocation } from 'react-router';
 import { CircleAlert, Download, ExternalLink } from 'lucide-react';
 
@@ -23,6 +23,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@tauc
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Label } from '@taucad/ui/components/label';
 import { Spinner } from '#components/ui/spinner.js';
+import { osClass } from '#telemetry/platform-class.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { desktopDeepLink } from '#lib/desktop-deep-link.js';
 import { browserDesktopScheme, useDesktopScheme } from '#hooks/use-desktop-scheme.js';
@@ -78,6 +79,15 @@ const writeAlwaysOpen = (value: boolean): void => {
   }
 };
 
+// OS facts are stable for this page. Pointer precision does not determine whether Tau Desktop can run.
+const subscribePlatform = (): (() => void) => () => undefined;
+const canOpenDesktop = (): boolean => {
+  const platform = osClass();
+  return platform !== 'ios' && platform !== 'android';
+};
+// No offer until the browser can classify its OS; SSR and first hydration therefore agree on phones too.
+const serverCanOpenDesktop = (): boolean => false;
+
 /** What the offer is showing, in the order a person meets it. */
 type OfferStage = 'offer' | 'opening' | 'not-opened' | 'dismissed';
 
@@ -100,6 +110,7 @@ export type OpenInDesktopProps = {
 export function OpenInDesktop({ continueLabel }: OpenInDesktopProps): React.JSX.Element | undefined {
   const location = useLocation();
   const scheme = useDesktopScheme();
+  const isDesktopSupported = useSyncExternalStore(subscribePlatform, canOpenDesktop, serverCanOpenDesktop);
   const checkboxId = useId();
   const [stage, setStage] = useState<OfferStage>('offer');
   const [alwaysOpen, setAlwaysOpen] = useState(false);
@@ -107,9 +118,10 @@ export function OpenInDesktop({ continueLabel }: OpenInDesktopProps): React.JSX.
      would otherwise navigate to the scheme twice. */
   const attempted = useRef(false);
 
-  const deepLink = isDesktopTarget()
-    ? undefined
-    : desktopDeepLink(`${location.pathname}${location.search}${location.hash}`, scheme);
+  const deepLink =
+    isDesktopTarget() || !isDesktopSupported
+      ? undefined
+      : desktopDeepLink(`${location.pathname}${location.search}${location.hash}`, scheme);
 
   const handOff = useCallback((): void => {
     if (deepLink === undefined) {
@@ -225,6 +237,7 @@ export function OpenInDesktop({ continueLabel }: OpenInDesktopProps): React.JSX.
         <div className='flex items-center gap-2'>
           <Checkbox
             id={checkboxId}
+            className='pointer-coarse:size-6'
             checked={alwaysOpen}
             onCheckedChange={(value) => {
               const next = value === true;

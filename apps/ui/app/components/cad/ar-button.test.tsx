@@ -1,10 +1,11 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { Artifact, RuntimeDocument } from '@taucad/runtime';
-import { mimeTypes } from '@taucad/types/constants';
+import type { Artifact } from '@taucad/runtime';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ArButton } from '#components/cad/ar-button.js';
+import { UsdzTranscodeError } from '#components/cad/ar-usdz-transcode.js';
+import type * as UsdzTranscodeModule from '#components/cad/ar-usdz-transcode.js';
 
 // WebGL is unavailable in jsdom, so the Three.js scene is the one simulated boundary; the session, overlay, capability
 // detection and recovery all run for real against faked platform globals.
@@ -14,6 +15,16 @@ const sceneMocks = vi.hoisted(() => ({
 
 vi.mock('#components/cad/ar-webxr-scene.js', () => ({
   presentGlbInArSession: sceneMocks.present,
+}));
+
+// The USDZ worker is the second simulated boundary: jsdom has no module workers. Its own test covers the worker client.
+const usdzMocks = vi.hoisted(() => ({
+  transcode: vi.fn<(glb: Uint8Array<ArrayBuffer>) => Promise<Uint8Array<ArrayBuffer>>>(),
+}));
+
+vi.mock('#components/cad/ar-usdz-transcode.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof UsdzTranscodeModule>()),
+  transcodeGlbToUsdz: usdzMocks.transcode,
 }));
 
 const ua = {
@@ -117,6 +128,7 @@ beforeEach(() => {
   xr.isSessionSupported.mockReset();
   xr.requestSession.mockReset().mockImplementation(async () => session);
   sceneMocks.present.mockReset().mockImplementation(async () => () => undefined);
+  usdzMocks.transcode.mockReset().mockImplementation(async () => new Uint8Array([1, 2, 3]));
   clickedLinks = [];
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
     clickedLinks.push({ rel: this.rel, href: this.getAttribute('href') ?? '' });
@@ -144,23 +156,6 @@ afterEach(() => {
 const glbBytes = new Uint8Array([0x67, 0x6c, 0x54, 0x46, 2, 0, 0, 0]);
 const glbArtifact: Artifact = { mimeType: 'model/gltf-binary', content: glbBytes };
 
-type ExportResult = Awaited<ReturnType<RuntimeDocument['export']>>;
-
-function createRuntimeDocument(result?: () => Promise<unknown>): {
-  readonly document: RuntimeDocument;
-  readonly exportModel: ReturnType<typeof vi.fn>;
-} {
-  const exportModel = vi.fn(
-    result ??
-      (async () => ({
-        success: true,
-        files: [{ name: 'model.usdz', mimeType: mimeTypes.usdz, bytes: new Uint8Array([1, 2, 3]) }],
-      })),
-  );
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the fake implements only `export`, the one member useAr calls.
-  return { document: { export: exportModel } as unknown as RuntimeDocument, exportModel };
-}
-
 function deferred<Value>(): {
   readonly promise: Promise<Value>;
   readonly resolve: (value: Value) => void;
@@ -184,11 +179,11 @@ async function settle(): Promise<void> {
   });
 }
 
-function renderAr(artifact: Artifact | undefined = glbArtifact, runtimeDocument?: RuntimeDocument): void {
+function renderAr(artifact: Artifact | undefined = glbArtifact): void {
   render(
     <>
       <button type='button'>Before</button>
-      <ArButton artifact={artifact} runtimeDocument={runtimeDocument ?? createRuntimeDocument().document} />
+      <ArButton artifact={artifact} />
     </>,
     { wrapper: TooltipProvider },
   );
@@ -250,9 +245,9 @@ describe('ArButton capability detection', () => {
     expect(screen.queryByRole('button', { name: /view in your space/i })).not.toBeInTheDocument();
   });
 
-  it('stays hidden for Quick Look without a runtime document to export USDZ', async () => {
+  it('stays hidden for Quick Look until there is a GLB model to convert', async () => {
     installPlatform(platforms.iPhoneSafari);
-    render(<ArButton artifact={glbArtifact} />, { wrapper: TooltipProvider });
+    renderAr({ mimeType: 'image/svg+xml', content: '<svg />' });
     await settle();
     expect(screen.queryByRole('button', { name: /view in your space/i })).not.toBeInTheDocument();
   });
@@ -270,17 +265,16 @@ describe('ArButton capability detection', () => {
 });
 
 describe('ArButton launch path', () => {
-  it('opens Quick Look on iPadOS with a same-origin USDZ blob and no WebXR session', async () => {
+  it('opens Quick Look on iPadOS with a USDZ blob converted from the viewer GLB, and no WebXR session', async () => {
     installPlatform(platforms.iPadOsDesktopUa);
-    const { document: runtimeDocument, exportModel } = createRuntimeDocument();
-    renderAr(glbArtifact, runtimeDocument);
+    renderAr();
     await settle();
     await userEvent.click(arButton());
 
     await waitFor(() => {
       expect(clickedLinks).toEqual([{ rel: 'ar', href: 'blob:http://localhost/0f6b6a52' }]);
     });
-    expect(exportModel).toHaveBeenCalledWith('usdz');
+    expect(usdzMocks.transcode).toHaveBeenCalledExactlyOnceWith(glbBytes);
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:http://localhost/0f6b6a52');
     expect(xr.requestSession).not.toHaveBeenCalled();
     expect(arButton()).toHaveFocus();
@@ -289,8 +283,7 @@ describe('ArButton launch path', () => {
 
   it('opens an in-page WebXR session on Android with the GLB bytes, then restores the control and focus', async () => {
     installPlatform(platforms.androidChromeWebXr);
-    const { document: runtimeDocument, exportModel } = createRuntimeDocument();
-    renderAr(glbArtifact, runtimeDocument);
+    renderAr();
     await settle();
     await userEvent.click(arButton());
 
@@ -300,7 +293,7 @@ describe('ArButton launch path', () => {
       expect.objectContaining({ domOverlay: { root: exit.parentElement } }),
     );
     expect(sceneMocks.present).toHaveBeenCalledWith(session, glbBytes, expect.anything());
-    expect(exportModel).not.toHaveBeenCalled();
+    expect(usdzMocks.transcode).not.toHaveBeenCalled();
     expect(screen.getByRole('status')).toHaveTextContent('tap to place the model');
     // While presenting, the control keeps its one name and reports itself busy.
     expect(arButton()).toHaveAttribute('aria-busy', 'true');
@@ -331,16 +324,11 @@ describe('ArButton launch path', () => {
     expect(screen.queryByRole('button', { name: 'Exit AR' })).not.toBeInTheDocument();
   });
 
-  it('ignores taps while the USDZ export is pending, keeping focus on the busy control', async () => {
+  it('ignores taps while the USDZ conversion is pending, keeping focus on the busy control', async () => {
     installPlatform(platforms.iPhoneSafari);
-    let finish: (value: unknown) => void = () => undefined;
-    const { document: runtimeDocument, exportModel } = createRuntimeDocument(
-      async () =>
-        new Promise((resolve) => {
-          finish = resolve;
-        }),
-    );
-    renderAr(glbArtifact, runtimeDocument);
+    const conversion = deferred<Uint8Array<ArrayBuffer>>();
+    usdzMocks.transcode.mockImplementationOnce(async () => conversion.promise);
+    renderAr();
     await settle();
     await userEvent.click(arButton());
 
@@ -350,13 +338,10 @@ describe('ArButton launch path', () => {
     expect(busy).toHaveAttribute('aria-disabled', 'true');
     expect(busy).toHaveFocus();
     await userEvent.click(busy);
-    expect(exportModel).toHaveBeenCalledTimes(1);
+    expect(usdzMocks.transcode).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      finish({
-        success: true,
-        files: [{ name: 'model.usdz', mimeType: mimeTypes.usdz, bytes: new Uint8Array([1]) }],
-      } satisfies Partial<ExportResult>);
+      conversion.resolve(new Uint8Array([1]));
     });
     expect(arButton()).toHaveFocus();
     expect(arButton()).toHaveAttribute('aria-busy', 'false');
@@ -427,7 +412,7 @@ describe('ArButton launch path', () => {
     installPlatform(platforms.androidChromeWebXr);
     const request = deferred<FakeXrSession>();
     xr.requestSession.mockImplementationOnce(async () => request.promise);
-    const { unmount } = render(<ArButton artifact={glbArtifact} runtimeDocument={createRuntimeDocument().document} />, {
+    const { unmount } = render(<ArButton artifact={glbArtifact} />, {
       wrapper: TooltipProvider,
     });
     await settle();
@@ -447,7 +432,7 @@ describe('ArButton launch path', () => {
     installPlatform(platforms.androidChromeWebXr);
     const load = deferred<() => void>();
     sceneMocks.present.mockImplementationOnce(async () => load.promise);
-    const { unmount } = render(<ArButton artifact={glbArtifact} runtimeDocument={createRuntimeDocument().document} />, {
+    const { unmount } = render(<ArButton artifact={glbArtifact} />, {
       wrapper: TooltipProvider,
     });
     await settle();
@@ -544,39 +529,21 @@ describe('ArButton recovery', () => {
     expect(xr.requestSession).toHaveBeenCalledTimes(2);
   });
 
-  it('names a failed USDZ export with its issue, and Escape returns focus to the control', async () => {
+  it('names a failed USDZ conversion with its message, and Escape returns focus to the control', async () => {
     installPlatform(platforms.iPhoneSafari);
-    const { document: runtimeDocument } = createRuntimeDocument(async () => ({
-      success: false,
-      issues: [{ message: 'Kernel cannot export USDZ' }],
-    }));
-    renderAr(glbArtifact, runtimeDocument);
+    usdzMocks.transcode.mockRejectedValueOnce(new UsdzTranscodeError('Assimp cannot write USDZ'));
+    renderAr();
     await settle();
     await userEvent.click(arButton());
 
     const dialog = await screen.findByRole('alertdialog', { name: 'Couldn’t prepare the model for AR' });
-    expect(dialog).toHaveAccessibleDescription('Kernel cannot export USDZ');
+    expect(dialog).toHaveAccessibleDescription('Assimp cannot write USDZ');
     expect(clickedLinks).toEqual([]);
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
     await userEvent.keyboard('{Escape}');
 
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(arButton()).toHaveFocus();
-  });
-
-  it('keeps USDZ export validation: an unexpected file is a named failure, never launched', async () => {
-    installPlatform(platforms.iPhoneSafari);
-    const { document: runtimeDocument } = createRuntimeDocument(async () => ({
-      success: true,
-      files: [{ name: 'model.glb', mimeType: 'model/gltf-binary', bytes: new Uint8Array([1]) }],
-    }));
-    renderAr(glbArtifact, runtimeDocument);
-    await settle();
-    await userEvent.click(arButton());
-
-    const dialog = await screen.findByRole('alertdialog', { name: 'Couldn’t prepare the model for AR' });
-    expect(dialog).toHaveAccessibleDescription(/expected exactly one \.usdz artifact/);
-    expect(clickedLinks).toEqual([]);
-    expect(URL.createObjectURL).not.toHaveBeenCalled();
   });
 
   it('ends the session and names a failed launch when the model cannot be shown', async () => {

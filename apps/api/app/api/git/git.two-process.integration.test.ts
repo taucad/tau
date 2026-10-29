@@ -2,7 +2,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- decorators are not constructors */
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { createServer } from 'node:http';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -14,7 +13,6 @@ import { APP_FILTER, APP_PIPE, HttpAdapterHost } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
-import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { FastifyInstance } from 'fastify';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { AuthGuard } from '#auth/auth.guard.js';
@@ -45,6 +43,8 @@ import { StorageReceiptsController } from '#api/git/forwarding/receipts.controll
 import { StorageForwarder } from '#api/git/forwarding/storage-forwarder.js';
 import { startStorageApp } from '#api/git/worker/storage-app.js';
 import type { StorageApp } from '#api/git/worker/storage-app.js';
+import { createGitTestListener } from '#api/git/git-test-listener.js';
+import type { GitTestListener } from '#api/git/git-test-listener.js';
 
 /**
  * Success criterion S2: two or more API processes serve the same repository
@@ -74,17 +74,7 @@ const projectId = `proj-w4x-${suffix}`;
 const ownerId = `user-w4x-${suffix}`;
 const token = 'two-process-token';
 
-const reservePort = async (): Promise<number> =>
-  new Promise((resolve) => {
-    const probe = createServer();
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address();
-      const port = typeof address === 'string' || address === null ? 0 : address.port;
-      probe.close(() => {
-        resolve(port);
-      });
-    });
-  });
+const cleanup: Array<() => Promise<void>> = [];
 
 @Injectable()
 class TwoProcessAuthGuard implements CanActivate {
@@ -148,10 +138,14 @@ const runGit = async (
  */
 const startWorker = async (
   storageUrls: readonly string[],
-  reservedPort?: number,
+  boundListener?: GitTestListener,
 ): Promise<{ app: NestFastifyApplication; origin: string; remote: string }> => {
-  const port = reservedPort ?? (await reservePort());
-  const origin = `http://127.0.0.1:${String(port)}`;
+  const listener = boundListener ?? (await createGitTestListener());
+  if (!boundListener) {
+    cleanup.push(listener.close);
+  }
+  const { origin } = listener;
+  process.env.TAU_API_URL = origin;
   const row = { storageBytes: 0, generation: 0, derivedGeneration: 0 };
   const rows = (): unknown[] => [row];
 
@@ -255,15 +249,15 @@ const startWorker = async (
     .useClass(TwoProcessAuthGuard)
     .compile();
 
-  const app = moduleRef.createNestApplication<NestFastifyApplication>(
-    new FastifyAdapter({ bodyLimit: 256 * 1024 * 1024 }),
-  );
+  let closeApplication = async (): Promise<void> => moduleRef.close();
+  cleanup.push(async () => closeApplication());
+  const app = moduleRef.createNestApplication<NestFastifyApplication>(listener.adapter);
+  closeApplication = async () => app.close();
   app.enableVersioning({ type: VersioningType.URI });
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
-  await app.listen(String(port), '127.0.0.1');
 
-  return { app, origin, remote: `http://tau:${token}@127.0.0.1:${String(port)}/v1/git/${projectId}.git` };
+  return { app, origin, remote: `http://tau:${token}@${new URL(origin).host}/v1/git/${projectId}.git` };
 };
 
 /**
@@ -304,28 +298,41 @@ describe('two API processes and two storage workers over one object store (S2, D
   beforeAll(async () => {
     process.env.TAU_API_URL = 'http://127.0.0.1:1';
     workspace = await mkdtemp(path.join(tmpdir(), 'tau-git-2p-'));
-    const firstPort = await reservePort();
-    storageA = await startStorage(`http://127.0.0.1:${String(firstPort)}`);
-    storageB = await startStorage(`http://127.0.0.1:${String(firstPort)}`);
-    first = await startWorker([storageA.url, storageB.url], firstPort);
+    cleanup.push(async () => rm(workspace, { recursive: true, force: true }));
+    const listener = await createGitTestListener();
+    cleanup.push(listener.close);
+    storageA = await startStorage(listener.origin);
+    cleanup.push(async () => storageA.close(1000));
+    storageB = await startStorage(listener.origin);
+    cleanup.push(async () => storageB.close(1000));
+    first = await startWorker([storageA.url, storageB.url], listener);
     second = await startWorker([storageB.url, storageA.url]);
     assertDestructiveTestBucketAllowed(
       first.app.get(ObjectStorageService).bucketFor('private'),
       'the two-worker git suite',
     );
+    cleanup.push(async () => {
+      await first.app.get(ObjectStorageService).deleteEntirePrefixForPurgeJob({
+        namespace: 'tenants',
+        keyPrefix: `${ownerId}/`,
+        tier: 'private',
+      });
+    });
   }, 120_000);
 
   afterAll(async () => {
-    await first.app.get(ObjectStorageService).deleteEntirePrefixForPurgeJob({
-      namespace: 'tenants',
-      keyPrefix: `${ownerId}/`,
-      tier: 'private',
-    });
-    await first.app.close();
-    await second.app.close();
-    await storageA.close(1000);
-    await storageB.close(1000);
-    await rm(workspace, { recursive: true, force: true });
+    const errors: unknown[] = [];
+    for (const close of cleanup.reverse()) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- release dependent fixtures in reverse acquisition order, even after a failure.
+        await close();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length > 0) {
+      throw new AggregateError(errors, 'Failed to clean up the two-worker git suite');
+    }
   }, 60_000);
 
   it('serves through the second worker what was pushed through the first', async () => {

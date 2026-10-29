@@ -122,7 +122,7 @@ The consumer surface is the **composed view**, not the authority. Protocol versi
 
 `'agent'` means the agent's tools **and any executor of the code the agent writes**: the kernel runtime, GeoSpec runner, Quick Look runtime, host-daemon runtime child and desktop `runtimeFileSystem` route all open that view. Its mask applies to reads, mutations and watches. A recursive remove or move refuses hidden paths at the view root for every consumer and at any depth for an agent; a user may remove a vendored directory containing its own nested store. The Node provider refuses a visible symlink that resolves onto a hidden real path with `ELOOP`, and directory listing drops it. This is defence in depth, not a sandbox: Node, desktop and `tau serve` import bundled project code as a real Node module with `node:fs`, and a browser worker can reach browser storage APIs directly.
 
-Every **bridge** rooted open names a consumer. The language plane is currently a direct internal exception rather than a bridge open: `languageFsSyncAttach` holds a read-only raw `createRootedFileSystem` handle so Monaco sees the checkout rather than the composed overlays.
+Every **bridge** rooted open names a consumer. The language plane is currently a direct internal exception rather than a bridge open: `languageFsSyncAttach` holds a read-only raw `createRootedFileSystem` handle so the TypeScript host sees the checkout rather than the composed overlays.
 
 ### L2 — Revisions
 

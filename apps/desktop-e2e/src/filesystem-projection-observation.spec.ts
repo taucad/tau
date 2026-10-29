@@ -57,12 +57,12 @@ test('projects independent native source, directory and skill mutations into the
     }
     const source = 'public/models/honeycomb.js';
     await fileTreeItemOf(page, source).click();
-    const editor = page.locator('.monaco-editor:visible').last();
+    const editor = page.locator('.cm-editor:visible').last();
     await expectVisible(editor);
     const original = await readFile(join(root, source), 'utf8');
     await writeFile(join(root, source), `${original}\n// Native independent source observation\n`);
     await expect
-      .poll(async () => editor.locator('.view-lines').textContent(), { timeout: 30_000 })
+      .poll(async () => editor.locator('.cm-content').textContent(), { timeout: 30_000 })
       .toContain('Native independent source observation');
     await editor.evaluate((element) => {
       if (!(element instanceof HTMLElement)) {
@@ -76,15 +76,15 @@ test('projects independent native source, directory and skill mutations into the
     await writeFile(join(root, source), `${original}\n// Native acknowledged retry observation\n`);
     await controlWatch(page, 'hold', source);
     await page.getByRole('button', { name: 'Retry file updates', exact: true }).click();
-    const acquiredValue2 = await editor.locator('.view-lines').textContent();
+    const acquiredValue2 = await editor.locator('.cm-content').textContent();
     expect(acquiredValue2).toContain('Native independent source observation');
-    const acquiredValue3 = await page.locator('.monaco-editor[data-observation-retained="yes"]').count();
+    const acquiredValue3 = await page.locator('.cm-editor[data-observation-retained="yes"]').count();
     expect(acquiredValue3).toBe(1);
     await controlWatch(page, 'release', source);
     await expect
-      .poll(async () => editor.locator('.view-lines').textContent(), { timeout: 30_000 })
+      .poll(async () => editor.locator('.cm-content').textContent(), { timeout: 30_000 })
       .toContain('Native acknowledged retry observation');
-    const acquiredValue4 = await page.locator('.monaco-editor[data-observation-retained="yes"]').count();
+    const acquiredValue4 = await page.locator('.cm-editor[data-observation-retained="yes"]').count();
     expect(acquiredValue4).toBe(1);
     const peer = 'public/models/native-observation-peer.js';
     await writeFile(join(root, peer), 'export default function main() { return []; }\n');
@@ -122,12 +122,12 @@ test('projects independent native source, directory and skill mutations into the
     const savedBytes = await readFile(join(root, source), 'utf8');
     await chmod(sourceDirectory, 0o555);
     try {
-      const input = editor.locator('.native-edit-context, textarea.inputarea').last();
+      const input = editor.locator('.cm-content[contenteditable="true"]').last();
       await input.focus();
       await page.keyboard.press('ControlOrMeta+End');
       await page.keyboard.insertText('\n// Unsaved native observation bytes\n');
       await expect
-        .poll(async () => editor.locator('.view-lines').textContent())
+        .poll(async () => editor.locator('.cm-content').textContent())
         .toContain('Unsaved native observation bytes');
       const acquiredValue7 = await readFile(join(root, source), 'utf8');
       expect(acquiredValue7).toBe(savedBytes);
@@ -136,11 +136,11 @@ test('projects independent native source, directory and skill mutations into the
       await expectVisible(page.getByText('File updates unavailable', { exact: true }));
       await controlWatch(page, 'hold', source);
       await page.getByRole('button', { name: 'Retry file updates', exact: true }).click();
-      const acquiredValue9 = await editor.locator('.view-lines').textContent();
+      const acquiredValue9 = await editor.locator('.cm-content').textContent();
       expect(acquiredValue9).toContain('Unsaved native observation bytes');
       await controlWatch(page, 'release', source);
       await expect.poll(async () => page.getByText('File updates unavailable', { exact: true }).count()).toBe(0);
-      const acquiredValue10 = await editor.locator('.view-lines').textContent();
+      const acquiredValue10 = await editor.locator('.cm-content').textContent();
       expect(acquiredValue10).toContain('Unsaved native observation bytes');
       const acquiredValue11 = await readFile(join(root, source), 'utf8');
       expect(acquiredValue11).toBe(savedBytes);

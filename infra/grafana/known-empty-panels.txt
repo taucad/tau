@@ -115,3 +115,108 @@ Runtime product insights › Machine Actions by Family
 Runtime product insights › Machine Outcomes by Provider
 Runtime product insights › Machine Operations: Person vs Agent
 Runtime product insights › Plugin Reach, Today
+
+
+# Storage dashboards (W14 OB9). Git execution, refusal and hop panels fill only from a push, a fetch or a
+# refusal: in process (the local default, no TAU_STORAGE_URL) the API emits the execution series, and the
+# tau-storage panels need a worker on :9467. Forward, spill, grant, member and slow-body panels need forwarded
+# mode, and refusal, lost-race, fallback and freeze panels need the condition itself.
+Storage — critical › Refusals by code
+Storage — critical › Manifest CAS lost or throttled (1h)
+Storage — critical › Busiest worker: active leases
+Storage — critical › Spill (1h)
+Storage — critical › Tightest disk (free − reserved)
+Storage — critical › Cache hit ratio (1h)
+Storage capability › Refusals by code and status
+Storage capability › Forward errors by reason
+Storage capability › Spills, router members and workers up
+Storage capability › Grants rejected by reason (tau-storage)
+Storage capability › Receipts by outcome
+Storage capability › Slow-body aborts by operation (tau-storage)
+Storage capability › Admissions by outcome
+Storage capability › Active leases per Machine
+Storage capability › Reserved vs free disk per Machine
+Storage capability › Cache lookups by result
+Storage capability › Hydrate bytes by source
+Storage capability › Lease phase p95 (hydrate, commit)
+Storage capability › Cache bytes vs budget per Machine
+Storage capability › Evictions
+Storage capability › Full-hydrate fallbacks by reason
+Storage capability › CAS attempts by outcome and kind
+Storage capability › CAS phase p50 / p95
+Storage capability › Measured per-project ceiling
+Storage capability › Hottest projects: commit rate by rank
+Storage capability › Hottest projects: writers by rank
+Storage capability › Repository size at commit p50 / p95
+Storage capability › Legacy manifest conflicts and sweeps
+Storage capability › Throughput by direction and app
+Storage capability › Freezes holding and oldest freeze
+Storage capability › Freeze holds and hold p95
+Storage capability › Route lookup p95 by source
+
+# Fly platform series (fly_*) exist only on Fly's Prometheus.
+Storage — critical › Running workers
+Storage — critical › Busiest worker CPU
+Storage capability › CPU busy per worker
+Storage capability › Memory available per worker
+Storage capability › Worker restarts (30m)
+Storage capability › Workers by state
+Storage capability › Fly proxy soft / hard limit hits
+
+# The B2 copier and drill (tau-mirror, W13 DM1/DR2) do not run on a local stack.
+Storage capability › Drills by outcome and failed checks
+Storage capability › Drill duration p95 and bytes verified
+Storage — critical › B2 copy lag
+Storage — critical › Last passing drill (age)
+Storage — critical › Stored bytes (R2 + B2)
+Storage capability › Copy lag vs B5 lines
+Storage capability › Lag in generations
+Storage capability › SLO-6 copy freshness (30d)
+Storage capability › Backlog by phase and LFS backlog
+Storage capability › Copy delay p50 / p95 / p99
+Storage capability › Rounds by outcome
+Storage capability › Objects copied by kind
+Storage capability › Bytes copied by kind
+Storage capability › Copy failures by stage and reason
+Storage capability › Retention extensions by outcome
+Storage capability › Lock headroom and furthest lock (days)
+Storage capability › B2 destination up
+Storage capability › Hidden versions (must be 0)
+Storage capability › Reconcile: hours since last success by scope
+Storage capability › Reconcile missing objects by kind
+Storage capability › B2 stored bytes and object versions
+Storage capability › Last passing drill (age)
+Storage capability › B2 storage cost (estimate)
+
+# The storage accounting scheduler (W14 OB3) declares these; they fill once it merges and, for R2, once the
+# Cloudflare analytics token is set.
+Storage — critical › R2 cost, month to date (estimate)
+Storage — critical › Repositories near 1 GiB (>= 80%)
+Storage capability › Bucket requests last hour (Cloudflare analytics)
+Storage capability › Stored bytes and objects per bucket
+Storage capability › Bucket bandwidth last hour
+Storage capability › Postgres connections vs budget
+Storage capability › Accounting tasks: seconds since last success
+Storage capability › Accounting passes by task and outcome
+Storage capability › R2 cost by component, month to date
+Storage capability › Projected monthly Class A from the last hour
+Storage capability › Stored bytes by class
+Storage capability › Stored bytes by plan
+Storage capability › Repositories by plan
+Storage capability › Repository size distribution
+Storage capability › Owners by quota band
+Storage capability › Repositories near the 1 GiB ceiling
+
+# Storage log panels read only {service_name=~"$service"}, which Tau Cloud rewrites to the API app: the hot-project
+# lines and the storage and mirror warnings come from tau-storage and tau-mirror, so these stay empty when hosted
+# (until the renderer binds a storage log selector) and on a quiet local run.
+Storage capability › Sync and storage warnings and errors (tau-api)
+Storage capability › Hot projects (top-N by rank)
+
+# SLO-1/SLO-2 read tau_sync_operations_total, which a run without a git push or fetch leaves empty; SLO-6 reads
+# the B2 copier.
+SLO / Executive › Tau Sync Availability, SLO-1 Push / SLO-2 Fetch (24h)
+SLO / Executive › Tau Sync Error Budget Remaining (SLO-1 / SLO-2)
+SLO / Executive › Tau Sync Burn Rate (6h, SLO-1 / SLO-2)
+SLO / Executive › Tau Sync Burn Rate (24h, SLO-1 / SLO-2)
+SLO / Executive › B2 Copy Freshness, SLO-6 (30d)

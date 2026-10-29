@@ -1,10 +1,14 @@
+# Host publications bind to 127.0.0.1 only. Sibling containers reach each other
+# by Compose DNS name; a loopback host port is not reachable through
+# host.docker.internal. Processes inside a container still listen on the
+# container interfaces so the published port and other containers can connect.
 services:
   postgres:
     image: pgvector/pgvector:pg17
     container_name: tau-postgres
     restart: unless-stopped
     ports:
-      - '5432:5432'
+      - '127.0.0.1:5432:5432'
     environment:
       POSTGRES_USER: dev_user
       POSTGRES_PASSWORD: dev_password
@@ -22,7 +26,7 @@ services:
     container_name: tau-redis
     restart: unless-stopped
     ports:
-      - '6379:6379'
+      - '127.0.0.1:6379:6379'
     volumes:
       - redis_data:/data
     healthcheck:
@@ -39,13 +43,13 @@ services:
     environment:
       GF_INSTALL_PLUGINS: redis-datasource,grafana-postgresql-datasource
     ports:
-      - '6100:3000' # Grafana UI
-      - '4317:4317' # OTLP gRPC
-      - '4318:4318' # OTLP HTTP
-      - '9090:9090' # Prometheus
-      - '3100:3100' # Loki
-      - '3200:3200' # Tempo
-      - '4040:4040' # Pyroscope
+      - '127.0.0.1:6100:3000' # Grafana UI
+      - '127.0.0.1:4317:4317' # OTLP gRPC
+      - '127.0.0.1:4318:4318' # OTLP HTTP
+      - '127.0.0.1:9090:9090' # Prometheus
+      - '127.0.0.1:3100:3100' # Loki
+      - '127.0.0.1:3200:3200' # Tempo
+      - '127.0.0.1:4040:4040' # Pyroscope
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     volumes:
@@ -67,8 +71,8 @@ services:
       MINIO_SERVER_URL: http://localhost:9000
       MINIO_BROWSER_REDIRECT_URL: http://localhost:9001
     ports:
-      - '9000:9000'
-      - '9001:9001'
+      - '127.0.0.1:9000:9000'
+      - '127.0.0.1:9001:9001'
     volumes:
       - minio-data:/data
     healthcheck:

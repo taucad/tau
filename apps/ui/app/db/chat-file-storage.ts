@@ -13,6 +13,7 @@ import { isRecord } from '@taucad/utils/schema';
 import { isNotFound } from '#db/attachment-store.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
 import { KeyedMutex } from '#db/keyed-mutex.js';
+import { registrationProbeChatId } from '#lib/chat-observation-guard.js';
 import type { ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
 import { chatPlacementOf, portableExecutionOf, withChatPlacement } from '#utils/chat-execution.js';
@@ -233,6 +234,10 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
    * subscriber, not this metadata store.
    */
   const readChatDirectory = async (projectId: string, chatId: string): Promise<Chat | undefined> => {
+    // The registration probe is one id in every project. A leftover empty log is not a chat.
+    if (chatId === registrationProbeChatId) {
+      return undefined;
+    }
     const record = await readRecord(projectId, chatId);
     if (record !== undefined) {
       return hydrate(record);

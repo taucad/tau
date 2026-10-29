@@ -9,8 +9,8 @@
  */
 
 import assert from 'node:assert/strict';
-import { readFileSync, statSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { accessSync, constants, readFileSync, statSync } from 'node:fs';
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -101,6 +101,8 @@ try {
   const archive = join(fixtureRoot, 'app.asar');
   const unpacked = [
     'node_modules/native/addon.node',
+    'node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp/x64/apply-seccomp',
+    'node_modules/@anthropic-ai/sandbox-runtime/vendor/java-proxy-agent/srt-proxy-agent.jar',
     'node_modules/native/engine.dll',
     'node_modules/@esbuild/darwin-arm64/bin/esbuild',
     'node_modules/@esbuild/win32-x64/esbuild.exe',
@@ -118,11 +120,26 @@ try {
   );
   await createPackageWithOptions(source, archive, runtimeAsarOptions);
   for (const file of unpacked) {
-    const entry = statFile(archive, file);
+    const entry = statFile(archive, join(file));
     assert.ok('unpacked' in entry && entry.unpacked, `${file} must exist outside the archive`);
     assert.equal(readFileSync(join(`${archive}.unpacked`, file), 'utf8'), 'fixture');
   }
   assert.ok(!('unpacked' in statFile(archive, 'app.js')), 'ordinary JavaScript remains packed');
+  if (process.platform === 'linux') {
+    const helper = `node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp/${process.arch}/apply-seccomp`;
+    const dependency = dirname(dirname(fileURLToPath(import.meta.resolve('@anthropic-ai/sandbox-runtime'))));
+    await mkdir(dirname(join(source, helper)), { recursive: true });
+    // A copy over the text placeholder retains its non-executable mode on Linux.
+    await rm(join(source, helper), { force: true });
+    await copyFile(join(dependency, 'vendor/seccomp', process.arch, 'apply-seccomp'), join(source, helper));
+    const executableArchive = join(fixtureRoot, 'executable.asar');
+    await createPackageWithOptions(source, executableArchive, runtimeAsarOptions);
+    const executable = join(`${executableArchive}.unpacked`, helper);
+    assert.doesNotThrow(() => {
+      accessSync(executable, constants.X_OK);
+    }, 'unpacked seccomp helper retains executable permission');
+    assert.deepEqual(readFileSync(executable), readFileSync(join(source, helper)));
+  }
 } finally {
   await rm(fixtureRoot, { recursive: true, force: true });
 }

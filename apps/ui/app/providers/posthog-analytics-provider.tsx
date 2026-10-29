@@ -155,11 +155,6 @@ export function PostHogAnalyticsProvider({
           posthog.capture(event, properties);
         }
       },
-      captureException(error, properties) {
-        if (isActive && posthog && isCapturing(posthog)) {
-          posthog.captureException(error, properties);
-        }
-      },
     }),
     [isActive, posthog],
   );

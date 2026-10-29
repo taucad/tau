@@ -27,6 +27,7 @@ export function SharedProjectPassword({
     <main className='flex min-h-dvh items-center justify-center bg-background p-6'>
       <form
         className='w-full max-w-sm rounded-xl border bg-card p-6'
+        aria-busy={isOpening}
         onSubmit={(event) => {
           event.preventDefault();
           if (passwordValid) {
@@ -61,7 +62,7 @@ export function SharedProjectPassword({
             </p>
           ) : null}
         </div>
-        <Button className='mt-5 w-full' type='submit' disabled={!passwordValid || isOpening}>
+        <Button className='mt-5 w-full' type='submit' disabled={!passwordValid || isOpening} aria-busy={isOpening}>
           {isOpening ? <Loader className='size-4' /> : null}
           Open project
         </Button>

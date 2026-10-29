@@ -13,7 +13,9 @@ import type { ParameterSetService } from '#services/parameter-set-service.js';
 import type { ActorRefFrom } from 'xstate';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
-import { holdEditorConflictRecord } from '#lib/monaco-model-service.js';
+import { EditorDocumentSession, isRecordingEditorConflict } from '#lib/editor-document-session.js';
+import { EditorSaveConflictError } from '@taucad/fs-client/file-content-service';
+import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type * as AgentHostClientModule from '#services/agent-host-client.js';
 import type * as HandleStoreModule from '#filesystem/handle-store.js';
 
@@ -287,8 +289,8 @@ vi.mock('#hooks/use-models.js', () => ({
 vi.mock('#routes/w.$workspace.$project/revision-save-shortcut.js', () => ({
   RevisionSaveShortcut: () => <span data-testid='focused-project' />,
 }));
-vi.mock('#hooks/use-monaco-model-service.js', () => ({
-  MonacoModelServiceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+vi.mock('#hooks/use-editor-document-session.js', () => ({
+  EditorDocumentSessionProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock('@taucad/viewer/hooks/use-webgl-context-tracker', () => ({
   WebglContextTrackerProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
@@ -771,8 +773,29 @@ describe('project route session identity', () => {
     const parameters = mock<ParameterSetService>();
     const project = mock<ActorRefFrom<typeof projectMachine>>();
     const editor = mock<ActorRefFrom<typeof editorMachine>>();
-    const release = holdEditorConflictRecord('proj-recording');
+    const content = mock<FileContentService>();
+    const encode = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
+    content.resolve.mockResolvedValue({ kind: 'text', content: encode('one') });
+    content.peekOutcome.mockReturnValue({ kind: 'text', content: encode('theirs') });
+    content.saveEditor.mockRejectedValueOnce(new EditorSaveConflictError('main.ts', encode('one')));
+    content.onDidContentChange.mockReturnValue(() => undefined);
+    content.onDidChangeOutcome.mockReturnValue(() => undefined);
+    const gate = Promise.withResolvers<void>();
+    const session = new EditorDocumentSession({
+      contentService: content,
+      projectId: 'proj-recording',
+      recordEditorConflict: async () => {
+        await gate.promise;
+        return { status: 'recorded', revisionId: 'r1', line: 'main', into: 'main' };
+      },
+    });
     try {
+      await session.acquire('main.ts');
+      session.apply('main.ts', { origin: 'view', expectedVersion: 1, changes: [{ from: 0, to: 3, insert: 'mine' }] });
+      const saved = session.save('main.ts');
+      await vi.waitFor(() => {
+        expect(isRecordingEditorConflict('proj-recording')).toBe(true);
+      });
       await expect(
         sessionsModule.flushProjectSessionPersistence({
           projectId: 'proj-recording',
@@ -784,8 +807,11 @@ describe('project route session identity', () => {
       ).rejects.toThrow('An edit that overlapped another change is still being recorded. Try again in a moment.');
       expect(parameters.close).not.toHaveBeenCalled();
       expect(project.send).not.toHaveBeenCalled();
+      gate.resolve();
+      await saved;
     } finally {
-      release();
+      gate.resolve();
+      session.dispose();
     }
   });
 

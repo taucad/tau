@@ -1,18 +1,7 @@
+import { useViewerControlSize } from '#cad/viewer-control-size.js';
 import React, { useCallback, useRef, useState, useMemo } from 'react';
 import type { ClassValue } from 'clsx';
-import {
-  Aperture,
-  Axis3D,
-  Box,
-  Grid3X3,
-  Layers,
-  Rotate3D,
-  Settings,
-  PenLine,
-  Sparkles,
-  ArrowUp,
-  Timer,
-} from 'lucide-react';
+import { Aperture, Axis3D, Box, Grid3X3, Rotate3D, Settings, PenLine, Sparkles, ArrowUp, Timer } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { Button } from '@taucad/ui/components/button';
 import {
@@ -54,7 +43,11 @@ const timeoutOptions: TimeoutOption[] = [
   { value: 600_000, label: '10 min' },
 ];
 
-const upDirectionOptions: Array<{ value: UpDirection; label: React.ReactNode; ariaLabel: string }> = [
+const upDirectionOptions: Array<{
+  value: UpDirection;
+  label: React.ReactNode;
+  ariaLabel: string;
+}> = [
   { value: 'x', label: <AxisLabel axis='x' />, ariaLabel: 'X-up' },
   { value: 'y', label: <AxisLabel axis='y' />, ariaLabel: 'Y-up' },
   { value: 'z', label: <AxisLabel axis='z' />, ariaLabel: 'Z-up' },
@@ -190,7 +183,6 @@ export function ViewerSettings({
   const enableGrid = useGraphicsSelector((state) => state.context.enableGrid);
   const enableAxes = useGraphicsSelector((state) => state.context.enableAxes);
   const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
-  const enablePostProcessing = useGraphicsSelector((state) => state.context.enablePostProcessing);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
   const is2dGeometry = useGraphicsSelector((state) => state.context.artifact?.mimeType === 'image/svg+xml');
 
@@ -236,13 +228,6 @@ export function ViewerSettings({
     [graphicsRef],
   );
 
-  const handlePostProcessingToggle = useCallback(
-    (checked: boolean) => {
-      graphicsRef.send({ type: 'setPostProcessingVisibility', payload: checked });
-    },
-    [graphicsRef],
-  );
-
   const handleUpDirectionChange = useCallback(
     (value: UpDirection) => {
       graphicsRef.send({ type: 'setUpDirection', payload: value });
@@ -258,6 +243,7 @@ export function ViewerSettings({
     [onOperationTimeoutChange],
   );
 
+  const controlSize = useViewerControlSize();
   const operationTimeoutValue = operationTimeout?.value;
   const operationTimeoutDefault = operationTimeout?.defaultValue;
   const currentTimeoutOption = useMemo(
@@ -276,7 +262,7 @@ export function ViewerSettings({
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
-            <Button variant='overlay' size='icon' aria-label='Viewer settings' className={cn(className)}>
+            <Button variant='overlay' size={controlSize} aria-label='Viewer settings' className={cn(className)}>
               <Settings />
             </Button>
           </DropdownMenuTrigger>
@@ -319,17 +305,6 @@ export function ViewerSettings({
               <InfoTooltip>
                 A material that gives models a consistent appearance independent of scene lighting.
                 <br /> Rendering performance is improved with this enabled.
-              </InfoTooltip>
-            </DropdownMenuSwitchItem>
-            <DropdownMenuSwitchItem
-              icon={<Layers />}
-              description={`Ambient occlusion is ${enablePostProcessing ? 'active' : 'inactive'}`}
-              isChecked={enablePostProcessing}
-              onIsCheckedChange={handlePostProcessingToggle}
-            >
-              Post-processing{' '}
-              <InfoTooltip>
-                Enables screen-space ambient occlusion for more realistic depth and contact shadows.
               </InfoTooltip>
             </DropdownMenuSwitchItem>
             <DropdownMenuSeparator />

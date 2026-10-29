@@ -144,12 +144,13 @@ const applyEvent = (session: Session, event: AgentLogEvent): Session => {
    * next turn is an ordinary Tau one must not inherit the last agent, or the
    * keyboard would go on refusing to steer a run that steers perfectly well. */
   const sameRun = session.runId === event.runId;
-  const startsRun =
-    (event.type === 'message.appended' && event.message.role === 'user') ||
-    (event.type === 'run.lifecycle' && event.state === 'admitted');
+  /* Only a run's own admission selects it: every start writes `admitted` first,
+   * and an external run's marker message follows it under the same run. A user
+   * row is no start — a Retry's batch can carry another run's abandoned turn
+   * under that run's id, which must not take the keyboard from the Retry. */
+  const startsRun = event.type === 'run.lifecycle' && event.state === 'admitted';
   /* A prior turn can settle after the next has been admitted. Its record is a
-   * transcript row, never a new keyboard target. The user marker precedes
-   * admission, so it must select the new run early enough to retain its agent. */
+   * transcript row, never a new keyboard target. */
   if (session.runId !== undefined && !sameRun && !startsRun) {
     return { ...session, rows };
   }

@@ -87,8 +87,6 @@ repos/**/*
 # Graphify generated graphs and extraction caches
 **/graphify-out/
 
-packages/geospec-engine/provenance.json
-
 # Codex spike build scratch
 .codex-spike-build/
 

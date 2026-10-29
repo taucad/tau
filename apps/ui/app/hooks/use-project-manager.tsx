@@ -21,7 +21,7 @@ import type {
 } from '@taucad/filesystem';
 import { resolveStorageRootKey } from '@taucad/filesystem/storage-root-key';
 import { consumableBytes } from '@taucad/fs-bridge';
-import type { CadAgentExecution, Chat } from '@taucad/chat';
+import type { CadAgentExecution, Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { generatePrefixedId } from '@taucad/utils/id';
@@ -62,11 +62,14 @@ import type {
 import { isOrphanedProjectRoute } from '#filesystem/orphaned-project-route.js';
 import { createChatFileStore } from '#db/chat-file-storage.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
-import { isBuildSuperseded } from '#filesystem/build-skew.js';
+import { chatPlacementOf } from '#utils/chat-execution.js';
+import { writeChatPlacement } from '#db/chat-placements.js';
+import { isBuildSuperseded, subscribeBuildSkew } from '#filesystem/build-skew.js';
 import { WorkspaceDirectoryRequiredError } from '#filesystem/workspace-errors.js';
 import { directoryPicker } from '#constants/browser.constants.js';
 import type { DirectoryPick } from '#constants/browser.constants.js';
 import { nodeHomeRoot } from '#filesystem/desktop-bridge.js';
+import { removeChatPermission, seedChatPermission } from '#hooks/use-permission-mode.js';
 import { createInitialProject } from '#constants/project.constants.js';
 import { attachmentKind, attachmentReferenceOf } from '#utils/attachment.utils.js';
 import { buildUserMessage } from '#utils/chat.utils.js';
@@ -291,6 +294,12 @@ type ProjectManagerContextType = {
   getAllChatRecords: (options?: { includeDeleted?: boolean }) => Promise<ChatRecord[]>;
   getChatRecordsForResource: (resourceId: string, options?: { includeDeleted?: boolean }) => Promise<ChatRecord[]>;
   getChat: (chatId: string, projectId?: string) => Promise<Chat | undefined>;
+  /** Adopt a pre-XD2 record's device-relative placement once, on a session's open (`ChatStorage.adoptLegacyChatPlacement`). */
+  adoptLegacyChatPlacement: (
+    chatId: string,
+    projectId: string | undefined,
+    accept: (hostId: TauAgentHostId) => Promise<boolean>,
+  ) => Promise<TauAgentHostId | undefined>;
   invalidateProjectedChats: (resourceId: string, chatIds: readonly string[]) => void;
   deleteChat: (chatId: string) => Promise<void>;
   purgeChat: (chatId: string) => Promise<void>;
@@ -762,6 +771,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   /** Settle attempts per pending operation this session (DF11 retry cap). */
   const recoveryAttemptsRef = useRef(new Map<string, number>());
   const discoveryPassRef = useRef<Promise<ProjectDiscoveryResult> | undefined>(undefined);
+  /** A discovery pass skipped its writes at a DF20 gate during the current write stop; it runs again once the stop lifts. */
+  const skippedDuringStopRef = useRef(false);
   const discoveryPassEpochRef = useRef<number | undefined>(undefined);
   const connectionTraceRef = useRef<WorkspaceConnectionTrace | undefined>(undefined);
   const connectionPromiseRef = useRef<Promise<ConnectedWorkspace | undefined> | undefined>(undefined);
@@ -1264,6 +1275,24 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [fileManager.client],
   );
 
+  /**
+   * Keep a new chat's device-relative placement in this device's placements record for its project (XD2).
+   *
+   * `chat.json` keeps the chat's intent and never a host that only this device can name, so a chat created on
+   * `origin` or a loopback daemon would otherwise open on this device's default. A failed write leaves the chat on
+   * that default, which is where it would run on any other device anyway.
+   */
+  const rememberChatPlacement = useCallback(
+    async (projectId: string, chatId: string, execution: CadAgentExecution | undefined): Promise<void> => {
+      const placement = chatPlacementOf(execution);
+      if (placement === undefined) {
+        return;
+      }
+      await writeChatPlacement({ client: fileManager.recordFiles, projectId, chatId, placement });
+    },
+    [fileManager.recordFiles],
+  );
+
   /** The attachment store a composer directory names; the Home composer's when none is named. */
   const composerAttachments = useCallback(
     (directory: string | undefined) =>
@@ -1596,7 +1625,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       // Seed the chat row with chat-scoped active model + kernel so a
       // cookie change in another tab does not mutate the active selection
       // for this freshly-created chat. Defaults to the kernel chosen by
-      // the creation flow when not explicitly supplied.
+      // the creation flow when not explicitly supplied. The chat store keeps
+      // only the portable execution; a device-relative placement is kept for
+      // this device below (XD2).
       const seededActiveExecution = options.activeExecution;
       const seededActiveKernel = options.activeKernel ?? kernel;
 
@@ -1622,6 +1653,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         storage: pendingStorage,
       });
       await resumePendingProjectOperation(operation, worker);
+      if (operation.chat !== undefined) {
+        await rememberChatPlacement(operation.projectId, operation.chat.id, seededActiveExecution);
+      }
       /* D19: a project born with no remote backs up to Tau Cloud from its first
          revision — a template, a fork, a file or zip import. A caller that
          supplies the id is adopting an identity that has a remote of its own (a
@@ -1658,6 +1692,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       namingImageUrls,
       projectNameClient,
       queryClient,
+      rememberChatPlacement,
       resumePendingProjectOperation,
     ],
   );
@@ -1711,10 +1746,18 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           return manifestId !== undefined && manifestId !== claimedBy;
         });
       let result: ProjectDiscoveryResult = { ...discovered, entries };
+      // The listing this pass read is the current one, whether or not it gets to write (DF20 gates below).
+      const recordSnapshot = (): ProjectDiscoveryResult => {
+        if (epoch === discoveryEpochRef.current) {
+          discoverySnapshotRef.current = { epoch, result };
+        }
+        return result;
+      };
       if (isBuildSuperseded()) {
         // A newer bundle owns durable state now: publish what we can read and
         // write nothing (DF20).
-        return result;
+        skippedDuringStopRef.current = true;
+        return recordSnapshot();
       }
       const rootStatuses = new Map(
         result.roots.map((root) => [persistentStorageRootKey(root.root), root.status] as const),
@@ -1784,9 +1827,28 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       const occupiedLocators = new Set(
         result.entries.map((entry) => locatorKey(entry.locator.storageRootKey, entry.locator.relativeDirectory)),
       );
+      /* A directory names its own identity. A route still pointing at it under another id is stale (a copy scanned
+       * before its identity file arrived was minted a fresh id, then the copy overwrote it), so it goes: kept, it
+       * would claim the same physical directory as the route that now binds that identity there (PG-PROJ-5). */
+      const identityAtLocator = new Map(
+        result.entries.flatMap((entry) =>
+          'projectId' in entry
+            ? [[locatorKey(entry.locator.storageRootKey, entry.locator.relativeDirectory), entry.projectId] as const]
+            : [],
+        ),
+      );
+      const isOrphanedAt = (locator: string, projectId: string): boolean => {
+        const identity = identityAtLocator.get(locator);
+        return identity === undefined ? !occupiedLocators.has(locator) : identity !== projectId;
+      };
       const orphanCandidates = [...configs.values()];
       // Only the newest epoch may prune: an older snapshot would delete configs
       // a newer pass — or another tab — has already written.
+      // DF20 again, right before writing: a newer tab may have announced itself while this pass awaited.
+      if (isBuildSuperseded()) {
+        skippedDuringStopRef.current = true;
+        return recordSnapshot();
+      }
       if (epoch === discoveryEpochRef.current) {
         const worker = await getReadiedWorker();
         for (const config of orphanCandidates) {
@@ -1797,7 +1859,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           if (
             completeRoots.has(storageRootKey) &&
             !validRoutes.has(`${storageRootKey}\0${config.projectId}`) &&
-            !occupiedLocators.has(locatorKey(storageRootKey, config.providerBasePath)) &&
+            isOrphanedAt(locatorKey(storageRootKey, config.providerBasePath), config.projectId) &&
             !quarantinedLocators.has(locatorKey(storageRootKey, config.providerBasePath))
           ) {
             // Chats, editor layout and library rows are keyed by project id, so
@@ -1805,16 +1867,25 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
             configDeletes.push(config.projectId);
           }
         }
+        if (isBuildSuperseded()) {
+          skippedDuringStopRef.current = true;
+          return recordSnapshot();
+        }
         await Promise.all(configDeletes.map(async (projectId) => worker.deleteProjectResources(projectId)));
       }
-      if (configUpserts.length > 0 || configDeletes.length > 0) {
-        await applyProjectFileSystemConfigChanges({ upserts: configUpserts, deletes: configDeletes });
+      /* Once resources are deleted their config rows must follow, so no gate splits the two. The
+       * upserts are new writes, though: DF20 once more after the awaits above, and skip them if a
+       * newer bundle took over meanwhile. */
+      const isStoppedNow = isBuildSuperseded();
+      if (isStoppedNow && configUpserts.length > 0) {
+        skippedDuringStopRef.current = true;
+      }
+      const upserts = isStoppedNow ? [] : configUpserts;
+      if (upserts.length > 0 || configDeletes.length > 0) {
+        await applyProjectFileSystemConfigChanges({ upserts, deletes: configDeletes });
         await fileManager.workspace.syncProjectRoots();
       }
-      if (epoch === discoveryEpochRef.current) {
-        discoverySnapshotRef.current = { epoch, result };
-      }
-      return result;
+      return recordSnapshot();
     },
     [fileManager, getReadiedWorker],
   );
@@ -1842,6 +1913,32 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [runDiscoveryPass],
   );
 
+  /* DF20: a pass that ran while durable writes were stopped published without reconciling.
+   * A provisional stop lifts when the server names this build live, so run that pass again, and only
+   * when one was actually skipped: a stop no pass ran into left nothing to redo. */
+  useEffect(
+    () =>
+      subscribeBuildSkew(() => {
+        if (isBuildSuperseded() || !skippedDuringStopRef.current) {
+          return;
+        }
+        skippedDuringStopRef.current = false;
+        invalidateProjectsList();
+        const reconcile = async (): Promise<void> => {
+          try {
+            // A pass in flight may already have read the stop and bailed: let it end, then run a fresh one.
+            await discoveryPassRef.current?.catch(() => undefined);
+            await discoverProjects();
+          } catch (error) {
+            console.warn('[ProjectManager] reconciliation after the write stop lifted failed', error);
+          }
+        };
+        // async-iife: bootstrap -- a skew listener cannot await; the pass owns its failures.
+        void reconcile();
+      }),
+    [discoverProjects, invalidateProjectsList],
+  );
+
   const settleRecovery = useCallback(
     async (operation: PendingProjectOperation, worker: Remote<ObjectStoreWorker>): Promise<void> => {
       const previous = recoveriesRef.current.get(operation.operationId);
@@ -1855,6 +1952,10 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       recoveryAttemptsRef.current.set(operation.operationId, attempts + 1);
       try {
         await resumePendingProjectOperation(operation, worker);
+        /* XD2: a replayed creation keeps its first chat's placement on this device, as the first attempt would have. */
+        if (operation.kind === 'create' && operation.chat !== undefined) {
+          await rememberChatPlacement(operation.projectId, operation.chat.id, operation.chat.activeExecution);
+        }
         recoveriesRef.current.delete(operation.operationId);
       } catch (error) {
         const recovery = pendingOperationRecovery(operation);
@@ -1867,7 +1968,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       setRecoveries([...recoveriesRef.current.values()]);
       invalidateProjectsList();
     },
-    [invalidateProjectsList, resumePendingProjectOperation],
+    [invalidateProjectsList, rememberChatPlacement, resumePendingProjectOperation],
   );
 
   /**
@@ -2882,11 +2983,14 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       },
     ): Promise<Chat> => {
       const chat = await chatStore.createChat(resourceId, chatData);
+      await rememberChatPlacement(resourceId, chat.id, chatData.activeExecution);
+      /* W9: the new chat copies the Settings default; one never seeded reads Ask. */
+      await seedChatPermission(resourceId, chat.id);
       await touchProject(resourceId);
       invalidateProjectsList();
       return chat;
     },
-    [chatStore, invalidateProjectsList, touchProject],
+    [chatStore, invalidateProjectsList, rememberChatPlacement, touchProject],
   );
 
   const createNavigationRepairChat = useCallback(
@@ -2996,11 +3100,21 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [metadataReadOwner],
   );
 
+  const adoptLegacyChatPlacement = useCallback(
+    async (
+      chatId: string,
+      projectId: string | undefined,
+      accept: (hostId: TauAgentHostId) => Promise<boolean>,
+    ): Promise<TauAgentHostId | undefined> => chatStore.adoptLegacyChatPlacement?.(chatId, projectId, accept),
+    [chatStore],
+  );
+
   const deleteChat = useCallback(
     async (chatId: string): Promise<void> => {
       const chat = await chatStore.getChat(chatId);
       await chatStore.deleteChat(chatId);
       if (chat) {
+        await removeChatPermission(chat.resourceId, chatId);
         await touchProject(chat.resourceId);
       }
       invalidateProjectsList();
@@ -3013,6 +3127,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       const chat = await chatStore.getChat(chatId);
       await chatStore.purgeChat(chatId);
       if (chat) {
+        await removeChatPermission(chat.resourceId, chatId);
         await touchProject(chat.resourceId);
       }
       invalidateProjectsList();
@@ -3070,6 +3185,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       getAllChatRecords,
       getChatRecordsForResource,
       getChat,
+      adoptLegacyChatPlacement,
       invalidateProjectedChats,
       deleteChat,
       purgeChat,
@@ -3123,6 +3239,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     getAllChatRecords,
     getChatRecordsForResource,
     getChat,
+    adoptLegacyChatPlacement,
     invalidateProjectedChats,
     deleteChat,
     purgeChat,

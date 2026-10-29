@@ -63,6 +63,8 @@ type DesktopShell = {
   readonly dialog: DesktopBridge['dialog'];
   readonly openFiles: DesktopBridge['openFiles'];
   readonly generatedImages: DesktopBridge['generatedImages'];
+  /** Runtime telemetry's `telemetry:consent`; absent on a shell that predates it. */
+  readonly telemetry?: DesktopBridge['telemetry'];
   /** Absent while the desktop's `isQuickLookEnabled()` flag is off. */
   readonly quickLook?: {
     readonly directPreviewExtensions: readonly string[];
@@ -333,6 +335,11 @@ export type DesktopBridge = {
   };
   /** Absent while the desktop's `isQuickLookEnabled()` flag is off. */
   readonly quickLook?: NonNullable<DesktopShell['quickLook']>;
+  /**
+   * The renderer's RESOLVED runtime telemetry consent, sent to main on every change (sign-in, the switch, GPC), which
+   * persists it so main's own reporter follows it (AR-W4-03c, AR-W5-03). Absent on a shell that predates it.
+   */
+  readonly telemetry?: { setConsent(consent: 'granted' | 'denied' | 'unknown'): void };
   /** Slicers that need the desktop host; absent on a shell built before them. */
   readonly slicers?: { readonly bambuStudio: DesktopBambuStudio };
   /**
@@ -460,6 +467,7 @@ export const desktopBridge = (): DesktopBridge | undefined => {
     openFiles: shell.openFiles,
     generatedImages: shell.generatedImages,
     ...(shell.quickLook === undefined ? {} : { quickLook: shell.quickLook }),
+    ...(shell.telemetry === undefined ? {} : { telemetry: shell.telemetry }),
     ...(shell.slicers === undefined ? {} : { slicers: { bambuStudio: bambuStudioBridge(shell.slicers.bambuStudio) } }),
   };
   return built;

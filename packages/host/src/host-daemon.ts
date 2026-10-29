@@ -177,7 +177,7 @@ export type HostDaemonAgentOptions = {
   /** Base the model gateway hangs off, e.g. the Tau API origin. */
   readonly gatewayBaseUrl: string;
   /**
-   * Bearer session token this daemon backs its projects up with (C67).
+   * Account session token for project backup and local-only model requests.
    *
    * Absent, a served project still knows *where* its Tau Cloud repository is
    * and says so when a remote refuses it; present, *Connect Tau Cloud*
@@ -290,9 +290,16 @@ export type HostDaemonOptions = {
    * `false` is a local-first daemon (`tau serve` without `--relay`, charter D29): it serves its agent channel and any
    * UI on loopback, never pairs and never opens the control connection, and is `ready` once the agent channel is.
    * `relayUrl` stays the Tau API origin its gateway, Zoo proxy and Tau Cloud sync talk to. A credential this
-   * machine already stored still admits Tau runs; without one they are refused `HOST_NOT_PAIRED`.
+   * machine already stored or an account session in `agent.tauApiToken` admits Tau runs; without either they are
+   * refused `HOST_NOT_PAIRED`.
    */
   readonly relay?: boolean;
+  /**
+   * Runtime telemetry (runtime observability PR-3): told each agent runtime client this daemon opens, under the
+   * `agent` caller, and returns its unsubscribe. The cloud host container composes it with route `cloud`; every other
+   * `tau serve` leaves it out.
+   */
+  readonly observeRuntimeClient?: (client: RuntimeClient, caller: 'agent') => () => void;
 };
 
 /** Final daemon closure result. @public */
@@ -726,10 +733,12 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
             : {}),
         }),
       });
+      const unobserve = options.observeRuntimeClient?.(client, 'agent');
       /* The client is bound to this child's port: once the child is gone, its next use gets a new child. */
       // async-iife: bootstrap -- the child's exit only retires its client.
       void (async (): Promise<void> => {
         await child.closed;
+        unobserve?.();
         client.terminate();
       })();
       return { child, client };
@@ -831,6 +840,8 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
    * @param agent - Workspace, gateway, model, admission secret, and binding.
    */
   const startAgent = async (agent: HostDaemonAgentOptions): Promise<void> => {
+    const localAccountSession =
+      options.relay === false && agent.tauCloudEnabled !== true && agent.tauApiToken ? agent.tauApiToken : undefined;
     const canonicalWorkspaceRoot = await realpath(agent.workspaceRoot);
     const authorityRoot = join(
       defaultConfigDirectory(),
@@ -970,8 +981,14 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
               /* No `projectId`: a `tau serve` workspace is a directory, not a
                * cloud project, so its receipts name no project by design. */
             })
-          : createGatewayModelTransport({ baseUrl: agent.gatewayBaseUrl, model: agent.model, auth: bearer }),
-      credential: () => credentialState,
+          : createGatewayModelTransport({
+              baseUrl: agent.gatewayBaseUrl,
+              model: agent.model,
+              // Local-only serving does not pair a device. Use its CLI account session;
+              // relayed hosts retain their live device credential, including revocation.
+              auth: localAccountSession === undefined ? bearer : () => localAccountSession,
+            }),
+      credential: () => (localAccountSession === undefined ? credentialState : { mode: 'session' }),
       ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
       /* The host's own decision, not a resolution accident: `false` withholds
        * `test_model` from an installation whose GeoSpec engine resolves. */
@@ -1593,7 +1610,8 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       emit({
         type: 'warning',
         code: 'TRUSTED_PROJECTS_ONLY',
-        message: 'Remote project code executes on this machine. Connect only projects you trust.',
+        message:
+          'Remote project code, including its tau.config.* and geospec.config.*, executes on this machine. Connect only projects you trust.',
       });
     }
     // async-iife: bootstrap -- a failed mint is a warning and retries on the source's interval.

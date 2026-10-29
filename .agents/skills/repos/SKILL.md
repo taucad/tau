@@ -139,7 +139,7 @@ For these maintained sources, read the Tau-side maintenance owner before enterin
 1. Run `pnpm repos list --json` and search the merged view.
 2. Clone a tracked source with `pnpm repos clone <name>`.
 3. If absent, add it privately with `pnpm repos add owner/repo --clone`.
-4. Read the checkout under `repos/<name>` rather than `node_modules`; it provides history, unminified source, and upstream tests.
+4. For runtime behavior, first resolve the installed package/artifact, lockfile revision and applied patches. Inspect those exact bytes, then use a version-matched checkout under `repos/<name>` for history and upstream tests. Record discrepancies; a newer checkout or online manual describes a separate candidate, not necessarily the running dependency. Do not silently change a shared checkout to obtain a match.
 5. Use `pnpm repos fork <name>` before contributing through a taucad fork.
 
 ## Build

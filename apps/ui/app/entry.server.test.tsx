@@ -3,10 +3,22 @@ import { resolve } from 'node:path';
 import { createStaticHandler } from 'react-router';
 import type { AppLoadContext, EntryContext } from 'react-router';
 import { mock, mockDeep } from 'vitest-mock-extended';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
-import handleRequest from '#entry.server.js';
+import handleRequest, { handleError } from '#entry.server.js';
+import { claimSsrErrors, queueSsrError, reportSsrError } from '#lib/sentry.server.js';
+import type * as SentryServer from '#lib/sentry.server.js';
 import { canonicalProductionUrl } from '#lib/canonical-url.js';
+
+vi.mock('#lib/sentry.server.js', async (importOriginal) => {
+  const original = await importOriginal<typeof SentryServer>();
+  return {
+    ...original,
+    claimSsrErrors: vi.fn(original.claimSsrErrors),
+    queueSsrError: vi.fn(original.queueSsrError),
+    reportSsrError: vi.fn(original.reportSsrError),
+  };
+});
 
 const contextMatching = (...routeIds: string[]): EntryContext =>
   ({
@@ -108,6 +120,43 @@ describe('entry.server handleRequest', () => {
     expect(responseHeaders.get('Cross-Origin-Resource-Policy')).toBe('same-origin');
   });
 
+  it('should make every document revalidate, so a deploy is never answered with the replaced build (TAU-UI-6)', async () => {
+    const response = await handleRequest(
+      new Request('https://taucad.dev/w/home/fixture', { method: 'HEAD' }),
+      200,
+      new Headers(),
+      entryContext,
+      loadContext,
+    );
+    expect(response.headers.get('Cache-Control')).toBe('private, no-cache');
+  });
+
+  it('should never let any cache keep the apex document, which a presentation cookie selects', async () => {
+    const response = await handleRequest(
+      new Request('https://taucad.dev/', { method: 'HEAD' }),
+      200,
+      new Headers(),
+      entryContext,
+      loadContext,
+    );
+    const netlifyConfig = readFileSync(resolve(import.meta.dirname, '../netlify.toml'), 'utf8');
+    const apexPolicy = /for = "\/"\n\[headers\.values\]\nCache-Control = "([^"]+)"/u.exec(netlifyConfig)?.[1];
+
+    expect(apexPolicy).toBe('private, no-store');
+    expect(response.headers.get('Cache-Control')).toBe(apexPolicy);
+  });
+
+  it("should keep a route's own document cache policy", async () => {
+    const response = await handleRequest(
+      new Request('https://taucad.dev/s/fixture', { method: 'HEAD' }),
+      200,
+      new Headers({ 'Cache-Control': 'public, max-age=0, must-revalidate' }),
+      entryContext,
+      loadContext,
+    );
+    expect(response.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate');
+  });
+
   it('answers an unknown path with 404 (catch-all route)', async () => {
     const response = await handleRequest(
       new Request('https://tau.example/no-such-page', { method: 'HEAD' }),
@@ -128,5 +177,48 @@ describe('entry.server handleRequest', () => {
       loadContext,
     );
     expect(response.status).toBe(200);
+  });
+});
+
+describe('entry.server handleError (SB10)', () => {
+  it('should hand a server error to the SSR reporter and still log it', () => {
+    const error = new Error('loader failed');
+    const request = new Request('https://taucad.dev/w/home/fixture');
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    handleError(error, { request, params: {}, context: loadContext });
+
+    expect(queueSsrError).toHaveBeenCalledWith(error, request);
+    expect(logged).toHaveBeenCalledWith(error);
+    logged.mockRestore();
+  });
+
+  it('should skip a request the client aborted', () => {
+    const controller = new AbortController();
+    controller.abort();
+    vi.mocked(queueSsrError).mockClear();
+
+    handleError(new Error('aborted'), {
+      request: new Request('https://taucad.dev/', { signal: controller.signal }),
+      params: {},
+      context: loadContext,
+    });
+
+    expect(queueSsrError).not.toHaveBeenCalled();
+  });
+
+  it('should name the document route and status for the errors handleError took', async () => {
+    const request = new Request('https://taucad.dev/w/home/fixture', { method: 'HEAD' });
+
+    await handleRequest(
+      request,
+      500,
+      new Headers(),
+      contextMatching('root', 'routes/w.$workspace.$project'),
+      loadContext,
+    );
+
+    expect(claimSsrErrors).toHaveBeenCalledWith(request, 'routes/w.$workspace.$project', 500);
+    expect(reportSsrError).not.toHaveBeenCalled();
   });
 });

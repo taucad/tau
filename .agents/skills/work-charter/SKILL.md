@@ -50,7 +50,9 @@ For an authorized sweeping migration of unreleased APIs, complete the architectu
 
 Use the smallest meaningful acceptance evidence for each change. Prefer applicable existing checks; add a focused semantic regression check for changed non-trivial behavior. Run project checks through Nx and follow `testing-policy`. Verify UI/runtime outcomes when needed. Passing frontmatter, a worker's assertion, or exit zero alone cannot establish the selected behavior.
 
-Give a fresh reviewer a bounded correctness question and the actual diff/evidence. Keep post-implementation review separate from `adversarial-review`, which owns pre-implementation research review. Resolve material findings and rerun affected checks; stop expanding verification after relevant checks pass unless new changes or failures justify it.
+When independent review is permitted, give a fresh reviewer a bounded correctness question and the actual diff/evidence. When the user requires solo work, perform a separate self-review of the diff and evidence, record that limitation, and do not delegate or call it independent review. Keep post-implementation review separate from `adversarial-review`, which owns pre-implementation research review. Resolve material findings and rerun affected checks; stop expanding verification after relevant checks pass unless new changes or failures justify it.
+
+When an authorized experiment revises an acceptance contract, record the new version and rationale before rerunning. Preserve historical failures; distinguish functional failure, unresolved appearance, uncertain benefit and bounded acceptance. Do not let unrelated rollout gates block a qualified incremental change, or report incremental acceptance as full rollout.
 
 On interruption or a new session:
 
@@ -64,7 +66,7 @@ Context, quota and interruption are continuation events. Persist usable evidence
 
 ## Human attention and closeout
 
-Resolve empirical facts and reversible details consistent with intent autonomously. Ask only about an unresolved objective/invariant, a material trade-off between valid outcomes, unavailable evidence that changes the authorized result, or missing authority. Supply the recommendation, resolved evidence, affected task IDs and independent work that can continue. Do not re-ask for authorization already present.
+Resolve empirical facts and reversible details consistent with intent autonomously; a size-limit raise inside the [npm policy](../../../docs/policy/npm-policy.md) band is one. Ask only about an unresolved objective/invariant, a material trade-off between valid outcomes, unavailable evidence that changes the authorized result, or missing authority. Supply the recommendation, resolved evidence, affected task IDs and independent work that can continue. Do not re-ask for authorization already present.
 
 Close out only the selected scope after semantic acceptance and relevant review. Record changed paths, observed checks, unresolved limitations and the next-ready set. Validate research/artifact links, check the separate Tau Brain Git boundary (commit Brain paths with `pnpm agent-env commit`), and distinguish local saving, commit and backup. Do not silently commit, push, publish, schedule a future run or implement the unselected remainder.
 

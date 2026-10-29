@@ -50,17 +50,17 @@ export type RevisionWhere = Readonly<{
 /** A decision waiting on the person, said one way on every surface (HQ1, HQ6). @public */
 export const needsDecision = 'Needs your decision';
 
-/** The calm state of a person whose access the owner removed (HQ3). @public */
-export const accessRemoved = 'Access removed';
+/** A settled missing cloud listing does not distinguish deletion from removed access. @public */
+export const cloudUnavailable = 'Cloud copy unavailable';
 
 /**
- * What a person whose access was removed can do about it (D17's owner-directed
- * sentence): the owner decides, and nothing on this device is lost.
+ * An absent cloud listing proves unavailability, not who removed access or
+ * whether the cloud copy still exists. Local revisions remain available.
  *
  * @public
  */
-export const accessRemovedSentence =
-  'The owner removed your access to this project’s cloud copy. Ask them to add you again; every revision stays on this device.';
+export const cloudUnavailableSentence =
+  'The cloud copy may have been deleted or your access may have changed. Every revision stays on this device.';
 
 /**
  * A revision's public name: `Rev N`, a first-parent ordinal on its line (EQ9).
@@ -208,7 +208,7 @@ export const backupCopy = (
   remote?: RemoteFacet,
 ): string | undefined => {
   if (role === 'revoked' && sync.state !== 'noRemote') {
-    return accessRemoved;
+    return cloudUnavailable;
   }
   if (
     remote !== undefined &&
@@ -286,6 +286,29 @@ const backupAsk = (
 export const conflictLine = (status: RevisionStatusProjection, where: RevisionWhere): string | undefined =>
   status.conflicts[0]?.into ?? where.branch;
 
+/**
+ * Whether a conflict waits on the person's decision: a merge or pull that stopped on conflicting files.
+ *
+ * @param status - The revision status projection.
+ * @returns Whether a decision is waiting.
+ * @public
+ */
+export const hasRevisionConflict = (status: RevisionStatusProjection): boolean =>
+  status.conflicts.length > 0 || status.sync.state === 'conflicted';
+
+/**
+ * The sentence that names a waiting conflict's decision and its line (HQ2, D14).
+ *
+ * @param status - The revision status projection.
+ * @param where - Where the checkout is.
+ * @returns *Needs your decision*, on the line the resolution lands on when one is known.
+ * @public
+ */
+export const conflictSentence = (status: RevisionStatusProjection, where: RevisionWhere): string => {
+  const line = conflictLine(status, where);
+  return line === undefined ? needsDecision : `${needsDecision} on ${line}`;
+};
+
 /** Failed, then needs you: the two tiers that interrupt. */
 const interruptingFacts = (status: RevisionStatusProjection, where: RevisionWhere): RevisionFacts | undefined => {
   const { sync } = status;
@@ -297,14 +320,8 @@ const interruptingFacts = (status: RevisionStatusProjection, where: RevisionWher
   if (where.role !== 'revoked' && sync.state === 'failed' && failedBackupReasons.has(sync.reason ?? 'unknown')) {
     return { icon: CircleAlert, tone: 'text-feature', mark: 'failed', sentence: 'Backup failed' };
   }
-  if (status.conflicts.length > 0 || sync.state === 'conflicted') {
-    const line = conflictLine(status, where);
-    return {
-      icon: GitMerge,
-      tone: 'text-warning',
-      mark: 'attention',
-      sentence: line === undefined ? needsDecision : `${needsDecision} on ${line}`,
-    };
+  if (hasRevisionConflict(status)) {
+    return { icon: GitMerge, tone: 'text-warning', mark: 'attention', sentence: conflictSentence(status, where) };
   }
   const ask = where.role === 'revoked' ? undefined : backupAsk(status, where.isSignedOut);
   return ask === undefined
@@ -521,7 +538,7 @@ export const selectStripVerbs = ({
    */
   canUpgrade?: boolean;
 }>): Readonly<{ primary: StripVerb | undefined; secondary: readonly StripVerb[] }> => {
-  if (status === undefined || !canWrite || status.conflicts.length > 0 || status.sync.state === 'conflicted') {
+  if (status === undefined || !canWrite || hasRevisionConflict(status)) {
     return { primary: undefined, secondary: [] };
   }
   const secondary: StripVerb[] = where.isDirty ? [] : undoable ? ['Undo restore'] : canUndo ? ['Undo'] : [];

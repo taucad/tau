@@ -1,7 +1,17 @@
+import { ObservabilityHarnessHydrationProbe } from '#lib/observability-harness-hydration.js';
 import { onDesktopMachineNavigation } from '#filesystem/desktop-bridge.js';
 import { installLoopbackHandOff } from '#lib/agent-host-placement.js';
 import type { ComponentType, ReactNode } from 'react';
-import { Links, Meta, Scripts, ScrollRestoration, useMatch, useNavigate, useRouteLoaderData } from 'react-router';
+import {
+  Links,
+  Meta,
+  Scripts,
+  ScrollRestoration,
+  useMatch,
+  useNavigate,
+  useRouteLoaderData,
+  useLocation,
+} from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { authQueryKeys } from '@better-auth-ui/core';
 import { Fragment, useEffect, useMemo } from 'react';
@@ -25,6 +35,7 @@ import { HomeFileManagerProvider } from '#hooks/use-file-manager.js';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import { RevisionActorIdentity } from '#components/revision-actor-identity.js';
+import { RuntimeTelemetryIdentity } from '#components/runtime-telemetry-identity.js';
 import { ChatSessionStoreProvider } from '#hooks/chat-session-store-provider.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import { ProjectSessionsHost, projectRoutePath } from '#routes/w.$workspace.$project/project-route.js';
@@ -141,6 +152,7 @@ export function RootLayout({
                   <GlobalChatFlushGuard />
                   <DocumentMemoryKillReporter />
                   <RevisionActorIdentity />
+                  <RuntimeTelemetryIdentity />
                   {children}
                 </SessionsProvider>
               </ChatSessionStoreProvider>
@@ -206,6 +218,7 @@ function LayoutDocument({
   // This is null during SSR when no theme preference is stored (system theme mode),
   // which allows PreventFlashOnWrongTheme's script to correctly detect and apply the
   // system preference before the page renders (prevents light mode flash on dark systems).
+  const location = useLocation();
   const { ssrTheme: resolvedTheme } = useTheme();
   const color = useColor();
   const { setFaviconColor } = useFavicon();
@@ -223,7 +236,6 @@ function LayoutDocument({
        * is English-only and re-renders continuously (chat stream, editor, viewer). */
       translate='no'
       className={cn(
-        '[--spacing:0.275rem] md:[--spacing:0.25rem]',
         (resolvedTheme === Theme.BLACK || resolvedTheme === Theme.HIGH_CONTRAST) && Theme.DARK,
         // Leave the specific product theme last so it overrides Dark's base palette.
         resolvedTheme,
@@ -245,6 +257,7 @@ function LayoutDocument({
             __html: buildClientEnvScript(env),
           }}
         />
+        <ObservabilityHarnessHydrationProbe pathname={location.pathname} search={location.search} />
         <SvgSpriteMount />
         {documentChrome}
         {children}

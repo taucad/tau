@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { Line } from '@react-three/drei';
-import { useThree } from '@react-three/fiber';
 import React from 'react';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { Line2 as Line2WebGpu } from 'three/addons/lines/webgpu/Line2.js';
@@ -9,7 +8,7 @@ import { Line2NodeMaterial } from '#graphics/three/materials/line2.material.js';
 import { axesHelperColors, axesHelperOpacity } from '#graphics/three/overlay-colors.constants.js';
 import { useThreeGraphicsBackend } from '#graphics/three/three-graphics-backend-context.jsx';
 import { viewportRenderTiers } from '#graphics/three/utils/render-order.utils.js';
-import { useCameraRig, useRenderFrame } from '#hooks/use-graphics.jsx';
+import { useRenderFrame } from '#hooks/use-graphics.jsx';
 
 /**
  * Shared origin used as one endpoint of the drei `<Line>` points array on the WebGL
@@ -76,11 +75,8 @@ type FatLineResources = Readonly<{
  * - The `LineGeometry` is initialised exactly once; Three.js issue
  *   [#31056](https://github.com/mrdoob/three.js/issues/31056) documents why replacing
  *   its position attribute after first use is unsafe with `WebGPURenderer`.
- * - **Policy Rule 8** (pipeline budget): the three axes warm three pipelines total.
- * - **Policy Rule 13** (pipeline pre-warm): the `useLayoutEffect` invokes
- *   `gl.compileAsync(group, camera)` before the first `useFrame` tick, mirroring the
- *   warmup pattern in `post-processing-webgpu.tsx`, so cold-cache mounts do not skip the
- *   first frame.
+ * Compile on the active frame target. Detached warmup allocates an unused output target
+ * and prepares the wrong render context; ordinary draws retain the compiled material.
  */
 export function AxesWebGpuFatLine({
   color,
@@ -88,10 +84,6 @@ export function AxesWebGpuFatLine({
   positiveEnd,
   thickness,
 }: AxesWebGpuFatLineProps): React.JSX.Element {
-  const gl = useThree((state) => state.gl);
-  const invalidate = useThree((state) => state.invalidate);
-  const cameraRig = useCameraRig();
-
   const resources = React.useMemo<FatLineResources>(() => {
     const material = new Line2NodeMaterial({
       color: new THREE.Color(color),
@@ -115,51 +107,6 @@ export function AxesWebGpuFatLine({
 
     return { geometry, group, material };
   }, [color, opacity, positiveEnd, thickness]);
-
-  // Pre-warm the WebGPU render pipeline so the first draw after mount does not skip
-  // while `createRenderPipelineAsync` resolves (Policy Rule 13). Mirrors the warmup
-  // pattern in `post-processing-webgpu.tsx`.
-  React.useLayoutEffect(() => {
-    const cancellation = { cancelled: false };
-    // `compileAsync` is only available on `WebGPURenderer`; the WebGL branch never mounts
-    // this component, but we guard defensively in case a renderer stub is supplied (tests
-    // override this; jsdom-driven harnesses never resolve a real compileAsync).
-    const renderer = gl as unknown as {
-      compileAsync?: (scene: THREE.Object3D, camera: THREE.Camera) => Promise<unknown>;
-    };
-    const compile = renderer.compileAsync;
-    if (typeof compile !== 'function') {
-      return undefined;
-    }
-
-    // async-iife: bootstrap — useLayoutEffect cannot be async; the cancellation flag
-    // ensures a teardown before resolution is a no-op.
-    void (async () => {
-      try {
-        await Promise.all([
-          // oxlint-disable-next-line react/immutability -- This mount owns the retained material; the version bump below schedules its node rebuild.
-          compile.call(renderer, resources.group, cameraRig.perspectiveCamera),
-          compile.call(renderer, resources.group, cameraRig.orthographicCamera),
-        ]);
-      } catch (error) {
-        console.error('AxesWebGpuFatLine pipeline warm-up failed', error);
-        return;
-      }
-      if (cancellation.cancelled) {
-        return;
-      }
-      // Rebuild the node graph for the live frame target. `compileAsync` builds it outside a
-      // render — no frame target, zero samples, a viewport copy taken of the canvas — and the
-      // first axis drawn kept that build: it composited over a stale copy at about half its
-      // ink. The rebuilt WGSL matches, so the warmed pipeline is still reused.
-      resources.material.needsUpdate = true;
-      invalidate();
-    })();
-
-    return () => {
-      cancellation.cancelled = true;
-    };
-  }, [cameraRig, gl, invalidate, resources]);
 
   React.useEffect(
     () => () => {

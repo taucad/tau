@@ -1021,6 +1021,40 @@ describe('the page client of the worker revision root', () => {
     expect(settled).toBe(true);
   });
 
+  /* Round 27: the page reads a foreign run by whether the host's placement can pull the chat; an older host says nothing. */
+  it.each([
+    { answer: { pulls: false }, pulls: false },
+    { answer: { pulls: true }, pulls: true },
+    { answer: null, pulls: true },
+  ])('should answer a host pullRemote $answer as pulls $pulls', async ({ answer, pulls }) => {
+    const seen: JsonValue[] = [];
+    const channel = revisionChannel({
+      revision: async (request: JsonValue) => {
+        seen.push(request);
+        return {
+          result:
+            typeof request === 'object' &&
+            request !== null &&
+            'command' in request &&
+            request['command'] === 'pullRemote'
+              ? answer
+              : null,
+          status: { projectId, branch: 'main' },
+        };
+      },
+      async *revisionEvents() {
+        yield { kind: 'status', value: { projectId, branch: 'main' } };
+      },
+      close: () => undefined,
+    });
+    const client = createHostRevisionClient({ projectId, connect: async () => channel });
+    client.open();
+
+    await expect(client.pullRemote('chat-1')).resolves.toBe(pulls);
+    expect(seen).toContainEqual({ command: 'pullRemote', chatId: 'chat-1' });
+    client.close();
+  });
+
   /* B7: the host answers the verb itself, so the page waits on that answer and never on a bound or a toast. */
   it('should resolve a host createBranch with the checkout the host answered', async () => {
     const { client } = hostBranchClient({

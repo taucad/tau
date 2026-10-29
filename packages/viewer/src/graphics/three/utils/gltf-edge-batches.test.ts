@@ -1,6 +1,17 @@
-import { describe, it, expect, vi } from 'vitest';
-import { Matrix4, Vector2 } from 'three';
-import type { InstancedBufferGeometry } from 'three';
+import type { EdgeBatchLayout } from '#graphics/three/utils/gltf-edge-batches.js';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import {
+  BufferGeometry,
+  Float32BufferAttribute,
+  Group,
+  InstancedBufferGeometry,
+  LineBasicMaterial,
+  LineSegments,
+  Matrix4,
+  Mesh,
+  Object3D,
+  Vector2,
+} from 'three';
 import {
   createEdgePrototypeGeometry,
   createEdgeBatchMaterial,
@@ -8,9 +19,69 @@ import {
   getEdgeOccurrenceCount,
   setEdgeOccurrenceCount,
   writeEdgePlacement,
+  createGltfEdgeBatches,
 } from '#graphics/three/utils/gltf-edge-batches.js';
-import type { EdgeBatchLayout } from '#graphics/three/utils/gltf-edge-batches.js';
+import { applyFatLineSegments } from '#graphics/three/materials/gltf-edges.js';
+import { createGltfSurfaceBatches } from '#graphics/three/utils/gltf-surface-batches.js';
 import { serialiseStrippedTslGraph } from '#graphics/three/utils/tsl-node-graph-snapshot.js';
+
+const cleanup: Array<() => void> = [];
+afterEach(() => {
+  for (const dispose of cleanup.splice(0).reverse()) {
+    dispose();
+  }
+  vi.restoreAllMocks();
+});
+
+const fixture = () => {
+  const root = new Group();
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new Float32BufferAttribute([0, 0, 0, 1, 0, 0], 3));
+  const unique = geometry.clone();
+  const material = new LineBasicMaterial();
+  for (const prototype of [geometry, geometry, unique]) {
+    root.add(new LineSegments(prototype, material));
+  }
+  applyFatLineSegments(
+    { scene: root },
+    { backend: 'webgl', resolution: new Vector2(128, 128), preserveSourceNodes: true },
+  );
+  const sources: Mesh[] = [];
+  root.traverse((object) => {
+    if (object instanceof Mesh && object.type === 'LineSegments2') {
+      sources.push(object as Mesh);
+    }
+  });
+  const restore = vi.fn((source: Mesh) => {
+    source.layers.mask = 1;
+  });
+  const owner = createGltfEdgeBatches(root, sources, {
+    backend: 'webgl',
+    resolution: new Vector2(128, 128),
+    hooks: {
+      restore,
+      suppress(source) {
+        source.layers.mask = 0;
+      },
+      prepareMaterial() {
+        return undefined;
+      },
+    },
+  });
+  cleanup.push(() => {
+    owner.dispose();
+    for (const source of sources) {
+      source.geometry.dispose();
+      for (const value of Array.isArray(source.material) ? source.material : [source.material]) {
+        value.dispose();
+      }
+    }
+    geometry.dispose();
+    unique.dispose();
+    material.dispose();
+  });
+  return { root, sources, owner, restore };
+};
 
 /** Bytes of the arrays a batch geometry allocated itself; the caller's prototype endpoints are not counted. */
 function ownedBytes(geometry: InstancedBufferGeometry, prototype: Float32Array): number {
@@ -38,6 +109,74 @@ function readPlacementColumns(geometry: InstancedBufferGeometry, slot: number): 
 }
 
 describe('edge occurrence semantics', () => {
+  it('should propagate canonical edges once when the aggregate surface owner synchronizes their pose', () => {
+    const { root, sources, owner } = fixture();
+    owner.dispose();
+    const aggregate = createGltfSurfaceBatches(root, [], {
+      sources,
+      backend: 'webgl',
+      resolution: new Vector2(128, 128),
+      prepareMaterial: () => undefined,
+    });
+    cleanup.push(aggregate.dispose);
+    aggregate.sync();
+    const update = vi.spyOn(Object3D.prototype, 'updateWorldMatrix');
+    for (const source of sources) {
+      source.position.y = 11;
+    }
+    aggregate.syncMatrices(sources);
+    for (const source of sources) {
+      expect(update.mock.contexts.filter((object) => object === source)).toHaveLength(1);
+      expect(source.matrixWorld.elements[13]).toBe(11);
+    }
+  });
+
+  it('should move a singleton and shared edges without rebuilding prototype membership', () => {
+    const { sources, owner, restore } = fixture();
+    owner.sync();
+    const [batch] = owner.group.children;
+    if (!(batch instanceof Mesh) || !(batch.geometry instanceof InstancedBufferGeometry)) {
+      throw new Error('Expected a shared edge batch');
+    }
+    const { geometry } = batch as Mesh<InstancedBufferGeometry>;
+    const endpoints = geometry.getAttribute('instanceStart');
+    restore.mockClear();
+    for (const source of sources) {
+      source.position.y = 9;
+    }
+    owner.syncMatrices(sources);
+    expect(restore).not.toHaveBeenCalled();
+    expect(owner.group.children).toEqual([batch]);
+    expect(geometry.getAttribute('instanceStart')).toBe(endpoints);
+    expect(geometry.getAttribute('tauOccurrence3').getY(0)).toBe(9);
+    expect(geometry.getAttribute('tauOccurrence3').getY(1)).toBe(9);
+    expect(sources[2]!.layers.mask).toBe(1);
+    expect(sources[2]!.matrixWorld.elements[13]).toBe(9);
+  });
+
+  it('should recover an edge occurrence after a singular transform without regrouping unchanged ineligibility', () => {
+    const { sources, owner, restore } = fixture();
+    owner.sync();
+    const moved = sources[0]!;
+    moved.scale.x = 0;
+    owner.syncMatrices([moved]);
+    expect(moved.layers.mask).toBe(1);
+    restore.mockClear();
+    moved.position.y = 7;
+    owner.syncMatrices([moved]);
+    expect(restore).not.toHaveBeenCalled();
+    moved.scale.x = -1;
+    owner.syncMatrices([moved]);
+    expect(moved.layers.mask).toBe(0);
+    const [batch] = owner.group.children;
+    if (!(batch instanceof Mesh) || !(batch.geometry instanceof InstancedBufferGeometry)) {
+      throw new Error('Expected a restored edge batch');
+    }
+    expect(batch.geometry.instanceCount).toBe(2);
+    expect(batch.geometry.getAttribute('tauOccurrence0').getX(0)).toBe(-1);
+    expect(batch.geometry.getAttribute('tauOccurrence3').getY(0)).toBe(7);
+  });
+
   it('should reject malformed prototypes and out-of-capacity placements', () => {
     for (const positions of [
       new Float32Array(),

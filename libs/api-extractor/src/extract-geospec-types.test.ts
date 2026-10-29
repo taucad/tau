@@ -4,22 +4,21 @@ import ts from 'typescript';
 import { buildGeoSpecTypeBundle } from '#extract-geospec-types.js';
 
 describe('GeoSpec public type extraction', () => {
-  it('should match every public source export and the checked-in declarations', () => {
+  it('should match every public export of the installed package and the checked-in declarations', () => {
     const generated = buildGeoSpecTypeBundle();
     const checkedIn: unknown = JSON.parse(
       readFileSync(new URL('generated/geospec/geospec.bundled.json', import.meta.url), 'utf8'),
     );
     expect(generated).toStrictEqual(checkedIn);
     const manifest = JSON.parse(
-      readFileSync(new URL('../../../packages/geospec/package.json', import.meta.url), 'utf8'),
-    ) as { exports: Record<string, string> };
+      readFileSync(new URL('../../../node_modules/geospec/package.json', import.meta.url), 'utf8'),
+    ) as { exports: Record<string, string | { types?: string }> };
     const expectedExports = Object.fromEntries(
-      Object.entries(manifest.exports)
-        .filter(([, source]) => source.startsWith('./src/'))
-        .map(([specifier, source]) => [
-          specifier,
-          { types: source.replace('./src/', './').replace(/\.ts$/u, '.d.ts') },
-        ]),
+      Object.entries(manifest.exports).flatMap(([specifier, target]) =>
+        typeof target === 'object' && target.types !== undefined
+          ? [[specifier, { types: target.types.replace('./dist/', './').replace(/\.d\.mts$/u, '.d.ts') }]]
+          : [],
+      ),
     );
     const bundle = generated['geospec']!;
     expect(bundle.packageJson['exports']).toStrictEqual(expectedExports);
@@ -39,21 +38,19 @@ describe('GeoSpec public type extraction', () => {
       throw new Error('Missing public MeshSource union');
     }
     expect(options.type.types).toHaveLength(7);
-    const statsSource = generated['geospec']!.files['mesh/types.d.ts']!;
-    const statsAst = ts.createSourceFile('mesh/types.d.ts', statsSource, ts.ScriptTarget.Latest, true);
-    const stats = statsAst.statements.find(
-      (statement) => ts.isTypeAliasDeclaration(statement) && statement.name.text === 'GeometryStats',
-    );
-    if (!stats || !ts.isTypeAliasDeclaration(stats) || !ts.isTypeLiteralNode(stats.type)) {
-      throw new Error('Missing public GeometryStats');
-    }
-    expect(stats.type.members.map((member) => member.name?.getText(statsAst))).toEqual([
-      'vertexCount',
-      'meshCount',
-      'triangleCount',
-      'meshQuality',
-      'watertight',
-      'boundingBox',
+    // The legacy TypeScript engine's evidence and STEP structure types left the public surface with it.
+    const meshSource = generated['geospec']!.files['mesh/types.d.ts']!;
+    const meshAst = ts.createSourceFile('mesh/types.d.ts', meshSource, ts.ScriptTarget.Latest, true);
+    expect(meshAst.statements.filter(ts.isTypeAliasDeclaration).map((statement) => statement.name.text)).toStrictEqual([
+      'Vec3',
+      'MeshFileFormat',
+      'GeometryFileFormat',
+      'GeometryExportIntent',
+      'GeometryDiagnostic',
     ]);
+    for (const legacy of ['BrepEvidence', 'GeometrySubject', 'MeshQualityStats', 'StepEvidence', 'XdeReadResult']) {
+      expect(bundle.content).not.toContain(legacy);
+      expect(bundle.files['mesh/index.d.ts']).not.toContain(legacy);
+    }
   }, 30_000);
 });

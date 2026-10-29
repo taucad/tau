@@ -65,6 +65,9 @@
           "env": "TAU_CLOUD_ENABLED"
         },
         {
+          "env": "TAU_TELEMETRY_HOST"
+        },
+        {
           "env": "POSTHOG_CLIENT_KEY"
         },
         {
@@ -318,7 +321,7 @@
       "executor": "nx:run-commands",
       "cache": true,
       "metadata": {
-        "description": "Renderer ownership gate: fails when the renderer bundle carries kernel, converter or host payloads (only KCL and Clipper WASM are allowed). Every package target depends on it. Cached on the bytes it checks, the renderer build and the main and preload bundles; `dist/dev-electron`, the branded Electron that `dev` and `serve` create, is left out of the key."
+        "description": "Renderer ownership gate: fails when the renderer bundle carries kernel, converter or host payloads (only the KCL editor, Clipper section-cap and Terminal ghostty-vt WASM are allowed, one copy each, with producer provenance). Every package target depends on it. Cached on the bytes it checks, the renderer build and the main and preload bundles; `dist/dev-electron`, the branded Electron that `dev` and `serve` create, is left out of the key."
       },
       "dependsOn": ["build"],
       "inputs": [
@@ -705,8 +708,30 @@
         "command": "node --import @oxc-node/core/register --test apps/desktop/scripts/desktop-sourcemaps.test.mts"
       }
     },
+    "test:authority-writer": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "vitest run --config vitest.config.ts src/tau/services-host.impl.test.ts src/tau/authority-writer-electron.test.ts --testNamePattern=\"filesystem authority lifetime|native Electron authority ownership\""
+      }
+    },
     "test": {
-      "dependsOn": ["test-sourcemaps"]
+      "dependsOn": ["test-sourcemaps", "test-first-use-download"]
+    },
+    "test:terminal-conformance": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "The desktop Terminal's conformance rows (W5: A09, A11, A14, A24): the services host's terminal concern over a transferred port into the real shell service, sandbox provider and the machine's own Bash in a PTY. macOS PTY rows are recorded unverified until the operator's own-pty run. Writes a JSON receipt when TAU_SHELL_CONFORMANCE_RECEIPT is set. Never cached: a receipt is only evidence of the run that wrote it."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop",
+        "command": "../../node_modules/.bin/vitest run --config vitest.config.ts src/tau/services-host.terminal.conformance.test.ts",
+        "env": {
+          "TAU_SHELL_CONFORMANCE": "1"
+        }
+      }
     },
     "test-qualification-appimage-sandbox": {
       "executor": "nx:run-commands",
@@ -722,6 +747,12 @@
       "options": {
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/preload-sandbox.test.mts",
         "cwd": "."
+      }
+    },
+    "test-first-use-download": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --import @oxc-node/core/register --test apps/desktop/scripts/first-use-evidence.test.mts"
       }
     }
   }

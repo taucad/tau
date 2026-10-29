@@ -1,0 +1,108 @@
+# Live download evidence (macOS DMG default, blueprint M6 "Live end-to-end"): open the real deployed download page in
+# Google Chrome on a native Apple silicon runner, screenshot it, record every visible Mac button label and link, click
+# the Apple silicon and Intel buttons and qualify the files the browser actually saved against the published
+# `latest/installers.json`: byte count, SHA-256, `hdiutil verify`, Gatekeeper's primary-signature assessment,
+# `stapler validate`, and `codesign --verify` on the mounted app. Quarantine is recorded and never removed. The ZIP
+# alternatives and both Mac updater feeds are fetched in full and hashed. `expect: zip` records today's archive-first
+# page as a baseline. It reads public URLs only: no environment, no secrets, and it changes nothing it observes.
+name: Desktop download live evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      page_url:
+        description: Download page to open in a real browser
+        required: true
+        default: https://taucad.dev/download/
+      expect:
+        description: Format every Mac button must offer (dmg after the catalog cutover, zip for the current baseline)
+        required: true
+        type: choice
+        default: dmg
+        options:
+          - dmg
+          - zip
+      inject_catalog_404:
+        description: 'Staging drill: inject a browser-only catalog 404 (requires expect=zip)'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-download-live-evidence-${{ inputs.page_url }}
+  cancel-in-progress: false
+
+jobs:
+  evidence:
+    name: Download evidence (${{ inputs.expect }}, ${{ inputs.page_url }})
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Require a native Apple silicon runner
+        run: |
+          sw_vers
+          test "$(uname -m)" = arm64
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      # The runner image's installed Google Chrome is the browser a visitor downloads with; nothing is installed.
+      - name: Require Google Chrome
+        run: test -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+      - name: Open the page, click the Mac buttons and qualify the downloads
+        env:
+          CHROME_CHANNEL: chrome
+          PAGE_URL: ${{ inputs.page_url }}
+          EXPECT: ${{ inputs.expect }}
+          INJECT_CATALOG_404: ${{ inputs.inject_catalog_404 }}
+          EVIDENCE_DIR: ${{ runner.temp }}/desktop-download-live-evidence
+        run: |
+          set -o pipefail
+          node apps/www/scripts/download-live-evidence.ts 2>&1 | tee "$RUNNER_TEMP/download-live-evidence.log"
+
+      - name: Summarize
+        if: always()
+        run: |
+          summary="$RUNNER_TEMP/desktop-download-live-evidence/summary.json"
+          {
+            echo '### Desktop download live evidence'
+            echo
+            if [ -f "$summary" ]; then
+              jq -r '"- Page: \(.pageUrl) (expect \(.expect))\n- Captured: \(.capturedAt)\n- Catalog: \(.catalog.status) \(.catalog.tag // "none") \(.catalog.sha256 // "")\n- Passed: \(.passed)"' "$summary"
+              echo
+              jq -r 'if .failureInjection then "- Failure injection: \(.failureInjection.kind) (\(.failureInjection.scope)); \(.failureInjection.requests | length) intercepted requests" else "- Failure injection: none" end' "$summary"
+              echo
+              echo '| Button | Label | Link |'
+              echo '| --- | --- | --- |'
+              jq -r '.buttons[]? | select(.visible) | "| \(.role) | \(.text) | \(.href) |"' "$summary"
+              echo
+              echo '| Download | File | Bytes | SHA-256 |'
+              echo '| --- | --- | --- | --- |'
+              jq -r '.downloads[]? | "| \(.architecture) | \(.filename) | \(.bytes // "-") | \(.sha256 // "-") |"' "$summary"
+              echo
+              jq -r '.failures[]? | "- Failure: \(.)"' "$summary"
+            else
+              echo 'No summary was written; see the job log.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          cp "$RUNNER_TEMP/download-live-evidence.log" "$RUNNER_TEMP/desktop-download-live-evidence/" 2>/dev/null || true
+
+      - name: Upload the evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-download-live-evidence
+          path: ${{ runner.temp }}/desktop-download-live-evidence
+          if-no-files-found: error
+          retention-days: 90

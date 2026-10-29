@@ -1,0 +1,38 @@
+{
+  "uid": "tau-storage-critical",
+  "title": "Storage — critical",
+  "templating": {
+    "list": [
+      { "name": "app", "type": "constant", "query": ".*" },
+      { "name": "storage_app", "type": "constant", "query": ".*storage.*" },
+      { "name": "mirror_app", "type": "constant", "query": ".*mirror.*" }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "In flight",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(tau_git_rpcs_inflight{app=~\"$storage_app\"})" }]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Lost races, one query per app",
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(tau_git_commit_attempts_total{app=~\"$app\",outcome=\"lost_race\"}[5m]))" },
+        {
+          "refId": "B",
+          "expr": "sum(rate(tau_git_commit_attempts_total{app=~\"$storage_app\",outcome=\"lost_race\"}[5m]))"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "B2 copy lag",
+      "targets": [{ "refId": "A", "expr": "max(tau_mirror_copy_lag_seconds{app=~\"$mirror_app\",destination=\"b2\"})" }]
+    }
+  ]
+}

@@ -30,11 +30,12 @@ export const environmentHref: (href: string, hostname: string) => string = (href
 };
 
 /**
- * Keep the staging download channel visibly distinct from production.
+ * Keep the staging download channel visibly distinct from production. The note claims no signing or notarization
+ * state: a staging release may be notarized or not, and neither the archive link nor the installer catalog says which.
  * @param hostname - The hostname serving the page.
- * @returns Staging installation guidance, or no override on production.
+ * @returns Staging update guidance, or no override on production.
  */
 export const stagingDesktopNote = (hostname: string): string | undefined =>
   stagingDocsOrigins.has(hostname)
-    ? 'This staging build connects to taucad.dev and updates automatically. It is signed without notarization; macOS may ask you to allow it in Privacy & Security.'
+    ? 'This staging build connects to taucad.dev and updates automatically from the staging channel. Tau asks before restarting and saves your projects first.'
     : undefined;

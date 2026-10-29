@@ -1,3 +1,4 @@
+import { chatComposerTrayClassName } from '#components/chat/chat-input-styles.js';
 import { ChatMessageQueue } from '#components/chat/chat-message-queue.js';
 import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
@@ -32,6 +33,7 @@ import {
   FloatingPanelErrorContent,
 } from '#components/ui/floating-panel.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
+import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { cn } from '@taucad/ui/utils/cn';
 import { ChatHistoryEmpty } from '#routes/w.$workspace.$project/chat-history-empty.js';
 import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
@@ -68,6 +70,9 @@ const TurnGroup = memo(function ({
     </div>
   );
 });
+
+/** How far past the transcript's foot Virtuoso renders, so an appended turn is measured and followed. Pixels. */
+const appendedTurnOverscan = { top: 0, bottom: 120 } as const;
 
 // Custom Virtuoso scroller. Single responsibility:
 // `[scrollbar-gutter:stable]` permanently reserves a `--scrollbar-thickness`
@@ -159,6 +164,8 @@ const ExpandedChatHistory = memo(function ({
     () => chatAttachmentDirectories(projectId, activeChatId),
     [activeChatId, projectId],
   );
+  // D14: only a phone's composer rests as one row; desktop and tablets keep the full bar (D12).
+  const isMobile = useIsMobile();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const chatTextareaRef = useRef<ChatTextareaHandle>(null);
   const focusComposer = useCallback(() => {
@@ -262,6 +269,7 @@ const ExpandedChatHistory = memo(function ({
               <ChatTitleBar
                 closeButton={
                   <FloatingPanelClose
+                    label='Close Chat'
                     icon={XIcon}
                     tooltipContent={(isOpen) => (
                       <div className='flex items-center gap-2'>
@@ -284,6 +292,11 @@ const ExpandedChatHistory = memo(function ({
                 computeItemKey={computeItemKey}
                 scrollerRef={followLatestOutput.scrollerRef}
                 followOutput={followLatestOutput.followOutput}
+                /* A turn appended at the end starts at the viewport's foot, outside the rendered range: Virtuoso
+                 * follows it only once it is measured, so render a little past the foot. Without this a turn sent
+                 * from a short viewport (the phone sheet's peek) is never followed, and its reply or failure stays
+                 * folded away below (I5). */
+                increaseViewportBy={appendedTurnOverscan}
                 totalListHeightChanged={followLatestOutput.totalListHeightChanged}
                 className='mt-1 min-h-0 min-w-0 flex-1'
                 atBottomStateChange={handleAtBottomStateChange}
@@ -314,14 +327,14 @@ const ExpandedChatHistory = memo(function ({
                 onScrollToBottom={scrollToBottom}
               />
               <ChatMessagePlanning key={activeChatId} className='mb-3 px-3' />
-              <div className='mx-2 -mb-3 flex flex-col rounded-t-2xl border border-b-0 border-border/60 bg-muted/20 pb-3 empty:hidden'>
+              <div className={chatComposerTrayClassName}>
                 <ChatTodoList key={activeChatId} />
                 <ChatMessageQueue key={`${activeChatId}:messages`} />
                 <ChatQuestionQueue key={`${activeChatId}:questions`} onDismissFocus={focusComposer} />
               </div>
               <ChatTextarea
                 ref={chatTextareaRef}
-                enableMobileCollapse
+                enableMobileCollapse={isMobile}
                 mode='main'
                 enableAutoFocus={false}
                 onSubmit={onSubmit}

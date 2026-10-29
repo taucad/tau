@@ -10,6 +10,8 @@ import { appendChatRows, createTauAgentHost } from '#host/tau-agent-host.js';
 import { chatRunState, emptyChatLedger, foldChatLedger } from '#log/chat-ledger.js';
 import type { LogRowBody } from '#log/chat-ledger.js';
 import { isResumableRunFailure } from '#log/resumable.js';
+import type { ForeignRun } from '#log/foreign-runs.js';
+import { foreignRunStaleMilliseconds } from '#log/foreign-runs.js';
 import lifecycleTable from '#log/run-lifecycle.legality.json' with { type: 'json' };
 import type { ExternalAgentTurn, ExternalAgentPort } from '#host/external-agent.js';
 import type { TauAgentHost } from '#host/tau-agent-host.js';
@@ -18,6 +20,7 @@ import { ScriptedParityModelTransport, scriptedParityResponses } from '#host/scr
 import type { ScriptedParityResponse } from '#host/scripted-model.fixture.js';
 import type { AgentLogEvent, JsonObject, ProviderMessage } from '#log/event-types.js';
 import { GatewayModelTransportError } from '#transport/gateway-model-transport.js';
+import { refusalOf } from '#wire/refusals.js';
 import type { GatewayModelErrorCode } from '#transport/gateway-model-transport.js';
 import type { HostCompactionError } from '#harness/compaction.js';
 import * as sessionModule from '#harness/session.js';
@@ -1246,6 +1249,290 @@ the cancelled tools left the system unchanged.
     const recorded = events.filter((event) => event.type === 'interrupt.recorded');
     expect(recorded.map((event) => event.phase)).toEqual(['requested', 'resolved']);
     expect(recorded[1]?.payload).toEqual({ outcome: 'approved' });
+    await host.close();
+  });
+
+  /**
+   * A paused print run on a log that reads other devices' segments (XD3): its cross-device reads answer as `reads`
+   * says at each call, and the append of the first row `hold` names lands, then waits to return until the test
+   * releases it. `onEpoch` runs as each new term is opened.
+   */
+  const crossDevicePause = async (
+    name: string,
+    reads: {
+      foreignWrote: boolean;
+      runTakenOver: () => Promise<boolean>;
+      foreignRuns?: () => readonly ForeignRun[];
+    },
+    hold?: (row: AgentLogEvent) => boolean,
+  ) => {
+    const file = createMemoryLogFile();
+    const held = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let holding = hold;
+    const options = hostOptions({
+      openEventLog: async () => {
+        const log = await file.open();
+        return {
+          ...log,
+          refresh: async () => undefined,
+          foreignRuns: async () => reads.foreignRuns?.() ?? [],
+          foreignWroteSinceTermBegan: async () => reads.foreignWrote,
+          runTakenOver: async () => reads.runTakenOver(),
+          append: async (row) => {
+            const appended = await log.append(row);
+            if (holding?.(row) === true) {
+              holding = undefined;
+              held.resolve();
+              await release.promise;
+            }
+            return appended;
+          },
+        };
+      },
+      transport: new ScriptedParityModelTransport(printResponses),
+      toolRegistry: printTool([]),
+      idPrefix: name,
+    });
+    const epochs: string[] = [];
+    const hooks: { onEpoch?: () => void } = {};
+    const host = createTauAgentHost({
+      ...options,
+      createLeaderEpoch: () => {
+        const epoch = options.createLeaderEpoch!();
+        epochs.push(epoch);
+        hooks.onEpoch?.();
+        return epoch;
+      },
+    });
+    const chatId = `chat-${name}`;
+    const runId = `run-${name}`;
+    const started = await host.command({
+      type: 'start',
+      commandId: `start-${name}`,
+      payload: {
+        chatId,
+        runId,
+        trigger: 'submit',
+        message: { id: `turn-${name}`, role: 'user', content: 'Print it.' },
+      },
+    });
+    expect(started).toMatchObject({ status: 'applied' });
+    await vi.waitFor(async () => {
+      await expect(host.snapshot(chatId)).resolves.toMatchObject({ state: 'paused' });
+    });
+    const [pending] = await host.pendingInterrupts(runId);
+    return { host, file, chatId, runId, interruptId: pending!.interruptId, epochs, hooks, held: held.promise, release };
+  };
+
+  /*
+   * Round 20: a batch's term and the chat's terms after it are one decision, taken as the write begins. An approval
+   * proposed a new term while the paused run's settlement was being written under the old one (its row landed, its
+   * write not yet returned), and was then refused: that settlement does not commit the approval's term, so the chat's
+   * next row still goes under the run's own term.
+   */
+  it('should not commit a term proposed while a batch of its run was being written', async () => {
+    const reads = { foreignWrote: false, runTakenOver: async () => false };
+    const paused = await crossDevicePause('mid-write', reads, (row) => row.type === 'turn.finalized');
+    const { host, chatId, runId, interruptId, epochs } = paused;
+    await paused.held;
+    reads.foreignWrote = true;
+    const opened = epochs.length;
+    paused.hooks.onEpoch = () => {
+      paused.release.resolve();
+    };
+
+    const approval = host.command({
+      type: 'resolve-interrupt',
+      commandId: 'approve-unknown',
+      payload: { chatId, runId, interruptId: 'interrupt-unknown', outcome: 'approved' },
+    });
+    await expect(approval).resolves.toMatchObject({ status: 'refused' });
+    expect(epochs.length).toBe(opened + 1);
+    reads.foreignWrote = false;
+    /* Re-sent while the pause's settlement still lands (`CHAT_RUN_LIVE`, a wait). */
+    let denials = 0;
+    await vi.waitFor(async () => {
+      denials += 1;
+      const denied = await host.command({
+        type: 'resolve-interrupt',
+        commandId: `deny-${String(denials)}`,
+        payload: { chatId, runId, interruptId, outcome: 'denied' },
+      });
+      expect(denied, JSON.stringify(denied)).toMatchObject({ status: 'applied' });
+    });
+
+    const events = await readLog(paused.file);
+    const pausedRow = events.find((event) => event.type === 'run.lifecycle' && event.state === 'paused');
+    const resolved = events.find((event) => event.type === 'interrupt.recorded' && event.phase === 'resolved');
+    expect(resolved?.leaderEpoch).toBe(pausedRow?.leaderEpoch);
+    await host.close();
+  });
+
+  /*
+   * Round 20: the approval's cross-device check fails closed. A read that fails with anything but a decision refuses it
+   * with a code the page re-sends on, and writes nothing; the same approval is applied once the read succeeds.
+   */
+  it('should refuse an approval, retryably and with no row, when its cross-device check fails', async () => {
+    let failing = true;
+    const reads = {
+      foreignWrote: false,
+      runTakenOver: async () => {
+        if (failing) {
+          throw new Error('The storage could not be read.');
+        }
+        return false;
+      },
+    };
+    const { host, file, chatId, runId, interruptId } = await crossDevicePause('fail-closed', reads);
+    const { length: before } = await readLog(file);
+
+    const refused = await host.command({
+      type: 'resolve-interrupt',
+      commandId: 'approve-1',
+      payload: { chatId, runId, interruptId, outcome: 'approved' },
+    });
+
+    expect(refused).toMatchObject({ status: 'refused', effect: 'not-applied' });
+    expect(refusalOf((refused as { code: string }).code).retry).toBe('wait');
+    const after = await readLog(file);
+    expect(after.slice(before).filter((event) => event.type !== 'run.heartbeat')).toEqual([]);
+    failing = false;
+    await expect(
+      host.command({
+        type: 'resolve-interrupt',
+        commandId: 'approve-2',
+        payload: { chatId, runId, interruptId, outcome: 'approved' },
+      }),
+    ).resolves.toMatchObject({ status: 'applied' });
+    await host.close();
+  });
+
+  /** Another device's run, never settled, whose pulls found its segment quiet past the bound. */
+  const abandonedDesktopRun: ForeignRun = {
+    deviceId: 'device-desktop',
+    runId: 'run-desktop',
+    state: 'paused',
+    lastRecordedAt: Date.UTC(2026, 8, 1),
+    tip: { leaderEpoch: 'desktop', sequence: 1 },
+    observedAt: 0,
+    pulledQuiet: foreignRunStaleMilliseconds + 1,
+    words: { id: 'desktop-user', role: 'user', content: 'from the desktop' },
+  };
+
+  /*
+   * Round 22, finding 1: an approval admitted past another device's abandoned run carries that run's turn to its run's
+   * next batch while its approved call is open (`t14_approval_waits`). A re-sent copy of the same approval (the same
+   * command, answered `replayed`) withdrew every entry under that command id, the original's too, so the run's next
+   * batch said nothing, and the other device could still approve its own stale paused run. A replay changes nothing.
+   */
+  /**
+   * A paused run whose approved call is still open in the history, on a host that reads one abandoned run on another
+   * device until `reads.foreignRuns` says otherwise, and counts those reads.
+   */
+  const pausedPastAbandonedRun = async (name: string) => {
+    const file = createMemoryLogFile();
+    await seedLog(file, [
+      { type: 'message.appended', runId: 'run-1', message: { id: 'turn-1', role: 'user', content: 'Read it.' } },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
+      {
+        type: 'message.appended',
+        runId: 'run-1',
+        message: {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 'call-read', name: 'read_file', arguments: { targetFile: 'main.ts' } }],
+          metadata: { stopReason: 'toolUse' },
+        },
+      },
+      { type: 'interrupt.recorded', runId: 'run-1', interruptId: 'int-1', phase: 'requested', reason: 'Read?' },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'paused' },
+    ]);
+    const reads = { count: 0, foreignRuns: (): readonly ForeignRun[] => [abandonedDesktopRun] };
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: async () => {
+          const log = await file.open();
+          return {
+            ...log,
+            refresh: async () => undefined,
+            foreignRuns: async () => {
+              reads.count += 1;
+              return reads.foreignRuns();
+            },
+            foreignWroteSinceTermBegan: async () => false,
+            runTakenOver: async () => false,
+          };
+        },
+        transport: new ScriptedParityModelTransport([
+          { id: 'reply', text: 'Read.', usage: { inputTokens: 10, outputTokens: 2 } },
+        ]),
+        toolRegistry: tools(async () => ({ content: 'main', isError: false })),
+        idPrefix: name,
+      }),
+    );
+    const chatId = `chat-${name}`;
+    const said = async (): Promise<boolean> => {
+      const events = await readLog(file);
+      return events.some((event) => event.type === 'message.appended' && event.message.id === 'desktop-user');
+    };
+    return { host, file, reads, chatId, said };
+  };
+
+  /*
+   * Round 22, finding 1: an approval admitted past another device's abandoned run carries that run's turn to its run's
+   * next batch while its approved call is open (`t14_approval_waits`). A re-sent copy of the same approval (the same
+   * command, answered `replayed`) withdrew every entry under that command id, the original's too, so the run's next
+   * batch said nothing, and the other device could still approve its own stale paused run. A replay is never admitted:
+   * it reads nothing, carries nothing and withdraws nothing (`t15_replay_no_change`).
+   */
+  it('should still say an abandoned run’s turn a replayed approval’s original carries', async () => {
+    const { host, reads, chatId, said } = await pausedPastAbandonedRun('replayed-approval');
+    const approve = {
+      type: 'resolve-interrupt',
+      commandId: 'approve-once',
+      payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
+    } as const;
+
+    await expect(host.command(approve)).resolves.toMatchObject({ status: 'applied' });
+    /* The approved call is still open: the turn waits for the run's next batch. */
+    expect(await said()).toBe(false);
+    const { count } = reads;
+    await expect(host.command(approve)).resolves.toMatchObject({ status: 'replayed' });
+    expect(reads.count).toBe(count);
+    /* The run's next batch comes from an admission that no longer reads the abandoned run. */
+    reads.foreignRuns = () => [];
+    await vi.waitFor(async () => host.resume(chatId));
+
+    expect(await said()).toBe(true);
+    await host.close();
+  });
+
+  /*
+   * Round 23: the replay check read the chat's in-memory ledger, which an idle eviction, a fenced log, a reopen or a
+   * restart unloads. A copy of an approval that already applied then ran full admission, and was refused because another
+   * device had since started a run: a replay is never admitted (`t15_replay_no_change`), whatever is loaded.
+   */
+  it('should answer a copy of an applied approval replayed after the chat was evicted', async () => {
+    const { host, reads, chatId } = await pausedPastAbandonedRun('replayed-after-eviction');
+    reads.foreignRuns = () => [];
+    const approve = {
+      type: 'resolve-interrupt',
+      commandId: 'approve-evicted',
+      payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
+    } as const;
+
+    await expect(host.command(approve)).resolves.toMatchObject({ status: 'applied' });
+    await vi.waitFor(async () => host.resume(chatId));
+    expect(await host.snapshot(chatId)).toMatchObject({ runId: 'run-1', state: 'completed' });
+    await vi.waitFor(async () => {
+      await expect(host.evictChat(chatId)).resolves.toBeUndefined();
+    });
+    /* Another device starts a run in the chat. */
+    reads.foreignRuns = () => [{ ...abandonedDesktopRun, state: 'running', pulledQuiet: 0, observedAt: Date.now() }];
+
+    await expect(host.command(approve)).resolves.toMatchObject({ status: 'replayed' });
     await host.close();
   });
 
@@ -2541,6 +2828,238 @@ the cancelled tools left the system unchanged.
     await host.close();
     // Closing the host ends every chat the runner still holds open.
     expect(closedChats).toEqual(['chat-external-session', 'chat-external-session']);
+  });
+
+  /* Every desktop places its own agents as `desktop`: the device's id on the marker says whose session a record names.
+   * The id is read when a turn is admitted, as a disk host's record device is: only its store knows it. */
+  it('stamps this device on an external turn’s marker, and restores only the session its own device stamped', async () => {
+    const file = createMemoryLogFile();
+    const seen: Array<{ device: string; state: JsonObject | undefined }> = [];
+    const placement = fakePlacement({ registry: tools(async () => ({ content: null, isError: false })) });
+    /* Each host is a later leader of the one log, as a device that reopens the chat is. */
+    let opened = 0;
+    const hostOf = (device: string): ReturnType<typeof createTauAgentHost> => {
+      opened += 1;
+      const externalPort: ExternalAgentPort = {
+        list: () => ['stub-agent'],
+        run: async (turn) => {
+          seen.push({ device, state: turn.state });
+          await turn.remember({ acpSessionId: `session-${device}`, hostId: 'desktop' });
+        },
+      };
+      return createTauAgentHost({
+        ...hostOptions({
+          openEventLog: file.open,
+          transport: {
+            funding: { type: 'unfunded' },
+            stream: () => {
+              throw new Error('An external turn must never reach the Tau model.');
+            },
+          },
+          toolRegistry: tools(async () => ({ content: null, isError: false })),
+          idPrefix: `external-${opened}`,
+        }),
+        deviceId: async () => device,
+        placement: placement.port,
+        externalRunners: { acp: externalPort },
+      });
+    };
+    const start = async (device: string, runId: string, messageId: string): Promise<void> => {
+      const host = hostOf(device);
+      try {
+        await host.admit({
+          chatId: 'chat-external-device',
+          runId,
+          trigger: 'submit',
+          message: { id: messageId, role: 'user', content: 'Run this here.' },
+          config: {
+            systemPrompt: 'unused by an external turn',
+            toolChoice: 'none',
+            agent: { kind: 'acp', id: 'stub-agent', hostId: 'desktop' },
+          },
+        });
+        await host.cancel({ runId });
+        await vi.waitFor(() => {
+          const acknowledged = placement.calls.filter((call) => call.verb === 'acknowledge');
+          expect(acknowledged.map((call) => call.key.runId)).toContain(runId);
+        });
+      } finally {
+        await host.close();
+      }
+    };
+
+    await start('device-1', 'run-1', 'turn-1');
+    await start('device-2', 'run-2', 'turn-2');
+    await start('device-1', 'run-3', 'turn-3');
+    await start('device-2', 'run-4', 'turn-4');
+    expect(seen.map(({ device, state }) => [device, state?.['acpSessionId']])).toEqual([
+      ['device-1', undefined],
+      ['device-2', undefined],
+      ['device-1', 'session-device-1'],
+      ['device-2', 'session-device-2'],
+    ]);
+    expect(seen[2]?.state).toMatchObject({ deviceId: 'device-1' });
+  });
+
+  /*
+   * Round 27: a host given a device provider that cannot read its device fails closed. Restoring without the device
+   * would skip this device's own stamped sessions for an older unstamped one, and its marker, written unstamped, would
+   * be restored by every device: so an external start is refused `REVISIONS_UNAVAILABLE` (`wait`) before any row.
+   */
+  it.each([
+    ['answers no device', async (): Promise<string | undefined> => undefined],
+    [
+      'fails',
+      async (): Promise<string | undefined> => {
+        throw new Error('The record devices could not be read.');
+      },
+    ],
+  ] as const)('refuses an external start, writing no marker, when its device provider %s', async (label, deviceId) => {
+    const file = createMemoryLogFile();
+    const seen: ExternalAgentTurn[] = [];
+    const placement = fakePlacement({ registry: tools(async () => ({ content: null, isError: false })) });
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: file.open,
+        transport: {
+          funding: { type: 'unfunded' },
+          stream: () => {
+            throw new Error('An external turn must never reach the Tau model.');
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: `external-no-device-${label.replaceAll(' ', '-')}`,
+      }),
+      deviceId,
+      placement: placement.port,
+      externalRunners: {
+        acp: {
+          list: () => ['stub-agent'],
+          run: async (turn) => {
+            seen.push(turn);
+          },
+        },
+      },
+    });
+    try {
+      await expect(
+        host.admit({
+          chatId: 'chat-external-no-device',
+          runId: 'run-1',
+          trigger: 'submit',
+          message: { id: 'turn-1', role: 'user', content: 'Run this here.' },
+          config: {
+            systemPrompt: 'unused by an external turn',
+            toolChoice: 'none',
+            agent: { kind: 'acp', id: 'stub-agent', hostId: 'desktop' },
+          },
+        }),
+      ).rejects.toMatchObject({ code: 'REVISIONS_UNAVAILABLE' });
+      expect(refusalOf('REVISIONS_UNAVAILABLE').retry).toBe('wait');
+      expect(seen).toEqual([]);
+      const rows = await readLog(file);
+      expect(rows.filter((event) => event.type === 'message.appended')).toEqual([]);
+    } finally {
+      await host.close();
+    }
+  });
+
+  /*
+   * Round 27: a Resume on a host whose device cannot be read continues the run's own session, the one its own turn's
+   * marker names, never an older unstamped marker another device may have written before markers named devices.
+   */
+  it('resumes an external run on its own session when its device cannot be read, never an older unstamped one', async () => {
+    const file = createMemoryLogFile();
+    const seen: Array<JsonObject | undefined> = [];
+    const placement = fakePlacement({ registry: tools(async () => ({ content: null, isError: false })) });
+    let opened = 0;
+    const hostOf = (
+      deviceId: (() => Promise<string | undefined>) | undefined,
+      run: ExternalAgentPort['run'],
+    ): ReturnType<typeof createTauAgentHost> => {
+      opened += 1;
+      return createTauAgentHost({
+        ...hostOptions({
+          openEventLog: file.open,
+          transport: {
+            funding: { type: 'unfunded' },
+            stream: () => {
+              throw new Error('An external turn must never reach the Tau model.');
+            },
+          },
+          toolRegistry: tools(async () => ({ content: null, isError: false })),
+          idPrefix: `external-own-session-${opened}`,
+        }),
+        ...(deviceId === undefined ? {} : { deviceId }),
+        placement: placement.port,
+        externalRunners: { acp: { list: () => ['stub-agent'], run } },
+      });
+    };
+    const agent = { kind: 'acp', id: 'stub-agent', hostId: 'desktop' } as const;
+    const config = { systemPrompt: 'unused by an external turn', toolChoice: 'none', agent } as const;
+
+    /* A turn from before markers named devices: its marker is unstamped. */
+    const legacy = hostOf(undefined, async (turn) => {
+      await turn.remember({ acpSessionId: 'session-legacy', hostId: 'desktop' });
+    });
+    await legacy.admit({
+      chatId: 'chat-own-session',
+      runId: 'run-1',
+      trigger: 'submit',
+      message: { id: 'turn-1', role: 'user', content: 'First.' },
+      config,
+    });
+    await legacy.cancel({ runId: 'run-1' });
+    await vi.waitFor(() => {
+      expect(placement.calls.filter((call) => call.verb === 'acknowledge').map((call) => call.key.runId)).toContain(
+        'run-1',
+      );
+    });
+    await legacy.close();
+
+    /* This device's run: it opens its own session, then stops on a limit a Resume continues. */
+    const own = hostOf(
+      async () => 'device-1',
+      async (turn) => {
+        await turn.remember({ acpSessionId: 'session-own', hostId: 'desktop' });
+        throw Object.assign(new Error('The agent is rate limited.'), {
+          code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+          details: {
+            agentId: 'stub-agent',
+            failure: { category: 'limit', title: 'The agent is rate limited.', actions: ['retry'] },
+          },
+        });
+      },
+    );
+    await own.admit({
+      chatId: 'chat-own-session',
+      runId: 'run-2',
+      trigger: 'submit',
+      message: { id: 'turn-2', role: 'user', content: 'Second.' },
+      config,
+    });
+    await vi.waitFor(async () => {
+      const stopped = await own.snapshot('chat-own-session');
+      expect(stopped.state).toBe('failed');
+    });
+    await own.close();
+
+    const resumed = hostOf(
+      async () => undefined,
+      async (turn) => {
+        seen.push(turn.state);
+      },
+    );
+    try {
+      await resumed.resume('chat-own-session');
+      await vi.waitFor(() => {
+        expect(seen).toHaveLength(1);
+      });
+    } finally {
+      await resumed.close();
+    }
+
+    expect(seen[0]).toMatchObject({ acpSessionId: 'session-own', deviceId: 'device-1' });
   });
 
   it('should record the stop details an external runner throws on its failed run', async () => {

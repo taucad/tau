@@ -55,6 +55,7 @@ import type { GithubProjectBinding } from '#lib/github-project-binding.js';
 import type { AgentChannelClient, JsonValue } from '@taucad/agent-host';
 import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import { reportRevisionToast } from '#lib/revision-failure-reporting.js';
 
 /** One project's live connection to its revision root. @public */
 export type RevisionClient = Readonly<{
@@ -107,6 +108,12 @@ export type RevisionClient = Readonly<{
     options?: Readonly<{ from?: string; against?: 'checkout' }>,
   ) => Promise<RevisionFileComparison>;
   send: (command: WorkerRevisionCommand) => void;
+  /**
+   * Pull the remote now for another device's run on `chatId` that awaits pulls (XD3), and answer whether this device
+   * can pull the chat at all (round 27): `false` where the placement's pull is refused `CHAT_NOT_SHARED`. A root that
+   * answers nothing (an older host) is taken to pull, as the agent host takes a placement with no pull verb.
+   */
+  pullRemote: (chatId: string) => Promise<boolean>;
   /**
    * Record what is on disk and wait for the answer (C16, contract §6).
    *
@@ -228,6 +235,8 @@ export const createHostRevisionClient = (input: {
     name: 'HostRevisionClientEvents',
   });
   const toasts = new Topic<RevisionToast>({ name: 'HostRevisionClientToasts' });
+  // SB4: every client's error toasts reach error reporting, whichever page surface shows them.
+  toasts.subscribe(reportRevisionToast);
   const projectedChatIds = new Set<string>();
   let status: RevisionStatusProjection | undefined;
   let channel: AgentChannelClient | undefined;
@@ -516,6 +525,11 @@ export const createHostRevisionClient = (input: {
         ...(options?.against === undefined ? {} : { against: options.against }),
       })) as unknown as RevisionFileComparison,
     send,
+    pullRemote: async (chatId) => {
+      /* An older host answers nothing: taken to pull. */
+      const { pulls } = ((await ask({ command: 'pullRemote', chatId })) ?? {}) as { pulls?: unknown };
+      return pulls !== false;
+    },
     saveRevision: async (trigger) => {
       await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
     },
@@ -985,6 +999,8 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
     name: 'RevisionClientEvents',
   });
   const toasts = new Topic<RevisionToast>({ name: 'RevisionClientToasts' });
+  // SB4: every client's error toasts reach error reporting, whichever page surface shows them.
+  toasts.subscribe(reportRevisionToast);
   const projectedChatIds = new Set<string>();
   const pending = new Map<number, PromiseWithResolvers<WorkerRevisionResult>>();
   let status: RevisionStatusProjection | undefined;
@@ -1171,6 +1187,10 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
     },
     send: (command) => {
       post(command);
+    },
+    pullRemote: async (chatId) => {
+      const result = await ask({ command: 'pullRemote', chatId });
+      return result.kind !== 'pulled' || result.pulls;
     },
     saveRevision: async (trigger) => {
       await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });

@@ -1,9 +1,9 @@
 import '#styles/global.css';
-import { createRef } from 'react';
+import { createRef, useRef, useState } from 'react';
 import type { ComponentProps } from 'react';
 import { act, cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { commands, page } from 'vitest/browser';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { Button } from '@taucad/ui/components/button';
 import type { Ask } from '@taucad/chat';
@@ -70,6 +70,13 @@ vi.doMock('#components/icons/svg-icon.js', () => ({ SvgIcon: () => <span classNa
 vi.doMock('#components/files/file-link.js', () => ({
   FileLink: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
+
+declare module 'vitest/internal/browser' {
+  // oxlint-disable-next-line typescript/consistent-type-definitions -- Augments the installed browser command registry.
+  interface BrowserCommands {
+    composerPointer(coarse: boolean): Promise<void>;
+  }
+}
 
 const { ChatTextareaDesktop } = await import('#components/chat/chat-textarea-desktop.js');
 const { QuestionCard } = await import('#components/chat/question-card.js');
@@ -193,6 +200,9 @@ for (const width of [320, 600]) {
           expect(right).toBeCloseTo(8, 1);
           expect(bottom).toBeCloseTo(right, 1);
         }
+        const addBounds = screen.getByRole('button', { name: 'Add' }).getBoundingClientRect();
+        const actionBounds = action.getBoundingClientRect();
+        expect((addBounds.top + addBounds.bottom) / 2).toBeCloseTo((actionBounds.top + actionBounds.bottom) / 2);
         expect(container.scrollWidth).toBe(container.clientWidth);
         if (mode === 'main' && ['empty', 'mixed attachments', 'blocked attachment', 'context chip'].includes(name)) {
           await page.screenshot({
@@ -616,4 +626,227 @@ describe('question dictation', () => {
       });
     },
   );
+});
+
+/** A phone's composer: focus, a streaming turn and Stop are real state, as `ChatTextarea` keeps them. */
+function PhoneComposer(
+  props: Partial<ComposerProps> & { readonly initialStatus?: string; readonly onStop?: () => void },
+): React.JSX.Element {
+  const { initialStatus = 'ready', onStop, ...rest } = props;
+  const [isFocused, setIsFocused] = useState(false);
+  const [status, setStatus] = useState(initialStatus);
+  const containerReference = useRef<HTMLDivElement>(null);
+  return (
+    <TooltipProvider>
+      <section aria-label='Composer' className='p-2'>
+        <ChatTextareaDesktop
+          enableAutoFocus={false}
+          enableMobileCollapse
+          isFocused={isFocused}
+          dragKind={undefined}
+          isSubmitting={false}
+          isAttaching={false}
+          inputText=''
+          attachments={[]}
+          attachmentDirectory={undefined}
+          sendBlockReason={undefined}
+          attachmentAccept='image/png,application/pdf'
+          attachmentInputSupported
+          status={status}
+          formattedCancelKeyCombination='⌘.'
+          treeService={undefined}
+          chats={[]}
+          setDraftText={noop}
+          fileInputReference={createRef<HTMLInputElement>()}
+          containerReference={containerReference}
+          focusEditorRef={{ current: undefined }}
+          addContextChipsRef={{ current: undefined }}
+          addContextReferencesRef={{ current: undefined }}
+          handleSubmit={asyncNoop}
+          handleCancelClick={() => {
+            onStop?.();
+            setStatus('ready');
+          }}
+          handleDragOver={noop}
+          handleDragLeave={noop}
+          handleDrop={asyncNoop}
+          handlePaste={() => false}
+          handleFileSelect={noop}
+          handleFileChange={noop}
+          handleAddImage={noop}
+          onScreenshotAction={noop}
+          handleTextareaFocus={() => {
+            setIsFocused(true);
+          }}
+          handleTextareaBlur={() => {
+            requestAnimationFrame(() => {
+              setIsFocused(containerReference.current?.contains(document.activeElement) === true);
+            });
+          }}
+          removeAttachment={noop}
+          {...rest}
+        />
+      </section>
+    </TooltipProvider>
+  );
+}
+
+/** The bar's controls a person can see and reach right now, by name, left to right. */
+const reachableControls = (): string[] =>
+  [...document.querySelectorAll<HTMLButtonElement>('[data-slot=composer-bar] button')]
+    .filter((button) => button.checkVisibility({ visibilityProperty: true, opacityProperty: true }))
+    .map((button) => button.getAttribute('aria-label') ?? button.textContent.trim());
+
+/**
+ * Every reachable control's hit area reaches 6px beyond each edge — a 28px control is a
+ * 40px target — and a tap just inside that ring belongs to it alone (I3).
+ */
+const expectTouchTargets = (): void => {
+  const buttons = [...document.querySelectorAll<HTMLButtonElement>('[data-slot=composer-bar] button')].filter(
+    (button) => button.checkVisibility({ visibilityProperty: true, opacityProperty: true }),
+  );
+  expect(buttons.length).toBeGreaterThan(1);
+  for (const button of buttons) {
+    const box = button.getBoundingClientRect();
+    expect(box.height + 12).toBeGreaterThanOrEqual(40);
+    expect(box.width + 12).toBeGreaterThanOrEqual(40);
+    expect(getComputedStyle(button, '::after').inset).toBe('-6px');
+    const middle = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+    for (const [x, y] of [
+      // Hit testing rounds to whole pixels, so probe 1px inside the ring's edge.
+      [box.left - 5, middle.y],
+      [box.right + 5, middle.y],
+      [middle.x, box.top - 5],
+      [middle.x, box.bottom + 5],
+    ] as const) {
+      expect(document.elementFromPoint(x, y)?.closest('button'), `${button.ariaLabel} at ${x},${y}`).toBe(button);
+    }
+  }
+  const rows = Map.groupBy(buttons, (button) => Math.round(button.getBoundingClientRect().top / 8));
+  for (const row of rows.values()) {
+    const boxes = row.map((button) => button.getBoundingClientRect()).toSorted((a, b) => a.left - b.left);
+    for (const [index, box] of boxes.slice(1).entries()) {
+      expect(box.left - boxes[index]!.right).toBeGreaterThanOrEqual(12 - 0.5);
+    }
+  }
+};
+
+describe('phone composer (D14, D18)', () => {
+  beforeEach(async () => {
+    dictationAvailable = true;
+    await page.viewport(390, 844);
+    await commands.composerPointer(true);
+    expect(matchMedia('(pointer: coarse)').matches).toBe(true);
+  });
+  afterEach(async () => {
+    await commands.composerPointer(false);
+  });
+
+  it('rests as one row of Add, Dictate and Send, each a 40px target', async () => {
+    render(<PhoneComposer />);
+    await screen.findByRole('button', { name: 'Dictate' });
+
+    await expect.poll(reachableControls).toEqual(['Add', 'Dictate', 'Send']);
+    const composer = document.querySelector<HTMLElement>('[data-collapsed]')!;
+    expect(composer.getBoundingClientRect().height).toBeLessThanOrEqual(48);
+    expectTouchTargets();
+    await page.screenshot({
+      element: screen.getByRole('region', { name: 'Composer' }),
+      path: '../../../../../out/test-results/composer/phone-idle.png',
+    });
+  });
+
+  it('unfolds on focus to the model selector, then Dictate, then Send', async () => {
+    render(<PhoneComposer />);
+    await screen.findByRole('button', { name: 'Dictate' });
+
+    await page.getByRole('textbox').click();
+    await expect.poll(reachableControls).toEqual(['Add', 'Select kernel (Manifold)', 'Haiku 5.5', 'Dictate', 'Send']);
+    expect(document.querySelector('[data-collapsed]')).toBeNull();
+    const [model, dictate, send] = ['Haiku 5.5', 'Dictate', 'Send'].map((name) =>
+      screen.getByRole('button', { name }).getBoundingClientRect(),
+    );
+    expect(model!.right).toBeLessThanOrEqual(dictate!.left);
+    expect(dictate!.right).toBeLessThanOrEqual(send!.left);
+    expectTouchTargets();
+    await page.screenshot({
+      element: screen.getByRole('region', { name: 'Composer' }),
+      path: '../../../../../out/test-results/composer/phone-expanded.png',
+    });
+  });
+
+  it('leaves a tap just inside the resting editor’s edges to the editor, clear of the touch rings', async () => {
+    render(<PhoneComposer />);
+    await screen.findByRole('button', { name: 'Dictate' });
+    await expect.poll(reachableControls).toEqual(['Add', 'Dictate', 'Send']);
+    // The row's padding eases in once dictation is offered; measure where it settles.
+    await Promise.all(document.getAnimations().map(async (animation) => animation.finished));
+    const editor = screen.getByRole('textbox');
+    const box = editor.getBoundingClientRect();
+    const y = box.top + box.height / 2;
+
+    for (const x of [box.left + 2, box.right - 2]) {
+      const hit = document.elementFromPoint(x, y);
+      expect(hit?.closest('button'), `tap at ${x},${y}`).toBeNull();
+      expect(hit?.closest('[data-slot=composer-bar]'), `tap at ${x},${y}`).toBeNull();
+    }
+    await page.getByRole('textbox').click({ position: { x: 2, y: box.height / 2 } });
+    await expect.element(page.getByRole('textbox')).toHaveFocus();
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Requesting microphone…' })).toBeNull();
+  });
+
+  it('opens attachments from + with a tap, no hover', async () => {
+    render(<PhoneComposer />);
+    await page.getByRole('button', { name: 'Add' }).click();
+
+    await expect.element(page.getByRole('menuitem', { name: 'Attach image or PDF' })).toBeVisible();
+  });
+
+  it('swaps Send for Stop while a turn streams, and Stop ends the turn', async () => {
+    const onStop = vi.fn();
+    render(<PhoneComposer initialStatus='streaming' onStop={onStop} />);
+    await screen.findByRole('button', { name: 'Dictate' });
+
+    await expect.poll(reachableControls).toEqual(['Add', 'Dictate', 'Stop']);
+    expectTouchTargets();
+    await page.getByRole('button', { name: 'Stop' }).click();
+    expect(onStop).toHaveBeenCalledOnce();
+    await expect.element(page.getByRole('button', { name: 'Send' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+  });
+
+  it('hides keyboard hints from a touch screen, keeping the words its name uses (I6, I7)', async () => {
+    render(<PhoneComposer inputText='A draft' />);
+    const send = await screen.findByRole('button', { name: 'Send' });
+    act(() => {
+      send.focus();
+    });
+    const tooltip = await vi.waitFor(() => document.querySelector<HTMLElement>('[data-slot=tooltip-content]')!);
+    const hint = [...tooltip.querySelectorAll('span')].find((span) => span.className.includes('tracking-'))!;
+    expect(getComputedStyle(hint).display).toBe('none');
+    // What remains to read is the control's name.
+    expect(tooltip.textContent.replace(hint.textContent, '').trim()).toBe('Send');
+  });
+});
+
+describe('desktop composer stays as it was', () => {
+  it('keeps the full bar, 28px targets with no touch ring, and its keyboard hints', async () => {
+    await commands.composerPointer(false);
+    await page.viewport(1024, 720);
+    const { containerReference } = renderComposer({ inputText: 'A draft', enableKernelSelector: true });
+    const send = await screen.findByRole('button', { name: 'Send' });
+
+    expect(containerReference.current).not.toHaveAttribute('data-collapsed');
+    expect(send.getBoundingClientRect().height).toBe(28);
+    expect(getComputedStyle(send, '::after').content).toBe('none');
+    expect(getComputedStyle(document.querySelector('[data-slot=composer-right]')!).columnGap).toBe('4px');
+    act(() => {
+      send.focus();
+    });
+    const tooltip = await vi.waitFor(() => document.querySelector<HTMLElement>('[data-slot=tooltip-content]')!);
+    const hint = [...tooltip.querySelectorAll('span')].find((span) => span.className.includes('tracking-'))!;
+    expect(getComputedStyle(hint).display).not.toBe('none');
+    expect(tooltip.textContent).toContain('Send');
+  });
 });

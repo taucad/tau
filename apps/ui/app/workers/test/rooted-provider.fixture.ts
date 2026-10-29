@@ -1,33 +1,50 @@
-/**
- * A provider rooted at one directory of another, as a project's root bridge sees the workspace: the browser tier's
- * shared test facade (agent-host and seam suites).
- */
-import type { FileSystemProvider } from '@taucad/filesystem';
-import { joinRelativePath } from '@taucad/utils/path';
+/** A watch-capable project root over the browser suites' real provider. */
+import { afterEach } from 'vitest';
+import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
+import type { FileSystemProvider, RootedFileSystem } from '@taucad/filesystem';
+import { assertRootedPath } from '@taucad/utils/path';
+import { randomUuid } from '@taucad/utils/id';
 
-/* oxlint-disable typescript/promise-function-async -- This test facade forwards provider promises unchanged. */
-export const rootedProvider = (source: FileSystemProvider, root: string): FileSystemProvider => {
-  const resolve = (path: string): string => joinRelativePath(root, path.replace(/^\/+/, ''));
-  function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
-  function readFile(path: string, encoding: 'utf8'): Promise<string>;
-  function readFile(path: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
-    return encoding === 'utf8' ? source.readFile(resolve(path), encoding) : source.readFile(resolve(path));
+const authorities = new Map<
+  FileSystemProvider,
+  { service: WorkspaceFileService; mounts: MountTable; storageRootKey: string }
+>();
+
+afterEach(() => {
+  for (const authority of authorities.values()) {
+    authority.service.dispose();
   }
-  return {
-    id: `rooted:${source.id}`,
-    capabilities: source.capabilities,
-    readFile,
-    writeFile: (path, data) => source.writeFile(resolve(path), data),
-    appendFile: (path, data) => source.appendFile!(resolve(path), data),
-    readdir: (path) => source.readdir(resolve(path)),
-    stat: (path) => source.stat(resolve(path)),
-    lstat: (path) => source.lstat(resolve(path)),
-    mkdir: (path, options) => source.mkdir(resolve(path), options),
-    unlink: (path) => source.unlink(resolve(path)),
-    rmdir: (path) => source.rmdir(resolve(path)),
-    rename: (from, to) => source.rename(resolve(from), resolve(to)),
-    exists: (path) => source.exists(resolve(path)),
-    dispose: () => undefined,
-  };
+  authorities.clear();
+});
+
+/** Share mutation and watch ownership across every bridge to the same provider. */
+export const rootedProvider = (source: FileSystemProvider, root: string): RootedFileSystem => {
+  const backend = source.id;
+  if (backend !== 'indexeddb' && backend !== 'opfs' && backend !== 'memory') {
+    throw new Error(`Unsupported browser fixture provider: ${backend}`);
+  }
+  let authority = authorities.get(source);
+  if (authority === undefined) {
+    const mountTable = new MountTable();
+    const service = new WorkspaceFileService({
+      // The caller owns the supplied provider; this empty registry owns no provider to dispose.
+      providerRegistry: new ProviderRegistry(),
+      resourceQueue: new ResourceQueue(),
+      eventBus: new ChangeEventBus(),
+      mountTable,
+    });
+    authority = { service, mounts: mountTable, storageRootKey: `${backend}:${randomUuid()}` };
+    authorities.set(source, authority);
+  }
+  const providerBasePath = assertRootedPath(root);
+  const authorityRoot = `/${providerBasePath}`;
+  if (authority.mounts.getExactMount(authorityRoot) === undefined) {
+    authority.mounts.mount(authorityRoot, source, {
+      class: 'authored',
+      backend,
+      storageRootKey: authority.storageRootKey,
+      providerBasePath,
+    });
+  }
+  return authority.service.createRootedFileSystem(authorityRoot);
 };
-/* oxlint-enable typescript/promise-function-async -- Only the facade above forwards promises unchanged. */

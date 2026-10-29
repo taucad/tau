@@ -43,6 +43,26 @@
         }
       }
     },
+    "test:e2e:deploy-skew": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "TAU-UI-6: serves one ui:build as two deploys and checks that a page whose lazy chunks the newer deploy no longer serves reloads into it instead of reaching the error page. Drives Playwright's Chromium from Node; set TAU_E2E_CHROMIUM_EXECUTABLE to use another installed Chromium."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "parallel": false,
+        "commands": [
+          "pnpm exec nx run ui:build",
+          "vitest run --dir apps/ui-e2e apps/ui-e2e/src/stale-deploy-recovery.test.ts --environment=node"
+        ],
+        "env": {
+          "TAU_CLOUD_ENABLED": "false",
+          "TAU_API_URL": "http://localhost:4000",
+          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+          "TAU_FRONTEND_URL": "http://localhost:3000"
+        }
+      }
+    },
     "test:e2e:webgpu": {
       "executor": "nx:run-commands",
       "options": {
@@ -233,6 +253,22 @@
           "TAU_WEBSOCKET_URL": "ws://localhost:4001",
           "TAU_FRONTEND_URL": "http://localhost:3000"
         }
+      }
+    },
+    "test:observability-helpers": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "vitest run --dir apps/ui-e2e apps/ui-e2e/src/support/observability-staging.test.ts --environment=node"
+      }
+    },
+    "test:e2e:observability-staging": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "vitest run --dir apps/ui-e2e apps/ui-e2e/src/observability.staging.test.ts apps/ui-e2e/src/observability-delivery.staging.test.ts apps/ui-e2e/src/observability-ssr.staging.test.ts apps/ui-e2e/src/observability-runtime.staging.test.ts --environment=node"
       }
     }
   }

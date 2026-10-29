@@ -37,6 +37,9 @@ import { stageUiEnvironment } from '#ui-environment.js';
 import { resolveZooAuthToken, cliZooProxyUrl } from '#zoo-proxy.js';
 import { requireGitToolchain } from '#commands/revisions.js';
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
+import { cliRuntimeTelemetry } from '#runtime-telemetry.js';
+// oxlint-disable-next-line no-restricted-imports -- relative import is the only portable way to load the CLI's own package.json (matches `packages/runtime/src/utils/package-info.ts`).
+import packageJson from '../../package.json' with { type: 'json' };
 import { createComputeStoreHost } from '#compute-store.js';
 import type { ComputeStoreConnection } from '#compute-store.js';
 import type * as NativeKernels from '#native-kernels.js';
@@ -283,7 +286,7 @@ export const handOffLink = (target: HandOffTarget, served: string, code: string)
   if (target.kind === 'desktop') {
     return `tau://host/${origin}?code=${encodeURIComponent(code)}`;
   }
-  return `${target.origin}/#${new URLSearchParams({ 'tau-host': origin, 'tau-code': code }).toString()}`;
+  return `${target.origin}/projects#${new URLSearchParams({ 'tau-host': origin, 'tau-code': code }).toString()}`;
 };
 
 /**
@@ -1105,6 +1108,10 @@ export const serveCommand = defineCommand({
       }
       reportEvent(event);
     };
+    /* Telemetry: self-hosted serve never reports; the provisioned cloud host (`TAU_CLOUD_HOST=1`) does. */
+    process.env['TAU_SERVE_ROLE'] ??= 'serve';
+    const runtimeTelemetry =
+      process.env['TAU_CLOUD_HOST'] === '1' ? cliRuntimeTelemetry('cloud', packageJson.version) : undefined;
     const daemon = startHostDaemon({
       relayUrl: new URL(apiUrl),
       relay: relay !== undefined,
@@ -1123,6 +1130,9 @@ export const serveCommand = defineCommand({
       systemSkillBundles: skillBundles,
       pair: args.pair,
       ...(configuredAgent ? { agent: configuredAgent } : {}),
+      ...(runtimeTelemetry === undefined
+        ? {}
+        : { observeRuntimeClient: (client, caller) => runtimeTelemetry.observe(client, caller) }),
       onEvent,
     });
     try {
@@ -1218,6 +1228,7 @@ export const serveCommand = defineCommand({
         await computeStore.close();
         await kernels.dispose().catch(() => undefined);
         await stagedUi?.dispose();
+        await runtimeTelemetry?.shutdown();
       }
     }
   },

@@ -172,7 +172,19 @@ serial build, so exact output is identical in every host.
 - An exact build that reads fast-lane data (a `LANE=fast` STL or `.vdb`, or a `fastRenorm: true`
   offset) is refused with a typed `REPRESENTATION_UNSUPPORTED` issue naming the remedy.
 - Exactly-zero-area triangles are dropped from every snapshot; area, volume and every other triangle
-  are unchanged.
+  are unchanged. An adaptive view keeps the ones whose three corners are distinct and in line, and
+  drops only those that repeat an index or place two corners at one position: adaptive meshes use
+  in-line triangles to stitch merged cells to their neighbours, and dropping them would open cracks.
+
+The render options `meshAdaptivity` (0 to below 1) and `meshRelax` (default `false`) ask for an adaptive
+display mesh in the fast lane. The viewer's settings menu shows both, since they are evaluate options every
+view shares; a change re-evaluates the model. Exports take the same two options and mesh uniformly (0) unless they
+set one; an adaptive export needs `lane: 'fast'`, and as every fast export, only STL is written. An exact render that asks for adaptivity is
+refused with a typed `REPRESENTATION_UNSUPPORTED` issue. PicoVoxel 0.1.0, whose `toMesh()` takes no
+options, refuses every adaptive request with `KERNEL_CAPABILITY_MISSING`; the pinned 0.2.1 meshes them.
+An unset `meshAdaptivity` never refuses: it meshes uniformly on the exact lane and under 0.1.0, and at
+0.25 (Balanced) on the fast lane of a release whose `toMesh()` takes options, as the pinned 0.2.1 does.
+An explicitly fast STL export of such a view therefore replays a uniform fast build of its own.
 
 ### Runtime lifetime
 
@@ -209,14 +221,14 @@ PicoVoxel's pure serializer.
 
 ## Dependency provenance
 
-| Field     | Value                                                                                             |
-| --------- | ------------------------------------------------------------------------------------------------- |
-| Specifier | `picovoxel@0.1.0` (exact workspace catalog pin)                                                   |
-| Source    | `taucad/picovoxel` release `v0.1.0`, commit `11c51188a8f4cc754a25bde77e07c107523f7986`            |
-| Version   | `0.1.0`                                                                                           |
-| CI run    | [36368135314](https://github.com/taucad/picovoxel/actions/runs/36368135314), every job green      |
-| Size      | 12,799,269 bytes unpacked                                                                         |
-| Integrity | `sha512-X8Q4YlKfIuNc8HbH8KusVUW1T/nz8xJUFjJ2pvh3KTCB8gev24gf0EQZzdB8IDE6px8aGp5z266vm6tTmJ56PQ==` |
+| Field     | Value                                                                                                          |
+| --------- | -------------------------------------------------------------------------------------------------------------- |
+| Specifier | `picovoxel@0.2.1` (exact workspace catalog pin)                                                                |
+| Source    | `taucad/picovoxel` release `v0.2.1`, commit `370120d01b2beb0a735e9d71afbe749db133d922`                         |
+| Version   | `0.2.1`                                                                                                        |
+| CI run    | [40277162955](https://github.com/taucad/picovoxel/actions/runs/40277162955), green (23 jobs passed, 2 skipped) |
+| Size      | 13,215,399 bytes unpacked                                                                                      |
+| Integrity | `sha512-wZL+tqewOFznSrPYSPKLZF/A3tx41krEWtUV8NJ766+veZ/vTUOAdnPSxLIkMHrjj+HBcltiyqdEChGn6yszTA==`              |
 
 Both WebAssembly binaries are CI-built. The kernel version carries the package version, both binary
 digests and one digest over every shipped script; `picovoxel.asset-ownership.test.ts` recomputes all

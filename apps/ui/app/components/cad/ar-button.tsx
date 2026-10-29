@@ -1,62 +1,179 @@
-import { memo } from 'react';
-import { Loader2 } from 'lucide-react';
-import type { Artifact, RuntimeDocument } from '@taucad/runtime';
+import { memo, useEffect, useId, useRef } from 'react';
+import { Loader2, Scan } from 'lucide-react';
+import type { Artifact } from '@taucad/runtime';
 import { Button } from '@taucad/ui/components/button';
-import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
-import { useAr } from '#components/cad/use-ar.js';
 import { cn } from '@taucad/ui/utils/cn';
+import { Popover, PopoverAnchor, PopoverContent } from '@taucad/ui/components/popover';
+import { useAr } from '#components/cad/use-ar.js';
+import type { ArFailure } from '#components/cad/use-ar.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 
-function ArIcon({ className }: { readonly className?: string }): React.JSX.Element {
-  return (
-    <svg
-      xmlns='http://www.w3.org/2000/svg'
-      viewBox='0 0 24 24'
-      fill='none'
-      stroke='currentColor'
-      strokeWidth={2}
-      strokeLinecap='round'
-      strokeLinejoin='round'
-      className={className}
-    >
-      {/* Viewfinder corners */}
-      <path d='M3 7V5a2 2 0 0 1 2-2h2' />
-      <path d='M17 3h2a2 2 0 0 1 2 2v2' />
-      <path d='M21 17v2a2 2 0 0 1-2 2h-2' />
-      <path d='M7 21H5a2 2 0 0 1-2-2v-2' />
-      {/* 3D cube */}
-      <path d='m12 7 4 2.5v5L12 17l-4-2.5v-5Z' />
-      <path d='m12 7 0 5' />
-      <path d='m12 12 4 2.5' />
-      <path d='m12 12-4 2.5' />
-    </svg>
-  );
+/** Shared AR glyph for the launch button and proposed grouped controls. */
+export function ArIcon({ className }: { readonly className?: string }): React.JSX.Element {
+  return <Scan aria-hidden className={className} />;
 }
 
+/**
+ * The capability-gated AR control. It renders only when this device can open the current model in AR — Quick Look
+ * on iPhone and iPad (including iPadOS's desktop user agent), or WebXR on supported Android — and nothing otherwise.
+ * It does not check the layout: the viewer bar places it after Fit view on phones and after Fullscreen in the
+ * desktop layout, so tablets get it too (D12) while desktop computers render nothing.
+ */
 export const ArButton = memo(function ({
   artifact,
-  runtimeDocument,
   className,
 }: {
   readonly artifact: Artifact | undefined;
-  readonly runtimeDocument?: RuntimeDocument;
   readonly className?: string;
 }): React.ReactNode {
-  const isMobile = useIsMobile();
-  const { canActivateAr, isConverting, activateAr } = useAr(artifact, runtimeDocument);
+  const { canActivateAr, isPreparing, isPresenting, failure, activateAr, dismissFailure } = useAr(artifact);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const wasBusyRef = useRef(false);
+  const isBusy = isPreparing || isPresenting;
 
-  if (!isMobile || !canActivateAr) {
+  // Coming back from AR, or from a session that ended while it started, focus returns to the control that opened it
+  // when the overlay took it away. A failure's popover manages focus itself.
+  useEffect(() => {
+    if (wasBusyRef.current && !isBusy && !failure) {
+      const active = document.activeElement;
+      if (!active || active === document.body) {
+        buttonRef.current?.focus();
+      }
+    }
+
+    wasBusyRef.current = isBusy;
+  }, [isBusy, failure]);
+
+  if (!canActivateAr) {
     return undefined;
   }
 
   return (
-    <Button
-      variant='overlay'
-      size='icon'
-      className={cn('size-10 rounded-xl shadow-md', className)}
-      disabled={isConverting}
-      onClick={activateAr}
-    >
-      {isConverting ? <Loader2 className='size-5 spin-glyph' /> : <ArIcon className='size-5' />}
-    </Button>
+    <ArControl
+      ref={buttonRef}
+      isPreparing={isBusy}
+      failure={failure}
+      className={className}
+      onActivate={() => {
+        void activateAr();
+      }}
+      onDismiss={dismissFailure}
+    />
   );
 });
+
+/** AR presentation shared by the capability-gated host and the review canvas. */
+export function ArControl({
+  ref,
+  isPreparing = false,
+  failure,
+  onActivate,
+  onDismiss,
+  className,
+}: {
+  readonly ref?: React.Ref<HTMLButtonElement>;
+  readonly isPreparing?: boolean;
+  /** A failed launch, shown in a popover above the control with Try again and Dismiss. */
+  readonly failure?: ArFailure;
+  readonly onActivate: () => void;
+  readonly onDismiss?: () => void;
+  readonly className?: string;
+}): React.JSX.Element {
+  const titleId = useId();
+  const detailId = useId();
+  const localRef = useRef<HTMLButtonElement>(null);
+
+  const button = (
+    <Button
+      ref={(node) => {
+        localRef.current = node;
+        if (typeof ref === 'function') {
+          ref(node);
+        } else if (ref) {
+          ref.current = node;
+        }
+      }}
+      variant='ghost'
+      size='icon-sm'
+      className={cn('aria-disabled:opacity-50', className)}
+      // One name for label, tooltip and accessible name (I6); preparing is told by aria-busy and the spinner.
+      aria-label='View in your space'
+      aria-busy={isPreparing}
+      // Stays focusable while preparing, so focus is never dropped to the page during an export or session.
+      aria-disabled={isPreparing}
+      onClick={() => {
+        if (!isPreparing) {
+          onActivate();
+        }
+      }}
+    >
+      {isPreparing ? <Loader2 className='size-4 spin-glyph' /> : <ArIcon className='size-4' />}
+    </Button>
+  );
+
+  return (
+    <Popover
+      open={failure !== undefined}
+      onOpenChange={(isOpen) => {
+        if (!isOpen) {
+          onDismiss?.();
+        }
+      }}
+    >
+      <Tooltip>
+        <PopoverAnchor asChild>
+          <TooltipTrigger asChild>{button}</TooltipTrigger>
+        </PopoverAnchor>
+        <TooltipContent>View in your space</TooltipContent>
+      </Tooltip>
+      {failure ? (
+        <PopoverContent
+          role='alertdialog'
+          aria-labelledby={titleId}
+          aria-describedby={detailId}
+          side='top'
+          align='center'
+          className='w-72 space-y-3'
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            // This runs a task after the popover closes. A retry that failed at once has opened the next failure by
+            // then, and taking focus from it would dismiss it, so return focus only when nothing holds it.
+            const active = document.activeElement;
+            if (!active || active === document.body) {
+              localRef.current?.focus();
+            }
+          }}
+        >
+          <div className='space-y-1'>
+            <p id={titleId} className='text-sm font-medium'>
+              {failure.title}
+            </p>
+            <p id={detailId} className='text-sm text-muted-foreground'>
+              {failure.detail}
+            </p>
+          </div>
+          <div className='flex justify-end gap-2'>
+            <Button
+              variant='outline'
+              size='sm'
+              onClick={() => {
+                onDismiss?.();
+              }}
+            >
+              Dismiss
+            </Button>
+            <Button
+              size='sm'
+              onClick={() => {
+                localRef.current?.focus();
+                onActivate();
+              }}
+            >
+              Try again
+            </Button>
+          </div>
+        </PopoverContent>
+      ) : null}
+    </Popover>
+  );
+}

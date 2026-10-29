@@ -95,6 +95,18 @@ const main = async (): Promise<void> => {
     await readFile(join(selector, 'etc/apparmor.d/tau-appimage'), 'utf8'),
     /\/opt\/tau-appimage\/releases\/\*\/Tau\.AppImage/u,
   );
+  // Only the installed (managed) route has a stable path a sandbox profile can attach to.
+  assert.match(
+    await readFile(join(selector, 'etc/apparmor.d/tau-appimage-bwrap'), 'utf8'),
+    /^profile tau-appimage-bwrap \/opt\/tau-appimage\/sandbox\/bwrap flags=\(unconfined\) \{$/mu,
+  );
+  // A portable AppImage mounts at a random path and has no install step, so it must not pretend to carry one.
+  const portable = await readdir(appDirectory, { recursive: true });
+  assert.deepEqual(
+    portable.filter((path) => /(?:^|\/)(?:bwrap|apparmor(?:\.d)?)$/u.test(path)),
+    [],
+    'should ship no bwrap or AppArmor profile inside the portable AppImage',
+  );
   assert.match(
     execFileSync('dpkg-deb', ['--field', packages[1]!, 'Depends'], { encoding: 'utf8' }),
     /tau-appimage-runtime-0\.1\.0 \(= 0\.1\.0\)/u,

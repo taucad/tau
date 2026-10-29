@@ -191,6 +191,40 @@ describe('MeasureTool', () => {
     expect(mocks.send).toHaveBeenCalledWith({ type: 'cancelCurrentMeasurement' });
   });
 
+  it('should revise active measurement candidates only when camera values change', () => {
+    mocks.graphicsSnapshot.context.measureMessage = 'Preparing measurement features…';
+    const advance = (frame: number): void => {
+      act(() => {
+        getState().advance(frame);
+      });
+    };
+    advance(0);
+    mocks.send.mockClear();
+    for (let frame = 1; frame <= 60; frame++) {
+      advance(frame);
+    }
+    expect(mocks.send).not.toHaveBeenCalledWith({ type: 'setMeasureMessage' });
+
+    camera.position.x += 1;
+    camera.updateMatrixWorld();
+    advance(61);
+    expect(mocks.send).toHaveBeenCalledWith({ type: 'setMeasureMessage' });
+    mocks.send.mockClear();
+    camera.zoom = 2;
+    camera.updateProjectionMatrix();
+    advance(62);
+    expect(mocks.send).toHaveBeenCalledWith({ type: 'setMeasureMessage' });
+
+    mocks.graphicsSnapshot.context.isMeasureActive = false;
+    act(renderTool);
+    mocks.send.mockClear();
+    camera.position.x += 1;
+    camera.updateMatrixWorld();
+    advance(63);
+    expect(mocks.send).not.toHaveBeenCalledWith({ type: 'setMeasureMessage' });
+    mocks.graphicsSnapshot.context.isMeasureActive = true;
+  });
+
   it('should hide edge-on labels and their pointer targets until the arrow is readable again', () => {
     mocks.graphicsSnapshot.context.measurements = [
       {
@@ -495,6 +529,7 @@ describe('MeasureTool', () => {
       let disposed = false;
       return {
         ready: () => undefined,
+        prioritize: () => undefined,
         prepare: async () => {
           if (!disposed) {
             livePrepares++;
@@ -523,6 +558,7 @@ describe('MeasureTool', () => {
     const dispose = vi.fn();
     mocks.workerClientFactory = () => ({
       ready: () => undefined,
+      prioritize: () => undefined,
       prepare: async () =>
         new Promise<ReturnType<MeasurementFeatureWorkerClient['ready']>>((_resolve, reject) => {
           rejectRequests.push(reject);

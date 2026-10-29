@@ -22,9 +22,7 @@
  * `GitModule` and `PublicationsModule` to import each other.
  */
 
-import { execFile } from 'node:child_process';
 import type { Readable } from 'node:stream';
-import { promisify } from 'node:util';
 import { and, eq, gt, sql } from 'drizzle-orm';
 import {
   isPublicationSystemArtifact,
@@ -36,6 +34,7 @@ import {
 import { BadRequestException, Logger, NotFoundException } from '@nestjs/common';
 import type { DatabaseService } from '#database/database.service.js';
 import * as schema from '#database/schema.js';
+import { assertProjectActive } from '#database/project-lifecycle.js';
 import { detectKernelIdsFromRelativePaths, resolveRuntimePin } from '#api/publications/publication-runtime.utils.js';
 import type { StoredPublicationManifest } from '#api/publications/publications.dto.js';
 import { storedPublicationManifestSchema } from '#api/publications/publications.dto.js';
@@ -43,8 +42,6 @@ import { isS3ObjectMissing } from '#storage/object-storage.service.js';
 import type { ObjectStorageService, StorageTier } from '#storage/object-storage.service.js';
 import type { StorageNamespace } from '#storage/storage.constants.js';
 import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.js';
-
-const execFileAsync = promisify(execFile);
 
 /** Everything this module logs: an over-release, and nothing else. */
 const logger = new Logger('PublicationMaterializer');
@@ -60,57 +57,14 @@ export const maxPublishedTotalBytes = 50 * 1024 * 1024;
  * Supplied by the caller rather than spawned here, so a caller that counts its
  * git children — the smart-HTTP route does — counts these too rather than
  * letting N concurrent pushes each add an uncounted `ls-tree`/`cat-file` pair
- * (review R8). {@link leaseGitRunner} is the default for callers that do not.
+ * (review R8). On tau-api that caller is the forwarded `git-read` to
+ * tau-storage (DC1); this module spawns no git child of its own (DC3).
  */
 export type GitChildRunner = (
   directory: string,
   args: readonly string[],
   stdin?: string,
 ) => Promise<Uint8Array<ArrayBuffer>>;
-
-/* eslint-disable @typescript-eslint/naming-convention -- process environment names */
-/**
- * The isolation a lease's children run under, as `lease.ts` spawns its own: no
- * user or system configuration reaches them, so the only settings in force are
- * the ones hydration wrote into the directory.
- */
-const gitEnvironment: Record<string, string> = {
-  PATH: process.env['PATH'] ?? '/usr/bin:/bin',
-  HOME: '/nonexistent',
-  LANG: 'C',
-  GIT_CONFIG_GLOBAL: '/dev/null',
-  GIT_CONFIG_SYSTEM: '/dev/null',
-  GIT_TERMINAL_PROMPT: '0',
-};
-/* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
-
-/**
- * One `git` child in a lease, reading binary stdout.
- *
- * `lease.ts`'s own runner decodes as UTF-8, which would corrupt the bytes
- * `cat-file --batch` hands back, so the materializer keeps a buffer runner of
- * its own. The ceiling is the publication ceiling plus headroom: a tree larger
- * than that is refused from `ls-tree -l`'s sizes before anything is read.
- *
- * @param directory - The lease the child runs in.
- * @param args - Arguments after `git`.
- * @param stdin - Written to the child, when given.
- * @returns The child's stdout.
- */
-export const leaseGitRunner: GitChildRunner = async (directory, args, stdin) => {
-  const running = execFileAsync('git', [...args], {
-    cwd: directory,
-    encoding: 'buffer',
-    timeout: 60_000,
-    maxBuffer: 64 * 1024 * 1024,
-    env: gitEnvironment as NodeJS.ProcessEnv,
-  });
-  if (stdin !== undefined) {
-    running.child.stdin?.end(stdin);
-  }
-  const { stdout } = await running;
-  return new Uint8Array(stdout);
-};
 
 /** What one materialization writes into the publication row. */
 export type MaterializedPublication = Readonly<{
@@ -189,6 +143,8 @@ export type MaterializerDependencies = Readonly<{
 /** One publication to materialize, and where its bytes come from. */
 export type MaterializeInput = Readonly<{
   publicationId: string;
+  /** Manifest whose references this row already holds under the caller's project lock. */
+  heldManifestKey?: string;
   projectId: string;
   /** Whose storage holds this project's LFS objects (D24). */
   ownerId: string;
@@ -526,6 +482,7 @@ export const materializePublication = async (
     });
   });
   const revision = new TextDecoder().decode(head).trim();
+  const manifestKey = `publications/${input.publicationId}/${revision}.json`;
   const files = await readPublishedTree(dependencies, input);
   const tier: StorageTier = input.visibility === 'private' ? 'private' : 'public';
 
@@ -571,7 +528,10 @@ export const materializePublication = async (
      two publishes sharing blobs in different tree order would otherwise take
      the same rows in opposite orders and deadlock (review F3). */
   const blobReferences = [...increments.values()].sort((left, right) => (left.sha256 < right.sha256 ? -1 : 1));
-  await applyBlobReferences(writer, blobReferences);
+  // Re-publishing identical content retains the row's existing references.
+  // Taking them again without moving the manifest would leak counts on deletion.
+  const newReferences = input.heldManifestKey === manifestKey ? [] : blobReferences;
+  await applyBlobReferences(writer, newReferences);
 
   await Promise.all(
     uploads.map(async ({ bytes, sha, contentType }) => {
@@ -599,7 +559,6 @@ export const materializePublication = async (
 
   /* Keyed by the revision, so a re-publish writes a new immutable object
    * rather than overwriting the one a viewer may be reading. */
-  const manifestKey = `publications/${input.publicationId}/${revision}.json`;
   const manifest: StoredPublicationManifest = storedPublicationManifestSchema.parse({
     version: 1,
     projectId: input.projectId,
@@ -633,7 +592,7 @@ export const materializePublication = async (
     kernels,
     runtimePin,
     fileCount: uploads.length,
-    blobRefs: blobReferences,
+    blobRefs: newReferences,
   };
 };
 
@@ -834,15 +793,16 @@ export const materializePublishedTags = async (
            the project rather than the owner, so a repair never waits on the
            quota lock `withOwnerLock` takes. */
         await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.projectId}, 0))`);
+        await assertProjectActive(transaction, input.projectId);
         /* Re-read under the lock: whoever waited here may be looking at work
            the holder just did, and materializing it again would take a second
            reference for one manifest. */
         const [fresh] = await transaction
-          .select({ manifestKey: schema.publication.manifestKey })
+          .select({ manifestKey: schema.publication.manifestKey, unpublishedAt: schema.publication.unpublishedAt })
           .from(schema.publication)
           .where(eq(schema.publication.id, row.id))
           .limit(1);
-        if (fresh === undefined || fresh.manifestKey !== superseded) {
+        if (fresh === undefined || fresh.unpublishedAt !== null || fresh.manifestKey !== superseded) {
           return undefined;
         }
         /* Inside the transaction, and first, so the reference counts are taken

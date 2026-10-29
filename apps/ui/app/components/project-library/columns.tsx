@@ -8,6 +8,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { formatRelativeTime } from '#utils/date.utils.js';
 import type { ProjectActions } from '#components/project-library/project-library.js';
+import { ProjectActionMenu } from '#components/project-library/project-cloud-delete.js';
 import { ProjectActionDropdown } from '#components/project-library/project-action-dropdown.js';
 import { Loader } from '@taucad/ui/components/loader';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
@@ -28,7 +29,7 @@ function ProjectNameCell({
   project,
   actions,
 }: {
-  readonly project: ProjectListItem & { readonly onCloud?: boolean };
+  readonly project: ProjectListItem & { readonly onCloud?: boolean; readonly cloud?: CloudProject };
   readonly actions: ProjectActions;
 }) {
   const thumbnail = useProjectThumbnail(project.id);
@@ -71,7 +72,11 @@ function ProjectNameCell({
               tells them apart on disk and in the URL (blueprint F5). */}
           <div className='flex min-w-0 items-center gap-1.5 pl-2 text-xs text-muted-foreground'>
             <span className='truncate font-mono'>{projectSlugOf(project.locator)}</span>
-            {project.onCloud === true ? <OnTauCloudMark /> : undefined}
+            {project.cloud?.cloudState === 'deleting' ? (
+              <span role='status'>Deleting from Tau Cloud…</span>
+            ) : project.onCloud === true ? (
+              <OnTauCloudMark />
+            ) : undefined}
           </div>
         </div>
       </div>
@@ -183,6 +188,7 @@ export const createColumns = (
       if (isCloudOnly(project)) {
         return (
           <div className='flex items-center justify-end gap-2'>
+            <ProjectActionMenu name={project.name} cloud={project} isCloudOnly />
             <OpenCloudProjectButton entry={project} onOpen={onOpenCloudProject} className='ml-auto' />
           </div>
         );
@@ -193,7 +199,7 @@ export const createColumns = (
         <div className='flex items-center justify-end gap-2'>
           <ProjectActionDropdown project={project} actions={actions} />
 
-          {!isDeleted && <ProjectOpenButton project={project} />}
+          {!isDeleted && project.cloud?.cloudState !== 'deleting' && <ProjectOpenButton project={project} />}
         </div>
       );
     },

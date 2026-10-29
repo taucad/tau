@@ -48,43 +48,100 @@ describe('page shell and populated Projects', () => {
   });
 });
 
-describe('mobile Preview controls', () => {
-  test('should connect drawer panels and keep Edit outside the orientation controls', async () => {
+/** The compact Preview bar's boxes: the bar, and every control in it by its name. */
+const readPreviewBar = async (): Promise<{
+  readonly bar: { readonly top: number; readonly height: number; readonly overflow: number };
+  readonly controls: ReadonlyArray<{ readonly name: string; readonly width: number; readonly height: number }>;
+}> =>
+  target.evaluateLocator(selectors.getByCss('[data-slot="preview-top-bar"]'), (bar) => {
+    const box = bar.getBoundingClientRect();
+    return {
+      bar: { top: box.top, height: box.height, overflow: bar.scrollWidth - bar.clientWidth },
+      controls: [...bar.querySelectorAll<HTMLElement>('a, button')].map((control) => {
+        const rect = control.getBoundingClientRect();
+        return {
+          name: control.getAttribute('aria-label') ?? control.textContent.trim(),
+          width: rect.width,
+          height: rect.height,
+        };
+      }),
+    };
+  });
+
+describe.each([
+  { width: 320, height: 720 },
+  { width: 390, height: 844 },
+])('mobile Preview at $width×$height (HDR-12)', (viewport) => {
+  test('should put a 48px bar with a crumb back to the project over the stage, with Export in the Workbench', async () => {
     await target.setViewport({ width: 1280, height: 720 });
     await target.navigate('/__e2e/project-navigation');
     await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
     const editorUrl = new URL(await target.currentUrl()).pathname;
-    await target.setViewport({ width: 320, height: 720 });
+    await target.setViewport(viewport);
     await target.navigate(`${editorUrl}/preview`);
     const workbench = selectors.getByRole('button', { name: 'Workbench', exact: true });
     await target.expectVisible(workbench, 60_000);
     await target.expectVisible(selectors.getByRole('application', { name: 'CAD canvas' }));
+
+    // D11: one 48px row at the top, every control a 40px target, nothing scrolling sideways (I3).
+    const geometry = await readPreviewBar();
+    expect(geometry.bar.top).toBeLessThanOrEqual(0.5);
+    expect(geometry.bar.height).toBeGreaterThanOrEqual(47.5);
+    expect(geometry.bar.height).toBeLessThanOrEqual(48.5);
+    expect(geometry.bar.overflow).toBeLessThanOrEqual(0);
+    expect(geometry.controls.map((control) => control.name)).toEqual([
+      'Open sidebar',
+      'Back to Project Navigation A',
+      'Workbench',
+      'More preview actions',
+    ]);
+    for (const control of geometry.controls) {
+      expect(control.height).toBeGreaterThanOrEqual(40);
+      expect(control.width).toBeGreaterThanOrEqual(40);
+    }
+    // The shell reserves no second strip above it: one sidebar control on the page.
+    await target.expectCount(selectors.getByRole('button', { name: 'Open sidebar', exact: true }), 1);
+    await target.expectText(selectors.getByRole('heading', { level: 1 }), 'Project Navigation A Preview');
+    await expect.poll(measureHorizontalOverflow).toEqual({ document: 0, scroller: 0, offenders: [] });
     expect(await seriousAxeViolations()).toEqual([]);
-    await target.click(selectors.getByRole('button', { name: 'Export', exact: true }));
-    await target.expectVisible(selectors.getByRole('dialog', { name: 'Project workbench' }));
-    await target.expectVisible(selectors.getByRole('tabpanel', { name: 'Export', exact: true }));
+    await target.screenshot(undefined, `preview-production-${String(viewport.width)}.png`);
+
+    // The Workbench drawer holds Preview's own surfaces under their workbench titles (I6), with a 44px grabber (D4).
+    await target.click(workbench);
+    const drawer = selectors.getByRole('dialog', { name: 'Project workbench' });
+    await target.expectVisible(drawer);
+    const grabberHeight = await target.evaluateLocator(
+      drawer,
+      (element) => element.querySelector('[data-slot="drawer-handle"]')?.getBoundingClientRect().height ?? 0,
+    );
+    expect(grabberHeight).toBeGreaterThanOrEqual(40);
     await target.click(selectors.getByRole('button', { name: 'Open workbench tab', exact: true }));
+    await target.expectVisible(selectors.getByRole('menuitem', { name: 'Parameters', exact: true }));
+    await target.expectCount(selectors.getByText(/^Params$/u), 0);
     await target.click(selectors.getByRole('menuitem', { name: 'Files', exact: true }));
     await target.expectVisible(selectors.getByRole('tabpanel', { name: 'Open file', exact: true }));
+    expect(await seriousAxeViolations()).toEqual([]);
+    await target.screenshot(undefined, `preview-workbench-${String(viewport.width)}.png`);
+    // Export is not on the bar (I4); the Workbench is where it lives.
+    await target.click(selectors.getByRole('button', { name: 'Open workbench tab', exact: true }));
+    await target.click(selectors.getByRole('menuitem', { name: 'Export', exact: true }));
+    await target.expectVisible(selectors.getByRole('tabpanel', { name: 'Export', exact: true }));
     await target.keyboardPress('Escape');
-    await target.expectHidden(selectors.getByRole('dialog', { name: 'Project workbench' }));
-    const edit = selectors.getByRole('link', { name: 'Edit', exact: true });
-    await target.expectVisible(edit);
-    const editIsHittable = async (): Promise<boolean> =>
-      target.evaluate(() => {
-        const button = [...document.querySelectorAll('a')].find(
-          (element) => element.checkVisibility() && element.textContent.trim() === 'Edit',
-        );
-        if (!button) {
-          return false;
-        }
-        const bounds = button.getBoundingClientRect();
-        const hit = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
-        return hit !== null && button.contains(hit);
-      });
-    await target.screenshot(undefined, 'preview-production-320.png');
-    await expect.poll(editIsHittable).toBe(true);
-    await target.click(edit);
+    await target.expectHidden(drawer);
+
+    // More holds the page's other actions; the crumb alone goes to the editor (I4).
+    await target.click(selectors.getByRole('button', { name: 'More preview actions', exact: true }));
+    const more = selectors.getByRole('menu');
+    await target.expectVisible(more);
+    await target.expectCount(more.getByRole('menuitem'), 2);
+    await target.expectVisible(more.getByRole('menuitem', { name: 'Download source', exact: true }));
+    await target.expectVisible(more.getByRole('menuitem', { name: 'Project settings', exact: true }));
+    await target.keyboardPress('Escape');
+    await target.expectHidden(more);
+
+    const crumb = selectors.getByRole('link', { name: 'Back to Project Navigation A', exact: true });
+    await target.expectVisible(crumb, 60_000);
+    await target.click(crumb);
     await target.expectUrl(new RegExp(`${editorUrl}$`, 'u'));
   });
 });

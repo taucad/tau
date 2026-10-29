@@ -18,7 +18,7 @@ Across files, use explicit ESM paths such as `./lib/widget.js` and pass `pico` t
 
 - `voxelSize` is the voxel edge h in millimetres. Choose about one third of the thinnest wall or strut. Time scales with 1/h³, memory and triangles with 1/h². A 200 mm gyroid lamp with 1.5 mm walls at 0.5 mm is about 59 M field evaluations and 1–2 M triangles, minutes per evaluation; a 44 mm geode at 0.5 mm is about 323 k triangles, seconds. A GeoSpec `loadModel` of the part sends about 72 bytes per triangle, so above about 930,000 triangles its claims are refused admission and reported not decided; that is a test ceiling, never a reason to coarsen the design.
 - Iterate with per-call `parameters`, e.g. `{ "voxelSize": 1.5 }` on `evaluate_model`, `screenshot` or `export_model`; they are never saved. Stay coarse while iterating and export at the author's value. Tau never changes `voxelSize` itself; edit the source value only when the author asks.
-- `voxelSize` is the model, not a mesh setting: PicoVoxel views take no `tessellation` presets. Results report `tessellation` with `voxelSize`, `activeVoxels`, `memoryBytes`, triangles, vertices and elapsed. A view or capture over 2 M triangles shows a mesh simplified within half a voxel and warns `DISPLAY_SIMPLIFIED`; only the picture changes. The grid, exports and GeoSpec subjects stay exact.
+- `voxelSize` is the model, not a mesh setting: PicoVoxel views take no `tessellation` presets. Results report `tessellation` with `voxelSize`, `activeVoxels`, `memoryBytes`, triangles, vertices and elapsed. A fast view that sets no `meshAdaptivity` meshes adaptively at 0.25, so flat regions get fewer, larger triangles and `tessellation` reports `adaptivity`; set `meshAdaptivity` (0 for the uniform mesh) to change it. Exports mesh at 0 unless the export sets `meshAdaptivity`, which needs `lane: 'fast'` (STL only). A view or capture over 2 M triangles is then simplified toward half a voxel of that delivered mesh (a measured target, not a guarantee) and warns `DISPLAY_SIMPLIFIED`; only the picture changes. The grid, exports and GeoSpec subjects stay exact.
 - Prefer voxel booleans, offsets, ShapeKernel and LatticeLibrary over manual triangles. Output is mesh, not BRep.
 - Prefer an `SdfExpression` (`['max', ['abs', 'x'], ['abs', 'y']]`) over a JS `sdf` callback: expressions fill in parallel, callbacks run serially.
 - Dispose large intermediates after their last use.
@@ -211,17 +211,20 @@ interface Voxels
   offset(options: {
       distance: number;
       fastRenorm?: boolean;
+      fastSweeping?: boolean;
     }): Voxels;
   // In, 2× out, in again
   smoothen(options: {
       distance: number;
       fastRenorm?: boolean;
+      fastSweeping?: boolean;
     }): Voxels;
   // Over-offset composition
   fillet(options: {
       rounding: number;
       finalSurfaceDistance?: number;
       fastRenorm?: boolean;
+      fastSweeping?: boolean;
     }): Voxels;
   // Everything outside the box is trimmed away (cube-mesh intersect, as C#)
   trim(bounds: Bounds): Voxels;
@@ -244,13 +247,21 @@ interface Voxels
     };
   // Bounding box via the intermediate mesh (the only accurate way)
   bounds(): Bounds;
-  toMesh(): Mesh;
+  // Triangle mesh of the zero level set
+  toMesh(options?: ToMeshOptions): Mesh;
   readonly metadata: Metadata
   // Raw ABI handle — escape hatch
   readonly handle: bigint
   // Optional
   dispose(): void;
   // … 24 more members in the API reference: clone, equals, isEmpty, doubleOffset, shell, withMesh, withLattice, withImplicit, gridHash, densifyInterior, isInside, surfaceNormal, closestPointOnSurface, raycastToSurface, raycastBatch, closestPointsOnSurface, dimensions, sliceCount, sliceOrigin, getSlice, toScalarField, memUsage, lane, [Symbol.dispose]
+
+// Options for {@link Voxels.toMesh}
+interface ToMeshOptions
+  // OpenVDB mesh adaptivity in `[0, 1)`
+  adaptivity?: number
+  // Run OpenVDB's `relaxDisorientedTriangles` pass after adaptive merging
+  relax?: boolean
 
 interface Metadata
   // Number of entries in the table
@@ -443,16 +454,6 @@ declare class BaseLens extends BaseShape implements MeshBaseShape, SurfaceBaseSh
   protected heightRatioFromStep(step: number): number;
   // Surface point (C# `vecGetSurfacePoint`
   surfacePoint(heightRatio: number, phiRatio: number, radiusRatio: number): Vec3;
-
-// BSpline-based control point spline, open or closed ends (C# `ControlPointSpline`)
-declare class ControlPointSpline implements Spline
-  constructor(controlPoints: readonly Vec3[], degree?: number, ends?: SplineEnds);
-  // Render with the given sample count (C# `aGetPoints`)
-  points(samples?: number): Vec3[];
-  // Sample dynamically at a length ratio (C# `vecGetPointAt`)
-  pointAt(lengthRatio: number): Vec3;
-
-SplineEnds: 'open' | 'closed'
 ```
 
 ### `picovoxel/numerics`
@@ -482,7 +483,7 @@ vec3: {
 
 ## API reference
 
-To read any other signature, find its name in `api-index.md`, which lists all 964 symbols by file with the lines that hold each, and read that range of the named file.
+To read any other signature, find its name in `api-index.md`, which lists all 968 symbols by file with the lines that hold each, and read that range of the named file.
 
 - `api-interfaces.md` — Interfaces
 - `api-interfaces-2.md` — Interfaces (2)

@@ -213,7 +213,8 @@ type MockCadActorOptions = {
   readonly tags?: ReadonlyArray<'cad-loading' | 'cad-runtime-error'>;
   readonly fileManagerReady?: boolean;
   readonly runtime?: MockRuntimeDocumentFixture;
-  readonly evaluation?: Evaluation;
+  /** `undefined` stands for an opened document whose first evaluation has not landed. */
+  readonly evaluation?: Evaluation | undefined;
 };
 
 function createMockCadActor(options: MockCadActorOptions = {}): ActorRefFrom<typeof cadMachine> {
@@ -229,7 +230,7 @@ function createMockCadActor(options: MockCadActorOptions = {}): ActorRefFrom<typ
       context: {
         entryPath: helperEntryPath,
         rendering,
-        evaluation: options.evaluation ?? runtime.evaluation,
+        evaluation: 'evaluation' in options ? options.evaluation : runtime.evaluation,
         document: runtime.document,
         units: { length: 'mm' },
         latestRenderingOutcome: options.latestRenderingOutcome,
@@ -498,23 +499,26 @@ vi.mock('#routes/w.$workspace.$project/chat-viewer-controls.js', () => ({
     captureRendering,
     leading,
     aboveControls,
+    mobileAction,
   }: {
     captureRendering: () => Promise<Rendering>;
     leading?: React.ReactNode;
     aboveControls?: React.ReactNode;
+    mobileAction?: React.ReactNode;
   }) => {
     mockCaptureRendering = captureRendering;
     return (
       <div role='group' aria-label='Viewer controls'>
         {aboveControls}
         {leading}
+        {mobileAction}
       </div>
     );
   },
 }));
 
 vi.mock('#components/cad/ar-button.js', () => ({
-  ArButton: () => <button type='button' aria-label='View in AR' />,
+  ArButton: () => <button type='button' aria-label='View in your space' />,
 }));
 
 // `use-graphics` drags in three.js via screenshot/camera capability machines, so
@@ -690,6 +694,35 @@ describe('ChatViewer reopen-renderer overlay', () => {
     viewer.unmount();
     expect(runtime.view.close).toHaveBeenCalledTimes(2);
     expect(runtime.document.close).not.toHaveBeenCalled();
+  });
+
+  it('should open the pane view once, under the offered view, when the first evaluation lands', () => {
+    const runtime = createMockRuntimeDocument();
+    const actor = createMockCadActor({ runtime, evaluation: undefined, rendering: undefined });
+    mockGeometryUnits.set(helperEntryPath, actor);
+    const viewer = renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    // The document is open and evaluating: no offer is known yet, so no view is opened to be replaced later.
+    expect(runtime.viewSpy).not.toHaveBeenCalled();
+
+    const opening = actor.getSnapshot();
+    vi.mocked(actor.getSnapshot).mockReturnValue({
+      ...opening,
+      context: { ...opening.context, evaluation: runtime.evaluation },
+    } as typeof opening);
+    // The selector mock delivers no store notification; a draft for another kernel view re-renders the pane instead.
+    act(() => {
+      setLiveViewOptions('view-1', { viewId: 'drawing', options: {} });
+    });
+
+    expect(runtime.viewSpy).toHaveBeenCalledTimes(1);
+    expect(runtime.viewSpy).toHaveBeenCalledWith('model', expect.objectContaining({ options: {} }));
+    expect(runtime.view.close).not.toHaveBeenCalled();
+    act(() => {
+      setLiveViewOptions('view-1', undefined);
+    });
+    viewer.unmount();
+    expect(runtime.view.close).toHaveBeenCalledTimes(1);
   });
 
   it('re-renders the view from the options panel live draft before the record saves it', () => {
@@ -1308,15 +1341,14 @@ describe('ChatViewer reopen-renderer overlay', () => {
     expect(strip.lastElementChild).toBe(bar);
   });
 
-  it('should keep the AR button on the line above the bar and the issues inside the bar', () => {
+  it('should hand AR to the bar as its mobile action, with no line above it, and keep the issues inside the bar', () => {
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
     renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
-    const line = screen.getByRole('button', { name: 'View in AR' }).parentElement!;
     const bar = screen.getByRole('group', { name: 'Viewer controls' });
-    expect(line).toHaveClass('[&>*]:pointer-events-auto');
-    expect(line.nextElementSibling).toBe(bar);
+    expect(screen.getAllByRole('button', { name: 'View in your space' })).toHaveLength(1);
+    expect(bar).toContainElement(screen.getByRole('button', { name: 'View in your space' }));
     expect(bar).toContainElement(screen.getByTestId('chat-stack-trace'));
   });
 
@@ -1519,13 +1551,13 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
     expect(await screen.findByRole('menuitem', { name: 'Focus on part' })).toBeInTheDocument();
     expect(screen.getByText('Add to chat')).toBeInTheDocument();
-    expect(screen.getByText('Reveal in Explorer')).toBeInTheDocument();
+    expect(screen.getByText('Reveal in model tree')).toBeInTheDocument();
     expect(screen.getByText('Hide')).toBeInTheDocument();
     expect(screen.getByText('Isolate')).toBeInTheDocument();
     expect(screen.getByText('Opacity')).toBeInTheDocument();
     expect(screen.getByRole('spinbutton', { name: 'Opacity' })).toHaveValue('100');
 
-    fireEvent.click(screen.getByText('Reveal in Explorer'));
+    fireEvent.click(screen.getByText('Reveal in model tree'));
 
     expect(mockGraphicsSend).toHaveBeenCalledWith({
       type: 'selectModelComponent',

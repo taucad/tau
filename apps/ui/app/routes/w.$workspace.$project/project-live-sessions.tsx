@@ -2,7 +2,7 @@
  * Every live project's resource subtree, and the focused project's chat route.
  *
  * Split out of `project-route.tsx` so the root layout does not statically reach it (D19/W21): this
- * module is what pulls in Monaco, three.js, shiki and the chat surface, and none of that belongs in
+ * module is what pulls in the editor, three.js, syntax assets and the chat surface, and none of that belongs in
  * the chunk a page that only lists projects evaluates. `project-route.tsx` loads it lazily the moment
  * a project is live, and the project route imports its own entry point from here directly.
  */
@@ -27,7 +27,7 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
 import { isKernelId } from '@taucad/types/constants';
-import { MonacoModelServiceProvider } from '#hooks/use-monaco-model-service.js';
+import { EditorDocumentSessionProvider } from '#hooks/use-editor-document-session.js';
 import { RevisionConflictChat } from '#routes/w.$workspace.$project/revision-conflict-chat.js';
 import { RevisionRestore } from '#routes/w.$workspace.$project/revision-restore.js';
 import { WorkbenchCheckoutRoot } from '#routes/w.$workspace.$project/workbench-checkout-root.js';
@@ -44,7 +44,7 @@ import {
 } from '#services/agent-host-client.js';
 import { createDaemonAgentHostTransport } from '#services/daemon-agent-host-client.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
-import { dialAgentHost, agentHostClientConfig } from '#chat-clients/_internal/turn-body.js';
+import { dialExecutionHost, agentHostClientConfig } from '#chat-clients/_internal/turn-body.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { useComputeReuseMode } from '#lib/compute-reuse-preference.js';
 import { ENV } from '#environment.config.js';
@@ -87,7 +87,7 @@ import {
   isRecordingEditorConflict,
   refuseCloseWhileRecording,
   subscribeEditorConflictRecords,
-} from '#lib/monaco-model-service.js';
+} from '#lib/editor-document-session.js';
 
 export type ProjectSessionFlushRegistration = {
   projectId: string;
@@ -210,8 +210,9 @@ function ProjectSessionBinding({
       editorRef.send({ type: 'retryEnsureFocusedChat' });
     }
   }, [editorRef, isChatDeferred, status?.sync.chats]);
-  /* Every live project publishes one read connector, even without a focused chat. Each chat's persisted placement
-   * decides which owner log to read; opening an observer never issues Start or acquires an SDK session. */
+  /* Every live project publishes one read connector, even without a focused chat. Each chat's placement on this
+   * device — its stored execution and this device's own choice for it — decides which owner log to read; opening an
+   * observer never issues Start or acquires an SDK session. */
   useEffect(() => {
     if (client === undefined || !viewsReady) {
       return;
@@ -229,9 +230,10 @@ function ProjectSessionBinding({
       const execution = stored?.activeExecution ?? fallback;
       const daemonHostId = daemonPlacementOf(execution);
       if (daemonHostId !== undefined) {
-        return createAgentHostClient(
-          createDaemonAgentHostTransport(async () => dialAgentHost(daemonHostId, projectId)),
-        );
+        return {
+          ...createAgentHostClient(createDaemonAgentHostTransport(async () => dialExecutionHost(execution, projectId))),
+          placement: { hostId: daemonHostId },
+        };
       }
       if (execution.kind !== 'tau') {
         throw new Error(`Chat ${chatId} has no readable host placement.`);
@@ -303,7 +305,7 @@ function ProjectSessionBinding({
       } as const;
       const hostClient = createBrowserAgentHostClient(options);
       browserHostRelease.current ??= { projectId, release: retainBrowserAgentHostProject(options) };
-      return hostClient;
+      return { ...hostClient, placement: { hostId: daemonHostId } };
     };
     const unpublish = chatSessions.publishProjectHostConnector(projectId, connect, async (chatId) => {
       const stored = await chatSessions.getChatHostSettings(chatId);
@@ -311,7 +313,7 @@ function ProjectSessionBinding({
       const daemonHostId = daemonPlacementOf(execution);
       if (daemonHostId !== undefined) {
         try {
-          const channel = await dialAgentHost(daemonHostId, projectId);
+          const channel = await dialExecutionHost(execution, projectId);
           channel.close();
           return 'stoppable';
         } catch {
@@ -602,7 +604,7 @@ function ProjectSession({
           {focused ? (
             <>
               <RevisionSaveShortcut isFocused={focused} />
-              <MonacoModelServiceProvider>
+              <EditorDocumentSessionProvider>
                 <ChatWorkspaceAuthorityProvider>
                   <ProjectWorkspaceProvider>
                     <WorkbenchRecordHost />
@@ -619,7 +621,7 @@ function ProjectSession({
                     {children}
                   </ProjectWorkspaceProvider>
                 </ChatWorkspaceAuthorityProvider>
-              </MonacoModelServiceProvider>
+              </EditorDocumentSessionProvider>
             </>
           ) : null}
         </ProjectProvider>

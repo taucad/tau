@@ -1,45 +1,115 @@
-import { AlertCircle, ArrowLeft, RefreshCcw } from 'lucide-react';
-import { lazy, Suspense, useEffect } from 'react';
+import { AlertCircle, ArrowLeft, LoaderCircle, RefreshCcw } from 'lucide-react';
+import { lazy, Suspense, useEffect, useSyncExternalStore } from 'react';
 import { isRouteErrorResponse, useNavigate, useRouteError } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
-import { useAnalytics } from '#hooks/use-analytics.js';
+import { chatObservationConflict, quarantineChatObservation } from '#lib/chat-observation-guard.js';
 import { PageNotFound } from '#components/page-not-found.js';
 import { reportUiError } from '#lib/error-reporting.js';
+import { isWeakKey } from '#lib/weak-key.js';
+import { describeSupersession, readServerVerdict, subscribeServerVerdict } from '#filesystem/build-skew.js';
+import type { ServerVerdict } from '#filesystem/build-skew.js';
+import { useSupersedingBuild } from '#hooks/use-superseding-build.js';
+import { useReloadPromptOwner } from '#components/nav/browser-update.js';
+import {
+  isStaleModuleError,
+  readReloadState,
+  readStaleBuildOutcome,
+  recoverFromStaleBuild,
+  showsUpdatePrompt,
+  subscribeReloadState,
+  subscribeStaleBuildOutcomes,
+} from '#lib/stale-build-recovery.js';
+import type { ReloadState, StaleBuildOutcome } from '#lib/stale-build-recovery.js';
 
 const CollapsibleCodeBlock = lazy(async () => {
   const m = await import('#components/ui/collapsible-code-block.js');
   return { default: m.CollapsibleCodeBlock };
 });
 
+const serverReloadState = (): ReloadState => 'idle';
+const serverVerdict = (): ServerVerdict => 'unknown';
+
+/** The `Error` reported for each route error response, so a remount reports the same value again. */
+const reportedForResponse = new WeakMap<WeakKey, Error>();
+
+/**
+ * The value to report for an error the route caught: the error itself, or one `Error` per route
+ * error response (named `route_error`).
+ */
+const toReported = (error: unknown): Error | undefined => {
+  if (isRouteErrorResponse(error)) {
+    let reported = isWeakKey(error) ? reportedForResponse.get(error) : undefined;
+    if (reported === undefined) {
+      reported = new Error(`${error.status} ${error.statusText}`);
+      reported.name = 'route_error';
+      if (isWeakKey(error)) {
+        reportedForResponse.set(error, reported);
+      }
+    }
+    return reported;
+  }
+  return error instanceof Error ? error : undefined;
+};
+const serverOutcome = (): StaleBuildOutcome | undefined => undefined;
+
 export function ErrorPage(): React.JSX.Element {
   const error = useRouteError();
   const navigate = useNavigate();
-  const analytics = useAnalytics();
+  const observationConflict = chatObservationConflict(error);
+  const isModuleLoadFailure = isStaleModuleError(error);
+  /* TAU-UI-6: the recovery owns a module load failure, its outcome and its report; this page only
+   * shows it, decided once, with the live verdict below choosing the prompt or the error. */
+  const outcome = useSyncExternalStore(subscribeStaleBuildOutcomes, () => readStaleBuildOutcome(error), serverOutcome);
+  const staleOutcome = isModuleLoadFailure ? outcome : undefined;
+  // The recovery's own reload: the button waits while it is pending and returns once it stalls.
+  const reloadState = useSyncExternalStore(subscribeReloadState, readReloadState, serverReloadState);
+  const { supersedingBuildId, isRolledBack } = useSupersedingBuild();
+  const verdict = useSyncExternalStore(subscribeServerVerdict, readServerVerdict, serverVerdict);
+  /* The prompt follows the live verdict: it shows while a deploy explains the failure and the server
+   * has not named this build since, or once the server confirms another build, and gives way to the
+   * error itself when the server confirms this build live (a rollback ended). */
+  const isExplained = isModuleLoadFailure && showsUpdatePrompt(staleOutcome, verdict);
+  // This screen is the reload prompt while it shows; the floating banner would only repeat it.
+  useReloadPromptOwner(isExplained);
+
+  const conflictingChatId = observationConflict?.chatId;
+  useEffect(() => {
+    if (conflictingChatId !== undefined) {
+      quarantineChatObservation(conflictingChatId);
+    }
+  }, [conflictingChatId]);
 
   useEffect(() => {
-    // Don't report 404 errors to analytics - they're expected user behavior
-    if (isRouteErrorResponse(error) && error.status === 404) {
+    if (isModuleLoadFailure) {
+      // async-iife: bootstrap -- an effect cannot await; the outcome arrives through the subscription.
+      void recoverFromStaleBuild(error);
       return;
     }
-
-    if (isRouteErrorResponse(error)) {
-      const routeError = new Error(`${error.status} ${error.statusText}`);
-      routeError.name = 'route_error';
-      analytics.captureException(routeError, { context: { component: 'ErrorPage' } });
-      if (error.status >= 500) {
-        void reportUiError(routeError);
-      }
-    } else if (error instanceof Error) {
-      analytics.captureException(error, { context: { component: 'ErrorPage' } });
-      void reportUiError(error);
+    // A route error response under 500 (a 404, a refusal) is expected; the error tracker hears the rest, once
+    // (`reportUiError` deduplicates, so a remount or the root's `onCaughtError` reporting it first costs nothing).
+    // A module load failure is the recovery's to report.
+    if (isRouteErrorResponse(error) && error.status < 500) {
+      return;
     }
-  }, [error, analytics]);
+    const captured = toReported(error);
+    if (captured !== undefined) {
+      void reportUiError(captured);
+    }
+  }, [error, isModuleLoadFailure]);
 
   const goBack = (): void => {
+    if (observationConflict !== undefined) {
+      quarantineChatObservation(observationConflict.chatId);
+      void navigate('/', { replace: true });
+      return;
+    }
     void navigate(-1);
   };
 
   const refreshPage = (): void => {
+    if (observationConflict !== undefined) {
+      quarantineChatObservation(observationConflict.chatId);
+    }
     globalThis.location.reload();
   };
 
@@ -77,6 +147,45 @@ export function ErrorPage(): React.JSX.Element {
     );
   }
 
+  if (isModuleLoadFailure && staleOutcome === undefined) {
+    return (
+      <div className='flex min-h-full flex-1 flex-col items-center justify-center gap-3 px-4 py-8'>
+        <LoaderCircle className='size-6 spin-glyph text-muted-foreground' />
+        <p role='status' className='text-sm text-muted-foreground'>
+          Checking for a newer version of Tau…
+        </p>
+      </div>
+    );
+  }
+
+  if (isExplained) {
+    return (
+      <div className='flex min-h-full flex-1 flex-col items-center justify-center gap-6 px-4 py-8'>
+        <div className='flex flex-col items-center gap-3 text-center'>
+          <div className='flex size-12 items-center justify-center rounded-full bg-feature/10'>
+            <RefreshCcw className='size-6 text-feature' />
+          </div>
+          <h1 className='text-lg font-semibold text-foreground'>
+            {isRolledBack ? 'Tau has been replaced' : 'Tau has been updated'}
+          </h1>
+          <p className='max-w-xs text-sm text-pretty text-muted-foreground'>
+            {describeSupersession(supersedingBuildId)}
+          </p>
+        </div>
+        <Button
+          variant='default'
+          size='sm'
+          className='gap-2'
+          disabled={staleOutcome === 'reloading' && reloadState === 'pending'}
+          onClick={refreshPage}
+        >
+          <RefreshCcw className='size-4' />
+          Reload
+        </Button>
+      </div>
+    );
+  }
+
   if (error instanceof Error) {
     return (
       <div className='flex min-h-full flex-1 flex-col items-center justify-center px-4 py-8'>
@@ -94,7 +203,8 @@ export function ErrorPage(): React.JSX.Element {
             Our team has been notified of the error and will investigate it shortly.
           </p>
 
-          {error.stack ? (
+          {/* A module that failed to load must not be answered by loading another one. */}
+          {error.stack && !isModuleLoadFailure ? (
             <Suspense
               fallback={
                 <div className='w-full rounded-md border border-border bg-muted/30 p-3 text-left'>

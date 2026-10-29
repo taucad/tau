@@ -9,6 +9,7 @@ import { resolveSectionPlanePickerRect } from '#graphics/three/controls/section-
 const mocks = vi.hoisted(() => ({
   frame: undefined as (() => void) | undefined,
   gl: { domElement: undefined as HTMLCanvasElement | undefined },
+  size: { width: 200, height: 400 },
   invalidate: vi.fn(),
 }));
 vi.mock('@react-three/fiber', () => ({
@@ -50,9 +51,56 @@ afterEach(() => {
   vi.useRealTimers();
   document.body.replaceChildren();
   mocks.invalidate.mockClear();
+  mocks.size = { width: 200, height: 400 };
 });
 
 describe('viewport submission FPS output', () => {
+  it('should keep the same live readout while resizing between a short phone stage and a narrow desktop canvas', () => {
+    vi.useFakeTimers();
+    const parent = document.createElement('div');
+    const canvas = document.createElement('canvas');
+    parent.append(canvas);
+    document.body.append(parent);
+    mocks.gl = { domElement: canvas };
+    mocks.size = { width: 320, height: 160 };
+    const view = render(<CompiledRenderFpsOverlay hasTopRightGizmo />);
+    const output = screen.getByLabelText('Render-loop submission FPS');
+    const observer = renderLoopObservers.get(canvas);
+    expect(output).toHaveClass('top-2', 'left-2', 'bg-background', 'text-foreground');
+    expect(output).not.toHaveClass('top-28', 'right-2');
+    expect(output).toHaveAttribute('aria-live', 'off');
+
+    act(() => {
+      for (let index = 0; index < 40; index++) {
+        vi.advanceTimersByTime(8);
+        mocks.frame?.();
+      }
+    });
+    expect(output.textContent).toMatch(/128\.0 FPS/u);
+    mocks.size = { width: 200, height: 400 };
+    view.rerender(<CompiledRenderFpsOverlay hasTopRightGizmo />);
+    expect(screen.getByLabelText('Render-loop submission FPS')).toBe(output);
+    expect(output).toHaveClass('top-28', 'right-2');
+    expect(output).not.toHaveClass('top-2', 'left-2');
+    expect(output.textContent).toMatch(/128\.0 FPS/u);
+    expect(renderLoopObservers.get(canvas)).toBe(observer);
+
+    mocks.size = { width: 390, height: 200 };
+    view.rerender(<CompiledRenderFpsOverlay hasTopRightGizmo />);
+    expect(output).toHaveClass('top-2', 'left-2');
+    expect(output).not.toHaveClass('top-28', 'right-2');
+    expect(renderLoopObservers.get(canvas)).toBe(observer);
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(output).toHaveTextContent('FPS · idle');
+    expect(mocks.invalidate).not.toHaveBeenCalled();
+    view.unmount();
+    expect(output.isConnected).toBe(false);
+    expect(renderLoopObservers.has(canvas)).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('should retain the controls band when compiled code replaces the canvas within the same parent', () => {
     vi.useFakeTimers();
     const parent = document.createElement('div');

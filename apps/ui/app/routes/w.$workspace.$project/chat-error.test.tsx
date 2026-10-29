@@ -282,6 +282,76 @@ describe('ChatError', () => {
     projection.stop();
   });
 
+  /** A failed run's projection, rebuilt from its log as a reload or a fresh attachment would. */
+  const failedRunState = (runId: string, attempt = 1): CombinedChatState => {
+    const projection = createActor(chatProjectionLogic).start();
+    projection.send({
+      type: 'batch',
+      answer: {
+        status: 'batch',
+        cursor: 0,
+        nextCursor: 3,
+        endCursor: 3,
+        events: [
+          lifecycleRow(0, 'admitted', runId),
+          lifecycleRow(1, 'running', runId),
+          logRow(2, { runId, type: 'run.lifecycle', state: 'failed', attempt, detail: { message: 'Refused once.' } }),
+        ],
+      },
+    });
+    const state = {
+      error: undefined,
+      persistedError: undefined,
+      projection: projection.getSnapshot().context,
+      attachmentStatus: 'attached',
+    } as unknown as CombinedChatState;
+    projection.stop();
+    return state;
+  };
+  const decisionIdOf = (container: HTMLElement): string | undefined =>
+    container.querySelector<HTMLElement>('[data-decision=run-error]')?.dataset['decisionId'];
+
+  it('should keep a failure one identity across a rerender, a remount and a rebuilt projection, and give Try again a new one (I5)', () => {
+    let state = failedRunState('req_1');
+    vi.mocked(useChatSelector).mockImplementation((selector) => selector(state));
+    const first = render(<ChatErrorBanner />);
+    const id = decisionIdOf(first.container);
+    expect(id).toBe('run:req_1:1');
+    first.rerender(<ChatErrorBanner className='again' />);
+    expect(decisionIdOf(first.container)).toBe(id);
+    first.unmount();
+
+    // A reload rebuilds the projection from the log: new objects, the same failure.
+    state = failedRunState('req_1');
+    const remounted = render(<ChatErrorBanner />);
+    expect(decisionIdOf(remounted.container)).toBe(id);
+    remounted.unmount();
+
+    // Try again starts a new run, whose failure is a new decision even in the same words.
+    state = failedRunState('req_2');
+    const retried = render(<ChatErrorBanner />);
+    expect(decisionIdOf(retried.container)).toBe('run:req_2:1');
+  });
+
+  it('should identify a refused command by its request (I5)', () => {
+    const projection = createActor(chatProjectionLogic).start();
+    projection.send({
+      type: 'batch',
+      answer: { status: 'batch', cursor: 0, nextCursor: 0, endCursor: 0, events: [] },
+    });
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({
+        error: undefined,
+        persistedError: { category: errorCategory.generic, title: 'Start refused', message: 'No.', requestId: 'req_9' },
+        projection: projection.getSnapshot().context,
+        attachmentStatus: 'attached',
+      } as CombinedChatState),
+    );
+    const { container } = render(<ChatErrorBanner />);
+    expect(decisionIdOf(container)).toBe('refusal:req_9');
+    projection.stop();
+  });
+
   it('keeps a refused Resume only while its identified run is paused', () => {
     const projection = createActor(chatProjectionLogic).start();
     projection.send({
@@ -632,6 +702,38 @@ describe('ChatError', () => {
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
+  /* XD3: another device runs the chat; its run cannot be moved or stopped from here. */
+  it('should state that another device is running the chat and offer nothing', () => {
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'Chat chat_1 is running on another device; send this again once that run finishes.',
+      code: 'RUN_ACTIVE_ON_ANOTHER_DEVICE',
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('This chat is running on another device')).toBeInTheDocument();
+    expect(screen.getByText('Send again here once that run finishes.')).toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  /* XD3/XD4: the chat waits on sync from another device; nothing here can hurry it. */
+  it.each([
+    ['SEGMENTS_UNREADABLE', "Another device's copy of this chat could not be read."],
+    ['BRANCH_UNAVAILABLE', 'The branch this chat ran on has not arrived on this device yet.'],
+  ])('should say a %s chat is waiting on sync from another device and offer nothing', (code, message) => {
+    persisted({ category: errorCategory.generic, title: 'Error', message, code });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Waiting on sync from another device')).toBeInTheDocument();
+    expect(
+      screen.getByText('This chat continues once sync brings what another device wrote. Send again then.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
   /* The one restart that loses nothing: admission refused before a run existed. */
   it('should keep Try again for a turn that never started', async () => {
     const user = userEvent.setup();
@@ -724,6 +826,25 @@ describe('ChatError', () => {
     await user.click(screen.getByRole('button', { name: 'Resume' }));
     expect(continueChat).toHaveBeenCalledTimes(1);
     expect(regenerate).not.toHaveBeenCalled();
+  });
+
+  /* XD4: a placement refused `wait` after the run was admitted ends it RUN_ABANDONED with the code kept (RA-R1): the
+   * card says what it waits on, and Resume places it again once sync brings the branch. */
+  it('should say an abandoned run waits on sync for its branch, and offer Resume', async () => {
+    const user = userEvent.setup();
+    projected({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: "This chat's branch is not on this device yet.",
+      code: 'RUN_ABANDONED',
+      details: { code: 'BRANCH_UNAVAILABLE' },
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Waiting on sync from another device')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(continueChat).toHaveBeenCalledTimes(1);
   });
 
   it.each([

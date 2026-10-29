@@ -16,10 +16,16 @@
  * @module
  */
 
-import { runGeoSpecTests } from '@taucad/agent-tools/geospec';
-import type { GeoSpecKernelEvidence } from '@taucad/agent-tools/geospec';
+import { rpcClientErrorCode } from '@taucad/chat';
+import { geoSpecHostLimitProblem } from '@taucad/chat/constants';
+import { createGeoSpecConfigSession, runGeoSpecTests } from '@taucad/agent-tools/geospec';
+import type { GeoSpecKernelEvidence, GeoSpecTestModelConfig } from '@taucad/agent-tools/geospec';
 import { tauClientExporter } from '@taucad/agent-tools/geospec/exporter';
+// GeoSpec has no browser VM of its own: Tau's esbuild VM bundles specs and configs, npm packages included.
+import { createEsbuildModuleVm } from '@taucad/esbuild/vm';
 import { createRuntimeClient } from '@taucad/runtime/client';
+import { forwardOperations, geoSpecVerifyEntry } from '#telemetry/worker-forwarding.js';
+import type { WorkerTelemetry } from '#telemetry/worker-forwarding.js';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
 import { fromFsLike } from '@taucad/runtime/filesystem';
 import type { FsLike } from '@taucad/runtime/filesystem';
@@ -319,6 +325,12 @@ type WorkerSession = {
   runtimeClient: AppRuntimeClient;
   runner: GeoSpecRunner;
   closeEngine?: (() => void) | undefined;
+  /** The project's `geospec.config.*` for one run: read through the spec VM each run; an unchanged not-applied outcome is reported once. */
+  readConfig: () => Promise<GeoSpecTestModelConfig>;
+  /** Host policy: the longest effective `testTimeout`; a longer one is refused, never clamped. Milliseconds. */
+  maxRunBudget?: number | undefined;
+  /** Runtime telemetry (FR-16): the page's context; absent where the page would not record. */
+  telemetry?: WorkerTelemetry | undefined;
 };
 
 type QueuedRun = {
@@ -374,6 +386,16 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
   let runtimeClient: AppRuntimeClient | undefined;
   let runner: GeoSpecRunner | undefined;
   let closeEngine: (() => void) | undefined;
+  let readConfig: WorkerSession['readConfig'] | undefined;
+  const telemetry: WorkerTelemetry | undefined =
+    request.telemetry === undefined
+      ? undefined
+      : {
+          context: request.telemetry,
+          forward: (entry) => {
+            workerScope.postMessage({ type: 'telemetry', entry });
+          },
+        };
   try {
     const runtimeConfigResult = uiRuntimeConfigSchema.safeParse(request.runtimeConfig);
     if (!runtimeConfigResult.success) {
@@ -390,10 +412,15 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
         compute: { mode: 'off' },
       }),
     );
+    if (telemetry !== undefined) {
+      // The session terminates the client on close, which ends these subscriptions with it.
+      forwardOperations(runtimeClient, 'geospec', telemetry);
+    }
     {
-      const [native, { createNativeGeoSpecRunner }, exporter] = await Promise.all([
+      const [native, { createNativeGeoSpecRunner }, { readGeoSpecConfig }, exporter] = await Promise.all([
         import('geospec-engine'),
         import('geospec/runner/native'),
+        import('geospec/config'),
         // The session owns the client and terminates it on close; the exporter only borrows it.
         tauClientExporter({ client: runtimeClient }),
       ]);
@@ -424,9 +451,17 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
           }),
       };
       const projectFiles = fileSystem;
+      const vmFileSystem = createBridgeVmFileSystem(fileSystem);
+      const configSession = createGeoSpecConfigSession();
+      // The browser never runs the config's exporters: it applies the data fields and says once when it cannot.
+      readConfig = async () =>
+        configSession(
+          await readGeoSpecConfig({ filesystem: vmFileSystem, projectPath: '', createModuleVm: createEsbuildModuleVm }),
+        );
 
       runner = createNativeGeoSpecRunner({
-        filesystem: createBridgeVmFileSystem(fileSystem),
+        filesystem: vmFileSystem,
+        createModuleVm: createEsbuildModuleVm,
         // PERF-OUTPUT-01: the product selects the bounded success evidence (ruling 13).
         nativeAssertions: {
           engine: candidateEngine,
@@ -450,6 +485,9 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       runtimeClient,
       runner,
       closeEngine,
+      readConfig,
+      maxRunBudget: request.maxRunBudget,
+      telemetry,
     };
     session = activeSession;
     workerScope.postMessage({ type: 'initialized', requestId: request.requestId, sessionId: request.sessionId });
@@ -500,6 +538,29 @@ export const describeKernelEvidence = async (
   }
 };
 
+/**
+ * FR-16: one run-level `verify` entry per settled run, after its result. Test names, specs and values never leave, and
+ * telemetry never changes a run's answer.
+ *
+ * @param activeSession - The run's session.
+ * @param output - The run's output.
+ * @param input - The run's wall time and whether it named its own work-unit limit.
+ */
+const forwardVerifyEntry = (
+  activeSession: WorkerSession,
+  output: Parameters<typeof geoSpecVerifyEntry>[0],
+  input: Parameters<typeof geoSpecVerifyEntry>[1],
+): void => {
+  if (activeSession.telemetry === undefined) {
+    return;
+  }
+  try {
+    activeSession.telemetry.forward(geoSpecVerifyEntry(output, input, activeSession.telemetry.context));
+  } catch {
+    /* Fire-and-forget. */
+  }
+};
+
 const runGeoSpecInWorker = async (request: GeoSpecRunnerWorkerRunRequest): Promise<void> => {
   const activeSession = session;
   if (!activeSession || activeSession.sessionId !== request.sessionId) {
@@ -512,12 +573,37 @@ const runGeoSpecInWorker = async (request: GeoSpecRunnerWorkerRunRequest): Promi
   locallyEstablishedCandidates = [];
 
   try {
+    const config = await activeSession.readConfig();
+    const testTimeout = request.args.testTimeout ?? config.defaults?.testTimeout;
+    // The client refuses an input over the host's maximum; a project config's default is only known here.
+    const overLimit =
+      activeSession.maxRunBudget === undefined
+        ? undefined
+        : geoSpecHostLimitProblem(
+            { testTimeout },
+            { maxRunBudget: activeSession.maxRunBudget, maxWorkUnitLimit: Number.POSITIVE_INFINITY },
+          );
+    if (overLimit !== undefined) {
+      workerScope.postMessage({
+        type: 'result',
+        requestId: request.requestId,
+        result: { success: false, errorCode: rpcClientErrorCode.validationError, message: overLimit },
+      });
+      return;
+    }
+    const startedAt = performance.now();
     const output = await runGeoSpecTests({
       discovery: createDiscoveryFileSystem(activeSession.fileSystem),
       runner: activeSession.runner,
       args: request.args,
+      config,
       onProgress: (event) => {
-        workerScope.postMessage({ type: 'progress', requestId: request.requestId, event });
+        workerScope.postMessage({
+          type: 'progress',
+          requestId: request.requestId,
+          event,
+          ...(event.type === 'run-start' && testTimeout !== undefined ? { testTimeout } : {}),
+        });
       },
       kernelEvidence: async (sourcePath) => describeKernelEvidence(activeSession.runtimeClient, sourcePath),
     });
@@ -526,6 +612,10 @@ const runGeoSpecInWorker = async (request: GeoSpecRunnerWorkerRunRequest): Promi
       requestId: request.requestId,
       result: { success: true, ...output },
       candidates: locallyEstablishedCandidates,
+    });
+    forwardVerifyEntry(activeSession, output, {
+      duration: performance.now() - startedAt,
+      workUnitLimitArgument: request.args.workUnitLimit !== undefined,
     });
   } catch (error) {
     postError(request.requestId, error instanceof Error ? error.message : 'GeoSpec worker failed to run tests.');

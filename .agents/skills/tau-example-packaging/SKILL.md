@@ -4,7 +4,7 @@ description: >-
   Packages a CAD example under libs/tau-examples/src/kernels/<kernel>/<example>/
   for Tau: classifies it with example.json (model, reference, test-fixture,
   spec-fixture), writes a strict id-free tau.json, shapes its
-  README or DESIGN.md, proves it with the geospec-engine CLI, regenerates the
+  README or DESIGN.md, proves it with geospec run and Tau's exporter, regenerates the
   manifest and WebP thumbnails, runs the example-health and GeoSpec suite gates,
   records licence provenance for ports and decides whether it becomes a
   Community showcase entry (communityLocators) or stays a plain builtin. Use
@@ -54,7 +54,7 @@ Thumbnails are independent of class: every row with a main file whose kernel is 
 3. **Prove the geometry** when the row has a suite:
 
    ```bash
-   node --import tsx packages/geospec-engine/src/cli/main.ts run libs/tau-examples/src/kernels/<kernel>/<example> --test-timeout 300000 --workers 1 --json
+   node --import tsx packages/cli/scripts/geospec.mts run libs/tau-examples/src/kernels/<kernel>/<example> --test-timeout 300000 --workers 1 --json
    ```
 
    Preserve selected unmet requirements as desired failing or unsupported tests; do not skip them to claim qualification. Explicitly excluded fixtures remain visible exclusions and do not certify their requirements. A runnable qualified row requires every selected requirement to pass.

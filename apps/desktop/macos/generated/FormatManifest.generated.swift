@@ -22,7 +22,6 @@ enum TauQuickLookManifest {
     Format(extensions: ["iges", "igs"], identifiers: ["com.taucad.iges", "com.shapr3d.iges", "com.shapr3d.igs"], includesSidecars: false),
     Format(extensions: ["brep"], identifiers: ["com.taucad.brep"], includesSidecars: false),
     Format(extensions: ["3dm"], identifiers: ["com.mcneel.rhinoceros.3dm", "com.shapr3d.rhino.3dm"], includesSidecars: false),
-    Format(extensions: ["3ds"], identifiers: ["com.taucad.3d-studio", "com.shapr3d.3d-studio.3ds"], includesSidecars: true),
     Format(extensions: ["3mf"], identifiers: ["com.taucad.3mf", "com.shapr3d.3d-manufacturing.3mf"], includesSidecars: false),
     Format(extensions: ["ac"], identifiers: ["com.taucad.ac3d"], includesSidecars: true),
     Format(extensions: ["amf"], identifiers: ["com.taucad.amf"], includesSidecars: false),
@@ -46,9 +45,6 @@ enum TauQuickLookManifest {
     Format(extensions: ["stl"], identifiers: ["public.standard-tesselated-geometry-format"], includesSidecars: false),
     Format(extensions: ["usda"], identifiers: ["com.pixar.universal-scene-description-utf8"], includesSidecars: true),
     Format(extensions: ["usdz"], identifiers: ["com.pixar.universal-scene-description-mobile"], includesSidecars: false),
-    Format(extensions: ["wrl"], identifiers: ["com.taucad.vrml", "com.shapr3d.vrml.wrl"], includesSidecars: true),
-    Format(extensions: ["x"], identifiers: ["com.taucad.directx-model"], includesSidecars: true),
-    Format(extensions: ["x3d", "x3db", "x3dv"], identifiers: ["com.taucad.x3d", "com.shapr3d.x3d.x3d", "com.shapr3d.x3d.x3db", "com.shapr3d.x3d.x3dv"], includesSidecars: true),
     Format(extensions: ["xgl"], identifiers: ["com.taucad.xgl"], includesSidecars: true)
   ]
 }

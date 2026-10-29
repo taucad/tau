@@ -3,6 +3,7 @@ import { wireAccountClosureSchema, wireAutoReloadConsentSchema, wirePaymentActio
 import type { WireAccountClosure, WireAutoReloadConsent, WirePaymentAction } from '@taucad/billing';
 import { parseCollectionRefusal } from '#lib/billing-payment-client.js';
 import type { PaymentActionBinding } from '#lib/billing-payment-client.js';
+import { recordApiRequestId } from '#lib/api-request-id.js';
 
 /** Automatic reload quotes tax from a billing address that only a Checkout purchase saves; retrying cannot help. */
 export class BillingAddressRequired extends Error {
@@ -57,10 +58,11 @@ const request = async (binding: PaymentActionBinding, path: string, init?: Reque
     throw new Error('Financial session changed');
   }
   if (!response.ok) {
-    throw (
+    throw recordApiRequestId(
       (await parseCollectionRefusal(response)) ??
-      (await parseConflictRefusal(response)) ??
-      new Error(`Billing lifecycle request failed with ${response.status}`)
+        (await parseConflictRefusal(response)) ??
+        new Error(`Billing lifecycle request failed with ${response.status}`),
+      response,
     );
   }
   const body: unknown = await response.json();

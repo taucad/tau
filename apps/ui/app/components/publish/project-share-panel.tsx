@@ -52,6 +52,7 @@ import {
 } from '#lib/share-providers.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { recordApiRequestId } from '#lib/api-request-id.js';
 
 /**
  * What wraps the shared Share pane with the host it reads: the project's workbench host in the workbench, or a
@@ -730,7 +731,10 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
       });
 
       if (!response.ok) {
-        throw new Error(response.status === 401 ? 'SIGN_IN_REQUIRED' : 'SHARE_ENVELOPE_FAILED');
+        throw recordApiRequestId(
+          new Error(response.status === 401 ? 'SIGN_IN_REQUIRED' : 'SHARE_ENVELOPE_FAILED'),
+          response,
+        );
       }
 
       const nextEnvelope = parseProjectShareEnvelope(await response.json());
@@ -847,7 +851,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
       });
 
       if (!response.ok) {
-        throw new Error('VISIBILITY_UPDATE_FAILED');
+        throw recordApiRequestId(new Error('VISIBILITY_UPDATE_FAILED'), response);
       }
 
       await loadEnvelope();
@@ -1055,14 +1059,18 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
                   <RadioGroupItem value='private' id='share-vis-private' disabled={!canCreatePrivateShares} />
                   <Label
                     htmlFor='share-vis-private'
-                    className={cn('font-normal', !canCreatePrivateShares && 'text-muted-foreground')}
+                    /* A 16px radio's label is its 24px target under a coarse pointer (I3). */
+                    className={cn(
+                      'font-normal pointer-coarse:min-h-6',
+                      !canCreatePrivateShares && 'text-muted-foreground',
+                    )}
                   >
                     Private (only you and people you share with)
                   </Label>
                   {canCreatePrivateShares || !isPlanResolved ? undefined : (
                     <button
                       type='button'
-                      className='inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline'
+                      className='inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline pointer-coarse:min-h-6'
                       onClick={() => {
                         requestUpgrade();
                       }}
@@ -1073,7 +1081,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
                 </div>
                 <div className='flex items-center gap-2'>
                   <RadioGroupItem value='public' id='share-vis-public' />
-                  <Label htmlFor='share-vis-public' className='font-normal'>
+                  <Label htmlFor='share-vis-public' className='font-normal pointer-coarse:min-h-6'>
                     Public
                   </Label>
                 </div>

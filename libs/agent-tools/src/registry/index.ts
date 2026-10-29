@@ -1,4 +1,5 @@
 export { createChatToolRegistry, type ChatToolRegistryOptions } from '#registry/tool-registry.js';
+export type { ShellClient, ShellRunRequest, ShellSource } from '#registry/shell-tool.js';
 export {
   createMachineToolRegistry,
   type MachinePrintPlanner,

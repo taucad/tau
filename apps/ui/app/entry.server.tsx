@@ -6,12 +6,29 @@ import { isbot } from 'isbot';
 import { renderToPipeableStream } from 'react-dom/server';
 import type { RenderToPipeableStreamOptions } from 'react-dom/server';
 import { ServerRouter } from 'react-router';
-import type { AppLoadContext, EntryContext } from 'react-router';
+import type { AppLoadContext, EntryContext, HandleErrorFunction } from 'react-router';
 import { reportOnlyContentSecurityPolicy } from '#lib/content-security-policy.server.js';
 import { isCanonicalProductionUrl } from '#lib/canonical-url.js';
 import { createModulePreloadCap, criticalModuleHrefs, isNotFoundRender } from '#lib/module-preload-cap.js';
+import { claimSsrErrors, leafRouteId, queueSsrError, reportSsrError } from '#lib/sentry.server.js';
 
 export const streamTimeout = 5000;
+
+/**
+ * Server errors React Router saw in a loader, action or render (SB10). A request the client aborted is skipped, as
+ * React Router's own guidance does; every other error is still logged and goes to the SSR reporter, which waits for
+ * the document render to name its route ({@link claimSsrErrors}).
+ *
+ * @param error - The thrown value.
+ * @param args - The request it belongs to.
+ */
+export const handleError: HandleErrorFunction = (error, { request }) => {
+  if (request.signal.aborted) {
+    return;
+  }
+  console.error(error);
+  queueSsrError(error, request);
+};
 
 // React Router v7 mandates this exact 5-parameter signature; we intentionally
 // exceed the max-params lint rule to match the framework contract.
@@ -23,8 +40,24 @@ export default function handleRequest(
   routerContext: EntryContext,
   _loadContext: AppLoadContext,
 ): Promise<Response> | Response {
+  const routeId = leafRouteId(routerContext);
+  // Errors `handleError` took for this document go out with its route and status (SB10).
+  claimSsrErrors(request, routeId, responseStatusCode);
   applyHandleRequestHeaders(responseHeaders);
   responseHeaders.set('Content-Security-Policy-Report-Only', reportOnlyContentSecurityPolicy);
+  /* TAU-UI-6: a document names its build's hashed chunks, and a deploy stops serving them, so no
+   * cache may answer a load or refresh with a stored document without asking the server. It is
+   * also rendered from the visitor's cookies, so no shared cache may keep it (`private`). The apex
+   * `/` is chosen by a presentation cookie, so no cache keeps it at all (`no-store`), as the `/`
+   * rule in `netlify.toml` says; that file's header blocks do not reach function responses, and the
+   * marketing edge function only covers Netlify. Routes that choose their own policy
+   * (`cdnBackedSsrRouteHeaders`) keep it. */
+  if (!responseHeaders.has('Cache-Control')) {
+    responseHeaders.set(
+      'Cache-Control',
+      new URL(request.url).pathname === '/' ? 'private, no-store' : 'private, no-cache',
+    );
+  }
   /* OQ-P11: `Document-Policy: js-profiling` lets a developer take a real sampling profile of this
    * document from `Profiler`. It is off the production origin, where it would offer every visitor's
    * browser a profiler it has no use for. */
@@ -86,8 +119,10 @@ export default function handleRequest(
       },
       onError(error: unknown) {
         responseStatusCode = 500;
+        // Before the shell, the error reaches `onShellError` and React Router's `handleError` instead.
         if (shellRendered) {
           console.error(error);
+          reportSsrError(error, { request, routeId, status: responseStatusCode, channel: 'stream' });
         }
       },
     });

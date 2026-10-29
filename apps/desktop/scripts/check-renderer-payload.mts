@@ -43,7 +43,26 @@ export type PayloadInventory = {
   totals: Record<string, { bytes: number; allocatedBytes: number; files: number }>;
 };
 
-const allowedWasm = /^(?:kcl_wasm_lib_bg|clipper2z)(?:-[\w-]+)?\.wasm$/u;
+// Renderer-owned WASM: the KCL editor, the viewer's Clipper section caps and the desktop Terminal's VT engine
+// (`@aurigax-ai/ghostty-web`, declared by `apps/ui`). None of them runs CAD.
+const allowedWasm = /^(?:kcl_wasm_lib_bg|clipper2z|ghostty-vt)(?:-[\w-]+)?\.wasm$/u;
+const approvedWasmProducers = [
+  { specifier: '@taucad/kcl-wasm-lib/kcl.wasm', manifest: 'package.json' },
+  { specifier: 'clipper2-wasm/dist/es/clipper2z.wasm', manifest: 'package.json' },
+  { specifier: '@aurigax-ai/ghostty-web/ghostty-vt.wasm', manifest: 'apps/ui/package.json' },
+] as const;
+/*
+ * JavaScript that writes WASM bytes itself. ghostty-web builds an import-and-re-export trampoline module from a byte
+ * array literal (`lib/abi.ts` `trampolineBytes`) to put JavaScript callbacks in libghostty-vt's function table; it
+ * carries no code section. A chunk is classified only when every module in it comes from the installed package next to
+ * `anchor` (resolved from its owning manifest) and its only marker is that byte-array header: base64 or data-URL WASM
+ * stays a violation even there.
+ */
+const embeddedWasmProducers = [
+  { anchor: '@aurigax-ai/ghostty-web/ghostty-vt.wasm', manifest: 'apps/ui/package.json' },
+] as const;
+const embeddedWasmMarker = /(?:AGFzbQ|data:application\/wasm|\\x00asm|0,97,115,109)/u;
+const encodedWasmMarker = /(?:AGFzbQ|data:application\/wasm|\\x00asm)/u;
 const browserExecutionEntry =
   /(?:^|\/)(?:runtime(?:-debug)?|converter-runtime|image-runtime|agent-host|geospec-runner)\.worker(?:[-.]|$)/u;
 const nativeMagic = new Set([
@@ -156,7 +175,6 @@ export const isRendererExecutionModule = (moduleId: string): boolean => {
     /packages\/plugins\/image\/src\/(?:image-backend|image\.transcoder|svg(?:-renderer|\.transcoder)?|resvg)/u.test(
       path,
     ) ||
-    /packages\/geospec-engine\/src\/runner\//u.test(path) ||
     /(?:node_modules\/|\.pnpm\/)(?:[^/]*\/node_modules\/)?(?:@taulabs\/openrscad-engine|libassimp|nanoraster\/dist\/(?:renderer|native|wasm|create|render)|@resvg\/resvg-wasm|esbuild-wasm)/u.test(
       path,
     )
@@ -364,9 +382,18 @@ export const inspectDesktopPayload = async (options: {
   };
   const require = createRequire(import.meta.url);
   const approvedWasm = new Map<string, string>();
+  const embeddedWasm: Array<{ path: string; encoded: boolean }> = [];
+  const embeddedWasmPackages = embeddedWasmProducers.map(({ anchor, manifest }) => {
+    const anchorPath = realpathSync(createRequire(resolve(workspaceRoot, manifest)).resolve(anchor));
+    return `${relative(workspaceRoot, dirname(anchorPath)).replaceAll('\\', '/')}/`;
+  });
+  // Each producer resolves from the manifest that declares it, so provenance is the installed, pinned copy.
   const approvedWasmSizes = await Promise.all(
-    ['@taucad/kcl-wasm-lib/kcl.wasm', 'clipper2-wasm/dist/es/clipper2z.wasm'].map(async (specifier) => {
-      const sourcePath = realpathSync(require.resolve(specifier)).replaceAll('\\', '/');
+    approvedWasmProducers.map(async ({ specifier, manifest }) => {
+      const sourcePath = realpathSync(createRequire(resolve(workspaceRoot, manifest)).resolve(specifier)).replaceAll(
+        '\\',
+        '/',
+      );
       const content = await readFile(sourcePath);
       approvedWasm.set(sourcePath, createHash('sha256').update(content).digest('hex'));
       return content.byteLength;
@@ -428,11 +455,11 @@ export const inspectDesktopPayload = async (options: {
     if (browserExecutionEntry.test(rendererPath)) {
       inventory.violations.push(`Browser execution worker in renderer: ${rendererPath}`);
     }
-    if (
-      kind === 'javascript' &&
-      /(?:AGFzbQ|data:application\/wasm|\\x00asm|0,97,115,109)/u.test(Buffer.from(content).toString())
-    ) {
-      inventory.violations.push(`Embedded WASM requires producer classification: ${rendererPath}`);
+    if (kind === 'javascript') {
+      const source = Buffer.from(content).toString();
+      if (embeddedWasmMarker.test(source)) {
+        embeddedWasm.push({ path: rendererPath, encoded: encodedWasmMarker.test(source) });
+      }
     }
     if (scope === 'renderer' && graphFileName.test(rendererPath)) {
       inventory.graphManifests.push(rendererPath);
@@ -561,6 +588,22 @@ export const inspectDesktopPayload = async (options: {
   // identical provenance is redundant; conflicting records remain failures.
   inventory.chunks = [...new Map(inventory.chunks.map((chunk) => [JSON.stringify(chunk), chunk])).values()];
   inventory.assets = [...new Map(inventory.assets.map((asset) => [JSON.stringify(asset), asset])).values()];
+  for (const { path, encoded } of embeddedWasm) {
+    const chunks = inventory.chunks.filter((chunk) => chunk.fileName === path);
+    const classified =
+      !encoded &&
+      chunks.length > 0 &&
+      chunks.every(
+        (chunk) =>
+          chunk.moduleIds.length > 0 &&
+          embeddedWasmPackages.some((packageRoot) =>
+            chunk.moduleIds.every((moduleId) => moduleId.replaceAll('\\', '/').startsWith(packageRoot)),
+          ),
+      );
+    if (!classified) {
+      inventory.violations.push(`Embedded WASM requires producer classification: ${path}`);
+    }
+  }
   for (const chunk of inventory.chunks) {
     for (const moduleId of chunk.moduleIds.filter(isRendererExecutionModule)) {
       inventory.violations.push(`Renderer execution module in ${chunk.fileName}: ${moduleId}`);

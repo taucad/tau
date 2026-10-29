@@ -692,13 +692,14 @@ export const ChatConverter = memo(function (properties: {
     <FloatingPanel isOpen={isExpanded} side='right' className={className} onOpenChange={setIsExpanded}>
       <FloatingPanelContent>
         <FloatingPanelContentHeader>
-          <FloatingPanelContentTitle>Exporter</FloatingPanelContentTitle>
+          <FloatingPanelContentTitle>Export</FloatingPanelContentTitle>
           <FloatingPanelContentHeaderActions>
             <FloatingPanelClose
+              label='Close Export'
               icon={XIcon}
               tooltipContent={(isOpen) => (
                 <div className='flex items-center gap-2'>
-                  {isOpen ? 'Close' : 'Open'} Exporter
+                  {isOpen ? 'Close' : 'Open'} Export
                   <KeyShortcut variant='tooltip'>{formattedConverterKeyCombination}</KeyShortcut>
                 </div>
               )}

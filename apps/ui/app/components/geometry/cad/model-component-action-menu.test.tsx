@@ -254,7 +254,7 @@ describe('model component action menu (app adapter)', () => {
     expect(screen.getByRole('menu')).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Focus on part' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Add to chat' })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: 'Reveal in Explorer' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Reveal in model tree' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Hide' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Isolate' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Show all' })).toBeDisabled();
@@ -298,7 +298,7 @@ describe('model component action menu (app adapter)', () => {
       />,
     );
 
-    await user.click(screen.getByRole('menuitem', { name: 'Reveal in Explorer' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Reveal in model tree' }));
 
     expect(graphicsRef.send).toHaveBeenCalledWith({
       type: 'selectModelComponent',
@@ -334,7 +334,7 @@ describe('model component action menu (app adapter)', () => {
 
     await user.click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
 
-    expect(screen.queryByText('Reveal in Explorer')).not.toBeInTheDocument();
+    expect(screen.queryByText('Reveal in model tree')).not.toBeInTheDocument();
   });
 
   it('should reveal the joint that moves a part in the Kinematics pane only for parts in a mechanism link', async () => {

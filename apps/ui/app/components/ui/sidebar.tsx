@@ -64,6 +64,8 @@ const SidebarBehavior = () => {
   useKeybinding(sidebarToggleKeyCombo, toggleSidebar, {
     preventDefault: true,
     stopPropagation: true,
+    // The phone sidebar sheet is a dialog; its own toggle still closes it.
+    allowedScopes: ['sidebar'],
   });
 
   return <MobileSidebarRouteReset key={key} />;
@@ -109,6 +111,8 @@ const SidebarTrigger = ({
 }): React.JSX.Element => {
   const { isMobile, open, openMobile, toggleSidebar } = useSidebar();
   const isOpen = isMobile ? openMobile : open;
+  /* On phones the sidebar is a sheet: the control opens it from a page, and inside the sheet it closes it. */
+  const label = isMobile ? (isOpen ? 'Close sidebar' : 'Open sidebar') : 'Toggle Sidebar';
 
   return (
     <Tooltip>
@@ -151,11 +155,13 @@ const SidebarTrigger = ({
           {...properties}
         >
           {children ?? <PanelLeft aria-hidden data-slot='sidebar-panel-icon' className='size-3.5' />}
-          <span className='sr-only'>Toggle Sidebar</span>
+          {/* The trigger owns its name. Hidden text rather than aria-label keeps a visible project name in it. */}
+          <span className='sr-only'>{label}</span>
         </Button>
       </TooltipTrigger>
-      <TooltipContent>
-        Sidebar{' '}
+      {/* On phones the trigger also sits in the sidebar sheet (z-100); its tooltip must clear the sheet. */}
+      <TooltipContent className={cn(isMobile && 'z-110')}>
+        {isMobile ? label : 'Sidebar'}{' '}
         <KeyShortcut className='ml-1' variant='tooltip'>
           {formatKeyCombination(sidebarToggleKeyCombo)}
         </KeyShortcut>

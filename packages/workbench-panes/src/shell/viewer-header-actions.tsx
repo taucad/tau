@@ -82,7 +82,7 @@ export function ViewerHeaderActions({
       <PaneAction
         icon={workbenchPanes.export.icon}
         label='Export'
-        tooltip='Open exporter'
+        tooltip='Open Export'
         disabled={isDisabled}
         onClick={() => {
           onOpenPane('export');

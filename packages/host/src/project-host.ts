@@ -95,6 +95,17 @@ export type ProjectHostOptions = Pick<
     /** Each revision fact; reporting only, never fatal. */
     onRevisionEvent: (event: HostRevisionEvent) => void;
     /**
+     * The contained shell `shell` runs on, given this host's run→checkout map (D1, F5) and its run→chat map (D19; a run
+     * this host did not admit has none). Only the desktop composition passes it; the MCP endpoint never lists `shell`,
+     * so external agents cannot reach it.
+     */
+    shell?:
+      | ((
+          checkouts: ReadonlyMap<string, TurnCheckout>,
+          chatOfRun: (runId: string) => string | undefined,
+        ) => HostToolRegistryOptions['shell'])
+      | undefined;
+    /**
      * W8 TS-S4: build this project's placement port. Every attempt is placed and settled through it and runs on its
      * grant's tools; the launcher reconciles the chats whose leases it holds (RH-R16). Absent: the in-process session
      * over this project's revisions ({@link ProjectRevisions.placement}), whose grants are the host's tool registry
@@ -149,6 +160,18 @@ const settled =
       const entry = ledger.runs[runId];
       return entry !== undefined && !liveStates.has(entry.lifecycle) && !unsettled.has(runId);
     });
+  };
+
+/* The chat a client started a run under here, from the host's own count of entered runs; undefined for any other run. */
+const chatOfEntered =
+  (entered: ReadonlyMap<string, ReadonlySet<string>>) =>
+  (runId: string): string | undefined => {
+    for (const [chatId, runIds] of entered) {
+      if (runIds.has(runId)) {
+        return chatId;
+      }
+    }
+    return undefined;
   };
 
 /**
@@ -244,7 +267,10 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     events: options.onRevisionEvent,
   });
 
-  /* One registry over every run's root (`checkouts`), or one rooted at a placed attempt's checkout. */
+  /* One registry over every run's root (`checkouts`), or one rooted at a placed attempt's checkout. The shell reads
+   * each call's checkout by run id from this host's map, whichever registry serves the call, and a call's chat from the
+   * runs a client started here: the chat the host admitted the run under, never model input. */
+  const shell = options.shell?.(checkouts, chatOfEntered(entered));
   const registryOptions = {
     revisions: revisions.history,
     filesystem: (root: string) => fileSystem.open(root),
@@ -259,6 +285,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     /* `prepare_kernel` (D7, D37): offered to Tau's agent and, through the host-local MCP endpoint, to ACP agents. */
     ...(options.prepareKernel === undefined ? {} : { prepareKernel: options.prepareKernel }),
     ...(options.preparableKernels === undefined ? {} : { preparableKernels: options.preparableKernels }),
+    ...(shell === undefined ? {} : { shell }),
   };
   const toolRegistry = createHostToolRegistry({ ...registryOptions, workspaceRoot, checkouts });
   const toolRegistryFor = (root: string, filesystem?: HostToolFileSystem): ToolRegistry =>
@@ -288,6 +315,20 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
 
   const launcher = createAgentLauncher({
     chats: createNodeChatStore({ workspaceRoot }),
+    /*
+     * The record device this project's chat segments sync under, read once the store has opened: an external turn's
+     * session is this device's, whatever its host id. Never the machine's name, which a rename changes, two machines
+     * can share, and a synced row must not carry (EQ10(a)). A store that cannot say answers none, and the host then
+     * refuses an external start retryably and resumes a run only on its own session (round 27): it never stamps none.
+     */
+    deviceId: async () => {
+      try {
+        await revisions.opened();
+        return await revisions.chatDevice();
+      } catch {
+        return undefined;
+      }
+    },
     modelTransport: options.modelTransport,
     credential: options.credential,
     systemPrompt: options.systemPrompt,

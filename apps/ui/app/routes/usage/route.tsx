@@ -41,6 +41,7 @@ import type { Handle } from '#types/matches.types.js';
 export const meta: MetaFunction = () => [{ title: 'Tau usage' }, { name: 'robots', content: 'noindex, nofollow' }];
 
 export const handle: Handle = {
+  title: 'Tau usage',
   enableOverflowY: true,
 };
 

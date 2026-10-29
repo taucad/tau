@@ -16,6 +16,8 @@ export default defineConfig({
   },
   test: {
     include: ['src/git/**/*.spec.ts'],
+    // Deletion acceptance owns guarded disposable services through its dedicated targets.
+    exclude: ['src/git/project-deletion.spec.ts', 'src/git/project-deletion-race.spec.ts'],
     environment: 'node',
     globalSetup: [resolve(import.meta.dirname, 'src/git/global-setup.ts')],
     testTimeout: 600_000,

@@ -80,6 +80,8 @@
  * | 73 | `opening.fetching(linked conflict) → backedUp` + parent `mergeConflicted` | **D87**: another checkout's conflict is announced without entering `conflicted`; this branch stays in sync |
  * | 74 | `queued(leaseLost on another branch) --syncBackoff--> opening → pushing` offering both sets | **D87**: a lost lease never narrows the retry away from this branch's own revisions |
  * | 75 | `selectSyncFacet(queued(leaseLost on another branch), undecided)` | **D90**: a branch whose conflict waits on the person says so instead of "will catch up and try again" |
+ * | 76 | `pushing → recording → backedUp` over a leftover `projection` or another remote's entry | an accepted push is judged on what this remote is owed: `ok` with its lag and no backoff, and the entry it could not settle stays queued |
+ * | 77 | `pushing → recording → queued` (refused chat ref beside a leftover `projection`) | a ref this push offered and the remote refused is still a `retry` |
  */
 
 import { createActor, createAsyncLogic } from 'xstate';
@@ -3306,6 +3308,97 @@ describe('syncMachine telemetry (W36 D1)', () => {
       expect(attempts(harness).at(-1)).toMatchObject({ direction: 'push', outcome: 'quota_refused' });
     });
     expect(attempts(harness).at(-1)).not.toHaveProperty('lagMilliseconds');
+
+    harness.stop();
+  });
+
+  /* Row 76: entries this push could not settle stay queued, but never make it a retry. */
+  const leftover = (entry: Readonly<{ ref: string; operation: 'push' | 'projection'; remote?: string }>) => ({
+    ...entry,
+    head: 'h-old',
+    expected: undefined,
+    reason: 'This record could not be restored.',
+    recordedAt: 1,
+  });
+
+  it.each([
+    ['a projection entry the fetch could not restore', leftover({ ref: chatRef, operation: 'projection' })],
+    ['an entry owed to a remote this project left', leftover({ ref: mainRef, operation: 'push', remote: 'github-42' })],
+  ])('row 76: reports an accepted push as ok over %s, and keeps it queued', async (_label, entry) => {
+    const harness = start({ pending: { version: 1, entries: [entry] } });
+    await openCleanly(harness);
+
+    mint(harness, 'r1');
+    harness.clock.advance(2000);
+    await settleWhenRunning(harness.effects, 'push', {
+      output: pushResult({ name: mainRef, status: 'updated', head: 'h1' }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+    });
+
+    const attempt = attempts(harness).at(-1);
+    expect(attempt).toMatchObject({ direction: 'push', outcome: 'ok' });
+    /* From the mint, not from the leftover entry's `recordedAt`. */
+    expect(attempt?.['lagMilliseconds']).toEqual(expect.any(Number));
+    expect(attempt?.['lagMilliseconds']).toBeLessThan(60_000);
+    const { context } = harness.actor.getSnapshot();
+    expect(context).toMatchObject({ failure: 'none', attempt: 0, unsyncedSince: undefined });
+    expect(context.pending).toEqual([entry]);
+    expect(harness.effects.inputsFor('writePending').at(-1)).toMatchObject({ record: { entries: [entry] } });
+
+    /* No backoff: nothing pulls or pushes again on its own. */
+    harness.clock.advance(10 * 60_000);
+    await Promise.resolve();
+    expect(harness.effects.inputsFor('push')).toHaveLength(1);
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(1);
+
+    harness.stop();
+  });
+
+  it('row 76: answers a correlated request backedUp when only a leftover projection entry remains', async () => {
+    const harness = start({
+      pending: { version: 1, entries: [leftover({ ref: chatRef, operation: 'projection' })] },
+    });
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'syncNow', pushId: 'publish-1' });
+    await settleWhenRunning(harness.effects, 'push', {
+      output: pushResult({ name: mainRef, status: 'updated', head: 'h1' }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+
+    await vi.waitFor(() => {
+      expect(harness.parent.events).toContainEqual({ type: 'pushSettled', pushId: 'publish-1', outcome: 'backedUp' });
+    });
+
+    harness.stop();
+  });
+
+  it('row 77: still reports a refused offered ref as a retry beside a leftover projection entry', async () => {
+    const projection = leftover({ ref: 'refs/tau/evidence/exports', operation: 'projection' });
+    const harness = start({ pending: { version: 1, entries: [projection] } });
+    await openCleanly(harness);
+
+    mint(harness, 'r1');
+    harness.clock.advance(2000);
+    await settleWhenRunning(harness.effects, 'push', {
+      output: pushResult(
+        { name: mainRef, status: 'updated', head: 'h1' },
+        { name: chatRef, status: 'rejected', head: undefined, reason: 'non-fast-forward' },
+      ),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+    });
+
+    expect(attempts(harness).at(-1)).toMatchObject({ direction: 'push', outcome: 'retry' });
+    expect(attempts(harness).at(-1)).not.toHaveProperty('lagMilliseconds');
+    const { context } = harness.actor.getSnapshot();
+    expect(context).toMatchObject({ failure: 'retry', attempt: 1, error: 'non-fast-forward' });
+    expect(context.pending.map((entry) => entry.ref)).toEqual([projection.ref, chatRef]);
 
     harness.stop();
   });

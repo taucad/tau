@@ -9,7 +9,6 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { Locator, Page } from 'playwright';
 import { desktopE2EApiUrl } from '#support/config.js';
-import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import {
   gatewayFixtureFinalText,
@@ -50,6 +49,7 @@ import {
   basicAuthorization,
   forgetSeededProjects,
   leaveProjectStorageHeadroom,
+  launchTauCloudDesktop,
   mintOneTimeToken,
   projectLfsBytes,
   readStorageUsage,
@@ -275,9 +275,9 @@ const saveRevisionInBrowser = async (client: BrowserClient): Promise<void> => {
   await client.page.keyboard.press(`${modifier}+KeyS`);
 };
 
-/** Focus the visible Monaco surface before sending keyboard input to its model. */
+/** Focus the visible CodeMirror content before sending keyboard input. */
 const focusBrowserEditor = async (client: BrowserClient): Promise<void> => {
-  const surface = client.page.locator('.editor-container:visible .monaco-editor .view-lines').last();
+  const surface = client.page.locator('.editor-container:visible .cm-editor .cm-content').last();
   await surface.waitFor({ state: 'visible', timeout: 60_000 });
   await surface.click();
 };
@@ -618,7 +618,7 @@ afterEach(async ({ task }) => {
 
 describe('one account, two clients', () => {
   it('should sign a desktop shell and a real browser in from one sign-in', async () => {
-    desktop = await launchDesktopApp({ token: bearer });
+    desktop = await launchTauCloudDesktop(bearer);
     /* S40's rule, and the reason for the one-time token: better-auth allows
      * three `/sign-in/email` attempts per ten seconds per address, and a second
      * sign-in for the browser would spend two of them on every run. */
@@ -1313,7 +1313,7 @@ describe('a project on the browser client', () => {
   it('should merge and render ordered replies from two divergent device logs', async () => {
     const accountOwner = required(owner, 'The account was not seeded.');
     const source = await launchBrowserClient({ oneTimeToken: await mintOneTimeToken(bearer) });
-    const destination = await launchDesktopApp({ token: bearer });
+    const destination = await launchTauCloudDesktop(bearer);
     const fixture = await startGatewayFixture({
       toolCalls: [{ name: 'use_skill', input: { skillName: 'cad-openscad' } }],
     });
@@ -1489,7 +1489,7 @@ describe('a project on the browser client', () => {
   }, 900_000);
 
   it('should open a system skill link as read-only on desktop', async () => {
-    const client = await launchDesktopApp({ token: bearer });
+    const client = await launchTauCloudDesktop(bearer);
     const fixture = await startGatewayFixture({
       toolCalls: [{ name: 'use_skill', input: { skillName: 'cad-openscad' } }],
     });
@@ -1514,13 +1514,13 @@ describe('a project on the browser client', () => {
       await client.page.getByRole('button', { name: 'cad-openscad', exact: true }).last().click();
       await client.page.keyboard.press('Control+KeyF');
       await client.page.getByRole('button', { name: 'View source', exact: true }).last().click();
-      const skillEditor = client.page.locator('.editor-container:visible .monaco-editor').last();
+      const skillEditor = client.page.locator('.editor-container:visible .cm-editor').last();
       await skillEditor.waitFor({ state: 'visible', timeout: 60_000 });
-      const skillSource = skillEditor.locator('.view-lines');
+      const skillSource = skillEditor.locator('.cm-content');
       await expect
         .poll(
           async () => {
-            // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- Monaco's token spans need rendered spacing; textContent collapses `OpenSCAD authoring` into `OpenSCADauthoring`.
+            // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- CodeMirror token spans need rendered spacing; textContent collapses `OpenSCAD authoring` into `OpenSCADauthoring`.
             const renderedSource = await skillSource.innerText();
             return renderedSource.replaceAll('\u00A0', ' ');
           },
@@ -1530,8 +1530,8 @@ describe('a project on the browser client', () => {
           },
         )
         .toContain('OpenSCAD authoring');
-      await expect(skillEditor.getByRole('textbox').getAttribute('aria-autocomplete')).resolves.toBe('none');
-      // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- read the same rendered Monaco text before and after the rejected edit.
+      await expect(skillEditor.locator('.cm-content').getAttribute('contenteditable')).resolves.toBe('false');
+      // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- read the same rendered CodeMirror text before and after the rejected edit.
       const sourceBeforeEditAttempt = await skillSource.innerText();
       await skillEditor.getByRole('textbox').focus();
       await client.page.keyboard.insertText('must-not-edit-system-skill');
@@ -1634,7 +1634,7 @@ describe('live and automatic', () => {
   beforeAll(async () => {
     const accountOwner = required(owner, 'The account was not seeded.');
     source = await launchBrowserClient({ oneTimeToken: await mintOneTimeToken(bearer) });
-    destination = await launchDesktopApp({ token: bearer });
+    destination = await launchTauCloudDesktop(bearer);
     fixture = await startGatewayFixture({
       toolCalls: [{ name: 'create_file', input: { targetFile: 'agent.scad', content: 'cube(3); // the agent\n' } }],
     });
@@ -2093,7 +2093,7 @@ describe('close and continue', () => {
         `${continuationOwner} ${direction}: source close revision changed paths must contain main.scad`,
       ).toContain('main.scad');
 
-      destination = await launchDesktopApp({ token: bearer });
+      destination = await launchTauCloudDesktop(bearer);
       const destinationSlug = await openTauCloudProject(destination.page, {
         projectsUrl: 'app://tau/projects',
         name: 'W18 Browser To Desktop',
@@ -2124,7 +2124,7 @@ describe('close and continue', () => {
   it('should continue a desktop quit on a fresh browser with the same file, close revision and chat', async () => {
     const direction = 'desktop→browser';
     const marker = 'cube([22, 22, 22]); // W18-a4 desktop close\n';
-    const source = await launchDesktopApp({ token: bearer });
+    const source = await launchTauCloudDesktop(bearer);
     let destination: BrowserClient | undefined;
     let fixture: Awaited<ReturnType<typeof installGatewayFixture>> | undefined;
     try {
@@ -2270,7 +2270,7 @@ describe('close and continue', () => {
    * `services.dispose()`, which was fire-and-forget until W19 landed it. The
    * continuation that should follow it is the case below. */
   it('should hold a desktop quit open until its services have quiesced', async () => {
-    const quitting = await launchDesktopApp({ token: bearer });
+    const quitting = await launchTauCloudDesktop(bearer);
     let log = '';
     try {
       await quitting.page.goto('app://tau/projects', { waitUntil: 'domcontentloaded' });
@@ -2552,7 +2552,7 @@ describe('chat attachments across two clients', () => {
     const photoName = `${createHash('sha256').update(photoBytes).digest('hex')}.jpg`;
     const specName = `${createHash('sha256').update(specBytes).digest('hex')}.pdf`;
     const source = await launchBrowserClient({ oneTimeToken: await mintOneTimeToken(bearer) });
-    const destination = await launchDesktopApp({ token: bearer });
+    const destination = await launchTauCloudDesktop(bearer);
     const fixture = await startGatewayFixture({ toolCalls: [] });
     const firstPrompt = 'Read the attached specification and photo.';
     const secondPrompt = 'Keep going from the same attachments.';
@@ -2883,7 +2883,7 @@ describe('backup by default and one library', () => {
   }, 900_000);
 
   it('should bring the account’s Tau Cloud projects to a device that materializes on sign-in', async () => {
-    const third = await launchDesktopApp({ token: bearer });
+    const third = await launchTauCloudDesktop(bearer);
     try {
       await third.page.goto('app://tau/?settings=filesystem', { waitUntil: 'domcontentloaded' });
       await third.page

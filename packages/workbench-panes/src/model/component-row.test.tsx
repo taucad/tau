@@ -64,7 +64,7 @@ describe('Model component rows', () => {
 
     const row = screen.getByRole('button', { name: 'planetary_housing' }).parentElement;
     expect(getComponentRowPaddingLeft({ depth: node.depth, rootDepth: 0 })).toBe(8);
-    expect(row).toHaveClass('h-7', 'rounded-md', 'text-sm', 'leading-5');
+    expect(row).toHaveClass('h-7', 'pointer-coarse:h-8', 'rounded-md', 'text-sm', 'leading-5');
     expect(row).toHaveStyle({ paddingLeft: '8px' });
   });
 
@@ -84,13 +84,19 @@ describe('Model component rows', () => {
 
     const preview = screen.getByRole('button', { name: 'Preview planetary_housing' });
     const row = preview.parentElement;
-    expect(row).toHaveClass('h-22');
-    expect(preview).toHaveClass('size-20', 'rounded-xs');
+    // The preview is fixed in px so enlarged text grows the name, not the picture.
+    expect(row).toHaveClass('h-[calc(80px+--spacing(2))]');
+    expect(preview).toHaveClass('size-[80px]', 'rounded-xs');
     expect(preview).toHaveAttribute('tabindex', '-1');
     // A refreshing preview keeps its last image, dimmed.
     expect(preview.querySelector('img')).toHaveClass('opacity-50');
     // The frame is a sibling of the selection button, never nested in it.
-    expect(screen.getByRole('button', { name: 'planetary_housing' }).querySelector('button')).toBeNull();
+    // The refreshing preview's status describes the selection button; its name stays the part's.
+    const selection = screen.getByRole('button', { name: 'planetary_housing' });
+    expect(selection).toHaveAccessibleDescription('Preview loading');
+    // Read once, as that description: the status text itself is not in the row's reading order.
+    expect(screen.getByText('Preview loading')).not.toBeVisible();
+    expect(selection.querySelector('button')).toBeNull();
 
     await userEvent.setup().click(preview);
     expect(openPartGallery).toHaveBeenCalledWith({
@@ -292,5 +298,57 @@ describe('Model component rows', () => {
       unitId,
       source: 'explorer',
     });
+  });
+});
+
+describe('Model tree rows on touch (PN-TREE-1, PN-TREE-2)', () => {
+  it('labels a hidden part in words, not only by dimming, and names it hidden', () => {
+    renderComponentRow(rowProperties({ node: createNode(firstComponentId, 'planetary_housing'), isHidden: true }));
+
+    const rowButton = screen.getByRole('button', { name: 'planetary_housing, hidden' });
+    expect(rowButton).toHaveTextContent('Hidden');
+  });
+
+  it('keeps a part named by itself while its preview loads or fails, and describes the preview status', () => {
+    const node = createNode(firstComponentId, 'planetary_housing');
+    const view = renderComponentRow(rowProperties({ node, preview: { status: 'pending' } }));
+    const loading = screen.getByRole('button', { name: 'planetary_housing' });
+    expect(loading).toHaveAttribute('aria-busy', 'true');
+    expect(loading).toHaveAccessibleDescription('Preview loading');
+    view.unmount();
+
+    const failedView = renderComponentRow(rowProperties({ node, isHidden: true, preview: { status: 'failed' } }));
+    expect(screen.getByRole('button', { name: 'planetary_housing, hidden' })).toHaveAccessibleDescription(
+      'Preview unavailable',
+    );
+    failedView.unmount();
+
+    renderComponentRow(rowProperties({ node, preview: undefined }));
+    const ready = screen.getByRole('button', { name: 'planetary_housing' });
+    expect(ready).not.toHaveAttribute('aria-describedby');
+  });
+
+  it('keeps a hidden part Show action in view without hover, and shows it again', () => {
+    const graphicsRef = createStaticGraphicsRef();
+    renderComponentRow(
+      rowProperties({ node: createNode(firstComponentId, 'planetary_housing'), isHidden: true, graphicsRef }),
+    );
+    const show = screen.getByRole('button', { name: 'Show planetary_housing' });
+
+    expect(show).toHaveClass('opacity-100');
+    fireEvent.click(show);
+    expect(graphicsRef.sent).toContainEqual(expect.objectContaining({ componentId: firstComponentId }));
+  });
+
+  it('shows row actions on coarse pointers as well as touch-only devices (D12)', () => {
+    renderComponentRow(rowProperties({ node: createNode(firstComponentId, 'planetary_housing') }));
+
+    expect(screen.getByRole('button', { name: 'Hide planetary_housing' })).toHaveClass('pointer-coarse:opacity-100');
+  });
+
+  it('does not label a visible part hidden', () => {
+    renderComponentRow(rowProperties({ node: createNode(firstComponentId, 'planetary_housing') }));
+
+    expect(screen.getByRole('button', { name: 'planetary_housing' })).not.toHaveTextContent('Hidden');
   });
 });

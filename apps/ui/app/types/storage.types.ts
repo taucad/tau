@@ -1,4 +1,4 @@
-import type { Chat } from '@taucad/chat';
+import type { Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import type { PartialDeep } from 'type-fest';
 import type { EditorState, EditorStateInput } from '#types/editor.types.js';
@@ -92,6 +92,18 @@ export type ChatStorage = {
    * read-modify-write race that lets one field's write undo another's.
    */
   patchChat<K extends keyof Chat>(chatId: string, key: K, value: Chat[K]): Promise<Chat | undefined>;
+  /**
+   * The device-relative Tau placement (`origin`, a `loopback:` daemon) a record written before placement moved to the
+   * device still carries (XD2), when `accept` holds for it: the caller adopts it into this device's placements. The
+   * record is never written by this: no device can prove the host is its own. Answered from the record's last read
+   * where there is one. A write that sets the chat's `activeExecution` drops the host (it is superseded); every other
+   * write keeps it.
+   */
+  adoptLegacyChatPlacement?(
+    chatId: string,
+    projectId: string | undefined,
+    accept: (hostId: TauAgentHostId) => Promise<boolean>,
+  ): Promise<TauAgentHostId | undefined>;
   /** Advance user-action recency monotonically. */
   touchChatRecency(chatId: string, requestedAt: number): Promise<Chat | undefined>;
   /**

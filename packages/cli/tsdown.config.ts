@@ -47,6 +47,8 @@ const cliConfig: UserConfig = {
     'runtime-worker': 'src/runtime.worker.ts',
     // Imported by URL inside each `tau test` GeoSpec pool worker, so it must be a real file.
     'geospec-exporter': 'src/geospec/exporter-module.ts',
+    // Imported by URL inside each `tau test` GeoSpec pool worker for Tau's module VM.
+    'geospec-module-vm': 'src/geospec/module-vm.ts',
   },
   format: 'esm',
   outDir: 'dist/bin',

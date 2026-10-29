@@ -36,6 +36,7 @@ import type {
 } from '@taucad/types';
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { getErrno } from '@taucad/utils/error';
+import { sha256Bytes } from '@taucad/utils/hash';
 import type {
   FileStatOptions,
   DirectoryEntry,
@@ -630,6 +631,36 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     return encoding === 'utf8' ? new TextDecoder('utf-8', { fatal: true }).decode(bytes) : bytes;
   }
 
+  /*
+   * Project files are digested by the base in one call, beside their bytes; an
+   * overlay entry is read and digested here, as `readFile` serves it. The mask
+   * refuses exactly as `readFile` does.
+   */
+  const baseHashFiles = base.hashFiles?.bind(base);
+  const overlayDigest = async (target: string): Promise<string> => {
+    try {
+      return await sha256Bytes(await readFile(target));
+    } catch (error) {
+      const code = getErrno(error);
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
+        return 'missing';
+      }
+      throw error;
+    }
+  };
+  const hashFiles = async (paths: readonly string[]): Promise<Record<string, string>> => {
+    const targets = paths.map((path) => readablePath(canonical(path)));
+    const routes = await Promise.all(targets.map(async (target) => routeFor(target)));
+    const project = targets.filter((_, index) => routes[index]!.kind !== 'overlay');
+    const projectDigests = project.length === 0 ? {} : await baseHashFiles!(project);
+    const digests = await Promise.all(
+      targets.map(async (target, index) =>
+        routes[index]!.kind === 'overlay' ? overlayDigest(target) : projectDigests[target]!,
+      ),
+    );
+    return Object.fromEntries(paths.map((path, index) => [path, digests[index]!]));
+  };
+
   function readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>>;
   function readdirWithStats(
     path: string,
@@ -829,6 +860,7 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       base.dispose();
     },
     readFile,
+    ...(baseHashFiles === undefined ? {} : { hashFiles }),
     async provenance(path) {
       const target = readablePath(canonical(path));
       return provenanceForRoute(target, await routeFor(target));

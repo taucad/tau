@@ -854,6 +854,43 @@ describe('Electron renderer runtime helpers', () => {
     expect(reports).toHaveLength(1);
   });
 
+  it('should pass a well-formed limit through the exit report and drop a malformed one', async () => {
+    const { takeElectronRuntimeHostExit } = await import('#electron/_internal/runtime-host-lease.js');
+    const exceeded = {
+      limit: 'host.utility.resident',
+      unit: 'By',
+      maximum: 1000,
+      demand: { kind: 'measured', value: 1500 },
+      origin: 'host-option',
+    };
+    const reports: unknown[] = [];
+    for (const [hostId, relayed] of [
+      ['host-exceeded', exceeded],
+      ['host-malformed', { ...exceeded, maximum: 'lots' }],
+    ] as const) {
+      const { bridge, target, dispatch } = setupRendererHarness(hostId);
+      // oxlint-disable-next-line no-await-in-loop -- Each harness installs the shared relay listener in turn.
+      const received = await requestElectronRuntimePort({ bridge, target });
+      takeElectronRuntimeHostExit(received)?.((detail) => reports.push(detail));
+      dispatch(
+        'message',
+        relayEvent({
+          taucadRelay: hostExitRelayTag,
+          hostId,
+          exitCode: 1,
+          released: false,
+          exceeded: relayed,
+          peakResidentBytes: 1500,
+        }),
+      );
+    }
+
+    expect(reports).toEqual([
+      { exitCode: 1, released: false, exceeded },
+      { exitCode: 1, released: false },
+    ]);
+  });
+
   it('keeps the host-exit listener alive across release so a kill is still explained', async () => {
     const { takeElectronRuntimeHostExit } = await import('#electron/_internal/runtime-host-lease.js');
     const { bridge, target, dispatch } = setupRendererHarness('host-released');

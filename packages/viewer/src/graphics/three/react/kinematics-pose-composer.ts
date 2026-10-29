@@ -54,6 +54,7 @@ type PoseTarget = Readonly<{
 }>;
 
 const delta = new Matrix4();
+const placement = new Matrix4();
 
 function collectPoseTargets(root: Object3D, mechanism: Mechanism): PoseTarget[] {
   const linkByComponent = new Map<string, string>();
@@ -92,7 +93,8 @@ function collectPoseTargets(root: Object3D, mechanism: Mechanism): PoseTarget[] 
   return targets;
 }
 
-function applyPose(targets: readonly PoseTarget[], pose: Pose | undefined): void {
+function applyPose(targets: readonly PoseTarget[], pose: Pose | undefined, changed: Object3D[]): void {
+  changed.length = 0;
   for (const { object, linkId, pre, post } of targets) {
     const linkTransform = pose?.linkTransforms[linkId];
     if (linkTransform) {
@@ -100,8 +102,11 @@ function applyPose(targets: readonly PoseTarget[], pose: Pose | undefined): void
     } else {
       delta.identity();
     }
-    object.matrix.multiplyMatrices(pre, delta).multiply(post);
-    object.updateMatrixWorld(true);
+    placement.multiplyMatrices(pre, delta).multiply(post);
+    if (!object.matrix.equals(placement)) {
+      object.matrix.copy(placement);
+      changed.push(object);
+    }
   }
 }
 
@@ -114,18 +119,19 @@ export function createKinematicsPoseComposer(root: Object3D): KinematicsPoseComp
   let mechanism: Mechanism | undefined;
   let revision: number | undefined;
   let targets: PoseTarget[] = [];
-  let targetObjects: Object3D[] = [];
+  const changed: Object3D[] = [];
 
-  const reset = (): void => {
-    applyPose(targets, undefined);
-    syncGltfSurfaceBatchMatrices(root, targetObjects);
+  const reset = (): boolean => {
+    applyPose(targets, undefined, changed);
+    syncGltfSurfaceBatchMatrices(root, changed);
+    const didChange = changed.length > 0;
     for (const target of targets) {
       target.object.matrixAutoUpdate = target.matrixAutoUpdate;
     }
     targets = [];
-    targetObjects = [];
     mechanism = undefined;
     revision = undefined;
+    return didChange;
   };
 
   return {
@@ -133,16 +139,16 @@ export function createKinematicsPoseComposer(root: Object3D): KinematicsPoseComp
       if (unit.mechanism === mechanism && unit.revision === revision) {
         return false;
       }
+      let didChange = false;
       if (unit.mechanism !== mechanism) {
-        reset();
+        didChange = reset();
         mechanism = unit.mechanism;
         targets = mechanism ? collectPoseTargets(root, mechanism) : [];
-        targetObjects = targets.map(({ object }) => object);
       }
       revision = unit.revision;
-      applyPose(targets, unit.pose);
-      syncGltfSurfaceBatchMatrices(root, targetObjects);
-      return true;
+      applyPose(targets, unit.pose, changed);
+      syncGltfSurfaceBatchMatrices(root, changed);
+      return didChange || changed.length > 0;
     },
     reset,
   };

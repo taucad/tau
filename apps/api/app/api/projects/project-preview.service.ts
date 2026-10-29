@@ -1,8 +1,12 @@
 /* oxlint-disable new-cap, @typescript-eslint/consistent-type-imports -- Nest decorators and runtime DI metadata. */
 import { createHash } from 'node:crypto';
-import { BadRequestException, HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
-import { projectPreviewMaximumBytes } from '#api/projects/project-preview.dto.js';
+import { projectPreviewKey, projectPreviewMaximumBytes } from '#api/projects/project-preview-key.js';
+import type { PreviewWriter } from '#api/projects/project-preview-store.js';
+
+/** Injection token for the preview writer: tau-storage's in tau-api (DC1). */
+export const previewWriterKey = Symbol('PreviewWriter');
 
 /* oxlint-disable no-bitwise -- WebP header fields are packed bit ranges. */
 /** Small, non-animated WebP; no SVG/script, full model, or unbounded decoder allocation. */
@@ -101,7 +105,10 @@ export const inspectProjectPreview = (bytes: Uint8Array<ArrayBuffer>): { width: 
 
 @Injectable()
 export class ProjectPreviewService {
-  public constructor(private readonly storage: ObjectStorageService) {}
+  public constructor(
+    private readonly storage: ObjectStorageService,
+    @Inject(previewWriterKey) private readonly writer: PreviewWriter,
+  ) {}
 
   public async put(input: {
     ownerId: string;
@@ -115,14 +122,11 @@ export class ProjectPreviewService {
     }
     inspectProjectPreview(bytes);
     const version = createHash('sha256').update(bytes).digest('hex');
-    const result = await this.storage.putBlob({
-      namespace: 'tenants',
-      key: this.key(input),
-      tier: 'private',
-      body: bytes,
-      contentType: 'image/webp',
-      cacheControl: 'private, no-store',
-      ...(input.createOnly ? { ifNoneMatch: '*' } : {}),
+    const result = await this.writer({
+      ownerId: input.ownerId,
+      projectId: input.projectId,
+      bytes,
+      createOnly: input.createOnly === true,
     });
     if (result.lost) {
       throw new HttpException('A saved preview already exists', HttpStatus.PRECONDITION_FAILED);
@@ -131,7 +135,7 @@ export class ProjectPreviewService {
   }
 
   public async get(input: { ownerId: string; projectId: string }): Promise<Uint8Array<ArrayBuffer> | undefined> {
-    const key = this.key(input);
+    const key = projectPreviewKey(input);
     const metadata = await this.storage.headBlob({ namespace: 'tenants', key, tier: 'private' });
     if (!metadata) {
       return undefined;
@@ -154,9 +158,5 @@ export class ProjectPreviewService {
     const bytes = Buffer.concat(chunks);
     inspectProjectPreview(bytes);
     return bytes;
-  }
-
-  private key(input: { ownerId: string; projectId: string }): string {
-    return `${input.ownerId}/repos/${input.projectId}/catalog-preview.webp`;
   }
 }

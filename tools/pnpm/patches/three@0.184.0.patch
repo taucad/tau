@@ -1,87 +1,8 @@
-diff --git a/src/renderers/common/RenderObject.js b/src/renderers/common/RenderObject.js
---- a/src/renderers/common/RenderObject.js
-+++ b/src/renderers/common/RenderObject.js
-@@ -325,6 +325,14 @@
- 
- 		};
- 
-+		this.onObjectDispose = () => {
-+
-+			this.dispose();
-+
-+		};
-+
-+		if ( this.object.isInstancedMesh === true ) this.object.addEventListener( 'dispose', this.onObjectDispose );
-+
- 		this.material.addEventListener( 'dispose', this.onMaterialDispose );
- 		this.geometry.addEventListener( 'dispose', this.onGeometryDispose );
- 
-@@ -903,6 +911,37 @@
- 	 */
- 	dispose() {
- 
-+		const state = this._nodes.has( this ) ? this._nodes.get( this ).nodeBuilderState : undefined;
-+		if ( this.object.isInstancedMesh === true && state !== undefined && state.usedTimes === 1 ) {
-+
-+			// Retire generated attributes with their last node-builder state user.
-+			const released = new Set();
-+			for ( const attribute of this.getAttributes() ) {
-+
-+				const buffer = attribute.isInterleavedBufferAttribute ? attribute.data : attribute;
-+				if ( buffer !== this.object.instanceMatrix && buffer.array === this.object.instanceMatrix.array ) {
-+
-+					if ( released.has( buffer ) ) {
-+
-+						this._geometries.attributes.data.delete( attribute );
-+						this._geometries.attributes.info.destroyAttribute( attribute );
-+
-+					}
-+					else {
-+
-+						this._geometries.attributes.delete( attribute );
-+						this._geometries.attributes.backend.delete( buffer );
-+						released.add( buffer );
-+
-+					}
-+
-+				}
-+
-+			}
-+		}
-+
-+		if ( this.object.isInstancedMesh === true ) this.object.removeEventListener( 'dispose', this.onObjectDispose );
-+
- 		this.material.removeEventListener( 'dispose', this.onMaterialDispose );
- 		this.geometry.removeEventListener( 'dispose', this.onGeometryDispose );
- 
-diff --git a/src/renderers/webgpu/utils/WebGPUBindingUtils.js b/src/renderers/webgpu/utils/WebGPUBindingUtils.js
---- a/src/renderers/webgpu/utils/WebGPUBindingUtils.js
-+++ b/src/renderers/webgpu/utils/WebGPUBindingUtils.js
-@@ -611,6 +611,20 @@
- 
- 		const bindingsData = backend.get( bindGroup );
- 
-+		// Unshared bindings are cloned per render object by NodeBuilderState.
-+		// Shared group buffers belong to their surviving users.
-+		for ( const binding of bindGroup.bindings ) {
-+
-+			if ( binding.isUniformBuffer && binding.groupNode.shared !== true ) {
-+
-+				const bindingData = backend.get( binding );
-+				if ( bindingData.buffer !== undefined ) bindingData.buffer.destroy();
-+				backend.delete( binding );
-+
-+			}
-+
-+		}
-+
- 		if ( bindingsData.layout ) {
- 
- 			bindingsData.layout.usedTimes --;
 diff --git a/build/three.webgpu.js b/build/three.webgpu.js
+index da6128d25f3443904c6be038b761365b7c884168..d70958d419ba13415ebf2c66e5311b4b55c27a1d 100644
 --- a/build/three.webgpu.js
 +++ b/build/three.webgpu.js
-@@ -155,6 +155,7 @@
+@@ -155,6 +155,7 @@ class NodeMaterialObserver {
  		if ( hasInitialized === false ) {
  
  			this.getRenderObjectData( renderObject );
@@ -89,7 +10,7 @@ diff --git a/build/three.webgpu.js b/build/three.webgpu.js
  
  			return true;
  
-@@ -29723,6 +29724,14 @@
+@@ -29723,6 +29724,14 @@ class RenderObject {
  
  		};
  
@@ -104,11 +25,10 @@ diff --git a/build/three.webgpu.js b/build/three.webgpu.js
  		this.material.addEventListener( 'dispose', this.onMaterialDispose );
  		this.geometry.addEventListener( 'dispose', this.onGeometryDispose );
  
-@@ -30300,6 +30309,37 @@
- 	 * Frees internal resources.
+@@ -30301,6 +30310,37 @@ class RenderObject {
  	 */
  	dispose() {
-+
+ 
 +		const state = this._nodes.has( this ) ? this._nodes.get( this ).nodeBuilderState : undefined;
 +		if ( this.object.isInstancedMesh === true && state !== undefined && state.usedTimes === 1 ) {
 +
@@ -139,10 +59,28 @@ diff --git a/build/three.webgpu.js b/build/three.webgpu.js
 +		}
 +
 +		if ( this.object.isInstancedMesh === true ) this.object.removeEventListener( 'dispose', this.onObjectDispose );
- 
++
  		this.material.removeEventListener( 'dispose', this.onMaterialDispose );
  		this.geometry.removeEventListener( 'dispose', this.onGeometryDispose );
-@@ -78657,6 +78697,20 @@
+ 
+@@ -33624,7 +33664,15 @@ class Textures extends DataMap {
+ 		const mipHeight = size.height >> activeMipmapLevel;
+ 
+ 		let depthTexture = renderTarget.depthTexture || depthTextureMips[ activeMipmapLevel ];
+-		const useDepthTexture = renderTarget.depthBuffer === true || renderTarget.stencilBuffer === true;
++		// A separate WebGL multisample framebuffer already owns its depth renderbuffer.
++		// Keep explicit/sampleable depth and every other backend/attachment path unchanged.
++		const renderbufferOnlyDepth = this.backend.isWebGLBackend === true &&
++			renderTarget.depthBuffer === true && renderTarget.stencilBuffer === false &&
++			renderTarget.resolveDepthBuffer === false && sampleCount > 1 &&
++			renderTarget.isXRRenderTarget !== true && renderTarget.multiview !== true &&
++			textures[ 0 ].isCubeTexture !== true && size.depth === 1 && activeMipmapLevel === 0 &&
++			this.backend.extensions.has( 'WEBGL_multisampled_render_to_texture' ) === false;
++		const useDepthTexture = ( renderTarget.depthBuffer === true || renderTarget.stencilBuffer === true ) && ! renderbufferOnlyDepth;
+ 
+ 		let textureNeedsUpdate = false;
+ 
+@@ -78657,6 +78705,20 @@ class WebGPUBindingUtils {
  
  		const bindingsData = backend.get( bindGroup );
  
@@ -164,9 +102,10 @@ diff --git a/build/three.webgpu.js b/build/three.webgpu.js
  
  			bindingsData.layout.usedTimes --;
 diff --git a/build/three.webgpu.nodes.js b/build/three.webgpu.nodes.js
+index 6834eb44a42521d85dd0da42bc84c09f286c9d3b..57135fb68307dffd58adcc5ffc9afbfb62db835b 100644
 --- a/build/three.webgpu.nodes.js
 +++ b/build/three.webgpu.nodes.js
-@@ -155,6 +155,7 @@
+@@ -155,6 +155,7 @@ class NodeMaterialObserver {
  		if ( hasInitialized === false ) {
  
  			this.getRenderObjectData( renderObject );
@@ -174,7 +113,7 @@ diff --git a/build/three.webgpu.nodes.js b/build/three.webgpu.nodes.js
  
  			return true;
  
-@@ -29723,6 +29724,14 @@
+@@ -29723,6 +29724,14 @@ class RenderObject {
  
  		};
  
@@ -189,11 +128,10 @@ diff --git a/build/three.webgpu.nodes.js b/build/three.webgpu.nodes.js
  		this.material.addEventListener( 'dispose', this.onMaterialDispose );
  		this.geometry.addEventListener( 'dispose', this.onGeometryDispose );
  
-@@ -30300,6 +30309,37 @@
- 	 * Frees internal resources.
+@@ -30301,6 +30310,37 @@ class RenderObject {
  	 */
  	dispose() {
-+
+ 
 +		const state = this._nodes.has( this ) ? this._nodes.get( this ).nodeBuilderState : undefined;
 +		if ( this.object.isInstancedMesh === true && state !== undefined && state.usedTimes === 1 ) {
 +
@@ -224,10 +162,28 @@ diff --git a/build/three.webgpu.nodes.js b/build/three.webgpu.nodes.js
 +		}
 +
 +		if ( this.object.isInstancedMesh === true ) this.object.removeEventListener( 'dispose', this.onObjectDispose );
- 
++
  		this.material.removeEventListener( 'dispose', this.onMaterialDispose );
  		this.geometry.removeEventListener( 'dispose', this.onGeometryDispose );
-@@ -78657,6 +78697,20 @@
+ 
+@@ -33624,7 +33664,15 @@ class Textures extends DataMap {
+ 		const mipHeight = size.height >> activeMipmapLevel;
+ 
+ 		let depthTexture = renderTarget.depthTexture || depthTextureMips[ activeMipmapLevel ];
+-		const useDepthTexture = renderTarget.depthBuffer === true || renderTarget.stencilBuffer === true;
++		// A separate WebGL multisample framebuffer already owns its depth renderbuffer.
++		// Keep explicit/sampleable depth and every other backend/attachment path unchanged.
++		const renderbufferOnlyDepth = this.backend.isWebGLBackend === true &&
++			renderTarget.depthBuffer === true && renderTarget.stencilBuffer === false &&
++			renderTarget.resolveDepthBuffer === false && sampleCount > 1 &&
++			renderTarget.isXRRenderTarget !== true && renderTarget.multiview !== true &&
++			textures[ 0 ].isCubeTexture !== true && size.depth === 1 && activeMipmapLevel === 0 &&
++			this.backend.extensions.has( 'WEBGL_multisampled_render_to_texture' ) === false;
++		const useDepthTexture = ( renderTarget.depthBuffer === true || renderTarget.stencilBuffer === true ) && ! renderbufferOnlyDepth;
+ 
+ 		let textureNeedsUpdate = false;
+ 
+@@ -78657,6 +78705,20 @@ class WebGPUBindingUtils {
  
  		const bindingsData = backend.get( bindGroup );
  
@@ -249,9 +205,10 @@ diff --git a/build/three.webgpu.nodes.js b/build/three.webgpu.nodes.js
  
  			bindingsData.layout.usedTimes --;
 diff --git a/src/materials/nodes/manager/NodeMaterialObserver.js b/src/materials/nodes/manager/NodeMaterialObserver.js
+index 29e26ebd184194778f88326ca6a3d47da3b94c8d..02134aa617c39918887b387c800bbfe26728b405 100644
 --- a/src/materials/nodes/manager/NodeMaterialObserver.js
 +++ b/src/materials/nodes/manager/NodeMaterialObserver.js
-@@ -147,6 +147,7 @@
+@@ -147,6 +147,7 @@ class NodeMaterialObserver {
  		if ( hasInitialized === false ) {
  
  			this.getRenderObjectData( renderObject );
@@ -259,6 +216,109 @@ diff --git a/src/materials/nodes/manager/NodeMaterialObserver.js b/src/materials
  
  			return true;
  
+diff --git a/src/renderers/common/RenderObject.js b/src/renderers/common/RenderObject.js
+index 14bf760075160551f34bda034a6e79d5ef40c17a..3593add94ed5f63a638c4d1887c4cfb18bb57a77 100644
+--- a/src/renderers/common/RenderObject.js
++++ b/src/renderers/common/RenderObject.js
+@@ -325,6 +325,14 @@ class RenderObject {
+ 
+ 		};
+ 
++		this.onObjectDispose = () => {
++
++			this.dispose();
++
++		};
++
++		if ( this.object.isInstancedMesh === true ) this.object.addEventListener( 'dispose', this.onObjectDispose );
++
+ 		this.material.addEventListener( 'dispose', this.onMaterialDispose );
+ 		this.geometry.addEventListener( 'dispose', this.onGeometryDispose );
+ 
+@@ -903,6 +911,37 @@ class RenderObject {
+ 	 */
+ 	dispose() {
+ 
++		const state = this._nodes.has( this ) ? this._nodes.get( this ).nodeBuilderState : undefined;
++		if ( this.object.isInstancedMesh === true && state !== undefined && state.usedTimes === 1 ) {
++
++			// Retire generated attributes with their last node-builder state user.
++			const released = new Set();
++			for ( const attribute of this.getAttributes() ) {
++
++				const buffer = attribute.isInterleavedBufferAttribute ? attribute.data : attribute;
++				if ( buffer !== this.object.instanceMatrix && buffer.array === this.object.instanceMatrix.array ) {
++
++					if ( released.has( buffer ) ) {
++
++						this._geometries.attributes.data.delete( attribute );
++						this._geometries.attributes.info.destroyAttribute( attribute );
++
++					}
++					else {
++
++						this._geometries.attributes.delete( attribute );
++						this._geometries.attributes.backend.delete( buffer );
++						released.add( buffer );
++
++					}
++
++				}
++
++			}
++		}
++
++		if ( this.object.isInstancedMesh === true ) this.object.removeEventListener( 'dispose', this.onObjectDispose );
++
+ 		this.material.removeEventListener( 'dispose', this.onMaterialDispose );
+ 		this.geometry.removeEventListener( 'dispose', this.onGeometryDispose );
+ 
+diff --git a/src/renderers/common/Textures.js b/src/renderers/common/Textures.js
+index 32c4b07b42f53d84eac56fda18c4de0483f0a3a9..dbf5aae83ecf152c2ecd2c6cc3af74cf0797f281 100644
+--- a/src/renderers/common/Textures.js
++++ b/src/renderers/common/Textures.js
+@@ -79,7 +79,15 @@ class Textures extends DataMap {
+ 		const mipHeight = size.height >> activeMipmapLevel;
+ 
+ 		let depthTexture = renderTarget.depthTexture || depthTextureMips[ activeMipmapLevel ];
+-		const useDepthTexture = renderTarget.depthBuffer === true || renderTarget.stencilBuffer === true;
++		// A separate WebGL multisample framebuffer already owns its depth renderbuffer.
++		// Keep explicit/sampleable depth and every other backend/attachment path unchanged.
++		const renderbufferOnlyDepth = this.backend.isWebGLBackend === true &&
++			renderTarget.depthBuffer === true && renderTarget.stencilBuffer === false &&
++			renderTarget.resolveDepthBuffer === false && sampleCount > 1 &&
++			renderTarget.isXRRenderTarget !== true && renderTarget.multiview !== true &&
++			textures[ 0 ].isCubeTexture !== true && size.depth === 1 && activeMipmapLevel === 0 &&
++			this.backend.extensions.has( 'WEBGL_multisampled_render_to_texture' ) === false;
++		const useDepthTexture = ( renderTarget.depthBuffer === true || renderTarget.stencilBuffer === true ) && ! renderbufferOnlyDepth;
+ 
+ 		let textureNeedsUpdate = false;
+ 
+diff --git a/src/renderers/webgpu/utils/WebGPUBindingUtils.js b/src/renderers/webgpu/utils/WebGPUBindingUtils.js
+index 2f9488d22deacc333c2c68dd7facfdf61c8daa38..b66595840329589183d3d1dc035a29ae548c8ce1 100644
+--- a/src/renderers/webgpu/utils/WebGPUBindingUtils.js
++++ b/src/renderers/webgpu/utils/WebGPUBindingUtils.js
+@@ -611,6 +611,20 @@ class WebGPUBindingUtils {
+ 
+ 		const bindingsData = backend.get( bindGroup );
+ 
++		// Unshared bindings are cloned per render object by NodeBuilderState.
++		// Shared group buffers belong to their surviving users.
++		for ( const binding of bindGroup.bindings ) {
++
++			if ( binding.isUniformBuffer && binding.groupNode.shared !== true ) {
++
++				const bindingData = backend.get( binding );
++				if ( bindingData.buffer !== undefined ) bindingData.buffer.destroy();
++				backend.delete( binding );
++
++			}
++
++		}
++
+ 		if ( bindingsData.layout ) {
+ 
+ 			bindingsData.layout.usedTimes --;
 diff --git a/src/renderers/webgl/WebGLTextures.js b/src/renderers/webgl/WebGLTextures.js
 --- a/src/renderers/webgl/WebGLTextures.js
 +++ b/src/renderers/webgl/WebGLTextures.js

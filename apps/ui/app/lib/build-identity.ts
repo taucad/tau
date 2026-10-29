@@ -23,6 +23,24 @@ export const readBuildId = (): number => {
   return Number.isFinite(published) ? published : 0;
 };
 
+/** The release a build without one reports: a valid label the API records as `_OTHER`. */
+export const unknownBuildRelease = '0000000';
+const releaseLabel = /^[\da-f]{7,12}$|^\d+\.\d+\.\d+$/u;
+
+/**
+ * This build's release label for runtime telemetry: the desktop app's semver (compiled in), else the web build's short
+ * commit the server published as `window.ENV.TAU_RELEASE`, else {@link unknownBuildRelease}.
+ *
+ * @returns The release label.
+ */
+export const readBuildRelease = (): string => {
+  const compiled = typeof tauBuildRelease === 'string' ? tauBuildRelease : '';
+  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- globalThis.window is absent in a worker.
+  const published = compiled === '' && globalThis.window ? globalThis.window.ENV?.TAU_RELEASE : undefined;
+  const release = compiled === '' ? published : compiled;
+  return typeof release === 'string' && releaseLabel.test(release) ? release : unknownBuildRelease;
+};
+
 /**
  * This bundle's build identity as a string, for equality checks and records.
  *
@@ -41,4 +59,76 @@ export const readBuildIdentity = (): string => {
   const isDocument = typeof document !== 'undefined';
   const scriptPath = isDocument ? undefined : (globalThis as { location?: Location }).location?.pathname;
   return scriptPath ?? '0';
+};
+
+/** Same-origin route that names the build the server renders pages for (`routes/health.build.ts`). */
+export const buildIdentityPath = '/health/build';
+
+/** Milliseconds {@link askLiveBuild} waits for the server before calling it unreachable. */
+export const liveBuildIdTimeout = 4000;
+
+/**
+ * What the server said about its live build: the build id; `none` when the host has no
+ * build endpoint or names no build (a 404, or an OK non-JSON document: the desktop and
+ * `tau serve` hosts answer this path with their SPA `index.html`); `unreachable` when no
+ * whole answer came in time (the request or its body timed out, was reset or cut short) or the
+ * answer was any other failure (5xx, 408, 429, …), which may pass. Only a JSON body read whole
+ * that names no build is `none`.
+ */
+export type LiveBuildAnswer = number | 'none' | 'unreachable';
+
+let liveBuildRequest: Promise<LiveBuildAnswer> | undefined;
+
+const requestLiveBuild = async (): Promise<LiveBuildAnswer> => {
+  let response: Response;
+  try {
+    response = await fetch(buildIdentityPath, {
+      cache: 'no-store',
+      credentials: 'omit',
+      signal: AbortSignal.timeout(liveBuildIdTimeout),
+    });
+  } catch {
+    return 'unreachable';
+  }
+  // Only a missing route or an SPA document means "no endpoint"; any other failure may pass.
+  if (response.status === 404) {
+    return 'none';
+  }
+  if (!response.ok) {
+    return 'unreachable';
+  }
+  if (!(response.headers.get('content-type') ?? '').includes('application/json')) {
+    return 'none';
+  }
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    // The body timed out, was reset or arrived cut short: the endpoint exists, its answer did not come whole.
+    return 'unreachable';
+  }
+  const published = typeof body === 'object' && body !== null && 'buildId' in body ? body.buildId : undefined;
+  const liveBuildId = Number(published);
+  return Number.isFinite(liveBuildId) && liveBuildId > 0 ? liveBuildId : 'none';
+};
+
+/**
+ * Ask the server which build it renders pages for, so a page can tell a deploy
+ * from a genuine failure (`#lib/stale-build-recovery`) and a live tab from a
+ * stale one (`#filesystem/build-skew`). Never answered from a cache and never
+ * throws; callers that ask while a request is in flight share it, and a later
+ * caller asks afresh.
+ *
+ * @returns The live build id, `none` or `unreachable` ({@link LiveBuildAnswer}).
+ */
+export const askLiveBuild = async (): Promise<LiveBuildAnswer> => {
+  const settle = async (): Promise<LiveBuildAnswer> => {
+    try {
+      return await requestLiveBuild();
+    } finally {
+      liveBuildRequest = undefined;
+    }
+  };
+  liveBuildRequest ??= settle();
+  return liveBuildRequest;
 };

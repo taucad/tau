@@ -1,14 +1,10 @@
-import { Copy, EllipsisVertical, Pencil, Trash, ArrowUpRightSquare } from 'lucide-react';
+import { Copy, Pencil, Trash, ArrowUpRightSquare } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import type { ProjectListItem } from '#types/project-library.types.js';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@taucad/ui/components/dropdown-menu';
+import type { CloudProject } from '#hooks/use-cloud-projects.js';
+import { ProjectActionMenu } from '#components/project-library/project-cloud-delete.js';
+import { DropdownMenuItem, DropdownMenuSeparator } from '@taucad/ui/components/dropdown-menu';
 import { Button } from '@taucad/ui/components/button';
 import type { ProjectActions } from '#components/project-library/project-library.js';
 import { Popover, PopoverContent } from '@taucad/ui/components/popover';
@@ -21,7 +17,7 @@ import { toast } from '#components/ui/sonner.js';
 import { NativeFileManagerIcon, useOpenProjectInFileManager } from '#hooks/use-native-file-manager.js';
 
 type ProjectActionDropdownProps = {
-  readonly project: ProjectListItem;
+  readonly project: ProjectListItem & { readonly cloud?: CloudProject };
   readonly actions: ProjectActions;
   readonly onRename?: () => void;
 };
@@ -71,103 +67,97 @@ export function ProjectActionDropdown({ project, actions, onRename }: ProjectAct
 
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant='ghost' size='icon' aria-label={`Actions for ${project.name}`}>
-            <EllipsisVertical className='size-4' />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align='end'
-          onCloseAutoFocus={(event) => {
-            if (isRenaming && onRename) {
-              event.preventDefault();
-              setIsRenaming(false);
-              onRename();
-            }
-          }}
-        >
-          {isDeleted ? (
-            <>
-              <DropdownMenuItem
-                data-action='restore'
-                data-id={project.id}
-                data-name={project.name}
-                onClick={() => {
-                  actions.handleRestore(project);
-                }}
-              >
-                <ArrowUpRightSquare />
-                <span>Restore</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                variant='destructive'
-                data-action='permanent-delete'
-                data-id={project.id}
-                data-name={project.name}
-                onClick={() => {
-                  actions.handlePermanentlyDelete(project);
-                }}
-              >
-                <Trash />
-                <span>Delete permanently</span>
-              </DropdownMenuItem>
-            </>
-          ) : (
-            <>
-              {openInFileManager ? (
-                <>
-                  <DropdownMenuItem
-                    data-action='open-in-file-manager'
-                    disabled={openInFileManager.isOpening}
-                    aria-busy={openInFileManager.isOpening}
-                    onClick={() => {
-                      void openInFileManager.open();
-                    }}
-                  >
-                    <NativeFileManagerIcon icon={openInFileManager.icon} />
-                    <span>{openInFileManager.label}</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                </>
-              ) : null}
-              <DropdownMenuItem
-                data-action='duplicate'
-                data-id={project.id}
-                data-name={project.name}
-                onClick={async () => actions.handleDuplicate(project)}
-              >
-                <Copy />
-                <span>Duplicate</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                data-action='rename'
-                data-id={project.id}
-                data-name={project.name}
-                onClick={() => {
-                  setNewName(project.name);
-                  setIsRenaming(true);
-                }}
-              >
-                <Pencil />
-                <span>Rename</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                variant='destructive'
-                data-action='delete'
-                data-id={project.id}
-                data-name={project.name}
-                onClick={() => {
-                  void requestTrash();
-                }}
-              >
-                <Trash />
-                <span>Move to Trash</span>
-              </DropdownMenuItem>
-            </>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <ProjectActionMenu
+        name={project.name}
+        cloud={project.cloud}
+        onCloseAutoFocus={(event) => {
+          if (isRenaming && onRename) {
+            event.preventDefault();
+            setIsRenaming(false);
+            onRename();
+          }
+        }}
+      >
+        {isDeleted ? (
+          <>
+            <DropdownMenuItem
+              data-action='restore'
+              data-id={project.id}
+              data-name={project.name}
+              onClick={() => {
+                actions.handleRestore(project);
+              }}
+            >
+              <ArrowUpRightSquare />
+              <span>Restore</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              variant='destructive'
+              data-action='permanent-delete'
+              data-id={project.id}
+              data-name={project.name}
+              onClick={() => {
+                actions.handlePermanentlyDelete(project);
+              }}
+            >
+              <Trash />
+              <span>Delete permanently</span>
+            </DropdownMenuItem>
+          </>
+        ) : (
+          <>
+            {openInFileManager ? (
+              <>
+                <DropdownMenuItem
+                  data-action='open-in-file-manager'
+                  disabled={openInFileManager.isOpening}
+                  aria-busy={openInFileManager.isOpening}
+                  onClick={() => {
+                    void openInFileManager.open();
+                  }}
+                >
+                  <NativeFileManagerIcon icon={openInFileManager.icon} />
+                  <span>{openInFileManager.label}</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            ) : null}
+            <DropdownMenuItem
+              data-action='duplicate'
+              data-id={project.id}
+              data-name={project.name}
+              onClick={async () => actions.handleDuplicate(project)}
+            >
+              <Copy />
+              <span>Duplicate</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              data-action='rename'
+              data-id={project.id}
+              data-name={project.name}
+              onClick={() => {
+                setNewName(project.name);
+                setIsRenaming(true);
+              }}
+            >
+              <Pencil />
+              <span>Rename</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              variant='destructive'
+              data-action='delete'
+              data-id={project.id}
+              data-name={project.name}
+              onClick={() => {
+                void requestTrash();
+              }}
+            >
+              <Trash />
+              <span>Move to Trash</span>
+            </DropdownMenuItem>
+          </>
+        )}
+      </ProjectActionMenu>
 
       <Popover open={isRenaming && !onRename} onOpenChange={setIsRenaming}>
         <PopoverContent align='end' className='w-64 p-1'>

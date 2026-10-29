@@ -39,11 +39,14 @@ export const previewProjectFileInQuickLook = async (options: PreviewProjectFileO
     return;
   }
 
-  const [{ createRuntimeClient }, resolveOptions] = await Promise.all([
+  const [{ createRuntimeClient }, resolveOptions, { observeRuntimeClient }] = await Promise.all([
     import('@taucad/runtime/client'),
     desktopKernelOptions(options.projectId, undefined, getComputeReuseMode())(),
+    import('#telemetry/runtime-telemetry.js'),
   ]);
   const client = createRuntimeClient(resolveOptions({ fileSystem: options.runtimeFileSystem }));
+  /* Runtime observability (FR-14): the conversion's attempts, reported by the renderer that issues them. */
+  const stopObserving = observeRuntimeClient(client, 'quicklook');
   const document = client.open({ source: { path }, watch: false });
   try {
     const exported = await document.export('usdz');
@@ -61,5 +64,6 @@ export const previewProjectFileInQuickLook = async (options: PreviewProjectFileO
   } finally {
     document.close();
     await client.shutdown();
+    stopObserving();
   }
 };

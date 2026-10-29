@@ -48,9 +48,9 @@ const geometryHelpers = createGeometryTestHelpers();
 
 type OpenCascadeSnapshotForTest = {
   kind: 'opencascade-native-handle';
-  version: 1;
-  format: 'brep-ascii';
-  occtFormatVersion: 'TopTools_FormatVersion_CURRENT';
+  version: 2;
+  format: 'bintools';
+  occtFormatVersion: 'BinTools_FormatVersion_CURRENT';
   entries: Array<{
     brep: Uint8Array<ArrayBuffer>;
     metadata: Record<string, unknown>;
@@ -61,9 +61,9 @@ function expectOpenCascadeSnapshot(value: unknown): OpenCascadeSnapshotForTest {
   expect(value).toEqual(
     expect.objectContaining({
       kind: 'opencascade-native-handle',
-      version: 1,
-      format: 'brep-ascii',
-      occtFormatVersion: 'TopTools_FormatVersion_CURRENT',
+      version: 2,
+      format: 'bintools',
+      occtFormatVersion: 'BinTools_FormatVersion_CURRENT',
       entries: expect.any(Array),
     }),
   );
@@ -508,7 +508,7 @@ export default function main() {
       expect(await readGltfMaterialNames(gltfBytes)).toEqual(['']);
     });
 
-    it('should serialize native handles as versioned geometry-only BRep snapshots', async () => {
+    it('should serialize native handles as versioned geometry-only binary BRep snapshots', async () => {
       const geometryFile = createGeometryFile('named-pbr.ts');
       const result = await renderGeometry({ file: geometryFile, parameters: {} });
       assertRenderingSuccess(result, 'named PBR shape createGeometry for native-handle snapshot');
@@ -517,7 +517,7 @@ export default function main() {
       const oc = registered.libcascade as OpenCascadeInstance | undefined;
       expect(oc, 'expected worker to have registered libcascade module').toBeDefined();
       const cascade = oc!;
-      const writeSpy = vi.spyOn(cascade.BRepTools, 'Write');
+      const writeSpy = vi.spyOn(cascade.BinTools, 'Write');
 
       const definition = await resolveRuntimePluginDefinition('kernel', opencascadeKernel());
       const kernelRuntime = createMockKernelRuntime();
@@ -561,7 +561,7 @@ export default function main() {
           expect.any(String),
           false,
           false,
-          cascade.TopTools_FormatVersion.TopTools_FormatVersion_CURRENT,
+          cascade.BinTools_FormatVersion.BinTools_FormatVersion_CURRENT,
           expect.any(Object),
         );
 
@@ -597,10 +597,35 @@ export default function main() {
             const curvedSnapshot = expectOpenCascadeSnapshot(
               definition.serializeHandle!({ handle: curvedHandle }, kernelRuntime, context),
             );
+            // The render triangulated the live shape; the snapshot carries its geometry only.
+            const writeBinary = (target: typeof cylinderShape, withTriangles: boolean): number => {
+              const path = `/tmp/tau_opencascade_test_triangles_${withTriangles}.bin`;
+              const range = new cascade.Message_ProgressRange();
+              try {
+                cascade.BinTools.Write(
+                  target,
+                  path,
+                  withTriangles,
+                  false,
+                  cascade.BinTools_FormatVersion.BinTools_FormatVersion_CURRENT,
+                  range,
+                );
+                return cascade.FS.readFile(path).byteLength;
+              } finally {
+                range.delete();
+                cascade.FS.unlink(path);
+              }
+            };
+            const snapshotBytes = curvedSnapshot.entries[0]!.brep.byteLength;
+            expect(snapshotBytes).toBe(writeBinary(cylinderShape, false));
+            expect(snapshotBytes).toBeLessThan(writeBinary(cylinderShape, true));
             const curvedRestored = definition.deserializeHandle!(
               { serialized: structuredClone(curvedSnapshot) },
               kernelRuntime,
               context,
+            );
+            expect(writeBinary(curvedRestored[0]!.shape, true), 'a restored shape has no triangulation').toBe(
+              snapshotBytes,
             );
             const curvedProperties = new cascade.GProp_GProps();
             try {

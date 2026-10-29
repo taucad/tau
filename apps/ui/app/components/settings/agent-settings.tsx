@@ -4,6 +4,8 @@ import { Switch } from '@taucad/ui/components/switch';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
+import { DefaultPermissionsSetting } from '#components/settings/default-permissions-setting.js';
+import { desktopPermissions } from '#filesystem/desktop-permissions.js';
 
 function SettingRow({
   label,
@@ -15,13 +17,14 @@ function SettingRow({
   readonly children: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <div className='flex items-center justify-between gap-4'>
-      <div className='flex flex-col gap-0.5'>
+    // The whole row is the switch's target: the bare switch alone is too small to tap.
+    <label className='flex items-center justify-between gap-4'>
+      <span className='flex flex-col gap-0.5'>
         <span className='text-sm font-medium'>{label}</span>
         <span className='text-xs text-muted-foreground'>{description}</span>
-      </div>
+      </span>
       {children}
-    </div>
+    </label>
   );
 }
 
@@ -87,6 +90,19 @@ export function AgentSettings(): React.JSX.Element {
           </SettingsItem>
         </CardContent>
       </SettingsSectionCard>
+
+      {desktopPermissions() === undefined ? null : (
+        <SettingsItem settingId='default-permissions'>
+          <SettingsSectionCard>
+            <CardHeader>
+              <CardTitle>Permissions</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <DefaultPermissionsSetting />
+            </CardContent>
+          </SettingsSectionCard>
+        </SettingsItem>
+      )}
     </div>
   );
 }

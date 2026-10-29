@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { and, eq, inArray } from 'drizzle-orm';
 import { DatabaseService } from '#database/database.service.js';
+import { assertActiveProjectLocked } from '#database/project-lifecycle.js';
 import { withOwnerLock } from '#database/owner-lock.js';
 import { projectGitLfsObject } from '#database/schema.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
@@ -109,6 +110,7 @@ export class GitLfsService {
     /** Absolute base of this repository's LFS endpoints. */
     endpoint: string;
   }): Promise<LfsBatchOutcome> {
+    await this.repositories.resolveActiveLocator(args.access);
     if (args.operation === 'download') {
       const records = await this.repositories.readLfsObjects(
         args.access.projectId,
@@ -133,35 +135,37 @@ export class GitLfsService {
          URL for bytes that are gone (D18). */
       const confirmed = await this.#clearUnreachable(args.access, [...held.keys()]);
 
-      const objects = await Promise.all(
-        args.objects.map(async (object): Promise<LfsObjectResponse> => {
-          const stored = confirmed.has(object.oid) ? held.get(object.oid) : undefined;
-          if (stored === undefined) {
+      const objects = await this.#withActiveProject(args.access, async () =>
+        Promise.all(
+          args.objects.map(async (object): Promise<LfsObjectResponse> => {
+            const stored = confirmed.has(object.oid) ? held.get(object.oid) : undefined;
+            if (stored === undefined) {
+              return {
+                oid: object.oid,
+                size: object.size,
+                authenticated: true,
+                error: {
+                  code: 404,
+                  message: 'Object does not exist on the Tau Hosted Remote',
+                },
+              };
+            }
             return {
               oid: object.oid,
               size: object.size,
               authenticated: true,
-              error: {
-                code: 404,
-                message: 'Object does not exist on the Tau Hosted Remote',
+              actions: {
+                download: {
+                  href: await this.objectStorage.presignGet({
+                    ...stored.location,
+                    expiresInSeconds: transferExpirySeconds,
+                  }),
+                  expires_in: transferExpirySeconds,
+                },
               },
             };
-          }
-          return {
-            oid: object.oid,
-            size: object.size,
-            authenticated: true,
-            actions: {
-              download: {
-                href: await this.objectStorage.presignGet({
-                  ...stored.location,
-                  expiresInSeconds: transferExpirySeconds,
-                }),
-                expires_in: transferExpirySeconds,
-              },
-            },
-          };
-        }),
+          }),
+        ),
       );
       return { status: 200, body: { transfer: 'basic', objects } };
     }
@@ -221,7 +225,7 @@ export class GitLfsService {
       }
     }
 
-    return {
+    return this.#withActiveProject(args.access, async () => ({
       status: 200,
       body: {
         transfer: 'basic',
@@ -267,11 +271,12 @@ export class GitLfsService {
           }),
         ),
       },
-    };
+    }));
   }
 
   /** Verify exact stored bytes before making the reserved object readable. */
   public async verify(args: { access: GitAccess; oid: string; size: number }): Promise<boolean> {
+    await this.repositories.resolveActiveLocator(args.access);
     if (args.size > projectFileLimitBytes) {
       return false;
     }
@@ -318,6 +323,18 @@ export class GitLfsService {
       },
     });
     return outcome === 'finalized' || outcome === 'already-finalized';
+  }
+
+  /** Signing completes under the same project lock that admits deletion. */
+  async #withActiveProject<T>(access: GitAccess, work: () => Promise<T>): Promise<T> {
+    return this.databaseService.database.transaction(async (transaction) => {
+      await assertActiveProjectLocked(
+        transaction,
+        access.projectId,
+        access.viaDevice === undefined ? access.callerId : access.ownerId,
+      );
+      return work();
+    });
   }
 
   /**
@@ -368,6 +385,11 @@ export class GitLfsService {
       return new Set();
     }
     return withOwnerLock(this.databaseService.database, access.ownerId, async (transaction) => {
+      await assertActiveProjectLocked(
+        transaction,
+        access.projectId,
+        access.viaDevice === undefined ? access.callerId : access.ownerId,
+      );
       const cleared = await transaction
         .update(projectGitLfsObject)
         .set({ unreachableAt: null })

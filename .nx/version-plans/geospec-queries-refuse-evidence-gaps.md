@@ -1,6 +1,4 @@
 ---
-geospec: minor
-geospec-engine: minor
 cli: minor
 host: minor
 ---

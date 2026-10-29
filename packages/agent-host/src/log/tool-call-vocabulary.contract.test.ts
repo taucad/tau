@@ -20,9 +20,11 @@ import { describe, expect, it } from 'vitest';
 import { createEventLogAppender } from '#log/event-log-appender.js';
 import { withLength } from '#log/event-log-storage.fixture.js';
 import type { BareEventLogStorage } from '#log/event-log-storage.fixture.js';
+import { classifyLogRow } from '#log/event-schema.js';
 import { reduceEventLog } from '#log/reducer.js';
 import { serializeLogEvent } from '#log/serialization.js';
 import { tauToolKinds } from '#harness/tools.js';
+import { interruptedToolOutput } from '#harness/interrupt-recovery.js';
 import { toolInputToProvider } from '#harness/session-record.js';
 import type { AgentLogEvent, LogEventBase, ProviderMessage } from '#log/event-types.js';
 
@@ -168,7 +170,8 @@ describe('the durable tool-call vocabulary', () => {
     expect(tauToolKinds.get('machine_action')).toBe('other');
     expect(tauToolKinds.get('list_machines')).toBe('read');
     expect(tauToolKinds.get('install_packages')).toBe('edit');
-    expect(tauToolKinds.size).toBe(28);
+    expect(tauToolKinds.get('shell')).toBe('execute');
+    expect(tauToolKinds.size).toBe(29);
   });
 
   it('preserves an ACP fact this vocabulary has no event for without acting on it', async () => {
@@ -195,6 +198,60 @@ describe('the durable tool-call vocabulary', () => {
     const replayed = await reader.read();
     expect(replayed[0]).toMatchObject({ type: 'acp.plan', entries: [{ content: 'Measure the part' }] });
     expect(reduceEventLog(replayed).map((message) => message.id)).toEqual(['after-plan']);
+    await reader.close();
+  });
+
+  it('records an approval spent before the call it approves, and a call with no output as interrupted (D23)', async () => {
+    const storage = memoryStorage();
+    const input = toolInputToProvider({
+      id: 'message-shell-input',
+      toolCallId: 'tau-call-3',
+      toolName: 'shell',
+      input: { command: 'npm install' },
+    });
+    const events: AgentLogEvent[] = [
+      { ...base(0), type: 'message.appended', message: input },
+      {
+        ...base(1),
+        type: 'approval.spent',
+        phase: 'spent',
+        interruptId: 'interrupt-1',
+        toolCallId: 'tau-call-3',
+        approvalKey: 'shell:digest',
+      },
+      {
+        ...base(2),
+        type: 'message.appended',
+        message: interruptedToolOutput({
+          id: 'message-shell-output',
+          toolCallId: 'tau-call-3',
+          toolName: 'shell',
+          timestamp: 0,
+        }),
+      },
+    ];
+    const writer = await createEventLogAppender(withLength(storage));
+    for (const event of events) {
+      // oxlint-disable-next-line no-await-in-loop -- one physical append order is the contract.
+      await writer.append(event);
+    }
+    await writer.close();
+
+    const reader = await createEventLogAppender(withLength(storage));
+    const replayed = await reader.read();
+    expect(replayed).toEqual(events);
+    /* A known row, not an opaque one: a reader of this build folds it. */
+    expect(classifyLogRow(replayed[1])).toMatchObject({ class: 'known' });
+    /* It renders nothing and replays nothing: the reducer keeps only the call and its interrupted output. */
+    expect(reduceEventLog(replayed).map((message) => message.id)).toEqual([
+      'message-shell-input',
+      'message-shell-output',
+    ]);
+    expect(reduceEventLog(replayed)[1]).toMatchObject({
+      role: 'tool-output',
+      isError: true,
+      content: { status: 'interrupted', errorCode: 'CLIENT_DISCONNECTED' },
+    });
     await reader.close();
   });
 });

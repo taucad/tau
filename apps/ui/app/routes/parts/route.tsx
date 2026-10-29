@@ -26,13 +26,12 @@ import { cookieName } from '#constants/cookie.constants.js';
 import { useImmediateSearchParameter } from '#hooks/use-immediate-search-parameter.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
-import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { useFeature } from '#flags/use-feature.js';
 import { enumParameter, stringParameter } from '#utils/search-parameter.codecs.js';
 import { isFunction } from '#utils/function.utils.js';
 import type { Handle } from '#types/matches.types.js';
 
-export const handle: Handle = { enableOverflowY: true };
+export const handle: Handle = { title: 'Parts', enableOverflowY: true };
 export const meta: MetaFunction = () => [
   { title: 'Parts · Tau' },
   { name: 'description', content: 'Browse, preview and remix reusable parametric CAD parts.' },
@@ -57,26 +56,18 @@ const searchShortcutOptions = { ignoreInputs: true };
 
 export default function Parts(): React.JSX.Element {
   const isEnabled = useFeature('partsWarehouse');
-  const settings = useSettingsDialog();
   return isEnabled ? (
     <PartsCatalog />
   ) : (
     <PageContent>
       <PageHeader title='Parts' />
+      {/* No setting turns Parts on in this build: the flag is not offered in Experimental settings. */}
       <PanelEmptyState
         icon={Package}
+        titleLevel={2}
         title='Parts is turned off'
-        description='Enable Parts warehouse in Experimental settings to browse the catalog.'
-      >
-        <Button
-          variant='outline'
-          onClick={() => {
-            settings.open('experimental');
-          }}
-        >
-          Open settings
-        </Button>
-      </PanelEmptyState>
+        description='Parts is not available in this version of Tau yet.'
+      />
     </PageContent>
   );
 }
@@ -212,6 +203,7 @@ function PartsCatalog(): React.JSX.Element {
         <div className='h-64'>
           <PanelEmptyState
             icon={SearchX}
+            titleLevel={2}
             title={query.trim() ? `No parts match “${query.trim()}”` : 'No parts match this category'}
             description='Try another name or category.'
           >

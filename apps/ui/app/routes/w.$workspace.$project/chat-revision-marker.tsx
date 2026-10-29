@@ -1,9 +1,10 @@
+import { ChatRevisionSummary } from '#routes/w.$workspace.$project/chat-revision-summary.js';
 import { memo, useCallback, useMemo, useState, useSyncExternalStore } from 'react';
-import { ChevronDown, RotateCw } from 'lucide-react';
+import { RotateCw } from 'lucide-react';
 import { messageRole } from '@taucad/chat/constants';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
+import { Collapsible } from '@taucad/ui/components/collapsible';
 import { cn } from '@taucad/ui/utils/cn';
-import { ActionButton, ActionsRow, disclosureMotion } from '@taucad/ui/components/actions';
+import { ActionButton, ActionsRow } from '@taucad/ui/components/actions';
 import { RevisionDetails, RevisionMenu } from '#routes/w.$workspace.$project/revision-marker.js';
 import { turnRevisionGlyph } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import {
@@ -200,7 +201,6 @@ export const ChatRevisionMarker = memo(function ({
   const fileCount = useRevisionChanges(savedRevision).length;
   const { continueChat } = useChatActions();
   const workspace = useProjectWorkspace({ enableNoContext: true });
-  const [isOpen, setIsOpen] = useState(false);
 
   if (!isUserMessage || state.kind === 'hidden') {
     return undefined;
@@ -261,49 +261,36 @@ export const ChatRevisionMarker = memo(function ({
   /* The whole header is the disclosure (R11); Retry stays a separate button
      because it is an action, not disclosure. */
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen} aria-label='Turn revision' className={cardClassName}>
-      <div className='flex items-start'>
-        <CollapsibleTrigger asChild>
-          <button
-            type='button'
-            aria-label={`${label}${fileSuffix ?? ''} · revision details`}
-            className='group/revision flex min-w-0 flex-1 cursor-action items-start gap-2 rounded-b-lg px-2 py-1.5 text-left text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:focus-outline'
-          >
-            {status}
-            <ChevronDown
-              aria-hidden
-              className='mt-px size-3.5 shrink-0 transition-transform group-data-[state=open]/revision:rotate-180 motion-reduce:transition-none'
-            />
-          </button>
-        </CollapsibleTrigger>
-        {state.kind === 'unconfirmed' ? (
+    <ChatRevisionSummary
+      label={`${label}${fileSuffix ?? ''}`}
+      status={status}
+      action={
+        state.kind === 'unconfirmed' ? (
           <ActionButton verb='Retry' icon={RotateCw} className='mt-0.5 mr-1' onClick={continueChat} />
-        ) : null}
-      </div>
-      {/* Padding sits on an inner element, so the height motion starts from zero. */}
-      <CollapsibleContent className={disclosureMotion}>
-        {savedRevision === undefined ? (
-          <div className='flex flex-col items-start gap-2 px-3 pt-1 pb-2'>
-            <p className='text-xs leading-relaxed text-muted-foreground'>{turnRevisionDetail(state)}</p>
-            {state.kind === 'conflicted' ? (
-              <ActionButton
-                verb='Open Revisions'
-                onClick={() => {
-                  openRevisions();
-                }}
-              />
-            ) : null}
-          </div>
-        ) : (
-          <SavedRevisionDetails
-            revision={savedRevision}
-            note={turnRevisionDetail(state)}
-            onView={() => {
-              openRevisions(savedRevision.revisionId);
-            }}
-          />
-        )}
-      </CollapsibleContent>
-    </Collapsible>
+        ) : undefined
+      }
+    >
+      {savedRevision === undefined ? (
+        <div className='flex flex-col items-start gap-2 px-3 pt-1 pb-2'>
+          <p className='text-xs leading-relaxed text-muted-foreground'>{turnRevisionDetail(state)}</p>
+          {state.kind === 'conflicted' ? (
+            <ActionButton
+              verb='Open Revisions'
+              onClick={() => {
+                openRevisions();
+              }}
+            />
+          ) : null}
+        </div>
+      ) : (
+        <SavedRevisionDetails
+          revision={savedRevision}
+          note={turnRevisionDetail(state)}
+          onView={() => {
+            openRevisions(savedRevision.revisionId);
+          }}
+        />
+      )}
+    </ChatRevisionSummary>
   );
 });

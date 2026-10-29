@@ -10,7 +10,8 @@ import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';
 
-const mocks = vi.hoisted(() => ({ hasGridReadout: true }));
+const mocks = vi.hoisted(() => ({ hasGridReadout: true, isMobile: false }));
+vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => mocks.isMobile }));
 const editorSnapshot = { context: { focusedChatId: 'chat-test' as string | undefined } };
 const editorRef = { getSnapshot: () => editorSnapshot, subscribe: () => ({ unsubscribe: () => undefined }) };
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ editorRef }) }));
@@ -37,6 +38,7 @@ afterEach(() => {
   activeActor?.stop();
   activeActor = undefined;
   mocks.hasGridReadout = true;
+  mocks.isMobile = false;
   editorSnapshot.context.focusedChatId = 'chat-test';
 });
 
@@ -69,7 +71,12 @@ const showSvg = (actor: GraphicsActor): void => {
 
 const renderBar = (
   actor: GraphicsActor,
-  properties: { shouldEnableCapture?: boolean; leading?: React.ReactNode; aboveControls?: React.ReactNode } = {},
+  properties: {
+    shouldEnableCapture?: boolean;
+    leading?: React.ReactNode;
+    aboveControls?: React.ReactNode;
+    mobileAction?: React.ReactNode;
+  } = {},
 ): void => {
   render(
     <KeyboardProvider>
@@ -120,9 +127,56 @@ describe('ChatViewerControls', () => {
     it('should never shrink below its rows, so no row spills out of the bar in a narrow strip', () => {
       renderBar(startGraphics());
 
-      expect(
-        screen.getByRole('group', { name: 'Viewer controls' }).closest('[data-slot="viewer-controls"]'),
-      ).toHaveClass('max-w-full', 'min-w-min');
+      const bar = screen.getByRole('group', { name: 'Viewer controls' }).closest('[data-slot="viewer-controls"]');
+      expect(bar).toHaveClass('max-w-full', 'min-w-min');
+      expect(bar).not.toHaveClass('min-w-0');
+      expect(screen.getByRole('button', { name: 'Fit view' }).parentElement).not.toHaveClass('flex-wrap');
+    });
+
+    it('should fit a phone sheet, wrapping its controls and scrolling its tool rows within the space it is given', () => {
+      mocks.isMobile = true;
+      const actor = startGraphics();
+      actor.send({ type: 'setMeasureActive', payload: true });
+      // This bar-only fixture acknowledges the listener owner before testing the ready layout.
+      actor.send({ type: 'setMeasureInputReady', ready: true });
+      renderBar(actor);
+
+      const bar = screen.getByRole('group', { name: 'Viewer controls' }).closest('[data-slot="viewer-controls"]');
+      expect(bar).toHaveClass('max-w-full', 'min-w-0', 'max-h-full', 'min-h-0');
+      expect(bar).not.toHaveClass('min-w-min');
+      expect(screen.getByRole('button', { name: 'Fit view' }).parentElement).toHaveClass('flex-wrap');
+      expect(measuringRow().closest('[data-slot="viewer-tool-rows"]')).toHaveClass('min-h-0', 'overflow-y-auto');
+    });
+
+    it('should put the mobile action in place of fullscreen on phones, after Fit view', () => {
+      mocks.isMobile = true;
+      renderBar(startGraphics(), { mobileAction: <button type='button' aria-label='View in your space' /> });
+
+      expect(controlNames()).toEqual([
+        'Grid 10 mm, units and grid',
+        'Section view',
+        'Measure',
+        'Fit view',
+        'View in your space',
+        'Capture view to chat',
+        'Viewer settings',
+      ]);
+    });
+
+    it('should offer neither fullscreen nor AR on a phone that cannot launch AR', () => {
+      mocks.isMobile = true;
+      renderBar(startGraphics());
+
+      expect(controlNames()).not.toContain('Enter fullscreen');
+      expect(controlNames()).not.toContain('View in your space');
+      expect(screen.getByRole('button', { name: 'Fit view' })).toBeInTheDocument();
+    });
+
+    it('should keep fullscreen and show the capability-gated host action after it on desktop (D12 tablets)', () => {
+      renderBar(startGraphics(), { mobileAction: <button type='button' aria-label='View in your space' /> });
+
+      const names = controlNames();
+      expect(names[names.indexOf('Enter fullscreen') + 1]).toBe('View in your space');
     });
 
     it('should hint the S, M and F shortcuts in the tooltips', async () => {
@@ -201,6 +255,7 @@ describe('ChatViewerControls', () => {
     it('should unfold measurements above the Measuring options line inside the bar', async () => {
       const actor = startGraphics();
       actor.send({ type: 'setMeasureActive', payload: true });
+      actor.send({ type: 'setMeasureInputReady', ready: true });
       actor.send({ type: 'startMeasurement', payload: [0, 0, 0] });
       actor.send({ type: 'completeMeasurement', payload: [0.01, 0, 0] });
       const user = userEvent.setup();
@@ -218,10 +273,14 @@ describe('ChatViewerControls', () => {
 
     it('should stack the Section row and its editor above the Measuring row, above the controls', async () => {
       const user = userEvent.setup();
-      renderBar(startGraphics());
+      const actor = startGraphics();
+      renderBar(actor);
 
       await user.click(screen.getByRole('button', { name: 'Section view' }));
       await user.click(screen.getByRole('button', { name: 'Measure' }));
+      act(() => {
+        actor.send({ type: 'setMeasureInputReady', ready: true });
+      });
 
       const order = [
         within(sectionRow()).getByRole('group', { name: 'XZ plane' }),
@@ -330,7 +389,8 @@ describe('ChatViewerControls', () => {
   describe('focus', () => {
     it('should move focus into a row when its toggle starts the tool', async () => {
       const user = userEvent.setup();
-      renderBar(startGraphics());
+      const actor = startGraphics();
+      renderBar(actor);
 
       await user.click(screen.getByRole('button', { name: 'Section view' }));
 
@@ -338,25 +398,46 @@ describe('ChatViewerControls', () => {
 
       await user.click(screen.getByRole('button', { name: 'Measure' }));
 
-      // The Targets control opens the row before disabled Clear all and Done.
+      expect(screen.getByRole('status', { name: 'Preparing measurement' })).toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: 'Measuring options' })).not.toBeInTheDocument();
+      const done = screen.getByRole('button', { name: 'Done with measure' });
+      expect(done).toHaveFocus();
+      act(() => {
+        actor.send({ type: 'setMeasureInputReady', ready: true });
+      });
+      expect(within(measuringRow()).getByRole('button', { name: 'Done with measure' })).toBe(done);
+      expect(done).toHaveFocus();
+      await user.tab({ shift: true });
       expect(within(measuringRow()).getByRole('button', { name: /^Targets:/u })).toHaveFocus();
     });
 
     it('should move focus into the row when Enter starts the tool', async () => {
       const user = userEvent.setup();
-      renderBar(startGraphics());
+      const actor = startGraphics();
+      renderBar(actor);
 
       act(() => {
         screen.getByRole('button', { name: 'Measure' }).focus();
       });
       await user.keyboard('{Enter}');
 
+      expect(screen.getByRole('status', { name: 'Preparing measurement' })).toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: 'Measuring options' })).not.toBeInTheDocument();
+      const done = screen.getByRole('button', { name: 'Done with measure' });
+      expect(done).toHaveFocus();
+      act(() => {
+        actor.send({ type: 'setMeasureInputReady', ready: true });
+      });
+      expect(within(measuringRow()).getByRole('button', { name: 'Done with measure' })).toBe(done);
+      expect(done).toHaveFocus();
+      await user.tab({ shift: true });
       expect(within(measuringRow()).getByRole('button', { name: /^Targets:/u })).toHaveFocus();
     });
 
     it('should leave focus where it is when S or M starts a tool', async () => {
       const user = userEvent.setup();
-      renderBar(startGraphics());
+      const actor = startGraphics();
+      renderBar(actor);
       const fitView = screen.getByRole('button', { name: 'Fit view' });
       act(() => {
         fitView.focus();
@@ -366,6 +447,12 @@ describe('ChatViewerControls', () => {
       await user.keyboard('m');
 
       expect(sectionRow()).toBeInTheDocument();
+      expect(screen.getByRole('status', { name: 'Preparing measurement' })).toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: 'Measuring options' })).not.toBeInTheDocument();
+      expect(fitView).toHaveFocus();
+      act(() => {
+        actor.send({ type: 'setMeasureInputReady', ready: true });
+      });
       expect(measuringRow()).toBeInTheDocument();
       expect(fitView).toHaveFocus();
     });

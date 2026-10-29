@@ -28,10 +28,12 @@ const bodies = [
   },
   { type: 'turn.conflicted', turnId: 't', chatId: 'c' },
   { type: 'turn.failed', turnId: 't', chatId: 'c', reason: 'why' },
+  { type: 'run.heartbeat' },
   { type: 'model.invocation-prepared', attemptId: 'a', purpose: 'generation', modelId: 'm' },
   { type: 'model.invocation-bound', attemptId: 'a', operationId: 'o', status: 'pending' },
   { type: 'model.invocation-settled', attemptId: 'a', outcome: 'settled', operationId: 'o', chargedCreditAtoms: '0' },
   { type: 'model.invocation-settled', attemptId: 'a', outcome: 'voided' },
+  { type: 'approval.spent', phase: 'spent', interruptId: 'i', toolCallId: 'call', approvalKey: 'shell:k' },
   { type: 'run.lifecycle', state: 'running' },
   { type: 'turn.history-projection-committed', retainedMessageIds: ['old'], message, context },
 ];

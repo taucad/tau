@@ -94,6 +94,12 @@ export type PythonSession = {
   background(operation: Promise<unknown>): void;
   /** Drain background operations and terminate the native worker. */
   cleanup(): Promise<void>;
+  /**
+   * One resident sample of the live worker's process tree, for observation only: a sum of resident sets, not a heap.
+   * Resolves `undefined` with no live worker, after a recycle or where the platform has no reader. Optional for
+   * sessions that cannot sample.
+   */
+  sampleResident?(): Promise<number | undefined>;
 };
 
 const parseReady = (value: unknown): void => {
@@ -231,6 +237,7 @@ export const createPythonSession = (options: PythonSessionOptions): PythonSessio
       await pending;
       await session.cleanup();
     },
+    sampleResident: async () => session.sampleResident(),
   };
   return python;
 };

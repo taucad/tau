@@ -15,13 +15,18 @@ import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
 import type { RevisionRow } from '@taucad/revisions';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import { RevisionsPanelBody, groupRevisionHistory } from '#routes/w.$workspace.$project/chat-revisions.js';
+import {
+  ChatRevisions,
+  RevisionsPanelBody,
+  groupRevisionHistory,
+} from '#routes/w.$workspace.$project/chat-revisions.js';
 import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-status-action.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { refuseCreateBranch, revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type { TurnOutcomeNotice } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { consumeRevisionReveal, requestRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
+import type { EditorDocument } from '#lib/editor-document.js';
 
 const projectSnapshot = { context: { project: { syncChats: true } } };
 const projectRef = {
@@ -40,10 +45,12 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({ updateProject: vi.fn() }),
 }));
-/* Monaco and Shiki are the editor's, not this pane's: the conflict rows are
+/* CodeMirror and syntax highlighting are the editor's, not this pane's: the conflict rows are
  * asserted by their verbs and the bytes they hand back (P43). */
 vi.mock('#components/code/code-editor.client.js', () => ({
-  CodeEditor: ({ value }: { readonly value?: string }) => <pre data-testid='conflict-buffer'>{value}</pre>,
+  CodeEditor: ({ document }: { readonly document: EditorDocument }) => (
+    <pre data-testid='conflict-buffer'>{document.text}</pre>
+  ),
 }));
 vi.mock('#components/code/diff-viewer.js', () => ({
   DiffViewer: ({
@@ -149,6 +156,17 @@ describe('Revisions pane', () => {
 
     expect(groups.map((group) => group.kind)).toStrictEqual(['revision', 'autosaves', 'revision']);
     expect(groups[1]).toMatchObject({ kind: 'autosaves', revisions: [{ revisionId: 'a' }, { revisionId: 'b' }] });
+  });
+
+  it('names its Close after the panel, as its tooltip does (I6)', () => {
+    render(
+      <TooltipProvider>
+        <ChatRevisions />
+      </TooltipProvider>,
+      { wrapper },
+    );
+
+    expect(screen.getByRole('button', { name: 'Close Revisions' })).toBeInTheDocument();
   });
 
   it('renders exactly one "Current" for a projection with two branches', async () => {
@@ -1239,7 +1257,7 @@ describe('Revisions pane vocabulary and History', () => {
     expect(screen.getByRole('button', { name: 'Rev 1 · Thicker base' })).toHaveAttribute('aria-expanded', 'true');
   });
 
-  it('keeps a removed collaborator calm: the strip and Sync say Access removed and what to do (HQ3)', async () => {
+  it('keeps a removed collaborator calm: the strip and Sync say Cloud copy unavailable and what to do (HQ3)', async () => {
     revisionStatusHarness.rows = [row({ revisionId: 'rev-4', revisionNumber: 4 })];
     revisionStatusHarness.role = 'revoked';
     revisionStatusHarness.status = {
@@ -1252,11 +1270,13 @@ describe('Revisions pane vocabulary and History', () => {
     renderPane();
 
     await waitFor(() => {
-      expect(screen.getByRole('status', { name: 'Revision status' })).toHaveTextContent('Saved · Access removed');
+      expect(screen.getByRole('status', { name: 'Revision status' })).toHaveTextContent(
+        'Saved · Cloud copy unavailable',
+      );
     });
     const backup = screen.getByRole('status', { name: 'Backup status' });
-    expect(backup).toHaveTextContent('Access removed');
-    expect(backup).toHaveTextContent('Ask them to add you again');
+    expect(backup).toHaveTextContent('Cloud copy unavailable');
+    expect(backup).toHaveTextContent('The cloud copy may have been deleted or your access may have changed.');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Sync now' })).not.toBeInTheDocument();
   });

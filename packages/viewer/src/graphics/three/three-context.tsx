@@ -5,6 +5,9 @@ import { ThreeCanvasInstance } from '#graphics/three/three-canvas-instance.jsx';
 import type { ThreeContextProperties } from '#graphics/three/three-viewer-properties.js';
 import { useWebglContextRef } from '#hooks/use-webgl-context-tracker.jsx';
 import { useViewerFeature } from '#environment/viewer-environment.jsx';
+import { WebglErrorBoundary } from '#cad/webgl-error-boundary.jsx';
+import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
+import { webGpuFallbackReason } from '#graphics/graphics-backend.js';
 import { resolveViewerPixelRatio } from '#graphics/three/utils/device-tier.js';
 import { admitsViewerContext, estimateViewerSurfaceBytes } from '#machines/webgl-context.machine.js';
 
@@ -19,7 +22,45 @@ let shaderStackOwners = 0;
  * @returns The canvas, or the WebGL limit fallback.
  * @public
  */
-export function ThreeProvider({
+export function ThreeProvider(properties: ThreeContextProperties): React.JSX.Element {
+  // A canvas loss turns the viewer's backend to WebGL (graphics machine `webGpuCanvasLost`) while this boundary already
+  // shows its WebGL fallback: keeping the boundary's key then keeps that canvas instead of mounting a second one.
+  const boundaryBackend =
+    properties.graphicsBackend === 'webgl' && webGpuFallbackReason() === 'canvas-loss'
+      ? 'webgpu'
+      : properties.graphicsBackend;
+  return (
+    <WebglErrorBoundary
+      key={boundaryBackend}
+      fallback={({ error }) => {
+        if (boundaryBackend !== 'webgpu' || !(error instanceof WebGpuInitializationError)) {
+          throw error ?? new Error('Renderer failed without an error description');
+        }
+        // A canvas cannot change its GPU context type, so WebGL mounts on a fresh owner, and only once. An error thrown
+        // while a boundary renders its fallback goes to the boundary above, but the WebGL canvas reports a failed start
+        // after it has mounted (its renderer is created asynchronously), and this boundary, still an ancestor, would
+        // catch that and mount WebGL again, without end when no WebGL context can be created (the node pipeline
+        // reports its own failed start as a WebGPU initialization error too). The inner boundary passes any failure of
+        // the fallback up as an ordinary error, for the viewer's failure screen and its Retry.
+        return (
+          <WebglErrorBoundary
+            fallback={({ error: fallbackError }) => {
+              throw fallbackError instanceof WebGpuInitializationError
+                ? new Error(fallbackError.message, { cause: fallbackError })
+                : (fallbackError ?? new Error('The WebGL renderer failed without an error description'));
+            }}
+          >
+            <ThreeProviderCanvas {...properties} graphicsBackend='webgl' />
+          </WebglErrorBoundary>
+        );
+      }}
+    >
+      <ThreeProviderCanvas {...properties} />
+    </WebglErrorBoundary>
+  );
+}
+
+function ThreeProviderCanvas({
   children,
   graphicsBackend,
   enableGizmo = false,
@@ -65,7 +106,11 @@ export function ThreeProvider({
     }
 
     // WebGPU canvases hold a device and surface too, so both backends count against one budget.
-    webglRef.send({ type: 'acquire', id: holderId, bytes: initialSurfaceBytes });
+    webglRef.send({
+      type: 'acquire',
+      id: holderId,
+      bytes: initialSurfaceBytes,
+    });
     return () => {
       webglRef.send({ type: 'release', id: holderId });
     };
@@ -73,7 +118,11 @@ export function ThreeProvider({
 
   const handleSurfaceResize = useCallback(
     (cssPixels: number, pixelRatio: number): void => {
-      webglRef?.send({ type: 'resize', id: holderId, bytes: estimateViewerSurfaceBytes(cssPixels, pixelRatio) });
+      webglRef?.send({
+        type: 'resize',
+        id: holderId,
+        bytes: estimateViewerSurfaceBytes(cssPixels, pixelRatio),
+      });
     },
     [webglRef, holderId],
   );

@@ -337,6 +337,12 @@ describe('composer record store', () => {
         second: { execution: { ...tau, model: 'anthropic/claude-opus-5' } },
         expected: { execution: { ...tau, model: 'anthropic/claude-opus-5' } },
       },
+      {
+        name: 'placements',
+        first: { placements: { chatTwo: 'origin' } },
+        second: { placements: { chatTwo: 'loopback:http://127.0.0.1:4100' } },
+        expected: { placements: { chatNine: 'origin', chatTwo: 'loopback:http://127.0.0.1:4100' } },
+      },
     ] satisfies ReadonlyArray<{
       name: string;
       first: ComposerRecordPatch;
@@ -353,6 +359,7 @@ describe('composer record store', () => {
         unread: { chatNine: true },
         readThrough: { chatNine: { leaderEpoch: 'g1', sequence: 1 } },
         execution: tau,
+        placements: { chatNine: 'origin' },
       };
 
       await store.patch(everything);
@@ -479,6 +486,44 @@ describe('composer record store', () => {
       });
       client.files.set(path, encode(JSON.stringify({ version: 1, readThrough: { chatOne: true } })));
       await expect(store.read()).resolves.toMatchObject({ status: 'invalid' });
+    });
+
+    it('should clear one chat’s placement when patched with false, and leave the others alone', async () => {
+      const client = memoryClient();
+      const placementsPath = composerRecordPaths.placements('proj_1');
+      const store = createComposerRecordStore(client, placementsPath);
+
+      await store.patch({ placements: { chatOne: 'origin', chatTwo: 'loopback:http://127.0.0.1:4100' } });
+      await store.patch({ placements: { chatOne: false } });
+
+      await expect(store.read()).resolves.toEqual({
+        status: 'valid',
+        record: { version: 1, placements: { chatTwo: 'loopback:http://127.0.0.1:4100' } },
+      });
+      await store.patch({ placements: { chatTwo: false } });
+      expect(client.text(placementsPath)).not.toContain('placements');
+    });
+
+    it('should keep both writers’ values when two chats’ placements race 100 times (storage policy rule 7)', async () => {
+      await Promise.all(
+        Array.from({ length: 100 }, async (_, index) => {
+          const client = memoryClient();
+          const placementsPath = composerRecordPaths.placements('proj_1');
+          const first = createComposerRecordStore(client, placementsPath);
+          const second = createComposerRecordStore(client, placementsPath);
+          const placement = index % 2 === 0 ? 'origin' : `loopback:http://127.0.0.1:${String(4000 + index)}`;
+
+          await Promise.all([
+            first.patch({ placements: { chatOne: placement } }),
+            second.patch({ placements: { chatTwo: 'origin' } }),
+          ]);
+
+          await expect(first.read()).resolves.toEqual({
+            status: 'valid',
+            record: { version: 1, placements: { chatOne: placement, chatTwo: 'origin' } },
+          });
+        }),
+      );
     });
 
     it('should lose no update across 100 concurrent interleavings of three fields', async () => {

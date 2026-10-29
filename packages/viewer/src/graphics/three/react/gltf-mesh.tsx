@@ -2148,10 +2148,12 @@ export function GltfMesh({
     // oxlint-disable-next-line react/immutability -- This presentation owns the external Three.js scene and restores its imperative raycast hook on teardown.
     scene.raycast = (raycaster, intersections): false => {
       const { context } = graphicsActor.getSnapshot();
-      // A section handle drag owns the pointer and suppresses model hover, so its moves skip the model query.
-      // The model's presses (secondary, and a primary one that starts a kinematics drag) never start that
-      // drag, and the release's click raycasts after pointer-up has lifted the suppression.
-      if (context.viewerHoverSuppressionReasons.includes('sectionViewTransform')) {
+      // A press can reach camera controls before R3F: only movement gives the camera ownership.
+      // Queries resume immediately on release, without waiting for a React render.
+      if (
+        context.cameraInteractionHadMovement ||
+        context.viewerHoverSuppressionReasons.includes('sectionViewTransform')
+      ) {
         return false;
       }
 

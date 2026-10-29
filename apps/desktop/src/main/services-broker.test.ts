@@ -52,7 +52,7 @@ const spawnUtility = (): Spawned => {
   };
 };
 
-const brokerHarness = () => {
+const brokerHarness = (extra: Partial<ServicesBrokerOptions> = {}) => {
   const spawns: Spawned[] = [];
   const log = vi.fn();
   const runtimeExits: Array<() => void> = [];
@@ -109,6 +109,7 @@ const brokerHarness = () => {
     revokeGeometry,
     prepareNativeKernel,
     log,
+    ...extra,
   } as unknown as ServicesBrokerOptions;
   return {
     broker: createServicesBroker(options),
@@ -385,6 +386,24 @@ describe('createServicesBroker', () => {
     });
   });
 
+  it('should send a permission request once, never replay it, and hand its answer to onUtilityFrame (W9)', () => {
+    const frames: Array<Readonly<Record<string, unknown>>> = [];
+    const onUtilityFrame = vi.fn((frame: Readonly<Record<string, unknown>>) => {
+      frames.push(frame);
+      return frame['type'] === 'permissions-answered';
+    });
+    const { broker, spawns } = brokerHarness({ onUtilityFrame });
+    broker.send({ type: 'permissions-request', requestId: 'permissions-1' });
+    expect(spawns).toHaveLength(1);
+    expect(spawns[0]?.posted).toContainEqual({ type: 'permissions-request', requestId: 'permissions-1' });
+    spawns[0]?.message({ type: 'permissions-answered', requestId: 'permissions-1', mode: 'ask' });
+    expect(frames).toEqual([{ type: 'permissions-answered', requestId: 'permissions-1', mode: 'ask' }]);
+    spawns[0]?.exit();
+    broker.connect('nodeFs');
+    expect(spawns).toHaveLength(2);
+    expect(spawns[1]?.posted).not.toContainEqual(expect.objectContaining({ type: 'permissions-request' }));
+  });
+
   it('should ask a running utility which machines a program streams to, and answer none without one', async () => {
     const { broker, spawns } = brokerHarness();
     /* Asking never spawns a utility: one that is not running feeds nothing. */
@@ -415,6 +434,45 @@ describe('createServicesBroker', () => {
         typeof message === 'object' && message !== null && 'type' in message && message.type === 'machines-resume',
     );
     expect(resumes).toEqual([{ type: 'machines-resume', attemptId: 'quit-1' }]);
+  });
+
+  it('should ask a running utility for its Terminal session count, answer none without one, and bound the wait (T15)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { broker, spawns } = brokerHarness();
+      await expect(broker.terminalSessions(1000)).resolves.toBe(0);
+      expect(spawns).toHaveLength(0);
+
+      broker.connect('nodeFs');
+      const question = (): Record<string, unknown> | undefined =>
+        (spawns[0]?.posted ?? []).findLast(
+          (message): message is Record<string, unknown> =>
+            typeof message === 'object' &&
+            message !== null &&
+            'type' in message &&
+            message['type'] === 'terminal-sessions',
+        );
+      const asked = broker.terminalSessions(1000);
+      spawns[0]?.message({ type: 'terminal-sessions-answered', requestId: question()?.['requestId'], sessions: 2 });
+      await expect(asked).resolves.toBe(2);
+      /* A peek carries no attempt; quit's question carries its attempt, which holds the utility's new starts. */
+      expect(question()).not.toHaveProperty('attemptId');
+      const quitAsked = broker.terminalSessions(1000, 'quit-9');
+      expect(question()?.['attemptId']).toBe('quit-9');
+      spawns[0]?.message({ type: 'terminal-sessions-answered', requestId: question()?.['requestId'], sessions: 1 });
+      await expect(quitAsked).resolves.toBe(1);
+
+      const invalid = broker.terminalSessions(1000);
+      spawns[0]?.message({ type: 'terminal-sessions-answered', requestId: question()?.['requestId'], sessions: -1 });
+      await expect(invalid).rejects.toThrow('invalid Terminal count');
+
+      const unanswered = broker.terminalSessions(1000);
+      const rejected = expect(unanswered).rejects.toThrow('did not say whether a Terminal is running');
+      await vi.advanceTimersByTimeAsync(1000);
+      await rejected;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('should peek at the streaming machines for keep-awake with a read-only question, never forking a utility', async () => {

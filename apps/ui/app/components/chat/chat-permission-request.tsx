@@ -9,6 +9,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/
 import type { ProviderPermissionResolution } from '@taucad/agent-host/wire';
 import type { AgentHostApproval } from '#services/agent-host-event-projection.js';
 import { useFeature } from '#flags/use-feature.js';
+import { ChatShellApprovalContent } from '#components/chat/chat-shell-approval.js';
 
 const text = (value: unknown): string | undefined =>
   typeof value === 'string' && value.trim() !== '' ? value : undefined;
@@ -247,6 +248,10 @@ function PermissionRequest({
   return (
     <section
       aria-label={isSettled ? status : 'Approval required'}
+      // A waiting approval is a decision the phone sheet never folds away (I5); settling it retires its identity.
+      data-decision={isSettled ? undefined : 'approval'}
+      data-decision-id={`approval:${approval.interruptId}`}
+      data-decision-state={isSettled ? 'settled' : 'open'}
       className='mb-2 flex min-w-0 flex-col gap-2 rounded-lg border bg-background p-2'
     >
       <div className='flex min-w-0 items-center gap-2 text-xs/5 text-muted-foreground'>
@@ -259,7 +264,11 @@ function PermissionRequest({
           {status}
         </p>
       ) : null}
-      <PermissionContent title={content.title} facts={content.facts} />
+      {approval.shell === undefined ? (
+        <PermissionContent title={content.title} facts={content.facts} />
+      ) : (
+        <ChatShellApprovalContent request={approval.shell} />
+      )}
       {!isSettled && approval.providerPermission?.unsupportedReason === 'unconfigured-mcp-server' ? (
         <p className='text-xs/5 text-muted-foreground'>
           This temporary connection supports approval for this request or session.
@@ -369,7 +378,7 @@ function PermissionRequest({
                   void respond(true);
                 }}
               >
-                Approve
+                {approval.shell === undefined ? 'Approve' : 'Allow once'}
                 {isSending && pendingResponse === true ? <Loader className='motion-reduce:animate-none' /> : null}
               </Button>
               <Button

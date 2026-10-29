@@ -4,6 +4,8 @@
 \* button and its diagnostic origin does not change cancellation or queue delivery.
 \* Explicit reorder changes only the saved queue sequence under delivery exclusion.
 \* Enlarged-text reflow and readable busy labels retain the same disabled guards.
+\* Composer tray dividers, row padding and icon alignment are presentation only;
+\* queue edit, reorder, retry and targeted-send callbacks retain their guards and identity.
 \* Pending view actions remain serialized until settlement. Pointer cancellation,
 \* dropping outside the queue and unsaved inline edits further restrict Reorder.
 \* Failed steering retains its durable cancel identity; a removed item's view-only
@@ -20,6 +22,42 @@
 \* it reads the projection only and leaves admission, delivery and the queue alone.
 \* Chat message-change wakes are throttled for React readers only; status wakes
 \* stay immediate, and admission, delivery and the queue never read either.
+\* A queued item's execution is the chat's intent with this device's own placement
+\* put back on it, and admission refuses an external agent this device cannot place
+\* before any host wait; queue delivery, persistence and cancellation are unchanged.
+\* A run another device holds disables submit like the existing disabled guards, and
+\* the host's `wait` refusal of a queued admission while it holds takes the existing
+\* refused-admission path; this device's placement is written on every change and
+\* read from the open session first. Queue transitions and guards are unchanged.
+\* A legacy device-relative placement is adopted once at a session's load, through
+\* the chat store's adopting write, before any queued item is admitted. A placement this
+\* tab cannot reach is held at load and the chat runs locally; queue paths unchanged.
+\* A held placement is applied once this tab can reach it and dropped when the person
+\* picks an execution elsewhere; admission, delivery and the queue never read it.
+\* The persistence context is the held placement's one copy, which the placement write reads.
+\* A half-finished legacy adoption is finished on a later open; queue paths are unchanged.
+\* A chat's load never waits on the origin probe or on finishing an adoption; queue paths unchanged.
+\* An adopted placement is written only after the chat record's drop commits; queue paths unchanged.
+\* A legacy host is adopted without leaving the synced record; a placement of unknown reach is applied
+\* at load and settled later, so admission waits for its host. Queue paths unchanged.
+\* Held placements are re-applied on one reachability signal (origin or loopback); queue paths unchanged.
+\* chat.json drops device-relative hosts in the chat store alone; queue paths unchanged.
+\* A late reach answer settles a load placement only while the chat still runs on it, and placements are read
+\* and written through one path; queue paths unchanged.
+\* A chat's open reads its placement through that one shared read too; queue paths unchanged.
+\* A placement held during a load is checked against reach once it is held; queue paths unchanged.
+\* Other devices' segments reach the projection with this device's read time, so a run held
+\* elsewhere goes stale by this device's clock; queue paths unchanged.
+\* Each segment also carries when it last changed on this device (its modification time), the one
+\* time the page and the agent host both measure a foreign run from; queue paths unchanged.
+\* A foreign run goes stale only once this device's last pull, read beside the segments, came past
+\* the bound after that time with nothing newer, and the page asks for that pull; queue paths unchanged.
+\* That pull answers whether this device can pull the chat at all; where it cannot, a run quiet past the
+\* ask interval no longer disables submit, as the host's fence reads it; queue paths unchanged.
+\* QueuePlacement.tla separately checks host-local lost-ACK recovery and scoped
+\* legacy receipt rebasing; this module retains its single-host FIFO scope.
+\* Skipping observation of the registration probe, or of a chat this tab already
+\* crashed on, never enqueues, prepares or acknowledges; queue paths unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

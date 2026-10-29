@@ -20,7 +20,7 @@ docs/research/artifacts/<subject>/
     synthesis/
 ```
 
-Create only the files the work uses. Keep established artifact paths for existing programs. The index links the owner, current run, evidence, and restart point; every report identifies its owner and sources. Root documents follow `create-research` frontmatter rules; raw artifacts retain their useful native format.
+Create only the files the work uses. Keep established artifact paths for existing programs. Keep one current status and restart point at the top of the index, updating it when the state changes. Label older summaries and handoffs historical; append-only evidence must not leave an obsolete “latest” claim active. The index links the owner, current run, evidence, and restart point; every report identifies its owner and sources. Root documents follow `create-research` frontmatter rules; raw artifacts retain their useful native format.
 
 In Tau, `docs/research` is a symlink into `repos/tau-brain/research`. Each checkout, worktree and cloud session mounts its own Brain working tree with `pnpm agent-env brain` (the Claude Code session hook runs it): a detached `origin/main` without `research/artifacts/<subject>/` trees until `pnpm agent-env widen <subject>`, and with LFS objects as pointers until `pnpm agent-env fetch <path>`. Never edit another session's Brain working tree. Commit with `pnpm agent-env commit -m <message> -- <paths>`, which commits by path and lands on `main` with a fetch, rebase and retry; Brain has no feature branches. Resolve the actual destination before giving a worker its output path. If a worker cannot access the destination, use a permitted parent save path; do not create a competing Brain or pretend temporary storage is durable.
 

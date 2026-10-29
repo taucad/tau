@@ -29,6 +29,7 @@ import { isFunction } from '#utils/function.utils.js';
 import type { Handle } from '#types/matches.types.js';
 
 export const handle: Handle = {
+  title: 'Community',
   enableOverflowY: true,
 };
 
@@ -244,6 +245,7 @@ export default function CadCommunity(): React.JSX.Element {
         <div className='h-64'>
           <PanelEmptyState
             icon={SearchX}
+            titleLevel={2}
             title={`No examples match “${query.trim()}”`}
             description='Try another name or kernel.'
           >

@@ -19,6 +19,8 @@ import { takeScreenshotGroup } from '#components/chat/tiptap/context-suggestion.
 import { useChatContextInsertion } from '#components/chat/chat-context-insertion.js';
 import type { ChatContextReference } from '#components/chat/chat-context-insertion.js';
 import { ChatApprovalBanner } from '#components/chat/chat-approval-banner.js';
+import { ChatPlacementNotice } from '#components/chat/chat-placement-notice.js';
+import { ChatRunElsewhereNotice } from '#components/chat/chat-run-elsewhere-notice.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
@@ -85,6 +87,8 @@ export const ChatTextarea = memo(function ({
     onBlur?.();
   }, [onBlur]);
 
+  /* Another device is running this chat (XD3): its host would refuse the send, so the composer holds it. */
+  const { runElsewhere } = useChatComposer();
   const logic = useChatTextareaLogic({
     ref,
     onSubmit,
@@ -92,7 +96,7 @@ export const ChatTextarea = memo(function ({
     onEscapePressed,
     onBlur: handleBlur,
     mode,
-    isSubmitDisabled,
+    isSubmitDisabled: isSubmitDisabled || runElsewhere !== undefined,
     onViewerScreenshotDrop: handleViewerScreenshotDrop,
     onAddContextChips: handleAddContextChips,
   });
@@ -321,12 +325,20 @@ export const ChatTextarea = memo(function ({
   const skeleton = <ChatTextareaSkeleton className={className} enableMobileCollapse={enableMobileCollapse} />;
   /* A paused run is answered from the composer, not the transcript. Only the
    * main composer, and only under a real session: the new-project composer runs
-   * on `ChatComposerProvider`, which has no chat to be paused. */
-  const approvalBanner = mode === 'main' && projectContext && session ? <ChatApprovalBanner /> : undefined;
+   * on `ChatComposerProvider`, which has no chat to be paused. An agent this
+   * device cannot reach is explained in the same place, beside its choice. */
+  const composerNotices =
+    mode === 'main' && projectContext && session ? (
+      <>
+        <ChatPlacementNotice />
+        <ChatRunElsewhereNotice />
+        <ChatApprovalBanner />
+      </>
+    ) : undefined;
 
   return (
     <ClientOnly fallback={skeleton}>
-      {approvalBanner}
+      {composerNotices}
       <ChatTextareaDesktop
         className={className}
         enableAutoFocus={enableAutoFocus}

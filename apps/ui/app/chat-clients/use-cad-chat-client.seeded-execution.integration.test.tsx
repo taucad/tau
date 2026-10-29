@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import type { CadAgentExecution, Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
 import type * as CadAgentConfigModuleShape from '#hooks/use-cad-agent-config.js';
+import type * as AgentHostPlacementModuleShape from '#lib/agent-host-placement.js';
 import { ChatSessionStore } from '#services/chat-session-store.js';
 import { ActiveChatProvider, ChatComposerProvider, useChatComposer } from '#hooks/active-chat-provider.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
@@ -24,6 +25,8 @@ import { projectSessionMachine } from '#machines/project-session.machine.js';
 import { resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import type { HostCommand } from '@taucad/agent-host/wire';
+import { KeyedMutex } from '#db/keyed-mutex.js';
+import { writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
 
 /** The Tau model the cookie holds — what the un-hydrated fallback rebuilds from. */
 const cookieModelId = 'openai-gpt-5.6-luna';
@@ -40,6 +43,7 @@ const harness = vi.hoisted(() => {
     stop: ReturnType<typeof vi.fn>;
     makeRequest: ReturnType<typeof vi.fn>;
   };
+  const files = new Map<string, Uint8Array<ArrayBuffer>>();
   const noop = (): void => undefined;
   const resolveModel = (
     id: string,
@@ -55,6 +59,7 @@ const harness = vi.hoisted(() => {
     model: { id, provider: { id: 'openai' }, details: { contextWindow: 128_000 } },
   });
   return {
+    files,
     chats: new Map<string, FakeChat>(),
     commands: [] as HostCommand[],
     store: undefined as unknown as ChatSessionStore,
@@ -72,15 +77,23 @@ const harness = vi.hoisted(() => {
     },
     patchChat: vi.fn(async () => undefined),
     actions: { sendMessage: vi.fn(), regenerate: vi.fn(), stop: vi.fn() },
-    /** An empty worker filesystem: every composer record reads as absent. */
+    /** Durable worker filesystem: prepared commands must survive the pre-send read. */
     client: {
       readFile: async (path: string): Promise<Uint8Array<ArrayBuffer>> => {
-        throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
+        const bytes = files.get(path);
+        if (bytes === undefined) {
+          throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
+        }
+        return new Uint8Array(bytes);
       },
-      writeFile: async () => undefined,
-      exists: async () => false,
+      writeFile: async (path: string, bytes: Uint8Array<ArrayBuffer>) => {
+        files.set(path, new Uint8Array(bytes));
+      },
+      exists: async (path: string) => files.has(path),
       readdir: async (): Promise<string[]> => [],
-      unlink: async () => undefined,
+      unlink: async (path: string) => {
+        files.delete(path);
+      },
       rmdir: async () => undefined,
     },
     /** Browser workspace claim — present so the client publishes its factory. */
@@ -146,13 +159,15 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   waitForRootedBridgeOpener: async () => undefined,
 }));
 // A browser build: no implicit local daemon, and no host directory to probe.
-vi.mock('#lib/agent-host-placement.js', () => ({
+vi.mock('#lib/agent-host-placement.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof AgentHostPlacementModuleShape>()),
   localAgentHostId: () => undefined,
   daemonPlacementOf: (execution: { kind: string; hostId?: string }) => execution.hostId,
   listAgentHostPlacements: async () => [],
   hostDirectoryOutage: () => undefined,
   desktopWorkspaceRoot: async () => '/workspace',
   openAgentHostChannel: async () => ({}),
+  unplaceableExecutionReason: () => undefined,
 }));
 // The assembler stays real; only its asynchronous capability probe, which
 // needs a mounted project filesystem, is answered directly.
@@ -192,6 +207,7 @@ const buildSeededRow = (activeExecution: CadAgentExecution | undefined): ChatEnt
 const dispatchSeededTurn = async (activeExecution: CadAgentExecution | undefined): Promise<HostCommand> => {
   const row = buildSeededRow(activeExecution);
   const store = new ChatSessionStore();
+  const mutex = new KeyedMutex<string>();
   harness.store = store;
   store.setDependencies({
     getChat: async () => row,
@@ -200,11 +216,14 @@ const dispatchSeededTurn = async (activeExecution: CadAgentExecution | undefined
     consumeChatStartupRequest: async () => ({ ...row, startupRequest: undefined }),
     commitCancelledDraftRestore: async () => undefined,
     client: harness.client,
+    queueLock: mutex.run.bind(mutex),
   });
   store.publishProjectHostConnector(
     row.resourceId,
     async () =>
       ({
+        placement: { hostId: activeExecution?.hostId },
+        catchUp: writerOwnedCatchUp,
         hostCommand: async (command: HostCommand) => {
           harness.commands.push(command);
           return { commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 1 };
@@ -260,6 +279,7 @@ beforeEach(() => {
   harness.commands.length = 0;
   harness.projectSession?.stop();
   harness.projectSession = undefined;
+  harness.files.clear();
   resetChatTurnServices();
   vi.clearAllMocks();
 });

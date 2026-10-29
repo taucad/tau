@@ -419,6 +419,8 @@ export type SyncProjectRecordsActorInput = Readonly<{
   syncChats: boolean;
   syncLargeExports: boolean;
   priorEvidenceHead?: string;
+  /** When this pull read the remote's refs, on this device's clock: the chats it projects record it (`pullRecordAfter`). */
+  pulledAt?: number | undefined;
 }>;
 
 /** Independent completion of optional records after authored integration. @public */
@@ -1909,10 +1911,15 @@ const syncMachineDefinition = setup({
           if (event.output.refs.some((entry) => entry.status === 'updated') && context.parentRef !== undefined) {
             enq.sendTo(context.parentRef, { type: 'remote', event: { type: 'pushed' } });
           }
-          const quota = isQuotaAnswer(pending, event.output.overQuota);
-          const acknowledged = pending.length === 0;
+          /* Acknowledged is judged on what this remote is owed, not the whole
+           * queue: a projection entry or one kept for a disconnected remote is
+           * not something this push could settle, and counting it reported an
+           * accepted push as a retry and backed off on it. Both stay queued. */
+          const owed = owedPushes({ ...context, pending });
+          const quota = isQuotaAnswer(owed, event.output.overQuota);
+          const acknowledged = owed.length === 0;
           /* A device that reopened with a queue and minted nothing since still owes its oldest entry. */
-          const since = context.unsyncedSince ?? Math.min(...context.pending.map((entry) => entry.recordedAt));
+          const since = context.unsyncedSince ?? Math.min(...owedPushes(context).map((entry) => entry.recordedAt));
           reportPushAttempt(context, enq, {
             outcome: acknowledged ? 'ok' : quota ? 'quota_refused' : 'retry',
             ...(acknowledged && Number.isFinite(since) ? { lagMilliseconds: Math.max(0, now - since) } : {}),
@@ -1926,15 +1933,15 @@ const syncMachineDefinition = setup({
               unsyncedSince: acknowledged ? context.mintedSincePushAt : context.unsyncedSince,
               /* Rule 19: a refused history is terminal, as the thrown class is; a
                * record's refusal never blocks history, so it keeps retrying. */
-              failure: quota && refusedHistory !== undefined ? 'fatal' : pending.length > 0 ? 'retry' : 'none',
-              attempt: pending.length > 0 ? context.attempt + 1 : 0,
+              failure: quota && refusedHistory !== undefined ? 'fatal' : acknowledged ? 'none' : 'retry',
+              attempt: acknowledged ? 0 : context.attempt + 1,
               retryAfterMilliseconds: undefined,
               conflictRef: refusedHistory === undefined ? undefined : refusedHistory.name,
               error: refusalSaid(
-                refusedHistory === undefined ? pending[0] : { ref: refusedHistory.name, reason: refusedHistory.reason },
+                refusedHistory === undefined ? owed[0] : { ref: refusedHistory.name, reason: refusedHistory.reason },
                 context.branch,
               ),
-              reason: quota ? 'quota' : pending.length > 0 ? 'rejected' : undefined,
+              reason: quota ? 'quota' : acknowledged ? undefined : 'rejected',
             },
           };
         },

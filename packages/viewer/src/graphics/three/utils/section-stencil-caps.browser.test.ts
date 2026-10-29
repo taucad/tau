@@ -6,7 +6,7 @@ import type { SectionCut, SectionHalfSpace, SectionPiece } from '#graphics/secti
 import { applyGltfSurfaceDepthBias } from '#graphics/three/materials/gltf-surface-depth-bias.js';
 import { createSectionClip, installSectionClip, writeSectionClip } from '#graphics/three/materials/section-clip.js';
 import { createRenderer } from '#graphics/three/renderer.js';
-import { sectionCapOpenChainColor } from '#graphics/three/overlay-colors.constants.js';
+import { sectionCapOpenChainColor, sectionCapOpenChainWidthScale } from '#graphics/three/overlay-colors.constants.js';
 import { sliceSectionLoops } from '#graphics/three/utils/section-loop-slice.js';
 import type { SectionLoopCapGeometry } from '#graphics/three/utils/section-loop-caps.js';
 import { createSectionStencilCaps } from '#graphics/three/utils/section-stencil-caps.js';
@@ -1093,6 +1093,30 @@ describe.each(['webgl', 'webgpu'] as const)('per-loop section caps on %s', (back
     expect(wrong.slice(0, 8)).toEqual([]);
   });
 
+  // The open-chain band is one-sided, 1.5 * widthScale device pixels wide.
+  // Project its three exact cut segments; a world-axis margin based on the
+  // ordinary 1.5-pixel outline underestimates that band on a tilted cut plane.
+  const chainCorners = [
+    [1.5, -1.5],
+    [-1.5, -1.5],
+    [-1.5, 1.5],
+    [1.5, 1.5],
+  ].map(([x, y]) => {
+    const point = new THREE.Vector3(openAt.x + x!, openAt.y + y!, planeCut.offset).project(rayCamera);
+    return new THREE.Vector2(((point.x + 1) * size) / 2, ((1 - point.y) * size) / 2);
+  });
+  const chainDistance = (row: number, column: number): number => {
+    const pixel = new THREE.Vector2(column + 0.5, row + 0.5);
+    return Math.min(
+      ...chainCorners.slice(1).map((end, index) => {
+        const start = chainCorners[index]!;
+        const direction = end.clone().sub(start);
+        const along = THREE.MathUtils.clamp(pixel.clone().sub(start).dot(direction) / direction.lengthSq(), 0, 1);
+        return pixel.distanceTo(start.clone().addScaledVector(direction, along));
+      }),
+    );
+  };
+
   it('should outline the open chain in the open-chain colour, beside the open box only', () => {
     // #DD003F reads back as strong red, no green and a little blue; nothing else in the scene is red.
     expect(sectionCapOpenChainColor).toBe(0xdd_00_3f);
@@ -1103,8 +1127,8 @@ describe.each(['webgl', 'webgpu'] as const)('per-loop section caps on %s', (back
         const [red, green, blue] = frame!.pixel(row, column);
         if (red > 150 && green < 60 && blue < 120) {
           chainPixels++;
-          if (reach(onPlane(row, column), openAt) > 1.5 + margin) {
-            stray.push(`${row},${column}`);
+          if (chainDistance(row, column) > 1.5 * sectionCapOpenChainWidthScale + 0.5) {
+            stray.push(`${row},${column}: ${chainDistance(row, column)}px from cut`);
           }
         }
       }

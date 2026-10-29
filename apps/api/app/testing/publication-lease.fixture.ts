@@ -22,6 +22,7 @@
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { Readable } from 'node:stream';
+import { buffer } from 'node:stream/consumers';
 import { commitLease } from '#api/git/store/commit.js';
 import { hydrateLease } from '#api/git/store/lease.js';
 import type { RepositoryLease } from '#api/git/store/lease.js';
@@ -65,7 +66,9 @@ export const createMemoryRepositoryStore = (): RepositoryStore => {
       return token;
     },
 
-    putObject: async (locator, key, body, options) => {
+    putObject: async (locator, key, source, options) => {
+      // The committer streams lease files (DA4); a memory store keeps their bytes.
+      const body = typeof source === 'function' ? new Uint8Array(await buffer(await source())) : source;
       /* The adapter refuses a declared length that disagrees with the body, so a
          caller that computed its length over different bytes than it uploads
          must fail here too rather than only against R2 (review F6). */

@@ -5,6 +5,10 @@ import { z } from 'zod';
 import type { ExportFile } from '@taucad/types';
 import type { WatchEvent } from '@taucad/filesystem';
 import { createChannelClient, wrapMessagePort } from '@taucad/rpc';
+import { contentDigest } from '@taucad/cache-core';
+import { createMemoryComputeEngine } from '#cache/memory-compute-engine.js';
+import { _registerComputeStore } from '#cache/kernel-compute-runtime.js';
+import type { ComputeBinding, ComputeStore } from '#types/runtime-compute.types.js';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { installWorkerCrashTrap } from '#transport/_internal/worker-crash-trap.js';
 import { createDocumentWorkerDispatcher } from '#transport/_internal/runtime-document-dispatcher.js';
@@ -479,7 +483,7 @@ describe('KernelRuntimeWorker direct transcode', () => {
       readonly name: string;
       readonly detail?: Record<string, unknown>;
     }> = [];
-    worker.setTelemetrySend((entries) => telemetry.push(...entries));
+    worker.setTelemetrySend(({ entries }) => telemetry.push(...entries));
 
     try {
       const result = await worker.transcode({
@@ -640,7 +644,7 @@ describe('KernelRuntimeWorker direct transcode', () => {
       readonly name: string;
       readonly detail?: Record<string, unknown>;
     }> = [];
-    worker.setTelemetrySend((entries) => telemetry.push(...entries));
+    worker.setTelemetrySend(({ entries }) => telemetry.push(...entries));
     const controller = new AbortController();
 
     try {
@@ -849,7 +853,7 @@ describe('KernelRuntimeWorker direct transcode', () => {
       readonly name: string;
       readonly detail?: Record<string, unknown>;
     }> = [];
-    worker.setTelemetrySend((entries) => telemetry.push(...entries));
+    worker.setTelemetrySend(({ entries }) => telemetry.push(...entries));
 
     try {
       await expect(
@@ -1696,7 +1700,7 @@ describe('KernelRuntimeWorker kernel selection', () => {
       const worker = await createMultiKernelWorker([
         { id: 'openrscad', extensions: ['scad'], definition: scadDefinition },
       ]);
-      worker.setTelemetrySend((batch) => entries.push(...batch));
+      worker.setTelemetrySend(({ entries: batch }) => entries.push(...batch));
 
       await openWorkerDocument(worker, 'selection-span-document', 'model.scad');
       worker.flushTelemetry();
@@ -3662,5 +3666,337 @@ describe('installWorkerCrashTrap', () => {
       fixture.channel.port1.close();
       fixture.channel.port2.close();
     };
+  });
+});
+
+describe('KernelRuntimeWorker idle publication (D1, D3)', () => {
+  /**
+   * A whole-build reuse middleware that, like the geometry cache, serialises the native-handle
+   * snapshot only when its codec encodes a publication. It is kernel-agnostic: any kernel that
+   * defines `serializeHandle` goes through it.
+   */
+  const createSnapshotReuse = () => {
+    const encodes: unknown[] = [];
+    const plugin = defineMiddleware({
+      id: 'snapshot-reuse',
+      name: 'Snapshot reuse',
+      version: '1.0.0',
+      async wrapEvaluate(input, handler, { compute, dependencyHash }) {
+        if (compute.status !== 'on') {
+          return handler(input);
+        }
+        const codec = { id: 'test.snapshot', version: '1', mediaType: 'application/json' } as const;
+        const result = await compute.evaluate({
+          action: {
+            schemaVersion: 1,
+            namespace: 'test.snapshot-reuse',
+            producer: { id: 'test.snapshot-reuse', version: '1', implementationAssets: [] },
+            operation: 'evaluate',
+            inputs: [
+              {
+                kind: 'content',
+                role: 'runtime-dependency-set',
+                digest: contentDigest({ value: `sha256:${dependencyHash}` }),
+              },
+            ],
+            arguments: {},
+            environment: {},
+            codec,
+          },
+          codec: {
+            ...codec,
+            encode: ({ value }) => {
+              if (!value.success) {
+                throw new Error('Failed builds are not reusable.');
+              }
+              const snapshot = value.serializeHandleSnapshot?.();
+              if (snapshot === undefined) {
+                throw new Error('A reusable build requires its snapshot.');
+              }
+              encodes.push(snapshot);
+              return textEncoder.encode(JSON.stringify(snapshot));
+            },
+            decode: ({ bytes }) => ({
+              success: true,
+              data: {},
+              issues: [],
+              serializedHandle: JSON.parse(textDecoder.decode(bytes)) as unknown,
+            }),
+          },
+          policy: 'best-effort',
+          compute: async () => handler(input),
+        });
+        return result.value;
+      },
+    })();
+    return { plugin, encodes };
+  };
+
+  const createSnapshotKernel = (serializeHandle: (input: { handle: unknown }) => unknown) =>
+    createMockKernelDefinition('idle-snapshot-kernel', {
+      evaluate: async ({ parameters }: { parameters: Record<string, unknown> }) => ({
+        geometry: gltfGeometry('display'),
+        handle: { label: `live-${JSON.stringify(parameters['width'] ?? 1)}` },
+        issues: [] as KernelIssue[],
+      }),
+      serializeHandle: serializeHandle as AnyKernelDefinitionV2['serializeHandle'],
+      deserializeHandle: ({ serialized }: { serialized: unknown }) => serialized,
+    } as Partial<AnyKernelDefinitionV2>);
+
+  it('should deliver the evaluation before it serialises the snapshot, then take it once the worker is idle', async () => {
+    const serializeHandle = vi.fn(({ handle }: { handle: unknown }) => ({ label: handleLabel(handle) }));
+    const reuse = createSnapshotReuse();
+    await seedTestFileSystem({ 'model.mock': '' });
+    const worker = await createMultiKernelWorker(
+      [{ id: 'idle-snapshot-kernel', extensions: ['mock'], definition: createSnapshotKernel(serializeHandle) }],
+      [],
+      [reuse.plugin],
+    );
+    worker.setComputeBinding({ mode: 'memory' });
+    try {
+      await openWorkerDocument(worker, 'idle-document', 'model.mock');
+      expect(serializeHandle, 'no snapshot on the result path').not.toHaveBeenCalled();
+      expect(reuse.encodes).toHaveLength(0);
+
+      worker.permitComputePublication();
+      await vi.waitFor(() => {
+        expect(reuse.encodes).toEqual([{ label: 'live-1' }]);
+      });
+      expect(serializeHandle).toHaveBeenCalledOnce();
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('should never serialise a snapshot when compute reuse is off', async () => {
+    const serializeHandle = vi.fn(({ handle }: { handle: unknown }) => ({ label: handleLabel(handle) }));
+    const reuse = createSnapshotReuse();
+    await seedTestFileSystem({ 'model.mock': '' });
+    const worker = await createMultiKernelWorker(
+      [{ id: 'idle-snapshot-kernel', extensions: ['mock'], definition: createSnapshotKernel(serializeHandle) }],
+      [],
+      [reuse.plugin],
+    );
+    worker.setComputeBinding({ mode: 'off' });
+    try {
+      await openWorkerDocument(worker, 'off-document', 'model.mock');
+      worker.permitComputePublication();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      expect(serializeHandle).not.toHaveBeenCalled();
+      expect(reuse.encodes).toHaveLength(0);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('should wait for a queued edit and skip the superseded snapshot without touching its disposed handle', async () => {
+    const serializeHandle = vi.fn(({ handle }: { handle: unknown }) => ({ label: handleLabel(handle) }));
+    const reuse = createSnapshotReuse();
+    await seedTestFileSystem({ 'model.mock': '' });
+    const worker = await createMultiKernelWorker(
+      [{ id: 'idle-snapshot-kernel', extensions: ['mock'], definition: createSnapshotKernel(serializeHandle) }],
+      [],
+      [reuse.plugin],
+    );
+    worker.setComputeBinding({ mode: 'memory' });
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
+    try {
+      await openWorkerDocumentWithParameters(worker, {
+        documentId: 'edited-document',
+        file: 'model.mock',
+        parameters: { width: 1 },
+      });
+      worker.onEvaluated = (event) => {
+        evaluated.push(event);
+      };
+      // The delivery permits the first build's publication, but the next edit is admitted before
+      // the worker is idle; the first build's handle is gone by the time it could run.
+      worker.permitComputePublication();
+      worker.handleUpdateDocument({ documentId: 'edited-document', intent: 2, parameters: { width: 2 } });
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(1);
+      });
+      expect(serializeHandle).not.toHaveBeenCalled();
+
+      worker.permitComputePublication();
+      await vi.waitFor(() => {
+        expect(reuse.encodes).toEqual([{ label: 'live-2' }]);
+      });
+      expect(serializeHandle.mock.calls.map(([input]) => handleLabel(input.handle))).toEqual(['live-2']);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+});
+
+describe('KernelRuntimeWorker projection release', () => {
+  /**
+   * A whole-mesh reuse middleware shaped like the geometry cache: a best-effort evaluation whose
+   * publication runs after delivery, at idle.
+   */
+  const createMeshReuse = (options: { refuseEncode?: boolean } = {}) => {
+    const sources: string[] = [];
+    const plugin = defineMiddleware({
+      id: 'mesh-reuse',
+      name: 'Mesh reuse',
+      version: '1.0.0',
+      async wrapRender(input, handler, { compute, dependencyHash }) {
+        if (compute.status !== 'on') {
+          return handler(input);
+        }
+        const codec = { id: 'test.mesh', version: '1', mediaType: 'application/json' } as const;
+        const result = await compute.evaluate({
+          action: {
+            schemaVersion: 1,
+            namespace: 'test.mesh-reuse',
+            producer: { id: 'test.mesh-reuse', version: '1', implementationAssets: [] },
+            operation: 'render',
+            inputs: [
+              {
+                kind: 'content',
+                role: 'runtime-dependency-set',
+                digest: contentDigest({ value: `sha256:${dependencyHash}` }),
+              },
+            ],
+            arguments: {},
+            environment: {},
+            codec,
+          },
+          codec: {
+            ...codec,
+            encode: ({ value }) => {
+              if (options.refuseEncode) {
+                throw new Error('This mesh is not reusable.');
+              }
+              return textEncoder.encode(
+                JSON.stringify(value, (_key, field: unknown) =>
+                  field instanceof Uint8Array ? { bytes: [...field] } : field,
+                ),
+              );
+            },
+            decode: ({ bytes }) =>
+              JSON.parse(textDecoder.decode(bytes), (_key, field: unknown) =>
+                typeof field === 'object' && field !== null && 'bytes' in field && Array.isArray(field.bytes)
+                  ? new Uint8Array(field.bytes as number[])
+                  : field,
+              ) as Awaited<ReturnType<typeof handler>>,
+          },
+          policy: 'best-effort',
+          compute: async () => handler(input),
+        });
+        sources.push(result.source);
+        return result.value;
+      },
+    })();
+    return { plugin, sources };
+  };
+
+  const bindings: ReadonlyArray<readonly [string, () => ComputeBinding]> = [
+    ['memory', () => ({ mode: 'memory' })],
+    [
+      'durable',
+      () => {
+        const durable = createMemoryComputeEngine();
+        const workspace = `projection-release-${crypto.randomUUID()}`;
+        return {
+          mode: 'durable',
+          store: _registerComputeStore({
+            spec: Object.freeze({}) as ComputeStore,
+            engine: durable.engine,
+            workspace,
+            control: durable.control({ workspace }),
+          }),
+        };
+      },
+    ],
+  ];
+
+  const createMeshWorker = async (binding: ComputeBinding, reuse: ReturnType<typeof createMeshReuse>) => {
+    const render = vi.fn(async () => ({ content: bytesFor('mesh') }));
+    await seedTestFileSystem({ 'model.mock': '' });
+    const worker = await createMultiKernelWorker(
+      [{ id: 'mesh-kernel', extensions: ['mock'], definition: createMockKernelDefinition('mesh-kernel', { render }) }],
+      [],
+      [reuse.plugin],
+    );
+    worker.setComputeBinding(binding);
+    await openWorkerDocument(worker, 'mesh-document', 'model.mock');
+    return { worker, render };
+  };
+
+  const retainedProjections = (worker: KernelRuntimeWorker): number =>
+    // @ts-expect-error -- Direct worker test reads the private projection map, which has no public accessor.
+    (worker.documents.get('mesh-document')?.current?.projections as Map<string, unknown> | undefined)?.size ?? 0;
+
+  const deliveredBytes = (event: Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]): string => {
+    if (!event.success) {
+      throw new Error(JSON.stringify(event.issues));
+    }
+    return JSON.stringify(event.artifact, (_key, field: unknown) => (field instanceof Uint8Array ? [...field] : field));
+  };
+
+  it.each(bindings)(
+    'should drop a projection once its mesh publication stores in %s mode, and serve the next view from the cache',
+    async (_mode, binding) => {
+      const reuse = createMeshReuse();
+      const { worker, render } = await createMeshWorker(binding(), reuse);
+      try {
+        const first = await requestWorkerView(worker, { documentId: 'mesh-document', subscriptionId: 'first' });
+        expect(retainedProjections(worker), 'kept until the cache holds the mesh').toBe(1);
+
+        worker.permitComputePublication();
+        await vi.waitFor(() => {
+          expect(retainedProjections(worker)).toBe(0);
+        });
+
+        const second = await requestWorkerView(worker, { documentId: 'mesh-document', subscriptionId: 'second' });
+        expect(deliveredBytes(second)).toBe(deliveredBytes(first));
+        expect(render, 'the cache served the second view').toHaveBeenCalledOnce();
+        expect(reuse.sources).toEqual(['computed', 'cache']);
+        expect(retainedProjections(worker), 'a cache hit is not retained twice').toBe(0);
+      } finally {
+        await worker.cleanup();
+      }
+    },
+  );
+
+  it('should keep the projection when its publication is refused, so the next view still reuses it', async () => {
+    const reuse = createMeshReuse({ refuseEncode: true });
+    const { worker, render } = await createMeshWorker({ mode: 'memory' }, reuse);
+    try {
+      await renderWorkerView(worker, { documentId: 'mesh-document', subscriptionId: 'first' });
+      worker.permitComputePublication();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+      expect(retainedProjections(worker)).toBe(1);
+
+      await renderWorkerView(worker, { documentId: 'mesh-document', subscriptionId: 'second' });
+      expect(render).toHaveBeenCalledOnce();
+      expect(reuse.sources).toEqual(['computed']);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('should keep the projection when compute reuse is off', async () => {
+    const reuse = createMeshReuse();
+    const { worker, render } = await createMeshWorker({ mode: 'off' }, reuse);
+    try {
+      await renderWorkerView(worker, { documentId: 'mesh-document', subscriptionId: 'first' });
+      worker.permitComputePublication();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+      expect(retainedProjections(worker)).toBe(1);
+
+      await renderWorkerView(worker, { documentId: 'mesh-document', subscriptionId: 'second' });
+      expect(render).toHaveBeenCalledOnce();
+      expect(reuse.sources).toEqual([]);
+    } finally {
+      await worker.cleanup();
+    }
   });
 });

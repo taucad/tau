@@ -1,7 +1,8 @@
+import type { GraphicsEvent } from '#machines/graphics.machine.js';
 import type * as ReactThreeFiber from '@react-three/fiber';
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import type { JSX } from 'react';
-import { useEffect } from 'react';
+import { StrictMode, useEffect, useLayoutEffect } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import {
   OrthographicCamera,
@@ -11,12 +12,13 @@ import {
   WebGLCoordinateSystem,
   WebGPUCoordinateSystem,
 } from 'three';
-import type { Camera } from 'three';
+import type { Camera, CoordinateSystem } from 'three';
 import { mock } from 'vitest-mock-extended';
 
 import { WebglErrorBoundary } from '#cad/webgl-error-boundary.jsx';
 import { WebglErrorFallback } from '#cad/webgl-fallback.jsx';
 import { ThreeCanvasInstance } from '#graphics/three/three-canvas-instance.jsx';
+import * as CanvasGl from '#graphics/three/canvas-three-gl.js';
 import {
   infiniteGridFadeEndVisibleSpans,
   infiniteGridPresentationPlaneByUpDirection,
@@ -37,6 +39,7 @@ let exposureAfterCreated: number | undefined;
 let latestCanvasState: StubRootState | undefined;
 /** The camera the stub root rays from; a test replaces it. */
 let stubRootCamera: Camera = new PerspectiveCamera();
+let stubCoordinateSystem: CoordinateSystem = WebGLCoordinateSystem;
 
 type StubPointerEvent = Readonly<Record<'offsetX' | 'offsetY' | 'clientX' | 'clientY', number>>;
 type StubCompute = (event: StubPointerEvent, state: StubRootState, previous?: StubRootState) => void;
@@ -54,6 +57,16 @@ const rigCamera = new PerspectiveCamera();
 const orthographicCamera = new OrthographicCamera();
 const setClipPlanes = vi.fn();
 const cameraRig = { activeCamera: rigCamera, perspectiveCamera: rigCamera, orthographicCamera, setClipPlanes };
+/** Frame callbacks registered inside the stub root, run by a test as R3F's loop would. */
+type StubFrameState = { size: { width: number; height: number } };
+const frameCallbacks = vi.hoisted(
+  (): Array<{ callback: (state: StubFrameState) => void; priority: number | undefined }> => [],
+);
+/** The stub root's size as R3F reports it; a test sets it to zero. */
+const stubSize = vi.hoisted(() => ({ width: 800, height: 600 }));
+/** Frame requests made inside the stub root. */
+const stubInvalidate = vi.hoisted(() => vi.fn());
+const reportRenderer = vi.hoisted(() => vi.fn<(event: GraphicsEvent) => void>());
 const enabledFeatures = vi.hoisted(() => new Set<string>());
 /** When set, the mocked renderer factory throws it, as three's `WebGLRenderer` does without a context. */
 const rendererFailure = vi.hoisted((): { error: Error | undefined } => ({ error: undefined }));
@@ -80,6 +93,7 @@ vi.mock('#graphics/three/render-fps-overlay.jsx', () => ({
 
 vi.mock('#hooks/use-graphics.jsx', () => ({
   useCameraRig: () => cameraRig,
+  useGraphics: () => ({ send: reportRenderer }),
 }));
 
 vi.mock('@react-three/fiber', async (importOriginal) => {
@@ -125,6 +139,7 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
 
       const gl = {
         toneMappingExposure: 0.37,
+        coordinateSystem: stubCoordinateSystem,
         domElement,
       };
 
@@ -171,7 +186,21 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
     return <div data-testid='stub-canvas'>{children}</div>;
   }
 
-  return { ...actual, Canvas: StubCanvas };
+  function useStubFrame(callback: (state: StubFrameState) => void, priority?: number): void {
+    useEffect(() => {
+      const entry = { callback, priority };
+      frameCallbacks.push(entry);
+      return () => {
+        frameCallbacks.splice(frameCallbacks.indexOf(entry), 1);
+      };
+    }, [callback, priority]);
+  }
+
+  const useStubThree = <Selected,>(
+    select: (state: { invalidate: typeof stubInvalidate; size: typeof stubSize }) => Selected,
+  ): Selected => select({ invalidate: stubInvalidate, size: { ...stubSize } });
+
+  return { ...actual, Canvas: StubCanvas, useFrame: useStubFrame, useThree: useStubThree };
 });
 
 vi.mock('#environment/viewer-environment.jsx', async (importOriginal) => ({
@@ -223,6 +252,14 @@ vi.mock('#graphics/three/actor-bridge.jsx', () => ({
   ActorBridge: () => <div data-testid='actor-bridge' />,
 }));
 
+/** The bridge's DOM can commit before the stub frame hook's passive effect subscribes. */
+const waitForPresentationObserver = async () =>
+  waitFor(() => {
+    const observer = frameCallbacks.find(({ priority }) => priority === 6);
+    expect(observer).toBeDefined();
+    return observer!;
+  });
+
 function KeyedThreeCanvas({ canvasKey }: { readonly canvasKey: string }) {
   return (
     <ThreeCanvasInstance key={canvasKey} graphicsBackend='webgl' onRetry={() => undefined}>
@@ -234,6 +271,7 @@ function KeyedThreeCanvas({ canvasKey }: { readonly canvasKey: string }) {
 describe('ThreeCanvasInstance', () => {
   beforeEach(() => {
     enabledFeatures.clear();
+    reportRenderer.mockClear();
     fireLatestWebGlContextLost = undefined;
     latestCanvasEventPrefix = undefined;
     latestCanvasEventSource = undefined;
@@ -243,12 +281,103 @@ describe('ThreeCanvasInstance', () => {
     exposureAfterCreated = undefined;
     latestCanvasState = undefined;
     stubRootCamera = new PerspectiveCamera();
+    stubCoordinateSystem = WebGLCoordinateSystem;
     setClipPlanes.mockClear();
     rendererFailure.error = undefined;
+    frameCallbacks.length = 0;
+    stubInvalidate.mockClear();
+    stubSize.width = 800;
+    stubSize.height = 600;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('should publish the initialized backend, then clear it on context loss', async () => {
+    const view = render(<ThreeCanvasInstance graphicsBackend='webgpu' onRetry={() => undefined} />);
+    // Only the mount itself is declared before the renderer exists; no backend is published yet.
+    expect(reportRenderer.mock.calls.map(([event]) => event.type)).toEqual(['canvasMounted']);
+    await waitFor(() => {
+      expect(reportRenderer.mock.lastCall?.[0]).toMatchObject({
+        type: 'rendererInitialized',
+        payload: { backend: 'webgl' },
+      });
+    });
+    const initialized = reportRenderer.mock.lastCall?.[0];
+    if (initialized?.type !== 'rendererInitialized') {
+      throw new Error('Expected initialized renderer status.');
+    }
+    act(() => fireLatestWebGlContextLost?.());
+    expect(reportRenderer).toHaveBeenLastCalledWith({
+      type: 'rendererRemoved',
+      canvasId: initialized.payload.canvasId,
+    });
+    view.unmount();
+  });
+
+  it('should publish WebGPU only when the initialized renderer uses its coordinate system', async () => {
+    stubCoordinateSystem = WebGPUCoordinateSystem;
+    const view = render(<ThreeCanvasInstance graphicsBackend='webgpu' onRetry={() => undefined} />);
+    await waitFor(() => {
+      expect(reportRenderer.mock.lastCall?.[0]).toMatchObject({
+        type: 'rendererInitialized',
+        payload: { backend: 'webgpu' },
+      });
+    });
+    view.unmount();
+    expect(reportRenderer.mock.lastCall?.[0].type).toBe('rendererRemoved');
+  });
+
+  it('should retain truthful status through StrictMode and retire it on unmount', async () => {
+    const view = render(
+      <StrictMode>
+        <KeyedThreeCanvas canvasKey='status' />
+      </StrictMode>,
+    );
+    await waitFor(() => {
+      expect(reportRenderer.mock.lastCall?.[0]).toMatchObject({
+        type: 'rendererInitialized',
+        payload: { backend: 'webgl' },
+      });
+    });
+    const initialized = reportRenderer.mock.lastCall?.[0];
+    if (initialized?.type !== 'rendererInitialized') {
+      throw new Error('Expected initialized renderer status.');
+    }
+    view.unmount();
+    expect(reportRenderer).toHaveBeenLastCalledWith({
+      type: 'rendererRemoved',
+      canvasId: initialized.payload.canvasId,
+    });
+  });
+
+  it('retains the renderer before scene layout effects can allocate environment targets', () => {
+    const events: string[] = [];
+    const createFactory = CanvasGl.createTauR3fGlProp;
+    vi.spyOn(CanvasGl, 'createTauR3fGlProp').mockImplementation((...parameters) => {
+      const factory = createFactory(...parameters);
+      const { retainScene } = factory;
+      vi.spyOn(factory, 'retainScene').mockImplementation(() => {
+        events.push('retained');
+        return retainScene();
+      });
+      return factory;
+    });
+    function EnvironmentAllocation(): undefined {
+      useLayoutEffect(() => {
+        events.push('environment-layout');
+      }, []);
+      return undefined;
+    }
+    render(
+      <ThreeCanvasInstance graphicsBackend='webgl' onRetry={() => undefined}>
+        <EnvironmentAllocation />
+      </ThreeCanvasInstance>,
+    );
+    expect(events).toContain('retained');
+    expect(events).toContain('environment-layout');
+    expect(events.indexOf('retained')).toBeLessThan(events.indexOf('environment-layout'));
   });
 
   describe('drawing-buffer pixel ratio', () => {
@@ -347,6 +476,35 @@ describe('ThreeCanvasInstance', () => {
     expect(screen.getByTestId('gpu-inspector')).toBeInTheDocument();
   });
 
+  it('declares a canvas that draws frames from its mounting commit until its context is lost', async () => {
+    render(<ThreeCanvasInstance graphicsBackend='webgl' onRetry={() => undefined} />);
+    const mounted = reportRenderer.mock.calls.map(([event]) => event).find((event) => event.type === 'canvasMounted');
+    if (mounted?.type !== 'canvasMounted') {
+      throw new Error('Expected the canvas to declare itself in its mounting commit.');
+    }
+    await waitFor(() => {
+      expect(fireLatestWebGlContextLost).toBeDefined();
+    });
+    await act(async () => {
+      fireLatestWebGlContextLost?.();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Graphics context lost')).toBeInTheDocument();
+    });
+    // The fallback draws no frames, so the stage stops waiting for one.
+    expect(reportRenderer).toHaveBeenCalledWith({ type: 'canvasUnmounted', canvasId: mounted.canvasId });
+  });
+
+  it('withdraws the canvas declaration when it unmounts', () => {
+    const view = render(<ThreeCanvasInstance graphicsBackend='webgl' onRetry={() => undefined} />);
+    const mounted = reportRenderer.mock.calls.map(([event]) => event).find((event) => event.type === 'canvasMounted');
+    if (mounted?.type !== 'canvasMounted') {
+      throw new Error('Expected the canvas to declare itself in its mounting commit.');
+    }
+    view.unmount();
+    expect(reportRenderer).toHaveBeenCalledWith({ type: 'canvasUnmounted', canvasId: mounted.canvasId });
+  });
+
   it('shows Graphics context lost fallback when WebGL fires context loss', async () => {
     const onRetry = vi.fn();
 
@@ -430,6 +588,69 @@ describe('ThreeCanvasInstance', () => {
     });
 
     expect(screen.getByTestId('actor-bridge')).toBeInTheDocument();
+  });
+
+  it('reports the first frame only once it has reached the screen, then observes no further frames', async () => {
+    render(<KeyedThreeCanvas canvasKey='first-frame' />);
+    const observer = await waitForPresentationObserver();
+    expect(observer).toBeDefined();
+    // The canvas may have drawn before the observer subscribed: it asks for exactly one frame to observe.
+    expect(stubInvalidate).toHaveBeenCalledTimes(1);
+    const presented = (): GraphicsEvent[] =>
+      reportRenderer.mock.calls.map(([event]) => event).filter((event) => event.type === 'rendererPresented');
+
+    // Submitting the frame is not presenting it: nothing is reported until two animation frames later.
+    act(() => {
+      observer.callback({ size: stubSize });
+    });
+    expect(presented()).toEqual([]);
+    await waitFor(() => {
+      expect(presented()).toHaveLength(1);
+    });
+    const initialized = reportRenderer.mock.calls.find(([event]) => event.type === 'rendererInitialized')?.[0];
+    expect(presented()[0]).toEqual({
+      type: 'rendererPresented',
+      canvasId: initialized?.type === 'rendererInitialized' ? initialized.payload.canvasId : undefined,
+    });
+    expect(frameCallbacks.some(({ priority }) => priority === 6)).toBe(false);
+    expect(stubInvalidate).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for the canvas to have area before it observes a frame', async () => {
+    stubSize.width = 0;
+    render(<KeyedThreeCanvas canvasKey='no-area' />);
+    const observer = await waitForPresentationObserver();
+    expect(stubInvalidate).not.toHaveBeenCalled();
+    const frame = vi.spyOn(globalThis, 'requestAnimationFrame');
+    act(() => {
+      observer.callback({ size: { width: 0, height: 600 } });
+    });
+    expect(frame).not.toHaveBeenCalled();
+    act(() => {
+      observer.callback({ size: { width: 800, height: 600 } });
+    });
+    expect(frame).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels the pending animation frame when it unmounts between the two frames', async () => {
+    const view = render(<KeyedThreeCanvas canvasKey='unmount-between' />);
+    const observer = await waitForPresentationObserver();
+    const callbacks: FrameRequestCallback[] = [];
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      callbacks.push(callback);
+      return callbacks.length;
+    });
+    const cancel = vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => undefined);
+    act(() => {
+      observer.callback({ size: stubSize });
+    });
+    // The first animation frame arrives and requests the second; the canvas unmounts before it.
+    expect(callbacks).toHaveLength(1);
+    callbacks[0]!(0);
+    expect(callbacks).toHaveLength(2);
+    view.unmount();
+    expect(cancel).toHaveBeenCalledWith(2);
+    expect(reportRenderer.mock.calls.some(([event]) => event.type === 'rendererPresented')).toBe(false);
   });
 
   it('forwards explicit Canvas event routing props to R3F', async () => {

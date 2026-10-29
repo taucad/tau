@@ -78,7 +78,9 @@ export function ForgotPassword({ className }: ForgotPasswordProps): React.JSX.El
   return (
     <Card className={cn('w-full max-w-sm', className)}>
       <CardHeader>
-        <CardTitle className='text-xl font-semibold'>{localization.auth.forgotPassword}</CardTitle>
+        <CardTitle className='text-xl font-semibold'>
+          <h1>{localization.auth.forgotPassword}</h1>
+        </CardTitle>
       </CardHeader>
 
       <CardContent>

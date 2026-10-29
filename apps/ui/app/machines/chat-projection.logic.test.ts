@@ -9,7 +9,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createAgentLauncher } from '@taucad/agent-host/launcher';
 import { createNodeChatStore } from '@taucad/agent-host/node';
-import { createTauCloudGatewayModelTransport } from '@taucad/agent-host';
+import {
+  createTauCloudGatewayModelTransport,
+  foreignRunAskPullMilliseconds,
+  foreignRunStaleMilliseconds,
+} from '@taucad/agent-host';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { createUIMessageStream, readUIMessageStream } from 'ai';
@@ -28,15 +32,20 @@ import {
   selectAttentionRow,
   selectCaughtUp,
   selectOpenInterrupts,
+  selectRunElsewhere,
+  selectRunElsewhereAwaitsPull,
+  selectRunElsewhereChangesAt,
+  selectRunElsewhereRecheckDelay,
   selectRunFailure,
   selectPosition,
   selectRunPhase,
   selectTranscriptSource,
   selectToolsInFlight,
   selectTurnRevision,
+  remoteSegmentParsesOf,
 } from '#machines/chat-projection.logic.js';
 import type { ChatProjection, ChatProjectionReadAnswer } from '#machines/chat-projection.logic.js';
-import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
+import { lifecycleRow, logRow, runningRows } from '#machines/chat-projection.fixture.js';
 
 /* Three recorded runs, and two seeded logs whose runs pause on an interrupt. */
 const logs = [
@@ -128,6 +137,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
       expect(actor.getSnapshot().context.ledger.position.cursor).toBe(0);
       actor.send({
         type: 'remote',
+        at: 0,
         segments: [
           {
             deviceId: 'other-device',
@@ -434,6 +444,21 @@ describe('chatProjectionLogic (PV-S7)', () => {
     expect(selectPosition(state).cursor).toBe(rows.length);
   });
 
+  it('names an open question over a later call opened beside it (I5)', () => {
+    const withCalls = (...names: string[]): ChatProjection => ({
+      ...initialChatProjection,
+      openTools: Object.fromEntries(
+        names.map((toolName, index) => [`call_${String(index)}`, { runId: 'run_1', toolName }]),
+      ),
+    });
+    expect(selectToolsInFlight(withCalls('AskUserQuestion', 'write_file'))).toEqual({
+      count: 2,
+      toolName: 'AskUserQuestion',
+    });
+    expect(selectToolsInFlight(withCalls('read_file', 'write_file'))).toEqual({ count: 2, toolName: 'write_file' });
+    expect(selectToolsInFlight(withCalls())).toEqual({ count: 0 });
+  });
+
   it('is invariant to how the log is chunked', () => {
     const rows = readLog('recorded/daemon-reattach-hexnut-4runs');
     const one = project(rows, 1);
@@ -465,6 +490,44 @@ describe('chatProjectionLogic (PV-S7)', () => {
     expect(withoutWatchedRun.some((message) => message.id === watched)).toBe(false);
   });
 
+  /*
+   * A heartbeat changes one device's segment every minute; the others' bytes are the same and are not parsed again, and
+   * the one that grew parses just its new rows. The parses live beside the projection state, never in it.
+   */
+  it('parses again only the segments whose bytes changed, and only what a grown segment gained', () => {
+    const encode = (rows: readonly unknown[]) =>
+      new TextEncoder().encode(rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
+    const steady = { deviceId: 'device-a', bytes: encode([lifecycleRow(0, 'admitted', 'run_a')]) };
+    const first = reduceChatProjection(initialChatProjection, {
+      type: 'remote',
+      at: 0,
+      segments: [steady, { deviceId: 'device-b', bytes: encode([lifecycleRow(0, 'admitted', 'run_b')]) }],
+    }).state;
+    const second = reduceChatProjection(first, {
+      type: 'remote',
+      at: 0,
+      segments: [
+        { deviceId: 'device-a', bytes: Uint8Array.from(steady.bytes) },
+        {
+          deviceId: 'device-b',
+          bytes: encode([lifecycleRow(0, 'admitted', 'run_b'), lifecycleRow(1, 'running', 'run_b')]),
+        },
+      ],
+    }).state;
+    const rowsOf = (state: typeof first, deviceId: string) =>
+      remoteSegmentParsesOf(state.remote)?.get(deviceId)?.events;
+
+    expect(rowsOf(second, 'device-a')).toBeDefined();
+    expect(rowsOf(second, 'device-a')).toBe(rowsOf(first, 'device-a'));
+    expect(rowsOf(second, 'device-b')).toHaveLength(2);
+    expect(rowsOf(second, 'device-b')![0]).toBe(rowsOf(first, 'device-b')![0]);
+    expect(second.remote).not.toHaveProperty('parsed');
+    /* Nor is the unchanged segment's run folded on its ledger again. */
+    const runOf = (state: typeof first) => state.remote?.unsettled?.find((run) => run.deviceId === 'device-a');
+    expect(runOf(second)).toBeDefined();
+    expect(runOf(second)).toBe(runOf(first));
+  });
+
   it('refolds another device’s run when its segment digest changes', async () => {
     const own = readLog('recorded/in-project-ping-pong-turn');
     const remote = readLog('recorded/daemon-reattach-hexnut');
@@ -477,8 +540,8 @@ describe('chatProjectionLogic (PV-S7)', () => {
     const before = segment(remote.slice(0, 3));
     const after = segment(remote);
     const ownProjection = project(own.slice(0, 10), 7);
-    const first = reduceChatProjection(ownProjection, { type: 'remote', segments: before }).state;
-    const second = reduceChatProjection(first, { type: 'remote', segments: after }).state;
+    const first = reduceChatProjection(ownProjection, { type: 'remote', at: 0, segments: before }).state;
+    const second = reduceChatProjection(first, { type: 'remote', at: 0, segments: after }).state;
     const completed = project(own, 7, second);
 
     expect(digestLogSegments(after)).not.toBe(digestLogSegments(before));
@@ -487,8 +550,165 @@ describe('chatProjectionLogic (PV-S7)', () => {
       ...(await materializeTranscript(project(remote, 1))),
       ...(await materializeTranscript(project(own, 1))),
     ]);
-    expect(reduceChatProjection(second, { type: 'remote', segments: after }).state).toBe(second);
+    expect(reduceChatProjection(second, { type: 'remote', at: 0, segments: after }).state).toBe(second);
     expect(completed.remote).toBe(second.remote);
+  });
+
+  /* XD3: a run in flight on another device holds this chat's composer until it settles or goes stale. */
+  describe('another device’s run in flight', () => {
+    const at = Date.parse('2026-09-28T00:00:00.000Z');
+    const remoteOf = (rows: readonly unknown[], pulledQuiet?: number) => [
+      {
+        deviceId: 'other-device',
+        bytes: new TextEncoder().encode(rows.map((row) => JSON.stringify(row)).join('\n')),
+        ...(pulledQuiet === undefined ? {} : { pulledQuiet }),
+      },
+    ];
+
+    it('names the run while it is unsettled and inside the bound', () => {
+      const remote = reduceChatProjection(initialChatProjection, {
+        type: 'remote',
+        at,
+        segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other'), lifecycleRow(1, 'running', 'run_other')]),
+      }).state;
+
+      expect(selectRunElsewhere(remote, at + 60_000)).toMatchObject({
+        deviceId: 'other-device',
+        runId: 'run_other',
+        state: 'running',
+        lastRecordedAt: at,
+        observedAt: at,
+      });
+    });
+
+    /* Rounds 18 and 19: gone stale means pulls found nothing newer for more than the bound, never this clock alone. */
+    it('names none once the run settles, or once pulls found nothing newer for more than the bound', () => {
+      const settled = reduceChatProjection(initialChatProjection, {
+        type: 'remote',
+        at,
+        segments: remoteOf([
+          lifecycleRow(0, 'admitted', 'run_other'),
+          lifecycleRow(1, 'running', 'run_other'),
+          lifecycleRow(2, 'completed', 'run_other'),
+        ]),
+      }).state;
+      const running = reduceChatProjection(initialChatProjection, {
+        type: 'remote',
+        at,
+        segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other')]),
+      }).state;
+      const pulled = reduceChatProjection(running, {
+        type: 'remote',
+        at,
+        segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other')], foreignRunStaleMilliseconds + 1),
+      }).state;
+
+      expect(selectRunElsewhere(settled, at)).toBeUndefined();
+      expect(selectRunElsewhere(running, at + foreignRunStaleMilliseconds + 1)).toBeDefined();
+      expect(selectRunElsewhereAwaitsPull(running, at + foreignRunStaleMilliseconds + 1)).toBe(true);
+      expect(selectRunElsewhere(pulled, at + foreignRunStaleMilliseconds + 1)).toBeUndefined();
+      expect(selectRunElsewhereAwaitsPull(pulled, at + foreignRunStaleMilliseconds + 1)).toBe(false);
+    });
+
+    /*
+     * Round 27: a device whose pull was refused CHAT_NOT_SHARED (chat sync off, no remote, no record identity) can never
+     * get the pulls a quiet run awaits, so that run no longer holds the chat here, as the host's fence reads it.
+     */
+    it('names none once a run quiet past the ask interval awaits pulls this device was refused', () => {
+      const running = reduceChatProjection(initialChatProjection, {
+        type: 'remote',
+        at,
+        segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other'), lifecycleRow(1, 'running', 'run_other')]),
+      }).state;
+      const refused = reduceChatProjection(running, { type: 'pulls', pulls: false }).state;
+      const quiet = at + foreignRunAskPullMilliseconds + 1;
+
+      expect(selectRunElsewhere(running, quiet)).toBeDefined();
+      expect(selectRunElsewhere(refused, quiet)).toBeUndefined();
+      /* The page still asks, so an answer that changes (chat sync turned back on) brings the run back. */
+      expect(selectRunElsewhereAwaitsPull(refused, quiet)).toBe(true);
+      expect(
+        selectRunElsewhere(reduceChatProjection(refused, { type: 'pulls', pulls: true }).state, quiet),
+      ).toBeDefined();
+      /* The answer is this device's, not the segments': a later read of them keeps it, and so does a catch-up. */
+      const reread = reduceChatProjection(refused, {
+        type: 'remote',
+        at,
+        segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other'), lifecycleRow(1, 'paused', 'run_other')]),
+      }).state;
+      expect(selectRunElsewhere(reread, quiet)).toBeUndefined();
+      const caughtUp = reduceChatProjection(refused, {
+        type: 'catch-up',
+        base: refused,
+        projection: initialChatProjection,
+      }).state;
+      expect(selectRunElsewhere(caughtUp, quiet)).toBeUndefined();
+    });
+
+    it('still names a run quiet here for less than the ask interval on a device whose pulls are refused', () => {
+      const running = reduceChatProjection(initialChatProjection, {
+        type: 'remote',
+        at,
+        segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other'), lifecycleRow(1, 'running', 'run_other')]),
+      }).state;
+      const refused = reduceChatProjection(running, { type: 'pulls', pulls: false }).state;
+
+      expect(selectRunElsewhere(refused, at + foreignRunAskPullMilliseconds)).toMatchObject({ runId: 'run_other' });
+      expect(selectRunElsewhereChangesAt(refused, at + 60_000)).toBe(at + foreignRunAskPullMilliseconds + 1);
+    });
+
+    it('names the moment the answer next changes with the clock, and none once nothing is unsettled', () => {
+      const running = reduceChatProjection(initialChatProjection, {
+        type: 'remote',
+        at,
+        segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other'), lifecycleRow(1, 'running', 'run_other')]),
+      }).state;
+      const settled = reduceChatProjection(initialChatProjection, {
+        type: 'remote',
+        at,
+        segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other'), lifecycleRow(1, 'completed', 'run_other')]),
+      }).state;
+      const changesAt = selectRunElsewhereChangesAt(running, at + 60_000);
+
+      expect(changesAt).toBe(at + foreignRunAskPullMilliseconds + 1);
+      expect(selectRunElsewhereAwaitsPull(running, changesAt! - 1)).toBe(false);
+      /* From then on only a pull changes it: the run awaits one, and still holds the chat. */
+      expect(selectRunElsewhereAwaitsPull(running, changesAt!)).toBe(true);
+      expect(selectRunElsewhere(running, changesAt!)).toBeDefined();
+      expect(selectRunElsewhereChangesAt(running, changesAt!)).toBeUndefined();
+      expect(selectRunElsewhereChangesAt(settled, at)).toBeUndefined();
+      expect(selectRunElsewhereChangesAt(initialChatProjection, at)).toBeUndefined();
+    });
+
+    /* Round 16: a far-future foreign clock decides nothing; the reader waits from when it saw the run (round 19: until it asks for pulls). */
+    it('waits for the next change from when it saw the run, whatever its clock, and not at all when nothing can change', () => {
+      const farAhead = reduceChatProjection(initialChatProjection, {
+        type: 'remote',
+        at,
+        segments: remoteOf([{ ...lifecycleRow(0, 'admitted', 'run_other'), recordedAt: '2027-09-28T00:00:00.000Z' }]),
+      }).state;
+      const running = reduceChatProjection(initialChatProjection, {
+        type: 'remote',
+        at,
+        segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other')]),
+      }).state;
+
+      expect(selectRunElsewhereRecheckDelay(farAhead, at)).toBe(foreignRunAskPullMilliseconds + 1);
+      expect(selectRunElsewhereRecheckDelay(running, at)).toBe(foreignRunAskPullMilliseconds + 1);
+      expect(selectRunElsewhereRecheckDelay(running, at + foreignRunAskPullMilliseconds + 5)).toBeUndefined();
+      expect(selectRunElsewhereRecheckDelay(initialChatProjection, at)).toBeUndefined();
+    });
+
+    it('never names this device’s own run, read back from a segment', () => {
+      const own = project(runningRows('run_own'), 2);
+      const remote = reduceChatProjection(own, {
+        type: 'remote',
+        at,
+        segments: remoteOf(runningRows('run_own')),
+      }).state;
+
+      expect(selectRunElsewhere(remote, at)).toBeUndefined();
+    });
   });
 
   it('keeps a device’s run order when its clock moves backwards', () => {
@@ -500,7 +720,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
       deviceId: 'other-device',
       bytes: new TextEncoder().encode(rows.map((row) => JSON.stringify(row)).join('\n')),
     };
-    const remote = reduceChatProjection(initialChatProjection, { type: 'remote', segments: [segment] }).state;
+    const remote = reduceChatProjection(initialChatProjection, { type: 'remote', at: 0, segments: [segment] }).state;
 
     expect(selectTranscriptSource(remote).map((view) => view.runId)).toEqual(['run_z', 'run_a']);
   });
@@ -523,8 +743,8 @@ describe('chatProjectionLogic (PV-S7)', () => {
     );
     expect(digestLogSegments(after)).not.toBe(digestLogSegments(before));
 
-    const first = reduceChatProjection(initialChatProjection, { type: 'remote', segments: before }).state;
-    const second = reduceChatProjection(first, { type: 'remote', segments: after }).state;
+    const first = reduceChatProjection(initialChatProjection, { type: 'remote', at: 0, segments: before }).state;
+    const second = reduceChatProjection(first, { type: 'remote', at: 0, segments: after }).state;
     expect(second.remote?.views).not.toEqual(first.remote?.views);
     expect(await materializeTranscript(second)).not.toEqual(await materializeTranscript(first));
     expect(JSON.stringify(await materializeTranscript(second))).toContain('40mm');

@@ -37,6 +37,8 @@ describe('createDockerCloudHostProvisioner', () => {
         /* Rule 15: who the host's revisions are by (FX7 D2). */
         'TAU_HOST_OWNER_ID=owner-1',
         'TAU_HOST_OWNER_NAME=Ada Owner',
+        /* Runtime telemetry: the container composes with route `cloud` (runtime observability PR-3). */
+        'TAU_CLOUD_HOST=1',
       ]),
     );
     expect(run?.arguments_.join(' ')).not.toContain('secret');

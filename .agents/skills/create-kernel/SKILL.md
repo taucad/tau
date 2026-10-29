@@ -1,6 +1,6 @@
 ---
 name: create-kernel
-description: Add a new first-party CAD kernel to Tau as a standalone @taucad/* package. Use when adding a kernel, integrating a new CAD engine, implementing defineKernel, scaffolding a kernel package, wiring kernel UI catalog, skill bundle, and Monaco entries, or writing a native Python, .NET or binary kernel. Agents should select this skill autonomously when a request clearly introduces or productizes a kernel.
+description: Add a new first-party CAD kernel to Tau as a standalone @taucad/* package. Use when adding a kernel, integrating a new CAD engine, implementing defineKernel, scaffolding a kernel package, wiring kernel UI catalog, skill bundle, and editor language entries, or writing a native Python, .NET or binary kernel. Agents should select this skill autonomously when a request clearly introduces or productizes a kernel.
 ---
 
 # Create Kernel
@@ -226,17 +226,16 @@ defineRuntime({ plugins: [<alias>()] });
 
 ### 3.2 Review every host runtime
 
-The seven host runtime definitions are intentional and ordered; do not add a kernel mechanically. For each applicable host, add the package dependency and package-named factory once. Record why a credentialed, native-only, converter-only, or otherwise incompatible kernel is omitted. Native kernels are ordinary entries: listing `smlibpy()`, `build123d()` or `picogk()` is the whole integration (section 3.8).
+The six host runtime definitions are intentional and ordered; do not add a kernel mechanically. For each applicable host, add the package dependency and package-named factory once. Record why a credentialed, native-only, converter-only, or otherwise incompatible kernel is omitted. Native kernels are ordinary entries: listing `smlibpy()`, `build123d()` or `picogk()` is the whole integration (section 3.8).
 
-| Host                          | Runtime definition                                     | Coverage test                                   | Dependency manifest                    |
-| ----------------------------- | ------------------------------------------------------ | ----------------------------------------------- | -------------------------------------- |
-| UI editor                     | `apps/ui/app/runtime/ui-runtime.definition.ts`         | `apps/ui/app/runtime/ui-runtime.config.test.ts` | `apps/ui/package.json`                 |
-| Desktop utility               | `apps/desktop/src/tau/desktop-runtime.factory.ts`      | `desktop-runtime.factory.test.ts`               | `apps/desktop/package.json`            |
-| CLI built-ins                 | `packages/cli/src/cli-runtime.ts`                      | `cli-runtime.test.ts`                           | `packages/cli/package.json`            |
-| GeoSpec default model runtime | `packages/geospec-engine/src/model/default-runtime.ts` | `default-runtime.test.ts`                       | `packages/geospec-engine/package.json` |
-| Runtime integration fixtures  | `apps/runtime-e2e/src/runtime.definition.ts`           | `runtime.definition.test.ts`                    | `apps/runtime-e2e/package.json`        |
-| Checked-in example rendering  | `libs/tau-examples/scripts/runtime.ts`                 | `libs/tau-examples/scripts/generation.test.ts`  | `libs/tau-examples/package.json`       |
-| Import/export converter       | `apps/libs/converter/src/runtime.ts`                   | `apps/libs/converter/src/runtime.test.ts`       | `apps/libs/converter/package.json`     |
+| Host                                    | Runtime definition                                | Coverage test                                   | Dependency manifest                |
+| --------------------------------------- | ------------------------------------------------- | ----------------------------------------------- | ---------------------------------- |
+| UI editor                               | `apps/ui/app/runtime/ui-runtime.definition.ts`    | `apps/ui/app/runtime/ui-runtime.config.test.ts` | `apps/ui/package.json`             |
+| Desktop utility                         | `apps/desktop/src/tau/desktop-runtime.factory.ts` | `desktop-runtime.factory.test.ts`               | `apps/desktop/package.json`        |
+| CLI built-ins and GeoSpec `tauExporter` | `packages/cli/src/cli-runtime.ts`                 | `cli-runtime.test.ts`                           | `packages/cli/package.json`        |
+| Runtime integration fixtures            | `apps/runtime-e2e/src/runtime.definition.ts`      | `runtime.definition.test.ts`                    | `apps/runtime-e2e/package.json`    |
+| Checked-in example rendering            | `libs/tau-examples/scripts/runtime.ts`            | `libs/tau-examples/scripts/generation.test.ts`  | `libs/tau-examples/package.json`   |
+| Import/export converter                 | `apps/libs/converter/src/runtime.ts`              | `apps/libs/converter/src/runtime.test.ts`       | `apps/libs/converter/package.json` |
 
 Array order is kernel-selection precedence. Preserve it deliberately; each host's existing order assertions pin it. Every coverage test calls `assertKernelRosterCoverage` from `@taucad/runtime-testing/roster` against `kernelConfigurations`: a new catalog row fails each one until that host lists the kernel or adds an `omitted` reason. The desktop also keeps `apps/desktop/src/tau/desktop-native-deployments.ts`, the native packages it bundles closures for; a parity test holds it equal to the deployments its runtime lists. Review `apps/ui/vite.config.ts` `ssr.external` only when the package emits sibling SSR chunks; most kernel packages do not belong there.
 
@@ -254,7 +253,7 @@ Kernel guidance ships as a package-owned skill bundle, not as an API prompt conf
 
 A first-party kernel then gets its product rows: the package in `skillOwners` (`packages/skills/src/skill-bundles.ts`) and its resources import in `src/resources.ts`, its slug and catalog id in `builtInSkillSlugs` and `kernelIds` (`libs/telemetry/src/ingest.ts`), its billing tier (`apps/libs/billing/src/kernel-tier-requirements.ts`) and, for a `pypi`/`nuget` kernel, its project template in the UI's `getKernelProjectTemplate`. The skills, telemetry and UI template tests fail on a missing row and the billing table fails typecheck. These rows are first-party enrichment, not support: a third-party kernel needs none of them, hosts load its `tau.skills` bundle through the plugin listing, and telemetry reports its slug as `custom`.
 
-### 3.5 Monaco IntelliSense types
+### 3.5 TypeScript language-service declarations
 
 Only needed when users `import` a JS/TS API from the kernel. Declarations are bundled as a JSON map (`Record<modulePath, dtsSource>`) — do **not** use `declare module` wrappers (TS1038 in ambient contexts).
 
@@ -272,7 +271,7 @@ Only needed when users `import` a JS/TS API from the kernel. Declarations are bu
 4. **Type-level tests:** `libs/api-extractor/src/generated/<id>/<id>.bundled.test-d.ts` plus `paths` entries in `libs/api-extractor/tsconfig.typetest.json`.
 5. **Run extraction:** `pnpm nx run api-extractor:extract-<id>`
 
-If the source extension is new to the editor, invoke the `add-monaco-language` skill. That workflow owns `libs/types/src/constants/code.constants.ts`, the Monaco contribution registry, Shiki grammar, and extension mapping; do not hand-roll a partial language registration here.
+If the source extension is new to the editor, invoke the `add-editor-language` skill. That workflow owns `libs/types/src/constants/code.constants.ts`, the lazy editor syntax/service loaders, shared Shiki grammar, and extension mapping; do not hand-roll a partial language registration here.
 
 ### 3.6 Documentation
 
@@ -322,7 +321,7 @@ If `apps/api` changed: `NX_DAEMON=false ./node_modules/.bin/nx run-many -t lint 
 
 1. Scaffold (section 0)
 2. Implement kernel + tests
-3. Review all seven host runtimes; list only applicable consumers
+3. Review all six host runtimes; list only applicable consumers
 4. Verify geometry-naming compliance for render, export, native handles, converter boundaries
 5. Complete catalog, skill bundle and product rows, editor types/language/icon, docs, and npm-name handoff
 6. Run the Nx checks and fix every regression
@@ -342,7 +341,7 @@ If `apps/api` changed: `NX_DAEMON=false ./node_modules/.bin/nx run-many -t lint 
 - [ ] Skill bundle, `skillOwners`, resources import, telemetry `kernelIds`/`builtInSkillSlugs` and billing tier rows
 - [ ] Native kernel only: `/native` deployment, `withNativeDeployment` kernel with late binding, `tau-plugin.json`, `native.test.ts`
 - [ ] `libs/api-extractor/` — extractor, target, generated declaration map/tests, `kernel-types.ts`, typetest paths
-- [ ] New source language, if any, added through `add-monaco-language`
+- [ ] New source language, if any, added through `add-editor-language`
 - [ ] Kernel docs pages + architecture policy updated
 - [ ] Maintainer has reserved the npm name and configured its `publish.yml` Trusted Publisher
 - [ ] Version plan covers every changed release-group project
@@ -359,7 +358,7 @@ If `apps/api` changed: `NX_DAEMON=false ./node_modules/.bin/nx run-many -t lint 
 - Local mock helpers instead of the shared testing utils → maintenance burden
 - Imported a removed `@taucad/runtime/testing` or `@taucad/geometry-core/testing` subpath → use `@taucad/runtime-testing`
 - Copied legacy generated geometry names instead of the naming helpers → explorer/import/export drift
-- `declare module` wrapper instead of raw `.d.ts` + JSON map → TS1038 errors in Monaco
+- `declare module` wrapper instead of raw `.d.ts` + JSON map → TS1038 errors in the TypeScript service
 - Added the kernel to one host runtime without reviewing the other six → hidden CLI/GeoSpec/desktop/example/converter drift
 - Added the kernel to code but not to its skill bundle, editor types/icon, or docs comparisons → product-surface drift
 - Wrote a per-host native kernel table or a host-side adopter list → list the plugin in the runtime; the registration carries the deployment

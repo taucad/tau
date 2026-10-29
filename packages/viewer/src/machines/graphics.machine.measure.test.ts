@@ -15,6 +15,26 @@ const startMeasuring = () => {
 };
 
 describe('graphics machine measure', () => {
+  it('should admit input readiness only for an active tool and reset it between activations', () => {
+    const actor = startMeasuring();
+    try {
+      expect(actor.getSnapshot().context.isMeasureInputReady).toBe(false);
+      actor.send({ type: 'setMeasureInputReady', ready: true });
+      expect(actor.getSnapshot().context.isMeasureInputReady).toBe(true);
+      actor.send({ type: 'setMeasureInputReady', ready: false });
+      expect(actor.getSnapshot().context.isMeasureInputReady).toBe(false);
+      actor.send({ type: 'setMeasureInputReady', ready: true });
+      actor.send({ type: 'setMeasureActive', payload: false });
+      expect(actor.getSnapshot().context.isMeasureInputReady).toBe(false);
+      actor.send({ type: 'setMeasureInputReady', ready: true });
+      expect(actor.getSnapshot().context.isMeasureInputReady).toBe(false);
+      actor.send({ type: 'setMeasureActive', payload: true });
+      expect(actor.getSnapshot().context.isMeasureInputReady).toBe(false);
+    } finally {
+      actor.stop();
+    }
+  });
+
   it('should invalidate pickable inventories on every line visibility transition', () => {
     const actor = startMeasuring();
     try {

@@ -28,7 +28,7 @@ Paths are relative to the repository root unless a command says otherwise. `<ker
 - [ ] GeoSpec suite green, if present:
 
   ```bash
-  node --import tsx packages/geospec-engine/src/cli/main.ts run libs/tau-examples/src/kernels/<kernel>/<example> --test-timeout 300000 --workers 1 --json
+  node --import tsx packages/cli/scripts/geospec.mts run libs/tau-examples/src/kernels/<kernel>/<example> --test-timeout 300000 --workers 1 --json
   ```
 
 - [ ] `pnpm nx generate-manifest tau-examples`; the row appears in `src/manifest.json` with the right `kind`, `geometry` and `mainFile`.

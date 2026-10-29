@@ -16,6 +16,7 @@ import {
   Save,
   Share2,
   SlidersHorizontal,
+  SquareTerminal,
   Terminal,
   Undo2,
 } from 'lucide-react';
@@ -37,6 +38,8 @@ import { isSyncReadOnly } from '#hooks/use-cloud-projects.js';
 import { useSaveRevisionRequest } from '#routes/w.$workspace.$project/revision-save-shortcut.js';
 import { selectStripVerbs, useRevisionFacts } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { isTerminalSurfaceOffered } from '#components/terminal/terminal-availability.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
 import { useFeature } from '#flags/use-feature.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
@@ -332,7 +335,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       },
       {
         id: 'open-model',
-        label: 'Open model structure',
+        label: 'Open model tree',
         group: 'Workbench',
         icon: <FileBox />,
         action: () => {
@@ -367,6 +370,16 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
           openPanel('console');
         },
         visible: isTauDebugEnabled,
+      },
+      {
+        id: 'open-terminal',
+        label: 'Open terminal',
+        group: 'Workbench',
+        icon: <SquareTerminal />,
+        action: () => {
+          openPanel('terminal');
+        },
+        visible: isTerminalSurfaceOffered({ desktop: isDesktopTarget(), profile: 'editor' }),
       },
       {
         id: 'revision-history',

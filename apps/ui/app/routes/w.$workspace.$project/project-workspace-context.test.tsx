@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { WorkbenchLaneNode, WorkbenchLayout } from '@taucad/workbench';
 import type * as KeyboardModule from '@taucad/ui/components/keyboard';
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
@@ -20,15 +20,16 @@ const send = vi.fn();
 type EditorOutputEvent = {
   readonly type: string;
   readonly path?: string;
-  readonly source?: 'user' | 'machine';
+  readonly source?: 'user' | 'machine' | 'record';
 };
 const listeners = new Map<string, (event: EditorOutputEvent) => void>();
+const editorFiles: Array<{ path: string }> = [];
 const editorRef = {
   send,
   getSnapshot: () => ({
     context: {
       activePaneId: undefined,
-      openFiles: [],
+      openFiles: editorFiles,
     },
   }),
   on: vi.fn((type: string, listener: (event: EditorOutputEvent) => void) => {
@@ -37,8 +38,10 @@ const editorRef = {
   }),
 };
 
+let currentEditorRef = editorRef;
+
 vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({ editorRef, mainEntryPath: 'main.ts' }),
+  useProject: () => ({ editorRef: currentEditorRef, mainEntryPath: 'main.ts' }),
 }));
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => state.isMobile }));
 vi.mock('react-router', () => ({ useLocation: () => route }));
@@ -69,6 +72,8 @@ function Probe(): React.JSX.Element {
 
 describe('ProjectWorkspaceProvider', () => {
   beforeEach(() => {
+    currentEditorRef = editorRef;
+    editorFiles.length = 0;
     state.isMobile = false;
     state.isEditorReady = true;
     route.key = 'initial';
@@ -508,6 +513,7 @@ describe('ProjectWorkspaceProvider', () => {
       personWorkbenchChanged: (next) => {
         workbench = typeof next === 'function' ? next(workbench) : next;
       },
+      ready: () => true,
     };
     act(() => {
       workspace.registerLayoutController(controller);
@@ -537,6 +543,99 @@ describe('ProjectWorkspaceProvider', () => {
       workspace.layoutController.registerWorkbench(adopt);
     });
     expect(adopt).toHaveBeenCalledExactlyOnceWith(workbench, expect.any(Function));
+  });
+
+  it('asks for a pane as a change on top of the saved arrangement while the layout record is still being read', () => {
+    render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    const changes: Array<WorkbenchLaneNode | ((current: WorkbenchLaneNode) => WorkbenchLaneNode)> = [];
+    let read = false;
+    const controller: WorkbenchLayoutController = {
+      snapshot: () => undefined,
+      subscribe: () => () => undefined,
+      restorePreviousArrangement: async () => true,
+      registerViewer: () => () => undefined,
+      registerWorkbench: () => () => undefined,
+      personViewerChanged: () => undefined,
+      personWorkbenchChanged: (next) => {
+        changes.push(next);
+      },
+      ready: () => read,
+    };
+    const opener = vi.fn();
+    act(() => {
+      workspace.registerLayoutController(controller);
+      workspace.connectWorkbench(opener);
+    });
+
+    // A Share deep link lands before the record is read: opening Share straight into the Dockview would be undone
+    // when the saved arrangement replaces it, so the pane is asked for as a change to that arrangement.
+    act(() => {
+      workspace.openPanel('share');
+    });
+    expect(opener).not.toHaveBeenCalled();
+    expect(changes).toHaveLength(1);
+    const [change] = changes;
+    if (typeof change !== 'function') {
+      throw new TypeError('Share was not asked for as a change.');
+    }
+    const saved: WorkbenchLaneNode = { kind: 'group', tabs: [{ kind: 'pane', pane: 'parameters' }] };
+    expect(change(saved)).toEqual({
+      kind: 'group',
+      tabs: [
+        { kind: 'pane', pane: 'parameters' },
+        { kind: 'pane', pane: 'share' },
+      ],
+      active: 1,
+    });
+
+    read = true;
+    act(() => {
+      workspace.openPanel('export');
+    });
+    expect(opener).toHaveBeenCalledExactlyOnceWith('export');
+    expect(changes).toHaveLength(1);
+  });
+
+  it('opens a pane directly when the layout record cannot take the change', () => {
+    render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    const controller: WorkbenchLayoutController = {
+      snapshot: () => undefined,
+      subscribe: () => () => undefined,
+      restorePreviousArrangement: async () => true,
+      registerViewer: () => () => undefined,
+      registerWorkbench: () => () => undefined,
+      personViewerChanged: () => undefined,
+      personWorkbenchChanged: (_next, unapplied) => {
+        unapplied?.();
+      },
+      ready: () => false,
+    };
+    act(() => {
+      workspace.registerLayoutController(controller);
+    });
+    // No workbench is connected yet: the pane waits for it.
+    act(() => {
+      workspace.openPanel('share');
+    });
+    const opener = vi.fn();
+    act(() => {
+      workspace.connectWorkbench(opener);
+    });
+    expect(opener).toHaveBeenCalledExactlyOnceWith('share');
+    // A connected workbench opens it at once.
+    act(() => {
+      workspace.openPanel('export');
+    });
+    expect(opener).toHaveBeenLastCalledWith('export');
+    expect(opener).toHaveBeenCalledTimes(2);
   });
 
   it('maps supported Workbench actions to the existing mobile drawer tabs', () => {
@@ -573,7 +672,17 @@ describe('ProjectWorkspaceProvider', () => {
     });
   });
 
-  it('does not mutate desktop state for unsupported mobile-only actions', () => {
+  it.each([
+    ['model', 'model-tree'],
+    ['kinematics', 'kinematics'],
+    ['print', 'print'],
+    ['agents', 'agents'],
+    ['kernel', 'kernel'],
+    ['console', 'console'],
+    ['parameters', 'parameters'],
+    ['files', 'files'],
+    ['details', 'details'],
+  ] as const)('opens %s as the %s phone surface without touching the desktop lanes (I1)', (panel, surface) => {
     state.isMobile = true;
     render(
       <ProjectWorkspaceProvider>
@@ -582,11 +691,203 @@ describe('ProjectWorkspaceProvider', () => {
     );
 
     act(() => {
-      workspace.openPanel('model');
-      workspace.openPanel('kernel');
+      workspace.openPanel(panel);
     });
 
-    expect(send).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledExactlyOnceWith({
+      type: 'setPanelState',
+      panelState: { mobileActiveTab: surface },
+    });
+  });
+
+  it('opens browser as the browser phone surface in the desktop app (I1)', () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    onTestFinished(() => {
+      vi.unstubAllEnvs();
+    });
+    state.isMobile = true;
+    render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+
+    act(() => {
+      workspace.openPanel('browser');
+    });
+
+    expect(send).toHaveBeenCalledExactlyOnceWith({
+      type: 'setPanelState',
+      panelState: { mobileActiveTab: 'browser' },
+    });
+  });
+
+  it.each([
+    [undefined, false, 'browser'],
+    [undefined, false, 'jobs'],
+    [undefined, true, 'jobs'],
+    ['desktop', false, 'jobs'],
+    ['desktop', true, 'jobs'],
+  ] as const)(
+    'refuses an unshipped surface on any layout (TAU_TARGET=%s, mobile=%s, %s)',
+    (buildTarget, isMobile, panel) => {
+      vi.stubEnv('TAU_TARGET', buildTarget);
+      onTestFinished(() => {
+        vi.unstubAllEnvs();
+      });
+      state.isMobile = isMobile;
+      render(
+        <ProjectWorkspaceProvider>
+          <Probe />
+        </ProjectWorkspaceProvider>,
+      );
+
+      act(() => {
+        workspace.openPanel(panel);
+      });
+
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([false, true])(
+    'should deliver a user file opened before Workbench connects once on mobile=%s',
+    (isMobile) => {
+      state.isMobile = isMobile;
+      render(
+        <ProjectWorkspaceProvider>
+          <Probe />
+        </ProjectWorkspaceProvider>,
+      );
+      editorFiles.push({ path: 'chosen-folder.md' });
+      act(() => {
+        listeners.get('fileOpened')?.({ type: 'fileOpened', path: 'chosen-folder.md', source: 'user' });
+      });
+      const activateFile = vi.fn();
+      const connect = workspace.connectWorkbench;
+      let disconnect = (): void => undefined;
+      act(() => {
+        disconnect = connect(vi.fn(), activateFile);
+      });
+      expect(activateFile).toHaveBeenCalledExactlyOnceWith('chosen-folder.md');
+      act(() => {
+        disconnect();
+        connect(vi.fn(), activateFile);
+      });
+      expect(activateFile).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('should retain the latest user file, deliver live opens, and ignore machine and record opens', () => {
+    render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    editorFiles.push({ path: 'first.md' }, { path: 'chosen.md' });
+    act(() => {
+      listeners.get('fileOpened')?.({ type: 'fileOpened', path: 'first.md', source: 'user' });
+      listeners.get('fileOpened')?.({ type: 'fileOpened', path: 'chosen.md', source: 'user' });
+      listeners.get('fileOpened')?.({ type: 'fileOpened', path: 'machine.md', source: 'machine' });
+      listeners.get('fileOpened')?.({ type: 'fileOpened', path: 'record.md', source: 'record' });
+    });
+    const activate = vi.fn();
+    act(() => {
+      workspace.connectWorkbench(vi.fn(), activate);
+      listeners.get('fileOpened')?.({ type: 'fileOpened', path: 'live.md', source: 'user' });
+      listeners.get('fileOpened')?.({ type: 'fileOpened', path: 'record.md', source: 'record' });
+    });
+    expect(activate.mock.calls).toEqual([['chosen.md'], ['live.md']]);
+  });
+
+  it.each(['utility', 'files', 'close', 'file-closed'] as const)(
+    'should discard a held file after %s supersedes it',
+    (action) => {
+      render(
+        <ProjectWorkspaceProvider>
+          <Probe />
+        </ProjectWorkspaceProvider>,
+      );
+      editorFiles.push({ path: 'chosen.md' });
+      const activate = vi.fn();
+      act(() => {
+        listeners.get('fileOpened')?.({ type: 'fileOpened', path: 'chosen.md', source: 'user' });
+        if (action === 'close') {
+          workspace.setWorkbenchOpen(false);
+        } else if (action === 'file-closed') {
+          editorFiles.length = 0;
+        } else {
+          workspace.openPanel(action === 'files' ? 'files' : 'parameters');
+        }
+        workspace.connectWorkbench(vi.fn(), activate);
+      });
+      expect(activate).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['route', 'actor', 'unmount'] as const)(
+    'should discard held opens and reject stale callbacks after %s changes',
+    (change) => {
+      const tree = (
+        <ProjectWorkspaceProvider>
+          <Probe />
+        </ProjectWorkspaceProvider>
+      );
+      const view = render(tree);
+      editorFiles.push({ path: 'old.md' }, { path: 'new.md' });
+      const retiredConnect = workspace.connectWorkbench;
+      const retiredEvent = listeners.get('fileOpened');
+      act(() => {
+        retiredEvent?.({ type: 'fileOpened', path: 'old.md', source: 'user' });
+      });
+      if (change === 'route') {
+        route.key = 'next';
+      } else if (change === 'actor') {
+        currentEditorRef = { ...editorRef };
+      }
+      if (change === 'unmount') {
+        view.unmount();
+      } else {
+        view.rerender(
+          <ProjectWorkspaceProvider>
+            <Probe />
+          </ProjectWorkspaceProvider>,
+        );
+      }
+      const retired = vi.fn();
+      const current = vi.fn();
+      act(() => {
+        retiredEvent?.({ type: 'fileOpened', path: 'old.md', source: 'user' });
+        retiredConnect(vi.fn(), retired);
+        if (change !== 'unmount') {
+          workspace.connectWorkbench(vi.fn(), current);
+        }
+      });
+      expect(retired).not.toHaveBeenCalled();
+      expect(current).not.toHaveBeenCalled();
+      if (change !== 'unmount') {
+        act(() => {
+          listeners.get('fileOpened')?.({ type: 'fileOpened', path: 'new.md', source: 'user' });
+        });
+        expect(current).toHaveBeenCalledExactlyOnceWith('new.md');
+      }
+    },
+  );
+
+  it('should not let retired cleanup disconnect a replacement using the same file callback', () => {
+    render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    const activate = vi.fn();
+    act(() => {
+      const disconnect = workspace.connectWorkbench(vi.fn(), activate);
+      workspace.connectWorkbench(vi.fn(), activate);
+      disconnect();
+      listeners.get('fileOpened')?.({ type: 'fileOpened', path: 'chosen.md', source: 'user' });
+    });
+    expect(activate).toHaveBeenCalledExactlyOnceWith('chosen.md');
   });
 
   it('selects Workbench only for user-origin file opens on desktop', () => {
@@ -626,7 +927,7 @@ describe('ProjectWorkspaceProvider', () => {
       fileReturn?.openFileFrom(preview, 'print');
     });
     expect(send).toHaveBeenCalledWith({ type: 'openFile', path: preview, source: 'user' });
-    // The preview's own open, however late Monaco reports it, keeps the way back.
+    // The preview's own open, however late the code editor reports it, keeps the way back.
     act(() => {
       listeners.get('fileOpened')?.({ type: 'fileOpened', path: preview, source: 'user' });
     });
@@ -648,13 +949,27 @@ describe('ProjectWorkspaceProvider', () => {
   });
 
   it('should leave file reveal routing to the sender-selected Workbench owner', () => {
+    state.isMobile = true;
     render(
       <ProjectWorkspaceProvider>
         <Probe />
       </ProjectWorkspaceProvider>,
     );
 
-    expect(listeners.has('fileRevealRequested')).toBe(false);
+    const opener = vi.fn();
+    act(() => {
+      workspace.connectWorkbench(opener);
+      listeners.get('fileOpened')?.({ type: 'fileOpened', path: 'parts/wheel.ts', source: 'user' });
+    });
+    expect(send).toHaveBeenCalledWith({ type: 'setPanelState', panelState: { mobileActiveTab: 'editor' } });
+    opener.mockClear();
+    send.mockClear();
+    act(() => {
+      listeners.get('fileRevealRequested')?.({ type: 'fileRevealRequested', path: 'parts/wheel.ts' });
+    });
+    expect(listeners.has('fileRevealRequested')).toBe(true);
+    expect(opener).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
     expect(listeners.has('modelComponentRevealRequested')).toBe(true);
   });
 
@@ -671,16 +986,18 @@ describe('ProjectWorkspaceProvider', () => {
     act(() => {
       workspace.connectWorkbench(opener);
     });
-    // Monaco 0.55 types into a role="textbox" EditContext div, or its textarea fallback, and binds Ctrl+M there
-    // on Windows and Linux ("Toggle Tab Key Moves Focus").
-    const editContext = document.createElement('div');
-    editContext.setAttribute('role', 'textbox');
-    editContext.tabIndex = 0;
+    // CodeMirror types into its contenteditable textbox and binds Ctrl+M there
+    // on Windows and Linux to toggle Tab focus mode.
+    const codeContent = document.createElement('div');
+    codeContent.className = 'cm-content';
+    codeContent.contentEditable = 'true';
+    codeContent.setAttribute('role', 'textbox');
+    codeContent.tabIndex = 0;
     const textArea = document.createElement('textarea');
     textArea.setAttribute('role', 'textbox');
-    document.body.append(editContext, textArea);
+    document.body.append(codeContent, textArea);
 
-    for (const input of [editContext, textArea]) {
+    for (const input of [codeContent, textArea]) {
       // `fireEvent` returns false once a listener has prevented the default action.
       expect(fireEvent.keyDown(input, { key: 'm', ctrlKey: true })).toBe(true);
     }
@@ -688,7 +1005,7 @@ describe('ProjectWorkspaceProvider', () => {
 
     expect(fireEvent.keyDown(document.body, { key: 'm', ctrlKey: true })).toBe(false);
     expect(opener).toHaveBeenCalledExactlyOnceWith('kinematics');
-    editContext.remove();
+    codeContent.remove();
     textArea.remove();
   });
 });

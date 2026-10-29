@@ -93,6 +93,57 @@ describe('canvas Vite config', () => {
     expect(() => withAlias('escape.tsx')).toThrow('Canvas fixture aliases must remain inside the Tau checkout');
   });
 
+  it('should preserve asset queries when resolving a canvas stylesheet alias', async () => {
+    const repoRoot = resolve(import.meta.dirname, '../..');
+    const parent = resolve(repoRoot, 'out/research');
+    mkdirSync(parent, { recursive: true });
+    const canvas = mkdtempSync(resolve(parent, 'canvas-style-alias-'));
+    temporaryPaths.push(canvas);
+    writeFileSync(resolve(canvas, 'index.html'), '');
+    writeFileSync(resolve(canvas, 'main.tsx'), '');
+    writeFileSync(resolve(canvas, 'surface.css'), '.surface { padding: 12px; }');
+    writeFileSync(
+      resolve(canvas, 'canvas.aliases.json'),
+      JSON.stringify({ '#canvas/surface.css': relative(repoRoot, resolve(canvas, 'surface.css')) }),
+    );
+    const server = await createServer({
+      ...createCanvasConfig(canvas, canvas, canvas),
+      configFile: false,
+      logLevel: 'silent',
+    });
+    try {
+      const result = await server.environments.client.pluginContainer.resolveId(
+        '#canvas/surface.css?inline',
+        resolve(canvas, 'main.tsx'),
+      );
+      expect(result?.id).toBe(`${resolve(canvas, 'surface.css')}?inline`);
+      const transformed = await server.transformRequest('/surface.css?inline');
+      expect(transformed?.code).toContain('padding: 12px');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('accepts workspace hook fixtures but refuses package component replacements', () => {
+    const repoRoot = resolve(import.meta.dirname, '../..');
+    const parent = resolve(repoRoot, 'out/research');
+    mkdirSync(parent, { recursive: true });
+    const canvas = mkdtempSync(resolve(parent, 'canvas-hook-alias-'));
+    temporaryPaths.push(canvas);
+    for (const entry of ['index.html', 'main.tsx', 'fixture.ts']) {
+      writeFileSync(resolve(canvas, entry), '');
+    }
+    const configure = (specifier: string): UserConfig => {
+      writeFileSync(
+        resolve(canvas, 'canvas.aliases.json'),
+        JSON.stringify({ [specifier]: relative(repoRoot, resolve(canvas, 'fixture.ts')) }),
+      );
+      return createCanvasConfig(canvas, canvas, canvas);
+    };
+    expect(configure('@taucad/billing/hooks/use-usage-snapshot').root).toBe(canvas);
+    expect(() => configure('@taucad/ui/components/button')).toThrow('Canvas aliases require');
+  });
+
   it(
     'should share billing and React Query providers with app hooks in a nested Brain canvas',
     { timeout: 60_000 },
@@ -212,7 +263,7 @@ describe('canvas Vite config', () => {
 
     writeFileSync(resolve(canvas, 'canvas.aliases.json'), JSON.stringify({ react: '/tmp/fixture.ts' }));
     expect(() => createCanvasConfig(root, output, artifacts)).toThrow(
-      'Canvas aliases require # imports and repository-relative fixture paths',
+      'Canvas aliases require # imports or workspace hooks and repository-relative fixture paths',
     );
   });
 

@@ -83,9 +83,11 @@
     "zod": "^4.1.0"
   },
   "devDependencies": {
+    "@gltf-transform/core": "catalog:",
     "@taucad/agent-tools": "workspace:*",
     "@taucad/archive-core": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
+    "@taucad/middleware": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
     "@taucad/types": "workspace:*",

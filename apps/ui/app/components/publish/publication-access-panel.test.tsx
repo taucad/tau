@@ -115,7 +115,7 @@ describe('PublicationAccessPanel', () => {
       />,
     );
 
-    await userEvent.type(screen.getByRole('textbox', { name: /share with emails/i }), 'Friend@Example.com{Enter}');
+    await userEvent.type(screen.getByRole('combobox', { name: /share with emails/i }), 'Friend@Example.com{Enter}');
     await userEvent.click(screen.getByRole('button', { name: /add access/i }));
 
     await waitFor(() => {
@@ -188,6 +188,6 @@ describe('PublicationAccessPanel', () => {
 
     expect(screen.getByRole('combobox', { name: /general access/i })).toHaveTextContent('Public');
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
-    expect(screen.queryByRole('textbox', { name: /share with emails/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: /share with emails/i })).not.toBeInTheDocument();
   });
 });

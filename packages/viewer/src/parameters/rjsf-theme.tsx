@@ -275,24 +275,50 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
     }
   };
 
+  /* A boolean drawn as a switch makes its whole row the switch's hit target, not only the 17px
+   * switch (canvas review R2): the switch's ::after covers the row, and the reset and hint buttons
+   * sit above it as their own targets. The name is the switch's label, so tapping it toggles too.
+   * The overlay and cursor attach only to a rendered switch, so a boolean a uiSchema draws as a
+   * select keeps a plain select. */
+  const isSwitchRow = schema.type === 'boolean';
+  const isSwitchDisabled = props.disabled || props.readonly;
+  const fieldName = (
+    <span
+      className={cn(
+        'min-w-0 truncate text-sm',
+        fieldHasValue ? 'font-medium text-foreground' : 'font-normal text-muted-foreground',
+      )}
+      role='group'
+      aria-label={`Parameter: ${prettyLabel}`}
+    >
+      <HighlightText text={prettyLabel} searchTerm={formContext.searchTerm} />
+      {required ? <span className='text-feature/50'>*</span> : null}
+    </span>
+  );
+
   return (
     <div
       data-slot='parameter-field'
       className='group/field @container/parameter my-1.5 flex flex-col gap-0.5 px-2.5 transition-colors'
     >
-      <div className='flex items-center gap-2 @[240px]/parameter:flex-row'>
+      <div
+        data-switch-row={isSwitchRow ? '' : undefined}
+        className={cn(
+          'flex items-center gap-2 @[240px]/parameter:flex-row',
+          isSwitchRow &&
+            "relative min-h-(--param-field-h) [&_[data-slot=switch]]:after:absolute [&_[data-slot=switch]]:after:inset-0 [&_[data-slot=switch]]:after:content-['']",
+          isSwitchRow && !isSwitchDisabled && '[&_[data-slot=switch]]:cursor-action',
+        )}
+      >
         <div className='flex min-w-0 shrink-0 items-center gap-1.5 @[240px]/parameter:w-[40%]'>
           <div className='flex min-w-0 items-center gap-0.5'>
-            <span
-              className={cn(
-                'min-w-0 truncate text-sm',
-                fieldHasValue ? 'font-medium text-foreground' : 'font-normal text-muted-foreground',
-              )}
-              aria-label={`Parameter: ${prettyLabel}`}
-            >
-              <HighlightText text={prettyLabel} searchTerm={formContext.searchTerm} />
-              {required ? <span className='text-feature/50'>*</span> : null}
-            </span>
+            {isSwitchRow ? (
+              <label htmlFor={id} className={cn('min-w-0', !isSwitchDisabled && 'cursor-action')}>
+                {fieldName}
+              </label>
+            ) : (
+              fieldName
+            )}
             {inferredHint ? (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -300,7 +326,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
                     type='button'
                     variant='ghost'
                     size='icon-xs'
-                    className='text-muted-foreground/60 hover:bg-transparent hover:text-foreground'
+                    className='relative z-10 text-muted-foreground/60 hover:bg-transparent hover:text-foreground'
                     aria-label={`${inferredHint} for ${prettyLabel}`}
                   >
                     <Info aria-hidden='true' className='size-3' />
@@ -315,7 +341,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
               onReset={handleReset}
               tooltip={`Reset ${prettyLabel}`}
               tooltipSide='left'
-              className='group-hover/field:**:data-[slot=dot]:opacity-0 group-hover/field:**:data-[slot=icon]:opacity-100'
+              className='z-10 group-hover/field:**:data-[slot=dot]:opacity-0 group-hover/field:**:data-[slot=icon]:opacity-100'
             />
           ) : null}
         </div>
@@ -324,7 +350,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
         </div>
       </div>
       {descriptionText ? (
-        <div className='text-xs text-muted-foreground/70'>
+        <div className='text-xs text-muted-foreground'>
           <HighlightText text={descriptionText} searchTerm={formContext.searchTerm} />
         </div>
       ) : (

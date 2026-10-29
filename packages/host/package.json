@@ -34,6 +34,7 @@
     ".": "./src/index.ts",
     "./agent-tools": "./src/agent-tools.ts",
     "./runtime-host": "./src/runtime-host.ts",
+    "./telemetry": "./src/telemetry.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -54,6 +55,11 @@
         "import": "./dist/runtime-host.mjs",
         "default": "./dist/runtime-host.mjs"
       },
+      "./telemetry": {
+        "types": "./dist/telemetry.d.mts",
+        "import": "./dist/telemetry.mjs",
+        "default": "./dist/telemetry.mjs"
+      },
       "./package.json": "./package.json"
     },
     "imports": {}
@@ -69,6 +75,7 @@
     "@taucad/bambu": "workspace:*",
     "@taucad/bundler-core": "workspace:*",
     "@taucad/carvera": "workspace:*",
+    "@taucad/esbuild": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/grbl": "workspace:*",
     "@taucad/jobs": "workspace:*",
@@ -92,18 +99,14 @@
     "ws": "catalog:"
   },
   "peerDependencies": {
-    "@taucad/geospec-engine": "^0.1.0-beta.0",
     "@taucad/revisions": "^0.1.0-beta.0",
     "@taucad/runtime": "^0.1.0-beta.0",
-    "geospec": "^0.1.0-beta.0",
-    "geospec-engine": "^0.3.0",
+    "geospec": "0.5.0",
+    "geospec-engine": "0.5.0",
     "xstate": "^6.0.0-alpha.59",
     "zod": "^4.1.0"
   },
   "peerDependenciesMeta": {
-    "@taucad/geospec-engine": {
-      "optional": true
-    },
     "geospec": {
       "optional": true
     },
@@ -115,14 +118,14 @@
     "@taucad/agent-tools": "workspace:*",
     "@taucad/chat": "workspace:*",
     "@taucad/formal": "workspace:*",
-    "@taucad/geospec-engine": "workspace:*",
     "@taucad/revisions": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "@taucad/telemetry": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
     "@taucad/xstate-testing": "workspace:*",
     "@types/ws": "^8.18.1",
-    "geospec": "workspace:*",
+    "geospec": "catalog:",
     "geospec-engine": "catalog:",
     "xstate": "catalog:",
     "zod": "catalog:"

@@ -125,6 +125,9 @@ describe('native host GeoSpec composition', () => {
     expect(native.filesystem).toHaveBeenCalledExactlyOnceWith(root);
     const options = native.runner.mock.calls[0]?.[0];
     expect(options?.filesystem).toBe(filesystem);
+    // Specs bundle with Tau's esbuild VM, which resolves npm packages, not GeoSpec's plain default (D11).
+    const { createEsbuildModuleVm } = await import('@taucad/esbuild/vm');
+    expect(options?.createModuleVm).toBe(createEsbuildModuleVm);
     const [exporter, ...others] = options?.model?.exporters ?? [];
     if (exporter === undefined) {
       throw new Error('Expected an exporter over the borrowed project runtime.');

@@ -16,6 +16,17 @@ beforeAll(async () => {
 });
 
 describe('brepKernel', () => {
+  // T26 (PR-1b, AR-W15-01): the observation-only heap hook reads the module's whole WebAssembly memory.
+  it('observes its WebAssembly memory after initialize', () => {
+    const observed = definition.observedHeapBytes?.(context);
+
+    expect(Number.isSafeInteger(observed)).toBe(true);
+    expect(observed).toBeGreaterThan(0);
+    expect(observed).toBe(context.occt.HEAPU8.buffer.byteLength);
+    expect(observed! % 65_536).toBe(0);
+    expect(definition.heapBytes).toBeUndefined();
+  });
+
   it('keeps the stable brep capability id', () => {
     expect(brepKernel().id).toBe('brep');
     expect(brepKernel()).toMatchObject({

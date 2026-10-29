@@ -304,9 +304,20 @@ describe.each(['webgl', 'webgpu'] as const)('surface batching actual %s', (backe
       expect(
         split.group.children.map((object) => (object instanceof InstancedMesh ? object.instanceMatrix : undefined)),
       ).toEqual(buffers);
-      const moved = sources[1]!;
-      moved.position.y += 0.5;
-      split.syncMatrices([moved]);
+      // Pose mixed canonical and instance paths together: singleton appearance,
+      // reflection, transparency and a custom callback must retain their direct draws.
+      sources[1]!.material.color.setHex(0x33_ff_33);
+      sources[3]!.scale.x = -1;
+      sources[5]!.material.transparent = true;
+      sources[5]!.material.opacity = 0.5;
+      sources[5]!.material.depthWrite = false;
+      sources[9]!.onBeforeRender = () => undefined;
+      split.sync();
+      const moved = [sources[1]!, sources[3]!, sources[5]!, sources[7]!, sources[9]!];
+      for (const source of moved) {
+        source.position.y += 0.5;
+      }
+      split.syncMatrices(moved);
       const posed = await render();
       split.dispose();
       expect(await render()).toEqual(posed);
@@ -369,6 +380,7 @@ describe.each(['webgl', 'webgpu'] as const)('surface batching actual %s', (backe
         large.dispose();
         await render();
         expect(instanceLifetime().destroyed).toBe(instanceLifetime().allocated);
+        const beforeWarm = instanceLifetime().allocated;
         const warmRoot = new Group();
         scene.add(warmRoot);
         const warmMembers = Array.from({ length: 100 }, () => {
@@ -386,7 +398,10 @@ describe.each(['webgl', 'webgpu'] as const)('surface batching actual %s', (backe
         warm.dispose();
         await render();
         expect(instanceLifetime().destroyed).toBe(instanceLifetime().allocated);
-        expect(instanceLifetime()).toEqual({ allocated: 12, destroyed: 12 });
+        // Three r184 prepares one matrix binding in compileAsync and another for the first
+        // render. Check that bounded pair and complete retirement, not a total
+        // coupled to earlier appearance/material recompilations in this fixture.
+        expect(instanceLifetime()).toEqual({ allocated: beforeWarm + 2, destroyed: beforeWarm + 2 });
         expect(geometryDispose).not.toHaveBeenCalled();
         expect(materialDispose).not.toHaveBeenCalled();
         geometryDispose.mockRestore();

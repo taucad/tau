@@ -7,6 +7,14 @@ export const linuxInstallation = (
   scheme: string;
   root: string;
   launcher: string;
+  /**
+   * Tau-owned bubblewrap the shell sandbox runs (`bwrapPath`). The selector package's `postinst`
+   * installs it, at this stable path outside every immutable generation, and it is the one
+   * path the `bwrapProfile` AppArmor profile attaches to. A portable AppImage has no such file.
+   */
+  bwrap: string;
+  /** AppArmor profile name, and its `/etc/apparmor.d` file name, granting `userns` to `bwrap` only. */
+  bwrapProfile: string;
   executable: 'Tau' | 'Tau.AppImage';
   runtimeKind: 'linux-deb-runtime' | 'linux-appimage-deb-runtime';
   selectorKind: 'linux-deb-selector' | 'linux-appimage-deb-selector';
@@ -18,6 +26,8 @@ export const linuxInstallation = (
     scheme,
     root: `/opt/${name}`,
     launcher: `/usr/bin/${name}`,
+    bwrap: `/opt/${name}/sandbox/bwrap`,
+    bwrapProfile: `${name}-bwrap`,
     executable: appImage ? 'Tau.AppImage' : 'Tau',
     runtimeKind: appImage ? 'linux-appimage-deb-runtime' : 'linux-deb-runtime',
     selectorKind: appImage ? 'linux-appimage-deb-selector' : 'linux-deb-selector',

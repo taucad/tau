@@ -77,7 +77,7 @@ const render = async (client: Client, lane?: 'fast' | 'exact') => {
   return outcome.rendering;
 };
 
-const exportStl = async (client: Client, exportOptions?: { lane: 'fast' | 'exact' }) => {
+const exportStl = async (client: Client, exportOptions?: { lane: 'fast' | 'exact'; meshAdaptivity?: number }) => {
   const result = await documentFor(client).export('stl', exportOptions ? { options: exportOptions } : {});
   if (!result.success) {
     throw new Error(result.issues.map(({ message }) => message).join('; '));
@@ -243,9 +243,27 @@ describe('PicoVoxel dual path through the runtime', () => {
       }),
       files: { 'main.ts': model },
     });
+    // A build publishes, with its native-handle snapshot, once the worker is idle after delivery.
+    const published: string[] = [];
+    client.on('telemetry', ({ entries }) => {
+      for (const entry of entries) {
+        if (entry.name === 'kernel.compute.publication' && entry.detail?.['status'] === 'stored') {
+          published.push(entry.name);
+        }
+      }
+    });
+    const settled = async (count: number) =>
+      vi.waitFor(() => {
+        expect(published.length).toBeGreaterThanOrEqual(count);
+      });
     try {
       const fast = await render(client);
+      // The fast lane's build and mesh.
+      await settled(2);
       const exact = await render(client, 'exact');
+      // The exact build: the lane switch disposes the fast lane's handle, so each build must publish
+      // while it is current. A revisited mesh still queued publishes before its lookup.
+      await settled(3);
       const fastAgain = await render(client);
       const exactAgain = await render(client, 'exact');
 
@@ -256,10 +274,55 @@ describe('PicoVoxel dual path through the runtime', () => {
     }
   }, 120_000);
 
-  it('should stamp an explicitly fast STL export of the fast viewer build without replaying', async () => {
+  it('should replay the adaptive fast viewer build uniformly for an explicitly fast STL export', async () => {
+    // An unset view adaptivity is Balanced (0.25) on the fast lane, and exports always mesh at 0,
+    // so the fast export keys a uniform fast build of its own.
     const client = createClient();
     try {
       await render(client);
+      const fast = await exportStl(client, { lane: 'fast' });
+
+      expect(sessions.lanes).toEqual(['fast', 'fast']);
+      expect(header(fast)).toBe('PicoGK UNITS=mm LANE=fast');
+    } finally {
+      await client.shutdown();
+    }
+  }, 120_000);
+
+  it('should export the adaptive fast viewer build itself when the STL export asks for its adaptivity', async () => {
+    const client = createClient();
+    try {
+      await render(client);
+      const fast = await exportStl(client, { lane: 'fast', meshAdaptivity: 0.25 });
+
+      expect(sessions.lanes).toEqual(['fast']);
+      expect(header(fast)).toBe('PicoGK UNITS=mm LANE=fast');
+    } finally {
+      await client.shutdown();
+    }
+  }, 120_000);
+
+  it('should refuse an adaptive export on the exact lane', async () => {
+    const client = createClient();
+    try {
+      const result = await documentFor(client).export('stl', { options: { meshAdaptivity: 0.25 } });
+
+      expect(result.success).toBe(false);
+      expect(result.issues).toHaveLength(1);
+      expect(JSON.stringify(result.issues[0]?.details)).toContain('"refusal":"PICOVOXEL_MESHING_EXACT_LANE"');
+    } finally {
+      await client.shutdown();
+    }
+  }, 120_000);
+
+  it('should stamp an explicitly fast STL export of a uniform fast viewer build without replaying', async () => {
+    const client = createClient();
+    const document = documentFor(client);
+    try {
+      const updated = await document.update({ evaluateOptions: { lane: 'fast', meshAdaptivity: 0 } });
+      // A superseded update would leave the export to build alone, so it must evaluate here.
+      expect(updated.superseded).toBe(false);
+      expect(!updated.superseded && updated.evaluation.success).toBe(true);
       const fast = await exportStl(client, { lane: 'fast' });
 
       expect(sessions.lanes).toEqual(['fast']);

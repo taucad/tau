@@ -89,7 +89,7 @@ export type PartGalleryPreviews = Readonly<{
 export type PartGalleryProps = Readonly<{
   /** Which part the gallery opens on, and where focus returns when it closes. */
   request: ModelComponentPreviewRequest;
-  /** The host's part verbs: "Reveal in Explorer" and "Add to chat" show only when the host has them. */
+  /** The host's part verbs: "Reveal in model tree" and "Add to chat" show only when the host has them. */
   actions: ModelComponentHostActions;
   /**
    * A hook that renders the shown part and its neighbours. The gallery calls it on every render, so it must stay the
@@ -497,7 +497,7 @@ function PartSheet({
         >
           <div className='@container/actions flex flex-wrap gap-2 border-b p-3'>
             {actions.revealInExplorer ? (
-              <ActionButton verb='Reveal in Explorer' icon={FileBox} onClick={andClose(actions.revealInExplorer)} />
+              <ActionButton verb='Reveal in model tree' icon={FileBox} onClick={andClose(actions.revealInExplorer)} />
             ) : undefined}
             <ActionButton verb='Focus on part' icon={Focus} onClick={andClose(actions.focusComponent)} />
             <DropdownMenu>

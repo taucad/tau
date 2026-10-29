@@ -1,9 +1,9 @@
 /**
  * Prepare one current installed GeoSpec test consumer; never import or probe products.
  * Usage: node scripts/src/prepare-geospec-test-consumer.ts <receipt.json>
- * Inputs: completed SDK dependency builds, and the `geospec-engine` catalog pin with its
- * pnpm-lock.yaml integrity; the engine installs from the npm registry at exactly that pin.
- * Output: retained consumer, initial SDK/framework receipts and ten hash-bound harness files.
+ * Inputs: completed SDK dependency builds, and the `geospec` and `geospec-engine` catalog pins with
+ * their pnpm-lock.yaml integrity; both install from the npm registry at exactly those pins.
+ * Output: retained consumer and initial SDK/framework receipts.
  * Environment: existing Node/pnpm/npm/tar/git on PATH and registry access; no build or install scripts run.
  * Exit: 0 prepared and inventoried; 1 missing inputs, incomplete closure or install failure.
  */
@@ -41,15 +41,40 @@ type Manifest = {
 type LockEntry = { version?: string; resolved?: string; integrity?: string; link?: boolean };
 
 const repositoryRoot = resolve(import.meta.dirname, '../..');
-/** The compiled engine published from taucad/geospec; the workspace CLI package is `@taucad/geospec-engine`. */
-const engineName = 'geospec-engine';
-const enginePayload = [
-  'dist/node.mjs',
-  'dist/native/index.js',
-  'dist/bindings/mixed-wasm/geospec_engine_native.mjs',
-  'dist/bindings/mixed-wasm/geospec_engine_native.wasm',
-  'licenses/SOURCE-RELINK.json',
-];
+/**
+ * The packages published from taucad/geospec: the compiled engine and the `geospec` authoring package that
+ * runs on it. Tau's exporter for the engine's pool ships in `@taucad/cli`.
+ */
+const registryPackages = [
+  {
+    name: 'geospec-engine',
+    payload: [
+      'dist/node.mjs',
+      'dist/native/index.js',
+      'dist/bindings/mixed-wasm/geospec_engine_native.mjs',
+      'dist/bindings/mixed-wasm/geospec_engine_native.wasm',
+      'licenses/SOURCE-RELINK.json',
+    ],
+  },
+  { name: 'geospec', payload: ['dist/index.mjs', 'dist/cli/main.mjs', 'agent/skills.json', 'agent/resources.js'] },
+] as const;
+const registryNames: ReadonlySet<string> = new Set(registryPackages.map(({ name }) => name));
+/**
+ * Whether a caret range admits an exact release pin: the same major (and minor below 1.0), at or above its floor.
+ * A prerelease pin or any other range form is never admitted.
+ */
+const caretAdmits = (range: string, pin: string): boolean => {
+  const floor = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(range)?.slice(1).map(Number);
+  const target = /^(\d+)\.(\d+)\.(\d+)$/.exec(pin)?.slice(1).map(Number);
+  if (floor === undefined || target === undefined || floor[0] !== target[0]) {
+    return false;
+  }
+  if (floor[0] === 0 && floor[1] !== target[1]) {
+    return false;
+  }
+  const differing = [0, 1, 2].find((index) => floor[index] !== target[index]);
+  return differing === undefined || target[differing]! > floor[differing]!;
+};
 const sha256 = (bytes: BinaryLike): string => createHash('sha256').update(bytes).digest('hex');
 const readManifest = (path: string): Manifest => JSON.parse(readFileSync(path, 'utf8')) as Manifest;
 const run = (command: string, arguments_: string[], cwd = repositoryRoot): string => {
@@ -104,21 +129,26 @@ const main = async (): Promise<void> => {
   const catalog = load(readFileSync(join(repositoryRoot, 'pnpm-workspace.yaml'), 'utf8')) as {
     catalog: Record<string, unknown>;
   };
-  const engineVersion = catalog.catalog[engineName];
-  assert.ok(
-    typeof engineVersion === 'string' && /^\d+\.\d+\.\d+(?:-[\w.]+)?$/.test(engineVersion),
-    `Pin an exact ${engineName} version in the pnpm catalog`,
-  );
   const lockfile = load(readFileSync(join(repositoryRoot, 'pnpm-lock.yaml'), 'utf8')) as {
     packages?: Record<string, { resolution?: { integrity?: string } }>;
   };
-  const engineIntegrity = lockfile.packages?.[`${engineName}@${engineVersion}`]?.resolution?.integrity;
-  assert.ok(engineIntegrity, `pnpm-lock.yaml has no integrity for ${engineName}@${engineVersion}`);
+  const pins: ReadonlyMap<string, { name: string; version: string; integrity: string; payload: readonly string[] }> =
+    new Map(
+      registryPackages.map(({ name, payload }) => {
+        const version = catalog.catalog[name];
+        assert.ok(
+          typeof version === 'string' && /^\d+\.\d+\.\d+(?:-[\w.]+)?$/.test(version),
+          `Pin an exact ${name} version in the pnpm catalog`,
+        );
+        const integrity = lockfile.packages?.[`${name}@${version}`]?.resolution?.integrity;
+        assert.ok(integrity, `pnpm-lock.yaml has no integrity for ${name}@${version}`);
+        return [name, { name, version, integrity, payload }] as const;
+      }),
+    );
   const resolved = await workspace({ fresh: true });
   const projects = new Map(publishable(resolved).map((project) => [project.name, project]));
-  const closure = publishableClosure(resolved, ['geospec', 'geospec-engine']);
-  assert.ok(closure.includes('geospec'), 'GeoSpec is missing from the publishable closure');
-  assert.ok(closure.includes('geospec-engine'), 'GeoSpec CLI is missing from the publishable closure');
+  const closure = publishableClosure(resolved, ['cli']);
+  assert.ok(closure.includes('cli'), 'The Tau CLI is missing from the publishable closure');
   const packages = closure.map((name) => {
     const project = projects.get(name);
     assert.ok(project, `Missing publishable project: ${name}`);
@@ -170,47 +200,63 @@ const main = async (): Promise<void> => {
   });
   const byName = new Map(packed.map((entry) => [entry.manifest.name, entry]));
   assert.equal(byName.size, packed.length, 'Duplicate packed package names');
-  assert.ok(!byName.has(engineName), `${engineName} must come from the registry, not a local tarball`);
+  for (const name of registryNames) {
+    assert.ok(!byName.has(name), `${name} must come from the registry, not a local tarball`);
+  }
   const workspaceNames = new Set(
     resolved.projects.flatMap((project) => (project.manifest?.name ? [project.manifest.name] : [])),
   );
   for (const { manifest } of packed) {
     for (const dependencies of [manifest.dependencies, manifest.optionalDependencies, manifest.peerDependencies]) {
+      const peers = dependencies !== undefined && dependencies === manifest.peerDependencies;
       for (const [name, version] of Object.entries(dependencies ?? {})) {
         assert.ok(
           !/^(?:workspace|catalog|link|file):/.test(version),
           `Unpublished dependency: ${manifest.name} ${name}`,
         );
         assert.ok(!workspaceNames.has(name) || byName.has(name), `Missing local workspace dependency: ${name}`);
-        assert.ok(name !== engineName || version === engineVersion, `${manifest.name} pins another ${engineName}`);
+        // A peer may name a caret range (`@taucad/host`'s optional GeoSpec peers); it must admit the pin.
+        const pin = pins.get(name)?.version;
+        assert.ok(
+          pin === undefined || version === pin || (peers && caretAdmits(version, pin)),
+          `${manifest.name} pins another ${name}`,
+        );
       }
     }
   }
   writeFileSync(join(consumerRoot, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
   run(
     'npm',
-    ['install', '--ignore-scripts', '--no-audit', '--no-fund', ...tarballs, `${engineName}@${engineVersion}`],
+    [
+      'install',
+      '--ignore-scripts',
+      '--no-audit',
+      '--no-fund',
+      ...tarballs,
+      ...[...pins.values()].map(({ name, version }) => `${name}@${version}`),
+    ],
     consumerRoot,
   );
   const lock = JSON.parse(readFileSync(join(consumerRoot, 'package-lock.json'), 'utf8')) as {
     packages: Record<string, LockEntry>;
   };
-  // The engine resolves exactly once, from the registry, with the bytes the workspace lockfile admitted.
-  const engineEntries = Object.entries(lock.packages).filter(
-    ([path]) => path.split('node_modules/').at(-1) === engineName,
-  );
-  assert.deepEqual(
-    engineEntries.map(([path]) => path),
-    [`node_modules/${engineName}`],
-    `Expected one ${engineName} occurrence`,
-  );
-  const engineEntry = engineEntries[0]![1];
-  assert.equal(engineEntry.version, engineVersion, `Installed ${engineName} differs from the catalog pin`);
-  assert.ok(
-    !engineEntry.link && typeof engineEntry.resolved === 'string' && engineEntry.resolved.startsWith('https://'),
-    `${engineName} did not install from the registry`,
-  );
-  assert.equal(engineEntry.integrity, engineIntegrity, `${engineName} integrity differs from pnpm-lock.yaml`);
+  // Each GeoSpec package resolves exactly once, from the registry, with the bytes the workspace lockfile admitted.
+  const registryEntries = [...pins.values()].map((pin) => {
+    const entries = Object.entries(lock.packages).filter(([path]) => path.split('node_modules/').at(-1) === pin.name);
+    assert.deepEqual(
+      entries.map(([path]) => path),
+      [`node_modules/${pin.name}`],
+      `Expected one ${pin.name} occurrence`,
+    );
+    const entry = entries[0]![1];
+    assert.equal(entry.version, pin.version, `Installed ${pin.name} differs from the catalog pin`);
+    assert.ok(
+      !entry.link && typeof entry.resolved === 'string' && entry.resolved.startsWith('https://'),
+      `${pin.name} did not install from the registry`,
+    );
+    assert.equal(entry.integrity, pin.integrity, `${pin.name} integrity differs from pnpm-lock.yaml`);
+    return { ...pin, resolved: entry.resolved };
+  });
   // Inspect every occurrence, including nested npm copies, so a mismatched sibling cannot use the registry.
   for (const [path, entry] of Object.entries(lock.packages)) {
     const name = path.split('node_modules/').at(-1)!;
@@ -248,26 +294,28 @@ const main = async (): Promise<void> => {
     }
     return { name: actual.name, version: actual.version, root, files };
   });
-  const engineRoot = join(consumerRoot, 'node_modules', engineName);
-  assert.ok(lstatSync(engineRoot).isDirectory() && !lstatSync(engineRoot).isSymbolicLink(), `Linked ${engineName}`);
-  const engineManifest = readManifest(join(engineRoot, 'package.json'));
-  assert.equal(engineManifest.name, engineName);
-  assert.equal(engineManifest.version, engineVersion);
-  for (const path of enginePayload) {
-    assert.ok(fileRecord(join(engineRoot, path)).bytes > 0, `Missing installed engine payload: ${path}`);
+  for (const { name, version, payload } of registryEntries) {
+    const root = join(consumerRoot, 'node_modules', name);
+    assert.ok(lstatSync(root).isDirectory() && !lstatSync(root).isSymbolicLink(), `Linked ${name}`);
+    const manifest = readManifest(join(root, 'package.json'));
+    assert.equal(manifest.name, name);
+    assert.equal(manifest.version, version);
+    for (const path of payload) {
+      assert.ok(fileRecord(join(root, path)).bytes > 0, `Missing installed ${name} payload: ${path}`);
+    }
+    installed.push({ name, version, root, files: installedFiles(root) });
   }
-  installed.push({ name: engineName, version: engineVersion, root: engineRoot, files: installedFiles(engineRoot) });
-  const engine = {
-    name: engineName,
-    version: engineVersion,
-    resolved: engineEntry.resolved,
-    integrity: engineIntegrity,
-  };
+  const registry = registryEntries.map(({ name, version, resolved, integrity }) => ({
+    name,
+    version,
+    resolved,
+    integrity,
+  }));
   assert.deepEqual(sourceIdentity(), source, 'Source inputs changed during consumer preparation');
   const receipt = {
     consumerRoot,
     source,
-    engine,
+    registry,
     packages: packed,
     installed,
     lock: fileRecord(join(consumerRoot, 'package-lock.json')),
@@ -289,7 +337,7 @@ const main = async (): Promise<void> => {
   // Framework installation may change npm flags, but never the selected local package identities.
   for (const path of new Set([...Object.keys(lock.packages), ...Object.keys(successorLock.packages)])) {
     const name = path.split('node_modules/').at(-1)!;
-    if (!workspaceNames.has(name) && !byName.has(name) && name !== engineName) {
+    if (!workspaceNames.has(name) && !byName.has(name) && !registryNames.has(name)) {
       continue;
     }
     const before = lock.packages[path];
@@ -318,39 +366,11 @@ const main = async (): Promise<void> => {
     unchangedPackages: installed.map((entry) => entry.name),
   };
   writeFileSync(join(temporaryRoot, 'framework-successor.json'), `${JSON.stringify(frameworkSuccessor, null, 2)}\n`);
-  const harness = [
-    'm3-corpus/installed.mjs',
-    'm3-corpus/installed.vitest.test.mjs',
-    'm3-corpus/vitest.config.mjs',
-    'm3-corpus/corpus.mjs',
-    'm3-corpus/profile-v3.mjs',
-    'f1-public-a1/authority.mjs',
-    'f1-public-a1/f1-public.vitest.test.mjs',
-    'f1-public-a1/vitest.config.mjs',
-    'fixtures/read-fixture.mjs',
-    'fixtures/manifest.json',
-    'installed-cli/cli.test.mjs',
-    'installed-cli/box-project/box-exporter.mjs',
-    'installed-cli/box-project/box.geospec.ts',
-    'installed-cli/box-project/geospec.config.mjs',
-    'installed-cli/box-project/part.box',
-  ].map((path) => {
-    const input = fileRecord(join(repositoryRoot, 'packages/geospec/host-tests', path));
-    const destination = join(consumerRoot, 'host-tests', path);
-    mkdirSync(dirname(destination), { recursive: true });
-    writeFileSync(destination, readFileSync(input.path));
-    const staged = fileRecord(destination);
-    assert.equal(staged.sha256, input.sha256, `Harness copy differs: ${path}`);
-    return { source: input, staged };
-  });
-  for (const entry of harness) {
-    assert.deepEqual(fileRecord(entry.source.path), entry.source, 'Harness source changed during preparation');
-  }
-  assert.deepEqual(sourceIdentity(), source, 'Source inputs changed during framework/harness preparation');
+  assert.deepEqual(sourceIdentity(), source, 'Source inputs changed during framework preparation');
   mkdirSync(dirname(receiptPath), { recursive: true });
   writeFileSync(
     receiptPath,
-    `${JSON.stringify({ ...receipt, lock: frameworkSuccessor.lock, frameworkSuccessor, harness }, null, 2)}\n`,
+    `${JSON.stringify({ ...receipt, lock: frameworkSuccessor.lock, frameworkSuccessor }, null, 2)}\n`,
   );
   console.log(JSON.stringify({ consumerRoot, receiptPath }));
 };

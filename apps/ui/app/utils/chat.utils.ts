@@ -426,6 +426,25 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
         output.message,
       ),
   },
+  [toolName.shell]: {
+    input: (input) =>
+      joinLines(
+        input.cwd === undefined || input.cwd === '' ? undefined : `cwd: ${input.cwd}`,
+        input.command,
+        input.access === undefined
+          ? undefined
+          : `access: ${[...(input.access.read ?? []), ...(input.access.write ?? []), ...(input.access.domains ?? [])].join(', ')} (agent's reason: ${input.access.reason})`,
+      ),
+    output: (output) =>
+      'stdout' in output
+        ? joinLines(
+            output.status === 'completed' ? `exit ${String(output.exitCode)}` : output.status,
+            output.stdout.text === '' ? undefined : output.stdout.text,
+            output.stderr.text === '' ? undefined : `stderr: ${output.stderr.text}`,
+            output.log?.status === 'saved' ? `full output: ${output.log.path}` : undefined,
+          )
+        : `${output.status}: ${output.message}`,
+  },
   [toolName.revisions]: {
     input: (input) => `action: ${input.action}`,
     /* The `where` line first, because it is the answer every action carries. */

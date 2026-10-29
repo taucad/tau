@@ -39,7 +39,9 @@ const routes: RouteConfigEntry[] = await flatRoutes({
 
     // Server proxies and resource routes: no server exists behind `app://tau`.
     '../../app/routes/api.ph.$/**',
+    '../../app/routes/api.monitoring/**',
     '../../app/routes/assets.$/**',
+    '../../app/routes/health.build.ts',
     '../../app/routes/health.live.ts',
     '../../app/routes/health.ready.ts',
     '../../app/routes/health.startup.ts',
@@ -54,6 +56,7 @@ const routes: RouteConfigEntry[] = await flatRoutes({
 
     // Browser-only e2e fixtures, all with server loaders.
     '../../app/routes/[[]__e2e[]].*/**',
+    '../../app/routes/[[]__debug[]].observability/**',
   ],
 });
 

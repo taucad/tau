@@ -82,11 +82,11 @@ import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hoo
 import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
 import { projectGridClassName } from '#components/project-grid-layout.js';
 import { PageContent } from '#components/layout/page-content.js';
-import { PageHeader } from '#components/layout/page-header.js';
+import { PageHeader, usePhoneTopBar } from '#components/layout/page-header.js';
 import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
 import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
-import { useCloudProjects } from '#hooks/use-cloud-projects.js';
+import { assertCloudProjectActive, useCloudProjects } from '#hooks/use-cloud-projects.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import { useOpenCloudProject } from '#hooks/use-open-cloud-project.js';
 import {
@@ -184,7 +184,36 @@ function ManifestIssueLines({ issue }: { readonly issue: ProjectDiscoveryIssue }
  *
  * @returns The library.
  */
-export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1 | 2 }): React.JSX.Element {
+/** The library's primary action: in its title row, and in the phone top bar on `/projects` at 40px. */
+export function NewProjectLink({
+  size,
+  isDeferredToPhoneBar = false,
+}: Pick<React.ComponentProps<typeof Button>, 'size'> & {
+  /** Hide below `md` while the phone top bar carries this action, so phones get one copy (I4). */
+  readonly isDeferredToPhoneBar?: boolean;
+}): React.JSX.Element {
+  const isInPhoneBar = usePhoneTopBar().hasAction && isDeferredToPhoneBar;
+  return (
+    <Button asChild size={size} className={cn(isInPhoneBar && 'max-md:hidden')} data-slot='new-project-link'>
+      <NavLink to='/projects/new'>
+        {({ isPending }) => (
+          <>
+            New project
+            {isPending ? <Loader /> : null}
+          </>
+        )}
+      </NavLink>
+    </Button>
+  );
+}
+
+export function ProjectLibrary({
+  headingLevel = 1,
+  emptyComposer,
+}: {
+  readonly headingLevel?: 1 | 2;
+  /** Optional host-owned composer for an embedded library. */ readonly emptyComposer?: ReactNode;
+}): React.JSX.Element {
   const [viewMode, setViewMode] = useCookie<'grid' | 'table'>(cookieName.projectViewMode, 'grid');
   /*
    * D1: the Trash is a place, not a menu tick. `/projects?trash=1` is what the
@@ -241,6 +270,7 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
   const handleOpenCloudProject = useCallback(
     async (entry: CloudProject): Promise<void> => {
       try {
+        await assertCloudProjectActive(entry.id);
         await openCloudProject(entry);
       } catch (error) {
         toast.error(`Could not open ${entry.name} from Tau Cloud`, {
@@ -457,13 +487,10 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
     [updateName],
   );
 
-  const actions: ProjectActions = {
-    handleDelete,
-    handlePermanentlyDelete,
-    handleDuplicate,
-    handleRename,
-    handleRestore,
-  };
+  const actions = useMemo<ProjectActions>(
+    () => ({ handleDelete, handlePermanentlyDelete, handleDuplicate, handleRename, handleRestore }),
+    [handleDelete, handlePermanentlyDelete, handleDuplicate, handleRename, handleRestore],
+  );
 
   const viewControls = (
     <div className='flex items-center gap-2'>
@@ -515,22 +542,12 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
         title='Projects'
         headingLevel={headingLevel}
         className='mb-0'
-        action={
-          <Button asChild>
-            <NavLink to='/projects/new'>
-              {({ isPending }) => (
-                <>
-                  New project
-                  {isPending ? <Loader /> : null}
-                </>
-              )}
-            </NavLink>
-          </Button>
-        }
+        // Only the page that owns `/projects` defers to the phone top bar; an embedded library keeps it.
+        action={<NewProjectLink isDeferredToPhoneBar={headingLevel === 1} />}
       />
 
       {workspaceBindingRepairs.length > 0 && (
-        <div className='mb-6 space-y-2' aria-label='Workspace link repair'>
+        <div role='group' className='mb-6 space-y-2' aria-label='Workspace link repair'>
           {workspaceBindingRepairs.map((repair) => (
             <div
               key={repair.canonicalWorkspaceId}
@@ -559,7 +576,7 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
       )}
 
       {conflicts.length > 0 && (
-        <div className='mb-6 space-y-2' aria-label='Project conflicts'>
+        <div role='group' className='mb-6 space-y-2' aria-label='Project conflicts'>
           {conflicts.map((conflict) => {
             const key = `${conflict.locator.storageRootKey}:${conflict.locator.relativeDirectory}`;
             const label =
@@ -605,7 +622,7 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
       )}
 
       {degradedProjects.length > 0 && (
-        <div className='mb-6 space-y-2' aria-label='Projects needing repair'>
+        <div role='group' className='mb-6 space-y-2' aria-label='Projects needing repair'>
           {degradedProjects.map((project) => (
             <div key={project.id} className='flex items-center gap-3 rounded-md border border-warning/40 p-3'>
               <AlertCircle className='size-4 shrink-0 text-warning' />
@@ -629,7 +646,7 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
       )}
 
       {recoveries.length > 0 && (
-        <div className='mb-6 space-y-2' aria-label='Project recovery'>
+        <div role='group' className='mb-6 space-y-2' aria-label='Project recovery'>
           {recoveries.map((recovery) => (
             <div
               key={recovery.operationId}
@@ -715,6 +732,7 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
         </div>
       ) : (
         <UnifiedProjectList
+          emptyComposer={emptyComposer}
           rows={toLibraryRows({ projects, held: heldProjects, cloud: cloudProjects, includeCloudOnly: !showDeleted })}
           isCatalogUnavailable={!showDeleted && auth === 'authed' && (cloudPending || isCloudFailed)}
           controls={viewControls}
@@ -722,6 +740,7 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
           viewMode={viewMode}
           actions={actions}
           onOpenCloudProject={handleOpenCloudProject}
+          emptyTitleLevel={headingLevel === 1 ? 2 : 3}
         />
       )}
       <AlertDialog
@@ -782,12 +801,15 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
 
 type UnifiedProjectListProps = {
   readonly isCatalogUnavailable: boolean;
+  readonly emptyComposer?: ReactNode;
   readonly controls: ReactNode;
   readonly isLoading: boolean;
   readonly rows: LibraryRow[];
   readonly viewMode: 'grid' | 'table';
   readonly actions: ProjectActions;
   readonly onOpenCloudProject: (entry: CloudProject) => Promise<void>;
+  /** The no-match state's heading level: one below the library's own heading. */
+  readonly emptyTitleLevel: 2 | 3;
 };
 
 // Page size options, shared by both view modes so the remembered choice survives a view switch.
@@ -809,6 +831,7 @@ const defaultPageSize = 20;
 const pageSizeOptions = [defaultPageSize, 50, 100, 150, 200];
 
 function UnifiedProjectList({
+  emptyComposer,
   rows,
   viewMode,
   actions,
@@ -816,6 +839,7 @@ function UnifiedProjectList({
   isCatalogUnavailable,
   controls,
   isLoading,
+  emptyTitleLevel,
 }: UnifiedProjectListProps) {
   'use no memo';
 
@@ -829,11 +853,13 @@ function UnifiedProjectList({
   const [globalFilter, setGlobalFilter] = useSearchParameter(searchParameterName.query, queryParameter);
   const [pageSize, setPageSize] = useCookie<number>(cookieName.projectPageSize, defaultPageSize);
   const [pageIndex, setPageIndex] = useState(0);
+  // TanStack flexRender treats cell functions as component types; recreating them unmounts open row dialogs.
+  const columns = useMemo(() => createColumns(actions, onOpenCloudProject), [actions, onOpenCloudProject]);
 
   // oxlint-disable-next-line react/incompatible-library -- This component is explicitly opted out because TanStack Table returns mutable functions that cannot be compiler-memoized safely.
   const table = useReactTable({
     data: rows,
-    columns: createColumns(actions, onOpenCloudProject),
+    columns,
     /* Stable across the cloud listing arriving, so a selection follows its project. */
     getRowId: (row) => row.id,
     /* A project this device does not hold has nothing here to trash (D20). */
@@ -883,7 +909,7 @@ function UnifiedProjectList({
                   <p className='text-sm'>Start by describing what you want to build, or create from code</p>
                 </div>
               </div>
-              <NewProjectChatComposer enableAutoFocus={false} className='shadow-none' />
+              {emptyComposer ?? <NewProjectChatComposer enableAutoFocus={false} className='shadow-none' />}
               <div className='flex items-center justify-center gap-4 text-sm text-muted-foreground'>
                 <div className='h-px flex-1 bg-border' />
                 <span>or</span>
@@ -901,7 +927,6 @@ function UnifiedProjectList({
     );
   }
 
-  const columns = createColumns(actions, onOpenCloudProject);
   return (
     <div className='space-y-4'>
       <div role='group' aria-label='Project controls' className='flex flex-wrap items-center justify-between gap-2'>
@@ -942,6 +967,7 @@ function UnifiedProjectList({
         <PanelEmptyState
           className='h-60'
           icon={PackageX}
+          titleLevel={emptyTitleLevel}
           title={isCatalogUnavailable ? 'No matches on this device' : 'No matching projects'}
           description={isCatalogUnavailable ? 'Tau Cloud projects are not all available yet.' : undefined}
         >
@@ -988,7 +1014,7 @@ function UnifiedProjectList({
 }
 
 type ProjectLibraryCardProps = {
-  readonly project: ProjectListItem & { readonly onCloud?: boolean };
+  readonly project: ProjectListItem & { readonly onCloud?: boolean; readonly cloud?: CloudProject };
   readonly actions: ProjectActions;
   readonly isSelected?: boolean;
   readonly onSelect?: () => void;
@@ -1022,8 +1048,9 @@ export function ProjectLibraryCard({
 
   return (
     <ProjectCard
-      to={projectUrl}
-      isOpening={isOpening}
+      {...(project.cloud?.cloudState === 'deleting'
+        ? { onOpen: () => undefined, isOpening: true }
+        : { to: projectUrl, isOpening })}
       linkLabel={`${isOpening ? 'Opening…' : 'Open'} ${project.name}`}
       className={cn('flex flex-col', isSelected && 'ring-3 ring-primary')}
     >
@@ -1077,11 +1104,16 @@ export function ProjectLibraryCard({
             <TooltipTrigger asChild>
               <div
                 className='flex w-fit max-w-full items-center gap-1.5 px-2 text-xs text-muted-foreground'
+                role='group'
                 aria-label={`Location: ${fullLocationLabel}`}
               >
                 <LocationIcon className='size-3 shrink-0' />
                 <span className='truncate'>{slugPath}</span>
-                {project.onCloud === true ? <OnTauCloudMark /> : undefined}
+                {project.cloud?.cloudState === 'deleting' ? (
+                  <span role='status'>Deleting from Tau Cloud…</span>
+                ) : project.onCloud === true ? (
+                  <OnTauCloudMark />
+                ) : undefined}
               </div>
             </TooltipTrigger>
             <TooltipContent side='right'>{fullLocationLabel}</TooltipContent>

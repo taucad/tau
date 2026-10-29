@@ -1,9 +1,9 @@
 import { packageVersion } from '@taucad/runtime/metadata';
 
 /**
- * Kernel import extensions the publication runtime routes, pinned against
- * `@taucad/geospec-engine`'s `defaultRuntime` by `publication-runtime.parity.test.ts`.
- * `zoo` is publication-only; `openrscad` is shared with the engine's default plugin set.
+ * Kernel import extensions the publication runtime routes, pinned against the Tau CLI's
+ * runtime (`@taucad/cli`'s `createCliRuntime`) by `publication-runtime.parity.test.ts`:
+ * every CLI kernel except the native ones, which bind a local payload store.
  * Never hand-edit an extension here — change the plugin.
  */
 export const publicationKernelExtensions = [
@@ -21,7 +21,6 @@ export const publicationKernelExtensions = [
   {
     id: 'assimp',
     extensions: [
-      '3ds',
       '3mf',
       'ac',
       'amf',
@@ -45,11 +44,6 @@ export const publicationKernelExtensions = [
       'stl',
       'usda',
       'usdz',
-      'wrl',
-      'x',
-      'x3d',
-      'x3db',
-      'x3dv',
       'xgl',
     ],
   },

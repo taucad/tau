@@ -50,23 +50,7 @@ if (typeof NativeTextEncoder === 'function' && !(new NativeTextEncoder().encode(
   });
 }
 
-// Monaco 0.55+ evaluates `document.queryCommandSupported('paste')` at module load
-// (see monaco-editor clipboard contribution). jsdom does not implement it.
-// oxlint-disable-next-line @typescript-eslint/no-deprecated -- Monaco still probes the deprecated DOM API; jsdom needs the stub to load
-if (typeof document !== 'undefined' && typeof document.queryCommandSupported !== 'function') {
-  Object.defineProperty(document, 'queryCommandSupported', {
-    configurable: true,
-    writable: true,
-    value: () => false,
-  });
-}
-
-// Monaco primes and re-measures Geist Mono through `document.fonts` — the
-// `FontFaceSet` jsdom does not implement — so `configureMonaco` threw at collect
-// in every suite that renders an editor (W14). The stub is here rather than a
-// guard in product code (review R13): a missing web-font API is a property of
-// this environment, and the browser path stays unconditional. `load` resolves
-// with no faces, which is the same answer an offline browser gives.
+// The jsdom environment omits the browser font-loading API used by rendered UI.
 // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- DOM types claim `fonts` is always there; jsdom omits it
 if (typeof document !== 'undefined' && (document.fonts as FontFaceSet | undefined) === undefined) {
   Object.defineProperty(document, 'fonts', {
@@ -83,18 +67,11 @@ if (typeof document !== 'undefined' && (document.fonts as FontFaceSet | undefine
   });
 }
 
-// Monaco's clipboard service answers every `copy` event on the body with
-// `navigator.clipboard.write([new ClipboardItem({'text/plain': deferred})])`.
-// jsdom implements neither name, so a suite that renders an editor collected
-// the call as an unhandled `ReferenceError` (W14 sweep). Each test that asserts
-// on the clipboard still installs its own spy over this, the way they do today.
+// Browser clipboard consumers need a constructor and settled MIME promises in jsdom.
 // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/no-extraneous-class -- DOM types claim ClipboardItem is always defined and jsdom omits it; the stub is a constructor-only class because the platform's is
 globalThis.ClipboardItem ??= class ClipboardItem {
   public constructor(items: Record<string, unknown>) {
-    /* Monaco hands one deferred promise per MIME type and cancels it when the
-     * next write supersedes it. A real clipboard consumes those promises, so
-     * this stub has to as well, or every cancelled write lands as an unhandled
-     * `Canceled` rejection. `allSettled` subscribes and never rejects. */
+    // Consume deferred MIME values just as the browser clipboard does.
     void Promise.allSettled(Object.values(items));
   }
 } as unknown as typeof ClipboardItem;
@@ -112,17 +89,7 @@ if (typeof navigator !== 'undefined' && (navigator.clipboard as Clipboard | unde
   });
 }
 
-const g = globalThis as typeof globalThis & {
-  MonacoEnvironment?: { getWorkerUrl?: (moduleId: string, label: string) => string };
-};
-g.MonacoEnvironment ??= {
-  getWorkerUrl(): string {
-    const source = 'self.onmessage=function(){};';
-    return `data:application/javascript;charset=utf-8,${encodeURIComponent(source)}`;
-  },
-};
-
-// Jsdom does not define the Web `Worker` global; Monaco still constructs one for TS diagnostics.
+// The jsdom environment has no worker host; actual language workers are covered in browser tests.
 // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- DOM types claim Worker is always defined; jsdom omits it
 globalThis.Worker ??= class Worker {
   public postMessage(_message: unknown): void {

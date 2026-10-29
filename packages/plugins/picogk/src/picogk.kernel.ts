@@ -15,7 +15,13 @@ import { createExportFile } from '@taucad/runtime/types';
 
 import { picogkArtifactToGlb, picogkTessellation, picogkTessellationSchema } from '#picogk-mesh.js';
 import { picogkAnalysisSchema, picogkBuildSchema, picogkResolveSchema } from '#picogk.protocol.js';
-import { picogkExportSchemas, picogkOptionsSchema } from '#picogk.schemas.js';
+import type { PicogkMeshing } from '#picogk.protocol.js';
+import {
+  picogkExportSchemas,
+  picogkOptionsSchema,
+  picogkPreviewAdaptivity,
+  picogkRenderSchema,
+} from '#picogk.schemas.js';
 import { PicogkSession, PicogkWorkerError } from '#picogk-session.js';
 import { picogkNative } from '#native.js';
 import { libraryVersionMismatches } from '#project-manifest.js';
@@ -65,12 +71,24 @@ const issuesFrom = (error: unknown, fileName?: string): KernelIssue[] => {
   ];
 };
 
+const sameMeshing = (requested: PicogkMeshing, applied: PicogkMeshing | undefined): boolean =>
+  applied !== undefined && applied.adaptivity === requested.adaptivity && applied.relax === requested.relax;
+
+const meshingUnsupportedIssue = (requested: PicogkMeshing): KernelIssue => ({
+  message: `This PicoGK runtime cannot mesh adaptively (meshAdaptivity ${String(requested.adaptivity)}). Set meshAdaptivity to 0 for the uniform mesh, or update the PicoGK runtime.`,
+  code: 'RUNTIME',
+  type: 'kernel',
+  severity: 'error',
+  details: { reason: 'meshing-unsupported', meshAdaptivity: requested.adaptivity, meshRelax: requested.relax },
+});
+
 const picogkKernelDefinition = defineKernel({
   id: 'picogk',
   extensions: ['cs'],
   name: 'PicogkKernel',
-  version: '2.5.2+dotnet10.roslyn5.9.host20.protocol8.material2.mechanism2.compute1',
+  version: '2.5.2+dotnet10.roslyn5.9.host21.protocol8.material2.mechanism2.compute1.meshing2',
   optionsSchema: picogkOptionsSchema,
+  evaluateOptionsSchema: picogkRenderSchema,
   // D2: `cancel` stops an in-flight build at the model's next viewer call and keeps the worker warm.
   cancellation: 'cooperative',
   /* A marching-cubes mesh has no B-rep edges, so the complete native answer to `includeEdges` is
@@ -198,7 +216,13 @@ const picogkKernelDefinition = defineKernel({
     }
   },
 
-  async evaluate({ entryPath, parameters }, services, context) {
+  async evaluate({ entryPath, parameters, options }, services, context) {
+    /* Only an adaptive request crosses the protocol, so an explicit 0 sends the uniform request. An unset value asks
+     * for Balanced: whether the worker meshes adaptively is known only from its echo, because the ready frame
+     * carries no capability and the published layers predate the echo. */
+    const defaulted = options.meshAdaptivity === undefined;
+    const adaptivity = options.meshAdaptivity ?? picogkPreviewAdaptivity;
+    const meshing = adaptivity > 0 ? { adaptivity, relax: options.meshRelax } : undefined;
     const paths = await context.mirror.sync(services.filesystem, services.fileContentCache, services.operationId);
     // D35: the project's own references must name the PicoGK this kernel runs, or it runs differently outside Tau.
     const manifestIssues: KernelIssue[] = [];
@@ -225,6 +249,7 @@ const picogkKernelDefinition = defineKernel({
           entryPath,
           parameters,
           ...(computeJob ? { computeReuse: computeJob.request } : {}),
+          ...(meshing ? { meshing } : {}),
         },
         schema: picogkBuildSchema,
         signal: computeJob?.signal ?? services.signal,
@@ -232,6 +257,15 @@ const picogkKernelDefinition = defineKernel({
         cancelMethod: 'cancel',
       });
       try {
+        if (meshing && !sameMeshing(meshing, result.meshing)) {
+          /* A worker that predates adaptive meshing ignores the request and builds the uniform mesh, which its
+           * report states by carrying no meshing. The default accepts that mesh, built once; an explicit request,
+           * or a worker that echoes other meshing, is refused rather than shown as adaptive. */
+          if (!defaulted || result.meshing !== undefined) {
+            throw new PicogkKernelError([meshingUnsupportedIssue(meshing)]);
+          }
+          services.logger.debug('PicoGK worker meshed the default view uniformly: it predates adaptive meshing.');
+        }
         const readSpan = services.tracer.startSpan('picogk.artifact-read');
         let artifact;
         try {
@@ -284,11 +318,23 @@ const picogkKernelDefinition = defineKernel({
       }
     } catch (error) {
       await computeJob?.failed();
-      throw new PicogkKernelError(issuesFrom(error, entryPath));
+      throw error instanceof PicogkKernelError ? error : new PicogkKernelError(issuesFrom(error, entryPath));
     } finally {
       span.end();
     }
   },
+
+  /* The report names the mesh a handle holds: no adaptivity is the uniform mesh (also what a worker that predates
+   * adaptive meshing answers a default view with), otherwise its adaptivity and relax. An export asking for that same
+   * meshing reuses the handle; any other export builds. A snapshot without a report says nothing. */
+  effectiveOptions: ({ handle, options }) =>
+    handle.tessellation === undefined
+      ? undefined
+      : {
+          ...options,
+          meshAdaptivity: handle.tessellation.adaptivity ?? 0,
+          meshRelax: handle.tessellation.relax ?? false,
+        },
 
   async render({ handle }) {
     return { content: handle.glb, ...(handle.tessellation ? { tessellation: handle.tessellation } : {}) };
@@ -326,6 +372,10 @@ const picogkKernelDefinition = defineKernel({
       tessellation: picogkTessellationSchema.parse(serialized.tessellation),
     };
   },
+
+  // Observation only: the resident set of the worker's process tree; `heapBytes` stays unimplemented, so recycling
+  // and `rendering.heapBytes` are unchanged.
+  observedChildResidentBytes: async (context) => context.session.sampleResident(),
 
   async onDispose(context) {
     try {

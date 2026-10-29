@@ -58,12 +58,19 @@ export type CadContext = {
   renderPhase: string | undefined;
   telemetryEntries: TelemetrySpanRecord[];
   operationTimeout: number;
+  /** The kernel's evaluate options this unit asks for, such as a mesh adaptivity; `{}` takes the kernel's defaults. */
+  evaluateOptions: Record<string, unknown>;
   kernelClient?: AppRuntimeClient;
   /** Allocated ownership, not connected readiness. */
   connectingClient?: AppRuntimeClient;
   runtimeCloseError?: Error;
   document?: RuntimeDocument;
   defaultView?: ViewSubscription;
+  /**
+   * Whether each viewer presenting this unit shows lines, by viewer id. The default view asks for
+   * GLB edges while any of them does, or while none has said (captures and previews).
+   */
+  edgeViewers: Readonly<Record<string, boolean>>;
   capabilities?: AppCapabilitiesManifest;
   activeKernelId?: string;
   eventCleanups: Array<() => void>;
@@ -138,6 +145,10 @@ type CadEvent =
     }
   | { type: 'stateChanged'; state: 'idle' | 'busy' | 'error'; detail?: string }
   | { type: 'setOperationTimeout'; operationTimeout: number }
+  /** Replaces the evaluate options and re-evaluates the open document with them. */
+  | { type: 'setEvaluateOptions'; evaluateOptions: Record<string, unknown> }
+  /** A viewer shows or hides lines; `undefined` when it stops presenting this unit. */
+  | { type: 'setViewerEdges'; viewerId: string; shown: boolean | undefined }
   | { type: 'capabilitiesUpdated'; capabilities: AppCapabilitiesManifest }
   | { type: 'activeKernelChanged'; kernelId: string | undefined }
   | { type: 'parkRuntime' }
@@ -171,6 +182,24 @@ type CadInput = {
   operationTimeout?: number;
   /** Kernel heap in bytes above which the unit recycles its runtime once idle (`runtimeRecycleHeapBytes`). */
   recycleHeapBytes?: number;
+};
+
+/**
+ * Whether the default view asks for GLB edges: while any viewer shows lines, or while no viewer has
+ * said, so captures and previews without a viewer keep them.
+ */
+export const cadEdgesWanted = (edgeViewers: Readonly<Record<string, boolean>>): boolean => {
+  const shown = Object.values(edgeViewers);
+  return shown.length === 0 || shown.includes(true);
+};
+
+/** Ask an open default view for edges or none; the view's own events report the outcome. */
+const requestDefaultViewEdges = async (view: ViewSubscription, includeEdges: boolean): Promise<void> => {
+  try {
+    await view.update({ content: { includeEdges } });
+  } catch {
+    // The view closed before the update; its replacement opens with the current answer.
+  }
 };
 
 /** Release the runtime resources held by one CAD unit. */
@@ -220,11 +249,14 @@ type ConnectKernelInput = {
 
 type RenderModelInput = {
   client: AppRuntimeClient | undefined;
+  /** Whether a newly opened default view should ask for GLB edges. */
+  edgesWanted: () => boolean;
   document: RuntimeDocument | undefined;
   machineRef: AnyActorRef;
   requestId: number;
   entryPath: string | undefined;
   parameterRender: ParameterRender | undefined;
+  evaluateOptions: Record<string, unknown>;
 };
 
 /**
@@ -278,6 +310,7 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
     import('@taucad/runtime/client'),
     import('@taucad/runtime/filesystem'),
     lazyKernelOptionsFactory(),
+    import('#telemetry/runtime-telemetry.js'),
   ]);
   // oxlint-disable-next-line promise/prefer-await-to-then -- an abort can skip the await below, and an unhandled rejection would take the page with it
   modules.catch(() => undefined);
@@ -330,7 +363,8 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
 
   signal.throwIfAborted();
 
-  const [{ createRuntimeClient }, { fromFileSystemBridge }, resolveKernelOptions] = await modules;
+  const [{ createRuntimeClient }, { fromFileSystemBridge }, resolveKernelOptions, { observeRuntimeClient }] =
+    await modules;
   signal.throwIfAborted();
 
   const computeConnection =
@@ -350,6 +384,8 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
   client = createRuntimeClient(kernelOptions);
 
   cleanups.push(
+    /* Runtime observability (FR-14): attached before `connect()` so `initialize` is observed. */
+    observeRuntimeClient(client, 'editor'),
     client.on('state', (state) => {
       machineRef.send({ type: 'stateChanged', state });
     }),
@@ -434,6 +470,7 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input, s
     const document = input.client.open({
       source: { path: input.entryPath },
       ...openingParameters(input.parameterRender),
+      ...(Object.keys(input.evaluateOptions).length > 0 ? { evaluateOptions: input.evaluateOptions } : {}),
       watch: true,
     });
     let defaultView: ViewSubscription | undefined;
@@ -459,7 +496,14 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input, s
         return;
       }
       const offer = evaluation.views[0];
-      const content = interactiveViewContent(offer?.mimeType, kernelId, input.client?.capabilities);
+      const content = interactiveViewContent({
+        mimeType: offer?.mimeType,
+        kernelId,
+        capabilities: input.client?.capabilities,
+        edgesShown: input.edgesWanted(),
+      });
+      // Keyed on whether the route takes content, not on its value: `setViewerEdges` updates the
+      // open view in place, so showing or hiding lines never reopens it.
       const key = `${offer?.id ?? ''}:${Boolean(content)}`;
       if (key === selectedViewKey) {
         return;
@@ -761,6 +805,8 @@ const renderRequestPatch = (context: CadContext, event: RenderTrigger): CadPatch
       return {
         ...bumped,
         entryPath: event.entryPath,
+        // Evaluate options belong to the entry's kernel; another entry starts from its defaults.
+        ...(event.entryPath === context.entryPath ? {} : { evaluateOptions: {} }),
         codeIssues: [],
         latestRenderingOutcome: undefined,
         parameterManifest: undefined,
@@ -781,6 +827,8 @@ const renderRequestPatch = (context: CadContext, event: RenderTrigger): CadPatch
       return {
         ...bumped,
         entryPath: event.entryPath,
+        // Evaluate options belong to the entry's kernel; another entry starts from its defaults.
+        ...(event.entryPath === context.entryPath ? {} : { evaluateOptions: {} }),
         // The staged bytes belong to the entry that was open; the new entry re-supplies its own.
         parameterRender: undefined,
         latestRenderingOutcome: undefined,
@@ -876,7 +924,13 @@ const runtimeSignals = {
   capabilitiesUpdated: ({ event }: CadArgs<'capabilitiesUpdated'>) => ({
     context: { capabilities: event.capabilities },
   }),
-  activeKernelChanged: ({ event }: CadArgs<'activeKernelChanged'>) => ({ context: { activeKernelId: event.kernelId } }),
+  activeKernelChanged: ({ context, event }: CadArgs<'activeKernelChanged'>) => ({
+    context: {
+      activeKernelId: event.kernelId,
+      // Another kernel's evaluate options mean nothing to this one.
+      ...(event.kernelId === context.activeKernelId ? {} : { evaluateOptions: {} }),
+    },
+  }),
 };
 
 /** Results and issues a unit with a kernel records in every state after connecting. */
@@ -1015,9 +1069,11 @@ export const cadMachine = setup({
     renderPhase: undefined,
     telemetryEntries: [],
     operationTimeout: input.operationTimeout ?? defaultOperationTimeout,
+    evaluateOptions: {},
     kernelClient: undefined,
     document: undefined,
     defaultView: undefined,
+    edgeViewers: {},
     capabilities: undefined,
     activeKernelId: undefined,
     eventCleanups: [],
@@ -1096,12 +1152,39 @@ export const cadMachine = setup({
      * kernel; releasing it here as well would dispose the same client twice,
      * because this transition reads the context from before that exit (S12). */
     filesystemBindingChanged: { target: '.connecting', reenter: true },
+    setViewerEdges: ({ context, event }, enq) => {
+      const { [event.viewerId]: _previous, ...others } = context.edgeViewers;
+      const edgeViewers = event.shown === undefined ? others : { ...others, [event.viewerId]: event.shown };
+      const wanted = cadEdgesWanted(edgeViewers);
+      const view = context.defaultView;
+      const requested = view?.request.content?.includeEdges;
+      // Only a view whose route takes edges carries an explicit `includeEdges`.
+      if (view && requested !== undefined && requested !== wanted) {
+        enq(() => {
+          // async-iife: fire-and-forget; the view's own events report the new rendering.
+          void requestDefaultViewEdges(view, wanted);
+        });
+      }
+      return { context: { edgeViewers } };
+    },
     setOperationTimeout: ({ context, event }, enq) => {
       const client = context.kernelClient;
       enq(() => {
         client?.setOperationTimeout(event.operationTimeout);
       });
       return { context: { operationTimeout: event.operationTimeout } };
+    },
+    setEvaluateOptions: ({ context, event }, enq) => {
+      const { document } = context;
+      // A document not open yet takes them when it opens.
+      enq(async () => {
+        try {
+          await document?.update({ evaluateOptions: event.evaluateOptions });
+        } catch {
+          // A refused or superseded update reports through the evaluation; nothing to do here.
+        }
+      });
+      return { context: { evaluateOptions: event.evaluateOptions } };
     },
   },
   initial: 'connecting',
@@ -1287,8 +1370,10 @@ export const cadMachine = setup({
             src: 'renderModelActor',
             input: ({ context, self }) => ({
               client: context.kernelClient,
+              edgesWanted: () => cadEdgesWanted(self.getSnapshot().context.edgeViewers),
               entryPath: context.entryPath,
               parameterRender: context.parameterRender,
+              evaluateOptions: context.evaluateOptions,
               document: context.document,
               machineRef: self,
               requestId: context.openAttempt,
@@ -1424,6 +1509,9 @@ export const selectCadEntryIssues =
     snapshot.context.kernelIssues.get(entryPath);
 
 export const selectCadOperationTimeout = (snapshot: CadSnapshot): number => snapshot.context.operationTimeout;
+/** The kernel evaluate options the unit asks for. */
+export const selectCadEvaluateOptions = (snapshot: CadSnapshot): Record<string, unknown> =>
+  snapshot.context.evaluateOptions;
 
 export const selectCadRendering = (snapshot: CadSnapshot): Rendering | undefined => snapshot.context.rendering;
 export const selectCadEvaluation = (snapshot: CadSnapshot): Evaluation | undefined => snapshot.context.evaluation;

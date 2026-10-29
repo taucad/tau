@@ -1,6 +1,19 @@
 # Reusable workflow for deploying API to Fly.io.
 # Supports the staging API (`tau-api-staging`, `api.taucad.dev`) and the
-# production API (`tau-api`, `api.tau.new`).
+# production API (`tau-api`, `api.tau.new`), and two private apps that serve
+# nothing: the B2 copier (`mirror`: `tau-mirror-staging` / `tau-mirror`, W13 DM1)
+# and the maintenance singleton (`maintenance`: `tau-maintenance-staging` /
+# `tau-maintenance`, north star DC4). Each is a target of the API Dockerfile
+# (`mirror`, `maintenance`) and deploys with its own token: `FLY_MIRROR_API_TOKEN`
+# (HCP tau-repo `fly_mirror_deploy_token_<env>`, change proposal P2.7) and
+# `FLY_MAINTENANCE_API_TOKEN` (HCP tau-repo `fly_maintenance_deploy_token_<env>`).
+# Neither uploads Sentry maps or runs the CORS smoke, and each must end with no IP
+# address and a started Machine; the maintenance app must have exactly one.
+# The git storage app (`storage`: `tau-storage-staging`, north star DC1) is
+# staging-only so far: the API Dockerfile's `storage` target, its own token
+# (`FLY_STORAGE_API_TOKEN`, from HCP tau-repo `fly_storage_deploy_token_<env>`),
+# Flycast only (no Sentry upload, no CORS smoke); it must end with no public IP
+# and must leave every `tau-api` Machine as it found it.
 #
 # The build pipeline:
 #   1. Authenticate Docker against `registry.fly.io` using FLY_API_TOKEN.
@@ -32,7 +45,7 @@ on:
       app:
         required: true
         type: string
-        description: 'App to deploy (api)'
+        description: 'App to deploy (api, mirror, maintenance or storage)'
   workflow_dispatch:
     # Manual trigger from GitHub UI
     inputs:
@@ -49,6 +62,9 @@ on:
         description: 'App to deploy'
         options:
           - api
+          - mirror
+          - maintenance
+          - storage
 
 jobs:
   deploy:
@@ -79,7 +95,67 @@ jobs:
 
       - name: Resolve deploy targets
         id: targets
+        env:
+          FLY_TOKEN_MIRROR: ${{ secrets.FLY_MIRROR_API_TOKEN }}
+          FLY_TOKEN_MAINTENANCE: ${{ secrets.FLY_MAINTENANCE_API_TOKEN }}
+          FLY_TOKEN_STORAGE: ${{ secrets.FLY_STORAGE_API_TOKEN }}
         run: |
+          # Every app but the API builds a target of the API's Dockerfile and has
+          # its Fly configs in its own project.
+          DOCKERFILE="apps/api/Dockerfile"
+          DOCKER_TARGET=""
+          TOKEN_SECRET="FLY_API_TOKEN"
+          if [ "${{ inputs.app }}" = "mirror" ] || [ "${{ inputs.app }}" = "maintenance" ]; then
+            case "${{ inputs.app }}" in
+              mirror)
+                PREFIX="tau-mirror"; TOKEN_SECRET="FLY_MIRROR_API_TOKEN"
+                TOKEN_HCP="fly_mirror_deploy_token"; TOKEN_VALUE="$FLY_TOKEN_MIRROR" ;;
+              maintenance)
+                PREFIX="tau-maintenance"; TOKEN_SECRET="FLY_MAINTENANCE_API_TOKEN"
+                TOKEN_HCP="fly_maintenance_deploy_token"; TOKEN_VALUE="$FLY_TOKEN_MAINTENANCE" ;;
+            esac
+            case "${{ inputs.environment }}" in
+              staging) FLY_APP="${PREFIX}-staging"; CONFIG_FILE="apps/${{ inputs.app }}/fly.staging.toml" ;;
+              production) FLY_APP="${PREFIX}"; CONFIG_FILE="apps/${{ inputs.app }}/fly.prod.toml" ;;
+              *) echo "::error::Invalid environment: ${{ inputs.environment }}"; exit 1 ;;
+            esac
+            [ -n "$TOKEN_VALUE" ] || {
+              echo "::error::Set ${TOKEN_HCP}_${{ inputs.environment }} in HCP tau-repo and apply its ${TOKEN_SECRET} GitHub environment mapping."
+              exit 1
+            }
+            echo "fly_app=${FLY_APP}" >> "$GITHUB_OUTPUT"
+            echo "config_file=${CONFIG_FILE}" >> "$GITHUB_OUTPUT"
+            echo "image=registry.fly.io/${FLY_APP}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+            echo "cache_ref=registry.fly.io/${FLY_APP}:buildcache" >> "$GITHUB_OUTPUT"
+            echo "dockerfile=${DOCKERFILE}" >> "$GITHUB_OUTPUT"
+            echo "docker_target=${{ inputs.app }}" >> "$GITHUB_OUTPUT"
+            echo "token_secret=${TOKEN_SECRET}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "${{ inputs.app }}" = "storage" ]; then
+            if [ "${{ inputs.environment }}" != "staging" ]; then
+              echo "::error::Only staging deploys tau-storage so far."
+              exit 1
+            fi
+            [ -n "$FLY_TOKEN_STORAGE" ] || {
+              echo "::error::Set fly_storage_deploy_token_staging in HCP tau-repo and apply its FLY_STORAGE_API_TOKEN GitHub environment mapping."
+              exit 1
+            }
+            {
+              echo "fly_app=tau-storage-staging"
+              echo "config_file=apps/storage/fly.staging.toml"
+              echo "image=registry.fly.io/tau-storage-staging:${GITHUB_SHA}"
+              echo "cache_ref=registry.fly.io/tau-storage-staging:buildcache"
+              echo "dockerfile=${DOCKERFILE}"
+              echo "docker_target=storage"
+              echo "token_secret=FLY_STORAGE_API_TOKEN"
+              echo "api_app=tau-api-staging"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "dockerfile=${DOCKERFILE}" >> "$GITHUB_OUTPUT"
+          echo "docker_target=${DOCKER_TARGET}" >> "$GITHUB_OUTPUT"
+          echo "token_secret=${TOKEN_SECRET}" >> "$GITHUB_OUTPUT"
           if [ "${{ inputs.environment }}" = "staging" ]; then
             FLY_APP="tau-api-staging"
             CONFIG_FILE="apps/${{ inputs.app }}/fly.staging.toml"
@@ -116,9 +192,10 @@ jobs:
         with:
           registry: registry.fly.io
           username: x
-          password: ${{ secrets.FLY_API_TOKEN }}
+          password: ${{ secrets[steps.targets.outputs.token_secret] }}
 
       - name: Require the Sentry source-map credential
+        if: inputs.app == 'api'
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: |
@@ -127,18 +204,19 @@ jobs:
             exit 1
           fi
 
-      - name: Build and push API image
+      - name: Build and push ${{ inputs.app }} image
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: .
-          file: apps/${{ inputs.app }}/Dockerfile
+          file: ${{ steps.targets.outputs.dockerfile }}
+          target: ${{ steps.targets.outputs.docker_target }}
           push: true
           tags: ${{ steps.targets.outputs.image }}
           # `mode=max` is required for monorepos so intermediate stages
           # (`deps`/`build`) survive in the cache, not just the final stage.
           cache-from: type=registry,ref=${{ steps.targets.outputs.cache_ref }}
           cache-to: type=registry,ref=${{ steps.targets.outputs.cache_ref }},mode=max
-          build-args: SENTRY_UPLOAD_ENABLED=true
+          build-args: SENTRY_UPLOAD_ENABLED=${{ inputs.app == 'api' }}
           secrets: |
             sentry_auth_token=${{ secrets.SENTRY_AUTH_TOKEN }}
             nx_cloud_token=${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
@@ -153,16 +231,119 @@ jobs:
           job-name: Deploy ${{ inputs.app }} to ${{ inputs.environment }}
           github-token: ${{ github.token }}
 
+      # DC1: a storage deploy must leave tau-api's Machines untouched. Recorded
+      # before and compared after: ids, instance ids (a new one per config or image
+      # update) and images; not state, which the proxy changes by autostop.
+      - name: Snapshot the API Machines before a storage deploy
+        if: inputs.app == 'storage' && steps.superseded.outputs.superseded != 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          API_APP: ${{ steps.targets.outputs.api_app }}
+        run: |
+          set -euo pipefail
+          flyctl machines list --app "$API_APP" --json \
+            | jq -S '[.[] | {id, instance_id, image: .config.image}] | sort_by(.id)' > "$RUNNER_TEMP/api-machines-before.json"
+          echo "API Machines before: $(jq length "$RUNNER_TEMP/api-machines-before.json")"
+
       - name: Deploy prebuilt image to Fly.io
         if: steps.superseded.outputs.superseded != 'true'
         run: |
           echo "Deploying ${{ steps.targets.outputs.image }} to ${{ inputs.environment }}"
+          # `--ha=false` keeps each private singleton at one Machine (tau-maintenance: charter
+          # D21); `--no-public-ips` keeps a first deploy of a private app (tau-mirror,
+          # tau-maintenance, tau-storage) from allocating any.
           flyctl deploy \
             --app "${{ steps.targets.outputs.fly_app }}" \
             --config "${{ steps.targets.outputs.config_file }}" \
-            --image "${{ steps.targets.outputs.image }}"
+            --image "${{ steps.targets.outputs.image }}" \
+            ${{ (inputs.app == 'mirror' || inputs.app == 'maintenance') && '--ha=false --no-public-ips' || '' }} \
+            ${{ inputs.app == 'storage' && '--no-public-ips' || '' }}
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_API_TOKEN: ${{ secrets[steps.targets.outputs.token_secret] }}
+
+      # A private app's Machine that crash-looped to Fly's restart limit stays
+      # stopped, and `flyctl deploy` updates a stopped Machine without starting it.
+      # Start it so the check below sees the new image run, not the old failure.
+      - name: Start a stopped ${{ inputs.app }} Machine
+        if: (inputs.app == 'mirror' || inputs.app == 'maintenance') && steps.superseded.outputs.superseded != 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets[steps.targets.outputs.token_secret] }}
+          FLY_APP: ${{ steps.targets.outputs.fly_app }}
+        run: |
+          set -euo pipefail
+          for id in $(flyctl machines list --app "$FLY_APP" --json | jq -r '.[] | select(.state == "stopped") | .id'); do
+            echo "Starting stopped Machine ${id}"
+            flyctl machines start "$id" --app "$FLY_APP"
+          done
+
+      # DM1 and DC4: a private app has no service, so it must have no IP address of
+      # any kind, and its Machine must be started and must not have exited non-zero
+      # since the deploy (a missing secret or grant stops it at boot, naming the
+      # variable or the failed check). tau-maintenance must also have exactly one
+      # Machine (charter D21). Names and counts only; nothing here prints a secret.
+      - name: Verify the ${{ inputs.app }} app is private and running
+        if: (inputs.app == 'mirror' || inputs.app == 'maintenance') && steps.superseded.outputs.superseded != 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets[steps.targets.outputs.token_secret] }}
+          FLY_APP: ${{ steps.targets.outputs.fly_app }}
+          APP: ${{ inputs.app }}
+        run: |
+          set -euo pipefail
+          since=$(( $(date +%s%3N) - 120000 ))
+          ips=$(flyctl ips list --app "$FLY_APP" --json | jq 'length')
+          if [ "$ips" != 0 ]; then
+            echo "::error::${FLY_APP} has ${ips} IP address(es); it must have none."
+            exit 1
+          fi
+          for attempt in 1 2 3 4 5 6; do
+            sleep 10
+            machines=$(flyctl machines list --app "$FLY_APP" --json)
+            count=$(jq 'length' <<< "$machines")
+            started=$(jq '[.[] | select(.state == "started")] | length' <<< "$machines")
+            exits=$(jq --argjson since "$since" \
+              '[.[].events[]? | select(.type == "exit" and (.timestamp // 0) > $since and ((.request.exit_event.exit_code // 0) != 0))] | length' \
+              <<< "$machines")
+            echo "attempt ${attempt}: machines=${count} started=${started} failed_exits=${exits}"
+            if [ "$APP" = maintenance ] && [ "$count" != 1 ]; then
+              echo "::error::${FLY_APP} has ${count} Machines; it must have exactly one (charter D21)."
+              exit 1
+            fi
+            if [ "$exits" != 0 ]; then
+              echo "::error::The ${FLY_APP} Machine exited non-zero; its log names the missing variable or the failed check."
+              exit 1
+            fi
+          done
+          [ "$started" -ge 1 ] || { echo "::error::No ${FLY_APP} Machine is started."; exit 1; }
+
+      # DC1 (review FR3): tau-storage is reached only through its Flycast address,
+      # so any public address is a failure; and its deploy must not have replaced,
+      # restarted or updated a tau-api Machine. Names, ids and counts only.
+      - name: Verify the storage app is private and the API untouched
+        if: inputs.app == 'storage' && steps.superseded.outputs.superseded != 'true'
+        env:
+          FLY_STORAGE_TOKEN: ${{ secrets[steps.targets.outputs.token_secret] }}
+          FLY_API_READ_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_APP: ${{ steps.targets.outputs.fly_app }}
+          API_APP: ${{ steps.targets.outputs.api_app }}
+        run: |
+          set -euo pipefail
+          public=$(FLY_API_TOKEN="$FLY_STORAGE_TOKEN" flyctl ips list --app "$FLY_APP" --json \
+            | jq '[.[] | select((.Type // .type // "") | ascii_downcase | test("private") | not)] | length')
+          if [ "$public" != 0 ]; then
+            echo "::error::${FLY_APP} has ${public} public IP address(es); it must have only its Flycast address (DC1, FR3)."
+            exit 1
+          fi
+          started=$(FLY_API_TOKEN="$FLY_STORAGE_TOKEN" flyctl machines list --app "$FLY_APP" --json \
+            | jq '[.[] | select(.state == "started")] | length')
+          echo "storage Machines started: ${started}"
+          [ "$started" -ge 1 ] || { echo "::error::No ${FLY_APP} Machine is started."; exit 1; }
+          FLY_API_TOKEN="$FLY_API_READ_TOKEN" flyctl machines list --app "$API_APP" --json \
+            | jq -S '[.[] | {id, instance_id, image: .config.image}] | sort_by(.id)' > "$RUNNER_TEMP/api-machines-after.json"
+          if ! diff -u "$RUNNER_TEMP/api-machines-before.json" "$RUNNER_TEMP/api-machines-after.json"; then
+            echo "::error::The ${FLY_APP} deploy changed a ${API_APP} Machine (DC1: a storage deploy leaves tau-api untouched)."
+            exit 1
+          fi
+          echo "API Machines unchanged: $(jq length "$RUNNER_TEMP/api-machines-after.json")"
 
       # The plan of the next push to `main` diffs the app against this commit.
       - name: Record this staging deploy
@@ -177,7 +358,7 @@ jobs:
       # `docs/research/staging-cors-coep-safari-rendering-audit.md` Finding
       # 11. Per user instruction this is post-deploy only — no daily cron.
       - name: Verify CORS reachability
-        if: steps.superseded.outputs.superseded != 'true'
+        if: inputs.app == 'api' && steps.superseded.outputs.superseded != 'true'
         run: bash scripts/src/smoke-cors.sh
         env:
           API_URL: ${{ steps.targets.outputs.api_url }}

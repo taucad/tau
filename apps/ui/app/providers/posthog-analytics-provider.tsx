@@ -124,11 +124,6 @@ export function PostHogAnalyticsProvider({
           posthog.capture(event, properties);
         }
       },
-      captureException(error, properties) {
-        if (isCapturing()) {
-          posthog.captureException(error, properties);
-        }
-      },
     }),
     [],
   );

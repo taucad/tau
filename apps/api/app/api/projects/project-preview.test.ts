@@ -7,8 +7,11 @@ import type { ProjectAccessService } from '#api/collaboration/project-access.ser
 import type { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
 import { ProjectPreviewController } from '#api/projects/project-preview.controller.js';
+import { objectStoragePreviewWriter } from '#api/projects/project-preview-store.js';
 import { inspectProjectPreview, ProjectPreviewService } from '#api/projects/project-preview.service.js';
 import { projectPreviewSchema } from '#api/projects/project-preview.dto.js';
+import type { DatabaseService } from '#database/database.service.js';
+import type { OwnerLockTransaction } from '#database/owner-lock.js';
 
 // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Node Buffer fixture encodes WebP integer headers.
 const image = (width = 768, height = 576): Buffer<ArrayBuffer> => {
@@ -29,12 +32,26 @@ describe('authenticated project previews', () => {
   const access = mock<ProjectAccessService>();
   const storage = mock<ObjectStorageService>();
   const budget = mock<PublicationRateLimiterService>();
-  const service = new ProjectPreviewService(storage);
-  const controller = new ProjectPreviewController(access, service, budget);
+  const service = new ProjectPreviewService(storage, objectStoragePreviewWriter(storage));
+  const transaction = mock<OwnerLockTransaction>();
+  const database = mock<DatabaseService['database']>();
+  const controller = new ProjectPreviewController(
+    access,
+    service,
+    budget,
+    Object.assign(mock<DatabaseService>(), { database }),
+  );
   const reply = mock<FastifyReply>();
   const projectId = 'proj_aaaaaaaaaaaaaaaaaaaaa';
   beforeEach(() => {
     vi.resetAllMocks();
+    transaction.execute.mockImplementation(vi.fn().mockResolvedValue([]));
+    transaction.select.mockImplementation(
+      vi.fn().mockReturnValue({
+        from: () => ({ where: () => ({ limit: async () => [] }) }),
+      }),
+    );
+    database.transaction.mockImplementation(async (callback) => callback(transaction));
     access.authorize.mockResolvedValue({ projectId, ownerId: 'owner', role: 'write' });
     budget.consumeDailyBudget.mockResolvedValue({ allowed: true, count: 1 });
     storage.putBlob.mockResolvedValue({ lost: false, alreadyExisted: false, etag: 'etag' });
@@ -51,6 +68,16 @@ describe('authenticated project previews', () => {
       contentType: 'image/webp',
     });
     expect(result.version).toMatch(/^[a-f0-9]{64}$/u);
+  });
+
+  it('should refuse an upload whose admission was revoked while awaiting the rate limiter', async () => {
+    access.authorize
+      .mockResolvedValueOnce({ projectId, ownerId: 'owner', role: 'write' })
+      .mockRejectedValueOnce(new NotFoundException());
+    await expect(controller.put(projectId, 'owner', { image: image().toString('base64') })).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(storage.putBlob).not.toHaveBeenCalled();
   });
 
   it('should atomically preserve an existing image during cached backfill', async () => {

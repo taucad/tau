@@ -41,7 +41,7 @@ describe('isFeatureEnabled', () => {
     expect(isFeatureEnabled('automaticReload', storage)).toBe(false);
   });
 
-  it.each(['webGpu', 'webGpuShaderStacks', 'webGpuInspector', 'partsWarehouse', 'pluginsStore'] as const)(
+  it.each(['webGpuShaderStacks', 'webGpuInspector', 'partsWarehouse', 'pluginsStore'] as const)(
     'should keep the hidden %s flag at its disabled default despite an override',
     (flag) => {
       const storage = createMockStorage();
@@ -50,6 +50,16 @@ describe('isFeatureEnabled', () => {
       expect(isFeatureEnabled(flag, storage)).toBe(false);
     },
   );
+
+  it('should prefer WebGPU by default and retain an explicit WebGL preference', () => {
+    const storage = createMockStorage();
+    expect(isFeatureEnabled('webGpu', storage)).toBe(true);
+    setFlagOverrides({ webGpu: false }, storage);
+    resetFlagCache();
+    expect(isFeatureEnabled('webGpu', storage)).toBe(false);
+    setFlagOverrides({ webGpu: true }, storage);
+    expect(isFeatureEnabled('webGpu', storage)).toBe(true);
+  });
 
   it('should return default value when no overrides exist', () => {
     const storage = createMockStorage();
@@ -183,6 +193,26 @@ describe('getAllFlags', () => {
 });
 
 describe('setFlagOverrides', () => {
+  it('does not persist unrelated defaults when changing a flag', () => {
+    const storage = createMockStorage();
+    setFlagOverrides({ tauDebug: true }, storage);
+    expect(JSON.parse(storage.getItem('tau:flags')!)).not.toHaveProperty('webGpu');
+  });
+
+  it('refreshes the legacy WebGPU default without losing debug or a subsequent explicit opt-out', () => {
+    const storage = createMockStorage({
+      'tau:flags': JSON.stringify({ ...featureFlagDefaults, webGpu: false, tauDebug: true }),
+    });
+    expect(getAllFlags(storage)).toMatchObject({ webGpu: true, tauDebug: true });
+    setFlagOverrides({ tauDebug: false }, storage);
+    expect(isFeatureEnabled('webGpu', storage)).toBe(true);
+    setFlagOverrides({ webGpu: false }, storage);
+    resetFlagCache();
+    expect(isFeatureEnabled('webGpu', storage)).toBe(false);
+    setFlagOverrides({ tauDebug: true }, storage);
+    expect(isFeatureEnabled('webGpu', storage)).toBe(false);
+  });
+
   it('should write overrides to storage', () => {
     const storage = createMockStorage();
     setFlagOverrides({ tauDebug: true }, storage);

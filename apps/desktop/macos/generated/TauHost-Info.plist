@@ -85,19 +85,6 @@
     </dict>
     <dict>
       <key>CFBundleTypeName</key>
-      <string>3D Studio model</string>
-      <key>CFBundleTypeRole</key>
-      <string>Viewer</string>
-      <key>LSHandlerRank</key>
-      <string>Alternate</string>
-      <key>LSItemContentTypes</key>
-      <array>
-        <string>com.taucad.3d-studio</string>
-        <string>com.shapr3d.3d-studio.3ds</string>
-      </array>
-    </dict>
-    <dict>
-      <key>CFBundleTypeName</key>
       <string>3D Manufacturing Format model</string>
       <key>CFBundleTypeRole</key>
       <string>Viewer</string>
@@ -376,46 +363,6 @@
     </dict>
     <dict>
       <key>CFBundleTypeName</key>
-      <string>VRML world</string>
-      <key>CFBundleTypeRole</key>
-      <string>Viewer</string>
-      <key>LSHandlerRank</key>
-      <string>Alternate</string>
-      <key>LSItemContentTypes</key>
-      <array>
-        <string>com.taucad.vrml</string>
-        <string>com.shapr3d.vrml.wrl</string>
-      </array>
-    </dict>
-    <dict>
-      <key>CFBundleTypeName</key>
-      <string>DirectX model</string>
-      <key>CFBundleTypeRole</key>
-      <string>Viewer</string>
-      <key>LSHandlerRank</key>
-      <string>Alternate</string>
-      <key>LSItemContentTypes</key>
-      <array>
-        <string>com.taucad.directx-model</string>
-      </array>
-    </dict>
-    <dict>
-      <key>CFBundleTypeName</key>
-      <string>Extensible 3D model</string>
-      <key>CFBundleTypeRole</key>
-      <string>Viewer</string>
-      <key>LSHandlerRank</key>
-      <string>Alternate</string>
-      <key>LSItemContentTypes</key>
-      <array>
-        <string>com.taucad.x3d</string>
-        <string>com.shapr3d.x3d.x3d</string>
-        <string>com.shapr3d.x3d.x3db</string>
-        <string>com.shapr3d.x3d.x3dv</string>
-      </array>
-    </dict>
-    <dict>
-      <key>CFBundleTypeName</key>
       <string>XGL model</string>
       <key>CFBundleTypeRole</key>
       <string>Viewer</string>
@@ -492,28 +439,6 @@
         <key>public.mime-type</key>
         <array>
           <string>model/vnd.opencascade.brep</string>
-        </array>
-      </dict>
-    </dict>
-    <dict>
-      <key>UTTypeIdentifier</key>
-      <string>com.taucad.3d-studio</string>
-      <key>UTTypeDescription</key>
-      <string>3D Studio model</string>
-      <key>UTTypeConformsTo</key>
-      <array>
-        <string>public.data</string>
-      </array>
-      <key>UTTypeTagSpecification</key>
-      <dict>
-        <key>public.filename-extension</key>
-        <array>
-          <string>3ds</string>
-        </array>
-        <key>public.mime-type</key>
-        <array>
-          <string>model/3ds</string>
-          <string>application/x-3ds</string>
         </array>
       </dict>
     </dict>
@@ -852,74 +777,6 @@
         <key>public.mime-type</key>
         <array>
           <string>model/vnd.valve.smd</string>
-        </array>
-      </dict>
-    </dict>
-    <dict>
-      <key>UTTypeIdentifier</key>
-      <string>com.taucad.vrml</string>
-      <key>UTTypeDescription</key>
-      <string>VRML world</string>
-      <key>UTTypeConformsTo</key>
-      <array>
-        <string>public.data</string>
-      </array>
-      <key>UTTypeTagSpecification</key>
-      <dict>
-        <key>public.filename-extension</key>
-        <array>
-          <string>wrl</string>
-        </array>
-        <key>public.mime-type</key>
-        <array>
-          <string>model/vrml</string>
-          <string>x-world/x-vrml</string>
-        </array>
-      </dict>
-    </dict>
-    <dict>
-      <key>UTTypeIdentifier</key>
-      <string>com.taucad.directx-model</string>
-      <key>UTTypeDescription</key>
-      <string>DirectX model</string>
-      <key>UTTypeConformsTo</key>
-      <array>
-        <string>public.data</string>
-      </array>
-      <key>UTTypeTagSpecification</key>
-      <dict>
-        <key>public.filename-extension</key>
-        <array>
-          <string>x</string>
-        </array>
-        <key>public.mime-type</key>
-        <array>
-          <string>model/vnd.directx</string>
-        </array>
-      </dict>
-    </dict>
-    <dict>
-      <key>UTTypeIdentifier</key>
-      <string>com.taucad.x3d</string>
-      <key>UTTypeDescription</key>
-      <string>Extensible 3D model</string>
-      <key>UTTypeConformsTo</key>
-      <array>
-        <string>public.data</string>
-      </array>
-      <key>UTTypeTagSpecification</key>
-      <dict>
-        <key>public.filename-extension</key>
-        <array>
-          <string>x3d</string>
-          <string>x3db</string>
-          <string>x3dv</string>
-        </array>
-        <key>public.mime-type</key>
-        <array>
-          <string>model/x3d+xml</string>
-          <string>model/x3d+binary</string>
-          <string>model/x3d+vrml</string>
         </array>
       </dict>
     </dict>

@@ -29,6 +29,59 @@ exec "$runtime/${executable}" "$@"
 `;
 };
 
+/**
+ * The Tau-scoped AppArmor profile for the shell sandbox's bubblewrap. Stock Ubuntu 24.04 and Debian 13
+ * keep `kernel.apparmor_restrict_unprivileged_userns=1`, which strips capabilities from an unprofiled
+ * binary's user namespace, so `bwrap --unshare-net` fails to bring loopback up. This grants `userns`
+ * to the one Tau-owned path and nothing else; the sysctl and every other profile stay untouched.
+ */
+export const linuxAptBwrapProfile = (name: string): string => {
+  if (!/^tau(?:-staging)?(?:-appimage)?$/u.test(name)) {
+    throw new TypeError('Invalid APT package name');
+  }
+  return `# Managed by the ${name} package; local changes belong in local/${name}-bwrap.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile ${name}-bwrap /opt/${name}/sandbox/bwrap flags=(unconfined) {
+  userns,
+
+  include if exists <local/${name}-bwrap>
+}
+`;
+};
+
+/** Remove only what the selector's maintainer scripts created; dpkg itself deletes packaged files. */
+export const linuxAptPostremove = (options: { name: string; appImage?: boolean }): string => {
+  const { name } = options;
+  if (!/^tau(?:-staging)?(?:-appimage)?$/u.test(name)) {
+    throw new TypeError('Invalid APT package name');
+  }
+  const appImageCleanup = options.appImage
+    ? `if [ "$1" = remove ] && command -v apparmor_parser >/dev/null 2>&1 && [ -d /sys/kernel/security/apparmor ] && [ -f /etc/apparmor.d/${name} ] && grep -Fqx '${name} (unconfined)' /sys/kernel/security/apparmor/profiles; then
+  apparmor_parser -R /etc/apparmor.d/${name}
+fi
+if [ -L /opt/${name}/current ]; then
+  rm /opt/${name}/current
+  sync -f /opt/${name}
+fi
+`
+    : '';
+  return `#!/bin/sh
+set -eu
+case "$1" in remove|purge) ;; *) exit 0 ;; esac
+${appImageCleanup}# dpkg has already deleted the profile file; unload exactly this profile by name.
+if [ -w /sys/kernel/security/apparmor/.remove ] && grep -Fqx '${name}-bwrap (unconfined)' /sys/kernel/security/apparmor/profiles; then
+  printf '%s' '${name}-bwrap' > /sys/kernel/security/apparmor/.remove
+fi
+rm -f -- /var/cache/apparmor/*/${name}-bwrap
+rm -f -- /opt/${name}/sandbox/bwrap /opt/${name}/sandbox/.bwrap.*
+if [ -d /opt/${name}/sandbox ]; then
+  rmdir --ignore-fail-on-non-empty -- /opt/${name}/sandbox
+fi
+`;
+};
+
 /** Publish the selector only after dpkg has configured its exact immutable dependency. */
 export const linuxAptPostinstall = (options: {
   name: string;
@@ -47,6 +100,27 @@ export const linuxAptPostinstall = (options: {
   }
   return `#!/bin/sh
 set -eu
+# Copy the distribution's bubblewrap to the one path ${name}-bwrap attaches to. A file trigger on
+# /usr/bin/bwrap repeats this whenever the distribution updates bubblewrap.
+publish_bwrap() {
+  [ -x /usr/bin/bwrap ]
+  mkdir -p /opt/${name}/sandbox
+  chmod 0755 /opt/${name}/sandbox
+  staged=$(mktemp /opt/${name}/sandbox/.bwrap.XXXXXX)
+  if ! { cp -- /usr/bin/bwrap "$staged" && chmod 0755 "$staged" && cmp -s -- /usr/bin/bwrap "$staged" && sync -f "$staged"; }; then
+    rm -f -- "$staged"
+    exit 1
+  fi
+  mv -f -- "$staged" /opt/${name}/sandbox/bwrap
+  sync -f /opt/${name}/sandbox
+}
+apparmor_enabled() {
+  command -v apparmor_parser >/dev/null 2>&1 && [ -d /sys/kernel/security/apparmor ] && [ "$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null || true)" = Y ]
+}
+if [ "$1" = triggered ]; then
+  publish_bwrap
+  exit 0
+fi
 [ "$1" = configure ] || exit 0
 [ "$(dpkg-query -W -f='\${db:Status-Status}' ${name}-runtime-${version})" = installed ]
 [ "$(dpkg-query -W -f='\${Version}' ${name}-runtime-${version})" = '${version}' ]
@@ -55,6 +129,11 @@ set -eu
 if command -v apparmor_parser >/dev/null 2>&1 && [ -d /sys/kernel/security/apparmor ]; then
   apparmor_parser -r /etc/apparmor.d/${name}
 fi
+# Load the attachment before the binary appears at its path, so it never runs there unprofiled.
+if apparmor_enabled; then
+  apparmor_parser -r -W /etc/apparmor.d/${name}-bwrap
+fi
+publish_bwrap
 temporary=$(mktemp -d /opt/${name}/.switch.XXXXXX)
 trap 'rm -f "$temporary/current"; rmdir "$temporary"' EXIT HUP INT TERM
 ln -s releases/${version} "$temporary/current"
@@ -142,33 +221,22 @@ export const buildLinuxAptPackages = async (options: LinuxAptPackageOptions): Pr
     control(
       runtimeName,
       'Tau immutable desktop runtime',
-      'libc6 (>= 2.38), libgtk-3-0 | libgtk-3-0t64, libnss3, libasound2t64 | libasound2, libgbm1, libdrm2, libx11-6, libxcomposite1, libxdamage1, libxrandr2, libxkbcommon0, libsecret-1-0, libatk1.0-0 | libatk1.0-0t64, libatk-bridge2.0-0 | libatk-bridge2.0-0t64, libcups2 | libcups2t64, bubblewrap, xdg-utils' +
+      'libc6 (>= 2.38), libgtk-3-0 | libgtk-3-0t64, libnss3, libasound2t64 | libasound2, libgbm1, libdrm2, libx11-6, libxcomposite1, libxdamage1, libxrandr2, libxkbcommon0, libsecret-1-0, libatk1.0-0 | libatk1.0-0t64, libatk-bridge2.0-0 | libatk-bridge2.0-0t64, libcups2 | libcups2t64, bubblewrap, ripgrep, socat, xdg-utils' +
         (appImage ? ', libfuse2t64 | libfuse2, fuse3' : ''),
     ),
   );
   await writeSelector(
     'DEBIAN/control',
-    control(name, 'Tau desktop launcher and runtime selector', `${runtimeName} (= ${version}), coreutils, dpkg`),
+    control(
+      name,
+      'Tau desktop launcher and runtime selector',
+      `${runtimeName} (= ${version}), coreutils, dpkg, bubblewrap`,
+    ),
   );
   await writeSelector('DEBIAN/postinst', linuxAptPostinstall({ name, version, sourceCommit, appImage }), 0o755);
+  await writeSelector('DEBIAN/postrm', linuxAptPostremove({ name, appImage }), 0o755);
+  await writeSelector('DEBIAN/triggers', 'interest-noawait /usr/bin/bwrap\n');
   await writeSelector(`usr/bin/${name}`, linuxAptLauncher(channel, appImage), 0o755);
-  if (appImage) {
-    await writeSelector(
-      'DEBIAN/postrm',
-      `#!/bin/sh
-set -eu
-case "$1" in remove|purge) ;; *) exit 0 ;; esac
-if [ "$1" = remove ] && command -v apparmor_parser >/dev/null 2>&1 && [ -d /sys/kernel/security/apparmor ] && [ -f /etc/apparmor.d/${name} ] && grep -Fqx '${name} (unconfined)' /sys/kernel/security/apparmor/profiles; then
-  apparmor_parser -R /etc/apparmor.d/${name}
-fi
-if [ -L /opt/${name}/current ]; then
-  rm /opt/${name}/current
-  sync -f /opt/${name}
-fi
-`,
-      0o755,
-    );
-  }
 
   const retentionPath = `etc/apt/apt.conf.d/99${name}-runtime-retention`;
   await writeSelector(retentionPath, `APT::NeverAutoRemove { "^${name}-runtime-[0-9]+[.][0-9]+[.][0-9]+$"; };\n`);
@@ -177,6 +245,8 @@ fi
     profilePath,
     `abi <abi/4.0>,\ninclude <tunables/global>\n\nprofile ${name} /opt/${name}/releases/*/${executableName} flags=(unconfined) {\n  userns,\n}\n`,
   );
+  // Not a conffile: dpkg deletes it on remove and restores it on reinstall, so no stale grant survives.
+  await writeSelector(`etc/apparmor.d/${name}-bwrap`, linuxAptBwrapProfile(name));
   await writeSelector('DEBIAN/conffiles', `/${retentionPath}\n/${profilePath}\n`);
   await writeSelector(
     `usr/share/applications/${name}.desktop`,

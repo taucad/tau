@@ -38,6 +38,8 @@ Filter examples:
 - Select a named requirement: { testNamePattern: 'intended envelope' }
 - Exclude an explicitly out-of-scope fixture: { exclude: ['**/fixtures/**'] }
 
+A project's \`geospec.config.*\` sets defaults: its include, exclude, testNamePattern, testTimeout and bail apply unless the input gives that field, and \`config\` in the result names the file or why it was not applied.
+
 Returns compact rows tagged by targetFile, plus \`sourceRevisions\` for loaded models. Check \`runStatus\`, \`accounting\`, discovery completion and \`lineageStatus\`; empty failures alone do not qualify a run. A skipped requirement is not a pass. ${testModelStatusRule} A run that outlives its host budget returns \`timeout\` (\`OPERATION_TIMEOUT\`) with only the requirements it completed. Filters qualify only the selected scope, never excluded requirements. Read the retained \`fullResult\` when compact details are omitted. ${sourceRevisionRule}
 
 When NOT to use:
@@ -197,6 +199,13 @@ For targetFile, first run test_model, fit get_machine's build volume and read ge
   [toolName.getPrintProfiles]: `List the slicing presets and settings request_job can use for a bound machine with an fff process (a 3D printer); other machines take a finished program and have none. Read-only.
 
 For a Bambu printer with Bambu Studio available it returns engine "bambu-studio": defaults (the presets chosen from the printer's model, nozzle, loaded filament and reported plate), the compatible printers, processes and filaments (source "user" marks the person's own), plates, and every setting's current value by group with enum choices. Pass profiles to read another selection, and keys for full descriptors. Otherwise it returns engine "reference" and why. The project's .tau/machines/settings/<typeId>.json keeps named profiles shared by machines of that type; savedProfiles lists their ids and the active one. Pass profileId to read another without changing the selection. machinePreferences reports the profile and source versions used; request_job arguments override its sparse values.`,
+  [toolName.shell]: `Run one command in a contained shell on this computer and return its exit code and bounded output. The host's language and version follow below.
+
+The command runs in a fresh process in the project folder (or cwd) with stdin closed, a private HOME and temporary folder, and no network. It can read and write the project's files, read Tau's records under .tau and exports, and never sees .git, other projects, credentials or Tau's own data. Nothing persists between calls but the files it writes.
+
+Use it for what the file tools cannot do: run a project's scripts, compilers and tests, or batch-rename and search with standard tools. Prefer read_file, edit_file and grep for single files, and evaluate_model, test_model and export_model for geometry: a command's output is never a geometry verdict.
+
+For more, set access with a one-sentence reason: exact absolute folders to read or write, or exact host names to reach. The person may be asked to allow it once; a denial means do not retry it. A nonzero exitCode is a completed command and returns as an error; timed-out, cancelled and not-started say why. Output beyond 64 KiB keeps each stream's tail, and log names the full output to read with read_file. An interrupted command may have changed files: check before running it again.`,
   [toolName.revisions]: `Read this project's saved revisions. Read-only.
 
 Actions:

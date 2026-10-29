@@ -2,13 +2,17 @@ import { and, asc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import type { Database } from '#database/owner-lock.js';
 import { withOwnerLock } from '#database/owner-lock.js';
-import { project, projectGit, projectGitLfsObject } from '#database/schema.js';
+import { assertActiveProjectLocked, assertProjectActive } from '#database/project-lifecycle.js';
+import { project, projectGit, projectGitLfsObject, projectDeletion } from '#database/schema.js';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
-import { hydrateLease } from '#api/git/store/lease.js';
+import { statfs } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { hydrateAdmittedLease } from '#api/git/admission/admitted-lease.js';
+import { LeaseAdmission } from '#api/git/admission/lease-admission.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
 import { lfsObjectLocations } from '#api/git/lfs-keys.js';
-import { referencedLfsOids } from '#api/git/lfs-reachability.js';
+import { referencedLfsOids } from '#api/git/lfs-references.js';
 
 /**
  * How long an object stays after the last tree that reached it (charter D16,
@@ -32,6 +36,29 @@ export type LfsRetirementDependencies = {
   readonly storage: ObjectStorageService;
   /** Where leases are built; defaults to the OS temp directory. */
   readonly leaseParentDirectory?: string;
+  /**
+   * Admits each lease by its real bytes against the lease disk (DC3). Defaults
+   * to one over `statfs` of the lease root; a refusal skips the project for
+   * this pass, and the next pass retries it.
+   */
+  readonly admission?: LeaseAdmission;
+};
+
+/** Leases built since boot share one admission, so two passes never overcommit one disk. */
+let defaultAdmission: LeaseAdmission | undefined;
+
+const admissionFor = (dependencies: LfsRetirementDependencies): LeaseAdmission => {
+  if (dependencies.admission !== undefined) {
+    return dependencies.admission;
+  }
+  const root = dependencies.leaseParentDirectory ?? tmpdir();
+  defaultAdmission ??= new LeaseAdmission({
+    readFreeBytes: async () => {
+      const { bavail, bsize } = await statfs(root);
+      return bavail * bsize;
+    },
+  });
+  return defaultAdmission;
 };
 
 type Candidate = { readonly oid: string; readonly size: number };
@@ -88,6 +115,23 @@ export const retireLfsObjects = async function* (
 ): AsyncGenerator<{ retired: readonly string[] }> {
   const window = args.window ?? lfsRetirementWindowMilliseconds;
 
+  await assertProjectActive(dependencies.database, args.projectId);
+  const [row] = await dependencies.database
+    .select({ storageAccountId: project.storageAccountId })
+    .from(project)
+    .where(and(eq(project.id, args.projectId), eq(project.ownerId, args.ownerId)))
+    .limit(1);
+  if (
+    row === undefined ||
+    (row.storageAccountId !== null && row.storageAccountId !== dependencies.storage.account.id)
+  ) {
+    throw new Error('LFS retirement project storage account unavailable');
+  }
+  const locator = repositoryLocator({
+    ownerId: args.ownerId,
+    projectId: args.projectId,
+    ...(row.storageAccountId === null ? {} : { accountId: row.storageAccountId }),
+  });
   let cursor: string | undefined;
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- stable OID pages bound parameters and memory
@@ -108,9 +152,11 @@ export const retireLfsObjects = async function* (
     }
     cursor = candidates.at(-1)!.oid;
     // oxlint-disable-next-line no-await-in-loop -- refresh and dispose one bounded batch before the next
-    const lease = await hydrateLease({
+    const admitted = await hydrateAdmittedLease({
       store: dependencies.store,
-      locator: repositoryLocator({ ownerId: args.ownerId, projectId: args.projectId }),
+      locator,
+      ownerId: args.ownerId,
+      admission: admissionFor(dependencies),
       ...(dependencies.leaseParentDirectory === undefined
         ? {}
         : { parentDirectory: dependencies.leaseParentDirectory }),
@@ -118,10 +164,10 @@ export const retireLfsObjects = async function* (
     let referenced: ReadonlySet<string>;
     try {
       // oxlint-disable-next-line no-await-in-loop -- refresh and dispose one bounded batch before the next
-      referenced = await referencedLfsOids(lease.directory);
+      referenced = await referencedLfsOids(admitted.lease.directory);
     } finally {
       // oxlint-disable-next-line no-await-in-loop -- refresh and dispose one bounded batch before the next
-      await lease.dispose();
+      await admitted.release();
     }
 
     const unreferenced = candidates.filter((candidate) => !referenced.has(candidate.oid));
@@ -129,6 +175,7 @@ export const retireLfsObjects = async function* (
 
     // oxlint-disable-next-line no-await-in-loop -- release the owner lock between bounded deletion batches
     yield await withOwnerLock(dependencies.database, args.ownerId, async (transaction) => {
+      await assertActiveProjectLocked(transaction, args.projectId);
       if (returned.length > 0) {
         await transaction
           .update(projectGitLfsObject)
@@ -232,9 +279,11 @@ export const retireDueLfsObjects = async function* (
       .selectDistinct({ projectId: projectGitLfsObject.projectId, ownerId: project.ownerId })
       .from(projectGitLfsObject)
       .innerJoin(project, eq(project.id, projectGitLfsObject.projectId))
+      .leftJoin(projectDeletion, eq(projectDeletion.projectId, project.id))
       .where(
         and(
           dueCondition(args.now, window),
+          isNull(projectDeletion.projectId),
           cursor === undefined ? undefined : gt(projectGitLfsObject.projectId, cursor),
         ),
       )

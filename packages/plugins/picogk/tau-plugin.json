@@ -32,18 +32,18 @@
           },
           {
             "name": "worker",
-            "integrity": "sha256-ECNIrPA0jR0hSYaI5iDJy62xHLG4BN2MX6wlr8GnON8=",
-            "byteLength": 24433608,
+            "integrity": "sha256-Yp7/JCY6cuDFbrT0aaUTh0+aIo3TfnEWRX56HiDwRWU=",
+            "byteLength": 24481160,
             "format": "tar.gz",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://cdn.tau.new/blobs/sha256/102348acf0348d1d21498688e620c9cbadb11cb1b804dd8c5fac25afc1a738df",
-                "https://github.com/taucad/tau/releases/download/picogk-layer-102348acf0348d1d/tau-picogk-layer-darwin-arm64.tar.gz"
+                "https://cdn.tau.new/blobs/sha256/629eff24263a72e0c56eb4f469a513874f9a228dd37e7116457e7a1e20f04565",
+                "https://github.com/taucad/tau/releases/download/picogk-layer-629eff24263a72e0/tau-picogk-layer-darwin-arm64.tar.gz"
               ]
             },
             "destination": "tau-worker",
-            "unpackedByteLength": 66912710
+            "unpackedByteLength": 67017750
           }
         ]
       },
@@ -71,18 +71,18 @@
           },
           {
             "name": "worker",
-            "integrity": "sha256-j/MhiVWJh5BmB1imOISjjUsFbvhQRmfqSXSHhMIJTd0=",
-            "byteLength": 22692075,
+            "integrity": "sha256-Tgv7Ck283opOEjj6D1M68Ss09yDb/ugB60EY6svzbH0=",
+            "byteLength": 22732015,
             "format": "tar.gz",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://cdn.tau.new/blobs/sha256/8ff3218955898790660758a63884a38d4b056ef8504667ea49748784c2094ddd",
-                "https://github.com/taucad/tau/releases/download/picogk-layer-8ff3218955898790/tau-picogk-layer-linux-x64.tar.gz"
+                "https://cdn.tau.new/blobs/sha256/4e0bfb0a4dbcde8a4e1238fa0f533af12b34f720dbfee801eb4118eacbf36c7d",
+                "https://github.com/taucad/tau/releases/download/picogk-layer-4e0bfb0a4dbcde8a/tau-picogk-layer-linux-x64.tar.gz"
               ]
             },
             "destination": "tau-worker",
-            "unpackedByteLength": 56795546
+            "unpackedByteLength": 56880640
           }
         ]
       }

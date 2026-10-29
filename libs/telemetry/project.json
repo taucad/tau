@@ -14,8 +14,24 @@
         "{workspaceRoot}/packages/agent-host/src/harness/tools.ts",
         "{workspaceRoot}/libs/types/src/constants/kernel.constants.ts",
         "{workspaceRoot}/packages/*/agent/skills.json",
-        "{workspaceRoot}/packages/plugins/*/agent/skills.json"
+        "{workspaceRoot}/packages/plugins/*/agent/skills.json",
+        "{workspaceRoot}/packages/plugins/*/src/**/*",
+        "{workspaceRoot}/packages/runtime/src/machines/**/*",
+        "{workspaceRoot}/packages/runtime/src/types/kernel-issue-codes.ts",
+        "{workspaceRoot}/packages/runtime/src/preparation/**/*",
+        "{workspaceRoot}/packages/runtime/src/host/host-admission.ts",
+        "{workspaceRoot}/packages/jobs/src/**/*",
+        "{workspaceRoot}/packages/jobs-solvers/src/**/*"
       ]
+    },
+    "generate-runtime-vocabulary": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "libs/telemetry",
+        "commands": ["tsx scripts/generate-runtime-vocabulary.mts", "oxfmt src/runtime-vocabulary.ts"],
+        "parallel": false
+      },
+      "cache": false
     }
   }
 }

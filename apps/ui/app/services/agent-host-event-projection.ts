@@ -9,11 +9,12 @@ import {
   providerPermissionResolutionSchema,
 } from '@taucad/agent-host/wire';
 import type { ProviderPermission } from '@taucad/agent-host/wire';
-import type { AcpSessionData, BillingInvocationStatus, MyUIMessage } from '@taucad/chat';
+import type { AcpSessionData, BillingInvocationStatus, MyUIMessage, ShellApprovalPayload } from '@taucad/chat';
 import {
   acpActivityDataSchema,
   acpSessionDataSchema,
   billingInvocationStatusSchema,
+  shellApprovalPayloadSchema,
   usageDataSchema,
 } from '@taucad/chat';
 import { errorCategoryTitles, httpStatusToCategory } from '@taucad/chat/utils';
@@ -758,7 +759,8 @@ export const projectAgentHostUserTurn = (event: PresentationEvent): MyUIMessage 
   }
   if (event.type === 'message.appended' && event.message.role === 'user') {
     const internal = event.message.metadata?.tauInternal;
-    if (internal !== undefined && internal['kind'] !== 'external-agent') {
+    /* A copy of an abandoned turn (XD3) is another run's words said as data, an external agent's keeping its marker. */
+    if (internal !== undefined && (internal['kind'] !== 'external-agent' || internal['abandoned'] === true)) {
       return undefined;
     }
     if (event.message.id.startsWith('tau:')) {
@@ -1035,6 +1037,11 @@ export type AgentHostApproval = {
    * can answer the same interrupt the banner shows; other tools may write nothing.
    */
   readonly context?: AgentHostApprovalContext | undefined;
+  /**
+   * The exact `shell` request the person approves, when a Tau `shell` call asked: the presenter renders its authority
+   * from these fields, never from the prompt text, and labels `access.reason` as the agent's words (A12).
+   */
+  readonly shell?: ShellApprovalPayload | undefined;
   /** Structured request facts retained for compact presentation and Debug inspection. */
   readonly request?: { readonly title?: string | undefined; readonly input?: unknown } | undefined;
 };
@@ -1249,6 +1256,7 @@ const agentHostApprovalSchema = z.object({
   agentId: z.string().optional(),
   login: agentHostLoginSchema.optional(),
   context: agentHostApprovalContextSchema.optional(),
+  shell: shellApprovalPayloadSchema.optional(),
   request: z.object({ title: z.string().optional(), input: z.json().optional() }).optional(),
 });
 
@@ -1284,6 +1292,7 @@ const approvalChunks = (
   const providerPermission = providerPermissionSchema.safeParse(request?.context?.providerPermission).data;
   const login = loginOf(event.payload);
   const context = approvalContextOf(request?.context);
+  const shell = shellApprovalPayloadSchema.safeParse(request?.context).data;
   const content = request?.context?.toolCall?.['content'];
   const description = Array.isArray(content)
     ? content
@@ -1307,6 +1316,7 @@ const approvalChunks = (
     ...(providerPermission === undefined ? {} : { providerPermission }),
     ...(login === undefined ? {} : { login }),
     ...(context === undefined ? {} : { context }),
+    ...(shell === undefined ? {} : { shell }),
     ...(request?.context?.toolCall === undefined && request?.context?.input === undefined
       ? {}
       : {
@@ -1350,14 +1360,17 @@ export const projectAgentHostEvent = (
     case 'model.invocation-prepared':
     case 'model.invocation-bound':
     case 'model.invocation-settled':
+    case 'approval.spent':
     case 'turn.changed':
     case 'turn.finalized':
     case 'turn.conflicted':
     case 'turn.failed':
-    case 'turn.history-projection-committed': {
+    case 'turn.history-projection-committed':
+    case 'run.heartbeat': {
       /* The three turn settlements are facts about the project's revision
        * graph, not about the transcript: they are read by
-       * `projectTurnFinalized` and render no chunk of their own. */
+       * `projectTurnFinalized` and render no chunk of their own. A heartbeat
+       * only says the run is alive, for the cross-device fence (XD3). */
       return [];
     }
     case 'interrupt.recorded': {

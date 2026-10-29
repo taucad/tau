@@ -1,4 +1,5 @@
 // oxlint-disable max-lines -- TODO: refactor this component to be more manageable
+import { subscribeWorkbenchFileReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { useCallback, useId, useState, useRef, useMemo, useEffect, memo } from 'react';
@@ -41,7 +42,7 @@ import type { KernelConfiguration } from '@taucad/types/constants';
 import type { FileItem } from '#types/editor.types.js';
 import type { FileEntry, FileProvenance } from '@taucad/types';
 import { cn } from '@taucad/ui/utils/cn';
-import { buttonVariants } from '@taucad/ui/components/button';
+import { Button, buttonVariants } from '@taucad/ui/components/button';
 import { Badge } from '@taucad/ui/components/badge';
 import { SearchInput } from '@taucad/ui/components/search-input';
 import { toast } from '#components/ui/sonner.js';
@@ -1168,58 +1169,59 @@ export const ChatEditorFileTree = memo(function ({
   // Reveal a file in the tree when requested from the tab context menu.
   // Expands all parent directories, focuses the item, and scrolls it into view.
   useEffect(() => {
-    const subscription = editorRef.on('fileRevealRequested', (event) => {
-      if (shouldHandleReveal && !shouldHandleReveal()) {
-        return;
-      }
-      const targetPath = event.path;
+    const unsubscribe = subscribeWorkbenchFileReveal(
+      editorRef,
+      (event) => {
+        const targetPath = event.path;
 
-      // Ensure the file-explorer panel is open before revealing the item
-      onRequestOpen?.();
+        // Ensure the file-explorer panel is open before revealing the item
+        onRequestOpen?.();
 
-      // Expand all parent directories
-      const parts = targetPath.split('/');
-      parts.pop(); // Remove the filename
-      const parentPaths: string[] = [];
-      let current = '';
-      for (const part of parts) {
-        if (!part) {
-          continue;
-        }
-
-        current = current ? `${current}/${part}` : part;
-        parentPaths.push(current);
-      }
-
-      const pathsToExpand = event.expandTarget && targetPath ? [...parentPaths, targetPath] : parentPaths;
-
-      if (pathsToExpand.length > 0) {
-        setExpandedItems((previous) => {
-          const newExpanded = new Set(previous);
-          for (const path of pathsToExpand) {
-            newExpanded.add(path);
+        // Expand all parent directories
+        const parts = targetPath.split('/');
+        parts.pop(); // Remove the filename
+        const parentPaths: string[] = [];
+        let current = '';
+        for (const part of parts) {
+          if (!part) {
+            continue;
           }
 
-          return [...newExpanded];
-        });
-      }
-
-      // Focus the item and scroll into view after the tree re-renders
-      setFocusedItem(targetPath);
-      setSelectedItems([targetPath]);
-
-      requestAnimationFrame(() => {
-        try {
-          const item = tree.getItemInstance(targetPath);
-          void item.scrollTo({ block: 'center' });
-        } catch {
-          // Item may not exist in the tree yet
+          current = current ? `${current}/${part}` : part;
+          parentPaths.push(current);
         }
-      });
-    });
+
+        const pathsToExpand = event.expandTarget && targetPath ? [...parentPaths, targetPath] : parentPaths;
+
+        if (pathsToExpand.length > 0) {
+          setExpandedItems((previous) => {
+            const newExpanded = new Set(previous);
+            for (const path of pathsToExpand) {
+              newExpanded.add(path);
+            }
+
+            return [...newExpanded];
+          });
+        }
+
+        // Focus the item and scroll into view after the tree re-renders
+        setFocusedItem(targetPath);
+        setSelectedItems([targetPath]);
+
+        requestAnimationFrame(() => {
+          try {
+            const item = tree.getItemInstance(targetPath);
+            void item.scrollTo({ block: 'center' });
+          } catch {
+            // Item may not exist in the tree yet
+          }
+        });
+      },
+      shouldHandleReveal,
+    );
 
     return () => {
-      subscription.unsubscribe();
+      unsubscribe();
     };
   }, [editorRef, onRequestOpen, shouldHandleReveal, tree, setExpandedItems, setFocusedItem, setSelectedItems]);
 
@@ -1941,7 +1943,7 @@ export const ChatEditorFileTree = memo(function ({
             <SearchInput
               {...tree.getSearchInputElementProps()}
               placeholder='Filter files…'
-              className='h-7 min-w-0 flex-1 bg-background'
+              className='h-7 min-w-0 flex-1 bg-background pointer-coarse:h-10'
               onBlur={undefined}
               onClear={() => {
                 tree.setSearch('');
@@ -1949,17 +1951,18 @@ export const ChatEditorFileTree = memo(function ({
             />
           </div>
 
+          <AssistiveTreeDescription tree={tree} getLabel={getFileTreeAssistiveDndLabel} />
           {tree.getItems().length > 0 || pendingFolder !== undefined || pendingFile !== undefined ? (
             <div
               data-tree-container
               {...tree.getContainerProps()}
+              aria-label='Project files'
               ref={setTreeContainerElement}
               className={cn(
                 'flex min-h-full flex-1 flex-col gap-0 outline-none',
                 borderless && 'gap-0.5 px-1.5 pb-1.5',
               )}
             >
-              <AssistiveTreeDescription tree={tree} getLabel={getFileTreeAssistiveDndLabel} />
               {/* Pending folder at root level */}
               {pendingFolder?.parentPath === '' ? (
                 <PendingFolderInput
@@ -2117,6 +2120,8 @@ export const ChatEditorFileTree = memo(function ({
                     {/* Root item as spacer to capture empty space drops */}
                     <div
                       {...rootItem.getProps()}
+                      aria-hidden='true'
+                      tabIndex={-1}
                       className={cn('min-h-4 flex-1', highlightAllItems && 'bg-primary/20')}
                     />
                   </>
@@ -2125,7 +2130,15 @@ export const ChatEditorFileTree = memo(function ({
             </div>
           ) : (
             <div className='min-h-0 flex-1 p-2'>
-              <FileTreeEmptyState />
+              <FileTreeEmptyState
+                onUpload={
+                  readOnly
+                    ? undefined
+                    : () => {
+                        handleUploadClick('');
+                      }
+                }
+              />
             </div>
           )}
         </FloatingPanelContentBody>
@@ -2145,12 +2158,22 @@ export const ChatEditorFileTree = memo(function ({
  * here. The revision status is read here rather than by the tree, whose rows
  * would otherwise all re-render on every revision the project mints.
  */
-function FileTreeEmptyState(): React.JSX.Element {
+/** An empty project offers one clear action, a touch path that does not depend on dropping files (PN-FIL-3, I2). */
+function FileTreeEmptyState({ onUpload }: { readonly onUpload: (() => void) | undefined }): React.JSX.Element {
   const availability = useProjectAvailability();
   if (availability !== 'ready') {
     return <ProjectSyncPlaceholder state={availability} />;
   }
-  return <PanelEmptyState icon={FolderOpen} title='No files available' className='rounded-xl border bg-card' />;
+  return (
+    <PanelEmptyState icon={FolderOpen} title='No files available' className='rounded-xl border bg-card'>
+      {onUpload ? (
+        <Button variant='outline' className='pointer-coarse:h-10' onClick={onUpload}>
+          <Upload aria-hidden />
+          Upload files
+        </Button>
+      ) : null}
+    </PanelEmptyState>
+  );
 }
 
 type TreeItemProps = {

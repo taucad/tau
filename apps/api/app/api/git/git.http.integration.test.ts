@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- decorators are not constructors; git-lfs wire fields are snake_case */
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { createServer, request as httpRequest } from 'node:http';
+import { request as httpRequest } from 'node:http';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -21,13 +21,13 @@ import { APP_FILTER, APP_PIPE, HttpAdapterHost } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
-import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { FastifyInstance } from 'fastify';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { AuthGuard } from '#auth/auth.guard.js';
 import { getEnvironment } from '#config/environment.config.js';
 import { corsBaseConfiguration } from '#constants/cors.constant.js';
 import { DatabaseService } from '#database/database.service.js';
+import { project, projectDeletion } from '#database/schema.js';
 import { RedisService } from '#redis/redis.service.js';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
@@ -37,19 +37,26 @@ import { ProjectAccessService } from '#api/collaboration/project-access.service.
 import { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import type { ProjectRole } from '#api/collaboration/project-access.service.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
-import { repositoryStoreKey } from '#api/git/git.constants.js';
+import { pktLine, repositoryStoreKey } from '#api/git/git.constants.js';
 import { GitBasicAuthMiddleware, registerGitContentTypeParsers } from '#api/git/git-transport.js';
 import { GitController } from '#api/git/git.controller.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
 import { tenantLfsObjectKey } from '#api/git/lfs-keys.js';
 import { GitProxyController } from '#api/git/git-proxy.controller.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
+import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';
+import type { StorageGitService } from '#api/git/worker/storage-git.service.js';
+import { startStorageHop } from '#testing/storage-hop.js';
+import type { StorageHop } from '#testing/storage-hop.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { livePackBound } from '#api/git/store/limits.js';
+import { hydrateLease } from '#api/git/store/lease.js';
+import { repositoryLocator } from '#api/git/store/locator.js';
 import type { RepositoryStore, StoredObject } from '#api/git/store/port.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { createGitTestListener } from '#api/git/git-test-listener.js';
 
 /**
  * The Tau Hosted Remote end to end over the repository store (W4).
@@ -75,19 +82,6 @@ const callers = {
 const roleRank: Record<ProjectRole, number> = { read: 0, write: 1, owner: 2 };
 
 let configuredApiUrl = '';
-
-/** A port nothing is listening on yet, so the API can be configured for it. */
-const reservePort = async (): Promise<number> =>
-  new Promise((resolve) => {
-    const probe = createServer();
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address();
-      const port = typeof address === 'string' || address === null ? 0 : address.port;
-      probe.close(() => {
-        resolve(port);
-      });
-    });
-  });
 
 /** Mutable fixture state the stubs read. */
 const state = {
@@ -203,7 +197,11 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
   let remoteUrl: string;
   let workspace: string;
   let repositories: GitRepositoryService;
+  /** DC1: tau-storage, behind the real hop; the git knobs live on it now. */
+  let hop: StorageHop;
+  let worker: StorageGitService;
   let storage: ObjectStorageService;
+  const cleanup: Array<() => Promise<void>> = [];
 
   const remoteFor = (token: string): string =>
     `http://tau:${token}@${new URL(configuredApiUrl).host}/v1/git/${projectId}.git`;
@@ -221,8 +219,10 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
 
   beforeAll(async () => {
     workspace = await mkdtemp(path.join(tmpdir(), 'tau-git-work-'));
-    const port = await reservePort();
-    configuredApiUrl = `http://127.0.0.1:${String(port)}`;
+    cleanup.push(async () => rm(workspace, { recursive: true, force: true }));
+    const listener = await createGitTestListener();
+    cleanup.push(listener.close);
+    configuredApiUrl = listener.origin;
     process.env.TAU_API_URL = configuredApiUrl;
 
     /* One statement shape per reader, because the derivation path and the plan
@@ -239,36 +239,43 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
        both awaitable and chainable; an `async` member would return a promise of
        the builder rather than being one. */
     const selectBuilder = (): unknown => ({
-      from: () => ({
+      from: (table: unknown) => ({
         leftJoin: () => ({ where: () => Object.assign(Promise.resolve(rows()), { limit: async () => rows() }) }),
-        where: () => Object.assign(Promise.resolve([] as unknown[]), { limit: async () => rows() }),
+        where: () =>
+          Object.assign(Promise.resolve([] as unknown[]), {
+            limit: async () =>
+              table === projectDeletion ? [] : table === project ? [{ storageAccountId: null }] : rows(),
+          }),
       }),
     });
     /* oxlint-enable typescript/promise-function-async -- end of the builder stub */
+    const insert = () => ({
+      values: (values: Record<string, unknown>) => ({
+        onConflictDoUpdate: async (change: { set: Record<string, unknown> }): Promise<void> => {
+          if (failGenerationWrites) {
+            throw new Error('database unavailable');
+          }
+          const merged = { ...values, ...change.set };
+          if (typeof merged['storageBytes'] === 'number') {
+            state.storageBytes = merged['storageBytes'];
+          }
+          if (typeof merged['generation'] === 'number') {
+            state.generation = merged['generation'];
+          }
+          if (typeof merged['derivedGeneration'] === 'number') {
+            state.derivedGeneration = merged['derivedGeneration'];
+          }
+        },
+      }),
+    });
     const databaseStub = {
       database: {
         select: selectBuilder,
-        insert: () => ({
-          values: (values: Record<string, unknown>) => ({
-            onConflictDoUpdate: async (change: { set: Record<string, unknown> }): Promise<void> => {
-              if (failGenerationWrites) {
-                throw new Error('database unavailable');
-              }
-              const merged = { ...values, ...change.set };
-              if (typeof merged['storageBytes'] === 'number') {
-                state.storageBytes = merged['storageBytes'];
-              }
-              if (typeof merged['generation'] === 'number') {
-                state.generation = merged['generation'];
-              }
-              if (typeof merged['derivedGeneration'] === 'number') {
-                state.derivedGeneration = merged['derivedGeneration'];
-              }
-            },
-          }),
-        }),
+        insert,
         transaction: async (run: (transaction: unknown) => Promise<unknown>): Promise<unknown> =>
           run({
+            select: selectBuilder,
+            insert,
             execute: async (): Promise<void> => undefined,
             update: () => ({
               set: () => ({
@@ -313,6 +320,16 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
           provide: repositoryStoreKey,
           useFactory: (inner: S3RepositoryStore) => wrapStore(inner),
           inject: [S3RepositoryStore],
+        },
+        {
+          provide: gitExecutorKey,
+          useFactory: async (store: RepositoryStore) => {
+            hop = await startStorageHop({ store, post: async (receipt) => repositories.applyReceipt(receipt) });
+            cleanup.push(async () => hop.close());
+            worker = hop.worker;
+            return hop.forwarder;
+          },
+          inject: [repositoryStoreKey],
         },
         { provide: DatabaseService, useValue: databaseStub },
         {
@@ -367,15 +384,24 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
       .useClass(GitTestAuthGuard)
       .compile();
 
-    app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter({ bodyLimit: 256 * 1024 * 1024 }));
+    let closeApplication = async (): Promise<void> => moduleRef.close();
+    cleanup.push(async () => closeApplication());
+    app = moduleRef.createNestApplication<NestFastifyApplication>(listener.adapter);
+    closeApplication = async () => app.close();
     app.enableCors({ ...corsBaseConfiguration, origin: true });
     app.enableVersioning({ type: VersioningType.URI });
     await app.init();
     await app.getHttpAdapter().getInstance().ready();
-    await app.listen(new URL(configuredApiUrl).port, '127.0.0.1');
 
     storage = app.get(ObjectStorageService);
     assertDestructiveTestBucketAllowed(storage.bucketFor('private'), 'the Tau Hosted Remote HTTP suite');
+    cleanup.push(async () => {
+      await storage.deleteEntirePrefixForPurgeJob({
+        namespace: 'tenants',
+        keyPrefix: `${ownerId}/`,
+        tier: 'private',
+      });
+    });
 
     repositories = app.get(GitRepositoryService);
     vi.spyOn(repositories, 'readOwnerUsage').mockImplementation(async () => {
@@ -424,13 +450,18 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
   }, 120_000);
 
   afterAll(async () => {
-    await app.close();
-    await storage.deleteEntirePrefixForPurgeJob({
-      namespace: 'tenants',
-      keyPrefix: `${ownerId}/`,
-      tier: 'private',
-    });
-    await rm(workspace, { recursive: true, force: true });
+    const errors: unknown[] = [];
+    for (const close of cleanup.reverse()) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- release dependent fixtures in reverse acquisition order, even after a failure.
+        await close();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length > 0) {
+      throw new AggregateError(errors, 'Failed to clean up the git HTTP suite');
+    }
   }, 60_000);
 
   it('serves a stock `git clone`, `git push` and `git fetch` with nothing on disk between them', async () => {
@@ -518,6 +549,51 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     expect(references).not.toContain('refs/tau/owners/owner_1');
   }, 120_000);
 
+  /**
+   * DB1: `info/refs` is answered from the manifest, and what reaches the client
+   * is what stock git writes over a lease of that manifest. This remote hands
+   * git no `GIT_PROTOCOL`, so a client asking for protocol v2 is answered v0,
+   * exactly as before, and falls back.
+   */
+  it('serves info/refs byte-identically to stock git over a lease of the same manifest, v2 request included', async () => {
+    const clone = path.join(workspace, 'clone');
+    await gitOk(['tag', '-a', 'db1-annotated', '-m', 'DB1'], clone);
+    await gitOk(['tag', 'db1-light'], clone);
+    await gitOk(['push', 'origin', 'refs/tags/db1-annotated', 'refs/tags/db1-light'], clone);
+
+    const lease = await hydrateLease({
+      store: app.get<RepositoryStore>(repositoryStoreKey),
+      locator: repositoryLocator({ ownerId, projectId }),
+      parentDirectory: workspace,
+    });
+    try {
+      for (const service of ['git-upload-pack', 'git-receive-pack'] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- one service at a time against its own stock answer
+        const stock = await gitOk(
+          [service.replace('git-', ''), '--stateless-rpc', '--advertise-refs', '.'],
+          lease.directory,
+        );
+        /* The annotated tag is peeled on the fetch side only, so the case covers both shapes. */
+        expect(stock.stdout.includes('refs/tags/db1-annotated^{}')).toBe(service === 'git-upload-pack');
+        for (const headers of [{}, { 'Git-Protocol': 'version=2' }] as ReadonlyArray<Record<string, string>>) {
+          // oxlint-disable-next-line no-await-in-loop -- as above
+          const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=${service}`, {
+            headers: { Authorization: `Bearer ${callers.owner.token}`, ...headers },
+          });
+          expect(response.status).toBe(200);
+          expect(response.headers.get('content-type')).toBe(`application/x-${service}-advertisement`);
+          // oxlint-disable-next-line no-await-in-loop -- as above
+          const body = Buffer.from(await response.arrayBuffer()).toString('utf8');
+          const prefix = `${pktLine(`# service=${service}\n`)}0000`;
+          expect(body.startsWith(prefix)).toBe(true);
+          expect(body.slice(prefix.length), `${service} ${JSON.stringify(headers)}`).toStrictEqual(stock.stdout);
+        }
+      }
+    } finally {
+      await lease.dispose();
+    }
+  }, 120_000);
+
   it('rejects a mixed stock push atomically, without accepting its ordinary branch', async () => {
     const clone = path.join(workspace, 'clone');
     await writeFile(path.join(clone, 'part.ts'), 'export const width = 13;\n', 'utf8');
@@ -543,13 +619,13 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     await writeFile(path.join(clone, 'part.ts'), 'export const width = 14;\n', 'utf8');
     await gitOk(['commit', '-am', 'raced revision'], clone);
 
-    repositories.faults = (point) => {
+    worker.faults = (point) => {
       if (point === 'before-manifest-commit') {
         throw new RepositoryStoreError('lost', 'another writer committed first');
       }
     };
     const raced = await runGit(['push', 'origin', 'HEAD:refs/heads/main'], clone);
-    repositories.faults = undefined;
+    worker.faults = undefined;
 
     expect(raced.code, `the lost race was accepted: ${raced.stderr}`).not.toBe(0);
     expect(raced.stderr).toMatch(/503|committed first/u);
@@ -588,7 +664,10 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
 
     expect(pushed.code, pushed.stderr).toBe(0);
     expect(state.generation).toBe(before);
+    /* DB1, W6 G8: the advertisement holds no lease, so the repair waits for the RPC after it. */
     await advertised();
+    expect(state.generation).toBe(before);
+    await gitOk(['clone', '--quiet', remoteUrl, path.join(workspace, 'repair-after-database-down')], workspace);
     expect(state.generation).toBeGreaterThan(before);
   }, 120_000);
 
@@ -637,22 +716,27 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     await gitOk(['commit', '-am', 'the revision that outlived its worker'], clone);
 
     const before = { generation: state.generation, derivedGeneration: state.derivedGeneration };
-    repositories.faults = (point) => {
+    worker.faults = (point) => {
       if (point === 'after-manifest-commit') {
         throw new Error('the worker died here');
       }
     };
     const killed = await runGit(['push', 'origin', 'HEAD:refs/heads/outlived'], clone);
-    repositories.faults = undefined;
+    worker.faults = undefined;
+    await worker.settled();
     await repositories.settled();
 
     expect(killed.code, 'the client must not be told a push succeeded when its worker died').not.toBe(0);
     expect(state.generation, 'a killed worker must not have recorded its generation').toBe(before.generation);
     expect(state.derivedGeneration).toBe(before.derivedGeneration);
 
-    /* The commit is durable all the same, and the plain read that proves it is
-       also the request that repairs the row: both columns agree afterwards. */
+    /* The commit is durable all the same, and the advertisement proves it from
+       the manifest. It holds no lease, so it repairs nothing (DB1, W6 G8); the
+       plain read after it is the request that repairs the row, and both columns
+       agree afterwards. */
     expect(await advertised()).toContain('refs/heads/outlived');
+    expect(state.derivedGeneration).toBe(before.derivedGeneration);
+    await gitOk(['clone', '--quiet', remoteUrl, path.join(workspace, 'repair-after-worker-death')], workspace);
     expect(state.derivedGeneration).toBeGreaterThan(before.derivedGeneration);
     expect(state.generation).toBe(state.derivedGeneration);
   }, 120_000);
@@ -670,10 +754,10 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     await gitOk(['add', '.'], clone);
     await gitOk(['commit', '-m', 'over the ceiling'], clone);
 
-    const ceiling = repositories.repositoryByteCeiling;
-    repositories.repositoryByteCeiling = 1024;
+    const ceiling = worker.repositoryByteCeiling;
+    worker.repositoryByteCeiling = 1024;
     const refused = await runGit(['push', 'origin', 'HEAD:refs/heads/ceiling-probe'], clone);
-    repositories.repositoryByteCeiling = ceiling;
+    worker.repositoryByteCeiling = ceiling;
 
     expect(refused.code, refused.stderr).not.toBe(0);
     expect(refused.stderr).toContain('Tau: repository size limit exceeded');
@@ -713,18 +797,32 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
   });
 
   /**
-   * D33: admission is concurrent leases × the per-lease reservation against the
-   * worker's free disk. A worker that cannot hold another lease says so with a
+   * D33, DA3: admission is every admitted lease's real-byte reservation against
+   * the worker's free disk. A worker that cannot hold another lease says so with a
    * `Retry-After` rather than filling its own disk and failing halfway.
    */
   it('answers 503 with Retry-After when this worker has no room for another lease', async () => {
-    const reservation = repositories.leaseDiskBytesPerLease;
-    repositories.leaseDiskBytesPerLease = Number.MAX_SAFE_INTEGER;
-    const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
+    const reservation = worker.leaseReservationFloorBytes;
+    worker.leaseReservationFloorBytes = Number.MAX_SAFE_INTEGER;
+    const wait = worker.admissionWaitMilliseconds;
+    worker.admissionWaitMilliseconds = 0;
+    /* DB1: the advertisement takes no lease, so a full disk never refuses it (TAU-API-5). */
+    const advertisement = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
       headers: { Authorization: `Bearer ${callers.owner.token}` },
     });
-    repositories.leaseDiskBytesPerLease = reservation;
+    const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/git-upload-pack`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${callers.owner.token}`,
+        'Content-Type': 'application/x-git-upload-pack-request',
+      },
+      body: '0000',
+    });
+    worker.leaseReservationFloorBytes = reservation;
+    worker.admissionWaitMilliseconds = wait;
 
+    expect(advertisement.status).toBe(200);
+    expect(await advertisement.text()).toContain('refs/heads/main');
     expect(response.status).toBe(503);
     expect(response.headers.get('retry-after')).toBe('5');
     expect(await response.text()).toContain('retry shortly');
@@ -1052,6 +1150,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
       expect(listings, 'no push compacted, so no sweep ran').toBeGreaterThan(0);
     } finally {
       parked.resolve();
+      await worker.settled();
       await repositories.settled();
       storeControl.listObjects = undefined;
     }

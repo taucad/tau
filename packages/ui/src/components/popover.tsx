@@ -1,3 +1,4 @@
+import { useResponsiveSurfaceContainer } from '#hooks/responsive-surface.js';
 import * as React from 'react';
 import { Popover as PopoverPrimitive, Slot as SlotPrimitive } from 'radix-ui';
 import { cn } from '#utils/cn.js';
@@ -79,11 +80,13 @@ function PopoverContent({
   readonly withPortal?: boolean;
 }): React.JSX.Element {
   const fullscreenElement = useFullscreenElement();
+  const surfaceContainer = useResponsiveSurfaceContainer();
   const Component = withPortal ? PopoverPrimitive.Portal : SlotPrimitive.Slot;
 
   return (
-    <Component {...(withPortal ? { container: fullscreenElement } : {})}>
+    <Component {...(withPortal ? { container: surfaceContainer ?? fullscreenElement } : {})}>
       <PopoverPrimitive.Content
+        collisionBoundary={surfaceContainer}
         data-slot='popover-content'
         align={align}
         sideOffset={sideOffset}

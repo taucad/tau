@@ -11,7 +11,7 @@ import { Loader } from '@taucad/ui/components/loader';
  * Shared by the legacy landing (flag off) and the signed-in home view (flag on),
  * both of which start new projects from the same persistent homepage draft.
  */
-export function HomepageChatHero(): React.JSX.Element {
+export function HomepageChatHero({ composer }: { readonly composer?: React.ReactNode } = {}): React.JSX.Element {
   return (
     <div className='container mx-auto px-4 py-6 pb-12 md:px-6 md:pt-32'>
       <div className='mx-auto max-w-3xl space-y-6 md:space-y-8'>
@@ -21,9 +21,7 @@ export function HomepageChatHero(): React.JSX.Element {
           </h1>
         </div>
 
-        <HomeNewProjectComposerProvider>
-          <NewProjectChatComposer />
-        </HomeNewProjectComposerProvider>
+        <HomeNewProjectComposerProvider>{composer ?? <NewProjectChatComposer />}</HomeNewProjectComposerProvider>
         <div className='mx-auto my-6 flex w-20 items-center justify-center'>
           <Separator />
           <div className='mx-4 text-sm font-light text-muted-foreground'>or</div>

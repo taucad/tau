@@ -9,6 +9,8 @@ if (cloudValue !== undefined && cloudValue !== 'true' && cloudValue !== 'false')
 /* Launch gate OBS-7: the release workflow passes the DSN from the `desktop` environment; other builds report nothing. */
 const define = {
   tauCloudBuildEnabled: JSON.stringify(cloudValue === 'true'),
+  /* Runtime telemetry's own Cloud-host signal for main, never derived from the billing gate above. */
+  tauTelemetryHostCloudBuild: JSON.stringify(process.env['TAU_TELEMETRY_HOST'] === 'cloud'),
   tauSentryDsn: JSON.stringify(process.env['SENTRY_DSN'] ?? ''),
   /* The release workflow passes the PostHog project key; without one the renderer's analytics stay inert. */
   tauPostHogClientKey: JSON.stringify(process.env['POSTHOG_CLIENT_KEY'] ?? ''),
@@ -26,7 +28,6 @@ const bundledWorkspaceDependencies = [
   '@taucad/esbuild',
   '@taucad/events',
   '@taucad/filesystem',
-  '@taucad/geospec-engine',
   '@taucad/gltf',
   '@taucad/grbl',
   '@taucad/host',
@@ -107,6 +108,11 @@ export default defineConfig(
             'services-host': resolve(import.meta.dirname, 'src/tau/services-host.entry.ts'),
             'geometry-host': resolve(import.meta.dirname, 'src/tau/geometry-host.entry.ts'),
             'compute-store.worker': resolve(import.meta.dirname, 'src/main/compute-store.worker.ts'),
+            /* One per shell launch, started by the shell provider beside `services-host.js` (desktop shell W4). */
+            'shell-supervisor': resolve(
+              import.meta.dirname,
+              '../../packages/core/native-process/src/shell/srt-supervisor.ts',
+            ),
           },
         },
       },

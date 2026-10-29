@@ -163,7 +163,8 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     }
     const { content = '', files = {}, packageJson = {} } = geospec;
 
-    expect(content).toContain("from './runner/types.js'");
+    // The published barrels import their modules, then re-export them.
+    expect(content).toContain('from "./runner/types.js"');
     for (const declarationFile of [
       'config/index.d.ts',
       'config/node/index.d.ts',
@@ -174,6 +175,7 @@ describe('@taucad/api-extractor runtime subpaths', () => {
       'runner/native/index.d.ts',
       'runner/node/index.d.ts',
       'runner/worker/index.d.ts',
+      'vitest/node/index.d.ts',
     ]) {
       expect(typeof files[declarationFile]).toBe('string');
     }
@@ -191,6 +193,7 @@ describe('@taucad/api-extractor runtime subpaths', () => {
       ['./runner/native', './runner/native/index.d.ts'],
       ['./runner/node', './runner/node/index.d.ts'],
       ['./runner/worker', './runner/worker/index.d.ts'],
+      ['./vitest/node', './vitest/node/index.d.ts'],
     ] as const;
     for (const removed of ['./brep', './inspection', './proofs', './runner/web', './selector', './step']) {
       expect(packageExports[removed]).toBeUndefined();
@@ -219,7 +222,8 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     const runnerNativeTypes = files['runner/native/native-serial-runner.d.ts'] ?? '';
     const runnerWorkerTypes = files['runner/worker/runner-types.d.ts'] ?? '';
 
-    expect(modelTypes).toContain("export { createModelLoader, loadModel } from './load-model.js';");
+    expect(modelTypes).toContain('import { createModelLoader, loadModel } from "./load-model.js";');
+    expect(modelTypes).toMatch(/^export \{[^}]*\bcreateModelLoader\b[^}]*\bloadModel\b[^}]*\};$/mu);
     expect(files['model/parameters.d.ts']).toBeUndefined();
     expect(modelTypes).not.toContain('parameterGroups');
     expect(modelTypes).not.toContain('activeParams');

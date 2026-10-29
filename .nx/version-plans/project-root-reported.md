@@ -2,7 +2,6 @@
 cli: minor
 host: minor
 mcp: minor
-geospec: minor
 ---
 
 `tau mcp`'s CAD tool results name the project root their paths resolved against, and a GeoSpec load can name the folder its paths resolve in.

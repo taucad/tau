@@ -5,6 +5,8 @@ import { TelemetryController } from '#api/telemetry/telemetry.controller.js';
 import { IngestPayloadDto } from '#api/telemetry/telemetry.dto.js';
 import { IngestEntryName, AttributeKey } from '@taucad/telemetry';
 import type { AgentTurnContext, ClientMetricEntry } from '@taucad/telemetry';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import type { RuntimeIngestService } from '#api/telemetry/runtime-ingest.service.js';
 
 type AgentTurnDetail = Extract<ClientMetricEntry, { name: typeof IngestEntryName.AGENT_TURN }>['detail'];
 
@@ -31,6 +33,7 @@ function createMockMetrics() {
     agentGeospecRuns: { add: vi.fn() },
     syncClientAttempts: { add: vi.fn() },
     syncClientLag: { record: vi.fn() },
+    syncClientAttemptDuration: { record: vi.fn() },
     syncClientPending: { record: vi.fn() },
   };
 }
@@ -41,17 +44,25 @@ describe('TelemetryController', () => {
 
   beforeEach(() => {
     mockMetrics = createMockMetrics();
-    controller = new TelemetryController(mockMetrics as unknown as MetricsService);
+    controller = new TelemetryController(
+      mockMetrics as unknown as MetricsService,
+      { ingest: vi.fn() } as unknown as RuntimeIngestService,
+    );
   });
 
+  /* A legacy-only batch is recorded synchronously and answered 204 before anything is awaited. */
+  const reply = { status: vi.fn(), header: vi.fn() } as unknown as FastifyReply;
+  const request = { headers: {}, ip: '192.0.2.1' } as unknown as FastifyRequest;
   const ingestSignedIn = (body: IngestPayloadDto): void => {
-    controller.ingest(body, 'user-1');
+    void controller.ingest(body, 'user-1', request, reply);
   };
 
   it('should accept a signed-out batch without recording it', () => {
-    controller.ingest(
+    void controller.ingest(
       { entries: [{ name: IngestEntryName.KERNEL_CREATE_GEOMETRY, duration: 1500, detail: { status: 'ok' } }] },
       undefined,
+      request,
+      reply,
     );
 
     expect(mockMetrics.kernelExecutionDuration.record).not.toHaveBeenCalled();
@@ -126,7 +137,7 @@ describe('TelemetryController', () => {
       expect(mockMetrics.kernelExportDuration.record).toHaveBeenCalledTimes(1);
     });
 
-    it('should record a client sync attempt, its lag and its queue depth by placement, clamped', () => {
+    it('should record a client sync attempt, its duration, its lag and its queue depth by placement, clamped', () => {
       ingestSignedIn({
         entries: [
           {
@@ -136,7 +147,7 @@ describe('TelemetryController', () => {
           },
           {
             name: IngestEntryName.SYNC_ATTEMPT,
-            duration: 50,
+            duration: 1e12,
             detail: { direction: 'push', outcome: 'retry', placement: 'daemon', lagMilliseconds: 1e12, pending: 1e9 },
           },
           {
@@ -151,6 +162,11 @@ describe('TelemetryController', () => {
         [1, { direction: 'push', outcome: 'ok', 'agent.placement': 'browser' }],
         [1, { direction: 'push', outcome: 'retry', 'agent.placement': 'daemon' }],
         [1, { direction: 'pull', outcome: 'offline', 'agent.placement': 'desktop' }],
+      ]);
+      expect(mockMetrics.syncClientAttemptDuration.record.mock.calls).toEqual([
+        [0.12, { direction: 'push', outcome: 'ok', 'agent.placement': 'browser' }],
+        [3600, { direction: 'push', outcome: 'retry', 'agent.placement': 'daemon' }],
+        [0, { direction: 'pull', outcome: 'offline', 'agent.placement': 'desktop' }],
       ]);
       expect(mockMetrics.syncClientLag.record.mock.calls).toEqual([
         [2.5, { 'agent.placement': 'browser' }],

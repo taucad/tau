@@ -155,6 +155,7 @@ function StageStatus({
  *       createElement(ModelViewer, {
  *         graphicsRef,
  *         artifact: undefined,
+ *         artifactHash: undefined,
  *         gizmoContainer,
  *         onComponentSecondaryPointerCandidate,
  *       }),
@@ -186,6 +187,10 @@ export function ViewerStage({
   const hasArtifact = useSelector(graphicsRef, (state) => state.context.artifact !== undefined);
   const hasModel = isModelShown ?? hasArtifact;
   const unitId = useSelector(graphicsRef, (state) => state.context.modelInteractionUnitId);
+  // A mounted Three canvas reports its first frame on screen; until then the region is busy, so assistive technology
+  // and automation wait for a drawn stage. On a software adapter that first frame can take seconds of pipeline
+  // compiling. Content that draws no frames (an SVG, a placeholder) never declares a canvas, so it is never busy.
+  const isBusy = useSelector(graphicsRef, (state) => state.context.canvasPresentation?.presented === false);
 
   const handlePointerMove = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
@@ -207,6 +212,11 @@ export function ViewerStage({
   }, []);
 
   const failure = status?.kind === 'failed' ? status : undefined;
+  const canvas = renderCanvas({
+    gizmoContainer: `#${regionId}`,
+    eventSource: regionRef as React.RefObject<HTMLElement>,
+    onComponentSecondaryPointerCandidate: partMenu?.onComponentSecondaryPointerCandidate,
+  });
 
   return (
     <div
@@ -225,17 +235,16 @@ export function ViewerStage({
         data-testid='cad-viewer-canvas-region'
         role='application'
         aria-label={regionLabel}
+        aria-busy={isBusy || undefined}
         tabIndex={partMenu === undefined ? undefined : 0}
-        className='relative min-h-0 flex-1 overflow-hidden focus-visible:focus-outline'
+        /* The orientation cube's library stacks it at z-index 1000. Under the viewer bar (z-10) instead: on a short
+           stage, such as a phone's at Half, the cube's box reaches the bar and would take its taps. */
+        className='relative min-h-0 flex-1 overflow-hidden focus-visible:focus-outline [&>.viewport-gizmo-cube]:z-[5]!'
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
         onPointerCancel={handlePointerLeave}
       >
-        {renderCanvas({
-          gizmoContainer: `#${regionId}`,
-          eventSource: regionRef as React.RefObject<HTMLElement>,
-          onComponentSecondaryPointerCandidate: partMenu?.onComponentSecondaryPointerCandidate,
-        })}
+        {canvas}
         {failure === undefined ? null : (
           <RuntimeErrorOverlay
             message={failure.message}

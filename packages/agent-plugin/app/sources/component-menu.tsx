@@ -2,7 +2,7 @@
  * The viewer page's part verbs and reveal channels, behind the Tau app's part menu: right-click a part on the canvas,
  * press Shift+F10 or the Menu key with the canvas region focused, open the header's "Actions for <name>", or open a
  * row's menu in the Model pane. The menu itself is `useViewerPartMenu` from `@taucad/workbench-panes`, as on the
- * desktop; the page's verbs are "Add to chat" (the host bridge), "Reveal in Explorer" (the Model pane), "Show
+ * desktop; the page's verbs are "Add to chat" (the host bridge), "Reveal in model tree" (the Model pane), "Show
  * kinematics" (the Kinematics pane) and "Open preview" (the page's part gallery).
  */
 import type { GeometryComponentReference } from '@taucad/types';

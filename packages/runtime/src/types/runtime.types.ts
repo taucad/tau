@@ -38,7 +38,7 @@ import type { RuntimeContentInput, RuntimeContentKey } from '#types/runtime-cont
 
 /**
  * Classification for stack frame origin.
- * - `user` -- the developer's project code. Visible by default. Used for Monaco error markers.
+ * - `user` -- the developer's project code. Visible by default. Used for editor error markers.
  * - `library` -- third-party CAD libraries the user imported (replicad, @jscad/modeling). Visible by default.
  * - `framework` -- runtime worker infrastructure (Proxy traps, bundler, esbuild). Hidden by default.
  * - `runtime` -- V8/Emscripten/WASM boundary frames, `node:` internals, native code. Hidden by default.
@@ -83,6 +83,48 @@ export type KernelIssueType = 'compilation' | 'runtime' | 'kernel' | 'connection
  * @public
  */
 export type IssueSeverity = 'error' | 'warning' | 'info';
+
+/**
+ * What a capacity limit refused, in the producer's own unit.
+ *
+ * `KernelIssue.details` stays `unknown`: a producer opts in with
+ * `satisfies ResourceLimitDetails`, and a reader checks the shape before it
+ * trusts it, so an older or third-party producer yields no limit details rather
+ * than a guessed number. A supervisor that kills a host for a limit reports the
+ * same shape as the host exit's `exceeded`.
+ *
+ * @public
+ *
+ * @example <caption>Report the limit an export refused</caption>
+ * ```typescript
+ * import type { KernelIssue, ResourceLimitDetails } from '@taucad/runtime/types';
+ *
+ * const issue: KernelIssue = {
+ *   message: 'The mesh has more triangles than this export allows.',
+ *   code: 'RESOURCE_LIMIT',
+ *   severity: 'error',
+ *   details: {
+ *     limit: 'occt.export.triangles',
+ *     unit: '{triangle}',
+ *     maximum: 5_000_000,
+ *     demand: { kind: 'estimated', value: 7_200_000 },
+ *     origin: 'default',
+ *   } satisfies ResourceLimitDetails,
+ * };
+ * ```
+ */
+export type ResourceLimitDetails = Readonly<{
+  /** Stable id `{owner}.{limit}`, such as `occt.export.triangles` or `host.utility.resident`. */
+  limit: string;
+  /** UCUM unit of `maximum` and `demand`: `By`, `{triangle}`, `{instance}`, `ms`. */
+  unit: string;
+  /** The effective limit that applied. */
+  maximum: number;
+  /** What the refused work needed. Unknown is not zero. */
+  demand: Readonly<{ kind: 'measured' | 'estimated'; value: number }> | Readonly<{ kind: 'unknown' }>;
+  /** Where `maximum` came from. */
+  origin: 'default' | 'host-option' | 'profile';
+}>;
 
 /**
  * Diagnostic produced by a kernel operation — displayed in the editor's

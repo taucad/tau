@@ -56,7 +56,7 @@ import { RevisionRegion } from '#components/revisions/revision-region.js';
 import { timelineRow } from '#components/revisions/revision-timeline.js';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import {
-  accessRemovedSentence,
+  cloudUnavailableSentence,
   asksTauSignIn,
   backupCopy,
   isGithubRemote,
@@ -131,7 +131,7 @@ export type RevisionSyncRegionProps = {
    *
    * Read from `GET /v1/projects` by the pane, because a role is an account fact
    * and not a projection fact. `revoked` is a settled listing that no longer
-   * names the project — an owner took access away while this tab was open.
+   * names the project — deletion and removed access both produce this result.
    * `undefined` is nothing known at all, and folds every affordance away.
    */
   readonly role?: ProjectAccessRole;
@@ -319,7 +319,7 @@ function PlanGate({ onUpgrade }: { readonly onUpgrade: (() => void) | undefined 
   return (
     <button
       type='button'
-      className='inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline'
+      className='inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline pointer-coarse:min-h-6'
       onClick={onUpgrade}
     >
       Available on Pro · <CommercialUpgradeLabel />
@@ -831,7 +831,7 @@ export function RevisionSyncRegion({
     [
       'Access',
       role === 'revoked'
-        ? 'Removed'
+        ? 'Unavailable'
         : role === 'read'
           ? 'View only'
           : remote.fetchOnly
@@ -877,7 +877,11 @@ export function RevisionSyncRegion({
           {hasFigure ? retainedFigure : undefined}
         </span>
         {role === 'revoked' ? (
-          <span className='text-muted-foreground'>{accessRemovedSentence}</span>
+          <span className='text-muted-foreground'>
+            {sync.reason === 'notFound' && failureSentence !== undefined
+              ? `${failureSentence} Every revision stays on this device.`
+              : cloudUnavailableSentence}
+          </span>
         ) : failureSentence === undefined ? (
           remote.provider === 'github' ? (
             <MovedRepository

@@ -1,18 +1,11 @@
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { renderSvgPng, renderSvgWebp } from '@taucad/image/svg';
+import { gpuAdapterIdentity, isSoftwareGpuAdapter } from '@taucad/viewer/graphics/graphics-backend';
+import type { GpuAdapterIdentity } from '@taucad/viewer/graphics/graphics-backend';
 import type { imageRuntime } from '#runtime/image-runtime.definition.js';
 import type { HeadlessImageBackend } from '#services/headless-image.service.js';
 
 type GpuAdapterProbe = { requestAdapter(): Promise<unknown> };
-type AutomaticAdapter = {
-  readonly isFallbackAdapter?: boolean;
-  readonly info?: {
-    readonly architecture?: string;
-    readonly description?: string;
-    readonly device?: string;
-    readonly vendor?: string;
-  };
-};
 
 const automaticAdapterAvailable = async (): Promise<boolean> => {
   const gpu = (globalThis.navigator as (Navigator & { gpu?: GpuAdapterProbe }) | undefined)?.gpu;
@@ -20,13 +13,9 @@ const automaticAdapterAvailable = async (): Promise<boolean> => {
     return false;
   }
   try {
-    const adapter = ((await gpu.requestAdapter()) ?? undefined) as AutomaticAdapter | undefined;
-    if (!adapter || adapter.isFallbackAdapter === true) {
-      return false;
-    }
-    const { info } = adapter;
-    const identity = [info?.vendor, info?.architecture, info?.device, info?.description].join(' ').trim().toLowerCase();
-    return identity.length > 0 && !/swiftshader|llvmpipe|software|cpu/u.test(identity);
+    const adapter = ((await gpu.requestAdapter()) ?? undefined) as GpuAdapterIdentity | undefined;
+    // An adapter that reports no identity cannot be shown to be hardware.
+    return adapter !== undefined && !isSoftwareGpuAdapter(adapter) && gpuAdapterIdentity(adapter).length > 0;
   } catch {
     return false;
   }
@@ -52,9 +41,10 @@ export const headlessImageBackend: HeadlessImageBackend = {
   renderSvg: async (content, format, options) =>
     format === 'webp' ? renderSvgWebp(content, options) : renderSvgPng(content, options),
   async createImageClient() {
-    const [{ createRuntimeClient }, { webWorkerTransport }] = await Promise.all([
+    const [{ createRuntimeClient }, { webWorkerTransport }, { observeRuntimeClient }] = await Promise.all([
       import('@taucad/runtime/client'),
       import('@taucad/runtime/transport/web'),
+      import('#telemetry/runtime-telemetry.js'),
     ]);
     const client = createRuntimeClient<typeof imageRuntime>({
       transport: webWorkerTransport({
@@ -66,10 +56,13 @@ export const headlessImageBackend: HeadlessImageBackend = {
         fileSystem: fromMemoryFs(),
       }),
     });
+    /* Runtime observability (FR-14): capture attempts, attached before `connect()`. */
+    const stopObserving = observeRuntimeClient(client, 'capture');
     const adapter: Awaited<ReturnType<HeadlessImageBackend['createImageClient']>> = {
       connect: async () => client.connect(),
       terminate: () => {
         client.terminate();
+        stopObserving();
       },
       on: (event, handler) => client.on(event, handler),
       transcode: async (input) => {

@@ -1,6 +1,6 @@
 import { decode as msgpackDecode, encode as msgpackEncode } from '@msgpack/msgpack';
 import { contentDigest, digestContent } from '@taucad/cache-core';
-import type { CacheCodec, ComputeAction, EncodedContent } from '@taucad/cache-core';
+import type { CacheCodec, ComputeAction, ContentDigest, EncodedContent } from '@taucad/cache-core';
 import { z } from 'zod';
 import { defineMiddleware, nativeBuildInputSymbol } from '@taucad/runtime/middleware';
 import type { NativeBuildInput, NativeBuildInputCarrier } from '@taucad/runtime/middleware';
@@ -32,7 +32,7 @@ const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
 
 // Paths identify actual binary slots, so ordinary snapshot objects with digest/byteLength fields remain data.
 const encodeBinarySlots = async (input: { value: unknown; signal: AbortSignal }) => {
-  const content = new Map<string, Uint8Array<ArrayBuffer>>();
+  const content = new Map<ContentDigest, Uint8Array<ArrayBuffer>>();
   const paths: Array<Array<string | number>> = [];
   const aliases = new WeakMap<ArrayBufferLike, Map<string, z.infer<typeof binaryReferenceSchema>>>();
   const pending: Array<Promise<void>> = [];
@@ -91,10 +91,13 @@ const encodeBinarySlots = async (input: { value: unknown; signal: AbortSignal })
     throw error;
   }
   await Promise.all(pending);
+  const leaves = [...content.entries()].sort(([left], [right]) => (left < right ? -1 : 1));
   return {
     value,
     paths,
-    content: [...content.entries()].sort(([left], [right]) => (left < right ? -1 : 1)).map(([, bytes]) => bytes),
+    content: leaves.map(([, bytes]) => bytes),
+    // Each leaf is this codec's own copy, hashed once above: publication need not copy or hash it again.
+    digests: leaves.map(([digest]) => digest),
   };
 };
 
@@ -311,6 +314,7 @@ const buildCodec: CacheCodec<EvaluateResult> = {
         { ignoreUndefined: true },
       ),
       content: encoded.content,
+      digests: encoded.digests,
     };
   },
   decode: async ({ bytes, signal, readContent }) => {
@@ -345,6 +349,7 @@ const meshCodec: CacheCodec<RenderResult> = {
         { ignoreUndefined: true },
       ),
       content: encoded.content,
+      digests: encoded.digests,
     };
   },
   decode: async ({ bytes, signal, readContent }) => {

@@ -10,7 +10,9 @@
  */
 
 import { useEffect, useSyncExternalStore } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import type { UseMutationResult } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { z } from 'zod';
 import { Topic } from '@taucad/events';
 import type { RemoteFacet, RevisionStatusProjection } from '@taucad/revisions';
 import { ENV } from '#environment.config.js';
@@ -20,6 +22,7 @@ import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import { getRevisionSessionUser, useRevisionSessionUser } from '#lib/revision-actor.js';
 import { KeyedMutex } from '#db/keyed-mutex.js';
+import { recordApiRequestId } from '#lib/api-request-id.js';
 
 /** What this account may do with a project on Tau Cloud (D27). @public */
 export type ProjectRole = 'owner' | 'write' | 'read';
@@ -28,7 +31,8 @@ export type ProjectRole = 'owner' | 'write' | 'read';
  * What a client surface knows about this account's access, losing it included.
  *
  * `revoked` is a *settled* answer: the listing was read and this project was not
- * in it, which is what an owner's revoke looks like to a tab that is still open.
+ * in it. Deletion and removed access both produce this result; it does not
+ * prove that the owner revoked access or that a cloud copy still exists.
  * `undefined` is "nothing known" — signed out, offline, a failed listing, or a
  * project with no Tau remote to hold a role at all. The two must never collapse,
  * because one folds a surface away and the other says access is gone.
@@ -59,7 +63,251 @@ export const isSyncReadOnly = (remote: RemoteFacet | undefined, role: ProjectAcc
  * `updatedAt` (epoch milliseconds) is what the one library (D20) sorts a
  * project this device does not hold by, under *Last Updated*.
  */
-export type CloudProject = Readonly<{ id: string; name: string; role: ProjectRole; updatedAt?: number }>;
+export type CloudProject = Readonly<{
+  id: string;
+  name: string;
+  role: ProjectRole;
+  updatedAt?: number;
+  /** Only an explicit server capability permits deletion. */
+  canDeleteCloud?: boolean;
+  cloudState?: 'active' | 'deleting';
+  /** A request may have reached the server; status has not answered yet. */
+  isCheckingDeletion?: boolean;
+}>;
+
+const deletionReceiptSchema = z.discriminatedUnion('state', [
+  z.object({ id: z.string(), name: z.string(), state: z.enum(['checking', 'deleting']) }),
+  z.object({ id: z.string(), state: z.literal('deleted') }),
+]);
+type DeletionReceipt = z.infer<typeof deletionReceiptSchema>;
+const deletionStatusSchema = z.object({
+  projectId: z.string(),
+  state: z.enum(['active', 'deleting', 'deleted']),
+  deletedAt: z.string().optional(),
+});
+const deletionStoragePrefix = 'tau:cloud-project-deletions:';
+const deletionTopic = new Topic<void>({ name: 'cloud-project-deletions' });
+let deletionRevision = 0;
+const notifyDeletion = (): void => {
+  deletionRevision += 1;
+  deletionTopic.emit();
+};
+const readDeletionReceipts = (account: string | undefined): DeletionReceipt[] => {
+  if (account === undefined) {
+    return [];
+  }
+  try {
+    return deletionReceiptSchema
+      .array()
+      .parse(JSON.parse(localStorage.getItem(`${deletionStoragePrefix}${account}`) ?? '[]'));
+  } catch {
+    return [];
+  }
+};
+const saveDeletionReceipt = async (account: string, receipt: DeletionReceipt, shouldRemove = false): Promise<void> => {
+  await withNamedLock(`${deletionStoragePrefix}${account}`, async () => {
+    const existing = readDeletionReceipts(account);
+    const current = existing.find((entry) => entry.id === receipt.id);
+    // Never let a late rejection/status erase an accepted intent or a completed identity.
+    if (
+      current?.state === 'deleted' ||
+      (current?.state === 'deleting' && receipt.state === 'checking') ||
+      (shouldRemove && current?.state !== 'checking')
+    ) {
+      return;
+    }
+    const receipts = existing.filter((entry) => entry.id !== receipt.id);
+    if (!shouldRemove) {
+      receipts.push(receipt.state === 'deleted' ? { id: receipt.id, state: 'deleted' } : receipt);
+    }
+    // The request is never sent unless its recovery record was persisted first.
+    localStorage.setItem(`${deletionStoragePrefix}${account}`, JSON.stringify(receipts));
+  });
+  notifyDeletion();
+};
+
+/** Known intent fences stale cards and default/open connection gestures. */
+export const getCloudDeletionState = (projectId: string): DeletionReceipt['state'] | undefined =>
+  readDeletionReceipts(getRevisionSessionUser()?.id).find((entry) => entry.id === projectId)?.state;
+
+const overlayDeletionReceipts = (projects: readonly CloudProject[], account: string | undefined): CloudProject[] => {
+  const rows = new Map(projects.map((entry) => [entry.id, entry]));
+  for (const receipt of readDeletionReceipts(account)) {
+    if (receipt.state === 'deleted') {
+      rows.delete(receipt.id);
+    } else {
+      rows.set(receipt.id, {
+        ...rows.get(receipt.id),
+        id: receipt.id,
+        name: receipt.name,
+        role: 'owner',
+        cloudState: 'deleting',
+        canDeleteCloud: false,
+        isCheckingDeletion: receipt.state === 'checking',
+      });
+    }
+  }
+  return [...rows.values()];
+};
+
+class CloudDeletionRequestError extends Error {
+  public readonly status: number;
+
+  public constructor(status: number) {
+    super(`Tau Cloud answered ${String(status)}. Check your connection and access, then try again.`);
+    this.name = 'CloudDeletionRequestError';
+    this.status = status;
+  }
+}
+
+const fetchDeletionStatus = async (projectId: string, method: 'GET' | 'DELETE' = 'GET') => {
+  const response = await fetch(
+    `${ENV.TAU_API_URL.replace(/\/$/u, '')}/v1/projects/${encodeURIComponent(projectId)}${method === 'GET' ? '/deletion' : ''}`,
+    {
+      method,
+      credentials: 'include',
+      signal: AbortSignal.timeout(10_000),
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- HTTP header name.
+      headers: { Accept: 'application/json' },
+    },
+  );
+  if (!response.ok) {
+    throw recordApiRequestId(new CloudDeletionRequestError(response.status), response);
+  }
+  const status = deletionStatusSchema.parse(await response.json());
+  if (status.projectId !== projectId || (method === 'DELETE' && status.state === 'active')) {
+    throw new Error('Tau Cloud did not confirm deletion. Check its status before trying again.');
+  }
+  return status;
+};
+
+const recoverCloudDeletion = async (account: string, receipt: DeletionReceipt): Promise<void> => {
+  if (receipt.state === 'deleted' || account !== getRevisionSessionUser()?.id) {
+    return;
+  }
+  try {
+    const status = await fetchDeletionStatus(receipt.id);
+    // An accepted intent is monotonic. An older active response cannot undo it.
+    if (status.state === 'active' && receipt.state !== 'checking') {
+      return;
+    }
+    const current = readDeletionReceipts(account).find((entry) => entry.id === receipt.id);
+    if (current?.state !== receipt.state) {
+      return;
+    }
+    if (status.state === 'active') {
+      await saveDeletionReceipt(account, receipt, true);
+    } else if (status.state !== receipt.state) {
+      await saveDeletionReceipt(account, { ...receipt, state: status.state });
+    }
+    if (status.state === 'deleted' && getRevisionSessionUser()?.id === account) {
+      tauCloudIntent.set(receipt.id, undefined);
+    }
+  } catch {
+    // Unknown is retained and polled again; absence and network failure are never success.
+  }
+};
+
+const recoverCloudDeletions = async (account: string | undefined): Promise<void> => {
+  if (account === undefined) {
+    return;
+  }
+  await Promise.all(
+    readDeletionReceipts(account)
+      .filter((receipt) => receipt.state !== 'deleted')
+      .map(async (receipt) =>
+        withNamedLock(`tau:delete-cloud-project:${receipt.id}`, async () => recoverCloudDeletion(account, receipt)),
+      ),
+  );
+};
+
+/** Owner gesture; the project ID remains the server's idempotency key. */
+export const useDeleteCloudProject = (): UseMutationResult<
+  'active' | 'checking' | 'deleting' | 'deleted',
+  Error,
+  CloudProject
+> => {
+  const queryClient = useQueryClient();
+  const account = useRevisionSessionUser()?.id;
+  return useMutation({
+    mutationFn: async (project: CloudProject) => {
+      if (account === undefined || getRevisionSessionUser()?.id !== account || project.canDeleteCloud !== true) {
+        throw new Error('Cloud deletion is unavailable. Refresh this project’s access and try again.');
+      }
+      await queryClient.cancelQueries({ queryKey: cloudProjectsQueryKeyFor(account), exact: true });
+      try {
+        return await withNamedLock(`tau:delete-cloud-project:${project.id}`, async () => {
+          if (getRevisionSessionUser()?.id !== account) {
+            throw new Error('Your account changed. Refresh the project before trying again.');
+          }
+          const known = getCloudDeletionState(project.id);
+          if (known !== undefined) {
+            await recoverCloudDeletion(account, { id: project.id, name: project.name, state: known });
+            return getCloudDeletionState(project.id) ?? 'active';
+          }
+          await saveDeletionReceipt(account, { id: project.id, name: project.name, state: 'checking' });
+          queryClient.setQueryData<readonly CloudProject[]>(cloudProjectsQueryKeyFor(account), (rows = []) =>
+            overlayDeletionReceipts(rows, account),
+          );
+          try {
+            if (getRevisionSessionUser()?.id !== account) {
+              await saveDeletionReceipt(account, { id: project.id, name: project.name, state: 'checking' }, true);
+              throw new Error('Your account changed. Refresh the project before trying again.');
+            }
+            const status = await fetchDeletionStatus(project.id, 'DELETE');
+            if (status.state !== 'active') {
+              await saveDeletionReceipt(account, { id: project.id, name: project.name, state: status.state });
+            }
+            if (status.state === 'deleted' && getRevisionSessionUser()?.id === account) {
+              tauCloudIntent.set(project.id, undefined);
+            }
+            return status.state;
+          } catch (error) {
+            if (error instanceof CloudDeletionRequestError && [400, 401, 403, 404].includes(error.status)) {
+              await saveDeletionReceipt(account, { id: project.id, name: project.name, state: 'checking' }, true);
+              throw error;
+            }
+            await recoverCloudDeletion(account, { id: project.id, name: project.name, state: 'checking' });
+            const recovered = getCloudDeletionState(project.id);
+            if (recovered !== undefined) {
+              return recovered;
+            }
+            throw error;
+          }
+        });
+      } finally {
+        if (!readDeletionReceipts(account).some((entry) => entry.id === project.id)) {
+          // A rejected request must not leave the locally inserted pending row in a failed query's cache.
+          queryClient.setQueryData<readonly CloudProject[]>(cloudProjectsQueryKeyFor(account), (rows = []) =>
+            rows.map((entry) => (entry.id === project.id ? project : entry)),
+          );
+        }
+        await queryClient.invalidateQueries({ queryKey: cloudProjectsQueryKeyFor(account), exact: true });
+      }
+    },
+  });
+};
+
+/** Fresh cloud access refusal, distinct from a temporarily unavailable network. */
+export class CloudProjectUnavailableError extends Error {
+  public override readonly name = 'CloudProjectUnavailableError';
+}
+
+/** Revalidate immediately before and after materialization, including collaborators. */
+export const assertCloudProjectActive = async (projectId: string): Promise<void> => {
+  const account = getRevisionSessionUser()?.id;
+  if (getCloudDeletionState(projectId) !== undefined) {
+    throw new CloudProjectUnavailableError('This project is being deleted from Tau Cloud. Local copies are kept.');
+  }
+  const projects = await fetchCloudProjects();
+  if (
+    account !== getRevisionSessionUser()?.id ||
+    !projects.some((entry) => entry.id === projectId && entry.cloudState !== 'deleting') ||
+    getCloudDeletionState(projectId) !== undefined
+  ) {
+    throw new CloudProjectUnavailableError('This project is no longer available on Tau Cloud. Local copies are kept.');
+  }
+};
 
 /** The prefix every listing key starts with, so one invalidation reaches every account's listing. */
 export const cloudProjectsQueryKey = ['cloud-projects'] as const;
@@ -80,7 +328,17 @@ export const cloudProjectsQueryKeyFor = (userId: string | undefined): readonly u
 const isRole = (value: unknown): value is ProjectRole => value === 'owner' || value === 'write' || value === 'read';
 
 const toCloudProject = (value: unknown): CloudProject | undefined => {
-  const row = value as Readonly<{ id?: unknown; name?: unknown; role?: unknown; updatedAt?: unknown }>;
+  if (typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+  const row = value as Readonly<{
+    id?: unknown;
+    name?: unknown;
+    role?: unknown;
+    updatedAt?: unknown;
+    canDeleteCloud?: unknown;
+    cloudState?: unknown;
+  }>;
   if (typeof row.id !== 'string' || typeof row.name !== 'string') {
     return undefined;
   }
@@ -92,6 +350,8 @@ const toCloudProject = (value: unknown): CloudProject | undefined => {
     id: row.id,
     name: row.name,
     role: isRole(row.role) ? row.role : 'owner',
+    canDeleteCloud: row.canDeleteCloud === true,
+    cloudState: row.cloudState === 'deleting' ? 'deleting' : 'active',
     ...(Number.isNaN(updatedAt) ? {} : { updatedAt }),
   };
 };
@@ -105,11 +365,17 @@ const toCloudProject = (value: unknown): CloudProject | undefined => {
  *
  * @returns Every project row the API answered with.
  */
-export const fetchCloudProjects = async (): Promise<readonly CloudProject[]> => {
+export const fetchCloudProjects = async (signal?: AbortSignal): Promise<readonly CloudProject[]> => {
+  const account = getRevisionSessionUser()?.id;
+  await recoverCloudDeletions(account);
+  if (getRevisionSessionUser()?.id !== account) {
+    return [];
+  }
   /* Normalised like every other caller of this API (review R6): a deployment
      whose `TAU_API_URL` ends in `/` would otherwise ask for `//v1/projects`. */
   const response = await fetch(`${ENV.TAU_API_URL.replace(/\/$/u, '')}/v1/projects`, {
     credentials: 'include',
+    signal,
     // eslint-disable-next-line @typescript-eslint/naming-convention -- HTTP header names retain TitleCase on the wire.
     headers: { Accept: 'application/json' },
   });
@@ -118,10 +384,27 @@ export const fetchCloudProjects = async (): Promise<readonly CloudProject[]> => 
        no projects" from "nobody asked" (N1). The library renders no section for
        either; only the role resolver needs the difference, and a silent empty
        list would have told a signed-out tab its access had been revoked. */
-    throw new Error(`Tau Cloud answered ${String(response.status)}`);
+    throw recordApiRequestId(new Error(`Tau Cloud answered ${String(response.status)}`), response);
   }
   const body: unknown = await response.json();
-  return Array.isArray(body) ? body.map((entry) => toCloudProject(entry)).filter((entry) => entry !== undefined) : [];
+  if (getRevisionSessionUser()?.id !== account) {
+    return [];
+  }
+  const projects = Array.isArray(body)
+    ? body.map((entry) => toCloudProject(entry)).filter((entry) => entry !== undefined)
+    : [];
+  for (const project of projects) {
+    if (
+      account !== undefined &&
+      project.cloudState === 'deleting' &&
+      !readDeletionReceipts(account).some((entry) => entry.id === project.id)
+    ) {
+      // Persist server pending rows too, so a failed listing after reload still has a recovery entry.
+      // oxlint-disable-next-line no-await-in-loop -- serialize receipt updates in listing order.
+      await saveDeletionReceipt(account, { id: project.id, name: project.name, state: 'deleting' });
+    }
+  }
+  return overlayDeletionReceipts(projects, account);
 };
 
 /**
@@ -144,6 +427,25 @@ export const useCloudProjects = (
   isFetching: boolean;
   retry: () => void;
 }> => {
+  const account = useRevisionSessionUser()?.id;
+  const queryClient = useQueryClient();
+  useSyncExternalStore(
+    (listener) => deletionTopic.subscribe(listener),
+    () => deletionRevision,
+    () => 0,
+  );
+  useEffect(() => {
+    const onStorage = (event: StorageEvent): void => {
+      if (event.key === null || event.key === `${deletionStoragePrefix}${account}`) {
+        notifyDeletion();
+        void queryClient.invalidateQueries({ queryKey: cloudProjectsQueryKeyFor(account), exact: true });
+      }
+    };
+    globalThis.addEventListener('storage', onStorage);
+    return () => {
+      globalThis.removeEventListener('storage', onStorage);
+    };
+  }, [account, queryClient]);
   const {
     data = [],
     isSuccess,
@@ -151,8 +453,12 @@ export const useCloudProjects = (
     isFetching,
     refetch,
   } = useQuery({
-    queryKey: cloudProjectsQueryKeyFor(useRevisionSessionUser()?.id),
-    queryFn: fetchCloudProjects,
+    queryKey: cloudProjectsQueryKeyFor(account),
+    queryFn: async ({ signal }) => fetchCloudProjects(signal),
+    refetchInterval: (query) =>
+      overlayDeletionReceipts(query.state.data ?? [], account).some((entry) => entry.cloudState === 'deleting')
+        ? 3000
+        : false,
     enabled: options?.enabled ?? true,
     /* The set only changes when another device backs something up or an owner
        shares one, and a window focus is when this device is most likely to have
@@ -162,7 +468,7 @@ export const useCloudProjects = (
     staleTime: options?.staleTime ?? 30_000,
   });
   return {
-    projects: data,
+    projects: overlayDeletionReceipts(data, account),
     isSettled: isSuccess,
     isFailed: isError,
     isFetching,
@@ -198,10 +504,10 @@ export const useProjectAccessRole = (projectId: string, isTauRemote: boolean): P
   }
   const listed = projects.find((project) => project.id === projectId);
   if (listed !== undefined) {
-    return listed.role;
+    return listed.cloudState === 'deleting' ? 'revoked' : listed.role;
   }
-  /* Settled and absent is the owner's revoke arriving at an open tab. Unsettled
-     and absent is a listing nobody has read yet — or one being re-read right
+  /* Settled and absent fences writes after either deletion or removed access.
+     Unsettled and absent is a listing nobody has read yet — or one being re-read right
      now — which says nothing. */
   return isSettled && !isFetching ? 'revoked' : undefined;
 };
@@ -249,6 +555,9 @@ export const tauCloudIntent = Object.freeze({
     }
   },
   set(projectId: string, intent: TauCloudIntent | undefined): void {
+    if (intent !== undefined && getCloudDeletionState(projectId) !== undefined) {
+      return;
+    }
     try {
       if (intent === undefined) {
         globalThis.localStorage.removeItem(intentOwnerKey(projectId));
@@ -276,6 +585,9 @@ export const isCloudProjectPending = (projectId: string): boolean => tauCloudInt
 
 /** Prevent a pending gesture from connecting under a different signed-in account. */
 export const canOpenCloudProject = (projectId: string): boolean => {
+  if (getCloudDeletionState(projectId) !== undefined) {
+    return false;
+  }
   const pending = transientIntents.get(projectId);
   if (pending !== undefined) {
     return pending.account === getRevisionSessionUser()?.id;
@@ -404,7 +716,11 @@ export const useTauCloudIntentConnection = ({
     intent === 'open' && !canOpenCloudProject(projectId) ? 'wait' : nextTauCloudStep(intent, eligibility, status);
   const { connectRemote } = commands;
   useEffect(() => {
-    if (getRevisionSessionUser()?.id !== account || tauCloudIntent.get(projectId) !== intent) {
+    if (
+      getCloudDeletionState(projectId) !== undefined ||
+      getRevisionSessionUser()?.id !== account ||
+      tauCloudIntent.get(projectId) !== intent
+    ) {
       return;
     }
     switch (step) {
@@ -421,7 +737,32 @@ export const useTauCloudIntentConnection = ({
         if (intent === 'noticed') {
           tauCloudIntent.set(projectId, 'connected');
         }
-        void connectRemote('tau');
+        if (intent === 'open') {
+          const connectActiveProject = async (): Promise<void> => {
+            try {
+              await assertCloudProjectActive(projectId);
+              if (
+                getRevisionSessionUser()?.id === account &&
+                tauCloudIntent.get(projectId) === 'open' &&
+                canOpenCloudProject(projectId)
+              ) {
+                await connectRemote('tau');
+              }
+            } catch (error) {
+              if (
+                error instanceof CloudProjectUnavailableError &&
+                getRevisionSessionUser()?.id === account &&
+                tauCloudIntent.get(projectId) === 'open'
+              ) {
+                tauCloudIntent.set(projectId, undefined);
+              }
+              console.error('Could not open the Tau Cloud project:', error);
+            }
+          };
+          void connectActiveProject();
+        } else {
+          void connectRemote('tau');
+        }
         break;
       }
       case 'wait': {

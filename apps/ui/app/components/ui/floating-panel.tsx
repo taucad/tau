@@ -7,11 +7,11 @@ import { cn } from '@taucad/ui/utils/cn';
 import { Button } from '@taucad/ui/components/button';
 import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { DrawerClose, DrawerHandle, useIsInsideDrawer } from '@taucad/ui/components/drawer';
+import { DrawerClose, useIsInsideDrawer } from '@taucad/ui/components/drawer';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { CollapsibleCodeBlock } from '#components/ui/collapsible-code-block.js';
-import { useAnalytics } from '#hooks/use-analytics.js';
-import type { Analytics } from '#hooks/use-analytics.js';
+import { reportUiError } from '#lib/error-reporting.js';
+import { reactErrorDetails } from '#lib/react-root-errors.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 
 type Side = 'left' | 'right';
@@ -199,12 +199,20 @@ function FloatingPanelTriggerButton({
 
 type FloatingPanelCloseProps = {
   readonly icon: LucideIcon | React.ReactNode;
+  /** The accessible name; pass the words the tooltip shows, so name and tooltip agree (I6). */
+  readonly label?: string;
   readonly className?: string;
   readonly children?: React.ReactNode;
   readonly tooltipContent: (isOpen: boolean) => React.ReactNode;
 };
 
-function FloatingPanelClose({ icon, className, children, tooltipContent }: FloatingPanelCloseProps): React.JSX.Element {
+function FloatingPanelClose({
+  icon,
+  label = 'Close panel',
+  className,
+  children,
+  tooltipContent,
+}: FloatingPanelCloseProps): React.JSX.Element {
   const { isOpen, close } = useFloatingPanel();
   const isMobile = useIsMobile();
   const isInsideDrawer = useIsInsideDrawer();
@@ -227,7 +235,7 @@ function FloatingPanelClose({ icon, className, children, tooltipContent }: Float
         'max-md:border max-md:bg-background/70 max-md:backdrop-blur-lg',
         className,
       )}
-      aria-label='Close panel'
+      aria-label={label}
       onClick={close}
     >
       {renderIcon()}
@@ -310,7 +318,6 @@ type FloatingPanelErrorBoundaryState = {
 class FloatingPanelErrorBoundary extends React.Component<
   {
     readonly children: ReactNode;
-    readonly analytics: Analytics;
     readonly fallback: (props: FloatingPanelErrorFallbackProps) => ReactNode;
   },
   FloatingPanelErrorBoundaryState
@@ -325,9 +332,10 @@ class FloatingPanelErrorBoundary extends React.Component<
   };
 
   public override componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
-    this.props.analytics.captureException(error, {
-      errorInfo,
-      context: { component: 'FloatingPanel' },
+    // SB4: one Sentry event per error, with its component stack; `onCaughtError` reporting it too is a no-op.
+    void reportUiError(error, {
+      ...reactErrorDetails(errorInfo),
+      tags: { boundary: 'floating-panel' },
     });
     console.error('FloatingPanel content error:', error, errorInfo);
   }
@@ -355,81 +363,34 @@ class FloatingPanelErrorBoundary extends React.Component<
 
 function FloatingPanelContent({ children, className, errorFallback }: FloatingPanelContentProps): React.JSX.Element {
   const fallback = errorFallback ?? ((props) => <FloatingPanelErrorContent {...props} />);
-  const analytics = useAnalytics();
   return (
     <div className={cn('flex size-full flex-col bg-sidebar/50', className)} data-slot='floating-panel-content'>
-      <FloatingPanelErrorBoundary fallback={fallback} analytics={analytics}>
-        {children}
-      </FloatingPanelErrorBoundary>
+      <FloatingPanelErrorBoundary fallback={fallback}>{children}</FloatingPanelErrorBoundary>
     </div>
   );
 }
 
-/**
- * Override vaul's `[data-vaul-handle]` base CSS which forces the Handle into a
- * tiny 32 x 5 px gray drag-indicator pill.  Vaul injects these styles outside
- * Tailwind's `@layer`, so they beat layered utilities -- we must use
- * `!important` to win.
- *
- * The inner `<span data-vaul-handle-hitarea>` is also reset from its default
- * absolute-centered positioning to a normal flex wrapper so that header
- * children (title + actions) lay out properly.
- */
-const drawerHandleOverrides = cn(
-  // Reset the outer handle div to a full-width flex row.
-  'flex! w-full! h-10! rounded-none! opacity-100! mx-0! bg-sidebar!',
-  // Reset the hitarea <span> from absolute-centered to a static flex wrapper.
-  '[&>[data-vaul-handle-hitarea]]:static!',
-  '[&>[data-vaul-handle-hitarea]]:inset-auto!',
-  '[&>[data-vaul-handle-hitarea]]:transform-none!',
-  '[&>[data-vaul-handle-hitarea]]:size-full!',
-  '[&>[data-vaul-handle-hitarea]]:flex',
-  '[&>[data-vaul-handle-hitarea]]:items-center',
-  '[&>[data-vaul-handle-hitarea]]:justify-between',
-);
-
+/** The drawer's dedicated grabber owns dragging; titles and actions remain ordinary controls. */
 function FloatingPanelContentHeader({ children, className }: FloatingPanelContentHeaderProps): React.JSX.Element {
-  const { side } = useFloatingPanel();
+  const side = React.useContext(FloatingPanelContext)?.side ?? 'right';
   const isMobile = useIsMobile();
   const isInsideDrawer = useIsInsideDrawer();
-  const handleRef = React.useRef<HTMLDivElement>(null);
-
-  if (isMobile && isInsideDrawer) {
-    return (
-      <DrawerHandle
-        ref={handleRef}
-        className={cn('relative', floatingPanelContentHeaderVariants({ side }), drawerHandleOverrides, className)}
-        data-slot='floating-panel-content-header'
-        onClickCapture={(event: React.MouseEvent) => {
-          // Portaled content (e.g. nested drawer overlays from ComboBoxResponsive)
-          // lives inside the React tree but outside the real DOM subtree.
-          // Prevent such clicks from reaching vaul's handleStartCycle, which
-          // would cycle the parent drawer's snap points.
-          // DismissableLayer (which closes the nested drawer) uses native
-          // pointerdown events on the document, so stopping the React click
-          // here does not interfere with it.
-          if (handleRef.current && !handleRef.current.contains(event.target as Node)) {
-            const target = event.target instanceof HTMLElement ? event.target : null;
-            // Allow clicks on Radix portaled content (dropdown menus, popovers)
-            // to reach their event handlers. Propagation from these clicks is
-            // instead stopped at the DropdownMenuContent level so they never
-            // reach vaul's handleStartCycle.
-            if (target?.closest('[data-radix-popper-content-wrapper]')) {
-              return;
-            }
-            event.stopPropagation();
-          }
-        }}
-      >
-        {children}
-      </DrawerHandle>
-    );
-  }
-
+  const headerRef = React.useRef<HTMLDivElement>(null);
   return (
     <div
-      className={cn('relative', floatingPanelContentHeaderVariants({ side }), className)}
+      ref={headerRef}
+      className={cn('relative', floatingPanelContentHeaderVariants({ side }), isMobile && 'h-10 pr-2', className)}
       data-slot='floating-panel-content-header'
+      onClickCapture={(event) => {
+        // A nested drawer's portaled overlay must not activate any ancestor surface. Its content (a sheet a header
+        // control opened, such as the chat switcher) and a popper's content keep their own clicks.
+        if (isMobile && isInsideDrawer && !headerRef.current?.contains(event.target as Node)) {
+          const target = event.target as Element;
+          if (!target.closest('[data-radix-popper-content-wrapper], [data-vaul-drawer]')) {
+            event.stopPropagation();
+          }
+        }
+      }}
     >
       {children}
     </div>
@@ -445,6 +406,7 @@ function FloatingPanelContentHeaderActions({
   children,
   className,
 }: FloatingPanelContentHeaderActionsProps): React.JSX.Element {
+  const isMobile = useIsMobile();
   return (
     <div
       className={cn(
@@ -456,6 +418,7 @@ function FloatingPanelContentHeaderActions({
         'md:opacity-0',
         // Keyboard focus reveals the slot too, or a tabbed-to action is an invisible focus ring.
         'group-hover/floating-panel:opacity-100 md:focus-within:opacity-100',
+        isMobile && 'gap-1 opacity-100 md:opacity-100',
         className,
       )}
       data-slot='floating-panel-content-header-actions'
@@ -475,8 +438,8 @@ type FloatingPanelMenuButtonProps = React.ComponentProps<typeof PaneButton>;
  * `floating-panel-menu-button` data-slot for styling hooks.
  *
  * When rendered inside a mobile drawer, stops click and pointerDown
- * propagation at the button level so vaul's DrawerHandle doesn't cycle
- * snap points or initiate drag state. Propagation is stopped here (not on
+ * propagation at the button level so parent surfaces do not initiate
+ * drag state or respond to an action click. Propagation is stopped here (not on
  * the parent actions container) so that React Portal children like nested
  * drawer overlays are unaffected.
  */
@@ -493,7 +456,11 @@ function FloatingPanelMenuButton({
   return (
     <PaneButton
       data-slot='floating-panel-menu-button'
-      className={cn('max-md:size-8 max-md:rounded-md', className)}
+      className={cn(
+        'max-md:size-8 max-md:rounded-md',
+        isMobile && 'size-8 rounded-md border bg-background shadow-xs',
+        className,
+      )}
       onClick={isDrawerHandle ? chainStopPropagation(onClick) : onClick}
       onPointerDown={isDrawerHandle ? chainStopPropagation(onPointerDown) : onPointerDown}
       {...properties}

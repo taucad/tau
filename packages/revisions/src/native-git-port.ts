@@ -28,7 +28,7 @@ import { CommandAbortedError, runGitCommand } from '#git-command.js';
 import type { GitCommandResult } from '#git-command.js';
 import { parseTransportValue, quoteFastImportPath } from '#native-git-adapter.js';
 import { NativeGitError } from '#native-git.types.js';
-import { digestHex } from '#object-hash.js';
+import { checkoutIdOfBranch } from '#checkout-id.js';
 import type { ObjectFormat } from '#object-hash.js';
 import {
   deriveChangeId,
@@ -902,8 +902,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     return commits;
   };
 
-  const checkoutIdOf = async (branch: string): Promise<string> =>
-    digestHex(await format(), textEncoder.encode(`tau-checkout\0${branch}`)).slice(0, 16);
+  const checkoutIdOf = async (branch: string): Promise<string> => checkoutIdOfBranch(await format(), branch);
 
   const requireCheckouts = (): NativeGitCheckoutOptions => {
     if (checkouts === undefined) {

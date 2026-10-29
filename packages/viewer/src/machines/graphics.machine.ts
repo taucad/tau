@@ -1,4 +1,4 @@
-import { createAsyncLogic, setup, types } from 'xstate';
+import { createAsyncLogic, createCallbackLogic, setup, types } from 'xstate';
 import type {
   ActorRefFrom,
   AnyActor,
@@ -24,7 +24,11 @@ import type {
   PinnedMeasurement,
   ResolvedGraphicsBackend,
 } from '#graphics/graphics-settings.js';
-import { probeWebGpuSupport, resolveGraphicsBackendPreference } from '#graphics/graphics-backend.js';
+import {
+  onWebGpuCanvasLoss,
+  probeWebGpuSupportWithin,
+  resolveGraphicsBackendPreference,
+} from '#graphics/graphics-backend.js';
 import {
   applySectionCutPatch,
   createDefaultPlaneCut,
@@ -33,6 +37,7 @@ import {
 } from '#graphics/section-cuts.js';
 import type { SectionAxis, SectionCut, SectionCutPatch, SectionPlane, SectionVector } from '#graphics/section-cuts.js';
 import { recordRendererSpan } from '#lib/renderer-telemetry.js';
+import { viewerFirstFrame } from '#lib/viewer-events.js';
 import { deriveModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionSource, ViewerHoverSuppressionReason } from '#machines/model-interaction.machine.js';
 import { kinematicsMachine } from '#machines/kinematics.machine.js';
@@ -172,7 +177,7 @@ const removeSuppressionReason = <T extends string>(reasons: readonly T[], reason
  *   `currentMeasurementStart`, `modelInteractionUnitId` and `selectedSectionCutId`.
  * - **ephemeral** -- derived from geometry, the canvas or a pointer on every mount, never seeded:
  *   `gridSizes`, `gridSizesComputed`, `cadUnits`, `cameraVisibleSpan`, `geometryRadius`,
- *   `geometryCenter`, `resolvedGraphicsBackend`, `webGpuAvailable`, `hoveredSectionCutId`,
+ *   `geometryCenter`, `resolvedGraphicsBackend`, `activeRenderer`, `webGpuAvailable`, `webGpuProbeSettled`, `hoveredSectionCutId`,
  *   `committedSectionCuts` (what the caps last committed),
  *   `hoveredMeasurementId`, `measureSnapDistance`, every
  *   suppression and interaction flag, `pickableMeshesVersion`, `geometry`, `geometryKey` and
@@ -229,8 +234,25 @@ export interface GraphicsContext {
   graphicsBackendPreference: GraphicsBackendPreference;
   /** Probe result cached after startup (invoked probe). */
   webGpuAvailable: boolean;
-  /** Active rendering backend consumed by `@react-three/fiber`. */
+  /**
+   * Whether the capability probe has answered (or failed, or run out of time). Until then a WebGPU-preferring viewer
+   * mounts no canvas: a canvas mounted on WebGL meanwhile would be thrown away for a WebGPU one, and on a software
+   * adapter its work also delays the adapter answer.
+   */
+  webGpuProbeSettled: boolean;
+  /** Capability-derived candidate; initialization can still fall back to WebGL. */
   resolvedGraphicsBackend: ResolvedGraphicsBackend;
+  /** Successfully initialized canvas; cleared on matching loss or teardown, never persisted. */
+  activeRenderer: Readonly<{ canvasId: string; backend: ResolvedGraphicsBackend }> | undefined;
+  /**
+   * The mounted canvas that draws frames, and whether its first frame is on screen. Only a Three canvas sets it, or the
+   * placeholder that holds its place while the WebGPU probe runs, so a stage showing other content (an SVG) is never
+   * waiting. The stage is busy while `presented` is false.
+   *
+   * Assumes one canvas per graphics actor: a second canvas mounted on the same actor replaces the first one's entry, and
+   * the stage would then wait only on whichever mounted last.
+   */
+  canvasPresentation: Readonly<{ canvasId: string; presented: boolean }> | undefined;
 
   // Section view state
   isSectionViewActive: boolean;
@@ -248,6 +270,8 @@ export interface GraphicsContext {
 
   // Measure state
   isMeasureActive: boolean;
+  /** Whether the active tool has attached its input listeners; never persisted. */
+  isMeasureInputReady: boolean;
   measurements: MeasurementRecord[];
   currentMeasurementStart: [number, number, number] | undefined;
   currentMeasurementAnchor?: MeasurementAnchor;
@@ -317,6 +341,16 @@ export type GraphicsEvent =
   | { type: 'setPostProcessingVisibility'; payload: boolean }
   | { type: 'setUpDirection'; payload: 'x' | 'y' | 'z' }
   | { type: 'setGraphicsBackendPreference'; payload: GraphicsBackendPreference }
+  /** A WebGPU canvas on this page could not present, or lost its device to the browser: WebGPU is off for the page. */
+  | { type: 'webGpuCanvasLost' }
+  | { type: 'rendererInitialized'; payload: NonNullable<GraphicsContext['activeRenderer']> }
+  | { type: 'rendererRemoved'; canvasId: string }
+  /** A canvas that draws frames has mounted; the stage waits for its first frame. */
+  | { type: 'canvasMounted'; canvasId: string }
+  /** The canvas's first frame is on screen. */
+  | { type: 'rendererPresented'; canvasId: string }
+  /** The canvas no longer draws frames (unmounted, or replaced by its context-lost fallback). */
+  | { type: 'canvasUnmounted'; canvasId: string }
   // Section view events
   /** Turning the section on with no cuts adds the default plane, removing the side `viewDirection` faces. */
   | { type: 'setSectionViewActive'; payload: boolean; viewDirection?: SectionVector }
@@ -333,6 +367,7 @@ export type GraphicsEvent =
   | { type: 'commitSectionCuts'; payload: readonly SectionCut[] }
   // Measure events
   | { type: 'setMeasureActive'; payload: boolean }
+  | { type: 'setMeasureInputReady'; ready: boolean }
   | { type: 'adoptPinnedMeasurements'; measurements: readonly PinnedMeasurement[] }
   | { type: 'startMeasurement'; payload: [number, number, number]; anchor?: MeasurementAnchor }
   | {
@@ -639,7 +674,12 @@ const adoptedSection = (context: GraphicsContext, section: PersistedSectionView)
 };
 
 const graphicsActors = {
-  probeWebGpu: createAsyncLogic({ run: async () => probeWebGpuSupport() }),
+  probeWebGpu: createAsyncLogic({ run: async () => probeWebGpuSupportWithin() }),
+  watchWebGpuCanvasLoss: createCallbackLogic<{ type: 'stop' }>(({ sendBack }) =>
+    onWebGpuCanvasLoss(() => {
+      sendBack({ type: 'webGpuCanvasLost' });
+    }),
+  ),
   modelInteraction: modelInteractionMachine,
   kinematics: kinematicsMachine,
 };
@@ -767,6 +807,7 @@ const graphicsMachineDefinition = setup({
         return {
           context: {
             webGpuAvailable: output,
+            webGpuProbeSettled: true,
             resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, output),
           },
         };
@@ -775,14 +816,16 @@ const graphicsMachineDefinition = setup({
       onError: ({ context }) => ({
         context: {
           webGpuAvailable: false,
+          webGpuProbeSettled: true,
           resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, false),
         },
       }),
     },
+    { src: 'watchWebGpuCanvasLoss', id: 'watchWebGpuCanvasLossInvocation' },
   ],
 
   context: ({ input, spawn, actors }) => {
-    const preference = input.graphicsBackend ?? 'webgl';
+    const preference = input.graphicsBackend ?? 'webgpu';
     const ownsModelInteractionRef = input.modelInteractionRef === undefined;
     const modelInteractionRef =
       input.modelInteractionRef ??
@@ -821,11 +864,14 @@ const graphicsMachineDefinition = setup({
       enableGrid: input.enableGrid ?? true,
       enableAxes: input.enableAxes ?? true,
       enableMatcap: input.enableMatcap ?? false,
-      enablePostProcessing: input.enablePostProcessing ?? false,
+      enablePostProcessing: input.enablePostProcessing ?? true,
       upDirection: input.upDirection ?? 'z',
       graphicsBackendPreference: preference,
       webGpuAvailable: false,
+      webGpuProbeSettled: false,
       resolvedGraphicsBackend: resolveGraphicsBackendPreference(preference, false),
+      activeRenderer: undefined,
+      canvasPresentation: undefined,
 
       // Section view state (the cuts are durable and entry-scoped)
       ...createSectionViewSeed(input.sectionView),
@@ -833,6 +879,7 @@ const graphicsMachineDefinition = setup({
 
       // Measure state
       isMeasureActive: false,
+      isMeasureInputReady: false,
       measurements: (input.pinnedMeasurements ?? []).map((m) => ({
         ...m,
         isPinned: true,
@@ -984,6 +1031,37 @@ const graphicsMachineDefinition = setup({
           context: ({ context, event }) => ({
             graphicsBackendPreference: event.payload,
             resolvedGraphicsBackend: resolveGraphicsBackendPreference(event.payload, context.webGpuAvailable),
+          }),
+        },
+
+        // A Retry or remount then starts on WebGL instead of repeating the WebGPU start the browser cannot present.
+        webGpuCanvasLost: {
+          context: ({ context }) => ({
+            webGpuAvailable: false,
+            resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, false),
+          }),
+        },
+        rendererInitialized: { context: ({ event }) => ({ activeRenderer: event.payload }) },
+        canvasMounted: {
+          context: ({ event }) => ({ canvasPresentation: { canvasId: event.canvasId, presented: false } }),
+        },
+        rendererPresented: {
+          context: ({ context, event }) => ({
+            canvasPresentation:
+              context.canvasPresentation?.canvasId === event.canvasId
+                ? { canvasId: event.canvasId, presented: true }
+                : context.canvasPresentation,
+          }),
+        },
+        canvasUnmounted: {
+          context: ({ context, event }) => ({
+            canvasPresentation:
+              context.canvasPresentation?.canvasId === event.canvasId ? undefined : context.canvasPresentation,
+          }),
+        },
+        rendererRemoved: {
+          context: ({ context, event }) => ({
+            activeRenderer: context.activeRenderer?.canvasId === event.canvasId ? undefined : context.activeRenderer,
           }),
         },
 
@@ -1197,6 +1275,13 @@ const graphicsMachineDefinition = setup({
               duration,
               attributes: { ...attributes, ...durations },
             });
+            if (attributes.outcome === 'presented' && durations.receiptToFirstFrame !== undefined) {
+              viewerFirstFrame({
+                backend: attributes.backend,
+                duration: durations.receiptToFirstFrame,
+                triangles: attributes.triangleCount,
+              });
+            }
           });
           return {};
         },
@@ -1589,7 +1674,11 @@ const graphicsMachineDefinition = setup({
                   event.payload
                     ? {
                         target: 'on',
-                        context: { isMeasureActive: true, ...beginMeasureHoverSuppression(context, enq) },
+                        context: {
+                          isMeasureActive: true,
+                          isMeasureInputReady: false,
+                          ...beginMeasureHoverSuppression(context, enq),
+                        },
                       }
                     : undefined,
               },
@@ -1598,6 +1687,8 @@ const graphicsMachineDefinition = setup({
             on: {
               initial: 'selecting',
               on: {
+                // Listener ownership is synchronous and local to the active tool; late inactive reports are ignored.
+                setMeasureInputReady: { context: ({ event }) => ({ isMeasureInputReady: event.ready }) },
                 // Leaving keeps every measurement; only a half-placed one is dropped.
                 setMeasureActive: ({ context, event }) =>
                   event.payload
@@ -1606,6 +1697,7 @@ const graphicsMachineDefinition = setup({
                         target: 'off',
                         context: {
                           isMeasureActive: false,
+                          isMeasureInputReady: false,
                           currentMeasurementStart: undefined,
                           currentMeasurementAnchor: undefined,
                           measureCandidates: [],

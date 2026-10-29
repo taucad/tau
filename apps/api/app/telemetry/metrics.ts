@@ -475,6 +475,164 @@ export class MetricsService {
     unit: TauMetrics.syncSweeps.unit,
   });
 
+  public readonly syncRefusals = this.apiMeter.createCounter(TauMetrics.syncRefusals.name, {
+    description: TauMetrics.syncRefusals.description,
+    unit: TauMetrics.syncRefusals.unit,
+  });
+
+  // --- Git execution (lease admission, hydrate, manifest commit) ---
+
+  public readonly gitAdmissions = this.apiMeter.createCounter(TauMetrics.gitAdmissions.name, {
+    description: TauMetrics.gitAdmissions.description,
+    unit: TauMetrics.gitAdmissions.unit,
+  });
+
+  public readonly gitLeasesActive = this.apiMeter.createUpDownCounter(TauMetrics.gitLeasesActive.name, {
+    description: TauMetrics.gitLeasesActive.description,
+    unit: TauMetrics.gitLeasesActive.unit,
+  });
+
+  public readonly gitLeaseReservedBytes = this.apiMeter.createGauge(TauMetrics.gitLeaseReservedBytes.name, {
+    description: TauMetrics.gitLeaseReservedBytes.description,
+    unit: TauMetrics.gitLeaseReservedBytes.unit,
+  });
+
+  public readonly gitDiskFreeBytes = this.apiMeter.createGauge(TauMetrics.gitDiskFreeBytes.name, {
+    description: TauMetrics.gitDiskFreeBytes.description,
+    unit: TauMetrics.gitDiskFreeBytes.unit,
+  });
+
+  public readonly gitHydrateBytes = this.apiMeter.createHistogram(TauMetrics.gitHydrateBytes.name, {
+    description: TauMetrics.gitHydrateBytes.description,
+    unit: TauMetrics.gitHydrateBytes.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.gitHydrateBytes.buckets] },
+  });
+
+  public readonly gitCommitAttempts = this.apiMeter.createCounter(TauMetrics.gitCommitAttempts.name, {
+    description: TauMetrics.gitCommitAttempts.description,
+    unit: TauMetrics.gitCommitAttempts.unit,
+  });
+
+  public readonly gitCommitDuration = this.apiMeter.createHistogram(TauMetrics.gitCommitDuration.name, {
+    description: TauMetrics.gitCommitDuration.description,
+    unit: TauMetrics.gitCommitDuration.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.gitCommitDuration.buckets] },
+  });
+
+  public readonly gitRepositorySize = this.apiMeter.createHistogram(TauMetrics.gitRepositorySize.name, {
+    description: TauMetrics.gitRepositorySize.description,
+    unit: TauMetrics.gitRepositorySize.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.gitRepositorySize.buckets] },
+  });
+
+  /** Observed at collection from the last full minute, so an idle minute reads 0 rather than a stale rate. */
+  public readonly gitHotProjectCommitRate = this.apiMeter.createObservableGauge(
+    TauMetrics.gitHotProjectCommitRate.name,
+    {
+      description: TauMetrics.gitHotProjectCommitRate.description,
+      unit: TauMetrics.gitHotProjectCommitRate.unit,
+    },
+  );
+
+  public readonly gitHotProjectWriters = this.apiMeter.createObservableGauge(TauMetrics.gitHotProjectWriters.name, {
+    description: TauMetrics.gitHotProjectWriters.description,
+    unit: TauMetrics.gitHotProjectWriters.unit,
+  });
+
+  // --- Git route table and freeze answer (DW1, DW2) ---
+
+  /** Observed at collection from the route table, so a lapsed freeze reads 0 rather than a stale count. */
+  public readonly gitRouteFrozen = this.apiMeter.createObservableGauge(TauMetrics.gitRouteFrozen.name, {
+    description: TauMetrics.gitRouteFrozen.description,
+    unit: TauMetrics.gitRouteFrozen.unit,
+  });
+
+  public readonly gitRouteFrozenOldest = this.apiMeter.createObservableGauge(TauMetrics.gitRouteFrozenOldest.name, {
+    description: TauMetrics.gitRouteFrozenOldest.description,
+    unit: TauMetrics.gitRouteFrozenOldest.unit,
+  });
+
+  public readonly gitRouteHolds = this.apiMeter.createCounter(TauMetrics.gitRouteHolds.name, {
+    description: TauMetrics.gitRouteHolds.description,
+    unit: TauMetrics.gitRouteHolds.unit,
+  });
+
+  public readonly gitRouteHoldDuration = this.apiMeter.createHistogram(TauMetrics.gitRouteHoldDuration.name, {
+    description: TauMetrics.gitRouteHoldDuration.description,
+    unit: TauMetrics.gitRouteHoldDuration.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.gitRouteHoldDuration.buckets] },
+  });
+
+  public readonly gitRouteLookupDuration = this.apiMeter.createHistogram(TauMetrics.gitRouteLookupDuration.name, {
+    description: TauMetrics.gitRouteLookupDuration.description,
+    unit: TauMetrics.gitRouteLookupDuration.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.gitRouteLookupDuration.buckets] },
+  });
+
+  // --- Pack cache and rendezvous affinity (DC2) ---
+
+  public readonly gitCacheLookups = this.apiMeter.createCounter(TauMetrics.gitCacheLookups.name, {
+    description: TauMetrics.gitCacheLookups.description,
+    unit: TauMetrics.gitCacheLookups.unit,
+  });
+
+  public readonly gitCacheBytes = this.apiMeter.createGauge(TauMetrics.gitCacheBytes.name, {
+    description: TauMetrics.gitCacheBytes.description,
+    unit: TauMetrics.gitCacheBytes.unit,
+  });
+
+  public readonly gitCacheBudgetBytes = this.apiMeter.createGauge(TauMetrics.gitCacheBudgetBytes.name, {
+    description: TauMetrics.gitCacheBudgetBytes.description,
+    unit: TauMetrics.gitCacheBudgetBytes.unit,
+  });
+
+  public readonly gitCacheEvictions = this.apiMeter.createCounter(TauMetrics.gitCacheEvictions.name, {
+    description: TauMetrics.gitCacheEvictions.description,
+    unit: TauMetrics.gitCacheEvictions.unit,
+  });
+
+  public readonly gitCacheEvictedBytes = this.apiMeter.createCounter(TauMetrics.gitCacheEvictedBytes.name, {
+    description: TauMetrics.gitCacheEvictedBytes.description,
+    unit: TauMetrics.gitCacheEvictedBytes.unit,
+  });
+
+  public readonly gitCacheFallbacks = this.apiMeter.createCounter(TauMetrics.gitCacheFallbacks.name, {
+    description: TauMetrics.gitCacheFallbacks.description,
+    unit: TauMetrics.gitCacheFallbacks.unit,
+  });
+
+  public readonly gitSpills = this.apiMeter.createCounter(TauMetrics.gitSpills.name, {
+    description: TauMetrics.gitSpills.description,
+    unit: TauMetrics.gitSpills.unit,
+  });
+
+  public readonly gitMembers = this.apiMeter.createGauge(TauMetrics.gitMembers.name, {
+    description: TauMetrics.gitMembers.description,
+    unit: TauMetrics.gitMembers.unit,
+  });
+
+  // --- tau-api to tau-storage (DC1) ---
+
+  public readonly gitGrantsRejected = this.apiMeter.createCounter(TauMetrics.gitGrantsRejected.name, {
+    description: TauMetrics.gitGrantsRejected.description,
+    unit: TauMetrics.gitGrantsRejected.unit,
+  });
+
+  public readonly gitForwardErrors = this.apiMeter.createCounter(TauMetrics.gitForwardErrors.name, {
+    description: TauMetrics.gitForwardErrors.description,
+    unit: TauMetrics.gitForwardErrors.unit,
+  });
+
+  public readonly gitReceipts = this.apiMeter.createCounter(TauMetrics.gitReceipts.name, {
+    description: TauMetrics.gitReceipts.description,
+    unit: TauMetrics.gitReceipts.unit,
+  });
+
+  public readonly gitSlowBodyAborts = this.apiMeter.createCounter(TauMetrics.gitSlowBodyAborts.name, {
+    description: TauMetrics.gitSlowBodyAborts.description,
+    unit: TauMetrics.gitSlowBodyAborts.unit,
+  });
+
   // Client-reported: Tau Sync
 
   public readonly syncClientAttempts = this.clientMeter.createCounter(TauMetrics.syncClientAttempts.name, {
@@ -488,11 +646,103 @@ export class MetricsService {
     advice: { explicitBucketBoundaries: [...TauMetrics.syncClientLag.buckets] },
   });
 
+  public readonly syncClientAttemptDuration = this.clientMeter.createHistogram(
+    TauMetrics.syncClientAttemptDuration.name,
+    {
+      description: TauMetrics.syncClientAttemptDuration.description,
+      unit: TauMetrics.syncClientAttemptDuration.unit,
+      advice: { explicitBucketBoundaries: [...TauMetrics.syncClientAttemptDuration.buckets] },
+    },
+  );
+
   public readonly syncClientPending = this.clientMeter.createHistogram(TauMetrics.syncClientPending.name, {
     description: TauMetrics.syncClientPending.description,
     unit: TauMetrics.syncClientPending.unit,
     advice: { explicitBucketBoundaries: [...TauMetrics.syncClientPending.buckets] },
   });
+
+  // --- Storage accounting scheduler (W14 OB3) ---
+
+  /* Observed at collection from the scheduler's shared snapshot, so every Machine exports the same figures. */
+  public readonly storageUsageBytes = this.apiMeter.createObservableGauge(TauMetrics.storageUsageBytes.name, {
+    description: TauMetrics.storageUsageBytes.description,
+    unit: TauMetrics.storageUsageBytes.unit,
+  });
+
+  public readonly storageUsageRepositories = this.apiMeter.createObservableGauge(
+    TauMetrics.storageUsageRepositories.name,
+    {
+      description: TauMetrics.storageUsageRepositories.description,
+      unit: TauMetrics.storageUsageRepositories.unit,
+    },
+  );
+
+  public readonly gitRepositorySizeDistribution = this.apiMeter.createObservableGauge(
+    TauMetrics.gitRepositorySizeDistribution.name,
+    {
+      description: TauMetrics.gitRepositorySizeDistribution.description,
+      unit: TauMetrics.gitRepositorySizeDistribution.unit,
+    },
+  );
+
+  public readonly gitRepositoryCeilingProximity = this.apiMeter.createObservableGauge(
+    TauMetrics.gitRepositoryCeilingProximity.name,
+    {
+      description: TauMetrics.gitRepositoryCeilingProximity.description,
+      unit: TauMetrics.gitRepositoryCeilingProximity.unit,
+    },
+  );
+
+  public readonly storageQuotaOwners = this.apiMeter.createObservableGauge(TauMetrics.storageQuotaOwners.name, {
+    description: TauMetrics.storageQuotaOwners.description,
+    unit: TauMetrics.storageQuotaOwners.unit,
+  });
+
+  public readonly databaseConnections = this.apiMeter.createObservableGauge(TauMetrics.databaseConnections.name, {
+    description: TauMetrics.databaseConnections.description,
+    unit: TauMetrics.databaseConnections.unit,
+  });
+
+  public readonly databaseConnectionBudget = this.apiMeter.createObservableGauge(
+    TauMetrics.databaseConnectionBudget.name,
+    {
+      description: TauMetrics.databaseConnectionBudget.description,
+      unit: TauMetrics.databaseConnectionBudget.unit,
+    },
+  );
+
+  public readonly r2Requests = this.apiMeter.createObservableGauge(TauMetrics.r2Requests.name, {
+    description: TauMetrics.r2Requests.description,
+    unit: TauMetrics.r2Requests.unit,
+  });
+
+  public readonly r2StoredBytes = this.apiMeter.createObservableGauge(TauMetrics.r2StoredBytes.name, {
+    description: TauMetrics.r2StoredBytes.description,
+    unit: TauMetrics.r2StoredBytes.unit,
+  });
+
+  public readonly r2Objects = this.apiMeter.createObservableGauge(TauMetrics.r2Objects.name, {
+    description: TauMetrics.r2Objects.description,
+    unit: TauMetrics.r2Objects.unit,
+  });
+
+  public readonly r2BandwidthBytes = this.apiMeter.createObservableGauge(TauMetrics.r2BandwidthBytes.name, {
+    description: TauMetrics.r2BandwidthBytes.description,
+    unit: TauMetrics.r2BandwidthBytes.unit,
+  });
+
+  public readonly storageAccountingPasses = this.apiMeter.createCounter(TauMetrics.storageAccountingPasses.name, {
+    description: TauMetrics.storageAccountingPasses.description,
+    unit: TauMetrics.storageAccountingPasses.unit,
+  });
+
+  public readonly storageAccountingLastSuccess = this.apiMeter.createObservableGauge(
+    TauMetrics.storageAccountingLastSuccess.name,
+    {
+      description: TauMetrics.storageAccountingLastSuccess.description,
+      unit: TauMetrics.storageAccountingLastSuccess.unit,
+    },
+  );
 
   // --- Billing workers ---
 
@@ -513,3 +763,38 @@ export type WsUpgradeRejection = z.infer<typeof TauMetrics.wsUpgradeRejections.a
 
 /** Attributes of one `tau.sync.operations` increment. */
 export type SyncOperationAttributes = z.infer<typeof TauMetrics.syncOperations.attributes>;
+
+/** Attributes of one `tau.sync.operation.duration` sample: the operation's, plus where git ran. */
+export type SyncOperationDurationAttributes = z.infer<typeof TauMetrics.syncOperationDuration.attributes>;
+
+/** Attributes of one `tau.sync.refusals` increment. */
+export type SyncRefusalAttributes = z.infer<typeof TauMetrics.syncRefusals.attributes>;
+
+/** `tau.git.operation`: what a lease was admitted for. */
+export type GitOperation = z.infer<typeof TauMetrics.gitAdmissions.attributes>['tau.git.operation'];
+
+/** Attributes of one `tau.git.admissions` increment. */
+export type GitAdmissionAttributes = z.infer<typeof TauMetrics.gitAdmissions.attributes>;
+
+/** `reason` on `tau.git.grants.rejected`. */
+export type GitGrantRejectionReason = z.infer<typeof TauMetrics.gitGrantsRejected.attributes>['reason'];
+
+/** `reason` on `tau.git.spills`. */
+export type GitSpillReason = z.infer<typeof TauMetrics.gitSpills.attributes>['reason'];
+
+/** `reason` on `tau.git.forward.errors`. */
+export type GitForwardErrorReason = z.infer<typeof TauMetrics.gitForwardErrors.attributes>['reason'];
+
+/** `outcome` on `tau.git.receipts`. */
+export type GitReceiptOutcome = z.infer<typeof TauMetrics.gitReceipts.attributes>['outcome'];
+
+/** Attributes of one `tau.git.commit.attempts` increment. */
+export type GitCommitAttemptAttributes = z.infer<typeof TauMetrics.gitCommitAttempts.attributes>;
+
+/** `rank` on the hot-project gauges. */
+export type HotProjectRank = z.infer<typeof TauMetrics.gitHotProjectCommitRate.attributes>['rank'];
+
+/** `tau.storage.accounting.task`: one of the storage accounting scheduler's periodic tasks. */
+export type StorageAccountingTask = z.infer<
+  typeof TauMetrics.storageAccountingPasses.attributes
+>['tau.storage.accounting.task'];

@@ -1,0 +1,109 @@
+# Fly config for `tau-storage-staging`, the private git storage app (Tau Brain north
+# star component 4, package DC1). It is the only process that runs a repository
+# `git` child, holds a lease or writes under `tenants/<owner>/repos/` on the request
+# path. `tau-api` verifies the caller, signs a 60 s Ed25519 grant and streams the
+# smart-HTTP body here; this app verifies the grant before it reads a body byte and
+# answers with a signed receipt (`apps/api/app/api/git/forwarding/contract/`).
+#
+# Private by construction: one `[http_service]` reached only through Flycast. The
+# app was created on its own custom 6PN (`tau-storage-staging-6pn`, review FR3) and
+# its Flycast address is allocated for the organisation's `default` network, where
+# `tau-api-staging` lives, by `scripts/hosted-storage-fly-bootstrap.sh` in tau-cloud.
+# No public IP: never run `fly ips allocate-v4` or a public `allocate-v6` here; the
+# deploy job refuses to finish if one exists (`.github/workflows/deploy.yml`, app
+# `storage`). `apps/api/app/storage-app.test.ts` holds this file to that shape.
+#
+# Secrets (names only; Terraform in tau-cloud pushes them, proposal P2.5):
+# TAU_STORAGE_GRANT_PUBLIC_KEYS, TAU_STORAGE_RECEIPT_SIGNING_KEY,
+# TAU_S3_ENDPOINT, TAU_S3_ACCESS_KEY_ID, TAU_S3_SECRET_ACCESS_KEY (the storage R2
+# token, Item Write on the private bucket), TAU_S3_BUCKET, TAU_S3_PRIVATE_BUCKET.
+# No DATABASE_URL and no REDIS_URL (Z1): the environment schema refuses to boot
+# with either (`app/config/storage-environment.config.ts`). Nothing here reaches B2.
+#
+# Deploy order (FR12): a key or contract-version change deploys the verifier
+# first. For a grant key that is this app (add the new public key to
+# TAU_STORAGE_GRANT_PUBLIC_KEYS, deploy, then rotate tau-api's signing key); for a
+# receipt key it is tau-api. Rollback is the reverse. A deploy of this app never
+# touches tau-api's Machines: it is a separate app with its own token.
+
+app = 'tau-storage-staging'
+primary_region = 'syd'
+kill_signal = 'SIGTERM'
+# The worker stops accepting, lets in-flight RPCs and post-reply work finish for
+# 100 s (`app/storage-worker.ts`, `stopGraceMilliseconds`), then exits. A push cut
+# past that loses nothing acknowledged: the client saw no report, and the next
+# fetch repairs what a lost receipt left (DC1).
+kill_timeout = '120s'
+
+[build]
+# Relative to this file: the API's Dockerfile, built at its `storage` target.
+dockerfile = '../api/Dockerfile'
+build-target = 'storage'
+
+[deploy]
+# No release_command: the API's release command owns migrations, and this app has
+# no database. Rolling keeps at least one worker serving.
+strategy = 'rolling'
+
+[env]
+NODE_ENV = 'production'
+PORT = '3100'
+LOG_LEVEL = 'info'
+OTEL_SERVICE_NAME = 'tau-storage'
+OTEL_METRICS_PORT = '9464'
+# The API's receipt route. Only a receipt known after the reply (a compacting
+# commit's `retained` bytes) is posted; it is authenticated by its signature alone.
+TAU_STORAGE_RECEIPT_URL = 'https://api.taucad.dev/v1/internal/storage/receipts'
+TAU_S3_PUBLIC_BASE_URL = 'https://cdn.taucad.dev'
+TAU_S3_REGION = 'auto'
+TAU_S3_FORCE_PATH_STYLE = 'false'
+# The slow-body watchdog: a body that moves fewer than 8 KiB in 30 s is aborted and
+# its slot released (FR9). The schema defaults are these values.
+TAU_STORAGE_SLOW_BODY_MINIMUM_BYTES = '8192'
+TAU_STORAGE_SLOW_BODY_WINDOW_SECONDS = '30'
+# DC2: the hard-linked pack cache may hold half the lease filesystem (free bytes
+# plus what it holds); 0 turns it off. The cache fills `tau.git.disk.free_bytes`,
+# so that gauge reads low by design while the cache is warm.
+TAU_STORAGE_PACK_CACHE_FRACTION = '0.5'
+# DC2 affinity: Fly's TXT record of every Machine in this app, answered to tau-api
+# on /v1/members. Only this app's 6PN resolves its own `.internal` names.
+TAU_STORAGE_MEMBERS_DNS = 'vms.tau-storage-staging.internal'
+
+[http_service]
+internal_port = 3100
+# Flycast is plain HTTP inside the private network: `http://tau-storage-staging.flycast`.
+force_https = false
+auto_stop_machines = 'stop'
+auto_start_machines = true
+# DC1's topology: two workers. DC2 adds the pre-created stopped pool and
+# fly-autoscaler; DB2 fixes the concurrency limits below.
+min_machines_running = 2
+
+[http_service.concurrency]
+type = 'requests'
+soft_limit = 16
+hard_limit = 32
+
+# FR11: a push is silent between its last body byte and the compare-and-swap for
+# up to the 5-minute commit deadline (`commitDeadlineMilliseconds`), so the proxy's
+# idle cut must exceed it. 600 s is the deadline plus margin; DB2 measures it.
+[http_service.http_options]
+idle_timeout = 600
+
+[[http_service.checks]]
+interval = '10s'
+grace_period = '15s'
+method = 'GET'
+path = '/health/ready'
+timeout = '2s'
+
+[[metrics]]
+port = 9464
+path = '/metrics'
+
+# The rootfs is the lease cache (DA3 admission reads its free bytes). The north
+# star sizes production at performance-1x or larger; staging stays shared.
+[[vm]]
+memory = '1gb'
+cpu_kind = 'shared'
+cpus = 1

@@ -716,28 +716,6 @@ export const bundleOwners: readonly BundleOwner[] = [
     },
   },
   {
-    slug: 'geospec-authoring',
-    packageDirectory: 'packages/geospec',
-    name: 'GeoSpec authoring',
-    title: 'GeoSpec authoring',
-    description:
-      'Guides canonical GeoSpec geometry tests in TypeScript or JavaScript for every Tau kernel. Use for *.geospec.ts and *.geospec.js tests.',
-    whenToUse: 'Use before creating or editing *.geospec.ts or *.geospec.js tests, for a model in any kernel.',
-    corpus: bundledTypescriptCorpus('geospec/geospec.bundled.json', 'geospec', {
-      packageDirectory: 'packages/geospec',
-      publicEntries: ['.', './model'],
-    }),
-    groupBy: byKind,
-    supplementalApi: {
-      corpus: bundledTypescriptCorpus('geospec/geospec.bundled.json', 'geospec', {
-        packageDirectory: 'packages/geospec',
-      }),
-      prefix: 'public',
-      groupBy: byKind,
-    },
-    core: { budgetTokens: 4000, pins: ['expectGeo', 'loadModel', 'GeoSpecMatcher.*'] },
-  },
-  {
     slug: 'workbench',
     packageDirectory: 'packages/workbench',
     name: 'Workbench',

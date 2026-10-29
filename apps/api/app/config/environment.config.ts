@@ -1,5 +1,6 @@
 import process from 'node:process';
 import { ensureWorktreeDatabase } from '@taucad/utils/worktree-database';
+import { parseRuntimeTelemetryMode, policyMaxAgeBounds, releasePattern } from '@taucad/telemetry';
 import { z } from 'zod';
 import { jsonCodec } from '#lib/zod.lib.js';
 
@@ -9,12 +10,49 @@ const strictEnvironmentBoolean = (defaultValue: boolean) =>
 const unsetWhenEmpty = <T extends z.ZodType>(schema: T) =>
   z.preprocess((value) => (value === '' ? undefined : value), schema);
 
-const environmentSchemaBase = z.object({
+export const environmentSchemaBase = z.object({
   /* eslint-disable @typescript-eslint/naming-convention -- environment variables are UPPER_CASED */
   NODE_ENV: z.enum(['development', 'production', 'test']),
+  TAU_PROJECT_DELETION_ENABLED: strictEnvironmentBoolean(false).describe(
+    'Enable owner-initiated cloud project deletion',
+  ),
   TAU_CLOUD_ENABLED: strictEnvironmentBoolean(false).describe(
     'Start Tau Cloud billing and funded-admission services. Defaults false for self-hosted deployments.',
   ),
+  /*
+   * Runtime Observability (AR-W4-01): the deployment's OWN runtime-telemetry switch, never derived from
+   * TAU_CLOUD_ENABLED. Unset is off, so a self-hosted API records nothing; Tau Cloud sets it per Fly config.
+   */
+  TAU_RUNTIME_TELEMETRY: unsetWhenEmpty(
+    z
+      .string()
+      .optional()
+      .refine(
+        (value) => {
+          try {
+            parseRuntimeTelemetryMode(value);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        { message: 'TAU_RUNTIME_TELEMETRY must be "on", "off" or "paused-until:<ISO 8601>"' },
+      ),
+  ).describe('Record runtime telemetry entries: on, off or paused-until:<ISO 8601>. Unset is off.'),
+  TAU_RUNTIME_TELEMETRY_MAX_AGE: unsetWhenEmpty(
+    z.coerce.number().int().min(policyMaxAgeBounds.minimum).max(policyMaxAgeBounds.maximum).optional(),
+  ).describe('Seconds clients may cache the telemetry policy answer; defaults to 900 when on and 86400 when off.'),
+  TAU_RUNTIME_RELEASES: unsetWhenEmpty(
+    z
+      .string()
+      .optional()
+      .refine(
+        (value) => value === undefined || value.split(',').every((release) => releasePattern.test(release.trim())),
+        {
+          message: 'TAU_RUNTIME_RELEASES must be a comma-separated list of semver or short-SHA releases, newest first',
+        },
+      ),
+  ).describe('Desktop, CLI and daemon releases admitted as runtime telemetry labels, newest first.'),
   /*
    * Charter D23: sync opens to the free tier only after the deployment gate
    * (DG1–DG4) closes. Off, a free account projects `canSyncFiles: false`
@@ -61,6 +99,13 @@ const environmentSchemaBase = z.object({
       'Browser-facing origin of this API (e.g. https://api.tau.new); used to build authenticated publication file proxy URLs. No default — startup validation must fail when it is unset.',
     ),
   ADDITIONAL_CORS_ORIGINS: jsonCodec(z.array(z.string()).describe('Additional CORS origin glob patterns to allow.'))
+    .optional()
+    .default([]),
+  TAU_AUTH_ALLOWED_EMAIL_DOMAINS: jsonCodec(
+    z
+      .array(z.string().trim().toLowerCase().min(1))
+      .describe('Email domains allowed to create an account or sign in, matched exactly. Empty = every domain.'),
+  )
     .optional()
     .default([]),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']),
@@ -238,6 +283,18 @@ const environmentSchemaBase = z.object({
     ),
 
   /*
+   * W14 OB3: R2 usage from Cloudflare's GraphQL Analytics API. Both optional: with either unset the
+   * storage accounting scheduler's `r2_analytics` task counts a skipped pass and exports no `tau_r2_*`
+   * series, and every other accounting task runs as usual.
+   */
+  TAU_CLOUDFLARE_ACCOUNT_ID: unsetWhenEmpty(z.string().optional()).describe(
+    'Cloudflare account id whose R2 analytics the storage accounting scheduler reads (W14 OB3)',
+  ),
+  TAU_CLOUDFLARE_ANALYTICS_TOKEN: unsetWhenEmpty(z.string().optional()).describe(
+    'Cloudflare API token with Account Analytics read, for R2 usage in Grafana (W14 OB3); unset leaves the R2 task off',
+  ),
+
+  /*
    * Tau Hosted Remote (charter D1). Retired: a repository's durable state is
    * its manifest and packs in object storage, and every request builds a
    * disposable lease on the worker's own ephemeral disk. There is no root
@@ -265,6 +322,31 @@ const environmentSchemaBase = z.object({
     .default('0')
     .describe('Dev/e2e only: let the git proxy reach private, loopback and http:// remotes'),
 
+  /*
+   * The tau-storage hop (north star DC1). With a URL, every git RPC executes in
+   * the private tau-storage app behind a grant this API signs, and comes back
+   * with a receipt tau-storage signs; an unreachable tau-storage answers 503 and
+   * never falls back. Unset URL: the same worker runs inside this API under
+   * process-only keys (`forwarding/git-execution.ts`, `git_execution=in_process`),
+   * which is production until a production tau-storage exists. Outside production the fixed development
+   * keys stand in for unset keys (`forwarding/contract/development-keys.ts`).
+   */
+  TAU_STORAGE_URL: unsetWhenEmpty(z.string().optional()).describe(
+    'tau-storage base URL (Flycast); a local stack may list several, comma-separated',
+  ),
+  TAU_STORAGE_GRANT_SIGNING_KEY: unsetWhenEmpty(z.string().optional()).describe(
+    'JSON {kid, alg: "Ed25519", privateKeyPem}: the grant signing key (tau-cloud modules/storage-signing-keys)',
+  ),
+  TAU_STORAGE_RECEIPT_PUBLIC_KEYS: unsetWhenEmpty(z.string().optional()).describe(
+    'JSON array of one or two {kid, alg: "Ed25519", publicKeyPem}: tau-storage receipt verification keys',
+  ),
+  TAU_STORAGE_AFFINITY: z
+    .enum(['off', 'rendezvous'])
+    .default('off')
+    .describe(
+      'DC2: rendezvous-rank each project over the tau-storage members (Flycast: the list tau-storage answers on /v1/members) and spill once',
+    ),
+
   // OpenTelemetry
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional().describe('OTLP endpoint for traces and logs'),
   OTEL_EXPORTER_OTLP_HEADERS: z.string().optional().describe('OTLP auth headers (e.g., Grafana Cloud Basic auth)'),
@@ -281,6 +363,19 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
       message: 'TAU_LLM_PROVIDER_UPSTREAM_URL requires BILLING_ENVIRONMENT=development',
       path: ['TAU_LLM_PROVIDER_UPSTREAM_URL'],
     });
+  }
+
+  /* DC1: a production API forwarding git to tau-storage holds both real keys; never the development pair. */
+  if (data.NODE_ENV === 'production' && data.TAU_STORAGE_URL !== undefined) {
+    for (const name of ['TAU_STORAGE_GRANT_SIGNING_KEY', 'TAU_STORAGE_RECEIPT_PUBLIC_KEYS'] as const) {
+      if (data[name] === undefined) {
+        context.addIssue({
+          code: 'custom',
+          message: `${name} is required when TAU_STORAGE_URL is set in production`,
+          path: [name],
+        });
+      }
+    }
   }
 
   if (data.TAU_TRANSCRIPTION_UPSTREAM_URL !== undefined && data.NODE_ENV === 'production') {
@@ -498,7 +593,7 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
  * The fork is created from the base database on first use, so a worktree never shares
  * (or migrates from under) another checkout's schema.
  */
-const withWorktreeDatabases = (environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+export const withWorktreeDatabases = (environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
   // oxlint-disable-next-line @typescript-eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
   if (environment['NODE_ENV'] !== 'development') {
     return environment;
@@ -526,3 +621,20 @@ export const getEnvironment = (): Environment => {
 };
 
 export type Environment = z.infer<typeof environmentSchema>;
+
+/**
+ * The settings `ObjectStorageService` reads. It takes only these, so a process
+ * that is not the API (`tau-maintenance`, DC4) can construct the driver from a
+ * narrower configuration without holding the API's secrets.
+ */
+export type ObjectStorageEnvironment = Pick<
+  Environment,
+  | 'TAU_S3_ENDPOINT'
+  | 'TAU_S3_REGION'
+  | 'TAU_S3_ACCESS_KEY_ID'
+  | 'TAU_S3_SECRET_ACCESS_KEY'
+  | 'TAU_S3_FORCE_PATH_STYLE'
+  | 'TAU_S3_BUCKET'
+  | 'TAU_S3_PUBLIC_BASE_URL'
+  | 'TAU_S3_PRIVATE_BUCKET'
+>;

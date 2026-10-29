@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import { CadViewer } from '@taucad/viewer/cad/cad-viewer';
 import { GraphicsProvider } from '@taucad/viewer/hooks/use-graphics';
 import type { ModelComponentActionMenuData } from '#component-menu/component-action-menu.jsx';
 import { useViewerPartMenu } from '#component-menu/use-viewer-part-menu.jsx';
@@ -100,6 +101,83 @@ describe('ViewerStage', () => {
       firePointer(region, 'pointerup', { button: 2, pointerId: 3, clientX: 51, clientY: 50 });
 
       expect(screen.getByRole('menu')).toBeInTheDocument();
+    });
+  });
+
+  describe('readiness', () => {
+    it('should keep the canvas region busy from a Three canvas mounting until its first frame is on screen', () => {
+      const { region, graphicsRef } = renderStage();
+      // The stub canvas draws no frames, so nothing is awaited until a Three canvas declares itself.
+      expect(region).not.toHaveAttribute('aria-busy');
+
+      act(() => {
+        graphicsRef.send({ type: 'canvasMounted', canvasId: 'stage' });
+      });
+      expect(region).toHaveAttribute('aria-busy', 'true');
+      act(() => {
+        graphicsRef.send({ type: 'rendererInitialized', payload: { canvasId: 'stage', backend: 'webgpu' } });
+      });
+      expect(region).toHaveAttribute('aria-busy', 'true');
+      act(() => {
+        graphicsRef.send({ type: 'rendererPresented', canvasId: 'stage' });
+      });
+      expect(region).not.toHaveAttribute('aria-busy');
+
+      // A replacement canvas (a backend switch or a retry) is busy again until it presents.
+      act(() => {
+        graphicsRef.send({ type: 'canvasMounted', canvasId: 'replacement' });
+        graphicsRef.send({ type: 'canvasUnmounted', canvasId: 'stage' });
+      });
+      expect(region).toHaveAttribute('aria-busy', 'true');
+      // A canvas that goes away (its context-lost fallback, or a closed unit) leaves nothing to wait for.
+      act(() => {
+        graphicsRef.send({ type: 'canvasUnmounted', canvasId: 'replacement' });
+      });
+      expect(region).not.toHaveAttribute('aria-busy');
+    });
+
+    it('should never report busy for an SVG stage, which draws no frames', async () => {
+      graphics = createViewerGraphics();
+      const graphicsRef = graphics;
+      render(
+        <KeyboardProvider>
+          <TooltipProvider>
+            <GraphicsProvider graphicsRef={graphicsRef}>
+              <ViewerStage
+                graphicsRef={graphicsRef}
+                regionId='viewer-canvas-svg'
+                renderCanvas={() => (
+                  <CadViewer
+                    artifact={{
+                      mimeType: 'image/svg+xml',
+                      content: '<svg viewBox="0 0 10 10"><path d="M0 0L10 10"/></svg>',
+                    }}
+                  />
+                )}
+              />
+            </GraphicsProvider>
+          </TooltipProvider>
+        </KeyboardProvider>,
+      );
+      const region = screen.getByRole('application', { name: 'CAD canvas' });
+      expect(await screen.findByTestId('svg-viewer-host')).toBeInTheDocument();
+      expect(region).not.toHaveAttribute('aria-busy');
+      expect(graphicsRef.getSnapshot().context.canvasPresentation).toBeUndefined();
+    });
+
+    it('should not report busy when the host draws no canvas', () => {
+      graphics = createViewerGraphics();
+      const graphicsRef = graphics;
+      render(
+        <KeyboardProvider>
+          <TooltipProvider>
+            <GraphicsProvider graphicsRef={graphicsRef}>
+              <ViewerStage graphicsRef={graphicsRef} regionId='viewer-canvas-none' renderCanvas={() => null} />
+            </GraphicsProvider>
+          </TooltipProvider>
+        </KeyboardProvider>,
+      );
+      expect(screen.getByRole('application', { name: 'CAD canvas' })).not.toHaveAttribute('aria-busy');
     });
   });
 

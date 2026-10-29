@@ -3,13 +3,15 @@
 /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- vitest asymmetric matchers return any */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ExportResult, Rendering } from '@taucad/runtime';
-import { assertRenderingSuccess, createTestRuntimeClient } from '@taucad/runtime-testing';
+import { assertRenderingSuccess, createTestRuntimeClient, glbToDocument } from '@taucad/runtime-testing';
 import { esbuildBundler } from '@taucad/esbuild';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { initOcct, occtExplicitTessellationDefaults } from '@taucad/occt-core';
 import type { OpenCascadeInstance } from 'libcascade/init';
 import { opencascadeKernel } from '#opencascade.kernel.js';
-import { measureShapesDiagonal, renderShapesWithinBudget } from '#opencascade-mesh.js';
+import { Primitive } from '@gltf-transform/core';
+import { extractShapeEdges } from '#opencascade-edges.js';
+import { countGlbMesh, measureShapesDiagonal, renderShapesWithinBudget, toMeshTolerances } from '#opencascade-mesh.js';
 
 const sphere = (radius: number): string =>
   `import { BRepPrimAPI_MakeSphere } from 'libcascade';
@@ -103,7 +105,8 @@ describe('OpenCascade tessellation presets (P2)', () => {
   it('keeps the triangle count of a preset within 20 % across a hundredfold scale', async () => {
     const small = reportOf(await renderModel(sphere(5), { tessellation: 'medium' }));
     const large = reportOf(await renderModel(sphere(500), { tessellation: 'medium' }));
-    expect(large.linearTolerance! / small.linearTolerance!).toBeCloseTo(100, 6);
+    // The box grows by each shape's absolute tolerance (1e-7 mm), so the ratio is 100 to within 1e-6.
+    expect(large.linearTolerance! / small.linearTolerance! / 100).toBeCloseTo(1, 6);
     expect(Math.abs(large.triangles - small.triangles) / small.triangles).toBeLessThanOrEqual(0.2);
   });
 
@@ -164,6 +167,61 @@ describe('OpenCascade preview budget (P4)', () => {
     maker.delete();
   });
 
+  it('should sample edges at the downgraded tolerances and keep lines out of the triangle count', async () => {
+    const maker = new oc.BRepPrimAPI_MakeSphere(50);
+    const sphere = maker.Shape();
+    const axis = new oc.gp_Ax2();
+    const circle = new oc.gp_Circ(axis, 40);
+    const edgeMaker = new oc.BRepBuilderAPI_MakeEdge(circle);
+    const ring = edgeMaker.Edge();
+    const shapes = [
+      { name: 'Sphere', shape: sphere },
+      { name: 'Ring', shape: ring },
+    ];
+    const request = { tessellation: 'medium', explicitDefaults: occtExplicitTessellationDefaults.preview } as const;
+    const fitted = await renderShapesWithinBudget(oc, shapes, { request, budget: Number.POSITIVE_INFINITY });
+    const budget = Math.floor(fitted.tessellation.triangles / 3);
+    const plain = await renderShapesWithinBudget(oc, shapes, { request, budget });
+    const budgeted = await renderShapesWithinBudget(oc, shapes, { request, budget, includeEdges: true });
+    const effective = {
+      linearTolerance: budgeted.tessellation.linearTolerance!,
+      angularTolerance: budgeted.tessellation.angularTolerance!,
+    };
+
+    expect(budgeted.tessellation.downgraded).toBeGreaterThanOrEqual(1);
+    // Lines never count as triangles: the report matches the same render without edges.
+    expect({ ...budgeted.tessellation, elapsed: 0 }).toEqual({ ...plain.tessellation, elapsed: 0 });
+    expect(countGlbMesh(budgeted.content).triangles).toBe(budgeted.tessellation.triangles);
+
+    const delivered = await glbToDocument(budgeted.content);
+    const meshes = delivered.getRoot().listMeshes();
+    const points = (name: string, mode: number): number[][] =>
+      meshes
+        .find((mesh) => mesh.getName() === name)!
+        .listPrimitives()
+        .filter((primitive) => primitive.getMode() === mode)
+        .flatMap((primitive) => {
+          const positions = primitive.getAttribute('POSITION')!;
+          return Array.from({ length: positions.getCount() }, (_, index) => positions.getElement(index, []));
+        });
+    // The sphere seam lies on the admitted, coarser surface mesh.
+    const surface = points('Sphere', Primitive.Mode['TRIANGLES']!);
+    const seam = points('Sphere', Primitive.Mode['LINES']!);
+    expect(seam.length).toBeGreaterThan(0);
+    for (const [x, y, z] of seam) {
+      expect(Math.min(...surface.map(([u, v, w]) => Math.hypot(x! - u!, y! - v!, z! - w!)))).toBeLessThan(1e-9);
+    }
+    // The free ring is sampled from its curve at the effective tolerances, not the requested ones.
+    const ringLines = points('Ring', Primitive.Mode['LINES']!);
+    const atEffective = extractShapeEdges(oc, ring, toMeshTolerances(effective));
+    const atRequested = extractShapeEdges(oc, ring, toMeshTolerances(fitted.tessellation as typeof effective));
+    expect(ringLines).toHaveLength(atEffective.lines.length / 3);
+    expect(atRequested.lines.length).toBeGreaterThan(atEffective.lines.length);
+    for (const handle of [ring, edgeMaker, circle, axis, sphere, maker]) {
+      handle.delete();
+    }
+  });
+
   it('measures the diagonal of every shape together from the B-rep', () => {
     const nearMaker = new oc.BRepPrimAPI_MakeBox(10, 10, 10);
     const near = nearMaker.Shape();
@@ -181,6 +239,59 @@ describe('OpenCascade preview budget (P4)', () => {
     expect(measureShapesDiagonal(oc, [])).toBeNaN();
     expect(measureShapesDiagonal(oc, [{ name: 'null', shape: empty }])).toBeNaN();
     for (const handle of [near, nearMaker, far, farMaker, corner, empty]) {
+      handle.delete();
+    }
+  });
+
+  it('measures a preset from the cheap B-rep box: never finer than the tight box, at most 10 % coarser', () => {
+    const torusMaker = new oc.BRepPrimAPI_MakeTorus(40, 8);
+    const origin = new oc.gp_Pnt(30, -20, 5);
+    const oblique = new oc.gp_Dir(1, 2, 3);
+    const axes = new oc.gp_Ax2(origin, oblique);
+    const cylinderMaker = new oc.BRepPrimAPI_MakeCylinder(axes, 6, 70);
+    const shapes = [
+      { name: 'torus', shape: torusMaker.Shape() },
+      { name: 'cylinder', shape: cylinderMaker.Shape() },
+    ];
+    const boxDiagonal = (
+      add: (shape: (typeof shapes)[number]['shape'], box: InstanceType<typeof oc.Bnd_Box>) => void,
+    ) => {
+      const box = new oc.Bnd_Box();
+      for (const { shape } of shapes) {
+        add(shape, box);
+      }
+      const diagonal = Math.hypot(
+        box.GetXMax() - box.GetXMin(),
+        box.GetYMax() - box.GetYMin(),
+        box.GetZMax() - box.GetZMin(),
+      );
+      box.delete();
+      return diagonal;
+    };
+    const tight = boxDiagonal((shape, box) => {
+      oc.BRepBndLib.AddOptimal(shape, box, false, false);
+    });
+    const cheap = boxDiagonal((shape, box) => {
+      oc.BRepBndLib.Add(shape, box, false);
+    });
+
+    const measured = measureShapesDiagonal(oc, shapes);
+    expect(measured).toBe(cheap);
+    expect(measured).toBeGreaterThanOrEqual(tight);
+    expect(measured / tight).toBeLessThanOrEqual(1.1);
+
+    // A triangulation left by an earlier mesh does not change the measurement.
+    const meshes = shapes.map(({ shape }) => new oc.BRepMesh_IncrementalMesh(shape, 5, false, 0.5, false));
+    expect(measureShapesDiagonal(oc, shapes)).toBe(measured);
+    for (const handle of [
+      ...meshes,
+      ...shapes.map(({ shape }) => shape),
+      torusMaker,
+      cylinderMaker,
+      axes,
+      oblique,
+      origin,
+    ]) {
       handle.delete();
     }
   });

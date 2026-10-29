@@ -8,9 +8,7 @@ import process from 'node:process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { localDatabaseName } from '@taucad/utils/worktree-database';
 import { desktopE2EApiUrl, desktopE2EDesktopCloudEnabled, desktopE2EFreeTierSyncEnabled } from '#support/config.js';
-import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import {
   forgetBackupByDefault,
@@ -19,7 +17,7 @@ import {
   revisionStatus,
   revisionStrip,
 } from '#support/revisions-pane.js';
-import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
+import { deleteTauTestUser, seedTauTestUser, tauDatabaseCommand, tauTestAccount } from '#support/tau-account.js';
 import { launchBrowserClient, openCloudOnlyProject, uploadFileInPage } from '#support/two-client/browser-client.js';
 import type { BrowserClient } from '#support/two-client/browser-client.js';
 import { routeGitRefusal } from '#support/two-client/git-faults.js';
@@ -29,6 +27,7 @@ import {
   basicAuthorization,
   forgetSeededProjects,
   projectLfsBytes,
+  launchTauCloudDesktop,
   mintOneTimeToken,
   readStorageUsage,
   runGit,
@@ -54,26 +53,10 @@ import type { UiServer } from '#support/two-client/ui-server.js';
 
 const execFileAsync = promisify(execFile);
 
-/** Count rows through the same `docker exec psql` channel the seeding helpers use. */
+/** Count rows through the same run-owned database route as account seeding. */
 const countRows = async (statement: string): Promise<number> => {
-  const { stdout } = await execFileAsync(
-    'docker',
-    [
-      'exec',
-      'tau-postgres',
-      'psql',
-      '-qtAX',
-      '-v',
-      'ON_ERROR_STOP=1',
-      '-U',
-      'dev_user',
-      '-d',
-      localDatabaseName(),
-      '-c',
-      statement,
-    ],
-    { encoding: 'utf8' },
-  );
+  const { file, args } = tauDatabaseCommand(statement);
+  const { stdout } = await execFileAsync(file, [...args, '-qtAX'], { encoding: 'utf8' });
   return Number(stdout.trim());
 };
 
@@ -570,7 +553,7 @@ describe.runIf(desktopE2EFreeTierSyncEnabled)('a free-tier owner with the free-s
   const incompressible = (bytes: number): string => randomBytes(bytes).toString('base64');
 
   beforeAll(async () => {
-    desktop = await launchDesktopApp({ token: required(free).bearer });
+    desktop = await launchTauCloudDesktop(required(free).bearer);
     collaborator = await seed('sync-collaborator', 'free');
   }, 900_000);
 

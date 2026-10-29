@@ -58,7 +58,8 @@ import type { ReadSkillResource } from '@taucad/agent-tools/registry';
 import { createSkillResolver } from '@taucad/agent-tools/skills';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
 import type { ModelAdmissionLimits } from '@taucad/agent-tools/runtime';
-import { runGeoSpecTests, tauClientExporter } from '@taucad/agent-tools/geospec';
+import { createGeoSpecConfigSession, runGeoSpecTests, tauClientExporter } from '@taucad/agent-tools/geospec';
+import type { GeoSpecTestModelConfig } from '@taucad/agent-tools/geospec';
 import type { GeoSpecModelExporter } from 'geospec/model';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
 import type { Engine as NativeGeoSpecEngine, HostEngineLimits } from 'geospec-engine/node';
@@ -78,6 +79,7 @@ import type { parameterSetMachine } from '@taucad/parameters/set-machine';
 import type { JsonObject, ToolRegistry } from '@taucad/agent-host';
 
 import type { ProjectRevisions } from '#revisions.js';
+import type { HostShell } from '#shell/shell-service.js';
 import { prepareKernelDescription, prepareKernelInputSchema, prepareKernelToolName } from '#prepare-kernel-tool.js';
 
 type ParameterActor = ActorRefFrom<typeof parameterSetMachine>;
@@ -480,16 +482,20 @@ export const createHostGeoSpecRunner = async (
   });
   await previous;
   try {
-    const [session, { createNativeGeoSpecRunner }, { createNodeVmFileSystem }, exporter] = await Promise.all([
-      openNativeGeoSpecSession(workspaceRoot),
-      import('geospec/runner/native'),
-      import('geospec/runner/node'),
-      tauClientExporter({ client: runtime }),
-    ]);
+    const [session, { createNativeGeoSpecRunner }, { createNodeVmFileSystem }, { createEsbuildModuleVm }, exporter] =
+      await Promise.all([
+        openNativeGeoSpecSession(workspaceRoot),
+        import('geospec/runner/native'),
+        import('geospec/runner/node'),
+        // Tau's esbuild VM resolves the npm packages a spec imports; GeoSpec's plain default does not.
+        import('@taucad/esbuild/vm'),
+        tauClientExporter({ client: runtime }),
+      ]);
 
     const filesystem = createNodeVmFileSystem(workspaceRoot);
     const runner = createNativeGeoSpecRunner({
       filesystem,
+      createModuleVm: createEsbuildModuleVm,
       // PERF-OUTPUT-01: the product reads verdicts and localized failures, so
       // it selects the bounded success evidence (ruling 13).
       nativeAssertions: { engine: session.engine, evidenceProfile: 'bounded' },
@@ -650,6 +656,13 @@ export type HostToolRegistryOptions = {
    * process's environment, read fail-closed: a value other than unset, empty or `open` is `locked`.
    */
   readonly acquisition?: 'open' | 'locked' | undefined;
+  /**
+   * The contained shell `shell` runs on, once `probeHostShell` answered `available` (D1). Only the desktop
+   * services host passes one: `tau mcp` and the daemon mint run ids and checkouts themselves and cannot ask a person,
+   * so they never offer `shell`. It reads each call's checkout by run id, never this registry's root. A function is read
+   * at every listing and call, so the tool appears once the probe settles.
+   */
+  readonly shell?: HostShell | (() => HostShell | undefined) | undefined;
 };
 
 /**
@@ -930,6 +943,27 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
             ? async () => createHostGeoSpecRunner(workspaceRoot, await runtimeClient(workspaceRoot))
             : undefined));
 
+    /*
+     * The project's `geospec.config.*` through the spec VM, as every host reads it: its data fields are this call's
+     * defaults and its exporters never run here. Its code runs only where the project's does, which the daemon
+     * already gates behind `--trust-projects` for relayed projects.
+     */
+    const configSession = createGeoSpecConfigSession();
+    const readConfig = async (): Promise<GeoSpecTestModelConfig> => {
+      const [{ readGeoSpecConfig }, { createNodeVmFileSystem }, { createEsbuildModuleVm }] = await Promise.all([
+        import('geospec/config'),
+        import('geospec/runner/node'),
+        import('@taucad/esbuild/vm'),
+      ]);
+      return configSession(
+        await readGeoSpecConfig({
+          filesystem: createNodeVmFileSystem(workspaceRoot),
+          projectPath: '',
+          createModuleVm: createEsbuildModuleVm,
+        }),
+      );
+    };
+
     /**
      * `test_model` in process: discovery walks the real directory, the runner
      * executes the selected specs, and the projection is the same one the browser
@@ -959,6 +993,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
               runner,
               projectPath: workspaceRoot,
               args,
+              config: await readConfig(),
               /* One report as the run starts and one as each test starts, counting the tests started, so a client
                * sees which requirement a long claim belongs to. */
               ...(onProgress === undefined
@@ -1029,6 +1064,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       skillResolver,
       testingEnabled: geospec !== undefined,
       acquisition,
+      ...(options.shell === undefined ? {} : { shell: options.shell }),
     });
     return { registry, settingsOwner };
   };

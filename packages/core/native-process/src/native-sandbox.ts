@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { accessSync, constants, realpathSync } from 'node:fs';
 import { endianness, homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -40,7 +40,12 @@ export type NativeSandboxLaunch = {
   readonly commandId: string;
 };
 
-const physicalVariants = (paths: readonly string[]): string[] => {
+/**
+ * Each path and its physical spelling, so a deny or grant holds whichever spelling a process opens.
+ *
+ * @internal
+ */
+export const physicalVariants = (paths: readonly string[]): string[] => {
   const variants = new Set<string>();
   for (const path of paths) {
     variants.add(path);
@@ -56,9 +61,10 @@ const physicalVariants = (paths: readonly string[]): string[] => {
 /**
  * Roots a native worker may never read: every user home, removable volume, and shared temporary storage.
  *
+ * @internal
  * @returns Logical and physical spellings of each root.
  */
-const deniedReadRoots = (): string[] =>
+export const deniedReadRoots = (): string[] =>
   physicalVariants([homedir(), '/Users', '/home', '/root', '/Volumes', '/mnt', '/media', '/tmp', tmpdir()]);
 
 /**
@@ -69,14 +75,57 @@ const deniedReadRoots = (): string[] =>
  * any checkout or app bundle below `/home` or `/tmp` — would otherwise hide its own helper and
  * every launch would exit 127 before the worker ran.
  *
+ * @internal
  * @returns The vendored seccomp directory on Linux; nothing elsewhere.
  */
-const sandboxRuntimeReadRoots = (): string[] => {
-  if (process.platform !== 'linux') {
-    return [];
+export const sandboxRuntimeReadRoots = (): string[] => {
+  const helper = sandboxRuntimeSeccomp();
+  const javaAgent = sandboxRuntimeJavaAgent();
+  return helper === undefined || javaAgent === undefined
+    ? []
+    : [dirname(dirname(helper.applyPath)), dirname(javaAgent)];
+};
+
+/**
+ * Resolve the executable on the real filesystem, not Electron's virtual ASAR filesystem.
+ * Desktop packaging unpacks the seccomp directory; both bubblewrap mounts and the shell
+ * invocation must use that same physical path. Missing payloads remain sandbox failures.
+ *
+ * @internal
+ * @param entry - Resolved sandbox-runtime entry; defaults to the installed dependency.
+ * @param platform - Host operating system.
+ * @param architecture - Host CPU architecture.
+ * @returns The Linux helper configuration; absent on other platforms.
+ */
+export const sandboxRuntimeSeccomp = (
+  entry = fileURLToPath(import.meta.resolve('@anthropic-ai/sandbox-runtime')),
+  platform: NodeJS.Platform = process.platform,
+  architecture: string = process.arch,
+): { applyPath: string } | undefined => {
+  if (platform !== 'linux') {
+    return undefined;
   }
-  const entry = fileURLToPath(import.meta.resolve('@anthropic-ai/sandbox-runtime'));
-  return [join(dirname(dirname(entry)), 'vendor', 'seccomp')];
+  const physicalEntry = entry.replace(/\.asar(?=[/\\])/u, '.asar.unpacked');
+  return { applyPath: join(dirname(dirname(physicalEntry)), 'vendor', 'seccomp', architecture, 'apply-seccomp') };
+};
+
+/**
+ * Resolve the Linux proxy agent on the physical filesystem for bubblewrap mounts.
+ *
+ * @internal
+ * @param entry - Installed sandbox-runtime entry.
+ * @param platform - Host operating system.
+ * @returns Physical JAR path on Linux; absent elsewhere.
+ */
+export const sandboxRuntimeJavaAgent = (
+  entry = fileURLToPath(import.meta.resolve('@anthropic-ai/sandbox-runtime')),
+  platform: NodeJS.Platform = process.platform,
+): string | undefined => {
+  if (platform !== 'linux') {
+    return undefined;
+  }
+  const physicalEntry = entry.replace(/\.asar(?=[/\\])/u, '.asar.unpacked');
+  return join(dirname(dirname(physicalEntry)), 'vendor', 'java-proxy-agent', 'srt-proxy-agent.jar');
 };
 
 /**
@@ -88,9 +137,10 @@ const sandboxRuntimeReadRoots = (): string[] => {
  * Reading the roots back from the same export keeps a runtime upgrade from re-opening the hole with a
  * new default. Character devices stay writable because the worker's stdio needs them.
  *
+ * @internal
  * @returns Every default write root except the `/dev` devices.
  */
-const deniedWriteRoots = (): string[] => getDefaultWritePaths().filter((path) => !path.startsWith('/dev/'));
+export const deniedWriteRoots = (): string[] => getDefaultWritePaths().filter((path) => !path.startsWith('/dev/'));
 
 /**
  * The capability profile handed to the sandbox runtime, spelled locally so the published
@@ -99,6 +149,8 @@ const deniedWriteRoots = (): string[] => getDefaultWritePaths().filter((path) =>
  * @public
  */
 export type NativeSandboxProfile = {
+  seccomp?: { applyPath: string };
+  javaAgentJarPath?: string;
   network: { allowedDomains: string[]; deniedDomains: string[]; strictAllowlist: boolean };
   filesystem: { denyRead: string[]; allowRead: string[]; allowWrite: string[]; denyWrite: string[] };
 };
@@ -125,6 +177,8 @@ export type NativeSandboxProfile = {
 export const nativeSandboxPolicy = (
   launch?: Pick<NativeSandboxLaunch, 'readablePaths' | 'writablePath'>,
 ): NativeSandboxProfile => ({
+  seccomp: sandboxRuntimeSeccomp(),
+  javaAgentJarPath: sandboxRuntimeJavaAgent(),
   network: { allowedDomains: [], deniedDomains: ['*'], strictAllowlist: true },
   filesystem: {
     denyRead: deniedReadRoots(),
@@ -208,7 +262,11 @@ const ensureInitialized = async (): Promise<void> => {
     if (dependencies.errors.length > 0) {
       throw new NativeRuntimeUnavailableError(dependencies.errors.join('; '));
     }
-    await SandboxManager.initialize(nativeSandboxPolicy());
+    const profile = nativeSandboxPolicy();
+    if (profile.seccomp) {
+      accessSync(profile.seccomp.applyPath, constants.X_OK);
+    }
+    await SandboxManager.initialize(profile);
   })();
   const attempt = initialization;
   try {

@@ -49,7 +49,16 @@ const picogkDeclaredHost =
     ) >= 28);
 
 /** What one run of the built `tau` produced. */
-type Run = { readonly code: number | undefined; readonly stdout: string; readonly stderr: string };
+type Run = {
+  readonly code: number | undefined;
+  readonly signal: NodeJS.Signals | undefined;
+  readonly pid: number | undefined;
+  readonly timedOut: boolean;
+  /** Milliseconds from spawning the process until its output streams close. */
+  readonly elapsed: number;
+  readonly stdout: string;
+  readonly stderr: string;
+};
 
 let scratch = '';
 
@@ -91,7 +100,7 @@ const binArguments = (args: readonly string[]): string[] => [
  *
  * @param args - Its arguments.
  * @param options - Environment additions and a working directory.
- * @returns Its exit code and output.
+ * @returns Its exit code, termination diagnostics and fully drained output.
  */
 const tau = async (
   args: readonly string[],
@@ -102,6 +111,7 @@ const tau = async (
   } = {},
 ): Promise<Run> =>
   new Promise((resolve, reject) => {
+    const started = performance.now();
     const child = spawn(process.execPath, binArguments(args), {
       cwd: options.cwd ?? repoRoot,
       env: isolated(options.env),
@@ -109,6 +119,7 @@ const tau = async (
     });
     let stdout = '';
     let stderr = '';
+    let timedOut = false;
     child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
       stdout += chunk;
     });
@@ -116,12 +127,26 @@ const tau = async (
       stderr += chunk;
     });
     const timer = setTimeout(() => {
+      timedOut = true;
       child.kill('SIGKILL');
     }, options.runTimeout ?? 300_000);
-    child.once('error', reject);
-    child.once('exit', (code) => {
+    child.once('error', (error) => {
       clearTimeout(timer);
-      resolve({ code: code ?? undefined, stdout, stderr });
+      reject(error);
+    });
+    child.once('exit', () => {
+      clearTimeout(timer);
+    });
+    child.once('close', (code, signal) => {
+      resolve({
+        code: code ?? undefined,
+        signal: signal ?? undefined,
+        pid: child.pid,
+        timedOut,
+        elapsed: Math.round(performance.now() - started),
+        stdout,
+        stderr,
+      });
     });
   });
 
@@ -392,7 +417,7 @@ describe('T3 — tau open --desktop hands the served folder to Tau Desktop (X54)
       const fragment = new URLSearchParams(link.hash.slice(1));
       const origin = fragment.get('tau-host') ?? '';
       const code = fragment.get('tau-code') ?? '';
-      expect(`${link.origin}${link.pathname}${link.search}`).toBe('https://tau.new/');
+      expect(`${link.origin}${link.pathname}${link.search}`).toBe('https://tau.new/projects');
       expect(origin).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/u);
       const redeem = async (from: string): Promise<Response> =>
         fetch(new URL('/.well-known/tau-host/session', origin), {
@@ -595,7 +620,9 @@ describe('T11 — tau check and tau test in CI', () => {
       { label: 'synthetic/model-error', file: join(broken, 'main.ts') },
     ];
     const statusExit: Record<string, number> = { ok: 0, error: 1, refused: 3 };
-    const outcomes: Array<{ label: string; code: number | undefined; status: unknown }> = [];
+    const outcomes: Array<
+      Pick<Run, 'code' | 'signal' | 'pid' | 'timedOut' | 'elapsed'> & { label: string; status: unknown }
+    > = [];
     const queue = [...inputs];
     const worker = async (): Promise<void> => {
       for (let input = queue.shift(); input !== undefined; input = queue.shift()) {
@@ -607,7 +634,15 @@ describe('T11 — tau check and tau test in CI', () => {
         } catch {
           status = `unparsed: ${run.stderr.slice(-400)}`;
         }
-        outcomes.push({ label: input.label, code: run.code, status });
+        outcomes.push({
+          label: input.label,
+          code: run.code,
+          signal: run.signal,
+          pid: run.pid,
+          timedOut: run.timedOut,
+          elapsed: run.elapsed,
+          status,
+        });
       }
     };
     await Promise.all(Array.from({ length: Math.max(2, Math.min(4, availableParallelism() - 1)) }, worker));
@@ -619,7 +654,10 @@ describe('T11 — tau check and tau test in CI', () => {
         log,
         outcomes
           .toSorted((left, right) => left.label.localeCompare(right.label))
-          .map(({ label, code, status }) => `${String(code)} ${String(status)} ${label}`)
+          .map(
+            ({ label, code, status, signal, pid, timedOut, elapsed }) =>
+              `${String(code)} ${String(status)} ${label}\t${JSON.stringify({ signal, pid, timedOut, elapsed })}`,
+          )
           .join('\n'),
       );
     }

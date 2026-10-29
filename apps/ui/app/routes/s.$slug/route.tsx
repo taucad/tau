@@ -1,3 +1,4 @@
+import { SharedProjectPassword } from '#components/share/shared-project-password.js';
 import { useEffect, useMemo, useState } from 'react';
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router';
 import { useLoaderData, useLocation, useParams } from 'react-router';
@@ -10,7 +11,6 @@ import {
 } from '@taucad/types';
 import type { ProjectManifest } from '@taucad/types';
 import { findBuiltinProject } from '#lib/builtin-projects.js';
-import { sharePasswordLimits } from '@taucad/share/artifact';
 import { requireParameterRecord } from '@taucad/parameters';
 import type { ShareOpenedArtifact } from '@taucad/share/artifact';
 import { parseShareSlug, parseShareUrl } from '@taucad/share/locator';
@@ -18,9 +18,6 @@ import { isShareError, ShareError } from '@taucad/share/provider';
 import type { ShareProtection } from '@taucad/share/provider';
 import type { ShareProjectSnapshot, ShareSnapshotFileRole } from '@taucad/share/snapshot';
 import { Loader } from '@taucad/ui/components/loader';
-import { Button } from '@taucad/ui/components/button';
-import { Input } from '@taucad/ui/components/input';
-import { Label } from '@taucad/ui/components/label';
 import type { Handle } from '#types/matches.types.js';
 import PublicationViewRoute, {
   ErrorBoundary as PublicationErrorBoundary,
@@ -285,9 +282,6 @@ export const PortableShareSurface = (): React.JSX.Element => {
     };
   }, [location.hash, slug, submittedPassword]);
 
-  const passwordBytes = new TextEncoder().encode(password.normalize('NFC')).byteLength;
-  const passwordValid = passwordBytes >= sharePasswordLimits.minBytes && passwordBytes <= sharePasswordLimits.maxBytes;
-
   const resolved = useMemo(() => (artifact ? resolvePortableArtifact(artifact) : undefined), [artifact]);
 
   if (unpublished) {
@@ -317,44 +311,16 @@ export const PortableShareSurface = (): React.JSX.Element => {
   }
   if (needsPassword && !artifact) {
     return (
-      <main className='flex min-h-dvh items-center justify-center bg-background p-6'>
-        <form
-          className='w-full max-w-sm rounded-xl border bg-card p-6'
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (passwordValid) {
-              setSubmittedPassword(password);
-            }
-          }}
-        >
-          <h1 className='text-lg font-semibold'>Password required</h1>
-          <p className='mt-2 text-sm text-muted-foreground'>Enter the password shared by the project author.</p>
-          <div className='mt-5 flex flex-col gap-2'>
-            <Label htmlFor='shared-project-password'>Password</Label>
-            <Input
-              id='shared-project-password'
-              type='password'
-              autoComplete='current-password'
-              autoFocus
-              value={password}
-              disabled={opening}
-              aria-invalid={Boolean(passwordError)}
-              onChange={(event) => {
-                setPassword(event.target.value);
-                setPasswordError(undefined);
-              }}
-            />
-            <p className='text-xs text-muted-foreground'>
-              {sharePasswordLimits.minBytes}–{sharePasswordLimits.maxBytes} UTF-8 bytes required.
-            </p>
-            {passwordError ? <p className='text-sm text-feature'>{passwordError}</p> : null}
-          </div>
-          <Button className='mt-5 w-full' type='submit' disabled={!passwordValid || opening}>
-            {opening ? <Loader className='size-4' /> : null}
-            Open project
-          </Button>
-        </form>
-      </main>
+      <SharedProjectPassword
+        password={password}
+        isOpening={opening}
+        passwordError={passwordError}
+        onPasswordChange={(value) => {
+          setPassword(value);
+          setPasswordError(undefined);
+        }}
+        onSubmit={setSubmittedPassword}
+      />
     );
   }
   if (!artifact || !resolved) {

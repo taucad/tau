@@ -1,11 +1,14 @@
-import { NavigationType, Outlet, useLocation, useNavigationType } from 'react-router';
+import { Link, NavigationType, Outlet, useLocation, useNavigationType } from 'react-router';
 import { Fragment } from 'react/jsx-runtime';
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import type { CSSProperties, ReactNode, UIEvent } from 'react';
 import { LayoutPriority } from 'allotment';
+import { ChevronLeft } from 'lucide-react';
 import { Allotment } from '#components/panes/allotment.js';
 import type { AllotmentHandle } from 'allotment';
 import { AppSidebar } from '#components/layout/app-sidebar.js';
+import { PhoneTopBarContext } from '#components/layout/page-header.js';
+import type { PhoneTopBar } from '#components/layout/page-header.js';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -13,9 +16,11 @@ import {
   BreadcrumbList,
   BreadcrumbSeparator,
 } from '@taucad/ui/components/breadcrumb';
+import { Button } from '@taucad/ui/components/button';
 import { Separator } from '@taucad/ui/components/separator';
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from '#components/ui/sidebar.js';
 import { useTypedMatches } from '#hooks/use-typed-matches.js';
+import type { TypedUiMatchWithHandle } from '#types/matches.types.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { Compose } from '#components/ui/utils/compose.js';
 import { CommandPaletteProvider, RouteCommandPaletteItems } from '#components/layout/command-palette.js';
@@ -41,6 +46,15 @@ const sidebarMaximumWidth = 480;
 const sidebarKeyboardResizeStep = 16;
 
 const headerOffsetClasses = 'mt-(--header-height) h-[calc(100dvh-var(--header-height)-1px)]';
+// A phone-only bar offsets the page below `md` only; from `md` up the page keeps the headerless layout.
+const phoneHeaderOffsetClasses = 'max-md:mt-(--header-height) max-md:h-[calc(100dvh-var(--header-height)-1px)]';
+/**
+ * Without a header, the closed sidebar's titlebar controls overlay the page top from `md` up; a page that draws its
+ * own bar (`enablePageHeader: false`) keeps this inset as the shell gives a headerless page.
+ *
+ * @public
+ */
+export const desktopTitlebarInset = 'md:group-data-[sidebar-open=false]/app-shell:pt-9';
 
 /*
  * Each history entry keeps its place in the shell's scroller. React Router's
@@ -101,6 +115,285 @@ const saveScroll = (locationKey: string, scrollTop: number): void => {
     // Persistence is best-effort.
   }
 };
+
+type PageTitles = {
+  /** The deepest `Handle.title`: what the phone top bar calls this page. */
+  readonly title: string | undefined;
+  /** The next titled match above it at another path: the back-to-parent crumb. */
+  readonly parent: { readonly to: string; readonly label: string } | undefined;
+  /** The titled match's own path: actions from routes above it belong to another page. */
+  readonly path: string | undefined;
+};
+
+/**
+ * The page's own title and its parent, read from the matched routes (D11). A nested
+ * route (`/projects/new` under `/projects`) gets its parent's title and path as the
+ * crumb; a top-level route, or a child that names no title of its own, gets none.
+ * The desktop build keeps its titlebar and has no phone bar, so it gets neither.
+ */
+const resolvePageTitles = (matches: readonly TypedUiMatchWithHandle[], isDesktopTarget: boolean): PageTitles => {
+  if (isDesktopTarget) {
+    return { title: undefined, parent: undefined, path: undefined };
+  }
+  const titled = matches.flatMap((match) => {
+    const title = typeof match.handle.title === 'function' ? match.handle.title(match) : match.handle.title;
+    return title ? [{ to: match.pathname, label: title }] : [];
+  });
+  const page = titled.at(-1);
+  const parent = titled.slice(0, -1).findLast((entry) => entry.to !== page?.to);
+  return { title: page?.label, parent, path: page?.to };
+};
+
+/** Header classes that change when the phone bar carries a title; `md` and up keep today's header. */
+const phoneBarClasses = (
+  hasPhoneTitle: boolean,
+): { readonly header: string | undefined; readonly cluster: string | undefined; readonly breadcrumbItem: string } =>
+  hasPhoneTitle
+    ? {
+        header: 'max-md:border-b max-md:bg-sidebar',
+        cluster: 'min-w-0 max-md:ml-1 max-md:flex-1',
+        // Phones show the title instead of the trail's last item.
+        breadcrumbItem: 'md:last:block',
+      }
+    : { header: undefined, cluster: undefined, breadcrumbItem: 'last:block' };
+
+/**
+ * The phone top bar's back-to-parent crumb ("‹ Projects", named "Back to Projects"), one 40px target whose label
+ * truncates. Every phone bar that returns to a parent draws this one, so the words and the target stay the same (I6).
+ *
+ * @param props - The parent's path and title, and the caller's placement classes.
+ * @returns The crumb.
+ * @public
+ */
+export function PageParentCrumb({
+  to,
+  label,
+  className,
+}: {
+  readonly to: string;
+  readonly label: string;
+  readonly className?: string;
+}): React.JSX.Element {
+  return (
+    <Button
+      asChild
+      variant='ghost'
+      size='lg'
+      className={cn('min-w-0 gap-0.5', className)}
+      data-slot='page-parent-crumb'
+    >
+      <Link to={to} aria-label={`Back to ${label}`}>
+        <ChevronLeft aria-hidden />
+        <span className='max-w-28 min-w-0 truncate'>{label}</span>
+      </Link>
+    </Button>
+  );
+}
+
+/**
+ * The phone top bar's back-to-parent crumb ("‹ Projects", named "Back to Projects")
+ * and page title. From `md` up the breadcrumb trail orients instead.
+ */
+function PhonePageTitle({
+  title,
+  parent,
+}: {
+  readonly title: string;
+  readonly parent: PageTitles['parent'];
+}): React.JSX.Element {
+  return (
+    <>
+      {parent ? <PageParentCrumb to={parent.to} label={parent.label} className='shrink-0 md:hidden' /> : null}
+      {/* Not a heading, and hidden from assistive tech: the page's `PageHeader` keeps the one `<h1>` that names the page. */}
+      <p aria-hidden data-slot='page-title' className='min-w-0 flex-1 truncate px-1 text-sm font-medium md:hidden'>
+        {title}
+      </p>
+    </>
+  );
+}
+
+const selectPageAction = (
+  actionItems: readonly TypedUiMatchWithHandle[],
+  pagePath: string | undefined,
+): TypedUiMatchWithHandle | undefined => {
+  const deepest = actionItems.at(-1);
+  return deepest && pagePath !== undefined && deepest.pathname.length < pagePath.length ? undefined : deepest;
+};
+
+type HeaderLayout = {
+  readonly reserveHeader: boolean;
+  /** The header exists only as the phone top bar (no breadcrumb or all-width action). */
+  readonly isPhoneOnly: boolean;
+  /** `--header-height` for the inset. */
+  readonly insetClass: string;
+  /** The scroller's offset below the header. */
+  readonly sectionClass: string | undefined;
+  /** One of the `phoneTopBars` constants, so the context value is stable across renders. */
+  readonly phoneTopBar: PhoneTopBar;
+};
+
+const phoneTopBars = {
+  none: { hasTitle: false, hasAction: false },
+  title: { hasTitle: true, hasAction: false },
+  action: { hasTitle: false, hasAction: true },
+  both: { hasTitle: true, hasAction: true },
+} as const satisfies Record<string, PhoneTopBar>;
+
+const selectPhoneTopBar = (hasTitle: boolean, hasAction: boolean): PhoneTopBar => {
+  if (hasTitle) {
+    return hasAction ? phoneTopBars.both : phoneTopBars.title;
+  }
+  return hasAction ? phoneTopBars.action : phoneTopBars.none;
+};
+
+/**
+ * Where the route header sits. The phone top bar (D11) is decided from route facts
+ * alone and placed by CSS (`md:hidden`, `md:[--header-height:0px]`), so the server
+ * markup already paints a phone's bar and the page's hidden title: nothing moves
+ * after hydration. `isMobile` only keeps the legacy trigger strip on untitled routes.
+ */
+const resolveHeaderLayout = ({
+  enablePageHeader,
+  isDesktopTarget,
+  isMobile,
+  hasPageHeaderChrome,
+  hasTitle,
+  hasAction,
+}: {
+  readonly enablePageHeader: boolean;
+  readonly isDesktopTarget: boolean;
+  readonly isMobile: boolean;
+  readonly hasPageHeaderChrome: boolean;
+  readonly hasTitle: boolean;
+  readonly hasAction: boolean;
+}): HeaderLayout => {
+  const hasPhoneBar = enablePageHeader && !isDesktopTarget && (hasTitle || hasAction);
+  const reserveHeader = enablePageHeader && (hasPageHeaderChrome || isMobile || hasPhoneBar);
+  const isPhoneOnly = hasPhoneBar && !hasPageHeaderChrome;
+  const phone = { phoneTopBar: selectPhoneTopBar(hasPhoneBar && hasTitle, hasPhoneBar && hasAction) };
+  if (!reserveHeader) {
+    return {
+      reserveHeader,
+      isPhoneOnly,
+      insetClass: '[--header-height:0px]',
+      sectionClass: enablePageHeader ? desktopTitlebarInset : undefined,
+      ...phone,
+    };
+  }
+  if (isPhoneOnly) {
+    return {
+      reserveHeader,
+      isPhoneOnly,
+      insetClass: '[--header-height:calc(var(--spacing)*12)] md:[--header-height:0px]',
+      sectionClass: cn(phoneHeaderOffsetClasses, desktopTitlebarInset),
+      ...phone,
+    };
+  }
+  return {
+    reserveHeader,
+    isPhoneOnly,
+    insetClass: isDesktopTarget
+      ? '[--header-height:calc(var(--spacing)*9)]'
+      : '[--header-height:calc(var(--spacing)*12)] md:[--header-height:calc(var(--spacing)*9)]',
+    sectionClass: headerOffsetClasses,
+    ...phone,
+  };
+};
+
+/**
+ * The shell's route header. From `md` up it holds the breadcrumb trail and the route
+ * action; on phones (D11) it is the 48px top bar: sidebar trigger, back-to-parent
+ * crumb, page title and at most one action.
+ */
+function PageShellHeader({
+  isDesktopTarget,
+  hasPageHeaderChrome,
+  isPhoneOnly,
+  breadcrumbItems,
+  titles,
+  actionMatch,
+}: {
+  readonly isDesktopTarget: boolean;
+  readonly hasPageHeaderChrome: boolean;
+  /** The header is only the phone top bar: hidden from `md` up, where it takes no room. */
+  readonly isPhoneOnly: boolean;
+  readonly breadcrumbItems: readonly TypedUiMatchWithHandle[];
+  readonly titles: PageTitles;
+  /** D11/I4: the deepest route that declares `actions`; only its one action renders. */
+  readonly actionMatch: TypedUiMatchWithHandle | undefined;
+}): React.JSX.Element {
+  const hasBreadcrumbItems = breadcrumbItems.length > 0;
+  const phoneBar = phoneBarClasses(titles.title !== undefined);
+  const isPhoneOnlyAction = actionMatch?.handle.actionsScope === 'phone';
+  return (
+    <header
+      className={cn(
+        'pointer-events-none absolute top-0 z-20 flex h-(--header-height) w-full shrink-0 items-center justify-between gap-2',
+        hasPageHeaderChrome && 'border-b bg-sidebar',
+        phoneBar.header,
+        isPhoneOnly && 'md:hidden',
+      )}
+    >
+      <div
+        className={cn(
+          'pointer-events-auto ml-2 flex h-full items-center gap-1 md:group-data-[sidebar-open=false]/app-shell:ml-(--titlebar-controls-width)',
+          !hasBreadcrumbItems && 'md:hidden',
+          phoneBar.cluster,
+          isDesktopTarget && '[app-region:no-drag]',
+        )}
+      >
+        {/* I3: the phone bar's primary controls are 40px (`icon-lg`, `lg`). */}
+        {isDesktopTarget ? null : <SidebarTrigger className='size-10 md:hidden' />}
+        {titles.title === undefined ? null : <PhonePageTitle title={titles.title} parent={titles.parent} />}
+        {hasBreadcrumbItems && !isDesktopTarget && titles.title === undefined ? (
+          <span className='h-4 md:hidden'>
+            <Separator orientation='vertical' />
+          </span>
+        ) : null}
+        <Breadcrumb className='hidden [&:has(>:not(:empty))]:block'>
+          <BreadcrumbList
+            className={cn(
+              'sm:gap-0',
+              '[&_[data-slot=button]]:h-7 [&_[data-slot=button]]:rounded-sm [&_[data-slot=button]]:p-2',
+              "[&_[data-slot='tooltip-trigger']]:h-7 [&_[data-slot='tooltip-trigger']]:rounded-sm [&_[data-slot='tooltip-trigger']]:p-2",
+              "[&_[data-slot='breadcrumb-link']]:h-7 [&_[data-slot='breadcrumb-link']]:rounded-sm [&_[data-slot='breadcrumb-link']]:p-2",
+              '[&_[data-slot=input]]:h-7 [&_[data-slot=input]]:rounded-sm',
+            )}
+          >
+            {breadcrumbItems.map((match) => {
+              const breadcrumb = match.handle.breadcrumb?.(match);
+              const breadcrumbArray = Array.isArray(breadcrumb) ? breadcrumb : [breadcrumb];
+
+              return (
+                <Fragment key={match.id}>
+                  {breadcrumbArray.map((item, index) => (
+                    // oxlint-disable-next-line react/no-array-index-key -- these are stable.
+                    <Fragment key={`${match.id}-${index}`}>
+                      <BreadcrumbSeparator className='hidden first:hidden lg:block' />
+                      <BreadcrumbItem className={cn('hidden hover:text-foreground lg:block', phoneBar.breadcrumbItem)}>
+                        <BreadcrumbLink asChild>{item}</BreadcrumbLink>
+                      </BreadcrumbItem>
+                    </Fragment>
+                  ))}
+                </Fragment>
+              );
+            })}
+          </BreadcrumbList>
+        </Breadcrumb>
+      </div>
+
+      <div
+        className={cn('pointer-events-auto flex items-center gap-2 px-2', isDesktopTarget && '[app-region:no-drag]')}
+      >
+        {actionMatch && !(isPhoneOnlyAction && isDesktopTarget) ? (
+          <div data-slot='page-header-action' className={cn('contents', isPhoneOnlyAction && 'md:hidden')}>
+            {actionMatch.handle.actions?.(actionMatch)}
+          </div>
+        ) : null}
+      </div>
+    </header>
+  );
+}
 
 /** Renders the main content area of the page: the route outlet, or the error content. */
 function SectionContent({ error }: { readonly error: ReactNode | undefined }): React.JSX.Element {
@@ -231,8 +524,8 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
   const {
     breadcrumbItems,
     hasBreadcrumbItems,
+    titleItems,
     actionItems,
-    hasActionItems,
     pageWrapperMatches,
     enableOverflowY,
     providers,
@@ -240,8 +533,8 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
   } = useTypedMatches((handles) => ({
     breadcrumbItems: handles.breadcrumb,
     hasBreadcrumbItems: handles.breadcrumb.length > 0,
+    titleItems: handles.title,
     actionItems: handles.actions,
-    hasActionItems: handles.actions.length > 0,
     pageWrapperMatches: handles.enablePageWrapper,
     enableOverflowY: handles.enableOverflowY.some((match) => match.handle.enableOverflowY === true),
     providers: handles.providers,
@@ -291,16 +584,23 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     },
     [locationKey],
   );
+  // The phone top bar (web build below `md`): sidebar, back-to-parent crumb, title.
+  const pageTitles = useMemo(() => resolvePageTitles(titleItems, desktopTarget), [desktopTarget, titleItems]);
+  // D11/I4: one header action, from the deepest route that declares one, unless a deeper
+  // titled page (`/projects/new` under `/projects`) sits below it: a parent's action is not the child's.
+  const actionMatch = selectPageAction(actionItems, pageTitles.path);
   const enablePageHeader = !enablePageHeaderMatches.some((match) => match.handle.enablePageHeader === false);
-  const hasPageHeaderChrome = [hasBreadcrumbItems, hasActionItems].includes(true);
+  const hasPageHeaderChrome =
+    hasBreadcrumbItems || (actionMatch !== undefined && actionMatch.handle.actionsScope !== 'phone');
   const isMobile = useIsMobile();
-  const reserveHeader = enablePageHeader && (hasPageHeaderChrome || isMobile);
-  const headerHeightClass = reserveHeader
-    ? cn(
-        desktopTarget && '[--header-height:calc(var(--spacing)*9)]',
-        !desktopTarget && '[--header-height:calc(var(--spacing)*12)] md:[--header-height:calc(var(--spacing)*9)]',
-      )
-    : '[--header-height:0px]';
+  const { reserveHeader, isPhoneOnly, insetClass, sectionClass, phoneTopBar } = resolveHeaderLayout({
+    enablePageHeader,
+    isDesktopTarget: desktopTarget,
+    isMobile,
+    hasPageHeaderChrome,
+    hasTitle: pageTitles.title !== undefined,
+    hasAction: actionMatch !== undefined,
+  });
 
   // Resolve `enablePageWrapper` per match: a match disables the wrapper when its
   // value is `false`, or when its function form returns `false` for the current
@@ -367,88 +667,31 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     <CommandPaletteProvider>
       <SidebarProvider className='h-dvh min-h-0 overflow-hidden'>
         <ApplicationShell isDesktopTarget={desktopTarget}>
-          <SidebarInset className={cn('size-full min-w-0', headerHeightClass)}>
+          <SidebarInset className={cn('size-full min-w-0', insetClass)}>
             {reserveHeader ? (
-              <header
-                className={cn(
-                  'pointer-events-none absolute top-0 z-20 flex h-(--header-height) w-full shrink-0 items-center justify-between gap-2',
-                  hasPageHeaderChrome && 'border-b bg-sidebar',
-                )}
-              >
-                <div
-                  className={cn(
-                    'pointer-events-auto ml-2 flex h-full items-center gap-1 md:group-data-[sidebar-open=false]/app-shell:ml-(--titlebar-controls-width)',
-                    !hasBreadcrumbItems && 'md:hidden',
-                    desktopTarget && '[app-region:no-drag]',
-                  )}
-                >
-                  {desktopTarget ? null : <SidebarTrigger className='md:hidden' />}
-                  {hasBreadcrumbItems && !desktopTarget ? (
-                    <span className='h-4 md:hidden'>
-                      <Separator orientation='vertical' />
-                    </span>
-                  ) : null}
-                  <Breadcrumb className='hidden [&:has(>:not(:empty))]:block'>
-                    <BreadcrumbList
-                      className={cn(
-                        'sm:gap-0',
-                        '[&_[data-slot=button]]:h-7 [&_[data-slot=button]]:rounded-sm [&_[data-slot=button]]:p-2',
-                        "[&_[data-slot='tooltip-trigger']]:h-7 [&_[data-slot='tooltip-trigger']]:rounded-sm [&_[data-slot='tooltip-trigger']]:p-2",
-                        "[&_[data-slot='breadcrumb-link']]:h-7 [&_[data-slot='breadcrumb-link']]:rounded-sm [&_[data-slot='breadcrumb-link']]:p-2",
-                        '[&_[data-slot=input]]:h-7 [&_[data-slot=input]]:rounded-sm',
-                      )}
-                    >
-                      {breadcrumbItems.map((match) => {
-                        const breadcrumb = match.handle.breadcrumb?.(match);
-                        const breadcrumbArray = Array.isArray(breadcrumb) ? breadcrumb : [breadcrumb];
-
-                        return (
-                          <Fragment key={match.id}>
-                            {breadcrumbArray.map((item, index) => (
-                              // oxlint-disable-next-line react/no-array-index-key -- these are stable.
-                              <Fragment key={`${match.id}-${index}`}>
-                                <BreadcrumbSeparator className='hidden first:hidden lg:block' />
-                                <BreadcrumbItem className='hidden last:block hover:text-foreground lg:block'>
-                                  <BreadcrumbLink asChild>{item}</BreadcrumbLink>
-                                </BreadcrumbItem>
-                              </Fragment>
-                            ))}
-                          </Fragment>
-                        );
-                      })}
-                    </BreadcrumbList>
-                  </Breadcrumb>
-                </div>
-
-                <div
-                  className={cn(
-                    'pointer-events-auto flex items-center gap-2 px-2',
-                    desktopTarget && '[app-region:no-drag]',
-                  )}
-                >
-                  {hasActionItems
-                    ? actionItems.map((match) => <Fragment key={match.id}>{match.handle.actions?.(match)}</Fragment>)
-                    : null}
-                </div>
-              </header>
+              <PageShellHeader
+                isDesktopTarget={desktopTarget}
+                hasPageHeaderChrome={hasPageHeaderChrome}
+                isPhoneOnly={isPhoneOnly}
+                breadcrumbItems={breadcrumbItems}
+                titles={pageTitles}
+                actionMatch={actionMatch}
+              />
             ) : null}
             <section
               ref={pageScrollRef}
-              className={cn(
-                'h-dvh',
-                enableOverflowY && 'overflow-y-auto',
-                reserveHeader && headerOffsetClasses,
-                enablePageHeader && !reserveHeader && 'md:group-data-[sidebar-open=false]/app-shell:pt-9',
-              )}
+              className={cn('h-dvh', enableOverflowY && 'overflow-y-auto', sectionClass)}
               onScroll={enableOverflowY ? handlePageScroll : undefined}
             >
-              <Compose components={Providers}>
-                <RouteCommandPaletteItems />
-                {/* Its compute section reads the active project; the dialog is a
-                    portal, so only its place in the React tree matters. */}
-                <SettingsDialog />
-                <SectionContent error={error} />
-              </Compose>
+              <PhoneTopBarContext.Provider value={phoneTopBar}>
+                <Compose components={Providers}>
+                  <RouteCommandPaletteItems />
+                  {/* Its compute section reads the active project; the dialog is a
+                      portal, so only its place in the React tree matters. */}
+                  <SettingsDialog />
+                  <SectionContent error={error} />
+                </Compose>
+              </PhoneTopBarContext.Provider>
             </section>
           </SidebarInset>
         </ApplicationShell>

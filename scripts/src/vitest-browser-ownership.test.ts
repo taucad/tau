@@ -210,6 +210,8 @@ describe('Vitest Browser test-runner ownership', () => {
     // The UI asset-integrity workflow and its gate's usage note install the three engines the gate measures.
     // The hosted staging observability workflow installs Chromium and WebKit for its isolated contexts.
     // The clean-host Mac acceptance workflow installs the Chromium its browser download uses.
+    // The PicoGK browser archive workflow installs the one engine each parity leg measures the browser
+    // runtime in, which Browser Mode cannot host.
     expect(installFiles.sort()).toEqual(
       [
         '.agents/skills/create-repo/templates/ci.yml',
@@ -217,6 +219,7 @@ describe('Vitest Browser test-runner ownership', () => {
         '.github/workflows/desktop-route-vm-acceptance.yml',
         '.github/workflows/e2e-nightly.yml',
         '.github/workflows/observability-staging.yml',
+        '.github/workflows/picogk-browser-archive.yml',
         '.github/workflows/preview-packages.yml',
         '.github/workflows/publish.yml',
         '.github/workflows/spike-publish-dry-run.yml',

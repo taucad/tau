@@ -609,6 +609,26 @@ describe('reading a tree with large objects', () => {
     expect(transfer).toHaveBeenCalledTimes(parts.length);
   });
 
+  it("fetches for itself what another reader's failed download did not deliver", async () => {
+    const { port, head, transfer, evict } = await lfsStore();
+    await evict(...parts.map(([, content]) => content!));
+    const failing = oidOf(parts[0]![1]!);
+    let refusals = 0;
+    const deliver = transfer.getMockImplementation()!;
+    transfer.mockImplementation(async (url, init) => {
+      if ((typeof url === 'string' ? url : url instanceof URL ? url.href : url.url).endsWith(failing) && refusals < 2) {
+        refusals += 1;
+        return new Response('', { status: 404 });
+      }
+      return deliver(url, init);
+    });
+    const [first, second] = await Promise.allSettled([port.readTree(head), port.readTree(head)]);
+    expect(first.status).toBe('rejected');
+    expect(second.status === 'fulfilled' ? second.value?.get(parts[0]![0]!) : second.reason).toStrictEqual(
+      encoder.encode(parts[0]![1]),
+    );
+  });
+
   it('fails closed, with no pointer in the tree, when there is no remote to ask', async () => {
     const filesystem = new MemoryProvider();
     providers.push(filesystem);

@@ -733,6 +733,38 @@ describe('downloadMany', () => {
     }
   });
 
+  it('re-requests an action with no stated lifetime once its relay has lapsed', async () => {
+    const { request, asked } = batchEndpoint();
+    let refused = false;
+    const transfer = vi.fn<typeof fetch>(async (url) => {
+      if (!refused) {
+        refused = true;
+        return new Response('{"code":"GIT_LFS_HANDLE_EXPIRED"}', { status: 400 });
+      }
+      return new Response(contentOf.get(oidOf(url)));
+    });
+    await createLfsClient({
+      url: 'https://api.tau.test/git',
+      http: { request },
+      fetch: transfer,
+      downloadConcurrency: 1,
+    }).downloadMany({ pointers: pointers.slice(0, 2), received: async () => undefined });
+    expect(asked).toEqual([pointers.slice(0, 2).map((pointer) => pointer.oid), [pointers[0]!.oid]]);
+    expect(transfer).toHaveBeenCalledTimes(3);
+  });
+
+  it('gives up on a refusal of a freshly issued action', async () => {
+    const { request } = batchEndpoint();
+    const transfer = vi.fn<typeof fetch>(async () => new Response('', { status: 404 }));
+    await expect(
+      createLfsClient({ url: 'https://api.tau.test/git', http: { request }, fetch: transfer }).downloadMany({
+        pointers: pointers.slice(0, 1),
+        received: async () => undefined,
+      }),
+    ).rejects.toThrow(/failed \(404\)/u);
+    expect(transfer).toHaveBeenCalledTimes(2);
+  });
+
   it('on an abort, starts nothing more and settles only after the transfers in flight', async () => {
     const controller = new AbortController();
     const signals: AbortSignal[] = [];

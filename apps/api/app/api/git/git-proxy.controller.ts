@@ -41,6 +41,12 @@ import { z } from 'zod';
 const gitEndpointPattern = /\/(?:info\/refs|git-upload-pack|git-receive-pack|info\/lfs\/objects\/batch)$/u;
 const lfsBatchSuffix = '/info/lfs/objects/batch';
 const lfsHandleTtlSeconds = 300;
+const lfsActionSchema = z.object({
+  href: z.url(),
+  header: z.record(z.string(), z.string()).optional(),
+  expires_in: z.number().optional(),
+  expires_at: z.string().optional(),
+});
 const lfsBatchSchema = z
   .object({
     objects: z.array(
@@ -50,9 +56,9 @@ const lfsBatchSchema = z
           size: z.number().int().nonnegative(),
           actions: z
             .object({
-              upload: z.object({ href: z.url(), header: z.record(z.string(), z.string()).optional() }).optional(),
-              download: z.object({ href: z.url(), header: z.record(z.string(), z.string()).optional() }).optional(),
-              verify: z.object({ href: z.url(), header: z.record(z.string(), z.string()).optional() }).optional(),
+              upload: lfsActionSchema.optional(),
+              download: lfsActionSchema.optional(),
+              verify: lfsActionSchema.optional(),
             })
             .optional(),
         })
@@ -625,11 +631,26 @@ export class GitProxyController {
           headers,
           expiresAt: Date.now() + lfsHandleTtlSeconds * 1000,
         };
+        /* The client refreshes an action before it lapses only when told when
+         * it does: the handle's own lifetime, or the upstream signature's when
+         * that is sooner. */
+        const upstreamSeconds = Math.min(
+          action.expires_in ?? Infinity,
+          action.expires_at === undefined ? Infinity : (Date.parse(action.expires_at) - Date.now()) / 1000,
+        );
+        const expiresIn = Math.max(
+          0,
+          Math.floor(
+            Number.isNaN(upstreamSeconds) ? lfsHandleTtlSeconds : Math.min(lfsHandleTtlSeconds, upstreamSeconds),
+          ),
+        );
         const { sealed, key } = sealRelayRecord(handle, record);
         // oxlint-disable-next-line no-await-in-loop -- each independently expiring action needs its own opaque handle.
         await this.redis.client.set(`git:lfs:relay:${handle}`, sealed, 'EX', lfsHandleTtlSeconds, 'NX');
         action.href = `${this.#apiUrl}/v1/git/lfs/${handle}`;
         action.header = { [httpHeader.xTauLfsKey]: key };
+        action.expires_in = expiresIn;
+        delete action.expires_at;
       }
     }
     void reply.status(response.status).header('content-type', lfsMediaType).header('cache-control', 'no-store');

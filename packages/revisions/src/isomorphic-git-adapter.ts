@@ -865,33 +865,16 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   ): Promise<Readonly<{ contents: ReadonlyMap<string, Uint8Array<ArrayBuffer>>; report: LfsFetchReport }>> => {
     const startedAt = Date.now();
     const contents = new Map<string, Uint8Array<ArrayBuffer>>();
-    const shared = new Map<string, Promise<Uint8Array<ArrayBuffer>>>();
+    const shared = new Map<string, Readonly<{ pointer: LfsPointer; inFlight: Promise<Uint8Array<ArrayBuffer>> }>>();
     const missing = new Map<string, LfsPointer>();
+    /* Registered the moment an object is found missing, so a concurrent reader
+     * scanning meanwhile waits on this transfer instead of starting its own. */
+    const pending = new Map<string, PromiseWithResolvers<Uint8Array<ArrayBuffer>>>();
+    const registered = new Map<string, Promise<Uint8Array<ArrayBuffer>>>();
+    let localObjects = 0;
     let localBytes = 0;
-    for (const pointer of pointers) {
-      if (contents.has(pointer.oid) || shared.has(pointer.oid) || missing.has(pointer.oid)) {
-        continue;
-      }
-      /* One download per object across concurrent tree readers: a second reader waits on the first one's transfer. */
-      const inFlight = downloads.get(pointer.oid);
-      if (inFlight !== undefined) {
-        shared.set(pointer.oid, inFlight);
-        continue;
-      }
-      const file = lfsObjectFile(pointer.oid);
-      // oxlint-disable-next-line no-await-in-loop -- local reads stay one at a time; the returned tree already retains every object.
-      if (await filesystem.exists(file)) {
-        // oxlint-disable-next-line no-await-in-loop -- as above.
-        const content = await filesystem.readFile(file);
-        contents.set(pointer.oid, content);
-        localBytes += content.byteLength;
-      } else {
-        missing.set(pointer.oid, pointer);
-      }
-    }
-    const localObjects = contents.size;
     let networkBytes = 0;
-    if (missing.size > 0) {
+    const fetchMissing = async (wanted: ReadonlyMap<string, LfsPointer>): Promise<void> => {
       const client = await lfsClient();
       if (client === undefined) {
         /* Fail closed: no pointer ever reaches a tree or a working copy. The
@@ -902,48 +885,82 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           'A large object this revision references is not in this store yet.',
         );
       }
-      const pending = new Map(
-        [...missing.keys()].map((oid) => {
+      await client.downloadMany({
+        pointers: [...wanted.values()],
+        received: async (pointer, content) => {
+          await storeLfsObject(pointer.oid, content);
+          contents.set(pointer.oid, content);
+          networkBytes += content.byteLength;
+          pending.get(pointer.oid)?.resolve(content);
+          pending.delete(pointer.oid);
+        },
+      });
+    };
+    try {
+      for (const pointer of pointers) {
+        if (contents.has(pointer.oid) || shared.has(pointer.oid) || missing.has(pointer.oid)) {
+          continue;
+        }
+        /* One download per object across concurrent tree readers: a second reader waits on the first one's transfer. */
+        const inFlight = downloads.get(pointer.oid);
+        if (inFlight !== undefined) {
+          shared.set(pointer.oid, { pointer, inFlight });
+          continue;
+        }
+        const file = lfsObjectFile(pointer.oid);
+        // oxlint-disable-next-line no-await-in-loop -- local reads stay one at a time; the returned tree already retains every object.
+        if (await filesystem.exists(file)) {
+          // oxlint-disable-next-line no-await-in-loop -- as above.
+          const content = await filesystem.readFile(file);
+          contents.set(pointer.oid, content);
+          localObjects += 1;
+          localBytes += content.byteLength;
+        } else {
+          missing.set(pointer.oid, pointer);
           const settled = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
           /* Only a concurrent reader awaits this; with none, a failure is reported by `downloadMany` below. */
           // oxlint-disable-next-line promise/prefer-await-to-then -- marks the rejection handled without awaiting it.
           settled.promise.catch(() => undefined);
-          downloads.set(oid, settled.promise);
-          return [oid, settled] as const;
-        }),
-      );
-      try {
-        await client.downloadMany({
-          pointers: [...missing.values()],
-          received: async (pointer, content) => {
-            await storeLfsObject(pointer.oid, content);
-            contents.set(pointer.oid, content);
-            networkBytes += content.byteLength;
-            pending.get(pointer.oid)?.resolve(content);
-          },
-        });
-      } catch (error) {
-        for (const settled of pending.values()) {
-          settled.reject(error);
+          downloads.set(pointer.oid, settled.promise);
+          registered.set(pointer.oid, settled.promise);
+          pending.set(pointer.oid, settled);
         }
-        throw error;
-      } finally {
-        for (const [oid, settled] of pending) {
-          if (downloads.get(oid) === settled.promise) {
-            downloads.delete(oid);
-          }
+      }
+      if (missing.size > 0) {
+        await fetchMissing(missing);
+      }
+    } catch (error) {
+      for (const settled of pending.values()) {
+        settled.reject(error);
+      }
+      throw error;
+    } finally {
+      for (const [oid, promise] of registered) {
+        if (downloads.get(oid) === promise) {
+          downloads.delete(oid);
         }
       }
     }
-    for (const [oid, inFlight] of shared) {
-      // oxlint-disable-next-line no-await-in-loop -- another reader's transfers, already running together.
-      contents.set(oid, await inFlight);
+    /* Another reader's transfers, already running together. One that failed
+     * may have failed on an object this tree does not hold, so whatever it
+     * did not deliver is fetched here rather than failing on its error. */
+    const orphaned = new Map<string, LfsPointer>();
+    for (const [oid, { pointer, inFlight }] of shared) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- the transfers run together; this only collects them.
+        contents.set(oid, await inFlight);
+      } catch {
+        orphaned.set(oid, pointer);
+      }
+    }
+    if (orphaned.size > 0) {
+      await fetchMissing(orphaned);
     }
     return Object.freeze({
       contents,
       report: Object.freeze({
         durationMilliseconds: Math.max(0, Date.now() - startedAt),
-        networkObjects: missing.size,
+        networkObjects: missing.size + orphaned.size,
         networkBytes,
         localObjects,
         localBytes,

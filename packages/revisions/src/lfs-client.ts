@@ -669,8 +669,12 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
         }
       } else {
         await response?.body?.cancel();
+        /* An action from the batch answer may have lapsed while it queued behind
+         * the transfers ahead of it (a relay that never said when it expires,
+         * say): any refusal of one earns a fresh action before giving up. */
         if (
           response !== undefined &&
+          answer !== initial &&
           response.status !== 401 &&
           response.status !== 403 &&
           !retryable(response.status)

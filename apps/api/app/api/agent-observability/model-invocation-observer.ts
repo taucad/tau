@@ -53,11 +53,25 @@ const supplierOf = (intent: ModelInvocationIntent, model: string | undefined): s
  * `terminal`) are not new supplier attempts and are not recorded.
  */
 export class ObservedModelInvocationService implements ModelInvocationService {
+  private readonly admits: boolean;
+  private readonly clock: () => number;
+
   public constructor(
     private readonly inner: ModelInvocationService,
     private readonly recorder: ModelInvocationEvidenceRecorder,
-    private readonly clock: () => number = performance.now.bind(performance),
-  ) {}
+    options: Readonly<{
+      /**
+       * Whether the inner owner admits a funded operation before it calls a
+       * supplier. When it does, a refusal before admission is Tau's own and
+       * is not a supplier attempt.
+       */
+      admits?: boolean;
+      clock?: () => number;
+    }> = {},
+  ) {
+    this.admits = options.admits ?? false;
+    this.clock = options.clock ?? performance.now.bind(performance);
+  }
 
   public async invoke(intent: ModelInvocationIntent): Promise<ModelInvocationResult> {
     const project = intent.projectHint;
@@ -97,7 +111,7 @@ export class ObservedModelInvocationService implements ModelInvocationService {
     } catch (error) {
       if (intent.signal.aborted) {
         this.recorder.record(attempt('aborted', undefined));
-      } else if (supplierRefusals.has(gatewayErrorType(error) ?? '')) {
+      } else if ((!this.admits || operation !== undefined) && supplierRefusals.has(gatewayErrorType(error) ?? '')) {
         this.recorder.record(attempt('failed', undefined));
       }
       throw error;

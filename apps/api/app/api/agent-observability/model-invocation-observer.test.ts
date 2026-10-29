@@ -46,7 +46,11 @@ const streaming = (completion: Promise<void> = Promise.resolve()): ModelInvocati
   completion,
 });
 
-const setup = (result: () => Promise<ModelInvocationResult>, capable = true) => {
+const setup = (
+  result: (intent: ModelInvocationIntent) => Promise<ModelInvocationResult>,
+  capable = true,
+  admits = false,
+) => {
   const inner = mock<ModelInvocationService>();
   inner.invoke.mockImplementation(result);
   const recorder = mock<ModelInvocationEvidenceRecorder>();
@@ -55,7 +59,7 @@ const setup = (result: () => Promise<ModelInvocationResult>, capable = true) => 
   recorder.record.mockImplementation((attempt) => {
     recorded.push(attempt);
   });
-  return { observed: new ObservedModelInvocationService(inner, recorder), inner, recorder, recorded };
+  return { observed: new ObservedModelInvocationService(inner, recorder, { admits }), inner, recorder, recorded };
 };
 
 describe('ObservedModelInvocationService', () => {
@@ -138,6 +142,30 @@ describe('ObservedModelInvocationService', () => {
     expect(replay.recorded).toEqual([]);
     expect(refused.recorded.map((attempt) => attempt.ended)).toEqual(['failed']);
     expect(tauRefusal.recorded).toEqual([]);
+  });
+
+  it('should not count a funded owner’s own refusal before admission as a supplier attempt', async () => {
+    const beforeAdmission = setup(
+      async () => {
+        throw new LlmGatewayError(503, 'PROVIDER_UNAVAILABLE', 'Exact input count is not qualified.');
+      },
+      true,
+      true,
+    );
+    const afterAdmission = setup(
+      async (received) => {
+        received.onAdmitted?.('op-2');
+        throw new LlmGatewayError(503, 'PROVIDER_UNAVAILABLE', 'The model provider is unavailable.');
+      },
+      true,
+      true,
+    );
+
+    await expect(beforeAdmission.observed.invoke(intent())).rejects.toThrow('not qualified');
+    await expect(afterAdmission.observed.invoke(intent())).rejects.toThrow('unavailable');
+
+    expect(beforeAdmission.recorded).toEqual([]);
+    expect(afterAdmission.recorded).toMatchObject([{ ended: 'failed', operation: 'op-2' }]);
   });
 
   it('should keep the caller’s admission callback', async () => {

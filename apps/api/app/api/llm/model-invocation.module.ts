@@ -51,7 +51,9 @@ export class ModelInvocationModule {
             inner: ModelInvocationService,
             recorder: ModelInvocationEvidenceRecorder | undefined,
           ): ModelInvocationService =>
-            recorder === undefined ? inner : new ObservedModelInvocationService(inner, recorder),
+            recorder === undefined
+              ? inner
+              : new ObservedModelInvocationService(inner, recorder, { admits: options.tauCloudEnabled }),
           inject: [implementation, { token: ModelInvocationEvidenceRecorder, optional: true }],
         },
       ],

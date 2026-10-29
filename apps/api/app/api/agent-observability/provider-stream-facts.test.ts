@@ -51,6 +51,13 @@ describe('ProviderStreamFacts', () => {
     expect(JSON.stringify(summary)).not.toContain(secret);
   });
 
+  it('should report no first output for a stream that ended before any byte', () => {
+    const summary = read('anthropic', '');
+
+    expect(summary.firstChunk).toBeUndefined();
+    expect(summary.usage.missing).toBe('unreported');
+  });
+
   it('should read a Responses stream and tell length from a normal stop', () => {
     const completed = (status: string, extra: Record<string, unknown>) =>
       frames([

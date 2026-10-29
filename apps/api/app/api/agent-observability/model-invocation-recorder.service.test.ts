@@ -31,6 +31,7 @@ const settlement = (change: Partial<ObservedSettlement['operation']> = {}): Obse
 /** The owner lookup as drizzle chains it, answering `owners`. */
 const ownerDatabase = (owners: ReadonlyArray<{ authUserId: string | undefined }>) => {
   const chain = { from: () => chain, where: () => chain, limit: async () => owners };
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- drizzle's fluent query builder has no practical structural fake
   return { database: { select: () => chain } } as unknown as DatabaseService;
 };
 

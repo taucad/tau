@@ -102,7 +102,11 @@ export class ProviderStreamFacts {
 
   /** @returns What the stream reported, after its last byte. */
   public summary(): ProviderStreamSummary {
-    this.accept(new Uint8Array(0));
+    try {
+      this.pending += this.decoder.decode();
+    } catch {
+      // Observation never affects the relay.
+    }
     if (this.pending.length > 0) {
       this.line(this.pending.trimEnd());
       this.pending = '';

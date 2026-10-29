@@ -34,6 +34,16 @@ describe('runtime vocabularies (T30)', () => {
     expect(actual).toEqual(derived);
   });
 
+  it('should derive both native and browser PicoGK exports from their own entry points', async () => {
+    const capabilities = await registry.registryCapabilities();
+    const picogk = capabilities.filter((capability) => capability.kind === 'kernels' && capability.id === 'picogk');
+    expect(picogk.map((capability) => [...capability.exports].sort())).toEqual([
+      ['glb', 'gltf', 'stl', 'vdb'],
+      ['glb', 'gltf'],
+    ]);
+    expect(generated.exportFormats).toContain('vdb');
+  });
+
   it('should keep the product kernelIds byte-identical to main (they are not runtime plugin ids)', () => {
     expect(kernelIds).toEqual([
       'picogk',

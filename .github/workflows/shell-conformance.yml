@@ -109,26 +109,20 @@ jobs:
           ls -l /dev/fuse /usr/local/bin/fusermount3
           id
 
-      - name: Build the bridge
-        working-directory: packages/core/native-process
-        run: |
-          node scripts/build-shell-projection.mts \
-            --node-headers "$TAU_PROJECTION_NODE_HEADERS" \
-            --fuse-headers "$TAU_PROJECTION_FUSE_HEADERS" \
-            --fuse-library "$TAU_PROJECTION_FUSE_LIBRARY" \
-            --fuse-sha256 "$TAU_PROJECTION_FUSE_SHA256"
+      - name: Run the projection transport conformance target (same as LNX-P)
+        run: pnpm nx run native-process-core:test:shell-projection-conformance --skip-nx-cache 2>&1 | tee /tmp/t.log || true
 
-      - name: Run only the G4 rows with instrumentation
-        working-directory: packages/core/native-process
-        env:
-          TAU_SHELL_PROJECTION_CONFORMANCE: '1'
-          TAU_PROJECTION_TRACE: '1'
+      - name: Per-row verdict
+        if: always()
         run: |
-          ../../../node_modules/.bin/vitest run --config vitest.config.ts \
-            --reporter=verbose --no-file-parallelism \
-            src/shell/shell-projection-native.test.ts 2>&1 | tee /tmp/g4.log || true
-          echo '===== ALL ROWS ====='
-          grep -E '^ (\xe2\x9c\x93|\xc3\x97)|Test Files|  Tests ' /tmp/g4.log | sed -e 's/src\/shell\/shell-projection-native.test.ts > //' | cut -c1-150
+          echo '===== every row =====' 
+          grep -E "^ (.|..)(\xe2\x9c\x93|\xc3\x97|\xe2\x86\x93) " /tmp/t.log | sed -e 's#src/shell/##' | cut -c1-160 || true
+          echo '===== summaries ====='
+          grep -E 'Test Files|  Tests |Failed Tests' /tmp/t.log || true
+          echo '===== any assertion failures ====='
+          grep -E 'AssertionError|FAIL |Expected|Received|\+   |-   ' /tmp/t.log | head -30 || true
+          echo '===== did the target pass? ====='
+          grep -E 'Successfully ran target|Running target .* failed' /tmp/t.log || true
 
       - name: Post-run kernel state
         if: always()

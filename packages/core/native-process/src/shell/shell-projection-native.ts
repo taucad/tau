@@ -154,11 +154,6 @@ export const openShellProjectionMount = (
   // Per-request cancellation: an interrupted caller gets EINTR at once and its handler's signal aborts.
   const requests = new Map<number, AbortController>();
   const earlyInterrupts = new Set<number>();
-  const trace = (...parts: unknown[]): void => {
-    if (process.env.TAU_PROJECTION_TRACE !== undefined) {
-      process.stderr.write(`[wrap ${String(Date.now() % 1_000_000)}] ${parts.map(String).join(' ')}\n`);
-    }
-  };
   let lastRequest = 0;
   const failures: unknown[] = [];
   let disposal: Promise<void> | undefined;
@@ -194,7 +189,6 @@ export const openShellProjectionMount = (
   // Only the handler may answer: replying EINTR here could hide a committed mutation.
   const interrupt = (id: number): void => {
     const request = requests.get(id);
-    trace('interrupt id=', id, 'known=', request !== undefined, 'lastRequest=', lastRequest);
     if (request !== undefined) {
       request.abort(new Error('Projection request interrupted.'));
     } else if (id > lastRequest) {
@@ -236,7 +230,6 @@ export const openShellProjectionMount = (
   const settle = async (request: ShellProjectionRequest): Promise<void> => {
     let reply: ShellProjectionReply;
     const local = new AbortController();
-    trace('settle enter id=', request.id, 'op=', request.operation, 'inode=', request.inode);
     requests.set(request.id, local);
     lastRequest = request.id;
     if (earlyInterrupts.has(request.id)) {
@@ -259,7 +252,6 @@ export const openShellProjectionMount = (
     } finally {
       requests.delete(request.id);
     }
-    trace('settle reply id=', request.id, 'op=', request.operation, 'error=', reply.error, 'closed=', controller.signal.aborted);
     if (!controller.signal.aborted) {
       binding.reply(mount, request.id, reply);
     }
@@ -286,7 +278,6 @@ export const openShellProjectionMount = (
         interrupt(request.id);
         return;
       }
-      trace('inbound id=', request.id, 'op=', request.operation, 'inode=', 'inode' in request ? request.inode : '-', 'offset=', 'offset' in request ? request.offset : '-', 'length=', 'length' in request ? request.length : '-');
       const operations = request.operation === 'lifetime' ? lifetime(request) : [settle(request)];
       for (const operation of operations) {
         track(operation);

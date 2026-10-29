@@ -312,7 +312,7 @@ const nfd = 'café.md';
 /** Each family is one shell attempt in the mount; the shell sees only exit status. */
 const families: ReadonlyArray<readonly [label: string, script: string, allowed: boolean]> = [
   ['ordinary edit, nested create', 'printf v2 > notes.md && mkdir -p docs/new && printf a > docs/new/a.md', true],
-  ['agent instructions under a case alias', 'mkdir .Tau && printf i > .Tau/AGENTS.md', true],
+  ['agent instructions under a case alias', 'mkdir .Tau && printf i > .Tau/AGENTS.md', false],
   ['NFD user file', `printf n > ${nfd}`, true],
   ['case alias .TAU', 'mkdir .TAU && printf x > .TAU/chats', false],
   ['trailing dot .tau.', 'mkdir .tau. && printf x > .tau./runs', false],
@@ -330,6 +330,7 @@ const families: ReadonlyArray<readonly [label: string, script: string, allowed: 
 ];
 /** Paths that must never exist on the backing checkout when the classifier is in place. */
 const protectedLanded = [
+  '.Tau/AGENTS.md',
   '.TAU/chats',
   '.tau./runs',
   '.tau:alias/export',
@@ -418,7 +419,6 @@ describe.runIf(enabled)('G5 PP3 spelling families through the FUSE path', () => 
     expect(lines).toStrictEqual(families.map(([label, , allowed]) => `${label}: ${allowed ? 'ok' : 'refused'}`));
     expect(await readFile(join(root, 'notes.md'), 'utf8')).toBe('v2');
     expect(await readFile(join(root, 'docs/new/a.md'), 'utf8')).toBe('a');
-    expect(await readFile(join(root, '.Tau/AGENTS.md'), 'utf8')).toBe('i');
     expect(await readFile(join(root, nfd), 'utf8')).toBe('n');
     expect(await readFile(join(root, 'r.md'), 'utf8')).toBe('r');
     expect(await readFile(join(root, 'd/chats'), 'utf8')).toBe('c');

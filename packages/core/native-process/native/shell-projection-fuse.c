@@ -12,7 +12,6 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -251,7 +250,6 @@ static void report_failure(napi_env env,napi_value callback,void *context,void *
  * handler answers, with EINTR when it committed nothing. */
 static void interrupted(fuse_req_t request,void *data) {
   struct mount_state *mount=fuse_req_userdata(request);
-  if (getenv("TAU_PROJECTION_TRACE")) { fprintf(stderr,"[brdg] interrupt func fired id=%llu\n",(unsigned long long)(uintptr_t)data); fflush(stderr); }
   struct message *message=calloc(1,sizeof(*message));
   if (!message) return;
   *message=(struct message){.mount=mount,.operation=INTERRUPT,.id=(uint64_t)(uintptr_t)data};

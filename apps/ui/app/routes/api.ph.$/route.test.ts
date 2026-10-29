@@ -1,5 +1,6 @@
 // @vitest-environment node
 /* eslint-disable @typescript-eslint/naming-convention -- HTTP headers and environment keys are external contracts. */
+import { gzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { posthogProxy } from '#routes/api.ph.$/route.js';
 
@@ -75,6 +76,42 @@ describe('PostHog proxy boundary', () => {
 
     expect(response.status).toBe(204);
     expect(response.body).toBeNull();
+  });
+
+  it('should forward a gzip capture payload byte for byte, declared as binary', async () => {
+    const upstream = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('ok'));
+    const payload = gzipSync(Buffer.from(JSON.stringify({ event: '$pageview' })));
+
+    await posthogProxy(
+      new Request('https://tau.new/api/ph/i/v0/e/?compression=gzip-js', {
+        body: payload,
+        headers: { 'Content-Type': 'text/plain' },
+        method: 'POST',
+      }),
+    );
+
+    const [, init] = upstream.mock.calls[0] ?? [];
+    // Declared as text, the hosted path decodes and re-encodes the body and the gzip stream is lost.
+    expect(new Headers(init?.headers).get('content-type')).toBe('application/octet-stream');
+    expect(Buffer.from(init?.body as Uint8Array<ArrayBuffer>)).toStrictEqual(payload);
+  });
+
+  it('should keep a textual body and its own content type', async () => {
+    const upstream = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('ok'));
+
+    await posthogProxy(
+      new Request('https://tau.new/api/ph/i/v0/e/', {
+        body: 'data=eyJldmVudCI6IiRwYWdldmlldyJ9',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        method: 'POST',
+      }),
+    );
+
+    const [, init] = upstream.mock.calls[0] ?? [];
+    expect(new Headers(init?.headers).get('content-type')).toBe('application/x-www-form-urlencoded');
+    expect(Buffer.from(init?.body as Uint8Array<ArrayBuffer>).toString('utf8')).toBe(
+      'data=eyJldmVudCI6IiRwYWdldmlldyJ9',
+    );
   });
 
   it('should strip fields nominated by Connection and every upstream cookie', async () => {

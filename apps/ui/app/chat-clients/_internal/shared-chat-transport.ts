@@ -1,4 +1,5 @@
-import { Chat } from '@ai-sdk/react';
+import type { Chat } from '@ai-sdk/react';
+import { requireChatSdk } from '#chat-clients/_internal/chat-sdk.js';
 import type { MyUIMessage } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
@@ -28,7 +29,7 @@ export const createChatInstance = ({
   onFinish,
   onError,
 }: CreateChatInstanceOptions): Chat<MyUIMessage> =>
-  new Chat<MyUIMessage>({
+  new (requireChatSdk().react.Chat)<MyUIMessage>({
     id: chatId,
     transport,
     generateId: () => generatePrefixedId(idPrefix.message),

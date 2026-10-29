@@ -30,7 +30,7 @@
  */
 
 import type { Chat } from '@ai-sdk/react';
-import { UIMessageStreamError } from 'ai';
+import { requireChatSdk } from '#chat-clients/_internal/chat-sdk.js';
 import type { ChatStatus } from 'ai';
 import { Topic } from '@taucad/events';
 import { ObservationService } from '@taucad/fs-client/observation-service';
@@ -121,7 +121,9 @@ const presentationErrorFacts = (
   error: unknown,
 ): Readonly<{ errorName: string; chunkId?: string; chunkType?: string }> => ({
   errorName: error instanceof Error ? error.name : 'UnknownError',
-  ...(UIMessageStreamError.isInstance(error) ? { chunkId: error.chunkId, chunkType: error.chunkType } : {}),
+  ...(requireChatSdk().ai.UIMessageStreamError.isInstance(error)
+    ? { chunkId: error.chunkId, chunkType: error.chunkType }
+    : {}),
 });
 
 /** Framing can exist even when no assistant content reached the person. */

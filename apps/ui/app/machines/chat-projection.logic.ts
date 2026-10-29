@@ -12,7 +12,6 @@
  */
 
 import { createLogic } from 'xstate';
-import { createUIMessageStream, readUIMessageStream } from 'ai';
 import type { InferUIMessageChunk, UIMessageChunk } from 'ai';
 import {
   agentLogEventSchema,
@@ -1461,6 +1460,7 @@ const materializeRun = async (view: RunView): Promise<MyUIMessage | undefined> =
       if (view.chunks.length === 0) {
         return undefined;
       }
+      const sdk = await import('ai');
       const [last] = chunksSince(view.chunks, view.chunks.length - 1);
       let eligible = false;
       if (last?.type === 'finish' && last.messageMetadata !== undefined && last.messageMetadata !== null) {
@@ -1476,7 +1476,7 @@ const materializeRun = async (view: RunView): Promise<MyUIMessage | undefined> =
       }
       if (eligible) {
         let message: MyUIMessage | undefined;
-        const completed = createUIMessageStream<MyUIMessage>({
+        const completed = sdk.createUIMessageStream<MyUIMessage>({
           // Eligible starts always provide their own ID; the generated fallback is never published.
           generateId: () => '',
           execute({ writer }) {
@@ -1522,7 +1522,7 @@ const materializeRun = async (view: RunView): Promise<MyUIMessage | undefined> =
         },
       });
       let message: MyUIMessage | undefined;
-      for await (const next of readUIMessageStream<MyUIMessage>({ stream, terminateOnError: true })) {
+      for await (const next of sdk.readUIMessageStream<MyUIMessage>({ stream, terminateOnError: true })) {
         message = next;
       }
       return message;

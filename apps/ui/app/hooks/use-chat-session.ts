@@ -14,6 +14,7 @@
  * live session without manual memoisation gymnastics.
  */
 
+import { loadChatSdk } from '#chat-clients/_internal/chat-sdk.js';
 import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { ChatSession, ChatSessionStore } from '#services/chat-session-store.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
@@ -48,28 +49,38 @@ export function useChatSession(chatId: string, projectId: string): ChatSession |
   }, [acquired]);
 
   useLayoutEffect(() => {
-    const session = store.acquire(chatId, projectId);
     const controller = new AbortController();
-    const publish = (): void => {
-      if (!controller.signal.aborted) {
+    const isCancelled = (): boolean => controller.signal.aborted;
+    let session: ChatSession | undefined;
+    const prepare = async (): Promise<void> => {
+      await loadChatSdk();
+      if (isCancelled()) {
+        return;
+      }
+      session = store.acquire(chatId, projectId);
+      const previous = presented.current;
+      if (previous?.store === store && previous.projectId === projectId) {
+        await store.preparePresentation(chatId, controller.signal);
+      }
+      if (!isCancelled()) {
         setAcquired({ store, projectId, session });
       }
     };
-    const previous = presented.current;
-    if (previous?.store === store && previous.projectId === projectId) {
-      const prepare = async (): Promise<void> => {
-        await store.preparePresentation(chatId, controller.signal);
-        publish();
-      };
-      // async-iife: bootstrap -- the layout effect cannot await; cleanup aborts the pending handoff.
-      void prepare();
-    } else {
-      // Cold/project-boundary mounting also bootstraps descendants needed by the host.
-      publish();
-    }
+    // async-iife: bootstrap -- preserve the displayed session while cancellable admission settles.
+    void (async (): Promise<void> => {
+      try {
+        await prepare();
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.error('Chat could not load', error);
+        }
+      }
+    })();
     return () => {
       controller.abort();
-      store.release(chatId);
+      if (session !== undefined) {
+        store.release(chatId);
+      }
     };
   }, [store, chatId, projectId]);
 

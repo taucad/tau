@@ -1,5 +1,4 @@
-import { isStaticToolUIPart, safeValidateUIMessages } from 'ai';
-import type { SafeValidateUIMessagesResult } from 'ai';
+import type { isStaticToolUIPart, SafeValidateUIMessagesResult } from 'ai';
 import { z } from 'zod';
 import { isRecord } from '@taucad/utils/schema';
 import {
@@ -198,10 +197,13 @@ const withMessageInputPath = (error: z.ZodError, messageIndex: number, partIndex
     })),
   );
 
-const validateStaticToolLifecycleInputs = (messages: MyUIMessage[]): z.ZodError | undefined => {
+const validateStaticToolLifecycleInputs = (
+  messages: MyUIMessage[],
+  isStaticPart: typeof isStaticToolUIPart,
+): z.ZodError | undefined => {
   for (const [messageIndex, message] of messages.entries()) {
     for (const [partIndex, part] of message.parts.entries()) {
-      if (!isStaticToolUIPart(part)) {
+      if (!isStaticPart(part)) {
         continue;
       }
       const inputSchema = getToolInputSchema(part.type);
@@ -271,7 +273,8 @@ export const safeValidateUiMessages = async (messages: unknown): Promise<SafeVal
     return { success: false, error: staticToolError };
   }
 
-  const result = await safeValidateUIMessages<MyUIMessage>({
+  const sdk = await import('ai');
+  const result = await sdk.safeValidateUIMessages<MyUIMessage>({
     messages: normalizeToolLifecycleParts(messages),
     metadataSchema: messageMetadataSchema.optional(),
     dataSchemas: dataPartSchema.shape,
@@ -281,7 +284,9 @@ export const safeValidateUiMessages = async (messages: unknown): Promise<SafeVal
     return result;
   }
 
-  const extensionError = validateStaticToolLifecycleInputs(result.data) ?? validateCommonReasoningMetadata(result.data);
+  const extensionError =
+    validateStaticToolLifecycleInputs(result.data, sdk.isStaticToolUIPart) ??
+    validateCommonReasoningMetadata(result.data);
   return extensionError ? { success: false, error: extensionError } : result;
 };
 

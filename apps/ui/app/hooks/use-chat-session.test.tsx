@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat class uses the SDK's own `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructor omits the `public` keyword to mirror the AI SDK's published shape. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, renderHook } from '@testing-library/react';
+import { act, render, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { StrictMode, Suspense, useEffect, useState } from 'react';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
@@ -114,6 +114,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({ client: {} }),
 }));
 
+const sdkLoader = await import('#chat-clients/_internal/chat-sdk.js');
 const { ChatSessionStoreProvider, useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
 const { useChatSession, useChatSessionSnapshot } = await import('#hooks/use-chat-session.js');
 
@@ -137,7 +138,48 @@ describe('useChatSession', () => {
     vi.restoreAllMocks();
   });
 
-  it('acquires a session on mount and releases on unmount', () => {
+  it('does not acquire an abandoned chat after its code finishes loading', async () => {
+    const sdk = await sdkLoader.loadChatSdk();
+    let finish: ((value: typeof sdk) => void) | undefined;
+    vi.spyOn(sdkLoader, 'loadChatSdk').mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const { result, unmount } = renderHook(() => useChatSession('chat_abandoned', 'proj_a'), {
+      wrapper: createWrapper(),
+    });
+    expect(result.current).toBeUndefined();
+    expect(harness.created).toHaveLength(0);
+    unmount();
+    await act(async () => {
+      finish!(sdk);
+    });
+    expect(harness.created).toHaveLength(0);
+  });
+
+  it('acquires only the current project when navigation outruns loading', async () => {
+    const sdk = await sdkLoader.loadChatSdk();
+    let finish: ((value: typeof sdk) => void) | undefined;
+    vi.spyOn(sdkLoader, 'loadChatSdk').mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const { result, rerender } = renderHook(({ chatId, projectId }) => useChatSession(chatId, projectId), {
+      wrapper: createWrapper(),
+      initialProps: { chatId: 'chat_a', projectId: 'proj_a' },
+    });
+    rerender({ chatId: 'chat_b', projectId: 'proj_b' });
+    expect(harness.created).toHaveLength(0);
+    await act(async () => {
+      finish!(sdk);
+    });
+    expect(result.current?.chatId).toBe('chat_b');
+    expect(harness.created.map((chat) => chat.id)).toEqual(['chat_b']);
+  });
+
+  it('acquires a session on mount and releases on unmount', async () => {
     const wrapper = createWrapper();
     const captured: { store?: ChatSessionStore } = {};
 
@@ -153,13 +195,15 @@ describe('useChatSession', () => {
       </ChatSessionStoreProvider>,
     );
 
-    expect(captured.store!.get('chat_a')).toBeDefined();
+    await waitFor(() => {
+      expect(captured.store!.get('chat_a')).toBeDefined();
+    });
     unmount();
     expect(captured.store!.get('chat_a')).toBeUndefined();
     void wrapper;
   });
 
-  it('shares a single session across two consumer hooks', () => {
+  it('shares a single session across two consumer hooks', async () => {
     let storeRef: ChatSessionStore | undefined;
     function ProbeStore() {
       storeRef = useChatSessionStore();
@@ -178,6 +222,9 @@ describe('useChatSession', () => {
       </ChatSessionStoreProvider>,
     );
 
+    await waitFor(() => {
+      expect(storeRef!.get('chat_a')).toBeDefined();
+    });
     const first = storeRef!.get('chat_a');
     expect(first).toBeDefined();
     rerender(
@@ -190,7 +237,7 @@ describe('useChatSession', () => {
     expect(storeRef!.get('chat_a')).toBe(first);
   });
 
-  it('keeps the session live until the last consumer unmounts', () => {
+  it('keeps the session live until the last consumer unmounts', async () => {
     let storeRef: ChatSessionStore | undefined;
     function ProbeStore() {
       storeRef = useChatSessionStore();
@@ -225,6 +272,9 @@ describe('useChatSession', () => {
     }
 
     const { getByTestId } = render(<Container />);
+    await waitFor(() => {
+      expect(storeRef!.get('chat_a')).toBeDefined();
+    });
     const sessionBefore = storeRef!.get('chat_a');
     expect(sessionBefore).toBeDefined();
 
@@ -235,15 +285,17 @@ describe('useChatSession', () => {
     expect(storeRef!.get('chat_a')).toBe(sessionBefore);
   });
 
-  it('returns the session record', () => {
+  it('returns the session record', async () => {
     const { result } = renderHook(() => useChatSession('chat_a', 'proj_a'), { wrapper: createWrapper() });
-    expect(result.current?.chatId).toBe('chat_a');
+    await waitFor(() => {
+      expect(result.current?.chatId).toBe('chat_a');
+    });
     expect(result.current?.chat).toBeDefined();
     expect(result.current?.persistenceActorRef).toBeDefined();
     expect(result.current?.draftActorRef).toBeDefined();
   });
 
-  it('should not expose the previous project session during a project switch', () => {
+  it('should not expose the previous project session during a project switch', async () => {
     const seen: Array<{ projectId: string; chatId: string | undefined }> = [];
     const { result, rerender } = renderHook(
       ({ chatId, projectId }) => {
@@ -253,12 +305,17 @@ describe('useChatSession', () => {
       },
       { wrapper: createWrapper(), initialProps: { chatId: 'chat_a', projectId: 'proj_a' } },
     );
+    await waitFor(() => {
+      expect(result.current?.chatId).toBe('chat_a');
+    });
     rerender({ chatId: 'chat_b', projectId: 'proj_b' });
-    expect(result.current?.chatId).toBe('chat_b');
+    await waitFor(() => {
+      expect(result.current?.chatId).toBe('chat_b');
+    });
     expect(seen).not.toContainEqual({ projectId: 'proj_b', chatId: 'chat_a' });
   });
 
-  it('survives strict-mode-style mount/unmount/mount cycles without losing the session', () => {
+  it('survives strict-mode-style mount/unmount/mount cycles without losing the session', async () => {
     let storeRef: ChatSessionStore | undefined;
     function ProbeStore() {
       storeRef = useChatSessionStore();
@@ -277,6 +334,9 @@ describe('useChatSession', () => {
     );
 
     const { rerender, unmount } = render(tree);
+    await waitFor(() => {
+      expect(storeRef!.get('chat_a')).toBeDefined();
+    });
     const first = storeRef!.get('chat_a');
     expect(first).toBeDefined();
 
@@ -316,7 +376,7 @@ describe('useChatSession', () => {
     expect(storeRef!.get('chat_a')).toBeUndefined();
   });
 
-  it('releases nothing it did not acquire under StrictMode', () => {
+  it('releases nothing it did not acquire under StrictMode', async () => {
     let storeRef: ChatSessionStore | undefined;
     function ProbeStore() {
       storeRef = useChatSessionStore();
@@ -335,7 +395,9 @@ describe('useChatSession', () => {
         </ChatSessionStoreProvider>
       </StrictMode>,
     );
-    expect(storeRef!.get('chat_a')).toBeDefined();
+    await waitFor(() => {
+      expect(storeRef!.get('chat_a')).toBeDefined();
+    });
 
     unmount();
     // An abandoned StrictMode render holds no view reference (PV-A11).
@@ -352,7 +414,7 @@ describe('useChatSessionSnapshot', () => {
     vi.restoreAllMocks();
   });
 
-  it('re-renders when the underlying chat messages change', () => {
+  it('re-renders when the underlying chat messages change', async () => {
     let renderCount = 0;
     const { result } = renderHook(
       () => {
@@ -363,6 +425,9 @@ describe('useChatSessionSnapshot', () => {
       { wrapper: createWrapper() },
     );
 
+    await waitFor(() => {
+      expect(harness.created).toHaveLength(1);
+    });
     const initialRenders = renderCount;
     expect(result.current).toEqual([]);
     expect(harness.created).toHaveLength(1);
@@ -379,7 +444,7 @@ describe('useChatSessionSnapshot', () => {
     expect(harness.created).toHaveLength(1);
   });
 
-  it('re-renders when the underlying chat status changes', () => {
+  it('re-renders when the underlying chat status changes', async () => {
     const { result } = renderHook(
       () => {
         useChatSession('chat_a', 'proj_a');
@@ -388,6 +453,9 @@ describe('useChatSessionSnapshot', () => {
       { wrapper: createWrapper() },
     );
 
+    await waitFor(() => {
+      expect(result.current).toBe('ready');
+    });
     const fake = harness.created[0]!;
     expect(result.current).toBe('ready');
 
@@ -399,7 +467,7 @@ describe('useChatSessionSnapshot', () => {
     expect(result.current).toBe('streaming');
   });
 
-  it('does not wake snapshot subscribers from a different chatId', () => {
+  it('does not wake snapshot subscribers from a different chatId', async () => {
     let renderCountA = 0;
 
     function ProbeA() {
@@ -421,6 +489,9 @@ describe('useChatSessionSnapshot', () => {
       </ChatSessionStoreProvider>,
     );
 
+    await waitFor(() => {
+      expect(harness.created).toHaveLength(2);
+    });
     const initial = renderCountA;
     const fakeB = harness.created.find((c) => c.id === 'chat_b')!;
     act(() => {

@@ -203,6 +203,8 @@ vi.mock('#machines/inspector.js', () => ({
   inspect: undefined,
 }));
 
+const { loadChatSdk } = await import('#chat-clients/_internal/chat-sdk.js');
+await loadChatSdk();
 const { ChatSessionStore } = await import('#services/chat-session-store.js');
 const { selectVisibleChatError } = await import('#routes/w.$workspace.$project/chat-error.js');
 const { attachmentSendBlockReason, buildUserMessage } = await import('#utils/chat.utils.js');

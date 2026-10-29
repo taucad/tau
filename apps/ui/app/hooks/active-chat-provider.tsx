@@ -1,3 +1,4 @@
+import { loadChatSdk } from '#chat-clients/_internal/chat-sdk.js';
 /**
  * Chat composer context — unified contract
  *
@@ -344,6 +345,26 @@ export function HomeNewProjectComposerProvider({
 }: {
   readonly children: React.ReactNode;
 }): React.JSX.Element {
+  const [sdkReady, setSdkReady] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    // async-iife: bootstrap -- mounting the composer owns this cancellable code load.
+    void (async (): Promise<void> => {
+      try {
+        await loadChatSdk();
+        if (!controller.signal.aborted) {
+          setSdkReady(true);
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.error('Chat could not load', error);
+        }
+      }
+    })();
+    return () => {
+      controller.abort();
+    };
+  }, []);
   const { recordFiles } = useFileManager();
   const store = useMemo(() => createComposerRecordStore(recordFiles, composerRecordPaths.newProject), [recordFiles]);
   /* Declared before both actors: effect cleanups run in declaration order, so the debounced keystroke
@@ -411,7 +432,13 @@ export function HomeNewProjectComposerProvider({
     }),
     [consumeDraft, draftActorRef, execution, kernel, model],
   );
-  return <ChatComposerContext.Provider value={value}>{children}</ChatComposerContext.Provider>;
+  return (
+    <ChatComposerContext.Provider value={value}>
+      <div className='contents' inert={!sdkReady} aria-busy={!sdkReady}>
+        {children}
+      </div>
+    </ChatComposerContext.Provider>
+  );
 }
 
 /**

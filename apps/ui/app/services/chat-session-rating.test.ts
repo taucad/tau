@@ -97,6 +97,16 @@ describe('ChatSessionStore ratings', () => {
     }
   });
 
+  it('offers no rating for a paused run, whose attempt ended but whose reply resumes', async () => {
+    const paused = await observed([...rows(false), lifecycleRow(3, 'paused')]);
+    try {
+      expect(paused.store.getProjection('chat_rated')?.ledger.runs['run_1']?.appendState).toBe('terminal');
+      expect(paused.store.ratableRun('chat_rated', 'turn-1')).toBeUndefined();
+    } finally {
+      paused.close();
+    }
+  });
+
   it('offers the newest run of a regenerated turn, never the ended run it replaced', async () => {
     const open = await observed([...rows(true), ...rows(false, 'run_2', 4)]);
     try {

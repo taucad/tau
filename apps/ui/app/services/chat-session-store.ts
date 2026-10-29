@@ -1072,8 +1072,8 @@ export class ChatSessionStore {
   }
 
   /**
-   * The ended run that answered a turn, which the account may rate (T12): the turn's last run whose current attempt
-   * appended its end. A live, unread or legacy run that names no turn is not ratable.
+   * The ended run that answered a turn, which the account may rate (T12): the turn's last run that ended and whose
+   * current attempt appended its end. A live, unread or legacy run that names no turn is not ratable.
    *
    * @param chatId - The chat.
    * @param turnId - The turn's user-message id.
@@ -1090,7 +1090,9 @@ export class ChatSessionStore {
       undefined,
       undefined,
     ];
-    return run?.appendState === 'terminal' || run?.appendState === 'settled' ? runId : undefined;
+    /* A native pause also ends its attempt, but the run resumes: only an ended lifecycle closes the reply. */
+    const ended = run?.lifecycle === 'completed' || run?.lifecycle === 'failed' || run?.lifecycle === 'cancelled';
+    return ended && (run.appendState === 'terminal' || run.appendState === 'settled') ? runId : undefined;
   }
 
   /** The rating this page gave a run, if any. @public */

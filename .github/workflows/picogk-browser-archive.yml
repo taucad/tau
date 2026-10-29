@@ -132,6 +132,25 @@ jobs:
           JSON
           pnpm nx run picogk:prepare-parity-apps out/parity-apps-config.json
           rm -rf out/parity-apps/artifacts-aot out/parity-apps/artifacts-dynamic
+      - name: Prepare both parity apps on the threaded runtime
+        # The execution the product ships: the browser kernel's default `auto` takes the threaded
+        # bundle wherever the page is cross-origin isolated, so this is the pair a figure and a
+        # byte comparison have to describe. The serial pair above stays measured as the fallback.
+        run: |
+          cat > out/parity-apps-threaded-config.json <<JSON
+          {
+            "dotnet": "$(command -v dotnet)",
+            "packageRoot": "$PWD/out/staged/packages/picovoxel.picogk/$PACKAGE_VERSION",
+            "picoGkProject": "$PWD/out/staged/base/PicoGK.csproj",
+            "picovoxelRoot": "$PWD/out/picovoxel",
+            "referencesRoot": "$PWD/out/staged/references",
+            "outputRoot": "$PWD/out/parity-apps-threaded",
+            "modes": ["aot", "dynamic"],
+            "execution": "threaded"
+          }
+          JSON
+          pnpm nx run picogk:prepare-parity-apps out/parity-apps-threaded-config.json
+          rm -rf out/parity-apps-threaded/artifacts-aot out/parity-apps-threaded/artifacts-dynamic
       - name: Build the matched native comparator and run the reference subject
         working-directory: out/picovoxel
         # The same engine sources and the same shared float trigonometry, built for this host: the
@@ -152,7 +171,10 @@ jobs:
         run: |
           mkdir -p out/inputs/evidence
           cp -R out/parity-apps/aot out/parity-apps/dynamic out/inputs/
+          cp -R out/parity-apps-threaded/aot out/inputs/aot-threaded
+          cp -R out/parity-apps-threaded/dynamic out/inputs/dynamic-threaded
           cp out/parity-apps/parity-apps.json out/inputs/
+          cp out/parity-apps-threaded/parity-apps.json out/inputs/parity-apps-threaded.json
           cp -R out/native/captures out/inputs/native-captures
           cp out/native/author-sources.json out/inputs/evidence/
           cp out/native-performance/performance-native.json out/inputs/
@@ -197,7 +219,7 @@ jobs:
       - run: pnpm exec playwright install --with-deps ${{ matrix.engine }}
       - name: Run both modes
         run: |
-          for mode in aot dynamic; do
+          for mode in aot dynamic aot-threaded dynamic-threaded; do
             node dotnet/run-parity-browser.mjs "out/inputs/$mode" "${{ matrix.engine }}" \
               "$SUBJECT" "out/runs/${{ matrix.engine }}-$mode"
           done
@@ -213,6 +235,14 @@ jobs:
             "$SUBJECT" dynamic-tape "out/performance/${{ matrix.engine }}-dynamic-tape" --options edit=on
           node dotnet/run-performance-browser.mjs out/inputs/dynamic "${{ matrix.engine }}" \
             "$SUBJECT" dynamic-callback "out/performance/${{ matrix.engine }}-dynamic-callback" --options tape=off
+          node dotnet/run-performance-browser.mjs out/inputs/aot-threaded "${{ matrix.engine }}" \
+            "$SUBJECT" aot-threaded "out/performance/${{ matrix.engine }}-aot-threaded"
+          node dotnet/run-performance-browser.mjs out/inputs/dynamic-threaded "${{ matrix.engine }}" \
+            "$SUBJECT" dynamic-threaded-tape "out/performance/${{ matrix.engine }}-dynamic-threaded-tape" \
+            --options edit=on
+          node dotnet/run-performance-browser.mjs out/inputs/dynamic-threaded "${{ matrix.engine }}" \
+            "$SUBJECT" dynamic-threaded-callback "out/performance/${{ matrix.engine }}-dynamic-threaded-callback" \
+            --options tape=off
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: picogk-performance-${{ matrix.engine }}
@@ -308,9 +338,9 @@ jobs:
           cp out/inputs/evidence/*.json out/desktop/desktop-neutrality.json out/evidence/
           node dotnet/tests/npm-contract.mjs . origin/main out/evidence/npm-contract.json
           node dotnet/gate-parity.mjs "$SUBJECT" out/inputs/native-captures out/evidence \
-            chromium=out/runs/chromium-aot/captures,out/runs/chromium-dynamic/captures \
-            firefox=out/runs/firefox-aot/captures,out/runs/firefox-dynamic/captures \
-            webkit=out/runs/webkit-aot/captures,out/runs/webkit-dynamic/captures
+            chromium=out/runs/chromium-aot/captures,out/runs/chromium-dynamic/captures,out/runs/chromium-aot-threaded/captures,out/runs/chromium-dynamic-threaded/captures \
+            firefox=out/runs/firefox-aot/captures,out/runs/firefox-dynamic/captures,out/runs/firefox-aot-threaded/captures,out/runs/firefox-dynamic-threaded/captures \
+            webkit=out/runs/webkit-aot/captures,out/runs/webkit-dynamic/captures,out/runs/webkit-aot-threaded/captures,out/runs/webkit-dynamic-threaded/captures
           node dotnet/tests/invariants.mjs out/evidence out/evidence/invariants.json
       - name: Judge every measured path against the matched native run
         # Separate from the byte gate above, and after it: a path that is fast and wrong is not a

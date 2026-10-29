@@ -71,6 +71,12 @@ const settingsCatalog = [
         description: 'Choose how your data, usage metrics and diagnostics are used to improve Tau',
         keywords: ['training', 'sharing', 'no train', 'telemetry', 'usage', 'metrics', 'anonymous', 'diagnostics'],
       },
+      {
+        id: 'agent-observability',
+        label: 'Agent recording',
+        description: 'Choose separately what may be recorded from your agent tasks, and for what',
+        keywords: ['agent', 'recording', 'capture', 'summaries', 'diagnosis', 'evaluation', 'training', 'purposes'],
+      },
     ],
   },
   {

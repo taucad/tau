@@ -994,7 +994,7 @@ await held.close(); await mount[Symbol.asyncDispose](); process.stdout.write('cl
           `
 import os, signal, sys, traceback
 log = open(sys.argv[2], "w", buffering=1)
-def say(message): log.write(message + "\n"); log.flush()
+def say(message): print(message, file=log, flush=True)
 class Stop(Exception): pass
 def stop(*_): say("signal handler ran"); raise Stop()
 signal.signal(signal.SIGUSR1, stop)

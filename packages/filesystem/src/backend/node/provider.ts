@@ -67,6 +67,24 @@ const hashConcurrency = 32;
 
 const inFlightTemporaryName = /^\..+\.\d+\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/u;
 
+/**
+ * The POSIX `open` hardening flag `flag`, or `0` where the platform omits it.
+ *
+ * Windows leaves `O_NOFOLLOW` and `O_NONBLOCK` undefined, so summing them into a
+ * flag word there yields `NaN`, which `fs.open` refuses with `ERR_OUT_OF_RANGE`
+ * before any durability or verification decision is reached. The refusals those
+ * bits would carry do not depend on them: every open below is preceded by an
+ * `lstat` symbolic-link refusal and a `realpath` containment check on its
+ * admitted parent, and the bounded reads never block on a regular file.
+ */
+const optionalOpenFlag = (flag: number | undefined): number => flag ?? 0;
+
+/** Bounded read of an already-admitted path. */
+const boundedReadFlags = constants.O_RDONLY + optionalOpenFlag(constants.O_NONBLOCK);
+
+/** Post-rename verification read, which must not traverse a symbolic link where the platform can refuse one. */
+const verificationReadFlags = boundedReadFlags + optionalOpenFlag(constants.O_NOFOLLOW);
+
 const isContained = (base: string, target: string): boolean => {
   const relative = path.relative(base, target);
   return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
@@ -888,7 +906,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
   }
 
   private async _readBounded(rooted: string, maximumBytes: number): Promise<Uint8Array<ArrayBuffer>> {
-    const handle = await fs.open(await this._resolve(rooted), constants.O_RDONLY + constants.O_NONBLOCK);
+    const handle = await fs.open(await this._resolve(rooted), boundedReadFlags);
     try {
       return await readBoundedDescriptor(handle, maximumBytes, () => undefined);
     } finally {
@@ -1159,10 +1177,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         await retainedHandle.sync();
       }
 
-      const verification = await fs.open(
-        admittedTarget,
-        constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK,
-      );
+      const verification = await fs.open(admittedTarget, verificationReadFlags);
       let committed: Uint8Array<ArrayBuffer>;
       try {
         committed = await readBoundedDescriptor(verification, bytes.byteLength, () => undefined);

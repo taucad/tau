@@ -316,7 +316,9 @@ describe('shell projection outbound publication', () => {
         to: 'archive',
         descendants,
         preconditions: [
-          ...descendants.filter((entry) => entry !== 'nested').map((entry) => ({ path: `big/${entry}`, expected: 'x' })),
+          ...descendants
+            .filter((entry) => entry !== 'nested')
+            .map((entry) => ({ path: `big/${entry}`, expected: 'x' })),
           { path: 'archive', expected: null },
         ],
       }),

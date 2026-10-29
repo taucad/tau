@@ -267,9 +267,7 @@ describe('projection owner through the real authority without FUSE', () => {
           total: 2 + entries * 4 + 5,
         });
         // Forgetting the retired generation releases exactly its own bytes.
-        await owner.handle(
-          ownerRequest({ operation: 'forget', inode: first.entry!.inode, lookupCount: 1n }),
-        );
+        await owner.handle(ownerRequest({ operation: 'forget', inode: first.entry!.inode, lookupCount: 1n }));
         expect(owner.usage()).toEqual({
           live: 2 + entries * 4 + 1,
           retired: 0,
@@ -293,7 +291,9 @@ describe('projection owner through the real authority without FUSE', () => {
         const tree = await owner.handle(ownerRequest({ operation: 'lookup', inode: 1n, name: 'tree' }));
         const parent = tree.entry!.inode;
         const leaves = await Promise.all(
-          ['a.md', 'b.md'].map(async (name) => owner.handle(ownerRequest({ operation: 'lookup', inode: parent, name }))),
+          ['a.md', 'b.md'].map(async (name) =>
+            owner.handle(ownerRequest({ operation: 'lookup', inode: parent, name })),
+          ),
         );
         expect(
           await owner.handle(
@@ -315,7 +315,9 @@ describe('projection owner through the real authority without FUSE', () => {
           const again = await owner.handle(ownerRequest({ operation: 'lookup', inode: parent, name }));
           expect(again.entry?.inode).toBe(leaves[index]!.entry?.inode);
         }
-        expect(await owner.handle(ownerRequest({ operation: 'lookup', inode: 1n, name: 'tree' }))).toEqual({ error: 2 });
+        expect(await owner.handle(ownerRequest({ operation: 'lookup', inode: 1n, name: 'tree' }))).toEqual({
+          error: 2,
+        });
       },
       async (root) => {
         await mkdir(join(root, 'tree'));

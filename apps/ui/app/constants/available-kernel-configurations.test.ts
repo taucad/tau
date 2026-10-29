@@ -18,9 +18,7 @@ describe('available kernel configurations', () => {
   });
 
   it('should retain native host availability without browser preparation', () => {
-    vi.mocked(desktopBridge).mockReturnValue({ runtimeKernelIds: ['picogk', 'build123d'] } as ReturnType<
-      typeof desktopBridge
-    >);
+    vi.mocked(desktopBridge, { partial: true }).mockReturnValue({ runtimeKernelIds: ['picogk', 'build123d'] });
     expect(availableKernelConfigurations().filter(({ id }) => ['picogk', 'build123d'].includes(id))).toHaveLength(2);
   });
 });

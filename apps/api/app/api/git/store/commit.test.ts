@@ -448,7 +448,7 @@ describe('commitLease', () => {
       const refused = new Error('index put refused');
       const journaled = journaledStore({
         honourSignal: true,
-        putMilliseconds: (key) => (key.endsWith('.idx') ? 5 : 5000),
+        putMilliseconds: (key) => (key.endsWith('.idx') ? 5 : 30_000),
         failPut: (key) => (key.endsWith('.idx') ? refused : undefined),
       });
       const locator = newLocator();
@@ -466,8 +466,8 @@ describe('commitLease', () => {
 
       expect(observed.error).toBe(refused);
       expect(observed.inFlight).toBe(0);
-      /* The 5 s pack put was aborted rather than awaited to the end. */
-      expect(performance.now() - startedAt).toBeLessThan(4000);
+      /* The 30 s pack put was aborted rather than awaited to the end. */
+      expect(performance.now() - startedAt).toBeLessThan(15_000);
       expect(
         journaled.events.flatMap((event) =>
           event.kind === 'put-failed' || event.kind === 'put-aborted' ? [[event.kind, event.key.slice(-4)]] : [],

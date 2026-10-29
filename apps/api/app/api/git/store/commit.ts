@@ -2,7 +2,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Logger } from '@nestjs/common';
 import { createReadStream } from 'node:fs';
-import { open, readFile, readdir, stat } from 'node:fs/promises';
+import { open, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type {
@@ -514,6 +514,37 @@ const inMemoryObjectBytes = 4 * 1024 * 1024;
  */
 const inMemoryCommitBytes = 8 * 1024 * 1024;
 
+/**
+ * Reads a small lease file straight into one buffer of its stat size, with no
+ * copy. A file that ended short is returned as what was read, so the declared
+ * length matches the bytes the digest covers.
+ */
+const readWhole = async (file: string, size: number, signal: AbortSignal): Promise<Uint8Array<ArrayBuffer>> => {
+  const bytes = new Uint8Array(new ArrayBuffer(size));
+  const handle = await open(file, 'r');
+  try {
+    let filled = 0;
+    while (filled < size) {
+      signal.throwIfAborted();
+      // oxlint-disable-next-line no-await-in-loop -- one buffer, filled in order
+      const { bytesRead } = await handle.read(bytes, filled, size - filled, filled);
+      if (bytesRead === 0) {
+        return bytes.slice(0, filled);
+      }
+      filled += bytesRead;
+    }
+    return bytes;
+  } finally {
+    await handle.close();
+  }
+};
+
+/**
+ * Files hashed at once. Each streamed file holds a 1 MiB read buffer while it
+ * hashes, so this bounds that memory beside the in-memory budget.
+ */
+const hashConcurrency = 4;
+
 type ReadyFile = { key: string; body: ObjectBody; contentLength: number; sha256: string };
 
 /**
@@ -555,7 +586,7 @@ const readyFiles = async (files: ReadonlyArray<{ key: string; file: string }>): 
   return settleAll(
     plans.map((plan) => async (signal: AbortSignal): Promise<ReadyFile> => {
       if (plan.buffered) {
-        const bytes = new Uint8Array(await readFile(plan.file, { signal }));
+        const bytes = await readWhole(plan.file, plan.size, signal);
         return {
           key: plan.key,
           body: bytes,
@@ -570,7 +601,7 @@ const readyFiles = async (files: ReadonlyArray<{ key: string; file: string }>): 
         sha256: await sha256OfFile(plan.file, signal),
       };
     }),
-    plans.length,
+    hashConcurrency,
   );
 };
 

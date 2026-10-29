@@ -59,6 +59,25 @@ const json = async (path: string): Promise<unknown> => JSON.parse(await readFile
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
 const projectRoot = resolve(import.meta.dirname, '../dotnet/Tau.PicoGK.Browser');
 const names = ['float-trig.o', 'libblosc.a', 'libopenvdb.a', 'libtbb.a', 'libz.a', 'picogk.26.2.a'];
+/**
+ * The fields a serial and a threaded archive must agree on. Each archive already proves its own
+ * compiler, runtime and staged bytes, but a pair built from different source would still admit, and
+ * the browser then runs two engines that are not the same program. `execution`, `flags` and
+ * `toolchain` are the three fields a threaded build is expected to change.
+ */
+const pairedReceiptSchema = z.object({
+  schemaVersion: z.number(),
+  comparator: z.string(),
+  nativeRid: z.string(),
+  driverSha256: z.string(),
+  globalJsonSha256: z.string(),
+  projectSha256: z.string(),
+  pinsSha256: z.string(),
+  sources: z.unknown(),
+  files: z.unknown(),
+});
+const pairedSource = async (archiveRoot: string): Promise<z.output<typeof pairedReceiptSchema>> =>
+  pairedReceiptSchema.parse(await json(join(archiveRoot, 'inputs.json')));
 type PreparationConfig = z.output<typeof configSchema>;
 const prepareVariant = async (
   config: PreparationConfig,
@@ -231,6 +250,13 @@ const main = async (): Promise<void> => {
   const outputRelative = relative(join(workspaceRoot, 'out'), config.outputRoot);
   if (!outputRelative || outputRelative.startsWith('..') || isAbsolute(outputRelative)) {
     throw new Error('Browser preparation output must be a child of this workspace out directory.');
+  }
+  if (config.threadedArchiveRoot) {
+    deepStrictEqual(
+      await pairedSource(config.threadedArchiveRoot),
+      await pairedSource(config.archiveRoot),
+      'The threaded archive was built from different source than the serial archive.',
+    );
   }
   const single = await prepareVariant(config, 'serial', config.archiveRoot);
   const multi = config.threadedArchiveRoot

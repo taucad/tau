@@ -11,7 +11,7 @@ import { deepStrictEqual } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import type { BinaryLike } from 'node:crypto';
-import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
@@ -42,6 +42,19 @@ const configSchema = z.object({
   outputRoot: absolute,
 });
 const sha256 = (bytes: BinaryLike): string => createHash('sha256').update(bytes).digest('hex');
+/**
+ * Emscripten's entry point runs Python with `-E`, which discards `PYTHONDONTWRITEBYTECODE`, so a
+ * build otherwise leaves `__pycache__` files inside the workload pack and changes the toolchain
+ * identity the archive receipts pin. The entry point reads `EMSDK_PYTHON` before `-E` applies, so a
+ * wrapper that adds `-B` keeps the installed SDK bytes unchanged without patching the SDK.
+ */
+const emscriptenEnvironment = async (outputRoot: string): Promise<NodeJS.ProcessEnv> => {
+  const wrapper = join(outputRoot, 'emsdk-python');
+  await writeFile(wrapper, `#!/bin/sh\nexec ${process.env['EMSDK_PYTHON'] ?? 'python3'} -B "$@"\n`);
+  await chmod(wrapper, 0o755);
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Emscripten's own environment variable name.
+  return { ...process.env, EMSDK_PYTHON: wrapper };
+};
 const json = async (path: string): Promise<unknown> => JSON.parse(await readFile(path, 'utf8')) as unknown;
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
 const projectRoot = resolve(import.meta.dirname, '../dotnet/Tau.PicoGK.Browser');
@@ -119,7 +132,7 @@ const prepareVariant = async (
       `-p:TauPicoGKArchiveRoot=${join(archiveRoot, 'native')}`,
       `-p:TauPicoGKRetentionProps=${config.retentionProps}`,
     ],
-    { cwd: projectRoot, stdio: 'inherit' },
+    { cwd: projectRoot, stdio: 'inherit', env: await emscriptenEnvironment(config.outputRoot) },
   );
   const publish = join(artifacts, 'publish', 'Tau.PicoGK.Browser', 'release', 'wwwroot');
   const bundle = join(config.outputRoot, 'bundle');

@@ -143,6 +143,8 @@ export type TargetDiagnostics = {
   readonly consoleMessages: ReadonlyArray<{
     readonly text: string;
     readonly type: string;
+    /** The source the message names: the script that logged it, or the resource a network error is about. */
+    readonly url?: string;
   }>;
   readonly pageErrors: readonly string[];
   readonly screenshot?: string;
@@ -350,6 +352,7 @@ export type UiBrowserCommands = {
     readonly consoleMessages: ReadonlyArray<{
       readonly text: string;
       readonly type: string;
+      readonly url?: string;
     }>;
     readonly pageErrors: readonly string[];
     readonly requestFailures: readonly TargetRequestFailure[];

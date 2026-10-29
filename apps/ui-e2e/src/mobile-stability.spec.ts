@@ -2,47 +2,60 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import { prepareComposerPage } from '#support/chat-attachments.js';
 import { measureProjectCardForeground } from '#support/project-card-framing.js';
 import {
   allSheet,
+  chooseTheme,
   followSidebarLink,
+  motionSettled,
   navButton,
-  navigation,
   openFromAll,
+  openPhone,
+  phoneViewports,
   projectTitle,
   surface,
   tapDestination,
+  themeNames,
 } from '#support/phone-shell.js';
+import type { PhoneViewport, ThemeName } from '#support/phone-shell.js';
 import { installResourceProbe, liveResourceNames, readResources } from '#support/resource-probe.js';
 import type { ResourceCounts } from '#support/resource-probe.js';
-import { waitForStageReady } from '#support/viewer-stage.js';
+import { waitForModelReady } from '#support/viewer-stage.js';
 
 /**
  * T7 on the production phone route: the shell stays whole and gives back what it takes over many cycles in one
- * document. Each circuit warms once, takes a same-browser baseline of live workers, WebGL and WebGPU contexts, GPU
- * devices, object URLs and window/document listeners after a garbage collection, then runs ten more cycles and, after
- * the last one's cleanup, fails on any count that stays above that baseline. Every cycle also fails on an uncaught page
- * error, a failed script or stylesheet load, a failed same-origin request, a chunk-load or React diagnostic in the
- * console, a binary value or object rendered into a DOM attribute, a replaced document (a reload), or a blank model or
- * editor.
+ * document. Each circuit warms once, takes a same-browser baseline of live dedicated workers, WebGL and WebGPU contexts,
+ * GPU devices, object URLs, window/document listeners and shared-worker constructions after a garbage collection, then
+ * runs ten more cycles and, after the last one's cleanup, fails on any count above that baseline. Every cycle also fails
+ * on an uncaught page error, a failed script, stylesheet or document load, a failed same-origin request, any console
+ * error not named in {@link benignConsole} (React's root error hooks log render faults to the console and do not
+ * rethrow them, so this is where a render fault shows), a serialized binary value or object in a DOM attribute, a
+ * replaced document (a reload), or a blank model or editor.
  *
  * - The workbench circuit, at 390×844: All → every surface it lists (and Chat and Parameters) → Model; one theme per
  *   cycle, with the production CodeMirror editor read in it, so Black and High Contrast reach the editor as their own
- *   themes, and showing the open project's own source and never the other's; then a switch to the other project through
- *   the sidebar, whose model renders. Projects alternate, so cycle 10 ends on Project Navigation A in the theme cycle 0
- *   ended in.
+ *   themes (a rendered keyword token's colour, not only the custom property), and showing the open project's own
+ *   source and never the other's; then a switch to the other project through the sidebar, whose model renders.
+ *   Projects alternate, so cycle 10 ends on Project Navigation A in the theme cycle 0 ended in.
  * - The preview circuit, at 390×844: on Projects, a card's live model preview mounts and draws the model; it unmounts
  *   by its own toggle before the card opens its project, or, every other cycle, by the sidebar leaving Projects with it
  *   still live; the project's model renders, and the sidebar returns to Projects, where no preview is left.
  *
- * Not covered here, and why: the canvas HMR identity check needs a development server's hot update, which a production
- * build cannot produce. React's binary-prop warnings are development-only, so against the production build the spec
- * checks their effect instead (no attribute holds serialized bytes or an `[object …]` string after any cycle); the
- * console check catches the warnings themselves only when the spec runs against the development server
- * (`TAU_E2E_SERVER_MODE=development`). JS heap is not budgeted: it is not a resource count and
- * varies with the collector. A worker's own contexts, URLs and listeners are outside the page probe; its liveness is
- * counted. Each circuit runs at 390×844 only: the workbench circuit alone takes about ten minutes at one width.
+ * What the budgets do not prove on this route and profile: no object URL is created in either circuit (the totals stay
+ * at zero), so that budget is unexercised; on the software WebGPU profile the one GPU device and WebGPU context are made
+ * at startup and lost before the baseline (the stage then draws with WebGL), so no WebGPU context or device is live in
+ * a measured cycle; the app constructs no shared worker, so that budget only catches a new one. JS heap is not
+ * budgeted: it is not a resource count and varies with the collector. A worker's own contexts, URLs and listeners are
+ * outside the page probe; its liveness is counted.
+ *
+ * Not covered here, and why:
+ * - T7's React binary-prop diagnostics. That failure is React 19's development performance track walking every byte
+ *   of a typed array in a changed prop (the GLB `artifact` the preview hands `ModelViewer` when it goes from absent to
+ *   loaded): a transient allocation and stall in development builds of react-dom only, with no console message and no
+ *   DOM trace, so a production-route spec cannot see it. The serialized-attribute check here is a different, extra
+ *   guard: bytes or an object rendered into the DOM as text.
+ * - The canvas HMR identity check needs a development server's hot update, which a production build cannot produce.
+ * - Each circuit runs at 390×844 only: the workbench circuit alone takes about ten minutes at one width.
  */
 
 const seedRoute = '/__e2e/project-navigation';
@@ -51,71 +64,55 @@ const projects = { a: 'Project Navigation A', b: 'Project Navigation B' } as con
 const sources = { a: 'makeBaseBox(18, 12, 6)', b: 'makeBaseBox(28, 12, 6)' } as const;
 /** Each seeded project's entry file, as its Editor tab names it. */
 const entryFiles = { a: 'alpha.ts', b: 'beta.ts' } as const;
-const themes = ['Light', 'Dark', 'Black', 'High Contrast'] as const;
-type ThemeName = (typeof themes)[number];
 const cycles = 10;
+const phone = phoneViewports[1];
+
+type ConsoleMessage = Readonly<{ text: string; type: string; url?: string }>;
 
 /**
- * How far a live count may sit above its baseline after the final cleanup. Zero for every owned resource. Listeners
- * get two: window and document listeners belong to whatever happens to be mounted when the count is read (a tooltip,
- * a sheet's dismiss handler mid-exit), and a fixed leak of one per cycle would still exceed two by the tenth cycle.
+ * The console errors that are not faults, each named and as narrow as the evidence allows. Every other console error
+ * is a fault, whatever its text: React's root error hooks (`react-root-errors.ts`) log caught, uncaught and
+ * recoverable render errors with `console.error(error, componentStack)` and do not rethrow them to `window`.
  */
-const tolerance: Readonly<Record<(typeof liveResourceNames)[number], number>> = {
-  liveWorkers: 0,
-  webglContexts: 0,
-  webgpuContexts: 0,
-  gpuDevices: 0,
-  objectUrls: 0,
-  listeners: 2,
-};
-
-/** Console errors that mean a module failed to load or React reported a fault, whatever the build. */
-const faultingConsole = [
-  /dynamically imported module/iu,
-  /Importing a module script failed/iu,
-  /Failed to load module script/iu,
-  /Loading (?:CSS )?chunk/iu,
-  /for a non-boolean attribute/u,
-  /Invalid value for prop/u,
-  /Minified React error/u,
-  /The above error occurred/u,
-  /Warning: React does not recognize/u,
+const benignConsole: ReadonlyArray<
+  Readonly<{
+    name: string;
+    /** Tolerated only until the baseline is taken (the opening and the warm cycle); a fault in a measured cycle. */
+    beforeBaselineOnly?: true;
+    matches: (message: ConsoleMessage, apiOrigin: string) => boolean;
+  }>
+> = [
+  {
+    // The local API is not running in this environment, so the browser logs each refused request to it.
+    name: 'refused request to the local API',
+    matches: ({ text, url }, apiOrigin) =>
+      text === 'Failed to load resource: net::ERR_CONNECTION_REFUSED' &&
+      url !== undefined &&
+      new URL(url).origin === apiOrigin,
+  },
+  {
+    // The served Content-Security-Policy-Report-Only header names a directive that only an enforced policy can carry.
+    name: 'report-only CSP notice',
+    matches: ({ text }) =>
+      text ===
+      "The Content Security Policy directive 'upgrade-insecure-requests' is ignored when delivered in a report-only policy.",
+  },
+  {
+    /* On the software WebGPU profile the stage's startup GPU device is lost ("no valid external Instance") and the
+     * stage draws with WebGL. Observed in most runs, always before the baseline: the probe shows the one device made
+     * at startup, none live at the baseline, and none made afterwards. Pinned to that exact message and to the opening
+     * and warm cycle: a device lost in a measured cycle is a fault. */
+    name: 'startup WebGPU device lost on the software profile',
+    beforeBaselineOnly: true,
+    matches: ({ text }) =>
+      /^THREE\.THREE\.WebGPURenderer: WebGPU Device Lost:\s+Message: A valid external Instance reference no longer exists\.\s+Reason: unknown$/u.test(
+        text,
+      ),
+  },
 ];
 
-const viewerControls = (): Locator => selectors.getByRole('group', { name: 'Viewer controls' }).first();
 const mobileSurfaces = (): Locator => selectors.getByCss('[data-slot="mobile-surface"]');
 const editorLines = (): Locator => surface('Editor').getByCss('.cm-editor .cm-content');
-
-/** Wait for every running animation with an end to finish, so a read is not of a sheet mid-slide. */
-const motionSettled = async (): Promise<void> =>
-  target.evaluate(async () => {
-    await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          resolve();
-        });
-      });
-    });
-    const finite = document
-      .getAnimations()
-      .filter((animation) => Number.isFinite(Number(animation.effect?.getComputedTiming().endTime ?? 0)));
-    await Promise.all(finite.map(async (animation) => animation.finished.catch(() => undefined)));
-  });
-
-/** Not blank: the stage has drawn its first frame and the model has geometry, so Section view is enabled. */
-const waitForModelReady = async (): Promise<void> => {
-  await waitForStageReady();
-  await expect
-    .poll(
-      async () =>
-        target.getAttribute(
-          viewerControls().getByRole('button', { name: 'Section view', exact: true }),
-          'aria-disabled',
-        ),
-      { timeout: 60_000 },
-    )
-    .toBe('false');
-};
 
 /**
  * Open the Editor, bring the project's entry file forward by its tab, and wait for its source in CodeMirror; the other
@@ -132,76 +129,60 @@ const expectEditorSource = async (project: keyof typeof sources): Promise<void> 
   expect(await target.textContent(editorLines())).not.toContain(sources[project === 'a' ? 'b' : 'a']);
 };
 
-/** How many dialogs are on screen, counted in the page so a dialog leaving mid-count is simply not counted. */
-const openDialogs = async (): Promise<number> =>
-  target.evaluate(
-    () => [...document.querySelectorAll('[role="dialog"]')].filter((dialog) => dialog.checkVisibility()).length,
-  );
-
-/**
- * Choose a theme in Settings › General, as a person does on a phone, and close Settings.
- *
- * @param theme - The theme's name.
- */
-const chooseTheme = async (theme: ThemeName): Promise<void> => {
-  await target.click(selectors.getByRole('button', { name: 'Open sidebar', exact: true }), { touch: true });
-  const sidebar = selectors.getByRole('dialog', { name: 'Sidebar' });
-  await target.expectVisible(sidebar);
-  await target.click(sidebar.getByRole('button', { name: 'Account', exact: true }), { touch: true });
-  await target.click(selectors.getByRole('menuitem', { name: 'Settings', exact: true }), { touch: true });
-  const settings = selectors.getByRole('dialog', { name: /^settings$/iu });
-  await target.expectVisible(settings, 60_000);
-  const themeButton = selectors.getByRole('button', { name: /^(?:light|dark|black|high contrast|system)$/iu });
-  if (!(await target.isVisible(themeButton))) {
-    await target.click(settings.getByRole('button', { name: /^General/u }).first(), { touch: true });
-  }
-  await target.click(themeButton, { touch: true });
-  await target.click(selectors.getByRole('option', { name: new RegExp(`^${theme}`, 'iu') }), { touch: true });
-  await target.expectClass(
-    selectors.getByCss('html'),
-    new RegExp(`\\b${theme.toLowerCase().replaceAll(' ', '-')}\\b`, 'u'),
-  );
-  await target.expectCount(selectors.getByRole('listbox'), 0, 30_000);
-  // On a phone Settings is a list and a detail: Escape steps back from General to the list, then closes it.
-  // oxlint-disable-next-line no-await-in-loop -- whether a dialog is left decides the next step.
-  for (let step = 0; step < 3 && (await openDialogs()) > 0; step++) {
-    // oxlint-disable-next-line no-await-in-loop -- one step back at a time.
-    await target.keyboardPress('Escape');
-    // oxlint-disable-next-line no-await-in-loop -- the dialog's exit animation runs between steps.
-    await motionSettled();
-  }
-  await target.expectCount(selectors.getByRole('dialog'), 0, 30_000);
-  await target.expectVisible(navigation(), 60_000);
-};
-
 type EditorTheme = Readonly<{
   /** The theme classes on the document element. */
   classes: readonly string[];
   /** The editor's background against the theme's own `--background`, resolved in the same place. */
   background: string;
   themeBackground: string;
-  /** The editor's keyword hue, which the theme's own syntax palette sets. */
+  /** The computed colour of a rendered keyword token (`return`) in the source, which the theme's syntax palette sets. */
   keyword: string;
 }>;
 
-/** Read the production CodeMirror editor's theme in the open Editor. */
-const readEditorTheme = async (): Promise<EditorTheme> =>
+/**
+ * Read the production CodeMirror editor's theme in the open Editor, once.
+ *
+ * @returns The theme, with an empty keyword while the source has no highlighted `return` token yet.
+ */
+const readEditorThemeOnce = async (): Promise<EditorTheme> =>
   target.evaluateLocator(surface('Editor').getByCss('.editor-container .cm-editor').first(), (editor) => {
     const swatch = document.createElement('div');
     swatch.style.backgroundColor = 'var(--background)';
     editor.append(swatch);
     const themeBackground = getComputedStyle(swatch).backgroundColor;
     swatch.remove();
-    const style = getComputedStyle(editor);
+    // The highlighter wraps a keyword in its own span; a bare text node means the source is not highlighted yet.
+    const keywordToken = [...editor.querySelectorAll('.cm-content .cm-line span')].find(
+      (span) => span.childElementCount === 0 && span.textContent === 'return',
+    );
     return {
       classes: [...document.documentElement.classList].filter((name) =>
         ['light', 'dark', 'black', 'high-contrast'].includes(name),
       ),
-      background: style.backgroundColor,
+      background: getComputedStyle(editor).backgroundColor,
       themeBackground,
-      keyword: style.getPropertyValue('--cm-keyword').trim(),
+      keyword: keywordToken ? getComputedStyle(keywordToken).color : '',
     };
   });
+
+/**
+ * Read the production CodeMirror editor's theme in the open Editor once its source is highlighted.
+ *
+ * @returns The theme.
+ */
+const readEditorTheme = async (): Promise<EditorTheme> => {
+  let theme: EditorTheme | undefined;
+  await expect
+    .poll(
+      async () => {
+        theme = await readEditorThemeOnce();
+        return theme.keyword;
+      },
+      { timeout: 30_000 },
+    )
+    .not.toBe('');
+  return theme!;
+};
 
 /** The theme classes each theme puts on the document element. */
 const themeClasses = new Map<ThemeName, readonly string[]>([
@@ -217,14 +198,13 @@ const editorThemes = new Map<ThemeName, EditorTheme>();
 type Fault = Readonly<{ kind: string; detail: string }>;
 
 /**
- * Attributes that carry a binary value or an object as text: what a production build renders when a typed array, an
- * `ArrayBuffer`, a `Blob` or a model artifact reaches a DOM element as a prop. Production React logs nothing for it (the
- * binary-prop warning is development-only), so the spec reads its result in the document instead: a run of sixteen or
- * more comma-separated bytes, or an `[object …]` string.
+ * Attributes that hold a binary value or an object serialized as text: what a production build renders when a typed
+ * array, an `ArrayBuffer`, a `Blob` or a model artifact reaches a DOM element as a prop: a run of sixteen or more
+ * comma-separated bytes, or an `[object …]` string. This is not React's binary-prop diagnostics (see the file's doc).
  *
  * @returns Each offending attribute as `tag[name]` with the start of its value.
  */
-const readBinaryAttributes = async (): Promise<string[]> =>
+const readSerializedAttributes = async (): Promise<string[]> =>
   target.evaluate(() => {
     const serializedBytes = /^(?:\d{1,3},){15,}\d{1,3}$/u;
     const serializedObject = /\[object [A-Za-z]+\]/u;
@@ -239,43 +219,55 @@ const readBinaryAttributes = async (): Promise<string[]> =>
     return found;
   });
 
+/** How many of each kind of event were already judged. */
+type Marks = Readonly<{ console: number; page: number; requests: number; loads: number }>;
+
 /**
- * The faults the target has recorded since `from`: uncaught page errors, failed script and stylesheet loads, failed
- * same-origin requests, and console errors that mean a failed module load or a React fault. The local API is not
- * running in this environment, so its refused requests (another origin) are expected and not faults.
+ * The faults the target has recorded since `from`: uncaught page errors; failed requests that are same-origin, or of
+ * any origin when they load a script, stylesheet or document; and every console error that {@link benignConsole} does
+ * not name. Every other failed request (another origin, not a script, stylesheet or document) is not a fault: in this
+ * environment those are the local API's refused requests. They are returned so the ledger keeps them.
  *
  * @param from - How many of each kind were already judged.
- * @returns The new faults and the new high-water marks.
+ * @param context - What the judgement depends on.
+ * @param context.apiOrigin - The local API's origin, as the page was told it.
+ * @param context.beforeBaseline - Whether the baseline is still to be taken.
+ * @returns The new faults, the console errors and ignored requests seen, and the new high-water marks.
  */
 const readFaults = async (
-  from: Readonly<{ console: number; page: number; requests: number }>,
+  from: Omit<Marks, 'loads'>,
+  { apiOrigin, beforeBaseline }: Readonly<{ apiOrigin: string; beforeBaseline: boolean }>,
 ): Promise<{
   faults: Fault[];
   consoleErrors: string[];
-  next: { console: number; page: number; requests: number };
+  ignoredRequests: string[];
+  next: Omit<Marks, 'loads'>;
 }> => {
   const events = await target.events();
   const { origin } = new URL(await target.currentUrl());
-  const faults: Fault[] = [
-    ...events.pageErrors.slice(from.page).map((detail) => ({ kind: 'page error', detail })),
-    ...events.requestFailures
-      .slice(from.requests)
-      .filter(
-        ({ url, resourceType }) =>
-          new URL(url).origin === origin || ['script', 'stylesheet', 'document'].includes(resourceType),
-      )
-      .map(({ url, resourceType, failure }) => ({ kind: 'request', detail: `${resourceType} ${url} ${failure}` })),
-    ...events.consoleMessages
-      .slice(from.console)
-      .filter(({ type, text }) => type === 'error' && faultingConsole.some((pattern) => pattern.test(text)))
-      .map(({ text }) => ({ kind: 'console', detail: text })),
-  ];
+  const requests = events.requestFailures.slice(from.requests);
+  const isFault = ({ url, resourceType }: (typeof requests)[number]): boolean =>
+    new URL(url).origin === origin || ['script', 'stylesheet', 'document'].includes(resourceType);
+  const consoleErrors = events.consoleMessages.slice(from.console).filter(({ type }) => type === 'error');
+  const describe = ({ text, url }: ConsoleMessage): string => (url ? `${text} @ ${new URL(url).origin}` : text);
+  const benign = (message: ConsoleMessage): boolean =>
+    benignConsole.some(
+      ({ matches, beforeBaselineOnly }) => (beforeBaseline || !beforeBaselineOnly) && matches(message, apiOrigin),
+    );
   return {
-    faults,
-    consoleErrors: events.consoleMessages
-      .slice(from.console)
-      .filter(({ type }) => type === 'error')
-      .map(({ text }) => text),
+    faults: [
+      ...events.pageErrors.slice(from.page).map((detail) => ({ kind: 'page error', detail })),
+      ...requests
+        .filter((request) => isFault(request))
+        .map(({ url, resourceType, failure }) => ({ kind: 'request', detail: `${resourceType} ${url} ${failure}` })),
+      ...consoleErrors
+        .filter((message) => !benign(message))
+        .map((message) => ({ kind: 'console', detail: describe(message) })),
+    ],
+    consoleErrors: consoleErrors.map((message) => describe(message)),
+    ignoredRequests: requests
+      .filter((request) => !isFault(request))
+      .map(({ url, resourceType, failure }) => `${resourceType} ${new URL(url).origin} ${failure}`),
     next: {
       console: events.consoleMessages.length,
       page: events.pageErrors.length,
@@ -290,7 +282,8 @@ const liveOf = (counts: ResourceCounts): Live =>
   Object.fromEntries(liveResourceNames.map((name) => [name, counts[name]])) as Live;
 
 /**
- * The counts that sit above the baseline by more than their tolerance, by name.
+ * The counts that sit above the baseline, by name. No count has a tolerance: in every recorded run each one, the
+ * window/document listeners included, read exactly its baseline after every cycle, so one above it is retained growth.
  *
  * @param baseline - The warmed baseline.
  * @param now - The counts now.
@@ -298,26 +291,45 @@ const liveOf = (counts: ResourceCounts): Live =>
  */
 const growthOver = (baseline: Live, now: Live): string[] =>
   liveResourceNames
-    .filter((name) => now[name] - baseline[name] > tolerance[name])
+    .filter((name) => now[name] > baseline[name])
     .map((name) => `${name} ${String(baseline[name])} → ${String(now[name])}`);
 
-/**
- * One circuit's evidence: the document token, the baseline, every cycle's counts and faults, the final counts, and the
- * console errors it judged.
- */
-type Ledger = {
-  document: string;
-  baseline?: ResourceCounts;
-  cycles: Array<Readonly<{ cycle: number; milliseconds: number; counts: ResourceCounts; faults: Fault[] }>>;
-  final?: ResourceCounts;
-  /** Every console error the circuit logged, faulting or not, by text, with how often it came. */
-  consoleErrors: Record<string, number>;
+/** Add each text to a tally. */
+const tally = (into: Record<string, number>, texts: readonly string[]): void => {
+  for (const text of texts) {
+    into[text] = (into[text] ?? 0) + 1;
+  }
 };
 
 /**
- * Run one circuit: open the phone on the seed, warm with cycle 0, take the baseline, run the ten cycles checking each,
- * and fail on retained growth after the last. Cycle 0 and cycle 10 must end in the same state, so the baseline and the
- * final counts are read with the same things mounted.
+ * One circuit's evidence: the document token, the baseline, every cycle's counts, faults and console errors, the final
+ * counts, and every console error and ignored request it saw.
+ */
+type Ledger = {
+  document: string;
+  apiOrigin: string;
+  baseline?: ResourceCounts;
+  cycles: Array<
+    Readonly<{
+      cycle: number;
+      /** Evidence only: how long the cycle took on this machine. Not a budget. */
+      milliseconds: number;
+      counts: ResourceCounts;
+      faults: Fault[];
+      consoleErrors: string[];
+    }>
+  >;
+  final?: ResourceCounts;
+  /** Every console error the circuit logged, faulting or not, by text and source origin, with how often it came. */
+  consoleErrors: Record<string, number>;
+  /** Every failed request that was not judged a fault, by type, origin and failure, with how often it came. */
+  ignoredRequests: Record<string, number>;
+};
+
+/**
+ * Run one circuit: open the phone on the seed with the probe installed, warm with cycle 0, take the baseline, run the
+ * ten cycles checking each, and fail on retained growth after the last. Cycle 0 and cycle 10 must end in the same
+ * state, so the baseline and the final counts are read with the same things mounted.
  *
  * @param circuit - The circuit.
  * @param circuit.name - The artifact name.
@@ -332,23 +344,29 @@ const runCircuit = async ({
   settle,
 }: Readonly<{
   name: string;
-  viewport: Readonly<{ width: number; height: number }>;
+  viewport: PhoneViewport;
   cycle: (index: number) => Promise<void>;
   settle: () => Promise<void>;
 }>): Promise<void> => {
-  await target.commands.uiOpenTarget({ hasTouch: true, isMobile: true });
-  await installResourceProbe();
-  await prepareComposerPage();
-  await target.setViewport(viewport);
-  await target.navigate(seedRoute);
-  await target.expectUrl(/\/w\/[^/]+\/[^/?]+/u, 60_000);
-  await target.expectVisible(navigation(), 60_000);
+  await openPhone(viewport, seedRoute, { beforeNavigate: installResourceProbe });
   await target.expectVisible(projectTitle(projects.a), 60_000);
   await waitForModelReady();
 
+  const apiUrl = await target.evaluate(
+    () => (globalThis as typeof globalThis & { ENV?: { TAU_API_URL?: string } }).ENV?.TAU_API_URL,
+  );
+  if (!apiUrl) {
+    throw new Error('The page did not publish TAU_API_URL.');
+  }
   const opened = await readResources();
-  const ledger: Ledger = { document: opened.document, cycles: [], consoleErrors: {} };
-  let marks = { console: 0, page: 0, requests: 0 };
+  const ledger: Ledger = {
+    document: opened.document,
+    apiOrigin: new URL(apiUrl).origin,
+    cycles: [],
+    consoleErrors: {},
+    ignoredRequests: {},
+  };
+  let marks: Marks = { console: 0, page: 0, requests: 0, loads: 0 };
   try {
     for (let index = 0; index <= cycles; index++) {
       const started = performance.now();
@@ -359,19 +377,26 @@ const runCircuit = async ({
       // oxlint-disable-next-line no-await-in-loop -- one cycle at a time.
       const counts = await readResources();
       // oxlint-disable-next-line no-await-in-loop -- one cycle at a time.
-      const read = await readFaults(marks);
-      marks = read.next;
-      for (const text of read.consoleErrors) {
-        ledger.consoleErrors[text] = (ledger.consoleErrors[text] ?? 0) + 1;
-      }
+      const read = await readFaults(marks, { apiOrigin: ledger.apiOrigin, beforeBaseline: index === 0 });
+      // The probe's load errors are cumulative: only those past the last read are new.
+      const loadErrors = counts.loadErrors.slice(marks.loads);
+      marks = { ...read.next, loads: counts.loadErrors.length };
+      tally(ledger.consoleErrors, read.consoleErrors);
+      tally(ledger.ignoredRequests, read.ignoredRequests);
       // oxlint-disable-next-line no-await-in-loop -- one cycle at a time.
-      const binaryAttributes = await readBinaryAttributes();
+      const serializedAttributes = await readSerializedAttributes();
       const faults = [
         ...read.faults,
-        ...counts.loadErrors.map((detail) => ({ kind: 'load', detail })),
-        ...binaryAttributes.map((detail) => ({ kind: 'binary attribute', detail })),
+        ...loadErrors.map((detail) => ({ kind: 'load', detail })),
+        ...serializedAttributes.map((detail) => ({ kind: 'serialized attribute', detail })),
       ];
-      ledger.cycles.push({ cycle: index, milliseconds: Math.round(performance.now() - started), counts, faults });
+      ledger.cycles.push({
+        cycle: index,
+        milliseconds: Math.round(performance.now() - started),
+        counts,
+        faults,
+        consoleErrors: read.consoleErrors,
+      });
       // Saved as each cycle ends, so a run that times out still leaves the cycles it finished.
       // oxlint-disable-next-line no-await-in-loop -- one cycle at a time.
       await target.writeArtifact(`mobile-stability/${name}.json`, `${JSON.stringify(ledger, null, 2)}\n`);
@@ -407,11 +432,11 @@ test(
     let listed: readonly string[] = [];
     let current: keyof typeof projects = 'a';
     /** The warm cycle visits every theme, ending on the one the last cycle chooses, so both counts are read in it. */
-    const lastTheme = themes[cycles % themes.length]!;
-    const warmThemes = [...themes.filter((theme) => theme !== lastTheme), lastTheme];
+    const lastTheme = themeNames[cycles % themeNames.length]!;
+    const warmThemes = [...themeNames.filter((theme) => theme !== lastTheme), lastTheme];
     await runCircuit({
       name: 'workbench-390',
-      viewport: { width: 390, height: 844 },
+      viewport: phone,
       cycle: async (index) => {
         if (index === 0) {
           await target.click(navButton('All'), { touch: true });
@@ -426,7 +451,7 @@ test(
           expect(listed).toContain('Editor');
         }
         // A theme per cycle; the warm cycle visits all four.
-        const cycleThemes = index === 0 ? warmThemes : [themes[index % themes.length]!];
+        const cycleThemes = index === 0 ? warmThemes : [themeNames[index % themeNames.length]!];
         for (const theme of cycleThemes) {
           // oxlint-disable-next-line no-await-in-loop -- one theme at a time.
           await chooseTheme(theme);
@@ -450,7 +475,6 @@ test(
               [...(themeClasses.get(theme) ?? [])].toSorted(),
             );
             expect(editor.background, `${theme} editor background`).toBe(editor.themeBackground);
-            expect(editor.keyword, `${theme} keyword hue`).not.toBe('');
             editorThemes.set(theme, editor);
           } else {
             // oxlint-disable-next-line no-await-in-loop -- one surface at a time.
@@ -507,7 +531,7 @@ test(
 
     await runCircuit({
       name: 'preview-390',
-      viewport: { width: 390, height: 844 },
+      viewport: phone,
       cycle: async (index) => {
         if (index === 0) {
           await projectsPage();
@@ -526,7 +550,7 @@ test(
           )
           .toBeGreaterThan(100);
         // The live preview holds the model's bytes; none of them reach the DOM as an attribute.
-        expect(await readBinaryAttributes(), 'attributes with the preview live').toEqual([]);
+        expect(await readSerializedAttributes(), 'attributes with the preview live').toEqual([]);
         // The preview unmounts both ways a person ends it: by its own toggle, then the card opens the project; or,
         // every other cycle, by leaving Projects with the preview still live.
         if (index % 2 === 0) {

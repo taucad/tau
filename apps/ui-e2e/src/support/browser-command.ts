@@ -109,6 +109,8 @@ type Session = {
   readonly consoleMessages: Array<{
     readonly text: string;
     readonly type: string;
+    /** The source the message names: the script that logged it, or the resource a network error is about. */
+    readonly url?: string;
   }>;
   readonly context: ProviderContext;
   /** The DevTools session of each page whose CPU profile `uiCpuProfile` is recording. */
@@ -259,6 +261,7 @@ const observePage = (session: Session, page: TargetPage): void => {
     session.consoleMessages.push({
       text: message.text(),
       type: message.type(),
+      ...(message.location().url ? { url: message.location().url } : {}),
     }),
   );
   page.on('pageerror', (error) => session.pageErrors.push(error.message));
@@ -3138,6 +3141,7 @@ export const uiReadTargetEvents: BrowserCommand<
     readonly consoleMessages: ReadonlyArray<{
       readonly text: string;
       readonly type: string;
+      readonly url?: string;
     }>;
     readonly pageErrors: readonly string[];
     readonly requestFailures: readonly TargetRequestFailure[];

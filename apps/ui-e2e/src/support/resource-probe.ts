@@ -1,7 +1,8 @@
 /**
  * A page-realm resource probe for the stability circuits (T7): installed before the app's first script, it keeps weak
  * track of the WebGL and WebGPU contexts, GPU devices, workers, object URLs and window/document listeners the page
- * makes, and stamps the document with a random token so a reload cannot pass for the same session.
+ * makes, counts the shared workers it constructs, and stamps the document with a random token so a reload cannot pass
+ * for the same session.
  *
  * It wraps the native entry points without changing their results, and it reaches what it tracks only through weak
  * references, so it never keeps a canvas, context or device alive. Its own listeners are added before the wrappers and
@@ -26,6 +27,12 @@ export type ResourceCounts = Readonly<{
   objectUrls: number;
   /** Listeners on `window` and `document`, deduplicated as the browser does; `once` listeners are not counted. */
   listeners: number;
+  /**
+   * Shared workers the page has constructed. A shared worker outlives the page's handle to it and the browser does not
+   * enumerate it to the page, so this is a construction count, not a live one: any shared worker made after the
+   * baseline counts as growth.
+   */
+  sharedWorkers: number;
   totals: Readonly<{
     workersConstructed: number;
     workersTerminated: number;
@@ -36,7 +43,10 @@ export type ResourceCounts = Readonly<{
     objectUrlsCreated: number;
     objectUrlsRevoked: number;
   }>;
-  /** Resource elements (scripts, stylesheets, preloads) that failed to load, and Vite preload failures. */
+  /**
+   * Resource elements (scripts, stylesheets, preloads) that failed to load, and Vite preload failures, since the
+   * document began: cumulative, so a reader judges only the entries past the last it read.
+   */
   loadErrors: readonly string[];
 }>;
 
@@ -257,6 +267,7 @@ const installProbe = (): void => {
         (sum, byKey) => sum + [...byKey.values()].reduce((count, set) => count + set.size, 0),
         0,
       ),
+      sharedWorkers: totals.sharedWorkersConstructed,
       totals: { ...totals },
       loadErrors: [...loadErrors],
     }),
@@ -298,4 +309,5 @@ export const liveResourceNames = [
   'gpuDevices',
   'objectUrls',
   'listeners',
+  'sharedWorkers',
 ] as const satisfies ReadonlyArray<keyof ResourceCounts>;

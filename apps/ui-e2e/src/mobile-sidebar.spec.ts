@@ -272,6 +272,57 @@ test('runs a drawer item on a real tap: Rename on a project row starts the renam
   await target.expectHidden(drawer);
   await target.expectVisible(sidebarSheet());
   await target.expectCount(sidebarSheet().getByRole('textbox'), 1);
+  // The editor has the focus: the drawer's close hands it nothing back that would end the rename.
+  await expect.poll(async () => hasFocus(sidebarSheet().getByRole('textbox'))).toBe(true);
+});
+
+test('paints a dialog opened from a sidebar drawer above the sheet: Help, then Cookie preferences', async () => {
+  await openSeededProject({ width: 390, height: 844 });
+  await openSidebarSheet();
+
+  await target.click(sidebarSheet().getByRole('button', { name: 'Help', exact: true }), { touch: true });
+  const help = menuDrawer('Help');
+  await target.expectVisible(help);
+  await target.click(help.getByRole('button', { name: 'Cookie preferences', exact: true }), { touch: true });
+  await target.expectHidden(help);
+
+  const dialog = selectors.getByRole('dialog', { name: 'Cookie preferences' });
+  await target.expectVisible(dialog);
+  await target.evaluateLocator(dialog, async (element) => {
+    await Promise.all(element.getAnimations().map(async (animation) => animation.finished.catch(() => undefined)));
+  });
+  // Its controls, its title and its overlay are above the sidebar sheet (z-100), which stays open beneath.
+  expect(await isPaintedOnTop(dialog.getByRole('heading', { name: 'Cookie preferences' })), 'the title').toBe(true);
+  const controls = await target.evaluateLocator(dialog, (element) =>
+    [...element.querySelectorAll<HTMLElement>('button')].map((button) => button.textContent.trim()).filter(Boolean),
+  );
+  expect(controls.length).toBeGreaterThan(0);
+  for (const name of controls) {
+    // oxlint-disable-next-line no-await-in-loop -- one probe at a time.
+    expect(await isPaintedOnTop(dialog.getByRole('button', { name, exact: true })), name).toBe(true);
+  }
+  // The modal dialog hides the sheet from the accessibility tree, so the sheet is found by its slot here.
+  const sheetCoveredByOverlay = await target.evaluateLocator(
+    selectors.getByCss('[data-slot=sidebar][data-mobile=true]'),
+    (sheet) => {
+      const box = sheet.getBoundingClientRect();
+      const probe = document.createElement('style');
+      probe.textContent = '* { pointer-events: auto !important; }';
+      document.head.append(probe);
+      try {
+        const hit = document.elementFromPoint(box.left + 8, box.top + 8);
+        return hit !== null && !sheet.contains(hit);
+      } finally {
+        probe.remove();
+      }
+    },
+  );
+  expect(sheetCoveredByOverlay, 'the dialog overlay dims the sheet too').toBe(true);
+  await target.screenshot(undefined, 'cookie-dialog-390.png');
+
+  await target.keyboardPress('Escape');
+  await target.expectHidden(dialog);
+  await target.expectVisible(sidebarSheet());
 });
 
 test('lists local projects signed out, with sign-in reachable from the footer', async () => {

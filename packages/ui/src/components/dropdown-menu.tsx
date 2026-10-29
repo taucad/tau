@@ -339,7 +339,8 @@ function DropdownMenuDrawerContent({
           </Button>
         </DrawerClose>
       </div>
-      {/* A group, so the checkbox and radio rows have the parent their roles need. */}
+      {/* A dialog's group of buttons: checkbox, radio and switch rows use the plain `checkbox`, `radio` and `switch`
+       * roles, since the `menuitem*` roles need a `menu` parent that a drawer does not have. */}
       <div
         role='group'
         aria-label={title}
@@ -521,7 +522,7 @@ function DropdownMenuCheckboxItem({
 }
 
 /**
- * A checkbox item as a drawer's touch row (`menuitemcheckbox`): choosing it toggles it, as a menu's does, then closes
+ * A checkbox item as a drawer's touch row (`checkbox`): choosing it toggles it, as a menu's does, then closes
  * the drawer unless `onSelect` prevented that.
  */
 function DropdownMenuDrawerCheckboxItem({
@@ -543,7 +544,7 @@ function DropdownMenuDrawerCheckboxItem({
   return (
     <button
       type='button'
-      role='menuitemcheckbox'
+      role='checkbox'
       aria-checked={isIndeterminate ? 'mixed' : checked}
       data-slot='dropdown-menu-checkbox-item'
       data-state={isIndeterminate ? 'indeterminate' : checked ? 'checked' : 'unchecked'}
@@ -605,7 +606,7 @@ function DropdownMenuRadioGroup({
   );
 }
 
-/** A radio group in a drawer: a group of `menuitemradio` rows that share its value. */
+/** A radio group in a drawer: a `radiogroup` of `radio` rows that share its value. */
 function DropdownMenuDrawerRadioGroup({
   className,
   value,
@@ -617,7 +618,7 @@ function DropdownMenuDrawerRadioGroup({
   return (
     <DropdownMenuDrawerRadioContext.Provider value={radio}>
       <div
-        role='group'
+        role='radiogroup'
         data-slot='dropdown-menu-radio-group'
         className={cn('flex flex-col', className)}
         {...(properties as React.ComponentProps<'div'>)}
@@ -651,7 +652,7 @@ function DropdownMenuRadioItem({
     return (
       <button
         type='button'
-        role='menuitemradio'
+        role='radio'
         aria-checked={isChecked}
         data-slot='dropdown-menu-radio-item'
         data-state={isChecked ? 'checked' : 'unchecked'}
@@ -732,11 +733,11 @@ function DropdownMenuSwitchItem({
   const drawer = React.useContext(DropdownMenuDrawerContext);
   if (drawer) {
     const { onClick, disabled = false, asChild: _asChild, textValue: _textValue, ...row } = properties;
-    // The row is the control (`menuitemcheckbox`); the switch only shows its state. Toggling keeps the drawer open.
+    // The row is the control (`switch`); the switch only shows its state. Toggling keeps the drawer open.
     return (
       <button
         type='button'
-        role='menuitemcheckbox'
+        role='switch'
         aria-checked={isChecked}
         aria-labelledby={`${id}-title`}
         {...(description === undefined ? {} : { 'aria-describedby': `${id}-description` })}

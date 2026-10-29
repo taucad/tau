@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import axe from 'axe-core';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
@@ -368,7 +369,7 @@ describe('responsive dropdown menu parts in a drawer', () => {
     return screen.findByRole('dialog', { name: 'View' });
   };
 
-  it('should render a checkbox item as a menuitemcheckbox row that toggles and closes the drawer', async () => {
+  it('should render a checkbox item as a checkbox row that toggles and closes the drawer', async () => {
     const onCheckedChange = vi.fn<(checked: boolean) => void>();
     const drawer = await openWith(
       <DropdownMenuCheckboxItem checked onCheckedChange={onCheckedChange}>
@@ -376,7 +377,7 @@ describe('responsive dropdown menu parts in a drawer', () => {
       </DropdownMenuCheckboxItem>,
     );
 
-    const row = within(drawer).getByRole('menuitemcheckbox', { name: 'Grid' });
+    const row = within(drawer).getByRole('checkbox', { name: 'Grid' });
     expect(row).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(row);
 
@@ -400,13 +401,13 @@ describe('responsive dropdown menu parts in a drawer', () => {
       </DropdownMenuCheckboxItem>,
     );
 
-    fireEvent.click(within(drawer).getByRole('menuitemcheckbox', { name: 'Grid' }));
+    fireEvent.click(within(drawer).getByRole('checkbox', { name: 'Grid' }));
 
     expect(onCheckedChange).toHaveBeenCalledWith(true);
     expect(screen.getByRole('dialog', { name: 'View' })).toBeInTheDocument();
   });
 
-  it('should render a radio group as menuitemradio rows that choose its value', async () => {
+  it('should render a radio group as radio rows that choose its value', async () => {
     const onValueChange = vi.fn<(value: string) => void>();
     const drawer = await openWith(
       <DropdownMenuRadioGroup value='cozy' onValueChange={onValueChange}>
@@ -415,10 +416,10 @@ describe('responsive dropdown menu parts in a drawer', () => {
       </DropdownMenuRadioGroup>,
     );
 
-    expect(within(drawer).getByRole('menuitemradio', { name: 'Cozy' })).toHaveAttribute('aria-checked', 'true');
-    const compact = within(drawer).getByRole('menuitemradio', { name: 'Compact' });
+    expect(within(drawer).getByRole('radio', { name: 'Cozy' })).toHaveAttribute('aria-checked', 'true');
+    const compact = within(drawer).getByRole('radio', { name: 'Compact' });
     expect(compact).toHaveAttribute('aria-checked', 'false');
-    expect(compact.parentElement).toHaveAttribute('role', 'group');
+    expect(compact.parentElement).toHaveAttribute('role', 'radiogroup');
     fireEvent.click(compact);
 
     expect(onValueChange).toHaveBeenCalledWith('compact');
@@ -427,7 +428,26 @@ describe('responsive dropdown menu parts in a drawer', () => {
     });
   });
 
-  it('should render a switch item as one menuitemcheckbox row that toggles and keeps the drawer open', async () => {
+  it('should give checkbox, radio and switch rows roles that need no menu parent', async () => {
+    const drawer = await openWith(
+      <>
+        <DropdownMenuCheckboxItem checked>Grid</DropdownMenuCheckboxItem>
+        <DropdownMenuRadioGroup value='cozy'>
+          <DropdownMenuRadioItem value='compact'>Compact</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value='cozy'>Cozy</DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSwitchItem isChecked={false}>Snap</DropdownMenuSwitchItem>
+      </>,
+    );
+
+    const results = await axe.run(drawer, {
+      runOnly: { type: 'rule', values: ['aria-required-parent', 'aria-required-children', 'aria-allowed-role'] },
+    });
+
+    expect(results.violations).toEqual([]);
+  });
+
+  it('should render a switch item as one switch row that toggles and keeps the drawer open', async () => {
     const onIsCheckedChange = vi.fn<(checked: boolean) => void>();
     const drawer = await openWith(
       <DropdownMenuSwitchItem isChecked={false} description='Align to the grid' onIsCheckedChange={onIsCheckedChange}>
@@ -435,7 +455,7 @@ describe('responsive dropdown menu parts in a drawer', () => {
       </DropdownMenuSwitchItem>,
     );
 
-    const row = within(drawer).getByRole('menuitemcheckbox', { name: 'Snap' });
+    const row = within(drawer).getByRole('switch', { name: 'Snap' });
     expect(row).toHaveAttribute('aria-checked', 'false');
     expect(row).toHaveAccessibleDescription('Align to the grid');
     // The switch only shows the state: no control inside the row.

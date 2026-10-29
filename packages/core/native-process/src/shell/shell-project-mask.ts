@@ -16,14 +16,21 @@ export const maskProblem = (filesystem: ShellFilesystem): string | undefined => 
     if (!isAbsolute(root) || root.includes('\0')) {
       return 'every masked container must be an absolute path.';
     }
+    // A firmlinked data-volume spelling is not the path the kernel reports, so no mask rule would match it.
+    if (root === '/System/Volumes/Data' || root.startsWith('/System/Volumes/Data/')) {
+      return 'a masked container must not be spelled through /System/Volumes/Data; use its firmlinked path.';
+    }
+    // The native realpath returns each component's stored case on macOS, so a root spelled in another case is
+    // refused rather than compiled into a mask that matches nothing.
+    const canonical = (path: string): string => realpathSync.native(path);
     try {
       const info = lstatSync(root, { throwIfNoEntry: false });
       if (info === undefined) {
         const parent = dirname(root);
-        if (!lstatSync(parent).isDirectory() || realpathSync(parent) !== parent) {
+        if (!lstatSync(parent).isDirectory() || canonical(parent) !== parent) {
           return 'an absent masked container must have a canonical directory parent.';
         }
-      } else if (!info.isDirectory() || realpathSync(root) !== root) {
+      } else if (!info.isDirectory() || canonical(root) !== root) {
         return 'a masked container must be a real directory without symbolic-link ancestors.';
       }
     } catch {
@@ -88,30 +95,51 @@ export const bindMaskedDirectories = (
     return undefined;
   }
   const regexEscape = (path: string): string => path.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`);
+  // Seatbelt matches the path of the resolved vnode, not the caller's spelling, so the parent keeps its physical
+  // spelling: C16 reaches an authored child, and is refused a hidden one, through an upper-cased checkout path.
+  // Only the reserved name is folded, for distinct spellings on a case-sensitive volume.
+  const fold = (text: string): string =>
+    [...text]
+      .map((character) =>
+        /[A-Za-z]/u.test(character) ? `[${character.toLowerCase()}${character.toUpperCase()}]` : regexEscape(character),
+      )
+      .join('');
   const rules = masked
     .flatMap((root) => {
-      // Registry-reserved names are ASCII. Match their case and trailing dot/space/colon spellings without
-      // interpreting arbitrary path bytes as SBPL or regex syntax. Parent paths retain their physical spelling.
-      const name = [...basename(root)]
-        .map((character) =>
-          /[A-Za-z]/u.test(character)
-            ? `[${character.toLowerCase()}${character.toUpperCase()}]`
-            : regexEscape(character),
-        )
-        .join('');
-      const region = `(regex ${JSON.stringify(`^${regexEscape(dirname(root))}/${name}[. ]*(:[^/]*)?(/.*)?$`)})`;
+      // Registry-reserved names are ASCII. Match their trailing dot/space/colon spellings without interpreting
+      // arbitrary path bytes as SBPL or regex syntax.
+      const container = `^${regexEscape(dirname(root))}/${fold(basename(root))}[. ]*(:[^/]*)?`;
+      const region = `(regex ${JSON.stringify(`${container}(/.*)?$`)})`;
+      const itself = `(regex ${JSON.stringify(`${container}$`)})`;
+      const within = (paths: readonly string[]): string[] =>
+        paths.filter((path) => path !== root && inside(path, root));
       const explicit = (paths: readonly string[]): string[] =>
-        paths.filter((path) => path !== root && inside(path, root)).map((path) => `(subpath ${JSON.stringify(path)})`);
+        within(paths).map((path) => `(subpath ${JSON.stringify(path)})`);
+      const opened = [...filesystem.readable, ...filesystem.writable, ...(filesystem.readOnly ?? [])];
+      // Directories between the container and an opened child, which a lookup of that child must stat.
+      const between = within(opened).flatMap((path) => {
+        const steps: string[] = [];
+        for (let step = dirname(path); step !== root && inside(step, root); step = dirname(step)) {
+          steps.push(`(literal ${JSON.stringify(step)})`);
+        }
+        return steps;
+      });
       const subtract = (filters: readonly string[]): string =>
         filters.length === 0
           ? region
           : `(require-all ${region} ${[...new Set(filters)].map((filter) => `(require-not ${filter})`).join(' ')})`;
       return [
-        `(deny file-read* ${subtract([
-          `(literal ${JSON.stringify(root)})`,
-          ...explicit([...filesystem.readable, ...filesystem.writable, ...(filesystem.readOnly ?? [])]),
-        ])})`,
+        `(deny file-read* ${subtract([itself, ...between, ...explicit(opened)])})`,
+        // The container and the directories leading to opened children stay traversable, but listing any of
+        // them would disclose hidden names.
+        `(deny file-read-data ${[itself, ...new Set(between)].join(' ')})`,
+        // The runtime allows directory metadata everywhere with an operation-specific rule, which outranks the
+        // wildcard above; hidden directories must not even be stat-able.
+        `(deny file-read-metadata ${subtract([itself, ...between, ...explicit(opened)])})`,
         `(deny file-write* ${subtract(explicit(filesystem.writable))})`,
+        // Seatbelt prefers an operation-specific rule over a wildcard regardless of order, and the runtime
+        // re-allows create and unlink beneath every write root. Name both so the mask outranks that allow.
+        `(deny file-write-create file-write-unlink ${subtract(explicit(filesystem.writable))})`,
       ];
     })
     .join('\n');

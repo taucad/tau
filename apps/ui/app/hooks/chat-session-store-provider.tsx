@@ -19,7 +19,7 @@ import type { EventRejection } from 'xstate';
 import { ChatSessionStore } from '#services/chat-session-store.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { peekRevisionClient } from '#hooks/use-revision-status.js';
+import { peekRevisionClient } from '#services/revision-client-registry.js';
 import { inspect } from '#machines/inspector.js';
 import {
   isPlacementOnThisDevice,

@@ -22,7 +22,7 @@ import {
   useRevisionClientLifecycle,
   useRevisionCommands,
 } from '#hooks/use-revision-status.js';
-import type { RevisionClient } from '#hooks/use-revision-status.js';
+import type { RevisionClient } from '#types/revision-client.types.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import { GithubRequestError } from '#lib/github-connections.js';
 import type * as GithubConnectionsModule from '#lib/github-connections.js';

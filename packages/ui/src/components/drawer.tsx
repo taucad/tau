@@ -9,12 +9,26 @@ type SnapPoint = number | string;
 type ActiveSnapPoint = React.ComponentProps<typeof DrawerPrimitive.Root>['activeSnapPoint'];
 type DrawerSnapState = {
   readonly points: SnapPoint[];
+  readonly names: readonly string[] | undefined;
   readonly active: ActiveSnapPoint;
   readonly setActive: (point: ActiveSnapPoint) => void;
+  /** Whether only the grabber drags the sheet (vaul's `handleOnly`), so a grab strip widens its target. */
+  readonly isHandleOnly: boolean;
 };
 const DrawerSnapContext = React.createContext<DrawerSnapState | undefined>(undefined);
 
-function useDrawerSnapState(properties: React.ComponentProps<typeof DrawerPrimitive.Root>): DrawerSnapState {
+type DrawerDetentNames = {
+  /**
+   * The spoken name of each detent, from the lowest, when its place alone does not say it: a drawer whose lowest
+   * detent is half the screen names it `Half`. One name per snap point.
+   */
+  readonly detentNames?: readonly string[];
+};
+
+function useDrawerSnapState(
+  properties: React.ComponentProps<typeof DrawerPrimitive.Root>,
+  names: readonly string[] | undefined,
+): DrawerSnapState {
   const [localPoint, setLocalPoint] = React.useState<ActiveSnapPoint>(properties.snapPoints?.[0] ?? null);
   const setActive = React.useCallback(
     (point: ActiveSnapPoint) => {
@@ -25,6 +39,8 @@ function useDrawerSnapState(properties: React.ComponentProps<typeof DrawerPrimit
   );
   return {
     points: properties.snapPoints ?? [],
+    names,
+    isHandleOnly: properties.handleOnly === true,
     active: properties.activeSnapPoint === undefined ? localPoint : properties.activeSnapPoint,
     setActive,
   };
@@ -116,10 +132,11 @@ function useIsInsideDrawer(): boolean {
  */
 function Drawer({
   repositionInputs = false,
+  detentNames,
   ...properties
-}: React.ComponentProps<typeof DrawerPrimitive.Root>): React.JSX.Element {
+}: React.ComponentProps<typeof DrawerPrimitive.Root> & DrawerDetentNames): React.JSX.Element {
   const container = useResponsiveSurfaceContainer();
-  const snaps = useDrawerSnapState(properties);
+  const snaps = useDrawerSnapState(properties, detentNames);
   return (
     // oxlint-disable-next-line react/jsx-boolean-value -- we want to explicitly set the value to true
     <DrawerContext.Provider value={true}>
@@ -154,10 +171,11 @@ function Drawer({
  */
 function DrawerNestedRoot({
   repositionInputs = false,
+  detentNames,
   ...properties
-}: React.ComponentProps<typeof DrawerPrimitive.NestedRoot>): React.JSX.Element {
+}: React.ComponentProps<typeof DrawerPrimitive.NestedRoot> & DrawerDetentNames): React.JSX.Element {
   const container = useResponsiveSurfaceContainer();
-  const snaps = useDrawerSnapState(properties);
+  const snaps = useDrawerSnapState(properties, detentNames);
   return (
     <DrawerSnapContext.Provider value={snaps}>
       <DrawerPrimitive.NestedRoot
@@ -221,18 +239,19 @@ function DrawerClose({ ...properties }: React.ComponentProps<typeof DrawerPrimit
 }
 
 /**
- * The spoken name of a detent: a half-screen detent is half wherever it sits, otherwise by its place: the lowest is the
- * peek, the tallest is full, and the one between three is half. Names, not percentages, so the same detent reads the
- * same at every viewport height.
+ * The spoken name of a detent: the drawer's own name for it when it gives one (`detentNames`), otherwise by its place:
+ * the lowest is the peek, the tallest is full, and the one between three is half. Names, not percentages, so the same
+ * detent reads the same at every viewport height.
  *
- * @param point - Where the detent rests: a fraction of the screen, or a CSS length.
+ * @param names - The drawer's names for its detents, from the lowest, if it names them.
  * @param index - The detent's place, from the lowest.
  * @param count - How many detents the drawer has.
- * @returns Peek, Half or Full.
+ * @returns The detent's name, such as Peek, Half or Full.
  */
-function detentName(point: SnapPoint | undefined, index: number, count: number): string {
-  if (point === 0.5 && count > 1) {
-    return 'Half';
+function detentName(names: readonly string[] | undefined, index: number, count: number): string {
+  const named = names?.[index];
+  if (named !== undefined) {
+    return named;
   }
   if (index === 0) {
     return 'Peek';
@@ -246,7 +265,8 @@ function detentName(point: SnapPoint | undefined, index: number, count: number):
 /**
  * Supplies Vaul's draggable drawer handle. For multiple snap points it implements the APG slider pattern:
  * arrows step, Home/End select the extremes, and Enter/Space cycle without dismissing. The current detent is announced
- * by name (Peek, Half, Full).
+ * by name (Peek, Half, Full). A tap never changes the detent (`preventCycle`): the grabber's target reaches over a grab
+ * strip's title, and tapping a title never moves the sheet (W1). Dragging and the keys do.
  *
  * @public
  * @example <caption>Render a drawer handle.</caption>
@@ -259,6 +279,7 @@ function detentName(point: SnapPoint | undefined, index: number, count: number):
  */
 function DrawerHandle({
   onKeyDown,
+  preventCycle = true,
   ...properties
 }: React.ComponentProps<typeof DrawerPrimitive.Handle>): React.JSX.Element {
   const snaps = React.useContext(DrawerSnapContext);
@@ -267,6 +288,7 @@ function DrawerHandle({
   return (
     <DrawerPrimitive.Handle
       data-slot='drawer-handle'
+      preventCycle={preventCycle}
       {...(adjustable
         ? {
             role: 'slider',
@@ -277,7 +299,7 @@ function DrawerHandle({
             'aria-valuemin': 1,
             'aria-valuemax': snaps.points.length,
             'aria-valuenow': index + 1,
-            'aria-valuetext': detentName(snaps.points[index], index, snaps.points.length),
+            'aria-valuetext': detentName(snaps.names, index, snaps.points.length),
           }
         : {})}
       {...properties}
@@ -310,15 +332,41 @@ function DrawerHandle({
 }
 
 /**
+ * Marks the header row directly under a sheet's grabber as its grab strip (I3, D4). In a sheet only the grabber drags
+ * (`handleOnly`), the grabber's target then reaches down over the strip, so dragging anywhere on the strip moves the
+ * sheet, while the strip paints above that target and lets only its controls (buttons, links, fields) take a pointer:
+ * they stay ordinary controls, and a tap on them never starts a drag. The strip is 40px tall
+ * (`--drawer-grab-strip-height`), the reach the target takes.
+ *
+ * @public
+ * @example <caption>Make a sheet's header its grab strip.</caption>
+ * ```typescript
+ * import { createElement } from 'react';
+ * import { drawerGrabStrip } from '@taucad/ui/components/drawer';
+ *
+ * createElement('div', { ...drawerGrabStrip, children: 'Parameters' });
+ * ```
+ */
+const drawerGrabStrip = {
+  'data-drawer-grab-strip': '',
+  className: cn(
+    'relative z-2 h-(--drawer-grab-strip-height) pointer-events-none',
+    '[&_:is(button,a,input,select,textarea,[role=button],[role=combobox],[tabindex])]:pointer-events-auto',
+  ),
+} as const;
+
+/**
  * The grabber row: an 8px row whose bar sits 4px below the sheet's edge and ends where the row does, so no empty band
- * separates it from the header below. A header's actions then keep the same space above them as below. Its 16px
- * target is the row plus 8px above the sheet's edge: the header's actions are never part of it, and content docked
- * above a sheet keeps 8px clear of its edge.
+ * separates it from the header below. A header's actions then keep the same space above them as below. The target
+ * starts 8px above the sheet's edge, so content docked above a sheet keeps 8px clear of it, and spans the row; in a
+ * sheet only the grabber drags, it also reaches down over a grab strip ({@link drawerGrabStrip}) under the row
+ * (`--drawer-handle-reach`), 56px in all, without a pixel of space of its own. It paints above the sheet's content
+ * (`z-1`) and under the strip (`z-2`), whose controls alone take a pointer there.
  */
 function DrawerHandleIndicator({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
   return (
     <div className='relative hidden h-(--drawer-handle-height) shrink-0 group-data-[vaul-drawer-direction=bottom]/drawer-content:block has-[:focus-visible]:focus-outline'>
-      <DrawerHandle className='absolute! inset-x-0! -top-2! bottom-0! m-0! h-auto! w-full! opacity-0! [&>[data-vaul-handle-hitarea]]:size-full!' />
+      <DrawerHandle className='absolute! inset-x-0! -top-2! bottom-[calc(-1*var(--drawer-handle-reach))]! z-1 m-0! h-auto! w-full! opacity-0! [&>[data-vaul-handle-hitarea]]:size-full!' />
       <div
         data-slot='drawer-handle-indicator'
         className={cn(
@@ -386,6 +434,7 @@ function DrawerContent({
   readonly overlayClassName?: string;
 }): React.JSX.Element {
   const keyboardFrame = React.useSyncExternalStore(subscribeKeyboardFrame, readKeyboardFrame, readNoKeyboard);
+  const isHandleOnly = React.useContext(DrawerSnapContext)?.isHandleOnly === true;
   const [isEditing, setIsEditing] = React.useState(false);
   const keyboard = isEditing ? keyboardFrame : undefined;
 
@@ -412,6 +461,9 @@ function DrawerContent({
         style={frameStyle ? { ...style, ...frameStyle } : style}
         className={cn(
           'group/drawer-content fixed z-50 flex h-auto flex-col bg-background [--drawer-handle-height:calc(var(--spacing)*2)]',
+          '[--drawer-grab-strip-height:calc(var(--spacing)*10)] [--drawer-handle-reach:0px]',
+          /* Only where nothing else drags the sheet does the grabber's target reach over a grab strip. */
+          isHandleOnly && 'has-[[data-drawer-grab-strip]]:[--drawer-handle-reach:var(--drawer-grab-strip-height)]',
           'select-none',
           /* A field is editable text even inside an unselectable drawer: WebKit inherits
              user-select, and iOS will not place a caret in an editor under user-select: none. */
@@ -530,6 +582,7 @@ function DrawerDescription({
 }
 
 export {
+  drawerGrabStrip,
   Drawer,
   DrawerNestedRoot,
   DrawerPortal,

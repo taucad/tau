@@ -32,6 +32,9 @@ export const mobileDrawerOpenSnapPoint = 0.5;
  */
 export const mobileDrawerSnapPoints: Array<number | string> = [mobileDrawerOpenSnapPoint, 1];
 
+/** The spoken names of {@link mobileDrawerSnapPoints}: its lowest detent is half the screen, not a peek. */
+export const mobileDrawerDetentNames: readonly string[] = ['Half', 'Full'];
+
 /** Default runtime operation timeout. Milliseconds. */
 export const defaultOperationTimeout = 180_000;
 

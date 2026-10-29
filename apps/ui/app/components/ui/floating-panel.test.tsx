@@ -24,6 +24,7 @@ vi.mock('@taucad/ui/hooks/use-mobile', () => ({
 const mockUseIsInsideDrawer = vi.fn(() => false);
 vi.mock('@taucad/ui/components/drawer', () => ({
   useIsInsideDrawer: () => mockUseIsInsideDrawer(),
+  drawerGrabStrip: { 'data-drawer-grab-strip': '', className: 'drawer-grab-strip' },
   DrawerHandle: ({ children, ...props }: React.ComponentProps<'div'>) => (
     <div data-testid='drawer-handle' {...props}>
       {children}
@@ -61,6 +62,40 @@ describe('FloatingPanelContentHeader', () => {
     renderInPanel(<FloatingPanelContentHeader>Title</FloatingPanelContentHeader>);
 
     expect(screen.getByText('Title')).toHaveClass('h-9');
+  });
+
+  it('is no grab strip on a desktop', () => {
+    renderInPanel(<FloatingPanelContentHeader>Title</FloatingPanelContentHeader>);
+
+    expect(screen.getByText('Title')).not.toHaveAttribute('data-drawer-grab-strip');
+  });
+
+  it('is the sheet’s grab strip in a phone drawer, so the grabber’s target reaches over it (I3, W1)', () => {
+    setMobileDrawerContext();
+    renderInPanel(
+      <FloatingPanelContent>
+        <FloatingPanelContentHeader>Title</FloatingPanelContentHeader>
+      </FloatingPanelContent>,
+    );
+
+    const header = screen.getByText('Title');
+    expect(header).toHaveAttribute('data-drawer-grab-strip');
+    expect(header).toHaveClass('drawer-grab-strip');
+  });
+
+  it('leaves a header nested in another panel’s content an ordinary row: only the outermost is under the grabber', () => {
+    setMobileDrawerContext();
+    renderInPanel(
+      <FloatingPanelContent>
+        <FloatingPanelContentHeader>Editor</FloatingPanelContentHeader>
+        <FloatingPanelContent>
+          <FloatingPanelContentHeader>Open file</FloatingPanelContentHeader>
+        </FloatingPanelContent>
+      </FloatingPanelContent>,
+    );
+
+    expect(screen.getByText('Editor')).toHaveAttribute('data-drawer-grab-strip');
+    expect(screen.getByText('Open file')).not.toHaveAttribute('data-drawer-grab-strip');
   });
 });
 

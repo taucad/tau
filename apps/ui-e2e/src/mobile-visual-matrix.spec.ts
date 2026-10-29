@@ -23,7 +23,7 @@ import { readWorkbenchTree, writeWorkbenchFile } from '#support/workbench-files.
  * from layout boxes and hit tests rather than from screenshots alone. At 320, 360 and 390px, at the stage, with the
  * sheet at Half, with All open and with the project sheet open, nothing scrolls sideways, every visible action is at
  * least 24px, wholly inside the viewport and its clip, and is what a tap at its centre reaches; the top bar's and the
- * nav's controls are 40px, the viewer's are 28px and centred, the grabber's target is 16px, nothing blank sits under
+ * nav's controls are 40px, the viewer's are 28px and centred, the grabber's target is 40px, nothing blank sits under
  * the nav, and the composer and Send clear it. The same holds in all four themes, at 200% text, with a 34px
  * home-indicator inset and with reduced motion, which also stills the status glyph and the sheet's slide. 767px is the
  * last phone width and 768px the first desktop one; a coarse-pointer tablet and a landscape phone keep the desktop
@@ -553,7 +553,7 @@ const expectStage = async (viewport: Readonly<{ width: number }>): Promise<void>
 };
 
 /**
- * Chat at Half: the grabber's target is 16px, the sheet reaches down to the nav, and the composer and Send are whole,
+ * Chat at Half: the grabber's target is 40px, the sheet reaches down to the nav, and the composer and Send are whole,
  * reachable and above the nav.
  *
  * @param viewport - The phone's size.
@@ -566,8 +566,8 @@ const expectChatAtHalf = async (viewport: Readonly<{ width: number }>): Promise<
   await expectTopBar(viewport);
   const nav = await expectNavigation();
   const handle = await boxOf(grabber(), 'The grabber');
-  // The bar's 8px row plus 8px above the sheet's edge: no row of space under the bar (the keys move the sheet too).
-  expect(handle.height).toBeGreaterThanOrEqual(16);
+  // From 8px above the sheet's edge down over the header strip: no row of space of its own under the bar.
+  expect(handle.height).toBeGreaterThanOrEqual(40);
   const chat = await boxOf(selectors.getByRole('region', { name: 'Chat', exact: true }), 'The chat surface');
   expect(chat.bottom).toBeLessThanOrEqual(nav.top + 0.5);
   for (const [what, locator] of [

@@ -657,7 +657,7 @@ describe('ChatInterfaceMobile', () => {
     expect(state.activeTab).toBe('chat');
   });
 
-  it('should raise the sheet from half when the surface no longer fits there (I5)', async () => {
+  it('should raise the sheet from half when a decision makes the fixed rows outgrow it (I5)', async () => {
     const observers: Array<() => void> = [];
     vi.stubGlobal(
       'ResizeObserver',
@@ -689,8 +689,20 @@ describe('ChatInterfaceMobile', () => {
     });
     expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
 
-    // A decision lands above the composer: the fixed rows outgrow half.
+    // A surface that merely holds more than half shows scrolls there: it never raises itself.
     Object.defineProperty(content, 'scrollHeight', { configurable: true, value: 260 });
+    act(() => {
+      for (const observer of observers) {
+        observer();
+      }
+    });
+    expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+
+    // A decision lands above the composer: the fixed rows outgrow half.
+    const approval = document.createElement('div');
+    approval.dataset['decision'] = 'approval';
+    approval.dataset['decisionId'] = 'approval-1';
+    content.append(approval);
     act(() => {
       for (const observer of observers) {
         observer();
@@ -837,12 +849,13 @@ describe('ChatInterfaceMobile', () => {
       });
     });
 
-    // Reopened at half with rows that no longer fit there, which the person never chose: the sheet rises.
+    // Reopened at half with a decision whose rows no longer fit there, which the person never chose: the sheet rises.
     act(() => {
       state.activeSnapPoint = mobileDrawerOpenSnapPoint;
       selectSurface('jobs');
     });
     const transcript = await scrollerInSurface({ box: rect(40, 140) });
+    decision(transcript, { 'data-decision': 'approval', 'data-decision-id': 'approval-1' }, () => rect(60, 120));
     Object.defineProperty(transcript.parentElement!, 'scrollHeight', { configurable: true, value: 360 });
     drive();
     expect(state.activeSnapPoint).toBe(1);

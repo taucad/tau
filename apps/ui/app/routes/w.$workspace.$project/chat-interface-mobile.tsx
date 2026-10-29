@@ -9,7 +9,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { ChatInterfaceNav, surfaceTitle } from '#routes/w.$workspace.$project/chat-interface-nav.js';
 import { mobileWorkbenchNavigationHeight } from '#components/mobile-workbench-navigation.js';
 import type { MobileWorkbenchDestinationCue } from '#components/mobile-workbench-navigation.js';
-import { mobileDrawerOpenSnapPoint } from '#constants/editor.constants.js';
+import { mobileDrawerDetentNames, mobileDrawerOpenSnapPoint } from '#constants/editor.constants.js';
 import type { MobilePanelId } from '#constants/editor.constants.js';
 import { useChatInterfaceState } from '#routes/w.$workspace.$project/use-chat-interface-state.js';
 import { viewName } from '#workbench-records/view-titles.js';
@@ -397,8 +397,14 @@ function useRaiseWhenClipped(
         acknowledged.current.delete(fixedRowsKey);
       }
       for (const panel of section.querySelectorAll<HTMLElement>('[data-slot=floating-panel-content]')) {
-        // Half is the only detent below full, so the fixed rows overflowing it raise the sheet.
-        if (!acknowledged.current.has(fixedRowsKey) && panel.scrollHeight > panel.clientHeight + 1) {
+        /* Half is the only detent below full: the fixed rows raise the sheet when a decision above the composer makes
+         * them outgrow it. A surface that merely holds more than half shows (a long parameter list, a deep tree) scrolls
+         * at half instead; it never raises itself. */
+        if (
+          !acknowledged.current.has(fixedRowsKey) &&
+          panel.querySelector(decisionSelector) !== null &&
+          panel.scrollHeight > panel.clientHeight + 1
+        ) {
           raise();
           return;
         }
@@ -622,6 +628,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
           modal={false}
           open={drawerOpen}
           snapPoints={snapPoints}
+          detentNames={mobileDrawerDetentNames}
           activeSnapPoint={activeSnapPoint}
           setActiveSnapPoint={chooseSnapPoint}
           onOpenChange={handleDrawerChange}

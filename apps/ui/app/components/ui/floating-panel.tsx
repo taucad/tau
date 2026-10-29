@@ -7,7 +7,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { Button } from '@taucad/ui/components/button';
 import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { DrawerClose, useIsInsideDrawer } from '@taucad/ui/components/drawer';
+import { DrawerClose, drawerGrabStrip, useIsInsideDrawer } from '@taucad/ui/components/drawer';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { CollapsibleCodeBlock } from '#components/ui/collapsible-code-block.js';
 import { reportUiError } from '#lib/error-reporting.js';
@@ -357,26 +357,46 @@ class FloatingPanelErrorBoundary extends React.Component<
   };
 }
 
+/** How many floating panel contents hold this one: a nested panel's header is never the one under a grabber. */
+const FloatingPanelContentDepthContext = React.createContext(0);
+
 function FloatingPanelContent({ children, className, errorFallback }: FloatingPanelContentProps): React.JSX.Element {
   const fallback = errorFallback ?? ((props) => <FloatingPanelErrorContent {...props} />);
+  const depth = React.useContext(FloatingPanelContentDepthContext) + 1;
   return (
     <div className={cn('flex size-full flex-col bg-sidebar/50', className)} data-slot='floating-panel-content'>
-      <FloatingPanelErrorBoundary fallback={fallback}>{children}</FloatingPanelErrorBoundary>
+      <FloatingPanelContentDepthContext.Provider value={depth}>
+        <FloatingPanelErrorBoundary fallback={fallback}>{children}</FloatingPanelErrorBoundary>
+      </FloatingPanelContentDepthContext.Provider>
     </div>
   );
 }
 
-/** The drawer's dedicated grabber owns dragging; titles and actions remain ordinary controls. */
+/**
+ * The panel's title row. In a phone sheet the outermost panel's header is the sheet's grab strip: the grabber's target
+ * reaches over it, so dragging the row moves the sheet, while its title menu and actions stay ordinary controls on top
+ * (I3, W1).
+ */
 function FloatingPanelContentHeader({ children, className }: FloatingPanelContentHeaderProps): React.JSX.Element {
   const side = React.useContext(FloatingPanelContext)?.side ?? 'right';
   const isMobile = useIsMobile();
   const isInsideDrawer = useIsInsideDrawer();
+  // A header sits in its own content (depth 1); one in a panel nested in another's content is deeper.
+  const depth = React.useContext(FloatingPanelContentDepthContext);
+  const isGrabStrip = isMobile && isInsideDrawer && depth <= 1;
   const headerRef = React.useRef<HTMLDivElement>(null);
   return (
     <div
       ref={headerRef}
-      className={cn('relative', floatingPanelContentHeaderVariants({ side }), isMobile && 'h-10 pr-2', className)}
+      className={cn(
+        'relative',
+        floatingPanelContentHeaderVariants({ side }),
+        isMobile && 'h-10 pr-2',
+        className,
+        isGrabStrip && drawerGrabStrip.className,
+      )}
       data-slot='floating-panel-content-header'
+      data-drawer-grab-strip={isGrabStrip ? drawerGrabStrip['data-drawer-grab-strip'] : undefined}
       onClickCapture={(event) => {
         // A nested drawer's portaled overlay must not activate any ancestor surface. Its content (a sheet a header
         // control opened, such as the chat switcher) and a popper's content keep their own clicks.

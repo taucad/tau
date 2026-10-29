@@ -129,8 +129,8 @@ jobs:
             -t 'G4' src/shell/shell-projection-native.test.ts 2>&1 | tee /tmp/g4.log || true
           echo '===== marks only ====='
           grep -E '^\[(mark|brdg)' /tmp/g4.log || true
-          echo '===== raw lines that are not instrumentation ====='
-          grep -vE '^\[(wrap|dump|mark|brdg)' /tmp/g4.log | grep -nE 'Traceback|OTHER|Interrupted|SyntaxError|^read|interrupted' || echo 'none'
+          echo '===== raw output without instrumentation ====='
+          grep -vE '^\[(wrap|dump|mark|brdg)' /tmp/g4.log | sed -n '1,45p'
           echo '===== CHILD SELF LOG ====='
           cat /tmp/g4-child.log || echo 'no child log file'
 

@@ -6,6 +6,7 @@ import type { ExportOptions } from '#kcl-utils.js';
 import { KclUtilities } from '#kcl-utils.js';
 import { OfflineEngineConnection } from '#offline/offline-engine-connection.js';
 import { compound, massProperties } from '#offline/offline-occt.js';
+import { enrichZooGltfTopology } from '#zoo-gltf-topology.utils.js';
 import type { Oc } from '#offline/offline-occt.js';
 
 const source = `
@@ -70,6 +71,33 @@ describe('offline KCL execution', () => {
       ),
     );
     expect(volume).toBeCloseTo(1000 - Math.PI * 4 * 10, 3);
+  });
+
+  it('writes B-rep topology the Zoo enrichment binds faces to', async () => {
+    const [file] = await utils.exportFromMemory({
+      type: 'gltf',
+      storage: 'binary',
+    });
+    const enriched = await enrichZooGltfTopology(file!.contents, {
+      format: 'glb',
+    });
+    const view = new DataView(enriched.buffer, enriched.byteOffset);
+    const jsonLength = view.getUint32(12, true);
+    const json = JSON.parse(text(enriched.subarray(20, 20 + jsonLength))) as {
+      bufferViews: Array<{ byteOffset?: number; byteLength: number }>;
+      extensions: { TAU_cad_topology: { topologyBufferView: number } };
+    };
+    const payloadView = json.bufferViews[json.extensions.TAU_cad_topology.topologyBufferView]!;
+    const bin = enriched.subarray(28 + jsonLength);
+    const offset = payloadView.byteOffset ?? 0;
+    const payload = JSON.parse(text(bin.subarray(offset, offset + payloadView.byteLength))) as {
+      components: Array<{ kind: string }>;
+      warnings: unknown[];
+    };
+    expect(payload.warnings).toEqual([]);
+    // Six box faces and the hole's cylinder.
+    expect(payload.components.filter((component) => component.kind === 'body')).toHaveLength(1);
+    expect(payload.components.filter((component) => component.kind === 'face')).toHaveLength(7);
   });
 
   it.each<[string, ExportOptions, (files: Array<{ name: string; contents: Uint8Array<ArrayBuffer> }>) => void]>([

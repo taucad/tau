@@ -20,6 +20,7 @@ import type {
 } from 'libcascade/init';
 import type { Frame, Vec3 } from '#offline/offline-math.js';
 import { frameFromAxes, vec3 } from '#offline/offline-math.js';
+import { helpersFor } from '#offline/offline-helpers.js';
 
 export type Oc = OpenCascadeInstance;
 // oxlint-disable-next-line no-barrel-files/no-barrel-files, unicorn-js/prefer-export-from -- one import site for the libcascade shape types
@@ -171,17 +172,8 @@ export function edgePoint(oc: Oc, edge: TopoDS_Edge, t: number): { point: Vec3; 
  * @returns min and max corners, or undefined for a void box
  */
 export function boundingBox(oc: Oc, shape: TopoDS_Shape): { min: Vec3; max: Vec3 } | undefined {
-  const box = new oc.Bnd_Box();
-  oc.BRepBndLib.Add(shape, box, false);
-  if (box.IsVoid()) {
-    box.delete();
-    return undefined;
-  }
-
-  const min = fromPnt(box.CornerMin());
-  const max = fromPnt(box.CornerMax());
-  box.delete();
-  return { min, max };
+  const bounds = helpersFor(oc).bounds(shape);
+  return bounds && { min: vec3(...bounds.min), max: vec3(...bounds.max) };
 }
 
 /**
@@ -244,20 +236,31 @@ export function faceCentroid(oc: Oc, face: TopoDS_Face): { center: Vec3; area: n
  * @returns volume (mm³) and surface area (mm²)
  */
 export function massProperties(oc: Oc, shape: TopoDS_Shape): { volume: number; area: number } {
-  // Only solids enclose volume; an open surface body (a surface loft or extrude) has none.
-  let volume = 0;
-  for (const solid of subShapes(oc, shape, 'TopAbs_SOLID')) {
-    const props = new oc.GProp_GProps();
-    oc.BRepGProp.VolumeProperties(solid, props, false, false, false);
-    volume += props.Mass();
-    props.delete();
-  }
+  const helpers = helpersFor(oc);
+  return { volume: helpers.volume(shape), area: helpers.area(shape) };
+}
 
-  const surface = new oc.GProp_GProps();
-  oc.BRepGProp.SurfaceProperties(shape, surface, false, false);
-  const area = surface.Mass();
-  surface.delete();
-  return { volume, area };
+/**
+ * Volume enclosed by a shape's solids; open surface bodies count as zero. Cheaper than `massProperties` when the
+ * area is not needed.
+ *
+ * @param oc - libcascade instance
+ * @param shape - shape
+ * @returns volume (mm³)
+ */
+export function volumeOf(oc: Oc, shape: TopoDS_Shape): number {
+  return helpersFor(oc).volume(shape);
+}
+
+/**
+ * Surface area of a shape.
+ *
+ * @param oc - libcascade instance
+ * @param shape - shape
+ * @returns area (mm²)
+ */
+export function areaOf(oc: Oc, shape: TopoDS_Shape): number {
+  return helpersFor(oc).area(shape);
 }
 
 /**

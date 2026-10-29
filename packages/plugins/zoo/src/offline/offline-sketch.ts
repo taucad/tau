@@ -15,9 +15,11 @@ import {
   edges,
   faces,
   listToArray,
-  massProperties,
+  areaOf,
   pnt,
+  subShapes,
 } from '#offline/offline-occt.js';
+import { helpersFor } from '#offline/offline-helpers.js';
 import type { PathEntity, PathSegment } from '#offline/offline-scene.js';
 import type { WireAngle, WirePoint2d, WirePoint3d } from '#offline/offline-engine.types.js';
 import { OfflineEngineError, toRadians } from '#offline/offline-engine.types.js';
@@ -403,7 +405,7 @@ export function buildArrangement(
   // faces, and as holes punched into their neighbours.
   const minArea = 1e-6 * Math.max(1, pad * pad);
   const cleaned = bounded.flatMap((face) => {
-    if (massProperties(oc, face).area < minArea) {
+    if (areaOf(oc, face) < minArea) {
       return [];
     }
 
@@ -433,7 +435,7 @@ function withoutTinyHoles(oc: Oc, face: TopoDS_Face, minArea: number): TopoDS_Fa
     }
 
     const loop = new oc.BRepBuilderAPI_MakeFace(wire, true);
-    if (loop.IsDone() && massProperties(oc, loop.Face()).area < minArea) {
+    if (loop.IsDone() && areaOf(oc, loop.Face()) < minArea) {
       dropped = true;
     } else {
       inner.push(wire);
@@ -651,13 +653,133 @@ export function regionAtPoint(oc: Oc, arrangement: Arrangement, frame: Frame, po
  * @returns profile faces and the segment pieces
  */
 export function pathFaces(oc: Oc, path: PathEntity, holes: readonly PathEntity[]): Arrangement {
-  const segments = [...path.segments, ...holes.flatMap((hole) => hole.segments)];
-  const arrangement = buildArrangement(oc, path.frame, segments);
-  if (holes.length === 0 || arrangement.faces.length <= 1) {
-    return holes.length === 0 ? arrangement : dropHoleFaces(oc, arrangement, holes);
+  // A path's regions are often created one command at a time; reuse its arrangement while the path is unchanged.
+  const key = [path.segments.length, ...holes.map((hole) => `${hole.id}:${hole.segments.length}`)].join('|');
+  const cached = arrangementCache.get(path);
+  if (cached?.key === key) {
+    return cached.arrangement;
   }
 
-  return dropHoleFaces(oc, arrangement, holes);
+  const arrangement = simpleLoopArrangement(oc, path, holes) ?? splitArrangement(oc, path, holes);
+  arrangementCache.set(path, { key, arrangement });
+  return arrangement;
+}
+
+const arrangementCache = new WeakMap<PathEntity, { key: string; arrangement: Arrangement }>();
+
+const splitArrangement = (oc: Oc, path: PathEntity, holes: readonly PathEntity[]): Arrangement => {
+  const segments = [...path.segments, ...holes.flatMap((hole) => hole.segments)];
+  const arrangement = buildArrangement(oc, path.frame, segments);
+  return holes.length === 0 ? arrangement : dropHoleFaces(oc, arrangement, holes);
+};
+
+const samePoint = (a: Vec2, b: Vec2): boolean => Math.abs(a.x - b.x) <= 1e-9 && Math.abs(a.y - b.y) <= 1e-9;
+
+/**
+ * The wire of one closed loop of segments, each segment's end meeting the next one's start, and each segment's edge
+ * as it lies in the wire.
+ *
+ * @param oc - libcascade instance
+ * @param segments - the loop's segments in order
+ * @returns the wire and the segment pieces, or undefined when the segments are not one closed chain
+ */
+const loopWire = (
+  oc: Oc,
+  segments: readonly PathSegment[],
+):
+  | {
+      wire: ReturnType<Oc['TopoDS']['Wire']>;
+      pieces: Map<string, TopoDS_Edge[]>;
+    }
+  | undefined => {
+  if (segments.length === 0 || !samePoint(segments.at(-1)!.end, segments[0]!.start)) {
+    return undefined;
+  }
+
+  const maker = new oc.BRepBuilderAPI_MakeWire();
+  const pieces = new Map<string, TopoDS_Edge[]>();
+  try {
+    for (const [index, segment] of segments.entries()) {
+      if (index > 0 && !samePoint(segments[index - 1]!.end, segment.start)) {
+        return undefined;
+      }
+
+      maker.Add(segment.edge);
+      if (!maker.IsDone()) {
+        return undefined;
+      }
+
+      // The wire may rebuild an edge to share its neighbour's vertex.
+      pieces.set(segment.id, [...(pieces.get(segment.id) ?? []), maker.Edge()]);
+    }
+
+    return { wire: maker.Wire(), pieces };
+  } finally {
+    maker.delete();
+  }
+};
+
+/**
+ * The arrangement of a path that is one simple closed loop, with simple closed loops as holes, built directly as a
+ * face instead of splitting a sheet with every segment. Most sketches are such loops, and the general splitter costs
+ * tens of milliseconds per region. Anything else (several sub-paths, crossing or touching segments, a hole outside
+ * the profile) returns undefined and takes the splitter.
+ *
+ * @param oc - libcascade instance
+ * @param path - path
+ * @param holes - hole paths
+ * @returns the one face and the segment pieces, or undefined
+ */
+function simpleLoopArrangement(oc: Oc, path: PathEntity, holes: readonly PathEntity[]): Arrangement | undefined {
+  const loops = [path, ...holes].map((loop) => loopWire(oc, loop.segments));
+  if (loops.some((loop) => !loop)) {
+    return undefined;
+  }
+
+  const plane = new oc.gp_Pln(new oc.gp_Ax3(pnt(oc, path.frame.origin), dir(oc, path.frame.z), dir(oc, path.frame.x)));
+  // A loop running clockwise about the sketch normal makes a face of negative area; the outer boundary must run
+  // counter-clockwise and holes clockwise, like the faces the splitter cuts from a sheet facing the normal.
+  const oriented = (wire: ReturnType<Oc['TopoDS']['Wire']>, outer: boolean): ReturnType<Oc['TopoDS']['Wire']> => {
+    const maker = new oc.BRepBuilderAPI_MakeFace(plane, wire, true);
+    const area = maker.IsDone() ? areaOf(oc, maker.Face()) : 0;
+    maker.delete();
+    return area > 0 === outer ? wire : oc.TopoDS.Wire(wire.Reversed());
+  };
+
+  const [outer, ...inner] = loops as Array<NonNullable<(typeof loops)[number]>>;
+  const maker = new oc.BRepBuilderAPI_MakeFace(plane, oriented(outer!.wire, true), true);
+  if (!maker.IsDone()) {
+    maker.delete();
+    return undefined;
+  }
+
+  const outerFace = maker.Face();
+  for (const hole of inner) {
+    maker.Add(oriented(hole.wire, false));
+  }
+
+  const face = maker.Face();
+  maker.delete();
+  const insideOuter = inner.every((hole) => {
+    const vertex = oc.TopExp.FirstVertex(oc.TopoDS.Edge(subShapes(oc, hole.wire, 'TopAbs_EDGE')[0]!), false);
+    const classifier = new oc.BRepClass_FaceClassifier(outerFace, oc.BRep_Tool.Pnt(vertex), 1e-6, false, 1e-6);
+    const state = classifier.State();
+    classifier.delete();
+    return state === oc.TopAbs_State.TopAbs_IN;
+  });
+  // The topology check catches self-crossing loops and holes that cross the boundary or each other.
+  if (!insideOuter || !helpersFor(oc).isValid(face) || areaOf(oc, face) <= 0) {
+    return undefined;
+  }
+
+  const pieces = new Map<string, TopoDS_Edge[]>();
+  for (const loop of loops) {
+    for (const [id, list] of loop!.pieces) {
+      pieces.set(id, [...(pieces.get(id) ?? []), ...list]);
+    }
+  }
+
+  return { faces: [face], pieces };
 }
 
 const dropHoleFaces = (oc: Oc, arrangement: Arrangement, holes: readonly PathEntity[]): Arrangement => {

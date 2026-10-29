@@ -14,10 +14,12 @@ import {
   ax1,
   compound,
   dir,
+  pnt,
   edges,
   gvec,
   listToArray,
-  massProperties,
+  areaOf,
+  volumeOf,
   solidsOf,
   subShapes,
 } from '#offline/offline-occt.js';
@@ -141,7 +143,7 @@ function recordSweep(
  * @returns a correctly oriented shape
  */
 export function orientOutward(oc: Oc, shape: TopoDS_Shape): TopoDS_Shape {
-  const { volume } = massProperties(oc, shape);
+  const volume = volumeOf(oc, shape);
   return volume < 0 ? shape.Reversed() : shape;
 }
 
@@ -405,8 +407,12 @@ export function loftProfiles(
   return { shape: solid ? orientOutward(oc, loft.Shape()) : loft.Shape(), ...recorded };
 }
 
+/** Section spacing of a continuous twist built from lofts. */
+const defaultTwistStep = (5 * Math.PI) / 180;
+
 /**
- * Extrudes while rotating: a loft through rotated copies of the profile.
+ * Extrudes while rotating: a pipe shell along the axis for a large continuous twist, otherwise a loft through rotated
+ * copies of the profile.
  *
  * @param oc - libcascade instance
  * @param profile - profile
@@ -417,12 +423,148 @@ export function loftProfiles(
 export function twistExtrudeProfile(
   oc: Oc,
   profile: Profile,
-  options: { distance: number; center: { x: number; y: number }; totalAngle: number; stepAngle: number },
+  options: {
+    distance: number;
+    center: { x: number; y: number };
+    totalAngle: number;
+    stepAngle: number;
+  },
+  mint: () => string,
+): SweepResult {
+  // A zero step asks for a continuous twist. Past two loft sections, sweep the section along the axis with a helix
+  // steering its rotation: one surface per edge instead of up to 48 stacked sections. A small twist stays a two-section
+  // loft, which is faster than the sweep there and closer to the exact volume (a twist preserves volume, and the
+  // sweep's approximation loses about 0.4% on a gear).
+  if (Math.abs(options.stepAngle) <= 1e-9 && Math.abs(options.totalAngle) > 2 * defaultTwistStep) {
+    const swept = twistByPipe(oc, profile, options, mint);
+    if (swept) {
+      return swept;
+    }
+  }
+
+  return twistByLofts(oc, profile, options, mint);
+}
+
+/**
+ * A continuous twist as a pipe shell: the spine runs along the sketch normal through the twist centre, and an
+ * auxiliary helix about it turns the section by the total angle over the distance.
+ *
+ * @param oc - libcascade instance
+ * @param profile - profile
+ * @param options - distance, twist and centre
+ * @param mint - id factory
+ * @returns sweep result, or undefined when the pipe shell fails and the lofts should be tried
+ */
+function twistByPipe(
+  oc: Oc,
+  profile: Profile,
+  options: {
+    distance: number;
+    center: { x: number; y: number };
+    totalAngle: number;
+  },
+  mint: () => string,
+): SweepResult | undefined {
+  const { frame } = profile;
+  const origin = toGlobal(frame, options.center.x, options.center.y);
+  const end = {
+    x: origin.x + frame.z.x * options.distance,
+    y: origin.y + frame.z.y * options.distance,
+    z: origin.z + frame.z.z * options.distance,
+  };
+  const spine = oc.TopoDS.Wire(
+    wireFromEdges(oc, [new oc.BRepBuilderAPI_MakeEdge(pnt(oc, origin), pnt(oc, end)).Edge()]),
+  );
+  // The helix's radius only sets how the rotation is sampled; one unit is enough at any model size.
+  const axes = new oc.gp_Ax3(
+    pnt(oc, origin),
+    dir(oc, scale(frame.z, Math.sign(options.distance) || 1)),
+    dir(oc, frame.x),
+  );
+  const surface = new oc.Geom_CylindricalSurface(axes, 1);
+  const length = Math.abs(options.distance);
+  const line = new oc.gp_Lin2d(
+    new oc.gp_Pnt2d(0, 0),
+    new oc.gp_Dir2d(options.totalAngle * Math.sign(options.distance || 1), length),
+  );
+  const helixEdge = new oc.BRepBuilderAPI_MakeEdge(
+    new oc.Geom2d_Line(line),
+    surface,
+    0,
+    Math.hypot(options.totalAngle, length),
+  ).Edge();
+  oc.BRepLib.BuildCurves3d(helixEdge);
+  const helix = oc.TopoDS.Wire(wireFromEdges(oc, [helixEdge]));
+  const solids: TopoDS_Shape[] = [];
+  let recorded: Omit<SweepResult, 'shape'> | undefined;
+  const sections = profile.faces.length > 1 ? [mergedFace(oc, profile.faces)] : profile.faces;
+  try {
+    for (const face of sections) {
+      const outer = oc.BRepTools.OuterWire(face);
+      const wires = [outer, ...wiresOf(oc, face).filter((wire) => !wire.IsSame(outer))];
+      const parts: TopoDS_Shape[] = [];
+      for (const [index, wire] of wires.entries()) {
+        const pipe = new oc.BRepOffsetAPI_MakePipeShell(spine);
+        pipe.SetMode(helix, false, oc.BRepFill_TypeOfContact.BRepFill_NoContact);
+        pipe.Add(wire, false, false);
+        pipe.Build(new oc.Message_ProgressRange());
+        if (!pipe.IsDone() || !pipe.MakeSolid()) {
+          return undefined;
+        }
+
+        if (index === 0 && !recorded && face === sections[0]) {
+          recorded = recordSweep(oc, {
+            profile,
+            sideFace: (edge) =>
+              listToArray(oc, pipe.Generated(edge)).find(
+                (shape) => shape.ShapeType() === oc.TopAbs_ShapeEnum.TopAbs_FACE,
+              ),
+            startCap: pipe.FirstShape(),
+            endCap: pipe.LastShape(),
+            preset: null,
+            mint,
+          });
+        }
+
+        parts.push(orientOutward(oc, pipe.Shape()));
+      }
+
+      let body = parts[0]!;
+      for (const hole of parts.slice(1)) {
+        body = new oc.BRepAlgoAPI_Cut(body, hole).Shape();
+      }
+
+      solids.push(body);
+    }
+  } catch {
+    return undefined;
+  }
+
+  return recorded && { shape: fuseAll(oc, solids), ...recorded };
+}
+
+/**
+ * A twist as lofts through rotated copies of the section, one every step angle.
+ *
+ * @param oc - libcascade instance
+ * @param profile - profile
+ * @param options - distance, twist, centre and step
+ * @param mint - id factory
+ * @returns sweep result
+ */
+function twistByLofts(
+  oc: Oc,
+  profile: Profile,
+  options: {
+    distance: number;
+    center: { x: number; y: number };
+    totalAngle: number;
+    stepAngle: number;
+  },
   mint: () => string,
 ): SweepResult {
   const { frame } = profile;
-  // A zero step asks for a continuous twist: a smooth loft through a section every 5° is close to the helix.
-  const stepAngle = Math.abs(options.stepAngle) > 1e-9 ? Math.abs(options.stepAngle) : (5 * Math.PI) / 180;
+  const stepAngle = Math.abs(options.stepAngle) > 1e-9 ? Math.abs(options.stepAngle) : defaultTwistStep;
   const steps = Math.min(Math.max(Math.ceil(Math.abs(options.totalAngle) / stepAngle), 2), 48);
   const axisOrigin = toGlobal(frame, options.center.x, options.center.y);
   const solids: TopoDS_Shape[] = [];
@@ -586,6 +728,6 @@ function mergedFace(oc: Oc, pieces: readonly TopoDS_Face[]): TopoDS_Face {
     return oc.TopoDS.Face(merged[0]!);
   }
 
-  const area = (face: TopoDS_Face): number => massProperties(oc, face).area;
+  const area = (face: TopoDS_Face): number => areaOf(oc, face);
   return [...pieces].sort((a, b) => area(b) - area(a))[0]!;
 }

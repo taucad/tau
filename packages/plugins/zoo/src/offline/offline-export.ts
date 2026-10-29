@@ -10,8 +10,10 @@ import type { Oc, TopoDS_Shape } from '#offline/offline-occt.js';
 import { compound } from '#offline/offline-occt.js';
 import type { SolidEntity } from '#offline/offline-scene.js';
 import { OfflineEngineError } from '#offline/offline-engine.types.js';
-import { appendEdgesToGlb, appendEdgesToGltf, extractShapeEdges } from '#offline/offline-edges.js';
-import type { GltfJson, ShapeEdges } from '#offline/offline-edges.js';
+import { appendEdgesToGlb, appendEdgesToGltf } from '#offline/offline-edges.js';
+import type { GltfJson, SolidOverlay } from '#offline/offline-edges.js';
+import { helpersFor } from '#offline/offline-helpers.js';
+import type { NativeHelpers } from '#offline/offline-helpers.js';
 
 type Axis = { axis: 'x' | 'y' | 'z'; direction: 'positive' | 'negative' };
 type Coords = { forward: Axis; up: Axis };
@@ -30,11 +32,45 @@ export type WireOutputFormat =
     }
   | { type: 'fbx'; storage?: string };
 
-/** Meshing tolerances for mesh formats: millimetres and radians. */
-const linearDeflection = 0.1;
-const angularDeflection = 0.3;
+/** Linear and angular deflection in the shapes' own length unit and radians. */
+type Tolerances = { linear: number; angular: number };
 
-const unitPerMm: Record<string, number> = { mm: 1, cm: 0.1, m: 0.001, in: 1 / 25.4, ft: 1 / 304.8, yd: 1 / 914.4 };
+/**
+ * Tessellation for mesh formats, scaled to the model: the chord deviation is a 1000th of the bounding-box diagonal,
+ * never under 0.1 mm (the spike's fixed value, still right for hand-sized parts) or over 50 mm, at 0.3 rad. The fixed
+ * 0.1 mm spent 16 s meshing a 100 m rocket, and a finer floor (OCCT's `medium` preset, a 2000th) made a 40 mm twisted
+ * gear 15 times larger.
+ *
+ * @param helpers - hot-path helpers
+ * @param solids - the solids about to be meshed, in the unit they will be meshed in
+ * @param unitScale - output units per millimetre, so the floor stays 0.1 mm
+ * @returns tolerances for the whole export
+ */
+function meshTolerances(helpers: NativeHelpers, solids: readonly SolidEntity[], unitScale = 1): Tolerances {
+  let min = [Infinity, Infinity, Infinity];
+  let max = [-Infinity, -Infinity, -Infinity];
+  for (const solid of solids) {
+    const bounds = solid.shape.IsNull() ? undefined : helpers.bounds(solid.shape);
+    if (bounds) {
+      min = min.map((value, axis) => Math.min(value, bounds.min[axis]!));
+      max = max.map((value, axis) => Math.max(value, bounds.max[axis]!));
+    }
+  }
+
+  const diagonal = Math.hypot(max[0]! - min[0]!, max[1]! - min[1]!, max[2]! - min[2]!);
+  const floor = 0.1 * unitScale;
+  const linear = Number.isFinite(diagonal) ? Math.min(50 * unitScale, Math.max(floor, diagonal / 1000)) : floor;
+  return { linear, angular: 0.3 };
+}
+
+const unitPerMm: Record<string, number> = {
+  mm: 1,
+  cm: 0.1,
+  m: 0.001,
+  in: 1 / 25.4,
+  ft: 1 / 304.8,
+  yd: 1 / 914.4,
+};
 
 const toBase64 = (bytes: Uint8Array<ArrayBuffer>): string => {
   let binary = '';
@@ -64,10 +100,16 @@ const readAndUnlink = (oc: Oc, path: string): Uint8Array<ArrayBuffer> => {
  *
  * @param oc - libcascade instance
  * @param solids - visible solids
- * @param mesh - whether to triangulate each shape (mesh formats)
+ * @param tolerances - tolerances to triangulate each shape at (mesh formats); a shape already meshed as finely keeps
+ *   its triangulation, so a second export of the same scene does not mesh again
  * @returns the document
  */
-function buildDocument(oc: Oc, solids: readonly SolidEntity[], mesh: boolean): InstanceType<Oc['TDocStd_Document']> {
+function buildDocument(
+  oc: Oc,
+  solids: readonly SolidEntity[],
+  tolerances: Tolerances | undefined,
+): InstanceType<Oc['TDocStd_Document']> {
+  const helpers = helpersFor(oc);
   const document = new oc.TDocStd_Document(new oc.TCollection_ExtendedString());
   const mainLabel = document.Main();
   const shapeTool = oc.XCAFDoc_DocumentTool.ShapeTool(mainLabel);
@@ -77,9 +119,8 @@ function buildDocument(oc: Oc, solids: readonly SolidEntity[], mesh: boolean): I
       continue;
     }
 
-    if (mesh) {
-      oc.BRepTools.Clean(solid.shape, false);
-      new oc.BRepMesh_IncrementalMesh(solid.shape, linearDeflection, false, angularDeflection, false).delete();
+    if (tolerances) {
+      helpers.mesh(solid.shape, tolerances);
     }
 
     const label = shapeTool.NewShape();
@@ -176,7 +217,9 @@ const exportGltf = (
   solids: readonly SolidEntity[],
   binary: boolean,
 ): Array<{ name: string; bytes: Uint8Array<ArrayBuffer> }> => {
-  const document = buildDocument(oc, solids, true);
+  const helpers = helpersFor(oc);
+  const tolerances = meshTolerances(helpers, solids);
+  const document = buildDocument(oc, solids, tolerances);
   const path = temporaryPath(binary ? 'glb' : 'gltf');
   const writer = new oc.RWGltf_CafWriter(new oc.TCollection_AsciiString(path), binary);
   const converter = new oc.RWMesh_CoordinateSystemConverter();
@@ -193,11 +236,15 @@ const exportGltf = (
     throw new OfflineEngineError('glTF export failed', 'internal_engine');
   }
 
-  // The B-rep edge overlay the Replicad and OpenCascade kernels draw, read from the same triangulation.
-  const edges = new Map<string, ShapeEdges>();
+  // The B-rep edge overlay the Replicad and OpenCascade kernels draw, read from the same triangulation, and the
+  // face structure Zoo's topology enrichment binds primitives to.
+  const edges = new Map<string, SolidOverlay>();
   for (const solid of solids) {
     if (!solid.shape.IsNull()) {
-      edges.set(solid.id, extractShapeEdges(oc, solid.shape, { linear: linearDeflection, angular: angularDeflection }));
+      edges.set(solid.id, {
+        edges: helpers.edges(solid.shape, tolerances),
+        topology: helpers.topology(solid.shape),
+      });
     }
   }
 
@@ -238,17 +285,17 @@ const exportStep = (
 const exportStl = (
   oc: Oc,
   solids: readonly SolidEntity[],
-  ascii: boolean,
+  options: { ascii: boolean; unitScale: number },
 ): Array<{ name: string; bytes: Uint8Array<ArrayBuffer> }> => {
   const shape = compound(
     oc,
     solids.map((solid) => solid.shape),
   );
-  oc.BRepTools.Clean(shape, false);
-  new oc.BRepMesh_IncrementalMesh(shape, linearDeflection, false, angularDeflection, false).delete();
+  const helpers = helpersFor(oc);
+  helpers.mesh(shape, meshTolerances(helpers, solids, options.unitScale));
   // `StlAPI_Writer.ASCIIMode` returns a reference the binding cannot assign through, so use the static writer.
   const path = temporaryPath('stl');
-  if (!oc.StlAPI.Write(shape, path, ascii)) {
+  if (!oc.StlAPI.Write(shape, path, options.ascii)) {
     throw new OfflineEngineError('STL export failed', 'internal_engine');
   }
 
@@ -258,9 +305,10 @@ const exportStl = (
 const exportMeshDocument = (
   oc: Oc,
   solids: readonly SolidEntity[],
-  kind: 'obj' | 'ply',
+  options: { kind: 'obj' | 'ply'; unitScale: number },
 ): Array<{ name: string; bytes: Uint8Array<ArrayBuffer> }> => {
-  const document = buildDocument(oc, solids, true);
+  const { kind, unitScale } = options;
+  const document = buildDocument(oc, solids, meshTolerances(helpersFor(oc), solids, unitScale));
   const path = temporaryPath(kind);
   const writer =
     kind === 'obj'
@@ -310,23 +358,28 @@ export function exportScene(
 
     case 'stl': {
       const unit = unitPerMm[format.units ?? 'mm'] ?? 1;
-      files = exportStl(
-        oc,
-        prepareShapes(oc, solids, coordsTrsf(oc, format.coords), unit),
-        format.storage !== 'binary',
-      );
+      files = exportStl(oc, prepareShapes(oc, solids, coordsTrsf(oc, format.coords), unit), {
+        ascii: format.storage !== 'binary',
+        unitScale: unit,
+      });
       break;
     }
 
     case 'obj': {
       const unit = unitPerMm[format.units ?? 'mm'] ?? 1;
-      files = exportMeshDocument(oc, prepareShapes(oc, solids, coordsTrsf(oc, format.coords), unit), 'obj');
+      files = exportMeshDocument(oc, prepareShapes(oc, solids, coordsTrsf(oc, format.coords), unit), {
+        kind: 'obj',
+        unitScale: unit,
+      });
       break;
     }
 
     case 'ply': {
       const unit = unitPerMm[format.units ?? 'mm'] ?? 1;
-      files = exportMeshDocument(oc, prepareShapes(oc, solids, coordsTrsf(oc, format.coords), unit), 'ply');
+      files = exportMeshDocument(oc, prepareShapes(oc, solids, coordsTrsf(oc, format.coords), unit), {
+        kind: 'ply',
+        unitScale: unit,
+      });
       break;
     }
 

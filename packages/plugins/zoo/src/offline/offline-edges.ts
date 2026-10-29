@@ -1,141 +1,18 @@
-/* oxlint-disable new-cap -- OpenCascade API uses PascalCase method names */
 /**
- * B-rep edge overlay for offline glTF exports, in the layout the Replicad and OpenCascade kernels write.
+ * B-rep edge overlay and topology for offline glTF exports.
  *
- * Each solid's edges become one `LINES` primitive on the solid's mesh: de-indexed segments, `tauComponentKind:
- * 'line'`, a `node/<n>/edges` selector and `edgeGroups` counted in XYZ scalars. An edge on a meshed face reads the
- * face's own boundary samples (`PolygonOnTriangulation`), so line vertices coincide with surface vertices; an edge
- * without one is sampled from its curve at the surface's tolerances.
+ * The overlay follows the layout the Replicad and OpenCascade kernels write. Each solid's edges become one `LINES`
+ * primitive on the solid's mesh: de-indexed segments, `tauComponentKind: 'line'`, a `node/<n>/edges` selector and
+ * `edgeGroups` counted in XYZ scalars. The edges come from `NativeHelpers.edges`, which reads each edge's samples on
+ * the face triangulation, so line vertices coincide with surface vertices.
+ *
+ * The topology is Zoo's `KITTYCAD_boundary_representation` with the structure only (solids, shells, faces, loops,
+ * edges, no geometry), which is what the Zoo kernel's topology enrichment reads to make faces and bodies selectable
+ * the same way online exports are.
  */
 import { formatPrimitiveSelector, transformVertexArray } from '@taucad/geometry-core';
-import { cadEdgeOverlayMaterialDefaults } from '@taucad/runtime/types';
-import type { Oc, TopoDS_Shape } from '#offline/offline-occt.js';
-
-/** One B-rep edge's span of the line soup, counted in XYZ scalars like replicad's `xyz-scalars-v1`. */
-type EdgeGroup = { start: number; count: number; edgeId: number };
-
-/** A shape's edges as a segment soup in kcl-lib's frame (millimetres, Z-up). */
-export type ShapeEdges = { lines: Float64Array; edgeGroups: EdgeGroup[] };
-
-type Deletable = { delete(): void };
-
-/**
- * The edge's samples on a face triangulation, or undefined when no meshed face keeps a polygon for it.
- *
- * @param oc - libcascade instance
- * @param edge - the edge
- * @param owned - collects handles to free
- * @returns flat XYZ samples
- */
-const polygonPoints = (oc: Oc, edge: TopoDS_Shape, owned: Deletable[]): number[] | undefined => {
-  const location = new oc.TopLoc_Location();
-  owned.push(location);
-  // Embind returns a missing OCCT handle as `null`, which the generated declarations do not express.
-  const found = oc.BRep_Tool.PolygonOnTriangulation(oc.TopoDS.Edge(edge), location) as Partial<{
-    P: InstanceType<Oc['Poly_PolygonOnTriangulation']>;
-    T: InstanceType<Oc['Poly_Triangulation']>;
-  }>;
-  if (!found.P || !found.T) {
-    return undefined;
-  }
-
-  const { P: polygon, T: triangulation } = found;
-  const trsf = location.Transformation();
-  owned.push(polygon, triangulation, trsf);
-  const points: number[] = [];
-  for (let index = 1; index <= polygon.NbNodes(); index++) {
-    const node = triangulation.Node(polygon.Node(index));
-    node.Transform(trsf);
-    points.push(node.X(), node.Y(), node.Z());
-    node.delete();
-  }
-
-  return points;
-};
-
-/**
- * The edge sampled from its curve with OCCT's angular-and-chordal discretizer.
- *
- * @param oc - libcascade instance
- * @param sample - the edge, and the linear (mm) and angular (rad) deflection to sample it at
- * @param owned - collects handles to free
- * @returns flat XYZ samples, at least two points
- */
-const curvePoints = (
-  oc: Oc,
-  sample: { edge: TopoDS_Shape; tolerances: { linear: number; angular: number } },
-  owned: Deletable[],
-): number[] => {
-  const { edge, tolerances } = sample;
-  const curve = new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(edge));
-  // The eight-argument overload: the six-argument one is ambiguous with the parameter-range form.
-  const sampler = new oc.GCPnts_TangentialDeflection(
-    curve,
-    curve.FirstParameter(),
-    curve.LastParameter(),
-    tolerances.angular,
-    tolerances.linear,
-    2,
-    1e-9,
-    1e-7,
-  );
-  owned.push(curve, sampler);
-  const points: number[] = [];
-  for (let index = 1; index <= sampler.NbPoints(); index++) {
-    const point = sampler.Value(index);
-    points.push(point.X(), point.Y(), point.Z());
-    point.delete();
-  }
-
-  return points;
-};
-
-/**
- * Extracts a meshed shape's B-rep edges as line segments, each edge once and degenerate edges skipped. The shape's
- * root location is left out because the glTF writer moves it onto the node.
- *
- * @param oc - libcascade instance
- * @param shape - a shape already meshed at `tolerances`
- * @param tolerances - linear (mm) and angular (rad) deflection
- * @returns the segment soup and one group per edge
- */
-export function extractShapeEdges(
-  oc: Oc,
-  shape: TopoDS_Shape,
-  tolerances: { linear: number; angular: number },
-): ShapeEdges {
-  const owned: Deletable[] = [];
-  try {
-    const identity = new oc.TopLoc_Location();
-    const root = shape.Located(identity, false);
-    const edgeMap = new oc.NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher();
-    owned.push(identity, root, edgeMap);
-    oc.TopExp.MapShapes(root, oc.TopAbs_ShapeEnum.TopAbs_EDGE, edgeMap);
-    const lines: number[] = [];
-    const edgeGroups: EdgeGroup[] = [];
-    for (let index = 1; index <= edgeMap.Extent(); index++) {
-      const edge = edgeMap.FindKey(index);
-      owned.push(edge);
-      if (oc.BRep_Tool.Degenerated(oc.TopoDS.Edge(edge))) {
-        continue;
-      }
-
-      const points = polygonPoints(oc, edge, owned) ?? curvePoints(oc, { edge, tolerances }, owned);
-      const start = lines.length;
-      for (let point = 3; point < points.length; point += 3) {
-        lines.push(...points.slice(point - 3, point + 3));
-      }
-
-      edgeGroups.push({ start, count: lines.length - start, edgeId: edgeGroups.length });
-    }
-
-    return { lines: Float64Array.from(lines), edgeGroups };
-  } finally {
-    for (const handle of owned) {
-      handle.delete();
-    }
-  }
-}
+import { cadEdgeOverlayMaterialDefaults, kittyCadBoundaryRepresentationExtension } from '@taucad/runtime/types';
+import type { ShapeEdges, SolidTopology } from '#offline/offline-helpers.js';
 
 /** The parts of glTF JSON the edge overlay touches. */
 export type GltfJson = {
@@ -144,35 +21,108 @@ export type GltfJson = {
   bufferViews?: Array<Record<string, unknown>>;
   accessors?: Array<Record<string, unknown>>;
   materials?: Array<Record<string, unknown>>;
-  meshes?: Array<{ name?: string; primitives: Array<{ [key: string]: unknown; mode?: number }> }>;
-  nodes?: Array<{ name?: string; mesh?: number }>;
+  meshes?: Array<{
+    name?: string;
+    primitives: Array<{ [key: string]: unknown; mode?: number }>;
+  }>;
+  nodes?: Array<{
+    name?: string;
+    mesh?: number;
+    extensions?: Record<string, unknown>;
+  }>;
+  extensions?: Record<string, unknown>;
   extensionsUsed?: string[];
 };
+
+/** What the export adds to each solid's mesh node. */
+export type SolidOverlay = { edges?: ShapeEdges; topology?: SolidTopology };
 
 const linesMode = 1;
 const unlitExtension = 'KHR_materials_unlit';
 const align4 = (value: number): number => Math.ceil(value / 4) * 4;
 
 /**
- * Appends each solid's edges to the mesh of the node the writer named after it, replacing the writer's own lines.
- * The glTF is edited in place as JSON plus one binary buffer, so the export stays synchronous.
+ * Writes the solids' topology as the root `KITTYCAD_boundary_representation` payload, with each solid's node pointing
+ * at its solid. Face order is the writer's primitive order, which `NativeHelpers.topology` follows.
+ *
+ * @param json - glTF JSON; edited in place
+ * @param topologyByNode - topology per node index
+ */
+function appendTopology(json: GltfJson, topologyByNode: ReadonlyMap<number, SolidTopology>): void {
+  const payload = {
+    solids: [] as Array<{ shells: number[] }>,
+    shells: [] as Array<{ faces: number[] }>,
+    faces: [] as Array<{ loops: number[] }>,
+    loops: [] as Array<{ edges: number[] }>,
+    edges: [] as Array<Record<string, never>>,
+  };
+  for (const [nodeIndex, shells] of topologyByNode) {
+    const edgeBase = payload.edges.length;
+    let edgeCount = 0;
+    const shellIndices = shells.map((faces) => {
+      const faceIndices = faces.map((loops) => {
+        const loopIndices = loops.map((edges) => {
+          edgeCount = Math.max(edgeCount, ...edges.map((edge) => edge + 1));
+          return (
+            payload.loops.push({
+              edges: edges.map((edge) => edgeBase + edge),
+            }) - 1
+          );
+        });
+        return payload.faces.push({ loops: loopIndices }) - 1;
+      });
+      return payload.shells.push({ faces: faceIndices }) - 1;
+    });
+    for (let edge = 0; edge < edgeCount; edge++) {
+      payload.edges.push({});
+    }
+
+    const node = json.nodes![nodeIndex]!;
+    node.extensions = {
+      ...node.extensions,
+      [kittyCadBoundaryRepresentationExtension]: {
+        solid: payload.solids.length,
+      },
+    };
+    payload.solids.push({ shells: shellIndices });
+  }
+
+  if (payload.solids.length > 0) {
+    json.extensions = {
+      ...json.extensions,
+      [kittyCadBoundaryRepresentationExtension]: payload,
+    };
+    json.extensionsUsed = [...new Set([...(json.extensionsUsed ?? []), kittyCadBoundaryRepresentationExtension])];
+  }
+}
+
+/**
+ * Appends each solid's edges to the mesh of the node the writer named after it, replacing the writer's own lines,
+ * and writes the solids' topology. The glTF is edited in place as JSON plus one binary buffer, so the export stays
+ * synchronous.
  *
  * @param json - glTF JSON whose first buffer is `bin`; edited in place
  * @param bin - the first buffer's bytes
- * @param edgesByName - edges per solid id
+ * @param overlays - edges and topology per solid id
  * @returns the grown buffer
  */
 export function appendEdgesToGltf(
   json: GltfJson,
   bin: Uint8Array<ArrayBuffer>,
-  edgesByName: ReadonlyMap<string, ShapeEdges>,
+  overlays: ReadonlyMap<string, SolidOverlay>,
 ): Uint8Array<ArrayBuffer> {
   const chunks: Array<Uint8Array<ArrayBuffer>> = [bin];
   let { byteLength } = bin;
   let materialIndex: number | undefined;
+  const topologyByNode = new Map<number, SolidTopology>();
   for (const [nodeIndex, node] of (json.nodes ?? []).entries()) {
     const mesh = node.mesh === undefined ? undefined : json.meshes?.[node.mesh];
-    const edges = edgesByName.get(node.name ?? '') ?? edgesByName.get(mesh?.name ?? '');
+    const overlay = overlays.get(node.name ?? '') ?? overlays.get(mesh?.name ?? '');
+    if (mesh && overlay?.topology) {
+      topologyByNode.set(nodeIndex, overlay.topology);
+    }
+
+    const edges = overlay?.edges;
     if (!mesh || !edges?.edgeGroups.length) {
       continue;
     }
@@ -229,6 +179,7 @@ export function appendEdgesToGltf(
     });
   }
 
+  appendTopology(json, topologyByNode);
   const grown = new Uint8Array(align4(byteLength));
   let cursor = 0;
   for (const chunk of chunks) {
@@ -242,15 +193,15 @@ export function appendEdgesToGltf(
 }
 
 /**
- * Adds the edge overlay to a GLB written by `RWGltf_CafWriter`.
+ * Adds the edge overlay and topology to a GLB written by `RWGltf_CafWriter`.
  *
  * @param glb - the GLB bytes
- * @param edgesByName - edges per solid id
+ * @param overlays - edges and topology per solid id
  * @returns the GLB with one `LINES` primitive per solid mesh
  */
 export function appendEdgesToGlb(
   glb: Uint8Array<ArrayBuffer>,
-  edgesByName: ReadonlyMap<string, ShapeEdges>,
+  overlays: ReadonlyMap<string, SolidOverlay>,
 ): Uint8Array<ArrayBuffer> {
   const view = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
   const jsonLength = view.getUint32(12, true);
@@ -260,7 +211,7 @@ export function appendEdgesToGlb(
     binStart + 8 <= glb.byteLength
       ? glb.subarray(binStart + 8, binStart + 8 + view.getUint32(binStart, true))
       : new Uint8Array();
-  const grown = appendEdgesToGltf(json, bin, edgesByName);
+  const grown = appendEdgesToGltf(json, bin, overlays);
   const jsonBytes = new TextEncoder().encode(JSON.stringify(json));
   const jsonPadded = align4(jsonBytes.byteLength);
   const total = 12 + 8 + jsonPadded + 8 + grown.byteLength;

@@ -25,6 +25,13 @@ const defaultLoader: OcctLoader = async () => {
 export class OfflineEngineConnection {
   /** Shared profiler: every offline session records into it until a caller takes a snapshot. */
   public static readonly profiler = new OfflineProfiler();
+  /**
+   * Whether to time every libcascade call, set before the first `initialize`. Off by default: the per-call wrappers
+   * cost time on the millions of small calls a model makes, so only reports turn it on. Commands are always timed.
+   */
+  public static profileOcct = false;
+  /** Debug mode for new sessions: topology-check every solid a command changes (`OfflineEngine.validationIssues`). */
+  public static validateSolids = false;
   private static occt: Promise<Oc> | undefined;
   private readonly wasmModule: WasmModule;
   private readonly fileSystemManager: FileSystemManager;
@@ -70,9 +77,14 @@ export class OfflineEngineConnection {
       await this.cleanup();
     }
 
-    OfflineEngineConnection.occt ??= (async () => OfflineEngineConnection.profiler.instrument(await this.loadOcct()))();
+    OfflineEngineConnection.occt ??= (async () => {
+      const oc = await this.loadOcct();
+      return OfflineEngineConnection.profileOcct ? OfflineEngineConnection.profiler.instrument(oc) : oc;
+    })();
     const oc = await OfflineEngineConnection.occt;
-    const engine = new OfflineEngine(oc, OfflineEngineConnection.profiler);
+    const engine = new OfflineEngine(oc, OfflineEngineConnection.profiler, {
+      validate: OfflineEngineConnection.validateSolids,
+    });
     const bridge = new OfflineEngineBridge(engine);
     // oxlint-disable-next-line @typescript-eslint/await-thenable -- wasm-bindgen `Context` ctor is Promise-like
     const context: Context = await new this.wasmModule.Context(bridge, this.fileSystemManager);

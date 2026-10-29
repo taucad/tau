@@ -35,10 +35,24 @@ const fs = {
 type Result = Record<string, unknown>;
 const result: Result = { name: path.basename(sampleDirectory) };
 const t0 = performance.now();
+// OFFLINE_PROFILE=1 times every libcascade call; OFFLINE_LIBCASCADE names another build's glue JS (the engine's own
+// `libcascade/libcascade-kcl.yml` build with native helpers) to load instead of the package's.
+OfflineEngineConnection.profileOcct = process.env['OFFLINE_PROFILE'] === '1';
+// OFFLINE_VALIDATE=1 topology-checks every solid each command changes and records the invalid ones.
+OfflineEngineConnection.validateSolids = process.env['OFFLINE_VALIDATE'] === '1';
+const libcascadeGlue = process.env['OFFLINE_LIBCASCADE'];
 const utils = new KclUtilities({
   baseUrl: 'ws://offline',
   mode: 'offline',
   fileSystemManager: new FileSystemManager(fs),
+  ...(libcascadeGlue && {
+    async loadOcct() {
+      const { default: factory } = (await import(path.resolve(libcascadeGlue))) as {
+        default: () => Promise<Parameters<typeof massProperties>[0]>;
+      };
+      return factory();
+    },
+  }),
 });
 try {
   await utils.initializeEngine();
@@ -86,6 +100,9 @@ try {
   const solids = engine.scene.visibleSolids();
   result['solidCount'] = solids.length;
   result['unhandled'] = Object.fromEntries(engine.unhandled);
+  if (OfflineEngineConnection.validateSolids) {
+    result['validationIssues'] = engine.validationIssues;
+  }
   const executeProfile = OfflineEngineConnection.profiler.takeSnapshot();
   const files = await utils.exportFromMemory({ type: 'gltf', storage: 'binary' });
   const tExport = performance.now();
@@ -117,6 +134,7 @@ try {
 
   result['profile'] = { execute: executeProfile, export: exportProfile };
   result['ok'] = solids.length > 0 && outcome.errors.length === 0;
+  result['native'] = Boolean((oc as unknown as { TauOffline?: unknown }).TauOffline);
 } catch (error) {
   result['ok'] = false;
   result['failure'] = String((error as { message?: string }).message ?? JSON.stringify(error)).slice(0, 2000);

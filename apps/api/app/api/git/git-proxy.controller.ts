@@ -48,7 +48,7 @@ const lfsActionSchema = z.object({
   expires_in: z.number().optional(),
   expires_at: z.string().optional(),
 });
-/* eslint-enable @typescript-eslint/naming-convention */
+/* eslint-enable @typescript-eslint/naming-convention -- back to our own spelling. */
 const lfsBatchSchema = z
   .object({
     objects: z.array(

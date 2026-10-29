@@ -63,8 +63,8 @@ export function createAoDenoise({
       // Build the fixed stencil once; constant weights need no per-fragment exp.
       for (let x = -2; x <= 2; x++) {
         for (let y = -2; y <= 2; y++) {
-          // Keep the 13 strongest Gaussian taps; omit distant corners before shader generation.
-          if (x * x + y * y > 4) {
+          // Spread 13 uniform taps across the footprint; guides still reject unrelated surfaces.
+          if ((x + y) % 2 !== 0) {
             continue;
           }
           const offset = vec2(x, y);
@@ -75,8 +75,7 @@ export function createAoDenoise({
           const planeDistance = abs(dot(centerPosition.sub(neighborPosition), centerNormal));
           const depthWeight = max(float(1).sub(planeDistance.div(depthPhi)), 0);
           const normalWeight = pow(max(dot(centerNormal, neighborNormal), 0), 8);
-          const spatialWeight = Math.exp(-(x * x + y * y) * 0.5);
-          const weight = depthWeight.mul(normalWeight).mul(spatialWeight).toVar();
+          const weight = depthWeight.mul(normalWeight).toVar();
           sum.addAssign(texture.sample(neighborUv).r.mul(weight));
           weightSum.addAssign(weight);
         }

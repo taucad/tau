@@ -33,6 +33,7 @@ class Locations(list)
   # smlibpy.locations.Locations.on (method)
   on(target: Any) -> Locations
 
+  # Where the locations move the origin to
   points: list[Vector]
 
 # Category: locations

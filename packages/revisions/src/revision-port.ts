@@ -523,6 +523,25 @@ export type AddCheckoutInput = Readonly<{
 }>;
 
 /**
+ * How one tree read treats large objects that are not in this store yet.
+ *
+ * @public
+ */
+export type ReadTreeOptions = Readonly<{
+  /**
+   * `local` answers from this store alone: an object that is not here yet
+   * stays its pointer, and nothing is fetched. A caller that asks for it
+   * either reads only small files or tracks every pointer it got back.
+   * Absent, every pointer is resolved, from the remote if need be.
+   */
+  largeObjects?: 'local';
+  /** Told about each large object as the remote delivers it, while a fetching read runs. */
+  onLargeObject?: (oid: string, content: Uint8Array<ArrayBuffer>) => void;
+  /** Stops a fetching read's transfers; the read then rejects. */
+  signal?: AbortSignal;
+}>;
+
+/**
  * The substrate capability. Every host constructs one; the port, not the
  * engine, is the seam callers program against.
  *
@@ -532,7 +551,8 @@ export type RevisionPort = Readonly<{
   describe(): Promise<RevisionEngineDescriptor>;
   init(input: InitRevisionStoreInput): Promise<void>;
   readRevision(id: RevisionId): Promise<RevisionRecord | undefined>;
-  readTree(id: RevisionId): Promise<ImmutableRevisionTree | undefined>;
+  /** The tree; a host without large objects, or with its own smudge, may ignore `options`. */
+  readTree(id: RevisionId, options?: ReadTreeOptions): Promise<ImmutableRevisionTree | undefined>;
   writeRevision(input: WriteRevisionInput): Promise<RevisionReceipt>;
   /** A branch by name, or any other ref spelled in full. */
   readRef(name: string): Promise<RevisionId | undefined>;

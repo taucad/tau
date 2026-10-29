@@ -8,6 +8,8 @@ import { DatabaseService } from '#database/database.service.js';
 import { readProjectDeletion } from '#database/project-lifecycle.js';
 import type { Environment } from '#config/environment.config.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { MetricsService } from '#telemetry/metrics.js';
+import type { AgentEvidenceDeliveryOutcome } from '#telemetry/metrics.js';
 import { TelemetryPurposeService } from '#api/telemetry-purposes/telemetry-purpose.service.js';
 import { openEvidence } from '#api/agent-observability/evidence-seal.js';
 import {
@@ -37,6 +39,28 @@ export const deliveryTiming = Object.freeze({
 /** Backoff for a send that provably never reached ingestion. */
 export const retryDelay = (attempts: number): number =>
   Math.min(deliveryTiming.maxBackoffMilliseconds, 5000 * 2 ** Math.max(0, attempts - 1));
+
+/** The bounded health outcome of one settlement; vendor reason codes stay in the row and the log. */
+const deliveryOutcome = (settlement: DeliverySettlement): AgentEvidenceDeliveryOutcome => {
+  switch (settlement.kind) {
+    case 'sent': {
+      return settlement.reason === 'acknowledged' ? 'acknowledged' : 'uncertain';
+    }
+    case 'expired': {
+      return settlement.reason === 'gap'
+        ? 'gap'
+        : settlement.reason === 'revoked' || settlement.reason === 'deleted'
+          ? 'revoked'
+          : 'expired';
+    }
+    case 'retry': {
+      return settlement.reason === 'key-unavailable' ? 'key_unavailable' : 'retry';
+    }
+    default: {
+      return settlement.kind;
+    }
+  }
+};
 
 const runInPool = async <T>(items: readonly T[], width: number, task: (item: T) => Promise<void>): Promise<void> => {
   let next = 0;
@@ -77,6 +101,7 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
     configService: ConfigService<Environment, true>,
     private readonly telemetryPurposes: TelemetryPurposeService,
     private readonly shutdown: ShutdownService,
+    private readonly metrics: MetricsService,
   ) {
     const encodedKey = configService.get('TAU_OBSERVABILITY_PAYLOAD_KEY', { infer: true });
     const key = encodedKey === undefined ? undefined : Uint8Array.from(Buffer.from(encodedKey, 'base64url'));
@@ -135,6 +160,8 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
       const swept = await sweepBacklog(database, now);
       counts['expired'] = swept.expired;
       counts['abandoned'] = swept.abandoned;
+      this.metrics.agentEvidenceLifecycleRecords.add(swept.expired, { action: 'purged' });
+      this.metrics.agentEvidenceDeliveries.add(swept.abandoned, { outcome: 'abandoned' });
       const lease = {
         owner: this.owner,
         leaseMilliseconds: deliveryTiming.leaseMilliseconds,
@@ -149,7 +176,9 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
       await runInPool(uncertain, deliveryTiming.concurrency, async (row) => {
         count(await this.reconcile(client, row, now));
       });
+      this.metrics.agentEvidencePasses.add(1, { 'tau.worker': 'delivery', outcome: 'ok' });
     } catch (error) {
+      this.metrics.agentEvidencePasses.add(1, { 'tau.worker': 'delivery', outcome: 'error' });
       this.logger.warn({ name: error instanceof Error ? error.name : typeof error }, 'Evidence delivery pass failed');
     }
     if (Object.values(counts).some((value) => value > 0)) {
@@ -180,6 +209,7 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
       { receiptId: row.receiptId, owner: this.owner },
       settlement,
     );
+    this.metrics.agentEvidenceDeliveries.add(1, { outcome: held ? deliveryOutcome(settlement) : 'lease_lost' });
     if (!held) {
       return 'lease-lost';
     }
@@ -264,6 +294,7 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
         },
       ))
     ) {
+      this.metrics.agentEvidenceDeliveries.add(1, { outcome: 'lease_lost' });
       return 'lease-lost';
     }
     const outcome = await client.send(span, this.shutdown.signal);

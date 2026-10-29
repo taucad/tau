@@ -31,15 +31,16 @@ const fixture = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('#hooks/use-project-availability.js', () => ({
-  useProjectAvailability: () => {
+vi.mock('#hooks/use-project-availability.js', () => {
+  const useAvailability = () => {
     const [, refresh] = useState(0);
     fixture.notifyAvailability = () => {
       refresh((value) => value + 1);
     };
     return fixture.availability;
-  },
-}));
+  };
+  return { useProjectAvailability: useAvailability, useModelAvailability: useAvailability };
+});
 
 vi.mock('#hooks/use-project.js', () => {
   const projectSnapshot = { matches: (state: string) => state === 'ready' };
@@ -271,6 +272,21 @@ describe('restored viewer layout admission', () => {
     });
     expect(fixture.setViewEntryPath).toHaveBeenCalledWith('main-view', 'models/main.ts');
     expect(fixture.setViewEntryPath).not.toHaveBeenCalledWith('main-view', 'main.scad');
+  });
+
+  /* Open the UI, model waits: the files are open, and no render starts until every large object is here. */
+  it('starts no geometry while model files are still downloading', () => {
+    fixture.availability = 'files';
+    render(<ViewerDockview profile='editor' />);
+    expect(fixture.projectSend).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'createGeometryUnit' }));
+    expect(fixture.projectSend).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'setViewerGeometryDemand', entryPath: expect.any(String) as string }),
+    );
+    fixture.availability = 'ready';
+    act(() => {
+      fixture.notifyAvailability();
+    });
+    expect(fixture.projectSend).toHaveBeenCalledWith(expect.objectContaining({ type: 'createGeometryUnit' }));
   });
 
   it('admits hidden editor view settings without geometry or canvas demand', () => {

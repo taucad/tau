@@ -16,13 +16,40 @@ type Overrides = Readonly<{
   sourceDigest?: string;
   projectionVersion?: string;
   uploader?: string;
-  plane?: 'summary' | 'content';
+  plane?: Evidence['payload']['plane'];
   text?: string;
   protection?: 'pro' | 'free' | 'unknown';
   lineageDigest?: string;
   now?: number;
   authority?: Evidence['authority'];
 }>;
+
+const payloadOf = (plane: Evidence['payload']['plane'], text: string, source: string): Evidence['payload'] => {
+  if (plane === 'summary') {
+    return { plane, fact: { kind: 'instruction', mode: 'initial', message: 'message-1' } };
+  }
+  if (plane === 'feedback') {
+    return { plane, fact: { kind: 'rating', scale: 'thumbs.1', value: 'negative', evidence: 'presented-1' } };
+  }
+  const bytes = new TextEncoder().encode(text).byteLength;
+  return {
+    plane,
+    family: 'instruction',
+    stage: 'admitted',
+    blocks: [
+      {
+        kind: 'text',
+        role: 'user',
+        format: 'text',
+        text,
+        source,
+        originalBytes: bytes,
+        retainedBytes: bytes,
+        redaction: 'none',
+      },
+    ],
+  };
+};
 
 /**
  * A valid host-reported envelope whose projection digest is computed, so a
@@ -34,7 +61,6 @@ export const evidenceFixture = async (overrides: Overrides = {}): Promise<Eviden
   const lineageDigest = overrides.lineageDigest ?? sourceDigest;
   const plane = overrides.plane ?? 'summary';
   const text = overrides.text ?? privateMarker;
-  const textBytes = new TextEncoder().encode(text).byteLength;
   const evidence: Evidence = {
     version: 1,
     source: {
@@ -44,7 +70,7 @@ export const evidenceFixture = async (overrides: Overrides = {}): Promise<Eviden
       sequence: overrides.sequence ?? 7,
       digest: sourceDigest,
     },
-    semantic: { kind: 'instruction', id: 'message-1' },
+    semantic: { kind: plane === 'feedback' ? 'rating' : 'instruction', id: 'message-1' },
     projection: { version: overrides.projectionVersion ?? 'v1', redactor: 'r1', digest: '0'.repeat(64) },
     delivery: {
       uploader: overrides.uploader ?? 'device-a',
@@ -93,26 +119,7 @@ export const evidenceFixture = async (overrides: Overrides = {}): Promise<Eviden
       artifacts: 'unsupported',
       permission: 'complete',
     },
-    payload:
-      plane === 'summary'
-        ? { plane, fact: { kind: 'instruction', mode: 'initial', message: 'message-1' } }
-        : {
-            plane,
-            family: 'instruction',
-            stage: 'admitted',
-            blocks: [
-              {
-                kind: 'text',
-                role: 'user',
-                format: 'text',
-                text,
-                source: lineageDigest,
-                originalBytes: textBytes,
-                retainedBytes: textBytes,
-                redaction: 'none',
-              },
-            ],
-          },
+    payload: payloadOf(plane, text, lineageDigest),
   };
   return { ...evidence, projection: { ...evidence.projection, digest: await evidenceDigest(evidence) } };
 };

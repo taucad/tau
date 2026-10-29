@@ -61,7 +61,7 @@ Mount generated dependency declarations at their canonical `/node_modules` paths
 
 Import CodeMirror only when a real source pane renders. Import the matching syntax family through `editor-syntax.ts`, and acquire its semantic service separately through `editor-language-runtime.ts`. Metadata modules must not import runtime editor code.
 
-Before admission, request no editor-only JavaScript, CSS, grammar, worker or declarations. This applies to link hover, route prefetch, service-worker precache, viewer-only and shared-model surfaces, Markdown preview and hidden mobile tabs. Do not activate unrelated language families or preload every kernel's declarations.
+Before admission, request no editor-only JavaScript, CSS, grammar, worker or declarations. This applies to link hover, route prefetch, service-worker precache, viewer-only and shared-model surfaces, Markdown preview and hidden mobile tabs. Do not activate unrelated language families or preload every kernel's declarations. `apps/ui-e2e/src/language-service-laziness.spec.ts` checks this against a production build. A new language service adds its adapter chunk, worker and staged assets to that spec's `languageResources`.
 
 Share backend services per project session and mirror each document once. Abort pending acquisition on pane closure; dispose per-view extensions and release the backend when its last view closes. Cached code modules do not justify keeping workers alive.
 

@@ -1,7 +1,14 @@
 /* eslint-disable @typescript-eslint/naming-convention -- LFS wire fields use expires_in. */
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { lfsPointerFor } from '#lfs.js';
-import { createLfsClient, lfsUploadConcurrency, lfsUploadResidentBytes } from '#lfs-client.js';
+import type { LfsPointer } from '#lfs.js';
+import {
+  createLfsClient,
+  lfsDownloadBatchSize,
+  lfsDownloadConcurrency,
+  lfsUploadConcurrency,
+  lfsUploadResidentBytes,
+} from '#lfs-client.js';
 import type { RevisionHttpClient, RevisionHttpResponse } from '#http-client.js';
 
 const encoder = new TextEncoder();
@@ -596,5 +603,260 @@ describe('parallel uploads', () => {
       }).upload({ pointers: pointers.slice(0, 2), read: async (oid) => contentOf.get(oid)! }),
     ).resolves.toHaveLength(2);
     expect(transfer).toHaveBeenCalledTimes(2);
+  });
+});
+
+/* Load-path audit fix 1: an open's large objects arrive in a few batch calls and several transfers at once. */
+describe('downloadMany', () => {
+  /* Hashed when this block runs, not when the file is collected: hundreds of tiny digests ahead of the 100 MiB one above slow it several times over. */
+  const pointers: LfsPointer[] = [];
+  const contentOf = new Map<string, Uint8Array<ArrayBuffer>>();
+  beforeAll(() => {
+    for (let index = 0; index < 205; index += 1) {
+      const content = encoder.encode(`download ${String(index)}`);
+      const { pointer } = lfsPointerFor(content);
+      pointers.push(pointer);
+      contentOf.set(pointer.oid, content);
+    }
+  });
+  const hrefOf = (oid: string): string => `https://o.test/${oid}`;
+  const oidOf = (url: Parameters<typeof fetch>[0]): string =>
+    (typeof url === 'string' ? url : url instanceof URL ? url.href : url.url).slice('https://o.test/'.length);
+  const requestedOids = async (request: Parameters<RevisionHttpClient['request']>[0]): Promise<string[]> => {
+    let json = '';
+    for await (const chunk of request.body ?? []) {
+      json += new TextDecoder().decode(chunk);
+    }
+    return (JSON.parse(json) as { objects: Array<{ oid: string }> }).objects.map((object) => object.oid);
+  };
+  /* A batch endpoint that answers whatever it was asked, with `extra` on each action; `asked` is what each call named. */
+  const batchEndpoint = (extra: Readonly<Record<string, unknown>> = {}) => {
+    const asked: string[][] = [];
+    const request = vi.fn<RevisionHttpClient['request']>(async (call) => {
+      const oids = await requestedOids(call);
+      asked.push(oids);
+      return response(
+        JSON.stringify({
+          objects: oids.map((oid) => ({
+            oid,
+            size: contentOf.get(oid)!.byteLength,
+            actions: { download: { href: hrefOf(oid), ...extra } },
+          })),
+        }),
+      );
+    });
+    return { request, asked };
+  };
+
+  it('asks for at most a hundred objects per batch call, once each, and verifies every one', async () => {
+    const { request, asked } = batchEndpoint();
+    const transfer = vi.fn<typeof fetch>(async (url) => new Response(contentOf.get(oidOf(url))));
+    const received = new Map<string, Uint8Array<ArrayBuffer>>();
+    await createLfsClient({ url: 'https://api.tau.test/git', http: { request }, fetch: transfer }).downloadMany({
+      /* A repeated pointer is fetched once. */
+      pointers: [...pointers, pointers[0]!],
+      received: async (pointer, content) => {
+        received.set(pointer.oid, content);
+      },
+    });
+    expect(request).toHaveBeenCalledTimes(Math.ceil(pointers.length / lfsDownloadBatchSize));
+    expect(asked.map((oids) => oids.length)).toEqual([100, 100, 5]);
+    expect(asked.flat()).toEqual(pointers.map((pointer) => pointer.oid));
+    expect(transfer).toHaveBeenCalledTimes(pointers.length);
+    expect(received).toEqual(contentOf);
+  });
+
+  it('transfers at most the bounded number of objects at once', async () => {
+    const releases: Array<() => void> = [];
+    let inFlight = 0;
+    let peak = 0;
+    const transfer = vi.fn<typeof fetch>(
+      async (url) =>
+        new Promise<Response>((resolve) => {
+          inFlight += 1;
+          peak = Math.max(peak, inFlight);
+          releases.push(() => {
+            inFlight -= 1;
+            resolve(new Response(contentOf.get(oidOf(url))));
+          });
+        }),
+    );
+    const subset = pointers.slice(0, 20);
+    const downloading = createLfsClient({
+      url: 'https://api.tau.test/git',
+      http: { request: batchEndpoint().request },
+      fetch: transfer,
+    }).downloadMany({ pointers: subset, received: async () => undefined });
+    await vi.waitFor(() => {
+      expect(transfer).toHaveBeenCalledTimes(lfsDownloadConcurrency);
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10);
+    });
+    expect(transfer).toHaveBeenCalledTimes(lfsDownloadConcurrency);
+    while (transfer.mock.calls.length < subset.length || releases.length > 0) {
+      releases.shift()?.();
+      // oxlint-disable-next-line no-await-in-loop -- let the pool admit the next object.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    }
+    await downloading;
+    expect(peak).toBe(lfsDownloadConcurrency);
+  });
+
+  it('re-requests an action that expired while the objects ahead of it transferred', async () => {
+    let now = 1_000_000;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { request, asked } = batchEndpoint({ expires_in: 900 });
+    const transfer = vi.fn<typeof fetch>(async (url) => {
+      now += 901_000;
+      return new Response(contentOf.get(oidOf(url)));
+    });
+    try {
+      await createLfsClient({
+        url: 'https://api.tau.test/git',
+        http: { request },
+        fetch: transfer,
+        downloadConcurrency: 1,
+      }).downloadMany({ pointers: pointers.slice(0, 3), received: async () => undefined });
+      /* One batch for all three, then one refresh each for the two whose action outlived its lifetime. */
+      expect(request).toHaveBeenCalledTimes(3);
+      expect(asked).toEqual([
+        pointers.slice(0, 3).map((pointer) => pointer.oid),
+        [pointers[1]!.oid],
+        [pointers[2]!.oid],
+      ]);
+      expect(transfer).toHaveBeenCalledTimes(3);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('re-requests an action with no stated lifetime once its relay has lapsed', async () => {
+    const { request, asked } = batchEndpoint();
+    let refused = false;
+    const transfer = vi.fn<typeof fetch>(async (url) => {
+      if (!refused) {
+        refused = true;
+        return new Response('{"code":"GIT_LFS_HANDLE_EXPIRED"}', { status: 400 });
+      }
+      return new Response(contentOf.get(oidOf(url)));
+    });
+    await createLfsClient({
+      url: 'https://api.tau.test/git',
+      http: { request },
+      fetch: transfer,
+      downloadConcurrency: 1,
+    }).downloadMany({ pointers: pointers.slice(0, 2), received: async () => undefined });
+    expect(asked).toEqual([pointers.slice(0, 2).map((pointer) => pointer.oid), [pointers[0]!.oid]]);
+    expect(transfer).toHaveBeenCalledTimes(3);
+  });
+
+  it('gives up on a refusal of a freshly issued action', async () => {
+    const { request } = batchEndpoint();
+    const transfer = vi.fn<typeof fetch>(async () => new Response('', { status: 404 }));
+    await expect(
+      createLfsClient({ url: 'https://api.tau.test/git', http: { request }, fetch: transfer }).downloadMany({
+        pointers: pointers.slice(0, 1),
+        received: async () => undefined,
+      }),
+    ).rejects.toThrow(/failed \(404\)/u);
+    expect(transfer).toHaveBeenCalledTimes(2);
+  });
+
+  it('on an abort, starts nothing more and settles only after the transfers in flight', async () => {
+    const controller = new AbortController();
+    const signals: AbortSignal[] = [];
+    const transfer = vi.fn<typeof fetch>(
+      async (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          signals.push(init!.signal!);
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('aborted', 'AbortError'));
+          });
+        }),
+    );
+    const { request } = batchEndpoint();
+    const received = vi.fn(async () => undefined);
+    const downloading = createLfsClient({
+      url: 'https://api.tau.test/git',
+      http: { request },
+      fetch: transfer,
+      downloadConcurrency: 2,
+    }).downloadMany({ pointers: pointers.slice(0, 150), received, signal: controller.signal });
+    await vi.waitFor(() => {
+      expect(transfer).toHaveBeenCalledTimes(2);
+    });
+    controller.abort(new Error('closed'));
+    await expect(downloading).rejects.toThrow('closed');
+    expect(transfer).toHaveBeenCalledTimes(2);
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+    /* The second hundred was never asked for. */
+    expect(request).toHaveBeenCalledOnce();
+    expect(received).not.toHaveBeenCalled();
+  });
+
+  it('stops at the first object the remote refused, and reports it', async () => {
+    const [refused, ...rest] = pointers.slice(0, 4);
+    const request = vi.fn<RevisionHttpClient['request']>(async () =>
+      response(
+        JSON.stringify({
+          objects: [
+            { ...refused, error: { code: 404, message: 'Object does not exist' } },
+            ...rest.map((pointer) => ({ ...pointer, actions: { download: { href: hrefOf(pointer.oid) } } })),
+          ],
+        }),
+      ),
+    );
+    const transfer = vi.fn<typeof fetch>(async (url) => new Response(contentOf.get(oidOf(url))));
+    await expect(
+      createLfsClient({
+        url: 'https://api.tau.test/git',
+        http: { request },
+        fetch: transfer,
+        downloadConcurrency: 1,
+      }).downloadMany({ pointers: pointers.slice(0, 4), received: async () => undefined }),
+    ).rejects.toThrow(`The remote refused large object ${refused!.oid}.`);
+    expect(transfer).not.toHaveBeenCalled();
+  });
+
+  it('reports a store that rejects, and aborts the transfer beside it', async () => {
+    const signals: AbortSignal[] = [];
+    const transfer = vi.fn<typeof fetch>(async (url, init) => {
+      signals.push(init!.signal!);
+      if (oidOf(url) === pointers[0]!.oid) {
+        return new Response(contentOf.get(oidOf(url)));
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('aborted', 'AbortError'));
+        });
+      });
+    });
+    await expect(
+      createLfsClient({
+        url: 'https://api.tau.test/git',
+        http: { request: batchEndpoint().request },
+        fetch: transfer,
+        downloadConcurrency: 2,
+      }).downloadMany({
+        pointers: pointers.slice(0, 5),
+        received: async () => {
+          throw new Error('quota exceeded');
+        },
+      }),
+    ).rejects.toThrow('quota exceeded');
+    expect(transfer).toHaveBeenCalledTimes(2);
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+  });
+
+  it('asks nothing for nothing', async () => {
+    const request = vi.fn<RevisionHttpClient['request']>();
+    await createLfsClient({ url: 'https://api.tau.test/git', http: { request } }).downloadMany({
+      pointers: [],
+      received: async () => undefined,
+    });
+    expect(request).not.toHaveBeenCalled();
   });
 });

@@ -224,6 +224,28 @@ export const settleDelivery = async (
 };
 
 /**
+ * Purge every unsettled row past its retention. Delivery and the lifecycle
+ * pass both run it, so retention holds while delivery is switched off (T13).
+ *
+ * @param database - The API database.
+ * @param now - The clock.
+ * @returns How many rows expired.
+ */
+export const expireBacklog = async (database: Database, now: Date): Promise<number> => {
+  const expired = await database
+    .update(agentEvidenceOutbox)
+    .set({ state: 'expired', payload: null, reason: 'retention', leaseOwner: null, leaseExpiresAt: null })
+    .where(
+      and(
+        inArray(agentEvidenceOutbox.state, ['pending', 'sending', 'uncertain']),
+        lte(agentEvidenceOutbox.expiresAt, now),
+      ),
+    )
+    .returning({ receiptId: agentEvidenceOutbox.receiptId });
+  return expired.length;
+};
+
+/**
  * Sweep the backlog: purge every row past its retention, and settle a send
  * whose lease ran out. A worker that died after recording the identity may
  * have been applied, so that row is reconciled, never resent; one that died
@@ -237,16 +259,7 @@ export const sweepBacklog = async (
   database: Database,
   now: Date,
 ): Promise<Readonly<{ expired: number; abandoned: number }>> => {
-  const expired = await database
-    .update(agentEvidenceOutbox)
-    .set({ state: 'expired', payload: null, reason: 'retention', leaseOwner: null, leaseExpiresAt: null })
-    .where(
-      and(
-        inArray(agentEvidenceOutbox.state, ['pending', 'sending', 'uncertain']),
-        lte(agentEvidenceOutbox.expiresAt, now),
-      ),
-    )
-    .returning({ receiptId: agentEvidenceOutbox.receiptId });
+  const expired = await expireBacklog(database, now);
   const lapsed = and(eq(agentEvidenceOutbox.state, 'sending'), lte(agentEvidenceOutbox.leaseExpiresAt, now));
   /* No identity was recorded, so no send began: it is safe to send again. */
   const unsent = await database
@@ -259,7 +272,7 @@ export const sweepBacklog = async (
     .set({ state: 'uncertain', payload: null, reason: 'abandoned', leaseOwner: null, leaseExpiresAt: null })
     .where(and(lapsed, isNotNull(agentEvidenceOutbox.traceId)))
     .returning({ receiptId: agentEvidenceOutbox.receiptId });
-  return { expired: expired.length, abandoned: abandoned.length + unsent.length };
+  return { expired, abandoned: abandoned.length + unsent.length };
 };
 
 /**

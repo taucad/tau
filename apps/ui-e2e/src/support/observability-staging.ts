@@ -6,6 +6,13 @@ export const stagingOrigin = 'https://taucad.dev';
 export const productionOrigin = 'https://tau.new';
 export const harnessPath = '/__debug/observability';
 
+/**
+ * How long one harness navigation may take. The harness boots the runtime kernel and the PostHog
+ * extension bundles before `load`, which has been measured past Playwright's 30 s default on both
+ * CI and a local run; the suite's other waits already allow 120 s.
+ */
+export const harnessNavigationTimeout = 120_000;
+
 /** One correlation id per failure, browser and consent decision. */
 export function createObservabilityRunId(): string {
   return `e2e-${randomUUID()}`;
@@ -43,8 +50,11 @@ export const observabilityRequestKind = (address: string): string => {
   return 'other';
 };
 
-/** Record bounded counts and envelope ids even when navigation or an assertion fails. */
-export const observeHarnessPage = (page: Page, runId: string): void => {
+/**
+ * Record bounded counts and envelope ids even when navigation or an assertion fails. The returned record is the
+ * live one the listeners write to, so a caller reads it after the page has settled and can assert on it.
+ */
+export const observeHarnessPage = (page: Page, runId: string): Readonly<Record<string, number>> => {
   observabilityUrl(runId);
   const counts: Record<string, number> = {};
   const eventIds = new Set<string>();
@@ -85,6 +95,7 @@ export const observeHarnessPage = (page: Page, runId: string): void => {
   page.once('close', () => {
     console.info('Harness observation finished', { runId, counts, eventIds: [...eventIds] });
   });
+  return counts;
 };
 
 type PollOptions = {

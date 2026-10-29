@@ -1,10 +1,12 @@
 /* oxlint-disable new-cap -- NestJS parameter decorators are factories */
-import { Controller, HttpCode, HttpStatus, Post, Req, UnsupportedMediaTypeException } from '@nestjs/common';
+import { Controller, HttpCode, HttpStatus, Post, Req, UnsupportedMediaTypeException, UseGuards } from '@nestjs/common';
 import type { OnModuleInit } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { evidenceLimits } from '@taucad/agent-observability/contract';
-import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
+import { User } from '#auth/decorators/auth.decorator.js';
+import { CloudHost, CloudHostEvidenceGuard } from '#api/hosts/cloud-host-evidence.guard.js';
+import type { CloudHostReporter } from '#api/hosts/cloud-host-evidence.guard.js';
 import type { EvidenceReceipt } from '#api/agent-observability/evidence-admission.js';
 import { EvidenceIngressService } from '#api/agent-observability/evidence-ingress.service.js';
 
@@ -14,9 +16,10 @@ export const evidenceContentType = 'application/vnd.tau.agent-evidence+json';
 /**
  * Agent-evidence ingress (blueprint T06). The envelope arrives as bytes under
  * its own media type and body limit, so the general 50 MiB JSON parser and its
- * validation diagnostics never see it.
+ * validation diagnostics never see it. A session or a provisioned cloud host
+ * reports here; the host only for its own project, as its own uploader.
  */
-@UseAuth()
+@UseGuards(CloudHostEvidenceGuard)
 @Controller({ path: 'agent-observability', version: '1' })
 export class EvidenceIngressController implements OnModuleInit {
   public constructor(
@@ -27,14 +30,18 @@ export class EvidenceIngressController implements OnModuleInit {
   /** Admit one evidence envelope and answer with its durable receipt. */
   @Post('evidence')
   @HttpCode(HttpStatus.OK)
-  public async admit(@User('id') userId: string, @Req() request: FastifyRequest): Promise<EvidenceReceipt> {
+  public async admit(
+    @User('id') userId: string,
+    @Req() request: FastifyRequest,
+    @CloudHost() host: CloudHostReporter | undefined,
+  ): Promise<EvidenceReceipt> {
     if (!Buffer.isBuffer(request.body)) {
       throw new UnsupportedMediaTypeException({
         code: 'EVIDENCE_MEDIA_TYPE',
         message: `Send the evidence as ${evidenceContentType}.`,
       });
     }
-    return this.ingress.admit(userId, Uint8Array.from(request.body));
+    return this.ingress.admit(userId, Uint8Array.from(request.body), host);
   }
 
   public onModuleInit(): void {

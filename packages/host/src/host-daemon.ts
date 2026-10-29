@@ -55,7 +55,7 @@ import type { HostJobWorkerFactory, HostJobWorkerHandle } from '#job-worker.js';
 import { keyedResource } from '#keyed-resource.js';
 import { resolveNodeProjectIdentity } from '#project-identity.js';
 import { createProjectHost } from '#project-host.js';
-import type { ProjectHost } from '#project-host.js';
+import type { ProjectHost, ProjectHostOptions } from '#project-host.js';
 import { startRuntimeChild } from '#runtime-child-supervisor.js';
 import { createZooProxyChildCredential } from '#zoo-proxy-child.js';
 import type { HostZooProxyOptions } from '#zoo-proxy-child.js';
@@ -300,6 +300,15 @@ export type HostDaemonOptions = {
    * `tau serve` leaves it out.
    */
   readonly observeRuntimeClient?: (client: RuntimeClient, caller: 'agent') => () => void;
+  /**
+   * Agent observability (T11): observe the chats the agent's project host leads, given that project's id and its
+   * own-row read. It must not throw and never affects a run. The cloud host container composes it from a module its
+   * image carries; every other `tau serve` leaves it out.
+   */
+  readonly observeChats?: (
+    projectId: string,
+    read: Parameters<NonNullable<ProjectHostOptions['observeChats']>>[0],
+  ) => ReturnType<NonNullable<ProjectHostOptions['observeChats']>>;
 };
 
 /** Final daemon closure result. @public */
@@ -866,7 +875,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         /* A checkout on disk can hold a symlink, so an ordinary name may not
          * resolve into a path the views above hide (CI1). */
         policy: tauPathPolicy,
-      }),
+      }).close,
       ports,
     };
     agentFileSystem = filesystem;
@@ -923,6 +932,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     /* Before the tools: the machine tools are offered only over a facet the
      * host already serves, the same rule the revisions history follows. */
     const machines = agent.machines ? await openMachineHost(agent.machines.providers, readArtifact) : undefined;
+    const { observeChats } = options;
     const project = createProjectHost({
       workspaceRoot: agent.workspaceRoot,
       checkoutsDirectory,
@@ -956,6 +966,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
        */
       apiBaseUrl: options.relayUrl.origin,
       syncTelemetryPlacement: 'daemon',
+      ...(observeChats === undefined ? {} : { observeChats: (read) => observeChats(projectId, read) }),
       /* The session, not this daemon's device credential: the Git endpoints and
        * `PUT /v1/projects/<id>` authenticate an account, and a paired device
        * credential is only ever offered to the agent relay. A terminal has no

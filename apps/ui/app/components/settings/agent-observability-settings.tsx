@@ -14,6 +14,11 @@ const purposeCopy: Record<TelemetryPurpose, PurposeCopy> = {
     label: 'Task summaries',
     description: 'Counts, timings and outcomes of your agent tasks, without prompts or designs',
   },
+  feedback: {
+    label: 'Ratings and corrections',
+    description:
+      'Record the ratings you give agent replies and when you accept, reject or correct one, linked to your account. Only the rating itself, never an explanation or the reply.',
+  },
   content: {
     label: 'Full task capture',
     description: 'Your prompts, designs and agent replies, so a task can be replayed',

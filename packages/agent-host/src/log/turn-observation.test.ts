@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { AgentLogEvent, UserProviderMessage } from '#log/event-types.js';
-import { observeTurns } from '#log/turn-observation.js';
+import { observeOwnTurns, observeTurns } from '#log/turn-observation.js';
 
 const chatId = 'chat-1';
 const start = Date.parse('2026-10-29T00:00:00.000Z');
@@ -112,6 +112,7 @@ describe('observeTurns', () => {
           outcome: 'completed',
           input: { chatId, leaderEpoch: 't1', sequence: 5 },
           output: { chatId, leaderEpoch: 't1', sequence: 6 },
+          modelCall: 'inv-1',
         },
       ],
       intervals: [
@@ -159,6 +160,84 @@ describe('observeTurns', () => {
       ['call-1', 'unknown', undefined],
     ]);
     expect(observation?.invocations[0]?.settlement).toBeUndefined();
+  });
+
+  describe('test_model checks', () => {
+    const checked = (content: unknown, isError = false): Body[] =>
+      toolTurn.map((body) =>
+        body.type === 'message.appended' && 'toolName' in body.message
+          ? {
+              ...body,
+              message: {
+                ...body.message,
+                toolName: 'test_model',
+                ...(body.message.role === 'tool-output' ? { content, isError } : {}),
+              },
+            }
+          : body,
+      ) as Body[];
+    const revision = { entry: 'main.ts', files: { 'main.ts': `sha256:${'a'.repeat(64)}` } };
+
+    it('reads a qualified run status, its requirements and its revision', () => {
+      const [observation] = observeTurns(
+        chatId,
+        term(
+          't1',
+          checked({
+            runStatus: 'passed',
+            tests: [
+              { id: 'spec.ts:2', targetFile: 'spec.ts', ordinal: 2, requirement: 'SYNTHETIC_REQ', status: 'passed' },
+              { id: 'spec.ts:1', targetFile: 'spec.ts', ordinal: 1, requirement: 'SYNTHETIC_REQ', status: 'passed' },
+            ],
+            sourceRevisions: [revision],
+            omittedTests: 3,
+            failures: [],
+            passes: [],
+            passed: 2,
+            total: 2,
+          }),
+        ),
+      );
+
+      expect(observation?.tools[0]?.check).toEqual({
+        result: 'passed',
+        revision: [`main.ts\u0000main.ts=sha256:${'a'.repeat(64)}`],
+        requirements: ['#omitted:3', 'spec.ts#1', 'spec.ts#2'],
+      });
+      expect(JSON.stringify(observation)).not.toContain('SYNTHETIC_REQ');
+    });
+
+    it.each([
+      [['passed', 'failed', 'inconclusive'], undefined, 'failed'],
+      [['passed', 'passed'], undefined, 'passed'],
+      [['passed', 'skipped'], undefined, 'not-run'],
+      [['passed', 'unsupported'], undefined, 'unsupported'],
+      [['passed', 'inconclusive'], undefined, 'inconclusive'],
+      [['passed'], { code: 'GEOSPEC_RUN_TIMEOUT' }, 'inconclusive'],
+      [[], undefined, 'not-run'],
+    ])(
+      'decides an unqualified run %j (timeout %j) as %s, never passing an undecided test',
+      (statuses, runTimeout, result) => {
+        const tests = statuses.map((status, ordinal) => ({ id: `s:${ordinal}`, targetFile: 's', ordinal, status }));
+        const [observation] = observeTurns(
+          chatId,
+          term(
+            't1',
+            checked({ tests, ...(runTimeout === undefined ? {} : { timeout: runTimeout }), total: tests.length }),
+          ),
+        );
+
+        expect(observation?.tools[0]?.check?.result).toBe(result);
+      },
+    );
+
+    it('reads no check from an errored call, an unreadable output or another tool', () => {
+      const tests = [{ id: 's:1', targetFile: 's', ordinal: 1, status: 'passed' }];
+
+      expect(observeTurns(chatId, term('t1', checked({ tests }, true)))[0]?.tools[0]?.check).toBeUndefined();
+      expect(observeTurns(chatId, term('t1', checked('SYNTHETIC_TOOL_RESULT')))[0]?.tools[0]?.check).toBeUndefined();
+      expect(observeTurns(chatId, term('t1', toolTurn))[0]?.tools[0]).not.toHaveProperty('check');
+    });
   });
 
   it('records a tool that returned an error as failed', () => {
@@ -250,6 +329,31 @@ describe('observeTurns', () => {
     ]);
   });
 
+  it('names each tool call by the generation prepared last before it, never a compaction', () => {
+    const input = (call: string): Body => ({
+      type: 'message.appended',
+      message: { id: `in-${call}`, role: 'tool-input', toolCallId: call, toolName: 'read_file', content: {} },
+    });
+    const rows = term('t1', [
+      input('call-0'),
+      { type: 'model.invocation-prepared', attemptId: 'inv-1', purpose: 'generation', modelId: 'fixture-model' },
+      input('call-1'),
+      { type: 'model.invocation-prepared', attemptId: 'inv-c', purpose: 'compaction', modelId: 'fixture-model' },
+      input('call-2'),
+      { type: 'model.invocation-prepared', attemptId: 'inv-2', purpose: 'generation', modelId: 'fixture-model' },
+      input('call-3'),
+    ]);
+
+    const [observation] = observeTurns(chatId, rows);
+
+    expect(observation?.tools.map((tool) => [tool.call, tool.modelCall])).toEqual([
+      ['call-0', undefined],
+      ['call-1', 'inv-1'],
+      ['call-2', 'inv-1'],
+      ['call-3', 'inv-2'],
+    ]);
+  });
+
   it('leaves an external agent’s run out entirely', () => {
     const external = term('t1', [
       { type: 'run.lifecycle', state: 'admitted', runId: 'run-acp' },
@@ -259,5 +363,24 @@ describe('observeTurns', () => {
     const tau = term('t1', toolTurn, external.length);
 
     expect(observeTurns(chatId, [...external, ...tau]).map((observation) => observation.runId)).toEqual(['run-1']);
+  });
+});
+
+describe('observeOwnTurns', () => {
+  it('should read every page of a chat’s own rows and own every term they name', async () => {
+    const rows = term('t1', toolTurn);
+    const read = vi.fn(async ({ cursor }: Readonly<{ cursor: number }>) => ({
+      cursor,
+      nextCursor: Math.min(cursor + 3, rows.length),
+      endCursor: rows.length,
+      events: rows.slice(cursor, cursor + 3),
+    }));
+
+    const { runs, ownsEpoch } = await observeOwnTurns(read, chatId);
+
+    expect(read.mock.calls.length).toBe(Math.ceil(rows.length / 3));
+    expect(runs).toEqual(observeTurns(chatId, rows));
+    expect(ownsEpoch('t1')).toBe(true);
+    expect(ownsEpoch('t2')).toBe(false);
   });
 });

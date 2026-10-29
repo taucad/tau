@@ -7,7 +7,7 @@ import { ENV } from '#environment.config.js';
 import { recordApiRequestId } from '#lib/api-request-id.js';
 
 /** The agent-observability processing purposes, in the order the settings show them. */
-export const telemetryPurposes = ['summary', 'content', 'diagnosis', 'reuse', 'training'] as const;
+export const telemetryPurposes = ['summary', 'feedback', 'content', 'diagnosis', 'reuse', 'training'] as const;
 
 /** One processing purpose. */
 export type TelemetryPurpose = (typeof telemetryPurposes)[number];

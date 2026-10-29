@@ -27,7 +27,7 @@ import { useOptionalFileManager } from '#hooks/use-file-manager.js';
 import type { FileSelectorDataSource } from '@taucad/workbench-panes/files/file-selector';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { useProject } from '#hooks/use-project.js';
-import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { useModelAvailability } from '#hooks/use-project-availability.js';
 import { useFileTreeMap } from '#hooks/use-file-tree.js';
 import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
 import type { GraphicsViewSettings } from '@taucad/viewer/graphics/graphics-settings';
@@ -842,7 +842,7 @@ export const ViewerDockview = memo(function ({
   // entryPath (happens when onReady fires before the project loads and the
   // main file is unknown).
   const projectIsReady = useSelector(projectRef, (state) => state.matches('ready'));
-  const availability = useProjectAvailability();
+  const availability = useModelAvailability();
   const admittedGraphics = useRef(new Set<string>());
   const admittedGeometry = useRef(new Map<string, string>());
   const visibleGeometryDemand = useRef(new Map<string, string>());

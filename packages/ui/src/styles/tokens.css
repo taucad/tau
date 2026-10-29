@@ -463,37 +463,43 @@
   }
 }
 
-/* Hairlines between a touch list's rows. Each row after a row draws one along its top edge, from
-   where its text starts (past a leading icon) to its inline padding; the highlighted row and the
-   row after it drop theirs so the highlight never sits on a line. */
-@utility command-item-dividers {
-  & [data-slot='command-item'] {
-    --command-item-divider-start: 0.75rem;
+/* Hairlines between the rows of a phone drawer's list (`DrawerList`): a responsive combobox's options and a
+   responsive menu's items. Each row after a row draws one along its top edge, from where its text starts (past a
+   leading icon) to its inline padding; the highlighted row and the row after it drop theirs so the highlight never
+   sits on a line. A row family sets its geometry with `--drawer-row-inset`, `--drawer-row-icon` and
+   `--drawer-row-gap`, or pins the start with `--drawer-row-text-start` when its text sits past an indicator. */
+@utility drawer-row-dividers {
+  & :is([data-slot='command-item'], [data-drawer-row]) {
+    --drawer-row-divider-start: var(--drawer-row-inset, 0.75rem);
   }
 
   &
-    [data-slot='command-item']:is(
+    :is([data-slot='command-item'], [data-drawer-row]):is(
       :has(> svg:first-child),
       :has(> :first-child > svg:first-child),
       :has(> :first-child > :first-child > svg:first-child)
     ) {
-    /* Inline padding, the 0.875rem icon and the 0.5rem gap of a menu row. */
-    --command-item-divider-start: 2.125rem;
+    /* Inline padding, the icon and the gap of a row: 0.75rem, 0.875rem and 0.5rem for a menu-sized row. */
+    --drawer-row-divider-start: calc(
+      var(--drawer-row-inset, 0.75rem) + var(--drawer-row-icon, 0.875rem) + var(--drawer-row-gap, 0.5rem)
+    );
   }
 
-  & [data-slot='command-item'] + [data-slot='command-item']::before,
+  & :is([data-slot='command-item'], [data-drawer-row]) + :is([data-slot='command-item'], [data-drawer-row])::before,
   & [data-item-index]:has(> [data-slot='command-item']) + [data-item-index] > [data-slot='command-item']::before {
     content: '';
     position: absolute;
     top: -1px;
-    right: 0.75rem;
-    left: var(--command-item-divider-start);
+    right: var(--drawer-row-inset, 0.75rem);
+    left: var(--drawer-row-text-start, var(--drawer-row-divider-start));
     border-top: 1px solid var(--border);
     pointer-events: none;
   }
 
-  & [data-slot='command-item'][data-selected='true']::before,
-  & [data-slot='command-item'][data-selected='true'] + [data-slot='command-item']::before {
+  & :is([data-slot='command-item'], [data-drawer-row])[data-selected='true']::before,
+  &
+    :is([data-slot='command-item'], [data-drawer-row])[data-selected='true']
+    + :is([data-slot='command-item'], [data-drawer-row])::before {
     content: none;
   }
 }

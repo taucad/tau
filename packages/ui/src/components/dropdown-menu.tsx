@@ -8,9 +8,11 @@ import {
   Drawer,
   DrawerClose,
   DrawerContent,
+  DrawerList,
   DrawerNestedRoot,
   DrawerTitle,
   DrawerTrigger,
+  drawerRowAttributes,
   useIsInsideDrawer,
 } from '#components/drawer.js';
 import { useIsMobile } from '#hooks/use-mobile.js';
@@ -89,9 +91,12 @@ function selectDrawerRow(onSelect: ((event: Event) => void) | undefined, close: 
   }
 }
 
-/** A drawer row's shape: a full-width touch row. */
+/** A drawer row's shape: a full-width touch row, whose 1rem padding, 1rem icon and 0.75rem gap place its divider. */
 const drawerRowClass =
-  'min-h-touch-row w-full shrink-0 gap-3 rounded-none px-4 text-left text-sm [&_svg:not([class*=size-])]:size-4';
+  'min-h-touch-row w-full shrink-0 gap-3 rounded-none px-4 text-left text-sm [--drawer-row-gap:0.75rem] [--drawer-row-icon:1rem] [--drawer-row-inset:1rem] [&_svg:not([class*=size-])]:size-4';
+
+/* A checkbox or radio row's text starts past its indicator column (`pl-11`), so its divider does too. */
+const drawerIndicatorRowClass = 'pl-11 [--drawer-row-text-start:2.75rem]';
 
 /** Hands a node to a ref the caller passed, as React would: a callback ref is called, an object ref is set. */
 function assignRef<T>(
@@ -341,14 +346,14 @@ function DropdownMenuDrawerContent({
       </div>
       {/* A dialog's group of buttons: checkbox, radio and switch rows use the plain `checkbox`, `radio` and `switch`
        * roles, since the `menuitem*` roles need a `menu` parent that a drawer does not have. */}
-      <div
+      <DrawerList
         role='group'
         aria-label={title}
         data-slot='dropdown-menu-drawer-items'
         className='flex min-h-0 flex-col overflow-y-auto border-t py-1 pb-3'
       >
         {children}
-      </div>
+      </DrawerList>
     </DrawerContent>
   );
 }
@@ -451,6 +456,7 @@ function DropdownMenuDrawerItem({
   return (
     <Comp
       data-slot='dropdown-menu-item'
+      {...drawerRowAttributes}
       data-inset={isInset}
       data-variant={variant}
       data-disabled={disabled ? '' : undefined}
@@ -547,10 +553,11 @@ function DropdownMenuDrawerCheckboxItem({
       role='checkbox'
       aria-checked={isIndeterminate ? 'mixed' : checked}
       data-slot='dropdown-menu-checkbox-item'
+      {...drawerRowAttributes}
       data-state={isIndeterminate ? 'indeterminate' : checked ? 'checked' : 'unchecked'}
       data-disabled={disabled ? '' : undefined}
       disabled={disabled}
-      className={cn(menuItemVariants(), drawerRowClass, 'pl-11', className)}
+      className={cn(menuItemVariants(), drawerRowClass, drawerIndicatorRowClass, className)}
       {...(properties as React.ComponentProps<'button'>)}
       onClick={(event) => {
         onClick?.(event as unknown as React.MouseEvent<HTMLDivElement>);
@@ -655,10 +662,11 @@ function DropdownMenuRadioItem({
         role='radio'
         aria-checked={isChecked}
         data-slot='dropdown-menu-radio-item'
+        {...drawerRowAttributes}
         data-state={isChecked ? 'checked' : 'unchecked'}
         data-disabled={disabled ? '' : undefined}
         disabled={disabled}
-        className={cn(menuItemVariants(), drawerRowClass, 'pl-11', className)}
+        className={cn(menuItemVariants(), drawerRowClass, drawerIndicatorRowClass, className)}
         {...(row as React.ComponentProps<'button'>)}
         onClick={(event) => {
           onClick?.(event as unknown as React.MouseEvent<HTMLDivElement>);
@@ -742,6 +750,7 @@ function DropdownMenuSwitchItem({
         aria-labelledby={`${id}-title`}
         {...(description === undefined ? {} : { 'aria-describedby': `${id}-description` })}
         data-slot='dropdown-menu-switch-item'
+        {...drawerRowAttributes}
         data-disabled={disabled ? '' : undefined}
         disabled={disabled}
         className={cn(
@@ -1054,6 +1063,7 @@ function DropdownMenuSubTrigger({
         aria-expanded={sub?.isOpen ?? false}
         aria-controls={sub?.isOpen ? sub.contentId : undefined}
         data-slot='dropdown-menu-sub-trigger'
+        {...drawerRowAttributes}
         data-inset={isInset}
         data-state={sub?.isOpen ? 'open' : 'closed'}
         data-disabled={disabled ? '' : undefined}

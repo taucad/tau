@@ -6,7 +6,15 @@ import { useNavigate } from 'react-router';
 import { useSelector } from '@xstate/react';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import { Button } from '@taucad/ui/components/button';
-import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from '@taucad/ui/components/drawer';
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerList,
+  DrawerTitle,
+  DrawerTrigger,
+  drawerRowAttributes,
+} from '@taucad/ui/components/drawer';
 import { cn } from '@taucad/ui/utils/cn';
 import { ChatHistorySettings, useExportTranscript } from '#routes/w.$workspace.$project/chat-history-settings.js';
 import { useActiveChatNaming } from '#routes/w.$workspace.$project/use-active-chat-naming.js';
@@ -49,7 +57,11 @@ function SwitcherRow({
   readonly onSelect: () => void;
 }): React.JSX.Element {
   return (
-    <li>
+    // A drawer list row: the touch button's 0.5rem padding, a 1rem icon and a 0.75rem gap.
+    <li
+      {...drawerRowAttributes}
+      className='relative [--drawer-row-gap:0.75rem] [--drawer-row-icon:1rem] [--drawer-row-inset:0.5rem]'
+    >
       <Button
         variant='ghost'
         size='touch'
@@ -208,7 +220,7 @@ function ChatSwitcherSheet({
           </Button>
         </div>
         <div className='min-h-0 overflow-y-auto pb-3'>
-          <ul aria-label='Chats' className='border-t py-1'>
+          <DrawerList role='list' aria-label='Chats' className='border-t py-1'>
             <SwitcherRow
               icon={SquarePen}
               label='New chat'
@@ -235,8 +247,8 @@ function ChatSwitcherSheet({
                 }}
               />
             ))}
-          </ul>
-          <ul aria-label='This chat' className='border-t py-1'>
+          </DrawerList>
+          <DrawerList role='list' aria-label='This chat' className='border-t py-1'>
             <SwitcherRow
               icon={Pencil}
               label='Rename this chat'
@@ -254,7 +266,7 @@ function ChatSwitcherSheet({
                 choose(exportTranscript);
               }}
             />
-          </ul>
+          </DrawerList>
         </div>
       </DrawerContent>
     </Drawer>

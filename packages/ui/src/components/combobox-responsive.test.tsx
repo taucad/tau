@@ -25,7 +25,9 @@ vi.mock('#components/popover.js', () => ({
   ),
 }));
 
-vi.mock('#components/drawer.js', () => ({
+vi.mock('#components/drawer.js', async (importOriginal) => ({
+  // The real list, so the drawer test sees the rows it divides.
+  DrawerList: (await importOriginal<typeof import('#components/drawer.js')>()).DrawerList,
   Drawer: ({ children }: { readonly children: React.ReactNode }) => <div data-testid='drawer-root'>{children}</div>,
   DrawerNestedRoot: ({ children }: { readonly children: React.ReactNode }) => (
     <div data-testid='drawer-nested-root'>{children}</div>
@@ -156,7 +158,9 @@ describe('ComboBoxResponsive (controlled)', () => {
     renderResponsive();
     expect(screen.queryByRole('button', { name: 'Back' })).toBeNull();
     expect(screen.getByTestId('drawer-title-test')).toHaveClass('sr-only');
-    expect(screen.getByTestId('drawer-content-test')).toHaveClass('command-item-dividers');
+    const list = screen.getByTestId('drawer-content-test').querySelector('[data-slot=drawer-list]');
+    expect(list).toHaveClass('drawer-row-dividers');
+    expect(list?.querySelectorAll('[data-slot=command-item]').length).toBeGreaterThan(0);
   });
 
   it('should keep a caller width on the popover and span the screen in the drawer', () => {

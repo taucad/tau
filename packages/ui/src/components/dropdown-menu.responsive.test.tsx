@@ -447,6 +447,31 @@ describe('responsive dropdown menu parts in a drawer', () => {
     expect(results.violations).toEqual([]);
   });
 
+  it('should draw every kind of row in the shared drawer list, so each gets the drawer row divider', async () => {
+    const drawer = await openWith(
+      <>
+        <DropdownMenuItem>Rename</DropdownMenuItem>
+        <DropdownMenuCheckboxItem checked>Grid</DropdownMenuCheckboxItem>
+        <DropdownMenuRadioGroup value='cozy'>
+          <DropdownMenuRadioItem value='cozy'>Cozy</DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSwitchItem isChecked={false}>Snap</DropdownMenuSwitchItem>
+      </>,
+    );
+
+    const list = drawer.querySelector('[data-slot=dropdown-menu-drawer-items]');
+    expect(list).toHaveClass('drawer-row-dividers');
+    for (const row of [
+      within(drawer).getByRole('button', { name: 'Rename' }),
+      within(drawer).getByRole('checkbox', { name: 'Grid' }),
+      within(drawer).getByRole('radio', { name: 'Cozy' }),
+      within(drawer).getByRole('switch', { name: 'Snap' }),
+    ]) {
+      expect(row).toHaveAttribute('data-drawer-row');
+      expect(list).toContainElement(row);
+    }
+  });
+
   it('should render a switch item as one switch row that toggles and keeps the drawer open', async () => {
     const onIsCheckedChange = vi.fn<(checked: boolean) => void>();
     const drawer = await openWith(

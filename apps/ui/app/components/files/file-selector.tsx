@@ -8,7 +8,14 @@ import { compareFileEntries, FileBrowser, useFileBrowser } from '@taucad/workben
 import type { FileBrowserStatus, FileSelectorDataSource } from '@taucad/workbench-panes/files/file-selector';
 import type { FilesEntry } from '@taucad/workbench-panes/files/files-source';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
-import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from '@taucad/ui/components/drawer';
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerList,
+  DrawerTitle,
+  DrawerTrigger,
+} from '@taucad/ui/components/drawer';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { Button } from '@taucad/ui/components/button';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
@@ -200,7 +207,7 @@ export function FileSelector({
         <DrawerContent>
           <DrawerTitle className='sr-only'>{title}</DrawerTitle>
           <DrawerDescription className='sr-only'>{description}</DrawerDescription>
-          {content}
+          <DrawerList className='contents'>{content}</DrawerList>
         </DrawerContent>
       </Drawer>
     );

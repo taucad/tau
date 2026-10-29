@@ -581,6 +581,46 @@ function DrawerDescription({
   );
 }
 
+/**
+ * The list every phone drawer of rows draws its rows in, so they all share one look: a hairline between rows, from
+ * where a row's text starts to its inline padding (`drawer-row-dividers`). A responsive combobox's options and a
+ * responsive menu's items use it; mark each row with {@link drawerRowAttributes}. Desktop popovers and menus never
+ * render it, so they keep their own style.
+ *
+ * @public
+ * @example <caption>List two rows in a drawer.</caption>
+ * ```typescript
+ * import { createElement } from 'react';
+ * import { DrawerList, drawerRowAttributes } from '@taucad/ui/components/drawer';
+ *
+ * createElement(
+ *   DrawerList,
+ *   null,
+ *   createElement('button', { ...drawerRowAttributes, className: 'relative' }, 'Rename'),
+ *   createElement('button', { ...drawerRowAttributes, className: 'relative' }, 'Delete'),
+ * );
+ * ```
+ */
+function DrawerList({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
+  return <div data-slot='drawer-list' className={cn('drawer-row-dividers', className)} {...properties} />;
+}
+
+/**
+ * Marks an element as a row of a {@link DrawerList}, so a row after it draws its divider. The row must be positioned
+ * (`relative`); `--drawer-row-inset`, `--drawer-row-icon` and `--drawer-row-gap` set where the divider starts, or
+ * `--drawer-row-text-start` pins it.
+ *
+ * @public
+ * @example <caption>Mark a row.</caption>
+ * ```typescript
+ * import { createElement } from 'react';
+ * import { drawerRowAttributes } from '@taucad/ui/components/drawer';
+ *
+ * createElement('button', { ...drawerRowAttributes, className: 'relative' }, 'Rename');
+ * ```
+ */
+const drawerRowAttributes = { 'data-drawer-row': '' } as const;
+
 export {
   drawerGrabStrip,
   Drawer,
@@ -595,5 +635,7 @@ export {
   DrawerFooter,
   DrawerTitle,
   DrawerDescription,
+  DrawerList,
+  drawerRowAttributes,
   useIsInsideDrawer,
 };

@@ -10,6 +10,7 @@ import {
   DrawerNestedRoot,
   DrawerContent,
   DrawerDescription,
+  DrawerList,
   DrawerTitle,
   DrawerTrigger,
   useIsInsideDrawer,
@@ -187,12 +188,7 @@ export function ComboBoxResponsive<T>({
           {...properties}
           {...drawerProperties}
           /* A caller's width is for the popover; the drawer spans the screen. */
-          className={cn(
-            'command-item-dividers [&_[data-slot=command]]:bg-transparent',
-            className,
-            'w-auto',
-            drawerProperties?.className,
-          )}
+          className={cn('[&_[data-slot=command]]:bg-transparent', className, 'w-auto', drawerProperties?.className)}
           onCloseAutoFocus={(event) => {
             drawerProperties?.onCloseAutoFocus?.(event);
             handleCloseAutoFocus(event);
@@ -231,7 +227,7 @@ export function ComboBoxResponsive<T>({
           <DrawerDescription className='sr-only' id='drawer-description'>
             {description}
           </DrawerDescription>
-          <>
+          <DrawerList className='contents'>
             <ItemList
               groupedItems={groupedItems}
               onPick={handleSelect}
@@ -252,7 +248,7 @@ export function ComboBoxResponsive<T>({
               onLoadMore={onLoadMore}
             />
             {footer}
-          </>
+          </DrawerList>
         </DrawerContent>
       </DrawerRoot>
     );

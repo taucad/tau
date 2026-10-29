@@ -17,6 +17,8 @@ import { util as zodUtility } from 'zod';
 import { MessageIdentities, providerMessageToPi } from '#harness/session-record.js';
 import { fitAttachmentBudget, rewriteDocuments } from '#transport/document-payload.js';
 import { createVertexResponseShim, echoThoughtSignatures } from '#transport/vertex-completions-shim.js';
+import { modelTelemetryParent, modelTelemetrySubject } from '#transport/model-telemetry.js';
+import type { ModelTelemetrySeam } from '#transport/model-telemetry.js';
 import type { JsonObject, ModelProviderKind, ModelSystemPromptBlock, ProviderMessage } from '#log/event-types.js';
 import type { ModelInvocationBinding, ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
 import { gatewayProviderKinds } from '#wire/admission.schema.js';
@@ -183,6 +185,13 @@ export type GatewayModelTransportOptions = {
   readonly fetch?: typeof globalThis.fetch | undefined;
   /** Optional funded-operation protocol supplied only by a managed Cloud composition. */
   readonly fundedOperations?: GatewayFundedOperationProtocol | undefined;
+  /**
+   * Host composition's native-telemetry seam. Supplied only by a composition
+   * that has an enabled, permitted adapter; absent in every other build, which
+   * is the default. A seam never changes what is requested, retried or
+   * returned, and a seam that fails loses its telemetry rather than the call.
+   */
+  readonly telemetry?: ModelTelemetrySeam | undefined;
 };
 
 /**
@@ -1081,6 +1090,9 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
         : {}),
       systemPromptBlocks: request.systemPromptBlocks,
     });
+    // Asked once per invocation, before anything is built or fetched. A seam
+    // that fails answers nothing and the request proceeds untelemetered.
+    const telemetryParent = modelTelemetryParent(options.telemetry, modelTelemetrySubject(request));
     const commonOptions = {
       headers: piCookieAuthValidationHeaders,
       cacheRetention: 'short',
@@ -1102,6 +1114,10 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
       maxRetries: 0,
       onPayload,
       ...(request.maxTokens === undefined ? {} : { maxTokens: request.maxTokens }),
+      // Native Pi spans hang from the composition's span when it supplies one.
+      // Absent key rather than `undefined` so a build with no seam sends pi-ai
+      // exactly the options it sent before this field existed.
+      ...(telemetryParent === undefined ? {} : { telemetry: telemetryParent }),
       signal: request.signal,
     } as const;
     const { reasoning } = request;

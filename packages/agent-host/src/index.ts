@@ -191,4 +191,9 @@ export type {
   GatewayModelErrorCode,
   GatewayModelTransportOptions,
 } from '#transport/gateway-model-transport.js';
+export type {
+  ModelTelemetryParent,
+  ModelTelemetrySeam,
+  ModelTelemetrySubject,
+} from '#transport/model-telemetry.js';
 export type { HostToolExecutionDetails, ToolResultSubstituter } from '#harness/tools.js';

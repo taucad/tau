@@ -114,6 +114,8 @@ const first = await build('1.0.1');
 const runtimeDependencies = command('dpkg-deb', ['-f', first[0]!, 'Depends']);
 assert.match(runtimeDependencies, /(?:^|, )ripgrep(?:,|$)/u);
 assert.match(runtimeDependencies, /(?:^|, )socat(?:,|$)/u);
+// The setuid fusermount3 the Linux projection transport mounts through, declared on every route, not only AppImage.
+assert.match(runtimeDependencies, /(?:^|, )fuse3(?:,|$)/u);
 const control = join(root, 'selector-control');
 command('dpkg-deb', ['--control', first[1]!, control]);
 assert.equal(await readFile(join(control, 'triggers'), 'utf8'), 'interest-noawait /usr/bin/bwrap\n');

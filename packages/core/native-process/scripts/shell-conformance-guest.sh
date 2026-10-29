@@ -14,8 +14,10 @@ before="$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null
 printf 'apparmor_restrict_unprivileged_userns: %s\n' "$before"
 sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq
 # Runtime prerequisites (bubblewrap, socat, ripgrep) and the toolchain node-pty builds from source with.
+# `fuse3` carries the setuid `fusermount3` the Linux projection transport mounts through. The projection is
+# unactivated, so no row here mounts one; the dependency is declared so activation needs no guest change.
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-  apparmor bubblewrap socat ripgrep curl git ca-certificates build-essential python3 util-linux
+  apparmor bubblewrap socat ripgrep fuse3 curl git ca-certificates build-essential python3 util-linux
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   "$HOME"/bwrap-fixture/tau-staging-runtime-*_amd64.deb "$HOME"/bwrap-fixture/tau-staging_*_amd64.deb
 sudo grep -Fx 'tau-staging-bwrap (unconfined)' /sys/kernel/security/apparmor/profiles

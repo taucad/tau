@@ -20,7 +20,7 @@ type RootListingSpan = { startedAt: number; settledAt: number; outcome: 'resolve
 
 /** XState's abrupt stop does not run the root exit, so dispose the published graph explicitly. */
 const stopProbeFileManager = (actor: Actor<typeof fileManagerMachine>): void => {
-  const context = actor.getSnapshot().context;
+  const { context } = actor.getSnapshot();
   actor.stop();
   let failure: unknown;
   for (const dispose of [
@@ -39,7 +39,20 @@ const stopProbeFileManager = (actor: Actor<typeof fileManagerMachine>): void => 
     }
   }
   if (failure !== undefined) {
-    throw failure instanceof Error ? failure : new Error(String(failure));
+    throw failure instanceof Error
+      ? failure
+      : new Error('Could not dispose the probe file manager.', { cause: failure });
+  }
+};
+
+const removeProbeRoot = async (projectId: string): Promise<void> => {
+  const opfsRoot = await navigator.storage.getDirectory();
+  try {
+    await opfsRoot.removeEntry(projectId, { recursive: true });
+  } catch (error) {
+    if (!(error instanceof DOMException && error.name === 'NotFoundError')) {
+      throw error;
+    }
   }
 };
 
@@ -95,118 +108,115 @@ const seedProjectRoot = async (projectId: string, count: number): Promise<void> 
   }
 };
 
-it.each([10, 1000])('should measure real selected-root bootstrap with %i authored root files', async (count) => {
-  const projectId = projectIdForProbe();
-  const rootDirectory = `/projects/${projectId}`;
-  let actor: Actor<typeof fileManagerMachine> | undefined;
-  const timing: {
-    listing?: RootListingSpan;
-    rootListingCalls: number;
-    initializingServicesAt?: number;
-    readyAt?: number;
-  } = { rootListingCalls: 0 };
-  const originalListDirectory = FileTreeService.prototype.listDirectory;
+it.each([10, 1000])(
+  'should measure real selected-root bootstrap with %i authored root files',
+  async (count) => {
+    const projectId = projectIdForProbe();
+    const rootDirectory = `/projects/${projectId}`;
+    let actor: Actor<typeof fileManagerMachine> | undefined;
+    const timing: {
+      listing?: RootListingSpan;
+      rootListingCalls: number;
+      initializingServicesAt?: number;
+      readyAt?: number;
+    } = { rootListingCalls: 0 };
+    const originalListDirectory = FileTreeService.prototype.listDirectory;
 
-  try {
-    await setProjectFileSystemConfig({ projectId, backend: 'opfs', providerBasePath: projectId });
-    await seedProjectRoot(projectId, count);
-
-    const wrapper = vi
-      .spyOn(FileTreeService.prototype, 'listDirectory')
-      .mockImplementation(async function (path, options) {
-        if (path !== '') {
-          return originalListDirectory.call(this, path, options);
-        }
-        timing.rootListingCalls += 1;
-        const startedAt = performance.now();
-        try {
-          const result = await originalListDirectory.call(this, path, options);
-          timing.listing = { startedAt, settledAt: performance.now(), outcome: 'resolved' };
-          return result;
-        } catch (error) {
-          timing.listing = { startedAt, settledAt: performance.now(), outcome: 'rejected' };
-          throw error;
-        }
-      });
     try {
-      actor = createActor(fileManagerMachine, {
-        input: { projectId, rootDirectory, shouldInitializeOnStart: true },
-      });
-      actor.subscribe((snapshot) => {
-        if (snapshot.matches('initializingServices')) {
-          timing.initializingServicesAt ??= performance.now();
-        }
-        if (snapshot.matches('ready')) {
-          timing.readyAt ??= performance.now();
-        }
-      });
-      actor.start();
-      const settled = await waitFor(actor, (snapshot) => snapshot.matches('ready') || snapshot.matches('error'), {
-        timeout: 120_000,
-      });
-      expect(settled.matches('ready'), settled.context.error?.message).toBe(true);
-      const tree = settled.context.treeService;
-      const content = settled.context.contentService;
-      if (tree === undefined || content === undefined) {
-        throw new Error('The scoped file services did not publish.');
-      }
-      const rows = tree.listDirectorySync('');
-      expect(rows?.filter(({ name }) => name.startsWith('part-'))).toHaveLength(count - 1);
-      expect(rows?.some(({ name }) => name === 'main.ts')).toBe(true);
-      expect(rows?.some(({ name }) => name === 'tau.json')).toBe(true);
-      const manifest = parseProjectManifestBytes(await content.readRawBytes('tau.json'));
-      expect(manifest.success).toBe(true);
+      await setProjectFileSystemConfig({ projectId, backend: 'opfs', providerBasePath: projectId });
+      await seedProjectRoot(projectId, count);
 
-      // Keep timings as inspectable structured evidence for the browser run.
-      // Exact provider operation counters require a separate worker-side probe.
-      expect(timing.listing).toMatchObject({ outcome: 'resolved' });
-      expect(timing.rootListingCalls).toBe(1);
-      if (
-        timing.listing === undefined ||
-        timing.initializingServicesAt === undefined ||
-        timing.readyAt === undefined ||
-        rows === undefined
-      ) {
-        throw new Error('The browser probe did not capture its required service timing.');
-      }
-      expect(timing.listing.settledAt).toBeGreaterThan(timing.listing.startedAt);
-      expect(timing.readyAt).toBeGreaterThanOrEqual(timing.listing.settledAt);
-      const evidence = {
-        kind: 'service-call-through',
-        buildMode: 'vitest-vite',
-        acceptanceQualified: false,
-        admissionScope: 'filesystem-only: no generated project identity or full route/session admission',
-        authoredRootFilesExcludingManifestAndIdentity: count,
-        rootListingCalls: timing.rootListingCalls,
-        rootListingMilliseconds: timing.listing.settledAt - timing.listing.startedAt,
-        initializingServicesToReadyMilliseconds: timing.readyAt - timing.initializingServicesAt,
-        listedAuthoredRootFiles: rows.filter(({ name }) => name.startsWith('part-') || name === 'main.ts').length,
-        manifestRead: manifest.success,
-        providerReadCounters: null,
-      };
-      const response = await fetch('/__project-open-probe', { method: 'POST', body: JSON.stringify(evidence) });
-      expect(response.ok).toBe(true);
-    } finally {
+      const wrapper = vi
+        .spyOn(FileTreeService.prototype, 'listDirectory')
+        .mockImplementation(async function (this: FileTreeService, path, options) {
+          if (path !== '') {
+            return originalListDirectory.call(this, path, options);
+          }
+          timing.rootListingCalls += 1;
+          const startedAt = performance.now();
+          try {
+            const result = await originalListDirectory.call(this, path, options);
+            timing.listing = { startedAt, settledAt: performance.now(), outcome: 'resolved' };
+            return result;
+          } catch (error) {
+            timing.listing = { startedAt, settledAt: performance.now(), outcome: 'rejected' };
+            throw error;
+          }
+        });
       try {
-        if (actor !== undefined) {
-          stopProbeFileManager(actor);
+        actor = createActor(fileManagerMachine, {
+          input: { projectId, rootDirectory, shouldInitializeOnStart: true },
+        });
+        actor.subscribe((snapshot) => {
+          if (snapshot.matches('initializingServices')) {
+            timing.initializingServicesAt ??= performance.now();
+          }
+          if (snapshot.matches('ready')) {
+            timing.readyAt ??= performance.now();
+          }
+        });
+        actor.start();
+        const settled = await waitFor(actor, (snapshot) => snapshot.matches('ready') || snapshot.matches('error'), {
+          timeout: 120_000,
+        });
+        expect(settled.matches('ready'), settled.context.error?.message).toBe(true);
+        const tree = settled.context.treeService;
+        const content = settled.context.contentService;
+        if (tree === undefined || content === undefined) {
+          throw new Error('The scoped file services did not publish.');
         }
+        const rows = tree.listDirectorySync('');
+        expect(rows?.filter(({ name }) => name.startsWith('part-'))).toHaveLength(count - 1);
+        expect(rows?.some(({ name }) => name === 'main.ts')).toBe(true);
+        expect(rows?.some(({ name }) => name === 'tau.json')).toBe(true);
+        const manifest = parseProjectManifestBytes(await content.readRawBytes('tau.json'));
+        expect(manifest.success).toBe(true);
+
+        // Keep timings as inspectable structured evidence for the browser run.
+        // Exact provider operation counters require a separate worker-side probe.
+        expect(timing.listing).toMatchObject({ outcome: 'resolved' });
+        expect(timing.rootListingCalls).toBe(1);
+        if (
+          timing.listing === undefined ||
+          timing.initializingServicesAt === undefined ||
+          timing.readyAt === undefined ||
+          rows === undefined
+        ) {
+          throw new Error('The browser probe did not capture its required service timing.');
+        }
+        expect(timing.listing.settledAt).toBeGreaterThan(timing.listing.startedAt);
+        expect(timing.readyAt).toBeGreaterThanOrEqual(timing.listing.settledAt);
+        const evidence = {
+          kind: 'service-call-through',
+          buildMode: 'vitest-vite',
+          acceptanceQualified: false,
+          admissionScope: 'filesystem-only: no generated project identity or full route/session admission',
+          authoredRootFilesExcludingManifestAndIdentity: count,
+          rootListingCalls: timing.rootListingCalls,
+          rootListingMilliseconds: timing.listing.settledAt - timing.listing.startedAt,
+          initializingServicesToReadyMilliseconds: timing.readyAt - timing.initializingServicesAt,
+          listedAuthoredRootFiles: rows.filter(({ name }) => name.startsWith('part-') || name === 'main.ts').length,
+          manifestRead: manifest.success,
+          providerReadCounters: null,
+        };
+        const response = await fetch('/__project-open-probe', { method: 'POST', body: JSON.stringify(evidence) });
+        expect(response.ok).toBe(true);
       } finally {
-        wrapper.mockRestore();
-      }
-    }
-  } finally {
-    try {
-      await deleteProjectFileSystemConfig(projectId);
-    } finally {
-      const opfsRoot = await navigator.storage.getDirectory();
-      try {
-        await opfsRoot.removeEntry(projectId, { recursive: true });
-      } catch (error) {
-        if (!(error instanceof DOMException && error.name === 'NotFoundError')) {
-          throw error;
+        try {
+          if (actor !== undefined) {
+            stopProbeFileManager(actor);
+          }
+        } finally {
+          wrapper.mockRestore();
         }
       }
+    } finally {
+      try {
+        await deleteProjectFileSystemConfig(projectId);
+      } finally {
+        await removeProbeRoot(projectId);
+      }
     }
-  }
-}, 180_000);
+  },
+  180_000,
+);

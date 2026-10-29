@@ -7,6 +7,9 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+#if PICOGK_BROWSER
+using PicoVoxel.Sdf.Generator;
+#endif
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Tau.PicoGK.Worker;
@@ -84,7 +87,7 @@ internal static class CompilationService
         return new CompiledEntryPoint(prefix + string.Join("+", names), entry.MetadataName, entry.Parameters.Length != 0);
     }
 #endif
-    private const string CompilerContractVersion = "4";
+    private const string CompilerContractVersion = "5";
     private const int MaximumSyntaxDepth = 512;
     private const int MaximumDiagnostics = 256;
     private static readonly object CacheLock = new();
@@ -153,6 +156,14 @@ internal static class CompilationService
         var selected = Select(ReadProject(workspace, sourceRead, parse), entryPath);
         using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         digest.AppendData(Encoding.UTF8.GetBytes(CompilerContractVersion));
+#if PICOGK_BROWSER
+        /*
+         * The generator decides which fields run as a tape, so its output is part of what a compilation is.
+         * Its declared contract version changes whenever that decision can change, and its assembly is one
+         * of the staged bundle files the host's manifest identity already covers.
+         */
+        digest.AppendData(Encoding.UTF8.GetBytes(SdfTapeGenerator.ContractVersion));
+#endif
         digest.AppendData(Environment.Value.Identity);
         foreach (var source in selected)
         {
@@ -191,6 +202,19 @@ internal static class CompilationService
          */
         var emit = Stopwatch.StartNew();
         var compilation = Template.Value.AddSyntaxTrees(trees);
+#if PICOGK_BROWSER
+        /*
+         * What an MSBuild author gets from an analyzer package reference, driven by hand: this host resolves
+         * no analyzer assemblies from disk, so its one generator runs explicitly, over the same parse options
+         * the author's own sources used. The generated registry is ordinary C# in the author's assembly, and
+         * `ModelRunner` invokes it after load rather than relying on a static constructor.
+         */
+        _ = CSharpGeneratorDriver
+            .Create([new SdfTapeGenerator().AsSourceGenerator()], parseOptions: AuthorParseOptions)
+            .RunGeneratorsAndUpdateCompilation(compilation, out var generated, out var generatorDiagnostics);
+        ThrowDiagnostics(generatorDiagnostics);
+        compilation = (CSharpCompilation)generated;
+#endif
         using var assembly = new MemoryStream();
         using var pdb = new MemoryStream();
         var emitted = compilation.Emit(assembly, pdbStream: pdb);
@@ -285,7 +309,7 @@ internal static class CompilationService
     {
         var tree = CSharpSyntaxTree.ParseText(
             Encoding.UTF8.GetString(content),
-            new CSharpParseOptions(LanguageVersion.Latest),
+            AuthorParseOptions,
             path,
             Encoding.UTF8);
         var root = tree.GetCompilationUnitRoot();
@@ -583,6 +607,9 @@ internal static class CompilationService
         }
     }
 
+    /// <summary>One parse configuration for the author's sources, the implicit usings and generated code.</summary>
+    private static readonly CSharpParseOptions AuthorParseOptions = new(LanguageVersion.Latest);
+
     private static SyntaxTree ParseImplicitUsings() => CSharpSyntaxTree.ParseText(
         """
         global using global::System;
@@ -593,7 +620,7 @@ internal static class CompilationService
         global using global::System.Threading;
         global using global::System.Threading.Tasks;
         """,
-        new CSharpParseOptions(LanguageVersion.Latest),
+        AuthorParseOptions,
         "<TauImplicitUsings>.g.cs",
         Encoding.UTF8);
 

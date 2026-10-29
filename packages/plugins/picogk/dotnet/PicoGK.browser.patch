@@ -17,18 +17,31 @@
      internal static void Check(int status, ExceptionDispatchInfo? error, object owner)
      {
          // Never unwind a managed exception through OpenVDB/C++. Restore the exact first error here.
-@@ -47,6 +50,10 @@
+@@ -47,6 +50,23 @@
      {
          ArgumentNullException.ThrowIfNull(implicitFunction);
          ObjectDisposedException.ThrowIf(m_bDisposed, this);
 +#if PICOGK_BROWSER
-+        if (intersect) BrowserCallbacks.Intersect(lib.hThis, hThis, implicitFunction);
-+        else BrowserCallbacks.Render(lib.hThis, hThis, in bounds, implicitFunction);
++        // A registered tape crosses the boundary once as data and then fills on every thread, while a
++        // field the generator could not lift exactly keeps the per-voxel callback. Only the ordinary
++        // upstream-compatible tape operations are used, never the narrow-band-changing fast ones.
++        if (intersect)
++        {
++            if (!SdfTapeRegistry.TryIntersect(lib.hThis, hThis, implicitFunction))
++                BrowserCallbacks.Intersect(lib.hThis, hThis, implicitFunction);
++        }
++        else
++        {
++            // The tape render fills a fresh grid, which is the only tape render the browser archive
++            // exports; composing an implicit into occupied voxels stays on the callback.
++            if (!bIsEmpty() || !SdfTapeRegistry.TryRender(lib.hThis, hThis, in bounds, implicitFunction))
++                BrowserCallbacks.Render(lib.hThis, hThis, in bounds, implicitFunction);
++        }
 +#else
          ExceptionDispatchInfo? failure = null;
          // The author sees the per-voxel sequence: the same points in the same order, and no call after a
          // throw or a nonfinite distance, which ends the row there as the per-voxel adapter ended the render.
-@@ -80,6 +87,7 @@
+@@ -80,6 +100,7 @@
              : TauCheckedCallbacks.RenderBatch(lib.hThis, hThis, bounds, callback);
          GC.KeepAlive(callback);
          TauCheckedCallbacks.Check(status, failure, this);
@@ -36,7 +49,7 @@
      }
  }
  
-@@ -89,6 +97,9 @@
+@@ -89,6 +110,9 @@
      {
          ArgumentNullException.ThrowIfNull(traversal);
          ObjectDisposedException.ThrowIf(m_bDisposed, this);
@@ -46,7 +59,7 @@
          ExceptionDispatchInfo? failure = null;
          TauCheckedCallbacks.Scalar callback = (in Vector3 point, float value) =>
          {
-@@ -99,6 +110,7 @@
+@@ -99,6 +123,7 @@
          var status = TauCheckedCallbacks.TraverseScalar(lib.hThis, hThis, callback);
          GC.KeepAlive(callback);
          TauCheckedCallbacks.Check(status, failure, this);
@@ -54,7 +67,7 @@
      }
  }
  
-@@ -108,6 +120,9 @@
+@@ -108,6 +133,9 @@
      {
          ArgumentNullException.ThrowIfNull(traversal);
          ObjectDisposedException.ThrowIf(m_bDisposed, this);
@@ -64,7 +77,7 @@
          ExceptionDispatchInfo? failure = null;
          TauCheckedCallbacks.Vector callback = (in Vector3 point, in Vector3 value) =>
          {
-@@ -118,5 +133,6 @@
+@@ -118,5 +146,6 @@
          var status = TauCheckedCallbacks.TraverseVector(lib.hThis, hThis, callback);
          GC.KeepAlive(callback);
          TauCheckedCallbacks.Check(status, failure, this);

@@ -8,6 +8,9 @@ using System.Runtime.Loader;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using PicoGK;
+#if PICOGK_BROWSER
+using PicoVoxel.Sdf.Generator;
+#endif
 
 namespace Tau.PicoGK.Worker;
 
@@ -62,6 +65,27 @@ internal static class ModelRunner
     private static byte[]? retainedAssemblyBytes;
     private static Assembly? retainedAssembly;
 
+    /// <summary>
+    /// Registers the signed-distance methods the generator lifted, once, right after the author's assembly
+    /// is loaded.
+    /// </summary>
+    /// <remarks>
+    /// Explicitly, by name: no author static constructor runs to install anything, and a compilation the
+    /// generator found nothing in still carries the entry point, so there is no conditional path here. A
+    /// field the generator refused is simply absent and keeps the per-voxel callback.
+    /// </remarks>
+    private static void RegisterGeneratedTapes(Assembly author)
+    {
+        var registry = author.GetType(GeneratedRegistryType, throwOnError: false)
+            ?? throw RuntimeError("The compiled C# assembly carries no signed-distance registry.");
+        (registry.GetMethod(GeneratedRegistryMethod, BindingFlags.Public | BindingFlags.Static)
+            ?? throw RuntimeError("The signed-distance registry carries no registration entry point."))
+            .Invoke(null, null);
+    }
+
+    private const string GeneratedRegistryType = SdfTapeGenerator.RegistryTypeName;
+    private const string GeneratedRegistryMethod = SdfTapeGenerator.RegistryMethodName;
+
     // Browser assemblies cannot unload. Parameter edits reuse this assembly; source edits
     // must replace the owning worker before another assembly is admitted.
     internal static async Task<ModelExecutionResult> ExecuteAsync(
@@ -81,6 +105,7 @@ internal static class ModelRunner
         {
             retainedAssembly = Assembly.Load(compiled.Assembly, compiled.Pdb);
             retainedAssemblyBytes = compiled.Assembly;
+            RegisterGeneratedTapes(retainedAssembly);
         }
         var invoke = Stopwatch.StartNew();
         using var host = new HostedLibraryHost(artifactRoot, cancellation, compute, meshing);

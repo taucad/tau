@@ -18,7 +18,14 @@ the hosted surface-normal batch callback. Do not link both adapters.
 
 For managed source, apply `PicoGK.hosted.patch`, then PicoVoxel's
 `browser-handles.patch`, then `PicoGK.browser.patch`, and include PicoVoxel's
-`BrowserCallbacks.cs`. Apply the build-time `stl-normal-canonicalization.patch`
+`BrowserCallbacks.cs` and `SdfTape.cs`. The latter is the signed-distance tape
+registry the browser boundary consults before falling back to a per-voxel
+callback; it is reached only from `PICOGK_BROWSER` branches and needs the
+archive's ordinary `Voxels_IntersectImplicitTape` and `Voxels_RenderImplicitTape`
+exports. Build PicoVoxel's `dotnet/generator/PicoVoxel.Sdf.Generator` and pass the
+resulting assembly as `TauPicoGKGeneratorPath`: the browser host resolves no
+analyzer assemblies from disk, so `CompilationService` drives that one generator
+explicitly. Apply the build-time `stl-normal-canonicalization.patch`
 to the parity library on both targets; it writes historical NaN normal bits after
 float storage without changing finite normals or vertices. Do not also apply the plain upstream
 `browser-callbacks.patch`: the hosted supplement routes through the existing

@@ -31,6 +31,9 @@
     <Compile Include="../Tau.PicoGK.Worker/*.cs" />
     <Content Include="main.mjs" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <ProjectReference Include="$(PicoGKProject)" AdditionalProperties="DefineConstants=PICOGK_BROWSER" />
+    <!-- PicoVoxel's signed-distance generator, driven explicitly by CompilationService rather than resolved
+         as an analyzer: this host loads no analyzer assemblies from disk. -->
+    <Reference Include="PicoVoxel.Sdf.Generator" HintPath="$(TauPicoGKGeneratorPath)" />
     <Reference Include="Microsoft.CodeAnalysis" HintPath="$(TauPicoGKRoslynRoot)/Microsoft.CodeAnalysis.dll" />
     <Reference Include="Microsoft.CodeAnalysis.CSharp" HintPath="$(TauPicoGKRoslynRoot)/Microsoft.CodeAnalysis.CSharp.dll" />
     <NativeFileReference Include="$(TauPicoGKArchiveRoot)/picogk.26.2.a" />
@@ -44,6 +47,7 @@
   <Target Name="ValidateBrowserHostInputs" BeforeTargets="PrepareForBuild">
     <Error Condition="!Exists('$(PicoGKProject)')" Text="Provide the qualified browser PicoGK project via PicoGKProject." />
     <Error Condition="!Exists('$(TauPicoGKRetentionProps)')" Text="Provide the qualified AuthoringRetention.props via TauPicoGKRetentionProps." />
+    <Error Condition="!Exists('$(TauPicoGKGeneratorPath)')" Text="Provide PicoVoxel's built signed-distance generator via TauPicoGKGeneratorPath." />
     <Error Condition="!Exists('$(TauPicoGKRoslynRoot)/Microsoft.CodeAnalysis.dll')" Text="Provide the patched Roslyn assemblies via TauPicoGKRoslynRoot." />
     <Error Condition="!Exists('$(TauPicoGKRoslynRoot)/Microsoft.CodeAnalysis.CSharp.dll')" Text="The patched C# compiler assembly is missing." />
     <Error Condition="!Exists('$(TauPicoGKArchiveRoot)/picogk.26.2.a')" Text="Provide a verified matching browser archive via TauPicoGKArchiveRoot." />

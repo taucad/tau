@@ -7,19 +7,13 @@ export const content = (): React.JSX.Element => (
   <>
     <section className='band'>
       {intro({
-        eyebrow: 'What will you make?',
-        title: (
-          <>
-            What do you need
-            <br />
-            it to do?
-          </>
-        ),
-        body: 'A mount for your project, a component for your team or a mechanism you want to understand. Design it, check the geometry and take it into the workshop.',
+        eyebrow: 'Use cases',
+        title: 'What you can make with Tau',
+        body: 'Prototype a mount or enclosure, design parts for an engineering project or learn how a mechanism works by changing it.',
       })}
       {caseCards()}
     </section>
-    {closing()}
+    {closing('Get started with Tau')}
   </>
 );
 export default function Page(): React.JSX.Element {

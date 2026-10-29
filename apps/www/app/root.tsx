@@ -78,7 +78,7 @@ function Navigation({ label }: { label: string }) {
   );
 }
 
-function SiteShell() {
+function SiteShell({ children }: { children?: React.ReactNode }) {
   const { pathname } = useLocation();
   const navigationState = useNavigation();
   const previousPath = useRef(pathname);
@@ -139,7 +139,7 @@ function SiteShell() {
         {navigationState.state === 'idle' ? '' : 'Loading page…'}
       </div>
       <main id='main' className='frame' tabIndex={-1}>
-        <Outlet />
+        {children ?? <Outlet />}
       </main>
       <footer className='site-footer frame'>
         <div className='band footer-grid'>
@@ -253,14 +253,30 @@ export default function App(): React.JSX.Element {
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps): React.JSX.Element {
   const isMissing = isRouteErrorResponse(error) && error.status === 404;
   return (
-    <main className='frame cell page-intro'>
+    <SiteShell>
       <title>{isMissing ? 'Page not found · Tau' : 'Page unavailable · Tau'}</title>
       <meta name='robots' content='noindex,nofollow' />
-      <h1>{isMissing ? 'This path ends here.' : 'This page is unavailable.'}</h1>
-      <p>{isMissing ? 'The link may have changed.' : 'Please try again in a moment.'}</p>
-      <Button asChild>
-        <a href='/'>Back to Tau</a>
-      </Button>
-    </main>
+      <section className='band'>
+        <header className='cell page-intro'>
+          <div>
+            <p className='kicker'>{isMissing ? '404' : 'Error'}</p>
+            <h1>{isMissing ? 'Page not found' : 'Page unavailable'}</h1>
+            <p className='lead'>
+              {isMissing
+                ? 'This page may have moved or no longer exists.'
+                : 'This page could not be loaded. Try again in a moment.'}
+            </p>
+          </div>
+          <div className='actions'>
+            <Button asChild size='lg'>
+              <a href='/'>Go to the homepage</a>
+            </Button>
+            <a className='text-link' href={`${appOrigin}/projects`}>
+              Open projects ↗
+            </a>
+          </div>
+        </header>
+      </section>
+    </SiteShell>
   );
 }

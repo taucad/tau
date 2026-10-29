@@ -475,7 +475,7 @@ export const planCards = (compact = false): React.JSX.Element => (
   </div>
 );
 export const closing = (
-  title = (
+  title: ReactNode = (
     <>
       What will you
       <br />
@@ -531,7 +531,7 @@ export function UseCase({ item }: { item: (typeof useCases)[number] }): React.JS
       <section className='band use-case'>
         {intro({
           eyebrow: item.audience,
-          title: item.title,
+          title: item.heading,
           body: item.description,
           aside: (
             <img
@@ -557,11 +557,11 @@ export function UseCase({ item }: { item: (typeof useCases)[number] }): React.JS
           ))}
         </ol>
         <p className='cell fine'>
-          Images show authored Tau examples, not customer case studies.{' '}
+          Images show example models from the Tau library, not customer projects.{' '}
           <SiteLink href='/use-cases/'>All use cases →</SiteLink>
         </p>
       </section>
-      {closing()}
+      {closing('Get started with Tau')}
     </>
   );
 }

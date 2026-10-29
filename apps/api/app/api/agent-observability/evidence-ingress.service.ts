@@ -137,6 +137,31 @@ export class EvidenceIngressService {
     }
   }
 
+  /**
+   * Admit evidence the API itself observed (T07), under the same purpose,
+   * epoch, lineage, fence and budget checks as host evidence. It never
+   * throws: a refusal or failure answers its bounded code, because the
+   * caller is a request path that must not change for observation.
+   *
+   * @param evidence - API-reported evidence for a principal Tau authenticated.
+   * @returns The receipt, or the code it was refused with.
+   */
+  public async admitApiReported(
+    evidence: Parameters<typeof admitEvidence>[0]['evidence'],
+  ): Promise<Readonly<{ receipt: EvidenceReceipt }> | Readonly<{ refused: string }>> {
+    const { key } = this;
+    if (key === undefined || evidence.authority !== 'api-reported') {
+      return { refused: 'EVIDENCE_UNAVAILABLE' };
+    }
+    try {
+      return { receipt: await this.admitWithin(evidence, key, new Date()) };
+    } catch (error) {
+      const body: unknown = error instanceof HttpException ? error.getResponse() : undefined;
+      const code: unknown = typeof body === 'object' && body !== null ? Reflect.get(body, 'code') : undefined;
+      return { refused: typeof code === 'string' ? code : 'EVIDENCE_UNAVAILABLE' };
+    }
+  }
+
   private async admitWithin(
     evidence: Parameters<typeof admitEvidence>[0]['evidence'],
     key: EvidenceSealKey,

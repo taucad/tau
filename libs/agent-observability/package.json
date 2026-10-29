@@ -38,6 +38,7 @@
     "./identity": "./src/identity.ts",
     "./pending-stores": "./src/pending-stores.ts",
     "./projection": "./src/projection.ts",
+    "./reporter": "./src/reporter.ts",
     "./pi-telemetry": "./src/pi-telemetry.ts",
     "./telemetry-policy": "./src/telemetry-policy.ts",
     "./package.json": "./package.json"

@@ -557,6 +557,36 @@ describe('createAgentLauncher', () => {
     expect(replayed.status === 'batch' && replayed.events.length > 0).toBe(true);
   });
 
+  it('tells its owner when a chat it leads goes quiescent, once the run is settled', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-node-launcher-'));
+    roots.push(workspaceRoot);
+    const quiescence: Array<readonly [string, boolean]> = [];
+    const fetchImplementation = scriptedGateway();
+    launcher = createNodeLauncher({
+      workspaceRoot,
+      model,
+      systemPrompt: 'You are Tau.',
+      toolRegistry: emptyTools,
+      modelTransport: createTauCloudGatewayModelTransport({
+        baseUrl: 'https://gateway.example',
+        model,
+        auth: () => 'daemon-bearer',
+        fetch: fetchImplementation,
+      }),
+      onChatQuiescent: (chatId, quiescent) => {
+        quiescence.push([chatId, quiescent]);
+      },
+    });
+
+    await start(launcher, { chatId: 'chat-1', runId: 'run-1' });
+    await settle(launcher, 'chat-1');
+    await vi.waitFor(() => {
+      expect(quiescence.at(-1)).toEqual(['chat-1', true]);
+    });
+
+    expect(quiescence).toContainEqual(['chat-1', false]);
+  });
+
   /*
    * A second `start` on a chat that already has an admitted run is a refusal,
    * not a second run, and it names the run in the way.

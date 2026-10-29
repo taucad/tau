@@ -33,7 +33,7 @@ const connect = (root: string, authorityRoot: string): { client: NodeFsProviderC
     policy: tauPathPolicy,
     allowRoot: (candidate) => candidate === root,
     authority,
-  });
+  }).close;
   const channel = new NodeFsChannel(port1);
   const close = async (): Promise<void> => {
     channel.close();

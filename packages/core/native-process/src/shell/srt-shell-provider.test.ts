@@ -602,8 +602,11 @@ describe('bindOwnPty', () => {
 });
 
 describe.runIf(process.platform === 'linux')('Linux runtime working directory and stand-ins', () => {
+  // Both rows launch through the prepared-launch harness: under I7 custody an unprepared launch is refused before
+  // the runtime directory or the writable-root check is reached, so preparation is what lets the landed main
+  // behaviour be observed at all.
   it('should start the supervisor in its private runtime directory, never the host working directory', async () => {
-    const outcome = await createSandboxShellProvider({ supervisor }).launch(
+    const outcome = await custodial().launch(
       launchOf({ arguments: ['--noprofile', '--norc', '-c', 'echo TAU_FIXTURE_CWD'] }),
     );
 
@@ -614,7 +617,7 @@ describe.runIf(process.platform === 'linux')('Linux runtime working directory an
   });
 
   it('should refuse a launch whose writable root holds the host working directory', async () => {
-    const outcome = await createSandboxShellProvider({ supervisor }).launch(
+    const outcome = await custodial().launch(
       launchOf({
         arguments: ['--noprofile', '--norc', '-c', 'true'],
         filesystem: { readable: [], writable: [process.cwd()], denied: [] },

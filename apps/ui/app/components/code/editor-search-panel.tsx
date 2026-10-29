@@ -108,6 +108,40 @@ function SearchControls({ view }: { readonly view: EditorView }): React.JSX.Elem
           <span aria-hidden='true' className='codicon codicon-close' />
         </Button>
       </div>
+      {isReplacing && !view.state.readOnly ? (
+        <div className='flex flex-wrap items-center gap-2 pr-8 pl-8'>
+          <Input
+            className='min-w-32 flex-1 border-muted-foreground bg-background text-base md:text-sm dark:bg-background'
+            name='replace'
+            aria-label='Replace'
+            placeholder='Replace with'
+            value={query.replace}
+            onChange={(event) => {
+              change({ replace: event.target.value });
+            }}
+          />
+          <Button
+            variant='outline'
+            size='sm'
+            disabled={!hasMatches}
+            onClick={() => {
+              replaceNext(view);
+            }}
+          >
+            Replace
+          </Button>
+          <Button
+            variant='outline'
+            size='sm'
+            disabled={!hasMatches}
+            onClick={() => {
+              replaceAll(view);
+            }}
+          >
+            Replace all
+          </Button>
+        </div>
+      ) : null}
       <div className='flex flex-wrap items-center gap-1'>
         {(
           [
@@ -172,40 +206,6 @@ function SearchControls({ view }: { readonly view: EditorView }): React.JSX.Elem
           Select all
         </Button>
       </div>
-      {isReplacing && !view.state.readOnly ? (
-        <div className='flex flex-wrap items-center gap-2 border-t pt-2'>
-          <Input
-            className='min-w-32 flex-1 border-muted-foreground bg-background text-base md:text-sm dark:bg-background'
-            name='replace'
-            aria-label='Replace'
-            placeholder='Replace with'
-            value={query.replace}
-            onChange={(event) => {
-              change({ replace: event.target.value });
-            }}
-          />
-          <Button
-            variant='outline'
-            size='sm'
-            disabled={!hasMatches}
-            onClick={() => {
-              replaceNext(view);
-            }}
-          >
-            Replace
-          </Button>
-          <Button
-            variant='outline'
-            size='sm'
-            disabled={!hasMatches}
-            onClick={() => {
-              replaceAll(view);
-            }}
-          >
-            Replace all
-          </Button>
-        </div>
-      ) : null}
     </div>
   );
 }

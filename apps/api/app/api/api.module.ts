@@ -10,6 +10,7 @@ import { LlmModule } from '#api/llm/llm.module.js';
 import { KernelsModule } from '#api/kernels/kernels.module.js';
 import { ModelModule } from '#api/models/model.module.js';
 import { PrivacyModule } from '#api/privacy/privacy.module.js';
+import { TelemetryPurposeModule } from '#api/telemetry-purposes/telemetry-purpose.module.js';
 import { ProjectsModule } from '#api/projects/projects.module.js';
 import { ProviderModule } from '#api/providers/provider.module.js';
 import { TestApiModule } from '#api/test-api/test-api.module.js';
@@ -47,6 +48,7 @@ export class ApiModule {
         LlmModule,
         ModelModule,
         PrivacyModule,
+        TelemetryPurposeModule.forRoot(options),
         ProjectsModule,
         ProviderModule,
         PublicationsModule,

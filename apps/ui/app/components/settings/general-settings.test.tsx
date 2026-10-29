@@ -169,6 +169,11 @@ vi.mock('#components/ui/color-picker.js', () => ({
   ColorPicker: ({ children }: { children: ReactNode }): ReactElement => <div>{children}</div>,
 }));
 
+// Server-resolved recording purposes have their own query-backed section and hook tests.
+vi.mock('#components/settings/agent-observability-settings.js', () => ({
+  AgentObservabilitySettings: (): ReactElement => <div data-testid='agent-observability-settings' />,
+}));
+
 describe('GeneralSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();

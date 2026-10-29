@@ -63,6 +63,15 @@ export const environmentSchemaBase = z.object({
   TAU_FREE_TIER_SYNC_ENABLED: strictEnvironmentBoolean(false).describe(
     'Open Tau Cloud backup and publishing to the free tier (charter D23). Ignored under NODE_ENV=production until the go-live checklist opens it.',
   ),
+  /*
+   * Blueprint T01/T04: the agent-observability purpose notice the account is
+   * shown and decides against. Unset — the default everywhere until the
+   * production notice is approved — keeps every new purpose unavailable, so no
+   * account can grant one and no capture can be authorised by one.
+   */
+  TAU_OBSERVABILITY_NOTICE_VERSION: unsetWhenEmpty(z.string().min(1).optional()).describe(
+    'The approved agent-observability purpose notice in force. Unset keeps every new purpose unavailable.',
+  ),
   PORT: z.string().default('3000'),
   DATABASE_URL: z.string(),
   // Bounded runtime pool (B8 R3). Every value fails closed: a non-numeric or out-of-range

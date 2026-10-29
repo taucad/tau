@@ -26,7 +26,7 @@ Use Nx tasks and workspace generators; inspect help/source for unfamiliar flags.
 
 ## Scope and authority
 
-Before editing a path, read every `AGENTS.md` from the repository root through that path's parent, in order. For several paths, read the union of those chains. Apply the policy conditions below and include applicable instruction paths in delegated briefs. Start a bounded native task in its narrowest suitable directory when supported; root-started tasks still read target descendants explicitly.
+Before editing, read `AGENTS.md` from the root through each target parent, in order; combine chains for multiple paths. Apply the policy conditions below and include applicable instruction paths in delegated briefs. Start a bounded native task in its narrowest suitable directory when supported; root-started tasks still read target descendants explicitly.
 
 System, developer and current user instructions take precedence. [Design](docs/policy/design-policy.md) governs user-facing design. Applicable normative policies cannot be weakened by operational AGENTS files or skills. Local AGENTS narrow ancestor operation within their directory, consistently with those policies; skills implement that task contract. Resolve contradictions at the owning source.
 
@@ -34,7 +34,7 @@ Codex and Claude read canonical `AGENTS.md` files directly. Shared skills live i
 
 ## Architecture and owners
 
-Project configuration and package exports define Tau's current interfaces.
+Project configuration and exports define current interfaces.
 
 - [apps/ui](apps/ui): CAD workspace and browser composition; `app/workers/agent-host.impl.ts` wires the host/tools
 - [packages/agent-host](packages/agent-host): Portable CAD-agent execution and session log; `src/index.ts`, browser/node entrypoints
@@ -61,7 +61,8 @@ Read the owners for each touched concern:
 - Tests/specs/harnesses: [testing](docs/policy/testing-policy.md); React/jsdom adds [React testing](docs/policy/react-testing-policy.md); TLA+/Lean specs add [formal verification](docs/policy/formal-verification-policy.md)
 - XState: [XState](docs/policy/xstate-policy.md); revision graphs/checkouts/machines/sync also [revisions](docs/policy/revisions-policy.md)
 - React/Tailwind/tokens/accessibility: [DESIGN](docs/policy/design-policy.md), [React](docs/policy/react-policy.md), [UI](docs/policy/ui-policy.md), [color](docs/policy/color-policy.md), [accessibility](docs/policy/accessibility-policy.md), [pages](docs/policy/page-composition-policy.md)
-- Prompts/tools/transcripts/compaction/offloading: [context engineering](docs/policy/context-engineering-policy.md), [filesystem context](docs/policy/filesystem-context-policy.md)
+- Agent capabilities/upgrades/telemetry: [observability](docs/policy/agent-observability-policy.md)
+- Prompts/tools/transcripts/compaction/offloading: [context](docs/policy/context-engineering-policy.md), [filesystem](docs/policy/filesystem-context-policy.md)
 - App-library placement/manifests: [workspace projects](docs/policy/workspace-project-policy.md); use `create-package`
 - Filesystem/runtime/app/UI event fan-out: [event fan-out](docs/policy/event-fanout-policy.md)
 - Filesystem authority, rooted views, mounts or watches: [filesystem](docs/policy/filesystem-policy.md), [authority](docs/policy/filesystem-authority-policy.md)

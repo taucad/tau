@@ -58,7 +58,7 @@ export const createTransportFailureDiagnostic = (
   const message =
     error instanceof Error ? error.message : typeof error['message'] === 'string' ? error['message'] : error['code'];
   const status = typeof error['status'] === 'number' && Number.isFinite(error['status']) ? error['status'] : undefined;
-  const refusal = zodUtility.isObject(error['details']) ? error['details'] : undefined;
+  const refusal = zodUtility.isObject(error['details']) ? toJsonValue(error['details']) : undefined;
   const details = { ...(status === undefined ? {} : { status }), ...(refusal === undefined ? {} : { refusal }) };
   return {
     type: transportFailureDiagnosticType,
@@ -79,7 +79,7 @@ export const createProviderMetadataDiagnostic = (
 ): AssistantMessageDiagnostic => ({
   type: providerMetadataDiagnosticType,
   timestamp,
-  details: { metadata },
+  details: { metadata: toJsonValue(metadata) },
 });
 
 /** Carry the live stream id through pi's immutable message copies without persisting the marker. @internal */

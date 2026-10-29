@@ -17,6 +17,7 @@ import type {
   UserProviderMessage,
 } from '#log/event-types.js';
 import type { ModelCallMiddleware } from '#harness/model-call-middleware.js';
+import { toJsonValue } from '#harness/session-record.js';
 import type { HostToolExecutionDetails } from '#harness/tools.js';
 
 const mapFinalAssistant = async (
@@ -488,7 +489,7 @@ const trimStructuredResult = (toolName: string, value: unknown): unknown => {
 const withModelContent = (message: ToolResultMessage, content: ToolResultMessage['content']): ToolResultMessage => {
   const details = message.details as HostToolExecutionDetails | undefined;
   return details && 'content' in details
-    ? { ...message, content, details: { ...details, content } }
+    ? { ...message, content, details: toJsonValue({ ...details, content }) }
     : { ...message, content };
 };
 

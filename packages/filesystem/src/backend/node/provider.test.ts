@@ -422,6 +422,26 @@ describe('NodeFsProvider atomic writes', () => {
     expect(temporaryFiles(root)).toEqual([]);
   });
 
+  it('should settle concurrent writes of one path last-writer-wins, verifying only its own entry', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+
+    /*
+     * Two writers of the same path, interleaved so that each publishes its entry
+     * while the other is still verifying the one it published. Neither may be told
+     * its write might not have applied: both renames land, and the path keeps the
+     * bytes of whichever landed last.
+     */
+    const results = await Promise.allSettled([
+      provider.writeFile('target.txt', 'first'),
+      provider.writeFile('target.txt', 'second'),
+    ]);
+
+    expect(results.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
+    expect(['first', 'second']).toContain(readFileSync(join(root, 'target.txt'), 'utf8'));
+    expect(temporaryFiles(root)).toEqual([]);
+  });
+
   it('should report WRITE_VERIFICATION_FAILED when committed bytes do not verify', async () => {
     const root = createRoot();
     const provider = new NodeFsProvider(root);

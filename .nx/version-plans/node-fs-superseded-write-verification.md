@@ -1,0 +1,5 @@
+---
+filesystem: patch
+---
+
+A node-provider write of a path another writer replaces at the same moment no longer rejects. The post-rename verification read re-opens the path by name, so a concurrent write of the same path either hands it the other writer's entry or unlinks the incarnation it is reading — reported as `WRITE_VERIFICATION_FAILED` or, through `ESTALE`, as `CHECKED_WRITE_POTENTIALLY_APPLIED`, when the rename had in fact applied and was merely superseded. Verification now applies only while the path still holds the entry that write published, so two writes of one path settle last-writer-wins as they did before. A path that still holds the write's own entry is verified exactly as before.

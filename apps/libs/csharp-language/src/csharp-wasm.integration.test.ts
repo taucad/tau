@@ -61,7 +61,7 @@ describe('C# language server on .NET WebAssembly', () => {
   };
 
   const notify = async (method: string, params: unknown): Promise<void> => {
-    expect(await server.handle(JSON.stringify({ jsonrpc: '2.0', method, params }))).toBeNull();
+    expect(await server.handle(JSON.stringify({ jsonrpc: '2.0', method, params }))).toBeUndefined();
   };
 
   beforeAll(async () => {

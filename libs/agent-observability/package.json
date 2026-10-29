@@ -42,6 +42,7 @@
     "./cloud-host-observer": "./src/cloud-host-observer.ts",
     "./projection": "./src/projection.ts",
     "./reporter": "./src/reporter.ts",
+    "./scorecard": "./src/scorecard.ts",
     "./pi-telemetry": "./src/pi-telemetry.ts",
     "./telemetry-policy": "./src/telemetry-policy.ts",
     "./package.json": "./package.json"

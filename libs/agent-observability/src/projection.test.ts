@@ -102,4 +102,28 @@ describe('projectRun', () => {
     expect(late).toMatchObject({ beforeGrant: 1 });
     expect(late.evidence.map((evidence) => evidence.semantic.kind)).toEqual(['outcome']);
   });
+
+  it('reports each foreign epoch it read, by its contract id, and flags an unended run whose tail is elsewhere', async () => {
+    const epochB = await contractId('epoch', 'epoch-b');
+    const own = await projectRun(run({ sources: [row(1), row(3), row(4), row(6)] }), context());
+    expect(own.foreignTails).toEqual([]);
+
+    const handedOff = await projectRun(
+      run({
+        ending: { source: row(6, 'epoch-b'), at: at + 6000 },
+        sources: [row(1), row(3), row(4), row(6, 'epoch-b')],
+      }),
+      context(),
+    );
+    expect(handedOff.foreignTails).toEqual([{ epoch: epochB, facts: 1, through: 6, open: false }]);
+
+    const takenOver = await projectRun(
+      run({ ending: undefined, termination: 'unknown', sources: [row(1), row(3), row(4), row(2, 'epoch-b')] }),
+      context(),
+    );
+    expect(takenOver).toMatchObject({
+      pending: 1,
+      foreignTails: [{ epoch: epochB, facts: 0, through: 2, open: true }],
+    });
+  });
 });

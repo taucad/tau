@@ -40,6 +40,8 @@ export type ProjectedRun = Readonly<{
     Readonly<{ phase: 'admission' | 'tool' | 'approval'; start: number; end: number | undefined }>
   >;
   ending: Readonly<{ source: ProjectedSource; at: number }> | undefined;
+  /** Every row the observation was built from, in log order; it locates a run's tail. */
+  sources?: readonly ProjectedSource[];
 }>;
 
 type ToolFact = Extract<Evidence['payload'], { plane: 'summary' }>['fact'] & { kind: 'tool' };
@@ -63,11 +65,32 @@ export type ProjectionContext = Readonly<{
   toolClass?: (toolName: string) => ToolFact['toolClass'];
 }>;
 
+/**
+ * A leader epoch this device did not hold but read rows from. Its facts are
+ * that device's to report; this device cannot see whether it did, so the host
+ * reports the gap instead of a fact. @public
+ */
+export type ForeignTail = Readonly<{
+  /** The epoch's contract id, as evidence names it. */
+  epoch: string;
+  /** Settled facts in that epoch this device left to it. */
+  facts: number;
+  /** The newest sequence this device read in that epoch. */
+  through: number;
+  /**
+   * Whether the run is still unended here and its newest row is in that epoch,
+   * so the rest of the run happened where this device cannot read it.
+   */
+  open: boolean;
+}>;
+
 /** The evidence one run yields, and what was left out and why. @public */
 export type RunProjection = Readonly<{
   evidence: readonly Evidence[];
   /** Facts whose rows another device led; that device reports them. */
   foreign: number;
+  /** The foreign epochs behind `foreign`, and an unended run's foreign tail, sorted by epoch id. */
+  foreignTails: readonly ForeignTail[];
   /** Facts that happened before the grant; they are never backfilled. */
   beforeGrant: number;
   /** Facts not yet settled; a later projection of the same rows writes them. */
@@ -169,6 +192,54 @@ const envelope = async (
   return { ...evidence, projection: { ...evidence.projection, digest: await evidenceDigest(evidence) } };
 };
 
+const foreignTailsOf = async (
+  run: ProjectedRun,
+  context: ProjectionContext,
+  candidates: readonly Candidate[],
+): Promise<ForeignTail[]> => {
+  const tails = new Map<string, { facts: number; through: number }>();
+  const tailOf = (leaderEpoch: string): { facts: number; through: number } => {
+    let tail = tails.get(leaderEpoch);
+    if (tail === undefined) {
+      tail = { facts: 0, through: 0 };
+      tails.set(leaderEpoch, tail);
+    }
+    return tail;
+  };
+  const seen = (source: ProjectedSource): void => {
+    if (!context.ownsEpoch(source.leaderEpoch)) {
+      const tail = tailOf(source.leaderEpoch);
+      tail.through = Math.max(tail.through, source.sequence);
+    }
+  };
+  for (const candidate of candidates) {
+    if (candidate !== 'pending') {
+      for (const source of candidate.lineage) {
+        seen(source);
+      }
+      if (!context.ownsEpoch(candidate.source.leaderEpoch)) {
+        tailOf(candidate.source.leaderEpoch).facts += 1;
+      }
+    }
+  }
+  for (const source of run.sources ?? []) {
+    seen(source);
+  }
+  const newest = run.sources?.at(-1);
+  const openEpoch = run.ending === undefined && newest !== undefined ? newest.leaderEpoch : undefined;
+  const reported = await Promise.all(
+    [...tails].map(
+      async ([leaderEpoch, tail]): Promise<ForeignTail> => ({
+        epoch: await contractId('epoch', leaderEpoch),
+        facts: tail.facts,
+        through: tail.through,
+        open: leaderEpoch === openEpoch,
+      }),
+    ),
+  );
+  return reported.toSorted((left, right) => left.epoch.localeCompare(right.epoch));
+};
+
 /**
  * Project one run's settled facts for this device.
  *
@@ -177,6 +248,9 @@ const envelope = async (
  * - An outcome is written once the run has an ending row.
  * - A fact whose row another device led is left to that device (`foreign`),
  *   and one that happened before the grant is never sent (`beforeGrant`).
+ * - Each foreign epoch this device read is reported in `foreignTails`, with
+ *   `open` when an unended run's newest row is there: what that device sends
+ *   is not visible here, so the host reports a gap, never a guessed fact.
  * - Host times are the rows' recorded times, labelled `host-recorded`: they
  *   order and bound phases, and are not a duration clock.
  *
@@ -258,5 +332,11 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
       projected.push(envelope(context, run, candidate));
     }
   }
-  return { evidence: await Promise.all(projected), foreign, beforeGrant, pending };
+  return {
+    evidence: await Promise.all(projected),
+    foreign,
+    foreignTails: await foreignTailsOf(run, context, candidates),
+    beforeGrant,
+    pending,
+  };
 };

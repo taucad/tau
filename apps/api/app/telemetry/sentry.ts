@@ -53,11 +53,11 @@ if (dsn) {
     skipOpenTelemetrySetup: true,
     sendDefaultPii: false,
     defaultIntegrations: false,
+    // Do not content-deduplicate across requests: identical failures still need their own correlation ids.
     integrations: [
       Sentry.eventFiltersIntegration(),
       Sentry.functionToStringIntegration(),
       Sentry.linkedErrorsIntegration(),
-      Sentry.dedupeIntegration(),
       Sentry.nodeContextIntegration(),
       // A crash still exits the process (the API's unhandled-rejection handler rethrows into this path); the
       // integration only reports it and flushes first.

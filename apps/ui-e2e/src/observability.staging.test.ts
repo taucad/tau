@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
 import {
   createObservabilityRunId,
+  observeHarnessPage,
   harnessPath,
   observabilityUrl,
   productionOrigin,
@@ -69,7 +70,9 @@ describe('P1 deployed staging observability harness', () => {
             },
           ]);
           const page = await context.newPage();
-          const response = await page.goto(observabilityUrl(createObservabilityRunId()), {
+          const runId = createObservabilityRunId();
+          observeHarnessPage(page, runId);
+          const response = await page.goto(observabilityUrl(runId), {
             waitUntil: 'domcontentloaded',
           });
           expect(response?.status()).toBe(200);

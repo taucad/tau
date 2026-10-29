@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
 import {
   createObservabilityRunId,
+  observeHarnessPage,
   observabilityUrl,
   pollSentryEventIds,
   stagingOrigin,
@@ -121,6 +122,7 @@ const engines = [
 /** Open the harness on one trigger and wait until the tunnel answered, so the browser does not close first. */
 const triggerAndAwaitDelivery = async (context: BrowserContext, runId: string, trigger: string): Promise<void> => {
   const page = await context.newPage();
+  observeHarnessPage(page, runId);
   const delivered = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/monitoring', {
     timeout: 60_000,
   });
@@ -187,6 +189,7 @@ describe('P2 staging delivery acceptance (A1, A5, A10)', () => {
             route.abort('blockedbyclient'),
           );
           const page = await context.newPage();
+          observeHarnessPage(page, runId);
           page.on('request', (request) => {
             if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/monitoring') {
               tunnelled += 1;

@@ -3,5 +3,53 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/libs/csharp-language",
   "projectType": "library",
-  "tags": ["scope:ui", "type:app-lib", "layer:data-access"]
+  "tags": ["scope:ui", "type:app-lib", "layer:data-access"],
+  "targets": {
+    "prepare": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/dotnet/**/*",
+        "!{projectRoot}/dotnet/**/bin/**",
+        "!{projectRoot}/dotnet/**/obj/**",
+        "{projectRoot}/scripts/**/*",
+        "{workspaceRoot}/packages/plugins/picogk/dotnet/PicoGK.hosted.patch",
+        {
+          "env": "TAU_DOTNET"
+        }
+      ],
+      "outputs": ["{workspaceRoot}/out/csharp-language/references.bin", "{workspaceRoot}/out/csharp-language/stage"],
+      "metadata": {
+        "description": "Build the C# language server's browser bundle: pinned .NET SDK 10.0.400, the Roslyn browser-wasm host, and the reference bundle (.NET 10 reference pack, Tau's patched PicoGK and stripped XML documentation), staged content-addressed under out/csharp-language/stage. Downloads the SDK and PicoGK source on first run."
+      },
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/libs/csharp-language/scripts/prepare-csharp-language-server.mts"
+      }
+    },
+    "test-dotnet": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/dotnet/**/*",
+        "!{projectRoot}/dotnet/**/bin/**",
+        "!{projectRoot}/dotnet/**/obj/**",
+        "{projectRoot}/scripts/**/*",
+        "{workspaceRoot}/packages/plugins/picogk/dotnet/PicoGK.hosted.patch",
+        {
+          "env": "TAU_DOTNET"
+        }
+      ],
+      "metadata": {
+        "description": "Run the .NET language service tests (every LSP method against BCL, PicoGK and multi-file fixtures) on CoreCLR with the prepared reference bundle."
+      },
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/libs/csharp-language/scripts/prepare-csharp-language-server.mts --test"
+      }
+    },
+    "test": {
+      "dependsOn": ["prepare", "test-dotnet"]
+    }
+  }
 }

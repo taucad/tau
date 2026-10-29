@@ -2,7 +2,7 @@ import type { JSONRPCRequest, JSONRPCResponse } from 'json-rpc-2.0';
 import { z } from 'zod';
 
 /** Content identity of the prepared browser bundle, injected by the UI build. */
-export type CSharpLanguageAssets = Readonly<{ url: string; sha256: string }>;
+export type CsharpLanguageAssets = Readonly<{ url: string; sha256: string }>;
 
 const sha256 = z.string().regex(/^[a-f\d]{64}$/u);
 const assetPath = z
@@ -19,13 +19,13 @@ export const csharpLanguageManifestSchema = z.object({
   files: z.array(z.object({ path: assetPath, sha256, byteLength: z.number().int().nonnegative() })).min(1),
 });
 
-export type CSharpLanguageManifest = z.infer<typeof csharpLanguageManifestSchema>;
+export type CsharpLanguageManifest = z.infer<typeof csharpLanguageManifestSchema>;
 
 /** Main thread to worker. */
-export type CSharpWorkerCommand =
+export type CsharpWorkerCommand =
   | Readonly<{
       type: 'init';
-      assets: CSharpLanguageAssets;
+      assets: CsharpLanguageAssets;
       /** Absolute workspace root, for Tier 0 file-pool keys. */
       rootDirectory: string;
       filePoolBuffer?: SharedArrayBuffer;
@@ -35,7 +35,7 @@ export type CSharpWorkerCommand =
   | Readonly<{ type: 'refresh' }>;
 
 /** Worker to main thread. */
-export type CSharpWorkerEvent =
+export type CsharpWorkerEvent =
   | Readonly<{ type: 'ready'; files: number }>
   | Readonly<{ type: 'lsp'; message: string }>
   | Readonly<{ type: 'fs-request'; request: JSONRPCRequest }>

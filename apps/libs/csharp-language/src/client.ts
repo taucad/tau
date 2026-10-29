@@ -1,23 +1,23 @@
 import { JSONRPCServer } from 'json-rpc-2.0';
-import type { JSONRPCResponse } from 'json-rpc-2.0';
+import type { JSONRPCRequest } from 'json-rpc-2.0';
 import type * as LSP from 'vscode-languageserver-protocol';
 import { serveLanguageFileSystemRequests } from '@taucad/lsp/language-fs-bridge';
 import type { ServeLanguageFileSystemOptions } from '@taucad/lsp/language-fs-bridge';
-import type { CSharpLanguageAssets, CSharpWorkerCommand, CSharpWorkerEvent } from '#protocol.js';
+import type { CsharpLanguageAssets, CsharpWorkerCommand, CsharpWorkerEvent } from '#protocol.js';
 
 /** An LSP error response from the C# server. */
-export class CSharpLanguageError extends Error {
+export class CsharpLanguageError extends Error {
   public readonly code: number;
 
   public constructor(code: number, message: string) {
     super(message);
-    this.name = 'CSharpLanguageError';
+    this.name = 'CsharpLanguageError';
     this.code = code;
   }
 }
 
-export type CSharpLanguageClientOptions = Readonly<{
-  assets: CSharpLanguageAssets;
+export type CsharpLanguageClientOptions = Readonly<{
+  assets: CsharpLanguageAssets;
   /** The project's filesystem owners; the worker reads closed files through them. */
   fs: ServeLanguageFileSystemOptions & Readonly<{ rootDirectory: string }>;
   createWorker?: () => Worker;
@@ -25,13 +25,21 @@ export type CSharpLanguageClientOptions = Readonly<{
   onFatal?: (error: Error) => void;
 }>;
 
+const observe = async (promise: Promise<unknown>): Promise<void> => {
+  try {
+    await promise;
+  } catch {
+    /* Callers that await readiness receive the rejection themselves. */
+  }
+};
+
 type Pending = { resolve: (result: unknown) => void; reject: (error: Error) => void };
 
 /**
  * Main-thread client for one project's C# language worker. Requests are LSP JSON-RPC; the worker answers `fs/*`
  * requests through `serveLanguageFileSystemRequests`, so the file manager stays the only filesystem authority.
  */
-export class CSharpLanguageClient {
+export class CsharpLanguageClient {
   readonly #worker: Worker;
   readonly #fsServer = new JSONRPCServer();
   readonly #fsDisposable: { dispose(): void };
@@ -43,10 +51,11 @@ export class CSharpLanguageClient {
   #disposed = false;
   #capabilities: LSP.ServerCapabilities = {};
 
-  public constructor(options: CSharpLanguageClientOptions) {
+  public constructor(options: CsharpLanguageClientOptions) {
     this.#onFatal = options.onFatal;
     this.#fsDisposable = serveLanguageFileSystemRequests(this.#fsServer, options.fs);
-    this.#ready.promise.catch(() => undefined);
+    // Readiness may fail before anyone awaits it; observe it so the rejection is not unhandled.
+    void observe(this.#ready.promise);
     this.#worker =
       options.createWorker?.() ??
       new Worker(new URL('csharp-language.worker.ts', import.meta.url), {
@@ -123,11 +132,11 @@ export class CSharpLanguageClient {
     this.#ready.reject(new Error('C# language client disposed'));
   }
 
-  #post(command: CSharpWorkerCommand): void {
+  #post(command: CsharpWorkerCommand): void {
     this.#worker.postMessage(command);
   }
 
-  readonly #onMessage = (event: MessageEvent<CSharpWorkerEvent>): void => {
+  readonly #onMessage = (event: MessageEvent<CsharpWorkerEvent>): void => {
     const message = event.data;
     switch (message.type) {
       case 'ready': {
@@ -139,11 +148,7 @@ export class CSharpLanguageClient {
         break;
       }
       case 'fs-request': {
-        void this.#fsServer.receive(message.request).then((response: JSONRPCResponse | null) => {
-          if (response && !this.#disposed) {
-            this.#post({ type: 'fs-response', response });
-          }
-        });
+        void this.#serveFs(message.request);
         break;
       }
       case 'fatal': {
@@ -154,7 +159,8 @@ export class CSharpLanguageClient {
   };
 
   readonly #onError = (event: Event): void => {
-    const detail = event instanceof ErrorEvent && event.message ? `: ${event.message}` : '';
+    const message = 'message' in event && typeof event.message === 'string' ? event.message : undefined;
+    const detail = message ? `: ${message}` : '';
     this.#fail(new Error(`C# language worker crashed${detail}`));
   };
 
@@ -170,14 +176,21 @@ export class CSharpLanguageClient {
     const pending = this.#pending.get(response.id);
     this.#pending.delete(response.id);
     if (response.error) {
-      pending?.reject(new CSharpLanguageError(response.error.code, response.error.message));
+      pending?.reject(new CsharpLanguageError(response.error.code, response.error.message));
     } else {
       pending?.resolve(response.result ?? undefined);
     }
   }
 
+  async #serveFs(request: JSONRPCRequest): Promise<void> {
+    const response = await this.#fsServer.receive(request);
+    if (response && !this.#disposed) {
+      this.#post({ type: 'fs-response', response });
+    }
+  }
+
   #fail(error: Error): void {
-    if (this.#failure || this.#disposed) {
+    if (this.#failure !== undefined || this.#disposed) {
       return;
     }
     this.#failure = error;

@@ -2,8 +2,8 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { loadCSharpServer, sha256Hex } from '#dotnet-host.js';
-import type { CSharpServerExports } from '#dotnet-host.js';
+import { loadCsharpServer, sha256Hex } from '#dotnet-host.js';
+import type { CsharpServerExports } from '#dotnet-host.js';
 
 /*
  * Boots the published browser-wasm bundle (`csharp-language:prepare`) on Node's WebAssembly engine, the same Mono
@@ -15,7 +15,7 @@ const manifestPath = resolve(stage, 'assets-manifest.json');
 const fileFetch: typeof fetch = async (input) => {
   const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
   try {
-    return new Response(await readFile(url));
+    return new Response(new Uint8Array(await readFile(url)));
   } catch {
     return new Response(undefined, { status: 404 });
   }
@@ -46,7 +46,7 @@ const shapes = [
 type Json = Record<string, unknown>;
 
 describe('C# language server on .NET WebAssembly', () => {
-  let server: CSharpServerExports;
+  let server: CsharpServerExports;
   let nextId = 0;
 
   const request = async <T = Json>(method: string, params: unknown): Promise<T> => {
@@ -66,7 +66,7 @@ describe('C# language server on .NET WebAssembly', () => {
 
   beforeAll(async () => {
     const manifest = new Uint8Array(await readFile(manifestPath));
-    server = await loadCSharpServer({
+    server = await loadCsharpServer({
       assets: { url: pathToFileURL(manifestPath).href, sha256: await sha256Hex(manifest) },
       fetch: fileFetch,
     });

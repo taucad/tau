@@ -1,4 +1,3 @@
-/// <reference lib="webworker" />
 /**
  * Module worker hosting the Roslyn C# language server on the .NET WebAssembly runtime.
  *
@@ -10,27 +9,34 @@ import { attachLanguageFsClient } from '@taucad/lsp-fs/client';
 import type { LanguageFsClient } from '@taucad/lsp-fs/client';
 import { languageFileUriToWorkspaceRelative } from '@taucad/lsp-fs/uri';
 import { joinPath } from '@taucad/utils/path';
-import { loadCSharpServer } from '#dotnet-host.js';
-import type { CSharpServerExports } from '#dotnet-host.js';
+import { loadCsharpServer } from '#dotnet-host.js';
+import type { CsharpServerExports } from '#dotnet-host.js';
 import { csharpWorkspaceLimits } from '#protocol.js';
-import type { CSharpWorkerCommand, CSharpWorkerEvent } from '#protocol.js';
+import type { CsharpWorkerCommand, CsharpWorkerEvent } from '#protocol.js';
 import { WorkspaceSnapshot } from '#workspace-snapshot.js';
 
-const scope = globalThis as unknown as DedicatedWorkerGlobalScope;
 const pendingFs = new Map<string | number, (response: JSONRPCResponse) => void>();
 const snapshot = new WorkspaceSnapshot();
-let server: CSharpServerExports | undefined;
+let server: CsharpServerExports | undefined;
 let fs: LanguageFsClient | undefined;
 let queue: Promise<unknown> = Promise.resolve();
 
-const post = (event: CSharpWorkerEvent): void => {
-  scope.postMessage(event);
+const post = (event: CsharpWorkerEvent): void => {
+  globalThis.postMessage(event);
 };
 
 /** Serialize every server call: the runtime has one thread and Roslyn state must not interleave. */
 const enqueue = async <T>(work: () => Promise<T>): Promise<T> => {
-  const next = queue.then(work, work);
-  queue = next.catch(() => undefined);
+  const previous = queue;
+  const next = (async (): Promise<T> => {
+    try {
+      await previous;
+    } catch {
+      /* A failed earlier call does not block later ones. */
+    }
+    return work();
+  })();
+  queue = next;
   return next;
 };
 
@@ -67,7 +73,15 @@ const fail = (error: unknown): void => {
   post({ type: 'fatal', message: error instanceof Error ? error.message : String(error) });
 };
 
-const initialize = async (command: Extract<CSharpWorkerCommand, { type: 'init' }>): Promise<void> => {
+const guard = async (work: () => Promise<void>): Promise<void> => {
+  try {
+    await work();
+  } catch (error) {
+    fail(error);
+  }
+};
+
+const initialize = async (command: Extract<CsharpWorkerCommand, { type: 'init' }>): Promise<void> => {
   fs = attachLanguageFsClient({
     filePoolBuffer: command.filePoolBuffer,
     absolutePathForUri: (uri) => joinPath(command.rootDirectory, languageFileUriToWorkspaceRelative(uri)),
@@ -77,28 +91,34 @@ const initialize = async (command: Extract<CSharpWorkerCommand, { type: 'init' }
         post({ type: 'fs-request', request });
       }),
   });
-  server = await loadCSharpServer({ assets: command.assets });
+  server = await loadCsharpServer({ assets: command.assets });
   const files = await synchronizeWorkspace();
   post({ type: 'ready', files });
   // Bind the first program while the editor attaches, so the first completion does not pay interpreter warm-up.
-  enqueue(async () => server?.warmUp()).catch(() => undefined);
+  // A warm-up failure is not fatal: the same failure surfaces on the first real request.
+  try {
+    await enqueue(async () => server?.warmUp());
+  } catch {
+    /* Reported by the next request instead. */
+  }
 };
 
-scope.addEventListener('message', (event: MessageEvent<CSharpWorkerCommand>) => {
+const handle = async (message: string): Promise<void> => {
+  const response = await enqueue(async () => server?.handle(message));
+  if (response) {
+    post({ type: 'lsp', message: response });
+  }
+};
+
+globalThis.addEventListener('message', (event: MessageEvent<CsharpWorkerCommand>) => {
   const command = event.data;
   switch (command.type) {
     case 'init': {
-      initialize(command).catch(fail);
+      void guard(async () => initialize(command));
       break;
     }
     case 'lsp': {
-      enqueue(async () => server?.handle(command.message))
-        .then((response) => {
-          if (response) {
-            post({ type: 'lsp', message: response });
-          }
-        })
-        .catch(fail);
+      void guard(async () => handle(command.message));
       break;
     }
     case 'fs-response': {
@@ -108,7 +128,9 @@ scope.addEventListener('message', (event: MessageEvent<CSharpWorkerCommand>) => 
       break;
     }
     case 'refresh': {
-      synchronizeWorkspace().catch(fail);
+      void guard(async () => {
+        await synchronizeWorkspace();
+      });
       break;
     }
   }

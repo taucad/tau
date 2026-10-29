@@ -8,9 +8,9 @@
  * Environment: Node 24+, git and network on first run (SDK, NuGet, PicoGK source). TAU_DOTNET may name an existing
  *   SDK 10.0.400 `dotnet` executable instead of the pinned download. CI=true restores NuGet in locked mode.
  * Usage: node --import @oxc-node/core/register apps/libs/csharp-language/scripts/prepare-csharp-language-server.mts
- *   [--references-only]
+ *   [--references-only | --test]
  *   Writes out/csharp-language/references.bin and, unless --references-only, out/csharp-language/stage/ with
- *   the gzip-compressed bundle.
+ *   the gzip-compressed bundle. --test builds the references, then runs the .NET language service tests on them.
  * Exit codes: 0 when the stage is current or rebuilt; non-zero on an unsupported host, integrity or build failure.
  */
 /* oxlint-disable no-await-in-loop -- Files are hashed and copied one at a time to bound memory. */
@@ -26,7 +26,7 @@ const runtimeVersion = '10.0.11';
 const skiaSharpVersion = '3.119.0';
 // The PicoGK commit and patch the desktop worker compiles against (apps/desktop/scripts/prepare-picogk-dotnet.mts).
 const picoGkCommit = '0e6cf6b6f4993ec16dbcd72d8f27f26b999980f3';
-const sdks: Readonly<Record<string, { readonly archive: string; readonly sha512: string }>> = {
+const sdks: Readonly<Partial<Record<string, { readonly archive: string; readonly sha512: string }>>> = {
   'linux-x64': {
     archive: `dotnet-sdk-${dotnetVersion}-linux-x64.tar.gz`,
     sha512:
@@ -39,14 +39,14 @@ const sdks: Readonly<Record<string, { readonly archive: string; readonly sha512:
   },
 };
 /** BCL documentation shipped for hover and completion; the rest of the reference pack binds without it. */
-const documentedFrameworkAssemblies = [
+const documentedFrameworkAssemblies = new Set([
   'System.Runtime',
   'System.Collections',
   'System.Linq',
   'System.Numerics.Vectors',
   'System.Console',
   'System.ComponentModel.Annotations',
-];
+]);
 
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
 const projectRoot = resolve(import.meta.dirname, '..');
@@ -54,6 +54,15 @@ const dotnetRoot = resolve(projectRoot, 'dotnet');
 const outputRoot = resolve(workspaceRoot, 'out/csharp-language');
 // Shared with prepare-picogk-dotnet.mts so one machine downloads the pinned SDK once.
 const sdkCacheRoot = resolve(workspaceRoot, 'out/cache/picogk');
+const { NUGET_PACKAGES: nugetPackages, HOME: home, TAU_DOTNET: dotnetOverride, CI: ci } = process.env;
+const nugetRoot = nugetPackages ?? resolve(home ?? '', '.nuget/packages');
+/* eslint-disable @typescript-eslint/naming-convention -- environment variables are not camelCase */
+const dotnetEnvironment = {
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1',
+  DOTNET_NOLOGO: '1',
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1',
+};
+/* eslint-enable @typescript-eslint/naming-convention -- End of the environment names. */
 const picoGkHostedPatch = resolve(workspaceRoot, 'packages/plugins/picogk/dotnet/PicoGK.hosted.patch');
 const reproducible = [
   '-p:Deterministic=true',
@@ -65,8 +74,11 @@ const reproducible = [
   `-p:PathMap=${workspaceRoot}/=/_/`,
 ];
 
-const sha = (bytes: Uint8Array, algorithm: 'sha256' | 'sha512' = 'sha256'): string =>
+const sha = (bytes: Uint8Array<ArrayBuffer>, algorithm: 'sha256' | 'sha512' = 'sha256'): string =>
   createHash(algorithm).update(bytes).digest('hex');
+
+/** Read a file as an ArrayBuffer-backed view. */
+const readBytes = async (path: string): Promise<Uint8Array<ArrayBuffer>> => new Uint8Array(await readFile(path));
 
 const exists = async (path: string): Promise<boolean> => {
   try {
@@ -81,19 +93,13 @@ const run = (command: string, args: readonly string[], cwd: string): void => {
   execFileSync(command, args, {
     cwd,
     stdio: 'inherit',
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables are not camelCase
-    env: {
-      ...process.env,
-      DOTNET_CLI_TELEMETRY_OPTOUT: '1',
-      DOTNET_NOLOGO: '1',
-      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1',
-    },
+    env: { ...process.env, ...dotnetEnvironment },
   });
 };
 
 /** Resolve the pinned SDK: TAU_DOTNET when it reports the pinned version, else the verified download. */
 const ensureDotnet = async (): Promise<string> => {
-  const override = process.env['TAU_DOTNET'];
+  const override = dotnetOverride;
   if (override) {
     const version = execFileSync(override, ['--version'], { encoding: 'utf8' }).trim();
     if (version !== dotnetVersion) {
@@ -108,10 +114,11 @@ const ensureDotnet = async (): Promise<string> => {
   }
   const root = resolve(sdkCacheRoot, `dotnet-${dotnetVersion}-${target}`);
   const marker = resolve(root, '.tau-dotnet-archive-sha512');
-  if (!(await exists(marker)) || (await readFile(marker, 'utf8')).trim() !== sdk.sha512) {
+  const installed = (await exists(marker)) ? await readFile(marker, 'utf8') : '';
+  if (installed.trim() !== sdk.sha512) {
     await mkdir(sdkCacheRoot, { recursive: true });
     const archive = resolve(sdkCacheRoot, sdk.archive);
-    if (!(await exists(archive)) || sha(await readFile(archive), 'sha512') !== sdk.sha512) {
+    if (!(await exists(archive)) || sha(await readBytes(archive), 'sha512') !== sdk.sha512) {
       const response = await fetch(`https://builds.dotnet.microsoft.com/dotnet/Sdk/${dotnetVersion}/${sdk.archive}`);
       if (!response.ok) {
         throw new Error(`.NET SDK download failed with HTTP ${String(response.status)}`);
@@ -137,11 +144,12 @@ const ensureDotnet = async (): Promise<string> => {
 
 /** Fetch the pinned PicoGK commit by its content hash and apply Tau's hosted patch once. */
 const ensurePicoGkSource = async (): Promise<string> => {
-  const patchSha256 = sha(await readFile(picoGkHostedPatch));
+  const patchSha256 = sha(await readBytes(picoGkHostedPatch));
   const root = resolve(outputRoot, 'cache', `PicoGK-${picoGkCommit}`);
   const markerPath = resolve(root, '.tau-picogk-hosted-source');
   const expected = `${picoGkCommit}:${patchSha256}`;
-  if ((await exists(markerPath)) && (await readFile(markerPath, 'utf8')).trim() === expected) {
+  const prepared = (await exists(markerPath)) ? await readFile(markerPath, 'utf8') : '';
+  if (prepared.trim() === expected) {
     return root;
   }
   const temporary = `${root}.${String(process.pid)}.tmp`;
@@ -169,15 +177,19 @@ const strippedSections =
  * Keep the documentation hover, completion and declarations show (summary, parameters, returns): drop long-form
  * sections and indentation. The XML is compiler-generated, so these elements are balanced and never self-nested.
  */
-export const stripDocumentation = (xml: string): string =>
+const stripDocumentation = (xml: string): string =>
   xml
     .replaceAll(new RegExp(`<(${strippedSections})\\b[^>]*/>`, 'gu'), '')
     .replaceAll(new RegExp(`<(${strippedSections})\\b[^>]*>[\\s\\S]*?</\\1>`, 'gu'), '')
     .replaceAll(/\n\s+/gu, '\n');
 
 /** Serialize the reference bundle format read by ReferenceSet.FromBundle. */
-export const writeReferenceBundle = (
-  entries: ReadonlyArray<{ readonly name: string; readonly image: Uint8Array; readonly documentation?: Uint8Array }>,
+const writeReferenceBundle = (
+  entries: ReadonlyArray<{
+    readonly name: string;
+    readonly image: Uint8Array<ArrayBuffer>;
+    readonly documentation?: Uint8Array<ArrayBuffer>;
+  }>,
 ): Uint8Array<ArrayBuffer> => {
   const sorted = [...entries].sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
   const header = new TextEncoder().encode(
@@ -224,24 +236,24 @@ const buildReferences = async (dotnet: string): Promise<Uint8Array<ArrayBuffer>>
   );
   const sdkRoot = resolve(dotnet, '..');
   const referencePack = resolve(sdkRoot, 'packs/Microsoft.NETCore.App.Ref', runtimeVersion, 'ref/net10.0');
-  const entries: Array<{ name: string; image: Uint8Array; documentation?: Uint8Array }> = [];
-  const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
-  for (const name of (await readdir(referencePack)).filter((file) => file.endsWith('.dll')).sort()) {
+  const entries: Array<{ name: string; image: Uint8Array<ArrayBuffer>; documentation?: Uint8Array<ArrayBuffer> }> = [];
+  const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text);
+  const referenceFiles = await readdir(referencePack);
+  for (const name of referenceFiles.filter((file) => file.endsWith('.dll')).sort()) {
     const assembly = name.slice(0, -'.dll'.length);
-    const documentation = documentedFrameworkAssemblies.includes(assembly)
+    const documentation = documentedFrameworkAssemblies.has(assembly)
       ? encode(stripDocumentation(await readFile(resolve(referencePack, `${assembly}.xml`), 'utf8')))
       : undefined;
-    entries.push({ name, image: await readFile(resolve(referencePack, name)), documentation });
+    entries.push({ name, image: await readBytes(resolve(referencePack, name)), documentation });
   }
   entries.push({
     name: 'PicoGK.dll',
-    image: await readFile(resolve(picoGkOutput, 'PicoGK.dll')),
+    image: await readBytes(resolve(picoGkOutput, 'PicoGK.dll')),
     documentation: encode(stripDocumentation(await readFile(resolve(picoGkOutput, 'PicoGK.xml'), 'utf8'))),
   });
-  const nuget = process.env['NUGET_PACKAGES'] ?? resolve(process.env['HOME'] ?? '', '.nuget/packages');
   entries.push({
     name: 'SkiaSharp.dll',
-    image: await readFile(resolve(nuget, 'skiasharp', skiaSharpVersion, 'lib/net8.0/SkiaSharp.dll')),
+    image: await readBytes(resolve(nugetRoot, 'skiasharp', skiaSharpVersion, 'lib/net8.0/SkiaSharp.dll')),
   });
   return writeReferenceBundle(entries);
 };
@@ -258,12 +270,25 @@ const listFiles = async (root: string): Promise<string[]> => {
 
 const main = async (): Promise<void> => {
   const referencesOnly = process.argv.includes('--references-only');
+  const test = process.argv.includes('--test');
   const dotnet = await ensureDotnet();
   await mkdir(outputRoot, { recursive: true });
-  const restore = process.env['CI'] === 'true' ? ['--locked-mode'] : [];
+  const restore = ci === 'true' ? ['--locked-mode'] : [];
   const references = await buildReferences(dotnet);
-  await writeFile(resolve(outputRoot, 'references.bin'), references);
+  const referencesPath = resolve(outputRoot, 'references.bin');
+  await writeFile(referencesPath, references);
   console.log(`C# reference bundle: ${String(references.length)} bytes, sha256 ${sha(references)}`);
+  if (test) {
+    const tests = resolve(dotnetRoot, 'Tau.CSharp.LanguageService.Tests');
+    run(dotnet, ['restore', ...restore], tests);
+    execFileSync(dotnet, ['test', '--no-restore', '-c', 'Release', ...reproducible], {
+      cwd: tests,
+      stdio: 'inherit',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables are not camelCase
+      env: { ...process.env, ...dotnetEnvironment, TAU_CSHARP_REFERENCE_BUNDLE: referencesPath },
+    });
+    return;
+  }
   if (referencesOnly) {
     return;
   }
@@ -280,6 +305,16 @@ const main = async (): Promise<void> => {
   const temporary = `${stage}.${String(process.pid)}.tmp`;
   await rm(temporary, { recursive: true, force: true });
   await cp(framework, resolve(temporary, '_framework'), { recursive: true });
+  // The runtime bootstrap names a source map the publish omits; ship Microsoft's map so tools resolve it.
+  await cp(
+    resolve(
+      nugetRoot,
+      'microsoft.netcore.app.runtime.mono.browser-wasm',
+      runtimeVersion,
+      'runtimes/browser-wasm/native/dotnet.runtime.js.map',
+    ),
+    resolve(temporary, '_framework/dotnet.runtime.js.map'),
+  );
   // Static hosts do not reliably compress octet streams; the worker inflates the bundle with DecompressionStream.
   await writeFile(
     resolve(temporary, 'references.bin.gz'),
@@ -287,7 +322,7 @@ const main = async (): Promise<void> => {
   );
   const files = [];
   for (const path of await listFiles(temporary)) {
-    const bytes = await readFile(resolve(temporary, path));
+    const bytes = await readBytes(resolve(temporary, path));
     files.push({ path, sha256: sha(bytes), byteLength: bytes.length });
   }
   const manifest = {
@@ -306,6 +341,4 @@ const main = async (): Promise<void> => {
   );
 };
 
-if (import.meta.main) {
-  await main();
-}
+await main();

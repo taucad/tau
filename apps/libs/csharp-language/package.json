@@ -51,5 +51,8 @@
     "vscode-languageserver-protocol": "^3.18.0",
     "vscode-uri": "catalog:",
     "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@taucad/fs-client": "workspace:*"
   }
 }

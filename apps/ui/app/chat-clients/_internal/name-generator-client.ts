@@ -1,5 +1,4 @@
 import { useCallback } from 'react';
-import { DefaultChatTransport, readUIMessageStream } from 'ai';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 import type { MyUIMessage } from '@taucad/chat';
@@ -80,20 +79,6 @@ const nameGeneratorFetch: typeof globalThis.fetch = async (input, init) => {
 };
 
 /**
- * Dedicated transport for the simple-text name profiles. Distinct from the
- * CAD chat's per-session projection transport because this needs a profile-specific fetch wrapper to preserve the
- * `NameGeneratorRequestError` contract; the CAD path uses the SDK's
- * default error shape.
- */
-// oxlint-disable-next-line tau-lint/require-public-export-jsdoc -- @internal, scoped to name-generator-client
-const createNameGeneratorTransport = (): DefaultChatTransport<MyUIMessage> =>
-  new DefaultChatTransport<MyUIMessage>({
-    api: `${ENV.TAU_API_URL}/v1/chat`,
-    credentials: 'include',
-    fetch: nameGeneratorFetch,
-  });
-
-/**
  * Factory for the simple-text profile clients. The `profile` discriminator
  * is the only thing that varies between project-name and commit-name; the
  * wire body and streaming pipeline are delegated entirely to the AI SDK.
@@ -103,6 +88,8 @@ const createNameGeneratorTransport = (): DefaultChatTransport<MyUIMessage> =>
 export const useNameGeneratorPartsClient = (profile: NameProfile): NameGeneratorPartsClient => {
   const generateFromParts = useCallback<GenerateNameFromParts>(
     async (parts, projectId) => {
+      // Mounting the project manager does not need a naming transport.
+      const sdk = await import('ai');
       const chatId = generatePrefixedId(idPrefix.chat);
       const messageId = generatePrefixedId(idPrefix.message);
       const userMessage: MyUIMessage = {
@@ -111,7 +98,12 @@ export const useNameGeneratorPartsClient = (profile: NameProfile): NameGenerator
         parts,
       };
 
-      const stream = await createNameGeneratorTransport().sendMessages({
+      const transport = new sdk.DefaultChatTransport<MyUIMessage>({
+        api: `${ENV.TAU_API_URL}/v1/chat`,
+        credentials: 'include',
+        fetch: nameGeneratorFetch,
+      });
+      const stream = await transport.sendMessages({
         chatId,
         messageId: undefined,
         messages: [userMessage],
@@ -128,7 +120,7 @@ export const useNameGeneratorPartsClient = (profile: NameProfile): NameGenerator
       });
 
       let assembled: MyUIMessage | undefined;
-      for await (const message of readUIMessageStream<MyUIMessage>({ stream })) {
+      for await (const message of sdk.readUIMessageStream<MyUIMessage>({ stream })) {
         assembled = message;
       }
 

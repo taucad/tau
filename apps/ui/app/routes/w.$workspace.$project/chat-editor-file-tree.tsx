@@ -552,12 +552,12 @@ export const ChatEditorFileTree = memo(function ({
   /** The user's access is `source !== 'project'` (ruling P10), never `agentAccess`. */
   const isReadOnlyPath = useCallback((path: string): boolean => presentationFor(path).readOnly, [presentationFor]);
 
-  const fileTree = useMemo((): FileItem[] => {
+  const fileTree = useMemo((): ReadonlyMap<string, FileItem> => {
     if (fileTreeMap.size === 0) {
-      return [];
+      return new Map();
     }
 
-    return [...fileTreeMap.values()]
+    const entries: FileItem[] = [...fileTreeMap.values()]
       .filter((entry) => !isEditorSystemArtifactPath(entry.path))
       .map((entry) => ({
         id: entry.path,
@@ -567,6 +567,7 @@ export const ChatEditorFileTree = memo(function ({
         language: getIconIdForFilename(entry.path),
         isDirectory: entry.type === 'dir',
       }));
+    return new Map(entries.map((entry) => [entry.path, entry]));
   }, [fileTreeMap]);
 
   // Tree state management
@@ -801,7 +802,7 @@ export const ChatEditorFileTree = memo(function ({
     const paths = new Set<string>();
     paths.add(rootId);
 
-    for (const file of fileTree) {
+    for (const file of fileTree.values()) {
       const parts = file.path.split('/');
       let currentPath = '';
 

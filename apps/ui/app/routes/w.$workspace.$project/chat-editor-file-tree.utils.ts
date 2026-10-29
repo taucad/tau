@@ -49,23 +49,23 @@ export type TreeItemData = {
 };
 
 /**
- * Resolve a tree item by ID. Checks the `fileTree` array first (returning
+ * Resolve a tree item by ID. Checks the `fileTree` map first (returning
  * `isFolder` from the entry's `isDirectory` flag), then falls back to a
  * virtual folder for paths not found in `fileTree` (e.g., inferred parent
  * directories from nested file paths).
  *
- * @param fileTree - Flat list of explicit file/directory entries.
+ * @param fileTree - Explicit file/directory entries keyed by path.
  * @param rootId - The sentinel root ID.
  * @param itemId - The item to resolve.
  * @returns Tree item data with correct `isFolder` flag.
  * @public
  */
-export const getItemData = (fileTree: FileItem[], rootId: string, itemId: string): TreeItemData => {
+export const getItemData = (fileTree: ReadonlyMap<string, FileItem>, rootId: string, itemId: string): TreeItemData => {
   if (itemId === rootId) {
     return { path: rootId, name: 'Root', isFolder: true };
   }
 
-  const file = fileTree.find((f) => f.path === itemId);
+  const file = fileTree.get(itemId);
   if (file) {
     return {
       path: file.path,
@@ -86,8 +86,8 @@ export const getItemData = (fileTree: FileItem[], rootId: string, itemId: string
  *
  * @public
  */
-export const isPathFolder = (path: string, fileTree: FileItem[], allPaths: Set<string>): boolean => {
-  const entry = fileTree.find((f) => f.path === path);
+export const isPathFolder = (path: string, fileTree: ReadonlyMap<string, FileItem>, allPaths: Set<string>): boolean => {
+  const entry = fileTree.get(path);
   if (entry) {
     return entry.isDirectory ?? false;
   }
@@ -101,7 +101,11 @@ export const isPathFolder = (path: string, fileTree: FileItem[], allPaths: Set<s
  *
  * @public
  */
-export const sortChildrenFoldersFirst = (children: string[], fileTree: FileItem[], allPaths: Set<string>): string[] =>
+export const sortChildrenFoldersFirst = (
+  children: string[],
+  fileTree: ReadonlyMap<string, FileItem>,
+  allPaths: Set<string>,
+): string[] =>
   [...children].sort((a, b) => {
     const aName = a.split('/').pop() ?? a;
     const bName = b.split('/').pop() ?? b;

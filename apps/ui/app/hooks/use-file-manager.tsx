@@ -269,7 +269,7 @@ export type WorkspaceFacade = {
 
 type FileManagerContextType = {
   fileManagerRef: FileManagerRef;
-  backendType: FileSystemBackend;
+  backendType: FileSystemBackend | undefined;
   contentService: FileContentService | undefined;
   treeService: FileTreeService | undefined;
   workerChangeChannel: WorkerChangeChannel | undefined;
@@ -466,15 +466,18 @@ const SharedWorkerContext = createContext<Worker | undefined>(undefined);
  */
 const SharedFilePoolBufferContext = createContext<SharedArrayBuffer | undefined>(undefined);
 
-const HomeStorageBackendContext = createContext<HomeStorageBackend | undefined>(undefined);
+const HomeStorageBackendContext = createContext<
+  | { readonly backend: HomeStorageBackend | undefined; readonly error: Error | undefined; readonly retry: () => void }
+  | undefined
+>(undefined);
 
 /** Physical engine selected for the system-owned Home workspace. */
-export function useHomeStorageBackend(): HomeStorageBackend {
-  const backend = useContext(HomeStorageBackendContext);
-  if (!backend) {
+export function useHomeStorageBackend(): HomeStorageBackend | undefined {
+  const selection = useContext(HomeStorageBackendContext);
+  if (selection === undefined) {
     throw new Error('useHomeStorageBackend must be used within HomeFileManagerProvider');
   }
-  return backend;
+  return selection.backend;
 }
 
 /**
@@ -517,38 +520,60 @@ function SharedWorkerFallback({
   fileManagerRef,
   placeholder,
   withShellFrame,
+  isInline = false,
 }: {
+  readonly isInline?: boolean;
   readonly fileManagerRef: FileManagerRef;
   readonly placeholder: ReactNode;
   readonly withShellFrame: boolean;
 }): React.ReactNode {
   const hasFailed = useSelector(fileManagerRef, (state) => state.matches('error'));
+  const isBackendPending = useSelector(fileManagerRef, (state) => state.context.backendType === undefined);
+  const homeSelection = useContext(HomeStorageBackendContext);
+  const homeFailed = isBackendPending && homeSelection?.error !== undefined;
 
-  if (!hasFailed) {
+  if (!hasFailed && !homeFailed) {
     return placeholder;
   }
 
+  const title = homeFailed ? "Couldn't open Home" : "Couldn't start the file service";
+  const description = homeFailed
+    ? "Tau couldn't read your Home storage selection. Try again to open your existing files."
+    : "Tau's file service did not start, so your files aren't available yet. Try again to restart it.";
+  const retry = (
+    <Button
+      type='button'
+      onClick={() => {
+        if (homeFailed) {
+          homeSelection.retry();
+        } else {
+          fileManagerRef.send({ type: 'initialize' });
+        }
+      }}
+    >
+      <RefreshCw />
+      Try again
+    </Button>
+  );
+  if (isInline) {
+    return (
+      <div role='alert' aria-label={title} className='flex flex-wrap items-center gap-3 border-b p-4'>
+        <OctagonAlert aria-hidden className='size-4 shrink-0 text-feature' />
+        <p className='min-w-0 flex-1 text-sm'>{description}</p>
+        {retry}
+      </div>
+    );
+  }
   return (
-    /* Above the shell nothing sizes this mount, so it takes the window, as the
-     * skeleton it replaces does; `PanelEmptyState` is size-contained and would
-     * otherwise collapse to nothing. */
     <div role='alert' className={withShellFrame ? 'h-dvh w-full' : 'size-full'}>
       <PanelEmptyState
         icon={OctagonAlert}
         iconClassName='text-feature'
-        title="Couldn't start the file service"
-        description="Tau's file service did not start, so your files aren't available yet. Try again to restart it."
+        title={title}
+        description={description}
         className='p-6 [&_[data-slot=panel-empty-state-copy]]:mt-6'
       >
-        <Button
-          type='button'
-          onClick={() => {
-            fileManagerRef.send({ type: 'initialize' });
-          }}
-        >
-          <RefreshCw />
-          Try again
-        </Button>
+        {retry}
       </PanelEmptyState>
     </div>
   );
@@ -568,7 +593,9 @@ export function SharedWorkerGate({
   children,
   placeholder,
   withShellFrame = false,
+  shouldReportFailure = true,
 }: {
+  readonly shouldReportFailure?: boolean;
   readonly children: ReactNode;
   readonly placeholder?: ReactNode;
   readonly withShellFrame?: boolean;
@@ -581,7 +608,7 @@ export function SharedWorkerGate({
   }
 
   /* Outside a provider there is no machine to report on, so the gate stays silent. */
-  return fileManager === undefined ? (
+  return fileManager === undefined || !shouldReportFailure ? (
     placeholder
   ) : (
     <SharedWorkerFallback
@@ -590,6 +617,19 @@ export function SharedWorkerGate({
       withShellFrame={withShellFrame}
     />
   );
+}
+
+/** Keep storage recovery inside the available page instead of displacing its shell. */
+export function HomeFileManagerNotice(): React.ReactNode {
+  const fileManager = useOptionalFileManager();
+  return fileManager ? (
+    <SharedWorkerFallback
+      fileManagerRef={fileManager.fileManagerRef}
+      placeholder={undefined}
+      withShellFrame={false}
+      isInline
+    />
+  ) : undefined;
 }
 
 /**
@@ -623,12 +663,6 @@ export type FileManagerProviderProps = FileManagerProviderCommonProps &
 
 export type HomeFileManagerProviderProps = FileManagerProviderCommonProps & {
   readonly projectId?: string;
-  /**
-   * What to show while Home's storage engine resolves. This mount wraps the
-   * whole app, so a route that knows what it is opening passes its own loading
-   * state rather than leaving the window empty.
-   */
-  readonly placeholder?: ReactNode;
 };
 
 /** Resolve Home once at the app root and reuse that engine at every nested mount. */
@@ -637,28 +671,35 @@ export function HomeFileManagerProvider({
   rootDirectory,
   projectId,
   shouldInitializeOnStart,
-  placeholder,
 }: HomeFileManagerProviderProps): React.ReactNode {
-  const inheritedBackend = useContext(HomeStorageBackendContext);
+  const inheritedSelection = useContext(HomeStorageBackendContext);
   const [resolvedBackend, setResolvedBackend] = useState<HomeStorageBackend>();
   const [resolutionFailure, setResolutionFailure] = useState<Error>();
-  const backend = inheritedBackend ?? resolvedBackend;
+  const [loadBackend, setLoadBackend] = useState(() => getHomeStorageBackend);
+  const retry = useCallback(() => {
+    setResolutionFailure(undefined);
+    setLoadBackend(() => async () => getHomeStorageBackend());
+  }, []);
+  const backend = inheritedSelection === undefined ? resolvedBackend : inheritedSelection.backend;
+  const selection = useMemo(
+    () => inheritedSelection ?? { backend, error: resolutionFailure, retry },
+    [backend, inheritedSelection, resolutionFailure, retry],
+  );
 
   useEffect(() => {
-    if (inheritedBackend) {
+    if (inheritedSelection !== undefined) {
       return;
     }
     const controller = new AbortController();
     // async-iife: bootstrap
     void (async () => {
       try {
-        const resolved = await getHomeStorageBackend();
+        const resolved = await loadBackend();
         if (!controller.signal.aborted) {
           setResolvedBackend(resolved);
         }
       } catch (error) {
-        // This provider gates the entire app, so a swallowed rejection is indistinguishable from a
-        // permanent hang. There is no safe fallback engine — surface it to the root error boundary.
+        // Keep the page mounted and expose retry through the file-service gate; never select a fallback engine.
         if (!controller.signal.aborted) {
           setResolutionFailure(error instanceof Error ? error : new Error(String(error)));
         }
@@ -667,42 +708,37 @@ export function HomeFileManagerProvider({
     return () => {
       controller.abort();
     };
-  }, [inheritedBackend]);
+  }, [inheritedSelection, loadBackend]);
 
-  if (resolutionFailure) {
-    throw resolutionFailure;
-  }
-
-  if (!backend) {
-    /* The placeholder carries its own status role; without one this is the bare live region. */
-    return placeholder ?? <div role='status' aria-label='Opening Home' />;
-  }
-
-  const fileManager = (
-    <FileManagerProvider
-      rootDirectory={rootDirectory}
-      initialBackend={backend}
-      {...(projectId === undefined ? {} : { projectId })}
-      {...(shouldInitializeOnStart === undefined ? {} : { shouldInitializeOnStart })}
-    >
-      {children}
-    </FileManagerProvider>
-  );
-
-  return inheritedBackend ? (
-    fileManager
-  ) : (
-    <HomeStorageBackendContext.Provider value={backend}>{fileManager}</HomeStorageBackendContext.Provider>
+  return (
+    <HomeStorageBackendContext.Provider value={selection}>
+      <FileManagerProviderCore
+        rootDirectory={rootDirectory}
+        initialBackend={backend}
+        projectId={projectId}
+        shouldInitializeOnStart={shouldInitializeOnStart}
+      >
+        {children}
+      </FileManagerProviderCore>
+    </HomeStorageBackendContext.Provider>
   );
 }
 
-export function FileManagerProvider({
+/** A resolved caller must still select an engine explicitly. Home alone owns deferred selection. */
+export function FileManagerProvider(props: FileManagerProviderProps): React.JSX.Element {
+  return <FileManagerProviderCore {...props} />;
+}
+
+function FileManagerProviderCore({
   children,
   rootDirectory,
   projectId,
   initialBackend,
   shouldInitializeOnStart = true,
-}: FileManagerProviderProps): React.JSX.Element {
+}: FileManagerProviderCommonProps & {
+  readonly initialBackend: FileSystemBackend | undefined;
+  readonly projectId?: string;
+}): React.JSX.Element {
   const parentWorker = useContext(SharedWorkerContext);
   const parentFilePoolBuffer = useContext(SharedFilePoolBufferContext);
 
@@ -712,7 +748,7 @@ export function FileManagerProvider({
     input: {
       rootDirectory,
       shouldInitializeOnStart,
-      initialBackend,
+      ...(initialBackend === undefined ? { backendResolution: 'pending' } : { initialBackend }),
       projectId,
       sharedWorker: parentWorker,
       sharedFilePoolBuffer: parentFilePoolBuffer,
@@ -722,8 +758,12 @@ export function FileManagerProvider({
   });
 
   useEffect(() => {
+    // Establish the latest scope before resolving a backend can start its connection.
     fileManagerRef.send({ type: 'setRoot', path: rootDirectory, projectId });
-  }, [fileManagerRef, rootDirectory, projectId]);
+    if (initialBackend !== undefined && initialBackend !== 'webaccess') {
+      fileManagerRef.send({ type: 'resolveInitialBackend', backend: initialBackend });
+    }
+  }, [fileManagerRef, initialBackend, rootDirectory, projectId]);
 
   const contentService = useSelector(fileManagerRef, (state) => state.context.contentService);
   const treeService = useSelector(fileManagerRef, (state) => state.context.treeService);
@@ -734,7 +774,7 @@ export function FileManagerProvider({
   const unavailableReason = useSelector(fileManagerRef, (state) => state.context.unavailableReason);
 
   useEffect(() => {
-    if (!contentService || !workerChangeChannel) {
+    if (!contentService || !workerChangeChannel || backendType === undefined) {
       return;
     }
     return observeHomeProjectSaves({ projectId, backend: backendType, contentService, channel: workerChangeChannel });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { directoryPicker, webAccessDirectoryPicker } from '#constants/browser.constants.js';
 import {
   checkHandlePermission,
@@ -129,8 +129,12 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
   const fileManager = useFileManager();
   const projectManager = useProjectManager();
   const telemetry = useWorkspaceTelemetry();
-  const [state, setState] = useState<ProjectCreationLocationState>(
-    directoryPicker().available ? loadingState : homeOnlyState,
+  // Keep the server and first browser render identical; host capability resolves after hydration.
+  const [state, setState] = useState<ProjectCreationLocationState>(loadingState);
+  const hasFolderCapability = useSyncExternalStore(
+    () => () => undefined,
+    () => directoryPicker().available,
+    () => undefined,
   );
   const mountedRef = useRef(true);
   const generationRef = useRef(0);
@@ -334,6 +338,9 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
     };
   }, []);
 
+  if (hasFolderCapability === false) {
+    return homeOnlyState;
+  }
   if (state.phase === 'ready' && state.hasWebAccessCapability) {
     return { ...state, connectWorkspace, refresh };
   }

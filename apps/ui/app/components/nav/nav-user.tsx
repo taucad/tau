@@ -37,7 +37,9 @@ export function NavUser(): React.JSX.Element {
   const [isCookiePreferencesOpen, setIsCookiePreferencesOpen] = useState(false);
   const website = websiteOrigin();
   // The edge serves the website on this hostname, so the entry preference selects it at `/`.
-  const isWebsiteHere = !isDesktopTarget() && website === globalThis.location.origin;
+  // The DOM declaration is required in browsers, but this component also renders in Node.
+  const browserGlobals: { readonly location?: Location } = globalThis;
+  const isWebsiteHere = !isDesktopTarget() && website === browserGlobals.location?.origin;
   const helpItems = [
     ...(isDesktopTarget()
       ? []

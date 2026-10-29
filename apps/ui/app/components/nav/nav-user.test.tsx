@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, within } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
 import { isValidElement } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -78,7 +79,19 @@ describe('NavUser', () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     globalThis.window.ENV = clientEnvironment;
+  });
+
+  it('renders without a browser address on the server', () => {
+    vi.stubGlobal('location', undefined);
+    expect(() =>
+      renderToString(
+        <MemoryRouter>
+          <NavUser />
+        </MemoryRouter>,
+      ),
+    ).not.toThrow();
   });
 
   it('shows product navigation, upgrade, and settings to free users', () => {
@@ -172,6 +185,7 @@ describe('Website preference navigation', () => {
     globalThis.window.ENV = clientEnvironment;
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
     Cookies.remove('tau-entry', { path: '/' });
   });

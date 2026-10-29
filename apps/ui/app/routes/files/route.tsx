@@ -30,7 +30,7 @@ import { PageHeader } from '#components/layout/page-header.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { cn } from '@taucad/ui/utils/cn';
 import { checkHandlePermission, getWorkspace, listWorkspaces } from '#filesystem/handle-store.js';
-import type { Workspace } from '#filesystem/handle-store.js';
+import type { HomeStorageBackend, Workspace } from '#filesystem/handle-store.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import { useProjectUrl } from '#hooks/use-project-slug-route.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
@@ -463,6 +463,20 @@ function WorkspaceConnectionStatus({
 
 export default function FilesRoute(): React.JSX.Element {
   const homeBackend = useHomeStorageBackend();
+  if (homeBackend === undefined) {
+    return (
+      <PageContent className='flex h-full flex-col gap-4'>
+        <PageHeader title='Files' />
+        <div role='status' aria-label='Opening Home' aria-busy='true'>
+          Opening Home…
+        </div>
+      </PageContent>
+    );
+  }
+  return <ResolvedFilesRoute homeBackend={homeBackend} />;
+}
+
+function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorageBackend }): React.JSX.Element {
   const { scopedStorage, workspace } = useFileManager();
   const { projects } = useProjects();
 

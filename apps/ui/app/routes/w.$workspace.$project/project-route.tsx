@@ -332,15 +332,21 @@ export function ProjectRouteGate({
    * This gate is app-wide: `ProjectSessionsHost` mounts it from the root layout on every route, so
    * live projects survive navigation. Only a project URL may wear the project's skeleton while the
    * file service connects — elsewhere the wait is not about a project, and the placeholder would be
-   * a workspace the person never asked for.
+   * a workspace the person never asked for. Keep the live resource list at one stable position inside
+   * the worker gate, but let non-project shell content render independently beside it. The gate still
+   * reports a failed file service without replacing the available page.
    */
   const isProjectRoute = slugs !== undefined || requestedProjectId !== undefined;
 
   return (
-    <SharedWorkerGate withShellFrame placeholder={isProjectRoute ? <WorkspaceSkeleton withShellFrame /> : undefined}>
-      <ProjectRouteStateContext.Provider value={state}>
-        <ProjectRouteRetryContext.Provider value={handleRetryLoad}>
-          <div className='contents' inert={pending || undefined} aria-busy={pending}>
+    <ProjectRouteStateContext.Provider value={state}>
+      <ProjectRouteRetryContext.Provider value={handleRetryLoad}>
+        <div className='contents' inert={pending || undefined} aria-busy={pending}>
+          <SharedWorkerGate
+            shouldReportFailure={isProjectRoute}
+            withShellFrame={isProjectRoute}
+            placeholder={isProjectRoute ? <WorkspaceSkeleton withShellFrame /> : undefined}
+          >
             {/* P72: this keyed resource list stays at one React tree position for
                 project, loading, error and non-project routes alike. It is absent only while no
                 project is live at all, where it would render nothing anyway (W21). */}
@@ -357,20 +363,21 @@ export function ProjectRouteGate({
                 />
               </Suspense>
             ) : null}
-            {isShellHostedByFocusedSession ? undefined : children}
+            {isProjectRoute && !isShellHostedByFocusedSession ? children : undefined}
+          </SharedWorkerGate>
+          {isProjectRoute ? undefined : children}
+        </div>
+        {pending ? (
+          <div
+            className='pointer-events-none fixed inset-0 z-50 flex items-center justify-center'
+            role='status'
+            aria-label='Opening project'
+          >
+            <Loader className='size-8' />
           </div>
-          {pending ? (
-            <div
-              className='pointer-events-none fixed inset-0 z-50 flex items-center justify-center'
-              role='status'
-              aria-label='Opening project'
-            >
-              <Loader className='size-8' />
-            </div>
-          ) : null}
-        </ProjectRouteRetryContext.Provider>
-      </ProjectRouteStateContext.Provider>
-    </SharedWorkerGate>
+        ) : null}
+      </ProjectRouteRetryContext.Provider>
+    </ProjectRouteStateContext.Provider>
   );
 }
 

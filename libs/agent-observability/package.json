@@ -36,6 +36,7 @@
     "./delivery": "./src/delivery.ts",
     "./authority": "./src/authority.ts",
     "./identity": "./src/identity.ts",
+    "./pending-stores": "./src/pending-stores.ts",
     "./projection": "./src/projection.ts",
     "./pi-telemetry": "./src/pi-telemetry.ts",
     "./telemetry-policy": "./src/telemetry-policy.ts",
@@ -53,6 +54,7 @@
     "@earendil-works/pi-ai": "catalog:",
     "@opentelemetry/sdk-metrics": "catalog:",
     "@opentelemetry/sdk-trace-base": "catalog:",
+    "fake-indexeddb": "catalog:",
     "zod": "catalog:"
   }
 }

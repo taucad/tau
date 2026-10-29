@@ -7,6 +7,7 @@ export default defineConfig({
     include: [
       'src/contract.test.ts',
       'src/delivery.test.ts',
+      'src/pending-stores.test.ts',
       'src/pi-native.test.ts',
       'src/pi-telemetry.test.ts',
       'src/projection.test.ts',

@@ -127,12 +127,12 @@ jobs:
           ../../../node_modules/.bin/vitest run --config vitest.config.ts \
             --reporter=verbose --no-file-parallelism \
             -t 'G4' src/shell/shell-projection-native.test.ts 2>&1 | tee /tmp/g4.log || true
-          echo '===== child self-log ====='
-          cat /tmp/g4-child.log || echo 'no child log'
-          echo '===== anything unusual in the raw output ====='
-          grep -nE 'Traceback|Error|error|OTHER|interrupted|^read$|after' /tmp/g4.log | grep -vE '^\s*[0-9]+:\[(wrap|dump)' | tail -40 || true
-          echo '===== marker / trace timeline ====='
-          grep -E '^\[(mark|dump|wrap|brdg)' /tmp/g4.log || echo 'no instrumentation lines captured'
+          echo '===== marks only ====='
+          grep -E '^\[(mark|brdg)' /tmp/g4.log || true
+          echo '===== raw lines that are not instrumentation ====='
+          grep -vE '^\[(wrap|dump|mark|brdg)' /tmp/g4.log | grep -nE 'Traceback|OTHER|Interrupted|SyntaxError|^read|interrupted' || echo 'none'
+          echo '===== CHILD SELF LOG ====='
+          cat /tmp/g4-child.log || echo 'no child log file'
 
       - name: Post-run kernel state
         if: always()

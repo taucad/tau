@@ -64,7 +64,11 @@ const rowOf = (span: OtlpSpan): LangfuseObservationRow => {
     const scalar = Object.values(value)[0] as unknown;
     /* Langfuse returns an integer as a number, and a string holding JSON as the value it encodes. */
     const read =
-      'intValue' in value ? Number(scalar) : key.endsWith('.intervals') ? JSON.parse(String(scalar)) : scalar;
+      'intValue' in value
+        ? Number(scalar)
+        : key.endsWith('.intervals')
+          ? (JSON.parse(String(scalar)) as unknown)
+          : scalar;
     if (key.startsWith(metadataPrefix)) {
       metadata[key.slice(metadataPrefix.length)] = read;
     } else if (key.startsWith('langfuse.')) {

@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
-import { picogkProtocolVersion, picogkReadySchema, picogkResponseSchema } from '#picogk.protocol.js';
+import {
+  picogkBrowserProtocolVersion,
+  picogkBrowserReadySchema,
+  picogkBrowserResponseSchema,
+} from '#picogk.protocol.js';
 import { PicogkWorkerError } from '#picogk-worker-error.js';
 import type { PicogkBrowserRuntimeFile } from '#picogk-browser-runtime.js';
 
@@ -106,7 +110,7 @@ export class PicogkBrowserSession {
       await this.ensureWorker(request.signal);
       assertCurrent();
       const requestId = String(++this.requestOrdinal);
-      const response = picogkResponseSchema.parse(
+      const response = picogkBrowserResponseSchema.parse(
         await this.exchange({
           signal: request.signal,
           exchangeTimeout: this.options.requestTimeout,
@@ -116,7 +120,7 @@ export class PicogkBrowserSession {
               kind: 'request',
               generation,
               frame: {
-                protocolVersion: picogkProtocolVersion,
+                protocolVersion: picogkBrowserProtocolVersion,
                 requestId,
                 method: request.method,
                 params: request.params,
@@ -239,8 +243,8 @@ export class PicogkBrowserSession {
           }
           const frame =
             envelope.kind === 'ready'
-              ? picogkReadySchema.parse(envelope.frame)
-              : picogkResponseSchema.parse(envelope.frame);
+              ? picogkBrowserReadySchema.parse(envelope.frame)
+              : picogkBrowserResponseSchema.parse(envelope.frame);
           const requestId = 'requestId' in frame ? frame.requestId : undefined;
           if (requestId !== this.pending?.requestId) {
             return;

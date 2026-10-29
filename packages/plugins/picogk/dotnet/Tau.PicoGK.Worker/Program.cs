@@ -8,7 +8,11 @@ namespace Tau.PicoGK.Worker;
 
 internal static partial class Program
 {
+#if PICOGK_BROWSER
+    private const int ProtocolVersion = 9;
+#else
     private const int ProtocolVersion = 8;
+#endif
     private const int MaximumRequestCharacters = 1_048_576;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly object ProtocolGate = new();
@@ -201,7 +205,8 @@ internal static partial class Program
                 }
                 var meshing = ParseMeshing(request.Params);
 #if PICOGK_BROWSER
-                var execution = await ModelRunner.ExecuteAsync(compiled, arguments.Artifacts, parameters, cancellation, compute, meshing);
+                using var authored = new AuthoredFileCapture(arguments.Workspace, arguments.Artifacts);
+                var execution = await ModelRunner.ExecuteAsync(compiled, authored.OutputRoot, parameters, cancellation, compute, meshing);
 #else
                 var execution = ModelRunner.Execute(compiled, arguments.Artifacts, parameters, cancellation, compute, meshing);
 #endif
@@ -234,11 +239,17 @@ internal static partial class Program
                 try
                 {
                     await ValidateImages(result.ArtifactPath, JsonSerializer.Serialize(result.Images, JsonOptions));
+                    result = result with { AuthoredOutputs = authored.Complete() };
                 }
                 catch (System.Runtime.InteropServices.JavaScript.JSException error)
                 {
                     File.Delete(result.ArtifactPath);
                     throw MaterialCapture.Invalid("Image.Data", error.Message);
+                }
+                catch
+                {
+                    File.Delete(result.ArtifactPath);
+                    throw;
                 }
 #endif
                 if(compute is not null&&execution.ComputeRecords is {} computeRecords) {

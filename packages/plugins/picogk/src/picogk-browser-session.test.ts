@@ -44,7 +44,7 @@ const ready = (worker: Worker, generation = 1) =>
       data: {
         generation,
         kind: 'ready',
-        frame: { protocolVersion: 8, type: 'ready', dotnetVersion: '11', picogkVersion: '2.3' },
+        frame: { protocolVersion: 9, type: 'ready', dotnetVersion: '11', picogkVersion: '2.3' },
       },
     }),
   );
@@ -58,7 +58,7 @@ const reply = (
         generation: options.generation ?? 1,
         kind: 'response',
         frame: {
-          protocolVersion: 8,
+          protocolVersion: 9,
           requestId: options.requestId ?? '1',
           ...(options.error === undefined ? { result: options.result ?? 7 } : { error: options.error }),
         },
@@ -299,7 +299,7 @@ describe('PicoGK browser session', () => {
     await tick();
     workers[0]!.dispatchEvent(
       new MessageEvent('message', {
-        data: { generation: 1, kind: 'response', frame: { protocolVersion: 8, requestId: '1', ...payload } },
+        data: { generation: 1, kind: 'response', frame: { protocolVersion: 9, requestId: '1', ...payload } },
       }),
     );
     await rejected;

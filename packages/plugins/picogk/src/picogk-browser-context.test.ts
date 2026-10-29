@@ -96,6 +96,25 @@ describe('PicoGK browser kernel context', () => {
     await context.session.cleanup();
   });
 
+  it('should own each authored receipt independently and reject stale or copied receipts', async () => {
+    const { context, services, request } = setup();
+    const output = { ...artifact(), artifactPath: '/artifacts/authored/first/files/part.stl' };
+    vi.spyOn(PicogkBrowserSession.prototype, 'request').mockResolvedValue({
+      ...artifact(),
+      authoredOutputs: [output, null],
+    });
+    vi.spyOn(PicogkBrowserSession.prototype, 'readArtifact').mockResolvedValue(new Uint8Array());
+    await context.mirror.sync(services);
+    const build = await request();
+    await context.session.readArtifact(build);
+    await expect(context.session.readArtifact({ ...output })).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(context.session.readArtifact(output)).resolves.toEqual(new Uint8Array());
+    await request();
+    await context.mirror.sync({ ...services, operationId: 2 });
+    await expect(context.session.readArtifact(output)).rejects.toMatchObject({ name: 'AbortError' });
+    await context.session.cleanup();
+  });
+
   it('should reject build completion superseded while the worker was running', async () => {
     const { context, services, request } = setup();
     const pending = Promise.withResolvers<ReturnType<typeof artifact>>();

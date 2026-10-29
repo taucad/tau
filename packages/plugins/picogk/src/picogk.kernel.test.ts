@@ -8,6 +8,7 @@ import { createMockFileSystem, createMockKernelRuntime, expectKernelProjectionOr
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { picogkKernel } from '#picogk.kernel.js';
+import { createPicogkKernelDefinition } from '#picogk-kernel-definition.js';
 import { picogkOptionsSchema } from '#picogk.schemas.js';
 import { picogkExportSchemas, picogkRenderSchema } from '#picogk-render.schemas.js';
 import { PicogkWorkerError } from '#picogk-worker-error.js';
@@ -721,5 +722,47 @@ describe('PicoGK kernel', () => {
     value.session.cleanup.mockRejectedValueOnce(new Error('cleanup failed'));
     await expect(definition.onDispose?.(value)).rejects.toThrow('cleanup failed');
     expect(value.mirror.cleanup).toHaveBeenCalled();
+  });
+});
+
+describe('authored browser exports', () => {
+  it('should retain original file bytes through handle serialization and preserve ordinary exports', async () => {
+    const value = context();
+    const original = new Uint8Array([0, 255, 1, 128]);
+    const output = {
+      artifactPath: `/artifacts/authored/${'a'.repeat(32)}/files/original.stl`,
+      name: 'original.stl',
+      byteLength: original.length,
+      sha256: 'b'.repeat(64),
+      mimeType: 'model/stl',
+    };
+    value.session.request.mockResolvedValue({ ...buildResult(), authoredOutputs: [output] });
+    value.session.readArtifact.mockResolvedValueOnce(triangle).mockResolvedValueOnce(original);
+    const factory = createPicogkKernelDefinition({
+      optionsSchema: picogkOptionsSchema,
+      version: 'test-authored-files',
+      authoredOutputs: true,
+      initialize: async () => value,
+    });
+    const definition = await resolveRuntimePluginDefinition('kernel', factory({ closure: kernelOptions }));
+    const built = await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: uniform }, runtime, value);
+    expect(built.exports).toEqual(['glb', 'gltf', 'authoredStl']);
+    expect(value.session.readArtifact).toHaveBeenLastCalledWith(output);
+    const serialized = definition.serializeHandle!({ handle: built.handle }, runtime, value);
+    const restored = definition.deserializeHandle!({ serialized: structuredClone(serialized) }, runtime, value);
+    original.fill(9);
+    const exported = await definition.export!(
+      { handle: restored, exportId: 'authoredStl', options: {} },
+      runtime,
+      value,
+    );
+    expect(exported.files).toEqual([
+      { name: 'original.stl', mimeType: 'model/stl', bytes: new Uint8Array([0, 255, 1, 128]) },
+    ]);
+    await expect(
+      definition.export!({ handle: restored, exportId: 'authoredVdb', options: {} }, runtime, value),
+    ).rejects.toThrow('at least one file');
+    const nativeDefinition = await loadDefinition();
+    expect(Object.keys(nativeDefinition.exports)).toEqual(['glb', 'gltf']);
   });
 });

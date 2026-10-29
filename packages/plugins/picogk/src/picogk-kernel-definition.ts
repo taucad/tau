@@ -9,6 +9,7 @@ import {
   createKernelParameterDeclaration,
   createKernelSuccess,
   defineKernel,
+  nonemptyExportFiles,
 } from '@taucad/runtime/kernel';
 import type { KernelDefinition, KernelServices, KernelIssue, TessellationReport } from '@taucad/runtime/kernel';
 import { createExportFile } from '@taucad/runtime/types';
@@ -23,6 +24,11 @@ import { libraryVersionMismatches } from '#project-manifest.js';
 /** Immutable mesh evidence retained by the runtime for display and export. @public */
 export type PicogkNativeHandle = {
   readonly glb: Uint8Array<ArrayBuffer>;
+  readonly authoredFiles?: ReadonlyArray<{
+    readonly name: string;
+    readonly mimeType: string;
+    readonly bytes: Uint8Array<ArrayBuffer>;
+  }>;
   /** What the delivered mesh cost, reported with each rendered view. */
   readonly tessellation?: TessellationReport;
 };
@@ -30,7 +36,11 @@ export type PicogkNativeHandle = {
 /** Snapshot of a native handle: its GLB bytes, with the mesh cost when the build reported one. */
 type PicogkSerializedHandle =
   | Uint8Array<ArrayBuffer>
-  | Readonly<{ glb: Uint8Array<ArrayBuffer>; tessellation: TessellationReport }>;
+  | Readonly<{
+      glb: Uint8Array<ArrayBuffer>;
+      tessellation?: TessellationReport;
+      authoredFiles?: PicogkNativeHandle['authoredFiles'];
+    }>;
 
 // Tau metadata remains execution context; the generated root thumbnail is not an execution input.
 const tauSystemArtifacts = new Set(['tau.json', 'thumbnail.webp']);
@@ -106,6 +116,7 @@ export const createPicogkKernelDefinition = <OptionsSchema extends z.ZodType>(se
   readonly optionsSchema: OptionsSchema;
   readonly version: string;
   readonly cancellation?: 'cooperative';
+  readonly authoredOutputs?: boolean;
   readonly initialize: KernelDefinition<
     'picogk',
     readonly ['cs'],
@@ -133,6 +144,12 @@ export const createPicogkKernelDefinition = <OptionsSchema extends z.ZodType>(se
      * mesh. Topology is not claimed: it is always written and cannot yet be withheld on request. */
     views: { model: { title: 'Model', mimeType: 'model/gltf-binary', content: ['includeEdges'] } },
     exports: {
+      ...(setup.authoredOutputs
+        ? {
+            authoredStl: { title: 'Authored STL files', mimeType: 'model/stl', extension: 'stl' },
+            authoredVdb: { title: 'Authored VDB files', mimeType: 'application/vnd.openvdb', extension: 'vdb' },
+          }
+        : {}),
       glb: {
         title: 'glTF binary',
         mimeType: 'model/gltf-binary',
@@ -311,10 +328,35 @@ export const createPicogkKernelDefinition = <OptionsSchema extends z.ZodType>(se
             ...metrics,
             ...(processWorkingSetBytes === null ? {} : { processWorkingSetBytes }),
           });
-          const handle: PicogkNativeHandle = { glb, tessellation: picogkTessellation(result) };
+          const authoredFiles: Array<NonNullable<PicogkNativeHandle['authoredFiles']>[number]> = [];
+          if (setup.authoredOutputs) {
+            for (const output of result.authoredOutputs ?? []) {
+              // oxlint-disable-next-line no-await-in-loop -- Transfer one receipt at a time to bound transient chunk memory.
+              const bytes = await context.session.readArtifact(output);
+              authoredFiles.push({ name: output.name, mimeType: output.mimeType, bytes });
+            }
+          }
+          services.signal.throwIfAborted();
+          const handle: PicogkNativeHandle = {
+            glb,
+            tessellation: picogkTessellation(result),
+            ...(setup.authoredOutputs ? { authoredFiles } : {}),
+          };
           return {
             handle,
             issues,
+            ...(setup.authoredOutputs
+              ? {
+                  exports: [
+                    'glb',
+                    'gltf',
+                    ...(authoredFiles.some((file) => file.mimeType === 'model/stl') ? (['authoredStl'] as const) : []),
+                    ...(authoredFiles.some((file) => file.mimeType === 'application/vnd.openvdb')
+                      ? (['authoredVdb'] as const)
+                      : []),
+                  ],
+                }
+              : {}),
           };
         } finally {
           if (result.recycleAfterResponse) {
@@ -349,6 +391,19 @@ export const createPicogkKernelDefinition = <OptionsSchema extends z.ZodType>(se
 
     async export(input) {
       try {
+        if (!input) {
+          throw new TypeError('A PicoGK export request is required.');
+        }
+        if (input.exportId === 'authoredStl' || input.exportId === 'authoredVdb') {
+          const mimeType = input.exportId === 'authoredStl' ? 'model/stl' : 'application/vnd.openvdb';
+          return {
+            files: nonemptyExportFiles(
+              (input.handle.authoredFiles ?? [])
+                .filter((file) => file.mimeType === mimeType)
+                .map((file) => ({ ...file, bytes: new Uint8Array(file.bytes) })),
+            ),
+          };
+        }
         const bytes = await transformGltfExportBytes(input.handle.glb, {
           ...input.options,
           format: input.exportId,
@@ -364,9 +419,15 @@ export const createPicogkKernelDefinition = <OptionsSchema extends z.ZodType>(se
 
     // A handle without a report snapshots as its GLB bytes alone, as it always has.
     serializeHandle: ({ handle }): PicogkSerializedHandle =>
-      handle.tessellation === undefined
+      handle.tessellation === undefined && handle.authoredFiles === undefined
         ? new Uint8Array(handle.glb)
-        : { glb: new Uint8Array(handle.glb), tessellation: handle.tessellation },
+        : {
+            glb: new Uint8Array(handle.glb),
+            tessellation: handle.tessellation,
+            ...(handle.authoredFiles
+              ? { authoredFiles: handle.authoredFiles.map((file) => ({ ...file, bytes: new Uint8Array(file.bytes) })) }
+              : {}),
+          },
     deserializeHandle: ({ serialized }): PicogkNativeHandle => {
       if (serialized instanceof Uint8Array) {
         return { glb: new Uint8Array(serialized) };
@@ -376,7 +437,19 @@ export const createPicogkKernelDefinition = <OptionsSchema extends z.ZodType>(se
       }
       return {
         glb: new Uint8Array(serialized.glb),
-        tessellation: picogkTessellationSchema.parse(serialized.tessellation),
+        ...(serialized.authoredFiles !== undefined && serialized.tessellation === undefined
+          ? {}
+          : { tessellation: picogkTessellationSchema.parse(serialized.tessellation) }),
+        ...(serialized.authoredFiles
+          ? {
+              authoredFiles: serialized.authoredFiles.map((file) => {
+                if (!(file.bytes instanceof Uint8Array)) {
+                  throw new TypeError('Invalid authored file bytes.');
+                }
+                return { ...file, bytes: new Uint8Array(file.bytes) };
+              }),
+            }
+          : {}),
       };
     },
 

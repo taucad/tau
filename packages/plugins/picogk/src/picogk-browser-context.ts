@@ -74,7 +74,16 @@ export const createPicogkBrowserContext = (options: PicogkBrowserSessionOptions)
           throw superseded();
         }
         if (request.method === 'build' && typeof result === 'object' && result !== null) {
-          receipts.set(result, { owner, snapshot, signal: request.signal, operationId: request.operationId });
+          const receipt = { owner, snapshot, signal: request.signal, operationId: request.operationId };
+          receipts.set(result, receipt);
+          if ('authoredOutputs' in result && Array.isArray(result.authoredOutputs)) {
+            const outputs: readonly unknown[] = result.authoredOutputs;
+            for (const output of outputs) {
+              if (typeof output === 'object' && output !== null) {
+                receipts.set(output, receipt);
+              }
+            }
+          }
         }
         return result;
       },

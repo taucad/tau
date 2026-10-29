@@ -1,6 +1,6 @@
 import { sha256Bytes } from '@taucad/runtime/kernel';
 import { z } from 'zod';
-import { picogkProtocolVersion } from '#picogk.protocol.js';
+import { picogkBrowserProtocolVersion } from '#picogk.protocol.js';
 import type { PicogkBrowserAssets } from '#picogk-browser-session.js';
 
 const digest = z.string().regex(/^[a-f\d]{64}$/u);
@@ -18,7 +18,7 @@ const variant = z.object({
 /** Immutable browser bundle format shared by preparation and admission. @internal */
 export const picogkBrowserManifestSchema = z.object({
   format: z.literal('tau-picogk-browser-v1'),
-  protocolVersion: z.literal(picogkProtocolVersion),
+  protocolVersion: z.literal(picogkBrowserProtocolVersion),
   toolchain: z.object({
     sdk: z.literal('11.0.100-rc.3.26522.148'),
     workload: z.literal('11.0.100-rc.3.26524.4'),

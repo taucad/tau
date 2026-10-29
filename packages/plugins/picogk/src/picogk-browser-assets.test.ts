@@ -11,7 +11,7 @@ const variant = () => ({
 });
 const manifest = () => ({
   format: 'tau-picogk-browser-v1',
-  protocolVersion: 8,
+  protocolVersion: 9,
   toolchain: {
     sdk: '11.0.100-rc.3.26522.148',
     workload: '11.0.100-rc.3.26524.4',
@@ -96,8 +96,8 @@ describe('PicoGK browser bundle admission', () => {
     ).rejects.toThrow('integrity mismatch');
   });
   it('should reject a mismatched protocol or unmatched compiler even when its document hash matches', async () => {
-    const protocol = setup({ ...manifest(), protocolVersion: 7 });
-    await expect(loadPicogkBrowserAssets(protocol.options)).rejects.toThrow('expected 8');
+    const protocol = setup({ ...manifest(), protocolVersion: 8 });
+    await expect(loadPicogkBrowserAssets(protocol.options)).rejects.toThrow('expected 9');
     const value = manifest();
     value.toolchain.emscriptenCompiler = '6.0.13';
     const compiler = setup(value);

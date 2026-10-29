@@ -41,7 +41,12 @@ internal sealed record BuildResult(
     // Build-level voxel edge length in millimetres; omitted when the model ran without a voxel library.
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] float? VoxelSize = null,
     // The display meshing applied to captured Voxels; omitted for the uniform mesh.
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] MeshingOptions? Meshing = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] MeshingOptions? Meshing = null)
+{
+#if PICOGK_BROWSER
+    public IReadOnlyList<AuthoredFile> AuthoredOutputs { get; init; } = [];
+#endif
+}
 
 // Build-level operation deltas; memory metrics above remain point-in-time snapshots.
 internal sealed record WorkCounters(long CapturedSnapshots, long GeometryReadbacks, long InputVertices,

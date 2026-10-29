@@ -6,7 +6,8 @@ import { createPicogkKernelDefinition, PicogkKernelError } from '#picogk-kernel-
 /** PicoGK capability backed by the prepared browser .NET runtime. @public */
 export const picogkBrowserKernel = createPicogkKernelDefinition({
   optionsSchema: picogkBrowserOptionsSchema,
-  version: '2.5.2+dotnet11rc3.browser1.protocol8.material2.mechanism2.meshing2',
+  authoredOutputs: true,
+  version: '2.5.2+dotnet11rc3.browser2.protocol9.material2.mechanism2.meshing2',
   async initialize(options, services) {
     if (!options.assets) {
       throw new PicogkKernelError([

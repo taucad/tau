@@ -29,6 +29,8 @@ internal static partial class Program
         CompilationService.InitializeBrowser(references, Convert.FromHexString(args[1]));
         var arguments = new Arguments("/project", "/artifacts", 0);
         Directory.CreateDirectory(arguments.Artifacts);
+        Directory.CreateDirectory(arguments.Workspace);
+        Directory.SetCurrentDirectory(arguments.Workspace);
         Write(new
         {
             protocolVersion = ProtocolVersion,

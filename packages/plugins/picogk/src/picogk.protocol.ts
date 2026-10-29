@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { GlbMaterial, GlbResources } from '@taucad/geometry-core';
 
 export const picogkProtocolVersion = 8;
+export const picogkBrowserProtocolVersion = 9;
 
 export const picogkIssueSchema = z.object({
   message: z.string(),
@@ -29,6 +30,14 @@ export const picogkResponseSchema = z.object({
   requestId: z.string(),
   result: z.unknown().optional(),
   error: z.object({ issues: z.array(picogkIssueSchema).min(1) }).optional(),
+});
+
+export const picogkBrowserReadySchema = picogkReadySchema.extend({
+  protocolVersion: z.literal(picogkBrowserProtocolVersion),
+});
+
+export const picogkBrowserResponseSchema = picogkResponseSchema.extend({
+  protocolVersion: z.literal(picogkBrowserProtocolVersion),
 });
 
 export const picogkCompilationTimingsSchema = z.object({
@@ -138,8 +147,33 @@ export const picogkMeshingSchema = z.object({ adaptivity: z.number().gt(0).lt(1)
 /** Adaptive meshing requested of, and echoed by, the worker. */
 export type PicogkMeshing = z.output<typeof picogkMeshingSchema>;
 
+/** Original geometry files captured by a browser build, separate from display artifacts. */
+export const picogkAuthoredOutputSchema = z
+  .object({
+    artifactPath: z.string().regex(/^\/artifacts\/authored\/[a-f\d]{32}\/files\//u),
+    name: z
+      .string()
+      .min(1)
+      .refine(
+        (name) =>
+          !name.includes('\\') &&
+          !name.includes('\0') &&
+          name.split('/').every((part) => part !== '' && part !== '.' && part !== '..'),
+      ),
+    byteLength: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    sha256: z.string().regex(/^[a-f\d]{64}$/u),
+    mimeType: z.enum(['model/stl', 'application/vnd.openvdb']),
+  })
+  .strict()
+  .refine(
+    (file) =>
+      file.artifactPath.slice('/artifacts/authored/'.length + 32 + '/files/'.length) === file.name &&
+      file.name.toLowerCase().endsWith(file.mimeType === 'model/stl' ? '.stl' : '.vdb'),
+  );
+
 export const picogkBuildSchema = z
   .object({
+    authoredOutputs: z.array(picogkAuthoredOutputSchema).optional(),
     artifactPath: z.string().min(1),
     byteLength: region,
     sha256: z.string().regex(/^[\da-f]{64}$/iu),
@@ -182,6 +216,13 @@ export const picogkBuildSchema = z
   })
   .strict()
   .superRefine((scene, context) => {
+    const outputs = scene.authoredOutputs ?? [];
+    if (
+      new Set(outputs.map((file) => file.name.toLowerCase())).size !== outputs.length ||
+      new Set(outputs.map((file) => file.artifactPath)).size !== outputs.length
+    ) {
+      context.addIssue({ code: 'custom', message: 'Duplicate authored output identity.' });
+    }
     const prototypes = new Set(scene.prototypes.map((prototype) => prototype.id));
     const referenced = new Set(scene.occurrences.map((occurrence) => occurrence.prototypeId));
     if (scene.prototypes.some((prototype) => !referenced.has(prototype.id))) {

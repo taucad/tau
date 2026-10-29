@@ -64,6 +64,19 @@ package provisioning and threaded-host qualification are separate implementation
 Tau UI builds consume that bundle through `PICOGK_BROWSER_ASSETS_ROOT`, verify its bytes and
 preserve its resource directory layout. Default native imports and desktop preparation are unchanged.
 
+Browser builds collect original `.stl` and `.vdb` files written under `Library.strLogFolder`
+or created/changed relative to the project root. These files are copied into run-owned receipts,
+verified during bounded transfers, and retained with the evaluated handle. `authoredStl` and
+`authoredVdb` export IDs return those bytes without remeshing or coordinate conversion, and are
+offered only when the build produced matching files. A format request for STL uses the authored
+files when available; otherwise the existing GLB-to-STL route remains available. VDB requires
+an authored file. Multiple original files use the existing export artifact-set handling.
+
+Each browser build starts from the authorized project snapshot. Writes in its private mirror do
+not modify the user's project; save exported files through the host's existing file services.
+Files from a failed or superseded run are never offered by a later evaluation. Exports retain
+whole file bytes in the handle; transfers are chunked, but the total memory policy still applies.
+
 PicoGK source stays PicoGK source:
 
 ```csharp
@@ -175,10 +188,10 @@ limits still apply. Workspace mirroring has no fixed byte, file-count or directo
 
 ## Environment
 
-| Host           | Supported | Notes                                                        |
-| -------------- | --------- | ------------------------------------------------------------ |
-| Browser worker | No        | `taucad.hostTarget: node` — this package is not browser-safe |
-| Node.js        | Yes       | `>=24`                                                       |
+| Host           | Supported      | Notes                                                            |
+| -------------- | -------------- | ---------------------------------------------------------------- |
+| Browser worker | Explicit entry | `@taucad/picogk/browser`, with a verified prepared serial bundle |
+| Node.js        | Yes            | `>=24`                                                           |
 
 ## Native performance gate
 

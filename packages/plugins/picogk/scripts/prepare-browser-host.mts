@@ -16,6 +16,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
+import { picogkBrowserProtocolVersion } from '#picogk.protocol.js';
 import { picogkBrowserManifestSchema } from '#picogk-browser-assets.js';
 
 const absolute = z.string().refine(isAbsolute, 'Preparation paths must be absolute.');
@@ -163,7 +164,7 @@ const main = async (): Promise<void> => {
   references.push(await copy(join(artifacts, 'bin', libraryName, 'release', 'PicoGK.dll'), 'refs/PicoGK.dll'));
   const manifest = picogkBrowserManifestSchema.parse({
     format: 'tau-picogk-browser-v1',
-    protocolVersion: 8,
+    protocolVersion: picogkBrowserProtocolVersion,
     toolchain: {
       sdk: '11.0.100-rc.3.26522.148',
       workload: '11.0.100-rc.3.26524.4',

@@ -6,7 +6,7 @@ import { preparePicogkBrowserRuntime } from '#picogk-browser-runtime.js';
 // Isolated .NET host. Only the owner supplies runtime URLs and authorized project bytes.
 /**
  * @typedef {Object} BrowserRuntime
- * @property {{FS: {mkdirTree(path: string): void, writeFile(path: string, bytes: Uint8Array | string): void, stat(path: string): {size: number}, open(path: string, flags: string): unknown, read(stream: unknown, bytes: Uint8Array, offset: number, length: number, position: number): number, close(stream: unknown): void, unlink(path: string): void}}} Module
+ * @property {{FS: {mkdirTree(path: string): void, chdir(path: string): void, writeFile(path: string, bytes: Uint8Array | string): void, stat(path: string): {size: number}, lstat(path: string): {mode: number}, isDir(mode: number): boolean, readdir(path: string): string[], rmdir(path: string): void, open(path: string, flags: string): unknown, read(stream: unknown, bytes: Uint8Array, offset: number, length: number, position: number): number, close(stream: unknown): void, unlink(path: string): void}}} Module
  * @property {(name: string, imports: {nextRequest(): Promise<string>, respond(json: string): void, validateImages(artifactPath: string, json: string): Promise<void>}) => void} setModuleImports
  * @property {() => {mainAssemblyName: string}} getConfig
  * @property {(assembly: string, args: string[]) => Promise<number>} runMain
@@ -31,6 +31,8 @@ let queued;
 let waiting;
 /** @type {string | undefined} */
 let activeMethod;
+/** @type {(() => void) | undefined} */
+let resetProject;
 const artifactReceipt = z.object({
   artifactPath: z.string(),
   byteLength: z.number().int().nonnegative(),
@@ -38,6 +40,21 @@ const artifactReceipt = z.object({
 });
 /** @type {Map<string, z.infer<typeof artifactReceipt>>} */
 const artifacts = new Map();
+
+/** @param {unknown} result - Managed build output. */
+const registerAuthoredArtifacts = (result) => {
+  const authored = z.object({ authoredOutputs: z.array(artifactReceipt).optional() }).parse(result);
+  for (const output of authored.authoredOutputs ?? []) {
+    if (!output.artifactPath.startsWith('/artifacts/authored/')) {
+      throw new Error('Invalid authored artifact path.');
+    }
+    relativePath(output.artifactPath.slice('/artifacts/'.length));
+    if (artifacts.has(output.artifactPath)) {
+      throw new Error('Duplicate authored artifact path.');
+    }
+    artifacts.set(output.artifactPath, output);
+  }
+};
 
 /** @param {unknown} error - Runtime failure. */
 const fail = (error) => {
@@ -70,6 +87,26 @@ const relativePath = (value) => {
 const writeFile = (path, bytes) => {
   runtime.Module.FS.mkdirTree(path.slice(0, path.lastIndexOf('/')));
   runtime.Module.FS.writeFile(path, bytes);
+};
+
+/** Remove only the disposable worker mirror, without following authored links.
+ * @param {string} root - Worker-owned absolute directory.
+ */
+const clearDirectory = (root) => {
+  runtime.Module.FS.mkdirTree(root);
+  for (const name of runtime.Module.FS.readdir(root)) {
+    if (name === '.' || name === '..') {
+      continue;
+    }
+    relativePath(name);
+    const path = `${root}/${name}`;
+    if (runtime.Module.FS.isDir(runtime.Module.FS.lstat(path).mode)) {
+      clearDirectory(path);
+      runtime.Module.FS.rmdir(path);
+    } else {
+      runtime.Module.FS.unlink(path);
+    }
+  }
 };
 
 /** @param {Incoming} message - Validated owner initialization. */
@@ -134,6 +171,15 @@ const initialize = async (message) => {
     paths.add(path);
     writeFile(path, file.contents);
   }
+  resetProject = () => {
+    runtime.Module.FS.chdir('/project');
+    clearDirectory('/project');
+    clearDirectory('/artifacts');
+    artifacts.clear();
+    for (const file of snapshot.files) {
+      writeFile(`/project/${relativePath(file.path)}`, file.contents);
+    }
+  };
   writeFile('/compiler-refs.json', JSON.stringify(references));
   runtime.setModuleImports('tau-picogk-host', {
     validateImages: async (artifactPath, json) => {
@@ -189,6 +235,7 @@ const initialize = async (message) => {
       if (activeMethod === 'build' && 'result' in frame) {
         const receipt = artifactReceipt.parse(frame.result);
         artifacts.set(receipt.artifactPath, receipt);
+        registerAuthoredArtifacts(frame.result);
       }
       const kind = 'type' in frame && frame.type === 'ready' ? 'ready' : 'response';
       state = 'ready';
@@ -272,6 +319,9 @@ globalThis.addEventListener('message', async (/** @type {MessageEvent<Incoming |
         { transfer: [bytes.buffer] },
       );
       return;
+    }
+    if (data.frame.method === 'build') {
+      resetProject?.();
     }
     state = 'running';
     activeMethod = data.frame.method;

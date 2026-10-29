@@ -20,7 +20,7 @@ import {
   utimes,
   writeFile,
 } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import type * as NodeFileSystem from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -645,6 +645,49 @@ const aborted = async (signal: AbortSignal): Promise<void> =>
     );
   });
 
+const mark = (what: string): void => {
+  process.stderr.write(`[mark ${String(Date.now() % 1_000_000)}] ${what}\n`);
+};
+const dump = (label: string, pid: number | undefined): void => {
+  const say = (key: string, value: string): void => {
+    process.stderr.write(`[dump ${label}] ${key} = ${value}\n`);
+  };
+  try {
+    say(
+      'fuse-mounts',
+      readFileSync('/proc/self/mountinfo', 'utf8')
+        .split('\n')
+        .filter((line) => line.includes('fuse'))
+        .join(' || '),
+    );
+  } catch (error) {
+    say('fuse-mounts', String(error));
+  }
+  try {
+    for (const connection of readdirSync('/sys/fs/fuse/connections')) {
+      for (const field of ['waiting', 'max_background', 'congestion_threshold']) {
+        try {
+          say(`conn.${connection}.${field}`, readFileSync(`/sys/fs/fuse/connections/${connection}/${field}`, 'utf8').trim());
+        } catch (error) {
+          say(`conn.${connection}.${field}`, String(error));
+        }
+      }
+    }
+  } catch (error) {
+    say('connections', String(error));
+  }
+  for (const target of pid === undefined ? [] : [pid]) {
+    for (const field of ['wchan', 'syscall', 'stack', 'status']) {
+      try {
+        const text = readFileSync(`/proc/${String(target)}/${field}`, 'utf8');
+        say(`child.${field}`, (field === 'status' ? (/^State:.*$/mu.exec(text)?.[0] ?? '?') : text).trim().slice(0, 400));
+      } catch (error) {
+        say(`child.${field}`, String(error));
+      }
+    }
+  }
+};
+
 describe.runIf(enabled)('private projection D8 core-correctness gates', () => {
   const withMount = async (
     run: (mountpoint: string, owner: ReturnType<typeof createOwner>) => Promise<void>,
@@ -962,14 +1005,28 @@ except Stop:
           join(mountpoint, 'blocked'),
         );
         const next = lines(child);
+        const watchdog = setTimeout(() => {
+          mark('WATCHDOG fired');
+          dump('watchdog', child.pid);
+        }, 8000);
+        mark('M0 spawned pid=' + String(child.pid));
         expect(await next()).toBe('ready');
+        mark('M1 got ready');
         await reading.promise;
+        mark('M2 reading.promise resolved');
+        dump('after-M2', child.pid);
         expect(await readFile(join(mountpoint, 'free'), 'utf8')).toBe('free');
+        mark('M3 readFile(free) done');
         child.kill('SIGUSR1');
+        mark('M4 sent SIGUSR1');
         expect(await next()).toBe('interrupted');
+        mark('M5 child printed interrupted');
         expect(await exited(child)).toBe(0);
+        mark('M6 child exited');
+        clearTimeout(watchdog);
         expect((reason as Error).message).toBe('Projection request interrupted.');
         expect(other?.aborted).toBe(false);
+        mark('M7 assertions done');
       },
       (owner) => {
         owner.names.set('blocked', 2n);

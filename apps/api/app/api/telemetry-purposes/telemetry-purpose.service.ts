@@ -1,11 +1,12 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { DatabaseService } from '#database/database.service.js';
 import { project, projectDeletion, projectInvitation, telemetryPurposeDecision } from '#database/schema.js';
 import type { Environment } from '#config/environment.config.js';
 import { Span } from '#telemetry/tracer.service.js';
-import { BillingService } from '#api/billing/billing.service.js';
+import { tierAssuranceKey } from '#api/telemetry-purposes/tier-assurance.js';
+import type { TierAssuranceSource } from '#api/telemetry-purposes/tier-assurance.js';
 import type { ProjectAuthority, RecordedPurposeDecision } from '#api/telemetry-purposes/purpose-authority.js';
 import { purposeEpoch, resolvePurposeAuthority } from '#api/telemetry-purposes/purpose-authority.js';
 import type {
@@ -25,7 +26,7 @@ export class TelemetryPurposeService {
   public constructor(
     private readonly databaseService: DatabaseService,
     private readonly configService: ConfigService<Environment, true>,
-    private readonly billingService: BillingService,
+    @Inject(tierAssuranceKey) private readonly tierAssurance: TierAssuranceSource,
   ) {}
 
   /**
@@ -40,7 +41,7 @@ export class TelemetryPurposeService {
     const noticeVersion = this.noticeVersion();
     const [decisions, assurance, projectAuthority] = await Promise.all([
       this.decisionsFor(userId),
-      this.billingService.getTierAssurance(userId),
+      this.tierAssurance.getTierAssurance(userId),
       projectId === undefined ? undefined : this.projectAuthority(userId, projectId),
     ]);
 

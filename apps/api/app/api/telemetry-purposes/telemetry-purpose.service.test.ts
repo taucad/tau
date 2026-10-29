@@ -3,7 +3,7 @@ import { mock, mockDeep } from 'vitest-mock-extended';
 import { BadRequestException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { DatabaseService } from '#database/database.service.js';
-import type { BillingService } from '#api/billing/billing.service.js';
+import type { TierAssuranceSource } from '#api/telemetry-purposes/tier-assurance.js';
 import type { project, projectDeletion, projectInvitation, telemetryPurposeDecision } from '#database/schema.js';
 import { TelemetryPurposeService } from '#api/telemetry-purposes/telemetry-purpose.service.js';
 import type { TelemetryPurpose } from '#api/telemetry-purposes/telemetry-purpose.schema.js';
@@ -42,8 +42,8 @@ const createService = (
   const configService = mock<ConfigService>();
   configService.get.mockReturnValue(options.noticeVersion);
 
-  const billingService = mock<BillingService>();
-  billingService.getTierAssurance.mockResolvedValue({
+  const tierAssurance = mock<TierAssuranceSource>();
+  tierAssurance.getTierAssurance.mockResolvedValue({
     tier: options.tier ?? 'free',
     assured: options.assured ?? true,
   });
@@ -52,7 +52,7 @@ const createService = (
     service: new TelemetryPurposeService(
       database,
       configService as unknown as ConstructorParameters<typeof TelemetryPurposeService>[1],
-      billingService,
+      tierAssurance,
     ),
     database,
     values,

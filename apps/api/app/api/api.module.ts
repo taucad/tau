@@ -48,7 +48,7 @@ export class ApiModule {
         LlmModule,
         ModelModule,
         PrivacyModule,
-        TelemetryPurposeModule,
+        TelemetryPurposeModule.forRoot(options),
         ProjectsModule,
         ProviderModule,
         PublicationsModule,

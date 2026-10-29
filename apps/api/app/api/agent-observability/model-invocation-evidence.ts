@@ -1,13 +1,27 @@
-import { createHash } from 'node:crypto';
 import type { Evidence } from '@taucad/agent-observability/contract';
-import { evidenceDigest, canonicalEvidence } from '@taucad/agent-observability/identity';
+import { canonicalEvidence, contractId, evidenceDigest, sha256Hex } from '@taucad/agent-observability/identity';
 import type { SourceProtection } from '#api/agent-observability/evidence-admission.js';
 import { evidenceRetentionMilliseconds } from '#api/agent-observability/evidence-admission.js';
 import type { ProviderFact, ProviderStreamSummary } from '#api/agent-observability/provider-stream-facts.js';
 import type { ModelInvocationSurface, ModelProviderWire } from '#api/llm/model-invocation.types.js';
 
 /** Bumped whenever the facts written for the same attempt change. */
-export const apiProviderMapper = 'api-provider-v1';
+export const apiProviderMapper = 'api-provider-v2';
+
+/* The host names each gateway attempt `<run>:<attempt>:<position>` when it prepares it (agent-host's session). */
+const hostAttemptKey = /^(.+):\d+:\d+$/u;
+
+/**
+ * The execution an attempt key belongs to: the host run it names, under the id the host's own facts use, so an attempt
+ * and its settlement join that run; any other key is its own execution.
+ *
+ * @param attemptKey - The caller's attempt key.
+ * @returns The contract id of the run, else of the attempt.
+ */
+export const executionOfAttempt = async (attemptKey: string): Promise<string> => {
+  const run = hostAttemptKey.exec(attemptKey)?.[1];
+  return run === undefined ? contractId('inv', attemptKey) : contractId('run', run);
+};
 
 /** One supplier attempt as the API saw it relay. */
 export type ObservedAttempt = Readonly<{
@@ -35,12 +49,6 @@ export type ObservedAttempt = Readonly<{
 /** What current authority stamps on the attempt. */
 export type AttemptAuthority = Readonly<{ policyEpoch: string; protection: SourceProtection }>;
 
-const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
-
-/** An id the contract accepts: the value itself when it already is one, else its digest. */
-const contractId = (prefix: string, value: string): string =>
-  /^[\w:.-]{1,128}$/u.test(value) ? value : `${prefix}-${sha256(value).slice(0, 48)}`;
-
 const stopOf = (attempt: ObservedAttempt): ProviderFact['stop'] => {
   if (attempt.ended === 'aborted') {
     return 'aborted';
@@ -65,8 +73,17 @@ export const providerAttemptEvidence = async (
   attempt: ObservedAttempt,
   authority: AttemptAuthority,
 ): Promise<Evidence> => {
-  const invocation = contractId('inv', attempt.attemptKey);
-  const run = attempt.chat === undefined ? invocation : contractId('chat', attempt.chat);
+  const optionalId = async (prefix: string, value: string | undefined): Promise<string | undefined> =>
+    value === undefined ? undefined : contractId(prefix, value);
+  const [invocation, execution, chat, operation, requestedModel, provider] = await Promise.all([
+    contractId('inv', attempt.attemptKey),
+    executionOfAttempt(attempt.attemptKey),
+    optionalId('chat', attempt.chat),
+    optionalId('op', attempt.operation),
+    optionalId('model', attempt.requestedModel),
+    optionalId('provider', attempt.provider),
+  ]);
+  const run = chat ?? invocation;
   const { stream } = attempt;
   const usage: ProviderFact['usage'] = stream?.usage ?? {
     input: null,
@@ -79,11 +96,11 @@ export const providerAttemptEvidence = async (
   const fact: ProviderFact = {
     kind: 'provider',
     logicalCall: invocation,
-    attempt: attempt.operation === undefined ? null : contractId('op', attempt.operation),
-    billing: attempt.operation === undefined ? null : contractId('op', attempt.operation),
-    requestedModel: attempt.requestedModel === undefined ? null : contractId('model', attempt.requestedModel),
+    attempt: operation ?? null,
+    billing: operation ?? null,
+    requestedModel: requestedModel ?? null,
     resolvedModel: stream?.resolvedModel ?? null,
-    provider: attempt.provider === undefined ? null : contractId('provider', attempt.provider),
+    provider: provider ?? null,
     response: stream?.response ?? null,
     firstOutput:
       stream?.firstChunk === undefined
@@ -93,7 +110,9 @@ export const providerAttemptEvidence = async (
     stop: stopOf(attempt),
     usage,
   };
-  const sourceDigest = sha256(canonicalEvidence(['api-provider-attempt', attempt.principal, invocation, fact]));
+  const sourceDigest = await sha256Hex(
+    canonicalEvidence(['api-provider-attempt', attempt.principal, invocation, fact]),
+  );
   const expiresAt = attempt.startedAt + evidenceRetentionMilliseconds;
   const firstChunk = stream?.firstChunk;
   const evidence: Evidence = {
@@ -109,7 +128,7 @@ export const providerAttemptEvidence = async (
       destination: 'langfuse',
     },
     run,
-    execution: { attempt: invocation, resumedFrom: null, branchedFrom: null },
+    execution: { attempt: execution, resumedFrom: null, branchedFrom: null },
     versions: {
       hostBuild: null,
       apiBuild: null,

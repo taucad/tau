@@ -3,6 +3,16 @@ import { Edge, Face, Part, Shape, ShapeList, Sketch } from './shapes.js';
 declare const inspect: unique symbol;
 /** Default K-factor: the neutral fiber at 0.44 of the thickness from the inside surface. */
 export declare const K_FACTOR = 0.44;
+/**
+ * What `kFactor` of `unfold`, `flatPattern` and `bends` takes: one K-factor for every bend; a
+ * function `(radius, thickness, angle) => k`; a mapping from inside radius to K-factor (a `Map`, or
+ * an object such as `{ 1: 0.33, 6: 0.45 }`); `[r / t, k]` pairs, interpolated; `'din6935'`; or
+ * `null`/left out, the K-factor each bend was folded with (`fold`, `flange`), else `K_FACTOR`.
+ */
+export type KFactor = number | string | ((radius: number, thickness: number, angle: number) => number) | ReadonlyMap<number, number> | Readonly<Record<string, number>> | readonly (readonly [
+    number,
+    number
+])[] | null;
 /** The bend of `bendAllowance` and `bendDeduction`. */
 export interface BendAllowanceOptions {
     /** Inside bend radius. */
@@ -20,6 +30,13 @@ export interface DevelopedLengthOptions extends BendAllowanceOptions {
 /** Smallest inside radius: the kernel's bend region reaches 0.1 past the sheet on both sides, so
  * unfolding needs a radius above 0.1. */
 export declare const MIN_RADIUS = 0.11;
+/**
+ * The K-factor of DIN 6935 for a bend of inside `radius` in a sheet of `thickness`: the standard
+ * puts the neutral fiber at `k * t / 2` from the inside with the correction factor
+ * `k = 0.65 + 0.5 * log10(r / t)`, which reaches 1 (the middle of the sheet) at `r / t = 5`. As a
+ * K-factor: `k / 2`, from 0 to 0.5.
+ */
+export declare function din6935(radius: number, thickness: number): number;
 /**
  * Length of the flat strip that a bend takes: `radians(angle) * (radius + kFactor * thickness)`.
  *
@@ -41,7 +58,10 @@ export declare function bendDeduction(angle: number, options: BendAllowanceOptio
  * `angle` is the angle of every bend, or one angle per bend (`legs.length - 1` of them). The
  * result is `sum(legs) - sum(bend deductions)`.
  */
-export declare function developedLength(...args: [...legs: number[], options: DevelopedLengthOptions]): number;
+export declare function developedLength(...args: [
+    ...legs: number[],
+    options: DevelopedLengthOptions
+]): number;
 /**
  * One bend of a sheet metal part.
  *
@@ -73,18 +93,19 @@ export declare class Bend {
  * the origin.
  *
  * `outline` is the cut contour (outer boundary and holes) as a sketch at z = 0; `bends` carry the
- * bend lines (at z = 0) with angle, radius, direction and allowance.
+ * bend lines (at z = 0) with angle, radius, direction, K-factor and allowance. `kFactor` is the
+ * K-factor of every bend, or `null` where the bends have different ones (each `Bend` has its own).
  */
 export declare class FlatPattern {
     readonly part: Part;
     readonly outline: Sketch;
     readonly bends: Bend[];
     readonly thickness: number;
-    readonly kFactor: number;
-    constructor(part: Part, outline: Sketch, bends: Bend[], thickness: number, kFactor: number);
+    readonly kFactor: number | null;
+    constructor(part: Part, outline: Sketch, bends: Bend[], thickness: number, kFactor: number | null);
     /** The bend lines (middle of each bend's strip), at z = 0. */
     get bendLines(): ShapeList<Edge>;
-    /** Size of the blank: (length along X, width along Y, thickness). */
+    /** Size of the blank: (length along X, width along Y, thickness), measured on its edges. */
     get size(): Vector;
     /** Equal fields (Python's dataclass `==`). */
     equals(other: unknown): boolean;
@@ -95,7 +116,8 @@ export declare class FlatPattern {
 export interface FoldOptions {
     /** Inside bend radius. */
     radius: number;
-    /** Position of the neutral fiber, 0 (inside) to 1 (outside); default `K_FACTOR`. */
+    /** Position of the neutral fiber, 0 (inside) to 1 (outside); default `K_FACTOR`. The part keeps
+     * it with the bend: `unfold` and `flatPattern` take it by default. */
     kFactor?: number;
     /** A point (or a face, edge or vertex) on the side of the line that stays in place; by default
      * the side that reaches farther from the line stays. */
@@ -153,17 +175,17 @@ export declare function flange(part: Part, edge: Edge | ShapeList<Edge>, length:
 /**
  * The bends of a sheet metal part: angle, inside radius, thickness, length and axis of each.
  *
- * A bend is a pair of coaxial cylinder faces one sheet thickness apart (as `fold` and `flange`
- * make them, or as imported from a sheet metal part). Cylinders without such a partner (holes,
- * rounds) are not bends. `kFactor` is only used for the allowances.
+ * A bend is a pair of coaxial cylinder faces one sheet thickness apart (as `fold`, `flange` and
+ * `bend` make them, or as imported from a sheet metal part), up to below a full turn. Cylinders
+ * without such a partner (holes, rounds) are not bends. `kFactor` is only used for the allowances.
  */
 export declare function bends(part: Part, options?: {
-    kFactor?: number;
+    kFactor?: KFactor;
 }): Bend[];
 /** Options of `unfold` and `flatPattern`. */
 export interface UnfoldOptions {
-    /** Position of the neutral fiber, 0 (inside) to 1 (outside); default `K_FACTOR`. */
-    kFactor?: number;
+    /** The K-factor of each bend (see `KFactor`); default: the one each bend was folded with, else `K_FACTOR`. */
+    kFactor?: KFactor;
     /** The planar face of the part that stays in place (default: the largest planar face). */
     fixed?: Face | null;
 }
@@ -172,13 +194,22 @@ export interface UnfoldOptions {
  *
  * The face `fixed` (default: the largest planar face) stays where it is; the rest of the sheet
  * unfolds into its plane. With the K-factor the part was bent with, the result is the blank it
- * was bent from. For the flat pattern on the XY plane, with outline and bend lines, use
+ * was bent from: by default each bend takes the K-factor `fold` or `flange` made it with (else
+ * `K_FACTOR`, 0.44, as for an imported part). `kFactor` gives other ones: one number for every
+ * bend, a function `(radius, thickness, angle) => k`, a mapping from inside radius to K-factor
+ * (`{ 1: 0.33, 6: 0.45 }`), `[r / t, k]` pairs to interpolate (a shop's table), or `'din6935'`
+ * (see `KFactor`). For the flat pattern on the XY plane, with outline and bend lines, use
  * `flatPattern`.
+ *
+ * Rolled parts (one bend, no flat sheet: a ring segment), bends at a free end of the sheet (a
+ * curl) and bends over 180 degrees unroll at the neutral radius `radius + kFactor * thickness`; a
+ * rolled part about the middle of its bend (`fixed` is refused there).
  */
 export declare function unfold(part: Part, options?: UnfoldOptions): Part;
 /**
  * The flat pattern of a sheet metal part, laid on the XY plane (see `FlatPattern`).
  *
+ * `kFactor` as for `unfold`: by default each bend's own (from `fold` and `flange`), else `K_FACTOR`.
  * The part is unfolded with `fixed` (default: the largest planar face) staying in place; that
  * face is the bottom of the flat (z = 0) and bends are "up" when the far side of the sheet folds
  * towards +Z. The longer side of the smallest rectangle around the blank runs along X, and the

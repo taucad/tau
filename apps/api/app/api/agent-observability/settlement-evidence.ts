@@ -1,14 +1,14 @@
-import { createHash } from 'node:crypto';
 import type { Evidence } from '@taucad/agent-observability/contract';
-import { canonicalEvidence, evidenceDigest } from '@taucad/agent-observability/identity';
+import { canonicalEvidence, contractId, evidenceDigest, sha256Hex } from '@taucad/agent-observability/identity';
 import type { creditOperation } from '#database/schema.js';
 import type { TerminalReceipt } from '#api/billing/credit-ledger.types.js';
 import type { SourceProtection } from '#api/agent-observability/evidence-admission.js';
 import { evidenceRetentionMilliseconds } from '#api/agent-observability/evidence-admission.js';
 import type { AttemptAuthority } from '#api/agent-observability/model-invocation-evidence.js';
+import { executionOfAttempt } from '#api/agent-observability/model-invocation-evidence.js';
 
 /** Bumped whenever the facts written for the same settlement change. */
-export const apiSettlementMapper = 'api-settlement-v1';
+export const apiSettlementMapper = 'api-settlement-v2';
 
 type FinancialFact = Extract<Evidence['payload'], { plane: 'summary' }>['fact'] & { kind: 'financial' };
 
@@ -27,11 +27,13 @@ export type ObservedSettlement = Readonly<{
 const atomsPerUsd = 1_000_000;
 const picoPerUsd = 1_000_000_000_000;
 
-const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
-
-/** An id the contract accepts: the value itself when it already is one, else its digest. */
-const contractId = (prefix: string, value: string): string =>
-  /^[\w:.-]{1,128}$/u.test(value) ? value : `${prefix}-${sha256(value).slice(0, 48)}`;
+/**
+ * The credits a settlement fact reports for what the ledger charged.
+ *
+ * @param atoms - Charged credit atoms.
+ * @returns Credits, in USD.
+ */
+export const creditsOfAtoms = (atoms: bigint): number => Number(atoms) / atomsPerUsd;
 
 /**
  * The API-reported financial fact of one settled funded operation (blueprint
@@ -52,22 +54,29 @@ export const settlementEvidence = async (
   authority: AttemptAuthority & Readonly<{ project: string }>,
 ): Promise<Evidence> => {
   const { operation, receipt } = settlement;
-  const invocation = contractId('inv', operation.attemptKey);
-  const run = operation.chatHint === null ? invocation : contractId('chat', operation.chatHint);
-  const ledger = contractId('ledger', `${operation.id}:${receipt.terminalRevision}`);
+  const [invocation, execution, chat, ledger, attempt, tariff, normalization] = await Promise.all([
+    contractId('inv', operation.attemptKey),
+    executionOfAttempt(operation.attemptKey),
+    operation.chatHint === null ? undefined : contractId('chat', operation.chatHint),
+    contractId('ledger', `${operation.id}:${receipt.terminalRevision}`),
+    contractId('op', operation.id),
+    contractId('tariff', operation.activationId),
+    contractId('norm', settlement.normalization ?? 'none'),
+  ]);
+  const run = chat ?? invocation;
   const fact: FinancialFact = {
     kind: 'financial',
     ledger,
-    attempt: contractId('op', operation.id),
-    credits: Number(receipt.chargedAtoms) / atomsPerUsd,
-    tariff: contractId('tariff', operation.activationId),
+    attempt,
+    credits: creditsOfAtoms(receipt.chargedAtoms),
+    tariff,
     supplierCost: receipt.supplierCostPicoUsd === null ? null : Number(receipt.supplierCostPicoUsd) / picoPerUsd,
     currency: 'USD',
-    normalization: contractId('norm', settlement.normalization ?? 'none'),
+    normalization,
     // A terminal settlement; later ledger corrections are separate adjustment facts.
     adjustment: false,
   };
-  const sourceDigest = sha256(canonicalEvidence(['api-settlement', principal, ledger, fact]));
+  const sourceDigest = await sha256Hex(canonicalEvidence(['api-settlement', principal, ledger, fact]));
   const originalAt = (operation.admittedAt ?? receipt.resolvedAt).getTime();
   const expiresAt = originalAt + evidenceRetentionMilliseconds;
   const evidence: Evidence = {
@@ -78,7 +87,7 @@ export const settlementEvidence = async (
     delivery: { uploader: 'api', attempt: 'api-1', cursor: { view: 'own', origin: 'api', position: ledger } },
     scope: { principal, project: authority.project, policyEpoch: authority.policyEpoch, destination: 'langfuse' },
     run,
-    execution: { attempt: invocation, resumedFrom: null, branchedFrom: null },
+    execution: { attempt: execution, resumedFrom: null, branchedFrom: null },
     versions: {
       hostBuild: null,
       apiBuild: null,

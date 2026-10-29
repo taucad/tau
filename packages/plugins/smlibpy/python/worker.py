@@ -372,45 +372,23 @@ def _face_runs(item: Any, mesh: Any) -> Any:
     return owner if len(owner) == len(mesh.triangles) else None
 
 
-def _open_edges(meshes: list[Any]) -> int:
-    """Edges used by other than two triangles once the meshes' coincident positions are joined; zero when watertight."""
-
-    import numpy
-
-    positions = numpy.concatenate([numpy.round(numpy.asarray(mesh.vertices, dtype=numpy.float64), 6) for mesh in meshes])
-    offsets = numpy.cumsum([0] + [len(mesh.vertices) for mesh in meshes[:-1]])
-    triangles = numpy.concatenate(
-        [numpy.asarray(mesh.triangles, dtype=numpy.int64) + offset for mesh, offset in zip(meshes, offsets)]
-    )
-    _, welded = numpy.unique(positions, axis=0, return_inverse=True)
-    corners = welded.reshape(-1)[triangles]
-    edges = numpy.sort(numpy.concatenate([corners[:, [0, 1]], corners[:, [1, 2]], corners[:, [2, 0]]]), axis=1)
-    _, counts = numpy.unique(edges, axis=0, return_counts=True)
-    return int((counts != 2).sum())
-
-
 def _surface(item: Any, linear_tolerance: float, angular_tolerance: float) -> tuple[Any, Any, Any]:
     """Tessellate one body, face or mesh in one pass, so faces share their boundary samples and close.
 
-    smlibpy 0.3.5 leaves the seam of a moved torus open in a whole-body mesh although the face alone meshes closed (the
-    SMLib kernel's smlibwasm shows the same): for a solid whose body mesh is open, per-face meshes are kept when they
-    close better.
+    Since smlibpy 0.6 a mesh frees the kernel's polygons once its arrays are copied out, so the body is tessellated
+    keeping them for the faces' triangle owners, and they are freed here.
     """
 
-    import numpy
-    from smlibpy import Mesh, Part, tessellate
-    from smlibpy.mesh import merge
+    from smlibpy import Mesh
+    from smlibpy.mesh import _tessellate
 
     if isinstance(item, Mesh):
         return item, None, item.triangles
-    mesh = tessellate(item, linear_tolerance, angular_tolerance)
-    if isinstance(item, Part) and len(mesh.triangles) > 0 and _open_edges([mesh]) > 0:
-        faces = [tessellate(face, linear_tolerance, angular_tolerance) for face in item.faces()]
-        if _open_edges(faces) < _open_edges([mesh]):
-            owners = numpy.repeat(numpy.arange(len(faces)), [len(face.triangles) for face in faces])
-            merged = merge(faces)
-            return merged, owners, merged.triangles
-    return mesh, _face_runs(item, mesh), mesh.triangles
+    mesh = _tessellate(item, linear_tolerance, angular_tolerance, True)
+    try:
+        return mesh, _face_runs(item, mesh), mesh.triangles
+    finally:
+        mesh.dispose()
 
 
 def _face_arrays(mesh: Any, owners: Any) -> dict[str, Any]:

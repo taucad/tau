@@ -58,6 +58,8 @@ import { dependencyMountRoot } from '#lib/bundled-types-tree.constants.js';
 import { readBuildIdentity } from '#lib/build-identity.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { reportToApi } from '#runtime/observability/report-to-api.js';
+import { createProjectOpenTimer, markProjectOpen } from '#machines/project-open-timer.js';
+import type { ProjectOpenTimer } from '#machines/project-open-timer.js';
 import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 
 /**
@@ -408,6 +410,8 @@ const checkoutRoutes = createCheckoutRoutes({ mountTable, fileService });
  * beside the client and read back by project id.
  */
 const pushRecorders = new Map<string, PushRecorder>();
+/* STO-25: each open project's open, timed from its root opening to its first usable view. */
+const projectOpenTimers = new Map<string, ProjectOpenTimer>();
 const revisionRegistry = createWorkerRevisionRegistry({
   /*
    * P31: one project, one store.
@@ -427,6 +431,21 @@ const revisionRegistry = createWorkerRevisionRegistry({
       createRevisionHttpClient({ credentials: 'include', ...createGitRemoteTransport(credential) }),
     );
     pushRecorders.set(projectId, recorder);
+    const openTimer = createProjectOpenTimer({
+      report: ({ durationMilliseconds, ...detail }) => {
+        const apiBaseUrl = credential()?.apiBaseUrl;
+        if (apiBaseUrl === undefined || isDesktopTarget()) {
+          return;
+        }
+        reportToApi({
+          reportUrl: `${apiBaseUrl}/v1/telemetry/ingest`,
+          name: 'observability.projectOpen',
+          duration: durationMilliseconds,
+          detail,
+        });
+      },
+    });
+    projectOpenTimers.set(projectId, openTimer);
     return createIsomorphicGitRevisionPort({
       filesystem: fileService.createRootedFileSystem(`/projects/${projectId}`),
       checkouts: checkoutRoutes(projectId),
@@ -439,6 +458,7 @@ const revisionRegistry = createWorkerRevisionRegistry({
       http: recorder.client,
       /* Load-path audit: the open's hydrate settles after the pull attempt is reported, so it is reported on its own. */
       onLfsFetch: ({ durationMilliseconds, ...detail }) => {
+        openTimer.fetchedFromNetwork();
         const apiBaseUrl = credential()?.apiBaseUrl;
         if (apiBaseUrl === undefined || isDesktopTarget()) {
           return;
@@ -471,6 +491,15 @@ const revisionRegistry = createWorkerRevisionRegistry({
   /* A recorded pack is as big as the push was; it goes when the project does. */
   released: (projectId) => {
     pushRecorders.delete(projectId);
+    projectOpenTimers.delete(projectId);
+  },
+  /* STO-25: `first_view` at the applied checkout, `fully_fetched` once its
+   * background large-object fill has written the last placeholder. */
+  observeStatus: (projectId, status) => {
+    const timer = projectOpenTimers.get(projectId);
+    if (timer !== undefined) {
+      markProjectOpen(timer, status);
+    }
   },
   filesystem: (root) => fileService.createRootedFileSystem(root),
   /* Every write in this worker raises its change event inside the write, so a

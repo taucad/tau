@@ -46,11 +46,19 @@ export const projectTitle = (name: string): Locator =>
  *
  * @param viewport - The phone size.
  * @param route - The seed route, e.g. `/__e2e/chat-attachments`.
+ * @param options - Optional steps.
+ * @param options.beforeNavigate - Runs once the target is open and sized, before the first navigation: the place for an
+ *   init script that must see the document from its start.
  */
-export const openPhone = async (viewport: PhoneViewport, route: string): Promise<void> => {
+export const openPhone = async (
+  viewport: PhoneViewport,
+  route: string,
+  options: Readonly<{ beforeNavigate?: () => Promise<void> }> = {},
+): Promise<void> => {
   await target.commands.uiOpenTarget({ hasTouch: true, isMobile: true });
   await prepareComposerPage();
   await target.setViewport(viewport);
+  await options.beforeNavigate?.();
   await target.navigate(route);
   await target.expectUrl(/\/w\/[^/]+\/[^/?]+/u, 60_000);
   await target.expectVisible(navigation(), 60_000);
@@ -63,25 +71,43 @@ export const detent = async (): Promise<string | undefined> =>
     : undefined;
 
 /**
+ * Wait two frames, then for every running animation with an end in one scope to finish: the whole document's, or the
+ * sheet's own (the dialog around the grabber). An animation without an end (a spinner) never finishes, so it is not
+ * waited on. A cancelled animation has settled too: a newer one replaced it or the element stopped moving.
+ *
+ * @param scope - Whose animations: the document's, or the open sheet's.
+ */
+const settleMotion = async (scope: 'document' | 'sheet'): Promise<void> =>
+  target.evaluateLocator(
+    scope === 'sheet' ? grabber() : selectors.getByCss('html'),
+    async (anchor, which) => {
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            resolve();
+          });
+        });
+      });
+      const root = which === 'sheet' ? anchor.closest('[role="dialog"]') : document;
+      if (!root) {
+        throw new Error('The grabber is not inside the sheet.');
+      }
+      const finite = root
+        .getAnimations()
+        .filter((animation) => Number.isFinite(Number(animation.effect?.getComputedTiming().endTime ?? 0)));
+      await Promise.all(finite.map(async (animation) => animation.finished.catch(() => undefined)));
+    },
+    scope,
+  );
+
+/**
  * Wait for the sheet to finish moving to its detent. The detent's value changes at once, but the sheet slides there
  * over a transition while the surface takes its new height in one step, so a box read mid-slide is not the detent's.
  */
-export const sheetSettled = async (): Promise<void> =>
-  target.evaluateLocator(grabber(), async (handle) => {
-    await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          resolve();
-        });
-      });
-    });
-    const sheet = handle.closest('[role="dialog"]');
-    if (!sheet) {
-      throw new Error('The grabber is not inside the sheet.');
-    }
-    // A cancelled transition has settled too: a newer one replaced it or the sheet stopped moving.
-    await Promise.all(sheet.getAnimations().map(async (animation) => animation.finished.catch(() => undefined)));
-  });
+export const sheetSettled = async (): Promise<void> => settleMotion('sheet');
+
+/** Wait for every running animation and transition with an end in the document to finish or be replaced. */
+export const motionSettled = async (): Promise<void> => settleMotion('document');
 
 /**
  * Move the sheet with the grabber's own keys (D4) and wait for the detent: `Home` half, `End` full; the arrows step
@@ -252,4 +278,54 @@ export const expectDetentHeld = async (expected: string): Promise<void> => {
     return [...values];
   });
   expect(seen).toEqual([expected]);
+};
+
+/** The four themes Settings offers, by the names its options show. */
+export const themeNames = ['Light', 'Dark', 'Black', 'High Contrast'] as const;
+export type ThemeName = (typeof themeNames)[number];
+
+/** How many dialogs are on screen, counted in the page so a dialog leaving mid-count is simply not counted. */
+export const openDialogs = async (): Promise<number> =>
+  target.evaluate(
+    () => [...document.querySelectorAll('[role="dialog"]')].filter((dialog) => dialog.checkVisibility()).length,
+  );
+
+/**
+ * Choose a theme in Settings › General, as a person does on a phone (the sidebar, Account, Settings, then the theme),
+ * wait for the document to take its class, and close Settings.
+ *
+ * @param theme - The theme's name.
+ */
+export const chooseTheme = async (theme: ThemeName): Promise<void> => {
+  await target.click(selectors.getByRole('button', { name: 'Open sidebar', exact: true }), { touch: true });
+  const sidebar = selectors.getByRole('dialog', { name: 'Sidebar' });
+  await target.expectVisible(sidebar);
+  await target.click(sidebar.getByRole('button', { name: 'Account', exact: true }), { touch: true });
+  // On a phone the account menu opens in a drawer above the sidebar sheet.
+  await target.click(
+    selectors.getByRole('dialog', { name: 'Account' }).getByRole('button', { name: 'Settings', exact: true }),
+    { touch: true },
+  );
+  const settings = selectors.getByRole('dialog', { name: /^settings$/iu });
+  await target.expectVisible(settings, 60_000);
+  const themeButton = selectors.getByRole('button', { name: /^(?:light|dark|black|high contrast|system)$/iu });
+  if (!(await target.isVisible(themeButton))) {
+    await target.click(settings.getByRole('button', { name: /^General/u }).first(), { touch: true });
+  }
+  await target.click(themeButton, { touch: true });
+  await target.click(selectors.getByRole('option', { name: new RegExp(`^${theme}`, 'iu') }), { touch: true });
+  const themeClass = theme.toLowerCase().replaceAll(' ', '-');
+  await target.expectClass(selectors.getByCss('html'), new RegExp(`\\b${themeClass}\\b`, 'u'));
+  await target.expectCount(selectors.getByRole('listbox'), 0, 30_000);
+  /* On a phone Settings is a list and a detail: Escape steps back from General to the list (whose dialog is then named
+   * Settings again) and from the list closes it. Close by Escape until no dialog is left. */
+  // oxlint-disable-next-line no-await-in-loop -- whether a dialog is left decides the next step.
+  for (let step = 0; step < 3 && (await openDialogs()) > 0; step++) {
+    // oxlint-disable-next-line no-await-in-loop -- one step back at a time.
+    await target.keyboardPress('Escape');
+    // oxlint-disable-next-line no-await-in-loop -- the dialog's exit animation runs between steps.
+    await motionSettled();
+  }
+  await target.expectCount(selectors.getByRole('dialog'), 0, 30_000);
+  await target.expectVisible(navigation(), 60_000);
 };

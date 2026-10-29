@@ -237,7 +237,7 @@ catalog:
   '@types/jsdom': ^21.1.7
   katex: 0.18.2
   knip: 6.41.0
-  libassimp: ^0.4.0
+  libassimp: ^0.4.1
   libcascade: 3.1.0
   lighthouse: ^13.5.0
   lint-staged: ^16.4.0
@@ -264,9 +264,9 @@ catalog:
   publint: ^0.3.21
   qrcode-terminal: ^0.12.0
   radix-ui: ^1.6.0
-  react: 19.2.7
+  react: 19.3.1
   react-day-picker: ^10.0.0
-  react-dom: 19.2.7
+  react-dom: 19.3.1
   react-email: ^6.6.3
   react-router: 7.18.2
   rehype-sanitize: ^6.0.0
@@ -313,7 +313,7 @@ catalog:
   # Exact: @taucad/picovoxel's kernel version carries this release's build-time digests.
   picovoxel: 0.2.1
   # Exact: @taucad/smlib's kernel version and compute identity carry this release's WASM.
-  '@classcad/smlibwasm': 0.3.4
+  '@classcad/smlibwasm': 0.6.2
   n8ao: 1.10.2
   postprocessing: 6.39.1
   '@cfworker/json-schema': 4.1.1
@@ -481,13 +481,12 @@ patchedDependencies:
   n8ao@1.10.2: tools/pnpm/patches/n8ao@1.10.2.patch
   vaul@1.1.2: tools/pnpm/patches/vaul@1.1.2.patch
   three@0.184.0: tools/pnpm/patches/three@0.184.0.patch
-  '@react-three/fiber@9.6.1': tools/pnpm/patches/@react-three__fiber@9.6.1.patch
 overrides:
   '@ai-sdk/provider-utils@>=4.0.0 <4.0.33': 4.0.57
   '@esbuild-kit/core-utils>esbuild': 0.28.2
   '@langchain/cerebras@1.0.4>uuid': 11.1.1
   '@langchain/google-common': npm:@taulabs/langchain-google-common@2.2.0-beta.0
-  '@react-three/fiber': 9.6.1
+  '@react-three/fiber': 9.8.2
   '@streamdown/math>katex': 0.18.2
   '@tailwindcss/typography@0.5.20>postcss-selector-parser': 7.1.6
   '@types/express': 'catalog:'

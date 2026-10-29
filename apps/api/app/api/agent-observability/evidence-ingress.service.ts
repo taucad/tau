@@ -16,12 +16,15 @@ import { parseEvidence } from '@taucad/agent-observability/contract';
 import { canonicalEvidence, verifyEvidenceDigest } from '@taucad/agent-observability/identity';
 import { DatabaseService } from '#database/database.service.js';
 import type { Environment } from '#config/environment.config.js';
+import { MetricsService } from '#telemetry/metrics.js';
+import type { AgentEvidenceAdmissionAttributes } from '#telemetry/metrics.js';
 import { Span } from '#telemetry/tracer.service.js';
 import { TelemetryPurposeService } from '#api/telemetry-purposes/telemetry-purpose.service.js';
 import { admitEvidence } from '#api/agent-observability/evidence-admission.js';
 import type { EvidenceReceipt } from '#api/agent-observability/evidence-admission.js';
 import { sealEvidence } from '#api/agent-observability/evidence-seal.js';
 import type { EvidenceSealKey } from '#api/agent-observability/evidence-seal.js';
+import type { CloudHostReporter } from '#api/hosts/cloud-host-evidence.guard.js';
 
 /** Submissions one principal may have in flight in one process. */
 export const evidenceConcurrencyPerPrincipal = 4;
@@ -33,6 +36,25 @@ const clockSkewMilliseconds = 5 * 60_000;
 const sqlState = (error: unknown): string | undefined => {
   const code: unknown = typeof error === 'object' && error !== null ? Reflect.get(error, 'code') : undefined;
   return typeof code === 'string' && /^[\dA-Z]{5}$/u.test(code) ? code : undefined;
+};
+
+/** The bounded health outcome of one admission; `granted` tells a stale epoch from a withheld purpose. */
+const admissionOutcome = (
+  outcome: Awaited<ReturnType<typeof admitEvidence>>,
+  granted: boolean,
+): AgentEvidenceAdmissionAttributes['outcome'] => {
+  switch (outcome.kind) {
+    case 'receipt': {
+      const { disposition, duplicate } = outcome.receipt;
+      return disposition === 'accepted' && duplicate ? 'duplicate' : disposition;
+    }
+    case 'refused': {
+      return granted ? 'policy_stale' : 'refused';
+    }
+    default: {
+      return outcome.kind;
+    }
+  }
 };
 
 /**
@@ -54,6 +76,7 @@ export class EvidenceIngressService {
     private readonly databaseService: DatabaseService,
     configService: ConfigService<Environment, true>,
     private readonly telemetryPurposes: TelemetryPurposeService,
+    private readonly metrics: MetricsService,
   ) {
     const encodedKey = configService.get('TAU_OBSERVABILITY_PAYLOAD_KEY', { infer: true });
     if (encodedKey !== undefined) {
@@ -80,10 +103,16 @@ export class EvidenceIngressService {
    *
    * @param userId - The authenticated principal.
    * @param body - The envelope bytes, already bounded by the route's body limit.
+   * @param host - The cloud host reporting for `userId`, if one is: its
+   *   evidence must be for its own project and carry its device as uploader.
    * @returns The durable receipt, committed before this resolves.
    */
   @Span()
-  public async admit(userId: string, body: Uint8Array<ArrayBuffer>): Promise<EvidenceReceipt> {
+  public async admit(
+    userId: string,
+    body: Uint8Array<ArrayBuffer>,
+    host?: CloudHostReporter,
+  ): Promise<EvidenceReceipt> {
     const { key } = this;
     if (key === undefined) {
       throw new ServiceUnavailableException({
@@ -100,7 +129,12 @@ export class EvidenceIngressService {
     const evidence = parsed.value;
     /* Only the host reports over HTTP; API-reported facts are written by the
      * API itself. The principal is the session's, never the envelope's. */
-    if (evidence.authority !== 'host-reported' || evidence.scope.principal !== userId) {
+    if (
+      evidence.authority !== 'host-reported' ||
+      evidence.scope.principal !== userId ||
+      (host !== undefined &&
+        (evidence.scope.project !== host.projectId || evidence.delivery.uploader !== host.deviceId))
+    ) {
       throw new ForbiddenException({ code: 'EVIDENCE_SCOPE', message: 'The evidence is outside this session.' });
     }
     if (!(await verifyEvidenceDigest(evidence))) {
@@ -174,6 +208,13 @@ export class EvidenceIngressService {
     const granted = state?.allowed === true;
     const current = authority.effective.epoch === scope.policyEpoch;
     const bytes = new TextEncoder().encode(canonicalEvidence(evidence));
+    const count = (outcome: AgentEvidenceAdmissionAttributes['outcome']): void => {
+      this.metrics.agentEvidenceAdmissions.add(1, {
+        'tau.agent_evidence.authority': evidence.authority === 'host-reported' ? 'host' : 'api',
+        'tau.agent_evidence.plane': plane,
+        outcome,
+      } satisfies AgentEvidenceAdmissionAttributes);
+    };
 
     let outcome: Awaited<ReturnType<typeof admitEvidence>>;
     try {
@@ -194,6 +235,7 @@ export class EvidenceIngressService {
         now,
       });
     } catch (error) {
+      count('error');
       this.logger.warn(
         { name: error instanceof Error ? error.name : typeof error, sqlState: sqlState(error) },
         'Evidence admission failed',
@@ -204,6 +246,7 @@ export class EvidenceIngressService {
       });
     }
 
+    count(admissionOutcome(outcome, granted));
     switch (outcome.kind) {
       case 'receipt': {
         return outcome.receipt;

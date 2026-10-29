@@ -112,6 +112,45 @@ export type RevisionStatusProjection = Readonly<{
    * a person has chosen so far.
    */
   conflicts: readonly RevisionConflictFacet[];
+  /**
+   * Files the selected checkout still holds as large-object placeholders, and
+   * how their transfer is going. Absent when every file is here.
+   *
+   * The root does not set it: the host that runs the fill merges what
+   * {@link LargeObjectsReport} told it (the browser worker does).
+   */
+  largeObjects?: LargeObjectsFacet;
+}>;
+
+/**
+ * The large objects one checkout is still waiting for.
+ *
+ * The files open as soon as the checkout is written; a file whose object has
+ * not arrived holds its pointer until it does, and a reader that must see real
+ * bytes — a model render — waits for `paths` to empty.
+ *
+ * @public
+ */
+export type LargeObjectsFacet = Readonly<{
+  phase: 'fetching' | 'failed';
+  /** Checkout-relative paths that still hold a pointer, sorted. */
+  paths: readonly string[];
+  /** Distinct objects (and their bytes) this fill wants, and how many have arrived. */
+  objects: number;
+  totalObjects: number;
+  bytes: number;
+  totalBytes: number;
+  /** Why the transfer stopped, when `phase` is `failed`. */
+  error?: string;
+}>;
+
+/** One checkout's fill, as a host is told about it. @public */
+export type LargeObjectsReport = Readonly<{
+  checkoutId: string;
+  /** `undefined` once every placeholder is filled. */
+  facet: LargeObjectsFacet | undefined;
+  /** Start the transfer again after a failure; a no-op otherwise. */
+  retry: () => void;
 }>;
 
 /**

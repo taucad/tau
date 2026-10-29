@@ -26,6 +26,7 @@ import type {
   TargetLinkedGithubState,
   TargetMouseOptions,
   TargetReadOptions,
+  TargetRequestFailure,
   TargetState,
   TargetSurface,
   TargetTauBillingOperation,
@@ -121,6 +122,8 @@ type Session = {
     }
   >;
   readonly pageErrors: string[];
+  /** Requests the page made that failed or answered 4xx/5xx, as `observePage` saw them. */
+  readonly requestFailures: TargetRequestFailure[];
   readonly posthogEvents: Array<{ readonly event: string; readonly decoded: string }>;
   readonly posthogRequests: string[];
   readonly primary: TargetPage;
@@ -259,6 +262,22 @@ const observePage = (session: Session, page: TargetPage): void => {
     }),
   );
   page.on('pageerror', (error) => session.pageErrors.push(error.message));
+  page.on('requestfailed', (request) =>
+    session.requestFailures.push({
+      url: request.url(),
+      resourceType: request.resourceType(),
+      failure: request.failure()?.errorText ?? 'failed',
+    }),
+  );
+  page.on('response', (response) => {
+    if (response.status() >= 400) {
+      session.requestFailures.push({
+        url: response.url(),
+        resourceType: response.request().resourceType(),
+        failure: `HTTP ${String(response.status())}`,
+      });
+    }
+  });
 };
 
 const disposeSession = async (session: Session): Promise<void> => {
@@ -412,6 +431,7 @@ export const uiOpenTarget: BrowserCommand<
     context,
     cpuProfiles: new Map(),
     pageErrors: [],
+    requestFailures: [],
     posthogEvents: [],
     posthogRequests: [],
     primary,
@@ -2433,6 +2453,20 @@ const startWorkerCpuProfiles = async (
  * @param surface - Which target page to profile.
  * @returns The profile's absolute path after `stop`; nothing after `start`.
  */
+/**
+ * Run a full V8 garbage collection in one page, so a count read next sees only what the page still references. Not a
+ * memory measurement: it only settles which objects a spec's weak references still reach.
+ */
+export const uiCollectGarbage: BrowserCommand<[surface?: TargetSurface]> = async (commandContext, surface) => {
+  const session = sessionFor(commandContext);
+  const cdp = await session.context.newCDPSession(pageFor(session, surface));
+  try {
+    await cdp.send('HeapProfiler.collectGarbage');
+  } finally {
+    await cdp.detach();
+  }
+};
+
 export const uiCpuProfile: BrowserCommand<
   [action: 'start' | 'stop' | 'snapshot', artifactName?: string, surface?: TargetSurface],
   string | undefined
@@ -3106,6 +3140,7 @@ export const uiReadTargetEvents: BrowserCommand<
       readonly type: string;
     }>;
     readonly pageErrors: readonly string[];
+    readonly requestFailures: readonly TargetRequestFailure[];
     readonly geospecWasm?: TargetDiagnostics['geospecWasm'];
     readonly geospecFault?: TargetDiagnostics['geospecFault'];
   }
@@ -3114,6 +3149,7 @@ export const uiReadTargetEvents: BrowserCommand<
   return {
     consoleMessages: session.consoleMessages,
     pageErrors: session.pageErrors,
+    requestFailures: session.requestFailures,
     geospecWasm: await session.geospecWasm,
     geospecFault: session.geospecFault,
   };
@@ -3130,6 +3166,7 @@ export const uiBrowserCommands = {
   uiClickTarget,
   uiCloseSecondaryTarget,
   uiCloseTarget,
+  uiCollectGarbage,
   uiCookies,
   uiCpuProfile,
   uiDragTarget,

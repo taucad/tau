@@ -27,8 +27,8 @@ import { waitForModelReady } from '#support/viewer-stage.js';
  * document. Each circuit warms once, takes a same-browser baseline of live dedicated workers, WebGL and WebGPU contexts,
  * GPU devices, object URLs, window/document listeners and shared-worker constructions after a garbage collection, then
  * runs ten more cycles and, after the last one's cleanup, fails on any count above that baseline. Every cycle also fails
- * on an uncaught page error, a failed request other than a refused one to the local API (not running here), any console
- * error not named in {@link benignConsole} (React's root error hooks log render faults to the console and do not
+ * on an uncaught page error, a failed request not named in {@link benignRequests}, any console error not named in
+ * {@link benignConsole} (React's root error hooks log render faults to the console and do not
  * rethrow them, so this is where a render fault shows), a serialized binary value or object in a DOM attribute, a
  * replaced document (a reload), or a blank model or editor.
  *
@@ -108,6 +108,32 @@ const benignConsole: ReadonlyArray<
       /^THREE\.THREE\.WebGPURenderer: WebGPU Device Lost:\s+Message: A valid external Instance reference no longer exists\.\s+Reason: unknown$/u.test(
         text,
       ),
+  },
+];
+
+type RequestFailure = Readonly<{ url: string; resourceType: string; failure: string }>;
+
+/**
+ * The failed requests that are not faults, each named and as narrow as the evidence allows. Every other failed
+ * request, of any origin, is a fault.
+ */
+const benignRequests: ReadonlyArray<
+  Readonly<{ name: string; matches: (request: RequestFailure, apiOrigin: string) => boolean }>
+> = [
+  {
+    // The local API is not running in this environment, so the browser refuses its requests.
+    name: 'refused request to the local API',
+    matches: ({ url, failure }, apiOrigin) =>
+      new URL(url).origin === apiOrigin && failure === 'net::ERR_CONNECTION_REFUSED',
+  },
+  {
+    /* The editor's type acquisition (`type-acquisition.ts`) fetches declarations from esm.sh with its own
+     * AbortController and aborts them when it is disposed, as the Editor closes or the project changes; one such fetch
+     * cut off mid-flight was seen in cycle 7 of a run. Only an aborted fetch to esm.sh: any other esm.sh failure is a
+     * fault. */
+    name: 'type acquisition fetch aborted on dispose',
+    matches: ({ url, resourceType, failure }) =>
+      new URL(url).origin === 'https://esm.sh' && resourceType === 'fetch' && failure === 'net::ERR_ABORTED',
   },
 ];
 
@@ -223,10 +249,10 @@ const readSerializedAttributes = async (): Promise<string[]> =>
 type Marks = Readonly<{ console: number; page: number; requests: number; loads: number }>;
 
 /**
- * The faults the target has recorded since `from`: uncaught page errors, every failed request except a refused one to
- * the local API, and every console error that {@link benignConsole} does not name. The local API is not running in this
- * environment, so the browser refuses its requests; they are returned so the ledger keeps them. A same-origin request
- * a navigation aborts (`net::ERR_ABORTED`) is a fault too: none was seen in the recorded runs.
+ * The faults the target has recorded since `from`: uncaught page errors, every failed request that
+ * {@link benignRequests} does not name, and every console error that {@link benignConsole} does not name. The named
+ * failed requests are returned so the ledger keeps them. A same-origin request a navigation aborts (`net::ERR_ABORTED`)
+ * is a fault: none was seen in the recorded runs.
  *
  * @param from - How many of each kind were already judged.
  * @param context - What the judgement depends on.
@@ -245,8 +271,8 @@ const readFaults = async (
 }> => {
   const events = await target.events();
   const requests = events.requestFailures.slice(from.requests);
-  const isFault = ({ url, failure }: (typeof requests)[number]): boolean =>
-    new URL(url).origin !== apiOrigin || failure !== 'net::ERR_CONNECTION_REFUSED';
+  const isFault = (request: RequestFailure): boolean =>
+    !benignRequests.some(({ matches }) => matches(request, apiOrigin));
   const consoleErrors = events.consoleMessages.slice(from.console).filter(({ type }) => type === 'error');
   const describe = ({ text, url }: ConsoleMessage): string => (url ? `${text} @ ${new URL(url).origin}` : text);
   const benign = (message: ConsoleMessage): boolean =>

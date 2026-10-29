@@ -1,5 +1,6 @@
 import { createHash, createHmac, hkdfSync } from 'node:crypto';
 import type { Evidence } from '@taucad/agent-observability/contract';
+import { evidenceKeys } from '@taucad/agent-observability/identity';
 import { phaseDurations } from '@taucad/agent-observability/scorecard';
 import type { SourceProtection } from '#api/agent-observability/evidence-admission.js';
 
@@ -207,16 +208,20 @@ export const langfuseObservation = (
   const group = (value: string): string =>
     sha256('tau-group', context.environment, evidence.scope.principal, value).slice(0, 32);
   const { coverage } = evidence;
+  /* A reader counts a fact once: by source, then by semantic identity, as the scorecard reconciles evidence. */
+  const keys = evidenceKeys(evidence);
   const attributes: OtlpAttribute[] = [
     stringAttribute('langfuse.trace.name', 'Tau agent run'),
     stringAttribute('langfuse.user.id', user),
     stringAttribute('langfuse.session.id', group(evidence.task?.id ?? evidence.run)),
     stringAttribute('langfuse.environment', context.environment),
-    stringAttribute('langfuse.release', evidence.versions.hostBuild ?? 'unknown'),
+    stringAttribute('langfuse.release', evidence.versions.hostBuild ?? evidence.versions.apiBuild ?? 'unknown'),
     stringAttribute('langfuse.observation.type', observationType(evidence.semantic.kind)),
     stringAttribute('langfuse.observation.metadata.receipt', context.receipt),
     stringAttribute('langfuse.observation.metadata.run', group(evidence.run)),
     stringAttribute('langfuse.observation.metadata.attempt', group(evidence.execution.attempt)),
+    stringAttribute('langfuse.observation.metadata.source', group(keys.source)),
+    stringAttribute('langfuse.observation.metadata.semantic', group(keys.semantic)),
     stringAttribute('langfuse.observation.metadata.plane', evidence.payload.plane),
     stringAttribute('langfuse.observation.metadata.family', evidence.semantic.kind),
     stringAttribute('langfuse.observation.metadata.authority', evidence.authority),

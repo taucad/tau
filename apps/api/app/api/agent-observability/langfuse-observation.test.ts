@@ -102,6 +102,17 @@ describe('langfuseObservation', () => {
       attribute(span, 'langfuse.observation.metadata.run'),
     );
     expect(otlpBody(span)).not.toContain('attempt-a');
+    expect(attribute(span, 'langfuse.observation.metadata.source')).toMatch(/^[a-f\d]{32}$/u);
+    expect(attribute(resumed, 'langfuse.observation.metadata.semantic')).toBe(
+      attribute(span, 'langfuse.observation.metadata.semantic'),
+    );
+
+    const apiOnly = langfuseObservation(
+      { ...timed, versions: { ...timed.versions, hostBuild: null, apiBuild: 'api-build-1' } },
+      context,
+      pseudonym,
+    ).span;
+    expect(attribute(apiOnly, 'langfuse.release')).toBe('api-build-1');
   });
 
   it('should send one span per request body', async () => {

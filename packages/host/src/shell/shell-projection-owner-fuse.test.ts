@@ -174,6 +174,7 @@ const withAuthorityOwner = async (
     root: string;
     journalDirectory: string;
   }) => Promise<void>,
+  seed?: (root: string) => Promise<void>,
 ): Promise<void> => {
   const sandbox = await realpath(await mkdtemp(join(tmpdir(), 'tau-owner-authority-')));
   const root = join(sandbox, 'project');
@@ -182,6 +183,7 @@ const withAuthorityOwner = async (
   await mkdir(join(root, 'docs'), { recursive: true });
   await mkdir(authority);
   await writeFile(join(root, 'notes.md'), 'v1');
+  await seed?.(root);
   const { port1, port2 } = new MessageChannel();
   const server = serveNodeFsProvider(port2, {
     policy: tauPathPolicy,
@@ -240,6 +242,87 @@ describe('projection owner through the real authority without FUSE', () => {
       }
       expect(await owner.handle(lookup)).toEqual(before);
     });
+  });
+
+  it('should charge a large checkout once per entry rather than once per entry pair', async () => {
+    const entries = 1200;
+    await withAuthorityOwner(
+      async ({ owner, editor }) => {
+        /* The accounts are carried forward, so admitting this checkout is one pass over it. Recomputing the live
+         * and retired sums on every entry would make capture, and then every publication, quadratic in entries. */
+        expect(owner.usage()).toEqual({ live: 2 + entries * 4, retired: 0, journal: 0, total: 2 + entries * 4 });
+        const lookup = ownerRequest({ operation: 'lookup', inode: 1n, name: 'bulk/f0' });
+        const before = await owner.handle(ownerRequest({ operation: 'lookup', inode: 1n, name: 'bulk' }));
+        const directory = before.entry!.inode;
+        const first = await owner.handle(ownerRequest({ ...lookup, inode: directory, name: 'f0' }));
+        expect(first.entry?.size).toBe(4);
+        // A newer authority version retires the generation the kernel still holds; both are charged, once each.
+        await editor.writeFile('bulk/f0', 'wider');
+        const next = await owner.handle(ownerRequest({ operation: 'lookup', inode: directory, name: 'f0' }));
+        expect(next.entry?.inode).not.toBe(first.entry?.inode);
+        expect(owner.usage()).toEqual({
+          live: 2 + entries * 4 + 1,
+          retired: 4,
+          journal: 0,
+          total: 2 + entries * 4 + 5,
+        });
+        // Forgetting the retired generation releases exactly its own bytes.
+        await owner.handle(
+          ownerRequest({ operation: 'forget', inode: first.entry!.inode, lookupCount: 1n }),
+        );
+        expect(owner.usage()).toEqual({
+          live: 2 + entries * 4 + 1,
+          retired: 0,
+          journal: 0,
+          total: 2 + entries * 4 + 1,
+        });
+      },
+      async (root) => {
+        await mkdir(join(root, 'bulk'));
+        for (let index = 0; index < entries; index++) {
+          // eslint-disable-next-line no-await-in-loop -- The fixture is seeded one entry at a time.
+          await writeFile(join(root, 'bulk', `f${index}`), 'seed');
+        }
+      },
+    );
+  });
+
+  it('should remap every moved name without rescanning the generations for each one', async () => {
+    await withAuthorityOwner(
+      async ({ owner, root }) => {
+        const tree = await owner.handle(ownerRequest({ operation: 'lookup', inode: 1n, name: 'tree' }));
+        const parent = tree.entry!.inode;
+        const leaves = await Promise.all(
+          ['a.md', 'b.md'].map(async (name) => owner.handle(ownerRequest({ operation: 'lookup', inode: parent, name }))),
+        );
+        expect(
+          await owner.handle(
+            ownerRequest({
+              operation: 'rename',
+              inode: 1n,
+              name: 'tree',
+              destinationParent: 1n,
+              destinationName: 'moved',
+            }),
+          ),
+        ).toEqual({});
+        expect(await readdir(join(root, 'moved'))).toEqual(['a.md', 'b.md']);
+        // The moved generations keep their inodes under the new names, and the old names resolve to nothing.
+        const moved = await owner.handle(ownerRequest({ operation: 'lookup', inode: 1n, name: 'moved' }));
+        expect(moved.entry?.inode).toBe(parent);
+        for (const [index, name] of ['a.md', 'b.md'].entries()) {
+          // eslint-disable-next-line no-await-in-loop -- One name revalidated at a time under its own claim.
+          const again = await owner.handle(ownerRequest({ operation: 'lookup', inode: parent, name }));
+          expect(again.entry?.inode).toBe(leaves[index]!.entry?.inode);
+        }
+        expect(await owner.handle(ownerRequest({ operation: 'lookup', inode: 1n, name: 'tree' }))).toEqual({ error: 2 });
+      },
+      async (root) => {
+        await mkdir(join(root, 'tree'));
+        await writeFile(join(root, 'tree', 'a.md'), 'a');
+        await writeFile(join(root, 'tree', 'b.md'), 'b');
+      },
+    );
   });
 
   it('should retain both conflicting versions on disk before returning ESTALE', async () => {

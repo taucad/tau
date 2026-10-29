@@ -113,47 +113,73 @@ const isContainer = (path: string): boolean =>
 const isCanonicalContainer = (path: string): boolean => path === reservedTauDirectory;
 
 /**
- * Every entry below `from`, relative to it, as the held claim sees it; `undefined` past the walk bound.
- * The walk runs under the same whole-root claim as the rename, so no Tau writer changes the tree between them.
+ * What one walk below `from` found, as it found it: how many entries there were, whether every one of them was a
+ * name the caller claimed, and whether both ends of every one stayed publishable. `count` is `undefined` past the
+ * walk bound. Nothing names an entry, so one change holds a bounded working set however many entries it moves.
+ */
+type ShellProjectionDescendants = Readonly<{ count: number | undefined; claimed: boolean; publishable: boolean }>;
+
+/** Nothing below `from`: the source is absent or is not a directory, so the move carries no entry. */
+const noDescendants: ShellProjectionDescendants = { count: 0, claimed: true, publishable: true };
+
+/**
+ * Walk every entry below `from` once, counting, matching and classifying each one as it is found.
+ *
+ * The walk runs under the same whole-root claim as the rename, so no Tau writer changes the tree between them. It
+ * retains no entry list and builds no list of moved ends: each name is counted against the bound, matched against
+ * the caller's claim and classified at both ends in the one pass that finds it, and only the three verdicts come
+ * back. The walk still runs to its end rather than stopping at the first unclaimed or protected name, because the
+ * refusal a caller sees is the bound, then the claim, then the classification, in that order, and only a complete
+ * count tells a claim that matches from one that does not.
  */
 const descendantsBelow = async (
   scope: Pick<NodeFsRootScope, 'readdir' | 'stat'>,
-  from: string,
+  move: Readonly<{ from: string; to: string; claimed: ReadonlySet<string> }>,
   signal: AbortSignal,
-): Promise<string[] | undefined> => {
+): Promise<ShellProjectionDescendants> => {
   let source: Awaited<ReturnType<NodeFsRootScope['stat']>>;
   try {
-    source = await scope.stat(from);
+    source = await scope.stat(move.from);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT' || (error as NodeJS.ErrnoException).code === 'ENOTDIR') {
-      return [];
+      return noDescendants;
     }
     throw error;
   }
   if (source.type !== 'dir') {
-    return [];
+    return noDescendants;
   }
-  const found: string[] = [];
+  let count = 0;
+  let claimed = true;
+  let publishable = true;
   const pending = [''];
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
     signal.throwIfAborted();
-    const directory = next === '' ? from : `${from}/${next}`;
+    const directory = next === '' ? move.from : `${move.from}/${next}`;
     // oxlint-disable-next-line no-await-in-loop -- One directory at a time keeps the walk bounded.
     const names = await scope.readdir(directory);
-    if (found.length + names.length > maximumDescendants) {
-      return undefined;
+    if (count + names.length > maximumDescendants) {
+      return { count: undefined, claimed, publishable };
     }
     for (const name of names) {
       const relative = next === '' ? name : `${next}/${name}`;
-      found.push(relative);
+      count++;
+      claimed = claimed && move.claimed.has(relative);
+      /* Both ends of this one entry, classified where it is found: an end that is reserved, or that is a container
+       * whose contents make it protected, refuses the whole move exactly as the whole-list classification did. */
+      publishable =
+        publishable &&
+        [`${move.from}/${relative}`, `${move.to}/${relative}`].every(
+          (path) => classifiedReadWrite(path) && !isContainer(path),
+        );
       // oxlint-disable-next-line no-await-in-loop -- Kinds are read in walk order under the held claim.
-      const child = await scope.stat(`${from}/${relative}`);
+      const child = await scope.stat(`${move.from}/${relative}`);
       if (child.type === 'dir') {
         pending.push(relative);
       }
     }
   }
-  return found;
+  return { count, claimed, publishable };
 };
 
 /**
@@ -198,20 +224,15 @@ export const publishShellProjectionEntry = async (
         : await scope.rmdirChecked({ path: change.path, signal });
     return { status: 'settled', result };
   }
-  const found = await descendantsBelow(scope, change.from, signal);
-  if (found === undefined) {
+  const claimed = new Set(change.descendants);
+  const found = await descendantsBelow(scope, { from: change.from, to: change.to, claimed }, signal);
+  if (found.count === undefined) {
     return { status: 'refused', reason: 'size-limit' };
   }
-  const claimed = new Set(change.descendants);
-  if (
-    claimed.size !== change.descendants.length ||
-    found.length !== claimed.size ||
-    !found.every((entry) => claimed.has(entry))
-  ) {
+  if (claimed.size !== change.descendants.length || found.count !== claimed.size || !found.claimed) {
     return { status: 'refused', reason: 'descendant-mismatch' };
   }
-  const moved = found.flatMap((entry) => [`${change.from}/${entry}`, `${change.to}/${entry}`]);
-  if (!moved.every((path) => classifiedReadWrite(path)) || moved.some((path) => isContainer(path))) {
+  if (!found.publishable) {
     return { status: 'refused', reason: 'protected-path' };
   }
   const result = await scope.renameChecked({

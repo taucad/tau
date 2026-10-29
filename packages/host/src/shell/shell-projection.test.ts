@@ -275,6 +275,110 @@ describe('shell projection outbound publication', () => {
     expect(existsSync(join(root, 'empty'))).toBe(false);
   });
 
+  it.each([
+    { entries: 4096, reason: 'descendant-mismatch' },
+    { entries: 4097, reason: 'size-limit' },
+  ])('should refuse a rename of $entries entries with $reason, never a truncated move', async ({ entries, reason }) => {
+    const { publishEntry, root } = connect();
+    mkdirSync(join(root, 'big'));
+    for (let index = 0; index < entries; index++) {
+      writeFileSync(join(root, 'big', `f${index}`), 'x');
+    }
+    /* The bound is a refusal, not a cut: one entry past it the walk reports `size-limit` without naming an entry,
+     * and exactly at it the walk still completes and the caller's empty claim is what refuses the move. */
+    expect(
+      await publishEntry({
+        kind: 'rename',
+        from: 'big',
+        to: 'archive',
+        descendants: [],
+        preconditions: [{ path: 'archive', expected: null }],
+      }),
+    ).toEqual({ status: 'refused', reason });
+    expect(readdirSync(join(root, 'big')).length).toBe(entries);
+    expect(existsSync(join(root, 'archive'))).toBe(false);
+  });
+
+  it('should publish a rename of many entries in one walk of the held claim', async () => {
+    const { publishEntry, root } = connect();
+    const entries = 500;
+    mkdirSync(join(root, 'big', 'nested'), { recursive: true });
+    const descendants = ['nested'];
+    for (let index = 0; index < entries; index++) {
+      const relative = index % 2 === 0 ? `f${index}` : `nested/f${index}`;
+      writeFileSync(join(root, 'big', relative), 'x');
+      descendants.push(relative);
+    }
+    expect(
+      await publishEntry({
+        kind: 'rename',
+        from: 'big',
+        to: 'archive',
+        descendants,
+        preconditions: [
+          ...descendants.filter((entry) => entry !== 'nested').map((entry) => ({ path: `big/${entry}`, expected: 'x' })),
+          { path: 'archive', expected: null },
+        ],
+      }),
+    ).toEqual({ status: 'settled', result: { status: 'applied' } });
+    expect(readFileSync(join(root, 'archive/nested/f1'), 'utf8')).toBe('x');
+    expect(existsSync(join(root, 'big'))).toBe(false);
+  });
+
+  it.each([
+    { kind: 'mkdir', path: '.TAU' },
+    { kind: 'rmdir', path: '.tau' },
+  ] as const)('should leave the authority untouched when $kind $path is refused', async (change) => {
+    const { root, server } = connect();
+    mkdirSync(join(root, '.tau'));
+    mkdirSync(join(root, 'd', 'chats'), { recursive: true });
+    const calls: string[] = [];
+    const outcome = await server.run({ root }, async (scope) => {
+      const recorded = {
+        readdir: scope.readdir.bind(scope),
+        stat: scope.stat.bind(scope),
+        mkdirChecked: async (input: Parameters<typeof scope.mkdirChecked>[0]) => {
+          calls.push('mkdirChecked');
+          return scope.mkdirChecked(input);
+        },
+        rmdirChecked: async (input: Parameters<typeof scope.rmdirChecked>[0]) => {
+          calls.push('rmdirChecked');
+          return scope.rmdirChecked(input);
+        },
+        renameChecked: async (input: Parameters<typeof scope.renameChecked>[0]) => {
+          calls.push('renameChecked');
+          return scope.renameChecked(input);
+        },
+      };
+      const refusals = [
+        await publishShellProjectionEntry(recorded, change, { signal: scope.signal }),
+        // A moved descendant that folds onto a reserved row refuses the whole move before any rename is attempted.
+        await publishShellProjectionEntry(
+          recorded,
+          {
+            kind: 'rename',
+            from: 'd',
+            to: '.TAU.',
+            descendants: ['chats'],
+            preconditions: [{ path: '.TAU.', expected: null }],
+          },
+          { signal: scope.signal },
+        ),
+      ];
+      return refusals;
+    });
+    expect(outcome).toEqual([
+      { status: 'refused', reason: 'protected-path' },
+      { status: 'refused', reason: 'protected-path' },
+    ]);
+    // Fail-closed: a refusal is decided before the authority is asked, so no partial entry can be left behind.
+    expect(calls).toEqual([]);
+    expect(existsSync(join(root, '.TAU'))).toBe(false);
+    expect(existsSync(join(root, '.tau'))).toBe(true);
+    expect(existsSync(join(root, '.TAU.'))).toBe(false);
+    expect(existsSync(join(root, 'd/chats'))).toBe(true);
+  });
+
   it('should reject a noncanonical entry path and a cancelled entry publication', async () => {
     const { server, root } = connect();
     await server.run({ root }, async (scope) => {

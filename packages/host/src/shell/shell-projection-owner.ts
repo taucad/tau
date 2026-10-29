@@ -139,17 +139,34 @@ export const openShellProjectionOwner = async (
   const names = new Map<string, bigint>([['', 1n]]);
   const journal: ShellProjectionConflict[] = [];
   let journalBytes = 0;
+  let liveBytes = 0;
+  let retiredBytes = 0;
   let next = 2n;
-  const live = (): number =>
-    [...generations.values()].reduce((total, item) => total + (item.path === undefined ? 0 : item.bytes.length), 0);
-  const retired = (): number =>
-    [...generations.values()].reduce((total, item) => total + (item.path === undefined ? item.bytes.length : 0), 0);
-  const total = (): number => live() + retired() + journalBytes;
+  /* The accounts are carried, not recomputed: one capture or publication charges only the generation it touches,
+   * so admitting a checkout costs one pass over it rather than one pass per entry. Every change to a generation's
+   * bytes, name or membership is bracketed by `uncharge` and `charge`, which are the only writers of either sum. */
+  const uncharge = (generation: Generation): void => {
+    if (generation.path === undefined) {
+      retiredBytes -= generation.bytes.length;
+    } else {
+      liveBytes -= generation.bytes.length;
+    }
+  };
+  const charge = (generation: Generation): void => {
+    if (generation.path === undefined) {
+      retiredBytes += generation.bytes.length;
+    } else {
+      liveBytes += generation.bytes.length;
+    }
+  };
+  const live = (): number => liveBytes;
+  const retired = (): number => retiredBytes;
+  const total = (): number => liveBytes + retiredBytes + journalBytes;
   const fits = (growth: number): boolean => total() + growth <= options.quotaBytes;
 
   const mint = (path: string, directory: boolean, bytes: Uint8Array<ArrayBuffer>): bigint => {
     const inode = next++;
-    generations.set(inode, {
+    const generation: Generation = {
       path,
       origin: path,
       superseded: false,
@@ -158,8 +175,10 @@ export const openShellProjectionOwner = async (
       baseline: directory ? null : bytes,
       lookups: 0n,
       opens: 0,
-    });
+    };
+    generations.set(inode, generation);
     names.set(path, inode);
+    charge(generation);
     return inode;
   };
   const retire = (inode: bigint, superseded = false): void => {
@@ -167,12 +186,22 @@ export const openShellProjectionOwner = async (
     if (generation === undefined) {
       return;
     }
+    uncharge(generation);
     generation.superseded = superseded;
     if (generation.path !== undefined && names.get(generation.path) === inode) {
       names.delete(generation.path);
     }
     generation.path = undefined;
     if (generation.lookups === 0n && generation.opens === 0) {
+      generations.delete(inode);
+      return;
+    }
+    charge(generation);
+  };
+  /** Drop one generation the kernel has finished with; a retired one is still charged until it goes. */
+  const forgotten = (inode: bigint, generation: Generation): void => {
+    if (generation.path === undefined && generation.lookups === 0n && generation.opens === 0) {
+      uncharge(generation);
       generations.delete(inode);
     }
   };
@@ -350,7 +379,9 @@ export const openShellProjectionOwner = async (
       }
       const failed = await publish(generation, projected);
       if (failed === undefined) {
+        uncharge(generation);
         generation.bytes = projected;
+        charge(generation);
       }
       return failed;
     };
@@ -436,8 +467,10 @@ export const openShellProjectionOwner = async (
       if (names.has(to)) {
         return { error: errno.exist };
       }
-      const below = [...generations.values()].filter((item) => item.path?.startsWith(`${from}/`) === true);
-      const files = generation.directory ? below.filter((item) => !item.directory) : [generation];
+      const below = [...generations.entries()].filter(([, item]) => item.path?.startsWith(`${from}/`) === true);
+      const files = generation.directory
+        ? below.filter(([, item]) => !item.directory).map(([, item]) => item)
+        : [generation];
       const outcome = await publishShellProjectionEntry(
         scope,
         {
@@ -448,7 +481,7 @@ export const openShellProjectionOwner = async (
             ...files.map((item) => ({ path: item.path!, expected: item.baseline })),
             { path: to, expected: null },
           ],
-          descendants: below.map((item) => item.path!.slice(from.length + 1)),
+          descendants: below.map(([, item]) => item.path!.slice(from.length + 1)),
         },
         { signal: scope.signal },
       );
@@ -458,15 +491,17 @@ export const openShellProjectionOwner = async (
       if (outcome.result.status === 'conflict') {
         return { error: errno.stale };
       }
-      for (const item of [generation, ...below]) {
+      /* The moved generations are known by inode, so the new names are set from them rather than by rescanning
+       * every generation for each one. Old names go first: a destination under the source would otherwise collide
+       * with a name still held by an entry this move has not reached. */
+      const moved: Array<readonly [bigint, Generation]> = [[inode, generation], ...below];
+      for (const [, item] of moved) {
         names.delete(item.path!);
+      }
+      for (const [key, item] of moved) {
         item.path = `${to}${item.path!.slice(from.length)}`;
         item.origin = item.path;
-      }
-      for (const [key, item] of generations) {
-        if (item === generation || below.includes(item)) {
-          names.set(item.path!, key);
-        }
+        names.set(item.path, key);
       }
       return {};
     };
@@ -528,9 +563,7 @@ export const openShellProjectionOwner = async (
           const generation = generations.get(request.inode);
           if (generation !== undefined) {
             generation.opens = Math.max(0, generation.opens - 1);
-            if (generation.path === undefined && generation.lookups === 0n && generation.opens === 0) {
-              generations.delete(request.inode);
-            }
+            forgotten(request.inode, generation);
           }
           return {};
         }
@@ -539,9 +572,7 @@ export const openShellProjectionOwner = async (
           if (generation !== undefined) {
             generation.lookups =
               generation.lookups > request.lookupCount ? generation.lookups - request.lookupCount : 0n;
-            if (generation.path === undefined && generation.lookups === 0n && generation.opens === 0) {
-              generations.delete(request.inode);
-            }
+            forgotten(request.inode, generation);
           }
           return {};
         }

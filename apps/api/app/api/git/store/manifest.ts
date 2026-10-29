@@ -465,6 +465,35 @@ export const assertSameIncarnation = (hydrated: Manifest, current: Manifest): vo
 export const isTombstoned = (manifest: Manifest | undefined): boolean =>
   manifest !== undefined && manifest.tombstone !== null;
 
+/** Who a deferred compaction's manifest names as its committer: the server, never a user (NI16). */
+export const compactionCommitter = 'compaction';
+
+/**
+ * Whether every generation `manifest` holds after `generation` is a deferred
+ * compaction's: same incarnation, live, and each of those generations' push
+ * records present, by {@link compactionCommitter}, moving no ref. A compaction
+ * keeps the refs and the objects they reach, so whatever was true of the
+ * repository at `generation` is still true of `manifest`, over other packs.
+ *
+ * `false` when a record it would need has spilled out of the manifest's own
+ * log: the answer is then unknown, and every caller treats unknown as no.
+ */
+export const onlyCompactedSince = (manifest: Manifest, base: { generation: number; incarnation: string }): boolean => {
+  if (manifest.incarnation !== base.incarnation || manifest.tombstone !== null) {
+    return false;
+  }
+  if (manifest.generation <= base.generation) {
+    return false;
+  }
+  for (let generation = base.generation + 1; generation <= manifest.generation; generation += 1) {
+    const record = manifest.pushes.find((candidate) => candidate.generation === generation);
+    if (record?.committedBy !== compactionCommitter || record.refs.length > 0 || record.omitted !== undefined) {
+      return false;
+    }
+  }
+  return true;
+};
+
 /**
  * The tombstone manifest (D10). The pack list is carried forward untouched so
  * the purge job knows what it is removing, and `purgeAfter` is the whole of

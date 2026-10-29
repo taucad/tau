@@ -55,7 +55,7 @@ import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { createIdleRuntimeClient } from '#workers/idle-runtime-client.js';
 import { createWorkerEvidence } from '#workers/agent-host-evidence.js';
-import type { WorkerEvidence } from '#workers/agent-host-evidence.js';
+import type { HostEvidence } from '@taucad/agent-observability/host-evidence';
 import { readBuildRelease } from '#lib/build-identity.js';
 import { forwardOperations } from '#telemetry/worker-forwarding.js';
 import type { ForwardEntry, WorkerTelemetry } from '#telemetry/worker-forwarding.js';
@@ -773,7 +773,7 @@ const composeProjectHost = async (
    * host's release or a successor (M2, C11). */
   let draining = false;
   /* T10: agent-observability summaries, composed once the launcher whose rows it reads exists. */
-  let evidence: WorkerEvidence | undefined;
+  let evidence: HostEvidence | undefined;
   const launcher: AgentLauncher = createAgentLauncher({
     admitting: () => !draining,
     onChatQuiescent: (chatId, quiescent) => {

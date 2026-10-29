@@ -12,7 +12,7 @@ export type { FoldProjectionFactsInput } from '#log/chat-ledger.js';
 export { EventLogError } from '#log/event-log-error.js';
 export { parseEventLog, serializeLogEvent } from '#log/serialization.js';
 export { reduceEventLog } from '#log/reducer.js';
-export { observeTurns } from '#log/turn-observation.js';
+export { observeOwnTurns, observeTurns } from '#log/turn-observation.js';
 export type {
   ObservedInterval,
   ObservedInvocation,
@@ -20,6 +20,8 @@ export type {
   ObservedSource,
   ObservedToolCall,
   ObservedTransformation,
+  OwnRowsRead,
+  OwnTurns,
   TurnObservation,
 } from '#log/turn-observation.js';
 export { compareSegmentDeviceIds, mergeLogSegments, mergeSegmentRows, parseLogSegments } from '#log/segments.js';

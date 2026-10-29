@@ -9,6 +9,7 @@ const baseConfig: UserConfig = {
     'src/authority.ts',
     'src/identity.ts',
     'src/pending-stores.ts',
+    'src/host-evidence.ts',
     'src/projection.ts',
     'src/reporter.ts',
     'src/pi-telemetry.ts',

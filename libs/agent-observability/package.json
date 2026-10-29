@@ -37,6 +37,7 @@
     "./authority": "./src/authority.ts",
     "./identity": "./src/identity.ts",
     "./pending-stores": "./src/pending-stores.ts",
+    "./host-evidence": "./src/host-evidence.ts",
     "./projection": "./src/projection.ts",
     "./reporter": "./src/reporter.ts",
     "./pi-telemetry": "./src/pi-telemetry.ts",

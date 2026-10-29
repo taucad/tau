@@ -28,6 +28,14 @@ const atomsPerUsd = 1_000_000;
 const picoPerUsd = 1_000_000_000_000;
 
 /**
+ * The credits a settlement fact reports for what the ledger charged.
+ *
+ * @param atoms - Charged credit atoms.
+ * @returns Credits, in USD.
+ */
+export const creditsOfAtoms = (atoms: bigint): number => Number(atoms) / atomsPerUsd;
+
+/**
  * The API-reported financial fact of one settled funded operation (blueprint
  * T07). It carries what the ledger charged and what the supplier is estimated
  * to have cost, never request or output text, and joins the provider attempt
@@ -60,7 +68,7 @@ export const settlementEvidence = async (
     kind: 'financial',
     ledger,
     attempt,
-    credits: Number(receipt.chargedAtoms) / atomsPerUsd,
+    credits: creditsOfAtoms(receipt.chargedAtoms),
     tariff,
     supplierCost: receipt.supplierCostPicoUsd === null ? null : Number(receipt.supplierCostPicoUsd) / picoPerUsd,
     currency: 'USD',

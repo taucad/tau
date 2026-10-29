@@ -87,6 +87,18 @@ export const observationIdentity = (environment: string, evidence: Evidence, rec
 });
 
 /**
+ * The keyed group a contract id reaches the vendor as: the same id under the same principal always joins, and no
+ * other principal's id collides with it.
+ *
+ * @param environment - The deployment.
+ * @param principal - The Tau user id the evidence is scoped to.
+ * @param value - The contract id.
+ * @returns 32 hex digits.
+ */
+export const observationGroup = (environment: string, principal: string, value: string): string =>
+  sha256('tau-group', environment, principal, value).slice(0, 32);
+
+/**
  * Derives the key that pseudonymises account ids for the vendor, so Langfuse
  * groups by user without holding Tau's user id or anything reversible to it.
  *
@@ -239,8 +251,7 @@ export const langfuseObservation = (
   const identity = observationIdentity(context.environment, evidence, context.receipt);
   const at = BigInt(evidence.clocks.occurredAt ?? evidence.retention.originalAt) * 1_000_000n;
   const user = accountPseudonym(context.environment, evidence.scope.principal, pseudonym);
-  const group = (value: string): string =>
-    sha256('tau-group', context.environment, evidence.scope.principal, value).slice(0, 32);
+  const group = (value: string): string => observationGroup(context.environment, evidence.scope.principal, value);
   const { coverage } = evidence;
   /* A reader counts a fact once: by source, then by semantic identity, as the scorecard reconciles evidence. */
   const keys = evidenceKeys(evidence);

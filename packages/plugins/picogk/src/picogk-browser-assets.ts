@@ -15,7 +15,8 @@ const variant = z.object({
   runtimeFiles: z.array(file).min(1),
   references: z.array(file).min(1),
 });
-const manifestSchema = z.object({
+/** Immutable browser bundle format shared by preparation and admission. @internal */
+export const picogkBrowserManifestSchema = z.object({
   format: z.literal('tau-picogk-browser-v1'),
   protocolVersion: z.literal(picogkProtocolVersion),
   toolchain: z.object({
@@ -56,7 +57,9 @@ export const loadPicogkBrowserAssets = async (options: {
   if ((await sha256Bytes(bytes)) !== options.manifest.sha256) {
     throw new Error('PicoGK browser manifest integrity mismatch.');
   }
-  const manifest = manifestSchema.parse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)));
+  const manifest = picogkBrowserManifestSchema.parse(
+    JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)),
+  );
   const mode = options.wasm === 'auto' ? (options.isolated && manifest.multi ? 'multi' : 'single') : options.wasm;
   if (mode === 'multi' && !options.isolated) {
     throw new Error('PicoGK multi-threaded execution requires cross-origin isolation.');

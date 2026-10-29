@@ -113,6 +113,17 @@
         "cwd": ".",
         "command": "node --import @oxc-node/core/register packages/plugins/picogk/scripts/benchmark-reuse.mts"
       }
+    },
+    "prepare-browser-host": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Build the serial browser host from an explicit qualified-input configuration and stage its immutable manifest; no research or optional repository paths are assumed."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "node --import @oxc-node/core/register packages/plugins/picogk/scripts/prepare-browser-host.mts"
+      }
     }
   }
 }

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://tau.new/schemas/tau-v1.json",
+  "name": "Coat Hook",
+  "description": "A wall plate and a grip swept along a cubic spline. SMLib keeps that path as a NURBS edge, which is the curve a mesh hull would only chord.",
+  "tags": ["household", "sweep", "nurbs", "smlib"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

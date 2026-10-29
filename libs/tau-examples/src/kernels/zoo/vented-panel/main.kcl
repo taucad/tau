@@ -1,0 +1,68 @@
+// A filleted plate with a rectangular hole pattern.
+// Zoo's KCL engine runs on a cloud GPU, which is the point of a panel whose
+// hole count is a parameter rather than a browser memory budget.
+// Unverified: the example runtime does not compose Zoo, and KCL needs Pro credentials.
+
+@settings(defaultLengthUnit = mm, kclVersion = 3.0)
+
+panelWidth = 120mm
+panelHeight = 72mm
+panelThickness = 4mm
+holeDiameter = 8mm
+holePitch = 16mm
+columns = 5
+rows = 3
+cornerRadius = 3mm
+
+panelSketch = sketch(on = XY) {
+  bottom = line(start = [var -60mm, var -36mm], end = [var 60mm, var -36mm])
+  right = line(start = [var 60mm, var -36mm], end = [var 60mm, var 36mm])
+  top = line(start = [var 60mm, var 36mm], end = [var -60mm, var 36mm])
+  left = line(start = [var -60mm, var 36mm], end = [var -60mm, var -36mm])
+  coincident([bottom.end, right.start])
+  coincident([right.end, top.start])
+  coincident([top.end, left.start])
+  coincident([left.end, bottom.start])
+  horizontal(bottom)
+  vertical(right)
+  horizontal(top)
+  vertical(left)
+  horizontalDistance([bottom.start, bottom.end]) == panelWidth
+  verticalDistance([right.start, right.end]) == panelHeight
+}
+
+panelRegion = region(segments = [panelSketch.bottom, panelSketch.right])
+panel = extrude(panelRegion, length = panelThickness, tagEnd = $topFace)
+  |> fillet(
+    radius = cornerRadius,
+    edges = [
+      { sideFaces = [panelRegion.tags.bottom, panelRegion.tags.right] },
+      { sideFaces = [panelRegion.tags.right, panelRegion.tags.top] },
+      { sideFaces = [panelRegion.tags.top, panelRegion.tags.left] },
+      { sideFaces = [panelRegion.tags.left, panelRegion.tags.bottom] }
+    ]
+  )
+
+holeSketch = sketch(on = XY) {
+  perimeter = circle(start = [var 4mm, var 0mm], center = [var 0mm, var 0mm])
+  diameter(perimeter) == holeDiameter
+}
+
+holeTool = extrude(region(segments = [holeSketch.perimeter]), length = panelThickness + 2mm)
+  |> translate(x = -32mm, y = -16mm, z = -1mm)
+
+fn shiftX(@id) {
+  return { translate = [holePitch * id, 0mm, 0mm] }
+}
+
+fn shiftY(@id) {
+  return { translate = [0mm, holePitch * id, 0mm] }
+}
+
+row = patternTransform(holeTool, instances = columns, transform = shiftX)
+grid = patternTransform(row, instances = rows, transform = shiftY)
+vented = subtract([panel], tools = grid)
+  |> appearance(color = "#c5ccd1")
+
+hide(panelSketch)
+hide(holeSketch)

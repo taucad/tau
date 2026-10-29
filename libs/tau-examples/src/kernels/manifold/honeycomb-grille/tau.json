@@ -1,0 +1,12 @@
+{
+  "$schema": "https://tau.new/schemas/tau-v1.json",
+  "name": "Honeycomb Grille",
+  "description": "A circular vent of dozens of hexagonal booleans inside a solid rim. Manifold is built to keep that many coplanar mesh cuts watertight and quick.",
+  "tags": ["vent", "3d-printing", "booleans", "manifold"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

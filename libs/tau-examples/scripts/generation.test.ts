@@ -117,9 +117,10 @@ describe('generated example artifacts', () => {
     expect(manifest.find((entry) => entry.name === 'v8-engine-rev2')?.mainFile).toBeUndefined();
 
     // PicoVoxel adds three test fixtures, the helix-heat-x heavy reference and six implicit references (D36).
+    // Launch drafts add three staged references: build123d pillow block, picogk heat exchanger, zoo vented panel.
     expect(manifest.filter((entry) => entry.kind === 'test-fixture')).toHaveLength(12);
     expect(manifest.filter((entry) => entry.kind === 'spec-fixture')).toHaveLength(1);
-    expect(manifest.filter((entry) => entry.kind === 'reference')).toHaveLength(13);
+    expect(manifest.filter((entry) => entry.kind === 'reference')).toHaveLength(16);
 
     for (const entry of manifest) {
       expect(entry.files.some((path) => path === 'thumbnail.webp' || path === 'thumbnail-featured.webp')).toBe(false);

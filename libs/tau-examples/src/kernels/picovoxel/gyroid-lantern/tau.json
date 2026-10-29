@@ -1,0 +1,12 @@
+{
+  "$schema": "https://tau.new/schemas/tau-v1.json",
+  "name": "Gyroid Lantern",
+  "description": "A tea-light sleeve whose wall is a gyroid sheet clipped to a cylinder, on a solid foot. PicoVoxel evaluates that implicit field in the browser; a BRep kernel has no such surface.",
+  "tags": ["lattice", "3d-printing", "implicit", "picovoxel"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

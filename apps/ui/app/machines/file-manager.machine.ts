@@ -1,5 +1,5 @@
 import { ENV } from '#environment.config.js';
-import { setup, types } from 'xstate';
+import { createCallbackLogic, setup, types } from 'xstate';
 import type { EnqueueObject, EventObject, SystemRegistry } from 'xstate';
 import type { FileSystemBackend } from '@taucad/types';
 import type { FileSystemBridgeConnection, RootedBridgeConsumer } from '@taucad/fs-bridge';
@@ -639,16 +639,6 @@ const initializeServicesActor = fromSafeAsync<
       authoritySpan?.finish(signal.aborted ? 'cancelled' : 'error');
       throw error;
     }
-    if (viewProxy.hello.payload.state !== 'unavailable') {
-      const listingSpan = context.openPerformance?.begin('tree.list');
-      try {
-        const entries = await initializedTreeService.listDirectory('', { signal });
-        listingSpan?.finish('ok', { directoryEntries: entries.length });
-      } catch (error) {
-        listingSpan?.finish(signal.aborted ? 'cancelled' : 'error');
-        throw error;
-      }
-    }
 
     signal.throwIfAborted();
     ownsConstructed = false;
@@ -684,10 +674,40 @@ const watchProxyClosedActor = fromSafeAsync<void, { proxy: FileManagerContext['p
   throw new Error('The file service for this project stopped.');
 });
 
+/** Keep the resident root projection observed without gating usable content services. */
+const observeRootDirectoryActor = createCallbackLogic<
+  EventObject,
+  { context: Pick<FileManagerContext, 'treeService' | 'openPerformance'> }
+>(({ input }) => {
+  const tree = input.context.treeService;
+  if (tree === undefined) {
+    return;
+  }
+  const observation = tree.observeDirectory('');
+  const span = input.context.openPerformance?.begin('tree.list');
+  const report = (): void => {
+    const snapshot = observation.getSnapshot();
+    if (snapshot.value?.kind === 'ready') {
+      span?.finish('ok', { directoryEntries: snapshot.value.entries.length });
+    } else if (snapshot.value?.kind === 'error' || snapshot.status === 'error') {
+      span?.finish('error');
+    }
+  };
+  const unsubscribe = observation.subscribe(report);
+  const lease = observation.acquire();
+  report();
+  return () => {
+    unsubscribe();
+    lease.release();
+    span?.finish('cancelled');
+  };
+});
+
 const fileManagerActors = {
   connectWorkerActor,
   initializeServicesActor,
   watchProxyClosedActor,
+  observeRootDirectoryActor,
 } as const;
 
 // ============ Events ============
@@ -1028,22 +1048,28 @@ export const fileManagerMachine = setup({
       after: {
         restartWindow: () => ({ context: { restarted: false } }),
       },
-      invoke: {
-        src: 'watchProxyClosedActor',
-        input: ({ context }) => ({ proxy: context.proxy }),
-        /* RV1-F1: the root mount restarts its own dead worker once without a click; a nested mount's worker is its
-         * parent's to restart, and a second death within the bound shows the error with "Try again". */
-        onError: ({ context, event }, enq) =>
-          context.sharedWorker === undefined && !context.restarted
-            ? {
-                target: 'connectingWorker',
-                context: { ...destroyWorkerAndServices(context, enq), restarted: true },
-              }
-            : {
-                target: 'error',
-                context: { ...setError(event.error, enq), ...destroyWorkerAndServices(context, enq) },
-              },
-      },
+      invoke: [
+        {
+          src: 'watchProxyClosedActor',
+          input: ({ context }) => ({ proxy: context.proxy }),
+          /* RV1-F1: the root mount restarts its own dead worker once without a click; a nested mount's worker is its
+           * parent's to restart, and a second death within the bound shows the error with "Try again". */
+          onError: ({ context, event }, enq) =>
+            context.sharedWorker === undefined && !context.restarted
+              ? {
+                  target: 'connectingWorker',
+                  context: { ...destroyWorkerAndServices(context, enq), restarted: true },
+                }
+              : {
+                  target: 'error',
+                  context: { ...setError(event.error, enq), ...destroyWorkerAndServices(context, enq) },
+                },
+        },
+        {
+          src: 'observeRootDirectoryActor',
+          input: ({ context }) => ({ context }),
+        },
+      ],
       on: {
         setRoot: changeRoot({ whenChanged: true, stopPolling: true }),
 

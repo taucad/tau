@@ -17,9 +17,16 @@ export default defineConfig({
             return;
           }
           try {
-            const chunks: Buffer[] = [];
+            const chunks: Array<Uint8Array<ArrayBuffer>> = [];
             for await (const chunk of request) {
-              chunks.push(Buffer.from(chunk));
+              const bytes: unknown = chunk;
+              if (typeof bytes === 'string') {
+                chunks.push(new TextEncoder().encode(bytes));
+              } else if (bytes instanceof Uint8Array) {
+                chunks.push(new Uint8Array(bytes));
+              } else {
+                throw new TypeError('Unexpected request body chunk');
+              }
             }
             const evidence: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
             if (
@@ -51,6 +58,24 @@ export default defineConfig({
       },
     },
   ],
+  // Worker dependencies must be optimized before the probe starts; late discovery reloads its page.
+  optimizeDeps: {
+    include: [
+      '@taucad/revisions > buffer',
+      '@taucad/utils > cdn-resolve',
+      'diff',
+      'es-module-lexer',
+      '@taucad/bambu > fflate',
+      'geospec/agent/resources.js',
+      '@taucad/revisions > isomorphic-git',
+      '@taucad/chat > js-yaml',
+      'minimatch',
+      '@taucad/chat > safe-regex',
+      '@taucad/bundler-core > semver',
+      '@taucad/runtime > source-map-js',
+      'vscode-uri',
+    ],
+  },
   server: {
     host: '127.0.0.1',
     fs: { allow: [fileURLToPath(new URL('../../../..', import.meta.url))] },

@@ -49,6 +49,11 @@ const actorStub = vi.hoisted(() => {
   };
 });
 
+// These fixtures describe an already loaded tree; root readiness has its own cases.
+vi.mock('@taucad/fs-client/react/use-directory-listing', () => ({
+  useDirectoryListing: () => ({ kind: 'ready', path: '', entries: [] }),
+}));
+
 vi.mock('@taucad/ui/components/highlight-text', async (importOriginal) => {
   const actual = await importOriginal<typeof HighlightTextModule>();
   return {

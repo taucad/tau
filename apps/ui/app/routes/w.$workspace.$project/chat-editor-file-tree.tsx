@@ -91,6 +91,7 @@ import { getFileExtension, encodeTextFile } from '#utils/filesystem.utils.js';
 import { downloadBlob, asBuffer } from '@taucad/utils/file';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFileTreeSelector } from '#hooks/use-file-tree.js';
+import { useDirectoryListing } from '@taucad/fs-client/react/use-directory-listing';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
@@ -523,6 +524,8 @@ export const ChatEditorFileTree = memo(function ({
   );
 
   const { treeService } = fileManager;
+  const [rootListingRetry, setRootListingRetry] = useState(0);
+  const rootListing = useDirectoryListing(treeService, '', { reloadToken: rootListingRetry });
 
   /* Every row re-renders with this component, so it holds the snapshot it last drew until a row
    * would change: sizes and mtimes in it may be stale, and nothing below reads them. */
@@ -1799,7 +1802,7 @@ export const ChatEditorFileTree = memo(function ({
 
   const fileActions = (
     <FloatingPanelButtonGroup className='shrink-0'>
-      {readOnly ? null : (
+      {readOnly || rootListing.kind !== 'ready' ? null : (
         <DropdownMenu modal={false}>
           <FloatingPanelMenuButton asChild tooltip='Create new file' aria-label='Create new file'>
             <DropdownMenuTrigger>
@@ -1844,7 +1847,7 @@ export const ChatEditorFileTree = memo(function ({
           </DropdownMenuContent>
         </DropdownMenu>
       )}
-      {readOnly ? null : (
+      {readOnly || rootListing.kind !== 'ready' ? null : (
         <FloatingPanelMenuButton
           aria-label='Create new folder'
           tooltip='Create new folder'
@@ -1950,7 +1953,29 @@ export const ChatEditorFileTree = memo(function ({
           </div>
 
           <AssistiveTreeDescription tree={tree} getLabel={getFileTreeAssistiveDndLabel} />
-          {tree.getItems().length > 0 || pendingFolder !== undefined || pendingFile !== undefined ? (
+          {rootListing.kind === 'error' ? (
+            <div role='alert' aria-label='Files unavailable' className='p-3 text-sm'>
+              <p>{rootListing.cause.message}</p>
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={() => {
+                  setRootListingRetry((value) => value + 1);
+                }}
+              >
+                Try again
+              </Button>
+            </div>
+          ) : rootListing.kind === 'loading' || rootListing.kind === 'unready' ? (
+            <div
+              role='status'
+              aria-label='Loading files'
+              aria-busy='true'
+              className='p-3 text-sm text-muted-foreground'
+            >
+              Loading files…
+            </div>
+          ) : tree.getItems().length > 0 || pendingFolder !== undefined || pendingFile !== undefined ? (
             <div
               data-tree-container
               {...tree.getContainerProps()}

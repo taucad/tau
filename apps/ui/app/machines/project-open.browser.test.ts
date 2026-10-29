@@ -1,7 +1,6 @@
 import { createActor, waitFor } from 'xstate';
 import type { Actor } from 'xstate';
 import { expect, it, vi } from 'vitest';
-import { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { parseProjectManifestBytes, projectManifestSchemaUrl, serializeProjectManifest } from '@taucad/types';
 import { createFileSystemBridgeProxy } from '@taucad/fs-bridge';
 import {
@@ -13,8 +12,8 @@ import { fileManagerMachine } from '#machines/file-manager.machine.js';
 
 /**
  * This probe uses the real file-manager worker and its OPFS provider. The
- * call-through wrapper measures the service's root-list promise, not provider
- * read counts; those remain unavailable across the worker boundary.
+ * passive span measures the root observation, including watch registration, not
+ * provider read counts; those remain unavailable across the worker boundary.
  */
 type RootListingSpan = { startedAt: number; settledAt: number; outcome: 'resolved' | 'rejected' };
 
@@ -120,32 +119,43 @@ it.each([10, 1000])(
       initializingServicesAt?: number;
       readyAt?: number;
     } = { rootListingCalls: 0 };
-    const originalListDirectory = FileTreeService.prototype.listDirectory;
 
     try {
       await setProjectFileSystemConfig({ projectId, backend: 'opfs', providerBasePath: projectId });
       await seedProjectRoot(projectId, count);
 
-      const wrapper = vi
-        .spyOn(FileTreeService.prototype, 'listDirectory')
-        .mockImplementation(async function (this: FileTreeService, path, options) {
-          if (path !== '') {
-            return originalListDirectory.call(this, path, options);
-          }
-          timing.rootListingCalls += 1;
-          const startedAt = performance.now();
-          try {
-            const result = await originalListDirectory.call(this, path, options);
-            timing.listing = { startedAt, settledAt: performance.now(), outcome: 'resolved' };
-            return result;
-          } catch (error) {
-            timing.listing = { startedAt, settledAt: performance.now(), outcome: 'rejected' };
-            throw error;
-          }
-        });
       try {
         actor = createActor(fileManagerMachine, {
-          input: { projectId, rootDirectory, shouldInitializeOnStart: true },
+          input: {
+            projectId,
+            rootDirectory,
+            shouldInitializeOnStart: true,
+            openPerformance: {
+              begin: (phase) => {
+                const startedAt = performance.now();
+                let finished = false;
+                if (phase === 'tree.list') {
+                  timing.rootListingCalls += 1;
+                }
+                return {
+                  spanId: crypto.randomUUID(),
+                  finish: (outcome) => {
+                    if (finished) {
+                      return;
+                    }
+                    finished = true;
+                    if (phase === 'tree.list') {
+                      timing.listing = {
+                        startedAt,
+                        settledAt: performance.now(),
+                        outcome: outcome === 'ok' ? 'resolved' : 'rejected',
+                      };
+                    }
+                  },
+                };
+              },
+            },
+          },
         });
         actor.subscribe((snapshot) => {
           if (snapshot.matches('initializingServices')) {
@@ -165,6 +175,12 @@ it.each([10, 1000])(
         if (tree === undefined || content === undefined) {
           throw new Error('The scoped file services did not publish.');
         }
+        await vi.waitFor(
+          () => {
+            expect(timing.listing?.outcome).toBe('resolved');
+          },
+          { timeout: 120_000 },
+        );
         const rows = tree.listDirectorySync('');
         expect(rows?.filter(({ name }) => name.startsWith('part-'))).toHaveLength(count - 1);
         expect(rows?.some(({ name }) => name === 'main.ts')).toBe(true);
@@ -185,14 +201,15 @@ it.each([10, 1000])(
           throw new Error('The browser probe did not capture its required service timing.');
         }
         expect(timing.listing.settledAt).toBeGreaterThan(timing.listing.startedAt);
-        expect(timing.readyAt).toBeGreaterThanOrEqual(timing.listing.settledAt);
+
         const evidence = {
-          kind: 'service-call-through',
+          kind: 'service-observation-span',
           buildMode: 'vitest-vite',
           acceptanceQualified: false,
           admissionScope: 'filesystem-only: no generated project identity or full route/session admission',
           authoredRootFilesExcludingManifestAndIdentity: count,
           rootListingCalls: timing.rootListingCalls,
+          readyToListingSettledMilliseconds: timing.listing.settledAt - timing.readyAt,
           rootListingMilliseconds: timing.listing.settledAt - timing.listing.startedAt,
           initializingServicesToReadyMilliseconds: timing.readyAt - timing.initializingServicesAt,
           listedAuthoredRootFiles: rows.filter(({ name }) => name.startsWith('part-') || name === 'main.ts').length,
@@ -202,12 +219,8 @@ it.each([10, 1000])(
         const response = await fetch('/__project-open-probe', { method: 'POST', body: JSON.stringify(evidence) });
         expect(response.ok).toBe(true);
       } finally {
-        try {
-          if (actor !== undefined) {
-            stopProbeFileManager(actor);
-          }
-        } finally {
-          wrapper.mockRestore();
+        if (actor !== undefined) {
+          stopProbeFileManager(actor);
         }
       }
     } finally {

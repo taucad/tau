@@ -10,10 +10,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import type { DirectoryListing } from '@taucad/fs-client/directory-listing';
 import type { FileEntry, FileProvenance } from '@taucad/types';
 import type * as FileUtils from '@taucad/utils/file';
 import type * as NativeFileManager from '#hooks/use-native-file-manager.js';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
+
+const listing = vi.hoisted((): { current: DirectoryListing; retry: number } => ({
+  current: { kind: 'ready', path: '', entries: [] },
+  retry: 0,
+}));
+vi.mock('@taucad/fs-client/react/use-directory-listing', () => ({
+  useDirectoryListing: (_service: unknown, _path: string, options?: { reloadToken?: number }) => {
+    listing.retry = options?.reloadToken ?? 0;
+    return listing.current;
+  },
+}));
 
 const tree = vi.hoisted(() => ({ current: new Map<string, FileEntry>() }));
 const editorSend = vi.hoisted(() => vi.fn());
@@ -136,6 +148,8 @@ const file = (
 const bundleIdentity = 'skill:cad-openscad@1.4.0#abc123';
 
 beforeEach(() => {
+  listing.current = { kind: 'ready', path: '', entries: [] };
+  listing.retry = 0;
   editorSend.mockClear();
   overrideUnit.mockClear();
   readRawBytes.mockClear();
@@ -267,5 +281,25 @@ describe('Files tree provenance rows (north star W4)', () => {
     const inside = screen.getByRole('treeitem', { name: 'three' });
     expect(inside).toHaveAccessibleDescription('Dependencies · read-only');
     expect(inside.querySelector('[data-provenance-glyph="lock"]')).toBeNull();
+  });
+});
+
+describe('Files root readiness', () => {
+  it('shows loading instead of empty or stale rows before the root is known', () => {
+    listing.current = { kind: 'loading', path: '' };
+    renderTree();
+    expect(screen.getByRole('status', { name: 'Loading files' })).toBeInTheDocument();
+    expect(screen.queryByRole('treeitem')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create File' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create Folder' })).not.toBeInTheDocument();
+  });
+
+  it('offers an explicit retry when listing fails without presenting stale rows', async () => {
+    listing.current = { kind: 'error', path: '', cause: { code: 'Unavailable', path: '', message: 'Unavailable' } };
+    renderTree();
+    expect(screen.getByRole('alert', { name: 'Files unavailable' })).toBeInTheDocument();
+    expect(screen.queryByRole('treeitem')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(listing.retry).toBe(1);
   });
 });

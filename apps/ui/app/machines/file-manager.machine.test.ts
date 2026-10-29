@@ -185,7 +185,16 @@ vi.mock('#filesystem/handle-store.js', () => ({
 describe('fileManagerMachine', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAuthorityWatch = undefined;
+    mockAuthorityWatch = () => {
+      const closed = Promise.withResolvers<void>();
+      return {
+        ready: Promise.resolve(),
+        closed: closed.promise,
+        unsubscribe: () => {
+          closed.resolve();
+        },
+      };
+    };
     diagnosticEnvironment.enabled = false;
     workerTestState.instances.length = 0;
     workerTestState.rootedProxyDisposals.length = 0;
@@ -497,7 +506,7 @@ describe('fileManagerMachine', () => {
     actor.stop();
   });
 
-  it('should reach ready without listing a root registered after worker boot', async () => {
+  it('should keep services ready when an unregistered root listing fails', async () => {
     mockViewHelloState = 'unavailable';
     mockViewReaddirWithStats.mockRejectedValue(new Error('The requested filesystem root is unavailable.'));
     const actor = createActor(fileManagerMachine, {
@@ -508,7 +517,9 @@ describe('fileManagerMachine', () => {
     await vi.waitFor(() => {
       expect(actor.getSnapshot().value).toBe('ready');
     });
-    expect(mockViewReaddirWithStats).not.toHaveBeenCalledWith('');
+    await vi.waitFor(() => {
+      expect(mockViewReaddirWithStats).toHaveBeenCalledWith('');
+    });
 
     // Once the root is registered, the reload the provider dispatches lists it.
     mockViewHelloState = 'ready';
@@ -1531,7 +1542,32 @@ describe('fileManagerMachine', () => {
       actor.stop();
     });
 
-    it('should dispose opened bridges when the root listing is cancelled', async () => {
+    it('should publish scoped services before the initial root listing settles', async () => {
+      const listing = Promise.withResolvers<void>();
+      const started = Promise.withResolvers<void>();
+      mockViewReaddirWithStats.mockImplementationOnce(async () => {
+        started.resolve();
+        await listing.promise;
+        return [];
+      });
+      const actor = createActor(fileManagerMachine, {
+        input: { rootDirectory: '/projects/proj-a', projectId: 'proj-a', shouldInitializeOnStart: true },
+      });
+      try {
+        actor.start();
+        await started.promise;
+        await vi.waitFor(() => {
+          expect(actor.getSnapshot().matches('ready')).toBe(true);
+          expect(actor.getSnapshot().context.contentService).toBeDefined();
+          expect(actor.getSnapshot().context.treeService?.listDirectorySync('')).toBeUndefined();
+        });
+      } finally {
+        listing.resolve();
+        actor.stop();
+      }
+    });
+
+    it('should dispose old bridges when the root changes during listing', async () => {
       let releaseListing = (): void => undefined;
       let markListingStarted = (): void => undefined;
       const listingGate = new Promise<void>((resolve) => {
@@ -1561,14 +1597,15 @@ describe('fileManagerMachine', () => {
         await listingStarted;
         expect(mockOpenFileSystemBridge).toHaveBeenCalledTimes(2);
 
-        actor.stop();
+        const oldDisposals = workerTestState.rootedProxyDisposals.slice(-2);
+        actor.send({ type: 'setRoot', path: '/projects/proj-b', projectId: 'proj-b' });
         releaseListing();
 
         await vi.waitFor(() => {
           expect(disposeChannel).toHaveBeenCalledOnce();
-          expect(workerTestState.rootedProxyDisposals.slice(-2).map((dispose) => dispose.mock.calls.length)).toEqual([
-            1, 1,
-          ]);
+          expect(oldDisposals.map((dispose) => dispose.mock.calls.length)).toEqual([1, 1]);
+          expect(actor.getSnapshot().matches('ready')).toBe(true);
+          expect(actor.getSnapshot().context.projectId).toBe('proj-b');
         });
         expect(disposeContent).toHaveBeenCalledOnce();
         expect(disposeTree).toHaveBeenCalledOnce();

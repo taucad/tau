@@ -1,6 +1,13 @@
 name: CI
 
 on:
+  workflow_dispatch:
+    inputs:
+      benchmark:
+        description: 'Matched uncached comparison at this SHA (all normal checks still run)'
+        required: true
+        type: choice
+        options: [baseline, candidate]
   push:
     branches: [main] # Only run on pushes to main branch
   pull_request:
@@ -39,6 +46,8 @@ jobs:
       actions: 'read'
       pull-requests: 'read'
     outputs:
+      test-shards: ${{ steps.test-shards.outputs.test-shards }}
+      test-shards-id: ${{ steps.test-shards.outputs.test-shards-id }}
       apps: ${{ steps.plan.outputs.apps }}
       deploy-apps: ${{ steps.plan.outputs.deploy-apps }}
       api: ${{ steps.plan.outputs.api }}
@@ -55,6 +64,32 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+
+      - name: Pin the benchmark selection
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "NX_BASE=$(git rev-parse HEAD^)" >> "$GITHUB_ENV"
+          echo "NX_HEAD=$GITHUB_SHA" >> "$GITHUB_ENV"
+
+      - name: Select and balance affected tests
+        id: test-shards
+        env:
+          BENCHMARK: ${{ inputs.benchmark }}
+        run: |
+          set -euo pipefail
+          mkdir -p out/reports/ci
+          pnpm nx show projects --affected --with-target test --exclude tag:scope:api,tag:ci:quarantined --json | tail -1 > out/reports/ci/selected-tests.json
+          pnpm nx graph --file=out/reports/ci/graph.json > /dev/null
+          history=scripts/ci-test-durations.json
+          if [ "$BENCHMARK" = baseline ]; then history=/dev/null; fi
+          pnpm nx run scripts:plan-ci-tests --args="--history=$history --selection=out/reports/ci/selected-tests.json --project-graph=out/reports/ci/graph.json"
+
+      - name: Retain the shared test assignment
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-test-assignment-${{ github.run_attempt }}
+          path: out/reports/ci/test-shards.json
+          retention-days: 14
 
       - name: Select the apps with a staging deploy
         id: deployables
@@ -172,6 +207,12 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
+      - name: Pin the benchmark selection
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "NX_BASE=$(git rev-parse HEAD^)" >> "$GITHUB_ENV"
+          echo "NX_HEAD=$GITHUB_SHA" >> "$GITHUB_ENV"
+
       - name: Setup Linux sandbox prerequisites
         if: startsWith(matrix.lane, 'test-')
         uses: ./.github/actions/setup-linux-sandbox
@@ -197,8 +238,8 @@ jobs:
       # runs in the `api` lane below, which has both; these lanes stay hermetic.
       #
       # The three test shards split the affected projects with a `test` target by
-      # their test-file counts. The project list comes from the graph at run time,
-      # never from this file.
+      # recent uncached durations, falling back to file counts when history is incomplete.
+      # One plan manifest supplies all three lanes; coverage is independent of weights.
       #
       # `--parallel=1`: ui:lint and ui:typecheck each peak near 9.5 GB, so any two of
       # them (or ui:build) together exhaust the 16 GB hosted runner, which then loses
@@ -206,9 +247,30 @@ jobs:
       # this happened a few minutes in; at two it still happened once both overlapped.
       # `test` needs the same cap: overlapping WASM suites lost the VM the same way
       # a few minutes into `test` (tau#306 and tau#299, 2026-10-04).
+      - name: Prepare timing output
+        if: matrix.lane == 'pkgcheck' || startsWith(matrix.lane, 'test-')
+        run: mkdir -p out/reports/ci/pkgcheck
+
+      - name: Build affected package prerequisites
+        if: matrix.lane == 'pkgcheck'
+        env:
+          NX_SKIP_REMOTE_CACHE: ${{ github.event_name == 'workflow_dispatch' && 'true' || '' }}
+          NX_CACHE_DIRECTORY: ${{ github.event_name == 'workflow_dispatch' && 'node_modules/.cache/ci-benchmark' || '' }}
+        run: |
+          set -euo pipefail
+          projects=$(pnpm nx show projects --affected --with-target pkgcheck --json | tail -1 | jq -r 'join(",")')
+          if [ -n "$projects" ]; then
+            NX_PROFILE=out/reports/ci/package-build-profile.json /usr/bin/time -v -o out/reports/ci/package-build-resource.txt pnpm nx run-many -t build --projects "$projects" --parallel=1
+          fi
+
       - name: Run the lane's tasks
         env:
           LANE: ${{ matrix.lane }}
+          BENCHMARK: ${{ inputs.benchmark }}
+          NX_SKIP_REMOTE_CACHE: ${{ github.event_name == 'workflow_dispatch' && 'true' || '' }}
+          NX_CACHE_DIRECTORY: ${{ github.event_name == 'workflow_dispatch' && 'node_modules/.cache/ci-benchmark' || '' }}
+          TEST_SHARDS: ${{ needs.plan.outputs.test-shards }}
+          TEST_SHARDS_ID: ${{ needs.plan.outputs.test-shards-id }}
         run: |
           set -o pipefail
           case "$LANE" in
@@ -216,43 +278,36 @@ jobs:
             typecheck) pnpm nx affected -t typecheck --parallel=1 ;;
             build) pnpm nx affected -t build size --parallel=1 ;;
             pkgcheck)
-              # publint, attw, madge and the surface checks are light, so they run three at
-              # a time once their builds exist. The builds stay serial and land in the local
-              # cache, so the checks reuse them.
-              projects=$(pnpm nx show projects --affected --with-target pkgcheck --json | tail -1 | jq -r 'join(",")')
-              if [ -n "$projects" ]; then
-                pnpm nx run-many -t build --projects "$projects" --parallel=1
-              fi
-              pnpm nx affected -t pkgcheck audit-public-surface readme-quickstart --parallel=3
+              # Keep the validator concurrency and consumer compiler unchanged; the
+              # profile distinguishes cache restores, sibling targets and actual work.
+              timing="$GITHUB_WORKSPACE/out/reports/ci/pkgcheck"
+              if [ "$BENCHMARK" = baseline ]; then timing=; fi
+              TAU_CI_TIMING_DIRECTORY="$timing" NX_PROFILE=out/reports/ci/package-check-profile.json /usr/bin/time -v -o out/reports/ci/package-check-resource.txt pnpm nx affected -t pkgcheck audit-public-surface readme-quickstart --parallel=3
               ;;
             test-*)
               # GeoSpec suites run here against the published `geospec-engine` prebuild for
               # this runner. `ci:quarantined` projects (runtime-e2e) run only in the nightly
               # workflow until their failing tests pass there: https://github.com/taucad/tau/issues/342
-              projects=$(pnpm nx show projects --affected --with-target test --exclude tag:scope:api,tag:ci:quarantined --json | tail -1)
-              pnpm nx graph --file="$RUNNER_TEMP/graph.json" > /dev/null
-              # Weigh each project by its test files, then deal the heaviest first to the
-              # lightest shard, so the slowest suites land in different shards.
-              shard=$(echo "$projects" | jq -r '.[]' | while read -r project; do
-                root=$(jq -r --arg project "$project" '.graph.nodes[$project].data.root' "$RUNNER_TEMP/graph.json")
-                weight=1
-                if [ "$root" != . ]; then
-                  weight=$(( $(git ls-files -- "$root" | grep -cE '(\.(test|spec)\.[cm]?[jt]sx?|Tests?\.cs)$') + 1 ))
-                fi
-                echo "$weight $project"
-              done | sort -k1,1nr -k2,2 | awk -v shard="$(( ${LANE#test-} - 1 ))" '
-                { best = 0; for (s = 1; s < 3; s++) if (load[s] < load[best]) best = s
-                  load[best] += $1
-                  if (best == shard) { printf "%s%s", sep, $2; sep = "," } }')
+              echo "Test assignment: $TEST_SHARDS_ID"
+              shard=$(jq -er --argjson index "$(( ${LANE#test-} - 1 ))" 'if type == "array" and length == 3 and all(.[]; type == "array") then .[$index] | join(",") else error("Invalid test assignment") end' <<< "$TEST_SHARDS")
               if [ -z "$shard" ]; then
                 echo "No affected test projects in this shard."
                 exit 0
               fi
               echo "Shard projects: $shard"
-              pnpm nx run-many -t test --projects "$shard" --parallel=1 --outputStyle=static 2>&1 | tee "$RUNNER_TEMP/affected-test.log"
+              NX_PROFILE=out/reports/ci/test-profile.json /usr/bin/time -v -o out/reports/ci/test-resource.txt pnpm nx run-many -t test --projects "$shard" --parallel=1 --outputStyle=static 2>&1 | tee "$RUNNER_TEMP/affected-test.log"
               ;;
             *) echo "Unknown lane $LANE" >&2; exit 1 ;;
           esac
+
+      - name: Retain package and test timing evidence
+        if: always() && (matrix.lane == 'pkgcheck' || startsWith(matrix.lane, 'test-'))
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-timing-${{ matrix.lane }}-${{ github.run_attempt }}
+          path: out/reports/ci
+          retention-days: 14
+          if-no-files-found: warn
 
       # The full log of a full-graph run is far longer than the API's log tail, so a failed
       # test phase repeats each failing suite's report (and the sandbox host facts the native
@@ -450,6 +505,12 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
+      - name: Pin the benchmark selection
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "NX_BASE=$(git rev-parse HEAD^)" >> "$GITHUB_ENV"
+          echo "NX_HEAD=$GITHUB_SHA" >> "$GITHUB_ENV"
+
       - name: Setup formal toolchains
         uses: ./.github/actions/setup-formal
         with:
@@ -493,6 +554,12 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+
+      - name: Pin the benchmark selection
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "NX_BASE=$(git rev-parse HEAD^)" >> "$GITHUB_ENV"
+          echo "NX_HEAD=$GITHUB_SHA" >> "$GITHUB_ENV"
 
       - name: Run affected example contracts
         run: pnpm nx affected -t test-geospec --parallel=1

@@ -1,4 +1,4 @@
-// oxlint-disable unicorn/no-process-exit, no-restricted-imports, import/extensions -- CLI tool shares its adjacent helper.
+// oxlint-disable unicorn/no-process-exit, no-restricted-imports, import/extensions -- CLI shares validation helpers and the workspace timing recorder.
 /**
  * Package Check Orchestrator
  *
@@ -56,6 +56,7 @@ import {
 } from './pkgcheck-metadata.js';
 import type { AssetFile, CopyEntry, UpstreamExport } from './pkgcheck-metadata.js';
 import { readCopyFilesConfig } from './copy-files-from-to.plugin.js';
+import { createTimingRecorder } from '../scripts/src/ci-timing.ts';
 
 type CheckResult = {
   name: string;
@@ -108,8 +109,51 @@ console.log();
 
 const results: CheckResult[] = [];
 
+const timingVersions: Record<string, string> = {};
+if (process.env['TAU_CI_TIMING_DIRECTORY']) {
+  for (const name of ['typescript', '@arethetypeswrong/cli', 'publint', 'madge', 'nx', 'size-limit']) {
+    try {
+      const manifest = JSON.parse(readFileSync(join(workspaceRoot, 'node_modules', name, 'package.json'), 'utf8')) as {
+        version: string;
+      };
+      timingVersions[name] = manifest.version;
+    } catch {
+      timingVersions[name] = 'unavailable';
+    }
+  }
+}
+
+const timing = createTimingRecorder({
+  directory: process.env['TAU_CI_TIMING_DIRECTORY'],
+  metadata: {
+    kind: 'pkgcheck',
+    package: packageName,
+    projectRoot,
+    sourceRevision: process.env['GITHUB_SHA'],
+    runId: process.env['GITHUB_RUN_ID'],
+    attempt: process.env['GITHUB_RUN_ATTEMPT'],
+    job: process.env['GITHUB_JOB'],
+    target: process.env['NX_TASK_TARGET_PROJECT'] ? `${process.env['NX_TASK_TARGET_PROJECT']}:pkgcheck` : undefined,
+    runner: process.env['RUNNER_NAME'],
+    runnerImage: process.env['ImageVersion'],
+    taskHash: process.env['NX_TASK_HASH'],
+    node: process.version,
+    platform: process.platform,
+    architecture: process.arch,
+    versions: timingVersions,
+  },
+});
+process.on('exit', (exitCode) => {
+  try {
+    timing.finish(exitCode);
+  } catch (error) {
+    // Telemetry must never replace a validation failure or change publication eligibility.
+    console.error('Unable to write package-check timing:', error);
+  }
+});
+
 /** The Nx graph answers "what exists" and "what publishes"; nothing here re-derives it. */
-const resolved = await workspace();
+const resolved = await timing.measure('workspace-graph', () => workspace());
 
 const workspaceProjects: WorkspaceProject[] = resolved.projects.flatMap((project) =>
   project.manifest?.name === undefined
@@ -835,42 +879,47 @@ function linkInstalledPackage(from: string, nodeModules: string, dependency: str
 
 /** Stage the files npm would publish, without running package lifecycle scripts. */
 function copyPackedFiles(source: string, destination: string): void {
-  const output = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
-    cwd: source,
-    encoding: 'utf8',
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  const output = timing.measureSync('npm-pack-file-list', () =>
+    execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
+      cwd: source,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }),
+  );
   const packs: unknown = JSON.parse(output);
   if (!Array.isArray(packs) || packs.length !== 1 || !isRecord(packs[0]) || !Array.isArray(packs[0].files)) {
     throw new Error(`npm pack returned an invalid file list for ${source}`);
   }
 
   const sourceRoot = realpathSync(source);
-  for (const file of packs[0].files) {
-    if (!isRecord(file) || typeof file.path !== 'string') {
-      throw new Error(`npm pack returned an invalid file path for ${source}`);
+  const packedFiles = packs[0].files;
+  timing.measureSync('copy-published-files', () => {
+    for (const file of packedFiles) {
+      if (!isRecord(file) || typeof file.path !== 'string') {
+        throw new Error(`npm pack returned an invalid file path for ${source}`);
+      }
+      const { path } = file;
+      if (path === 'package.json') {
+        // The staged manifest must retain publishConfig overrides and omit scripts.
+        continue;
+      }
+      if (
+        path.startsWith('/') ||
+        path.includes('\\') ||
+        path.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')
+      ) {
+        throw new Error(`npm pack returned an unsafe file path: ${path}`);
+      }
+      const fileSource = realpathSync(join(source, path));
+      const relativeSource = relative(sourceRoot, fileSource);
+      if (isAbsolute(relativeSource) || relativeSource.split(sep)[0] === '..') {
+        throw new Error(`npm pack returned a file outside the package: ${path}`);
+      }
+      const fileDestination = join(destination, path);
+      mkdirSync(dirname(fileDestination), { recursive: true });
+      cpSync(fileSource, fileDestination);
     }
-    const { path } = file;
-    if (path === 'package.json') {
-      // The staged manifest must retain publishConfig overrides and omit scripts.
-      continue;
-    }
-    if (
-      path.startsWith('/') ||
-      path.includes('\\') ||
-      path.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')
-    ) {
-      throw new Error(`npm pack returned an unsafe file path: ${path}`);
-    }
-    const fileSource = realpathSync(join(source, path));
-    const relativeSource = relative(sourceRoot, fileSource);
-    if (isAbsolute(relativeSource) || relativeSource.split(sep)[0] === '..') {
-      throw new Error(`npm pack returned a file outside the package: ${path}`);
-    }
-    const fileDestination = join(destination, path);
-    mkdirSync(dirname(fileDestination), { recursive: true });
-    cpSync(fileSource, fileDestination);
-  }
+  });
 }
 
 /**
@@ -1005,7 +1054,11 @@ function validateStrictConsumerTypes(): CheckResult {
 
   try {
     const nodeModules = join(directory, 'node_modules');
-    failures.push(...stagePublishedPackage(absoluteRoot, nodeModules, new Set()));
+    failures.push(
+      ...timing.measureSync('stage-published-closure', () =>
+        stagePublishedPackage(absoluteRoot, nodeModules, new Set()),
+      ),
+    );
     writeFileSync(join(directory, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
     writeFileSync(join(directory, 'probe.ts'), consumerProbeSource(specifiers));
 
@@ -1020,11 +1073,13 @@ function validateStrictConsumerTypes(): CheckResult {
         ),
       );
       try {
-        execFileSync(join(workspaceRoot, 'node_modules/.bin/tsc'), ['--project', configPath, '--pretty', 'false'], {
-          cwd: directory,
-          encoding: 'utf8',
-          stdio: ['pipe', 'pipe', 'pipe'],
-        });
+        timing.measureSync(`tsc-${resolution}`, () =>
+          execFileSync(join(workspaceRoot, 'node_modules/.bin/tsc'), ['--project', configPath, '--pretty', 'false'], {
+            cwd: directory,
+            encoding: 'utf8',
+            stdio: ['pipe', 'pipe', 'pipe'],
+          }),
+        );
       } catch (error) {
         const execError = error as { stdout?: string; stderr?: string };
         const { remaining, explained } = partitionConsumerDiagnostics(
@@ -1040,7 +1095,7 @@ function validateStrictConsumerTypes(): CheckResult {
       }
     }
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    timing.measureSync('consumer-cleanup', () => rmSync(directory, { recursive: true, force: true }));
   }
 
   const summary = `${String(specifiers.length)} published subpath(s) typecheck with skipLibCheck:false under bundler and nodenext`;
@@ -1600,71 +1655,71 @@ function printResult(result: CheckResult): void {
 }
 
 async function main(): Promise<void> {
-  results.push(validateEsmOnlyPackageMetadata());
+  results.push(timing.measureSync('validateEsmOnlyPackageMetadata', () => validateEsmOnlyPackageMetadata()));
   printResult(results.at(-1)!);
 
-  results.push(validateFlatDistributionLayout());
+  results.push(timing.measureSync('validateFlatDistributionLayout', () => validateFlatDistributionLayout()));
   printResult(results.at(-1)!);
 
-  results.push(validatePackageMetadata());
+  results.push(timing.measureSync('validatePackageMetadata', () => validatePackageMetadata()));
   printResult(results.at(-1)!);
 
-  results.push(validatePublishableManifest());
+  results.push(timing.measureSync('validatePublishableManifest', () => validatePublishableManifest()));
   printResult(results.at(-1)!);
 
-  results.push(validateBundleOwnership());
+  results.push(timing.measureSync('validateBundleOwnership', () => validateBundleOwnership()));
   printResult(results.at(-1)!);
 
-  results.push(validateVendoredNodeModules());
+  results.push(timing.measureSync('validateVendoredNodeModules', () => validateVendoredNodeModules()));
   printResult(results.at(-1)!);
 
-  results.push(validatePeerDependencyShape());
+  results.push(timing.measureSync('validatePeerDependencyShape', () => validatePeerDependencyShape()));
   printResult(results.at(-1)!);
 
-  results.push(validateLibDependencyShape());
+  results.push(timing.measureSync('validateLibDependencyShape', () => validateLibDependencyShape()));
   printResult(results.at(-1)!);
 
-  results.push(validateInternalImports());
+  results.push(timing.measureSync('validateInternalImports', () => validateInternalImports()));
   printResult(results.at(-1)!);
 
-  results.push(validateWorkspaceRanges());
+  results.push(timing.measureSync('validateWorkspaceRanges', () => validateWorkspaceRanges()));
   printResult(results.at(-1)!);
 
-  results.push(validateVendoredAssets());
+  results.push(timing.measureSync('validateVendoredAssets', () => validateVendoredAssets()));
   printResult(results.at(-1)!);
 
-  results.push(validateHostTarget());
+  results.push(timing.measureSync('validateHostTarget', () => validateHostTarget()));
   printResult(results.at(-1)!);
 
-  results.push(validatePluginRuntimePeerDependency());
+  results.push(timing.measureSync('validatePluginRuntimePeerDependency', () => validatePluginRuntimePeerDependency()));
   printResult(results.at(-1)!);
 
-  results.push(await validateDistributionAssets());
+  results.push(await timing.measure('validateDistributionAssets', () => validateDistributionAssets()));
   printResult(results.at(-1)!);
 
-  results.push(validateWorkerUrls());
+  results.push(timing.measureSync('validateWorkerUrls', () => validateWorkerUrls()));
   printResult(results.at(-1)!);
 
-  results.push(validateBundledArtifact());
+  results.push(timing.measureSync('validateBundledArtifact', () => validateBundledArtifact()));
   printResult(results.at(-1)!);
 
-  results.push(validateStrictConsumerTypes());
+  results.push(timing.measureSync('validateStrictConsumerTypes', () => validateStrictConsumerTypes()));
   printResult(results.at(-1)!);
 
-  results.push(await runPublint());
+  results.push(await timing.measure('runPublint', () => runPublint()));
   printResult(results.at(-1)!);
 
-  results.push(await runAttw());
+  results.push(await timing.measure('runAttw', () => runAttw()));
   printResult(results.at(-1)!);
 
-  results.push(await runMadge());
+  results.push(await timing.measure('runMadge', () => runMadge()));
   printResult(results.at(-1)!);
 
-  results.push(await runSizeLimit());
+  results.push(await timing.measure('runSizeLimit', () => runSizeLimit()));
   printResult(results.at(-1)!);
 
-  printExportsSummary();
-  printSizeSummary();
+  timing.measureSync('exports-summary', () => printExportsSummary());
+  timing.measureSync('size-summary', () => printSizeSummary());
 
   const failures = results.filter((r) => r.status === 'fail');
   console.log();

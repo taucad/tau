@@ -53,6 +53,9 @@ const deliveryOutcome = (settlement: DeliverySettlement): AgentEvidenceDeliveryO
           ? 'revoked'
           : 'expired';
     }
+    case 'retry': {
+      return settlement.reason === 'key-unavailable' ? 'key_unavailable' : 'retry';
+    }
     default: {
       return settlement.kind;
     }

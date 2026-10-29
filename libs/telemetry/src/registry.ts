@@ -183,7 +183,8 @@ const agentEvidenceAdmissionOutcomes = [
 /**
  * `outcome` of one agent-evidence delivery step. `acknowledged` and `uncertain` are sends whose
  * visibility is not yet proven; `confirmed` was read back; `gap` was never visible and is not resent;
- * `abandoned` is a lease a stopped worker left, returned for another pass.
+ * `key_unavailable` is held for a payload key this deployment no longer has; `abandoned` is a lease a
+ * stopped worker left, returned for another pass.
  */
 const agentEvidenceDeliveryOutcomes = [
   'acknowledged',
@@ -191,6 +192,7 @@ const agentEvidenceDeliveryOutcomes = [
   'confirmed',
   'recheck',
   'retry',
+  'key_unavailable',
   'rejected',
   'revoked',
   'gap',

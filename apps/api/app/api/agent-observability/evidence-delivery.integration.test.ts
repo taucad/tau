@@ -85,12 +85,12 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     return found!;
   };
 
-  const service = (allowed: readonly TelemetryPurpose[] = ['summary', 'content']) => {
+  const service = (allowed: readonly TelemetryPurpose[] = ['summary', 'content'], keyVersion = 1) => {
     const config = mock<ConfigService>();
     /* eslint-disable @typescript-eslint/naming-convention -- environment variables are UPPER_CASED */
     const values: Record<string, unknown> = {
       TAU_OBSERVABILITY_PAYLOAD_KEY: Buffer.from(key).toString('base64url'),
-      TAU_OBSERVABILITY_PAYLOAD_KEY_VERSION: 1,
+      TAU_OBSERVABILITY_PAYLOAD_KEY_VERSION: keyVersion,
       TAU_OBSERVABILITY_DELIVERY_ENABLED: true,
       LANGFUSE_BASE_URL: 'https://langfuse.test.invalid',
       LANGFUSE_PUBLIC_KEY: 'pk-test',
@@ -204,6 +204,19 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     expect(retried.leaseExpiresAt!.getTime()).toBeGreaterThan(now.getTime());
     /* The vendor's reason stays on the row; the series carries only the bounded outcome. */
     expect(metrics.agentEvidenceDeliveries.add).toHaveBeenCalledWith(1, { outcome: 'retry' });
+  });
+
+  it('should hold a payload sealed under a key this deployment lacks, and count it apart from a retry', async () => {
+    const { receiptId } = await admitted();
+    const fetcher = vendor(() => json(200, {}));
+
+    await service(['summary', 'content'], 2).drain(new Date());
+
+    expect(fetcher).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ method: 'POST' }));
+    const held = await row(receiptId);
+    expect(held).toMatchObject({ state: 'pending', reason: 'key-unavailable' });
+    expect(held.payload).not.toBeNull();
+    expect(metrics.agentEvidenceDeliveries.add).toHaveBeenCalledWith(1, { outcome: 'key_unavailable' });
   });
 
   it('should purge without sending when the purpose was withdrawn or the project deleted', async () => {

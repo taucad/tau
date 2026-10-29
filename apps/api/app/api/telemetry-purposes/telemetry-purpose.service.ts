@@ -108,7 +108,10 @@ export class TelemetryPurposeService {
    * @param purposes - Purposes to withdraw; all of them when omitted.
    */
   @Span()
-  public async withdrawAll(userId: string, purposes?: ReadonlyArray<RecordedPurposeDecision['purpose']>): Promise<void> {
+  public async withdrawAll(
+    userId: string,
+    purposes?: ReadonlyArray<RecordedPurposeDecision['purpose']>,
+  ): Promise<void> {
     const noticeVersion = this.noticeVersion();
     if (noticeVersion === undefined) {
       return;

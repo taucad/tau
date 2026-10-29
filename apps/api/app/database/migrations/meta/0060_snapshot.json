@@ -94,12 +94,8 @@
           "name": "account_user_id_user_id_fk",
           "tableFrom": "account",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -207,12 +203,8 @@
           "name": "agent_run_owner_id_user_id_fk",
           "tableFrom": "agent_run",
           "tableTo": "user",
-          "columnsFrom": [
-            "owner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["owner_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -220,12 +212,8 @@
           "name": "agent_run_placement_agent_device_id_fk",
           "tableFrom": "agent_run",
           "tableTo": "agent_device",
-          "columnsFrom": [
-            "placement"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["placement"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -587,12 +575,8 @@
           "tableFrom": "billing_account_closure",
           "tableTo": "billing_owner_binding",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "binding_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["binding_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -601,14 +585,8 @@
           "tableFrom": "billing_account_closure",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "environment",
-            "account_id"
-          ],
-          "columnsTo": [
-            "environment",
-            "id"
-          ],
+          "columnsFrom": ["environment", "account_id"],
+          "columnsTo": ["environment", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -618,17 +596,12 @@
         "billing_account_closure_account_id_unique": {
           "name": "billing_account_closure_account_id_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id"
-          ]
+          "columns": ["account_id"]
         },
         "billing_account_closure_owner": {
           "name": "billing_account_closure_owner",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "id"
-          ]
+          "columns": ["account_id", "id"]
         }
       },
       "policies": {},
@@ -771,18 +744,8 @@
           "tableFrom": "billing_budget",
           "tableTo": "billing_budget_funding",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "environment",
-            "funding_id",
-            "kind",
-            "scope"
-          ],
-          "columnsTo": [
-            "environment",
-            "id",
-            "kind",
-            "scope"
-          ],
+          "columnsFrom": ["environment", "funding_id", "kind", "scope"],
+          "columnsTo": ["environment", "id", "kind", "scope"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -792,10 +755,7 @@
         "billing_budget_environment_id": {
           "name": "billing_budget_environment_id",
           "nullsNotDistinct": false,
-          "columns": [
-            "environment",
-            "id"
-          ]
+          "columns": ["environment", "id"]
         }
       },
       "policies": {},
@@ -895,20 +855,12 @@
         "billing_funding_environment_id": {
           "name": "billing_funding_environment_id",
           "nullsNotDistinct": false,
-          "columns": [
-            "environment",
-            "id"
-          ]
+          "columns": ["environment", "id"]
         },
         "billing_funding_scope_id": {
           "name": "billing_funding_scope_id",
           "nullsNotDistinct": false,
-          "columns": [
-            "environment",
-            "id",
-            "kind",
-            "scope"
-          ]
+          "columns": ["environment", "id", "kind", "scope"]
         }
       },
       "policies": {},
@@ -998,12 +950,8 @@
           "tableFrom": "billing_budget_hold",
           "tableTo": "billing_budget",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "budget_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["budget_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1012,12 +960,8 @@
           "tableFrom": "billing_budget_hold",
           "tableTo": "credit_operation",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "operation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["operation_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1206,12 +1150,8 @@
           "tableFrom": "billing_cash_fact",
           "tableTo": "billing_cash_scan",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "scan_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["scan_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1221,14 +1161,7 @@
         "billing_cash_fact_identity": {
           "name": "billing_cash_fact_identity",
           "nullsNotDistinct": false,
-          "columns": [
-            "environment",
-            "stripe_account_id",
-            "livemode",
-            "source_type",
-            "source_id",
-            "object_digest"
-          ]
+          "columns": ["environment", "stripe_account_id", "livemode", "source_type", "source_id", "object_digest"]
         }
       },
       "policies": {},
@@ -1449,14 +1382,7 @@
         "billing_cash_scan_window": {
           "name": "billing_cash_scan_window",
           "nullsNotDistinct": false,
-          "columns": [
-            "environment",
-            "stripe_account_id",
-            "livemode",
-            "currency",
-            "window_start",
-            "window_end"
-          ]
+          "columns": ["environment", "stripe_account_id", "livemode", "currency", "window_start", "window_end"]
         }
       },
       "policies": {},
@@ -1496,12 +1422,8 @@
           "tableFrom": "billing_cash_scan_fact",
           "tableTo": "billing_cash_scan",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "scan_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["scan_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1510,12 +1432,8 @@
           "tableFrom": "billing_cash_scan_fact",
           "tableTo": "billing_cash_fact",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "fact_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["fact_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1523,10 +1441,7 @@
       "compositePrimaryKeys": {
         "billing_cash_scan_fact_scan_id_fact_id_pk": {
           "name": "billing_cash_scan_fact_scan_id_fact_id_pk",
-          "columns": [
-            "scan_id",
-            "fact_id"
-          ]
+          "columns": ["scan_id", "fact_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1675,12 +1590,8 @@
           "tableFrom": "billing_financial_case",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1690,13 +1601,7 @@
         "billing_financial_case_identity": {
           "name": "billing_financial_case_identity",
           "nullsNotDistinct": false,
-          "columns": [
-            "environment",
-            "stripe_account_id",
-            "livemode",
-            "kind",
-            "dedupe_key"
-          ]
+          "columns": ["environment", "stripe_account_id", "livemode", "kind", "dedupe_key"]
         }
       },
       "policies": {},
@@ -1779,12 +1684,8 @@
           "tableFrom": "billing_invocation_evidence",
           "tableTo": "credit_operation",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "operation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["operation_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1794,10 +1695,7 @@
         "billing_invocation_evidence_delivery": {
           "name": "billing_invocation_evidence_delivery",
           "nullsNotDistinct": false,
-          "columns": [
-            "operation_id",
-            "payload_digest"
-          ]
+          "columns": ["operation_id", "payload_digest"]
         }
       },
       "policies": {},
@@ -1889,11 +1787,7 @@
         "billing_journal_checkpoint_scope": {
           "name": "billing_journal_checkpoint_scope",
           "nullsNotDistinct": false,
-          "columns": [
-            "environment",
-            "stripe_account_id",
-            "livemode"
-          ]
+          "columns": ["environment", "stripe_account_id", "livemode"]
         }
       },
       "policies": {},
@@ -1972,12 +1866,8 @@
           "tableFrom": "billing_operation_exception",
           "tableTo": "credit_operation",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "operation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["operation_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1987,11 +1877,7 @@
         "billing_operation_exception_cause": {
           "name": "billing_operation_exception_cause",
           "nullsNotDistinct": false,
-          "columns": [
-            "operation_id",
-            "kind",
-            "source_identity"
-          ]
+          "columns": ["operation_id", "kind", "source_identity"]
         }
       },
       "policies": {},
@@ -2087,12 +1973,8 @@
           "name": "billing_owner_binding_auth_user_id_user_id_fk",
           "tableFrom": "billing_owner_binding",
           "tableTo": "user",
-          "columnsFrom": [
-            "auth_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["auth_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -2101,14 +1983,8 @@
           "tableFrom": "billing_owner_binding",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "environment",
-            "account_id"
-          ],
-          "columnsTo": [
-            "environment",
-            "id"
-          ],
+          "columnsFrom": ["environment", "account_id"],
+          "columnsTo": ["environment", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -2222,12 +2098,8 @@
           "tableFrom": "billing_period",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -2235,14 +2107,8 @@
           "name": "billing_period_account_id_subscription_id_subscription_account_id_id_fk",
           "tableFrom": "billing_period",
           "tableTo": "subscription",
-          "columnsFrom": [
-            "account_id",
-            "subscription_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "subscription_id"],
+          "columnsTo": ["account_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -2251,16 +2117,8 @@
           "tableFrom": "billing_period",
           "tableTo": "credit_transaction",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id",
-            "id",
-            "receipt_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "period_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "id", "receipt_id"],
+          "columnsTo": ["account_id", "period_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -2270,33 +2128,22 @@
         "billing_period_source_identity_unique": {
           "name": "billing_period_source_identity_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "source_identity"
-          ]
+          "columns": ["source_identity"]
         },
         "billing_period_invoice_id_unique": {
           "name": "billing_period_invoice_id_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "invoice_id"
-          ]
+          "columns": ["invoice_id"]
         },
         "billing_period_account_id": {
           "name": "billing_period_account_id",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "id"
-          ]
+          "columns": ["account_id", "id"]
         },
         "billing_period_entitlement": {
           "name": "billing_period_entitlement",
           "nullsNotDistinct": false,
-          "columns": [
-            "subscription_id",
-            "period_start",
-            "period_end"
-          ]
+          "columns": ["subscription_id", "period_start", "period_end"]
         }
       },
       "policies": {},
@@ -2414,10 +2261,7 @@
         "billing_policy_environment_id": {
           "name": "billing_policy_environment_id",
           "nullsNotDistinct": false,
-          "columns": [
-            "environment",
-            "id"
-          ]
+          "columns": ["environment", "id"]
         }
       },
       "policies": {},
@@ -2518,14 +2362,8 @@
           "tableFrom": "billing_policy_activation",
           "tableTo": "billing_policy",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "environment",
-            "policy_id"
-          ],
-          "columnsTo": [
-            "environment",
-            "id"
-          ],
+          "columnsFrom": ["environment", "policy_id"],
+          "columnsTo": ["environment", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -2535,19 +2373,12 @@
         "billing_activation_environment_id": {
           "name": "billing_activation_environment_id",
           "nullsNotDistinct": false,
-          "columns": [
-            "environment",
-            "id"
-          ]
+          "columns": ["environment", "id"]
         },
         "billing_activation_policy_id": {
           "name": "billing_activation_policy_id",
           "nullsNotDistinct": false,
-          "columns": [
-            "environment",
-            "id",
-            "policy_id"
-          ]
+          "columns": ["environment", "id", "policy_id"]
         }
       },
       "policies": {},
@@ -2623,14 +2454,8 @@
           "tableFrom": "billing_policy_activation_cancellation",
           "tableTo": "billing_policy_activation",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "environment",
-            "activation_id"
-          ],
-          "columnsTo": [
-            "environment",
-            "id"
-          ],
+          "columnsFrom": ["environment", "activation_id"],
+          "columnsTo": ["environment", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -2691,14 +2516,8 @@
           "tableFrom": "billing_policy_head",
           "tableTo": "billing_policy_activation",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "environment",
-            "current_activation_id"
-          ],
-          "columnsTo": [
-            "environment",
-            "id"
-          ],
+          "columnsFrom": ["environment", "current_activation_id"],
+          "columnsTo": ["environment", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -2707,14 +2526,8 @@
           "tableFrom": "billing_policy_head",
           "tableTo": "billing_policy_activation",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "environment",
-            "pending_activation_id"
-          ],
-          "columnsTo": [
-            "environment",
-            "id"
-          ],
+          "columnsFrom": ["environment", "pending_activation_id"],
+          "columnsTo": ["environment", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -2723,14 +2536,8 @@
           "tableFrom": "billing_policy_head",
           "tableTo": "billing_policy_activation",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "environment",
-            "observed_activation_id"
-          ],
-          "columnsTo": [
-            "environment",
-            "id"
-          ],
+          "columnsFrom": ["environment", "observed_activation_id"],
+          "columnsTo": ["environment", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -2840,12 +2647,8 @@
           "tableFrom": "billing_promotion_issuance",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -2854,12 +2657,8 @@
           "tableFrom": "billing_promotion_issuance",
           "tableTo": "billing_budget",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "budget_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["budget_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -2868,14 +2667,8 @@
           "tableFrom": "billing_promotion_issuance",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "environment",
-            "account_id"
-          ],
-          "columnsTo": [
-            "environment",
-            "id"
-          ],
+          "columnsFrom": ["environment", "account_id"],
+          "columnsTo": ["environment", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -2884,14 +2677,8 @@
           "tableFrom": "billing_promotion_issuance",
           "tableTo": "billing_budget",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "environment",
-            "budget_id"
-          ],
-          "columnsTo": [
-            "environment",
-            "id"
-          ],
+          "columnsFrom": ["environment", "budget_id"],
+          "columnsTo": ["environment", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -2901,10 +2688,7 @@
         "billing_promotion_account_id": {
           "name": "billing_promotion_account_id",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "id"
-          ]
+          "columns": ["account_id", "id"]
         }
       },
       "policies": {},
@@ -3157,14 +2941,8 @@
           "tableFrom": "billing_provider_leg",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "environment",
-            "account_id"
-          ],
-          "columnsTo": [
-            "environment",
-            "id"
-          ],
+          "columnsFrom": ["environment", "account_id"],
+          "columnsTo": ["environment", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -3173,14 +2951,8 @@
           "tableFrom": "billing_provider_leg",
           "tableTo": "billing_stripe_customer",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id",
-            "customer_binding_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "customer_binding_id"],
+          "columnsTo": ["account_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -3189,14 +2961,8 @@
           "tableFrom": "billing_provider_leg",
           "tableTo": "billing_purchase",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id",
-            "purchase_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "purchase_id"],
+          "columnsTo": ["account_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -3204,14 +2970,8 @@
           "name": "billing_provider_leg_account_id_subscription_id_subscription_account_id_id_fk",
           "tableFrom": "billing_provider_leg",
           "tableTo": "subscription",
-          "columnsFrom": [
-            "account_id",
-            "subscription_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "subscription_id"],
+          "columnsTo": ["account_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -3220,14 +2980,8 @@
           "tableFrom": "billing_provider_leg",
           "tableTo": "billing_reload_consent",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id",
-            "reload_consent_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "reload_consent_id"],
+          "columnsTo": ["account_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -3236,14 +2990,8 @@
           "tableFrom": "billing_provider_leg",
           "tableTo": "billing_subscription_offer",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id",
-            "subscription_offer_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "subscription_offer_id"],
+          "columnsTo": ["account_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -3252,14 +3000,8 @@
           "tableFrom": "billing_provider_leg",
           "tableTo": "billing_refund_intent",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id",
-            "refund_intent_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "refund_intent_id"],
+          "columnsTo": ["account_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -3268,14 +3010,8 @@
           "tableFrom": "billing_provider_leg",
           "tableTo": "billing_account_closure",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id",
-            "closure_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "closure_id"],
+          "columnsTo": ["account_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -3285,18 +3021,12 @@
         "billing_provider_leg_idempotency_key_unique": {
           "name": "billing_provider_leg_idempotency_key_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "idempotency_key"
-          ]
+          "columns": ["idempotency_key"]
         },
         "billing_provider_request": {
           "name": "billing_provider_request",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "kind",
-            "request_id"
-          ]
+          "columns": ["account_id", "kind", "request_id"]
         }
       },
       "policies": {},
@@ -3565,12 +3295,8 @@
           "tableFrom": "billing_purchase",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -3579,14 +3305,8 @@
           "tableFrom": "billing_purchase",
           "tableTo": "billing_stripe_customer",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id",
-            "customer_binding_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "customer_binding_id"],
+          "columnsTo": ["account_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -3595,16 +3315,8 @@
           "tableFrom": "billing_purchase",
           "tableTo": "credit_transaction",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id",
-            "id",
-            "receipt_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "purchase_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "id", "receipt_id"],
+          "columnsTo": ["account_id", "purchase_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -3613,14 +3325,8 @@
           "tableFrom": "billing_purchase",
           "tableTo": "billing_reload_consent",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id",
-            "reload_consent_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "reload_consent_id"],
+          "columnsTo": ["account_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -3630,44 +3336,27 @@
         "billing_purchase_source_identity_unique": {
           "name": "billing_purchase_source_identity_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "source_identity"
-          ]
+          "columns": ["source_identity"]
         },
         "billing_purchase_account_id": {
           "name": "billing_purchase_account_id",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "id"
-          ]
+          "columns": ["account_id", "id"]
         },
         "billing_purchase_request": {
           "name": "billing_purchase_request",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "purpose",
-            "request_id"
-          ]
+          "columns": ["account_id", "purpose", "request_id"]
         },
         "billing_purchase_payment": {
           "name": "billing_purchase_payment",
           "nullsNotDistinct": false,
-          "columns": [
-            "stripe_account_id",
-            "livemode",
-            "payment_intent_id"
-          ]
+          "columns": ["stripe_account_id", "livemode", "payment_intent_id"]
         },
         "billing_purchase_charge": {
           "name": "billing_purchase_charge",
           "nullsNotDistinct": false,
-          "columns": [
-            "stripe_account_id",
-            "livemode",
-            "charge_id"
-          ]
+          "columns": ["stripe_account_id", "livemode", "charge_id"]
         }
       },
       "policies": {},
@@ -3860,12 +3549,8 @@
           "tableFrom": "billing_recovery_notice",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -3875,10 +3560,7 @@
         "billing_recovery_notice_identity": {
           "name": "billing_recovery_notice_identity",
           "nullsNotDistinct": false,
-          "columns": [
-            "environment",
-            "dedupe_key"
-          ]
+          "columns": ["environment", "dedupe_key"]
         }
       },
       "policies": {},
@@ -4038,14 +3720,8 @@
           "tableFrom": "billing_refund_intent",
           "tableTo": "billing_reversal_case",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id",
-            "reversal_case_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "reversal_case_id"],
+          "columnsTo": ["account_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -4054,14 +3730,8 @@
           "tableFrom": "billing_refund_intent",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "environment",
-            "account_id"
-          ],
-          "columnsTo": [
-            "environment",
-            "id"
-          ],
+          "columnsFrom": ["environment", "account_id"],
+          "columnsTo": ["environment", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -4071,18 +3741,12 @@
         "billing_refund_intent_owner": {
           "name": "billing_refund_intent_owner",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "id"
-          ]
+          "columns": ["account_id", "id"]
         },
         "billing_refund_intent_request": {
           "name": "billing_refund_intent_request",
           "nullsNotDistinct": false,
-          "columns": [
-            "reversal_case_id",
-            "request_id"
-          ]
+          "columns": ["reversal_case_id", "request_id"]
         }
       },
       "policies": {},
@@ -4311,12 +3975,8 @@
           "tableFrom": "billing_reload_consent",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -4325,14 +3985,8 @@
           "tableFrom": "billing_reload_consent",
           "tableTo": "billing_stripe_customer",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id",
-            "customer_binding_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "customer_binding_id"],
+          "columnsTo": ["account_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -4341,14 +3995,8 @@
           "tableFrom": "billing_reload_consent",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "environment",
-            "account_id"
-          ],
-          "columnsTo": [
-            "environment",
-            "id"
-          ],
+          "columnsFrom": ["environment", "account_id"],
+          "columnsTo": ["environment", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -4358,26 +4006,17 @@
         "billing_reload_consent_owner": {
           "name": "billing_reload_consent_owner",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "id"
-          ]
+          "columns": ["account_id", "id"]
         },
         "billing_reload_consent_version": {
           "name": "billing_reload_consent_version",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "version"
-          ]
+          "columns": ["account_id", "version"]
         },
         "billing_reload_consent_request": {
           "name": "billing_reload_consent_request",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "request_id"
-          ]
+          "columns": ["account_id", "request_id"]
         }
       },
       "policies": {},
@@ -4517,12 +4156,8 @@
           "tableFrom": "billing_reload_work",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -4531,14 +4166,8 @@
           "tableFrom": "billing_reload_work",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "environment",
-            "account_id"
-          ],
-          "columnsTo": [
-            "environment",
-            "id"
-          ],
+          "columnsFrom": ["environment", "account_id"],
+          "columnsTo": ["environment", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -4783,12 +4412,8 @@
           "tableFrom": "billing_reversal_case",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -4797,14 +4422,8 @@
           "tableFrom": "billing_reversal_case",
           "tableTo": "billing_purchase",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id",
-            "purchase_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "purchase_id"],
+          "columnsTo": ["account_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -4813,14 +4432,8 @@
           "tableFrom": "billing_reversal_case",
           "tableTo": "billing_period",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id",
-            "period_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "period_id"],
+          "columnsTo": ["account_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -4830,28 +4443,17 @@
         "billing_reversal_account_id": {
           "name": "billing_reversal_account_id",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "id"
-          ]
+          "columns": ["account_id", "id"]
         },
         "billing_reversal_charge": {
           "name": "billing_reversal_charge",
           "nullsNotDistinct": false,
-          "columns": [
-            "stripe_account_id",
-            "livemode",
-            "charge_id"
-          ]
+          "columns": ["stripe_account_id", "livemode", "charge_id"]
         },
         "billing_reversal_payment": {
           "name": "billing_reversal_payment",
           "nullsNotDistinct": false,
-          "columns": [
-            "stripe_account_id",
-            "livemode",
-            "payment_intent_id"
-          ]
+          "columns": ["stripe_account_id", "livemode", "payment_intent_id"]
         }
       },
       "policies": {},
@@ -4968,12 +4570,8 @@
           "tableFrom": "billing_route_pause",
           "tableTo": "credit_operation",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "operation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["operation_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -4982,14 +4580,8 @@
           "tableFrom": "billing_route_pause",
           "tableTo": "credit_operation",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "environment",
-            "operation_id"
-          ],
-          "columnsTo": [
-            "environment",
-            "id"
-          ],
+          "columnsFrom": ["environment", "operation_id"],
+          "columnsTo": ["environment", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -5055,14 +4647,8 @@
           "tableFrom": "billing_stripe_customer",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "environment",
-            "account_id"
-          ],
-          "columnsTo": [
-            "environment",
-            "id"
-          ],
+          "columnsFrom": ["environment", "account_id"],
+          "columnsTo": ["environment", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -5072,29 +4658,17 @@
         "billing_stripe_customer_owner_id": {
           "name": "billing_stripe_customer_owner_id",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "id"
-          ]
+          "columns": ["account_id", "id"]
         },
         "billing_stripe_customer_slot": {
           "name": "billing_stripe_customer_slot",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "environment",
-            "stripe_account_id",
-            "livemode"
-          ]
+          "columns": ["account_id", "environment", "stripe_account_id", "livemode"]
         },
         "billing_stripe_customer_remote": {
           "name": "billing_stripe_customer_remote",
           "nullsNotDistinct": false,
-          "columns": [
-            "stripe_account_id",
-            "livemode",
-            "stripe_customer_id"
-          ]
+          "columns": ["stripe_account_id", "livemode", "stripe_customer_id"]
         }
       },
       "policies": {},
@@ -5205,13 +4779,7 @@
         "billing_stripe_source_identity": {
           "name": "billing_stripe_source_identity",
           "nullsNotDistinct": false,
-          "columns": [
-            "environment",
-            "stripe_account_id",
-            "livemode",
-            "source_type",
-            "source_id"
-          ]
+          "columns": ["environment", "stripe_account_id", "livemode", "source_type", "source_id"]
         }
       },
       "policies": {},
@@ -5351,14 +4919,8 @@
           "name": "billing_subscription_offer_account_id_subscription_id_subscription_account_id_id_fk",
           "tableFrom": "billing_subscription_offer",
           "tableTo": "subscription",
-          "columnsFrom": [
-            "account_id",
-            "subscription_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "subscription_id"],
+          "columnsTo": ["account_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -5367,14 +4929,8 @@
           "tableFrom": "billing_subscription_offer",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "environment",
-            "account_id"
-          ],
-          "columnsTo": [
-            "environment",
-            "id"
-          ],
+          "columnsFrom": ["environment", "account_id"],
+          "columnsTo": ["environment", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -5384,18 +4940,12 @@
         "billing_subscription_offer_owner": {
           "name": "billing_subscription_offer_owner",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "id"
-          ]
+          "columns": ["account_id", "id"]
         },
         "billing_subscription_offer_period": {
           "name": "billing_subscription_offer_period",
           "nullsNotDistinct": false,
-          "columns": [
-            "subscription_id",
-            "effective_period_start"
-          ]
+          "columns": ["subscription_id", "effective_period_start"]
         }
       },
       "policies": {},
@@ -5550,12 +5100,8 @@
           "tableFrom": "billing_tax_fact",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -5564,12 +5110,8 @@
           "tableFrom": "billing_tax_fact",
           "tableTo": "billing_stripe_source",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "source_claim_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_claim_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -5578,12 +5120,8 @@
           "tableFrom": "billing_tax_fact",
           "tableTo": "billing_tax_fact",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "supersedes_fact_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["supersedes_fact_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -5593,21 +5131,12 @@
         "billing_tax_fact_source": {
           "name": "billing_tax_fact_source",
           "nullsNotDistinct": false,
-          "columns": [
-            "environment",
-            "stripe_account_id",
-            "livemode",
-            "source_type",
-            "source_id",
-            "source_digest"
-          ]
+          "columns": ["environment", "stripe_account_id", "livemode", "source_type", "source_id", "source_digest"]
         },
         "billing_tax_fact_successor": {
           "name": "billing_tax_fact_successor",
           "nullsNotDistinct": false,
-          "columns": [
-            "supersedes_fact_id"
-          ]
+          "columns": ["supersedes_fact_id"]
         }
       },
       "policies": {},
@@ -5752,10 +5281,7 @@
         "credit_account_environment_id": {
           "name": "credit_account_environment_id",
           "nullsNotDistinct": false,
-          "columns": [
-            "environment",
-            "id"
-          ]
+          "columns": ["environment", "id"]
         }
       },
       "policies": {},
@@ -5826,14 +5352,8 @@
           "tableFrom": "credit_attempt_void",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "environment",
-            "account_id"
-          ],
-          "columnsTo": [
-            "environment",
-            "id"
-          ],
+          "columnsFrom": ["environment", "account_id"],
+          "columnsTo": ["environment", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -5841,11 +5361,7 @@
       "compositePrimaryKeys": {
         "credit_attempt_void_account_id_surface_attempt_key_pk": {
           "name": "credit_attempt_void_account_id_surface_attempt_key_pk",
-          "columns": [
-            "account_id",
-            "surface",
-            "attempt_key"
-          ]
+          "columns": ["account_id", "surface", "attempt_key"]
         }
       },
       "uniqueConstraints": {},
@@ -6310,12 +5826,8 @@
           "tableFrom": "credit_operation",
           "tableTo": "billing_policy",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "policy_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["policy_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -6324,12 +5836,8 @@
           "tableFrom": "credit_operation",
           "tableTo": "billing_policy_activation",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "activation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["activation_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -6338,14 +5846,8 @@
           "tableFrom": "credit_operation",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "environment",
-            "account_id"
-          ],
-          "columnsTo": [
-            "environment",
-            "id"
-          ],
+          "columnsFrom": ["environment", "account_id"],
+          "columnsTo": ["environment", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -6354,16 +5856,8 @@
           "tableFrom": "credit_operation",
           "tableTo": "billing_policy_activation",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "environment",
-            "activation_id",
-            "policy_id"
-          ],
-          "columnsTo": [
-            "environment",
-            "id",
-            "policy_id"
-          ],
+          "columnsFrom": ["environment", "activation_id", "policy_id"],
+          "columnsTo": ["environment", "id", "policy_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -6372,16 +5866,8 @@
           "tableFrom": "credit_operation",
           "tableTo": "credit_transaction",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id",
-            "id",
-            "base_transaction_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "operation_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "id", "base_transaction_id"],
+          "columnsTo": ["account_id", "operation_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -6391,18 +5877,12 @@
         "credit_operation_account_id": {
           "name": "credit_operation_account_id",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "id"
-          ]
+          "columns": ["account_id", "id"]
         },
         "credit_operation_environment_id": {
           "name": "credit_operation_environment_id",
           "nullsNotDistinct": false,
-          "columns": [
-            "environment",
-            "id"
-          ]
+          "columns": ["environment", "id"]
         }
       },
       "policies": {},
@@ -6751,12 +6231,8 @@
           "tableFrom": "credit_transaction",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -6765,14 +6241,8 @@
           "tableFrom": "credit_transaction",
           "tableTo": "credit_transaction",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id",
-            "correction_of"
-          ],
-          "columnsTo": [
-            "account_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "correction_of"],
+          "columnsTo": ["account_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -6781,14 +6251,8 @@
           "tableFrom": "credit_transaction",
           "tableTo": "credit_operation",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id",
-            "operation_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "operation_id"],
+          "columnsTo": ["account_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -6797,14 +6261,8 @@
           "tableFrom": "credit_transaction",
           "tableTo": "billing_purchase",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id",
-            "purchase_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "purchase_id"],
+          "columnsTo": ["account_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -6813,14 +6271,8 @@
           "tableFrom": "credit_transaction",
           "tableTo": "billing_period",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id",
-            "period_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "period_id"],
+          "columnsTo": ["account_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -6829,14 +6281,8 @@
           "tableFrom": "credit_transaction",
           "tableTo": "billing_reversal_case",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id",
-            "reversal_case_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "reversal_case_id"],
+          "columnsTo": ["account_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -6845,14 +6291,8 @@
           "tableFrom": "credit_transaction",
           "tableTo": "billing_promotion_issuance",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id",
-            "promotion_issuance_id"
-          ],
-          "columnsTo": [
-            "account_id",
-            "id"
-          ],
+          "columnsFrom": ["account_id", "promotion_issuance_id"],
+          "columnsTo": ["account_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -6862,37 +6302,22 @@
         "credit_transaction_operation_id": {
           "name": "credit_transaction_operation_id",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "operation_id",
-            "id"
-          ]
+          "columns": ["account_id", "operation_id", "id"]
         },
         "credit_transaction_account_id": {
           "name": "credit_transaction_account_id",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "id"
-          ]
+          "columns": ["account_id", "id"]
         },
         "credit_transaction_purchase_receipt": {
           "name": "credit_transaction_purchase_receipt",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "purchase_id",
-            "id"
-          ]
+          "columns": ["account_id", "purchase_id", "id"]
         },
         "credit_transaction_period_receipt": {
           "name": "credit_transaction_period_receipt",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "period_id",
-            "id"
-          ]
+          "columns": ["account_id", "period_id", "id"]
         }
       },
       "policies": {},
@@ -6999,12 +6424,8 @@
           "name": "device_code_user_id_user_id_fk",
           "tableFrom": "device_code",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -7014,16 +6435,12 @@
         "device_code_device_code_unique": {
           "name": "device_code_device_code_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "device_code"
-          ]
+          "columns": ["device_code"]
         },
         "device_code_user_code_unique": {
           "name": "device_code_user_code_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "user_code"
-          ]
+          "columns": ["user_code"]
         }
       },
       "policies": {},
@@ -7142,12 +6559,8 @@
           "name": "durable_stream_owner_id_user_id_fk",
           "tableFrom": "durable_stream",
           "tableTo": "user",
-          "columnsFrom": [
-            "owner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["owner_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -7236,12 +6649,8 @@
           "name": "durable_stream_event_stream_id_durable_stream_id_fk",
           "tableFrom": "durable_stream_event",
           "tableTo": "durable_stream",
-          "columnsFrom": [
-            "stream_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["stream_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -7249,10 +6658,7 @@
       "compositePrimaryKeys": {
         "durable_stream_event_stream_id_sequence_pk": {
           "name": "durable_stream_event_stream_id_sequence_pk",
-          "columns": [
-            "stream_id",
-            "sequence"
-          ]
+          "columns": ["stream_id", "sequence"]
         }
       },
       "uniqueConstraints": {},
@@ -7427,12 +6833,8 @@
           "name": "github_connection_user_id_user_id_fk",
           "tableFrom": "github_connection",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -7442,10 +6844,7 @@
         "github_connection_user_subject": {
           "name": "github_connection_user_subject",
           "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "github_subject"
-          ]
+          "columns": ["user_id", "github_subject"]
         }
       },
       "policies": {},
@@ -7481,12 +6880,8 @@
           "name": "github_gist_preference_user_id_user_id_fk",
           "tableFrom": "github_gist_preference",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -7545,12 +6940,8 @@
           "name": "github_repository_write_connection_id_github_connection_id_fk",
           "tableFrom": "github_repository_write",
           "tableTo": "github_connection",
-          "columnsFrom": [
-            "connection_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["connection_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -7558,10 +6949,7 @@
       "compositePrimaryKeys": {
         "github_repository_write_connection_id_repository_id_pk": {
           "name": "github_repository_write_connection_id_repository_id_pk",
-          "columns": [
-            "connection_id",
-            "repository_id"
-          ]
+          "columns": ["connection_id", "repository_id"]
         }
       },
       "uniqueConstraints": {},
@@ -7709,12 +7097,8 @@
           "name": "agent_device_owner_id_user_id_fk",
           "tableFrom": "agent_device",
           "tableTo": "user",
-          "columnsFrom": [
-            "owner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["owner_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -7846,12 +7230,8 @@
           "name": "job_artifact_attempt_id_job_attempt_id_fk",
           "tableFrom": "job_artifact",
           "tableTo": "job_attempt",
-          "columnsFrom": [
-            "attempt_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["attempt_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -7859,12 +7239,8 @@
           "name": "job_artifact_job_id_job_run_id_fk",
           "tableFrom": "job_artifact",
           "tableTo": "job_run",
-          "columnsFrom": [
-            "job_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["job_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -8001,12 +7377,8 @@
           "name": "job_attempt_job_id_job_run_id_fk",
           "tableFrom": "job_attempt",
           "tableTo": "job_run",
-          "columnsFrom": [
-            "job_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["job_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -8098,12 +7470,8 @@
           "name": "job_dispatch_outbox_job_id_job_run_id_fk",
           "tableFrom": "job_dispatch_outbox",
           "tableTo": "job_run",
-          "columnsFrom": [
-            "job_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["job_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -8336,12 +7704,8 @@
           "name": "job_run_owner_id_user_id_fk",
           "tableFrom": "job_run",
           "tableTo": "user",
-          "columnsFrom": [
-            "owner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["owner_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -8349,12 +7713,8 @@
           "name": "job_run_stream_id_durable_stream_id_fk",
           "tableFrom": "job_run",
           "tableTo": "durable_stream",
-          "columnsFrom": [
-            "stream_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["stream_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -8450,12 +7810,8 @@
           "name": "job_runner_owner_id_user_id_fk",
           "tableFrom": "job_runner",
           "tableTo": "user",
-          "columnsFrom": [
-            "owner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["owner_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -8559,12 +7915,8 @@
           "name": "credit_account_user_id_user_id_fk",
           "tableFrom": "credit_account",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -8671,12 +8023,8 @@
           "name": "credit_reservation_user_id_user_id_fk",
           "tableFrom": "credit_reservation",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -8809,12 +8157,8 @@
           "name": "credit_transaction_user_id_user_id_fk",
           "tableFrom": "credit_transaction",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -9000,12 +8344,8 @@
           "name": "project_owner_id_user_id_fk",
           "tableFrom": "project",
           "tableTo": "user",
-          "columnsFrom": [
-            "owner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["owner_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -9013,12 +8353,8 @@
           "name": "project_forked_from_publication_id_fk",
           "tableFrom": "project",
           "tableTo": "publication",
-          "columnsFrom": [
-            "forked_from"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["forked_from"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -9026,12 +8362,8 @@
           "name": "project_current_publication_id_publication_id_fk",
           "tableFrom": "project",
           "tableTo": "publication",
-          "columnsFrom": [
-            "current_publication_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["current_publication_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -9039,12 +8371,8 @@
           "name": "project_storage_account_id_storage_account_id_fk",
           "tableFrom": "project",
           "tableTo": "storage_account",
-          "columnsFrom": [
-            "storage_account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["storage_account_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -9113,12 +8441,8 @@
           "name": "project_collaborator_project_id_project_id_fk",
           "tableFrom": "project_collaborator",
           "tableTo": "project",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -9126,12 +8450,8 @@
           "name": "project_collaborator_user_id_user_id_fk",
           "tableFrom": "project_collaborator",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -9139,12 +8459,8 @@
           "name": "project_collaborator_invited_by_user_id_fk",
           "tableFrom": "project_collaborator",
           "tableTo": "user",
-          "columnsFrom": [
-            "invited_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["invited_by"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -9152,10 +8468,7 @@
       "compositePrimaryKeys": {
         "project_collaborator_project_id_user_id_pk": {
           "name": "project_collaborator_project_id_user_id_pk",
-          "columns": [
-            "project_id",
-            "user_id"
-          ]
+          "columns": ["project_id", "user_id"]
         }
       },
       "uniqueConstraints": {},
@@ -9378,11 +8691,7 @@
       "compositePrimaryKeys": {
         "project_deletion_manifest_project_id_publication_id_manifest_key_pk": {
           "name": "project_deletion_manifest_project_id_publication_id_manifest_key_pk",
-          "columns": [
-            "project_id",
-            "publication_id",
-            "manifest_key"
-          ]
+          "columns": ["project_id", "publication_id", "manifest_key"]
         }
       },
       "uniqueConstraints": {},
@@ -9523,12 +8832,8 @@
           "name": "project_git_project_id_project_id_fk",
           "tableFrom": "project_git",
           "tableTo": "project",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -9675,12 +8980,8 @@
           "name": "project_git_lfs_object_project_id_project_id_fk",
           "tableFrom": "project_git_lfs_object",
           "tableTo": "project",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -9688,10 +8989,7 @@
       "compositePrimaryKeys": {
         "project_git_lfs_object_project_id_oid_pk": {
           "name": "project_git_lfs_object_project_id_oid_pk",
-          "columns": [
-            "project_id",
-            "oid"
-          ]
+          "columns": ["project_id", "oid"]
         }
       },
       "uniqueConstraints": {},
@@ -9769,12 +9067,8 @@
           "name": "project_git_route_project_id_project_id_fk",
           "tableFrom": "project_git_route",
           "tableTo": "project",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -9882,12 +9176,8 @@
           "name": "project_invitation_project_id_project_id_fk",
           "tableFrom": "project_invitation",
           "tableTo": "project",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -9895,12 +9185,8 @@
           "name": "project_invitation_invited_by_user_id_fk",
           "tableFrom": "project_invitation",
           "tableTo": "user",
-          "columnsFrom": [
-            "invited_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["invited_by"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -9908,12 +9194,8 @@
           "name": "project_invitation_accepted_by_user_id_fk",
           "tableFrom": "project_invitation",
           "tableTo": "user",
-          "columnsFrom": [
-            "accepted_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["accepted_by"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -9921,10 +9203,7 @@
       "compositePrimaryKeys": {
         "project_invitation_project_id_email_pk": {
           "name": "project_invitation_project_id_email_pk",
-          "columns": [
-            "project_id",
-            "email"
-          ]
+          "columns": ["project_id", "email"]
         }
       },
       "uniqueConstraints": {},
@@ -10161,12 +9440,8 @@
           "name": "publication_project_id_project_id_fk",
           "tableFrom": "publication",
           "tableTo": "project",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -10174,12 +9449,8 @@
           "name": "publication_owner_id_user_id_fk",
           "tableFrom": "publication",
           "tableTo": "user",
-          "columnsFrom": [
-            "owner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["owner_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -10187,12 +9458,8 @@
           "name": "publication_parent_publication_id_publication_id_fk",
           "tableFrom": "publication",
           "tableTo": "publication",
-          "columnsFrom": [
-            "parent_publication_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["parent_publication_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -10328,12 +9595,8 @@
           "name": "publication_access_publication_id_publication_id_fk",
           "tableFrom": "publication_access",
           "tableTo": "publication",
-          "columnsFrom": [
-            "publication_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["publication_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -10341,12 +9604,8 @@
           "name": "publication_access_owner_id_user_id_fk",
           "tableFrom": "publication_access",
           "tableTo": "user",
-          "columnsFrom": [
-            "owner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["owner_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -10426,12 +9685,8 @@
           "name": "session_user_id_user_id_fk",
           "tableFrom": "session",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -10441,9 +9696,7 @@
         "session_token_unique": {
           "name": "session_token_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "token"
-          ]
+          "columns": ["token"]
         }
       },
       "policies": {},
@@ -10553,12 +9806,8 @@
           "name": "storage_account_owner_id_user_id_fk",
           "tableFrom": "storage_account",
           "tableTo": "user",
-          "columnsFrom": [
-            "owner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["owner_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -10807,12 +10056,7 @@
         "stripe_event_delivery": {
           "name": "stripe_event_delivery",
           "nullsNotDistinct": false,
-          "columns": [
-            "environment",
-            "stripe_account_id",
-            "livemode",
-            "event_id"
-          ]
+          "columns": ["environment", "stripe_account_id", "livemode", "event_id"]
         }
       },
       "policies": {},
@@ -11027,12 +10271,8 @@
           "tableFrom": "subscription",
           "tableTo": "credit_account",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -11041,12 +10281,8 @@
           "tableFrom": "subscription",
           "tableTo": "billing_stripe_customer",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "customer_binding_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["customer_binding_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -11056,10 +10292,7 @@
         "subscription_account_id": {
           "name": "subscription_account_id",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "id"
-          ]
+          "columns": ["account_id", "id"]
         }
       },
       "policies": {},
@@ -11105,12 +10338,8 @@
           "name": "subscription_extension_subscription_id_subscription_id_fk",
           "tableFrom": "subscription_extension",
           "tableTo": "subscription",
-          "columnsFrom": [
-            "subscription_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["subscription_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -11257,12 +10486,8 @@
           "tableFrom": "supplier_cost_evidence",
           "tableTo": "credit_operation",
           "schemaTo": "billing",
-          "columnsFrom": [
-            "operation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["operation_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -11365,12 +10590,8 @@
           "name": "telemetry_purpose_decision_user_id_user_id_fk",
           "tableFrom": "telemetry_purpose_decision",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -11452,9 +10673,7 @@
         "user_email_unique": {
           "name": "user_email_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "email"
-          ]
+          "columns": ["email"]
         }
       },
       "policies": {},

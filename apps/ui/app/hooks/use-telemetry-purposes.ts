@@ -64,7 +64,11 @@ type UseTelemetryPurposesReturn = {
   canDecide: boolean;
   isLoading: boolean;
   error: unknown;
-  decide: UseMutationResult<EffectiveTelemetryPurposes, unknown, Readonly<{ purpose: TelemetryPurpose; granted: boolean }>>['mutate'];
+  decide: UseMutationResult<
+    EffectiveTelemetryPurposes,
+    unknown,
+    Readonly<{ purpose: TelemetryPurpose; granted: boolean }>
+  >['mutate'];
   isDeciding: boolean;
 };
 

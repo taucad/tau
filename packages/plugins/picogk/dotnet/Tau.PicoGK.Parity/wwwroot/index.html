@@ -15,13 +15,26 @@
        * runtime's own file system first, the same way the shipped worker's owner stages them, and
        * the program compiles them in the browser rather than running an ahead-of-time build.
        */
-      const subject = new URL(location.href).searchParams.get('subject') ?? 'gyroid';
+      const query = new URL(location.href).searchParams;
+      const subject = query.get('subject') ?? 'gyroid';
+      // Whatever the gate asked for, passed to the program unread: it owns what each option means.
+      const options = query.get('options') ?? '';
+      const timings = {};
+      const mark = (stage, milliseconds) => {
+        timings[stage] = milliseconds;
+        console.log(`PARITY_TIMING ${stage} ${milliseconds.toFixed(1)}`);
+      };
       const bytesOf = async (url) => new Uint8Array(await (await fetch(url)).arrayBuffer());
       const hex = (buffer) => [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
       try {
         const { mode } = await (await fetch('./parity-mode.json')).json();
+        const booting = performance.now();
         const { dotnet } = await import('./_framework/dotnet.js');
         const runtime = await dotnet.create();
+        // Cold start: an empty page to a runtime that can be given work, which is what an author
+        // waits through before anything of theirs has run.
+        mark('boot', performance.now() - booting);
+        const staging = performance.now();
         let referenceList = '';
         let identity = '';
         if (mode === 'dynamic') {
@@ -44,6 +57,7 @@
           identity = hex(await crypto.subtle.digest('SHA-256', await bytesOf('./staged/refs/PicoGK.dll')));
           console.log(`PARITY_STAGED ${String(references.length)} references ${String(staged.sources.length)} sources`);
         }
+        mark('stage', performance.now() - staging);
         runtime.setModuleImports('tau-picogk-parity', {
           upload: async (name, bytes) => {
             const response = await fetch(`capture/${encodeURIComponent(name)}`, { method: 'PUT', body: bytes });
@@ -51,9 +65,19 @@
           },
           compilerReferences: () => referenceList,
           buildIdentity: () => identity,
+          report: mark,
         });
-        console.log(`PARITY_START ${mode} ${subject} isolated ${String(crossOriginIsolated)}`);
-        const code = await runtime.runMain(runtime.getConfig().mainAssemblyName, [subject]);
+        console.log(`PARITY_START ${mode} ${subject} isolated ${String(crossOriginIsolated)} ${options}`);
+        const started = performance.now();
+        const code = await runtime.runMain(runtime.getConfig().mainAssemblyName, [subject, options]);
+        mark('main', performance.now() - started);
+        /*
+         * The engine's own memory, which is the figure a voxel run is bounded by and the one every
+         * engine reports the same way. A browser's own estimate is not comparable between engines,
+         * so it is not what the gate reads.
+         */
+        mark('heapBytes', runtime.Module.HEAPU8.byteLength);
+        globalThis.parityTimings = timings;
         document.title = code === 0 ? 'done' : 'failed';
       } catch (error) {
         console.log(`PARITY_FAILED ${error instanceof Error ? error.message : String(error)}`);

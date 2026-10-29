@@ -611,8 +611,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [ktx-parse](https://github.com/donmccurdy/ktx-parse) | 1.1.0 | MIT |
 | [kysely](https://github.com/kysely-org/kysely) | 0.29.6 | MIT |
 | [lazy-val](https://github.com/develar/lazy-val) | 1.0.5 | MIT |
-| [libassimp](https://github.com/taucad/libassimp) | 0.4.0 | Apache-2.0 |
-| [libassimp-{platform}](https://github.com/taucad/libassimp) | 0.4.0 | Apache-2.0 |
+| [libassimp](https://github.com/taucad/libassimp) | 0.4.1 | Apache-2.0 |
+| [libassimp-{platform}](https://github.com/taucad/libassimp) | 0.4.1 | Apache-2.0 |
 | [libcascade](https://github.com/taucad/opencascade.js) | 3.1.0 | LGPL-2.1-only WITH Open-CASCADE-Exception-1.0 |
 | [libphonenumber-js](https://gitlab.com/catamphetamine/libphonenumber-js) | 1.13.15 | MIT |
 | [lie](https://github.com/calvinmetcalf/lie) | 3.3.0 | MIT |

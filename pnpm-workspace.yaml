@@ -237,7 +237,7 @@ catalog:
   '@types/jsdom': ^21.1.7
   katex: 0.18.2
   knip: 6.41.0
-  libassimp: ^0.4.0
+  libassimp: ^0.4.1
   libcascade: 3.1.0
   lighthouse: ^13.5.0
   lint-staged: ^16.4.0

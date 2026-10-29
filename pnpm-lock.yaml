@@ -679,8 +679,8 @@ catalogs:
       specifier: 6.41.0
       version: 6.41.0
     libassimp:
-      specifier: ^0.4.0
-      version: 0.4.0
+      specifier: ^0.4.1
+      version: 0.4.1
     libcascade:
       specifier: 3.1.0
       version: 3.1.0
@@ -2073,7 +2073,7 @@ importers:
         version: 0.5.0
       libassimp:
         specifier: 'catalog:'
-        version: 0.4.0
+        version: 0.4.1
       nanoraster:
         specifier: 'catalog:'
         version: 0.7.1
@@ -4409,7 +4409,7 @@ importers:
         version: link:../../core/geometry
       libassimp:
         specifier: 'catalog:'
-        version: 0.4.0
+        version: 0.4.1
     devDependencies:
       '@taucad/esbuild':
         specifier: workspace:*
@@ -20322,27 +20322,27 @@ packages:
     resolution: {integrity: sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ==}
     engines: {node: '>= 0.8.0'}
 
-  libassimp-darwin-arm64@0.4.0:
-    resolution: {integrity: sha512-agGn9w8Z2AqH8p931p8FnkthQNZyTSoWEcPKOj3aZabzzHPeVv0OSkzYW3bSrVjOSxTvKEwdaqJNhhDi89FdPw==}
+  libassimp-darwin-arm64@0.4.1:
+    resolution: {integrity: sha512-dlWeKz3kqEJRgTIXpv52+wu3UkAC3G8dP2bT+vipJwD6FJEbIS9ruJh7RgRxGMklIvBabv1O04/9nLTvRfPbDQ==}
     engines: {node: '>=22.14.0'}
     cpu: [arm64]
     os: [darwin]
 
-  libassimp-linux-x64-gnu@0.4.0:
-    resolution: {integrity: sha512-Bpyj+TpzvV36cuCoII3ee5JoUhUet6ziI1KjZ3r8dxo3sa5g5T5k9OzAZ76jJ/1YKiBqrjac44uxmZJBpsu0rg==}
+  libassimp-linux-x64-gnu@0.4.1:
+    resolution: {integrity: sha512-ZYAIQWv688YPoZdlTcaCahRLinbtjY9LZMYRkl5xrnAPmZ1HfC3bh3X9IYpTj7DGXvBEv83Ic970+LEHfIQ8ig==}
     engines: {node: '>=22.14.0'}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  libassimp-win32-x64-msvc@0.4.0:
-    resolution: {integrity: sha512-efefh9BSDz9FmQLvqzx/L/SLNOY+7YK7sKtupO6Ld/r+z9EN9/cuS61p6rSyX/T3LLz9s5tCEtc1wrqcnFnAKA==}
+  libassimp-win32-x64-msvc@0.4.1:
+    resolution: {integrity: sha512-1tSbe3rNgVCPJpDhZ/FASHtWy30Q+lGSsiy8SzEhEChOIPO+k46+Gq744ybiE+AkfizdnIN5CAf/ehNeGJ9HFQ==}
     engines: {node: '>=22.14.0'}
     cpu: [x64]
     os: [win32]
 
-  libassimp@0.4.0:
-    resolution: {integrity: sha512-RJul1HVAXArxagwzrz0WmPVQjGNRLz2cHByyIJGzwGDQ5Fs/eds83lVY6hiJqPEmpN+hk0GqtaqAsk+5X9F0PA==}
+  libassimp@0.4.1:
+    resolution: {integrity: sha512-uw2DWg0bhmZjbWIDoSct9b5nxpdL+StqBGQxEoUa4RAWtlwjgBmDurCUJfy2Z5ynxGdwB0+lfEp+Tdl15E7wag==}
     engines: {node: '>=22.14.0'}
 
   libcascade@3.1.0:
@@ -42601,20 +42601,20 @@ snapshots:
       prelude-ls: 1.2.1
       type-check: 0.4.0
 
-  libassimp-darwin-arm64@0.4.0:
+  libassimp-darwin-arm64@0.4.1:
     optional: true
 
-  libassimp-linux-x64-gnu@0.4.0:
+  libassimp-linux-x64-gnu@0.4.1:
     optional: true
 
-  libassimp-win32-x64-msvc@0.4.0:
+  libassimp-win32-x64-msvc@0.4.1:
     optional: true
 
-  libassimp@0.4.0:
+  libassimp@0.4.1:
     optionalDependencies:
-      libassimp-darwin-arm64: 0.4.0
-      libassimp-linux-x64-gnu: 0.4.0
-      libassimp-win32-x64-msvc: 0.4.0
+      libassimp-darwin-arm64: 0.4.1
+      libassimp-linux-x64-gnu: 0.4.1
+      libassimp-win32-x64-msvc: 0.4.1
 
   libcascade@3.1.0: {}
 

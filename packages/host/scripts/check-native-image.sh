@@ -113,6 +113,18 @@ probe=$(docker run --rm --network none --entrypoint node "$image" -e \
 [[ "$probe" == no\ network:* ]] && verdict=pass || verdict=fail
 check 'no network in the container' "$verdict" "$probe"
 
+# Agent observability (T11): the image's observer loads from the path it names and observes only its own project.
+observer=$(docker run --rm --network none --entrypoint node \
+  -e TAU_API_URL=http://127.0.0.1:9 -e TAU_HOST_DEVICE_ID=check-device -e TAU_HOST_CREDENTIAL=check-only \
+  -e TAU_HOST_PROJECT_ID=check-project -e TAU_HOST_OWNER_ID=check-owner "$image" --input-type=module -e \
+  "const { default: observer } = await import(process.env.TAU_HOST_OBSERVER_MODULE);
+const observe = async () => ({ runs: [], ownsEpoch: () => true });
+const own = observer({ projectId: 'check-project', observe });
+console.log(typeof own?.onChatQuiescent, observer({ projectId: 'other-project', observe }) === undefined);
+own.close();" 2>&1)
+[[ "$observer" == 'function true' ]] && verdict=pass || verdict=fail
+check 'agent-evidence observer loads and stays on its project' "$verdict" "$observer"
+
 # Recorded, not gated: the refusals the sandbox gives as root and under Docker's defaults.
 code=0
 tau export-root --user 0 --volume "$workspace:/workspace" --workdir /workspace -- export main.py --ext=glb --output=/workspace/root.glb --json || code=$?

@@ -13,6 +13,8 @@ import type { Parameter } from '@taucad/kcl-wasm-lib/bindings/Parameter';
 import type { LspFileManager } from '#lib/kcl-language/lsp/kcl-lsp-client.js';
 import { createKclLogger } from '#lib/kcl-language/lsp/kcl-logs.js';
 import { kclUriToWorkspacePath } from '#lib/kcl-language/kcl-register-paths.js';
+import { indexKclProgram } from '#lib/kcl-language/kcl-bindings.js';
+import type { KclIndex } from '#lib/kcl-language/kcl-bindings.js';
 
 const log = createKclLogger('Symbol Service');
 
@@ -119,6 +121,8 @@ export class KclSymbolService {
   /** Cached stdlib symbols - parsed once from sourceFiles */
   private stdlibSymbols: KclSymbol[] = [];
   private stdlibProcessed = false;
+  /** Parse-only name indexes, keyed by URI and valid for exactly the text they were built from. */
+  private readonly indexes = new Map<string, { content: string; index: Promise<KclIndex> }>();
 
   /**
    * Set the parse function (from KclUtils)
@@ -218,6 +222,32 @@ export class KclSymbolService {
    */
   public getStdlibSymbols(): KclSymbol[] {
     return this.stdlibSymbols;
+  }
+
+  /**
+   * Resolve every name in `content` to its declaration. Parsing only, without mock execution, so
+   * workspace-wide reference searches stay cheap; the result is reused until the text changes.
+   */
+  public async getIndex(uri: string, content: string): Promise<KclIndex> {
+    const cached = this.indexes.get(uri);
+    if (cached?.content === content) {
+      return cached.index;
+    }
+    const { parseFunction } = this;
+    const index = (async (): Promise<KclIndex> => {
+      if (!parseFunction) {
+        return indexKclProgram(undefined);
+      }
+      try {
+        const { program } = await parseFunction(content);
+        return indexKclProgram(program);
+      } catch {
+        // A fatal parse error leaves no program; the file has no resolvable names until it parses.
+        return indexKclProgram(undefined);
+      }
+    })();
+    this.indexes.set(uri, { content, index });
+    return index;
   }
 
   /**
@@ -322,6 +352,7 @@ export class KclSymbolService {
    */
   public removeDocument(uri: string): void {
     this.cache.delete(uri);
+    this.indexes.delete(uri);
   }
 
   /**
@@ -429,6 +460,7 @@ export class KclSymbolService {
    */
   public clear(): void {
     this.cache.clear();
+    this.indexes.clear();
   }
 
   /**

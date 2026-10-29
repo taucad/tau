@@ -1,0 +1,140 @@
+# DV1 concurrent-sync run on staging (STO-20, TAU-API-5): runs
+# apps/api/scripts/dv1-concurrency.mts from a one-off Fly Machine in `syd`, so
+# the traffic comes from the deployed region through the public edge, as a
+# client's does. Manual dispatch only; nothing triggers it otherwise.
+#
+# Inert until the operator provisions it: the bench app `tau-dv1-bench-staging`
+# (default network, no services, not the storage 6PN), its deploy token as the
+# `staging` environment secret FLY_DV1_BENCH_API_TOKEN, and the owners' keys as
+# the bench app's Fly secret TAU_DV1_OWNER_KEYS (comma-separated `sk_` keys of
+# staging test owners entitled to Tau Sync). Until then the token check fails
+# the job before anything runs. Every run needs the operator's go; dispatching
+# is that go.
+#
+# Staging only, by construction: the API origin, the app, the region and the
+# GitHub environment are fixed here, and the harness itself refuses any origin
+# but https://api.taucad.dev. This repository and its run logs are public: the
+# harness prints owners as `owner-<n>` and counts, never a key, and inputs are
+# validated against closed patterns before any shell reads them.
+#
+# The Machine is created with `--rm` and removed when the command exits. The
+# harness prints its JSON document (`--json`) to the Machine's log; the job
+# collects that log as the run's evidence artifact.
+
+name: DV1 concurrency (staging)
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: 'seed | adverts6 | storm | ramp | cleanup (see the script header)'
+        required: true
+        type: choice
+        default: adverts6
+        options:
+          - seed
+          - adverts6
+          - storm
+          - ramp
+          - cleanup
+      run_id:
+        description: 'Run id tying seed, shapes and cleanup together (lowercase letters and digits)'
+        required: true
+        type: string
+      sizes:
+        description: 'Comma-separated sizes: small, median, median8m, large, xl'
+        required: true
+        type: string
+        default: small,median,median8m
+      flags:
+        description: 'Optional extra flags, e.g. --devices=2,4,8 --rounds=5 --ops=fetch,push,mixed --k=1,2,4,8,16,32 --step-seconds=60'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dv1-staging
+  cancel-in-progress: false
+
+jobs:
+  dv1:
+    name: DV1 ${{ inputs.command }} (${{ inputs.run_id }}) from syd
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    environment:
+      name: staging
+      deployment: false
+    env:
+      FLY_APP: tau-dv1-bench-staging
+    steps:
+      - name: Validate the dispatch
+        id: args
+        env:
+          COMMAND: ${{ inputs.command }}
+          RUN_ID: ${{ inputs.run_id }}
+          SIZES: ${{ inputs.sizes }}
+          FLAGS: ${{ inputs.flags }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          [ "$REF" = 'refs/heads/main' ] || fail 'Dispatch DV1 from main.'
+          case "$COMMAND" in seed | adverts6 | storm | ramp | cleanup) ;; *) fail 'Unknown command.' ;; esac
+          [[ "$RUN_ID" =~ ^[a-z0-9]{1,20}$ ]] || fail 'run_id is 1-20 lowercase letters and digits.'
+          [[ "$SIZES" =~ ^(small|median|median8m|large|xl)(,(small|median|median8m|large|xl))*$ ]] || fail 'sizes must list small, median, median8m, large or xl.'
+          if [ -n "$FLAGS" ]; then
+            for flag in $FLAGS; do
+              [[ "$flag" =~ ^--(devices|rounds|k|step-seconds|repeats|op-timeout)=[0-9]+(,[0-9]+)*$|^--(variants)=(push-then-fetch|allpush)(,(push-then-fetch|allpush))*$|^--(ops)=(fetch|push|mixed)(,(fetch|push|mixed))*$ ]] || fail "Flag not allowed: ${flag}"
+            done
+          fi
+          echo "harness=node dv1-concurrency.mts ${COMMAND} --run=${RUN_ID} --sizes=${SIZES} ${FLAGS} --json" >> "$GITHUB_OUTPUT"
+
+      - name: Require the bench deploy token
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_DV1_BENCH_API_TOKEN }}
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "::error::FLY_DV1_BENCH_API_TOKEN is not provisioned: create tau-dv1-bench-staging and its deploy token first (handbook: cloud/operate/scaling.md, DV1)."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Fly.io CLI
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # master
+
+      - name: Run the harness from syd
+        id: run
+        timeout-minutes: 220
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_DV1_BENCH_API_TOKEN }}
+          HARNESS: ${{ steps.args.outputs.harness }}
+        run: |
+          set -uo pipefail
+          date -u +%Y-%m-%dT%H:%M:%SZ > "$RUNNER_TEMP/t0"
+          flyctl machine run node:24-bookworm \
+            --app "$FLY_APP" --region syd --rm --restart no \
+            --vm-cpu-kind shared --vm-cpus 4 --vm-memory 4096 \
+            --file-local /bench/dv1-concurrency.mts=apps/api/scripts/dv1-concurrency.mts \
+            --env TAU_BENCH_API=https://api.taucad.dev \
+            -- bash -lc "apt-get update -qq && apt-get install -y -qq git >/dev/null && cd /bench && ${HARNESS}"
+          status=$?
+          date -u +%Y-%m-%dT%H:%M:%SZ > "$RUNNER_TEMP/t1"
+          flyctl logs --app "$FLY_APP" --no-tail > "$RUNNER_TEMP/dv1-log.txt" || true
+          echo "T0 $(cat "$RUNNER_TEMP/t0"), T1 $(cat "$RUNNER_TEMP/t1"), exit ${status}" | tee "$RUNNER_TEMP/dv1-window.txt"
+          exit "$status"
+
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dv1-${{ inputs.command }}-${{ inputs.run_id }}
+          path: |
+            ${{ runner.temp }}/dv1-log.txt
+            ${{ runner.temp }}/dv1-window.txt
+          if-no-files-found: warn
+          retention-days: 90

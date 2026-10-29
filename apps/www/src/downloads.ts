@@ -8,7 +8,7 @@ export const desktopDownloads = {
     icon: platformIcons.apple,
     file: 'Tau-macos-arm64.zip',
     detail: 'Apple silicon · ZIP download',
-    install: 'Open the ZIP, move Tau to Applications, then launch Tau and sign in.',
+    install: 'Open the ZIP, drag Tau to Applications, then open Tau and sign in.',
     updates: 'Updates download automatically. Tau asks before restarting and saves your projects first.',
   },
   macIntel: {
@@ -16,7 +16,7 @@ export const desktopDownloads = {
     icon: platformIcons.apple,
     file: 'Tau-macos-x64.zip',
     detail: 'Intel Mac · ZIP download',
-    install: 'Open the ZIP, move Tau to Applications, then launch Tau and sign in.',
+    install: 'Open the ZIP, drag Tau to Applications, then open Tau and sign in.',
     updates: 'Updates download automatically. Tau asks before restarting and saves your projects first.',
   },
   windows: {
@@ -24,16 +24,18 @@ export const desktopDownloads = {
     icon: platformIcons.windows,
     file: 'Tau-win32-x64.zip',
     detail: 'Windows x64 · ZIP download',
-    install: 'Extract the ZIP to a folder you own, then launch Tau.exe and sign in.',
-    updates: 'Download and install new versions manually. Keep your project files when replacing the app.',
+    install: 'Extract the ZIP to a folder you own, then run Tau.exe and sign in.',
+    updates:
+      'Updates are manual: download the new version from this page and replace the app. Keep your project files.',
   },
   linux: {
     label: 'Linux',
     icon: platformIcons.linux,
     file: 'Tau-linux-x64.tar.gz',
     detail: 'Linux x64 · tar.gz download',
-    install: 'Extract the archive to a folder you own, then launch Tau and sign in.',
-    updates: 'Download and install new versions manually. Keep your project files when replacing the app.',
+    install: 'Extract the archive to a folder you own, then run Tau and sign in.',
+    updates:
+      'Updates are manual: download the new version from this page and replace the app. Keep your project files.',
   },
 };
 

@@ -21,6 +21,8 @@ import type {
 } from '@taucad/chat';
 import { rpcClientErrorCode, rpcClientErrorCodeSchema } from '@taucad/chat';
 import { mutatingRpcNames } from '@taucad/chat/constants';
+import type { LargeObjectsFacet } from '@taucad/revisions';
+import { guardLargeObjectFiles, guardLargeObjectKernel } from '#lib/large-object-guard.js';
 import { applyClientTextMutation, createExactReplacementPlan, createRpcDispatcher } from '@taucad/chat/rpc';
 import type {
   RpcDependencies,
@@ -126,6 +128,8 @@ export type RpcHandlerDependencies = {
   createGeoSpecClient?: () => RpcGeoSpecClient;
   /** The page's managed acquisition profile (`ENV.TAU_ACQUISITION`); `locked` makes `install_packages` refuse. */
   acquisition?: 'open' | 'locked';
+  /** The checkout's large objects still to land; kernel calls wait for none (open first, model waits). */
+  largeObjects?: () => LargeObjectsFacet | undefined;
 };
 export type RpcCallInput = RpcCall & {
   toolCallId: string;
@@ -818,7 +822,8 @@ export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
     }
     return read.record.entries[path]?.renderTimeout;
   };
-  const fileSystem = createBrowserRpcFileSystem(fileManager);
+  /* A file still downloading is never read as its pointer or written over. */
+  const fileSystem = guardLargeObjectFiles(createBrowserRpcFileSystem(fileManager));
   const skillResolver = createSkillResolver({
     async readFile(path) {
       return fileManager.readFile(path);
@@ -829,8 +834,7 @@ export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
     },
   });
 
-  const rpcDeps: RpcDependencies = {
-    fileSystem,
+  const kernelDeps = {
     kernelClient:
       deps.kernelClient ??
       (projectRef
@@ -843,7 +847,6 @@ export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
             }),
           }),
     geospec: deps.geoSpecClient ?? createBrowserGeoSpecClient(createGeoSpecClient),
-    skillResolver,
     graphics:
       deps.graphicsClient ??
       (projectRef ? createBrowserGraphicsClient(projectRef, operationTimeoutForFile) : undefined),
@@ -852,6 +855,11 @@ export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
       (projectRef && headlessImageService
         ? createBrowserImageClient(projectRef, headlessImageService, operationTimeoutForFile)
         : undefined),
+  };
+  const rpcDeps: RpcDependencies = {
+    fileSystem,
+    skillResolver,
+    ...(deps.largeObjects === undefined ? kernelDeps : guardLargeObjectKernel(kernelDeps, deps.largeObjects)),
     ...(deps.acquisition === undefined ? {} : { acquisition: deps.acquisition }),
   };
 

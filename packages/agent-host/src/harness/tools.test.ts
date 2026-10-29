@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { estimateContextTokens } from '@earendil-works/pi-agent-core';
+import { estimateContextTokens } from '@earendil-works/pi-ai/utils/estimate';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { Api, Model } from '@earendil-works/pi-ai';
 import type { HostToolInvocation, ToolRegistry } from '#waist/ports.js';
@@ -250,10 +250,10 @@ describe('CaptureToolResults', () => {
     });
 
     // The defect's own measurement, for the record: stringified, six views are
-    // most of a 200 000-token window; as image blocks pi charges 1200 each.
+    // most of a 200 000-token window; as image blocks Pi estimates about 1372 tokens each (4800 / 3.5).
     expect(estimateContextTokens([asText(multiAngleViews)]).tokens).toBeGreaterThan(160_000);
-    expect(estimateContextTokens([single]).tokens).toBeLessThan(1400);
-    expect(estimateContextTokens([multi]).tokens).toBeLessThan(7500);
+    expect(estimateContextTokens([single]).tokens).toBeLessThan(1600);
+    expect(estimateContextTokens([multi]).tokens).toBeLessThan(9000);
   });
 
   it('records the durable row as the structured capture, never as base64 text', async () => {

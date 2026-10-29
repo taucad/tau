@@ -15,6 +15,5 @@ export declare const Align: {
 export type Align = (typeof Align)[keyof typeof Align];
 /** One alignment for all axes, or one per axis (null leaves an axis alone). */
 export type AlignLike = Align | string | null | readonly (Align | string | null)[];
-export declare function _one(a: Align | string | null): Align | null;
 /** Translation that aligns `box` as requested (axes beyond `dims` are left alone). */
 export declare function alignmentOffset(box: BoundBox, align: AlignLike, dims?: number): Vector;

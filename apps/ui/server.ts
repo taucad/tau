@@ -241,7 +241,7 @@ const compressibleExtensions = new Set(['.css', '.js', '.json', '.map', '.mjs', 
  * @returns Middleware to mount before the matching `express.static`.
  */
 // The measured large KCL WASM is precompressed at build; other files retain this streaming fallback.
-const compressedStatic =
+export const compressedStatic =
   (root: string, cacheControl: string): RequestHandler =>
   // oxlint-disable-next-line complexity -- Negotiation, validators, ranges, and streaming fallbacks share this route.
   async (request, response, next) => {
@@ -285,6 +285,11 @@ const compressedStatic =
     const sidecarStat = /^kcl_wasm_lib_bg-[A-Za-z0-9_-]{8,}\.wasm$/u.test(path.basename(file))
       ? await stat(sidecar).catch(() => undefined)
       : undefined;
+    // A client that left during the metadata awaits has closed the response; piping into it rejects with
+    // ERR_STREAM_UNABLE_TO_PIPE before `pipeline` registers cleanup, stranding the source and encoder streams.
+    if (response.closed || response.destroyed) {
+      return;
+    }
     const precompressedStat =
       sidecarStat?.isFile() && sidecarStat.mtimeMs >= fileStat.mtimeMs ? sidecarStat : undefined;
     if (precompressedStat) {

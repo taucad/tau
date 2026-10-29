@@ -10,6 +10,7 @@ import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
 import { BatchLogRecordProcessor } from '@opentelemetry/sdk-logs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
+import { LangChainInstrumentation } from '@traceloop/instrumentation-langchain';
 
 const { instrumentationConfigs, exporterConfigs, sdkConfigs } = vi.hoisted(() => ({
   instrumentationConfigs: [] as Array<Record<string, unknown>>,
@@ -61,6 +62,14 @@ const incomingSpanHook = async (): Promise<NonNullable<HttpInstrumentationConfig
   return hook;
 };
 const request = (url: string): IncomingMessage => mock<IncomingMessage>({ url, headers: {} });
+
+describe('OTEL LangChain instrumentation', () => {
+  it('should trace helper calls without their prompts or completions', async () => {
+    await import('#telemetry/otel.js');
+
+    expect(LangChainInstrumentation).toHaveBeenCalledWith({ traceContent: false });
+  });
+});
 
 describe('OTEL incoming request span redaction', () => {
   it.each(['/v1/github/callback?code=oauth-code&state=oauth-state', '/v1/auth/callback/github?code=oauth-code'])(

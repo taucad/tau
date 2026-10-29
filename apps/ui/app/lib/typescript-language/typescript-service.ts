@@ -74,6 +74,14 @@ export class TypeScriptService {
   }
   // oxlint-enable typescript/parameter-properties
 
+  public get environmentRevision(): number {
+    return this.acquisition.revision;
+  }
+
+  public subscribeEnvironment(listener: (revision: number) => void): () => void {
+    return this.acquisition.subscribe(listener);
+  }
+
   /** Mirror a neutral document into the worker exactly once across split views. */
   public async attach(document: EditorDocument): Promise<void> {
     if (this.disposed) {

@@ -58,6 +58,8 @@
 \* legacy receipt rebasing; this module retains its single-host FIFO scope.
 \* Skipping observation of the registration probe, or of a chat this tab already
 \* crashed on, never enqueues, prepares or acknowledges; queue paths unchanged.
+\* Timing when a live run's first model text was shown (agent observability T10)
+\* only reads the projection and notifies the host; queue paths unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

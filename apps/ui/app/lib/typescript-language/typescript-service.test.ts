@@ -9,6 +9,7 @@ vi.mock('@taucad/lsp/typescript-worker/client', () => ({
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Mock the exported worker class name.
   TypeScriptWorkerClient: class {
     public readonly setExtraLib = setExtraLib;
+    public readonly request = vi.fn(async () => []);
     public dispose(): void {
       /* No worker in this service boot test. */
     }
@@ -129,7 +130,7 @@ describe('TypeScript service static declarations', () => {
     }
     const dependencyReader = {
       readdir: vi.fn(async (path: string) =>
-        path === '/node_modules/tscircuit' ? ['index.d.ts', 'package.json'] : ['index.d.ts'],
+        path === '/node_modules/tscircuit' ? ['index.d.ts', 'package.json'] : [],
       ),
       readFile,
     };

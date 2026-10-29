@@ -973,7 +973,10 @@ describe('ProjectWorkspaceProvider', () => {
     expect(listeners.has('modelComponentRevealRequested')).toBe(true);
   });
 
-  it('should leave Ctrl+M to a focused code editor and open Kinematics everywhere else', () => {
+  it.each([
+    ['a', 'model'],
+    ['m', 'kinematics'],
+  ] as const)('should leave Ctrl+%s to focused text and open %s elsewhere', (key, panel) => {
     keyboard.useKeybinding.mockImplementation(keyboardActual.useKeybinding);
     render(
       <keyboardActual.KeyboardProvider>
@@ -986,8 +989,7 @@ describe('ProjectWorkspaceProvider', () => {
     act(() => {
       workspace.connectWorkbench(opener);
     });
-    // CodeMirror types into its contenteditable textbox and binds Ctrl+M there
-    // on Windows and Linux to toggle Tab focus mode.
+    // Preserve Select All and CodeMirror Tab focus mode inside editable text.
     const codeContent = document.createElement('div');
     codeContent.className = 'cm-content';
     codeContent.contentEditable = 'true';
@@ -999,12 +1001,12 @@ describe('ProjectWorkspaceProvider', () => {
 
     for (const input of [codeContent, textArea]) {
       // `fireEvent` returns false once a listener has prevented the default action.
-      expect(fireEvent.keyDown(input, { key: 'm', ctrlKey: true })).toBe(true);
+      expect(fireEvent.keyDown(input, { key, ctrlKey: true })).toBe(true);
     }
     expect(opener).not.toHaveBeenCalled();
 
-    expect(fireEvent.keyDown(document.body, { key: 'm', ctrlKey: true })).toBe(false);
-    expect(opener).toHaveBeenCalledExactlyOnceWith('kinematics');
+    expect(fireEvent.keyDown(document.body, { key, ctrlKey: true })).toBe(false);
+    expect(opener).toHaveBeenCalledExactlyOnceWith(panel);
     codeContent.remove();
     textArea.remove();
   });

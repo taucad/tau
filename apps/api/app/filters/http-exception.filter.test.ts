@@ -255,7 +255,7 @@ describe('HttpExceptionFilter OTEL integration', () => {
     filter.catch(exception, host as any);
 
     expect(warn).toHaveBeenCalledWith(
-      { gatewayResponse: exception.getResponse(), requestId: 'req_test_123' },
+      { gatewayRefusal: { status: 502, type: 'UPSTREAM_REJECTED' }, requestId: 'req_test_123' },
       'Model gateway refusal',
     );
   });

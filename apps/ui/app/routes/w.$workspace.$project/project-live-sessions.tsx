@@ -39,6 +39,7 @@ import {
 import {
   createBrowserAgentHostClient,
   createAgentHostClient,
+  noteBrowserRunPresented,
   readBrowserRunStoppability,
   retainBrowserAgentHostProject,
 } from '#services/agent-host-client.js';
@@ -307,20 +308,33 @@ function ProjectSessionBinding({
       browserHostRelease.current ??= { projectId, release: retainBrowserAgentHostProject(options) };
       return { ...hostClient, placement: { hostId: daemonHostId } };
     };
-    const unpublish = chatSessions.publishProjectHostConnector(projectId, connect, async (chatId) => {
-      const stored = await chatSessions.getChatHostSettings(chatId);
-      const execution = stored?.activeExecution ?? choices.current.defaultExecution;
-      const daemonHostId = daemonPlacementOf(execution);
-      if (daemonHostId !== undefined) {
-        try {
-          const channel = await dialExecutionHost(execution, projectId);
-          channel.close();
-          return 'stoppable';
-        } catch {
-          return 'background-window';
+    const unpublish = chatSessions.publishProjectHostConnector(projectId, connect, {
+      stoppability: async (chatId) => {
+        const stored = await chatSessions.getChatHostSettings(chatId);
+        const execution = stored?.activeExecution ?? choices.current.defaultExecution;
+        const daemonHostId = daemonPlacementOf(execution);
+        if (daemonHostId !== undefined) {
+          try {
+            const channel = await dialExecutionHost(execution, projectId);
+            channel.close();
+            return 'stoppable';
+          } catch {
+            return 'background-window';
+          }
         }
-      }
-      return readBrowserRunStoppability(projectId, chatId);
+        return readBrowserRunStoppability(projectId, chatId);
+      },
+      /* Only a browser host hears what this page showed (T10); a run on a daemon is not timed. */
+      presented: async (chatId, runId, at) => {
+        try {
+          const stored = await chatSessions.getChatHostSettings(chatId);
+          if (daemonPlacementOf(stored?.activeExecution ?? choices.current.defaultExecution) === undefined) {
+            await noteBrowserRunPresented({ projectId, chatId, runId, at });
+          }
+        } catch {
+          /* A lost time is only a missing presentation fact. */
+        }
+      },
     });
     return () => {
       connectorActive = false;

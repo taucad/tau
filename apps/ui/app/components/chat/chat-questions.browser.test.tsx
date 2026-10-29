@@ -1,15 +1,33 @@
 import '#styles/global.css';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ChatPermissionRequest } from '#components/chat/chat-permission-request.js';
 import { QuestionCard } from '#components/chat/question-card.js';
 import type { Ask } from '@taucad/chat';
 import type { AgentHostApproval } from '#services/agent-host-event-projection.js';
 
 vi.mock('#flags/use-feature.js', () => ({ useFeature: () => false }));
+const microphone = vi.hoisted(() => ({
+  available: false,
+  transcription: undefined as ReturnType<typeof Promise.withResolvers<string>> | undefined,
+  recordLevel: undefined as ((level: number) => void) | undefined,
+}));
+vi.mock('#components/dictation/dictation-client.js', () => ({
+  fetchDictationStatus: async () => ({ available: microphone.available }),
+  transcribeDictation: async () => microphone.transcription?.promise ?? 'Use rounded corners.',
+}));
+vi.mock('#components/dictation/dictation-capture.js', () => ({
+  captureDictation: async ({ onLevel }: { onLevel: (level: number) => void }) => {
+    microphone.recordLevel = onLevel;
+    return { finish: async () => new Blob([], { type: 'audio/wav' }), cancel: () => undefined };
+  },
+}));
 afterEach(() => {
   cleanup();
+  microphone.available = false;
+  microphone.transcription = undefined;
   document.documentElement.className = '';
   document.documentElement.style.fontSize = '';
 });
@@ -229,3 +247,61 @@ it.each(['', 'dark', 'dark black', 'dark high-contrast'])(
     });
   },
 );
+
+it.each(['', 'dark'])('should dictate an own-words answer beside the draft in theme %s', async (theme) => {
+  await page.viewport(1000, 800);
+  document.documentElement.className = theme;
+  microphone.available = true;
+  microphone.transcription = Promise.withResolvers<string>();
+  const onAnswer = vi.fn();
+  render(
+    <TooltipProvider>
+      <div style={{ width: 560 }}>
+        <QuestionCard
+          ask={ask}
+          answers={undefined}
+          now={0}
+          onAnswer={onAnswer}
+          onHold={() => undefined}
+          onDecline={() => undefined}
+        />
+      </div>
+    </TooltipProvider>,
+  );
+  await userEvent.click(screen.getByRole('button', { name: /^C, Something else/u }));
+  const box = screen.getByRole('textbox', { name: 'Your answer' });
+  await userEvent.type(box, 'Clamp it to the tube.');
+  await userEvent.click(await screen.findByRole('button', { name: 'Dictate' }));
+  const stop = await screen.findByRole('button', { name: 'Stop dictation' });
+  act(() => {
+    // Deterministic microphone samples: silence, then speech.
+    for (let index = 0; index < 60; index++) {
+      const peak = Math.abs(Math.sin(index * 0.9)) * 0.1;
+      microphone.recordLevel?.(index > 40 ? peak : 0);
+    }
+  });
+  const input = screen.getByRole('group', { name: 'Answer input' });
+  const cancel = screen.getByRole('button', { name: 'Cancel dictation' });
+  // The draft stays in view; cancel sits left of the pill, which holds the waveform and stops recording.
+  expect(box).toHaveValue('Clamp it to the tube.');
+  expect(stop).toContainElement(screen.getByRole('img', { name: 'Microphone waveform' }));
+  expect(cancel.getBoundingClientRect().right).toBeLessThanOrEqual(stop.getBoundingClientRect().left);
+  expect(input.scrollWidth).toBeLessThanOrEqual(input.clientWidth);
+  await page.screenshot({
+    element: input,
+    path: `../../../../../out/test-results/message-queue/question-dictation-${theme || 'light'}-recording.png`,
+  });
+  await userEvent.click(stop);
+  expect(await screen.findByRole('button', { name: 'Transcribing' })).toHaveAttribute('aria-busy', 'true');
+  await page.screenshot({
+    element: input,
+    path: `../../../../../out/test-results/message-queue/question-dictation-${theme || 'light'}-transcribing.png`,
+  });
+  await act(async () => {
+    microphone.transcription?.resolve('Use rounded corners.');
+  });
+  await expect
+    .element(page.getByRole('textbox', { name: 'Your answer' }))
+    .toHaveValue('Clamp it to the tube. Use rounded corners.');
+  expect(onAnswer).not.toHaveBeenCalled();
+});

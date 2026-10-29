@@ -98,7 +98,8 @@ const sdk = new NodeSDK({
   logRecordProcessors: hasOtlpEndpoint ? [new BatchLogRecordProcessor({ exporter: new OTLPLogExporter() })] : undefined,
 
   instrumentations: [
-    new LangChainInstrumentation(),
+    // Spans keep model, timing and usage; prompts and completions never ride them into Grafana (blueprint T07).
+    new LangChainInstrumentation({ traceContent: false }),
     getNodeAutoInstrumentations({
       '@opentelemetry/instrumentation-fs': { enabled: false },
       '@opentelemetry/instrumentation-dns': { enabled: false },

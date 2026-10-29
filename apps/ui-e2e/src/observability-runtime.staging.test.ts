@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
 import {
   createObservabilityRunId,
+  harnessNavigationTimeout,
+  observeHarnessPage,
   observabilityUrl,
   pollSentryEventIds,
   stagingOrigin,
@@ -54,6 +56,7 @@ const readEvent = async (id: string): Promise<SentryEventDetail> => {
   if (!response.ok) {
     throw new Error(`Sentry detail query refused (HTTP ${String(response.status)})`);
   }
+  console.info('Reading Sentry event', { eventId: id });
   return (await response.json()) as SentryEventDetail;
 };
 
@@ -95,15 +98,25 @@ const decodePosthogBody = (request: Request): string => {
 };
 
 /** What the page sent to PostHog: event captures seen, and how many of them carried `$exception`. */
-type PosthogTraffic = { captures: number; exceptions: number; undecodable: number };
+type PosthogTraffic = {
+  requests: number;
+  captures: number;
+  exceptions: number;
+  undecodable: number;
+  missingBody: number;
+};
 
 /** Watch every PostHog request the context sends through the same-origin `/api/ph` proxy. */
 const observePosthog = (context: BrowserContext): PosthogTraffic => {
-  const traffic: PosthogTraffic = { captures: 0, exceptions: 0, undecodable: 0 };
+  const traffic: PosthogTraffic = { requests: 0, captures: 0, exceptions: 0, undecodable: 0, missingBody: 0 };
   context.on('request', (request) => {
     const url = new URL(request.url());
     if (url.origin !== stagingOrigin || !url.pathname.startsWith('/api/ph/') || request.method() !== 'POST') {
       return;
+    }
+    traffic.requests += 1;
+    if (request.postDataBuffer() === null) {
+      traffic.missingBody += 1;
     }
     const body = decodePosthogBody(request);
     if (body === '') {
@@ -169,11 +182,15 @@ const triggerAndAwaitDelivery = async ({
       },
     ]);
     const traffic = observePosthog(context);
+    context.once('close', () => {
+      console.info('PostHog observation', { runId, ...traffic });
+    });
     const page = await context.newPage();
+    observeHarnessPage(page, runId);
     const delivered = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/monitoring', {
       timeout: 120_000,
     });
-    await page.goto(observabilityUrl(runId, trigger), { waitUntil: 'load' });
+    await page.goto(observabilityUrl(runId, trigger), { timeout: harnessNavigationTimeout, waitUntil: 'load' });
     await ready?.(page);
     await delivered;
     if (requirePosthog) {

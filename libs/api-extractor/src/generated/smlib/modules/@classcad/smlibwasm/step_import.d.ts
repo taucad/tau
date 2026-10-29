@@ -1,5 +1,6 @@
 import { type Location, Plane, Vector } from './geometry.js';
 import { Edge, Part, Shell, Wire, type ShapeList } from './shapes.js';
+import { type BytesLike } from './_bytes.js';
 declare const inspect: unique symbol;
 /** A coordinate system of a STEP file (a named `AXIS2_PLACEMENT_3D`) at its place in the
  * assembly. `product` names the part or assembly it belongs to. */
@@ -42,13 +43,16 @@ export declare class StepPoint {
     [inspect](): string;
 }
 /** Everything `readStep` reads from a STEP file: the bodies (what `importStep` returns, always as
- * a list), and the coordinate systems, curves and points that belong to no body. */
+ * a list), and the coordinate systems, curves and points that belong to no body. `skipped` says
+ * which bodies could not be read, and why (`"body 'b' (#99): curve type CLOTHOID (#203),
+ * which is not supported"`). */
 export declare class StepModel {
     readonly bodies: ShapeList<Part | Shell>;
     readonly frames: StepFrame[];
     readonly curves: StepCurve[];
     readonly points: StepPoint[];
-    constructor(bodies: ShapeList<Part | Shell>, frames?: StepFrame[], curves?: StepCurve[], points?: StepPoint[]);
+    readonly skipped: string[];
+    constructor(bodies: ShapeList<Part | Shell>, frames?: StepFrame[], curves?: StepCurve[], points?: StepPoint[], skipped?: string[]);
     /** The coordinate system called `name` as a `Plane`. Where several have that name (each part of
      * a tool assembly has its own `MCS`), `product` picks the one of the product whose name is or
      * begins with it. */
@@ -63,8 +67,9 @@ export declare class StepModel {
  *
  * `readStep` for the contents in memory (in the browser too); see `readStep`.
  */
-export declare function fromStepModel(data: string | Uint8Array, options?: {
+export declare function fromStepModel(data: string | BytesLike, options?: {
     heal?: boolean;
+    strict?: boolean;
 }): StepModel;
 /**
  * Read everything a STEP file holds that smlibwasm can use: its bodies, and the coordinate systems,
@@ -76,10 +81,12 @@ export declare function fromStepModel(data: string | Uint8Array, options?: {
  * the wireframe geometry (contours such as a tool's cutting edge line, curve sets, reference
  * points). Each carries its name and the product it belongs to, at its place in the assembly, in
  * millimeters. Items on hidden layers are left out. A file with no bodies gives an empty
- * `bodies`. `heal` as for `importStep` (default true).
+ * `bodies`. `heal` as for `importStep` (default true). A body that cannot be read is left out with
+ * a warning and listed in `skipped` (`strict: true` throws instead), as `importStep` does.
  */
 export declare function readStep(path: string, options?: {
     heal?: boolean;
+    strict?: boolean;
 }): StepModel;
 /**
  * Read the solids and surfaces of STEP file contents (AP203, AP214, AP242 B-rep data): the text,
@@ -87,19 +94,29 @@ export declare function readStep(path: string, options?: {
  *
  * Returns a single `Part` (or `Shell`) when the file holds one body, otherwise a `ShapeList` of
  * them. Lengths are converted to millimeters; assembly placements are applied; names and colors
- * are kept. `heal` repairs bodies that come out invalid (valid ones are left alone; default true).
+ * are kept. `heal` repairs bodies that come out invalid (valid ones are left alone; default
+ * true): the kernel's healer, then stitching where faces do not share their edges,
+ * each with a warning when it changed the body or could not repair it.
+ *
+ * A body that cannot be read (an entity smlibwasm does not read, one the kernel cannot build) is
+ * left out with a warning that names it, its entity and the reason; the other bodies are read.
+ * `strict: true` throws a `ModelingError` for it instead. A file none of whose bodies can be read
+ * throws.
  */
-export declare function fromStep(data: string | Uint8Array, options?: {
+export declare function fromStep(data: string | BytesLike, options?: {
     heal?: boolean;
+    strict?: boolean;
 }): Part | Shell | ShapeList<Part | Shell>;
 /**
  * Read the solids and surfaces of a STEP file (AP203, AP214, AP242 B-rep data).
  *
  * Returns a single `Part` (or `Shell`) when the file holds one body, otherwise a `ShapeList` of
  * them. Lengths are converted to millimeters; assembly placements are applied; names and colors
- * are kept. `heal` repairs bodies that come out invalid (valid ones are left alone; default true).
+ * are kept. `heal` repairs bodies that come out invalid (valid ones are left alone; default true);
+ * `strict` as for `fromStep`.
  */
 export declare function importStep(path: string, options?: {
     heal?: boolean;
+    strict?: boolean;
 }): Part | Shell | ShapeList<Part | Shell>;
 export {};

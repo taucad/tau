@@ -57,7 +57,7 @@ describe('OpenSCAD CodeMirror language behavior', () => {
       line: 1,
       column: 8,
     });
-    expect(await importedHoverTextFor(used, environment, 'imported')).toBe('imported()');
+    expect(await importedHoverTextFor(used, environment, 'imported')).toEqual({ text: 'imported()', literal: true });
     const included = new EditorDocument('models/main.scad', 'include <library.scad>\ncube(size);');
     expect(await definitionFor(included, environment, 'size')).toEqual({
       uri: 'file:///models/library.scad',
@@ -67,8 +67,18 @@ describe('OpenSCAD CodeMirror language behavior', () => {
   });
 
   it('keeps built-in and group comment hover text', () => {
-    expect(hoverTextFor('cube(1);', 'main.scad', { text: 'cube', from: 0, to: 4 })).toContain('cube');
+    expect(hoverTextFor('cube(1);', 'main.scad', { text: 'cube', from: 0, to: 4 })?.text).toContain('cube');
     const group = '/* [Dimensions] */';
-    expect(hoverTextFor(group, 'main.scad', { text: 'Dimensions', from: 4, to: 14 })).toBe('Group — Dimensions');
+    expect(hoverTextFor(group, 'main.scad', { text: 'Dimensions', from: 4, to: 14 })).toEqual({
+      text: 'Group — Dimensions',
+      literal: true,
+    });
+  });
+
+  it('keeps arithmetic in local hover signatures literal', () => {
+    expect(hoverTextFor('module custom(value = 2*3*4) {}', 'main.scad', { text: 'custom', from: 7, to: 13 })).toEqual({
+      text: 'custom(value=2*3*4)',
+      literal: true,
+    });
   });
 });

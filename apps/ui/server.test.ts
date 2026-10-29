@@ -1,10 +1,87 @@
 // @vitest-environment node
-import { existsSync, readdirSync, readFileSync, statSync, utimesSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { once } from 'node:events';
+import type * as FsModule from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
+import type * as FsPromisesModule from 'node:fs/promises';
+import type { ClientRequest, Server, ServerResponse } from 'node:http';
+import { IncomingMessage, request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { Express } from 'express';
-import type { Server } from 'node:http';
+import { Readable } from 'node:stream';
+import type { Transform } from 'node:stream';
+import type * as ZlibModule from 'node:zlib';
+import { brotliCompressSync, constants as zlibConstants } from 'node:zlib';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { ErrorRequestHandler, Express, RequestHandler } from 'express';
+import express from 'express';
+
+/**
+ * Seams over the file system and zlib that `compressedStatic` reaches through its imports. Each delegates to the
+ * real implementation unless a test arms it: `heldStat` parks one metadata `stat` until the test releases it,
+ * `failingRead` makes the source stream for one path fail, and every created source/encoder stream is recorded.
+ */
+const seams = vi.hoisted(() => ({
+  heldStat: undefined as { path: string; entered: () => void; released: Promise<void> } | undefined,
+  failingRead: undefined as { path: string; error: NodeJS.ErrnoException } | undefined,
+  streams: [] as Array<Readable | Transform>,
+}));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof FsPromisesModule>();
+  const stat = async (...args: Parameters<typeof actual.stat>): ReturnType<typeof actual.stat> => {
+    const hold = seams.heldStat;
+    if (hold?.path === String(args[0])) {
+      seams.heldStat = undefined;
+      hold.entered();
+      await hold.released;
+    }
+    return actual.stat(...args);
+  };
+  return { ...actual, stat };
+});
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof FsModule>();
+  const createReadStream = (...args: Parameters<typeof actual.createReadStream>): Readable => {
+    const failure = seams.failingRead;
+    const stream =
+      failure?.path === String(args[0])
+        ? new Readable({
+            read() {
+              this.destroy(failure.error);
+            },
+          })
+        : actual.createReadStream(...args);
+    seams.streams.push(stream);
+    return stream;
+  };
+  return { ...actual, createReadStream };
+});
+
+vi.mock('node:zlib', async (importOriginal) => {
+  const actual = await importOriginal<typeof ZlibModule>();
+  const record = <T extends Transform>(stream: T): T => {
+    seams.streams.push(stream);
+    return stream;
+  };
+  return {
+    ...actual,
+    createBrotliCompress: (...args: Parameters<typeof actual.createBrotliCompress>) =>
+      record(actual.createBrotliCompress(...args)),
+    createGzip: (...args: Parameters<typeof actual.createGzip>) => record(actual.createGzip(...args)),
+  };
+});
 
 const buildServerEntry = resolve(import.meta.dirname, 'build/server/index.js');
 const buildClientAssets = resolve(import.meta.dirname, 'build/client/assets');
@@ -192,6 +269,254 @@ describeIfBuilt('apps/ui server (cross-origin isolation parity)', () => {
       const identity = await fetch(url, { headers: { 'accept-encoding': 'identity' } });
       expect(identity.headers.get('content-encoding')).toBeNull();
       expect(Buffer.from(await identity.arrayBuffer()).equals(original)).toBe(true);
+    },
+  );
+});
+
+type ServedRequest = { readonly response: ServerResponse; readonly settled: Promise<void> };
+
+type ClientOutcome = {
+  readonly status: number;
+  readonly headers: IncomingMessage['headers'];
+  readonly body: Uint8Array<ArrayBuffer>;
+};
+
+/** Resolves once the static handler under test has been entered for the next request. */
+type NextServed = () => Promise<ServedRequest>;
+
+describe('compressedStatic response lifecycle', () => {
+  let root: string;
+  // Incompressible content keeps both encoders producing far more than socket buffers hold, so an abort lands mid-body.
+  const streamedName = 'streamed.js';
+  const streamedBytes = randomBytes(16 * 1024 * 1024);
+  const precompressedName = 'kcl_wasm_lib_bg-abcdefgh.wasm';
+  const precompressedBytes = randomBytes(16 * 1024 * 1024);
+  const routes = {
+    streaming: { name: streamedName, bytes: streamedBytes, held: streamedName },
+    precompressed: {
+      name: precompressedName,
+      bytes: precompressedBytes,
+      // The sidecar `stat` is the last metadata await before the precompressed pipeline starts.
+      held: `${precompressedName}.br`,
+    },
+  } as const;
+
+  const errors: unknown[] = [];
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+  const waiters: Array<(served: ServedRequest) => void> = [];
+  const nextServed: NextServed = async () =>
+    new Promise<ServedRequest>((resolve) => {
+      waiters.push(resolve);
+    });
+  let server: Server;
+  let origin: string;
+  const clients: ClientRequest[] = [];
+
+  beforeAll(async () => {
+    root = mkdtempSync(resolve(tmpdir(), 'tau-ui-compressed-static-'));
+    writeFileSync(resolve(root, streamedName), streamedBytes);
+    writeFileSync(resolve(root, precompressedName), precompressedBytes);
+    writeFileSync(
+      resolve(root, `${precompressedName}.br`),
+      brotliCompressSync(precompressedBytes, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 1 } }),
+    );
+
+    const { compressedStatic } = (await import('./server.js')) as {
+      compressedStatic: (root: string, cacheControl: string) => RequestHandler;
+    };
+    const handler = compressedStatic(root, 'public, max-age=3600');
+    const app = express();
+    // Mirrors Express 5's promise handling while letting each test await the handler's own settlement.
+    app.use((request, response, next) => {
+      const settle = async (): Promise<void> => {
+        try {
+          await handler(request, response, next);
+        } catch (error) {
+          next(error);
+        }
+      };
+      const settled = settle();
+      waiters.shift()?.({ response, settled });
+    });
+    app.use(express.static(root));
+    // oxlint-disable-next-line eslint/max-params -- Express recognises error middleware by its four parameters.
+    const recordError: ErrorRequestHandler = (error: unknown, _request, response, _next) => {
+      errors.push(error);
+      if (response.headersSent) {
+        response.destroy();
+      } else {
+        response.status(500).end();
+      }
+    };
+    app.use(recordError);
+
+    // Streams recorded by earlier describes belong to finished requests; this block only judges its own.
+    seams.streams.length = 0;
+    process.on('unhandledRejection', onUnhandled);
+    server = app.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+
+  afterEach(() => {
+    for (const client of clients.splice(0)) {
+      client.destroy();
+    }
+    for (const stream of seams.streams.splice(0)) {
+      stream.destroy();
+    }
+    seams.heldStat = undefined;
+    seams.failingRead = undefined;
+    errors.length = 0;
+    unhandled.length = 0;
+  });
+
+  afterAll(async () => {
+    process.off('unhandledRejection', onUnhandled);
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => {
+      server.close(() => {
+        resolve();
+      });
+    });
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  /** Opens a real HTTP request without consuming it, so the test decides when the client leaves. */
+  const open = (
+    name: string,
+    encoding: string,
+  ): { client: ClientRequest; response: Promise<IncomingMessage | Error> } => {
+    const client = httpRequest(`${origin}/${name}`, { headers: { 'accept-encoding': encoding } });
+    clients.push(client);
+    // Settles with the socket error instead of rejecting, so a test that never awaits it leaves no unhandled rejection.
+    const response = new Promise<IncomingMessage | Error>((resolve) => {
+      client.once('response', resolve);
+      client.once('error', resolve);
+    });
+    client.end();
+    return { client, response };
+  };
+
+  const fetchDecoded = async (name: string, encoding: string): Promise<ClientOutcome> => {
+    const response = await fetch(`${origin}/${name}`, { headers: { 'accept-encoding': encoding } });
+    return {
+      status: response.status,
+      headers: Object.fromEntries(response.headers),
+      body: new Uint8Array(await response.arrayBuffer()),
+    };
+  };
+
+  const expectNoOpenStreams = (): void => {
+    for (const stream of seams.streams) {
+      expect(stream.destroyed, `${stream.constructor.name} left open`).toBe(true);
+    }
+  };
+
+  const holdStat = (name: string): { entered: Promise<void>; release: () => void } => {
+    let release!: () => void;
+    let entered!: () => void;
+    const enteredPromise = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    seams.heldStat = {
+      path: resolve(root, name),
+      entered,
+      released: new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    };
+    return { entered: enteredPromise, release };
+  };
+
+  it.each([
+    { route: 'streaming', encoding: 'gzip' },
+    { route: 'streaming', encoding: 'br' },
+    { route: 'precompressed', encoding: 'br' },
+  ] as const)(
+    'should stop without an error when the client leaves during the metadata await ($route, $encoding)',
+    async ({ route, encoding }) => {
+      const { name, bytes, held } = routes[route];
+      const hold = holdStat(held);
+      const served = nextServed();
+      const { client } = open(name, encoding);
+      const { response, settled } = await served;
+      await hold.entered;
+
+      client.destroy();
+      await once(response, 'close');
+      hold.release();
+      await settled;
+
+      expect(errors).toEqual([]);
+      expect(unhandled).toEqual([]);
+      expectNoOpenStreams();
+
+      const following = await fetchDecoded(name, encoding);
+      expect(following.status).toBe(200);
+      expect(following.headers['content-encoding']).toBe(encoding);
+      expect(Buffer.compare(following.body, bytes)).toBe(0);
+    },
+  );
+
+  it.each([
+    { route: 'streaming', encoding: 'br' },
+    { route: 'precompressed', encoding: 'br' },
+  ] as const)(
+    'should end cleanly when the client leaves mid-transfer and serve the next request whole ($route)',
+    async ({ route, encoding }) => {
+      const { name, bytes } = routes[route];
+      const served = nextServed();
+      const { client, response: clientResponse } = open(name, encoding);
+      const { response, settled } = await served;
+      const message = await clientResponse;
+      expect(message).toBeInstanceOf(IncomingMessage);
+      expect((message as IncomingMessage).statusCode).toBe(200);
+      await once(message as IncomingMessage, 'data');
+
+      client.destroy();
+      await settled;
+
+      // The body was still being written when the client left.
+      expect(response.writableFinished).toBe(false);
+      expect(errors).toEqual([]);
+      expect(unhandled).toEqual([]);
+      expectNoOpenStreams();
+
+      const following = await fetchDecoded(name, encoding);
+      expect(following.status).toBe(200);
+      expect(following.headers['content-encoding']).toBe(encoding);
+      expect(following.headers.vary).toMatch(/accept-encoding/i);
+      expect(following.headers.etag).toMatch(new RegExp(`-${encoding}"$`, 'u'));
+      expect(Buffer.compare(following.body, bytes)).toBe(0);
+    },
+  );
+
+  it.each([
+    { route: 'streaming', encoding: 'gzip', read: streamedName },
+    { route: 'precompressed', encoding: 'br', read: `${precompressedName}.br` },
+  ] as const)(
+    'should report a source read failure for a connected client ($route)',
+    async ({ route, encoding, read }) => {
+      const { name } = routes[route];
+      const failure: NodeJS.ErrnoException = Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' });
+      seams.failingRead = { path: resolve(root, read), error: failure };
+      const served = nextServed();
+      const { response: clientResponse } = open(name, encoding);
+      const { settled } = await served;
+      await settled;
+
+      expect(errors).toHaveLength(1);
+      expect((errors[0] as NodeJS.ErrnoException).code).toBe('EIO');
+      expect((errors[0] as Error).message).toBe('EIO: i/o error, read');
+      expect(unhandled).toEqual([]);
+      expectNoOpenStreams();
+      const outcome = await clientResponse;
+      expect(outcome).toBeInstanceOf(Error);
+      expect((outcome as NodeJS.ErrnoException).code).toBe('ECONNRESET');
     },
   );
 });

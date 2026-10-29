@@ -313,7 +313,7 @@ catalog:
   # Exact: @taucad/picovoxel's kernel version carries this release's build-time digests.
   picovoxel: 0.2.1
   # Exact: @taucad/smlib's kernel version and compute identity carry this release's WASM.
-  '@classcad/smlibwasm': 0.3.4
+  '@classcad/smlibwasm': 0.6.2
   n8ao: 1.10.2
   postprocessing: 6.39.1
   '@cfworker/json-schema': 4.1.1
@@ -371,6 +371,12 @@ catalog:
   '@codemirror/legacy-modes': 6.5.5
   '@lezer/highlight': 1.2.5
   vscode-json-languageservice: 5.7.2
+  '@earendil-works/pi-agent-core': 1.4.0
+  '@earendil-works/pi-ai': 1.4.0
+  '@earendil-works/pi-telemetry': 1.4.0
+  '@opentelemetry/sdk-trace-base': 2.12.0
+  '@opentelemetry/sdk-metrics': 2.12.0
+  '@vscode/codicons': 0.0.46-24
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0

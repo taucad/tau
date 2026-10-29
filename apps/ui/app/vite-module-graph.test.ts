@@ -173,6 +173,49 @@ describe('desktop module graph', () => {
     const serverFiles = await readdir(path.join(root, 'server'));
     expect(serverFiles.some((file) => file.startsWith('tau-module-graph-'))).toBe(false);
   });
+  it('should exclude the AR USDZ Assimp worker from the desktop renderer graph', async () => {
+    // `desktop:check-renderer-payload` only runs under the `package-*` targets, so this guard keeps the AR
+    // USDZ Assimp worker and its WebAssembly out of the renderer in core CI instead of at packaging time.
+    // The payload pattern below is safe only because the entry is the single AR module: the renderer ships
+    // other runtime workers and Assimp legitimately, so widening the entry would make it fire on those.
+    const cacheRoot = path.resolve('node_modules/.cache/tau-ui-module-graph');
+    await mkdir(cacheRoot, { recursive: true });
+    const root = await mkdtemp(path.join(cacheRoot, 'ar-usdz-'));
+    roots.push(root);
+    const entry = path.join(root, 'entry.js');
+    await writeFile(entry, "export { transcodeGlbToUsdz } from '#components/cad/ar-usdz-transcode.js';\n");
+    // Mirrors apps/ui/desktop/vite.config.ts: `tauRuntime` at the root only, and the worker is its own Vite
+    // build, so it emits its own graph and needs fresh plugin instances for each bundling pass.
+    const workerPlugins = () => [createUiSourceAliasPlugin({ emitModuleGraph: true, target: 'desktop' })];
+    await build({
+      configFile: false,
+      root,
+      logLevel: 'silent',
+      plugins: [tauRuntime({ crossOriginIsolation: false }), ...workerPlugins()],
+      worker: { plugins: workerPlugins },
+      build: { lib: { entry, formats: ['es'] }, assetsInlineLimit: 0 },
+    });
+    const files = await readdir(path.join(root, 'dist'), { recursive: true });
+    const manifestFiles = files.filter((file) => /tau-module-graph(?:-[\w-]+)?\.json$/u.test(file));
+    const manifests = await Promise.all(
+      manifestFiles.map(
+        async (file) =>
+          JSON.parse(await readFile(path.join(root, 'dist', file), 'utf8')) as {
+            chunks: Array<{ moduleIds: string[] }>;
+          },
+      ),
+    );
+    const moduleIds = manifests.flatMap((manifest) => manifest.chunks.flatMap((chunk) => chunk.moduleIds));
+    expect(moduleIds.some((moduleId) => moduleId.endsWith('/components/cad/ar-usdz-transcode.desktop.ts'))).toBe(true);
+    expect(
+      moduleIds.filter((moduleId) =>
+        /usdz-runtime\.(?:worker|definition)|libassimp|plugins\/assimp|packages\/runtime\/src\/worker\//u.test(
+          moduleId,
+        ),
+      ),
+    ).toEqual([]);
+    expect(files.filter((file) => file.endsWith('.wasm'))).toEqual([]);
+  }, 60_000);
 });
 
 describe('web module graph', () => {

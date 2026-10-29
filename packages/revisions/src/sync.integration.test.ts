@@ -56,7 +56,7 @@ import { selectSyncFacet, syncMachine } from '#sync.machine.js';
 import type { SyncFetchActorOutput, SyncProjectRecordsActorOutput } from '#sync.machine.js';
 import type { SyncQueueRecord } from '#sync.types.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
-import type { ConflictRecord, RevisionPort } from '#revision-port.js';
+import type { ConflictRecord, RevisionPort, RevisionPushSession } from '#revision-port.js';
 import type { RevisionStreamHandlers } from '#revision-stream.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
 import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
@@ -186,7 +186,7 @@ const device = async (
       policy: tauPathPolicy,
       allowRoot: (candidate) => candidate === root,
       authority,
-    });
+    }).close;
     const channel = new NodeFsChannel(toNodeFsPort(port1));
     filesystem = new NodeFsProviderClient(channel, root);
     authorityCleanups.push(async () => {
@@ -927,6 +927,165 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       await remote.close();
     }
   }, 180_000);
+
+  /* F5: an attempt's history push and record-set push read the remote's advertisement once, not once each. */
+  it.skipIf(leg.name === 'native git')(
+    'row 9a: one push attempt reads one receive-pack advertisement for the history and the record set',
+    async () => {
+      const remote = await startGitHttpBackend({ root: await temporaryRoot('remote-one-advert') });
+      const manifest = JSON.stringify({ syncLargeExports: true });
+      try {
+        const one = await device({
+          leg,
+          label: 'a-one-advert',
+          remoteUrl: remote.url,
+          files: { 'main.ts': 'source\n', 'tau.json': manifest, 'exports/model.step': 'export\n' },
+        });
+        await record({
+          device: one,
+          files: { 'main.ts': 'source\n', 'tau.json': manifest },
+          summary: 'Advertise once',
+        });
+        const before = remote.trail().length;
+        const pushed = await run<{ refs: ReadonlyArray<{ name: string; status: string }> }>(one.actors.sync.push, {
+          remote: 'tau',
+          branch: 'main',
+          leases: {},
+        });
+        expect(pushed.refs).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ name: mainRef, status: 'updated' }),
+            expect.objectContaining({ name: 'refs/tau/evidence/exports', status: 'updated' }),
+          ]),
+        );
+        const attempt = remote.trail().slice(before);
+        /* Two receive-packs (A39: the history set atomic, the record set not), one advertisement. */
+        expect(attempt.filter((entry) => entry.endsWith('/git-receive-pack'))).toHaveLength(2);
+        expect(attempt.filter((entry) => entry.endsWith('/info/refs'))).toHaveLength(1);
+        await expect(remote.git(['rev-parse', 'refs/tau/evidence/exports'])).resolves.toMatch(/^[\da-f]{40}$/u);
+      } finally {
+        await remote.close();
+      }
+    },
+    180_000,
+  );
+
+  it.skipIf(leg.name === 'native git')(
+    'row 9b: a session forgets its advertisement after a refusal, so the next push reads a fresh one',
+    async () => {
+      const remote = await startGitHttpBackend({ root: await temporaryRoot('remote-forget-advert') });
+      try {
+        const one = await device({ leg, label: 'a-forget-advert', remoteUrl: remote.url, files: { 'a.ts': '1\n' } });
+        const first = await record({ device: one, files: { 'a.ts': '1\n' }, summary: 'First' });
+        const session: RevisionPushSession = {};
+        const adverts = (): number => remote.trail().filter((entry) => entry.endsWith('/info/refs')).length;
+        const before = adverts();
+
+        const pushed = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }], session });
+        expect(pushed.refs[0]).toMatchObject({ status: 'updated', head: first });
+        const second = await record({ device: one, files: { 'a.ts': '2\n' }, summary: 'Second', parent: first });
+        /* The kept copy says the remote holds `first`, so a lease on anything else is refused here, unsent. */
+        const refused = await one.port.push({
+          remote: 'tau',
+          refs: [{ name: mainRef, expected: revisionId('0'.repeat(40)) }],
+          session,
+        });
+        expect(refused.refs[0]).toMatchObject({ status: 'rejected' });
+        expect(adverts() - before).toBe(1);
+
+        const retried = await one.port.push({
+          remote: 'tau',
+          refs: [{ name: mainRef, expected: revisionId(first) }],
+          session,
+        });
+        expect(retried.refs[0]).toMatchObject({ status: 'updated', head: second });
+        expect(adverts() - before).toBe(2);
+      } finally {
+        await remote.close();
+      }
+    },
+    180_000,
+  );
+
+  /* Review F5b: a kept advertisement can be stale by the next push; the server's compare-and-set refusing it is a lost lease. */
+  it.skipIf(leg.name === 'native git')(
+    'row 9c: a ref another writer moved after the session read its advertisement is refused as leaseLost',
+    async () => {
+      const remote = await startGitHttpBackend({ root: await temporaryRoot('remote-stale-advert') });
+      try {
+        const one = await device({ leg, label: 'a-stale-advert', remoteUrl: remote.url, files: { 'a.ts': '1\n' } });
+        const first = await record({ device: one, files: { 'a.ts': '1\n' }, summary: 'First' });
+        const session: RevisionPushSession = {};
+        const pushed = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }], session });
+        expect(pushed.refs[0]).toMatchObject({ status: 'updated', head: first });
+        const second = await record({ device: one, files: { 'a.ts': '2\n' }, summary: 'Second', parent: first });
+        /* A second writer moves the branch between this session's two pushes. */
+        const tree = await remote.git(['rev-parse', `${first}^{tree}`]);
+        const other = await remote.git([
+          '-c',
+          'user.name=Another writer',
+          '-c',
+          'user.email=another@example.test',
+          'commit-tree',
+          tree,
+          '-p',
+          first,
+          '-m',
+          'Another writer',
+        ]);
+        await remote.git(['update-ref', mainRef, other]);
+
+        const stale = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }], session });
+        expect(stale.refs[0]).toMatchObject({ status: 'rejected', reason: 'leaseLost' });
+        expect(second).not.toBe(other);
+        await expect(remote.git(['rev-parse', mainRef])).resolves.toBe(other);
+      } finally {
+        await remote.close();
+      }
+    },
+    180_000,
+  );
+
+  /* Review: a kept copy saying a ref is already there is read again, since nothing sent would find out. */
+  it.skipIf(leg.name === 'native git')(
+    'row 9d: a session reads the remote again before calling a ref another writer moved up to date',
+    async () => {
+      const remote = await startGitHttpBackend({ root: await temporaryRoot('remote-stale-up-to-date') });
+      try {
+        const one = await device({ leg, label: 'a-stale-up-to-date', remoteUrl: remote.url, files: { 'a.ts': '1\n' } });
+        const first = await record({ device: one, files: { 'a.ts': '1\n' }, summary: 'First' });
+        const session: RevisionPushSession = {};
+        const adverts = (): number => remote.trail().filter((entry) => entry.endsWith('/info/refs')).length;
+        const before = adverts();
+        const pushed = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }], session });
+        expect(pushed.refs[0]).toMatchObject({ status: 'updated', head: first });
+        /* A second writer moves the branch; this device still holds `first`, which the kept copy names. */
+        const tree = await remote.git(['rev-parse', `${first}^{tree}`]);
+        const other = await remote.git([
+          '-c',
+          'user.name=Another writer',
+          '-c',
+          'user.email=another@example.test',
+          'commit-tree',
+          tree,
+          '-p',
+          first,
+          '-m',
+          'Another writer',
+        ]);
+        await remote.git(['update-ref', mainRef, other]);
+
+        const again = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }], session });
+        /* Not `upToDate`: the fresh read sees the remote ahead, and the remote is left as it is. */
+        expect(again.refs[0]).toMatchObject({ status: 'rejected' });
+        expect(adverts() - before).toBe(2);
+        await expect(remote.git(['rev-parse', mainRef])).resolves.toBe(other);
+      } finally {
+        await remote.close();
+      }
+    },
+    180_000,
+  );
 
   it('row 4 (red pin e): a device whose work the remote never took drains its queue on the next open', async () => {
     const remoteRoot = await temporaryRoot('remote-drain');

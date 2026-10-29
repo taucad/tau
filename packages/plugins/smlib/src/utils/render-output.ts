@@ -423,35 +423,6 @@ function sliceFaceMesh(mesh: FaceMesh, { start, end }: FaceRun): FaceMesh {
   return { vertices, triangles, normals };
 }
 
-/**
- * Edges used by other than two triangles once the meshes' coincident positions are joined.
- * @param meshes - Meshes that together should close a solid.
- * @returns How many edges are open or non-manifold; zero for a watertight solid.
- */
-function countOpenEdges(meshes: readonly FaceMesh[]): number {
-  const edges = new Map<string, number>();
-  for (const { vertices, triangles } of meshes) {
-    const key = (vertex: number): string =>
-      `${vertices[vertex * 3]!.toFixed(6)},${vertices[vertex * 3 + 1]!.toFixed(6)},${vertices[vertex * 3 + 2]!.toFixed(6)}`;
-    for (let corner = 0; corner < triangles.length; corner += 3) {
-      const corners = [key(triangles[corner]!), key(triangles[corner + 1]!), key(triangles[corner + 2]!)];
-      for (let side = 0; side < 3; side++) {
-        const a = corners[side]!;
-        const b = corners[(side + 1) % 3]!;
-        const edge = a < b ? `${a}|${b}` : `${b}|${a}`;
-        edges.set(edge, (edges.get(edge) ?? 0) + 1);
-      }
-    }
-  }
-  let open = 0;
-  for (const count of edges.values()) {
-    if (count !== 2) {
-      open++;
-    }
-  }
-  return open;
-}
-
 function emptyGeometry(config: NamedInputShape): GeometrySmlib {
   const { name, color, opacity, metalness, roughness, material } = config;
   return {
@@ -495,19 +466,6 @@ function renderMesh(config: NamedInputShape, options: RenderOptions): GeometrySm
     }
     // One mesh of the whole body: faces meshed alone sample their shared edges differently and crack.
     const mesh = library.tessellate(shape, tessellation.linearTolerance, tessellation.angularTolerance);
-    if (shape instanceof library.Part && !mesh.isClosed()) {
-      // SMLib 0.3.4 leaves a moved torus's seam open in a body mesh, though the face alone meshes
-      // closed: keep whichever mesh has fewer open edges.
-      const faceMeshes = [...shape.faces()].map((face) =>
-        library.tessellate(face, tessellation.linearTolerance, tessellation.angularTolerance),
-      );
-      if (countOpenEdges(faceMeshes) < countOpenEdges([mesh])) {
-        for (const [faceId, faceMesh] of faceMeshes.entries()) {
-          appendFaceMesh(geometry.faces, faceMesh, faceId);
-        }
-        return;
-      }
-    }
     let runs: FaceRun[];
     try {
       runs = shape instanceof library.Face ? [] : findFaceRuns([...shape.faces()], mesh, tessellation.linearTolerance);

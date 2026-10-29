@@ -55,10 +55,10 @@ RoundedRectangle(width: float, height: float, radius: float, *, align: AlignLike
 Slot(length: float, width: float, *, rotation: float = 0.0, align: AlignLike = Align.CENTER) -> Sketch
 
 # Category: sketches
-# The region a pen ``width`` wide covers along a path of lines and arcs
-# Remarks: two centers (``Stroke(Line(a, b), 6)``), a slot along an arc, a rib from its centerline. ``ends``: ``"round"`` (half circles, the default) or ``"flat"`` (cut square at the end points). ``corners``: how the outside of a bend is shaped, ``"round"``, ``"sharp"`` or ``"chamfer"``. A closed path makes a ring. The path stays where it is (in its plane).
+# The region a pen ``width`` wide covers along a path
+# Remarks: (``Stroke(Line(a, b), 6)``), a slot along an arc, a rib from its centerline, a groove along a spline. Lines and arcs give exact lines and arcs; splines and ellipses their offsets (:meth:`Edge.offset`), within 1e-6 of the path's size. ``ends``: ``"round"`` (half circles, the default) or ``"flat"`` (cut square at the end points). ``corners``: how the outside of a bend is shaped, ``"round"``, ``"sharp"`` or ``"chamfer"``. A closed path makes a ring. The path stays where it is (in its plane).
 # smlibpy.sketches.Stroke (function)
-Stroke(path: Edge | Wire, width: float, *, ends: str = 'round', corners: str = 'round') -> Sketch
+Stroke(path: Edge | Wire, width: float, *, ends: Literal['round', 'flat'] = 'round', corners: Literal['round', 'sharp', 'chamfer'] = 'round') -> Sketch
 
 # Category: sketches
 # A trapezoid with a base of ``width``

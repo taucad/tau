@@ -171,6 +171,10 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/ui-e2e/src/observability-ssr.staging.test.ts',
       // Its A2/A6 acceptance watches PostHog requests per context across a hydration and a kernel worker kill.
       'apps/ui-e2e/src/observability-runtime.staging.test.ts',
+      // The hosted gate's shared diagnostics use Page/request types; its offline privacy test stubs those emitters.
+      // Neither helper owns another browser runner.
+      'apps/ui-e2e/src/support/observability-staging.ts',
+      'apps/ui-e2e/src/support/observability-staging.test.ts',
       // Composer and pane-resize acceptance emulate a coarse pointer through the browser session.
       'apps/ui/app/components/chat/chat-textarea.vitest.browser.config.ts',
       'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',
@@ -293,6 +297,7 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/ui/app/routes/w.$workspace.$project/use-follow-latest-output.vitest.browser.config.ts',
         'apps/ui/app/workers/agent-host.vitest.browser.config.ts',
         'apps/ui/chat-revision-marker.vitest.browser.config.ts',
+        'libs/agent-observability/vitest.browser.config.ts',
         'packages/agent-host/vitest.browser.config.ts',
         'packages/core/bundler/vitest.browser.config.ts',
         'packages/plugins/openrscad/e2e/vitest.config.ts',

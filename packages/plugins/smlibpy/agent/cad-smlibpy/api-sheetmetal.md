@@ -16,7 +16,7 @@ class Bend
 
 # Category: sheetmetal
 # The unfolded part, laid on the XY plane
-# Remarks: the longer side of the smallest rectangle around it along X and its bounding box starting at the origin. ``outline`` is the cut contour (outer boundary and holes) as a sketch at z = 0; ``bends`` carry the bend lines (at z = 0) with angle, radius, direction and allowance.
+# Remarks: the longer side of the smallest rectangle around it along X and its bounding box starting at the origin. ``outline`` is the cut contour (outer boundary and holes) as a sketch at z = 0; ``bends`` carry the bend lines (at z = 0) with angle, radius, direction, K-factor and allowance. ``k_factor`` is the K-factor of every bend, or ``None`` where the bends have different ones (each :class:`Bend` has its own).
 # smlibpy.sheetmetal.FlatPattern (class)
 class FlatPattern
 
@@ -27,11 +27,11 @@ class FlatPattern
   size: Vector
 
   # smlibpy.sheetmetal.FlatPattern.__init__ (constructor)
-  FlatPattern(part: Part, outline: Sketch, bends: list[Bend], thickness: float, k_factor: float) -> NoneType
+  FlatPattern(part: Part, outline: Sketch, bends: list[Bend], thickness: float, k_factor: float | None) -> NoneType
 
 # Category: sheetmetal
 # Length of the flat strip that a bend takes
-# Remarks: ``angle`` is the bend angle in degrees (90 for an L), ``radius`` the inside radius.
+# Remarks: ``angle`` is the bend angle in degrees (90 for an L, up to below 360 for a rolled part), ``radius`` the inside radius.
 # smlibpy.sheetmetal.bend_allowance (function)
 bend_allowance(angle: float, *, radius: float, thickness: float, k_factor: float = K_FACTOR) -> float
 
@@ -61,9 +61,9 @@ flange(part: Part, edge: Edge | ShapeList[Edge], length: float, *, angle: float 
 
 # Category: sheetmetal
 # The flat pattern of a sheet metal part, laid on the XY plane (see :class:`FlatPattern`)
-# Remarks: The part is unfolded with ``fixed`` (default: the largest planar face) staying in place; that face is the bottom of the flat (z = 0) and bends are ``"up"`` when the far side of the sheet folds towards +Z. The longer side of the smallest rectangle around the blank runs along X, and the bounding box starts at the origin.
+# Remarks: ``k_factor`` as for :func:`unfold`: by default each bend's own (from :func:`fold` and :func:`flange`), else :data:`K_FACTOR`. The part is unfolded with ``fixed`` (default: the largest planar face) staying in place; that face is the bottom of the flat (z = 0) and bends are ``"up"`` when the far side of the sheet folds towards +Z. The longer side of the smallest rectangle around the blank runs along X, and the bounding box starts at the origin.
 # smlibpy.sheetmetal.flat_pattern (function)
-flat_pattern(part: Part, *, k_factor: float = K_FACTOR, fixed: Face | None = None) -> FlatPattern
+flat_pattern(part: Part, *, k_factor: KFactor = None, fixed: Face | None = None) -> FlatPattern
 
 # Category: sheetmetal
 # Fold a sheet along a line
@@ -80,6 +80,6 @@ fold(part: Part, line: Axis | Edge, angle: float, *, radius: float, k_factor: fl
 
 # Category: sheetmetal
 # Unfold a sheet metal part
-# Remarks: The face ``fixed`` (default: the largest planar face) stays where it is; the rest of the sheet unfolds into its plane. With the K-factor the part was bent with, the result is the blank it was bent from. For the flat pattern on the XY plane, with outline and bend lines, use :func:`flat_pattern`.
+# Remarks: The face ``fixed`` (default: the largest planar face) stays where it is; the rest of the sheet unfolds into its plane. With the K-factor the part was bent with, the result is the blank it was bent from: by default each bend takes the K-factor :func:`fold` or :func:`flange` made it with (else :data:`K_FACTOR`, 0.44, as for an imported part). ``k_factor`` gives other ones: one number for every bend, a function ``(radius, thickness, angle) -> k``, a mapping from inside radius to K-factor (``{1: 0.33, 6: 0.45}``), ``(r / t, k)`` pairs to interpolate (a shop's table), or ``"din6935"`` (see :data:`KFactor`). For the flat pattern on the XY plane, with outline and bend lines, use :func:`flat_pattern`. Rolled parts (one bend, no flat sheet: a ring segment), bends at a free end of the sheet (a curl) and bends over 180 degrees unroll at the neutral radius ``radius + k_factor * thickness``; a rolled part about the middle of its bend (``fixed`` is refused there).
 # smlibpy.sheetmetal.unfold (function)
-unfold(part: Part, *, k_factor: float = K_FACTOR, fixed: Face | None = None) -> Part
+unfold(part: Part, *, k_factor: KFactor = None, fixed: Face | None = None) -> Part

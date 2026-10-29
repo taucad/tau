@@ -1,5 +1,5 @@
 import type { CheckedEntryResult, NodeFsRootScope } from '@taucad/filesystem/backend/node';
-import { classify } from '@taucad/filesystem/path-registry';
+import { classify, reservedTauDirectory } from '@taucad/filesystem/path-registry';
 import type { CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 import { assertRootedPath } from '@taucad/utils/path';
 
@@ -99,11 +99,18 @@ const classifiedReadWrite = (path: string): boolean => classify(path).agentAcces
 
 /**
  * A container is a path the registry leaves read-write while what lies below it is reserved: `.tau` and every
- * spelling that folds onto it. Its contents are what makes it protected, so it may be created but never moved
- * or removed.
+ * spelling that folds onto it. Its contents are what makes it protected, so it may never be moved or removed.
  */
 const isContainer = (path: string): boolean =>
   classifiedReadWrite(path) && !classifiedReadWrite(`${path}/tau-container-probe`);
+
+/**
+ * The one spelling of a container the registry itself uses. Every other spelling — `.TAU`, `.tau.`,
+ * `.tau:alias` — folds onto it, so the shell asking for one asks for a second name for the same reserved
+ * container. Creation is admitted under the canonical name only: an alias directory on a case-sensitive
+ * filesystem is a real second entry in the checkout, and nothing authored ever needs it.
+ */
+const isCanonicalContainer = (path: string): boolean => path === reservedTauDirectory;
 
 /**
  * Every entry below `from`, relative to it, as the held claim sees it; `undefined` past the walk bound.
@@ -155,8 +162,8 @@ const descendantsBelow = async (
  * The rooted scope applies no path registry of its own, so every name this change creates, removes or moves is
  * classified here first, as the filesystem folds it (PP3). A rename's descendants are derived here by walking
  * `from` under the held claim, refused unless they equal the caller's list, and checked at both ends, so moving an
- * ordinary directory onto a reserved spelling cannot carry children past the check. A container such as `.tau`
- * may be created but never renamed or removed.
+ * ordinary directory onto a reserved spelling cannot carry children past the check. A container may be created
+ * under its canonical name `.tau` only, and never renamed or removed; every folded alias of it is refused.
  *
  * @internal
  * @param scope - The held claim's reads and checked entry methods for the exact admitted checkout.
@@ -180,7 +187,7 @@ export const publishShellProjectionEntry = async (
   }
   if (
     !ends.every((path) => classifiedReadWrite(path)) ||
-    (change.kind !== 'mkdir' && ends.some((path) => isContainer(path)))
+    ends.some((path) => isContainer(path) && !(change.kind === 'mkdir' && isCanonicalContainer(path)))
   ) {
     return { status: 'refused', reason: 'protected-path' };
   }

@@ -212,14 +212,23 @@ describe('shell projection outbound publication', () => {
     expect(readFileSync(join(root, 'archive/notes/a.md'), 'utf8')).toBe('a');
   });
 
-  it.each(['.tau', '.Tau', '.TAU.', '.tau:alias'])(
-    'should create container spelling %s but never rename or remove it',
-    async (container) => {
+  it.each([
+    { container: '.tau', canonical: true },
+    { container: '.Tau', canonical: false },
+    { container: '.TAU.', canonical: false },
+    { container: '.tau:alias', canonical: false },
+  ])(
+    'should create container spelling $container only when canonical, and never rename or remove it',
+    async ({ container, canonical }) => {
       const { editor, publishEntry, root } = connect();
-      expect(await publishEntry({ kind: 'mkdir', path: container })).toEqual({
-        status: 'settled',
-        result: { status: 'applied' },
-      });
+      /* A folded alias is a second name for the one reserved container: admitting it would leave a real second
+       * directory in the checkout on any case-sensitive filesystem, and nothing authored ever needs one. */
+      expect(await publishEntry({ kind: 'mkdir', path: container })).toEqual(
+        canonical
+          ? { status: 'settled', result: { status: 'applied' } }
+          : { status: 'refused', reason: 'protected-path' },
+      );
+      expect(existsSync(join(root, container))).toBe(canonical);
       const away = {
         kind: 'rename',
         from: container,
@@ -351,7 +360,7 @@ describe('shell projection activation boundary', () => {
     const source = readFileSync(join(sourceRoot, 'shell', 'shell-projection.ts'), 'utf8');
     const imports = [...source.matchAll(/^import\s[^;]*?from\s+'([^']+)';/gmu)].map((match) => match[0]);
     expect(imports.filter((line) => !line.startsWith('import type'))).toEqual([
-      "import { classify } from '@taucad/filesystem/path-registry';",
+      "import { classify, reservedTauDirectory } from '@taucad/filesystem/path-registry';",
       "import { assertRootedPath } from '@taucad/utils/path';",
     ]);
     expect(source).not.toMatch(/NodeFsProviderClient|NodeFsChannel|@taucad\/filesystem\/backend'/u);

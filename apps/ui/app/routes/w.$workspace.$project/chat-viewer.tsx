@@ -925,7 +925,7 @@ const ViewerContent = memo(function ({
           >
             {({ segment, list }) => (
               <ChatViewerControls
-                mobileAction={<ArButton artifact={artifact} runtimeDocument={runtimeDocument} />}
+                mobileAction={<ArButton artifact={artifact} />}
                 captureRendering={captureRendering}
                 kernelSettings={
                   cadRef ? <ViewerKernelSettings viewId={viewId} entryPath={entryPath} cadActor={cadRef} /> : undefined
@@ -942,7 +942,7 @@ const ViewerContent = memo(function ({
           </ViewerIssues>
         ) : (
           <ChatViewerControls
-            mobileAction={<ArButton artifact={artifact} runtimeDocument={runtimeDocument} />}
+            mobileAction={<ArButton artifact={artifact} />}
             shouldEnableCapture={false}
             captureRendering={captureRendering}
           />

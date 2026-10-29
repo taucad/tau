@@ -388,6 +388,21 @@ const cohortsBy = (
 };
 
 /**
+ * Aggregate run scores overall and per release and protection cohort, however they were read.
+ *
+ * @param runs - Each run once.
+ * @returns The cohorts.
+ * @public
+ */
+export const summarizeRuns = (
+  runs: readonly RunScore[],
+): Pick<Scorecard, 'overall' | 'byRelease' | 'byProtection'> => ({
+  overall: scoreCohort(runs),
+  byRelease: cohortsBy(runs, (run) => run.release),
+  byProtection: cohortsBy(runs, (run) => run.protection),
+});
+
+/**
  * Score admitted evidence: reconcile it, score each run once, and aggregate overall and per cohort.
  *
  * A rating of `none` means no rating fact: the run was not rated, or its account did not allow ratings. Evidence alone
@@ -400,11 +415,5 @@ const cohortsBy = (
 export const scorecard = (evidence: readonly Evidence[]): Scorecard => {
   const { facts, reconciliation } = reconcileEvidence(evidence);
   const runs = scoreRuns(facts);
-  return {
-    reconciliation,
-    overall: scoreCohort(runs),
-    byRelease: cohortsBy(runs, (run) => run.release),
-    byProtection: cohortsBy(runs, (run) => run.protection),
-    runs,
-  };
+  return { reconciliation, ...summarizeRuns(runs), runs };
 };

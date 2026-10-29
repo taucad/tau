@@ -88,3 +88,28 @@ export const createProjectOpenTimer = (
  */
 export const isHostedCheckoutApplied = (status: Pick<RevisionStatusProjection, 'remote' | 'sync'>): boolean =>
   status.remote.kind === 'tau' && status.sync.hasAppliedRemote === true;
+
+/**
+ * Mark an open's boundaries from one status its root published.
+ *
+ * `first_view` is the applied checkout. The large objects are filled after it
+ * ("open the UI, model waits"), and the status carries `largeObjects` until
+ * the last placeholder is written — published before the checkout reads as
+ * applied — so an applied checkout without it is `fully_fetched`.
+ *
+ * @param timer - The project's open timer.
+ * @param status - A status the project's root published.
+ * @public
+ */
+export const markProjectOpen = (
+  timer: ProjectOpenTimer,
+  status: Pick<RevisionStatusProjection, 'remote' | 'sync' | 'largeObjects'>,
+): void => {
+  if (!isHostedCheckoutApplied(status)) {
+    return;
+  }
+  timer.firstView();
+  if (status.largeObjects === undefined) {
+    timer.fullyFetched();
+  }
+};

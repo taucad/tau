@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import type { RevisionStatusProjection } from '@taucad/revisions';
-import { createProjectOpenTimer, isHostedCheckoutApplied } from '#machines/project-open-timer.js';
+import { createProjectOpenTimer, isHostedCheckoutApplied, markProjectOpen } from '#machines/project-open-timer.js';
 import type { ProjectOpenMark } from '#machines/project-open-timer.js';
 
 type OpenStatus = Pick<RevisionStatusProjection, 'remote' | 'sync'>;
@@ -125,5 +125,42 @@ describe('isHostedCheckoutApplied', () => {
     expect(isHostedCheckoutApplied(status({}))).toBe(false);
     expect(isHostedCheckoutApplied(status({ kind: 'git', hasAppliedRemote: true }))).toBe(false);
     expect(isHostedCheckoutApplied(status({ kind: 'none' }))).toBe(false);
+  });
+});
+
+/* Open the UI, model waits: the view opens at the checkout, and the large objects finish after it. */
+describe('markProjectOpen', () => {
+  const downloading = {
+    phase: 'fetching',
+    paths: ['models/part.step'],
+    objects: 0,
+    totalObjects: 1,
+    bytes: 0,
+    totalBytes: 9,
+  } as const;
+
+  it('marks first view at the checkout and fully fetched only once the large objects are filled', () => {
+    const { marks, advance, timer } = harness();
+    markProjectOpen(timer, status({ hasAppliedRemote: false }));
+    advance(200);
+    markProjectOpen(timer, { ...status({ hasAppliedRemote: true }), largeObjects: downloading });
+    expect(marks).toStrictEqual([]);
+    advance(5000);
+    timer.fetchedFromNetwork();
+    markProjectOpen(timer, status({ hasAppliedRemote: true }));
+    expect(marks).toStrictEqual([
+      { phase: 'first_view', cache: 'cold', durationMilliseconds: 200 },
+      { phase: 'fully_fetched', cache: 'cold', durationMilliseconds: 5200 },
+    ]);
+  });
+
+  it('marks both at once for a checkout with nothing left to fetch', () => {
+    const { marks, advance, timer } = harness();
+    advance(300);
+    markProjectOpen(timer, status({ hasAppliedRemote: true }));
+    expect(marks).toStrictEqual([
+      { phase: 'first_view', cache: 'warm', durationMilliseconds: 300 },
+      { phase: 'fully_fetched', cache: 'warm', durationMilliseconds: 300 },
+    ]);
   });
 });

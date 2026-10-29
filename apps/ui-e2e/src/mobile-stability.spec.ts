@@ -24,7 +24,8 @@ import { waitForStageReady } from '#support/viewer-stage.js';
  * devices, object URLs and window/document listeners after a garbage collection, then runs ten more cycles and, after
  * the last one's cleanup, fails on any count that stays above that baseline. Every cycle also fails on an uncaught page
  * error, a failed script or stylesheet load, a failed same-origin request, a chunk-load or React diagnostic in the
- * console, a replaced document (a reload), or a blank model or editor.
+ * console, a binary value or object rendered into a DOM attribute, a replaced document (a reload), or a blank model or
+ * editor.
  *
  * - The workbench circuit, at 390×844: All → every surface it lists (and Chat and Parameters) → Model; one theme per
  *   cycle, with the production CodeMirror editor read in it, so Black and High Contrast reach the editor as their own
@@ -36,9 +37,10 @@ import { waitForStageReady } from '#support/viewer-stage.js';
  *   still live; the project's model renders, and the sidebar returns to Projects, where no preview is left.
  *
  * Not covered here, and why: the canvas HMR identity check needs a development server's hot update, which a production
- * build cannot produce. React's binary-prop warnings are development-only, so against the production build the console
- * check can only catch what production React logs; it catches the warnings themselves only when the spec runs against
- * the development server (`TAU_E2E_SERVER_MODE=development`). JS heap is not budgeted: it is not a resource count and
+ * build cannot produce. React's binary-prop warnings are development-only, so against the production build the spec
+ * checks their effect instead (no attribute holds serialized bytes or an `[object …]` string after any cycle); the
+ * console check catches the warnings themselves only when the spec runs against the development server
+ * (`TAU_E2E_SERVER_MODE=development`). JS heap is not budgeted: it is not a resource count and
  * varies with the collector. A worker's own contexts, URLs and listeners are outside the page probe; its liveness is
  * counted. Each circuit runs at 390×844 only: the workbench circuit alone takes about ten minutes at one width.
  */
@@ -215,6 +217,29 @@ const editorThemes = new Map<ThemeName, EditorTheme>();
 type Fault = Readonly<{ kind: string; detail: string }>;
 
 /**
+ * Attributes that carry a binary value or an object as text: what a production build renders when a typed array, an
+ * `ArrayBuffer`, a `Blob` or a model artifact reaches a DOM element as a prop. Production React logs nothing for it (the
+ * binary-prop warning is development-only), so the spec reads its result in the document instead: a run of sixteen or
+ * more comma-separated bytes, or an `[object …]` string.
+ *
+ * @returns Each offending attribute as `tag[name]` with the start of its value.
+ */
+const readBinaryAttributes = async (): Promise<string[]> =>
+  target.evaluate(() => {
+    const serializedBytes = /^(?:\d{1,3},){15,}\d{1,3}$/u;
+    const serializedObject = /\[object [A-Za-z]+\]/u;
+    const found: string[] = [];
+    for (const element of document.querySelectorAll('*')) {
+      for (const { name, value } of element.attributes) {
+        if (serializedBytes.test(value) || serializedObject.test(value)) {
+          found.push(`${element.tagName.toLowerCase()}[${name}] ${value.slice(0, 48)}`);
+        }
+      }
+    }
+    return found;
+  });
+
+/**
  * The faults the target has recorded since `from`: uncaught page errors, failed script and stylesheet loads, failed
  * same-origin requests, and console errors that mean a failed module load or a React fault. The local API is not
  * running in this environment, so its refused requests (another origin) are expected and not faults.
@@ -339,7 +364,13 @@ const runCircuit = async ({
       for (const text of read.consoleErrors) {
         ledger.consoleErrors[text] = (ledger.consoleErrors[text] ?? 0) + 1;
       }
-      const faults = [...read.faults, ...counts.loadErrors.map((detail) => ({ kind: 'load', detail }))];
+      // oxlint-disable-next-line no-await-in-loop -- one cycle at a time.
+      const binaryAttributes = await readBinaryAttributes();
+      const faults = [
+        ...read.faults,
+        ...counts.loadErrors.map((detail) => ({ kind: 'load', detail })),
+        ...binaryAttributes.map((detail) => ({ kind: 'binary attribute', detail })),
+      ];
       ledger.cycles.push({ cycle: index, milliseconds: Math.round(performance.now() - started), counts, faults });
       // Saved as each cycle ends, so a run that times out still leaves the cycles it finished.
       // oxlint-disable-next-line no-await-in-loop -- one cycle at a time.
@@ -494,6 +525,8 @@ test(
             { timeout: 60_000 },
           )
           .toBeGreaterThan(100);
+        // The live preview holds the model's bytes; none of them reach the DOM as an attribute.
+        expect(await readBinaryAttributes(), 'attributes with the preview live').toEqual([]);
         // The preview unmounts both ways a person ends it: by its own toggle, then the card opens the project; or,
         // every other cycle, by leaving Projects with the preview still live.
         if (index % 2 === 0) {

@@ -2441,19 +2441,6 @@ const startWorkerCpuProfiles = async (
 };
 
 /**
- * Records a CPU profile of one target page through the DevTools protocol.
- *
- * `start` begins sampling at 100 µs; `stop` ends it and writes the profile as `artifactName`
- * (a `.cpuprofile` that DevTools and speedscope open) beside the other test output. The page's
- * own `performance` entries cannot say which function held the main thread; this can.
- *
- * @param commandContext - The Vitest browser command context.
- * @param action - Whether to begin or end the recording.
- * @param artifactName - File name for the profile; required by `stop`.
- * @param surface - Which target page to profile.
- * @returns The profile's absolute path after `stop`; nothing after `start`.
- */
-/**
  * Run a full V8 garbage collection in one page, so a count read next sees only what the page still references. Not a
  * memory measurement: it only settles which objects a spec's weak references still reach.
  */
@@ -2467,6 +2454,19 @@ export const uiCollectGarbage: BrowserCommand<[surface?: TargetSurface]> = async
   }
 };
 
+/**
+ * Records a CPU profile of one target page through the DevTools protocol.
+ *
+ * `start` begins sampling at 100 µs; `stop` ends it and writes the profile as `artifactName`
+ * (a `.cpuprofile` that DevTools and speedscope open) beside the other test output. The page's
+ * own `performance` entries cannot say which function held the main thread; this can.
+ *
+ * @param commandContext - The Vitest browser command context.
+ * @param action - Whether to begin or end the recording.
+ * @param artifactName - File name for the profile; required by `stop`.
+ * @param surface - Which target page to profile.
+ * @returns The profile's absolute path after `stop`; nothing after `start`.
+ */
 export const uiCpuProfile: BrowserCommand<
   [action: 'start' | 'stop' | 'snapshot', artifactName?: string, surface?: TargetSurface],
   string | undefined

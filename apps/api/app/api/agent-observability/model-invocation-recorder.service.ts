@@ -1,17 +1,23 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { and, eq, isNotNull, isNull } from 'drizzle-orm';
+import { DatabaseService } from '#database/database.service.js';
+import { billingOwnerBinding } from '#database/schema.js';
 import type { Environment } from '#config/environment.config.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { TelemetryPurposeService } from '#api/telemetry-purposes/telemetry-purpose.service.js';
 import { EvidenceIngressService } from '#api/agent-observability/evidence-ingress.service.js';
 import { providerAttemptEvidence } from '#api/agent-observability/model-invocation-evidence.js';
 import type { ObservedAttempt } from '#api/agent-observability/model-invocation-evidence.js';
+import { settlementEvidence } from '#api/agent-observability/settlement-evidence.js';
+import type { ObservedSettlement } from '#api/agent-observability/settlement-evidence.js';
 
 /** Recordings one process may have in flight; past it, an attempt goes unrecorded and is counted. */
 export const attemptRecordingsInFlight = 16;
 
 /**
- * Records one API-reported summary per supplier attempt (blueprint T07).
+ * Records one API-reported summary per supplier attempt and one financial
+ * fact per funded settlement (blueprint T07).
  * Capture is possible only with a payload key and an approved notice, and an
  * attempt is admitted only when its account's summary purpose allows it for
  * the project; every refusal and failure is counted, never thrown.
@@ -29,6 +35,7 @@ export class ModelInvocationEvidenceRecorder {
     private readonly telemetryPurposes: TelemetryPurposeService,
     private readonly ingress: EvidenceIngressService,
     private readonly shutdown: ShutdownService,
+    private readonly databaseService: DatabaseService,
   ) {
     this.capable =
       configService.get('TAU_OBSERVABILITY_PAYLOAD_KEY', { infer: true }) !== undefined &&
@@ -46,6 +53,32 @@ export class ModelInvocationEvidenceRecorder {
    * @param attempt - What the relay observed.
    */
   public record(attempt: ObservedAttempt): void {
+    this.background(async () => this.admit(attempt));
+  }
+
+  /**
+   * Record one funded settlement in the background, after the ledger committed
+   * it. Never awaited by settlement, and nothing it does can fail one.
+   *
+   * @param settlement - What the ledger terminalized.
+   */
+  public recordSettlement(settlement: ObservedSettlement): void {
+    if (!this.capable) {
+      return;
+    }
+    this.background(async () => this.admitSettlement(settlement));
+  }
+
+  /**
+   * Hold observation work open against the shutdown deadline.
+   *
+   * @param work - Observation the request path does not wait for.
+   */
+  public track(work: Promise<unknown>): void {
+    this.shutdown.track(work);
+  }
+
+  private background(admit: () => Promise<string>): void {
     if (this.inFlight >= attemptRecordingsInFlight) {
       this.count('capacity');
       return;
@@ -53,7 +86,7 @@ export class ModelInvocationEvidenceRecorder {
     this.inFlight++;
     const work = (async (): Promise<void> => {
       try {
-        this.count(await this.admit(attempt));
+        this.count(await admit());
       } catch (error) {
         this.count('failed');
         this.logger.warn({ name: error instanceof Error ? error.name : typeof error }, 'Attempt evidence failed');
@@ -65,12 +98,40 @@ export class ModelInvocationEvidenceRecorder {
   }
 
   /**
-   * Hold observation work open against the shutdown deadline.
-   *
-   * @param work - Observation the request path does not wait for.
+   * A settlement belongs to a funded account; the fact is the account's active
+   * owner's. A closed or unbound account has no owner left to admit it for.
    */
-  public track(work: Promise<unknown>): void {
-    this.shutdown.track(work);
+  private async admitSettlement(settlement: ObservedSettlement): Promise<string> {
+    const { operation } = settlement;
+    if (operation.projectHint === null) {
+      return 'unscoped';
+    }
+    const [owner] = await this.databaseService.database
+      .select({ authUserId: billingOwnerBinding.authUserId })
+      .from(billingOwnerBinding)
+      .where(
+        and(
+          eq(billingOwnerBinding.accountId, operation.accountId),
+          eq(billingOwnerBinding.environment, operation.environment),
+          isNull(billingOwnerBinding.revokedAt),
+          isNotNull(billingOwnerBinding.authUserId),
+        ),
+      )
+      .limit(1);
+    if (owner?.authUserId === undefined || owner.authUserId === null) {
+      return 'unbound';
+    }
+    const authority = await this.telemetryPurposes.getAdmissionAuthority(owner.authUserId, operation.projectHint);
+    if (authority.effective.purposes.find((purpose) => purpose.purpose === 'summary')?.allowed !== true) {
+      return 'not-permitted';
+    }
+    const evidence = await settlementEvidence(settlement, owner.authUserId, {
+      project: operation.projectHint,
+      policyEpoch: authority.effective.epoch,
+      protection: authority.protection,
+    });
+    const outcome = await this.ingress.admitApiReported(evidence);
+    return 'receipt' in outcome ? outcome.receipt.disposition : outcome.refused;
   }
 
   private async admit(attempt: ObservedAttempt): Promise<string> {

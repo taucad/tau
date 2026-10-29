@@ -43,6 +43,7 @@ import type { AdmissionDenied } from '#api/billing/credit-ledger.service.js';
 import type { QualifiedAdmissionInput, TerminalEvidence } from '#api/billing/credit-ledger.types.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { ModelInvocationEvidenceRecorder } from '#api/agent-observability/model-invocation-recorder.service.js';
 
 type InvocationRow = NonNullable<Awaited<ReturnType<CreditLedgerService['getOperationForAttempt']>>>;
 const requestKeyVersion = 1;
@@ -151,6 +152,8 @@ export class BillableModelInvocationService {
     @Optional() private readonly metrics?: MetricsService,
     // oxlint-disable-next-line new-cap -- NestJS parameter decorators are invoked without new
     @Optional() private readonly shutdown?: ShutdownService,
+    // oxlint-disable-next-line new-cap -- NestJS parameter decorators are invoked without new
+    @Optional() private readonly evidenceRecorder?: ModelInvocationEvidenceRecorder,
   ) {}
 
   public async invoke(suppliedIntent: BillableInvocationIntent): Promise<BillableInvocationResult> {
@@ -751,6 +754,11 @@ export class BillableModelInvocationService {
       receipt,
       row.environment,
     );
+    this.evidenceRecorder?.recordSettlement({
+      operation: row,
+      receipt,
+      normalization: evidence.normalizationEvidence?.version,
+    });
   }
 
   /**

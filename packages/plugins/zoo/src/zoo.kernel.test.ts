@@ -38,7 +38,7 @@ const getParameterResult = async (files: Record<string, string>, mainFile: strin
       },
     },
   });
-  const context = await definition.initialize({ baseUrl: 'https://api.zoo.dev' }, runtime);
+  const context = await definition.initialize({ baseUrl: 'https://api.zoo.dev', mode: 'online' }, runtime);
   return definition.describe({ entryPath: mainFile }, runtime, context);
 };
 
@@ -221,7 +221,13 @@ describe('ZooWorker', () => {
       baseUrl: 'wss://api.zoo.dev/ws/modeling/commands',
       token: 'zoo-token',
       closeErrors: { 4401: 'Sign in through the embedding application.' },
+      mode: 'online',
     });
+  });
+
+  it('accepts offline mode, which runs KCL on libcascade without the Zoo engine', () => {
+    expect(zooOptionsSchema.parse({ mode: 'offline' }).mode).toBe('offline');
+    expect(() => zooOptionsSchema.parse({ mode: 'local' })).toThrow();
   });
 
   // ===========================================================================

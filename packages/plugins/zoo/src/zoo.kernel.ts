@@ -48,6 +48,7 @@ type ZooContext = {
   baseUrl: string;
   closeErrors: Record<string, string> | undefined;
   token: string | undefined;
+  mode?: 'online' | 'offline';
   kclUtils: KclUtilities | undefined;
   fileSystemManager: FileSystemManager | undefined;
   /** Changes whenever this kernel replaces the engine's current program. */
@@ -187,6 +188,7 @@ function getKclUtilitiesInstance(context: ZooContext): KclUtilities {
       baseUrl: context.baseUrl,
       closeErrors: context.closeErrors,
       token: context.token,
+      mode: context.mode,
       fileSystemManager: context.fileSystemManager,
     });
   }
@@ -218,6 +220,8 @@ export type ZooOptions = {
   closeErrors?: Record<string, string>;
   /** Zoo API token for direct connections. Browser-embedded tokens are visible to the browser environment. */
   token?: string;
+  /** `online` (default) sends modeling commands to the Zoo engine; `offline` executes them locally on libcascade. */
+  mode?: 'online' | 'offline';
 };
 
 // =============================================================================
@@ -256,6 +260,7 @@ export const zooKernel = defineKernel({
       baseUrl: options.baseUrl,
       closeErrors: options.closeErrors,
       token: options.token,
+      mode: options.mode,
       kclUtils: undefined,
       fileSystemManager: undefined,
     };

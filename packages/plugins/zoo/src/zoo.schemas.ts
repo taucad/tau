@@ -29,6 +29,12 @@ export const zooOptionsSchema = z.object({
   baseUrl: z.string().default('wss://api.zoo.dev/ws/modeling/commands'),
   closeErrors: z.record(z.string(), z.string()).optional(),
   token: z.string().optional(),
+  mode: z
+    .enum(['online', 'offline'])
+    .default('online')
+    .describe(
+      'Where modeling commands run: `online` uses the Zoo engine WebSocket, `offline` runs them locally on libcascade',
+    ),
 });
 
 /**

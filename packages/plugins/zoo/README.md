@@ -12,6 +12,7 @@ Zoo KCL kernel plugin for Tau
 
 - **KCL as a kernel** — `.kcl` models execute against Zoo's engine and return glTF with BRep topology attached.
 - **Engine over WebSocket** — geometry is computed by Zoo's Design API; `zoo({ kernels: { default: { baseUrl, token } } })` points at your endpoint.
+- **Offline mode (experimental)** — `mode: 'offline'` runs the same KCL locally: the engine's modeling commands execute on [libcascade](https://www.npmjs.com/package/libcascade) in-process, with no WebSocket, and exports (glTF, STEP, STL, OBJ, PLY) come from OpenCascade.
 - **KCL diagnostics preserved** — engine and language errors map to runtime issues with source ranges.
 - **No module-scope work** — the KCL WASM module and the connection load in `initialize()`, one per worker.
 
@@ -40,12 +41,12 @@ Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, o
 
 ## API
 
-| Export       | Kind            | Use                                                                                  |
-| ------------ | --------------- | ------------------------------------------------------------------------------------ |
-| `zoo`        | toolkit factory | package-named factory; presets select capabilities and nested options configure them |
-| `plugin`     | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key        |
-| `zooKernel`  | kernel factory  | direct `kernels` composition; reads `kcl`                                            |
-| `ZooOptions` | type            | `{ baseUrl?, token?, closeErrors? }`                                                 |
+| Export       | Kind            | Use                                                                                        |
+| ------------ | --------------- | ------------------------------------------------------------------------------------------ |
+| `zoo`        | toolkit factory | package-named factory; presets select capabilities and nested options configure them       |
+| `plugin`     | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key              |
+| `zooKernel`  | kernel factory  | direct `kernels` composition; reads `kcl`                                                  |
+| `ZooOptions` | type            | `{ baseUrl?, token?, closeErrors?, mode? }`; `mode` is `'online'` (default) or `'offline'` |
 
 One preset, `default`, selecting `kernels.default`.
 

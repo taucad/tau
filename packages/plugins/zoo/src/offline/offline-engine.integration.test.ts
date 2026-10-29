@@ -1,0 +1,139 @@
+// @vitest-environment node
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { KernelFileSystem } from '@taucad/runtime/kernel';
+import { FileSystemManager } from '#filesystem-manager.js';
+import type { ExportOptions } from '#kcl-utils.js';
+import { KclUtilities } from '#kcl-utils.js';
+import { OfflineEngineConnection } from '#offline/offline-engine-connection.js';
+import { compound, massProperties } from '#offline/offline-occt.js';
+import type { Oc } from '#offline/offline-occt.js';
+
+const source = `
+profile = startSketchOn(XY)
+  |> startProfile(at = [0, 0])
+  |> line(end = [10, 0])
+  |> line(end = [0, 10])
+  |> line(end = [-10, 0])
+  |> close()
+box = extrude(profile, length = 10)
+hole = startSketchOn(XY)
+  |> circle(center = [5, 5], radius = 2)
+  |> extrude(length = 10)
+part = subtract([box], tools = [hole])
+`;
+
+const memoryFs = (): KernelFileSystem =>
+  ({
+    async readFile() {
+      return new TextEncoder().encode(source);
+    },
+    async exists() {
+      return true;
+    },
+    async readdir() {
+      return ['main.kcl'];
+    },
+  }) as unknown as KernelFileSystem;
+
+const text = (bytes: Uint8Array<ArrayBuffer>): string => new TextDecoder().decode(bytes);
+
+describe('offline KCL execution', () => {
+  const utils = new KclUtilities({
+    baseUrl: 'ws://offline',
+    mode: 'offline',
+    fileSystemManager: new FileSystemManager(memoryFs()),
+  });
+
+  beforeAll(async () => {
+    await utils.initializeEngine();
+    const { program, errors } = await utils.parseKcl(source);
+    expect(errors).toEqual([]);
+    const outcome = await utils.executeProgram(program, 'main.kcl');
+    expect(outcome.errors).toEqual([]);
+  }, 120_000);
+
+  afterAll(async () => {
+    await utils.cleanup();
+  });
+
+  it('builds the solid with libcascade, without a WebSocket', async () => {
+    const engine = utils.offlineConnection?.engine;
+    expect(engine).toBeDefined();
+    const solids = engine!.scene.visibleSolids();
+    expect(solids).toHaveLength(1);
+    const oc = await (OfflineEngineConnection as unknown as { occt: Promise<Oc> }).occt;
+    const { volume } = massProperties(
+      oc,
+      compound(
+        oc,
+        solids.map((solid) => solid.shape),
+      ),
+    );
+    expect(volume).toBeCloseTo(1000 - Math.PI * 4 * 10, 3);
+  });
+
+  it.each<[string, ExportOptions, (files: Array<{ name: string; contents: Uint8Array<ArrayBuffer> }>) => void]>([
+    [
+      'STEP',
+      { type: 'step' },
+      ([file]) => {
+        expect(text(file!.contents)).toMatch(/^ISO-10303-21;/);
+        expect(text(file!.contents)).toContain('MANIFOLD_SOLID_BREP');
+      },
+    ],
+    [
+      'binary STL',
+      { type: 'stl', storage: 'binary' },
+      ([file]) => {
+        const view = new DataView(file!.contents.buffer, file!.contents.byteOffset);
+        const triangles = view.getUint32(80, true);
+        expect(triangles).toBeGreaterThan(10);
+        expect(file!.contents.byteLength).toBe(84 + triangles * 50);
+      },
+    ],
+    [
+      'ASCII STL',
+      { type: 'stl', storage: 'ascii' },
+      ([file]) => {
+        expect(text(file!.contents)).toMatch(/^solid/);
+        expect(text(file!.contents)).toContain('facet normal');
+      },
+    ],
+    [
+      'OBJ',
+      { type: 'obj' },
+      (files) => {
+        const objectFile = files.find((file) => file.name.endsWith('.obj'));
+        expect(text(objectFile!.contents)).toMatch(/^v /m);
+        expect(text(objectFile!.contents)).toMatch(/^f /m);
+      },
+    ],
+    [
+      'PLY',
+      { type: 'ply' },
+      ([file]) => {
+        expect(text(file!.contents.subarray(0, 200))).toMatch(/^ply/);
+      },
+    ],
+    [
+      'glTF binary',
+      { type: 'gltf', storage: 'binary' },
+      ([file]) => {
+        expect(text(file!.contents.subarray(0, 4))).toBe('glTF');
+      },
+    ],
+    [
+      'glTF embedded',
+      { type: 'gltf', storage: 'embedded' },
+      ([file]) => {
+        const json = JSON.parse(text(file!.contents)) as { buffers: Array<{ uri: string }>; meshes: unknown[] };
+        expect(json.meshes.length).toBeGreaterThan(0);
+        expect(json.buffers[0]!.uri).toMatch(/^data:application\/octet-stream;base64,/);
+      },
+    ],
+  ])('exports %s through libcascade', async (_name, options, check) => {
+    const files = await utils.exportFromMemory(options);
+    expect(files.length).toBeGreaterThan(0);
+    check(files);
+  });
+});

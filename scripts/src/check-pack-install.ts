@@ -1428,8 +1428,8 @@ const main = async (): Promise<void> => {
           private: true,
           type: 'module',
           dependencies: {
-            react: '19.2.7',
-            'react-dom': '19.2.7',
+            react: '19.3.1',
+            'react-dom': '19.3.1',
             zod: zod.version,
             ...(plan.names.includes('@taucad/middleware') ? { xstate: '6.0.0-alpha.59' } : {}),
             // `@taucad/viewer` peers `@xstate/react@^7.0.0-alpha.3`, whose newest alpha (alpha.4) requires

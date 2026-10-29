@@ -5,8 +5,11 @@ const baseConfig: UserConfig = {
   entry: [
     'src/index.ts',
     'src/contract.ts',
+    'src/delivery.ts',
     'src/authority.ts',
     'src/identity.ts',
+    'src/pending-stores.ts',
+    'src/projection.ts',
     'src/pi-telemetry.ts',
     'src/telemetry-policy.ts',
   ],

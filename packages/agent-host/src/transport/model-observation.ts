@@ -24,7 +24,7 @@ import type { ModelTelemetryParent } from '#transport/model-telemetry.js';
  *
  * So Tau observes its own stream instead, writing exactly the spans, events
  * and metrics pi publishes in `AI_TELEMETRY_SCHEMA`. That schema is imported
- * rather than copied, and `model-observation.conformance.test.ts` asserts every
+ * rather than copied, and `model-telemetry.test.ts` asserts every
  * name and attribute written here is declared in it, so an upstream change
  * fails this build rather than drifting into a differently-shaped span.
  */
@@ -36,6 +36,12 @@ export type ModelObservationSubject = Readonly<{
   /** Scalar requested reasoning level, when the catalog froze one. */
   reasoning?: string | undefined;
 }>;
+
+/** An observer for one request, with the span's own settlement held rather than floated. */
+export type ModelRequestObservation = LazyStreamObserver & {
+  /** Resolves once the span has ended. Never rejects, and never awaited on the model path. */
+  readonly spanEnded: Promise<void>;
+};
 
 /** The two low-cardinality labels every pi.ai instrument carries. */
 type ModelLabels = { provider: string; model: string };
@@ -82,12 +88,12 @@ const instrumentsFor = (metrics: TelemetryMetrics): ReturnType<typeof createInst
  *
  * @param parent - The composition's parent span, absent when telemetry is off.
  * @param subject - The request being observed.
- * @returns An observer for `lazyStream`.
+ * @returns The observer `observeModelStream` reads the stream through, holding the span's settlement.
  */
 export const observeModelRequest = (
   parent: ModelTelemetryParent | undefined,
   subject: ModelObservationSubject,
-): LazyStreamObserver => {
+): ModelRequestObservation => {
   const started = performance.now();
   const attributes = spanAttributesOf(subject);
   const { requestDuration, firstChunkDuration, tokens, cost } = instrumentsFor(
@@ -111,9 +117,48 @@ export const observeModelRequest = (
   };
   /* Two calls rather than a conditional spread: the typed starter checks the
    * attribute set exactly, and a spread of an optional widens it away. */
-  void (subject.reasoning === undefined
-    ? start('pi.ai.request', { ...attributes, api: subject.model.api }, open)
-    : start('pi.ai.request', { ...attributes, api: subject.model.api, reasoning: subject.reasoning }, open));
+  /* Never awaited, and a span that rejects is the composition's to observe:
+   * an unhandled rejection here would be telemetry failing the process. */
+  const { reasoning } = subject;
+  const run = async (): Promise<void> => {
+    try {
+      await (reasoning === undefined
+        ? start('pi.ai.request', { ...attributes, api: subject.model.api }, open)
+        : start('pi.ai.request', { ...attributes, api: subject.model.api, reasoning }, open));
+    } catch {
+      /* The span is lost; the request is not. */
+    }
+  };
+  /* Held, never awaited on the model path: it resolves once the span has ended. */
+  const spanEnded = run();
+
+  /* Counts, timings and identifiers only. A provider's error text can quote
+   * the request, so it is not carried; the stop reason says what happened. */
+  const record = (message: AssistantMessage | undefined): void => {
+    if (message && span !== undefined) {
+      span.setAttributes({
+        stop: message.stopReason,
+        'usage.input': message.usage.input,
+        'usage.output': message.usage.output,
+        'usage.cache_read': message.usage.cacheRead,
+        'usage.cache_write': message.usage.cacheWrite,
+        'cost.total': message.usage.cost.total,
+        'response.id': message.responseId,
+      });
+      if (message.stopReason === 'error') {
+        span.setStatus({
+          status: 'error',
+          error: { name: 'provider_error', message: 'provider_error' },
+        });
+      }
+      requestDuration.record(performance.now() - started, { ...attributes, stop: message.stopReason }, span);
+      tokens.add(message.usage.input, { ...attributes, kind: 'input' });
+      tokens.add(message.usage.output, { ...attributes, kind: 'output' });
+      tokens.add(message.usage.cacheRead, { ...attributes, kind: 'cache_read' });
+      tokens.add(message.usage.cacheWrite, { ...attributes, kind: 'cache_write' });
+      cost.add(message.usage.cost.total, attributes);
+    }
+  };
 
   return {
     onEvent(event: AssistantMessageEvent) {
@@ -157,30 +202,104 @@ export const observeModelRequest = (
       }
     },
     onResult(message: AssistantMessage | undefined) {
-      if (message && span !== undefined) {
-        span.setAttributes({
-          stop: message.stopReason,
-          'usage.input': message.usage.input,
-          'usage.output': message.usage.output,
-          'usage.cache_read': message.usage.cacheRead,
-          'usage.cache_write': message.usage.cacheWrite,
-          'cost.total': message.usage.cost.total,
-          'response.id': message.responseId,
-        });
-        if (message.stopReason === 'error') {
-          span.setStatus({
-            status: 'error',
-            error: { name: 'provider_error', message: message.errorMessage?.slice(0, 500) ?? '' },
-          });
-        }
-        requestDuration.record(performance.now() - started, { ...attributes, stop: message.stopReason }, span);
-        tokens.add(message.usage.input, { ...attributes, kind: 'input' });
-        tokens.add(message.usage.output, { ...attributes, kind: 'output' });
-        tokens.add(message.usage.cacheRead, { ...attributes, kind: 'cache_read' });
-        tokens.add(message.usage.cacheWrite, { ...attributes, kind: 'cache_write' });
-        cost.add(message.usage.cost.total, attributes);
+      try {
+        record(message);
+      } finally {
+        finish();
       }
-      finish();
     },
+    spanEnded,
   };
+};
+
+/**
+ * Forward a provider stream unchanged while an observer reads it.
+ *
+ * This is the whole of the observation's reach into the model path. Each event
+ * is yielded before the observer sees it, so the observer cannot hold, reorder
+ * or rewrite anything a caller receives. An observer that throws is dropped
+ * for the rest of the stream and the stream continues exactly as it would
+ * have with none (I1); pi's own `lazyStream` would instead turn that throw
+ * into a terminal error event, which is why it is not used here. A consumer
+ * that stops early, or a stream that throws, still settles the observation
+ * once with no result, so no span is left open.
+ *
+ * @param events - The codec stream Tau already consumes.
+ * @param observer - The observation, absent when telemetry is off.
+ * @returns The same events, in the same order.
+ */
+export const observeModelStream = async function* (
+  events: AsyncIterable<AssistantMessageEvent>,
+  observer: LazyStreamObserver | undefined,
+): AsyncGenerator<AssistantMessageEvent> {
+  let active = observer;
+  let result: AssistantMessage | undefined;
+  let settled = false;
+  /* True the first time only: the observation is settled exactly once. */
+  const settleOnce = (): boolean => {
+    if (settled) {
+      return false;
+    }
+    settled = true;
+    return true;
+  };
+  const guard = (call: (target: LazyStreamObserver) => void): void => {
+    if (active === undefined) {
+      return;
+    }
+    try {
+      call(active);
+    } catch {
+      /* Drop the observer, but still let it close its span: `onResult` with
+       * no message only settles, and a second fault there is swallowed too. */
+      const dropped = active;
+      active = undefined;
+      if (settleOnce()) {
+        try {
+          dropped.onResult?.(undefined);
+        } catch {
+          /* Nothing further to settle. */
+        }
+      }
+    }
+  };
+  try {
+    for await (const event of events) {
+      yield event;
+      if (event.type === 'done') {
+        result = event.message;
+      } else if (event.type === 'error') {
+        result = event.error;
+      }
+      guard((target) => target.onEvent?.(event));
+    }
+  } finally {
+    if (settleOnce()) {
+      guard((target) => target.onResult?.(result));
+    }
+  }
+};
+
+/**
+ * Build the observation for one request, or none.
+ *
+ * Construction touches the composition's span; a span that fails there costs
+ * this request its telemetry and nothing else.
+ *
+ * @param parent - The composition's parent span, absent when telemetry is off.
+ * @param subject - The request being observed.
+ * @returns The observer, or `undefined` when there is nothing to observe with.
+ */
+export const modelRequestObserver = (
+  parent: ModelTelemetryParent | undefined,
+  subject: ModelObservationSubject,
+): LazyStreamObserver | undefined => {
+  if (parent === undefined) {
+    return undefined;
+  }
+  try {
+    return observeModelRequest(parent, subject);
+  } catch {
+    return undefined;
+  }
 };

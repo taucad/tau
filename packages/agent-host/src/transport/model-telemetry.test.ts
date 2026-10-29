@@ -1,9 +1,7 @@
+import { AI_TELEMETRY_SCHEMA } from '@earendil-works/pi-ai';
 import { describe, expect, it, vi } from 'vitest';
 import type { ModelStreamEvent, ModelStreamRequest } from '#waist/ports.js';
-import {
-  createCachedSystemPromptBlocks,
-  createGatewayModelTransport,
-} from '#transport/gateway-model-transport.js';
+import { createCachedSystemPromptBlocks, createGatewayModelTransport } from '#transport/gateway-model-transport.js';
 import { modelTelemetryParent, modelTelemetrySubject } from '#transport/model-telemetry.js';
 import type { ModelTelemetryParent, ModelTelemetrySeam, ModelTelemetrySubject } from '#transport/model-telemetry.js';
 import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixture.js';
@@ -52,53 +50,55 @@ const fixtureResponse = (): Response => {
 type RecordedSpan = {
   name: string;
   attributes: Record<string, unknown>;
+  events: Array<{ name: string; attributes?: Record<string, unknown> | undefined }>;
+  status?: unknown;
+  ended: boolean;
   children: RecordedSpan[];
 };
 
 /**
  * A parent span that records the tree built under it.
  *
- * The spans themselves are asserted once `model-observation.ts` is wired into
- * the three provider streams; until then this only has to be a usable span, so
- * the remaining cases can prove the seam is consulted and that configuring one
- * changes nothing a caller sees.
- *
- * @returns The root's recorded children and the span to pass as the parent.
+ * @returns The parent's recorded children and the span to pass as the parent.
  */
 const recordingParent = (): { readonly spans: RecordedSpan[]; readonly parent: ModelTelemetryParent } => {
   const spans: RecordedSpan[] = [];
-  const spanFor = (siblings: RecordedSpan[]): ModelTelemetryParent => {
-    const node: RecordedSpan = { name: '', attributes: {}, children: [] };
-    const span: ModelTelemetryParent = {
-      async startSpan(options, callback) {
-        const child: RecordedSpan = { name: options.name, attributes: { ...options.attributes }, children: [] };
-        node.children.push(child);
-        return callback(childSpan(child));
-      },
-      addLink: () => undefined,
-      addEvent: () => undefined,
-      setAttributes: (attributes) => {
-        Object.assign(node.attributes, attributes);
-      },
-      setStatus: () => undefined,
-    };
-    siblings.push(node);
-    return span;
-  };
-  const childSpan = (node: RecordedSpan): ModelTelemetryParent => ({
+  const spanFor = (node: RecordedSpan, siblings: RecordedSpan[]): ModelTelemetryParent => ({
     async startSpan(options, callback) {
-      const child: RecordedSpan = { name: options.name, attributes: { ...options.attributes }, children: [] };
-      node.children.push(child);
-      return callback(childSpan(child));
+      const child: RecordedSpan = {
+        name: options.name,
+        attributes: { ...options.attributes },
+        events: [],
+        ended: false,
+        children: [],
+      };
+      siblings.push(child);
+      try {
+        return await callback(spanFor(child, child.children));
+      } finally {
+        child.ended = true;
+      }
     },
     addLink: () => undefined,
-    addEvent: () => undefined,
+    addEvent: (name, attributes) => {
+      node.events.push({ name, ...(attributes === undefined ? {} : { attributes: { ...attributes } }) });
+    },
     setAttributes: (attributes) => {
       Object.assign(node.attributes, attributes);
     },
-    setStatus: () => undefined,
+    setStatus: (status) => {
+      node.status = status;
+    },
   });
-  return { spans, parent: spanFor(spans) };
+  const root: RecordedSpan = { name: 'root', attributes: {}, events: [], ended: false, children: spans };
+  return { spans, parent: spanFor(root, spans) };
+};
+
+/** Let the span's settle callback run: it ends on a microtask after the result. */
+const flush = async (): Promise<void> => {
+  await new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
 };
 
 describe('modelTelemetrySubject', () => {
@@ -213,6 +213,130 @@ describe('the gateway transport with a telemetry seam', () => {
     expect(parentFor.mock.calls.map(([subject]) => [subject.attemptId, subject.invocationPurpose])).toEqual([
       ['attempt-a', 'generation'],
       ['attempt-b', 'compaction'],
+    ]);
+  });
+});
+
+describe('native model spans from the gateway transport', () => {
+  const base = {
+    baseUrl: 'https://gateway.example',
+    model: { contextWindow: 200_000, maxTokens: 8192 },
+  } as const;
+  const telemetered = (parent: ModelTelemetryParent) =>
+    createGatewayModelTransport({
+      ...base,
+      fetch: vi.fn(async () => fixtureResponse()),
+      telemetry: { parentFor: () => parent },
+    });
+
+  it('writes one closed pi.ai.request span with identity, usage and the stop reason', async () => {
+    const { spans, parent } = recordingParent();
+
+    await collect(telemetered(parent).stream(request()));
+    await flush();
+
+    expect(spans).toHaveLength(1);
+    const [span] = spans;
+    expect(span).toMatchObject({
+      name: 'pi.ai.request',
+      ended: true,
+      attributes: { model: 'fixture-model', stop: 'toolUse', 'usage.output': 4 },
+    });
+    expect(typeof span?.attributes['provider']).toBe('string');
+    expect(typeof span?.attributes['api']).toBe('string');
+    expect(span?.events.map((event) => event.name)).toEqual(['pi.ai.first_chunk', 'pi.ai.block', 'pi.ai.block']);
+    expect(span?.events.slice(1).map((event) => event.attributes)).toEqual([
+      { type: 'thinking', index: 0, chars: 'think'.length },
+      { type: 'tool_call', index: 1, chars: '{"targetFile":"main.ts"}'.length, tool: 'read_file' },
+    ]);
+  });
+
+  it('records lengths and names, never the reasoning, arguments or prompt', async () => {
+    const { spans, parent } = recordingParent();
+
+    await collect(telemetered(parent).stream(request()));
+    await flush();
+
+    const written = JSON.stringify(spans);
+    for (const content of ['think"', 'main.ts', 'targetFile', 'hello', 'static', 'workspace', 'dynamic']) {
+      expect(written).not.toContain(content);
+    }
+  });
+
+  it('writes only span, event and attribute names pi declares in its telemetry schema', async () => {
+    const { spans, parent } = recordingParent();
+
+    await collect(telemetered(parent).stream(request({ reasoning: { effort: 'high' } })));
+    await flush();
+
+    const declared = AI_TELEMETRY_SCHEMA.spans['pi.ai.request'];
+    const attributeNames = new Set([...Object.keys(declared.startAttributes), ...Object.keys(declared.endAttributes)]);
+    for (const span of spans) {
+      expect(Object.keys(AI_TELEMETRY_SCHEMA.spans)).toContain(span.name);
+      for (const name of Object.keys(span.attributes)) {
+        expect(attributeNames).toContain(name);
+      }
+      for (const event of span.events) {
+        expect(Object.keys(declared.events)).toContain(event.name);
+        const eventAttributes = Object.keys(declared.events[event.name as keyof typeof declared.events].attributes);
+        for (const name of Object.keys(event.attributes ?? {})) {
+          expect(eventAttributes).toContain(name);
+        }
+      }
+    }
+    expect(spans[0]?.attributes['reasoning']).toBe('high');
+  });
+
+  it('streams the same events and closes the span when the span throws on every event', async () => {
+    const { spans, parent } = recordingParent();
+    const faulty: ModelTelemetryParent = {
+      ...parent,
+      async startSpan(options, callback) {
+        return parent.startSpan(options, async (span) =>
+          callback({
+            ...span,
+            addEvent: () => {
+              throw new Error('exporter fault');
+            },
+          }),
+        );
+      },
+    };
+    const untelemetered = await collect(
+      createGatewayModelTransport({ ...base, fetch: vi.fn(async () => fixtureResponse()) }).stream(request()),
+    );
+
+    const observed = await collect(telemetered(faulty).stream(request()));
+    await flush();
+
+    expect(observed).toEqual(untelemetered);
+    expect(spans.map((span) => span.ended)).toEqual([true]);
+  });
+
+  it('streams the same events when the parent refuses to start a span', async () => {
+    const parent: ModelTelemetryParent = {
+      ...recordingParent().parent,
+      startSpan: async () => {
+        throw new Error('span refused');
+      },
+    };
+    const untelemetered = await collect(
+      createGatewayModelTransport({ ...base, fetch: vi.fn(async () => fixtureResponse()) }).stream(request()),
+    );
+
+    await expect(collect(telemetered(parent).stream(request()))).resolves.toEqual(untelemetered);
+  });
+
+  it('closes the span when the caller stops reading before the result', async () => {
+    const { spans, parent } = recordingParent();
+
+    for await (const _event of telemetered(parent).stream(request())) {
+      break;
+    }
+    await flush();
+
+    expect(spans.map((span) => [span.name, span.ended, span.attributes['stop']])).toEqual([
+      ['pi.ai.request', true, undefined],
     ]);
   });
 });

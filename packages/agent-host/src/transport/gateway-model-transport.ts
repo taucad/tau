@@ -18,6 +18,7 @@ import { MessageIdentities, providerMessageToPi } from '#harness/session-record.
 import { fitAttachmentBudget, rewriteDocuments } from '#transport/document-payload.js';
 import { createVertexResponseShim, echoThoughtSignatures } from '#transport/vertex-completions-shim.js';
 import { modelTelemetryParent, modelTelemetrySubject } from '#transport/model-telemetry.js';
+import { modelRequestObserver, observeModelStream } from '#transport/model-observation.js';
 import type { ModelTelemetrySeam } from '#transport/model-telemetry.js';
 import type { JsonObject, ModelProviderKind, ModelSystemPromptBlock, ProviderMessage } from '#log/event-types.js';
 import type { ModelInvocationBinding, ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
@@ -1177,6 +1178,17 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
                   }
                 : {}),
             } satisfies OpenAICompletionsOptions);
-    yield* streamPiEvents({ events, state, signal: request.signal, thoughtSignatures });
+    // Observation reads the codec stream Tau already consumes and never sits
+    // between it and the caller; with no parent the codec stream is used as is.
+    const observer = modelRequestObserver(telemetryParent, {
+      model,
+      ...(reasoning?.effort === undefined ? {} : { reasoning: reasoning.effort }),
+    });
+    yield* streamPiEvents({
+      events: observer === undefined ? events : observeModelStream(events, observer),
+      state,
+      signal: request.signal,
+      thoughtSignatures,
+    });
   },
 });

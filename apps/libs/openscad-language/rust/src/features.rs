@@ -413,12 +413,15 @@ fn path_completions(workspace: &Workspace, document: &Document, start: usize, of
 }
 
 fn file_summary(document: &Document) -> String {
-    let count = |kind: DeclKind| document.index.decls.iter().filter(|decl| decl.kind == kind).count();
+    let count = |kind: DeclKind, noun: &str| {
+        let count = document.index.decls.iter().filter(|decl| decl.kind == kind).count();
+        format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
+    };
     format!(
-        "{} modules, {} functions, {} variables",
-        count(DeclKind::Module),
-        count(DeclKind::Function),
-        count(DeclKind::Variable)
+        "{}, {}, {}",
+        count(DeclKind::Module, "module"),
+        count(DeclKind::Function, "function"),
+        count(DeclKind::Variable, "variable")
     )
 }
 
@@ -458,6 +461,15 @@ pub fn hover(workspace: &Workspace, params: &Value) -> RpcResult {
         }
         return Ok(Value::Null);
     }
+    // A customizer group comment, `/* [Size] */`, titles the parameters below it.
+    if let Some(comment) =
+        document.tree.root_node().descendant_for_byte_range(offset, offset).filter(|node| is_comment(*node))
+        && let Some(group) = customizer_group(document.node_text(comment))
+    {
+        let value = format!("Customizer group **{group}**: the parameters below it are listed under *{group}*.");
+        let range = (comment.start_byte(), comment.end_byte());
+        return Ok(json!({ "contents": { "kind": "markdown", "value": value }, "range": range_json(document, range) }));
+    }
     // Keywords that are also built-ins: `assert`, `echo`, `let`, `for`, `each`, `if`.
     let (start, word) = context::word_before(&document.text, context::word_end(&document.text, offset));
     if let Some(decl) = keyword_decl(workspace, word) {
@@ -468,6 +480,12 @@ pub fn hover(workspace: &Workspace, params: &Value) -> RpcResult {
         }));
     }
     Ok(Value::Null)
+}
+
+fn customizer_group(comment: &str) -> Option<&str> {
+    let inner = comment.strip_prefix("/*")?.strip_suffix("*/")?.trim();
+    let name = inner.strip_prefix('[')?.strip_suffix(']')?.trim();
+    (!name.is_empty() && !name.contains(['[', ']'])).then_some(name)
 }
 
 fn keyword_decl(workspace: &Workspace, word: &str) -> Option<Decl> {

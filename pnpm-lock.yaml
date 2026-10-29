@@ -2846,6 +2846,9 @@ importers:
       '@taucad/openrscad':
         specifier: workspace:*
         version: link:../../packages/plugins/openrscad
+      '@taucad/openscad-language':
+        specifier: workspace:*
+        version: link:../libs/openscad-language
       '@taucad/parameters':
         specifier: workspace:*
         version: link:../../packages/parameters

@@ -71,6 +71,7 @@
     "@taucad/occt-core": "workspace:*",
     "@taucad/opencascade": "workspace:*",
     "@taucad/openrscad": "workspace:*",
+    "@taucad/openscad-language": "workspace:*",
     "@taucad/parameters": "workspace:*",
     "@taucad/picogk": "workspace:*",
     "@taucad/picovoxel": "workspace:*",

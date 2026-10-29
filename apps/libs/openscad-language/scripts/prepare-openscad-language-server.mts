@@ -50,7 +50,7 @@ const cargoTarget = resolve(outputRoot, 'cargo');
 const moduleName = 'tau_openscad_language.wasm';
 const { TAU_WASM_CC: ccOverride, TAU_WASM_AR: arOverride, CI: ci } = process.env;
 
-const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
+const sha256 = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('hex');
 
 const exists = async (path: string): Promise<boolean> => {
   try {
@@ -86,7 +86,8 @@ const ensureWasmCompiler = async (): Promise<{ cc: string; ar: string }> => {
   const cacheRoot = resolve(workspaceRoot, 'out/cache/wasi-sdk');
   const root = resolve(cacheRoot, sdk.archive.replace(/\.tar\.gz$/u, ''));
   const marker = resolve(root, '.tau-wasi-sdk-sha256');
-  if (!(await exists(marker)) || (await readFile(marker, 'utf8')).trim() !== sdk.sha256) {
+  const recorded = (await exists(marker)) ? await readFile(marker, 'utf8') : undefined;
+  if (recorded?.trim() !== sdk.sha256) {
     console.log(`Downloading ${sdk.archive}`);
     const response = await fetch(
       `https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${wasiSdkVersion}/${sdk.archive}`,
@@ -156,10 +157,10 @@ const main = async (): Promise<void> => {
     AR_wasm32_unknown_unknown: compiler.ar,
   });
   /* eslint-enable @typescript-eslint/naming-convention -- End of the environment names. */
-  const rust = (await readFile(resolve(crateRoot, 'rust-toolchain.toml'), 'utf8')).match(/channel = "([^"]+)"/u)?.[1];
-  const grammar = (await readFile(resolve(crateRoot, 'vendor/tree-sitter-openscad/README.md'), 'utf8')).match(
-    /tree-sitter-openscad-ng` (\S+) crate/u,
-  )?.[1];
+  const toolchainFile = await readFile(resolve(crateRoot, 'rust-toolchain.toml'), 'utf8');
+  const vendorReadme = await readFile(resolve(crateRoot, 'vendor/tree-sitter-openscad/README.md'), 'utf8');
+  const rust = /channel = "([^"]+)"/u.exec(toolchainFile)?.[1];
+  const grammar = /tree-sitter-openscad-ng` (\S+) crate/u.exec(vendorReadme)?.[1];
   const module = new Uint8Array(await readFile(resolve(cargoTarget, 'wasm32-unknown-unknown/release', moduleName)));
   const stage = resolve(outputRoot, 'stage');
   const temporary = `${stage}.${String(process.pid)}.tmp`;

@@ -67,8 +67,13 @@ fn hovers_parameters_builtins_and_imports() {
     assert!(fragments.contains("[`$fn`](file:///__openscad_builtins__/builtins.scad#L"), "{fragments}");
 
     let import = hover(&mut harness, "main.scad", "lib/gears.scad", 2);
-    assert!(import.contains("`lib/gears.scad`: 1 modules, 2 functions, 1 variables"), "{import}");
+    assert!(import.contains("`lib/gears.scad`: 1 module, 2 functions, 1 variable"), "{import}");
     assert!(import.contains("`use` imports the file's modules and functions."));
+
+    let mut grouped = Harness::new(&[("model.scad", "/* [Size] */\nwidth = 10;\n")]);
+    grouped.open("model.scad");
+    let group = hover(&mut grouped, "model.scad", "Size", 0);
+    assert!(group.contains("Customizer group **Size**"), "{group}");
 }
 
 #[test]

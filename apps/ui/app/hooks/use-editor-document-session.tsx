@@ -72,7 +72,10 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
       }
       const path = assertRootedPath(uri.path.slice(1));
       if (target.declaration) {
-        if ((!path.startsWith('__typescript_lib__/') && !path.startsWith('cdn-types/')) || !path.endsWith('.d.ts')) {
+        const typeScriptDeclaration =
+          (path.startsWith('__typescript_lib__/') || path.startsWith('cdn-types/')) && path.endsWith('.d.ts');
+        const openscadBuiltins = path.startsWith('__openscad_builtins__/') && path.endsWith('.scad');
+        if (!typeScriptDeclaration && !openscadBuiltins) {
           return;
         }
         opener.current =

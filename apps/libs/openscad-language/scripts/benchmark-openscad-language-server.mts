@@ -13,7 +13,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
-import { loadOpenscadServer, sha256Hex } from '../src/wasm-host.ts';
+import { loadOpenscadServer, sha256Hex } from '#wasm-host.js';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
 const stage = resolve(workspaceRoot, 'out/openscad-language/stage');
@@ -74,7 +74,7 @@ const run = async (): Promise<void> => {
   });
   const bootMilliseconds = performance.now() - bootStarted;
   let nextId = 0;
-  const send = (method: string, params: unknown, notification = false): void => {
+  const send = (method: string, params: unknown, notification = false): string | undefined => {
     const message = notification
       ? { jsonrpc: '2.0', method, params }
       : { jsonrpc: '2.0', id: ++nextId, method, params };
@@ -82,6 +82,7 @@ const run = async (): Promise<void> => {
     if (response?.includes('"error"')) {
       throw new Error(`${method} failed: ${response}`);
     }
+    return response;
   };
   send('initialize', { capabilities: {} });
   const mainText = main();
@@ -100,11 +101,14 @@ const run = async (): Promise<void> => {
   const lines = mainText.split('\n');
   const last = lines.length - 1;
   const document = { uri: 'file:///main.scad' };
-  const at = (line: number, character: number): unknown => ({ textDocument: document, position: { line, character } });
+  const at = (line: number, character: number): Record<string, unknown> => ({
+    textDocument: document,
+    position: { line, character },
+  });
   const callLine = lines.findIndex((line) => line.includes('part_3_3('));
   const callColumn = lines[callLine]!.indexOf('part_3_3') + 2;
   let version = 1;
-  const cases: Array<[string, () => void]> = [
+  const cases: Array<[string, () => unknown]> = [
     ['completion (statement)', () => send('textDocument/completion', at(last, 3))],
     ['completion (arguments)', () => send('textDocument/completion', at(last, 11))],
     ['hover', () => send('textDocument/hover', at(callLine, callColumn))],
@@ -114,7 +118,7 @@ const run = async (): Promise<void> => {
       'references (workspace)',
       () =>
         send('textDocument/references', {
-          ...(at(callLine, callColumn) as object),
+          ...at(callLine, callColumn),
           context: { includeDeclaration: true },
         }),
     ],

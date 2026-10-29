@@ -74,6 +74,7 @@ describe('wrapOpenscadServer', () => {
     const received: string[] = [];
     let response = '';
     const instance = {
+      /* eslint-disable @typescript-eslint/naming-convention -- The module's C ABI exports keep their Rust names. */
       exports: {
         memory,
         osl_alloc: () => 64,
@@ -85,6 +86,7 @@ describe('wrapOpenscadServer', () => {
         },
         osl_response: () => 1024,
       },
+      /* eslint-enable @typescript-eslint/naming-convention -- End of the C ABI names. */
     } as unknown as WebAssembly.Instance;
     const server = wrapOpenscadServer(instance);
     response = '{"id":1,"result":"é"}';

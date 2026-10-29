@@ -16,6 +16,9 @@ internal static partial class Program
     [JSImport("respond", "tau-picogk-host")]
     private static partial void Respond(string frame);
 
+    [JSImport("validateImages", "tau-picogk-host")]
+    private static partial Task ValidateImages(string artifactPath, string imageRanges);
+
     // The JS owner supplies immutable runtime references and a project snapshot before Main.
     // Hard cancellation and source replacement terminate this worker, including its assemblies.
     private static async Task<int> Main(string[] args)

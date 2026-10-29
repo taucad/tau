@@ -1,9 +1,12 @@
 /* oxlint-disable jsdoc-js/no-types -- This standalone SDK bootstrap is JavaScript; JSDoc supplies its checked types. */
+import { z } from 'zod';
+import { validatePicogkBrowserImage } from '#picogk-browser-images.js';
+
 // Isolated .NET host. Only the owner supplies runtime URLs and authorized project bytes.
 /**
  * @typedef {Object} BrowserRuntime
- * @property {{FS: {mkdirTree(path: string): void, writeFile(path: string, bytes: Uint8Array | string): void}}} Module
- * @property {(name: string, imports: {nextRequest(): Promise<string>, respond(json: string): void}) => void} setModuleImports
+ * @property {{FS: {mkdirTree(path: string): void, writeFile(path: string, bytes: Uint8Array | string): void, stat(path: string): {size: number}, open(path: string, flags: string): unknown, read(stream: unknown, bytes: Uint8Array, offset: number, length: number, position: number): number, close(stream: unknown): void}}} Module
+ * @property {(name: string, imports: {nextRequest(): Promise<string>, respond(json: string): void, validateImages(artifactPath: string, json: string): Promise<void>}) => void} setModuleImports
  * @property {() => {mainAssemblyName: string}} getConfig
  * @property {(assembly: string, args: string[]) => Promise<number>} runMain
  */
@@ -118,6 +121,41 @@ const initialize = async (message) => {
   }
   writeFile('/compiler-refs.json', JSON.stringify(references));
   runtime.setModuleImports('tau-picogk-host', {
+    validateImages: async (artifactPath, json) => {
+      if (!artifactPath.startsWith('/artifacts/')) {
+        throw new Error('Invalid PicoGK image artifact path.');
+      }
+      relativePath(artifactPath.slice('/artifacts/'.length));
+      const ranges = z
+        .array(
+          z.object({
+            offset: z.number().int().nonnegative(),
+            byteLength: z.number().int().positive(),
+            mimeType: z.string(),
+          }),
+        )
+        .parse(JSON.parse(json));
+      if (ranges.length === 0) {
+        return;
+      }
+      const { size } = runtime.Module.FS.stat(artifactPath);
+      const stream = runtime.Module.FS.open(artifactPath, 'r');
+      try {
+        for (const range of ranges) {
+          if (range.offset + range.byteLength > size) {
+            throw new Error('Invalid PicoGK image artifact range.');
+          }
+          const bytes = new Uint8Array(range.byteLength);
+          if (runtime.Module.FS.read(stream, bytes, 0, bytes.length, range.offset) !== bytes.length) {
+            throw new Error('Incomplete PicoGK image artifact.');
+          }
+          // oxlint-disable-next-line no-await-in-loop -- Release one decoded image before reading the next.
+          await validatePicogkBrowserImage({ bytes, mimeType: range.mimeType });
+        }
+      } finally {
+        runtime.Module.FS.close(stream);
+      }
+    },
     nextRequest: async () => {
       if (queued !== undefined) {
         const frame = queued;

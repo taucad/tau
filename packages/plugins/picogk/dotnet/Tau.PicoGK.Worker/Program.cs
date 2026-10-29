@@ -230,6 +230,16 @@ internal static partial class Program
 #else
                             Environment.WorkingSet)));
 #endif
+#if PICOGK_BROWSER
+                try
+                {
+                    await ValidateImages(result.ArtifactPath, JsonSerializer.Serialize(result.Images, JsonOptions));
+                }
+                catch (System.Runtime.InteropServices.JavaScript.JSException error)
+                {
+                    throw MaterialCapture.Invalid("Image.Data", error.Message);
+                }
+#endif
                 if(compute is not null&&execution.ComputeRecords is {} computeRecords) {
                     try{result=result with{ComputeReuseManifest=compute.WriteSuccessful(computeRecords)};}
                     catch(Exception error) when(ComputeWorkerSession.IsDisposableFailure(error)){ComputeWorkerSession.ReportBypass("publication",error);}

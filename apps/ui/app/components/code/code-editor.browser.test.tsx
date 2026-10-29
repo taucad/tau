@@ -454,6 +454,137 @@ it('opens TypeScript definitions on Mod-click and from {@link} references in hov
   }
 }, 60_000);
 
+it('offers VS Code symbol navigation, references, call hierarchy, occurrences and parameter hints for TypeScript', async () => {
+  const [{ createTypeScriptService }, { createTypeScriptExtensions }] = await Promise.all([
+    import('#lib/typescript-language/typescript-service.js'),
+    import('#lib/typescript-language/create-typescript-extensions.js'),
+  ]);
+  const source = [
+    'export function area(width: number): number {',
+    '  let total = width;',
+    '  total = total * 2;',
+    '  return total;',
+    '}',
+    'export function report(): number {',
+    '  return area(3);',
+    '}',
+    '',
+  ].join('\n');
+  const sourceDocument = new EditorDocument('shapes.ts', source);
+  const service = await createTypeScriptService({ dynamicTypes: false });
+  let view: EditorView | undefined;
+  let target: EditorNavigationTarget | undefined;
+  const modifier = { metaKey: isMac, ctrlKey: !isMac };
+  const pickerItems = (): string[] =>
+    [...document.querySelectorAll('.cm-picker-item .cm-picker-label')].map((label) => label.textContent);
+  try {
+    await service.attach(sourceDocument);
+    const extensions = createTypeScriptExtensions({
+      document: sourceDocument,
+      service,
+      navigate: async (next) => {
+        target = next;
+      },
+      applyWorkspaceEdits: async (edits) => {
+        for (const edit of edits) {
+          sourceDocument.apply({
+            expectedVersion: sourceDocument.version,
+            origin: 'workspace-edit',
+            changes: edit.changes,
+          });
+        }
+        return true;
+      },
+    });
+    const { container } = render(
+      <div className='h-96'>
+        <CodeEditor
+          document={sourceDocument}
+          viewId='language-features'
+          languageId='typescript'
+          extensions={extensions}
+          onMount={(mounted) => {
+            view = mounted;
+          }}
+        />
+      </div>,
+    );
+    await expect.poll(() => view).toBeDefined();
+    const editor = view!;
+    editor.focus();
+
+    // Semantic occurrences: two writes and two reads of `total`, and the cursor's symbol path above the editor.
+    editor.dispatch({ selection: { anchor: source.indexOf('total') + 1 } });
+    await expect.poll(() => container.querySelectorAll('.cm-occurrence').length).toBe(4);
+    expect(container.querySelectorAll('.cm-occurrence-write')).toHaveLength(2);
+    await expect.poll(() => container.querySelector('.cm-breadcrumbs')?.textContent).toContain('area');
+    await page.screenshot();
+
+    // Go to Symbol in Editor filters the outline and moves the cursor.
+    fireEvent.keyDown(editor.contentDOM, { key: 'o', code: 'KeyO', shiftKey: true, ...modifier });
+    await expect.poll(pickerItems).toEqual(expect.arrayContaining(['area', 'report']));
+    await page.screenshot();
+    await userEvent.keyboard('rep');
+    await expect.poll(pickerItems).toEqual(['report']);
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => editor.state.selection.main.head).toBe(source.indexOf('report'));
+
+    // Find All References lists each site with its source line, like VS Code's peek.
+    editor.dispatch({ selection: { anchor: source.indexOf('area(3)') } });
+    fireEvent.keyDown(editor.contentDOM, { key: 'F12', code: 'F12', shiftKey: true });
+    await expect.poll(() => document.querySelector('.cm-picker-title')?.textContent).toBe('2 references');
+    expect([...document.querySelectorAll('.cm-picker-preview')].map((preview) => preview.textContent)).toEqual([
+      'export function area(width: number): number {',
+      'return area(3);',
+    ]);
+    await page.screenshot();
+    await userEvent.keyboard('{ArrowDown}{Enter}');
+    await expect.poll(() => target).toMatchObject({ uri: sourceDocument.uri, line: 7 });
+
+    // Call hierarchy shows the caller, and Outgoing switches direction.
+    editor.dispatch({ selection: { anchor: source.indexOf('area') } });
+    editor.focus();
+    fireEvent.keyDown(editor.contentDOM, { key: 'h', code: 'KeyH', shiftKey: true, altKey: true });
+    await expect.poll(pickerItems).toEqual(['report']);
+    await page.getByRole('button', { name: 'Outgoing' }).click();
+    await expect.poll(() => document.querySelector('.cm-picker-empty')?.textContent).toBe('No calls found');
+    await userEvent.keyboard('{Escape}');
+    await expect.poll(() => document.querySelector('.cm-picker')).toBeNull();
+
+    // Typing `(` and `,` opens and advances parameter hints without a shortcut.
+    editor.dispatch({ selection: { anchor: editor.state.doc.length } });
+    editor.focus();
+    await userEvent.keyboard('area(');
+    await expect
+      .poll(() => document.querySelector('.cm-signature-help .cm-signature-active-parameter')?.textContent)
+      .toBe('width: number');
+    await page.screenshot();
+    await userEvent.keyboard('2)');
+    await expect.poll(() => document.querySelector('.cm-signature-help')).toBeNull();
+
+    // The context menu offers every language command the server supports.
+    fireEvent.contextMenu(editor.contentDOM);
+    for (const name of [
+      'Go to Definition',
+      'Go to Type Definition',
+      'Go to Implementations',
+      'Find All References',
+      'Show Call Hierarchy',
+      'Go to Symbol in Editor…',
+      'Go to Symbol in Workspace…',
+      'Rename Symbol',
+      'Format Document',
+      'Quick Fix…',
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- each menu item is checked in order.
+      await expect.element(page.getByRole('menuitem', { name, exact: true })).toBeVisible();
+    }
+    await page.screenshot();
+  } finally {
+    service.dispose();
+  }
+}, 90_000);
+
 it('adds the import when a TypeScript auto-import completion is accepted with Enter after more typing', async () => {
   const [{ createTypeScriptService }, { createTypeScriptExtensions }] = await Promise.all([
     import('#lib/typescript-language/typescript-service.js'),
@@ -780,7 +911,7 @@ it.each([Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST])(
       view!.dispatch({ selection: { anchor: source.lastIndexOf('greet(') + 'greet('.length } });
       view!.focus();
       fireEvent.keyDown(view!.contentDOM, { key: ' ', code: 'Space', metaKey: isMac, ctrlKey: !isMac, shiftKey: true });
-      await expect.poll(() => document.querySelector('.cm-typescript-signature')?.textContent).toContain('name');
+      await expect.poll(() => document.querySelector('.cm-signature-help')?.textContent).toContain('name');
       await page.screenshot();
 
       view!.dispatch({ selection: { anchor: source.indexOf('value:') + 2 } });

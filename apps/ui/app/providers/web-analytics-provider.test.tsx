@@ -101,15 +101,20 @@ const readBlob = async (body: Blob): Promise<ArrayBuffer> =>
  * `disable_compression`, so a capture is base64 text today (`#lib/web-posthog.lib`),
  * but the SDK still gzips in other configurations and this reads either.
  *
- * @param encoded - One captured beacon body, as a string or as the bytes of a Blob.
+ * @param encoded - One captured beacon body: text, or the bytes a Blob body was read into.
  * @returns The decoded JSON text.
+ * @throws When the body is one the SDK never uses for a capture, such as a stream or form data.
  */
-const decodeBeacon = (encoded: string | ArrayBuffer | ArrayBufferView): string => {
-  const bytes = typeof encoded === 'string' ? undefined : new Uint8Array(encoded as ArrayBuffer);
-  if (bytes !== undefined && bytes[0] === 0x1f && bytes[1] === 0x8b) {
+const decodeBeacon = (encoded: BodyInit | ArrayBuffer | undefined): string => {
+  if (typeof encoded !== 'string' && !(encoded instanceof ArrayBuffer) && !ArrayBuffer.isView(encoded)) {
+    throw new TypeError('Captured beacon body is not text or bytes');
+  }
+  const bytes =
+    typeof encoded === 'string' ? undefined : new Uint8Array(ArrayBuffer.isView(encoded) ? encoded.buffer : encoded);
+  if (bytes?.[0] === 0x1f && bytes[1] === 0x8b) {
     return gunzipSync(bytes).toString();
   }
-  const text = typeof encoded === 'string' ? encoded : new TextDecoder().decode(bytes);
+  const text = bytes === undefined ? (encoded as string) : new TextDecoder().decode(bytes);
   // `compression=base64` posts the envelope form encoded as `data=<base64>`.
   const form = /^data=(?<payload>.*)$/su.exec(text);
   return form === null ? text : Buffer.from(decodeURIComponent(form.groups?.['payload'] ?? ''), 'base64').toString();

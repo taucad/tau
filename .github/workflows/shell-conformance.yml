@@ -123,8 +123,12 @@ jobs:
           grep -E 'AssertionError|FAIL |Expected|Received|\+   |-   ' /tmp/t.log | head -30 || true
           echo '===== did the target pass? ====='
           grep -E 'Successfully ran target|Running target .* failed' /tmp/t.log || true
-          echo '===== full failure block ====='
-          grep -B3 -A28 'AssertionError' /tmp/t.log | cut -c1-200 || true
+          echo '===== .tau:x MECHANISM (per operation, per strategy) ====='
+          cat /tmp/g5-probe.log || echo 'no g5 probe log'
+          echo '===== backing checkout, untruncated ====='
+          grep -E '^\[g5probe\]' /tmp/t.log || echo 'no g5probe lines'
+          echo '===== remaining failure ====='
+          grep -A6 'AssertionError' /tmp/t.log | cut -c1-200 || true
 
       - name: Post-run kernel state
         if: always()

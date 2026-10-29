@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { spawn } from 'node:child_process';
+import { appendFileSync } from 'node:fs';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -326,7 +327,8 @@ const families: ReadonlyArray<readonly [label: string, script: string, allowed: 
   ['rename a directory with a protected child onto .tAu', 'mkdir e && printf c > e/chats && mv e .tAu', false],
   ['Unicode long s exportſ', 'mkdir exportſ && printf x > exportſ/model.step', false],
   ['rename the container alias .taU away', 'mkdir .taU && mv .taU gone', false],
-  ['remove the container alias .tau:x', 'mkdir .tau:x && rmdir .tau:x', false],
+  ['remove the container alias .tau:x', 'mkdir .tau:x; echo "mkdir=$?" >> /tmp/g5-probe.log; test -d .tau:x; echo "visible_in_mount_after_mkdir=$?" >> /tmp/g5-probe.log; rmdir .tau:x; echo "rmdir=$?" >> /tmp/g5-probe.log; test -d .tau:x; echo "visible_in_mount_after_rmdir=$?" >> /tmp/g5-probe.log; false', false],
+
 ];
 /** Paths that must never exist on the backing checkout when the classifier is in place. */
 const protectedLanded = [
@@ -382,6 +384,7 @@ const landed = async (root: string, path: string): Promise<boolean> => {
 
 describe.runIf(enabled)('G5 PP3 spelling families through the FUSE path', () => {
   const run = async (strategy: (scope: NodeFsRootScope) => Publisher) => {
+    appendFileSync('/tmp/g5-probe.log', `--- run strategy=${strategy.name || '?'} ---\n`);
     const sandbox = await realpath(await mkdtemp(join(tmpdir(), 'tau-projection-pp3-')));
     const root = join(sandbox, 'project');
     const authority = join(sandbox, 'authority');
@@ -427,6 +430,8 @@ describe.runIf(enabled)('G5 PP3 spelling families through the FUSE path', () => 
       expect({ path, landed: await landed(root, path) }).toStrictEqual({ path, landed: false });
     }
     const top = await readdir(root);
+    process.stderr.write(`[g5probe] backing root = ${JSON.stringify(top)}\n`);
+    process.stderr.write(`[g5probe] landed('.tau:x') = ${String(await landed(root, '.tau:x'))}\n`);
     expect(top).not.toContain('.TAU.');
     expect(top).toContain('.tau');
     expect(top).toContain('.tau:x');

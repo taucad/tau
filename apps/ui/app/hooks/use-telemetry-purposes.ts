@@ -133,8 +133,9 @@ export function useTelemetryPurposes(options: Readonly<{ projectId?: string }> =
         body: JSON.stringify({ noticeVersion, decisions: [decision] }),
       });
     },
-    onSuccess(data) {
-      queryClient.setQueryData(queryKey, data);
+    async onSuccess() {
+      // The PUT answers for the account alone; refetch so a project-scoped key keeps its project's answer.
+      await queryClient.invalidateQueries({ queryKey });
     },
   });
 

@@ -1,20 +1,11 @@
 import { findBuiltinProject } from '#lib/builtin-projects.js';
 import { shareArtifactLimits } from '@taucad/share/artifact';
 import type { ShareOpenedFile } from '@taucad/share/artifact';
-import type {
-  ShareProvider,
-  ShareProviderContext,
-  ShareProviderDescriptor,
-  ShareResolveInput,
-} from '@taucad/share/provider';
+import type { ShareProvider, ShareProviderContext, ShareResolveInput } from '@taucad/share/provider';
 import { ShareError } from '@taucad/share/provider';
 import type { ShareSnapshotFileRole } from '@taucad/share/snapshot';
 
-export const builtinShareProviderDescriptor = {
-  id: 'builtin',
-  label: 'Tau catalog',
-  capabilities: ['project.resolve'],
-} as const satisfies ShareProviderDescriptor;
+import { builtinShareProviderDescriptor } from '#lib/builtin-share-provider-descriptor.js';
 
 const roleFor = (path: string, entryPath: string): ShareSnapshotFileRole => {
   if (path === entryPath) {

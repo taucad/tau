@@ -44,8 +44,8 @@ const intent = (body: unknown): Omit<BillableInvocationIntent, 'authUserId' | 's
 
 describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should preserve every intended static funded route identity', () => {
-    expect(billableModelRouteIds).toHaveLength(26);
-    expect(new Set(billableModelRouteIds).size).toBe(26);
+    expect(billableModelRouteIds).toHaveLength(27);
+    expect(new Set(billableModelRouteIds).size).toBe(27);
     expect(billableModelRouteIds).toContain('anthropic-claude-sonnet-5.5');
     expect(billableModelRouteIds).toContain('google-gemini-3.1-pro');
     expect(billableModelRouteIds).toContain('morph-minimax-m2.7');
@@ -496,6 +496,32 @@ describe('catalog route vocabulary', () => {
       { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '2000000000000', denominatorUnits: '1000000' },
       { dimension: 'cache_read', tier: null, numeratorPicoUsd: '100000000000', denominatorUnits: '1000000' },
       { dimension: 'output', tier: null, numeratorPicoUsd: '10000000000000', denominatorUnits: '1000000' },
+    ]);
+  });
+
+  it.each([
+    { input: 'hello', suffix: '', amounts: ['1000000000000', '50000000000', '1250000000000', '5000000000000'] },
+    {
+      input: 'x'.repeat(280_000),
+      suffix: ':long-context',
+      amounts: ['2000000000000', '100000000000', '2500000000000', '7500000000000'],
+    },
+  ])('should pin the GPT-6.1 Terra $suffix tariff', ({ input, suffix, amounts }) => {
+    const result = catalogResolver.resolve(
+      intent({ model: 'openai-gpt-6.1-terra', input, max_output_tokens: 128_000, stream: true }),
+    );
+
+    expect(result.sku).toBe(`model:openai-gpt-6.1-terra${suffix}`);
+    expect(result.normalizedRequest.body).toMatchObject({ model: 'gpt-6.1-terra', max_output_tokens: 128_000 });
+    expect(result.invocation.supplierValuation).toMatchObject({
+      sourceRevision: 'official-pricing:2026-10-29:openai-gpt-6.1-terra',
+      longContextMinimumInputTokens: suffix === '' ? null : '272001',
+    });
+    expect(result.invocation.supplierRates).toEqual([
+      { dimension: 'uncached_input', tier: null, numeratorPicoUsd: amounts[0], denominatorUnits: '1000000' },
+      { dimension: 'cache_read', tier: null, numeratorPicoUsd: amounts[1], denominatorUnits: '1000000' },
+      { dimension: 'cache_write', tier: '30m', numeratorPicoUsd: amounts[2], denominatorUnits: '1000000' },
+      { dimension: 'output', tier: null, numeratorPicoUsd: amounts[3], denominatorUnits: '1000000' },
     ]);
   });
 

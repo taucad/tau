@@ -1,4 +1,5 @@
 import { completionTypeFromLsp } from '#components/code/editor-completion-icon.js';
+import { definitionProvider } from '#components/code/editor-definition.js';
 import { editorCompletionInfo, renderEditorDocumentation } from '#components/code/editor-documentation.js';
 import { StateEffect, StateField } from '@codemirror/state';
 import type { Extension, StateEffectType } from '@codemirror/state';
@@ -754,18 +755,10 @@ export function kclExtensions({
         }
       },
     ),
+    definitionProvider.of(async (view) =>
+      observeKclOperation(jumpToDefinition(view, client, { document, environment, symbols }), document, isDisposed),
+    ),
     keymap.of([
-      {
-        key: 'F12',
-        run(view) {
-          void observeKclOperation(
-            jumpToDefinition(view, client, { document, environment, symbols }),
-            document,
-            isDisposed,
-          );
-          return true;
-        },
-      },
       {
         key: 'Shift-Alt-f',
         run(view) {

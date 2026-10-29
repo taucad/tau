@@ -2,7 +2,7 @@
 
 // oxlint-disable-next-line import/no-unassigned-import -- registers DOM matchers for this test module
 import '@testing-library/jest-dom/vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -157,6 +157,9 @@ describe('SettingsDialog', () => {
 
   it('should mount Security only after its tab is selected', async () => {
     render(<SettingsTestSurface />);
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
 
     expect(await screen.findByText('Mounted general settings')).toBeInTheDocument();
     expect(screen.queryByText('Mounted security settings')).not.toBeInTheDocument();

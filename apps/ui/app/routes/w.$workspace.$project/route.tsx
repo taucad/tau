@@ -31,15 +31,18 @@ type EditorState =
   | { readonly status: 'failed' }
   | { readonly status: 'ready'; readonly Content: typeof ProjectChatRoute };
 
+const loadProjectChatRoute = async (): Promise<{ ProjectChatRoute: typeof ProjectChatRoute }> =>
+  import('#routes/w.$workspace.$project/project-live-sessions.js');
+
 function DeferredProjectChatRoute(): React.JSX.Element {
   const [state, setState] = useState<EditorState>({ status: 'loading' });
-  const [attempt, setAttempt] = useState(0);
+  const [loadContent, setLoadContent] = useState(() => loadProjectChatRoute);
   useEffect(() => {
     const controller = new AbortController();
     // async-iife: bootstrap -- the mounted destination owns completion and explicit retry.
     void (async (): Promise<void> => {
       try {
-        const { ProjectChatRoute: Content } = await import('#routes/w.$workspace.$project/project-live-sessions.js');
+        const { ProjectChatRoute: Content } = await loadContent();
         if (!controller.signal.aborted) {
           setState({ status: 'ready', Content });
         }
@@ -53,7 +56,7 @@ function DeferredProjectChatRoute(): React.JSX.Element {
     return () => {
       controller.abort();
     };
-  }, [attempt]);
+  }, [loadContent]);
 
   if (state.status === 'ready') {
     return <state.Content />;
@@ -66,7 +69,7 @@ function DeferredProjectChatRoute(): React.JSX.Element {
           variant='outline'
           onClick={() => {
             setState({ status: 'loading' });
-            setAttempt((previous) => previous + 1);
+            setLoadContent(() => async () => loadProjectChatRoute());
           }}
         >
           Retry

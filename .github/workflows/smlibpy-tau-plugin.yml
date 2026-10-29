@@ -1,5 +1,7 @@
 # SMLibPy's registry-native closure, checked and golden-recorded by the shared Python kernel workflow: `--check` on
-# pull requests, golden receipts on dispatch. tau-plugin.golden.json stays `{}` until a dispatch records them.
+# pull requests, and on every target a sealed closure, its golden receipt and the Python tests (the worker, the
+# documented smlibpy surface, the agent skill's models and the examples). tau-plugin.golden.json stays `{}` until a
+# maintainer commits the receipts a run reports.
 name: SMLibPy tau-plugin
 
 on:
@@ -8,6 +10,8 @@ on:
       - packages/plugins/smlibpy/python/**
       - packages/plugins/smlibpy/tau-plugin*.json
       - packages/plugins/smlibpy/project/**
+      - packages/plugins/smlibpy/agent/**
+      - libs/tau-examples/src/kernels/smlibpy/**
       - packages/core/python-kernel/python/**
       - packages/core/python-kernel/scripts/**
       - packages/core/python-kernel/src/{generator,template}.ts
@@ -28,3 +32,4 @@ jobs:
     with:
       package: packages/plugins/smlibpy
       project: smlibpy
+      test-python: true

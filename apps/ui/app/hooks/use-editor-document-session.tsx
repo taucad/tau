@@ -16,10 +16,7 @@ type EditorContextValue = {
   session: EditorDocumentSession | undefined;
   environment: EditorLanguageEnvironment | undefined;
 };
-const EditorSessionContext = createContext<EditorContextValue>({
-  session: undefined,
-  environment: undefined,
-});
+const EditorSessionContext = createContext<EditorContextValue>({ session: undefined, environment: undefined });
 
 /** Owns one filesystem-backed document session for the mounted project. */
 export function EditorDocumentSessionProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
@@ -56,10 +53,7 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
       },
     });
     return () => {
-      editorRef.send({
-        type: 'registerMaterialiseModel',
-        materialiseModel: undefined,
-      });
+      editorRef.send({ type: 'registerMaterialiseModel', materialiseModel: undefined });
       next.dispose();
       clearEditorNavigation(projectId);
       setSession((current) => (current === next ? undefined : current));

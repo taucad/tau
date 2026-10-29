@@ -8,12 +8,7 @@
 
 export type KclBindingKind = 'variable' | 'function' | 'parameter' | 'import' | 'module' | 'tag' | 'type';
 
-export type KclParameter = Readonly<{
-  name: string;
-  labeled: boolean;
-  optional: boolean;
-  type: string | undefined;
-}>;
+export type KclParameter = Readonly<{ name: string; labeled: boolean; optional: boolean; type: string | undefined }>;
 
 export type KclBinding = {
   readonly name: string;
@@ -67,24 +62,10 @@ export type KclIndex = Readonly<{
 
 type AstNode = Readonly<Record<string, unknown>> & Readonly<{ type?: string; start?: number; end?: number }>;
 
-type Scope = Readonly<{
-  parent: Scope | undefined;
-  bindings: Map<string, KclBinding>;
-  container?: KclBinding;
-}>;
+type Scope = Readonly<{ parent: Scope | undefined; bindings: Map<string, KclBinding>; container?: KclBinding }>;
 
-type PendingReference = {
-  name: string;
-  from: number;
-  to: number;
-  scope: Scope;
-};
-type PendingLabel = Readonly<{
-  name: string;
-  from: number;
-  to: number;
-  call: PendingReference;
-}>;
+type PendingReference = { name: string; from: number; to: number; scope: Scope };
+type PendingLabel = Readonly<{ name: string; from: number; to: number; call: PendingReference }>;
 
 const skippedKeys = new Set(['digest', 'nonCodeMeta', 'outerAttrs', 'innerAttrs', 'preComments', 'shebang']);
 
@@ -183,11 +164,7 @@ class IndexBuilder {
         },
       };
     });
-    return {
-      occurrences: this.occurrences,
-      calls,
-      globImports: this.globImports,
-    };
+    return { occurrences: this.occurrences, calls, globImports: this.globImports };
   }
 
   #declare(
@@ -229,11 +206,7 @@ class IndexBuilder {
     }
     switch (value.type) {
       case 'Program': {
-        this.#visit(value['body'], {
-          parent: scope,
-          bindings: new Map(),
-          container: scope.container,
-        });
+        this.#visit(value['body'], { parent: scope, bindings: new Map(), container: scope.container });
         return;
       }
       case 'VariableDeclaration': {
@@ -342,13 +315,7 @@ class IndexBuilder {
       return;
     }
     const typeName = isNode(init) && init.type === 'AscribedExpression' ? kclTypeName(init['ty']) : undefined;
-    this.#declare(scope, {
-      ...name,
-      kind: 'variable',
-      exported,
-      typeName,
-      extent,
-    });
+    this.#declare(scope, { ...name, kind: 'variable', exported, typeName, extent });
     this.#visit(init, scope);
   }
 
@@ -389,20 +356,9 @@ class IndexBuilder {
           continue;
         }
         const alias = identifier(item['alias']);
-        this.#declare(scope, {
-          ...(alias ?? name),
-          kind: 'import',
-          exported,
-          importPath,
-          importedName: name.name,
-        });
+        this.#declare(scope, { ...(alias ?? name), kind: 'import', exported, importPath, importedName: name.name });
         if (alias) {
-          this.occurrences.push({
-            ...name,
-            declaration: false,
-            binding: undefined,
-            importedFrom: importPath,
-          });
+          this.occurrences.push({ ...name, declaration: false, binding: undefined, importedFrom: importPath });
         }
       }
       return;
@@ -435,11 +391,7 @@ class IndexBuilder {
       const label = identifier(argument['label']);
       const expression = isNode(argument['arg']) ? argument['arg'] : undefined;
       if (label) {
-        labeled.push({
-          label: label.name,
-          from: label.from,
-          to: expression?.end ?? label.to,
-        });
+        labeled.push({ label: label.name, from: label.from, to: expression?.end ?? label.to });
         if (reference) {
           this.#labels.push({ ...label, call: reference });
         }
@@ -510,10 +462,7 @@ export function kclExportedBinding(index: KclIndex, name: string): KclBinding | 
   )?.binding;
 }
 
-export type KclOutlineSymbol = Readonly<{
-  binding: KclBinding;
-  children: readonly KclOutlineSymbol[];
-}>;
+export type KclOutlineSymbol = Readonly<{ binding: KclBinding; children: readonly KclOutlineSymbol[] }>;
 
 /** Functions, variables and types as an outline, nested in the function that declares them. */
 export function kclOutline(index: KclIndex): KclOutlineSymbol[] {
@@ -531,10 +480,7 @@ export function kclOutline(index: KclIndex): KclOutlineSymbol[] {
     }
   }
   const build = (container: KclBinding | undefined): KclOutlineSymbol[] =>
-    (children.get(container) ?? []).map((binding) => ({
-      binding,
-      children: build(binding),
-    }));
+    (children.get(container) ?? []).map((binding) => ({ binding, children: build(binding) }));
   return build(undefined);
 }
 

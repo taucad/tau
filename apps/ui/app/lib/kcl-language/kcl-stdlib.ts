@@ -57,19 +57,11 @@ export function buildKclStdlib(exported: KclStdlibExport): KclStdlib {
   };
   const declare = (
     entry: Omit<KclStdlibEntry, 'line' | 'column'>,
-    text: Readonly<{
-      documentation: readonly string[];
-      prefix: string;
-      declaration: string;
-    }>,
+    text: Readonly<{ documentation: readonly string[]; prefix: string; declaration: string }>,
   ): void => {
     const target = lines(entry.module);
     target.push(...text.documentation);
-    entries.push({
-      ...entry,
-      line: target.length + 1,
-      column: text.prefix.length + 1,
-    });
+    entries.push({ ...entry, line: target.length + 1, column: text.prefix.length + 1 });
     target.push(...`${text.prefix}${text.declaration}`.split('\n'), '');
   };
   for (const type of exported.types) {

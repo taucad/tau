@@ -24,6 +24,7 @@ import {
   symbolCompletion,
 } from '#lib/kcl-language/kcl-codemirror.js';
 import { indexKclProgram } from '#lib/kcl-language/kcl-bindings.js';
+import { languageFeatures } from '#components/code/editor-language-features.js';
 
 describe('KCL pending worker requests', () => {
   it('observes a rejected semantic refresh and keeps the editor usable', async () => {
@@ -75,6 +76,66 @@ describe('KCL pending worker requests', () => {
   });
 });
 
+describe('KCL shared editor features', () => {
+  it('supplies every TypeScript feature the shared editor shows, with server signatures first', async () => {
+    const client = mock<KclLspClient>();
+    client.textDocumentSemanticTokensFull.mockResolvedValue(undefined);
+    client.textDocumentFoldingRange.mockResolvedValue([]);
+    client.textDocumentSignatureHelp.mockResolvedValue({
+      activeSignature: 0,
+      activeParameter: 1,
+      signatures: [
+        {
+          label: 'extrude(@sketches: [Sketch], length?: number(Length))',
+          documentation: { kind: 'markdown', value: 'Prefer a [`sketch` block](/docs/kcl-lang/sketches).' },
+          parameters: [{ label: '@sketches: [Sketch]' }, { label: [30, 54] }],
+        },
+      ],
+    });
+    const document = new EditorDocument('main.kcl', 'extrude(');
+    const environment = mock<EditorLanguageEnvironment>({ diagnostics: new EditorDiagnostics() });
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: document.text,
+        extensions: kclExtensions({
+          backend: new KclBackend(environment, client),
+          document,
+          environment,
+          isDisposed: () => false,
+        }),
+      }),
+      parent: globalThis.document.body,
+    });
+    try {
+      const features = view.state.facet(languageFeatures);
+      expect(Object.keys(features).sort()).toEqual([
+        'documentSymbols',
+        'format',
+        'occurrences',
+        'quickFix',
+        'references',
+        'rename',
+        'signatureHelp',
+        'typeDefinition',
+        'workspaceSymbols',
+      ]);
+      expect(features.signatureHelp?.triggerCharacters).toEqual(['(', ',']);
+      const signature = await features.signatureHelp?.provide(view, 8, '(');
+      expect(signature).toMatchObject({
+        label: 'extrude(@sketches: [Sketch], length?: number(Length))',
+        parameters: [
+          [8, 27],
+          [30, 54],
+        ],
+        activeParameter: 1,
+        documentation: 'Prefer a [`sketch` block](https://zoo.dev/docs/kcl-lang/sketches).',
+      });
+    } finally {
+      view.destroy();
+    }
+  });
+});
+
 describe('KCL completion parity', () => {
   function completionView(query: string, options: Completion[]): EditorView {
     return new EditorView({
@@ -100,10 +161,7 @@ describe('KCL completion parity', () => {
       await vi.waitFor(() => {
         expect(currentCompletions(view.state)).toHaveLength(1);
       });
-      expect(currentCompletions(view.state)[0]).toMatchObject({
-        label: 'stringLength',
-        displayLabel: 'length',
-      });
+      expect(currentCompletions(view.state)[0]).toMatchObject({ label: 'stringLength', displayLabel: 'length' });
     } finally {
       view.destroy();
     }
@@ -113,10 +171,7 @@ describe('KCL completion parity', () => {
     const source = 'import thing from "a.kcl"\n\nx = ge';
     const document = new EditorDocument('main.kcl', source);
     const view = new EditorView({
-      state: EditorState.create({
-        doc: source,
-        selection: { anchor: source.length },
-      }),
+      state: EditorState.create({ doc: source, selection: { anchor: source.length } }),
       parent: globalThis.document.body,
       dispatchTransactions: (transactions, current) => {
         current.update(transactions);
@@ -127,11 +182,7 @@ describe('KCL completion parity', () => {
             changes.push({ from, to, insert: inserted.toString() });
           });
           if (changes.length > 0) {
-            document.apply({
-              expectedVersion: document.version,
-              origin: 'view',
-              changes,
-            });
+            document.apply({ expectedVersion: document.version, origin: 'view', changes });
           }
         }
       },
@@ -139,19 +190,10 @@ describe('KCL completion parity', () => {
     const completion = kclLspCompletion(
       {
         label: 'gear',
-        textEdit: {
-          range: {
-            start: { line: 2, character: 4 },
-            end: { line: 2, character: 6 },
-          },
-          newText: 'gear',
-        },
+        textEdit: { range: { start: { line: 2, character: 4 }, end: { line: 2, character: 6 } }, newText: 'gear' },
         additionalTextEdits: [
           {
-            range: {
-              start: { line: 0, character: 0 },
-              end: { line: 0, character: 0 },
-            },
+            range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
             newText: 'import gear from "gear.kcl"\n',
           },
         ],
@@ -213,20 +255,9 @@ describe('KCL completion parity', () => {
 
   it('should apply an LSP snippet field instead of inserting a literal tabstop', () => {
     const document = new EditorDocument('main.kcl', 'fo');
-    const item: LSP.CompletionItem = {
-      label: 'foo',
-      insertText: 'foo($1)',
-      insertTextFormat: 2,
-    };
-    const completion = kclLspCompletion(item, {
-      document,
-      version: document.version,
-      isDisposed: () => false,
-    });
-    const view = new EditorView({
-      state: EditorState.create({ doc: 'fo' }),
-      parent: globalThis.document.body,
-    });
+    const item: LSP.CompletionItem = { label: 'foo', insertText: 'foo($1)', insertTextFormat: 2 };
+    const completion = kclLspCompletion(item, { document, version: document.version, isDisposed: () => false });
+    const view = new EditorView({ state: EditorState.create({ doc: 'fo' }), parent: globalThis.document.body });
     try {
       expect(typeof completion.apply).toBe('function');
       if (typeof completion.apply === 'function') {
@@ -245,22 +276,11 @@ describe('KCL completion parity', () => {
       kind: 'function',
       importPath: undefined,
       returnType: 'Solid',
-      parameters: [
-        {
-          name: 'length',
-          type: 'number',
-          isLabeled: true,
-          hasDefault: false,
-          range: { start: 0, end: 0 },
-        },
-      ],
+      parameters: [{ name: 'length', type: 'number', isLabeled: true, hasDefault: false, range: { start: 0, end: 0 } }],
     });
     const functionCompletion = symbolCompletion(functionSymbol, 2);
     expect(functionCompletion.detail).toBe('fn shape(length: number) -> Solid');
-    const view = new EditorView({
-      state: EditorState.create({ doc: '' }),
-      parent: globalThis.document.body,
-    });
+    const view = new EditorView({ state: EditorState.create({ doc: '' }), parent: globalThis.document.body });
     try {
       expect(typeof functionCompletion.apply).toBe('function');
       if (typeof functionCompletion.apply === 'function') {
@@ -272,12 +292,7 @@ describe('KCL completion parity', () => {
       view.destroy();
     }
     const parameter = symbolCompletion(
-      mock<KclSymbol>({
-        name: 'length',
-        kind: 'parameter',
-        containingFunction: 'shape',
-        value: undefined,
-      }),
+      mock<KclSymbol>({ name: 'length', kind: 'parameter', containingFunction: 'shape', value: undefined }),
       2,
     );
     expect(parameter.apply).toBe('length = ');
@@ -307,18 +322,9 @@ describe('KCL LSP document lifecycle', () => {
     );
     expect(client.textDocumentDidOpen).toHaveBeenCalledTimes(1);
     expect(client.textDocumentDidOpen).toHaveBeenCalledWith({
-      textDocument: {
-        uri: document.uri,
-        languageId: 'kcl',
-        version: 1,
-        text: 'one',
-      },
+      textDocument: { uri: document.uri, languageId: 'kcl', version: 1, text: 'one' },
     });
-    document.apply({
-      expectedVersion: 1,
-      origin: 'view',
-      changes: [{ from: 3, to: 3, insert: ' two' }],
-    });
+    document.apply({ expectedVersion: 1, origin: 'view', changes: [{ from: 3, to: 3, insert: ' two' }] });
     expect(client.textDocumentDidChange).toHaveBeenCalledWith({
       textDocument: { uri: document.uri, version: 2 },
       contentChanges: [{ text: 'one two' }],
@@ -328,11 +334,7 @@ describe('KCL LSP document lifecycle', () => {
     backend.release(document);
     expect(client.textDocumentDidClose).toHaveBeenCalledTimes(1);
     expect(client.dispose).toHaveBeenCalledTimes(1);
-    document.apply({
-      expectedVersion: 2,
-      origin: 'view',
-      changes: [{ from: 7, to: 7, insert: '!' }],
-    });
+    document.apply({ expectedVersion: 2, origin: 'view', changes: [{ from: 7, to: 7, insert: '!' }] });
     expect(client.textDocumentDidChange).toHaveBeenCalledTimes(1);
   });
 });
@@ -355,57 +357,32 @@ describe('KCL import navigation', () => {
     symbols.getIndex.mockResolvedValue(indexKclProgram(undefined));
     const navigate = vi.fn();
     const environment = mock<EditorLanguageEnvironment>({ navigate });
-    const importState = EditorState.create({
-      doc: document.text,
-      selection: { anchor: 10 },
-    });
+    const importState = EditorState.create({ doc: document.text, selection: { anchor: 10 } });
     await jumpToDefinition(mock<Pick<EditorView, 'state'>>({ state: importState }), client, {
       document,
       environment,
       symbols,
     });
-    expect(navigate).toHaveBeenCalledWith({
-      uri: 'file:///bench/part.kcl',
-      line: 1,
-      column: 1,
-    });
+    expect(navigate).toHaveBeenCalledWith({ uri: 'file:///bench/part.kcl', line: 1, column: 1 });
 
-    const symbol = mock<KclSymbol>({
-      name: 'myVar',
-      kind: 'variable',
-      uri: document.uri,
-      lineNumber: 2,
-      column: 1,
-    });
+    const symbol = mock<KclSymbol>({ name: 'myVar', kind: 'variable', uri: document.uri, lineNumber: 2, column: 1 });
     symbols.getDefinitionForUsage.mockReturnValue(symbol);
-    const symbolState = EditorState.create({
-      doc: document.text,
-      selection: { anchor: document.text.length - 2 },
-    });
+    const symbolState = EditorState.create({ doc: document.text, selection: { anchor: document.text.length - 2 } });
     await jumpToDefinition(mock<Pick<EditorView, 'state'>>({ state: symbolState }), client, {
       document,
       environment,
       symbols,
     });
-    expect(navigate).toHaveBeenLastCalledWith({
-      uri: document.uri,
-      line: 2,
-      column: 1,
-    });
+    expect(navigate).toHaveBeenLastCalledWith({ uri: document.uri, line: 2, column: 1 });
     expect(client.textDocumentDefinition).not.toHaveBeenCalled();
   });
 
   it('shows module import and user symbol text when LSP hover is absent', () => {
     const symbols = mock<KclSymbolService>();
     const document = new EditorDocument('main.kcl', 'import "part.kcl"\nmyVar');
-    expect(
-      kclHoverFallback({
-        text: document.text,
-        offset: 10,
-        uri: document.uri,
-        symbols,
-      }),
-    ).toContain('module "part.kcl"');
+    expect(kclHoverFallback({ text: document.text, offset: 10, uri: document.uri, symbols })).toContain(
+      'module "part.kcl"',
+    );
     symbols.getDefinitionForUsage.mockReturnValue(
       mock<KclSymbol>({
         name: 'myVar',
@@ -417,12 +394,7 @@ describe('KCL import navigation', () => {
       }),
     );
     expect(
-      kclHoverFallback({
-        text: document.text,
-        offset: document.text.length - 2,
-        uri: document.uri,
-        symbols,
-      }),
+      kclHoverFallback({ text: document.text, offset: document.text.length - 2, uri: document.uri, symbols }),
     ).toContain('myVar');
   });
 });
@@ -447,10 +419,7 @@ function environmentFor(document: EditorDocument): {
     contentKind: 'text',
     isLoaded: true,
   });
-  return {
-    environment: mock<EditorLanguageEnvironment>({ session, treeService }),
-    session,
-  };
+  return { environment: mock<EditorLanguageEnvironment>({ session, treeService }), session };
 }
 
 describe('KCL workspace edits', () => {
@@ -461,15 +430,7 @@ describe('KCL workspace edits', () => {
       documentChanges: [
         {
           textDocument: { uri: document.uri, version: document.version },
-          edits: [
-            {
-              range: {
-                start: { line: 1, character: 0 },
-                end: { line: 1, character: 3 },
-              },
-              newText: 'TWO',
-            },
-          ],
+          edits: [{ range: { start: { line: 1, character: 0 }, end: { line: 1, character: 3 } }, newText: 'TWO' }],
         },
       ],
     };
@@ -493,15 +454,7 @@ describe('KCL workspace edits', () => {
       documentChanges: [
         {
           textDocument: { uri: document.uri, version: 0 },
-          edits: [
-            {
-              range: {
-                start: { line: 0, character: 0 },
-                end: { line: 0, character: 3 },
-              },
-              newText: 'two',
-            },
-          ],
+          edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } }, newText: 'two' }],
         },
       ],
     };
@@ -531,10 +484,7 @@ describe('KCL workspace edits', () => {
       changes: {
         [target.uri]: [
           {
-            range: {
-              start: { line: 0, character: 0 },
-              end: { line: 0, character: 3 },
-            },
+            range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
             newText: 'new',
           },
         ],
@@ -547,11 +497,7 @@ describe('KCL workspace edits', () => {
     await applyKclWorkspaceEdit(edit, environment, basis);
     expect(target.text).toBe('new');
     expect(session.save).toHaveBeenCalledWith('part.kcl');
-    target.apply({
-      expectedVersion: target.version,
-      origin: 'view',
-      changes: [{ from: 0, to: 3, insert: 'newer' }],
-    });
+    target.apply({ expectedVersion: target.version, origin: 'view', changes: [{ from: 0, to: 3, insert: 'newer' }] });
     await expect(applyKclWorkspaceEdit(edit, environment, basis)).rejects.toThrow('refused');
     expect(target.text).toBe('newer');
   });

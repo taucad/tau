@@ -20,9 +20,7 @@ beforeAll(async () => {
   const kcl = await import('@taucad/kcl-wasm-lib');
   const wasm = await fs.promises.readFile(fileURLToPath(import.meta.resolve('@taucad/kcl-wasm-lib/kcl.wasm')));
   // eslint-disable-next-line @typescript-eslint/naming-convention -- wasm-bindgen generated API
-  await kcl.default({
-    module_or_path: await WebAssembly.compile(new Uint8Array(wasm)),
-  });
+  await kcl.default({ module_or_path: await WebAssembly.compile(new Uint8Array(wasm)) });
   parse = (code) => (kcl.parse_wasm(code) as [unknown, unknown])[0];
 }, 30_000);
 
@@ -93,11 +91,7 @@ describe('indexKclProgram', () => {
     expect(kclExportedBinding(built, 'shape')?.kind).toBe('function');
     expect(kclExportedBinding(built, 'local')).toBeUndefined();
     const alias = kclOccurrenceAt(built, code.indexOf(' c ') + 1);
-    expect(alias?.binding).toMatchObject({
-      kind: 'import',
-      importedName: 'b',
-      importPath: 'lib.kcl',
-    });
+    expect(alias?.binding).toMatchObject({ kind: 'import', importedName: 'b', importPath: 'lib.kcl' });
     expect(kclRelatedOccurrences(built, alias!)).toHaveLength(2);
     expect(kclOccurrenceAt(built, code.indexOf('b as'))?.importedFrom).toBe('lib.kcl');
   });
@@ -107,10 +101,7 @@ describe('indexKclProgram', () => {
     const call = kclCallAt(built, source.indexOf('depth = width') + 2);
     expect(call?.callee.name).toBe('box');
     expect(call?.callee.binding?.signature?.map((parameter) => parameter.name)).toEqual(['size', 'depth']);
-    expect(call?.unlabeled).toEqual({
-      from: source.indexOf('box(width') + 4,
-      to: source.indexOf('box(width') + 9,
-    });
+    expect(call?.unlabeled).toEqual({ from: source.indexOf('box(width') + 4, to: source.indexOf('box(width') + 9 });
     expect(call?.arguments.map((argument) => argument.label)).toEqual(['depth']);
   });
 });
@@ -127,9 +118,6 @@ describe('kclOutline', () => {
       ['other', 'variable', []],
       ['edge', 'variable', []],
     ]);
-    expect(outline[1]?.binding.extent).toEqual({
-      from: source.indexOf('fn box'),
-      to: source.indexOf('}') + 1,
-    });
+    expect(outline[1]?.binding.extent).toEqual({ from: source.indexOf('fn box'), to: source.indexOf('}') + 1 });
   });
 });

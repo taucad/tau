@@ -35,9 +35,7 @@ beforeAll(async () => {
   const kcl = await import('@taucad/kcl-wasm-lib');
   const wasm = await fs.promises.readFile(fileURLToPath(import.meta.resolve('@taucad/kcl-wasm-lib/kcl.wasm')));
   // eslint-disable-next-line @typescript-eslint/naming-convention -- wasm-bindgen generated API
-  await kcl.default({
-    module_or_path: await WebAssembly.compile(new Uint8Array(wasm)),
-  });
+  await kcl.default({ module_or_path: await WebAssembly.compile(new Uint8Array(wasm)) });
   symbols = new KclSymbolService();
   symbols.setParseFunction(async (code) => {
     const [program] = kcl.parse_wasm(code) as [Node<Program>, unknown[]];
@@ -68,10 +66,7 @@ const main = [
 const other = 'import width as w from "part.kcl"\nimport * from "part.kcl"\nc = w + width';
 
 /** An open `main.kcl` beside stored `part.kcl` and `other.kcl` files. */
-function workspace(): Readonly<{
-  document: EditorDocument;
-  environment: EditorLanguageEnvironment;
-}> {
+function workspace(): Readonly<{ document: EditorDocument; environment: EditorLanguageEnvironment }> {
   const document = new EditorDocument('main.kcl', main);
   const stored = new Map([
     ['part.kcl', part],
@@ -81,21 +76,27 @@ function workspace(): Readonly<{
   session.get.mockImplementation((path) => (path === document.path ? document : undefined));
   const treeService = mock<FileTreeService>();
   treeService.searchFiles.mockResolvedValue(
-    ['main.kcl', ...stored.keys()].map((path) => ({ path, name: path, type: 'file', size: 1, mtimeMs: 0 }) as const),
+    ['main.kcl', ...stored.keys()].map((path) =>
+      mock<Awaited<ReturnType<FileTreeService['searchFiles']>>[number]>({
+        path,
+        name: path,
+        type: 'file',
+        provenance: undefined,
+      }),
+    ),
   );
   const contentService = mock<FileContentService>();
   contentService.resolve.mockImplementation(async (path) => {
     const text = stored.get(path);
-    const resolved: Awaited<ReturnType<FileContentService['resolve']>> =
-      text === undefined ? { kind: 'missing' } : { kind: 'text', content: new TextEncoder().encode(text) };
-    return resolved;
+    if (text === undefined) {
+      throw new Error(`Not stored: ${path}`);
+    }
+    return { kind: 'text', content: new TextEncoder().encode(text) };
   });
   const fileManagerRef = mock<EditorLanguageEnvironment['fileManagerRef']>();
   fileManagerRef.getSnapshot.mockReturnValue(
     mock<ReturnType<typeof fileManagerRef.getSnapshot>>({
-      context: mock<ReturnType<typeof fileManagerRef.getSnapshot>['context']>({
-        rootDirectory: '/',
-      }),
+      context: mock<ReturnType<typeof fileManagerRef.getSnapshot>['context']>({ rootDirectory: '/' }),
     }),
   );
   const environment = mock<EditorLanguageEnvironment>({
@@ -138,16 +139,8 @@ describe('KCL navigation (real WASM parse)', () => {
     const references = await kclReferences(navigation, main.indexOf('w)'));
     expect(references.map((reference) => reference.line)).toEqual([2, 3]);
     expect(await kclOccurrences(navigation, main.indexOf('w)'))).toEqual([
-      {
-        from: main.indexOf('@w') + 1,
-        to: main.indexOf('@w') + 2,
-        kind: 'write',
-      },
-      {
-        from: main.indexOf('return w') + 7,
-        to: main.indexOf('return w') + 8,
-        kind: 'read',
-      },
+      { from: main.indexOf('@w') + 1, to: main.indexOf('@w') + 2, kind: 'write' },
+      { from: main.indexOf('return w') + 7, to: main.indexOf('return w') + 8, kind: 'read' },
     ]);
   });
 
@@ -168,10 +161,7 @@ describe('KCL navigation (real WASM parse)', () => {
 
     await openKclTarget(navigation.environment, extrude!);
     expect(navigation.environment.navigate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        uri: 'file:///__kcl_std__/std/sketch.kcl',
-        declaration: { text: source.join('\n') },
-      }),
+      expect.objectContaining({ uri: 'file:///__kcl_std__/std/sketch.kcl', declaration: { text: source.join('\n') } }),
     );
   });
 
@@ -222,20 +212,13 @@ describe('KCL navigation (real WASM parse)', () => {
     const signature = await kclSignatureAt(navigation, main.indexOf('thickness = 3') + 2);
     expect(signature).toBeUndefined();
     const local = await kclSignatureAt(navigation, main.indexOf('local(width') + 7);
-    expect(local).toEqual({
-      label: 'local(@w)',
-      parameters: [[6, 8]],
-      activeParameter: 0,
-    });
+    expect(local).toEqual({ label: 'local(@w)', parameters: [[6, 8]], activeParameter: 0 });
     const extrude = await kclSignatureAt(navigation, main.indexOf('length = width') + 1);
     expect(extrude?.label).toMatch(/^extrude\(@sketches: /u);
     const active = extrude?.parameters[extrude.activeParameter];
     expect(extrude?.label.slice(active?.[0], active?.[1])).toMatch(/^length\?/u);
 
-    const hints = await kclParameterHints(navigation, {
-      from: 0,
-      to: main.length,
-    });
+    const hints = await kclParameterHints(navigation, { from: 0, to: main.length });
     expect(hints).toEqual([
       { position: main.indexOf('local(width') + 6, label: 'w:' },
       { position: main.indexOf('XY'), label: 'planeOrSolid:' },

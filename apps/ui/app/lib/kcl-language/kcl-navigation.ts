@@ -24,11 +24,7 @@ import type { KclSymbolService } from '#lib/kcl-language/lsp/kcl-symbol-service.
 import { decodeTextFile } from '#utils/filesystem.utils.js';
 
 /** A source file with the exact text a result's offsets refer to. */
-export type KclSource = Readonly<{
-  uri: string;
-  version: number;
-  text: string;
-}>;
+export type KclSource = Readonly<{ uri: string; version: number; text: string }>;
 
 /** A span in a workspace file, with 1-based line and column for navigation. */
 export type KclLocation = Readonly<{
@@ -63,9 +59,7 @@ export async function kclWorkspaceSources(
   limit = kclWorkspaceFileLimit,
 ): Promise<Readonly<{ sources: KclSource[]; truncated: boolean }>> {
   const paths = new WorkspacePathResolver(environment.fileManagerRef.getSnapshot().context.rootDirectory);
-  const files = await environment.treeService.searchFiles('.kcl', {
-    maxResults: limit + 1,
-  });
+  const files = await environment.treeService.searchFiles('.kcl', { maxResults: limit + 1 });
   const sources: KclSource[] = [];
   for (const file of files.slice(0, limit)) {
     const path = file.path.startsWith('/') ? paths.toRelativePath(file.path) : file.path;
@@ -74,21 +68,13 @@ export async function kclWorkspaceSources(
     }
     const loaded = environment.session.get(path);
     if (loaded) {
-      sources.push({
-        uri: loaded.uri,
-        version: loaded.version,
-        text: loaded.text,
-      });
+      sources.push({ uri: loaded.uri, version: loaded.version, text: loaded.text });
       continue;
     }
     // oxlint-disable-next-line eslint/no-await-in-loop -- one bounded, ordered snapshot of the workspace.
     const result = await environment.contentService.resolve(path);
     if (result.kind === 'text') {
-      sources.push({
-        uri: URI.file(`/${path}`).toString(),
-        version: 1,
-        text: decodeTextFile(result.content),
-      });
+      sources.push({ uri: URI.file(`/${path}`).toString(), version: 1, text: decodeTextFile(result.content) });
     }
   }
   return { sources, truncated: files.length > limit };
@@ -105,12 +91,7 @@ function lineAndColumn(text: string, offset: number): Readonly<{ line: number; c
 }
 
 function location(source: Pick<KclSource, 'uri' | 'text'>, span: Readonly<{ from: number; to: number }>): KclLocation {
-  return {
-    uri: source.uri,
-    from: span.from,
-    to: span.to,
-    ...lineAndColumn(source.text, span.from),
-  };
+  return { uri: source.uri, from: span.from, to: span.to, ...lineAndColumn(source.text, span.from) };
 }
 
 /** Resolve an import path against the importing file, as the KCL executor does. */
@@ -121,17 +102,11 @@ export function resolveKclImport(uri: string, importPath: string): string {
 /** The exported declaration an occurrence stands for in another file, if it names one. */
 function importOrigin(uri: string, target: KclOccurrence): Readonly<{ uri: string; name: string }> | undefined {
   if (target.importedFrom) {
-    return {
-      uri: resolveKclImport(uri, target.importedFrom),
-      name: target.name,
-    };
+    return { uri: resolveKclImport(uri, target.importedFrom), name: target.name };
   }
   const { binding } = target;
   if (binding?.kind === 'import' && binding.importPath && binding.importedName) {
-    return {
-      uri: resolveKclImport(uri, binding.importPath),
-      name: binding.importedName,
-    };
+    return { uri: resolveKclImport(uri, binding.importPath), name: binding.importedName };
   }
   if (binding?.topLevel && binding.exported) {
     return { uri, name: binding.name };
@@ -176,11 +151,7 @@ function occurrencesOfOrigin(
  */
 export async function kclReferences(context: KclNavigationContext, offset: number): Promise<KclLocation[]> {
   const { document, environment, symbols } = context;
-  const current: KclSource = {
-    uri: document.uri,
-    version: document.version,
-    text: document.text,
-  };
+  const current: KclSource = { uri: document.uri, version: document.version, text: document.text };
   const index = await symbols.getIndex(current.uri, current.text);
   const target = kclOccurrenceAt(index, offset);
   if (!target) {
@@ -209,11 +180,7 @@ export async function kclDocumentSymbols(
   return kclOutline(await context.symbols.getIndex(context.document.uri, context.document.text));
 }
 
-export type KclWorkspaceSymbol = Readonly<{
-  name: string;
-  kind: KclBindingKind;
-  location: KclLocation;
-}>;
+export type KclWorkspaceSymbol = Readonly<{ name: string; kind: KclBindingKind; location: KclLocation }>;
 
 /** Top-level declarations across project files whose name contains every character of `query` in order. */
 export async function kclWorkspaceSymbols(
@@ -266,12 +233,7 @@ export async function kclOccurrences(
 }
 
 function stdlibTarget(entry: Pick<KclStdlibEntry, 'module' | 'line' | 'column'>): KclTarget {
-  return {
-    kind: 'stdlib',
-    module: entry.module,
-    line: entry.line,
-    column: entry.column,
-  };
+  return { kind: 'stdlib', module: entry.module, line: entry.line, column: entry.column };
 }
 
 async function readSource(environment: EditorLanguageEnvironment, uri: string): Promise<KclSource | undefined> {
@@ -300,12 +262,7 @@ async function exportedTarget(
   }
   const binding = name ? kclExportedBinding(await context.symbols.getIndex(source.uri, source.text), name) : undefined;
   const position = binding ? lineAndColumn(source.text, binding.from) : { line: 1, column: 1 };
-  return {
-    kind: 'file',
-    uri: source.uri,
-    line: position.line,
-    column: position.column,
-  };
+  return { kind: 'file', uri: source.uri, line: position.line, column: position.column };
 }
 
 /** Resolve the definition of the name at `offset` through its scope, imports and the standard library. */
@@ -326,12 +283,7 @@ export async function kclDefinition(context: KclNavigationContext, offset: numbe
   }
   if (binding) {
     const position = lineAndColumn(document.text, binding.from);
-    return {
-      kind: 'file',
-      uri: document.uri,
-      line: position.line,
-      column: position.column,
-    };
+    return { kind: 'file', uri: document.uri, line: position.line, column: position.column };
   }
   for (const path of index.globImports) {
     // oxlint-disable-next-line eslint/no-await-in-loop -- the first glob import that exports the name wins.
@@ -421,12 +373,7 @@ export async function kclTypeDefinition(context: KclNavigationContext, offset: n
   );
   if (local) {
     const position = lineAndColumn(document.text, local.from);
-    return {
-      kind: 'file',
-      uri: document.uri,
-      line: position.line,
-      column: position.column,
-    };
+    return { kind: 'file', uri: document.uri, line: position.line, column: position.column };
   }
   const library = await loadKclStdlib();
   const stdlib = library.lookupType(typeName);
@@ -436,11 +383,7 @@ export async function kclTypeDefinition(context: KclNavigationContext, offset: n
 /** Open a target: workspace files in the editor, standard library modules as read-only source. */
 export async function openKclTarget(environment: EditorLanguageEnvironment, target: KclTarget): Promise<void> {
   if (target.kind === 'file') {
-    await environment.navigate({
-      uri: target.uri,
-      line: target.line,
-      column: target.column,
-    });
+    await environment.navigate({ uri: target.uri, line: target.line, column: target.column });
     return;
   }
   const library = await loadKclStdlib();
@@ -460,29 +403,16 @@ export async function openKclTarget(environment: EditorLanguageEnvironment, targ
 function calleeSignature(
   stdlib: KclStdlib,
   occurrence: KclOccurrence,
-):
-  | Readonly<{
-      name: string;
-      parameters: readonly KclParameter[];
-      returnType?: string;
-    }>
-  | undefined {
+): Readonly<{ name: string; parameters: readonly KclParameter[]; returnType?: string }> | undefined {
   if (occurrence.binding?.signature) {
-    return {
-      name: occurrence.binding.name,
-      parameters: occurrence.binding.signature,
-    };
+    return { name: occurrence.binding.name, parameters: occurrence.binding.signature };
   }
   if (occurrence.binding) {
     return undefined;
   }
   const entry = stdlib.lookup(occurrence.name);
   return entry?.kind === 'function' && entry.parameters
-    ? {
-        name: entry.name,
-        parameters: entry.parameters,
-        returnType: entry.returnType,
-      }
+    ? { name: entry.name, parameters: entry.parameters, returnType: entry.returnType }
     : undefined;
 }
 

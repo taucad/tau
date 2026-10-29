@@ -159,6 +159,54 @@ const databaseApplications = ['api', 'billing-operations', 'maintenance', 'mirro
 /** `tau.storage.accounting.task`: the accounting scheduler's periodic tasks. */
 const accountingTasks = ['usage', 'r2_analytics', 'db', 'hot_projects', 'route'] as const;
 
+/** `tau.agent_evidence.plane`: the purpose plane a piece of agent evidence was captured under. */
+const agentEvidencePlanes = ['summary', 'feedback', 'content'] as const;
+
+/**
+ * `outcome` of one agent-evidence admission. `duplicate` answered a held receipt, `revoked` and
+ * `expired` a replay current policy or retention no longer delivers; `policy_stale` a submission
+ * under a superseded policy epoch, `refused` one whose purpose is not granted.
+ */
+const agentEvidenceAdmissionOutcomes = [
+  'accepted',
+  'duplicate',
+  'revoked',
+  'expired',
+  'refused',
+  'policy_stale',
+  'conflict',
+  'fenced',
+  'capacity',
+  'error',
+] as const;
+
+/**
+ * `outcome` of one agent-evidence delivery step. `acknowledged` and `uncertain` are sends whose
+ * visibility is not yet proven; `confirmed` was read back; `gap` was never visible and is not resent;
+ * `key_unavailable` is held for a payload key this deployment no longer has; `abandoned` is a lease a
+ * stopped worker left, returned for another pass.
+ */
+const agentEvidenceDeliveryOutcomes = [
+  'acknowledged',
+  'uncertain',
+  'confirmed',
+  'recheck',
+  'retry',
+  'key_unavailable',
+  'rejected',
+  'revoked',
+  'gap',
+  'expired',
+  'abandoned',
+  'lease_lost',
+] as const;
+
+/** `tau.agent_evidence.state`: an agent-evidence backlog row's delivery state. */
+const agentEvidenceBacklogStates = ['pending', 'sending', 'confirmed', 'uncertain', 'rejected', 'expired'] as const;
+
+/** `outcome` of one Langfuse trace erasure step; only `absent` settles a trace. */
+const agentEvidenceErasureOutcomes = ['requested', 'retry', 'absent', 'present', 'recheck', 'lease_lost'] as const;
+
 /**
  * Canonical metric registry for Tau.
  *
@@ -1506,6 +1554,24 @@ export const TauMetrics = {
     }),
   }),
 
+  /*
+   * STO-25: how long a hosted project takes to open in the browser, from its revision root opening.
+   * `first_view` is the repository checked out, so the editor and file tree are usable; `fully_fetched`
+   * is every large object local, so the viewer can render. `cache` is cold when the open fetched at
+   * least one large object from the network.
+   */
+  projectOpenDuration: defineHistogram({
+    name: 'tau.project.open.duration',
+    unit: 's',
+    description:
+      'Client-reported time from a hosted project opening in the browser to its first usable view, and to every large object being local',
+    buckets: [0.25, 0.5, 1, 2, 3, 5, 7.5, 10, 15, 20, 30, 60, 120, 300, 900],
+    attributes: z.object({
+      phase: z.enum(['first_view', 'fully_fetched']),
+      cache: z.enum(['cold', 'warm']),
+    }),
+  }),
+
   // --- B2 second copy: the `tau-mirror` copier and reconciler (W13 Finding 8, W14 OB6) ---
   // W13's Prometheus names end in their unit, so the unit word is part of the OTel name. No label
   // carries an owner or project; the busiest-lagging repositories are logged, not labelled.
@@ -1849,6 +1915,73 @@ export const TauMetrics = {
       'Completed billing-worker passes; a gauge keeps exporting its last value, so this is the liveness signal',
     attributes: z.object({
       'tau.worker': z.enum(['recovery', 'operations']),
+      outcome: z.enum(['ok', 'error']),
+    }),
+  }),
+
+  // --- Agent evidence (Tau Agent observability T14; counts and bounded codes only, never ids or content) ---
+
+  agentEvidenceAdmissions: defineCounter({
+    name: 'tau.agent_evidence.admissions',
+    unit: '{admission}',
+    description: 'Parsed agent-evidence submissions by who reported them, purpose plane and outcome',
+    attributes: z.object({
+      'tau.agent_evidence.authority': z.enum(['host', 'api']),
+      'tau.agent_evidence.plane': z.enum(agentEvidencePlanes),
+      outcome: z.enum(agentEvidenceAdmissionOutcomes),
+    }),
+  }),
+
+  agentEvidenceDeliveries: defineCounter({
+    name: 'tau.agent_evidence.deliveries',
+    unit: '{delivery}',
+    description: 'Agent-evidence delivery and reconciliation steps settled, by outcome',
+    attributes: z.object({
+      outcome: z.enum(agentEvidenceDeliveryOutcomes),
+    }),
+  }),
+
+  agentEvidenceBacklogRows: defineGauge({
+    name: 'tau.agent_evidence.backlog_rows',
+    unit: '{row}',
+    description: 'Agent-evidence backlog rows by delivery state; every replica reports the same shared figure',
+    attributes: z.object({
+      'tau.agent_evidence.state': z.enum(agentEvidenceBacklogStates),
+    }),
+  }),
+
+  agentEvidenceBacklogHeldBytes: defineGauge({
+    name: 'tau.agent_evidence.backlog_held_bytes',
+    unit: 'By',
+    description: 'Sealed agent-evidence payload bytes still held for delivery, against the backlog budget',
+    attributes: z.object({}),
+  }),
+
+  agentEvidenceErasureTraces: defineCounter({
+    name: 'tau.agent_evidence.erasure_traces',
+    unit: '{trace}',
+    description: 'Langfuse traces moved through an erasure step, by outcome',
+    attributes: z.object({
+      outcome: z.enum(agentEvidenceErasureOutcomes),
+    }),
+  }),
+
+  agentEvidenceLifecycleRecords: defineCounter({
+    name: 'tau.agent_evidence.lifecycle_records',
+    unit: '{record}',
+    description:
+      'Agent-evidence records retired: `purged` payloads past retention, `reaped` receipts past grace, `erased` subjects completed',
+    attributes: z.object({
+      action: z.enum(['purged', 'reaped', 'erased']),
+    }),
+  }),
+
+  agentEvidencePasses: defineCounter({
+    name: 'tau.agent_evidence.passes',
+    unit: '{pass}',
+    description: 'Completed agent-evidence worker passes; the liveness signal for delivery and lifecycle',
+    attributes: z.object({
+      'tau.worker': z.enum(['delivery', 'lifecycle']),
       outcome: z.enum(['ok', 'error']),
     }),
   }),

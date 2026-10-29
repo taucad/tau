@@ -161,6 +161,84 @@ describe('observeTurns', () => {
     expect(observation?.invocations[0]?.settlement).toBeUndefined();
   });
 
+  describe('test_model checks', () => {
+    const checked = (content: unknown, isError = false): Body[] =>
+      toolTurn.map((body) =>
+        body.type === 'message.appended' && 'toolName' in body.message
+          ? {
+              ...body,
+              message: {
+                ...body.message,
+                toolName: 'test_model',
+                ...(body.message.role === 'tool-output' ? { content, isError } : {}),
+              },
+            }
+          : body,
+      ) as Body[];
+    const revision = { entry: 'main.ts', files: { 'main.ts': `sha256:${'a'.repeat(64)}` } };
+
+    it('reads a qualified run status, its requirements and its revision', () => {
+      const [observation] = observeTurns(
+        chatId,
+        term(
+          't1',
+          checked({
+            runStatus: 'passed',
+            tests: [
+              { id: 'spec.ts:2', targetFile: 'spec.ts', ordinal: 2, requirement: 'SYNTHETIC_REQ', status: 'passed' },
+              { id: 'spec.ts:1', targetFile: 'spec.ts', ordinal: 1, requirement: 'SYNTHETIC_REQ', status: 'passed' },
+            ],
+            sourceRevisions: [revision],
+            omittedTests: 3,
+            failures: [],
+            passes: [],
+            passed: 2,
+            total: 2,
+          }),
+        ),
+      );
+
+      expect(observation?.tools[0]?.check).toEqual({
+        result: 'passed',
+        revision: [`main.ts\u0000main.ts=sha256:${'a'.repeat(64)}`],
+        requirements: ['#omitted:3', 'spec.ts#1', 'spec.ts#2'],
+      });
+      expect(JSON.stringify(observation)).not.toContain('SYNTHETIC_REQ');
+    });
+
+    it.each([
+      [['passed', 'failed', 'inconclusive'], undefined, 'failed'],
+      [['passed', 'passed'], undefined, 'passed'],
+      [['passed', 'skipped'], undefined, 'not-run'],
+      [['passed', 'unsupported'], undefined, 'unsupported'],
+      [['passed', 'inconclusive'], undefined, 'inconclusive'],
+      [['passed'], { code: 'GEOSPEC_RUN_TIMEOUT' }, 'inconclusive'],
+      [[], undefined, 'not-run'],
+    ])(
+      'decides an unqualified run %j (timeout %j) as %s, never passing an undecided test',
+      (statuses, runTimeout, result) => {
+        const tests = statuses.map((status, ordinal) => ({ id: `s:${ordinal}`, targetFile: 's', ordinal, status }));
+        const [observation] = observeTurns(
+          chatId,
+          term(
+            't1',
+            checked({ tests, ...(runTimeout === undefined ? {} : { timeout: runTimeout }), total: tests.length }),
+          ),
+        );
+
+        expect(observation?.tools[0]?.check?.result).toBe(result);
+      },
+    );
+
+    it('reads no check from an errored call, an unreadable output or another tool', () => {
+      const tests = [{ id: 's:1', targetFile: 's', ordinal: 1, status: 'passed' }];
+
+      expect(observeTurns(chatId, term('t1', checked({ tests }, true)))[0]?.tools[0]?.check).toBeUndefined();
+      expect(observeTurns(chatId, term('t1', checked('SYNTHETIC_TOOL_RESULT')))[0]?.tools[0]?.check).toBeUndefined();
+      expect(observeTurns(chatId, term('t1', toolTurn))[0]?.tools[0]).not.toHaveProperty('check');
+    });
+  });
+
   it('records a tool that returned an error as failed', () => {
     const errored = toolTurn.map((body) =>
       body.type === 'message.appended' && body.message.role === 'tool-output'

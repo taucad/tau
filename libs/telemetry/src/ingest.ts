@@ -16,6 +16,7 @@ export const IngestEntryName = {
   AGENT_TURN: 'agent.turn',
   SYNC_ATTEMPT: 'observability.syncAttempt',
   LFS_FETCH: 'observability.lfsFetch',
+  PROJECT_OPEN: 'observability.projectOpen',
 } as const;
 /* eslint-enable @typescript-eslint/naming-convention -- end OTEL constants block */
 
@@ -353,6 +354,19 @@ const lfsFetchEntrySchema = z.object({
 });
 
 /**
+ * One phase of a hosted project's open in the browser; `duration` runs from the project's root opening.
+ * Two words only: no project, path or object id.
+ */
+const projectOpenEntrySchema = z.object({
+  name: z.literal(IngestEntryName.PROJECT_OPEN),
+  duration: z.number().nonnegative(),
+  detail: z.object({
+    phase: z.enum(['first_view', 'fully_fetched']),
+    cache: z.enum(['cold', 'warm']),
+  }),
+});
+
+/**
  * Discriminated union of all client metric entry shapes.
  * Used for validating individual entries in the ingest payload.
  * @public
@@ -368,6 +382,7 @@ export const clientMetricEntrySchema = z.discriminatedUnion('name', [
   agentTurnEntrySchema,
   syncAttemptEntrySchema,
   lfsFetchEntrySchema,
+  projectOpenEntrySchema,
 ]);
 
 /**

@@ -244,7 +244,7 @@ export const smlibKernel = defineKernel({
     [smlibModuleName]: { name: smlibPackage.name, version: smlibPackage.version },
   },
   name: 'SmlibKernel',
-  version: '1.0.0',
+  version: '1.1.0',
   optionsSchema: smlibOptionsSchema,
   views: {
     model: {

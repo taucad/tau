@@ -9,7 +9,7 @@
 Native SMLibPy kernel for trusted Tau desktop and Node hosts: the SMLib NURBS kernel's Python API, with the
 capabilities of the SMLib WebAssembly kernel (`@taucad/smlib`).
 
-The pinned engine is smlibpy 0.3.5 on CPython 3.13 with NumPy 2.5.2.
+The pinned engine is smlibpy 0.6.2 on CPython 3.13 with NumPy 2.5.2.
 
 ## Why @taucad/smlibpy?
 

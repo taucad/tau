@@ -9,6 +9,7 @@ export type EvidenceAuthority = Readonly<{
   destination: 'langfuse';
   purposes: Readonly<{
     summary: boolean;
+    feedback: boolean;
     content: boolean;
     diagnosis: boolean;
     evaluation: boolean;
@@ -51,7 +52,7 @@ export const authorizeEvidence = ({
   if (
     !Object.hasOwn(authority.purposes, purpose) ||
     !authority.purposes[purpose] ||
-    ((purpose === 'summary' || purpose === 'content') && evidence.payload.plane !== purpose)
+    ((purpose === 'summary' || purpose === 'feedback' || purpose === 'content') && evidence.payload.plane !== purpose)
   ) {
     return { allowed: false, code: 'PURPOSE' };
   }
@@ -126,7 +127,7 @@ const authorizeLineage = (
 export const operationalEvidence = (
   evidence: Evidence,
 ): Readonly<{
-  plane: 'summary' | 'content';
+  plane: Evidence['payload']['plane'];
   family: Evidence['semantic']['kind'];
   coverage: Evidence['coverage']['events'];
 }> => ({ plane: evidence.payload.plane, family: evidence.semantic.kind, coverage: evidence.coverage.events });

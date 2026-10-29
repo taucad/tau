@@ -89,10 +89,10 @@ class Align(Enum)
 Box(length: float, width: float, height: float, *, align: AlignLike = Align.CENTER) -> Part
 
 # A cylinder along Z
-Cylinder(radius: float, height: float, *, align: AlignLike = Align.CENTER) -> Part
+Cylinder(radius: float, height: float, *, arc_size: float = 360.0, align: AlignLike = Align.CENTER) -> Part
 
-# A sphere
-Sphere(radius: float, *, align: AlignLike = Align.CENTER) -> Part
+# A sphere, or a part of one
+Sphere(radius: float, *, arc_size1: float = -90.0, arc_size2: float = 90.0, arc_size3: float = 360.0, align: AlignLike = Align.CENTER) -> Part
 
 # A drilling tool
 Hole(radius: float, depth: float) -> Part
@@ -131,18 +131,25 @@ class Plane
 
 # An immutable 3D vector or point
 class Vector
+  # The length (for a point
   length: float
   # … 24 more members in the API reference: __init__, x, y, z, to_tuple, __getitem__, __add__, __radd__, __sub__, __mul__, __rmul__, __truediv__, __neg__, dot, cross, normalized, distance_to, angle_to, is_close, is_parallel, is_perpendicular, rotate, project_to, any_perpendicular
 
 # An axis-aligned bounding box
 class BoundBox
   BoundBox(min: VectorLike, max: VectorLike)
+  # The smallest box along the axes around the points
   of_points(points: Iterable[VectorLike]) -> BoundBox
+  # The box's extent along X, Y and Z, as a vector
   size: Vector
+  # The middle of the box
   center: Vector
+  # The length of the box's diagonal
   diagonal: float
+  # The smallest box around both boxes
   union(other: BoundBox) -> BoundBox
-  contains(point: VectorLike, tol: float = TOLERANCE) -> bool
+  # True if the point lies in the box or on its sides, or at…
+  contains(point: VectorLike, tolerance: float = TOLERANCE) -> bool
 ```
 
 ### locations
@@ -161,24 +168,24 @@ PolarLocations(radius: float, count: int, *, start_angle: float = 0.0, angular_r
 # A solid
 class Part(_Body)
   # Round edges
-  fillet(edges: Any, radius: float | tuple[float, float] | Sequence[float], *, continuity: int | str | None = None, fullness: float = 1.0) -> Part
+  fillet(edges: Any, radius: float | tuple[float, float] | Sequence[float] | dict[float, float], *, continuity: int | str | None = None, fullness: float = 1.0, propagate: bool = True, corners: Literal['patch', 'mitre', 'miter'] = 'patch', setback: float | None = None) -> Part
   # Bevel edges
-  chamfer(edges: Any, length: float) -> Part
+  chamfer(edges: Any, length: float, *, length2: float | None = None, angle: float | None = None, reference: Any = None, propagate: bool = True, corners: Literal['patch', 'mitre', 'miter'] = 'patch') -> Part
   # Hollow the part out to walls of ``thickness``, removing the ``openings`` faces
-  shell(thickness: float, openings: Any = None, *, outward: bool = False) -> Part
-  # … 32 more members in the API reference: volume, area, center, mass_properties, is_valid, solids, merge, cells, fuse, cut, intersect, __add__, __radd__, __sub__, __and__, offset, split, section, twist, taper, bend, deform, remove_fillets, remove_faces, draft_analysis, parting_line, draft, fold, flange, bends, unfold, flat_pattern
+  shell(thickness: float, openings: Any = None, *, outward: bool = False, corners: Literal['round', 'sharp'] | None = None, walls: Any = None) -> Part
+  # … 49 more members in the API reference: volume, area, center, mass_properties, is_valid, solids, shells, voids, info, merge, sources, cells, classify, contains, cell_at, fuse, cut, intersect, __add__, __radd__, __sub__, __and__, fillet_preview, offset, split, imprint, section, slices, from_mesh, twist, taper, bend, unroll, deform, remove_fillets, remove_faces, draft_analysis, parting_line, draft, and 10 more
 
 # A planar region (with holes, possibly several pieces) on a plane
 class Sketch(Shell)
   # Round corners of the region with tangent arcs of ``radius``
-  fillet(radius: float, vertices: Iterable[VectorLike | Vertex] | None = None) -> Sketch
+  fillet(radius: float, vertices: VectorLike | Vertex | Iterable[VectorLike | Vertex] | None = None) -> Sketch
   # Extrude the region into a solid
-  extrude(amount: float, *, both: bool = False, taper: float = 0.0, direction: Axis | VectorLike | None = None) -> Part
+  extrude(amount: float, *, both: bool = False, taper: float = 0.0, direction: Axis | VectorLike | None = None, corners: Literal['sharp', 'round'] = 'sharp') -> Part
   # Revolve the region about an axis in its plane
   revolve(axis: Axis | None = None, angle: float = 360.0) -> Part
-  # Sweep the region along a path
-  sweep(path: Edge | Wire, *, sharp_corners: bool | None = None) -> Part
-  # … 11 more members in the API reference: plane, __add__, __radd__, __sub__, __and__, __xor__, center, perimeter, offset, chamfer, mirror
+  # Sweep the region along a path (see :func:`~smlibpy.sweep`
+  sweep(path: Edge | Wire, *, orient: bool = True, translational: bool = False, sharp_corners: bool | None = None, up: Axis | VectorLike | str | None = None, twist: float | Callable[[float], float] = 0.0, scale: tuple[float, float] | Sequence[tuple[float, float]] | Callable[[float], float] | None = None, anchor: Literal['center', 'origin'] | VectorLike | Vertex = 'center') -> Part
+  # … 18 more members in the API reference: flipped, plane, fuse, cut, intersect, xor, __add__, __radd__, __sub__, __and__, __xor__, center, perimeter, section_properties, offset, chamfer, mirror, swing
 
 # A list of shapes with selection helpers
 class ShapeList(list)
@@ -186,15 +193,17 @@ class ShapeList(list)
   sort_by(key: SortKey = Z, reverse: bool = False) -> ShapeList[T]
   # ``parallel_to(axis)``, ``of_type(name)`` or ``filter(predicate)``, depending on the
   filter_by(criterion: Axis | str | Callable[[T], bool]) -> ShapeList[T]
-  # Group shapes with equal key (within ``tol``), groups in ascending key order
-  group_by(key: SortKey = Z, tol: float = 0.0001) -> list[ShapeList[T]]
+  # Group shapes with equal key (within ``tolerance``), groups in ascending key order
+  group_by(key: SortKey = Z, tolerance: float = 0.0001) -> list[ShapeList[T]]
   # Highest shapes (largest Z)
   top() -> ShapeList[T]
   # Straight edges along ``axis``, or planar faces whose normal is along ``axis``
   parallel_to(axis: Axis | VectorLike) -> ShapeList[T]
+  # The edges of all the shapes, each once
   edges() -> ShapeList[Edge]
+  # The faces of all the shapes, each once
   faces() -> ShapeList[Face]
-  # … 47 more members in the API reference: one, first, last, __gt__, __lt__, __rshift__, __lshift__, sort_by_distance, max_by, min_by, bottom, right, left, back, front, largest, smallest, nearest, filter, of_type, lines, circles, planar, cylinders, perpendicular_to, facing, convex, concave, smooth, fillets, hit_by, within, at, __add__, __or__, __sub__, __and__, __getitem__, vertices, wires, center, and 6 more
+  # … 54 more members in the API reference: one, first, last, __gt__, __lt__, __rshift__, __lshift__, sort_by_distance, max_by, min_by, bottom, right, left, back, front, largest, smallest, nearest, filter, of_type, lines, circles, planar, cylinders, perpendicular_to, facing, convex, concave, smooth, tangent_chain, g1, g2, fillets, hit_by, within, at, new, derived_from, joining, shared, __add__, and 13 more
 
 Z: Axis.Z
 
@@ -214,53 +223,62 @@ class Shape
 
 # A bounded curve
 class Edge(Shape)
+  # The edge's length
   length: float
-  # All edges of this shape
+  # This edge, in a list
   edges() -> ShapeList[Edge]
-  # All faces of this shape
+  # The faces of the body that meet at this edge (none for an edge…
   faces() -> ShapeList[Face]
-  # … 23 more members in the API reference: __init__, geom_type, start, end, is_closed, is_seam, convexity, is_convex, direction, radius, arc_center, normal, point_at, tangent_at, center, bbox, distance_to, intersections, vertices, reversed, nurbs, remove_knots, __add__
+  # … 44 more members in the API reference: __init__, geom_type, tolerance, start, end, is_closed, is_seam, convexity, dihedral_angle, is_convex, direction, radius, arc_center, normal, point_at, tangent_at, center, bbox, distance_to, closest_point, param_at_point, trim, split, extend, intersections, intersection_params, self_intersections, curvature_at, radius_at, min_radius, min_radius_at, and 13 more
 
 # A chain of edges, open or closed
 class Wire(Shape)
-  # All edges of this shape
+  # The wire's edges, in order
   edges() -> ShapeList[Edge]
+  # The sum of the edges' lengths
   length: float
-  # … 17 more members in the API reference: __init__, vertices, wires, is_closed, start, end, center, bbox, point_at, tangent_at, distance_to, close, reversed, __add__, plane, fillet, to_sketch
+  # … 27 more members in the API reference: __init__, vertices, wires, is_closed, start, end, center, bbox, point_at, tangent_at, distance_to, split, trim, intersections, to_edge, offset, to_arcs, min_radius, min_radius_at, closest_point, continuity, close, reversed, __add__, plane, fillet, to_sketch
 
 # A shape backed by one kernel Brep
 class _Body(Shape)
-  # All faces of this shape
+  # The body's faces
   faces() -> ShapeList[Face]
   # All edges
-  edges(seams: bool = False) -> ShapeList[Edge]
-  # … 16 more members in the API reference: __init__, named, colored, vertices, wires, bbox, distance_to, closest_point, raycast, intersection_curves, silhouette, project, outline, to_nurbs, heal, info
+  edges(*, seams: bool = False) -> ShapeList[Edge]
+  # … 20 more members in the API reference: __init__, named, colored, vertices, wires, bbox, distance_to, closest_points, closest_point, raycast_many, raycast, compact, intersection_curves, silhouette, project, outline, to_nurbs, heal, check, info
 
 # A bounded piece of a surface, belonging to a body (a part, shell or…
 class Face(Shape)
   # The face's edges (seam edges only with ``seams=True``)
-  edges(seams: bool = False) -> ShapeList[Edge]
-  # All faces of this shape
+  edges(*, seams: bool = False) -> ShapeList[Edge]
+  # This face, in a list
   faces() -> ShapeList[Face]
-  # … 22 more members in the API reference: __init__, owner, geom_type, area, center, interior_point, normal_at, is_planar, plane, radius, axis, bbox, distance_to, raycast, outer_wire, inner_wires, wires, vertices, neighbors, to_sketch, to_shell, extrude
+  # … 41 more members in the API reference: __init__, owner, color, name, cells, geom_type, area, center, interior_point, normal_at, is_planar, plane, radius, major_radius, cone_angle, axis, bbox, distance_to, closest_point, uv_at, position_at, curvature_at, min_radius, nurbs, raycast, project, iso, wrap, outer_wire, inner_wires, wires, vertices, neighbors, to_sketch, to_shell, offset, split, and 4 more
 
 # A point
 class Vertex(Shape)
   Vertex(x: float | VectorLike = 0.0, y: float = 0.0, z: float = 0.0)
+  # Where the vertex is
   point: Vector
+  # The vertex's x coordinate
   x: float
+  # The vertex's y coordinate
   y: float
+  # The vertex's z coordinate
   z: float
-  # Center of mass (centroid) of the shape
+  # How far the edges and faces that meet at this vertex may pass from…
+  tolerance: float
+  # Where the vertex is (as :attr:`point`)
   center() -> Vector
-  # Tight axis-aligned bounding box
+  # A box of size 0 at the vertex
   bbox() -> BoundBox
-  # All vertices of this shape
+  # This vertex, in a list
   vertices() -> ShapeList[Vertex]
-  # All edges of this shape
+  # The edges of the body that meet at this vertex (none for a vertex…
   edges() -> ShapeList[Edge]
-  # All faces of this shape
+  # The faces of the body that meet at this vertex (none for a vertex…
   faces() -> ShapeList[Face]
+  # The distance to a point or to a shape
   distance_to(other: VectorLike | Shape) -> float
   # For a corner of a sketch
   convexity: str
@@ -270,10 +288,12 @@ class Vertex(Shape)
 
 ```python
 # A solid through a sequence of cross sections, or a surface through open curves
-loft(sections: Sequence[Sketch | Face | Wire | Edge], *, ruled: bool = False, smooth: bool = True) -> Part | Shell
+loft(sections: Sequence[Sketch | Face], *, ruled: bool = ..., smooth: bool = ..., start_tangent: Axis | VectorLike | Face | None = ..., end_tangent: Axis | VectorLike | Face | None = ..., closed: bool = ..., rails: Edge | Wire | Sequence[Edge | Wire] | None = ...) -> Part
+loft(sections: Sequence[Sketch | Face | Wire | Edge], *, ruled: bool = ..., smooth: bool = ..., start_tangent: Axis | VectorLike | Face | None = ..., end_tangent: Axis | VectorLike | Face | None = ..., closed: bool = ..., rails: Edge | Wire | Sequence[Edge | Wire] | None = ...) -> Part | Shell
 
 # Sweep a profile along a path
-sweep(profile: Sketch | Face | Wire, path: Edge | Wire, *, orient: bool = True, translational: bool = False, sharp_corners: bool | None = None) -> Part
+sweep(profile: Sketch | Face, path: Edge | Wire, *, orient: bool = ..., translational: bool = ..., sharp_corners: bool | None = ..., up: Axis | VectorLike | str | None = ..., twist: float | Callable[[float], float] = ..., scale: tuple[float, float] | Sequence[tuple[float, float]] | Callable[[float], float] | None = ..., anchor: Literal['center', 'origin'] | VectorLike | Vertex = ..., rails: Edge | Wire | None = ...) -> Part
+sweep(profile: Sketch | Face | Wire | Edge, path: Edge | Wire, *, orient: bool = ..., translational: bool = ..., sharp_corners: bool | None = ..., up: Axis | VectorLike | str | None = ..., twist: float | Callable[[float], float] = ..., scale: tuple[float, float] | Sequence[tuple[float, float]] | Callable[[float], float] | None = ..., anchor: Literal['center', 'origin'] | VectorLike | Vertex = ..., rails: Edge | Wire | None = ...) -> Part | Shell
 ```
 
 ### curves
@@ -283,14 +303,14 @@ sweep(profile: Sketch | Face | Wire, path: Edge | Wire, *, orient: bool = True, 
 Polyline(*points: VectorLike, close: bool = False) -> Wire
 
 # A smooth cubic curve through the points
-Spline(*points: VectorLike, tangents: tuple[VectorLike | None, VectorLike | None] | None = None, closed: bool = False) -> Edge
+Spline(*points: VectorLike, tangents: tuple[VectorLike | None, VectorLike | None] | Sequence[VectorLike] | None = None, closed: bool = False) -> Edge
 ```
 
 ### text
 
 ```python
 # Lettering as a sketch in the XY plane, with the exact outlines of the…
-Text(text: str, size: float, *, font: str | os.PathLike[str] | None = None, align: AlignLike = Align.CENTER, spacing: float = 0.0, line_spacing: float = 1.6, kerning: bool = True, path: Edge | Wire | None = None) -> Sketch
+Text(text: str, size: float, *, font: str | os.PathLike[str] | bytes | Font | None = None, align: AlignLike = Align.CENTER, spacing: float = 0.0, line_spacing: float = 1.6, kerning: bool = True, path: Edge | Wire | None = None) -> Sketch
 ```
 
 ### sheetmetal
@@ -302,13 +322,13 @@ class FlatPattern
   bend_lines: ShapeList[Edge]
   # Size of the blank
   size: Vector
-  FlatPattern(part: Part, outline: Sketch, bends: list[Bend], thickness: float, k_factor: float) -> NoneType
+  FlatPattern(part: Part, outline: Sketch, bends: list[Bend], thickness: float, k_factor: float | None) -> NoneType
 ```
 
 ## API reference
 
-To read any other signature, find its name in `api-index.md`, which lists all 479 symbols by file with the lines that hold each, and read that range of the named file.
+To read any other signature, find its name in `api-index.md`, which lists all 692 symbols by file with the lines that hold each, and read that range of the named file.
 
-- 23 reference files, named in `api-index.md`
+- 29 reference files, named in `api-index.md`
 
 Read ranges, not whole files. Never copy a reference into a source file.

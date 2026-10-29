@@ -52,10 +52,11 @@ import type { AgentHostProjectProvide, AgentHostProjectRebridge } from '#workers
 import { closeProvidedPorts, createDisposers } from '#workers/agent-host-projects.js';
 import { createResidentPlacement } from '#workers/agent-host-placement.js';
 import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
+import { guardLargeObjectFiles, guardLargeObjectKernel } from '#lib/large-object-guard.js';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { createIdleRuntimeClient } from '#workers/idle-runtime-client.js';
 import { createWorkerEvidence } from '#workers/agent-host-evidence.js';
-import type { HostEvidence } from '@taucad/agent-observability/host-evidence';
+import type { HostEvidence, RunRating } from '@taucad/agent-observability/host-evidence';
 import { readBuildRelease } from '#lib/build-identity.js';
 import { forwardOperations } from '#telemetry/worker-forwarding.js';
 import type { ForwardEntry, WorkerTelemetry } from '#telemetry/worker-forwarding.js';
@@ -101,6 +102,10 @@ export type BrowserProjectHost = Readonly<{
   needsRebridge: () => boolean;
   /** Read this host's current leadership actor without taking a lock. */
   stoppability: (chatId: string) => ReturnType<AgentLauncher['stoppability']>;
+  /** The page showed a live run's model text at `at`; reported with the run's summaries, when they are allowed (T10). */
+  presented: (chatId: string, runId: string, at: number) => void;
+  /** The account rated a run; reported only on the feedback plane, when ratings are allowed (T12). */
+  rated: (rating: RunRating) => void;
   /** Serve one stream; closing it only detaches (D17). */
   connect: (port: MessagePort) => void;
   /** Swap in fresh bridges, as after a file-manager restart; the launcher and its runs stay (RV1-F1). */
@@ -664,17 +669,18 @@ const composeProjectHost = async (
     );
     const record = composeView({ filesystem: provider }, { consumer: 'user', policy: tauPathPolicy });
     return createChatToolRegistry({
+      /* A file still downloading is never read as its pointer or written over (open first, model waits). */
       fileSystemFor: (signal) =>
-        createProviderRpcFileSystem({ provider: view, mutations: fileSystemMutations, signal }),
+        guardLargeObjectFiles(createProviderRpcFileSystem({ provider: view, mutations: fileSystemMutations, signal })),
       recordFileSystemFor: (signal) =>
         createProviderRpcFileSystem({ provider: record, mutations: fileSystemMutations, signal }),
       workbenchFileSystemFor: (signal) =>
         createProviderRpcFileSystem({ provider: workbenchRootView, mutations: fileSystemMutations, signal }),
       workbench: createRuntimeWorkbenchClient(async () => runtimeClient),
       skillResolver,
-      ...runtimeRpc,
+      /* The kernel reads the model's files itself, so it runs once every large object has landed. */
+      ...guardLargeObjectKernel({ ...runtimeRpc, geospec: geoSpecClient }, () => revisions?.largeObjects()),
       parameters,
-      geospec: geoSpecClient,
       ...(residentRuntime === undefined ? {} : { machines: residentRuntime.machines }),
       machineSettings: preferences,
       print: {
@@ -885,6 +891,12 @@ const composeProjectHost = async (
     hostId: provide.hostId,
     needsRebridge: placement.needsRecovery,
     stoppability: (chatId) => launcher.stoppability(chatId),
+    presented: (chatId, runId, at) => {
+      evidence?.onPresented(chatId, runId, at);
+    },
+    rated: (rating) => {
+      evidence?.onRated(rating);
+    },
     connect: (port) => {
       const channel = serveAgentChannel(port, launcher, {
         build: agentHostWorkerBuild,

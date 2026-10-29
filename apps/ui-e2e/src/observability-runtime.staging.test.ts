@@ -6,6 +6,7 @@ import { chromium, devices, webkit } from 'playwright';
 import type { BrowserContext, BrowserType, Page, Request } from 'playwright';
 import { describe, expect, it } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
+import { maskAutomationFromAnalytics } from './support/analytics-bot-mask.ts';
 import {
   createObservabilityRunId,
   harnessNavigationTimeout,
@@ -166,13 +167,7 @@ const triggerAndAwaitDelivery = async ({
     const context = await browser.newContext({ ...device });
     // As in the analytics consent fixture, let PostHog capture this automated browser's events.
     // Its bot filter otherwise suppresses every event, making the no-$exception check inconclusive.
-    await context.addInitScript(() => {
-      Object.defineProperty(navigator, 'webdriver', { configurable: true, value: false });
-      Object.defineProperty(navigator, 'userAgent', {
-        configurable: true,
-        value: navigator.userAgent.replace('HeadlessChrome', 'Chrome'),
-      });
-    });
+    await context.addInitScript(maskAutomationFromAnalytics);
     await context.addCookies([
       { name: 'tau-entry', value: 'app', url: stagingOrigin },
       {

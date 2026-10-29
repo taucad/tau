@@ -56,6 +56,22 @@ describe('clientMetricEntrySchema', () => {
     ).toBe(false);
   });
 
+  it('should accept a project open of two bounded words, and refuse any other word', () => {
+    const entry = {
+      name: IngestEntryName.PROJECT_OPEN,
+      duration: 4200,
+      detail: { phase: 'first_view', cache: 'cold' },
+    };
+    expect(clientMetricEntrySchema.parse(entry)).toEqual(entry);
+    expect(clientMetricEntrySchema.safeParse({ ...entry, detail: { ...entry.detail, phase: 'proj_1' } }).success).toBe(
+      false,
+    );
+    expect(clientMetricEntrySchema.safeParse({ ...entry, detail: { ...entry.detail, cache: 'partial' } }).success).toBe(
+      false,
+    );
+    expect(clientMetricEntrySchema.safeParse({ ...entry, duration: -1 }).success).toBe(false);
+  });
+
   it('should accept an entry without detail', () => {
     const entry = { name: 'observability.createGeometry', duration: 10 };
     expect(clientMetricEntrySchema.parse(entry)).toEqual(entry);

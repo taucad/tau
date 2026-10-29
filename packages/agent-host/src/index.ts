@@ -14,6 +14,8 @@ export { parseEventLog, serializeLogEvent } from '#log/serialization.js';
 export { reduceEventLog } from '#log/reducer.js';
 export { observeOwnTurns, observeTurns } from '#log/turn-observation.js';
 export type {
+  ObservedCheck,
+  ObservedCheckResult,
   ObservedInterval,
   ObservedInvocation,
   ObservedOutcome,

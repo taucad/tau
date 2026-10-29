@@ -57,6 +57,70 @@ describe('langfuseObservation', () => {
     expect(attribute(content.span, 'langfuse.observation.output')).toBeUndefined();
   });
 
+  it('should send a rating as its closed fields, with no input or output', async () => {
+    const { span } = langfuseObservation(await evidenceFixture({ plane: 'feedback' }), context, pseudonym);
+
+    expect(attribute(span, 'langfuse.observation.metadata.plane')).toBe('feedback');
+    expect(attribute(span, 'langfuse.observation.metadata.fact.value')).toBe('negative');
+    expect(attribute(span, 'langfuse.observation.metadata.fact.scale')).toBe('thumbs.1');
+    expect(attribute(span, 'langfuse.observation.metadata.fact.evidence')).toMatch(/^[a-f\d]{32}$/u);
+    expect(otlpBody(span)).not.toContain('presented-1');
+    expect(attribute(span, 'langfuse.observation.input')).toBeUndefined();
+    expect(otlpBody(span)).not.toContain(privateMarker);
+  });
+
+  it('should name the attempt and time each closed phase per clock domain, with no raw ids', async () => {
+    const evidence = await evidenceFixture();
+    const timed = {
+      ...evidence,
+      clocks: {
+        ...evidence.clocks,
+        intervals: [
+          { phase: 'tool', domain: 'host-recorded', start: 0, end: 10 },
+          { phase: 'tool', domain: 'host-recorded', start: 5, end: 20 },
+          { phase: 'provider-wait', domain: 'api-recorded', start: 0, end: 7 },
+          { phase: 'tool', domain: 'host-recorded', start: 30, end: null },
+        ],
+      },
+    } satisfies typeof evidence;
+    const { span } = langfuseObservation(timed, context, pseudonym);
+    const resumed = langfuseObservation(
+      { ...timed, execution: { ...timed.execution, attempt: 'attempt-b' } },
+      { ...context, receipt: 'evr_2' },
+      pseudonym,
+    ).span;
+
+    expect(attribute(span, 'langfuse.observation.metadata.mapper')).toBe('langfuse-v4.2');
+    expect(attribute(span, 'langfuse.observation.metadata.phase.tool@host-recorded')).toBe('20');
+    expect(attribute(span, 'langfuse.observation.metadata.phase.provider-wait@api-recorded')).toBe('7');
+    expect(attribute(span, 'langfuse.observation.metadata.openIntervals')).toBe('1');
+    expect(JSON.parse(String(attribute(span, 'langfuse.observation.metadata.intervals')))).toEqual([
+      ['tool', 'host-recorded', 0, 10],
+      ['tool', 'host-recorded', 5, 20],
+      ['provider-wait', 'api-recorded', 0, 7],
+      ['tool', 'host-recorded', 30, null],
+    ]);
+    expect(attribute(span, 'langfuse.observation.metadata.attempt')).toMatch(/^[a-f\d]{32}$/u);
+    expect(attribute(resumed, 'langfuse.observation.metadata.attempt')).not.toBe(
+      attribute(span, 'langfuse.observation.metadata.attempt'),
+    );
+    expect(attribute(resumed, 'langfuse.observation.metadata.run')).toBe(
+      attribute(span, 'langfuse.observation.metadata.run'),
+    );
+    expect(otlpBody(span)).not.toContain('attempt-a');
+    expect(attribute(span, 'langfuse.observation.metadata.source')).toMatch(/^[a-f\d]{32}$/u);
+    expect(attribute(resumed, 'langfuse.observation.metadata.semantic')).toBe(
+      attribute(span, 'langfuse.observation.metadata.semantic'),
+    );
+
+    const apiOnly = langfuseObservation(
+      { ...timed, versions: { ...timed.versions, hostBuild: null, apiBuild: 'api-build-1' } },
+      context,
+      pseudonym,
+    ).span;
+    expect(attribute(apiOnly, 'langfuse.release')).toBe('api-build-1');
+  });
+
   it('should send one span per request body', async () => {
     const { span } = langfuseObservation(await evidenceFixture(), context, pseudonym);
     const body = JSON.parse(otlpBody(span)) as { resourceSpans: Array<{ scopeSpans: Array<{ spans: unknown[] }> }> };

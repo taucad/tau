@@ -54,7 +54,7 @@ export const openLocalParameterActors = (
     authority,
     allowRoot: () => true,
     policy: tauPathPolicy,
-  });
+  }).close;
   const actors = createParameterActors({
     open: (root) => new NodeFsProviderClient(channel, root),
     runtimeClient: options.runtimeClient,

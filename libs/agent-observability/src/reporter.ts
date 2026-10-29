@@ -23,10 +23,35 @@ export type EffectivePurposesAnswer = Readonly<{
   purposes: ReadonlyArray<Readonly<{ purpose: string; allowed: boolean }>>;
 }>;
 
+/** A purpose a host reports under; each is its own plane and grant. @public */
+export type ReportingPurpose = 'summary' | 'feedback';
+
 /**
- * The summary grant an effective-purposes answer gives, if any. Only an
- * answer scoped to this very project that allows `summary` grants; anything
- * else, including an answer for the account alone, grants nothing.
+ * The grant an effective-purposes answer gives for one purpose, if any. Only
+ * an answer scoped to this very project that allows that purpose grants;
+ * anything else, including an answer for the account alone, grants nothing.
+ *
+ * @param answer - The server's answer, as received.
+ * @param subject - The signed-in account and the project the host serves.
+ * @param purpose - The purpose asked about; one never answers for another.
+ * @returns The grant, or `undefined`.
+ * @public
+ */
+export const purposeGrantOf = (
+  answer: EffectivePurposesAnswer,
+  subject: Readonly<{ principal: string; project: string }>,
+  purpose: ReportingPurpose,
+): ReportingGrant | undefined => {
+  const state = answer.purposes.find((candidate) => candidate.purpose === purpose);
+  if (answer.projectId !== subject.project || state?.allowed !== true || answer.epoch === '') {
+    return undefined;
+  }
+  /* The answer does not say the account's protection; `unknown` is the strictest claim, and the API only tightens it. */
+  return { principal: subject.principal, project: subject.project, policyEpoch: answer.epoch, protection: 'unknown' };
+};
+
+/**
+ * The summary grant an effective-purposes answer gives, if any.
  *
  * @param answer - The server's answer, as received.
  * @param subject - The signed-in account and the project the host serves.
@@ -36,14 +61,7 @@ export type EffectivePurposesAnswer = Readonly<{
 export const summaryGrantOf = (
   answer: EffectivePurposesAnswer,
   subject: Readonly<{ principal: string; project: string }>,
-): ReportingGrant | undefined => {
-  const summary = answer.purposes.find((state) => state.purpose === 'summary');
-  if (answer.projectId !== subject.project || summary?.allowed !== true || answer.epoch === '') {
-    return undefined;
-  }
-  /* The answer does not say the account's protection; `unknown` is the strictest claim, and the API only tightens it. */
-  return { principal: subject.principal, project: subject.project, policyEpoch: answer.epoch, protection: 'unknown' };
-};
+): ReportingGrant | undefined => purposeGrantOf(answer, subject, 'summary');
 
 /** What the reporter held back or could not do, counted by reason, beside its outbox's counts. @public */
 export type ReporterCoverage = Readonly<{
@@ -76,6 +94,8 @@ export type EvidenceReporterOptions = Readonly<{
   hostBuild: string | undefined;
   now: () => number;
   toolClass?: ProjectionContext['toolClass'];
+  /** The purpose `grant` answers for, and so the plane projected; `summary` when absent. */
+  purpose?: ReportingPurpose;
   /** Run `callback` after `milliseconds`; answers its cancel. `setTimeout` when absent. */
   schedule?: (callback: () => void, milliseconds: number) => () => void;
 }>;
@@ -242,6 +262,7 @@ export const createEvidenceReporter = (options: EvidenceReporterOptions): Eviden
       grantedAt: scope.grantedAt,
       hostBuild: options.hostBuild,
       ...(options.toolClass === undefined ? {} : { toolClass: options.toolClass }),
+      plane: options.purpose ?? 'summary',
     };
     const unsettled = runs.filter((run) => !settled.has(settledKey(run)));
     const projections = await Promise.all(unsettled.map(async (run) => projectRun(run, context)));

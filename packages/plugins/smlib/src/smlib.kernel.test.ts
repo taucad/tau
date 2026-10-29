@@ -27,6 +27,7 @@ import {
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { esbuildBundler } from '@taucad/esbuild';
 import { defineRuntime } from '@taucad/runtime/worker';
+import * as smlibLibrary from '@classcad/smlibwasm';
 import { offersFor, smlibKernel } from '#smlib.kernel.js';
 import { normalizeRenderShapes } from '#utils/render-output.js';
 
@@ -408,6 +409,22 @@ describe('SmlibKernel', () => {
     it('should return empty parameters when the file declares none', async () => {
       const { defaults } = await getParameters({ 'box.ts': boxCode }, 'box.ts');
       expect(defaults).toEqual({});
+    });
+
+    it('should give user code every export of the installed library', async () => {
+      const { defaults } = await getParameters(
+        {
+          'surface.ts': `
+            import * as smlib from '@classcad/smlibwasm';
+            // The built-in module also has a \`default\` (the namespace itself) for default imports.
+            const names = Object.keys(smlib).filter((name) => name !== 'default');
+            export const defaultParams = { version: smlib.version, exports: names.sort().join(',') };
+            export default function main() {}
+          `,
+        },
+        'surface.ts',
+      );
+      expect(defaults).toEqual({ version: smlibLibrary.version, exports: Object.keys(smlibLibrary).sort().join(',') });
     });
   });
 

@@ -56,17 +56,22 @@ const readEventsOver =
     events: events.slice(cursor, cursor + 2),
   });
 
-const purposes = (allowed: boolean) =>
+const purposes = (allowed: readonly string[]) =>
   new Response(
     JSON.stringify({
       epoch: 'policy-1',
       projectId: 'project-1',
-      purposes: [{ purpose: 'summary', allowed, decided: true, granted: allowed }],
+      purposes: ['summary', 'feedback'].map((purpose) => ({
+        purpose,
+        allowed: allowed.includes(purpose),
+        decided: true,
+        granted: allowed.includes(purpose),
+      })),
     }),
     { status: 200 },
   );
 
-const setup = (allowed: boolean) => {
+const setup = (allowed: readonly string[]) => {
   const sent: unknown[] = [];
   const urls: string[] = [];
   const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
@@ -88,13 +93,14 @@ const setup = (allowed: boolean) => {
     readEvents: readEventsOver(rows()),
     fetch: fetchMock,
     store: memoryPendingStore(),
+    feedbackStore: memoryPendingStore(),
   });
   return { evidence, fetchMock, sent, urls };
 };
 
 describe('createWorkerEvidence', () => {
   it('should report a settled run’s tool and outcome facts, with no person or tool text', async () => {
-    const { evidence, sent } = setup(true);
+    const { evidence, sent } = setup(['summary']);
 
     evidence.onChatQuiescent('chat-1', true);
     await vi.waitFor(() => {
@@ -110,7 +116,7 @@ describe('createWorkerEvidence', () => {
   });
 
   it('should send nothing while the server grants no summaries', async () => {
-    const { evidence, sent, urls } = setup(false);
+    const { evidence, sent, urls } = setup([]);
 
     evidence.onChatQuiescent('chat-1', true);
     await vi.waitFor(() => {
@@ -122,9 +128,9 @@ describe('createWorkerEvidence', () => {
   });
 
   it('should read nothing when the chat is not quiescent', async () => {
-    const { evidence, fetchMock } = setup(true);
+    const { evidence, fetchMock } = setup(['summary']);
     await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
     evidence.onChatQuiescent('chat-1', false);
@@ -132,6 +138,30 @@ describe('createWorkerEvidence', () => {
       setTimeout(resolve, 10);
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('should report a rating from its own queue only while ratings are allowed', async () => {
+    const rate = async (allowed: readonly string[]) => {
+      const { evidence, sent, fetchMock } = setup(allowed);
+      await vi.waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+      });
+      evidence.onRated({ chatId: 'chat-1', runId: 'run-1', value: 'positive', at: Date.now() });
+      return { evidence, sent };
+    };
+
+    const allowed = await rate(['summary', 'feedback']);
+    await vi.waitFor(() => {
+      expect(
+        allowed.sent.filter((body) => (body as { payload: { plane: string } }).payload.plane === 'feedback'),
+      ).toMatchObject([{ semantic: { kind: 'rating' }, payload: { fact: { value: 'positive' } } }]);
+    });
+
+    const refused = await rate(['summary']);
+    await vi.waitFor(() => {
+      expect(refused.evidence.feedback?.coverage().ungranted).toBe(1);
+    });
+    expect(JSON.stringify(refused.sent)).not.toContain('"feedback"');
   });
 });

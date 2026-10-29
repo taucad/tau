@@ -28,10 +28,12 @@ export type WorkerEvidenceOptions = Readonly<{
   fetch?: typeof fetch;
   /** Where unanswered envelopes wait; the project's IndexedDB database when absent. */
   store?: PendingEvidenceStore;
+  /** Where unanswered ratings wait, apart from summaries; the project's own IndexedDB database when absent. */
+  feedbackStore?: PendingEvidenceStore;
 }>;
 
-const defaultStore = (projectId: string): PendingEvidenceStore =>
-  typeof indexedDB === 'undefined' ? memoryPendingStore() : indexedDbPendingStore(`tau-agent-evidence:${projectId}`);
+const defaultStore = (name: string): PendingEvidenceStore =>
+  typeof indexedDB === 'undefined' ? memoryPendingStore() : indexedDbPendingStore(name);
 
 /**
  * Compose one browser project host's evidence reporter.
@@ -43,11 +45,12 @@ const defaultStore = (projectId: string): PendingEvidenceStore =>
 export const createWorkerEvidence = (options: WorkerEvidenceOptions): HostEvidence =>
   createHostEvidence({
     apiBaseUrl: options.apiBaseUrl,
-    principal: options.principal,
+    principal: () => options.principal,
     project: options.projectId,
     uploader: `browser-${randomUuid()}`,
     hostBuild: options.hostBuild,
     fetch: options.fetch ?? fetch.bind(globalThis),
-    store: options.store ?? defaultStore(options.projectId),
+    store: options.store ?? defaultStore(`tau-agent-evidence:${options.projectId}`),
+    feedbackStore: options.feedbackStore ?? defaultStore(`tau-agent-evidence-feedback:${options.projectId}`),
     observe: async (chatId) => observeOwnTurns(options.readEvents, chatId),
   });

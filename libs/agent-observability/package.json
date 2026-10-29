@@ -33,8 +33,10 @@
   "exports": {
     ".": "./src/index.ts",
     "./contract": "./src/contract.ts",
+    "./delivery": "./src/delivery.ts",
     "./authority": "./src/authority.ts",
     "./identity": "./src/identity.ts",
+    "./projection": "./src/projection.ts",
     "./pi-telemetry": "./src/pi-telemetry.ts",
     "./telemetry-policy": "./src/telemetry-policy.ts",
     "./package.json": "./package.json"

@@ -153,6 +153,7 @@ describe('observeTurns', () => {
     const [observation] = observeTurns(chatId, term('t1', toolTurn.slice(0, 6)));
 
     expect(observation?.termination).toBe('unknown');
+    expect(observation?.ending).toBeUndefined();
     expect(observation?.revision).toBeUndefined();
     expect(observation?.tools.map((tool) => [tool.call, tool.outcome, tool.output])).toEqual([
       ['call-1', 'unknown', undefined],
@@ -187,6 +188,10 @@ describe('observeTurns', () => {
     ]);
 
     expect(observeTurns(chatId, resumed)[0]?.termination).toBe('completed');
+    expect(observeTurns(chatId, resumed)[0]?.ending).toEqual({
+      source: { chatId, leaderEpoch: 't2', sequence: 1 },
+      at: start + 1000,
+    });
     const [observation] = observeTurns(chatId, [...failed, ...failed, failed[1]!]);
     expect(observation?.termination).toBe('failed');
     expect(observation?.sources).toHaveLength(2);

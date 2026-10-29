@@ -31,6 +31,9 @@ export type ObservedToolCall = Readonly<{
   outcome: ObservedOutcome;
   input: ObservedSource;
   output: ObservedSource | undefined;
+  /** When the input and the output rows were recorded; `settledAt` is absent with `output`. */
+  startedAt: number;
+  settledAt: number | undefined;
 }>;
 
 /** One gateway invocation the run prepared, and what the gateway answered for it. @public */
@@ -74,6 +77,8 @@ export type TurnObservation = Readonly<{
   tools: readonly ObservedToolCall[];
   transformations: readonly ObservedTransformation[];
   intervals: readonly ObservedInterval[];
+  /** The row that recorded the run's ending, and when; absent while the run has none. */
+  ending: Readonly<{ source: ObservedSource; at: number }> | undefined;
   /** Newest time any fact landed. A heartbeat is not a fact, so it never moves this. */
   lastFactAt: number;
   /** Every row the observation was built from, once each, in log order. */
@@ -92,8 +97,8 @@ type RunDraft = {
   runId: string;
   turnId: string | undefined;
   external: boolean;
-  /** Terminal state per attempt; the highest attempt's wins. */
-  terminal: Map<number, ObservedOutcome>;
+  /** Terminal state per attempt, with the row that recorded it; the highest attempt's wins. */
+  terminal: Map<number, Readonly<{ outcome: ObservedOutcome; source: ObservedSource; at: number }>>;
   revision: TurnObservation['revision'];
   invocations: Map<string, ObservedInvocation>;
   tools: Map<string, ObservedToolCall>;
@@ -163,7 +168,7 @@ const fold = (draft: RunDraft, event: AgentLogEvent, fact: Readonly<{ at: number
         draft.intervals.push({ phase: 'admission', start: draft.openAdmission, end: at });
         draft.openAdmission = undefined;
       } else if (terminalStates.has(event.state)) {
-        draft.terminal.set(attempt, event.state as ObservedOutcome);
+        draft.terminal.set(attempt, { outcome: event.state as ObservedOutcome, source, at });
       }
       break;
     }
@@ -182,6 +187,8 @@ const fold = (draft: RunDraft, event: AgentLogEvent, fact: Readonly<{ at: number
           outcome: 'unknown',
           input: source,
           output: undefined,
+          startedAt: at,
+          settledAt: undefined,
         });
         draft.toolStarted.set(message.toolCallId, at);
       } else if (message.role === 'tool-output') {
@@ -192,6 +199,7 @@ const fold = (draft: RunDraft, event: AgentLogEvent, fact: Readonly<{ at: number
             ...input,
             outcome: message.isError ? 'failed' : 'completed',
             output: source,
+            settledAt: at,
           });
           const started = draft.toolStarted.get(message.toolCallId);
           if (started !== undefined) {
@@ -289,16 +297,18 @@ const settle = (draft: RunDraft): TurnObservation => {
     open.unshift({ phase: 'admission', start: draft.openAdmission, end: undefined });
   }
   const intervals = [...draft.intervals, ...open];
+  const ending = last === undefined ? undefined : draft.terminal.get(last);
   return {
     chatId: draft.chatId,
     runId: draft.runId,
     turnId: draft.turnId,
-    termination: last === undefined ? 'unknown' : (draft.terminal.get(last) ?? 'unknown'),
+    termination: ending?.outcome ?? 'unknown',
     revision: draft.revision,
     invocations: [...draft.invocations.values()],
     tools: [...draft.tools.values()],
     transformations: draft.transformations,
     intervals,
+    ending: ending === undefined ? undefined : { source: ending.source, at: ending.at },
     lastFactAt: draft.lastFactAt,
     sources: draft.sources,
   };

@@ -16,8 +16,7 @@ const purposeCopy: Record<TelemetryPurpose, PurposeCopy> = {
   },
   feedback: {
     label: 'Ratings and corrections',
-    description:
-      'Record the ratings you give agent replies and when you accept, reject or correct one, linked to your account. Only the rating itself, never an explanation or the reply.',
+    description: 'Your ratings of agent replies and whether you accepted or corrected them, without the reply itself',
   },
   content: {
     label: 'Full task capture',

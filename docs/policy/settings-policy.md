@@ -120,7 +120,7 @@ A button either navigates, opens a dialog, changes a value, or shows a result. R
 
 ### 9. Hide What Does Not Apply
 
-Filter unavailable settings out of the registry by build or platform (`tauCloudEnabled`, `isDesktopTarget()`, feature flags) so they disappear from both navigation and search. Use a disabled control with a reason only when the setting exists for this user but cannot change now (for example, a plan that guarantees no training).
+Filter unavailable settings out of the registry by build or platform (`tauCloudEnabled`, `isDesktopTarget()`, feature flags) so they disappear from both navigation and search. Use a disabled control with a reason only when the setting exists for this user but cannot change now (for example, a permission whose notice is not yet approved).
 
 ### 10. Accessible By Construction
 

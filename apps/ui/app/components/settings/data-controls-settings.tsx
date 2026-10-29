@@ -5,7 +5,6 @@ import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.j
 import { AgentObservabilitySettings } from '#components/settings/agent-observability-settings.js';
 import { CookiePreferencesDialog } from '#components/cookie-preferences.js';
 import { CloudAccountClosure } from '#cloud/settings-billing.js';
-import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import { usePrivacyPreferences } from '#hooks/use-privacy-preferences.js';
 import { telemetryCopy, useTelemetrySwitch } from '#hooks/use-telemetry-switch.js';
 import { legalUrl } from '#lib/legal-url.js';
@@ -23,34 +22,31 @@ function LearnMore(): React.JSX.Element {
   );
 }
 
-/** Whether the owner's chats may improve the service; paid plans carry a no-train guarantee instead of a choice. */
+/**
+ * Whether the owner's chats may improve the service. The server answers with the effective consent: on by default for
+ * Free, off for a paid plan until its owner turns it on here.
+ */
 function ImproveServiceRow(): React.JSX.Element {
   const { preferences, isLoading, error, updatePreferences, isUpdating } = usePrivacyPreferences();
-  // T15/AD15: paid tiers carry a contractual no-train guarantee — the projection forces `trainingConsent: false`.
-  const { hasNoTrainGuarantee } = useCommercialFeatures();
-
-  const description = hasNoTrainGuarantee ? (
-    <>
-      Your plan never uses your chats to improve the service. <LearnMore />
-    </>
-  ) : error ? (
-    'Couldn’t load this setting. Check your connection and refresh.'
-  ) : (
-    <>
-      Control whether your chats are used for improving the service. <LearnMore />
-    </>
-  );
 
   return (
     <SettingsRow
       settingId='improve-service'
       title='Improve the service for everyone'
-      description={description}
+      description={
+        error ? (
+          'Couldn’t load this setting. Check your connection and refresh.'
+        ) : (
+          <>
+            Control whether your chats are used for improving the service. <LearnMore />
+          </>
+        )
+      }
       control={
         <Switch
           aria-label='Improve the service for everyone'
-          checked={!hasNoTrainGuarantee && preferences?.allowsAiTraining === true}
-          disabled={hasNoTrainGuarantee || isLoading || Boolean(error) || isUpdating}
+          checked={preferences?.allowsAiTraining === true}
+          disabled={isLoading || Boolean(error) || isUpdating}
           onCheckedChange={(checked) => {
             updatePreferences({ allowsAiTraining: checked });
           }}
@@ -70,8 +66,7 @@ export function DataControlsSettings(): React.JSX.Element {
   return (
     <div className='flex flex-col gap-6 pb-6'>
       <SettingsGroup>
-        {/* Works signed out, so it reads no account preference; usage metrics are not training data, so the
-         * no-train guarantee does not replace it. */}
+        {/* Works signed out, so it reads no account preference; usage metrics are not training data. */}
         <SettingsRow
           settingId='usage-diagnostics'
           title={telemetryCopy.label}

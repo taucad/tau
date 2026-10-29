@@ -86,17 +86,17 @@ describe('DataControlsSettings', () => {
     globalThis.window.ENV = clientEnvironment;
   });
 
-  it('replaces the training choice with the no-train guarantee on paid tiers (T15/AD15)', () => {
+  it("lets a paid plan opt in, showing the server's default-off answer", async () => {
     useEntitlementsMock.mockReturnValue(entitlementsFromTier('pro'));
-
     render(<DataControlsSettings />);
+    const user = userEvent.setup();
 
     const toggle = screen.getByRole('switch', { name: improve });
-    expect(toggle).toBeDisabled();
+    expect(toggle).toBeEnabled();
     expect(toggle).toHaveAttribute('data-state', 'unchecked');
-    expect(screen.getByRole('group', { name: improve })).toHaveAccessibleDescription(
-      /your plan never uses your chats/i,
-    );
+    await user.click(toggle);
+
+    expect(mockUpdatePreferences).toHaveBeenCalledWith({ allowsAiTraining: true });
   });
 
   it('lets free-tier users choose whether their chats improve the service', async () => {

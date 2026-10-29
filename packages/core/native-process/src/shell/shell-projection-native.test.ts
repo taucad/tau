@@ -587,7 +587,9 @@ const mounted = (mountpoint: string): boolean =>
     .some((line) => line.split(' ')[4] === mountpoint);
 
 const python = (script: string, ...parameters: string[]): ChildProcessWithoutNullStreams =>
-  spawn('python3', ['-I', '-c', script, ...parameters], { stdio: ['pipe', 'pipe', 'pipe'] });
+  spawn('python3', ['-I', '-c', script, ...parameters], {
+    stdio: ['pipe', 'pipe', 'inherit'],
+  }) as ChildProcessWithoutNullStreams;
 
 const lines = (child: ChildProcessWithoutNullStreams): (() => Promise<string>) => {
   const queue: string[] = [];
@@ -990,7 +992,7 @@ await held.close(); await mount[Symbol.asyncDispose](); process.stdout.write('cl
         });
         const child = python(
           `
-import os, signal, sys
+import os, signal, sys, traceback
 class Stop(Exception): pass
 def stop(*_): raise Stop()
 signal.signal(signal.SIGUSR1, stop)
@@ -1001,6 +1003,10 @@ try:
     print("read", flush=True)
 except Stop:
     print("interrupted", flush=True)
+except BaseException as error:
+    print("OTHER " + type(error).__name__ + " " + repr(error), flush=True)
+    traceback.print_exc()
+print("after", flush=True)
 `,
           join(mountpoint, 'blocked'),
         );
@@ -1010,10 +1016,6 @@ except Stop:
           mark(`STDOUT ${JSON.stringify(line)}`);
           return line;
         };
-        child.stderr.setEncoding('utf8');
-        child.stderr.on('data', (chunk: string) => {
-          process.stderr.write(`[chld-stderr] ${chunk.replaceAll('\n', ' | ')}\n`);
-        });
         child.on('exit', (code, signal) => {
           mark(`CHILD EXIT code=${String(code)} signal=${String(signal)}`);
         });

@@ -61,7 +61,8 @@ try {
   Wait-Service 'LanmanWorkstation' 5
   Write-Phase 'services'
   $taken = @([IO.DriveInfo]::GetDrives() | ForEach-Object { $_.Name.Substring(0, 1).ToUpperInvariant() })
-  $taken += @(Get-SmbMapping -ErrorAction SilentlyContinue | ForEach-Object { $_.LocalPath.Substring(0, 1).ToUpperInvariant() })
+  # A mapping can exist without a local path, and reading a drive letter off it would fail the whole setup.
+  $taken += @(Get-SmbMapping -ErrorAction SilentlyContinue | Where-Object { $_.LocalPath } | ForEach-Object { $_.LocalPath.Substring(0, 1).ToUpperInvariant() })
   $drive = @('Z', 'Y', 'X', 'W', 'V', 'U', 'T', 'S', 'R') | Where-Object { $taken -notcontains $_ } | Select-Object -First 1
   if (-not $drive) { throw 'No disposable drive available' }
   $existing = Get-SmbShare -Name $share -ErrorAction SilentlyContinue

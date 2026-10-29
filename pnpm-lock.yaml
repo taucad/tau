@@ -1955,6 +1955,9 @@ importers:
       '@taucad/agent-host':
         specifier: workspace:*
         version: link:../../packages/agent-host
+      '@taucad/agent-observability':
+        specifier: workspace:*
+        version: link:../../libs/agent-observability
       '@taucad/agent-tools':
         specifier: workspace:*
         version: link:../../libs/agent-tools

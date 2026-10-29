@@ -26,8 +26,8 @@ export type ObservedChat = Readonly<{
 export type HostEvidenceOptions = Readonly<{
   /** The API origin, without a trailing slash. */
   apiBaseUrl: string;
-  /** The signed-in account. */
-  principal: string;
+  /** The signed-in account, read per report; none grants nothing, and a different one rebinds. */
+  principal: () => string | undefined;
   /** The project id the API knows; a local directory has none and composes nothing. */
   project: string;
   /** This host's uploader id. */
@@ -62,6 +62,10 @@ const contractIdPattern = /^[\w:.-]{1,128}$/u;
  * @returns The grant, or `undefined`.
  */
 const readGrant = async (options: HostEvidenceOptions): Promise<ReportingGrant | undefined> => {
+  const principal = options.principal();
+  if (principal === undefined) {
+    return undefined;
+  }
   const response = await options.fetch(
     `${options.apiBaseUrl}/v1/telemetry-purposes?projectId=${encodeURIComponent(options.project)}`,
     { credentials: 'include', headers: { accept: 'application/json' } },
@@ -73,7 +77,10 @@ const readGrant = async (options: HostEvidenceOptions): Promise<ReportingGrant |
     throw new Error(`The agent-observability purposes could not be read: ${response.status}`);
   }
   const answer = (await response.json()) as EffectivePurposesAnswer;
-  return summaryGrantOf(answer, { principal: options.principal, project: options.project });
+  /* An account switched while the answer was in flight is not the account it answered for. */
+  return options.principal() === principal
+    ? summaryGrantOf(answer, { principal, project: options.project })
+    : undefined;
 };
 
 /**

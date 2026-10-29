@@ -31,7 +31,7 @@ const setup = (purposes: () => Response) => {
   const store = memoryPendingStore();
   const evidence = createHostEvidence({
     apiBaseUrl: 'https://api.test',
-    principal: 'user-1',
+    principal: () => 'user-1',
     project: 'project-1',
     uploader: 'node-1',
     hostBuild: '1.2.3',

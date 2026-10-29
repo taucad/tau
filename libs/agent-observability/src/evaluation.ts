@@ -123,6 +123,44 @@ export type Calibration = Readonly<{
   abstention: number | undefined;
 }>;
 
+/** One CAD check a run settled: which requirement, against which revision, with what result. @public */
+export type CheckReading = Readonly<{
+  /** When it settled, in milliseconds. */
+  at: number;
+  /** The digest of the source revision it checked. */
+  revision: string;
+  requirement: string;
+  result: 'passed' | 'failed' | 'inconclusive' | 'unsupported' | 'not-run';
+}>;
+
+/**
+ * The deterministic reference for a case, from its CAD checks alone. Only the
+ * last revision checked counts, each requirement by its latest result there:
+ * any failure fails it, and it passes only when every requirement passed. An
+ * inconclusive, unsupported or unrun requirement is not a pass, so it leaves
+ * the reference unknown rather than counting as either. Nothing the assistant
+ * said about the run enters it: a claimed success cannot outvote a check.
+ *
+ * @param checks - The run's checks, in any order; ties keep the order given.
+ * @returns The reference verdict, `unknown` when the run checked nothing.
+ * @public
+ */
+export const checkReference = (checks: readonly CheckReading[]): ReferenceVerdict => {
+  const ordered = [...checks].sort((a, b) => a.at - b.at);
+  const final = ordered.at(-1)?.revision;
+  const latest = new Map<string, CheckReading['result']>();
+  for (const { revision, requirement, result } of ordered) {
+    if (revision === final) {
+      latest.set(requirement, result);
+    }
+  }
+  const results = [...latest.values()];
+  if (results.includes('failed')) {
+    return 'fail';
+  }
+  return results.length > 0 && results.every((result) => result === 'passed') ? 'pass' : 'unknown';
+};
+
 const evaluatorKey = ({ prompt, model, rubric, parser }: EvaluatorVersion): string =>
   JSON.stringify([prompt, model, rubric, parser]);
 

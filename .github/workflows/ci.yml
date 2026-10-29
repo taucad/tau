@@ -520,7 +520,12 @@ jobs:
       # The budgets gate on this checkout alone. The action below also rebuilds the base branch
       # for its comparison comment, so the comparison only reports.
       - name: Enforce bundle size budgets
-        run: pnpm size:build && pnpm size:check
+        run: |
+          pnpm size:build
+          pnpm size:check || {
+            echo "::error title=Size budget exceeded::Raise a limit inside the docs/policy/npm-policy.md § 7 band yourself (growth merged from main counts): update its measured note, run pnpm size:raises and report the table row as an FYI. Ask the operator only when size:raises exits 1."
+            exit 1
+          }
 
       # Before the comparison: the action below leaves the checkout on the base branch.
       - name: Check workspace root hygiene

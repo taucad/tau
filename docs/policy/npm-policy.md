@@ -3,7 +3,7 @@ title: 'npm Publishing Policy'
 description: 'Per-package rules for preparing @taucad/* libraries for npm publication: tsdown shape, dependency hygiene, exports map discipline, validation gates, README requirements.'
 status: active
 created: '2026-05-22'
-updated: '2026-10-24'
+updated: '2026-10-29'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/release-policy.md
@@ -372,9 +372,11 @@ A `.size-limit.json` limit is the latest measurement plus a little headroom, so 
 The operator decides, whatever the size, when:
 
 - the entry is reserved: the `@taucad/runtime` total and root (`.`) entries;
-- the growth is unexplained: a new dependency entered the measured output, a lazy chunk became eager, or the growth does not come from the change being made.
+- the growth is unexplained: a new dependency entered the measured output, a lazy chunk became eager, or the growth comes from neither the change being made nor code already merged to `main`.
 
-Before raising, confirm the growth comes from the change (diff the entry's built files against the base build) and fix any accidental growth instead of raising. Set the new limit to the new measurement plus at most 10 % headroom, update the entry's `measured <size> on <date>` note with the reason, and run `pnpm size:raises` (add `--program-base <ref>` inside a program); it matches entries by `path`, parses limits as `size-limit` does (`1 kB` is 1,000 bytes), and exits 1 when a raise needs the operator. Report an autonomous raise as an FYI in the PR body and the program's state log with the script's table row. Do not split one raise across commits or PRs to stay inside the band.
+Growth that arrives by merging `main` into a branch is explained: it was reviewed where it landed, and `main` does not run this gate, so the next pull request inherits it. Raise for it inside the band like any other growth and name the responsible `main` commits in the FYI. Before raising, confirm the growth comes from the change or from `main` (diff the entry's built files against the base build) and fix any accidental growth the change introduced instead of raising. Set the new limit to the new measurement plus at most 10 % headroom, update the entry's `measured <size> on <date>` note with the reason, and run `pnpm size:raises` (add `--program-base <ref>` inside a program); it matches entries by `path`, parses limits as `size-limit` does (`1 kB` is 1,000 bytes), and exits 1 when a raise needs the operator. Report an autonomous raise as an FYI in the PR body and the program's state log with the script's table row. Do not split one raise across commits or PRs to stay inside the band.
+
+Asking the operator about a raise inside the band is a defect, whatever a program handoff, an earlier approval or a habit suggests; so is offering "trim bytes instead" as an alternative for growth that came from `main`. Raise, report the FYI, and continue.
 
 An operator raise is one message: the entry, old and new limit, the measured growth and where it comes from, and the alternative (what would be cut). Other work continues meanwhile. A program handoff does not reserve size budgets beyond this subsection unless its charter rules so.
 

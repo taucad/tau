@@ -1,10 +1,11 @@
-smlibpy 0.3.5
+smlibpy 0.6.2
 
-The pinned smlibpy-0.3.5 wheels carry their own licence files in
-smlibpy-0.3.5.dist-info/licenses/, which every sealed closure keeps:
+The pinned smlibpy-0.6.2 wheels carry their own licence files in
+smlibpy-0.6.2.dist-info/licenses/, which every sealed closure keeps:
 
 - LICENSE: smlibpy, MIT License, Copyright (c) 2026 AWV Informatik AG.
-- NOTICE: the attribution for USD BRep (SMLib, SM_API, SmPyLib) and Lato.
+- NOTICE: the attribution for USD BRep (SMLib, SM_API, SmPyLib), Lato and the
+  Brotli static dictionary (MIT License, src/smlibpy/_brotli_dictionary.bin).
 - third_party/usd-brep/LICENSE: USD BRep, Apache License 2.0,
   Copyright (c) 2020-2026, NVIDIA CORPORATION & AFFILIATES.
 - src/smlibpy/fonts/OFL.txt: Lato Regular, SIL Open Font License 1.1.

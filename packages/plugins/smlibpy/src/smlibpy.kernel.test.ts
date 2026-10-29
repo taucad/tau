@@ -579,7 +579,7 @@ describe('SMLibPy kernel', () => {
         {
           code: 'LIBRARY_VERSION_MISMATCH',
           severity: 'warning',
-          details: { library: 'smlibpy', declared: '0.3.0', runs: '0.3.5' },
+          details: { library: 'smlibpy', declared: '0.3.0', runs: '0.6.2' },
         },
       ],
     });

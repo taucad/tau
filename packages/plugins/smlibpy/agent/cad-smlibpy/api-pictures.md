@@ -1,21 +1,21 @@
-# smlibpy — render
+# smlibpy — pictures
 
 2 top-level symbols. Signatures are verbatim python.
 
-# Category: render
+# Category: pictures
 # Compare two pictures of the same size pixel by pixel
 # Remarks: Meaningful for two renders of the same view with a pinned frame (``frame=`` of the first): without it, a changed model is fitted anew and every pixel moves. Returns: An :class:`ImageDiff`: the number, share and bounding box of the changed pixels, and a picture of the difference (changed pixels red on a faded gray of ``b``).
-# smlibpy.render.diff_images (function)
+# smlibpy.pictures.diff_images (function)
 diff_images(a: Any, b: Any, tolerance: int = 0) -> ImageDiff
 #   a: A picture from :func:`render`, PNG bytes, a PNG file path, or an ``(h, w, 3)`` ``uint8`` array
 #   b: The picture to compare with, in any of the same forms
 #   tolerance: Largest difference per color channel (0 to 255) that still counts as equal
 
-# Category: render
+# Category: pictures
 # Render shapes to a PNG image
 # Remarks: The options combine: a sectioned drawing with highlights and markers is fine. Returns: A :class:`Picture`: the PNG file contents as ``bytes``, with ``.pixels`` and ``.frame``.
-# smlibpy.render.render (function)
-render(*shapes: Any, path: str | os.PathLike[str] | None = None, view: Any = 'iso', size: tuple[int, int] = (800, 600), edges: bool = True, background: Any = 'white', tolerance: float | None = None, zoom: float = 1.0, look_at: Any = None, frame: Any = None, supersample: int = 2, colors: str = 'native', lines: bool = False, drawing: Any = False, sheet: Any = False, section: Any = None, cap: bool = True, highlight: Any = None, highlight_at: Any = None, markers: Any = None, annotate: bool = False, xray: bool = False, xray_alpha: float = 0.42, zebra: Any = False, curvature: Any = None) -> Picture
+# smlibpy.pictures.render (function)
+render(*shapes: Any, path: str | os.PathLike[str] | None = None, view: Literal['iso', 'front', 'back', 'left', 'right', 'top', 'bottom', 'sheet'] | dict[str, Any] | tuple[float, float, float] = 'iso', size: tuple[int, int] = (800, 600), edges: bool = True, background: Any = 'white', tolerance: float | None = None, zoom: float = 1.0, look_at: Any = None, frame: Any = None, supersample: int = 2, colors: Literal['native', 'distinct'] = 'native', lines: bool = False, drawing: Any = False, sheet: Any = False, section: Any = None, cap: bool = True, highlight: Any = None, highlight_at: Any = None, markers: Any = None, annotate: bool = False, xray: bool = False, xray_alpha: float = 0.42, zebra: Any = False, curvature: Any = None) -> Picture
 #   shapes: Parts, sketches, shells, faces, edges, wires, meshes, or lists of them
 #   path: Also write the PNG to this file
 #   view: The camera, orthographic, Z up

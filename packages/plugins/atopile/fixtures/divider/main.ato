@@ -1,0 +1,28 @@
+import ElectricPower
+import Electrical
+import RectangularBoardShape
+
+from "parts/UNI_ROYAL_0402WGF1002TCE/UNI_ROYAL_0402WGF1002TCE.ato" import UNI_ROYAL_0402WGF1002TCE_package
+from "parts/UNI_ROYAL_0402WGF5101TCE/UNI_ROYAL_0402WGF5101TCE.ato" import UNI_ROYAL_0402WGF5101TCE_package
+from "parts/Samsung_Electro_Mechanics_CL05B104KO5NNNC/Samsung_Electro_Mechanics_CL05B104KO5NNNC.ato" import Samsung_Electro_Mechanics_CL05B104KO5NNNC_package
+
+module App:
+    """Voltage divider with a decoupling capacitor"""
+    board = new RectangularBoardShape
+    board.x = 30mm
+    board.y = 12mm
+    board.corner_radius = 1mm
+
+    power = new ElectricPower
+    output = new Electrical
+
+    r_top = new UNI_ROYAL_0402WGF1002TCE_package
+    r_bottom = new UNI_ROYAL_0402WGF5101TCE_package
+    c_out = new Samsung_Electro_Mechanics_CL05B104KO5NNNC_package
+
+    power.hv ~ r_top.1
+    r_top.2 ~ output
+    output ~ r_bottom.1
+    r_bottom.2 ~ power.lv
+    output ~ c_out.1
+    c_out.2 ~ power.lv

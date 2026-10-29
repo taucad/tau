@@ -4419,6 +4419,130 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
+  packages/plugins/atopile:
+    dependencies:
+      '@gltf-transform/core':
+        specifier: 'catalog:'
+        version: 4.5.1
+      '@taucad/geometry-core':
+        specifier: workspace:*
+        version: link:../../core/geometry
+      '@tscircuit/alphabet':
+        specifier: 'catalog:'
+        version: 0.0.26(typescript@5.9.3)
+      '@tscircuit/capacity-autorouter':
+        specifier: 'catalog:'
+        version: 0.0.879(typescript@5.9.3)
+      '@tscircuit/checks':
+        specifier: 'catalog:'
+        version: 0.0.183(@flatten-js/core@1.6.14)(@tscircuit/math-utils@0.0.38(typescript@5.9.3))(circuit-json-to-connectivity-map@0.0.30(typescript@5.9.3))(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(typescript@5.9.3)
+      '@tscircuit/circuit-json-util':
+        specifier: 'catalog:'
+        version: 0.0.111(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(transformation-matrix@3.1.0)
+      '@tscircuit/copper-pour-solver':
+        specifier: 'catalog:'
+        version: 0.0.52(typescript@5.9.3)
+      '@tscircuit/core':
+        specifier: 'catalog:'
+        version: 0.0.1844(ecffe673c01d9b3913e704571e04e525)
+      '@tscircuit/create-fdm-enclosure':
+        specifier: 'catalog:'
+        version: 0.0.7(@resvg/resvg-js@2.6.2)(@tscircuit/image-utils@0.0.10)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@5.9.3)
+      '@tscircuit/footprinter':
+        specifier: 'catalog:'
+        version: 0.0.426(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(typescript@5.9.3)
+      '@tscircuit/image-utils':
+        specifier: 'catalog:'
+        version: 0.0.10
+      '@tscircuit/infer-cable-insertion-point':
+        specifier: 'catalog:'
+        version: 0.0.4(typescript@5.9.3)
+      '@tscircuit/infgrid-ijump-astar':
+        specifier: 'catalog:'
+        version: 0.0.35
+      '@tscircuit/matchpack':
+        specifier: 'catalog:'
+        version: 0.0.91(typescript@5.9.3)
+      '@tscircuit/math-utils':
+        specifier: 'catalog:'
+        version: 0.0.38(typescript@5.9.3)
+      '@tscircuit/miniflex':
+        specifier: 'catalog:'
+        version: 0.0.4(typescript@5.9.3)
+      '@tscircuit/props':
+        specifier: 'catalog:'
+        version: 0.0.646(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(react@19.2.7)
+      '@tscircuit/schematic-match-adapt':
+        specifier: 'catalog:'
+        version: 0.0.22(typescript@5.9.3)
+      '@tscircuit/schematic-trace-solver':
+        specifier: 'catalog:'
+        version: 0.0.184(typescript@5.9.3)
+      '@tscircuit/solver-utils':
+        specifier: 'catalog:'
+        version: 0.0.21(graphics-debug@0.0.100(@resvg/resvg-js@2.6.2)(@tscircuit/image-utils@0.0.10)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@5.9.3))(typescript@5.9.3)
+      '@tscircuit/soup-util':
+        specifier: 'catalog:'
+        version: 0.0.41(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(transformation-matrix@3.1.0)
+      bpc-graph:
+        specifier: 'catalog:'
+        version: 0.0.67(typescript@5.9.3)
+      calculate-elbow:
+        specifier: 'catalog:'
+        version: 0.0.13(typescript@5.9.3)
+      circuit-json:
+        specifier: 'catalog:'
+        version: 0.0.485(format-si-unit@0.0.14(typescript@5.9.3))
+      circuit-json-to-bom-csv:
+        specifier: 'catalog:'
+        version: 0.0.17(@types/react@19.2.17)(typescript@5.9.3)
+      circuit-json-to-bpc:
+        specifier: 'catalog:'
+        version: 0.0.14(bpc-graph@0.0.67(typescript@5.9.3))(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(typescript@5.9.3)
+      circuit-json-to-connectivity-map:
+        specifier: 'catalog:'
+        version: 0.0.30(typescript@5.9.3)
+      circuit-json-to-gltf:
+        specifier: 'catalog:'
+        version: 0.0.123(@resvg/resvg-js@2.6.2)(@resvg/resvg-wasm@2.6.2)(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(@tscircuit/circuit-json-util@0.0.111(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(transformation-matrix@3.1.0))(@tscircuit/footprinter@0.0.426(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(typescript@5.9.3))(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(circuit-to-svg@0.0.413(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(typescript@5.9.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064))(typescript@5.9.3)
+      circuit-json-to-readable-netlist:
+        specifier: 'catalog:'
+        version: 0.0.17(@tscircuit/circuit-json-util@0.0.111(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(transformation-matrix@3.1.0))(circuit-json-to-connectivity-map@0.0.30(typescript@5.9.3))(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(typescript@5.9.3)
+      circuit-to-svg:
+        specifier: 'catalog:'
+        version: 0.0.413(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(typescript@5.9.3)
+      connectivity-map:
+        specifier: 'catalog:'
+        version: 1.0.0(typescript@5.9.3)
+      format-si-unit:
+        specifier: 'catalog:'
+        version: 0.0.14(typescript@5.9.3)
+      graphics-debug:
+        specifier: 'catalog:'
+        version: 0.0.100(@resvg/resvg-js@2.6.2)(@tscircuit/image-utils@0.0.10)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@5.9.3)
+      minicssgrid:
+        specifier: 'catalog:'
+        version: 0.0.9(typescript@5.9.3)
+      nanoid:
+        specifier: 'catalog:'
+        version: 5.1.16
+      react:
+        specifier: 'catalog:'
+        version: 19.2.7
+      schematic-symbols:
+        specifier: 'catalog:'
+        version: 0.0.244(typescript@5.9.3)
+    devDependencies:
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../../runtime
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../../runtime-testing
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+
   packages/plugins/bambu:
     dependencies:
       '@standard-schema/spec':
@@ -35361,7 +35485,7 @@ snapshots:
   '@types/body-parser@1.19.6':
     dependencies:
       '@types/connect': 3.4.38
-      '@types/node': 24.0.15
+      '@types/node': 26.6.5
 
   '@types/bonjour@3.5.13':
     dependencies:
@@ -35544,7 +35668,7 @@ snapshots:
 
   '@types/express-serve-static-core@5.1.3':
     dependencies:
-      '@types/node': 24.0.15
+      '@types/node': 26.6.5
       '@types/qs': 6.15.1
       '@types/range-parser': 1.2.7
       '@types/send': 1.2.1
@@ -35745,7 +35869,7 @@ snapshots:
   '@types/serve-static@2.2.0':
     dependencies:
       '@types/http-errors': 2.0.5
-      '@types/node': 24.0.15
+      '@types/node': 26.6.5
 
   '@types/sockjs@0.3.36':
     dependencies:
@@ -47550,7 +47674,7 @@ snapshots:
 
   speedline-core@1.4.3:
     dependencies:
-      '@types/node': 24.0.15
+      '@types/node': 26.6.5
       image-ssim: 0.2.0
       jpeg-js: 0.4.4
 

@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EditorStateMachineRef } from '#machines/editor.machine.js';
 import {
+  heldRevealLifetimeMilliseconds,
   holdUnheardFileReveal,
   holdUnheardReveal,
   subscribeWorkbenchFileReveal,
+  runWhenRendered,
   subscribeWorkbenchReveal,
 } from '#routes/w.$workspace.$project/workbench-reveal.js';
 
@@ -175,5 +177,55 @@ describe('subscribeWorkbenchFileReveal', () => {
     const remounted = vi.fn();
     subscribeWorkbenchFileReveal(editorRef, remounted)();
     expect(remounted).not.toHaveBeenCalled();
+  });
+});
+
+describe('runWhenRendered', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('should run the step on the first frame its target has rendered, once', () => {
+    vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame', 'performance'] });
+    let isRendered = false;
+    const step = vi.fn<() => void>();
+    runWhenRendered(() => (isRendered ? step : undefined));
+
+    vi.advanceTimersByTime(16 * 5);
+    expect(step).not.toHaveBeenCalled();
+
+    isRendered = true;
+    vi.advanceTimersByTime(16 * 5);
+    expect(step).toHaveBeenCalledOnce();
+  });
+
+  it('should stop asking once a held reveal would have lapsed', () => {
+    vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame', 'performance'] });
+    const locate = vi.fn<() => (() => void) | undefined>(() => undefined);
+    runWhenRendered(locate);
+
+    vi.advanceTimersByTime(heldRevealLifetimeMilliseconds + 1000);
+    const asked = locate.mock.calls.length;
+    vi.advanceTimersByTime(1000);
+
+    expect(asked).toBeGreaterThan(0);
+    expect(locate).toHaveBeenCalledTimes(asked);
+  });
+
+  it('should never run the step once cancelled, as when a newer reveal replaces it or the pane unmounts', () => {
+    vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame', 'performance'] });
+    let isRendered = false;
+    const step = vi.fn<() => void>();
+    const locate = vi.fn<() => (() => void) | undefined>(() => (isRendered ? step : undefined));
+    const cancel = runWhenRendered(locate);
+    vi.advanceTimersByTime(16 * 3);
+    const asked = locate.mock.calls.length;
+
+    cancel();
+    isRendered = true;
+    vi.advanceTimersByTime(1000);
+
+    expect(step).not.toHaveBeenCalled();
+    expect(locate).toHaveBeenCalledTimes(asked);
   });
 });

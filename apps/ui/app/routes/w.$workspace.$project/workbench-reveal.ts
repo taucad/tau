@@ -23,7 +23,7 @@ export type WorkbenchFileRevealTarget = Readonly<{ path: string; expandTarget?: 
  * enough for a cold lazy chunk on a slow phone connection, which can take several seconds; short of a person opening
  * the pane by hand later.
  */
-const heldRevealLifetimeMilliseconds = 10_000;
+export const heldRevealLifetimeMilliseconds = 10_000;
 
 type HeldReveal<T> = { readonly target: T; readonly heldAt: number };
 type Channel<T> = { subscribers: number; held: HeldReveal<T> | undefined };
@@ -138,5 +138,32 @@ export function subscribeWorkbenchFileReveal(
   }
   return () => {
     subscription.unsubscribe();
+  };
+}
+
+/**
+ * Runs a reveal's last step once its target has rendered: each frame it asks `locate` for the step, and runs it the
+ * first time there is one. A cold pane renders its row only after the pane and each parent's listing have loaded,
+ * which on a phone can take seconds, so it keeps asking for as long as a held reveal lives, and no longer.
+ *
+ * @param locate - The step to run, such as a scroll to the row, or `undefined` while the target has not rendered.
+ * @returns Cancels the wait: call it when a newer reveal replaces this one or the pane unmounts.
+ */
+export function runWhenRendered(locate: () => (() => void) | undefined): () => void {
+  const deadline = performance.now() + heldRevealLifetimeMilliseconds;
+  let frame = 0;
+  const attempt = (): void => {
+    frame = requestAnimationFrame(() => {
+      const step = locate();
+      if (step) {
+        step();
+      } else if (performance.now() < deadline) {
+        attempt();
+      }
+    });
+  };
+  attempt();
+  return () => {
+    cancelAnimationFrame(frame);
   };
 }

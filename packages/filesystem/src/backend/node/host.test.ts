@@ -6,18 +6,21 @@
  * same server is the concurrent writer these tests race.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
+  renameSync,
   realpathSync,
   rmSync,
   symlinkSync,
   truncateSync,
   writeFileSync,
 } from 'node:fs';
+import fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -29,6 +32,7 @@ import { tauPathPolicy } from '#path-registry.js';
 const cleanups: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const cleanup of cleanups.splice(0).reverse()) {
     // oxlint-disable-next-line no-await-in-loop -- Close the authority before deleting the fixture it owns.
     await cleanup();
@@ -626,5 +630,392 @@ describe('NodeFsRootScope checked entry operations', () => {
     });
     expect(existsSync(join(root, 'empty'))).toBe(false);
     expect(existsSync(join(root, 'full', 'part.ts'))).toBe(true);
+  });
+});
+
+describe('bounded entry observation', () => {
+  it.skipIf(process.platform === 'linux')(
+    'should refuse unsupported descriptor traversal before reading content',
+    async () => {
+      const { root, server } = serve();
+      writeFileSync(join(root, 'secret'), 'must not be read');
+      await expect(
+        server.run({ root }, async (scope) =>
+          scope.observeEntry({
+            path: 'secret',
+            maximumBytes: 32,
+            maximumEntries: 1,
+          }),
+        ),
+      ).rejects.toMatchObject({ code: 'EOPNOTSUPP' });
+    },
+  );
+
+  it.skipIf(process.platform !== 'linux')(
+    'should observe bounded files, directories and safe existing links without flattening them',
+    async () => {
+      const { root, server } = serve();
+      mkdirSync(join(root, 'parts'));
+      writeFileSync(join(root, 'parts', 'model'), 'solid');
+      symlinkSync('parts/model', join(root, 'relative'));
+      symlinkSync(join(root, 'relative'), join(root, 'absolute'));
+      await server.run({ root }, async (scope) => {
+        const limits = { maximumBytes: 256, maximumEntries: 16 };
+        const file = await scope.observeEntry({ path: 'parts/model', ...limits });
+        expect(file).toMatchObject({ kind: 'file', bytes: text('solid') });
+        expect(await scope.observeEntry({ path: 'parts', ...limits })).toMatchObject({
+          kind: 'directory',
+          names: ['model'],
+        });
+        expect(await scope.observeEntry({ path: 'absolute', ...limits })).toMatchObject({
+          kind: 'symlink',
+          targetBytes: text(join(root, 'relative')),
+          targets: ['relative', 'parts', 'parts/model'],
+        });
+        await expect(
+          scope.observeEntry({ path: 'parts/model', maximumBytes: 4, maximumEntries: 1 }),
+        ).rejects.toMatchObject({ code: 'EFBIG' });
+        await expect(scope.observeEntry({ path: 'parts', maximumBytes: 256, maximumEntries: 0 })).rejects.toMatchObject(
+          { code: 'EOVERFLOW' },
+        );
+      });
+    },
+  );
+
+  it.skipIf(process.platform !== 'linux')('should replace only the observed empty directory incarnation', async () => {
+    const { root, server } = serve();
+    mkdirSync(join(root, 'source'));
+    mkdirSync(join(root, 'destination'));
+    await server.run({ root }, async (scope) => {
+      const limits = { maximumBytes: 256, maximumEntries: 16 };
+      const source = await scope.observeEntry({ path: 'source', ...limits });
+      const destination = await scope.observeEntry({ path: 'destination', ...limits });
+      if (source.kind !== 'directory' || destination.kind !== 'directory') {
+        throw new Error('Expected directories.');
+      }
+      const input = {
+        from: 'source',
+        to: 'destination',
+        preconditions: [
+          { path: 'source', expectedEntry: { kind: 'directory', identity: source.identity, empty: true } },
+          { path: 'destination', expectedEntry: { kind: 'directory', identity: destination.identity, empty: true } },
+        ],
+      } as const;
+      rmSync(join(root, 'destination'), { recursive: true });
+      mkdirSync(join(root, 'destination'));
+      expect(await scope.renameChecked(input)).toMatchObject({
+        status: 'conflict',
+        conflicts: [{ path: 'destination', actual: 'directory' }],
+      });
+      expect(existsSync(join(root, 'source'))).toBe(true);
+    });
+  });
+});
+
+describe.skipIf(process.platform !== 'linux')('descriptor-relative entry races', () => {
+  it('should bound retained directory names across a nested rename before returning conflicts', async () => {
+    const { root, server } = serve();
+    mkdirSync(join(root, 'source'));
+    for (const directory of ['a', 'b']) {
+      mkdirSync(join(root, 'source', directory));
+      for (let index = 0; index < 1500; index += 1) {
+        writeFileSync(join(root, 'source', directory, String(index)), '');
+      }
+    }
+    await server.run({ root }, async (scope) => {
+      const source = await scope.observeEntry({ path: 'source', maximumBytes: 1024, maximumEntries: 4 });
+      if (source.kind !== 'directory') {
+        throw new Error('Expected the source directory.');
+      }
+      await expect(
+        scope.renameChecked({
+          from: 'source',
+          to: 'destination',
+          preconditions: [
+            { path: 'source', expectedEntry: { kind: 'directory', identity: source.identity, empty: false } },
+            { path: 'destination', expected: null },
+          ],
+        }),
+      ).rejects.toMatchObject({ code: 'EOVERFLOW' });
+      expect(existsSync(join(root, 'source', 'a', '1499'))).toBe(true);
+      expect(existsSync(join(root, 'destination'))).toBe(false);
+    });
+  });
+
+  it('should retain readable record links while refusing hidden targets and cycles', async () => {
+    const { root, server } = serve();
+    mkdirSync(join(root, '.tau', 'chats'), { recursive: true });
+    mkdirSync(join(root, '.git'));
+    writeFileSync(join(root, '.tau', 'chats', 'record'), 'record');
+    writeFileSync(join(root, '.git', 'config'), 'hidden');
+    symlinkSync('.tau/chats/record', join(root, 'record'));
+    symlinkSync('.git/config', join(root, 'hidden'));
+    symlinkSync('cycle', join(root, 'cycle'));
+    await server.run({ root }, async (scope) => {
+      const limits = { maximumBytes: 4096, maximumEntries: 64 };
+      expect(await scope.observeEntry({ path: 'record', ...limits })).toMatchObject({
+        kind: 'symlink',
+        targetBytes: text('.tau/chats/record'),
+        targets: ['.tau', '.tau/chats', '.tau/chats/record'],
+      });
+      await expect(scope.observeEntry({ path: 'hidden', ...limits })).rejects.toMatchObject({ code: 'ELOOP' });
+      await expect(scope.observeEntry({ path: 'cycle', ...limits })).rejects.toMatchObject({ code: 'ELOOP' });
+    });
+  });
+
+  it('should never read an outside replacement after a parent descriptor is opened', async () => {
+    const { root, server } = serve();
+    const outside = join(root, '..', 'outside');
+    mkdirSync(outside);
+    writeFileSync(join(outside, 'file'), 'outside canary');
+    mkdirSync(join(root, 'parent'));
+    writeFileSync(join(root, 'parent', 'file'), 'inside');
+    const open = fs.open.bind(fs);
+    let substituted = false;
+    vi.spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
+      const handle = await open(path, flags, mode);
+      if (!substituted && String(path).startsWith('/proc/self/fd/') && String(path).endsWith('/parent')) {
+        substituted = true;
+        renameSync(join(root, 'parent'), join(root, 'retired'));
+        symlinkSync(outside, join(root, 'parent'));
+      }
+      return handle;
+    });
+    await expect(
+      server.run({ root }, async (scope) =>
+        scope.observeEntry({ path: 'parent/file', maximumBytes: 256, maximumEntries: 16 }),
+      ),
+    ).rejects.toMatchObject({ code: 'ESTALE' });
+    expect(substituted).toBe(true);
+    expect(readFileSync(join(outside, 'file'), 'utf8')).toBe('outside canary');
+  });
+
+  it.each([false, true])(
+    'should close every traversal descriptor after child stat fails (close failure: %s)',
+    async (failClose) => {
+      const { root, server } = serve();
+      mkdirSync(join(root, 'parent'));
+      writeFileSync(join(root, 'parent', 'file'), 'inside');
+      const primary = Object.assign(new Error('Injected child stat failure'), { code: 'EIO' });
+      const cleanupFailure = new Error('Injected child close failure');
+      const open = fs.open.bind(fs);
+      const handles: Array<Awaited<ReturnType<typeof fs.open>>> = [];
+      vi.spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
+        const handle = await open(path, flags, mode);
+        if (String(path) === root || String(path).startsWith('/proc/self/fd/')) {
+          handles.push(handle);
+        }
+        if (String(path).startsWith('/proc/self/fd/') && String(path).endsWith('/parent')) {
+          vi.spyOn(handle, 'stat').mockRejectedValue(primary);
+          if (failClose) {
+            const close = handle.close.bind(handle);
+            vi.spyOn(handle, 'close').mockImplementation(async () => {
+              await close();
+              throw cleanupFailure;
+            });
+          }
+        }
+        return handle;
+      });
+      await expect(
+        server.run({ root }, async (scope) =>
+          scope.observeEntry({ path: 'parent/file', maximumBytes: 256, maximumEntries: 16 }),
+        ),
+      ).rejects.toBe(primary);
+      expect(handles).toHaveLength(2);
+      expect(handles.map((handle) => handle.fd)).toEqual([-1, -1]);
+      if (failClose) {
+        expect(primary.cause).toBeInstanceOf(AggregateError);
+        const cleanup = (primary.cause as AggregateError).errors[0] as AggregateError;
+        expect(cleanup.errors).toContain(cleanupFailure);
+      }
+    },
+  );
+
+  it('should refuse growth after allocation and never use an unbounded readFile', async () => {
+    const { root, server } = serve();
+    writeFileSync(join(root, 'file'), 'tiny');
+    const unbounded = vi.spyOn(fs, 'readFile');
+    const open = fs.open.bind(fs);
+    let grown = false;
+    vi.spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
+      const handle = await open(path, flags, mode);
+      if (String(path).startsWith('/proc/self/fd/') && String(path).endsWith('/file')) {
+        const read = handle.read.bind(handle);
+        vi.spyOn(handle, 'read').mockImplementation(async (...arguments_: Parameters<typeof handle.read>) => {
+          if (!grown) {
+            grown = true;
+            truncateSync(join(root, 'file'), 1024 * 1024);
+          }
+          return read(...arguments_);
+        });
+      }
+      return handle;
+    });
+    await expect(
+      server.run({ root }, async (scope) => scope.observeEntry({ path: 'file', maximumBytes: 8, maximumEntries: 1 })),
+    ).rejects.toMatchObject({ code: 'EFBIG' });
+    expect(grown).toBe(true);
+    expect(unbounded).not.toHaveBeenCalled();
+  });
+
+  it('should preserve stored relative link bytes on rename and admit its prospective target', async () => {
+    const { root, server } = serve();
+    mkdirSync(join(root, 'a'));
+    mkdirSync(join(root, 'b'));
+    writeFileSync(join(root, 'a', 'model'), 'old target');
+    writeFileSync(join(root, 'b', 'model'), 'new target');
+    symlinkSync('model', join(root, 'a', 'link'));
+    await server.run({ root }, async (scope) => {
+      const source = await scope.observeEntry({ path: 'a/link', maximumBytes: 4096, maximumEntries: 64 });
+      if (source.kind !== 'symlink') {
+        throw new Error('Expected a link.');
+      }
+      expect(
+        await scope.renameChecked({
+          from: 'a/link',
+          to: 'b/link',
+          preconditions: [
+            {
+              path: 'a/link',
+              expectedEntry: { kind: 'symlink', identity: source.identity, targetBytes: source.targetBytes },
+            },
+            { path: 'b/link', expected: null },
+          ],
+        }),
+      ).toEqual({ status: 'applied' });
+    });
+    expect(readlinkSync(join(root, 'b', 'link'))).toBe('model');
+    expect(readFileSync(join(root, 'b', 'link'), 'utf8')).toBe('new target');
+    expect(existsSync(join(root, 'a', 'link'))).toBe(false);
+  });
+
+  it('should stop a bounded observation when root admission is revoked during native reads', async () => {
+    const { root, server, admit } = serve();
+    writeFileSync(join(root, 'file'), 'bytes');
+    const open = fs.open.bind(fs);
+    vi.spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
+      const handle = await open(path, flags, mode);
+      if (String(path).endsWith('/file')) {
+        admit(false);
+      }
+      return handle;
+    });
+    await expect(
+      server.run({ root }, async (scope) => scope.observeEntry({ path: 'file', maximumBytes: 8, maximumEntries: 1 })),
+    ).rejects.toMatchObject({ code: 'EACCES' });
+  });
+});
+
+describe.skipIf(process.platform !== 'linux')('checked entry publication', () => {
+  it('should move a directory containing a relative link without changing its bytes', async () => {
+    const { root, server } = serve();
+    mkdirSync(join(root, 'source'));
+    mkdirSync(join(root, 'destination'));
+    writeFileSync(join(root, 'source', 'model'), 'solid');
+    symlinkSync('model', join(root, 'source', 'link'));
+    await server.run({ root }, async (scope) => {
+      const limits = { maximumBytes: 4096, maximumEntries: 64 };
+      const source = await scope.observeEntry({ path: 'source', ...limits });
+      const destination = await scope.observeEntry({ path: 'destination', ...limits });
+      const link = await scope.observeEntry({ path: 'source/link', ...limits });
+      if (source.kind !== 'directory' || destination.kind !== 'directory' || link.kind !== 'symlink') {
+        throw new Error('Expected the authored directory and link.');
+      }
+      expect(
+        await scope.renameChecked({
+          from: 'source',
+          to: 'destination',
+          preconditions: [
+            { path: 'source', expectedEntry: { kind: 'directory', identity: source.identity, empty: false } },
+            { path: 'destination', expectedEntry: { kind: 'directory', identity: destination.identity, empty: true } },
+            {
+              path: 'source/link',
+              expectedEntry: { kind: 'symlink', identity: link.identity, targetBytes: link.targetBytes },
+            },
+            { path: 'source/model', expected: 'solid' },
+          ],
+        }),
+      ).toEqual({ status: 'applied' });
+    });
+    expect(existsSync(join(root, 'source'))).toBe(false);
+    expect(readlinkSync(join(root, 'destination', 'link'))).toBe('model');
+    expect(readFileSync(join(root, 'destination', 'link'), 'utf8')).toBe('solid');
+  });
+
+  it('should refuse an intermediate link changed during native target observation', async () => {
+    const { root, server } = serve();
+    writeFileSync(join(root, 'safe'), 'safe');
+    mkdirSync(join(root, '.git'));
+    writeFileSync(join(root, '.git', 'config'), 'hidden canary');
+    symlinkSync('safe', join(root, 'hop'));
+    symlinkSync('hop', join(root, 'link'));
+    const readlink = fs.readlink.bind(fs);
+    let replaced = false;
+    vi.spyOn(fs, 'readlink').mockImplementation(async (...arguments_: Parameters<typeof fs.readlink>) => {
+      const bytes = await readlink(...arguments_);
+      if (!replaced && String(arguments_[0]).endsWith('/hop')) {
+        replaced = true;
+        rmSync(join(root, 'hop'));
+        symlinkSync('.git/config', join(root, 'hop'));
+      }
+      return bytes;
+    });
+    await expect(
+      server.run({ root }, async (scope) =>
+        scope.observeEntry({ path: 'link', maximumBytes: 4096, maximumEntries: 64 }),
+      ),
+    ).rejects.toMatchObject({ code: 'ESTALE' });
+    expect(replaced).toBe(true);
+    expect(readFileSync(join(root, '.git', 'config'), 'utf8')).toBe('hidden canary');
+  });
+
+  it('should rename a readable record link without writing its target', async () => {
+    const { root, server } = serve();
+    mkdirSync(join(root, '.tau', 'chats'), { recursive: true });
+    writeFileSync(join(root, '.tau', 'chats', 'record'), 'record canary');
+    symlinkSync('.tau/chats/record', join(root, 'record'));
+    await server.run({ root }, async (scope) => {
+      const entry = await scope.observeEntry({ path: 'record', maximumBytes: 4096, maximumEntries: 64 });
+      if (entry.kind !== 'symlink') {
+        throw new Error('Expected a link.');
+      }
+      expect(
+        await scope.renameChecked({
+          from: 'record',
+          to: 'renamed',
+          preconditions: [
+            {
+              path: 'record',
+              expectedEntry: { kind: 'symlink', identity: entry.identity, targetBytes: entry.targetBytes },
+            },
+            { path: 'renamed', expected: null },
+          ],
+        }),
+      ).toEqual({ status: 'applied' });
+    });
+    expect(readlinkSync(join(root, 'renamed'))).toBe('.tau/chats/record');
+    expect(readFileSync(join(root, '.tau', 'chats', 'record'), 'utf8')).toBe('record canary');
+  });
+});
+
+describe('checked operation allocation bounds', () => {
+  it('should refuse an oversized checked baseline before any whole-file read or mutation', async () => {
+    const { root, server } = serve();
+    writeFileSync(join(root, 'oversized'), '');
+    truncateSync(join(root, 'oversized'), checkedRenameLimits.bytes + 1);
+    const unbounded = vi.spyOn(fs, 'readFile');
+    await expect(
+      server.run({ root }, async (scope) =>
+        scope.writeFileChecked({
+          path: 'oversized',
+          data: 'replacement',
+          preconditions: [{ path: 'oversized', expected: '' }],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'EFBIG', applicationState: 'known-not-applied' });
+    expect(unbounded).not.toHaveBeenCalled();
+    const stats = await fs.stat(join(root, 'oversized'));
+    expect(stats.size).toBe(checkedRenameLimits.bytes + 1);
   });
 });

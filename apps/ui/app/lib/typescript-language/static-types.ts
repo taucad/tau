@@ -8,7 +8,10 @@ export type StaticTypeDefinition = Readonly<{
   packageJsonContent?: string;
 }>;
 
-export type DependencyReader = Pick<ComposedViewClient, 'readFile' | 'readdir'>;
+export type DependencyReader = {
+  readdir: ComposedViewClient['readdir'];
+  readFile(path: string): Promise<string | Uint8Array<ArrayBuffer>>;
+};
 
 const root = `/${bundledTypesWorkspaceRootSegment}`;
 const decoder = new TextDecoder();
@@ -35,9 +38,12 @@ async function collectDeclarations(
   const nested = await Promise.all(
     entries.map(async (entry) => {
       const path = `${directory}/${entry}`;
-      if (entry.endsWith('.d.ts')) {
+      if (/\.d\.(?:ts|mts|cts)$/u.test(entry)) {
         const text = await readText(reader, path);
-        return text === undefined ? [] : [{ path, text }];
+        if (text === undefined) {
+          throw new Error(`Declaration unavailable: ${path}`);
+        }
+        return [{ path, text }];
       }
       return collectDeclarations(reader, path);
     }),
@@ -53,10 +59,20 @@ export async function readStaticTypePackage(
     return [];
   }
   const packageRoot = `${root}/${packageName}`;
-  const [packageJsonContent, declarations] = await Promise.all([
-    readText(reader, `${packageRoot}/package.json`),
-    collectDeclarations(reader, packageRoot),
-  ]);
+  let packageJsonContent: string | undefined;
+  let declarations: Array<{ path: string; text: string }>;
+  try {
+    [packageJsonContent, declarations] = await Promise.all([
+      readText(reader, `${packageRoot}/package.json`),
+      collectDeclarations(reader, packageRoot),
+    ]);
+  } catch {
+    // A partially readable mount is retried as a unit; never cache an incomplete package.
+    return [];
+  }
+  if (!packageJsonContent) {
+    return [];
+  }
   return declarations.map(({ path, text }) => ({
     packageName,
     content: text,

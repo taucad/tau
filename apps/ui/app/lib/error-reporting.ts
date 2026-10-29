@@ -49,7 +49,7 @@ type LoadOutcome = { readonly sentry?: typeof SentryLibrary; readonly failure?: 
 let started: Promise<LoadOutcome> | undefined;
 /** The load's outcome once it is in ({@link isSdkLoadFailure} reads it without waiting). */
 let loadOutcome: LoadOutcome | undefined;
-/** The SDK once it has started on this page; captures go straight to it from then on. */
+/** The SDK once it has started on this page; captures use it from then on. */
 let liveSentry: typeof SentryLibrary | undefined;
 /** Whether the SDK cannot be used on this page (its load or start failed): errors go out without it. */
 let isSdkUnavailable = false;
@@ -412,6 +412,10 @@ export const reportUiError = async (error: unknown, details?: ErrorDetails): Pro
   };
   if (liveSentry !== undefined) {
     markReported();
+    // React reports to the root before componentDidCatch adds the boundary details in the same turn.
+    if (!isPageHidden()) {
+      await Promise.resolve();
+    }
     capture(liveSentry, error);
     return;
   }

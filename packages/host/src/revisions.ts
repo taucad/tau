@@ -723,7 +723,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       if (credential === undefined) {
         return;
       }
-      const { direction, outcome, durationMilliseconds, lagMilliseconds, pending } = attempt;
+      const { direction, outcome, durationMilliseconds, lagMilliseconds, lagSince, pending } = attempt;
       /* async-iife: bootstrap -- telemetry is best effort and never fails a sync. */
       void (async (): Promise<void> => {
         try {
@@ -740,6 +740,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
                     outcome,
                     placement,
                     ...(lagMilliseconds === undefined ? {} : { lagMilliseconds }),
+                    ...(lagSince === undefined ? {} : { lagSince }),
                     ...(pending === undefined ? {} : { pending }),
                   },
                 },

@@ -85,6 +85,7 @@ const diagnosticToWire = (diagnostic: ts.Diagnostic): TypeScriptDiagnostic => ({
 /** One editor-independent TypeScript language service for a project session. */
 export class TypeScriptProjectService {
   private readonly openFiles = new Map<string, OpenFile>();
+  private readonly moduleAliases = new Map<string, string>();
   private readonly extraFiles = new Map<string, ExtraFile>();
   private readonly projectFiles = new Set<string>();
   private readonly libraries: Map<string, string>;
@@ -117,10 +118,59 @@ export class TypeScriptProjectService {
       readFile: (path) => this.textOf(path),
       directoryExists: (path) => this.directoryExists(path),
       getDirectories: (path) => this.getDirectories(path),
+      resolveModuleNames: (names, containingFile) =>
+        names.map((name) => {
+          const alias = this.moduleAliases.get(name);
+          return alias
+            ? {
+                resolvedFileName: alias,
+                extension: alias.endsWith('.d.mts')
+                  ? ts.Extension.Dmts
+                  : alias.endsWith('.d.cts')
+                    ? ts.Extension.Dcts
+                    : ts.Extension.Dts,
+              }
+            : ts.resolveModuleName(name, containingFile, this.options, this.host).resolvedModule;
+        }),
       useCaseSensitiveFileNames: () => true,
       getNewLine: () => '\n',
     };
     this.service = ts.createLanguageService(this.host, ts.createDocumentRegistry(true, '/'));
+  }
+
+  public setModuleAlias(specifier: string, uri: string): void {
+    const path = toPath(uri);
+    if (this.moduleAliases.get(specifier) !== path) {
+      this.moduleAliases.set(specifier, path);
+      this.service.cleanupSemanticCache();
+    }
+  }
+
+  public declarationImports(
+    text: string,
+  ): Array<{ name: string; from: number; to: number; reference?: 'path' | 'types' }> {
+    const info = ts.preProcessFile(text, true, true);
+    return [
+      ...info.importedFiles.map((ref) => ({ name: ref.fileName, from: ref.pos + 1, to: ref.end + 1 })),
+      ...info.referencedFiles.map(
+        (ref) =>
+          ({
+            name: ref.fileName,
+            from: ref.pos,
+            to: ref.end,
+            reference: 'path',
+          }) as const,
+      ),
+      ...info.typeReferenceDirectives.map(
+        (ref) =>
+          ({
+            name: ref.fileName,
+            from: ref.pos,
+            to: ref.end,
+            reference: 'types',
+          }) as const,
+      ),
+    ];
   }
 
   public open(uri: string, text: string, version: number): void {

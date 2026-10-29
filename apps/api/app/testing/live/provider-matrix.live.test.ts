@@ -66,7 +66,7 @@ const vertexModelIds = Object.values(modelList.vertexai)
 const matrixModelIds: readonly string[] = [
   ...vertexModelIds,
   'anthropic-claude-sonnet-5.5',
-  'openai-gpt-5.6-luna',
+  'openai-gpt-6.1-terra',
   'xai-grok-4.7',
 ];
 

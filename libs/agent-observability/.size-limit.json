@@ -1,0 +1,7 @@
+[
+  {
+    "name": "Shared contract and native adapter",
+    "path": "dist/**/*.mjs",
+    "limit": "100 kB"
+  }
+]

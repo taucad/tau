@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fetchDictationStatus, transcribeDictation } from '#components/dictation/dictation-client.js';
+import { SilentDictationError, dictationMessages } from '#components/dictation/dictation-errors.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- environment module shape
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test' } }));
@@ -90,24 +91,49 @@ describe('transcribeDictation', () => {
     }
   });
 
-  it('should surface the API refusal, a streamed error and a truncated stream', async () => {
+  it('should word API refusals, streamed errors and truncated streams without technical detail', async () => {
     vi.stubGlobal(
       'fetch',
       vi
         .fn<typeof fetch>()
         .mockResolvedValueOnce(Response.json({ error: 'Dictation is not configured on this server.' }, { status: 503 }))
-        .mockResolvedValueOnce(ndjson('{"type":"error","message":"Transcription stopped unexpectedly."}\n'))
+        .mockResolvedValueOnce(
+          Response.json({ error: 'The recording could not be transcribed. Try recording again.' }, { status: 503 }),
+        )
+        .mockResolvedValueOnce(Response.json({ error: 'Unauthorized' }, { status: 401 }))
+        .mockResolvedValueOnce(Response.json({ error: 'Payload Too Large' }, { status: 413 }))
+        .mockResolvedValueOnce(Response.json({ error: 'Send the recording as audio/wav.' }, { status: 400 }))
+        .mockResolvedValueOnce(new Response('<html>Bad gateway</html>', { status: 502 }))
+        .mockResolvedValueOnce(ndjson('{"type":"error","message":"Upstream exploded: ECONNRESET"}\n'))
+        .mockResolvedValueOnce(ndjson('{"type":"surprise"}\n'))
         .mockResolvedValueOnce(ndjson('{"type":"delta","text":"Build"}\n')),
     );
+    const transcribe = async () => transcribeDictation(wav, { signal, onPreview: vi.fn() });
 
-    await expect(transcribeDictation(wav, { signal, onPreview: vi.fn() })).rejects.toThrow(
-      'Dictation is not configured on this server.',
+    for (const message of [
+      dictationMessages.serviceUnavailable,
+      dictationMessages.transcriptionFailed,
+      dictationMessages.sessionExpired,
+      dictationMessages.recordingTooLong,
+      dictationMessages.transcriptionFailed,
+      dictationMessages.serviceUnavailable,
+      dictationMessages.transcriptionStopped,
+      dictationMessages.transcriptionFailed,
+      dictationMessages.transcriptionUnfinished,
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- Responses are consumed in order.
+      await expect(transcribe()).rejects.toThrow(message);
+    }
+  });
+
+  it('should end quietly when another tab is already transcribing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(Response.json({ error: 'A dictation is already being transcribed.' }, { status: 429 })),
     );
-    await expect(transcribeDictation(wav, { signal, onPreview: vi.fn() })).rejects.toThrow(
-      'Transcription stopped unexpectedly.',
-    );
-    await expect(transcribeDictation(wav, { signal, onPreview: vi.fn() })).rejects.toThrow(
-      'Transcription ended before it finished.',
-    );
+
+    await expect(transcribeDictation(wav, { signal, onPreview: vi.fn() })).rejects.toBeInstanceOf(SilentDictationError);
   });
 });

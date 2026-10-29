@@ -1,9 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
+import type { Page } from 'playwright';
 
 export const stagingOrigin = 'https://taucad.dev';
 export const productionOrigin = 'https://tau.new';
 export const harnessPath = '/__debug/observability';
+
+/**
+ * How long one harness navigation may take. The harness boots the runtime kernel and the PostHog
+ * extension bundles before `load`, which has been measured past Playwright's 30 s default on both
+ * CI and a local run; the suite's other waits already allow 120 s.
+ */
+export const harnessNavigationTimeout = 120_000;
 
 /** One correlation id per failure, browser and consent decision. */
 export function createObservabilityRunId(): string {
@@ -21,6 +29,70 @@ export function observabilityUrl(runId: string, trigger?: string): string {
   }
   return url.href;
 }
+
+/** Fixed categories only: paths, query values and foreign origins never reach diagnostics. */
+export const observabilityRequestKind = (address: string): string => {
+  const url = new URL(address);
+  if (url.origin === stagingOrigin) {
+    if (url.pathname === harnessPath) {
+      return 'document';
+    }
+    if (url.pathname === '/api/monitoring') {
+      return 'monitoring';
+    }
+    if (url.pathname.startsWith('/api/ph/')) {
+      return 'posthog';
+    }
+  }
+  if (url.origin === 'https://api.taucad.dev' && url.pathname === '/v1/__debug/observability/failure') {
+    return 'api-failure';
+  }
+  return 'other';
+};
+
+/** Record bounded counts and envelope ids even when navigation or an assertion fails. */
+export const observeHarnessPage = (page: Page, runId: string): void => {
+  observabilityUrl(runId);
+  const counts: Record<string, number> = {};
+  const eventIds = new Set<string>();
+  const count = (key: string): void => {
+    counts[key] = (counts[key] ?? 0) + 1;
+  };
+  console.info('Harness observation started', { runId });
+  page.on('pageerror', () => {
+    count('pageErrors');
+  });
+  page.on('requestfailed', (request) => {
+    count(`${observabilityRequestKind(request.url())}:failed`);
+  });
+  page.on('response', (response) => {
+    count(`${observabilityRequestKind(response.url())}:status:${String(response.status())}`);
+  });
+  page.on('request', (request) => {
+    const kind = observabilityRequestKind(request.url());
+    count(`${kind}:requests`);
+    if (kind !== 'monitoring' || eventIds.size >= 20) {
+      return;
+    }
+    try {
+      const header: unknown = JSON.parse(request.postData()?.split('\n')[0] ?? '{}');
+      if (
+        typeof header === 'object' &&
+        header !== null &&
+        'event_id' in header &&
+        typeof header.event_id === 'string' &&
+        /^[\da-f]{32}$/u.test(header.event_id)
+      ) {
+        eventIds.add(header.event_id);
+      }
+    } catch {
+      count('monitoring:unreadableHeader');
+    }
+  });
+  page.once('close', () => {
+    console.info('Harness observation finished', { runId, counts, eventIds: [...eventIds] });
+  });
+};
 
 type PollOptions = {
   token: string;
@@ -74,8 +146,11 @@ export async function pollSentryEventIds({
   url.searchParams.set('field', 'id');
   url.searchParams.set('statsPeriod', '1h');
   const deadline = Date.now() + pollTimeout;
+  let attempts = 0;
+  let lastStatus = 0;
   // oxlint-disable no-await-in-loop -- Polls are sequential and share one bounded deadline.
   while (Date.now() < deadline) {
+    attempts += 1;
     const response = await fetchEvents(url, {
       headers: { authorization: `Bearer ${token}` },
       redirect: 'error',
@@ -83,6 +158,7 @@ export async function pollSentryEventIds({
     }).catch(() => {
       throw new Error('Sentry event query failed without exposing response details');
     });
+    lastStatus = response.status;
     if (!response.ok && response.status !== 429 && response.status < 500) {
       throw new Error(`Sentry event query refused (HTTP ${response.status})`);
     }
@@ -92,11 +168,13 @@ export async function pollSentryEventIds({
       });
       const ids = readEventIds(body);
       if (ids.length > 0) {
+        console.info('Sentry run indexed', { runId, attempts, count: new Set(ids).size });
         return [...new Set(ids)];
       }
     }
     await sleep(Math.min(pollInterval, Math.max(0, deadline - Date.now())));
   }
   // oxlint-enable no-await-in-loop
+  console.info('Sentry run not indexed', { runId, attempts, lastStatus });
   throw new Error('Sentry event query exceeded its bounded observation window');
 }

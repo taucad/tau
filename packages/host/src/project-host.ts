@@ -12,7 +12,7 @@ import { realpath } from 'node:fs/promises';
 import { isAbsolute, relative } from 'node:path';
 
 import { followChat, unsettledAttempts } from '@taucad/agent-host';
-import type { ChatLedger, ToolRegistry, TurnAttemptKey, TurnPlacementPort } from '@taucad/agent-host';
+import type { ChatLedger, OwnRowsRead, ToolRegistry, TurnAttemptKey, TurnPlacementPort } from '@taucad/agent-host';
 import { createAgentLauncher } from '@taucad/agent-host/launcher';
 import { chatIdSchema } from '@taucad/agent-host/wire';
 import type { AgentLauncher, AgentLauncherOptions } from '@taucad/agent-host/launcher';
@@ -107,6 +107,16 @@ export type ProjectHostOptions = Pick<
           checkouts: ShellCheckouts,
           chatOfRun: (runId: string) => string | undefined,
         ) => HostToolRegistryOptions['shell'])
+      | undefined;
+    /**
+     * Observe the chats this host leads (agent observability, T11): given the host's own-row read, answer the hook the
+     * launcher calls each time a chat goes quiescent or stops being so, and a close the host calls when it closes. It
+     * must not throw and never affects a run. Absent, nothing observes.
+     */
+    observeChats?:
+      | ((
+          read: OwnRowsRead,
+        ) => Readonly<{ onChatQuiescent: (chatId: string, quiescent: boolean) => void; close: () => void }>)
       | undefined;
     /**
      * W8 TS-S4: build this project's placement port. Every attempt is placed and settled through it and runs on its
@@ -474,8 +484,13 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
       ? undefined
       : createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry: toolRegistry, workspaceRoot });
 
+  /* Reads only on quiescence, by which time the launcher exists. */
+  const observer = options.observeChats?.(async (input) => launcher.host.readEvents(input));
   const launcher = createAgentLauncher({
     chats: createNodeChatStore({ workspaceRoot }),
+    onChatQuiescent: (chatId, quiescent) => {
+      observer?.onChatQuiescent(chatId, quiescent);
+    },
     /*
      * The record device this project's chat segments sync under, read once the store has opened: an external turn's
      * session is this device's, whatever its host id. Never the machine's name, which a rename changes, two machines
@@ -531,6 +546,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
         failures.push(error);
       }
     };
+    observer?.close();
     await settle(async () => launcher.close());
     /* After the launcher: its attempts are settled, so the tree records what is on disk and stops. */
     await settle(async () => revisions.release());

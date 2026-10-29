@@ -44,6 +44,12 @@ const createConfig = (
           },
         }),
       }),
+      // Agent-evidence erasure: the owned-project read, then one transaction per subject.
+      select: () => ({ from: () => ({ where: async () => [] }) }),
+      transaction: async () => {
+        order.push('evidence');
+        return { erasureId: 'eve_test', fenced: 0, traces: 0 };
+      },
     },
   } as unknown as DatabaseService;
   const configService = {
@@ -261,7 +267,7 @@ describe('getBetterAuthConfig abuse gates', () => {
        `purge_after`, so the real deletion weeks later inherits a window that has
        already run down. The closure deletes no bytes, so writing first bought
        nothing. */
-    expect(order).toStrictEqual(['closure', 'cloudHosts', 'tombstone']);
+    expect(order).toStrictEqual(['closure', 'cloudHosts', 'tombstone', 'evidence']);
     /* W10 a4: the account's cloud hosts stop before the cascade takes their rows. */
     expect(cloudHosts.retireCloudHosts).toHaveBeenCalledWith(user.id);
     expect(writes).toHaveLength(1);

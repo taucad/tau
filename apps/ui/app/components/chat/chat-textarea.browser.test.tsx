@@ -388,8 +388,10 @@ describe('dictation recording and transcription', () => {
       expect(cancelRecording.getBoundingClientRect().right).toBeLessThanOrEqual(
         stopRecording.getBoundingClientRect().left,
       );
+      // Dictating offers Send even while a turn streams, so the pill's stop square is the only stop.
+      expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
       expect(stopRecording.getBoundingClientRect().right).toBeLessThanOrEqual(
-        screen.getByRole('button', { name: status === 'streaming' ? 'Stop' : 'Send' }).getBoundingClientRect().left,
+        screen.getByRole('button', { name: 'Send' }).getBoundingClientRect().left,
       );
       expect(screen.getByRole('button', { name: 'Add' })).toBeVisible();
       expect(containerReference.current!.scrollWidth).toBe(containerReference.current!.clientWidth);

@@ -50,6 +50,15 @@ describe('recordErrorDetails', () => {
 });
 
 describe('applyErrorDetails', () => {
+  it('should retain reporter context fields beside SDK fields, with SDK values winning conflicts', () => {
+    const error = recordErrorDetails(new Error('failure'), {
+      contexts: { react: { componentStack: 'Panel', version: 'recorded' } },
+    });
+    const event = { ...exceptionEvent(), contexts: { react: { version: 'sdk' } } };
+    expect(applyErrorDetails(event, error).contexts).toEqual({ react: { componentStack: 'Panel', version: 'sdk' } });
+    expect(event.contexts).toEqual({ react: { version: 'sdk' } });
+  });
+
   it('should return the same event when the error carries nothing', () => {
     const event = exceptionEvent();
 

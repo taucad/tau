@@ -7,6 +7,8 @@ import { parseDesktopAcceptanceReceipt, parseDesktopArtifactManifest } from '#sh
 import type { DesktopAcceptanceReceipt } from '#shared/desktop-release.js';
 /* oxlint-disable no-restricted-imports -- Share the installed runner's trusted source admission and the publication gate's exact Mac-only candidate shape. */
 import { desktopCandidateRoutes } from './desktop-route-publication.mjs';
+import { fetchInstallerCandidate } from './fetch-desktop-installer-candidate.mjs';
+import { usesQualificationBinding, createQualificationBinding } from './qualification-binding.mjs';
 import { assertQualificationSource } from './qualification-candidates.mjs';
 /* oxlint-enable no-restricted-imports */
 
@@ -136,16 +138,27 @@ const main = async (): Promise<void> => {
   if (JSON.stringify([...directories].sort()) !== JSON.stringify(expected)) {
     throw new Error('Qualification artifact directories differ from the complete host matrix');
   }
+  const kind = z.enum(['ci', 'vm']).parse(process.env['TAU_DESKTOP_ACCEPTANCE_KIND'] ?? 'ci');
+  const candidateProvenance =
+    kind === 'ci'
+      ? await fetchInstallerCandidate({
+          runId: required('TAU_INSTALLER_CANDIDATE_RUN_ID'),
+          workflowCommit: required('GITHUB_SHA'),
+          scope,
+          directory: 'out/qualification-candidate',
+        })
+      : undefined;
   const candidate = parseDesktopArtifactManifest(await readJson('out/qualification-candidate/desktop-artifacts.json'));
   assertQualificationSource({
     sourceCommit: candidate.sourceCommit,
     workflowCommit: required('GITHUB_SHA'),
     scope,
     channel: required('TAU_QUALIFICATION_CHANNEL'),
+    kind,
   });
   const result = collectQualificationRows({
     scope,
-    kind: z.enum(['ci', 'vm']).parse(process.env['TAU_DESKTOP_ACCEPTANCE_KIND'] ?? 'ci'),
+    kind,
     candidate,
     sourceCommit: candidate.sourceCommit,
     channel: required('TAU_QUALIFICATION_CHANNEL'),
@@ -174,6 +187,18 @@ const main = async (): Promise<void> => {
     ),
   });
   await mkdir('out/qualification-receipts', { recursive: false });
+  if (usesQualificationBinding(scope, candidate.channel, kind)) {
+    if (!candidateProvenance) {
+      throw new Error('Missing authenticated CI candidate');
+    }
+    const binding = createQualificationBinding({
+      manifest: candidate,
+      candidate: candidateProvenance,
+      workflowCommit: required('GITHUB_SHA'),
+      runId: Number(required('GITHUB_RUN_ID')),
+    });
+    await writeFile('out/qualification-receipts/qualification-binding.json', JSON.stringify(binding), { flag: 'wx' });
+  }
   await writeFile('out/qualification-receipts/host-matrix.json', JSON.stringify(result.hostMatrix, undefined, 2), {
     flag: 'wx',
   });

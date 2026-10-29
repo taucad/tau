@@ -11,6 +11,8 @@ import type {
   ModelInvocationService,
 } from '#api/llm/model-invocation.types.js';
 import { modelInvocationServiceKey } from '#api/llm/model-invocation.types.js';
+import { ModelInvocationEvidenceRecorder } from '#api/agent-observability/model-invocation-recorder.service.js';
+import { ObservedModelInvocationService } from '#api/agent-observability/model-invocation-observer.js';
 import type { BillingEnvironment } from '#api/billing/credit-ledger.types.js';
 import type { Environment } from '#config/environment.config.js';
 
@@ -40,7 +42,21 @@ export class ModelInvocationModule {
       global: true,
       module: ModelInvocationModule,
       imports: options.tauCloudEnabled ? [BillingModule] : [ModelModule],
-      providers: [implementation, { provide: modelInvocationServiceKey, useExisting: implementation }],
+      providers: [
+        implementation,
+        {
+          provide: modelInvocationServiceKey,
+          /* Agent-evidence capture (T07) observes whichever owner is selected; without it, the owner as is. */
+          useFactory: (
+            inner: ModelInvocationService,
+            recorder: ModelInvocationEvidenceRecorder | undefined,
+          ): ModelInvocationService =>
+            recorder === undefined
+              ? inner
+              : new ObservedModelInvocationService(inner, recorder, { admits: options.tauCloudEnabled }),
+          inject: [implementation, { token: ModelInvocationEvidenceRecorder, optional: true }],
+        },
+      ],
       exports: [modelInvocationServiceKey],
     };
   }

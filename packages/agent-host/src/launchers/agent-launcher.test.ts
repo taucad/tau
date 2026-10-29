@@ -557,6 +557,67 @@ describe('createAgentLauncher', () => {
     expect(replayed.status === 'batch' && replayed.events.length > 0).toBe(true);
   });
 
+  it('tells its owner when a chat it leads goes quiescent, once the run is settled', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-node-launcher-'));
+    roots.push(workspaceRoot);
+    const quiescence: Array<readonly [string, boolean]> = [];
+    const fetchImplementation = scriptedGateway();
+    launcher = createNodeLauncher({
+      workspaceRoot,
+      model,
+      systemPrompt: 'You are Tau.',
+      toolRegistry: emptyTools,
+      modelTransport: createTauCloudGatewayModelTransport({
+        baseUrl: 'https://gateway.example',
+        model,
+        auth: () => 'daemon-bearer',
+        fetch: fetchImplementation,
+      }),
+      onChatQuiescent: (chatId, quiescent) => {
+        quiescence.push([chatId, quiescent]);
+      },
+    });
+
+    await start(launcher, { chatId: 'chat-1', runId: 'run-1' });
+    await settle(launcher, 'chat-1');
+    await vi.waitFor(() => {
+      expect(quiescence.at(-1)).toEqual(['chat-1', true]);
+    });
+
+    expect(quiescence).toContainEqual(['chat-1', false]);
+  });
+
+  it('settles a run although its quiescence observer throws', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-node-launcher-'));
+    roots.push(workspaceRoot);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    launcher = createNodeLauncher({
+      workspaceRoot,
+      model,
+      systemPrompt: 'You are Tau.',
+      toolRegistry: emptyTools,
+      modelTransport: createTauCloudGatewayModelTransport({
+        baseUrl: 'https://gateway.example',
+        model,
+        auth: () => 'daemon-bearer',
+        fetch: scriptedGateway(),
+      }),
+      onChatQuiescent: () => {
+        throw new Error('observer failed');
+      },
+    });
+
+    await start(launcher, { chatId: 'chat-1', runId: 'run-1' });
+    await settle(launcher, 'chat-1');
+
+    await vi.waitFor(() => {
+      expect(logged).toHaveBeenCalledWith('[agent-launcher] a quiescence observer threw', 'chat-1', expect.any(Error));
+    });
+    await launcher.close();
+    launcher = undefined;
+    logged.mockRestore();
+  });
+
   /*
    * A second `start` on a chat that already has an admitted run is a refusal,
    * not a second run, and it names the run in the way.
@@ -913,13 +974,16 @@ describe('createAgentLauncher', () => {
     expect(log).toContain('"type":"interrupt.recorded"');
     expect(log).toContain('"phase":"requested"');
 
-    const resolved = await host.execute({
-      type: 'resolve-interrupt',
-      commandId: 'cmd-resolve',
-      payload: { chatId: 'chat-2', runId: 'run-2', interruptId: 'int-1', outcome: 'denied', optionId: 'reject' },
+    // A durable pause can precede driver settlement. CHAT_RUN_LIVE is a retryable, non-applied answer.
+    await vi.waitFor(async () => {
+      const resolved = await host.execute({
+        type: 'resolve-interrupt',
+        commandId: 'cmd-resolve',
+        payload: { chatId: 'chat-2', runId: 'run-2', interruptId: 'int-1', outcome: 'denied', optionId: 'reject' },
+      });
+      // Answered only once the resolution row is durable (SC-R9).
+      expect(resolved).toMatchObject({ status: 'applied', effect: 'durable' });
     });
-    // Answered only once the resolution row is durable (SC-R9).
-    expect(resolved).toMatchObject({ status: 'applied', effect: 'durable' });
     expect(await host.pendingInterrupts('run-2')).toEqual([]);
     const after = await readFile(join(currentRoot(), '.tau', 'chats', 'chat-2', 'events.jsonl'), 'utf8');
     expect(after).toContain('"phase":"resolved"');

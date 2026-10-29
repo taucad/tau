@@ -17,7 +17,7 @@ supported-markers = [
 [manifest]
 constraints = [
     { name = "numpy", specifier = "==2.5.2" },
-    { name = "smlibpy", specifier = "==0.3.5" },
+    { name = "smlibpy", specifier = "==0.6.2" },
 ]
 
 [[package]]
@@ -38,17 +38,17 @@ wheels = [
 
 [[package]]
 name = "smlibpy"
-version = "0.3.5"
+version = "0.6.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9a/8b/d375336964c54bcea01a31d2686837349d69fdacf94e4c3abb763cceb95f/smlibpy-0.3.5.tar.gz", hash = "sha256:a7b7ef62caf0689dc3398fdf3ab7e15e1401291ef13586f7d18cf99282e06217", size = 13326795, upload-time = "2026-10-17T19:11:18.425Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f6/8d/528c7f88c5d5b53fe69f988b423250b91f9f634151a73a5be8045be68634/smlibpy-0.6.2.tar.gz", hash = "sha256:be2a9a6ee3b1b4e439565db6dfd2843e2c950261c58e04f006224b7b01a34bde", size = 18387154, upload-time = "2026-10-28T04:07:29.718Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/95/94/3a1cce022396b3839c97e4da111094c74fc77c9b90ca9108ba7b5a83f010/smlibpy-0.3.5-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:fab69bd6f69724ee882aa8e6f4300e1170df76d54d6f7e758ea925ca828f65f1", size = 6667795, upload-time = "2026-10-17T19:11:02.346Z" },
-    { url = "https://files.pythonhosted.org/packages/82/3d/a5c9861f4e51c883b3f1fbf374f557f19263ccf6df2875ae5df23cd996d7/smlibpy-0.3.5-cp313-cp313-macosx_11_0_x86_64.whl", hash = "sha256:f6f2fe5cd8c4384d026374707783bea7df0834789c6e31e26514b1154da3a639", size = 7242047, upload-time = "2026-10-17T19:11:04.444Z" },
-    { url = "https://files.pythonhosted.org/packages/e9/cb/aeb41cd6c9ba2f78fc78bab729348fcb53ef4d638aae1f8b5a11a57bf3eb/smlibpy-0.3.5-cp313-cp313-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:695ca595f42d86d3e9788201e79af36b371dc5cf9f08fa07c1fbf453ee02fcb3", size = 8025067, upload-time = "2026-10-17T19:11:06.306Z" },
-    { url = "https://files.pythonhosted.org/packages/8e/38/92b5eb0cca60f97345a202aec5c977ec7b771d9459834869626e4b01815a/smlibpy-0.3.5-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:a65f37208d3665f894ee4ddac34d6e57be8daf8c54c274441f54769fda9b866f", size = 8793054, upload-time = "2026-10-17T19:11:08.164Z" },
+    { url = "https://files.pythonhosted.org/packages/f8/63/be80cb9af19aaec4add61a02f8ae836fddd6d1ffc6fa6b793fa31756c419/smlibpy-0.6.2-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:cb4c08d14be89cabfb0d437e7e1a799e97335f4cf46271b820b070982ac982ec", size = 8315609, upload-time = "2026-10-28T04:06:55.744Z" },
+    { url = "https://files.pythonhosted.org/packages/ea/48/17ff5eda9475fa1d49ef08b30a26416216e6565d8a49fa9b883c7a496cad/smlibpy-0.6.2-cp313-cp313-macosx_11_0_x86_64.whl", hash = "sha256:dfe1dbea8e9ba13a02d73a5840b7bc868e789724b047441f5aa4d0a84908afe7", size = 9075530, upload-time = "2026-10-28T04:06:58.029Z" },
+    { url = "https://files.pythonhosted.org/packages/d7/27/b77b7e16210e20177713a1af23271f72760028c8c4ff8a827c2c0cbeb0aa/smlibpy-0.6.2-cp313-cp313-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:b378a4a67fea4266b9166123ae808b10bae29d559a515587ecb70602d02e211a", size = 9832961, upload-time = "2026-10-28T04:07:00.689Z" },
+    { url = "https://files.pythonhosted.org/packages/3b/a4/c3b55d7c4b740c5353561cd9343a95ddd4fbea0ed8f5e94962682925a914/smlibpy-0.6.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:c5ce1917ee972910038067f5844bd2aa8418953df3027019dfb641a8191bbefd", size = 10720185, upload-time = "2026-10-28T04:07:03.844Z" },
 ]
 
 [[package]]
@@ -63,5 +63,5 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "numpy", specifier = "==2.5.2" },
-    { name = "smlibpy", specifier = "==0.3.5" },
+    { name = "smlibpy", specifier = "==0.6.2" },
 ]

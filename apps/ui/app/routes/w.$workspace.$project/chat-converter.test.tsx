@@ -25,7 +25,11 @@ import type { ParameterSetService } from '#services/parameter-set-service.js';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
 import { toast } from '#components/ui/sonner.js';
 
-vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
+vi.mock('#hooks/use-project-availability.js', () => ({
+  useProjectAvailability: () => 'ready',
+  useModelAvailability: () => 'ready',
+  useLargeObjectPending: () => false,
+}));
 
 vi.mock('#machines/await-fresh-render.js', () => ({ awaitFreshRender: vi.fn() }));
 

@@ -250,7 +250,72 @@ describe('SelectWidget', () => {
       render(<SelectWidget {...props} />);
 
       const trigger = screen.getByRole('combobox');
-      expect(trigger).toHaveTextContent('wood');
+      expect(trigger).toHaveTextContent('Wood');
+    });
+
+    it('should capitalise raw string labels in the trigger and options while emitting the raw value', async () => {
+      Element.prototype.scrollIntoView = vi.fn();
+      Element.prototype.hasPointerCapture = vi.fn(() => false);
+      Element.prototype.setPointerCapture = vi.fn();
+      Element.prototype.releasePointerCapture = vi.fn();
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      const presets = ['low', 'medium', 'high', 'extra-high'].map((value) => ({ value, label: value }));
+      render(
+        <SelectWidget
+          {...createWidgetProps({ value: 'medium', schema: stringSchema, options: { enumOptions: presets }, onChange })}
+        />,
+      );
+
+      expect(screen.getByRole('combobox')).toHaveTextContent('Medium');
+      await user.click(screen.getByRole('combobox'));
+      expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+        'Low',
+        'Medium',
+        'High',
+        'Extra-high',
+      ]);
+      await user.click(screen.getByRole('option', { name: 'High' }));
+      expect(onChange).toHaveBeenCalledWith('high');
+    });
+
+    it.each([
+      ['y-up', 'Y-up'],
+      ['meter', 'Meter'],
+      ['+z', '+z'],
+      ['-y', '-y'],
+    ])('should display the raw value %s as %s', (value, label) => {
+      render(
+        <SelectWidget
+          {...createWidgetProps({ value, schema: stringSchema, options: { enumOptions: [{ value, label: value }] } })}
+        />,
+      );
+
+      expect(screen.getByRole('combobox')).toHaveTextContent(label);
+    });
+
+    it('should keep explicit titles and enum names verbatim', () => {
+      const { rerender } = render(
+        <SelectWidget
+          {...createWidgetProps({
+            value: 'mm',
+            schema: stringSchema,
+            options: { enumOptions: [{ value: 'mm', label: 'mm', schema: { const: 'mm', title: 'mm' } }] },
+          })}
+        />,
+      );
+      expect(screen.getByRole('combobox')).toHaveTextContent('mm');
+
+      rerender(
+        <SelectWidget
+          {...createWidgetProps({
+            value: 'mm',
+            schema: stringSchema,
+            options: { enumOptions: [{ value: 'mm', label: 'millimetre' }] },
+          })}
+        />,
+      );
+      expect(screen.getByRole('combobox')).toHaveTextContent('millimetre');
     });
   });
 
@@ -579,7 +644,7 @@ describe('composite fields', () => {
     expect(screen.getByLabelText('Parameter: Preset').closest('[data-slot="parameter-field"]')).toHaveTextContent(
       'Quality preset derived from the shape bounding-box diagonal',
     );
-    expect(screen.getByRole('combobox', { name: 'Select for Preset' })).toHaveTextContent('high');
+    expect(screen.getByRole('combobox', { name: 'Select for Preset' })).toHaveTextContent('High');
     expect(typeRow?.contains(screen.getByLabelText('Parameter: Preset'))).toBe(false);
   });
 

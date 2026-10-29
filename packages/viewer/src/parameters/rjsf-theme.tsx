@@ -761,6 +761,22 @@ const ParameterArrayList = memo(function ParameterArrayList({
   );
 });
 
+/**
+ * An option's display label. A string value shown as itself, with no title and no distinct `ui:enumNames` entry,
+ * starts with a capital letter (`extra-high` reads `Extra-high`, `+z` stays `+z`); the option's value is unchanged.
+ *
+ * @param option - RJSF's enum option.
+ * @returns The label to show.
+ */
+const formatOptionLabel = (option: {
+  readonly label: string;
+  readonly value: unknown;
+  readonly schema?: RJSFSchema;
+}): string =>
+  typeof option.value === 'string' && option.label === option.value && option.schema?.title === undefined
+    ? option.label.replace(/^\p{L}/u, (letter) => letter.toUpperCase())
+    : String(option.label);
+
 // Custom Select Widget for Enums
 function SelectWidget(props: WidgetProps): React.ReactNode {
   const { id, options, onChange, onBlur, onFocus, placeholder, name, disabled, readonly, autofocus } = props;
@@ -806,7 +822,7 @@ function SelectWidget(props: WidgetProps): React.ReactNode {
         {
           options: enumOptions.map((option) => ({
             value: String(option.value),
-            label: String(option.label),
+            label: formatOptionLabel(option),
             // oxlint-disable-next-line @typescript-eslint/no-unsafe-argument -- value is untyped in RJSF
             disabled: enumDisabled?.includes(option.value),
           })),

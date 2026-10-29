@@ -2,9 +2,8 @@ import { useState, useCallback, useEffect } from 'react';
 import { Plus } from 'lucide-react';
 import { resolveStorageRootKey } from '@taucad/filesystem/storage-root-key';
 import { Button } from '@taucad/ui/components/button';
-import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { Loader } from '@taucad/ui/components/loader';
-import { SettingsSectionCard } from '#components/settings/settings-item.js';
+import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
 import { WorkspaceDirectoryPanel } from '#components/filesystem/workspace-directory-panel.js';
 import {
   checkHandlePermission,
@@ -319,37 +318,23 @@ export function WorkspaceConnections({
     return undefined;
   }
   return (
-    <SettingsSectionCard>
-      <CardHeader className='flex flex-row items-center justify-between gap-2'>
-        <CardTitle>Workspaces</CardTitle>
-        <Button
-          size='sm'
-          variant='outline'
-          disabled={isAddingWorkspace || busyWorkspaceId !== undefined}
-          onClick={handleAddWorkspace}
-        >
-          <Plus />
-          Add workspace
-        </Button>
-      </CardHeader>
-      <CardContent className='flex flex-col gap-3'>
-        <p className='text-sm text-muted-foreground'>
-          Connected workspaces are folders on your disk. Choose one from the new-project location picker when you do not
-          want to use Home.
-        </p>
-        <p className='text-xs text-muted-foreground'>Disconnecting stops access to a workspace. Files stay on disk.</p>
-        {errorMessage ? (
-          <p role='alert' className='text-sm'>
-            {errorMessage}
-          </p>
-        ) : undefined}
-        {message ? (
-          <p role='status' className='text-sm'>
-            {message}
-          </p>
-        ) : undefined}
+    <div className='flex flex-col gap-3'>
+      <SettingsGroup
+        title='Workspaces'
+        action={
+          <Button
+            size='sm'
+            variant='outline'
+            disabled={isAddingWorkspace || busyWorkspaceId !== undefined}
+            onClick={handleAddWorkspace}
+          >
+            <Plus />
+            Add workspace
+          </Button>
+        }
+      >
         {showWorkspaceConnection ? (
-          <div role='status' aria-live='polite' className='flex items-center gap-3 rounded-md border p-3'>
+          <div role='status' aria-live='polite' className='flex items-center gap-3 py-3'>
             {workspaceConnection.phase === 'failed' ? undefined : <Loader className='size-4 shrink-0' />}
             <div className='min-w-0'>
               <div className='truncate text-sm font-medium'>{pendingWorkspaceName ?? 'Choose a workspace folder'}</div>
@@ -370,53 +355,61 @@ export function WorkspaceConnections({
           </div>
         ) : undefined}
         {isLoading ? (
-          <Loader className='size-4' />
-        ) : rows.length === 0 ? (
-          <p className='text-sm text-muted-foreground'>
-            No connected workspaces yet. Add one to store projects in a folder on your disk.
-          </p>
-        ) : (
-          <div className='flex flex-col gap-2'>
-            {rows.map((row) => {
-              const isBusyRow = busyWorkspaceId !== undefined || isAddingWorkspace;
-              const projectCountLabel = `${row.projectCount} project${row.projectCount === 1 ? '' : 's'}`;
-              const meta =
-                row.projectCount === undefined ? undefined : (
-                  <div className='flex items-center gap-2 text-xs text-muted-foreground'>
-                    <span>{projectCountLabel}</span>
-                  </div>
-                );
-              return (
-                <WorkspaceDirectoryPanel
-                  key={row.workspace.workspaceId}
-                  variant='row'
-                  workspaceId={row.workspace.workspaceId}
-                  workspaceName={row.workspace.name}
-                  status={row.status}
-                  description={row.workspace.path}
-                  isBusy={isBusyRow}
-                  onConnect={
-                    row.workspace.path === undefined
-                      ? async () => {
-                          await handleConnectChange(row.workspace.workspaceId);
-                        }
-                      : row.status === 'disconnected'
-                        ? handleAddWorkspace
-                        : undefined
-                  }
-                  onGrantAccess={async () => {
-                    await handleGrantAccess(row.workspace.workspaceId);
-                  }}
-                  onDisconnect={async () => {
-                    await handleDisconnectWorkspace(row.workspace);
-                  }}
-                  meta={meta}
-                />
-              );
-            })}
+          <div className='py-3.5'>
+            <Loader className='size-4' />
           </div>
+        ) : rows.length === 0 ? (
+          <SettingsRow title='No workspaces' description='Add a folder on your disk to keep projects there.' />
+        ) : (
+          rows.map((row) => {
+            const isBusyRow = busyWorkspaceId !== undefined || isAddingWorkspace;
+            const projectCountLabel = `${row.projectCount} project${row.projectCount === 1 ? '' : 's'}`;
+            const meta =
+              row.projectCount === undefined ? undefined : (
+                <div className='flex items-center gap-2 text-xs text-muted-foreground'>
+                  <span>{projectCountLabel}</span>
+                </div>
+              );
+            return (
+              <WorkspaceDirectoryPanel
+                key={row.workspace.workspaceId}
+                variant='row'
+                workspaceId={row.workspace.workspaceId}
+                workspaceName={row.workspace.name}
+                status={row.status}
+                description={row.workspace.path}
+                isBusy={isBusyRow}
+                onConnect={
+                  row.workspace.path === undefined
+                    ? async () => {
+                        await handleConnectChange(row.workspace.workspaceId);
+                      }
+                    : row.status === 'disconnected'
+                      ? handleAddWorkspace
+                      : undefined
+                }
+                onGrantAccess={async () => {
+                  await handleGrantAccess(row.workspace.workspaceId);
+                }}
+                onDisconnect={async () => {
+                  await handleDisconnectWorkspace(row.workspace);
+                }}
+                meta={meta}
+              />
+            );
+          })
         )}
-      </CardContent>
-    </SettingsSectionCard>
+      </SettingsGroup>
+      {errorMessage ? (
+        <p role='alert' className='text-sm'>
+          {errorMessage}
+        </p>
+      ) : undefined}
+      {message ? (
+        <p role='status' className='text-sm text-muted-foreground'>
+          {message}
+        </p>
+      ) : undefined}
+    </div>
   );
 }

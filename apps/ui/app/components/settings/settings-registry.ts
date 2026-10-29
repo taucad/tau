@@ -76,7 +76,7 @@ const settingsCatalog = [
     entries: [
       {
         id: 'profile',
-        label: 'User profile',
+        label: 'Profile',
         description: 'Change your name and avatar',
         keywords: ['picture', 'photo'],
       },
@@ -212,7 +212,7 @@ const settingsCatalog = [
         id: 'compute-reuse',
         label: 'Compute reuse',
         description: 'Choose how local CAD work reuses expensive results',
-        keywords: ['cache', 'durable', 'memory', 'off', 'inspect', 'clear', 'collect'],
+        keywords: ['cache', 'durable', 'memory', 'off', 'inspect', 'clear', 'collect', 'check size', 'free space'],
       },
       {
         id: 'tau-host',
@@ -301,24 +301,24 @@ const settingsCatalog = [
     entries: [
       {
         id: 'show-credits',
-        label: 'Show Credits',
-        description: 'Display the Tau credits charged for each message in the chat history',
+        label: 'Show credits',
+        description: 'Show the credits each message used',
         keywords: ['metadata', 'cost'],
       },
       {
         id: 'filesystem-context',
-        label: 'Filesystem',
-        description: 'Include a snapshot of the project file tree',
-        keywords: ['editor', 'context'],
+        label: 'Project files',
+        description: 'Include the project file tree',
+        keywords: ['editor', 'context', 'filesystem'],
       },
       {
         id: 'active-file',
-        label: 'Active File',
-        description: 'Include the currently focused file',
+        label: 'Active file',
+        description: 'Include the file you are editing',
         keywords: ['editor', 'context'],
       },
-      { id: 'open-tabs', label: 'Open Tabs', description: 'Include all open editor tabs', keywords: ['context'] },
-      { id: 'testing-tools', label: 'Enable Testing Tools', description: 'Allow the agent to run and edit tests' },
+      { id: 'open-tabs', label: 'Open tabs', description: 'Include every open editor tab', keywords: ['context'] },
+      { id: 'testing-tools', label: 'Testing tools', description: 'Let the agent run and edit tests' },
       {
         id: 'default-permissions',
         label: 'Default permissions',
@@ -341,14 +341,14 @@ const settingsCatalog = [
       },
       {
         id: 'browser-storage',
-        label: 'Browser Storage',
+        label: 'Browser storage',
         description: 'View Home storage usage and available space',
         keywords: ['quota', 'disk'],
       },
       {
         id: 'tau-cloud-projects',
-        label: 'Tau Cloud Projects',
-        description: 'Bring your Tau Cloud projects to this device when you sign in',
+        label: 'Tau Cloud projects',
+        description: 'Choose where your cloud projects appear when you sign in',
         keywords: ['sync', 'backup', 'download', 'materialize', 'sign in'],
       },
     ],

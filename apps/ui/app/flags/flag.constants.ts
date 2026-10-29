@@ -34,7 +34,7 @@ export const flagRegistry = {
     schema: z.boolean().default(isMachinesFeatureEnabled(ENV.TAU_MACHINES_ENABLED)),
     showInExperimental: false,
     label: 'Machines',
-    description: 'Connect machines and use the Print workbench after deployment qualification.',
+    description: 'Connect machines and use the Print workbench.',
   },
   automaticReload: {
     schema: z.boolean().default(false),
@@ -52,7 +52,7 @@ export const flagRegistry = {
     showInExperimental: true,
     schema: z.boolean().default(true),
     label: 'Prefer WebGPU',
-    description: 'Uses WebGL2 when WebGPU is unavailable or cannot start. Turn off to prefer WebGL2.',
+    description: 'Falls back to WebGL2 when WebGPU is unavailable.',
   },
   webGpuShaderStacks: {
     showInExperimental: false,
@@ -69,14 +69,14 @@ export const flagRegistry = {
   pluginsStore: {
     showInExperimental: false,
     schema: z.boolean().default(false),
-    label: 'Plugins Store',
-    description: 'Expose the plugin and skill store while it is under development.',
+    label: 'Plugin store',
+    description: 'Browse plugins and skills.',
   },
   tauDebug: {
     showInExperimental: true,
     schema: z.boolean().default(tauDebugDefault),
-    label: 'Tau Debug',
-    description: 'Enable in-app debug surfaces (e2e diagnostic panels, geometry inspectors).',
+    label: 'Debug tools',
+    description: 'Show diagnostic panels and geometry inspectors.',
   },
 } as const satisfies Record<string, FlagDefinition>;
 

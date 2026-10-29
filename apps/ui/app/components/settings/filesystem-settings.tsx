@@ -1,17 +1,17 @@
 import { useState, useEffect } from 'react';
-import { AlertCircle, HardDrive } from 'lucide-react';
-import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
-import { SettingsItem, SettingsSectionCard } from '#components/settings/settings-item.js';
+import { AlertCircle } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
+import { SettingsGroup, SettingsItem, SettingsRow } from '#components/settings/settings-item.js';
 import { WorkspaceConnections } from '#components/filesystem/workspace-connections.js';
 import { BrowserStorageStatus } from '#components/settings/browser-storage-status.js';
 import { usePersistentStorageStatus } from '#filesystem/use-persistent-storage-status.js';
-import { refreshPersistentStorageStatus } from '#filesystem/handle-store.js';
 import type { Workspace } from '#filesystem/handle-store.js';
 import { materializeOnSignIn, useMaterializeOnSignInLocation } from '#hooks/use-cloud-projects.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
 import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { formatBytes } from '#lib/format-bytes.js';
 
 export function FileSystemSettings(): React.JSX.Element {
   const persistenceStatus = usePersistentStorageStatus();
@@ -54,47 +54,30 @@ export function FileSystemSettings(): React.JSX.Element {
       {/* Desktop's Home is a folder on disk, so the origin's storage quota says nothing about it. */}
       {isDesktopTarget() ? undefined : (
         <SettingsItem settingId='browser-storage'>
-          <SettingsSectionCard>
-            <CardHeader>
-              <CardTitle>Browser storage</CardTitle>
-            </CardHeader>
-            <CardContent className='flex flex-col gap-4'>
-              {storageUsage ? (
-                <div className='flex items-center gap-3'>
-                  <HardDrive className='size-5 shrink-0 text-muted-foreground' />
-                  <div className='flex flex-1 flex-col gap-1.5'>
-                    <div className='flex items-center justify-between text-sm'>
-                      <span>{formatBytes(storageUsage.used)} used</span>
-                      <span className='text-muted-foreground'>{formatBytes(storageUsage.quota)} total</span>
-                    </div>
-                    <div className='h-2 w-full overflow-hidden rounded-full bg-muted'>
-                      <div
-                        className='h-full rounded-full bg-primary transition-all'
-                        style={{
-                          width: `${storageUsage.quota > 0 ? Math.min((storageUsage.used / storageUsage.quota) * 100, 100).toFixed(1) : 0}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
+          <SettingsGroup title='Browser storage'>
+            {storageUsage ? (
+              <SettingsRow
+                title='Space used'
+                description={`${formatBytes(storageUsage.used)} of ${formatBytes(storageUsage.quota)}`}
+              >
+                <div className='h-1.5 w-full overflow-hidden rounded-full bg-muted'>
+                  <div
+                    className='h-full rounded-full bg-primary transition-all'
+                    style={{
+                      width: `${storageUsage.quota > 0 ? Math.min((storageUsage.used / storageUsage.quota) * 100, 100).toFixed(1) : 0}%`,
+                    }}
+                  />
                 </div>
-              ) : undefined}
-              {isStorageUnderPressure ? (
-                <div className='flex items-center gap-3 rounded-md border border-warning/40 p-3'>
-                  <AlertCircle className='size-4 shrink-0 text-warning' />
-                  <p className='text-sm'>
-                    Browser storage is nearly full. Free up space or move projects to a connected workspace — writes
-                    start failing once the quota is reached.
+                {isStorageUnderPressure ? (
+                  <p className='flex items-center gap-2 text-xs'>
+                    <AlertCircle className='size-3.5 shrink-0 text-warning' aria-hidden='true' />
+                    Browser storage is nearly full. Saving fails once it runs out.
                   </p>
-                </div>
-              ) : undefined}
-              <BrowserStorageStatus
-                status={persistenceStatus}
-                onCheckStatus={() => {
-                  void refreshPersistentStorageStatus();
-                }}
-              />
-            </CardContent>
-          </SettingsSectionCard>
+                ) : undefined}
+              </SettingsRow>
+            ) : undefined}
+            <BrowserStorageStatus status={persistenceStatus} />
+          </SettingsGroup>
         </SettingsItem>
       )}
     </div>
@@ -122,47 +105,31 @@ function TauCloudProjectsSetting({ workspaces }: { readonly workspaces: readonly
   ];
   const selectedKey = selected === undefined ? 'off' : selected.kind === 'home' ? 'home' : selected.workspaceId;
   return (
-    <SettingsSectionCard aria-labelledby='tau-cloud-projects-title'>
-      <CardHeader>
-        <CardTitle id='tau-cloud-projects-title'>Tau Cloud Projects</CardTitle>
-      </CardHeader>
-      <CardContent className='flex flex-col gap-3'>
-        <p className='text-sm text-muted-foreground'>
-          When you sign in, add every project backed up on Tau Cloud to this workspace. Each one downloads the first
-          time you open it.
-        </p>
-        <fieldset className='grid gap-2 sm:grid-cols-3'>
-          <legend className='sr-only'>Workspace for Tau Cloud projects</legend>
-          {options.map((option) => (
-            <label
-              key={option.key}
-              className='flex cursor-action items-center gap-3 rounded-md border p-3 transition-colors hover:border-primary/50 hover:bg-accent/50 has-checked:border-primary has-[input:focus-visible]:focus-outline'
-            >
-              <input
-                className='accent-primary'
-                type='radio'
-                name='tau-cloud-projects-location'
-                value={option.key}
-                checked={selectedKey === option.key}
-                onChange={() => {
-                  materializeOnSignIn.set(option.location);
-                }}
-              />
-              <span className='truncate text-sm font-medium'>{option.label}</span>
-            </label>
-          ))}
-        </fieldset>
-      </CardContent>
-    </SettingsSectionCard>
+    <SettingsGroup>
+      <SettingsRow
+        title='Tau Cloud projects'
+        description='Where your cloud projects appear when you sign in.'
+        info='Each project downloads the first time you open it.'
+        control={
+          <Select
+            value={selectedKey}
+            onValueChange={(key) => {
+              materializeOnSignIn.set(options.find((option) => option.key === key)?.location);
+            }}
+          >
+            <SelectTrigger aria-label='Tau Cloud projects' className='w-40'>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {options.map((option) => (
+                <SelectItem key={option.key} value={option.key}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        }
+      />
+    </SettingsGroup>
   );
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) {
-    return '0 B';
-  }
-  const units = ['B', 'KB', 'MB', 'GB'];
-  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const value = bytes / 1024 ** exponent;
-  return `${value.toFixed(exponent === 0 ? 0 : 1)} ${units[exponent]}`;
 }

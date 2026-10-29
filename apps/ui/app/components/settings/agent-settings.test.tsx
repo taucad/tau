@@ -35,18 +35,18 @@ function renderAgentSettings(): ReturnType<typeof render> {
 
 /**
  * Switches render in this order within AgentSettings:
- * 0 - Show Model Cost
- * 1 - Filesystem
- * 2 - Active File
- * 3 - Open Tabs
- * 4 - Enable Testing Tools
+ * 0 - Show credits
+ * 1 - Testing tools
+ * 2 - Project files
+ * 3 - Active file
+ * 4 - Open tabs
  */
 const switchIndex = {
   showModelCost: 0,
-  filesystem: 1,
-  activeFile: 2,
-  openTabs: 3,
-  testing: 4,
+  testing: 1,
+  filesystem: 2,
+  activeFile: 3,
+  openTabs: 4,
 } as const;
 
 function getAllSwitches(): HTMLElement[] {
@@ -76,7 +76,7 @@ describe('AgentSettings', () => {
   it('should toggle a switch when its row text is tapped', async () => {
     renderAgentSettings();
 
-    await userEvent.click(screen.getByText('Include all open editor tabs'));
+    await userEvent.click(screen.getByText('Include every open editor tab.'));
 
     expect(mockSetIncludeOpenFiles).toHaveBeenCalledTimes(1);
     expect(mockSetIncludeOpenFiles).toHaveBeenCalledWith(false);
@@ -85,18 +85,28 @@ describe('AgentSettings', () => {
   it('should toggle a switch once when the switch itself is tapped inside its row', async () => {
     renderAgentSettings();
 
-    await userEvent.click(screen.getByRole('switch', { name: 'Open Tabs' }));
+    await userEvent.click(screen.getByRole('switch', { name: 'Open tabs' }));
 
     expect(mockSetIncludeOpenFiles).toHaveBeenCalledTimes(1);
     expect(mockSetIncludeOpenFiles).toHaveBeenCalledWith(false);
   });
 
-  it('should render all setting cards', () => {
+  it('should render all setting groups', () => {
     renderAgentSettings();
 
-    expect(screen.getByText('Metadata Display')).toBeInTheDocument();
-    expect(screen.getByText('Editor Context')).toBeInTheDocument();
-    expect(screen.getByText('Testing')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Chat' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Context' })).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Show credits' })).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Testing tools' })).toBeInTheDocument();
+  });
+
+  it('should toggle a switch when its title is tapped', async () => {
+    renderAgentSettings();
+
+    await userEvent.click(screen.getByText('Testing tools'));
+
+    expect(mockSetTestingEnabled).toHaveBeenCalledTimes(1);
+    expect(mockSetTestingEnabled).toHaveBeenCalledWith(false);
   });
 
   it('should omit obsolete image controls', () => {

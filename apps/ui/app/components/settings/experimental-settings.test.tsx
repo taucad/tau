@@ -42,15 +42,15 @@ describe('ExperimentalSettings', () => {
     render(<ExperimentalSettings />);
 
     expect(screen.getByRole('switch', { name: 'Prefer WebGPU' })).toBeChecked();
-    expect(screen.getByText(/Uses WebGL2 when WebGPU is unavailable or cannot start/)).toBeInTheDocument();
-    expect(screen.getByText('Tau Debug')).toBeInTheDocument();
+    expect(screen.getByText('Falls back to WebGL2 when WebGPU is unavailable.')).toBeInTheDocument();
+    expect(screen.getByText('Debug tools')).toBeInTheDocument();
     for (const hidden of [
       'Marketing Landing',
       'Machines',
       'Parts warehouse',
       'WebGPU shader stacks',
       'WebGPU inspector',
-      'Plugins Store',
+      'Plugin store',
     ]) {
       expect(screen.queryByText(hidden)).not.toBeInTheDocument();
     }
@@ -116,7 +116,7 @@ describe('ExperimentalSettings', () => {
   it('should toggle a flag when its row text is tapped', async () => {
     render(<ExperimentalSettings />);
 
-    await userEvent.click(screen.getByText('Tau Debug'));
+    await userEvent.click(screen.getByText('Debug tools'));
 
     expect(mockState.setFlag).toHaveBeenCalledTimes(1);
     expect(mockState.setFlag).toHaveBeenCalledWith('tauDebug', !featureFlagDefaults.tauDebug);
@@ -125,7 +125,7 @@ describe('ExperimentalSettings', () => {
   it('should toggle a flag once when the switch itself is tapped inside its row', async () => {
     render(<ExperimentalSettings />);
 
-    await userEvent.click(screen.getByRole('switch', { name: 'Tau Debug' }));
+    await userEvent.click(screen.getByRole('switch', { name: 'Debug tools' }));
 
     expect(mockState.setFlag).toHaveBeenCalledTimes(1);
     expect(mockState.setFlag).toHaveBeenCalledWith('tauDebug', !featureFlagDefaults.tauDebug);

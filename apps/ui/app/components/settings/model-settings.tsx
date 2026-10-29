@@ -53,9 +53,9 @@ export function ModelSettings(): React.JSX.Element {
         placeholder='Search models…'
       />
 
-      <div className='flex flex-col gap-2'>
-        <div className='flex items-center justify-between gap-2'>
-          <h2>Available models</h2>
+      <div className='flex flex-col gap-3'>
+        <div className='flex min-h-8 items-center justify-between gap-4'>
+          <h2 className='text-sm font-medium'>Available models</h2>
           {hasOverrides ? (
             <Button variant='link' size='sm' className='h-auto px-0' onClick={resetAvailability}>
               Reset to recommended
@@ -115,7 +115,7 @@ export function ModelSettings(): React.JSX.Element {
             setShowAll((previous) => !previous);
           }}
         >
-          {showAll ? 'Show recommended only' : 'View All Models'}
+          {showAll ? 'Show recommended only' : 'Show all models'}
         </Button>
       ) : null}
     </div>

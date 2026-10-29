@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Button } from '@taucad/ui/components/button';
-import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
-import { SettingsSectionCard } from '#components/settings/settings-item.js';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
+import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
+import { formatBytes } from '#lib/format-bytes.js';
 import { setComputeReuseMode, useComputeReuseMode } from '#lib/compute-reuse-preference.js';
 import type { ComputeReuseMode } from '#lib/compute-reuse-preference.js';
 import { useProject } from '#hooks/use-project.js';
@@ -9,15 +10,27 @@ import { useOptionalFileManager } from '#hooks/use-file-manager.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { desktopProjectRoot } from '#constants/desktop-kernel-options.js';
 
-const modes: ReadonlyArray<{ value: ComputeReuseMode; label: string; description: string }> = [
-  { value: 'durable', label: 'Saved on this device', description: 'Reuse results across sessions and restarts.' },
+const modes: ReadonlyArray<{
+  value: ComputeReuseMode;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: 'durable',
+    label: 'On this device',
+    description: 'Kept across sessions and restarts.',
+  },
   // Memory reuse lives in the kernel worker, which a heap recycle or a mode change also restarts.
   {
     value: 'memory',
-    label: 'This session only',
-    description: 'Reuse results until the project closes or its kernel restarts.',
+    label: 'This session',
+    description: 'Kept until the project closes or its kernel restarts.',
   },
-  { value: 'off', label: 'Off', description: 'Do not reuse computed results.' },
+  {
+    value: 'off',
+    label: 'Off',
+    description: 'Every change recomputes from scratch.',
+  },
 ];
 
 export function ComputeReuseSettings(): React.JSX.Element {
@@ -25,7 +38,10 @@ export function ComputeReuseSettings(): React.JSX.Element {
   const project = useProject({ enableNoContext: true });
   const fileManager = useOptionalFileManager();
   const [status, setStatus] = useState<{ projectId: string; value: string }>();
-  const [collection, setCollection] = useState<{ projectId: string; cursor: string }>();
+  const [collection, setCollection] = useState<{
+    projectId: string;
+    cursor: string;
+  }>();
   const [confirmClearProjectId, setConfirmClearProjectId] = useState<string>();
   const projectId = project?.projectId;
   const collectCursor = collection && collection.projectId === projectId ? collection.cursor : undefined;
@@ -61,10 +77,13 @@ export function ComputeReuseSettings(): React.JSX.Element {
       if (action === 'inspect' && 'entries' in result) {
         setStatus({
           projectId: project.projectId,
-          value: `${String(result.entries)} entries, ${String(result.logicalBytes)} bytes retained`,
+          value: `${formatBytes(result.logicalBytes)} cached`,
         });
       } else if (action === 'clear' && 'retained' in result) {
-        setStatus({ projectId: project.projectId, value: `Clear complete; ${String(result.retained)} bytes retained` });
+        setStatus({
+          projectId: project.projectId,
+          value: `Cleared. ${formatBytes(result.retained)} still in use.`,
+        });
         setCollection(undefined);
       } else if ('reclaimed' in result) {
         setCollection(
@@ -74,46 +93,65 @@ export function ComputeReuseSettings(): React.JSX.Element {
         );
         setStatus({
           projectId: project.projectId,
-          value: `${String(result.reclaimed)} bytes reclaimed; ${result.status === 'incomplete' ? 'more remain' : 'complete'}`,
+          value: `Freed ${formatBytes(result.reclaimed)}${result.status === 'incomplete' ? '. More can be freed.' : '.'}`,
         });
       }
     } catch (error) {
-      setStatus({ projectId: project.projectId, value: error instanceof Error ? error.message : String(error) });
+      setStatus({
+        projectId: project.projectId,
+        value: error instanceof Error ? error.message : String(error),
+      });
     }
   };
   return (
-    <SettingsSectionCard aria-labelledby='compute-reuse-title'>
-      <CardHeader>
-        <CardTitle id='compute-reuse-title'>Compute reuse</CardTitle>
-      </CardHeader>
-      <CardContent className='flex flex-col gap-4'>
-        <fieldset className='grid gap-2 lg:grid-cols-3'>
-          <legend className='sr-only'>Compute reuse mode</legend>
-          {modes.map((mode) => (
-            <label
-              key={mode.value}
-              className='flex cursor-action items-start gap-3 rounded-md border p-3 transition-colors hover:border-primary/50 hover:bg-accent/50 has-checked:border-primary has-[input:focus-visible]:focus-outline'
-            >
-              <input
-                className='mt-1 accent-primary'
-                type='radio'
-                name='compute-reuse-mode'
-                value={mode.value}
-                checked={selected === mode.value}
-                onChange={() => {
-                  setComputeReuseMode(mode.value);
-                }}
-              />
-              <span>
-                <span className='block text-sm font-medium'>{mode.label}</span>
-                <span className='text-xs text-muted-foreground'>{mode.description}</span>
-              </span>
-            </label>
-          ))}
-        </fieldset>
-        <div className='flex flex-wrap items-center gap-2 border-t pt-4'>
+    <SettingsGroup title='Compute reuse'>
+      <SettingsRow
+        title='Reuse results'
+        description='Skip recomputing CAD work that has not changed.'
+        info={
+          <dl className='space-y-1.5'>
+            {modes.map((mode) => (
+              <div key={mode.value}>
+                <dt className='font-medium'>{mode.label}</dt>
+                <dd>{mode.description}</dd>
+              </div>
+            ))}
+          </dl>
+        }
+        control={
+          <Select
+            value={selected}
+            onValueChange={(value) => {
+              setComputeReuseMode(value as ComputeReuseMode);
+            }}
+          >
+            <SelectTrigger aria-label='Reuse results' className='w-40'>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {modes.map((mode) => (
+                <SelectItem key={mode.value} value={mode.value}>
+                  {mode.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        }
+      />
+      <SettingsRow
+        title='Project cache'
+        description={available ? 'Results reused by the open project.' : 'Open a project to manage its cache.'}
+        info={
+          <>
+            <p>Check size shows how much the open project has cached.</p>
+            <p>Free space removes results the project no longer uses.</p>
+            <p>Clear removes everything. The next render recomputes it.</p>
+          </>
+        }
+      >
+        <div className='flex flex-wrap items-center gap-2'>
           <Button size='sm' variant='outline' disabled={!available} onClick={async () => control('inspect')}>
-            Inspect
+            Check size
           </Button>
           <Button
             size='sm'
@@ -121,7 +159,7 @@ export function ComputeReuseSettings(): React.JSX.Element {
             disabled={!available}
             onClick={async () => control('collect', collectCursor)}
           >
-            {collectCursor ? 'Continue collect' : 'Collect'}
+            {collectCursor ? 'Free more' : 'Free space'}
           </Button>
           {confirmClear ? (
             <Button
@@ -146,13 +184,13 @@ export function ComputeReuseSettings(): React.JSX.Element {
               Clear
             </Button>
           )}
-          {currentStatus ? (
-            <p role='status' className='basis-full text-xs text-muted-foreground'>
-              {currentStatus}
-            </p>
-          ) : null}
         </div>
-      </CardContent>
-    </SettingsSectionCard>
+        {currentStatus ? (
+          <p role='status' className='text-xs text-muted-foreground'>
+            {currentStatus}
+          </p>
+        ) : null}
+      </SettingsRow>
+    </SettingsGroup>
   );
 }

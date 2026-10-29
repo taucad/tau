@@ -1085,10 +1085,11 @@ export class ChatSessionStore {
     if (projection === undefined || !selectCaughtUp(projection)) {
       return undefined;
     }
-    const ended = Object.entries(projection.ledger.runs).filter(
-      ([, run]) => run.turnId === turnId && (run.appendState === 'terminal' || run.appendState === 'settled'),
-    );
-    return ended.at(-1)?.[0];
+    /* The turn's newest run, as a regenerated turn's earlier run stays in the ledger; an open one is not yet rated. */
+    const [runId, run] = Object.entries(projection.ledger.runs)
+      .filter(([, entry]) => entry.turnId === turnId)
+      .at(-1) ?? [undefined, undefined];
+    return run?.appendState === 'terminal' || run?.appendState === 'settled' ? runId : undefined;
   }
 
   /** The rating this page gave a run, if any. @public */

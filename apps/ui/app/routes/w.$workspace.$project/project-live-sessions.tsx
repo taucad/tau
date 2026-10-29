@@ -336,13 +336,13 @@ function ProjectSessionBinding({
           /* A lost time is only a missing presentation fact. */
         }
       },
-      /* As with a presentation, only a browser host reports a rating; a daemon's run is not rated. */
+      /*
+       * Every rating goes to the browser host, which reports one only for a run it observed in its own rows: the
+       * chat's current execution may have changed since the rated run ended, and a daemon's run is never reported.
+       */
       rated: async (rating) => {
         try {
-          const stored = await chatSessions.getChatHostSettings(rating.chatId);
-          if (daemonPlacementOf(stored?.activeExecution ?? choices.current.defaultExecution) === undefined) {
-            await noteBrowserRunRated({ projectId, ...rating });
-          }
+          await noteBrowserRunRated({ projectId, ...rating });
         } catch {
           /* A lost rating is only a missing feedback fact. */
         }

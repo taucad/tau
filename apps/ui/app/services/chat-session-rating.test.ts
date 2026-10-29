@@ -9,23 +9,23 @@ const unusedHostCommand = async (): Promise<never> => {
   throw new Error('Unexpected host command.');
 };
 
-/** A run that answered the turn `turn-1`, open or ended. */
-const rows = (ended: boolean): Array<Record<string, unknown>> => [
-  lifecycleRow(0, 'admitted'),
-  logRow(1, {
+/** A run that answered the turn `turn-1` from `sequence`, open or ended. */
+const rows = (ended: boolean, runId = 'run_1', sequence = 0): Array<Record<string, unknown>> => [
+  lifecycleRow(sequence, 'admitted', runId),
+  logRow(sequence + 1, {
+    runId,
     type: 'turn.history-projection-committed',
     retainedMessageIds: [],
     message: { id: 'turn-1', role: 'user', content: 'hello' },
     context: { version: 1, systemPrompt: '', initialMessages: [], postCompactionMessages: [] },
   }),
-  lifecycleRow(2, 'running'),
-  ...(ended ? [lifecycleRow(3, 'completed')] : []),
+  lifecycleRow(sequence + 2, 'running', runId),
+  ...(ended ? [lifecycleRow(sequence + 3, 'completed', runId)] : []),
 ];
 
-const observed = async (ended: boolean) => {
+const observed = async (events: ReadonlyArray<Record<string, unknown>>) => {
   const store = new ChatSessionStore();
   const release = store.observe('chat_rated', 'project_1');
-  const events = rows(ended);
   const batch: ReadAnswer = {
     status: 'batch',
     sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
@@ -67,7 +67,7 @@ const observed = async (ended: boolean) => {
 
 describe('ChatSessionStore ratings', () => {
   it('rates the ended run that answered a turn once, through the project host', async () => {
-    const { store, rated, close } = await observed(true);
+    const { store, rated, close } = await observed(rows(true));
     try {
       expect(store.ratableRun('chat_rated', 'turn-1')).toBe('run_1');
       expect(store.ratableRun('chat_rated', 'turn-other')).toBeUndefined();
@@ -89,11 +89,26 @@ describe('ChatSessionStore ratings', () => {
   });
 
   it('offers no rating for a run that is still open', async () => {
-    const { store, close } = await observed(false);
+    const { store, close } = await observed(rows(false));
     try {
       expect(store.ratableRun('chat_rated', 'turn-1')).toBeUndefined();
     } finally {
       close();
+    }
+  });
+
+  it('offers the newest run of a regenerated turn, never the ended run it replaced', async () => {
+    const open = await observed([...rows(true), ...rows(false, 'run_2', 4)]);
+    try {
+      expect(open.store.ratableRun('chat_rated', 'turn-1')).toBeUndefined();
+    } finally {
+      open.close();
+    }
+    const ended = await observed([...rows(true), ...rows(true, 'run_2', 4)]);
+    try {
+      expect(ended.store.ratableRun('chat_rated', 'turn-1')).toBe('run_2');
+    } finally {
+      ended.close();
     }
   });
 });

@@ -4,8 +4,6 @@ declare const inspect: unique symbol;
 /** Draft angles (degrees) within this of 0 count as none: such a face is parallel to the pull
  * direction there. */
 export declare const ANGLE_TOLERANCE = 0.000001;
-/** Least and greatest n . d over a face. */
-export declare function _range(face: Face, d: Vector): [number, number];
 /** The draft of one face: the least and the greatest draft angle over it (degrees) and the group
  * it falls in ("positive", "insufficient", "vertical" or "undercut"). */
 export declare class FaceDraft {
@@ -36,7 +34,6 @@ export declare class DraftAnalysis {
     readonly minAngle: number;
     readonly faces: readonly FaceDraft[];
     constructor(direction: Vector, minAngle: number, faces: readonly FaceDraft[]);
-    _group(kind: string): ShapeList<Face>;
     /** Faces with at least `minAngle` of draft everywhere. */
     get positive(): ShapeList<Face>;
     /** Faces with less than `minAngle` of draft somewhere, but nowhere negative. */
@@ -48,7 +45,10 @@ export declare class DraftAnalysis {
     /** True if every face has at least `minAngle` of draft. */
     get ok(): boolean;
     /** The least and the greatest draft angle of a face of the part (degrees). */
-    angles(face: Face): [number, number];
+    angles(face: Face): [
+        number,
+        number
+    ];
     [Symbol.iterator](): IterableIterator<FaceDraft>;
     /** The number of faces (Python's `len`). */
     get length(): number;
@@ -64,8 +64,6 @@ export declare function partingLine(part: Part, direction: Axis | VectorLike): S
 /** Angle (degrees) between the normals of two faces along an edge below which the faces meet
  * tangentially. A face that meets a drafted face so must be drafted with it. */
 export declare let TANGENCY: number;
-/** Sets TANGENCY (for tests, as Python's monkeypatch does); returns the value it had. */
-export declare function _setTangency(value: number): number;
 /** See `Part.draft`. */
 export declare function draftFaces(part: Part, faces: unknown, angle: number, neutralPlane: Plane | Face): Part;
 export {};

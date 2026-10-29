@@ -171,6 +171,12 @@ One preset, `default`, selecting `kernels.default`.
 
 `@taucad/picogk/project/*` holds the files a new PicoGK project carries, so it runs outside Tau with the .NET 10 SDK on macOS arm64 or Windows x64 (`dotnet restore --locked-mode`, then `dotnet run`, which opens PicoGK's viewer): `project.csproj`, which Tau writes as `<Name>.csproj` and which references upstream PicoGK 2.3.0 from NuGet, and its `packages.lock.json`. The project's `main.cs` is the program, so no separate entry file is needed. When a root `.csproj` references PicoGK at another version, evaluation succeeds with a `LIBRARY_VERSION_MISMATCH` warning located at the reference.
 
+`TargetFramework` selects the out-of-Tau run alone. Neither target inside Tau reads the project file: the
+desktop kernel runs the author's sources against its own native PicoGK, and the browser kernel compiles the
+same sources against the prepared bundle's own pinned reference assemblies, so a project carries one program
+and no per-target project configuration. That warning is the one link between the two: it says when the
+library a project would restore outside Tau has drifted from the library the kernel actually runs.
+
 ## Display meshing
 
 `meshAdaptivity` (0 to below 1) and `meshRelax` (default `false`) are evaluate options, so the viewer's

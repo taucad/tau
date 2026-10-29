@@ -348,17 +348,18 @@
     ]
   },
   {
-    "kind": "model",
+    "kind": "test-fixture",
     "geometry": "3d",
     "kernel": "picogk",
     "name": "boolean-shell",
     "mainFile": "main.cs",
     "files": [
-      "main.cs"
+      "main.cs",
+      "tau.json"
     ]
   },
   {
-    "kind": "model",
+    "kind": "test-fixture",
     "geometry": "3d",
     "kernel": "picogk",
     "name": "multifile-asset",
@@ -366,17 +367,19 @@
     "files": [
       "ShapeFactory.cs",
       "main.cs",
-      "radius-scale.txt"
+      "radius-scale.txt",
+      "tau.json"
     ]
   },
   {
-    "kind": "model",
+    "kind": "test-fixture",
     "geometry": "3d",
     "kernel": "picogk",
     "name": "parameterized-sphere",
     "mainFile": "main.cs",
     "files": [
-      "main.cs"
+      "main.cs",
+      "tau.json"
     ]
   },
   {
@@ -1210,6 +1213,9 @@
     "name": "logo-keychain",
     "mainFile": "main.ts",
     "files": [
+      "assets.d.ts",
+      "assets/Geist-Bold.ttf",
+      "assets/Geist-LICENSE.txt",
       "assets/logo.svg",
       "logo-keychain.geospec.ts",
       "main.ts",

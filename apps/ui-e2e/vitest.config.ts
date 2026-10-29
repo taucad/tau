@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
 import { resolve } from 'node:path';
@@ -49,6 +50,41 @@ const picovoxelExactPins = (
   ) as { readonly 'sphere-minus-beams': { readonly stl: ExactPin; readonly glb: ExactPin } }
 )['sphere-minus-beams'];
 
+/** One file of the prepared PicoGK browser bundle, as its own manifest records it. */
+type PicogkBundleFile = { readonly path: string; readonly sha256: string; readonly byteLength: number };
+/*
+ * T15: the prepared PicoGK browser bundle this UI build embedded, when one is staged. The browser
+ * consumer spec fetches these back out of the running build and compares bytes, so the kernel it
+ * exercises is provably the staged package's bundle and not some other prepared tree. `ui:build`
+ * declares `PICOGK_BROWSER_ASSETS_ROOT` as an input, so the build can never be a reused one made
+ * against a different bundle.
+ */
+const picogkBundle = ((stage: string | undefined) => {
+  if (!stage) {
+    return undefined;
+  }
+  const bytes = readFileSync(resolve(stage, 'assets-manifest.json'));
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const receipt = JSON.parse(readFileSync(resolve(stage, 'assets-receipt.json'), 'utf8')) as {
+    readonly sha256: string;
+  };
+  if (receipt.sha256 !== sha256) {
+    throw new Error('The staged PicoGK bundle receipt does not match its own manifest');
+  }
+  const manifest = JSON.parse(bytes.toString('utf8')) as {
+    readonly single: {
+      readonly runtimeFiles: readonly PicogkBundleFile[];
+      readonly references: readonly PicogkBundleFile[];
+    };
+  };
+  /* A sample, not the whole inventory: the compiler and library the kernel cannot run without. */
+  const witnessed = /(?:^|\/)(?:PicoGK|dotnet|Microsoft\.CodeAnalysis)[\w.]*\.(?:wasm|js|dll)$/u;
+  return {
+    sha256,
+    files: [...manifest.single.runtimeFiles, ...manifest.single.references].filter((file) => witnessed.test(file.path)),
+  };
+})(process.env['PICOGK_BROWSER_ASSETS_ROOT']);
+
 export default defineConfig({
   root: import.meta.dirname,
   optimizeDeps: { include: ['axe-core', 'jszip', 'zod', 'esbuild'] },
@@ -77,6 +113,7 @@ export default defineConfig({
       crossOriginIsolation: !disableCoi,
       picovoxelExactPins,
       /* Names only: the live GitHub rows skip naming what is missing (R17). */
+      picogkBundle,
       liveGithubMissing: {
         c10: missingLiveGithubVariables(['first', 'second']),
         a4: missingLiveGithubVariables(['second']),

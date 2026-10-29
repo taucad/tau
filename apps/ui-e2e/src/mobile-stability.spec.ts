@@ -27,7 +27,7 @@ import { waitForModelReady } from '#support/viewer-stage.js';
  * document. Each circuit warms once, takes a same-browser baseline of live dedicated workers, WebGL and WebGPU contexts,
  * GPU devices, object URLs, window/document listeners and shared-worker constructions after a garbage collection, then
  * runs ten more cycles and, after the last one's cleanup, fails on any count above that baseline. Every cycle also fails
- * on an uncaught page error, a failed script, stylesheet or document load, a failed same-origin request, any console
+ * on an uncaught page error, a failed request other than a refused one to the local API (not running here), any console
  * error not named in {@link benignConsole} (React's root error hooks log render faults to the console and do not
  * rethrow them, so this is where a render fault shows), a serialized binary value or object in a DOM attribute, a
  * replaced document (a reload), or a blank model or editor.
@@ -223,10 +223,10 @@ const readSerializedAttributes = async (): Promise<string[]> =>
 type Marks = Readonly<{ console: number; page: number; requests: number; loads: number }>;
 
 /**
- * The faults the target has recorded since `from`: uncaught page errors; failed requests that are same-origin, or of
- * any origin when they load a script, stylesheet or document; and every console error that {@link benignConsole} does
- * not name. Every other failed request (another origin, not a script, stylesheet or document) is not a fault: in this
- * environment those are the local API's refused requests. They are returned so the ledger keeps them.
+ * The faults the target has recorded since `from`: uncaught page errors, every failed request except a refused one to
+ * the local API, and every console error that {@link benignConsole} does not name. The local API is not running in this
+ * environment, so the browser refuses its requests; they are returned so the ledger keeps them. A same-origin request
+ * a navigation aborts (`net::ERR_ABORTED`) is a fault too: none was seen in the recorded runs.
  *
  * @param from - How many of each kind were already judged.
  * @param context - What the judgement depends on.
@@ -244,10 +244,9 @@ const readFaults = async (
   next: Omit<Marks, 'loads'>;
 }> => {
   const events = await target.events();
-  const { origin } = new URL(await target.currentUrl());
   const requests = events.requestFailures.slice(from.requests);
-  const isFault = ({ url, resourceType }: (typeof requests)[number]): boolean =>
-    new URL(url).origin === origin || ['script', 'stylesheet', 'document'].includes(resourceType);
+  const isFault = ({ url, failure }: (typeof requests)[number]): boolean =>
+    new URL(url).origin !== apiOrigin || failure !== 'net::ERR_CONNECTION_REFUSED';
   const consoleErrors = events.consoleMessages.slice(from.console).filter(({ type }) => type === 'error');
   const describe = ({ text, url }: ConsoleMessage): string => (url ? `${text} @ ${new URL(url).origin}` : text);
   const benign = (message: ConsoleMessage): boolean =>

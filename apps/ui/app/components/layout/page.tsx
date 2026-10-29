@@ -1,3 +1,4 @@
+import { HomeFileManagerNotice } from '#hooks/use-file-manager.js';
 import { Link, NavigationType, Outlet, useLocation, useNavigationType } from 'react-router';
 import { Fragment } from 'react/jsx-runtime';
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
@@ -689,6 +690,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
                   {/* Its compute section reads the active project; the dialog is a
                       portal, so only its place in the React tree matters. */}
                   <SettingsDialog />
+                  <HomeFileManagerNotice />
                   <SectionContent error={error} />
                 </Compose>
               </PhoneTopBarContext.Provider>

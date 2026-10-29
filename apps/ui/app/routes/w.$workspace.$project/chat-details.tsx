@@ -33,9 +33,16 @@ function FileSystemInfo({
   backendType,
   activeWorkspaceName,
 }: {
-  readonly backendType: FileSystemBackend;
+  readonly backendType: FileSystemBackend | undefined;
   readonly activeWorkspaceName: string | undefined;
 }): React.JSX.Element {
+  if (backendType === undefined) {
+    return (
+      <div role='status' aria-label='Opening Home' aria-busy='true'>
+        Opening Home…
+      </div>
+    );
+  }
   const meta = projectLocationDescriptor(
     backendType === 'webaccess'
       ? { kind: 'workspace', workspaceName: activeWorkspaceName }
@@ -173,7 +180,7 @@ export function DetailsPanelContent({
   readonly mainFile: string;
   readonly isReadOnly: boolean;
   readonly hasManifestIssue: boolean;
-  readonly backendType: FileSystemBackend;
+  readonly backendType: FileSystemBackend | undefined;
   readonly activeWorkspaceName?: string;
   readonly onNameChange: (name: string) => void;
   readonly onDescriptionChange: (description: string) => void;

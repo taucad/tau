@@ -96,8 +96,8 @@ describe('selected project route verification', () => {
     const release = Promise.withResolvers<void>();
     const started = Promise.withResolvers<void>();
     const originalRead = provider.readFile.bind(provider);
-    vi.spyOn(provider, 'readFile').mockImplementationOnce(async (path) => {
-      const bytes = await originalRead(path);
+    vi.spyOn(provider, 'readFile').mockImplementationOnce(async (...args) => {
+      const bytes = await originalRead(...args);
       started.resolve();
       await release.promise;
       return bytes;
@@ -131,8 +131,8 @@ describe('selected project route verification', () => {
     const release = Promise.withResolvers<void>();
     const started = Promise.withResolvers<void>();
     const originalRead = provider.readFile.bind(provider);
-    vi.spyOn(provider, 'readFile').mockImplementation(async (path) => {
-      const bytes = await originalRead(path);
+    vi.spyOn(provider, 'readFile').mockImplementation(async (...args) => {
+      const bytes = await originalRead(...args);
       started.resolve();
       await release.promise;
       return bytes;

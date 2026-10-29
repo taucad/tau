@@ -54,17 +54,20 @@ export function installProjectOpenCounters(enabled: boolean): boolean {
     return true;
   }
 
-  const idbDatabase = Reflect.get(globalThis, 'IDBDatabase') as { prototype: Record<string, unknown> } | undefined;
-  const idbStore = Reflect.get(globalThis, 'IDBObjectStore') as { prototype: Record<string, unknown> } | undefined;
-  const directoryHandle = Reflect.get(globalThis, 'FileSystemDirectoryHandle') as
-    | { prototype: Record<string, unknown> }
-    | undefined;
-  const fileHandle = Reflect.get(globalThis, 'FileSystemFileHandle') as
-    | { prototype: Record<string, unknown> }
-    | undefined;
-  const syncHandle = Reflect.get(globalThis, 'FileSystemSyncAccessHandle') as
-    | { prototype: Record<string, unknown> }
-    | undefined;
+  /**
+   * Reads a browser-native constructor from this realm so the probe can patch
+   * its prototype. The realm's own declarations are narrower than the record
+   * the patch writes through, and a realm may not define the constructor at
+   * all, so the lookup widens deliberately rather than asserting a DOM type.
+   */
+  const nativeConstructor = (name: string) =>
+    Reflect.get(globalThis, name) as unknown as { prototype: Record<string, unknown> } | undefined;
+
+  const idbDatabase = nativeConstructor('IDBDatabase');
+  const idbStore = nativeConstructor('IDBObjectStore');
+  const directoryHandle = nativeConstructor('FileSystemDirectoryHandle');
+  const fileHandle = nativeConstructor('FileSystemFileHandle');
+  const syncHandle = nativeConstructor('FileSystemSyncAccessHandle');
   // oxlint-disable-next-line typescript/no-restricted-types -- WeakSet accepts arbitrary browser-native object identities.
   const filesReturnedByHandles = new WeakSet<object>();
   // oxlint-disable-next-line typescript/no-restricted-types -- Constructor is discovered dynamically in each realm.
@@ -136,7 +139,11 @@ export function installProjectOpenCounters(enabled: boolean): boolean {
 
   for (const [name, [prototype, key]] of Object.entries(methods)) {
     const original = prototype && Object.getOwnPropertyDescriptor(prototype, key);
-    if (original === undefined || typeof original.value !== 'function' || (!original.writable && !original.configurable)) {
+    if (
+      original === undefined ||
+      typeof original.value !== 'function' ||
+      (!original.writable && !original.configurable)
+    ) {
       coverage[name] = false;
       continue;
     }
@@ -178,19 +185,31 @@ export function installProjectOpenCounters(enabled: boolean): boolean {
             const bytes = success && (name === 'idb.put' || name === 'idb.add') ? knownWriteSize(args[0]) : undefined;
             finish(counter, { start, success, bytes, generation: callGeneration });
           };
-          target.addEventListener(name === 'idb.transaction' ? 'complete' : 'success', () => {
-            settle(true);
-          }, {
-            once: true,
-          });
+          target.addEventListener(
+            name === 'idb.transaction' ? 'complete' : 'success',
+            () => {
+              settle(true);
+            },
+            {
+              once: true,
+            },
+          );
           if (name === 'idb.transaction') {
-            target.addEventListener('abort', () => {
-              settle(false);
-            }, { once: true });
+            target.addEventListener(
+              'abort',
+              () => {
+                settle(false);
+              },
+              { once: true },
+            );
           } else {
-            target.addEventListener('error', () => {
-              settle(false);
-            }, { once: true });
+            target.addEventListener(
+              'error',
+              () => {
+                settle(false);
+              },
+              { once: true },
+            );
           }
         } else {
           finish(counter, { start, success: true, generation: callGeneration });

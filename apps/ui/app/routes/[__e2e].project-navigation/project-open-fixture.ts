@@ -28,12 +28,7 @@ export const parseProjectOpenFixtureOptions = (searchParams: URLSearchParams): P
   const totalProjects = searchParams.get('projects');
   const targetFileCount = searchParams.get('files');
   const layout = searchParams.get('layout') ?? 'shallow';
-  if (
-    totalProjects !== '1' &&
-    totalProjects !== '20' &&
-    totalProjects !== '64' &&
-    totalProjects !== '500'
-  ) {
+  if (totalProjects !== '1' && totalProjects !== '20' && totalProjects !== '64' && totalProjects !== '500') {
     throw new Error('Project-open fixture projects must be 1, 20, 64, or 500.');
   }
   if (targetFileCount !== '10' && targetFileCount !== '1000' && targetFileCount !== '10000') {
@@ -67,9 +62,7 @@ export const projectOpenTargetFiles = (
   for (let index = 1; index < options.targetFileCount; index += 1) {
     const part = `part-${String(index).padStart(5, '0')}.ts`;
     const path =
-      options.layout === 'deep'
-        ? `parts/group-${String(Math.floor(index / 100)).padStart(3, '0')}/${part}`
-        : part;
+      options.layout === 'deep' ? `parts/group-${String(Math.floor(index / 100)).padStart(3, '0')}/${part}` : part;
     files[path] = { content: encode(`export const part = ${String(index)};\n`) };
   }
   return files;

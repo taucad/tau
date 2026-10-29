@@ -169,18 +169,8 @@ const admittedConfig = (raw: unknown): Readonly<ProjectOpenPerformanceConfig> | 
   }
   try {
     const values = raw as Record<string, unknown>;
-    const {
-      enabled,
-      origin,
-      runId,
-      journeyId,
-      buildId,
-      fixtureId,
-      routeTemplate,
-      profile,
-      cacheCohort,
-      realm,
-    } = values;
+    const { enabled, origin, runId, journeyId, buildId, fixtureId, routeTemplate, profile, cacheCohort, realm } =
+      values;
     if (
       enabled !== true ||
       typeof origin !== 'string' ||
@@ -194,10 +184,7 @@ const admittedConfig = (raw: unknown): Readonly<ProjectOpenPerformanceConfig> | 
         cacheCohort !== 'warm' &&
         cacheCohort !== 'fresh-storage' &&
         cacheCohort !== 'initialized-storage') ||
-      (realm !== 'page' &&
-        realm !== 'dedicated-worker' &&
-        realm !== 'shared-worker' &&
-        realm !== 'service-worker')
+      (realm !== 'page' && realm !== 'dedicated-worker' && realm !== 'shared-worker' && realm !== 'service-worker')
     ) {
       return undefined;
     }
@@ -244,9 +231,7 @@ const admittedConfig = (raw: unknown): Readonly<ProjectOpenPerformanceConfig> | 
  * @param config - Explicit harness configuration for this page or worker realm.
  * @returns A begin/finish recorder, inert outside an admitted loopback origin.
  */
-export const createProjectOpenPerformance = (
-  config?: ProjectOpenPerformanceConfig,
-): ProjectOpenPerformance => {
+export const createProjectOpenPerformance = (config?: ProjectOpenPerformanceConfig): ProjectOpenPerformance => {
   const admitted = admittedConfig(config);
   if (admitted === undefined) {
     return disabled;
@@ -326,4 +311,3 @@ export const readLocalProjectOpenPerformance = (): ProjectOpenPerformance | unde
     return undefined;
   }
 };
-

@@ -1,8 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  createProjectOpenPerformance,
-  readLocalProjectOpenPerformance,
-} from '#lib/project-open-performance.js';
+import { createProjectOpenPerformance, readLocalProjectOpenPerformance } from '#lib/project-open-performance.js';
 import type { ProjectOpenPerformanceConfig } from '#lib/project-open-performance.js';
 
 const runId = '123e4567-e89b-42d3-a456-426614174000';

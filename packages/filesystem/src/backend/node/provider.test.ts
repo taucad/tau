@@ -455,7 +455,8 @@ describe('NodeFsProvider atomic writes', () => {
     let replaced = false;
     vi.spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
       const handle = await open(path, flags, mode);
-      if (typeof flags === 'number' && path === join(root, 'target.txt')) {
+      // The provider opens the admitted real path, which differs from `root` on macOS and Windows temp dirs.
+      if (typeof flags === 'number' && String(path).endsWith('target.txt')) {
         const read = handle.read.bind(handle);
         vi.spyOn(handle, 'read').mockImplementation(async (...arguments_: Parameters<typeof handle.read>) => {
           if (!replaced) {

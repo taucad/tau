@@ -1,8 +1,7 @@
 /* oxlint-disable new-cap -- OpenCascade API uses PascalCase method names */
 /**
- * Hot-path helpers with two implementations: the `TauOffline` native class that the engine's own libcascade build
- * compiles in (`libcascade/libcascade-kcl.yml`), and the same work over the stock bindings when a host loads the
- * published libcascade package instead.
+ * Hot-path helpers over the `TauOffline` native class that the engine's own libcascade build compiles in
+ * (`libcascade/libcascade-kcl.yml`).
  *
  * The native class leaves array results in a static buffer that is read straight from `wasmMemory`, so one call
  * replaces thousands of per-node and per-edge binding crossings.
@@ -46,8 +45,6 @@ export type Bounds = {
 
 /** The helpers the engine calls on hot paths. */
 export type NativeHelpers = {
-  /** Whether the engine's own build with native helpers is loaded. */
-  readonly native: boolean;
   /** Meshes a shape in OCCT's absolute mode; faces already meshed at least as finely keep their triangulation. */
   mesh(shape: TopoDS_Shape, tolerances: { linear: number; angular: number }): void;
   /** B-rep edges of a meshed shape, in the shape's root frame. */
@@ -62,20 +59,6 @@ export type NativeHelpers = {
   bounds(shape: TopoDS_Shape): Bounds | undefined;
   /** `BRepCheck_Analyzer` validity of a result. */
   isValid(shape: TopoDS_Shape): boolean;
-};
-
-type Deletable = { delete(): void };
-
-const subShapes = (oc: Oc, shape: TopoDS_Shape, kind: 'TopAbs_EDGE' | 'TopAbs_SOLID'): TopoDS_Shape[] => {
-  const map = new oc.NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher();
-  oc.TopExp.MapShapes(shape, oc.TopAbs_ShapeEnum[kind], map);
-  const out: TopoDS_Shape[] = [];
-  for (let index = 1; index <= map.Extent(); index++) {
-    out.push(map.FindKey(index));
-  }
-
-  map.delete();
-  return out;
 };
 
 const groupsFrom = (flat: Int32Array): EdgeGroup[] => {
@@ -123,7 +106,6 @@ function nativeHelpers(tau: TauOfflineClass, memory: WebAssembly.Memory): Native
   };
 
   return {
-    native: true,
     mesh(shape, tolerances) {
       tau.mesh(shape, tolerances.linear, tolerances.angular, false);
     },
@@ -149,236 +131,26 @@ function nativeHelpers(tau: TauOfflineClass, memory: WebAssembly.Memory): Native
   };
 }
 
-/**
- * The edge's samples on a face triangulation, or undefined when no meshed face keeps a polygon for it.
- *
- * @param oc - libcascade instance
- * @param edge - the edge
- * @param owned - collects handles to free
- * @returns flat XYZ samples
- */
-const polygonPoints = (oc: Oc, edge: TopoDS_Shape, owned: Deletable[]): number[] | undefined => {
-  const location = new oc.TopLoc_Location();
-  owned.push(location);
-  // Embind returns a missing OCCT handle as `null`, which the generated declarations do not express.
-  const found = oc.BRep_Tool.PolygonOnTriangulation(oc.TopoDS.Edge(edge), location) as Partial<{
-    P: InstanceType<Oc['Poly_PolygonOnTriangulation']>;
-    T: InstanceType<Oc['Poly_Triangulation']>;
-  }>;
-  if (!found.P || !found.T) {
-    return undefined;
-  }
-
-  const { P: polygon, T: triangulation } = found;
-  const trsf = location.Transformation();
-  owned.push(polygon, triangulation, trsf);
-  const points: number[] = [];
-  for (let index = 1; index <= polygon.NbNodes(); index++) {
-    const node = triangulation.Node(polygon.Node(index));
-    node.Transform(trsf);
-    points.push(node.X(), node.Y(), node.Z());
-    node.delete();
-  }
-
-  return points;
-};
-
-/**
- * The edge sampled from its curve with OCCT's angular-and-chordal discretizer.
- *
- * @param oc - libcascade instance
- * @param sample - the edge, and the linear (mm) and angular (rad) deflection to sample it at
- * @param owned - collects handles to free
- * @returns flat XYZ samples, at least two points
- */
-const curvePoints = (
-  oc: Oc,
-  sample: {
-    edge: TopoDS_Shape;
-    tolerances: { linear: number; angular: number };
-  },
-  owned: Deletable[],
-): number[] => {
-  const { edge, tolerances } = sample;
-  const curve = new oc.BRepAdaptor_Curve(oc.TopoDS.Edge(edge));
-  // The eight-argument overload: the six-argument one is ambiguous with the parameter-range form.
-  const sampler = new oc.GCPnts_TangentialDeflection(
-    curve,
-    curve.FirstParameter(),
-    curve.LastParameter(),
-    tolerances.angular,
-    tolerances.linear,
-    2,
-    1e-9,
-    1e-7,
-  );
-  owned.push(curve, sampler);
-  const points: number[] = [];
-  for (let index = 1; index <= sampler.NbPoints(); index++) {
-    const point = sampler.Value(index);
-    points.push(point.X(), point.Y(), point.Z());
-    point.delete();
-  }
-
-  return points;
-};
-
-/**
- * Helpers over the stock libcascade bindings.
- *
- * @param oc - libcascade instance
- * @returns binding-level helpers
- */
-function bindingHelpers(oc: Oc): NativeHelpers {
-  const area = (shape: TopoDS_Shape): number => {
-    const props = new oc.GProp_GProps();
-    oc.BRepGProp.SurfaceProperties(shape, props, false, false);
-    const mass = props.Mass();
-    props.delete();
-    return mass;
-  };
-
-  return {
-    native: false,
-    mesh(shape, tolerances) {
-      new oc.BRepMesh_IncrementalMesh(shape, tolerances.linear, false, tolerances.angular, false).delete();
-    },
-    edges(shape, tolerances) {
-      const owned: Deletable[] = [];
-      try {
-        const identity = new oc.TopLoc_Location();
-        const root = shape.Located(identity, false);
-        owned.push(identity, root);
-        const lines: number[] = [];
-        const edgeGroups: EdgeGroup[] = [];
-        for (const [edgeId, edge] of subShapes(oc, root, 'TopAbs_EDGE').entries()) {
-          owned.push(edge);
-          if (oc.BRep_Tool.Degenerated(oc.TopoDS.Edge(edge))) {
-            continue;
-          }
-
-          const points = polygonPoints(oc, edge, owned) ?? curvePoints(oc, { edge, tolerances }, owned);
-          const start = lines.length;
-          for (let point = 3; point < points.length; point += 3) {
-            lines.push(...points.slice(point - 3, point + 3));
-          }
-
-          edgeGroups.push({ start, count: lines.length - start, edgeId });
-        }
-
-        return { lines: Float64Array.from(lines), edgeGroups };
-      } finally {
-        for (const handle of owned) {
-          handle.delete();
-        }
-      }
-    },
-    topology(shape) {
-      const owned: Deletable[] = [];
-      const explore = (parent: TopoDS_Shape, kind: 'TopAbs_SHELL' | 'TopAbs_FACE' | 'TopAbs_WIRE' | 'TopAbs_EDGE') => {
-        const found: TopoDS_Shape[] = [];
-        const explorer = new oc.TopExp_Explorer(parent, oc.TopAbs_ShapeEnum[kind], oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
-        owned.push(explorer);
-        // oxlint-disable-next-line typescript/no-confusing-void-expression -- libcascade iterator idiom
-        for (; explorer.More(); explorer.Next()) {
-          found.push(explorer.Current());
-        }
-
-        owned.push(...found);
-        return found;
-      };
-
-      try {
-        const edgeMap = new oc.NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher();
-        owned.push(edgeMap);
-        oc.TopExp.MapShapes(shape, oc.TopAbs_ShapeEnum.TopAbs_EDGE, edgeMap);
-        const shells = explore(shape, 'TopAbs_SHELL');
-        return (shells.length > 0 ? shells : [shape]).map((shell) =>
-          explore(shell, 'TopAbs_FACE')
-            .filter((face) => {
-              const location = new oc.TopLoc_Location();
-              owned.push(location);
-              // Embind returns a missing triangulation handle as `null`, which the declarations do not express.
-              const triangulation = oc.BRep_Tool.Triangulation(oc.TopoDS.Face(face), location, 0) as
-                | InstanceType<Oc['Poly_Triangulation']>
-                | undefined;
-              if (!triangulation) {
-                return false;
-              }
-
-              owned.push(triangulation);
-              return triangulation.NbTriangles() > 0;
-            })
-            .map((face) =>
-              explore(face, 'TopAbs_WIRE').map((wire) =>
-                explore(wire, 'TopAbs_EDGE').map((edge) => edgeMap.FindIndex(edge) - 1),
-              ),
-            ),
-        );
-      } finally {
-        for (const handle of owned) {
-          handle.delete();
-        }
-      }
-    },
-    volume(shape) {
-      let volume = 0;
-      for (const solid of subShapes(oc, shape, 'TopAbs_SOLID')) {
-        const props = new oc.GProp_GProps();
-        oc.BRepGProp.VolumeProperties(solid, props, false, false, false);
-        volume += props.Mass();
-        props.delete();
-      }
-
-      return volume;
-    },
-    area,
-    bounds(shape) {
-      const box = new oc.Bnd_Box();
-      oc.BRepBndLib.Add(shape, box, false);
-      try {
-        if (box.IsVoid()) {
-          return undefined;
-        }
-
-        const min = box.CornerMin();
-        const max = box.CornerMax();
-        return {
-          min: [min.X(), min.Y(), min.Z()],
-          max: [max.X(), max.Y(), max.Z()],
-        };
-      } finally {
-        box.delete();
-      }
-    },
-    isValid(shape) {
-      if (shape.IsNull()) {
-        return false;
-      }
-
-      const analyzer = new oc.BRepCheck_Analyzer(shape, false, false);
-      // The no-argument overload is not bound; asking about the analysed shape itself is equivalent.
-      const valid = analyzer.IsValid(shape);
-      analyzer.delete();
-      return valid;
-    },
-  };
-}
-
 const cache = new WeakMap<Oc, NativeHelpers>();
 
 /**
- * The hot-path helpers for a libcascade instance: native when it carries the `TauOffline` class, binding-level
- * otherwise.
+ * The hot-path helpers for a libcascade instance.
  *
- * @param oc - libcascade instance
+ * @param oc - libcascade instance built from `libcascade-kcl.yml`
  * @returns helpers, created once per instance
+ * @throws Error when the instance lacks the `TauOffline` class, as stock libcascade builds do
  */
 export function helpersFor(oc: Oc): NativeHelpers {
   let helpers = cache.get(oc);
   if (!helpers) {
     const { TauOffline: tau } = oc as NativeOc;
-    helpers = tau ? nativeHelpers(tau, oc.wasmMemory) : bindingHelpers(oc);
+    if (!tau) {
+      throw new Error(
+        'The offline engine needs its own libcascade build (libcascade/build.sh), which carries TauOffline',
+      );
+    }
+
+    helpers = nativeHelpers(tau, oc.wasmMemory);
     cache.set(oc, helpers);
   }
 

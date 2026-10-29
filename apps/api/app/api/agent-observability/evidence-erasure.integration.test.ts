@@ -184,14 +184,16 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
   });
 
   describe('drainer', () => {
-    const service = () => {
+    const service = (langfuse = true) => {
       const config = mock<ConfigService>();
       /* eslint-disable @typescript-eslint/naming-convention -- environment variables are UPPER_CASED */
-      const values: Record<string, unknown> = {
-        LANGFUSE_BASE_URL: 'https://langfuse.test.invalid',
-        LANGFUSE_PUBLIC_KEY: 'pk-test',
-        LANGFUSE_SECRET_KEY: 'sk-test',
-      };
+      const values: Record<string, unknown> = langfuse
+        ? {
+            LANGFUSE_BASE_URL: 'https://langfuse.test.invalid',
+            LANGFUSE_PUBLIC_KEY: 'pk-test',
+            LANGFUSE_SECRET_KEY: 'sk-test',
+          }
+        : {};
       /* eslint-enable @typescript-eslint/naming-convention -- end of the environment table */
       config.get.mockImplementation((name: string) => values[name]);
       return new EvidenceErasureService(
@@ -276,6 +278,39 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
       );
       expect(await journal(erasureId)).toEqual([expect.objectContaining({ state: 'requested' }) as unknown]);
       expect(await completedAt(erasureId)).toBeNull();
+    });
+
+    it('should purge expired payloads and then reap their receipts with no Langfuse configured', async () => {
+      const userId = await account();
+      const receiptId = await admitted(userId, await ownedProject(userId));
+      const now = new Date();
+      const expired = new Date(now.getTime() - 60_000);
+      await database
+        .update(schema.agentEvidenceReceipt)
+        .set({ expiresAt: expired })
+        .where(eq(schema.agentEvidenceReceipt.id, receiptId));
+      await database
+        .update(schema.agentEvidenceOutbox)
+        .set({ expiresAt: expired })
+        .where(eq(schema.agentEvidenceOutbox.receiptId, receiptId));
+      const fetcher = vendor(() => new Response('{}', { status: 500 }));
+      const lifecycle = service(false);
+
+      await lifecycle.drain(now);
+      expect(await outbox(receiptId)).toMatchObject({ state: 'expired', payload: null, reason: 'retention' });
+
+      await lifecycle.drain(new Date(now.getTime() + erasureTiming.receiptGraceMilliseconds));
+      const [receipt] = await database
+        .select({ id: schema.agentEvidenceReceipt.id })
+        .from(schema.agentEvidenceReceipt)
+        .where(eq(schema.agentEvidenceReceipt.id, receiptId));
+      expect(receipt).toBeUndefined();
+      const [row] = await database
+        .select({ id: schema.agentEvidenceOutbox.receiptId })
+        .from(schema.agentEvidenceOutbox)
+        .where(eq(schema.agentEvidenceOutbox.receiptId, receiptId));
+      expect(row).toBeUndefined();
+      expect(fetcher).not.toHaveBeenCalled();
     });
   });
 });

@@ -371,10 +371,10 @@ const recallTurn = `Without calling any tool, reply with the exact marker the ea
 
 /** The ordered pairs a user can switch between, both directions each. */
 const switchPairs: ReadonlyArray<{ readonly from: string; readonly to: string }> = [
-  { from: 'openai-gpt-5.6-luna', to: 'google-gemini-3.8-flash' },
-  { from: 'google-gemini-3.8-flash', to: 'openai-gpt-5.6-luna' },
-  { from: 'openai-gpt-5.6-luna', to: 'anthropic-claude-sonnet-5.5' },
-  { from: 'anthropic-claude-sonnet-5.5', to: 'openai-gpt-5.6-luna' },
+  { from: 'openai-gpt-6.1-terra', to: 'google-gemini-3.8-flash' },
+  { from: 'google-gemini-3.8-flash', to: 'openai-gpt-6.1-terra' },
+  { from: 'openai-gpt-6.1-terra', to: 'anthropic-claude-sonnet-5.5' },
+  { from: 'anthropic-claude-sonnet-5.5', to: 'openai-gpt-6.1-terra' },
   { from: 'anthropic-claude-sonnet-5.5', to: 'google-gemini-3.8-flash' },
   { from: 'google-gemini-3.8-flash', to: 'anthropic-claude-sonnet-5.5' },
   { from: 'xai-grok-4.7', to: 'google-gemini-3.8-flash' },
@@ -496,7 +496,7 @@ for (const pair of switchPairs) {
 const orphanRows: ReadonlyArray<{ readonly from: string; readonly to: string }> = [
   { from: 'google-gemini-3.8-flash', to: 'anthropic-claude-sonnet-5.5' },
   { from: 'anthropic-claude-sonnet-5.5', to: 'google-gemini-3.8-flash' },
-  { from: 'anthropic-claude-sonnet-5.5', to: 'openai-gpt-5.6-luna' },
+  { from: 'anthropic-claude-sonnet-5.5', to: 'openai-gpt-6.1-terra' },
 ];
 
 for (const { from, to } of orphanRows) {
@@ -535,8 +535,8 @@ for (const { from, to } of orphanRows) {
 /** Compaction then switch, once per target wire, so the summary is proven to replay everywhere. */
 const compactionRows: ReadonlyArray<{ readonly from: string; readonly to: string }> = [
   { from: 'anthropic-claude-sonnet-5.5', to: 'google-gemini-3.8-flash' },
-  { from: 'openai-gpt-5.6-luna', to: 'anthropic-claude-sonnet-5.5' },
-  { from: 'google-gemini-3.8-flash', to: 'openai-gpt-5.6-luna' },
+  { from: 'openai-gpt-6.1-terra', to: 'anthropic-claude-sonnet-5.5' },
+  { from: 'google-gemini-3.8-flash', to: 'openai-gpt-6.1-terra' },
 ];
 
 for (const { from, to } of compactionRows) {

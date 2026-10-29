@@ -450,6 +450,44 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     },
   },
   openai: {
+    'gpt-6.1-terra': {
+      enabled: true,
+      id: 'openai-gpt-6.1-terra',
+      providerKind: 'tau-hosted',
+      name: 'GPT-6.1 Terra',
+      slug: 'gpt-6.1-terra',
+      recommended: true,
+      description: 'Fast visual reasoning for interpreting technical drawings and everyday CAD design iterations.',
+      provider: {
+        id: 'openai',
+        name: 'OpenAI',
+      },
+      model: 'gpt-6.1-terra',
+      support: {
+        reasoning: { levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+        modalities: pdfInputModalities,
+      },
+      details: {
+        family: 'gpt',
+        families: ['GPT-6.1'],
+        contextWindow: 200_000, // Provider supports 1.05M tokens; Tau caps effective chat budget for cost and compaction reliability.
+        maxTokens: 128_000,
+        knowledgeCutoff: '2026-06',
+        cost: {
+          inputTokens: 1,
+          outputTokens: 5,
+          cacheReadTokens: 0.05,
+          cacheWriteTokens: 1.25,
+        },
+      },
+      configuration: {
+        streaming: true,
+        reasoning: {
+          effort: 'high',
+          summary: 'auto',
+        },
+      },
+    },
     'gpt-6-astra': {
       enabled: true,
       id: 'openai-gpt-6-astra',

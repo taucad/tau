@@ -1,4 +1,5 @@
 import type { Evidence } from '#contract.js';
+import { evidenceSchema } from '#contract.js';
 import type { PendingEvidence, PendingEvidenceStore } from '#delivery.js';
 
 /*
@@ -77,14 +78,22 @@ export const indexedDbPendingStore = (name: string, factory: IDBFactory = indexe
       });
       return settle(request);
     })();
-    return opened;
+    const opening = opened;
+    try {
+      return await opening;
+    } catch (error) {
+      /* A blocked or failed open is retried on the next call, not cached for the session. */
+      if (opened === opening) {
+        opened = undefined;
+      }
+      throw error;
+    }
   };
   const transact = async <T>(mode: IDBTransactionMode, work: (store: IDBObjectStore) => Promise<T>): Promise<T> => {
     const connection = await database();
     const transaction = connection.transaction(pendingStoreName, mode);
-    const done = committed(transaction);
-    const result = await work(transaction.objectStore(pendingStoreName));
-    await done;
+    /* Awaited together, so a request failure that aborts the transaction is not left unhandled. */
+    const [, result] = await Promise.all([committed(transaction), work(transaction.objectStore(pendingStoreName))]);
     return result;
   };
 
@@ -147,6 +156,13 @@ export const indexedDbPendingStore = (name: string, factory: IDBFactory = indexe
   };
 };
 
+const isPendingEvidence = (entry: unknown): entry is PendingEvidence =>
+  typeof entry === 'object' &&
+  entry !== null &&
+  typeof Reflect.get(entry, 'key') === 'string' &&
+  typeof Reflect.get(entry, 'bytes') === 'number' &&
+  evidenceSchema.safeParse(Reflect.get(entry, 'evidence')).success;
+
 /** The few file operations a Node host gives the file store. @public */
 export type PendingFileSystem = Readonly<{
   readFile: (path: string) => Promise<string | undefined>;
@@ -186,8 +202,8 @@ export const filePendingStore = (path: string, files: PendingFileSystem): Pendin
       }
       try {
         const parsed: unknown = JSON.parse(contents);
-        /* A file this version cannot read is dropped, not trusted: the API is the record. */
-        return Array.isArray(parsed) ? (parsed as PendingEvidence[]) : [];
+        /* Anything this version cannot read is dropped, not trusted: the API is the record. */
+        return Array.isArray(parsed) ? parsed.filter((entry) => isPendingEvidence(entry)) : [];
       } catch {
         return [];
       }
@@ -200,9 +216,11 @@ export const filePendingStore = (path: string, files: PendingFileSystem): Pendin
     const previous = queue;
     const next = (async () => {
       await previous;
-      const items = await load();
+      /* Changed on a copy, cached only once written, so a failed write leaves memory and file alike. */
+      const items = [...(await load())];
       const result = work(items);
       await files.replaceFile(path, JSON.stringify(items));
+      loaded = Promise.resolve(items);
       return result;
     })();
     queue = quietly(next);

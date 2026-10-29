@@ -59,7 +59,9 @@ const retryAfterOf = (response: Response, body: unknown): number => {
   if (typeof seconds === 'number' && Number.isFinite(seconds) && seconds >= 0) {
     return seconds * 1000;
   }
-  const header = Number(response.headers.get('retry-after'));
+  /* An absent or empty header is no answer, not a zero wait. */
+  const raw = response.headers.get('retry-after')?.trim();
+  const header = raw === undefined || raw === '' ? Number.NaN : Number(raw);
   return Number.isFinite(header) && header >= 0 ? header * 1000 : defaultRetryMilliseconds;
 };
 
@@ -307,8 +309,8 @@ export const createEvidenceOutbox = (options: OutboxOptions): EvidenceOutbox => 
         return { stop: 'gone' };
       }
       case 'stale': {
-        /* Everything held under this epoch would get the same answer. */
-        counts.stale += await store.purge((evidence) => evidence.scope.policyEpoch === scope.policyEpoch);
+        /* Everything held under this grant would get the same answer. */
+        counts.stale += await store.purge((evidence) => inScope(scope, evidence));
         return { stop: 'stale' };
       }
       case 'retry': {

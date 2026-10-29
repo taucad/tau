@@ -127,5 +127,32 @@ describe('file pending store', () => {
 
     files.set('/queue.json', '{not json');
     expect(await filePendingStore('/queue.json', access).size()).toEqual({ items: 0, bytes: 0 });
+
+    files.set('/queue.json', JSON.stringify([item(evidence!), { key: 'k', bytes: 1, evidence: { kind: 'other' } }]));
+    expect(await filePendingStore('/queue.json', access).size()).toEqual({ items: 1, bytes: 100 });
+  });
+
+  it('keeps memory and file alike when a write fails', async () => {
+    const { files, access } = memoryFiles();
+    const [first, second] = await envelopes(2);
+    let failing = false;
+    const store = filePendingStore('/queue.json', {
+      ...access,
+      replaceFile: async (path, contents) => {
+        if (failing) {
+          throw new Error('disk full');
+        }
+        await access.replaceFile(path, contents);
+      },
+    });
+    await store.hold(item(first!));
+
+    failing = true;
+    await expect(store.hold(item(second!))).rejects.toThrow('disk full');
+    await expect(store.release([item(first!).key])).rejects.toThrow('disk full');
+
+    const held = await store.oldest(10);
+    expect(held.map((entry) => entry.evidence)).toEqual([first]);
+    expect(JSON.parse(files.get('/queue.json')!)).toHaveLength(1);
   });
 });

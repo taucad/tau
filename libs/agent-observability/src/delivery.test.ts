@@ -72,6 +72,7 @@ describe('submitEvidence', () => {
     [401, {}, { kind: 'unauthenticated' }],
     [429, { code: 'EVIDENCE_BUSY', retryAfterSeconds: 1 }, { kind: 'retry', afterMilliseconds: 1000 }],
     [503, { code: 'EVIDENCE_CAPACITY', retryAfterSeconds: 60 }, { kind: 'retry', afterMilliseconds: 60_000 }],
+    [503, {}, { kind: 'retry', afterMilliseconds: 30_000 }],
   ])('reads HTTP %i as what it means for the envelope', async (status, body, expected) => {
     const [evidence] = await envelopes(1);
 

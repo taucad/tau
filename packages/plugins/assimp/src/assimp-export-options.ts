@@ -9,6 +9,9 @@ const quantityOptions: Readonly<Record<string, () => z.ZodNumber>> = {
   identityMatrixEpsilon: () => quantity({ unit: '1', quantityKind: quantityKinds.dimensionlessRatio, space: 'linear' }),
 };
 
+/** A description that is a bare Assimp config key or member name, such as `3MF_EXPORT_UNIT.`, rather than prose. */
+const configKeyDescription = /^\w+\.?$/u;
+
 const schemaFromDescriptor = (name: string, descriptor: DescribedOptionDescriptor): z.ZodType => {
   let schema: z.ZodType;
   if (descriptor.values === undefined) {
@@ -43,7 +46,10 @@ const schemaFromDescriptor = (name: string, descriptor: DescribedOptionDescripto
     schema = z.literal(descriptor.values);
   }
 
-  schema = schema.describe(descriptor.description);
+  // Some descriptors carry only Assimp's config key (`3MF_EXPORT_UNIT.`); a form would show it as prose.
+  if (!configKeyDescription.test(descriptor.description)) {
+    schema = schema.describe(descriptor.description);
+  }
   return descriptor.default === null ? schema.optional() : schema.default(descriptor.default);
 };
 

@@ -20,7 +20,12 @@ import {
  */
 
 const sentryApi = 'https://us.sentry.io/api/0';
-const harnessRouteId = 'routes/[__debug].observability/route';
+// React Router gives a folder route the folder's path as its id, so
+// `routes/[__debug].observability/route.tsx` is `routes/[__debug].observability`
+// with no `/route` suffix. The unit-test fixtures in `sentry.server.test.ts` and
+// `sentry.server-sdk.test.ts` carry a `/route` suffix, but those are arbitrary
+// strings the code under test only passes through; they do not describe the real id.
+const harnessRouteId = 'routes/[__debug].observability';
 /** The blueprint's bound on waiting for Sentry to index an event. */
 const pollTimeout = 180_000;
 const pollInterval = 5000;

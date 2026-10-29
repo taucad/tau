@@ -16,11 +16,15 @@ export type ProjectOpenMark = Readonly<{
 
 /** One project's open, timed once. @public */
 export type ProjectOpenTimer = Readonly<{
-  /** A tree read during the open fetched at least one large object from the remote. */
+  /**
+   * At least one large object of the open was not in the local store: a tree
+   * read fetched it, or the checkout opened with it still to download (a
+   * transfer shared with another reader counts, though no read reports it).
+   */
   fetchedFromNetwork: () => void;
   /** The project's repository is checked out and its editor and file tree are usable; the first call counts. */
   firstView: () => void;
-  /** Every large object of the checkout is in the local store; the first call counts. */
+  /** Every large object of the checkout is in the local store; the first call after `firstView` counts. */
   fullyFetched: () => void;
 }>;
 
@@ -28,11 +32,11 @@ export type ProjectOpenTimer = Readonly<{
  * Time one hosted project's open, from its revision root opening (STO-25).
  *
  * `first_view` is the repository checked out, so the editor and file tree are
- * usable; `fully_fetched` is every large object local, so the viewer can
- * render. `cache` is cold when the open fetched at least one large object from
- * the network, and is only known once everything is local, so both marks are
- * sent together then. `fully_fetched` never reads earlier than `first_view`.
- * A root released before it is fully fetched sends nothing.
+ * usable, and is sent then; `fully_fetched` is every large object local, so
+ * the viewer can render, and is sent when the background fill completes.
+ * `cache` is cold when any large object of the open came from the network,
+ * as far as was known at that mark. A fill that fails, or a root released
+ * before its fill completes, sends no `fully_fetched`.
  *
  * @param options - The clock, and where each mark goes.
  * @returns The timer.
@@ -44,35 +48,28 @@ export const createProjectOpenTimer = (
   const now = options.now ?? Date.now;
   const startedAt = now();
   let cold = false;
-  let firstViewAt: number | undefined;
-  let fullyFetchedAt: number | undefined;
-  let settled = false;
-  const settle = (): void => {
-    if (settled || firstViewAt === undefined || fullyFetchedAt === undefined) {
-      return;
-    }
-    settled = true;
-    const cache = cold ? 'cold' : 'warm';
-    options.report({ phase: 'first_view', cache, durationMilliseconds: Math.max(0, firstViewAt - startedAt) });
-    options.report({
-      phase: 'fully_fetched',
-      cache,
-      durationMilliseconds: Math.max(0, Math.max(firstViewAt, fullyFetchedAt) - startedAt),
-    });
+  let viewed = false;
+  let fetched = false;
+  const mark = (phase: ProjectOpenPhase): void => {
+    options.report({ phase, cache: cold ? 'cold' : 'warm', durationMilliseconds: Math.max(0, now() - startedAt) });
   };
   return Object.freeze({
     fetchedFromNetwork: () => {
-      if (fullyFetchedAt === undefined) {
+      if (!fetched) {
         cold = true;
       }
     },
     firstView: () => {
-      firstViewAt ??= now();
-      settle();
+      if (!viewed) {
+        viewed = true;
+        mark('first_view');
+      }
     },
     fullyFetched: () => {
-      fullyFetchedAt ??= now();
-      settle();
+      if (viewed && !fetched) {
+        fetched = true;
+        mark('fully_fetched');
+      }
     },
   });
 };
@@ -95,7 +92,8 @@ export const isHostedCheckoutApplied = (status: Pick<RevisionStatusProjection, '
  * `first_view` is the applied checkout. The large objects are filled after it
  * ("open the UI, model waits"), and the status carries `largeObjects` until
  * the last placeholder is written — published before the checkout reads as
- * applied — so an applied checkout without it is `fully_fetched`.
+ * applied — so an applied checkout without it is `fully_fetched`. A checkout
+ * that opened with objects still to download is a cold open.
  *
  * @param timer - The project's open timer.
  * @param status - A status the project's root published.
@@ -105,6 +103,9 @@ export const markProjectOpen = (
   timer: ProjectOpenTimer,
   status: Pick<RevisionStatusProjection, 'remote' | 'sync' | 'largeObjects'>,
 ): void => {
+  if (status.largeObjects !== undefined) {
+    timer.fetchedFromNetwork();
+  }
   if (!isHostedCheckoutApplied(status)) {
     return;
   }

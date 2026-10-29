@@ -53,13 +53,13 @@ const harness = (): Readonly<{
 };
 
 describe('createProjectOpenTimer', () => {
-  it('should time a cold open from the root opening: first view at checkout, fully fetched once every object is local', () => {
+  it('should send first view on its own at the checkout, and fully fetched when every object is local', () => {
     const { marks, advance, timer } = harness();
     advance(1200);
     timer.fetchedFromNetwork();
     advance(800);
     timer.firstView();
-    expect(marks).toEqual([]);
+    expect(marks).toEqual([{ phase: 'first_view', cache: 'cold', durationMilliseconds: 2000 }]);
     advance(3000);
     timer.fetchedFromNetwork();
     timer.fullyFetched();
@@ -70,19 +70,21 @@ describe('createProjectOpenTimer', () => {
     ]);
   });
 
-  it('should mark an open that fetched nothing from the network as warm, both phases together', () => {
+  it('should label each mark by what was known then: a warm first view, a cold fully fetched', () => {
     const { marks, advance, timer } = harness();
     advance(800);
     timer.firstView();
+    advance(400);
+    timer.fetchedFromNetwork();
     timer.fullyFetched();
 
     expect(marks).toEqual([
       { phase: 'first_view', cache: 'warm', durationMilliseconds: 800 },
-      { phase: 'fully_fetched', cache: 'warm', durationMilliseconds: 800 },
+      { phase: 'fully_fetched', cache: 'cold', durationMilliseconds: 1200 },
     ]);
   });
 
-  it('should never read fully fetched earlier than first view, when objects land before the checkout', () => {
+  it('should never send fully fetched before first view', () => {
     const { marks, advance, timer } = harness();
     timer.fetchedFromNetwork();
     advance(4000);
@@ -90,10 +92,9 @@ describe('createProjectOpenTimer', () => {
     advance(500);
     timer.firstView();
 
-    expect(marks).toEqual([
-      { phase: 'first_view', cache: 'cold', durationMilliseconds: 4500 },
-      { phase: 'fully_fetched', cache: 'cold', durationMilliseconds: 4500 },
-    ]);
+    expect(marks).toEqual([{ phase: 'first_view', cache: 'cold', durationMilliseconds: 4500 }]);
+    timer.fullyFetched();
+    expect(marks.at(-1)).toEqual({ phase: 'fully_fetched', cache: 'cold', durationMilliseconds: 4500 });
   });
 
   it('should mark only the first open, so a later pull or fetch changes nothing', () => {
@@ -109,12 +110,12 @@ describe('createProjectOpenTimer', () => {
     expect(marks.every((mark) => mark.cache === 'warm' && mark.durationMilliseconds === 0)).toBe(true);
   });
 
-  it('should send nothing until everything is local', () => {
+  it('should send no fully fetched while objects are still downloading, or ever when the root closes first', () => {
     const { marks, timer } = harness();
     timer.fetchedFromNetwork();
     timer.firstView();
 
-    expect(marks).toEqual([]);
+    expect(marks.map(({ phase }) => phase)).toEqual(['first_view']);
   });
 });
 
@@ -144,14 +145,29 @@ describe('markProjectOpen', () => {
     markProjectOpen(timer, status({ hasAppliedRemote: false }));
     advance(200);
     markProjectOpen(timer, { ...status({ hasAppliedRemote: true }), largeObjects: downloading });
-    expect(marks).toStrictEqual([]);
+    expect(marks).toStrictEqual([{ phase: 'first_view', cache: 'cold', durationMilliseconds: 200 }]);
     advance(5000);
-    timer.fetchedFromNetwork();
     markProjectOpen(timer, status({ hasAppliedRemote: true }));
     expect(marks).toStrictEqual([
       { phase: 'first_view', cache: 'cold', durationMilliseconds: 200 },
       { phase: 'fully_fetched', cache: 'cold', durationMilliseconds: 5200 },
     ]);
+  });
+
+  it('counts objects another reader was already downloading as cold, though no read of its own reported them', () => {
+    const { marks, timer } = harness();
+    markProjectOpen(timer, { ...status({ hasAppliedRemote: false }), largeObjects: downloading });
+    markProjectOpen(timer, status({ hasAppliedRemote: true }));
+    expect(marks.map(({ cache }) => cache)).toStrictEqual(['cold', 'cold']);
+  });
+
+  it('sends no fully fetched while the fill has failed', () => {
+    const { marks, timer } = harness();
+    markProjectOpen(timer, {
+      ...status({ hasAppliedRemote: true }),
+      largeObjects: { ...downloading, phase: 'failed', error: 'offline' },
+    });
+    expect(marks.map(({ phase }) => phase)).toStrictEqual(['first_view']);
   });
 
   it('marks both at once for a checkout with nothing left to fetch', () => {

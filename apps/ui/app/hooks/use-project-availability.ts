@@ -94,7 +94,25 @@ export function useModelAvailability(): ModelAvailability {
  */
 export function useLargeObjectPending(path: string | undefined): boolean {
   const paths = useRevisionStatus()?.largeObjects?.paths;
-  return path !== undefined && (paths?.includes(path) ?? false);
+  return path !== undefined && paths !== undefined && pendingPathSet(paths).has(path);
+}
+
+/* One set per published facet, shared by every file-tree row that asks of it. */
+const pendingPathSets = new WeakMap<readonly string[], ReadonlySet<string>>();
+
+/**
+ * The pending paths of one facet as a set, built once per facet.
+ *
+ * @param paths - A facet's `paths`.
+ * @returns The same paths, for constant-time lookups.
+ */
+export function pendingPathSet(paths: readonly string[]): ReadonlySet<string> {
+  let set = pendingPathSets.get(paths);
+  if (set === undefined) {
+    set = new Set(paths);
+    pendingPathSets.set(paths, set);
+  }
+  return set;
 }
 
 /** The large-object facet itself, for the one surface that draws its progress. */

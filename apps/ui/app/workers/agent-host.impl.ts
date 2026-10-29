@@ -52,6 +52,7 @@ import type { AgentHostProjectProvide, AgentHostProjectRebridge } from '#workers
 import { closeProvidedPorts, createDisposers } from '#workers/agent-host-projects.js';
 import { createResidentPlacement } from '#workers/agent-host-placement.js';
 import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
+import { guardLargeObjectFiles, guardLargeObjectKernel } from '#lib/large-object-guard.js';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { createIdleRuntimeClient } from '#workers/idle-runtime-client.js';
 import { createWorkerEvidence } from '#workers/agent-host-evidence.js';
@@ -664,17 +665,18 @@ const composeProjectHost = async (
     );
     const record = composeView({ filesystem: provider }, { consumer: 'user', policy: tauPathPolicy });
     return createChatToolRegistry({
+      /* A file still downloading is never read as its pointer or written over (open first, model waits). */
       fileSystemFor: (signal) =>
-        createProviderRpcFileSystem({ provider: view, mutations: fileSystemMutations, signal }),
+        guardLargeObjectFiles(createProviderRpcFileSystem({ provider: view, mutations: fileSystemMutations, signal })),
       recordFileSystemFor: (signal) =>
         createProviderRpcFileSystem({ provider: record, mutations: fileSystemMutations, signal }),
       workbenchFileSystemFor: (signal) =>
         createProviderRpcFileSystem({ provider: workbenchRootView, mutations: fileSystemMutations, signal }),
       workbench: createRuntimeWorkbenchClient(async () => runtimeClient),
       skillResolver,
-      ...runtimeRpc,
+      /* The kernel reads the model's files itself, so it runs once every large object has landed. */
+      ...guardLargeObjectKernel({ ...runtimeRpc, geospec: geoSpecClient }, () => revisions?.largeObjects()),
       parameters,
-      geospec: geoSpecClient,
       ...(residentRuntime === undefined ? {} : { machines: residentRuntime.machines }),
       machineSettings: preferences,
       print: {

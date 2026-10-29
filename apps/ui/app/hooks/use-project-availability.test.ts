@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RevisionStatusProjection } from '@taucad/revisions';
-import { modelAvailability, projectAvailability } from '#hooks/use-project-availability.js';
+import { modelAvailability, pendingPathSet, projectAvailability } from '#hooks/use-project-availability.js';
 
 vi.mock('#hooks/use-project.js', () => ({ useProject: vi.fn() }));
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: vi.fn() }));
@@ -65,5 +65,16 @@ describe('model availability', () => {
   });
   it('is ready when no large object is outstanding', () => {
     expect(modelAvailability('ready', undefined)).toBe('ready');
+  });
+});
+
+describe('pending large-object paths', () => {
+  it('builds one set per published facet, shared by every row that asks of it', () => {
+    const paths = ['models/a.step', 'models/b.step'];
+    const set = pendingPathSet(paths);
+    expect(set.has('models/b.step')).toBe(true);
+    expect(set.has('main.scad')).toBe(false);
+    expect(pendingPathSet(paths)).toBe(set);
+    expect(pendingPathSet([...paths])).not.toBe(set);
   });
 });

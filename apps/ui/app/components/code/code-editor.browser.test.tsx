@@ -10,7 +10,13 @@ import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import { mock } from 'vitest-mock-extended';
-import { autocompletion, closeCompletion, startCompletion } from '@codemirror/autocomplete';
+import {
+  autocompletion,
+  closeCompletion,
+  completionStatus,
+  selectedCompletion,
+  startCompletion,
+} from '@codemirror/autocomplete';
 import { CodeEditor } from '#components/code/code-editor.client.js';
 import { VirtualDeclarationDialog } from '#components/code/virtual-declaration-dialog.js';
 import { jsonDepthHighlighting } from '#components/code/json-depth-highlighting.js';
@@ -502,20 +508,27 @@ it('adds the import when a TypeScript auto-import completion is accepted with En
     startCompletion(view!);
     await expect.poll(() => document.querySelector('.cm-tooltip-autocomplete')?.textContent).toContain('Mechanism');
     await userEvent.keyboard('ec');
-    await expect
-      .poll(() => document.querySelector('.cm-tooltip-autocomplete [aria-selected="true"]')?.textContent)
-      .toBeTruthy();
+    const editor = view!;
+    // CodeMirror ignores list keys while a query is pending and for a short delay after the list opens.
+    const listReady = async (): Promise<void> => {
+      await expect.poll(() => completionStatus(editor.state)).toBe('active');
+      await new Promise((resolve) => {
+        setTimeout(resolve, 150);
+      });
+    };
     await expect
       .poll(() => document.querySelector('.cm-tooltip-autocomplete')?.textContent)
       .toContain('MechanismUnits');
-    for (let index = 0; index < 5; index += 1) {
-      const selected = document.querySelector('.cm-tooltip-autocomplete [aria-selected="true"]')?.textContent ?? '';
-      if (/^Mechanism(?!Source|Units)/u.test(selected)) {
-        break;
-      }
+    await listReady();
+    for (let index = 0; index < 5 && selectedCompletion(editor.state)?.label !== 'Mechanism'; index += 1) {
+      const selected = selectedCompletion(editor.state);
       // oxlint-disable-next-line no-await-in-loop -- arrow through the open list one row at a time.
       await userEvent.keyboard('{ArrowDown}');
+      // oxlint-disable-next-line no-await-in-loop -- wait for each move before reading the next row.
+      await expect.poll(() => selectedCompletion(editor.state)).not.toBe(selected);
     }
+    expect(selectedCompletion(editor.state)?.label).toBe('Mechanism');
+    await listReady();
     await userEvent.keyboard('{Enter}');
     await expect
       .poll(() => sourceDocument.text)

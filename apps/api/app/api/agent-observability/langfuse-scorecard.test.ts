@@ -3,12 +3,12 @@ import { describe, expect, it } from 'vitest';
 import type { Evidence } from '@taucad/agent-observability/contract';
 import type { ProjectedRun, ProjectionContext } from '@taucad/agent-observability/projection';
 import { projectRun } from '@taucad/agent-observability/projection';
-import type { RunScore } from '@taucad/agent-observability/scorecard';
+import type { FeedbackGrants, RunScore } from '@taucad/agent-observability/scorecard';
 import { scorecard } from '@taucad/agent-observability/scorecard';
 import type { OtlpSpan } from '#api/agent-observability/langfuse-observation.js';
 import { langfuseObservation, pseudonymKey } from '#api/agent-observability/langfuse-observation.js';
 import type { LangfuseObservationRow } from '#api/agent-observability/langfuse-scorecard.js';
-import { scoreObservations } from '#api/agent-observability/langfuse-scorecard.js';
+import { pseudonymGrants, scoreObservations } from '#api/agent-observability/langfuse-scorecard.js';
 import type { ObservedAttempt } from '#api/agent-observability/model-invocation-evidence.js';
 import { providerAttemptEvidence } from '#api/agent-observability/model-invocation-evidence.js';
 import type { ObservedSettlement } from '#api/agent-observability/settlement-evidence.js';
@@ -235,6 +235,34 @@ describe('scoreObservations', () => {
       { attempts: 0, calls: 0, settlements: 0, credits: 0, supplierCost: 0, supplierCostUnknown: 0 },
     ]);
     expect(fromEvidence.attempts.joined).toEqual({ attempts: 2, settlements: 1 });
+  });
+
+  it('splits runs by feedback grant from Langfuse exactly as from the evidence, keyed by the account pseudonym', async () => {
+    const evidence = [
+      ...(await project(run({ rating: { value: 'positive', at: at + 9000 } }), { plane: 'feedback' })),
+      ...(await project(run())),
+      ...(await project(
+        run({ runId: 'run-2', tools: [], intervals: [], ending: { source: row(20), at: at + 20_000 } }),
+        {
+          principal: 'user-b',
+        },
+      )),
+    ];
+    const grants: FeedbackGrants = (account) => (account === 'user-a' ? 'granted' : 'withheld');
+
+    const fromLangfuse = scoreObservations(
+      delivered(evidence),
+      pseudonymGrants(grants, { userIds: ['user-a', 'user-b'], environment: 'synthetic', pseudonym }),
+    );
+    const fromEvidence = scorecard(evidence, grants);
+
+    expect(fromLangfuse.runs.map(withoutIds)).toEqual(fromEvidence.runs.map(withoutIds));
+    expect(fromLangfuse.overall).toEqual(fromEvidence.overall);
+    expect(fromEvidence.overall).toMatchObject({
+      feedback: { granted: 1, withheld: 1 },
+      granted: { runs: 1, rating: { positive: 1 } },
+    });
+    expect(scoreObservations(delivered(evidence)).overall.feedback).toEqual({ unknown: 2 });
   });
 
   it('counts a fact once across uploaders and replays, and never reads content or another mapper', async () => {

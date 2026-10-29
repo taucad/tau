@@ -48,20 +48,20 @@ describe('assimp transcoder', () => {
       };
     });
     assimpMock.convert.mockResolvedValue({
-      files: [{ name: 'result.stl', bytes: new Uint8Array([1, 2, 3]) }],
+      files: [{ name: 'model.stl', bytes: new Uint8Array([1, 2, 3]) }],
     });
   });
 
-  it('derives exactly the 26 policy routes from libassimp', async () => {
+  it('derives exactly the 22 policy routes from libassimp', async () => {
     const resolved = await definition();
     const expected = libassimpExporter.conversionEdges.filter(
       ({ from, to }) => (from === 'glb' || from === 'gltf') && to !== 'assjson',
     );
 
     expect(resolved.edges.map(({ from, to }) => ({ from, to }))).toEqual(expected);
-    expect(resolved.edges).toHaveLength(26);
-    expect(resolved.edges.filter(({ from }) => from === 'glb')).toHaveLength(13);
-    expect(resolved.edges.filter(({ from }) => from === 'gltf')).toHaveLength(13);
+    expect(resolved.edges).toHaveLength(22);
+    expect(resolved.edges.filter(({ from }) => from === 'glb')).toHaveLength(11);
+    expect(resolved.edges.filter(({ from }) => from === 'gltf')).toHaveLength(11);
     for (const edge of resolved.edges) {
       expect(edge.fidelity).toBe('mesh');
       expect(edge.optionsSchema).toBe(assimpEdgeSchemas[edge.to as keyof typeof assimpEdgeSchemas]);
@@ -120,12 +120,12 @@ describe('assimp transcoder', () => {
     );
   });
 
-  it('preserves sidecar order, copies bytes, maps MIME types, and normalizes STEP', async () => {
+  it('preserves sidecar order, copies bytes, and maps MIME types', async () => {
     const primary = new Uint8Array([7, 8, 9]);
     const sidecar = new Uint8Array([10, 11]);
     assimpMock.convert.mockResolvedValue({
       files: [
-        { name: 'result.stp', bytes: primary },
+        { name: 'model.step', bytes: primary },
         { name: 'material.mtl', bytes: sidecar },
       ],
     });
@@ -143,7 +143,7 @@ describe('assimp transcoder', () => {
       return;
     }
     expect(result.data.map(({ name, mimeType }) => ({ name, mimeType }))).toEqual([
-      { name: 'result.step', mimeType: 'application/step' },
+      { name: 'model.step', mimeType: 'application/step' },
       { name: 'material.mtl', mimeType: 'application/octet-stream' },
     ]);
     expect(result.data[0]?.bytes).toEqual(primary);

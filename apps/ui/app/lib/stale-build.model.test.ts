@@ -21,6 +21,8 @@
  * at once, so an older tab that boots while a newer one is stopped is told by nothing but the
  * stopped tab itself (I1b). The browser takes only a few beacons at a time, so a hide may not fit
  * everything that waits; whatever does not fit goes no other way while the page is hidden (I8b).
+ * At irreversible exit, refused events may be omitted only after an exit-summary attempt accounts
+ * for their exact count. Live and restored pages still owe individual delivery (I2).
  */
 import process from 'node:process';
 import { array, assert, asyncProperty, constant, constantFrom, oneof, record, tuple } from 'fast-check';
@@ -68,6 +70,8 @@ const model = {
   installing: undefined as Tab | undefined,
   /** The tab whose page is loading, whose channel the next `BroadcastChannel` is. */
   loading: undefined as Tab | undefined,
+  /** The page synchronously dispatching its irreversible exit, including summary beacons. */
+  exiting: undefined as Tab | undefined,
   failures: 0,
 };
 
@@ -141,6 +145,9 @@ type Tab = {
   errorReporting?: typeof ErrorReporting;
   /** Events the model error tracker sent per failure; Sentry ignores a second capture of the same value. */
   readonly tracked: Map<unknown, number>;
+  /** Failures covered by a verified exit-summary attempt after the browser refused delivery. */
+  readonly omittedAtExit: Set<unknown>;
+  readonly exitSummaryCounts: number[];
   /** The tag each failure of a page that left would be sent with, as that page knew it when it went. */
   readonly tagsAtLeave: Map<unknown, StaleBuildRecovery.StaleBuildTag>;
   /** The tags a page knew for each of its failures whenever it was hidden (frozen or left). */
@@ -282,6 +289,7 @@ const loadTab = async (tab: Tab): Promise<void> => {
 };
 
 type IngestedEvent = {
+  readonly fingerprint?: readonly string[];
   readonly tags?: Readonly<Record<string, string>>;
   readonly exception?: { readonly values?: ReadonlyArray<{ readonly value?: string }> };
 };
@@ -328,7 +336,17 @@ const ingest = async (_url: string, init: { readonly body?: unknown }): Promise<
 
 /** The browser's `sendBeacon`: it takes a few from each tab at a time ({@link beaconRoom}), then refuses. */
 const sendBeacon = (_url: string, body: unknown): boolean => {
-  const tab = ownerOf(body)?.tab;
+  const event = JSON.parse(String(body).split('\n')[2] ?? '{}') as IngestedEvent;
+  const isSummary = event.fingerprint?.[0] === 'ui-errors-undelivered-at-page-exit';
+  const tab = ownerOf(body)?.tab ?? (isSummary ? model.exiting : undefined);
+  if (isSummary) {
+    expect(tab, 'exit summary belongs to an exiting page').toBeDefined();
+    const count = /^(\d+) further UI errors were not delivered at page exit$/u.exec(
+      event.exception?.values?.[0]?.value ?? '',
+    )?.[1];
+    expect(count, 'exit summary declares its exact omitted count').toBeDefined();
+    tab?.exitSummaryCounts.push(Number(count));
+  }
   if (tab !== undefined) {
     if (tab.beacons === 0) {
       tab.beaconRefused = true;
@@ -428,7 +446,27 @@ const hasSettled = async (promise: Promise<unknown> | undefined): Promise<boolea
  */
 const leavePage = async (tab: Tab, { bootHidden = false }: { readonly bootHidden?: boolean } = {}): Promise<void> => {
   const page = tab.recovery!;
-  hidePage(tab, { persisted: false });
+  const summariesBefore = tab.exitSummaryCounts.length;
+  model.exiting = tab;
+  try {
+    hidePage(tab, { persisted: false });
+  } finally {
+    model.exiting = undefined;
+  }
+  const missing = tab.failures.filter(
+    ({ failure, recovery, sdk }) => recovery === page && !sdk && !tab.tracked.has(failure),
+  );
+  if (missing.length > 0) {
+    expect(tab.beaconRefused, 'only browser-refused delivery may be omitted at exit').toBe(true);
+    expect(tab.exitSummaryCounts.slice(summariesBefore), 'exit summary accounts for every undelivered error').toEqual([
+      missing.length,
+    ]);
+    for (const { failure } of missing) {
+      tab.omittedAtExit.add(failure);
+    }
+  } else {
+    expect(tab.exitSummaryCounts.slice(summariesBefore), 'no summary when every error was delivered').toEqual([]);
+  }
   for (const { failure, recovery } of tab.failures) {
     if (recovery === page) {
       tab.tagsAtLeave.set(failure, page.readStaleBuildTag(failure));
@@ -460,6 +498,8 @@ const newTab = (build: number, answer: Answer, answerDelay: number): Tab => ({
   beacons: beaconRoom,
   beaconRefused: false,
   tracked: new Map(),
+  omittedAtExit: new Set(),
+  exitSummaryCounts: [],
   tagsAtLeave: new Map(),
   tagsAtHide: new Map(),
   storage: new Map(),
@@ -808,14 +848,15 @@ const checkEnd = async (tabs: readonly [Tab, Tab]): Promise<void> => {
         expect(tab.analytics.get(failure) ?? 0, `I9 analytics tab ${String(index)}`).toBe(0);
         continue;
       }
-      expect(tab.tracked.get(failure) ?? 0, `I2 tracker tab ${String(index)}`).toBe(1);
+      const omittedAtExit = tab.omittedAtExit.has(failure);
+      expect(tab.tracked.get(failure) ?? 0, `I2 tracker tab ${String(index)}`).toBe(omittedAtExit ? 0 : 1);
       // I2b: the tag sent is the settled decision's, or what the page knew when it was hidden.
       const allowed = new Set(tab.tagsAtHide.get(failure));
       if (!tab.tagsAtLeave.has(failure) && outcome !== undefined) {
         // oxlint-disable-next-line no-await-in-loop -- Each tag was settled during the wait already.
         allowed.add(await recovery.classifyStaleBuildFailure(failure));
       }
-      if (allowed.size > 0) {
+      if (!omittedAtExit && allowed.size > 0) {
         // oxlint-disable-next-line no-await-in-loop -- Each tag was settled during the wait already.
         const sent = await tab.tags.get(failure);
         expect(allowed.has(sent!), `I2b tag tab ${String(index)} (${String(outcome)}: ${String(sent)})`).toBe(true);
@@ -985,6 +1026,24 @@ const untilReloadPending: readonly Step[] = [
 ];
 
 describe('build-skew and stale-build-recovery, together (model)', () => {
+  it('should account for three errors when the SDK fails and the page exits before their tags settle', async () => {
+    await runModel(
+      ['X', 'X', 0, 1000],
+      [
+        { kind: 'sdkFails', tab: 1, handOver: 'prompt' },
+        { kind: 'failure', tab: 1, channel: 'boundary' },
+        { kind: 'failure', tab: 1, channel: 'boundary' },
+        { kind: 'failure', tab: 1, channel: 'boundary' },
+        { kind: 'reload', tab: 1 },
+      ],
+      ([, tab]) => {
+        expect(tab.tracked.size).toBe(2);
+        expect(tab.omittedAtExit.size).toBe(1);
+        expect(tab.exitSummaryCounts).toEqual([1]);
+      },
+    );
+  });
+
   it('keep DF20, report every failure once, offer on replaced and withdraw on live, and ask a bounded number of times', async () => {
     await assert(
       asyncProperty(

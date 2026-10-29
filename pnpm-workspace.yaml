@@ -237,7 +237,7 @@ catalog:
   '@types/jsdom': ^21.1.7
   katex: 0.18.2
   knip: 6.41.0
-  libassimp: ^0.3.0
+  libassimp: ^0.4.0
   libcascade: 3.1.0
   lighthouse: ^13.5.0
   lint-staged: ^16.4.0
@@ -376,6 +376,7 @@ catalog:
   '@earendil-works/pi-telemetry': 1.4.0
   '@opentelemetry/sdk-trace-base': 2.12.0
   '@opentelemetry/sdk-metrics': 2.12.0
+  '@vscode/codicons': 0.0.46-24
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0

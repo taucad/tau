@@ -1,3 +1,5 @@
+import { completionTypeFromLsp } from '#components/code/editor-completion-icon.js';
+import { editorCompletionInfo, renderEditorDocumentation } from '#components/code/editor-documentation.js';
 import type { Extension } from '@codemirror/state';
 import { autocompletion, snippet } from '@codemirror/autocomplete';
 import type { Completion } from '@codemirror/autocomplete';
@@ -19,6 +21,7 @@ type JsonDiagnostic = Readonly<{
   code?: string | number;
 }>;
 type JsonCompletion = Readonly<{
+  kind?: number;
   label: string;
   detail?: string;
   documentation?: string;
@@ -291,8 +294,9 @@ export async function acquireJsonLanguage({
             from: context.matchBefore(/[\w$-]*/)?.from ?? context.pos,
             options: items.map((item) => ({
               label: item.label,
+              type: completionTypeFromLsp(item.kind),
               detail: item.detail,
-              info: item.documentation,
+              info: editorCompletionInfo(item.documentation),
               // oxlint-disable-next-line max-params -- CodeMirror completion apply callback contract.
               apply(view: EditorView, completion: Completion, from: number, to: number): void {
                 const range = item.range ?? { from, to };
@@ -323,8 +327,7 @@ export async function acquireJsonLanguage({
         pos: result.range?.from ?? pos,
         end: result.range?.to,
         create() {
-          const dom = documentObject().createElement('div');
-          dom.textContent = result.text;
+          const dom = renderEditorDocumentation(result.text, documentObject());
           return { dom };
         },
       };

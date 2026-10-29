@@ -20,6 +20,7 @@ import {
   deniedWriteRoots,
   physicalVariants,
   sandboxRuntimeReadRoots,
+  sandboxRuntimeJavaAgent,
   sandboxRuntimeSeccomp,
 } from '#native-sandbox.js';
 import { terminateOwnedProcesses, trackDescendants } from '#shell/process-tree.js';
@@ -240,6 +241,7 @@ export const shellSandboxProfile = (
   const { domains } = launch.network;
   return {
     seccomp: sandboxRuntimeSeccomp(),
+    javaAgentJarPath: sandboxRuntimeJavaAgent(),
     network: { allowedDomains: [...domains], deniedDomains: domains.length > 0 ? [] : ['*'], strictAllowlist: true },
     filesystem: {
       denyRead: [...new Set([...deniedReadRoots(), ...denied])],

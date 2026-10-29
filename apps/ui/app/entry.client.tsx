@@ -1,13 +1,13 @@
+// SB5: first, so its listeners catch what any module below throws before the SDK's handlers are in.
+// oxlint-disable-next-line import/no-unassigned-import -- evaluated for its listeners, before every other module.
+import '#lib/early-error-buffer.js';
 import { HydratedRouter } from 'react-router/dom';
 import { startTransition, StrictMode } from 'react';
 import { hydrateRoot } from 'react-dom/client';
 import { observeLongAnimationFrames } from '@taucad/viewer/lib/renderer-telemetry';
 import { startErrorReporting } from '#lib/error-reporting.js';
-import {
-  installStaleBuildRecovery,
-  recoverFromCaughtError,
-  recoverFromSdkLoadFailure,
-} from '#lib/stale-build-recovery.js';
+import { reactRootErrorHooks } from '#lib/react-root-errors.js';
+import { installStaleBuildRecovery, recoverFromSdkLoadFailure } from '#lib/stale-build-recovery.js';
 
 /* D21: started before hydration and never stopped, so the frames that block the first paint are
  * recorded too (the observer is buffered, and the platform only reports frames over 50 ms). */
@@ -25,13 +25,8 @@ startTransition(() => {
     <StrictMode>
       <HydratedRouter />
     </StrictMode>,
-    {
-      // Every boundary hands a chunk a deploy stopped serving to the recovery; the log stays as React's default.
-      // Uncaught errors keep React's default, which reaches the global listeners and error reporting.
-      onCaughtError(error, errorInfo) {
-        recoverFromCaughtError(error);
-        console.error(error, errorInfo.componentStack);
-      },
-    },
+    // SB4: caught, uncaught and recoverable errors are each reported once with their component stack; a chunk a
+    // deploy stopped serving goes to the recovery instead. React's console output stays.
+    reactRootErrorHooks,
   );
 });

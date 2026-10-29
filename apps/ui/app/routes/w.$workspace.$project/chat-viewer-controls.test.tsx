@@ -137,6 +137,8 @@ describe('ChatViewerControls', () => {
       mocks.isMobile = true;
       const actor = startGraphics();
       actor.send({ type: 'setMeasureActive', payload: true });
+      // This bar-only fixture acknowledges the listener owner before testing the ready layout.
+      actor.send({ type: 'setMeasureInputReady', ready: true });
       renderBar(actor);
 
       const bar = screen.getByRole('group', { name: 'Viewer controls' }).closest('[data-slot="viewer-controls"]');
@@ -253,6 +255,7 @@ describe('ChatViewerControls', () => {
     it('should unfold measurements above the Measuring options line inside the bar', async () => {
       const actor = startGraphics();
       actor.send({ type: 'setMeasureActive', payload: true });
+      actor.send({ type: 'setMeasureInputReady', ready: true });
       actor.send({ type: 'startMeasurement', payload: [0, 0, 0] });
       actor.send({ type: 'completeMeasurement', payload: [0.01, 0, 0] });
       const user = userEvent.setup();
@@ -270,10 +273,14 @@ describe('ChatViewerControls', () => {
 
     it('should stack the Section row and its editor above the Measuring row, above the controls', async () => {
       const user = userEvent.setup();
-      renderBar(startGraphics());
+      const actor = startGraphics();
+      renderBar(actor);
 
       await user.click(screen.getByRole('button', { name: 'Section view' }));
       await user.click(screen.getByRole('button', { name: 'Measure' }));
+      act(() => {
+        actor.send({ type: 'setMeasureInputReady', ready: true });
+      });
 
       const order = [
         within(sectionRow()).getByRole('group', { name: 'XZ plane' }),
@@ -382,7 +389,8 @@ describe('ChatViewerControls', () => {
   describe('focus', () => {
     it('should move focus into a row when its toggle starts the tool', async () => {
       const user = userEvent.setup();
-      renderBar(startGraphics());
+      const actor = startGraphics();
+      renderBar(actor);
 
       await user.click(screen.getByRole('button', { name: 'Section view' }));
 
@@ -390,25 +398,46 @@ describe('ChatViewerControls', () => {
 
       await user.click(screen.getByRole('button', { name: 'Measure' }));
 
-      // The Targets control opens the row before disabled Clear all and Done.
+      expect(screen.getByRole('status', { name: 'Preparing measurement' })).toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: 'Measuring options' })).not.toBeInTheDocument();
+      const done = screen.getByRole('button', { name: 'Done with measure' });
+      expect(done).toHaveFocus();
+      act(() => {
+        actor.send({ type: 'setMeasureInputReady', ready: true });
+      });
+      expect(within(measuringRow()).getByRole('button', { name: 'Done with measure' })).toBe(done);
+      expect(done).toHaveFocus();
+      await user.tab({ shift: true });
       expect(within(measuringRow()).getByRole('button', { name: /^Targets:/u })).toHaveFocus();
     });
 
     it('should move focus into the row when Enter starts the tool', async () => {
       const user = userEvent.setup();
-      renderBar(startGraphics());
+      const actor = startGraphics();
+      renderBar(actor);
 
       act(() => {
         screen.getByRole('button', { name: 'Measure' }).focus();
       });
       await user.keyboard('{Enter}');
 
+      expect(screen.getByRole('status', { name: 'Preparing measurement' })).toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: 'Measuring options' })).not.toBeInTheDocument();
+      const done = screen.getByRole('button', { name: 'Done with measure' });
+      expect(done).toHaveFocus();
+      act(() => {
+        actor.send({ type: 'setMeasureInputReady', ready: true });
+      });
+      expect(within(measuringRow()).getByRole('button', { name: 'Done with measure' })).toBe(done);
+      expect(done).toHaveFocus();
+      await user.tab({ shift: true });
       expect(within(measuringRow()).getByRole('button', { name: /^Targets:/u })).toHaveFocus();
     });
 
     it('should leave focus where it is when S or M starts a tool', async () => {
       const user = userEvent.setup();
-      renderBar(startGraphics());
+      const actor = startGraphics();
+      renderBar(actor);
       const fitView = screen.getByRole('button', { name: 'Fit view' });
       act(() => {
         fitView.focus();
@@ -418,6 +447,12 @@ describe('ChatViewerControls', () => {
       await user.keyboard('m');
 
       expect(sectionRow()).toBeInTheDocument();
+      expect(screen.getByRole('status', { name: 'Preparing measurement' })).toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: 'Measuring options' })).not.toBeInTheDocument();
+      expect(fitView).toHaveFocus();
+      act(() => {
+        actor.send({ type: 'setMeasureInputReady', ready: true });
+      });
       expect(measuringRow()).toBeInTheDocument();
       expect(fitView).toHaveFocus();
     });

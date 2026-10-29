@@ -7,7 +7,7 @@ import type { getDefaultWritePaths } from '@anthropic-ai/sandbox-runtime';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { launchInNativeSandbox, NativeRuntimeUnavailableError, nativeSandboxPolicy } from '#index.js';
-import { sandboxRuntimeSeccomp } from '#native-sandbox.js';
+import { sandboxRuntimeJavaAgent, sandboxRuntimeSeccomp } from '#native-sandbox.js';
 
 /** A fresh module registry per file keeps the launcher's one-time initialization observable. */
 const sandbox = vi.hoisted(() => ({
@@ -190,13 +190,18 @@ describe('nativeSandboxPolicy', () => {
       expect.arrayContaining([homedir(), '/Users', '/home', '/root', '/Volumes', '/mnt', '/media', '/tmp', tmpdir()]),
     );
     expect(policy.filesystem.denyRead).toContain(realpathSync(tmpdir()));
-    // On Linux the runtime's own seccomp helper must stay readable under a denied root.
+    // Linux grants only the two physical vendor helper directories under otherwise denied roots.
     expect(policy.filesystem.allowRead.slice(0, 3)).toEqual([
       '/opt/runtime',
       '/private/workspace',
       '/private/artifacts',
     ]);
-    expect(policy.filesystem.allowRead.slice(3).every((path) => /[/\\]vendor[/\\]seccomp$/u.test(path))).toBe(true);
+    expect(
+      policy.filesystem.allowRead.slice(3).every((path) => /[/\\]vendor[/\\](seccomp|java-proxy-agent)$/u.test(path)),
+    ).toBe(true);
+    expect(new Set(policy.filesystem.allowRead.slice(3).map((path) => path.split(/[/\\]/u).at(-1)))).toEqual(
+      new Set(process.platform === 'linux' ? ['seccomp', 'java-proxy-agent'] : []),
+    );
     expect(policy.filesystem.allowRead.length > 3).toBe(process.platform === 'linux');
     expect(policy.filesystem.allowWrite).toEqual(['/private/artifacts']);
     // The runtime grants these to every command by default; a CAD worker must not inherit them.
@@ -218,6 +223,15 @@ describe('nativeSandboxPolicy', () => {
 });
 
 describe('packaged sandbox helper', () => {
+  it('resolves the Linux Java agent outside ASAR and preserves ordinary installations', () => {
+    expect(sandboxRuntimeJavaAgent('/tmp/app.asar/node_modules/srt/dist/index.js', 'linux')).toBe(
+      join('/tmp/app.asar.unpacked/node_modules/srt/vendor/java-proxy-agent/srt-proxy-agent.jar'),
+    );
+    expect(sandboxRuntimeJavaAgent('/opt/srt/dist/index.js', 'linux')).toBe(
+      join('/opt/srt/vendor/java-proxy-agent/srt-proxy-agent.jar'),
+    );
+    expect(sandboxRuntimeJavaAgent('/Applications/app.asar/srt/dist/index.js', 'darwin')).toBeUndefined();
+  });
   it('uses the unpacked executable for Linux ASAR packages and leaves ordinary installations intact', () => {
     expect(
       sandboxRuntimeSeccomp(

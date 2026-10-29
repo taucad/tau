@@ -28,6 +28,7 @@ import { freezeEverything, parseFreezeSeconds, thawEverything } from '#api/git/r
 import { RedisInFlightRegistry } from '#api/git/routing/in-flight.js';
 import type { ScheduledMaintenanceCommand } from '#api/git/maintenance/liveness.js';
 import { holdInStandby } from '#api/git/maintenance/standby.js';
+import { applicationNameOf } from '#database/application-name.js';
 
 /**
  * `revisions-maintenance`: the singleton entry for everything that must happen
@@ -259,6 +260,7 @@ async function main(): Promise<void> {
     connect_timeout: environment.DATABASE_CONNECT_TIMEOUT_SECONDS,
     idle_timeout: environment.DATABASE_IDLE_TIMEOUT_SECONDS,
     connection: {
+      application_name: applicationNameOf('maintenance'),
       statement_timeout: environment.DATABASE_STATEMENT_TIMEOUT_MS,
       lock_timeout: environment.DATABASE_LOCK_TIMEOUT_MS,
       idle_in_transaction_session_timeout: environment.DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS,

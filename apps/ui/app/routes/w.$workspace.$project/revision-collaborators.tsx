@@ -24,6 +24,7 @@ import { CopyButton } from '@taucad/ui/components/copy-button';
 import { ENV } from '#environment.config.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { shareOrigin } from '#lib/share-origin.js';
+import { recordApiRequestId } from '#lib/api-request-id.js';
 
 /** One row of `GET /v1/projects/:id/collaborators`. Never a token. */
 type CollaboratorEntry = Readonly<{
@@ -110,7 +111,7 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
         /* F4: a listing nobody could read is not an empty one. Answering `[]`
            told an owner "nobody else has access" while a collaborator with a
            live membership was sitting behind a 500. */
-        throw new Error('The list of people with access could not be loaded.');
+        throw recordApiRequestId(new Error('The list of people with access could not be loaded.'), response);
       }
       const body: unknown = await response.json();
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the owner-only route's own DTO, narrowed by the array check.
@@ -132,8 +133,11 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
       });
       if (!response.ok) {
         const answered = (await response.json().catch(() => ({}))) as Readonly<{ code?: unknown }>;
-        throw new Error(
-          inviteFailureMessage(response.status, typeof answered.code === 'string' ? answered.code : undefined),
+        throw recordApiRequestId(
+          new Error(
+            inviteFailureMessage(response.status, typeof answered.code === 'string' ? answered.code : undefined),
+          ),
+          response,
         );
       }
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the route's own DTO.
@@ -163,10 +167,13 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
         body: JSON.stringify({ role: next.role }),
       });
       if (!response.ok) {
-        throw new Error(
-          response.status === 404
-            ? `${next.email} has no invitation to change.`
-            : `The role for ${next.email} could not be changed. Try again.`,
+        throw recordApiRequestId(
+          new Error(
+            response.status === 404
+              ? `${next.email} has no invitation to change.`
+              : `The role for ${next.email} could not be changed. Try again.`,
+          ),
+          response,
         );
       }
     },
@@ -187,7 +194,7 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
         headers: { Accept: 'application/json' },
       });
       if (!response.ok) {
-        throw new Error(`Access for ${address} could not be revoked. Try again.`);
+        throw recordApiRequestId(new Error(`Access for ${address} could not be revoked. Try again.`), response);
       }
     },
     async onSuccess() {

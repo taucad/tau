@@ -22,6 +22,7 @@ import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import { getRevisionSessionUser, useRevisionSessionUser } from '#lib/revision-actor.js';
 import { KeyedMutex } from '#db/keyed-mutex.js';
+import { recordApiRequestId } from '#lib/api-request-id.js';
 
 /** What this account may do with a project on Tau Cloud (D27). @public */
 export type ProjectRole = 'owner' | 'write' | 'read';
@@ -171,7 +172,7 @@ const fetchDeletionStatus = async (projectId: string, method: 'GET' | 'DELETE' =
     },
   );
   if (!response.ok) {
-    throw new CloudDeletionRequestError(response.status);
+    throw recordApiRequestId(new CloudDeletionRequestError(response.status), response);
   }
   const status = deletionStatusSchema.parse(await response.json());
   if (status.projectId !== projectId || (method === 'DELETE' && status.state === 'active')) {
@@ -383,7 +384,7 @@ export const fetchCloudProjects = async (signal?: AbortSignal): Promise<readonly
        no projects" from "nobody asked" (N1). The library renders no section for
        either; only the role resolver needs the difference, and a silent empty
        list would have told a signed-out tab its access had been revoked. */
-    throw new Error(`Tau Cloud answered ${String(response.status)}`);
+    throw recordApiRequestId(new Error(`Tau Cloud answered ${String(response.status)}`), response);
   }
   const body: unknown = await response.json();
   if (getRevisionSessionUser()?.id !== account) {

@@ -1771,10 +1771,16 @@ registerHooks({
           { signal: controller.signal },
         );
 
-        await until(
-          () => mirror.requests.some((request) => request.hex === dotnet && request.completed),
-          'the runtime payload download',
-        );
+        /* The mirror finishing its response precedes the consumer verifying and atomically publishing the blob. */
+        const runtimeBlob = join('payloads', 'blobs', 'sha256', dotnet);
+        await until(async () => {
+          const entries = await entriesOf(store);
+          if (!entries.includes(runtimeBlob)) {
+            return false;
+          }
+          const bytes = await readFile(join(store, runtimeBlob));
+          return bytes.equals(synthetic.dotnet);
+        }, 'the verified runtime payload publication');
         await until(() => mirror.requests.some((request) => request.hex === worker), 'the layer request');
         controller.abort();
         await expect(pending).rejects.toThrow();

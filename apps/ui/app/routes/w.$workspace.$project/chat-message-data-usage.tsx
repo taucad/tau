@@ -9,6 +9,7 @@ import { ChatMessageUsage, sumUsageTokens } from '#routes/w.$workspace.$project/
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { recordBillingRevisionMinimum } from '#db/billing-snapshot-store.js';
+import { recordApiRequestId } from '#lib/api-request-id.js';
 
 /** What the account's own authority says one funded operation cost. @public */
 export type ReceiptCredit =
@@ -77,7 +78,7 @@ export const useReceiptCredits = (operationIds: readonly string[]): ReadonlyMap<
           signal,
         });
         if (!response.ok) {
-          throw new Error(`Operation receipt request failed with ${response.status}`);
+          throw recordApiRequestId(new Error(`Operation receipt request failed with ${response.status}`), response);
         }
         const receipt = wireOperationReceiptSchema.parse(await response.json());
         if (receipt.ownerId !== userId || receipt.environment !== environment) {

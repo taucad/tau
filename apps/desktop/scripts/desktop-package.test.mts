@@ -102,6 +102,7 @@ try {
   const unpacked = [
     'node_modules/native/addon.node',
     'node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp/x64/apply-seccomp',
+    'node_modules/@anthropic-ai/sandbox-runtime/vendor/java-proxy-agent/srt-proxy-agent.jar',
     'node_modules/native/engine.dll',
     'node_modules/@esbuild/darwin-arm64/bin/esbuild',
     'node_modules/@esbuild/win32-x64/esbuild.exe',

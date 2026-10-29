@@ -1,4 +1,6 @@
 declare const tauBuildFrontendUrl: string;
+/** Netlify `CONTEXT` of the web build (`''` elsewhere); read only through `resolveDeployContext` in `environment.config`. */
+declare const tauBuildDeployContext: string;
 declare const tauBuildId: number;
 declare const tauCloudBuildEnabled: boolean;
 /** Runtime telemetry's Cloud-host build signal (`TAU_TELEMETRY_HOST=cloud`); read only through `#cloud/telemetry-host`. */

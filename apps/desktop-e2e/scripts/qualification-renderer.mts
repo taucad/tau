@@ -279,6 +279,30 @@ const main = async (): Promise<void> => {
       throw new Error('Installed renderer produced no fresh admitted Build123d payload record');
     }
     await page.screenshot({ path: `${output}.png`, fullPage: true });
+    let softwareRenderer: string | undefined;
+    if (process.env['TAU_QUALIFICATION_GRAPHICS'] === 'isolated-software') {
+      softwareRenderer = await page
+        .getByTestId('cad-viewer-canvas-region')
+        .locator('canvas')
+        .evaluate((canvas) => {
+          if (!(canvas instanceof HTMLCanvasElement)) {
+            throw new Error('Viewer canvas is not an HTML canvas');
+          }
+          const gl = canvas.getContext('webgl2');
+          const debug = gl?.getExtension('WEBGL_debug_renderer_info');
+          if (!gl || !debug) {
+            throw new Error('Viewer WebGL2 renderer identity unavailable');
+          }
+          const renderer: unknown = gl.getParameter(debug.UNMASKED_RENDERER_WEBGL);
+          if (typeof renderer !== 'string') {
+            throw new TypeError('Viewer WebGL2 renderer identity is not a string');
+          }
+          return renderer;
+        });
+      if (!/SwiftShader/iu.test(softwareRenderer)) {
+        throw new Error('Isolated software CI did not observe the SwiftShader viewer backend');
+      }
+    }
     await writeFile(
       output,
       JSON.stringify(
@@ -291,6 +315,7 @@ const main = async (): Promise<void> => {
           exported,
           logOffset,
           observedAt: new Date().toISOString(),
+          ...(softwareRenderer ? { softwareRenderer } : {}),
         },
         undefined,
         2,

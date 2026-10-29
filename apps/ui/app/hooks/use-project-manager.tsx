@@ -2271,7 +2271,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           }
           const verificationEpoch = discoveryEpochRef.current;
           const verification =
-            operations.length === 0 && recoveriesRef.current.size === 0
+            operations.length === 0 &&
+            recoveriesRef.current.size === 0 &&
+            discoverySnapshotRef.current?.epoch !== verificationEpoch
               ? await fileManager.client.verifyProjectRoute({ projectId })
               : ({ status: 'discovery-required' } as const);
           if (verification.status === 'superseded' || verificationEpoch !== discoveryEpochRef.current) {

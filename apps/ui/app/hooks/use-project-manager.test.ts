@@ -792,6 +792,46 @@ describe('useProjectManager.createProject', () => {
     },
   );
 
+  it('reuses current discovery without verifying the selected target again', async () => {
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await result.current.getProjectListing();
+    const scans = mockListProjectManifests.mock.calls.length;
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({ status: 'ready' });
+    expect(mockVerifyProjectRoute).not.toHaveBeenCalled();
+    expect(mockListProjectManifests).toHaveBeenCalledTimes(scans);
+  });
+
+  it('verifies again after the discovery snapshot is invalidated', async () => {
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await result.current.getProjectListing();
+    mockVerifyProjectRoute.mockResolvedValue({ status: 'unavailable' });
+    emitWorkerChange('fileDeleted', '/test-project/tau.json');
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({ status: 'unavailable' });
+    expect(mockVerifyProjectRoute).toHaveBeenCalledExactlyOnceWith({ projectId: fakeProject.id });
+  });
+
+  it('preserves a current discovery conflict even when exact verification would succeed', async () => {
+    mockListProjectManifests.mockResolvedValue({
+      roots: [],
+      entries: [fakeLocator, { ...fakeLocator, relativeDirectory: 'test-project-copy' }].map((locator) => ({
+        status: 'duplicate-id',
+        projectId: fakeProject.id,
+        manifest: projectToManifest(fakeProject),
+        locator,
+      })),
+    });
+    mockVerifyProjectRoute.mockResolvedValue({
+      status: 'verified',
+      project: { projectId: fakeProject.id, manifest: projectToManifest(fakeProject) },
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await result.current.getProjectListing();
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({ status: 'conflict' });
+    expect(mockVerifyProjectRoute).not.toHaveBeenCalled();
+  });
+
   it('admits an exact verified target without scanning the project catalog', async () => {
     mockVerifyProjectRoute.mockResolvedValue({
       status: 'verified',

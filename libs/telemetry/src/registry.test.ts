@@ -7,7 +7,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(186);
+    expect(metrics).toHaveLength(187);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -314,6 +314,22 @@ describe('TauMetrics', () => {
       expect(metric.attributes.safeParse({ 'agent.placement': 'desktop', source: 'local' }).success).toBe(true);
       expect(metric.attributes.safeParse({ 'agent.placement': 'desktop', source: 'proj_1' }).success).toBe(false);
     }
+  });
+
+  /* STO-25: a hosted project's open, by phase and by whether it fetched from the network. */
+  it('should label project opens by phase and cache state only', () => {
+    expect(TauMetrics.projectOpenDuration).toMatchObject({ name: 'tau.project.open.duration', unit: 's' });
+    expect(TauMetrics.projectOpenDuration.buckets).toContain(5);
+    expect(TauMetrics.projectOpenDuration.attributes.safeParse({ phase: 'first_view', cache: 'cold' }).success).toBe(
+      true,
+    );
+    expect(TauMetrics.projectOpenDuration.attributes.safeParse({ phase: 'fully_fetched', cache: 'warm' }).success).toBe(
+      true,
+    );
+    expect(TauMetrics.projectOpenDuration.attributes.safeParse({ phase: 'first_view', cache: 'partial' }).success).toBe(
+      false,
+    );
+    expect(TauMetrics.projectOpenDuration.attributes.safeParse({ phase: 'proj_1', cache: 'cold' }).success).toBe(false);
   });
 
   it('should bound a refusal to a declared code, never a free-form one', () => {

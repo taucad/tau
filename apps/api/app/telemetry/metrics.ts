@@ -661,6 +661,28 @@ export class MetricsService {
     advice: { explicitBucketBoundaries: [...TauMetrics.syncClientPending.buckets] },
   });
 
+  public readonly syncClientLfsDuration = this.clientMeter.createHistogram(TauMetrics.syncClientLfsDuration.name, {
+    description: TauMetrics.syncClientLfsDuration.description,
+    unit: TauMetrics.syncClientLfsDuration.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.syncClientLfsDuration.buckets] },
+  });
+
+  public readonly syncClientLfsObjects = this.clientMeter.createCounter(TauMetrics.syncClientLfsObjects.name, {
+    description: TauMetrics.syncClientLfsObjects.description,
+    unit: TauMetrics.syncClientLfsObjects.unit,
+  });
+
+  public readonly syncClientLfsBytes = this.clientMeter.createCounter(TauMetrics.syncClientLfsBytes.name, {
+    description: TauMetrics.syncClientLfsBytes.description,
+    unit: TauMetrics.syncClientLfsBytes.unit,
+  });
+
+  public readonly projectOpenDuration = this.clientMeter.createHistogram(TauMetrics.projectOpenDuration.name, {
+    description: TauMetrics.projectOpenDuration.description,
+    unit: TauMetrics.projectOpenDuration.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.projectOpenDuration.buckets] },
+  });
+
   // --- Storage accounting scheduler (W14 OB3) ---
 
   /* Observed at collection from the scheduler's shared snapshot, so every Machine exports the same figures. */

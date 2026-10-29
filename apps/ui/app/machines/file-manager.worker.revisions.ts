@@ -1785,6 +1785,8 @@ export type WorkerRevisionRegistryOptions = Readonly<{
    * review 2 R2, secondary).
    */
   released?: (projectId: string) => void;
+  /** Told each status one project's root publishes, from its first, for the host's open telemetry (STO-25). */
+  observeStatus?: (projectId: string, status: RevisionStatusProjection) => void;
   /** One rooted provider per checkout route. */
   filesystem: (root: string) => RootedFileSystem | Promise<RootedFileSystem>;
   /**
@@ -2030,8 +2032,10 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
           port.postMessage(frame);
         }
       };
+      options.observeStatus?.(projectId, tree.status());
       const subscriptions = [
         tree.subscribe((status) => {
+          options.observeStatus?.(projectId, status);
           publish({ type: 'status', status });
         }),
         tree.subscribeEvents((event) => {

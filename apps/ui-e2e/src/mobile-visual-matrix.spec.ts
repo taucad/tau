@@ -12,10 +12,13 @@ import {
   moveSheet,
   navButton,
   navigation,
+  chooseTheme,
+  motionSettled,
   sheetSettled,
   tapDestination,
+  themeNames,
 } from '#support/phone-shell.js';
-import { waitForStageReady } from '#support/viewer-stage.js';
+import { viewerControls, waitForModelReady as modelReady } from '#support/viewer-stage.js';
 import { readWorkbenchTree, writeWorkbenchFile } from '#support/workbench-files.js';
 
 /**
@@ -36,7 +39,7 @@ const portraitViewports = [
   { width: 360, height: 780 },
   { width: 390, height: 844 },
 ] as const;
-const themes = ['Light', 'Dark', 'Black', 'High Contrast'] as const;
+const themes = themeNames;
 
 /** Retain navigation, layout and renderer evidence before the failed case's target closes. */
 afterEach(async (context) => {
@@ -79,7 +82,6 @@ afterEach(async (context) => {
 const topBar = (): Locator => selectors.getByCss('[data-slot="mobile-project-top-bar"]');
 const titleButton = (): Locator => selectors.getByCss('[data-slot="project-title-button"]');
 const projectSheet = (): Locator => selectors.getByCss('[data-slot="project-sheet"]');
-const viewerControls = (): Locator => selectors.getByRole('group', { name: 'Viewer controls' }).first();
 const composer = (): Locator => selectors.getByCss(composerSelector).first();
 const send = (): Locator => selectors.getByRole('button', { name: 'Send', exact: true }).first();
 const chatLaneToggle = (): Locator => selectors.getByRole('button', { name: 'Toggle Chat lane' });
@@ -331,46 +333,8 @@ const reachable = async (locator: Locator): Promise<boolean> =>
     return hit !== null && element.contains(hit);
   });
 
-/** Wait for every running animation and transition in the document to finish or be replaced. */
-const motionSettled = async (): Promise<void> =>
-  target.evaluate(async () => {
-    await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          resolve();
-        });
-      });
-    });
-    const finite = document
-      .getAnimations()
-      .filter((animation) => Number.isFinite(Number(animation.effect?.getComputedTiming().endTime ?? 0)));
-    await Promise.all(finite.map(async (animation) => animation.finished.catch(() => undefined)));
-  });
-
-/** Wait for a rendered stage with geometry, rather than an empty first frame. */
-const waitForModelReady = async (): Promise<void> => {
-  try {
-    await waitForStageReady();
-  } catch (error) {
-    await target.screenshot(undefined, 'mobile-matrix-stage-not-ready.png');
-    const diagnostics = await target.commands.uiCaptureTargetDiagnostics();
-    await target.writeArtifact(
-      'mobile-matrix-stage-not-ready.json',
-      JSON.stringify({ ...diagnostics, screenshot: undefined }, null, 2),
-    );
-    throw error;
-  }
-  await expect
-    .poll(
-      async () =>
-        target.getAttribute(
-          viewerControls().getByRole('button', { name: 'Section view', exact: true }),
-          'aria-disabled',
-        ),
-      { timeout: 60_000 },
-    )
-    .toBe('false');
-};
+/** Wait for a rendered stage with geometry, saving the stage's evidence if it never becomes ready. */
+const waitForModelReady = async (): Promise<void> => modelReady({ diagnostics: 'mobile-matrix-stage-not-ready' });
 
 /**
  * Open a touch phone at `viewport` on the seed route and wait for its geometry.
@@ -625,49 +589,6 @@ const dismiss = async (locator: Locator): Promise<void> => {
 const returnToStage = async (): Promise<void> => {
   await tapDestination('Model');
   await target.expectCount(selectors.getByCss('[data-slot="mobile-surface"]'), 0, 30_000);
-  await motionSettled();
-};
-
-/**
- * Choose a theme in Settings › General, as a person does on a phone: the list, then General, then the theme.
- *
- * @param theme - The theme's name.
- */
-/** How many dialogs are on screen, counted in the page so a dialog leaving mid-count is simply not counted. */
-const openDialogs = async (): Promise<number> =>
-  target.evaluate(
-    () => [...document.querySelectorAll('[role="dialog"]')].filter((dialog) => dialog.checkVisibility()).length,
-  );
-
-const chooseTheme = async (theme: (typeof themes)[number]): Promise<void> => {
-  await target.click(selectors.getByRole('button', { name: 'Open sidebar', exact: true }), { touch: true });
-  const sidebar = selectors.getByRole('dialog', { name: 'Sidebar' });
-  await target.expectVisible(sidebar);
-  await target.click(sidebar.getByRole('button', { name: 'Account', exact: true }), { touch: true });
-  await target.click(selectors.getByRole('menuitem', { name: 'Settings', exact: true }), { touch: true });
-  const settings = selectors.getByRole('dialog', { name: /^settings$/iu });
-  await target.expectVisible(settings, 60_000);
-  const themeButton = selectors.getByRole('button', { name: /^(?:light|dark|black|high contrast|system)$/iu });
-  if (!(await target.isVisible(themeButton))) {
-    await target.click(settings.getByRole('button', { name: /^General/u }).first(), { touch: true });
-  }
-  await target.click(themeButton, { touch: true });
-  await target.click(selectors.getByRole('option', { name: new RegExp(`^${theme}`, 'iu') }), { touch: true });
-  const themeClass = theme.toLowerCase().replaceAll(' ', '-');
-  await target.expectClass(selectors.getByCss('html'), new RegExp(`\\b${themeClass}\\b`, 'u'));
-  await target.expectCount(selectors.getByRole('listbox'), 0, 30_000);
-  /* On a phone Settings is a list and a detail: Escape steps back from General to the list (whose dialog is then named
-   * Settings again) and from the list closes it. Close by Escape until no dialog is left. */
-  // oxlint-disable-next-line no-await-in-loop -- whether a dialog is left decides the next step.
-  for (let step = 0; step < 3 && (await openDialogs()) > 0; step++) {
-    // oxlint-disable-next-line no-await-in-loop -- one step back at a time.
-    await target.keyboardPress('Escape');
-    // oxlint-disable-next-line no-await-in-loop -- the dialog's exit animation runs between steps.
-    await motionSettled();
-  }
-  await target.expectCount(selectors.getByRole('dialog'), 0, 30_000);
-  await target.expectVisible(navigation(), 60_000);
-  await waitForModelReady();
   await motionSettled();
 };
 
@@ -1167,6 +1088,8 @@ describe.each(themes)('the phone shell in %s', (theme) => {
     const viewport = portraitViewports[1];
     await openPhoneProject(viewport);
     await chooseTheme(theme);
+    await waitForModelReady();
+    await motionSettled();
     await expectStage(viewport);
     await expectChatAtHalf(viewport);
     expect(

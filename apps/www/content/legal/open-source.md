@@ -97,7 +97,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@better-auth/utils](https://github.com/better-auth/utils) | 0.5.0 | MIT |
 | [@better-fetch/fetch](https://github.com/better-auth/better-fetch) | 1.3.2 | MIT |
 | [@cfworker/json-schema](https://github.com/cfworker/cfworker) | 4.1.1 | MIT |
-| [@classcad/smlibwasm](https://github.com/awv-informatik/smlibpy) | 0.3.4 | MIT AND Apache-2.0 AND OFL-1.1 |
+| [@classcad/smlibwasm](https://github.com/awv-informatik/smlibpy) | 0.6.2 | MIT AND Apache-2.0 AND OFL-1.1 |
 | [@codemirror/autocomplete](https://code.haverbeke.berlin/codemirror/autocomplete) | 6.20.4 | MIT |
 | [@codemirror/commands](https://code.haverbeke.berlin/codemirror/commands) | 6.11.1 | MIT |
 | [@codemirror/lang-css](https://github.com/codemirror/lang-css) | 6.3.1 | MIT |

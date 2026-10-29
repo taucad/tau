@@ -24,6 +24,7 @@ import {
 import type { FinancialActivityKind } from '@taucad/billing';
 import { DatabaseService } from '#database/database.service.js';
 import { MetricsService } from '#telemetry/metrics.js';
+import { ModelInvocationEvidenceRecorder } from '#api/agent-observability/model-invocation-recorder.service.js';
 import { BillingPolicyService, PolicyRouteUnavailableError } from '#api/billing/billing-policy.service.js';
 import {
   billingFinancialCase,
@@ -423,6 +424,8 @@ export class CreditLedgerService {
     private readonly policyService: BillingPolicyService,
     // oxlint-disable-next-line new-cap -- NestJS parameter decorators are invoked without new
     @Optional() private readonly metrics?: MetricsService,
+    // oxlint-disable-next-line new-cap -- NestJS parameter decorators are invoked without new
+    @Optional() private readonly evidenceRecorder?: ModelInvocationEvidenceRecorder,
   ) {}
 
   /** Creates stable financial identity before a financial transaction takes the account lock. */
@@ -1366,6 +1369,12 @@ export class CreditLedgerService {
           receipt,
           input.environment,
         );
+        // Late settlement: the same financial fact the live terminal records.
+        this.evidenceRecorder?.recordSettlement({
+          operation,
+          receipt,
+          normalization: evidence.normalizationEvidence?.version,
+        });
         resolved += 1;
       } catch (error) {
         // Never retry provider execution: classify, then either back off or absorb this claim.

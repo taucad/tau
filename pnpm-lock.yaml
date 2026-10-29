@@ -55,8 +55,8 @@ catalogs:
       specifier: 4.1.1
       version: 4.1.1
     '@classcad/smlibwasm':
-      specifier: 0.3.4
-      version: 0.3.4
+      specifier: 0.6.2
+      version: 0.6.2
     '@codemirror/autocomplete':
       specifier: 6.20.4
       version: 6.20.4
@@ -1840,6 +1840,9 @@ importers:
       '@sentry/node':
         specifier: 'catalog:'
         version: 10.75.0(@opentelemetry/core@2.12.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.223.0(@opentelemetry/api@1.9.1))
+      '@taucad/agent-observability':
+        specifier: workspace:*
+        version: link:../../libs/agent-observability
       '@taucad/api-extractor':
         specifier: workspace:*
         version: link:../../libs/api-extractor
@@ -1952,6 +1955,9 @@ importers:
       '@taucad/agent-host':
         specifier: workspace:*
         version: link:../../packages/agent-host
+      '@taucad/agent-observability':
+        specifier: workspace:*
+        version: link:../../libs/agent-observability
       '@taucad/agent-tools':
         specifier: workspace:*
         version: link:../../libs/agent-tools
@@ -2722,6 +2728,9 @@ importers:
       '@taucad/agent-host':
         specifier: workspace:*
         version: link:../../packages/agent-host
+      '@taucad/agent-observability':
+        specifier: workspace:*
+        version: link:../../libs/agent-observability
       '@taucad/agent-tools':
         specifier: workspace:*
         version: link:../../libs/agent-tools
@@ -3334,6 +3343,9 @@ importers:
       '@opentelemetry/sdk-trace-base':
         specifier: 'catalog:'
         version: 2.12.0(@opentelemetry/api@1.9.1)
+      fake-indexeddb:
+        specifier: 'catalog:'
+        version: 6.2.5
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
@@ -3401,7 +3413,7 @@ importers:
     devDependencies:
       '@classcad/smlibwasm':
         specifier: 'catalog:'
-        version: 0.3.4
+        version: 0.6.2
       picovoxel:
         specifier: 'catalog:'
         version: 0.2.1(three@0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064))
@@ -3559,7 +3571,7 @@ importers:
     devDependencies:
       '@classcad/smlibwasm':
         specifier: 'catalog:'
-        version: 0.3.4
+        version: 0.6.2
       '@jscad/modeling':
         specifier: 'catalog:'
         version: 2.13.0
@@ -3673,6 +3685,9 @@ importers:
       '@earendil-works/pi-ai':
         specifier: 'catalog:'
         version: 1.4.0(@aws-sdk/credential-provider-node@3.972.86)(@modelcontextprotocol/sdk@1.32.1(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(@smithy/signature-v4@5.7.4)(undici@8.11.2)(ws@8.22.0)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
+      '@earendil-works/pi-telemetry':
+        specifier: 'catalog:'
+        version: 1.4.0
       '@msgpack/msgpack':
         specifier: 'catalog:'
         version: 3.1.3
@@ -5036,7 +5051,7 @@ importers:
     dependencies:
       '@classcad/smlibwasm':
         specifier: 'catalog:'
-        version: 0.3.4
+        version: 0.6.2
       '@gltf-transform/core':
         specifier: 'catalog:'
         version: 4.5.1
@@ -7353,8 +7368,8 @@ packages:
   '@chevrotain/types@11.1.2':
     resolution: {integrity: sha512-U+HFai5+zmJCkK86QsaJtoITlboZHBqrVketcO2ROv865xfCMSFpELQoz1GkX5GzME8pTa+3kbKrZHQtI0gdbw==}
 
-  '@classcad/smlibwasm@0.3.4':
-    resolution: {integrity: sha512-XS7bLRA6UDxEu2uKhZZZRLClOa8DZeZSRQck4h/ke1KuXJGOIhTY/K6AZu+QHTD7u0+HUNCSnNJRM9avPW6Pxw==}
+  '@classcad/smlibwasm@0.6.2':
+    resolution: {integrity: sha512-JDHQDdX13u1DiXJvNMfAWG7iyUVPpCVIL8Sfuw+p0CZq1E5sqN9VBFeuj+mEGbSFbZ+6/8ftRn6wnwlMWBu3SQ==}
     engines: {node: '>=22.18'}
 
   '@codemirror/autocomplete@6.20.4':
@@ -27852,7 +27867,7 @@ snapshots:
 
   '@chevrotain/types@11.1.2': {}
 
-  '@classcad/smlibwasm@0.3.4': {}
+  '@classcad/smlibwasm@0.6.2': {}
 
   '@codemirror/autocomplete@6.20.4':
     dependencies:

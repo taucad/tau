@@ -267,6 +267,107 @@ describe('ChatSessionStore with the pinned real SDK', () => {
     },
   );
 
+  /* T10: the UI's own clock for when a live run's text first showed, kept apart from the API's model-text time. */
+  it.each([
+    { visibility: 'visible', seeded: false, times: 1 },
+    { visibility: 'hidden', seeded: false, times: 0 },
+    { visibility: 'visible', seeded: true, times: 0 },
+  ] as const)(
+    'should time a live run’s first shown text once, on the frame after it arrives (page $visibility, text already there: $seeded)',
+    async ({ visibility, seeded, times }) => {
+      vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+        queueMicrotask(() => {
+          callback(0);
+        });
+        return 1;
+      });
+      vi.stubGlobal('document', { visibilityState: visibility });
+      const store = createStore();
+      let deliverLive: Parameters<AgentHostClient['subscribeLive']>[1] | undefined;
+      const connect = async () => ({
+        hostCommand: vi.fn<AgentHostClient['hostCommand']>(),
+        catchUp: writerOwnedCatchUp,
+        read: vi.fn<AgentHostClient['read']>(),
+        subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
+          queueMicrotask(() => {
+            parameters[3]?.({
+              status: 'batch',
+              sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
+              sourceGeneration: 'writer-live',
+              chatId: 'chat',
+              cursor: parameters[0].cursor,
+              nextCursor: seeded ? 3 : 2,
+              endCursor: seeded ? 3 : 2,
+              events:
+                parameters[0].cursor === 0
+                  ? [
+                      {
+                        ...lifecycleRow(0, 'admitted'),
+                        admission: { kind: 'tau', turnId: 'u', message: { id: 'u', role: 'user', content: 'Prompt' } },
+                      },
+                      lifecycleRow(1, 'running'),
+                      /* A page that opens mid-run finds text it did not see arrive. */
+                      ...(seeded
+                        ? [
+                            logRow(2, {
+                              type: 'message.appended',
+                              message: {
+                                id: 'assistant-0',
+                                role: 'assistant',
+                                content: [{ type: 'text', text: 'Earlier' }],
+                              },
+                            }),
+                          ]
+                        : []),
+                    ]
+                  : [],
+            });
+          });
+          return vi.fn();
+        },
+        subscribeLive: (_chatId: string, listener: Parameters<AgentHostClient['subscribeLive']>[1]) => {
+          deliverLive = listener;
+          return vi.fn();
+        },
+        close: vi.fn(async () => undefined),
+      });
+      const presented = vi.fn<(chatId: string, runId: string, at: number) => Promise<void>>(async () => undefined);
+      const { chat } = store.acquire('chat', 'project');
+      const unobserve = store.observe('chat', 'project');
+      const unpublish = store.publishProjectHostConnector('project', connect, { presented });
+      await vi.waitFor(() => {
+        expect(deliverLive).toBeDefined();
+        expect(chat.messages[0]?.id).toBe('u');
+      });
+      const identity = {
+        sourceGeneration: 'writer-live',
+        chatId: 'chat',
+        runId: 'run_1',
+        messageId: 'assistant-1',
+        contentIndex: 0,
+      };
+      const before = Date.now();
+      deliverLive?.('chat', { ...identity, type: 'text-delta', delta: 'AA', offset: 0 });
+      deliverLive?.('chat', { ...identity, type: 'text-delta', delta: 'BB', offset: 2 });
+      await vi.waitFor(() => {
+        expect(visible(chat.messages).some((message) => message.text.endsWith('AABB'))).toBe(true);
+      });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+
+      expect(presented).toHaveBeenCalledTimes(times);
+      if (times > 0) {
+        expect(presented).toHaveBeenCalledWith('chat', 'run_1', expect.any(Number));
+        expect(presented.mock.calls[0]![2]).toBeGreaterThanOrEqual(before);
+      }
+      unpublish();
+      unobserve();
+      store.release('chat');
+      vi.unstubAllGlobals();
+    },
+  );
+
   /* D-UI-10: every streamed chunk woke every chat subscriber, so a long answer
    * re-rendered the transcript once per token. */
   it('should coalesce a burst of message updates into one leading and one trailing notification', async () => {

@@ -83,3 +83,26 @@ export const compareEvidence = (
 /** Verify claimed projection bytes before deduplication; callers still require current authority. @public */
 export const verifyEvidenceDigest = async (evidence: Evidence): Promise<boolean> =>
   evidence.projection.digest === (await evidenceDigest(evidence));
+
+const contractIdPattern = /^[\w:.-]{1,128}$/u;
+
+/** Hex SHA-256 of UTF-8 text, the same in browsers and Node. @public */
+export const sha256Hex = async (value: string): Promise<string> => {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+};
+
+/**
+ * An id the contract accepts: the value itself when it already is one, else
+ * `<prefix>-` and 48 hex digits of its digest. Host and API producers derive
+ * shared ids (a chat's run, an attempt) this one way, so their facts join.
+ *
+ * @public
+ */
+export const contractId = async (prefix: string, value: string): Promise<string> => {
+  if (contractIdPattern.test(value)) {
+    return value;
+  }
+  const digest = await sha256Hex(value);
+  return `${prefix}-${digest.slice(0, 48)}`;
+};

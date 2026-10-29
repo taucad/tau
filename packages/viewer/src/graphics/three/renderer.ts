@@ -5,6 +5,7 @@ import { reversedDepthTransparentSort } from '#graphics/three/reversed-depth-tra
 import { installLogarithmicGeometryDepth } from '#graphics/three/logarithmic-depth.js';
 import { syncGltfSurfaceDepthBias } from '#graphics/three/materials/gltf-surface-depth-bias.js';
 import { installWebGpuDepthSampling } from '#graphics/three/webgpu-depth-sampling.js';
+import { installWebGlClearState } from '#graphics/three/webgl-clear-state.js';
 import { installWebGpuStencilState } from '#graphics/three/webgpu-stencil-state.js';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
 import { reportWebGpuCanvasLoss } from '#graphics/graphics-backend.js';
@@ -81,6 +82,7 @@ async function initWebGpuIfNeeded(renderer: WebGpuRenderer): Promise<void> {
   await renderer.init();
   installWebGpuDepthSampling(renderer);
   installWebGpuStencilState(renderer);
+  installWebGlClearState(renderer);
 }
 
 const destroyAllocatedDevice = (backend: WebGpuRenderer['backend']): void => {

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChatService } from '#api/chat/chat.service.js';
 import { DirectModelInvocationService } from '#api/llm/direct-model-invocation.service.js';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
+import { providerDiagnostic, textMarker } from '#api/llm/provider-diagnostic.js';
 import type { ModelInvocationIntent } from '#api/llm/model-invocation.types.js';
 import type { ModelService } from '#api/models/model.service.js';
 import type { Environment } from '#config/environment.config.js';
@@ -257,12 +258,15 @@ describe('DirectModelInvocationService', () => {
         routeId: 'openai-gpt-5.6-luna',
         modelId: 'gpt-5.6-luna',
         upstreamStatus: 400,
-        upstreamBody: JSON.stringify({
-          error: { ...vertexSchemaRefusal.error, metadata: { authorization: '[redacted]' } },
-        }),
+        upstreamBody: providerDiagnostic(vertexSchemaRefusal),
       },
       'Upstream model provider refused the request',
     );
+    // The log keeps the provider's vocabulary and drops its sentences, which can quote the request.
+    const logged = JSON.stringify(warn.mock.calls);
+    expect(logged).toContain('INVALID_ARGUMENT');
+    expect(logged).not.toContain(vertexSchemaRefusal.error.message);
+    expect(logged).not.toContain('ya29');
   });
 
   it('should answer an upstream 429 as RATE_LIMITED carrying the upstream retry estimate', async () => {
@@ -408,7 +412,8 @@ describe('DirectModelInvocationService', () => {
     const line = String(logged.mock.calls[0]?.[0]);
     expect(line).toContain('Provider stream failed for openai');
     expect(line).toContain('req_fixture_1');
-    expect(line).toContain(reason);
+    expect(line).toContain(textMarker(reason));
+    expect(line).not.toContain(reason);
   });
 
   it('should refuse a helper turn before streaming when the provider account is exhausted', async () => {

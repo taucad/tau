@@ -291,8 +291,10 @@ describe('ChatSessionStore.observe', () => {
         hostCommand: unusedHostCommand,
         close: async () => undefined,
       }),
-      async (chatId) =>
-        chatId === 'chat_local' ? 'stoppable' : chatId === 'chat_foreign' ? 'other-build' : 'background-window',
+      {
+        stoppability: async (chatId) =>
+          chatId === 'chat_local' ? 'stoppable' : chatId === 'chat_foreign' ? 'other-build' : 'background-window',
+      },
     );
     await vi.waitFor(() => {
       expect(store.getProjection('chat_background')?.ledger.position.cursor).toBe(2);
@@ -489,7 +491,7 @@ describe('ChatSessionStore.observe', () => {
         hostCommand: unusedHostCommand,
         close: async () => undefined,
       }),
-      async () => classification.promise,
+      { stoppability: async () => classification.promise },
     );
     await vi.waitFor(() => {
       expect(store.getProjection('chat_unopened')?.ledger.position.cursor).toBe(2);

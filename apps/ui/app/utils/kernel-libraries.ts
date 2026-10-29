@@ -14,7 +14,7 @@ export const kernelLibraries: Partial<Record<KernelProvider, Readonly<Record<str
   jscad: { '@jscad/modeling': '2.13.0' },
   manifold: { 'manifold-3d': '3.4.1' },
   picovoxel: { picovoxel: '0.2.1' },
-  smlib: { '@classcad/smlibwasm': '0.3.4' },
+  smlib: { '@classcad/smlibwasm': '0.6.2' },
   tscircuit: {
     // The connectivity-map floating Biome range can select releases before their platform binaries exist.
     '@biomejs/biome': '2.5.15',

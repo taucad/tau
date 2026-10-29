@@ -102,6 +102,38 @@ describe('TypeScriptProjectService with real TypeScript language service', () =>
     service.dispose();
   });
 
+  it('returns the import edit for an auto-import completion into an existing import', () => {
+    const source = "import type { MechanismSource } from './lib/mechanism';\n\nexport type Test = Mec";
+    const service = fixture({
+      'file:///lib/mechanism.ts': 'export interface Mechanism {}\nexport interface MechanismSource {}\n',
+    });
+    service.open('file:///main.ts', source, 1);
+    const entry = service
+      .getCompletions('file:///main.ts', source.length)
+      ?.entries.find((candidate) => candidate.name === 'Mechanism' && candidate.hasAction);
+    expect(entry?.data).toBeDefined();
+    const { codeActions } = service.getCompletionDetailsWithBases({
+      uri: 'file:///main.ts',
+      position: source.length,
+      name: 'Mechanism',
+      source: entry?.source,
+      data: entry?.data,
+    });
+    expect(codeActions).toEqual([
+      expect.objectContaining({
+        edits: [expect.objectContaining({ uri: 'file:///main.ts', baseText: source, workerVersion: 1 })],
+      }),
+    ]);
+    const [edit] = codeActions[0]?.edits ?? [];
+    const applied = [...(edit?.changes ?? [])]
+      .sort((left, right) => right.from - left.from)
+      .reduce((text, change) => text.slice(0, change.from) + change.insert + text.slice(change.to), source);
+    expect(applied).toBe(
+      "import type { Mechanism, MechanismSource } from './lib/mechanism';\n\nexport type Test = Mec",
+    );
+    service.dispose();
+  });
+
   it('resolves a closed imported file through the rooted sync FS and supports navigation, edits and completion', () => {
     const dep = 'export function cube(size: number): number { return size ** 3; }\n';
     const source = "import { cube } from './lib/cube';\nconst volume: number = cube(3);\n";

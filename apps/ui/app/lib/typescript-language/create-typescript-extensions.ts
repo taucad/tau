@@ -479,22 +479,21 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
         // oxlint-disable-next-line eslint/max-params -- CodeMirror fixes this callback signature.
         apply: (view, _completion, from, to) => {
           void runAction(options, async () => {
-            if (!unchanged(options, version)) {
-              return;
-            }
-            const span = entry.replacementSpan ?? response.optionalReplacementSpan;
+            // The list stays open while typing narrows it, so resolve the entry against the current text.
+            const current = await revision(options);
+            const span = current === version ? (entry.replacementSpan ?? response.optionalReplacementSpan) : undefined;
             const replaceFrom = span?.start ?? from;
             const replaceTo = span ? span.start + span.length : to;
             const details = await client.request<CompletionDetails>({
               kind: 'completionDetailsWithBases',
               uri,
-              position: context.pos,
+              position: current === version ? context.pos : replaceTo,
               name: entry.name,
               source: entry.source,
               data: entry.data,
-              expectedVersion: version,
+              expectedVersion: current,
             });
-            if (!unchanged(options, version)) {
+            if (!unchanged(options, current)) {
               return;
             }
             const extras = details.codeActions.flatMap((action) => action.edits);
@@ -503,7 +502,7 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
               view,
               completion: _completion,
               entry,
-              version,
+              version: current,
               from: replaceFrom,
               to: replaceTo,
               extras,

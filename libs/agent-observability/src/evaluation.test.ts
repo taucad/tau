@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { CorpusCandidate, EvaluatorVersion, Judgement } from '#evaluation.js';
-import { calibrate, corpusEligibility } from '#evaluation.js';
+import type { CheckReading, CorpusCandidate, EvaluatorVersion, Judgement } from '#evaluation.js';
+import { calibrate, checkReference, corpusEligibility } from '#evaluation.js';
 
 const at = Date.parse('2026-10-29T00:00:00.000Z');
 const later = at + 86_400_000;
@@ -136,5 +136,45 @@ describe('calibrate', () => {
       abstention: 1 / 2,
     });
     expect(calibrate([])).toEqual([]);
+  });
+});
+
+const check = (
+  at: number,
+  [requirement, result]: [string, CheckReading['result']],
+  revision = 'revision-2',
+): CheckReading => ({ at, revision, requirement, result });
+
+describe('checkReference', () => {
+  it('passes only when every requirement passed at the last revision checked, and fails on any failure there', () => {
+    expect(checkReference([check(1, ['fit', 'passed']), check(2, ['mass', 'passed'])])).toBe('pass');
+    expect(checkReference([check(1, ['fit', 'passed']), check(2, ['mass', 'failed'])])).toBe('fail');
+    expect(checkReference([check(2, ['fit', 'passed']), check(1, ['fit', 'failed'])])).toBe('pass');
+    expect(
+      checkReference([
+        check(1, ['fit', 'failed'], 'revision-1'),
+        check(2, ['fit', 'passed']),
+        check(3, ['mass', 'passed']),
+      ]),
+    ).toBe('pass');
+    expect(checkReference([check(1, ['fit', 'passed']), check(2, ['fit', 'failed'], 'revision-3')])).toBe('fail');
+  });
+
+  it('keeps inconclusive, unsupported and unrun checks distinct from a pass, and no checks unknown', () => {
+    for (const result of ['inconclusive', 'unsupported', 'not-run'] as const) {
+      expect(checkReference([check(1, ['fit', 'passed']), check(2, ['mass', result])])).toBe('unknown');
+      expect(checkReference([check(1, ['fit', 'failed']), check(2, ['mass', result])])).toBe('fail');
+    }
+    expect(checkReference([])).toBe('unknown');
+  });
+
+  it("measures a judge that accepts the assistant's claimed success against the checks, not the claim", () => {
+    const reference = checkReference([check(1, ['fit', 'failed'])]);
+    const [calibration] = calibrate([
+      judged('c1', ['pass', reference]),
+      judged('c2', ['pass', checkReference([check(1, ['fit', 'passed'])])]),
+    ]);
+
+    expect(calibration).toMatchObject({ measured: 2, agreement: 1 / 2, falseSuccess: 1, falseFailure: 0 });
   });
 });

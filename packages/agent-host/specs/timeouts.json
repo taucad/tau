@@ -1062,6 +1062,15 @@
       "owner": "desktop-bash-terminal W3"
     },
     {
+      "id": "TERMINAL-ADMISSION-WAIT",
+      "bound": "5-second bound (terminalAdmissionMilliseconds) on main admitting a Terminal start's project root to the trusted-root allowlist; each wait ends on the next allowlist change, the connection ending, or the bound, after which the start is refused project-not-admitted",
+      "site": "apps/desktop/src/tau/services-host.terminal.ts",
+      "token": "timer = setTimeout(resolve, remaining)",
+      "class": "Peer",
+      "owner": "desktop-bash-terminal W7",
+      "fixedBy": "outside this charter: main sending the trusted-root allowlist within the terminal port handshake would delete this wait (desktop main/services-broker owner)"
+    },
+    {
       "id": "TERMINAL-OPEN-TIMEOUT",
       "bound": "30-second bound on a fresh desktop terminal port's open frame; a port that never opens is closed before any shell starts",
       "site": "apps/desktop/src/tau/services-host.terminal.ts",

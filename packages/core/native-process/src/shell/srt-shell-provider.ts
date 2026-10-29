@@ -24,6 +24,7 @@ import {
   sandboxRuntimeSeccomp,
 } from '#native-sandbox.js';
 import { terminateOwnedProcesses, trackDescendants } from '#shell/process-tree.js';
+import { bindMaskedDirectories, maskProblem } from '#shell/shell-project-mask.js';
 import { shellBaselineDenied } from '#shell/shell-baseline.js';
 import { refusedShellEnvironment } from '#shell/shell-environment.js';
 import { holdProtectedStandIns, useStandInJournal } from '#shell/shell-stand-ins.js';
@@ -238,13 +239,24 @@ export const shellSandboxProfile = (
     ...shellBaselineDenied({ platform: process.platform, home: options.home ?? homedir(), environment: process.env }),
   ]);
   const readOnly = launch.filesystem.readOnly ?? [];
+  const masked = process.platform === 'linux' ? deniedVariants(launch.filesystem.masked ?? []) : [];
+  // A strict child makes SRT mount an empty directory at the absent container. A direct
+  // deny would mount /dev/null there and conflict with the directory stubs for protected children.
+  const absentMasked = masked.filter((path) => !existsSync(path)).map((path) => join(path, '.tau-mask-boundary'));
+  // A mask already pins its container. Rebinding that host directory would expose everything
+  // the tmpfs hid. Only ancestors within explicitly writable children may be restored.
+  const pinned = pinnedAncestors(launch.filesystem.writable, [...readOnly, ...launch.filesystem.denied]).filter(
+    (path) =>
+      !masked.some((root) => inside(path, root)) ||
+      launch.filesystem.writable.some((root) => masked.some((mask) => inside(root, mask)) && inside(path, root)),
+  );
   const { domains } = launch.network;
   return {
     seccomp: sandboxRuntimeSeccomp(),
     javaAgentJarPath: sandboxRuntimeJavaAgent(),
     network: { allowedDomains: [...domains], deniedDomains: domains.length > 0 ? [] : ['*'], strictAllowlist: true },
     filesystem: {
-      denyRead: [...new Set([...deniedReadRoots(), ...denied])],
+      denyRead: [...new Set([...deniedReadRoots(), ...denied, ...masked])],
       allowRead: physicalVariants([
         ...launch.filesystem.readable,
         ...launch.filesystem.writable,
@@ -252,11 +264,8 @@ export const shellSandboxProfile = (
         ...sandboxRuntimeReadRoots(),
         ...(runtimeDirectory === undefined ? [] : [runtimeDirectory]),
       ]),
-      allowWrite: physicalVariants([
-        ...launch.filesystem.writable,
-        ...pinnedAncestors(launch.filesystem.writable, [...readOnly, ...launch.filesystem.denied]),
-      ]),
-      denyWrite: [...new Set([...deniedWriteRoots(), ...denied, ...deniedVariants(readOnly)])],
+      allowWrite: physicalVariants([...launch.filesystem.writable, ...pinned]),
+      denyWrite: [...new Set([...deniedWriteRoots(), ...denied, ...deniedVariants(readOnly), ...absentMasked])],
     },
     allowPty: false,
     ripgrep: { command: options.ripgrepPath ?? 'rg' },
@@ -741,6 +750,10 @@ const admit = (launch: ShellLaunch, options: SandboxShellProviderOptions): Shell
   if (refused.length > 0) {
     return unsupported('environment', `the shell may not receive ${refused.join(', ')}.`);
   }
+  const maskRefusal = maskProblem(launch.filesystem);
+  if (maskRefusal !== undefined) {
+    return unsupported('filesystem-mask', maskRefusal);
+  }
   const { readable, writable, denied, readOnly = [] } = launch.filesystem;
   const paths = [launch.executablePath, launch.workingDirectory, ...readable, ...writable, ...readOnly, ...denied];
   if (paths.some((path) => !isAbsolute(path) || path.includes('\0'))) {
@@ -868,7 +881,18 @@ const createProvider = (options: SandboxShellProviderOptions): ShellProvider => 
       await supervisor.close();
       launch.signal.throwIfAborted();
     }
-    const argv = hostBound(supervisor.reply.argv, options.bwrapPath ?? '/usr/bin/bwrap');
+    const maskedArgv =
+      process.platform === 'darwin'
+        ? bindMaskedDirectories(supervisor.reply.argv, launch.filesystem)
+        : supervisor.reply.argv;
+    if (maskedArgv === undefined) {
+      await supervisor.close();
+      return {
+        status: 'sandbox-unavailable',
+        message: 'the sandbox profile could not enforce masked directory creation.',
+      };
+    }
+    const argv = hostBound(maskedArgv, options.bwrapPath ?? '/usr/bin/bwrap');
     if (launch.stdio.kind === 'pipes') {
       return { status: 'started', process: startPipes(argv, launch, supervisor) };
     }

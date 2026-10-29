@@ -45,12 +45,12 @@
   },
   "dependencies": {
     "@earendil-works/pi-telemetry": "catalog:",
-    "@opentelemetry/api": "catalog:",
-    "zod": "catalog:"
+    "@opentelemetry/api": "catalog:"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "catalog:",
     "@opentelemetry/sdk-metrics": "catalog:",
-    "@opentelemetry/sdk-trace-base": "catalog:"
+    "@opentelemetry/sdk-trace-base": "catalog:",
+    "zod": "catalog:"
   }
 }

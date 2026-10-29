@@ -3300,9 +3300,6 @@ importers:
       '@opentelemetry/api':
         specifier: 'catalog:'
         version: 1.9.1
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
       '@earendil-works/pi-ai':
         specifier: 'catalog:'
@@ -3313,6 +3310,9 @@ importers:
       '@opentelemetry/sdk-trace-base':
         specifier: 'catalog:'
         version: 2.12.0(@opentelemetry/api@1.9.1)
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   libs/agent-tools:
     dependencies:

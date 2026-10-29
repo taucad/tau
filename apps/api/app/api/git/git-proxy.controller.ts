@@ -41,12 +41,14 @@ import { z } from 'zod';
 const gitEndpointPattern = /\/(?:info\/refs|git-upload-pack|git-receive-pack|info\/lfs\/objects\/batch)$/u;
 const lfsBatchSuffix = '/info/lfs/objects/batch';
 const lfsHandleTtlSeconds = 300;
+/* eslint-disable @typescript-eslint/naming-convention -- the git-lfs batch body spells its own field names. */
 const lfsActionSchema = z.object({
   href: z.url(),
   header: z.record(z.string(), z.string()).optional(),
   expires_in: z.number().optional(),
   expires_at: z.string().optional(),
 });
+/* eslint-enable @typescript-eslint/naming-convention */
 const lfsBatchSchema = z
   .object({
     objects: z.array(

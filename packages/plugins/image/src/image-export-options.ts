@@ -102,8 +102,8 @@ const lightingSchema = z.union([
 const aoSchema = z
   .object({
     radiusPixels: pixels().min(1).max(128).optional(),
-    intensity: ratio().min(0).max(8).optional(),
-    distanceFalloff: ratio().min(0.01).max(1).optional(),
+    intensity: ratio().min(0).max(8).default(3),
+    distanceFalloff: ratio().min(0.01).max(1).default(0.2),
   })
   .strict();
 const defaultImageLighting = {
@@ -282,7 +282,11 @@ const baseImageShape = {
   lighting: lightingSchema
     .default(defaultImageLighting)
     .describe('Studio lighting or an explicit directional-light rig'),
-  ao: aoSchema.optional().describe('Screen-space ambient occlusion for opaque contact shadows'),
+  // Pin the export SSAO profile; GTAO's scale/falloff use different units.
+  // The renderer owns the matched native-beauty/half-resolution-AO quality policy.
+  ao: aoSchema
+    .default({ intensity: 3, distanceFalloff: 0.2 })
+    .describe('Ambient occlusion for opaque contact shadows; set intensity to zero to disable'),
 } as const;
 
 const validateAnnotatedDimensions = (

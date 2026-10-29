@@ -389,6 +389,31 @@ describe('FileContentService', () => {
     expect(first).toBe(second);
   });
 
+  it('should join an already selected content read when a document resolves the same path', async () => {
+    const pending = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+    const data = new TextEncoder().encode('export default function main() { return 1; }');
+    const harness = createHarness({ proxy: createMockProxy({ readFile: vi.fn().mockReturnValue(pending.promise) }) });
+    const observation = harness.service.observeContent('main.ts').acquire();
+    try {
+      await vi.waitFor(() => {
+        expect(harness.proxy.readFile).toHaveBeenCalledOnce();
+      });
+      const documentRead = harness.service.resolve('main.ts');
+      pending.resolve(data);
+
+      expectTextContent(await documentRead, data);
+      await vi.waitFor(() => {
+        expect(observation.getSnapshot()).toMatchObject({ status: 'ready', value: { kind: 'text', content: data } });
+      });
+      expect(harness.service.peekOutcome('main.ts')).toMatchObject({ kind: 'text', content: data });
+      expect(harness.proxy.readFile).toHaveBeenCalledOnce();
+    } finally {
+      observation.release();
+      harness.service.dispose();
+      harness.disposeChannel();
+    }
+  });
+
   it('should clone buffer before transfer on write, keeping valid local copy', async () => {
     const original = new Uint8Array([1, 2, 3]);
 

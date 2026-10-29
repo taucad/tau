@@ -46,6 +46,7 @@ import { useEffect, useSyncExternalStore } from 'react';
 import type { RevisionUserActor } from '@taucad/revisions';
 import { randomUuid } from '@taucad/utils/id';
 import { ENV } from '#environment.config.js';
+import { recordApiRequestId } from '#lib/api-request-id.js';
 
 /** Local-storage key prefix; one entry per workspace (EQ8). @public */
 export const anonymousRevisionsStorageKeyPrefix = 'tau-anonymous-revisions:';
@@ -227,7 +228,7 @@ const fetchAccountSalt = async (workspace: string): Promise<string> => {
     { credentials: 'include', headers: { Accept: 'application/json' } },
   );
   if (!response.ok) {
-    throw new Error(`Tau Cloud answered ${String(response.status)}`);
+    throw recordApiRequestId(new Error(`Tau Cloud answered ${String(response.status)}`), response);
   }
   const { salt } = (await response.json()) as { salt?: unknown };
   if (typeof salt !== 'string' || salt === '') {

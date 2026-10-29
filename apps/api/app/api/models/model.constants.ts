@@ -6,7 +6,13 @@ type CloudCatalogProviderId = Exclude<ProviderId, 'ollama'>;
 
 const textOnlyModalities = { input: ['text'], output: ['text'] } satisfies ModelModalities;
 const imageInputModalities = { input: ['text', 'image'], output: ['text'] } satisfies ModelModalities;
-/** Vision models on an Anthropic or OpenAI codec; providers rasterise PDF pages, so `pdf` never appears without `image`. */
+/**
+ * Vision models whose codec can deliver a PDF. Anthropic and OpenAI rasterise
+ * pages on their document parts. Vertex's OpenAI-compatible chat endpoint does
+ * not accept a `file` part; the gateway rewrites it to an `image_url` PDF data
+ * URI, the blob form that endpoint uses for any GenerateContent document type.
+ * `pdf` never appears without `image`.
+ */
 const pdfInputModalities = { input: ['text', 'image', 'pdf'], output: ['text'] } satisfies ModelModalities;
 
 /*
@@ -777,7 +783,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         tools: true,
         toolChoice: false,
         reasoning: lowToHighReasoning,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'gemini',
@@ -812,7 +818,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'gemini-3.1-pro-preview-customtools',
       support: {
         reasoning: lowToHighReasoning,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'gemini',
@@ -848,7 +854,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'gemini-3.8-flash',
       support: {
         reasoning: lowToHighReasoning,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'gemini',
@@ -883,7 +889,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'gemini-3.5-flash-lite',
       support: {
         reasoning: lowToHighReasoning,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'gemini',
@@ -918,7 +924,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'gemini-3.5-flash',
       support: {
         reasoning: lowToHighReasoning,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'gemini',
@@ -1440,40 +1446,6 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       configuration: {
         streaming: true,
-      },
-    },
-    // Off-catalog metering row (AD14): the code-completion service bills its
-    // Cerebras calls through the credit ledger via getModelCost; never listed.
-    'llama-3.3-70b': {
-      enabled: false,
-      id: 'cerebras-llama-3.3-70b',
-      providerKind: 'tau-hosted',
-      name: 'Llama 3.3 70B (completion metering)',
-      slug: 'cerebras-llama-3.3-70b',
-      description: 'Internal cost-metering entry for the inline code-completion service.',
-      provider: {
-        id: 'cerebras',
-        name: 'Cerebras',
-      },
-      model: 'llama-3.3-70b',
-      support: {
-        toolChoice: false,
-        modalities: textOnlyModalities,
-      },
-      details: {
-        family: 'llama',
-        families: ['llama'],
-        contextWindow: 128_000,
-        maxTokens: 8192,
-        cost: {
-          inputTokens: 0.85,
-          outputTokens: 1.2,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: false,
       },
     },
   },

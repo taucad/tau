@@ -263,9 +263,7 @@ const forkBranchHere = async (name: string): Promise<void> => {
   await target.expectHidden(selectors.getByCss(visibleRevisionsPanel), 15_000);
   /* Focus, not a click: sixty saves in, the typed line has scrolled the editor
    * sideways and the lines' centre sits under the gutter. The caret stays put. */
-  await target.focus(
-    selectors.getByCss('.monaco-editor .native-edit-context, .monaco-editor textarea.inputarea').last(),
-  );
+  await target.focus(selectors.getByCss('.cm-editor .cm-content[contenteditable="true"]').last());
 };
 
 test('records how long *Saved* takes after Mod+S in a project with bulk in it (B1)', async () => {

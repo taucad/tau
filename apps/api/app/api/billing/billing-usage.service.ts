@@ -826,6 +826,7 @@ export class BillingUsageService {
     rawQuery: unknown;
   }): Promise<WireOperationReceipt | { readonly state: 'not_found'; readonly voided: true }> {
     this.parseRawObject(input.rawQuery, []);
+    // Legacy completion receipts remain readable after the producer and route are retired.
     if (
       !['gateway', 'project_name', 'commit_name', 'code_completion'].includes(input.surface) ||
       !/^[\u0021-\u007E]{1,128}$/u.test(input.attemptKey)

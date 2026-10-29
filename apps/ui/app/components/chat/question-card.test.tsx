@@ -236,7 +236,10 @@ describe('question dictation', () => {
     await user.click(screen.getByRole('button', { name: 'Dictate' }));
     expect(onHold).toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Send answer' })).toHaveAttribute('aria-disabled', 'false');
-    expect(screen.queryByRole('textbox', { name: 'Your answer' })).not.toBeInTheDocument();
+    // The draft stays in view beside the expanded microphone and its cancel button.
+    expect(screen.getByRole('textbox', { name: 'Your answer' })).toHaveValue('A seashell.');
+    expect(screen.getByRole('button', { name: 'Cancel dictation' })).toBeVisible();
+    expect(screen.getByRole('img', { name: 'Microphone waveform' })).toBeInTheDocument();
     expect(onAnswer).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Stop dictation' }));
     await waitFor(() => {
@@ -246,6 +249,24 @@ describe('question dictation', () => {
     expect(onAnswer).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Send answer' }));
     expect(onAnswer).toHaveBeenCalledExactlyOnceWith('form', { text: 'A seashell. Use rounded corners.' });
+  });
+
+  it('should keep keyboard focus on the dictation control as the microphone expands and folds back', async () => {
+    const { user } = await openReply();
+    screen.getByRole('button', { name: 'Dictate' }).focus();
+    await user.keyboard('{Enter}');
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Stop dictation' })).toHaveFocus();
+    });
+    await user.keyboard('{Enter}');
+    await waitFor(() => {
+      expect(screen.getByRole('textbox', { name: 'Your answer' })).toHaveValue('Use rounded corners.');
+    });
+    // The answer takes focus back for review once the transcript lands.
+    expect(screen.getByRole('textbox', { name: 'Your answer' })).toHaveFocus();
+    await user.click(screen.getByRole('button', { name: 'Dictate' }));
+    await user.click(await screen.findByRole('button', { name: 'Cancel dictation' }));
+    expect(screen.getByRole('textbox', { name: 'Your answer' })).toHaveFocus();
   });
 
   it.each(['', 'A seashell. '])('should finish dictation and send once with draft %j', async (draft) => {

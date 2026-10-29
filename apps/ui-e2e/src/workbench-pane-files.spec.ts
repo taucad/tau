@@ -31,24 +31,48 @@ const readCommandInputVisualState = async (input: Locator) =>
     };
   });
 
-const expectModernCommandInput = async (input: Locator): Promise<void> => {
+/** A drawer is a touch surface: its filter field takes the 40px touch row height (`--spacing-touch-row`). */
+const touchRowHeight = 40;
+
+const expectModernCommandInput = async (input: Locator, surface: 'menu' | 'drawer' = 'menu'): Promise<void> => {
   await target.expectVisible(input);
   const state = await readCommandInputVisualState(input);
-  expect(state.height).toBeGreaterThanOrEqual(28);
-  expect(state.height).toBeLessThan(32);
+  if (surface === 'drawer') {
+    expect(state.height).toBe(touchRowHeight);
+  } else {
+    expect(state.height).toBeGreaterThanOrEqual(28);
+    expect(state.height).toBeLessThan(32);
+  }
   expect(state.borderRadius).toBeGreaterThan(0);
   expect(state.borderLeftWidth).toBe(1);
-  expect(state.leftInset).toBeGreaterThan(7);
-  expect(state.leftInset).toBeLessThan(10);
+  expect(state.leftInset).toBe(4);
   expect(state.leftInset).toBeCloseTo(state.rightInset, 1);
   expect(state.wrapperBottomBorderWidth).toBe(0);
 };
 
+// The command palette's field is its dialog header: 36px and borderless inside the shared padded wrapper.
+const expectCommandPaletteHeaderInput = async (input: Locator): Promise<void> => {
+  await target.expectVisible(input);
+  const state = await readCommandInputVisualState(input);
+  expect(state.height).toBe(36);
+  expect(state.borderLeftWidth).toBe(0);
+  expect(state.leftInset).toBe(4);
+  expect(state.leftInset).toBeCloseTo(state.rightInset, 1);
+  expect(
+    await target.evaluateLocator(input, (element) => {
+      const icon = element.closest('[data-slot="command-input-wrapper"]')?.querySelector('svg');
+      return icon ? getComputedStyle(icon).display : 'none';
+    }),
+  ).toBe('none');
+};
+
 const readHeaderInlinePadding = async (actions: Locator) =>
   target.evaluateLocator(actions, (element) => {
-    const header = element.parentElement;
-    if (!header) {
-      throw new Error('File actions were not inside a stable header.');
+    const pane = element.closest('[data-file-pane-id]');
+    const breadcrumbs = pane?.querySelector('nav[aria-label="File breadcrumbs"]');
+    const header = breadcrumbs ? breadcrumbs.parentElement : element.parentElement;
+    if (!header?.contains(element)) {
+      throw new Error('File actions were not inside their pane header.');
     }
     const style = getComputedStyle(header);
     return {
@@ -153,17 +177,23 @@ test('should own Files and Markdown views independently in each Workbench pane',
   await target.screenshot(selectors.getByCss('body'), 'workbench-pane-files-wide.png');
 
   const packageSeparator = packageRegion.getByRole('separator', { name: 'Resize Files pane' });
+  await target.expectAttribute(packageSeparator, 'aria-valuenow', '176');
   await target.press(packageSeparator, 'ArrowLeft');
-  await target.expectAttribute(packageSeparator, 'aria-valuenow', '248');
+  await target.expectAttribute(packageSeparator, 'aria-valuenow', '184');
 
   await target.delay(1200);
   await target.reload();
   await target.expectVisible(packageRegion, 60_000);
-  await target.expectVisible(openFileRegion, 60_000);
+  // The layout record keeps file tabs with their Files state; a placeholder pane returns as its launcher (B3).
+  const restoredLauncher = selectors.getByCss('.dv-groupview:has(.dv-tab[aria-label="New tab"])');
+  await target.expectCount(restoredLauncher, 1, 60_000);
+  await target.expectCount(openFileRegion, 0);
+  await target.click(restoredLauncher.getByRole('button', { name: /^Files/u }));
+  await target.expectVisible(openFileRegion, 15_000);
   await target.expectAttribute(
     packageRegion.getByRole('separator', { name: 'Resize Files pane' }),
     'aria-valuenow',
-    '248',
+    '184',
   );
 
   await target.click(packageFilesToggle);
@@ -202,7 +232,7 @@ test('should share modern command search chrome across command, model, kernel, a
 
   await target.click(selectors.getByRole('button', { name: /Search/u }));
   const commandFilter = selectors.getByPlaceholder('Search projects, chats, and actions…');
-  await expectModernCommandInput(commandFilter);
+  await expectCommandPaletteHeaderInput(commandFilter);
   await target.press(commandFilter, 'Escape');
 
   const chatComposer = selectors.getByCss('[class*="group/chat-textarea"]');
@@ -210,35 +240,52 @@ test('should share modern command search chrome across command, model, kernel, a
     await target.click(selectors.getByRole('button', { name: 'Toggle Chat lane' }));
   }
   await target.expectVisible(chatComposer);
-  const chatControlButtons = chatComposer.getByCss('button');
-  await target.click(chatControlButtons.first());
+  // The model list sits behind the agent sheet's overview: Escape steps back, then closes.
+  const modelChange = selectors.getByRole('button', { name: /^Model: .*\. Change$/u });
+  await target.click(chatComposer.getByRole('button', { name: /^Agent and model: /u }));
+  await target.click(modelChange);
   const modelFilter = selectors.getByPlaceholder('Search models…');
   await expectModernCommandInput(modelFilter);
   await target.press(modelFilter, 'Escape');
+  await target.expectCount(modelFilter, 0);
+  await target.expectVisible(modelChange);
+  await target.keyboardPress('Escape');
+  await target.expectCount(modelChange, 0);
 
-  await target.click(chatControlButtons.nth(1));
+  await target.click(chatComposer.getByRole('button', { name: /^Select kernel/u }));
   const kernelFilter = selectors.getByPlaceholder('Search kernels…');
   await expectModernCommandInput(kernelFilter);
   await target.screenshot(selectors.getByCss('body'), 'workbench-command-search-light.png');
   await target.press(kernelFilter, 'Escape');
 
   await target.setViewport({ width: 390, height: 844 });
-  const chatToggle = selectors.getByRole('button', { name: 'Toggle Chat lane' });
-  const agentTrigger = selectors.getByRole('button', { name: /^Agent and model: /u });
-  if (!(await target.isVisible(agentTrigger))) {
-    await target.click(chatToggle);
+  // The phone opens on the model stage (Option B): the composer lives on the Chat destination.
+  const phoneChat = selectors
+    .getByRole('navigation', { name: 'Workbench' })
+    .getByRole('button', { name: 'Chat', exact: true });
+  const agentTrigger = selectors.getByRole('button', { name: /^Agent and model: /u }).first();
+  const phoneEditor = selectors.getByCss('[aria-label="Ask Tau to build anything..."]').first();
+  if (!(await target.isVisible(phoneEditor))) {
+    await target.click(phoneChat);
   }
+  // The resting phone composer shows + / microphone / Send; focus unfolds the model selector (D18).
+  await target.click(phoneEditor);
+  await target.expectVisible(agentTrigger);
   // The phone composer is the same bar: its agent sheet opens as a drawer.
   await target.click(agentTrigger);
-  await target.click(selectors.getByRole('button', { name: /^Model: .*\. Change$/u }));
+  await target.click(modelChange);
   const mobileModelFilter = selectors.getByPlaceholder('Search models…');
-  await expectModernCommandInput(mobileModelFilter);
+  await expectModernCommandInput(mobileModelFilter, 'drawer');
   await target.press(mobileModelFilter, 'Escape');
   await target.expectCount(mobileModelFilter, 0);
+  await target.expectVisible(modelChange);
+  await target.keyboardPress('Escape');
+  await target.expectCount(modelChange, 0);
 
-  await target.click(selectors.getByRole('button', { name: /^Select kernel/u }));
+  // Closing the sheet returns focus to the editor, so the bar stays unfolded with its kernel control.
+  await target.click(selectors.getByRole('button', { name: /^Select kernel/u }).first());
   const mobileKernelFilter = selectors.getByPlaceholder('Search kernels…');
-  await expectModernCommandInput(mobileKernelFilter);
+  await expectModernCommandInput(mobileKernelFilter, 'drawer');
   await target.emulateColorScheme('dark');
   await target.screenshot(selectors.getByCss('body'), 'workbench-command-search-mobile-dark.png');
 });
@@ -247,6 +294,13 @@ test('should render native image controls in the file header instead of over the
   await target.setViewport({ width: 1440, height: 900 });
   await openSeededProject();
 
+  // A software adapter defers automatic previews; the manual command still renders `thumbnail.webp` on any adapter.
+  if (!(await target.isVisible(treeItem(filesPane(), 'thumbnail.webp')))) {
+    await target.click(selectors.getByRole('button', { name: /Search/u }));
+    await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions…'), 'Update thumbnail');
+    await target.click(selectors.getByText('Update thumbnail', { exact: true }));
+    await target.expectVisible(selectors.getByText('Thumbnail updated', { exact: true }), 120_000);
+  }
   await target.click(treeItem(filesPane(), 'thumbnail.webp'));
 
   const actions = selectors.getByRole('group', { name: 'File actions for thumbnail.webp' });

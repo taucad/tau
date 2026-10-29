@@ -4,6 +4,7 @@ import { playwright } from '@vitest/browser-playwright';
 import { defineConfig } from 'vitest/config';
 
 const testEntries = [
+  'app/components/chat/chat-composer-tray.browser.test.tsx',
   'app/components/chat/chat-message-queue.browser.test.tsx',
   'app/components/chat/chat-questions.browser.test.tsx',
   'app/components/chat/chat-acp-activity.browser.test.tsx',
@@ -15,6 +16,7 @@ export default defineConfig({
   // Vite's optimizer hash excludes entries; keep this suite's scan separate from other browser configs.
   cacheDir: fileURLToPath(new URL('../../../node_modules/.vite/chat-message-queue', import.meta.url)),
   plugins: [tailwindcss()],
+  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
   server: {
     host: '127.0.0.1',
     fs: { allow: [fileURLToPath(new URL('../../../../..', import.meta.url))] },

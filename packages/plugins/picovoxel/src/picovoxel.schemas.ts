@@ -165,8 +165,9 @@ export const picovoxelRenderSchema = z
       .min(0)
       .lt(1)
       .optional()
+      .meta({ examples: [0.25] })
       .describe(
-        "OpenVDB mesh adaptivity in [0, 1) for the displayed Voxels parts: 0 is the uniform mesh; higher values merge flat regions into fewer, larger triangles. Only lane 'fast' meshes adaptively, it never changes the voxels, and exports always mesh at 0. Unset, it is 0.25 (Balanced) on lane 'fast' of a PicoVoxel release whose toMesh takes options, and 0 on lane 'exact' and under PicoVoxel 0.1.0.",
+        "OpenVDB mesh adaptivity in [0, 1) for the displayed Voxels parts: 0 is the uniform mesh; higher values merge flat regions into fewer, larger triangles. Only lane 'fast' meshes adaptively, it never changes the voxels, and an export meshes at its own meshAdaptivity, 0 unless it sets one. Unset, it is 0.25 (Balanced) on lane 'fast' of a PicoVoxel release whose toMesh takes options, and 0 on lane 'exact' and under PicoVoxel 0.1.0.",
       ),
     meshRelax: z
       .boolean()
@@ -186,16 +187,26 @@ const exportLaneSchema = z.object({
       "'exact' (default) replays the model in a deterministic session. 'fast' exports fast-lane geometry: STL is stamped LANE=fast, GLB and glTF are refused.",
     ),
   region: picovoxelRegionSchema.optional(),
-  // Exports always mesh uniformly: a view's adaptivity never reaches an exported file.
-  meshAdaptivity: z.literal(0).default(0).describe('Exports always use the uniform mesh (0).'),
-  meshRelax: z.literal(false).default(false).describe('Exports never relax the mesh.'),
+  // Exports mesh uniformly unless they ask otherwise: a view's adaptivity never reaches an exported file.
+  meshAdaptivity: z
+    .number()
+    .min(0)
+    .lt(1)
+    .default(0)
+    .describe(
+      "OpenVDB mesh adaptivity in [0, 1) for the exported mesh. 0 (default) is the uniform mesh. Above 0 flat regions merge into fewer, larger triangles; only lane 'fast' meshes adaptively (lane 'exact' refuses it), and a PicoVoxel release whose toMesh takes no options refuses it too.",
+    ),
+  meshRelax: z
+    .boolean()
+    .default(false)
+    .describe('Relax disoriented triangles of an adaptive export (meshAdaptivity above 0). Default false.'),
 });
 
 const vector3Schema = z.tuple([z.number(), z.number(), z.number()]);
 
 /**
  * Per-format PicoVoxel export schemas. Each carries `lane`, defaulting to `'exact'`, an optional
- * `region` the runtime replays into the native build, and the uniform mesh (`meshAdaptivity` 0).
+ * `region` the runtime replays into the native build, and `meshAdaptivity`, defaulting to the uniform mesh (0).
  * @public
  */
 export const picovoxelExportSchemas = {

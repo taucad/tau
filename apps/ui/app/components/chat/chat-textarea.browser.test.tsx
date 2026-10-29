@@ -84,6 +84,15 @@ const { ChatTextareaSkeleton } = await import('#components/chat/chat-textarea-sk
 type ComposerProps = ComponentProps<typeof ChatTextareaDesktop>;
 const noop = (): void => undefined;
 const asyncNoop = async (): Promise<void> => undefined;
+/** Lets the microphone's expansion into the stop pill finish, so geometry reads its resting place. */
+const settleDictationEntrance = async (): Promise<void> => {
+  await Promise.all(
+    document
+      .getAnimations()
+      .filter((animation) => animation.effect?.getComputedTiming().endTime !== Number.POSITIVE_INFINITY)
+      .map(async (animation) => animation.finished),
+  );
+};
 const image = storedRef({ hash: '1'.repeat(64), mediaType: 'image/png' });
 const pdf = storedRef({ hash: '2'.repeat(64), mediaType: 'application/pdf', filename: 'spec.pdf' });
 const scenarios = [
@@ -200,6 +209,9 @@ for (const width of [320, 600]) {
           expect(right).toBeCloseTo(8, 1);
           expect(bottom).toBeCloseTo(right, 1);
         }
+        const addBounds = screen.getByRole('button', { name: 'Add' }).getBoundingClientRect();
+        const actionBounds = action.getBoundingClientRect();
+        expect((addBounds.top + addBounds.bottom) / 2).toBeCloseTo((actionBounds.top + actionBounds.bottom) / 2);
         expect(container.scrollWidth).toBe(container.clientWidth);
         if (mode === 'main' && ['empty', 'mixed attachments', 'blocked attachment', 'context chip'].includes(name)) {
           await page.screenshot({
@@ -359,19 +371,27 @@ describe('dictation recording and transcription', () => {
       });
       await page.getByRole('button', { name: 'Dictate', exact: true }).click();
       await expect.element(page.getByRole('button', { name: 'Stop dictation', exact: true })).toBeVisible();
+      await settleDictationEntrance();
       act(() => {
         // Deterministic microphone samples; the real composer and dictation hook render them.
         for (let index = 0; index < 100; index++) {
           const peak = Math.max(0, Math.sin(index * 0.31) + Math.sin(index * 0.79) * 0.6 - 0.6);
-          recordLevel?.(index > 45 ? peak * 0.12 : 0);
+          recordLevel?.(index > 45 ? Math.max(peak * 0.12, Math.abs(Math.sin(index * 0.9)) * 0.08) : 0);
         }
       });
       const waveform = screen.getByRole('img', { name: 'Microphone waveform' });
       const cancelRecording = screen.getByRole('button', { name: 'Cancel dictation' });
       const stopRecording = screen.getByRole('button', { name: 'Stop dictation' });
-      expect(waveform.getBoundingClientRect().width).toBeGreaterThan(width / 2);
-      expect(waveform.getBoundingClientRect().left).toBeGreaterThan(cancelRecording.getBoundingClientRect().right);
-      expect(waveform.getBoundingClientRect().right).toBeLessThan(stopRecording.getBoundingClientRect().left);
+      // The microphone expands in place into the stop pill holding the waveform; cancel sits on its left, and
+      // the bar's other controls stay where they were.
+      expect(stopRecording).toContainElement(waveform);
+      expect(cancelRecording.getBoundingClientRect().right).toBeLessThanOrEqual(
+        stopRecording.getBoundingClientRect().left,
+      );
+      expect(stopRecording.getBoundingClientRect().right).toBeLessThanOrEqual(
+        screen.getByRole('button', { name: status === 'streaming' ? 'Stop' : 'Send' }).getBoundingClientRect().left,
+      );
+      expect(screen.getByRole('button', { name: 'Add' })).toBeVisible();
       expect(containerReference.current!.scrollWidth).toBe(containerReference.current!.clientWidth);
       await page.getByRole('textbox').click();
       await page.screenshot({
@@ -429,6 +449,7 @@ describe('dictation idle waveform', () => {
       renderComposer({ status: 'ready', inputText: '' });
       await page.getByRole('button', { name: 'Dictate', exact: true }).click();
       await expect.element(page.getByRole('button', { name: 'Stop dictation', exact: true })).toBeVisible();
+      await settleDictationEntrance();
       act(() => {
         // A silent microphone still delivers a zero-level batch every 100ms.
         for (let index = 0; index < 40; index++) {
@@ -436,7 +457,8 @@ describe('dictation idle waveform', () => {
         }
       });
       const waveform = screen.getByRole('img', { name: 'Microphone waveform' });
-      const bars = [...waveform.querySelectorAll('span')];
+      // The waveform's one row of bars.
+      const bars = [...waveform.firstElementChild!.children] as HTMLElement[];
       const row = bars[0]!.parentElement!;
       // Silence stays a flat line of equal dots: no invented amplitude.
       expect(new Set(bars.map((bar) => bar.getBoundingClientRect().height)).size).toBe(1);
@@ -539,6 +561,15 @@ describe('question dictation', () => {
       await box.fill(draft);
       const reply = screen.getByRole('group', { name: 'Answer input' });
       const idleHeight = reply.getBoundingClientRect().height;
+      /** At phone width the expanded control may wrap below the draft; elsewhere the reply holds its height. */
+      const expectActiveHeight = (): void => {
+        const { height } = reply.getBoundingClientRect();
+        if (width === 320) {
+          expect(height).toBeGreaterThanOrEqual(idleHeight);
+        } else {
+          expect(height).toBe(idleHeight);
+        }
+      };
       const expectAlignedActions = (label: string): void => {
         const action = screen.getByRole('button', { name: label }).getBoundingClientRect();
         const send = screen.getByRole('button', { name: 'Send answer' }).getBoundingClientRect();
@@ -559,11 +590,10 @@ describe('question dictation', () => {
       await page.getByRole('button', { name: 'Dictate', exact: true }).click();
       expect(onHold).toHaveBeenCalled();
       await expect.element(page.getByRole('status', { name: 'Requesting microphone…' })).toBeVisible();
+      await settleDictationEntrance();
       await expect.element(page.getByRole('button', { name: 'Send answer' })).toHaveAttribute('aria-disabled', 'true');
       expectAlignedActions('Requesting microphone…');
-      const requesting = screen.getByRole('status', { name: 'Requesting microphone…' });
-      expect(requesting.scrollHeight).toBeLessThanOrEqual(requesting.clientHeight);
-      expect(reply.getBoundingClientRect().height).toBe(idleHeight);
+      expectActiveHeight();
       await page.screenshot({
         element: region,
         path: `../../../../../out/test-results/composer/question-requesting-${width}-${theme}-${variant}.png`,
@@ -574,11 +604,11 @@ describe('question dictation', () => {
       await expect.element(page.getByRole('button', { name: 'Stop dictation' })).toBeVisible();
       act(() => {
         for (let index = 0; index < 100; index++) {
-          recordLevel?.(Math.max(0, Math.sin(index * 0.31)) * 0.12);
+          recordLevel?.(Math.abs(Math.sin(index * 0.9)) * 0.1);
         }
       });
       await expect.element(page.getByRole('button', { name: 'Send answer' })).toHaveAttribute('aria-disabled', 'false');
-      expect(reply.getBoundingClientRect().height).toBe(idleHeight);
+      expectActiveHeight();
       const cancel = screen.getByRole('button', { name: 'Cancel dictation' }).getBoundingClientRect();
       const stop = screen.getByRole('button', { name: 'Stop dictation' }).getBoundingClientRect();
       const waveform = screen.getByRole('img', { name: 'Microphone waveform' }).getBoundingClientRect();
@@ -586,15 +616,18 @@ describe('question dictation', () => {
       expect(cancel.top).toBe(stop.top);
       expect(send.top).toBe(stop.top);
       expect(send.left).toBeGreaterThanOrEqual(stop.right);
-      expect(waveform.left).toBeGreaterThanOrEqual(cancel.right);
-      expect(waveform.right).toBeLessThanOrEqual(stop.left);
+      // The microphone expanded into the stop pill around the waveform, with cancel on its left.
+      expect(cancel.right).toBeLessThanOrEqual(stop.left);
+      expect(waveform.left).toBeGreaterThanOrEqual(stop.left);
+      expect(waveform.right).toBeLessThanOrEqual(stop.right);
+      await expect.element(box).toHaveValue(draft);
       await page.screenshot({
         element: region,
         path: `../../../../../out/test-results/composer/question-recording-${width}-${theme}-${variant}.png`,
       });
       await page.getByRole('button', { name: sendWhileRecording ? 'Send answer' : 'Stop dictation' }).click();
       await expect.element(page.getByRole('status', { name: 'Transcribing', exact: true })).toBeVisible();
-      expect(reply.getBoundingClientRect().height).toBe(idleHeight);
+      expectActiveHeight();
       await page.screenshot({
         element: region,
         path: `../../../../../out/test-results/composer/question-transcribing-${width}-${theme}-${variant}.png`,
@@ -603,9 +636,6 @@ describe('question dictation', () => {
       await expect.element(page.getByRole('button', { name: 'Send answer' })).toHaveAttribute('aria-disabled', 'true');
       expect(onAnswer).not.toHaveBeenCalled();
       expectAlignedActions('Transcribing');
-      const progress = screen.getByRole('status', { name: 'Transcribing' });
-      const microphone = screen.getByRole('button', { name: 'Transcribing' });
-      expect(progress.getBoundingClientRect().right).toBeLessThanOrEqual(microphone.getBoundingClientRect().left);
       await act(async () => {
         transcription?.resolve('Use a brushed finish.');
       });

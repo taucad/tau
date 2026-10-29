@@ -25,6 +25,30 @@
           }
         }
       ]
+    },
+    {
+      "uid": "seeded-storage-exporters",
+      "data": [
+        {
+          "refId": "A",
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "max(tau_mirror_copy_lag_seconds{app=~\".*mirror.*\",service_name=\"tau-api\"}) > 900 or sum(tau_git_leases_active{app=~\".*storage.*\",service_name=\"tau-storage\"}) > 0 or sum(fly_instance_up{app=~\".*storage.*\"}) < 2"
+          }
+        }
+      ]
+    },
+    {
+      "uid": "seeded-fly-unbound",
+      "data": [
+        {
+          "refId": "A",
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum(fly_instance_up{}) < 2"
+          }
+        }
+      ]
     }
   ]
 }

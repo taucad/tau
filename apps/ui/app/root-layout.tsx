@@ -1,7 +1,17 @@
+import { ObservabilityHarnessHydrationProbe } from '#lib/observability-harness-hydration.js';
 import { onDesktopMachineNavigation } from '#filesystem/desktop-bridge.js';
 import { installLoopbackHandOff } from '#lib/agent-host-placement.js';
 import type { ComponentType, ReactNode } from 'react';
-import { Links, Meta, Scripts, ScrollRestoration, useMatch, useNavigate, useRouteLoaderData } from 'react-router';
+import {
+  Links,
+  Meta,
+  Scripts,
+  ScrollRestoration,
+  useMatch,
+  useNavigate,
+  useRouteLoaderData,
+  useLocation,
+} from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { authQueryKeys } from '@better-auth-ui/core';
 import { Fragment, useEffect, useMemo } from 'react';
@@ -37,8 +47,6 @@ import { SvgSpriteMount } from '#components/icons/svg-sprite-mount.js';
 import { HeadlessImageProvider } from '#providers/headless-image-provider.js';
 import { authErrorMessage, betterFetchErrorBodyMessage } from '#utils/auth-error.utils.js';
 import { CloudRootBoundary, useCloudPaymentActionReturn } from '#cloud/root-billing.js';
-import { useAnalytics } from '#hooks/use-analytics.js';
-import { subscribeGenuineFailures } from '#lib/stale-build-recovery.js';
 
 export type RootLoaderData = {
   readonly env: ClientEnvironment;
@@ -210,6 +218,7 @@ function LayoutDocument({
   // This is null during SSR when no theme preference is stored (system theme mode),
   // which allows PreventFlashOnWrongTheme's script to correctly detect and apply the
   // system preference before the page renders (prevents light mode flash on dark systems).
+  const location = useLocation();
   const { ssrTheme: resolvedTheme } = useTheme();
   const color = useColor();
   const { setFaviconColor } = useFavicon();
@@ -218,16 +227,6 @@ function LayoutDocument({
   useEffect(() => {
     setFaviconColor(color.serialized.hex);
   }, [setFaviconColor, color]);
-
-  // TAU-UI-6: analytics hears each module load failure the recovery decided genuine, once, wherever it was caught.
-  const analytics = useAnalytics();
-  useEffect(
-    () =>
-      subscribeGenuineFailures((failure) => {
-        analytics.captureException(failure, { context: { component: 'StaleBuildRecovery' } });
-      }),
-    [analytics],
-  );
 
   return (
     <html
@@ -258,6 +257,7 @@ function LayoutDocument({
             __html: buildClientEnvScript(env),
           }}
         />
+        <ObservabilityHarnessHydrationProbe pathname={location.pathname} search={location.search} />
         <SvgSpriteMount />
         {documentChrome}
         {children}

@@ -117,7 +117,7 @@ export function WorkspaceConnections({
       await reloadRows();
       toast.success(`Connected workspace "${connected.workspace.name}"`);
     } catch (error) {
-      telemetry.workspaceOpenFailed({ workspaceId: undefined, reason: 'unknown' });
+      telemetry.workspaceOpenFailed({ workspaceId: undefined, reason: 'unknown', error });
       toast.error('Failed to connect workspace.');
       setErrorMessage(error instanceof Error ? error.message : 'Failed to connect workspace.');
     } finally {
@@ -149,7 +149,7 @@ export function WorkspaceConnections({
           telemetry.workspaceOpenFailed({ workspaceId, reason: 'aborted' });
           return;
         }
-        telemetry.workspaceOpenFailed({ workspaceId, reason: 'unknown' });
+        telemetry.workspaceOpenFailed({ workspaceId, reason: 'unknown', error });
         toast.error(
           isWorkspaceIdentityConflictError(error)
             ? workspaceIdentityConflictCopy

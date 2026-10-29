@@ -72,7 +72,7 @@ export function ChatMessageQueueView({
       aria-label='Queued messages'
       className='@container/message-queue max-h-64 min-w-0 overflow-y-auto overscroll-contain'
     >
-      <ul className='m-0 list-none divide-y divide-border/50 p-0'>
+      <ul className='m-0 list-none divide-y divide-border p-0'>
         {items.map((item, index) => {
           const content = item.message.parts
             .filter((part) => part.type === 'text')
@@ -96,7 +96,7 @@ export function ChatMessageQueueView({
                   rows.current.set(item.id, element);
                 }
               }}
-              className={cn('relative min-w-0 px-2 py-0.5', drag?.id === item.id && 'bg-accent/30')}
+              className={cn('relative min-w-0 px-2 py-1', drag?.id === item.id && 'bg-accent/30')}
             >
               {drag !== undefined &&
               (drag.beforeId === item.id || (drag.beforeId === undefined && index === items.length - 1)) ? (
@@ -364,7 +364,13 @@ export function ChatMessageQueueView({
         })}
       </ul>
       {visibleError !== undefined || error !== undefined ? (
-        <div role='alert' className='flex items-start gap-2 px-2 py-2 text-xs text-muted-foreground'>
+        <div
+          role='alert'
+          className={cn(
+            'flex items-start gap-2 px-2 py-2 text-xs text-muted-foreground',
+            items.length > 0 && 'border-t',
+          )}
+        >
           <span className='min-w-0 flex-1 self-center wrap-anywhere'>{visibleError?.message ?? error}</span>
           <Button
             variant='ghost'

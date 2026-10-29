@@ -22,7 +22,8 @@ const corsAllowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
 export const corsBaseConfiguration = {
   allowedHeaders: corsAllowedHeaders,
   // `retry-after` carries a rate-limited refusal's retry estimate (`GITHUB_RATE_LIMITED`); the body does not.
-  exposedHeaders: ['x-tau-chat-run-id', 'x-tau-operation-id', 'set-auth-token', 'retry-after'],
+  // `request-id` lets the browser tag the error a failed call raises with the id this API's Sentry event carries.
+  exposedHeaders: ['x-tau-chat-run-id', 'x-tau-operation-id', 'set-auth-token', 'retry-after', httpHeader.requestId],
   methods: corsAllowedMethods,
   credentials: true,
   maxAge: corsMaxAge,

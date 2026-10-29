@@ -56,12 +56,15 @@ const main = async (): Promise<void> => {
       ),
     })
     .parse(api(`actions/runs/${runId}/artifacts?per_page=100`));
-  const scope = z.enum(['all', 'linux', 'macos']).parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
-  // Each scope admits only the candidate artifact its own workflow scope produced.
+  const scope = z
+    .enum(['all', 'linux', 'macos', 'windows'])
+    .parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
+  // Windows consumer acceptance uses the existing all-platform candidate producer.
   const name = {
     all: 'desktop-installer-candidate',
     linux: 'desktop-linux-installer-candidate',
     macos: 'desktop-macos-installer-candidate',
+    windows: 'desktop-installer-candidate',
   }[scope];
   const matches = list.artifacts.filter((entry) => entry.name === name);
   const artifact = matches[0];

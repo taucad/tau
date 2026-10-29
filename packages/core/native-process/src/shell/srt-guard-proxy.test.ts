@@ -23,10 +23,11 @@ afterEach(async () => {
 /** Send one raw request to the guard and read the first response line. */
 const ask = async (guard: GuardProxy, head: string): Promise<string> => {
   const url = new URL(guard.url);
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const socket = connect({ host: url.hostname, port: Number(url.port) }, () => {
       socket.write(head);
     });
+    socket.on('error', reject);
     let data = '';
     socket.on('data', (chunk) => {
       data += chunk.toString();
@@ -107,6 +108,10 @@ describe('startGuardProxy', () => {
     const guard = await startGuardProxy(resolvingTo('93.184.215.14'));
     disposables.push(guard);
     const upstream = createServer((socket) => {
+      // The probe closes after CONNECT's response, before consuming the upstream payload.
+      socket.on('error', (error: NodeJS.ErrnoException) => {
+        expect(error.code).toBe('ECONNRESET');
+      });
       socket.end('pong');
     });
     await new Promise<void>((resolve) => {
@@ -119,6 +124,10 @@ describe('startGuardProxy', () => {
 
   it('should tunnel to a checked address, IPv4 first, past one that does not answer', async () => {
     const upstream = createServer((socket) => {
+      // The probe closes after CONNECT's response, before consuming the upstream payload.
+      socket.on('error', (error: NodeJS.ErrnoException) => {
+        expect(error.code).toBe('ECONNRESET');
+      });
       socket.end('pong');
     });
     await new Promise<void>((resolve) => {

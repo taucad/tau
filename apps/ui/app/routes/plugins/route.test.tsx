@@ -1,5 +1,7 @@
+import { hydrateRoot } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
 import { MemoryRouter } from 'react-router';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -135,6 +137,39 @@ function getFirstWrite(): FileWrites {
 }
 
 describe('PluginsRoute', () => {
+  it('should preserve a search typed before hydration and apply its filter', async () => {
+    const content = (
+      <MemoryRouter>
+        <PluginsRoute />
+      </MemoryRouter>
+    );
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(content);
+    document.body.append(container);
+    const input = within(container).getByRole<HTMLInputElement>('textbox', { name: 'Search plugins' });
+    input.value = 'zz-early-plugin-no-match';
+    input.focus();
+    input.setSelectionRange(3, 7);
+    const onRecoverableError = vi.fn();
+    const root = hydrateRoot(container, content, { onRecoverableError });
+    try {
+      expect(await within(container).findByText('No plugins match “zz-early-plugin-no-match”')).toBeInTheDocument();
+      expect(within(container).getByRole('textbox', { name: 'Search plugins' })).toBe(input);
+      expect(input).toHaveValue('zz-early-plugin-no-match');
+      expect(input).toHaveFocus();
+      expect([input.selectionStart, input.selectionEnd]).toEqual([3, 7]);
+      expect(onRecoverableError).not.toHaveBeenCalled();
+      await userEvent.click(within(container).getByRole('button', { name: 'Clear filters' }));
+      expect(input).toHaveValue('');
+      expect(within(container).queryByText('No plugins match “zz-early-plugin-no-match”')).not.toBeInTheDocument();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
   beforeEach(() => {
     for (const service of contentObservations.values()) {
       service.dispose();

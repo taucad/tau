@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router';
 import type { MetaFunction } from 'react-router';
 import { PageContent } from '#components/layout/page-content.js';
 import { useCallback, useMemo, useState, useRef } from 'react';
+import type { RefCallback } from 'react';
 import {
   Blocks,
   Check,
@@ -387,6 +388,13 @@ export function PluginStoreView({
   const [kind, setKind] = useState<'plugins' | 'skills' | undefined>(undefined);
   const [builtByTau, setBuiltByTau] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  // Native typing can precede hydration; carry that text into the filter's existing state.
+  const adoptSearch = useCallback<RefCallback<HTMLInputElement>>((input) => {
+    searchRef.current = input;
+    if (input) {
+      setQuery(input.value);
+    }
+  }, []);
   const navigate = useNavigate();
   const systemSkills = systemSkillsCatalog.map((item) => systemSkillToStoreItem(item));
   const storeSkills = tauStoreSkills.map((item, index) => skillToStoreItem(item, index));
@@ -439,7 +447,7 @@ export function PluginStoreView({
             <div className='relative min-w-0 grow sm:w-64'>
               <Search className='pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground' />
               <Input
-                ref={searchRef}
+                ref={adoptSearch}
                 value={query}
                 onChange={(event) => {
                   setQuery(event.target.value);

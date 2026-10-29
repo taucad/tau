@@ -996,7 +996,11 @@ function LiveKinematicsUnit({
       )}
       <div
         data-slot='kinematics-unit-scroller'
-        className='flex min-h-0 w-full flex-1 scroll-shadows-y flex-col overflow-y-auto pb-2 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'
+        role='group'
+        aria-label='Joints'
+        // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable column must be keyboard reachable (WCAG 2.1.1), even when it holds no control, as the empty state on a half-height phone sheet
+        tabIndex={0}
+        className='flex min-h-0 w-full flex-1 scroll-shadows-y flex-col overflow-y-auto pb-2 outline-none [--scroll-fade-end:transparent] [--scroll-fade-size:28px] focus-visible:focus-outline'
       >
         <KinematicsLiveRegions
           kinematicsRef={kinematicsRef}

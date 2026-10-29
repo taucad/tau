@@ -18,6 +18,43 @@ afterEach(async () => {
 });
 
 describe('desktop module graph', () => {
+  it('should route USDZ conversion through the native client without renderer execution payloads', async () => {
+    const cacheRoot = path.resolve('node_modules/.cache/tau-ui-module-graph');
+    await mkdir(cacheRoot, { recursive: true });
+    const root = await mkdtemp(path.join(cacheRoot, 'usdz-'));
+    roots.push(root);
+    const entry = path.join(root, 'entry.js');
+    await writeFile(entry, "export { transcodeGlbToUsdz } from '#components/cad/ar-usdz-transcode.js';");
+    const plugins = () => [
+      tauRuntime({ crossOriginIsolation: false }),
+      createUiSourceAliasPlugin({ emitModuleGraph: true, target: 'desktop' }),
+    ];
+    await build({
+      configFile: false,
+      root,
+      logLevel: 'silent',
+      plugins: plugins(),
+      worker: { plugins },
+      build: { lib: { entry, formats: ['es'] }, assetsInlineLimit: 0 },
+    });
+    const files = await readdir(path.join(root, 'dist'), { recursive: true });
+    const manifests = files.filter((file) => /tau-module-graph(?:-[\w-]+)?\.json$/u.test(file));
+    const manifestModules = await Promise.all(
+      manifests.map(async (file) => {
+        const graph = JSON.parse(await readFile(path.join(root, 'dist', file), 'utf8')) as {
+          chunks: Array<{ moduleIds: string[] }>;
+        };
+        return graph.chunks.flatMap((chunk) => chunk.moduleIds);
+      }),
+    );
+    const modules = manifestModules.flat();
+    expect(modules.some((moduleId) => moduleId.endsWith('/runtime/usdz-client-options.desktop.ts'))).toBe(true);
+    expect(modules.filter((moduleId) => /usdz-runtime\.worker|libassimp|runtime\/src\/worker/u.test(moduleId))).toEqual(
+      [],
+    );
+    expect(files.filter((file) => file.endsWith('.wasm'))).toEqual([]);
+  }, 60_000);
+
   it.each([false, true])('should emit the esbuild fallback only when its module is retained (%s)', async (retained) => {
     const cacheRoot = path.resolve('node_modules/.cache/tau-ui-module-graph');
     await mkdir(cacheRoot, { recursive: true });

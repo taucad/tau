@@ -137,6 +137,7 @@ const desktopSourceOverrides = new Map([
   ['#constants/local-kernel-options.js', '#constants/local-kernel-options.desktop.js'],
   ['#constants/ephemeral-kernel-options.js', '#constants/ephemeral-kernel-options.desktop.js'],
   ['#runtime/converter-client-options.js', '#runtime/converter-client-options.desktop.js'],
+  ['#runtime/usdz-client-options.js', '#runtime/usdz-client-options.desktop.js'],
   ['#services/headless-image-backend.js', '#services/headless-image-backend.desktop.js'],
   ['#services/browser-agent-worker.js', '#services/browser-agent-worker.desktop.js'],
   ['#services/browser-geospec-worker.js', '#services/browser-geospec-worker.desktop.js'],

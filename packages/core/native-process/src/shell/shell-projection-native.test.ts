@@ -972,7 +972,12 @@ print(outcome, flush=True)
 `,
           join(mountpoint, 'blocked'),
         );
-        const next = lines(child);
+        const next0 = lines(child);
+        const next = async (): Promise<string> => {
+          const line = await next0();
+          process.stderr.write(`[mark] STDOUT ${JSON.stringify(line)}\n`);
+          return line;
+        };
         expect(await next()).toBe('ready');
         await reading.promise;
         expect(await readFile(join(mountpoint, 'free'), 'utf8')).toBe('free');

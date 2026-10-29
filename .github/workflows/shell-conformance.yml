@@ -129,8 +129,8 @@ jobs:
             -t 'G4' src/shell/shell-projection-native.test.ts 2>&1 | tee /tmp/g4.log || true
           echo '===== VERDICT ====='
           grep -A30 'FAIL.*G4 aborts' /tmp/g4.log | grep -vE '^\[(wrap|dump|mark|brdg)' | head -40
-          echo '===== G4 ROWS ====='
-          grep -E 'G4 ' /tmp/g4.log || true
+          echo '===== OUTCOME ====='
+          grep -E '^\[mark\] STDOUT' /tmp/g4.log || echo 'no stdout marks'
 
       - name: Post-run kernel state
         if: always()

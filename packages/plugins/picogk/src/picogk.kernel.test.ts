@@ -8,9 +8,9 @@ import { createMockFileSystem, createMockKernelRuntime, expectKernelProjectionOr
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { picogkKernel } from '#picogk.kernel.js';
-import { picogkExportSchemas, picogkOptionsSchema, picogkRenderSchema } from '#picogk.schemas.js';
+import { picogkOptionsSchema } from '#picogk.schemas.js';
+import { picogkExportSchemas, picogkRenderSchema } from '#picogk-render.schemas.js';
 import { PicogkWorkerError } from '#picogk-worker-error.js';
-import type { PicogkSession } from '#picogk-session.js';
 
 const runtime = createMockKernelRuntime();
 const kernelOptions = {
@@ -176,7 +176,7 @@ describe('PicoGK kernel', () => {
     );
     const mirrorRuntime = { ...createMockKernelRuntime(), filesystem };
     const value = await definition.initialize(picogkOptionsSchema.parse({ closure: kernelOptions }), mirrorRuntime);
-    vi.spyOn((value as { readonly session: PicogkSession }).session, 'request').mockResolvedValue({
+    vi.spyOn(value.session, 'request').mockResolvedValue({
       sources: ['main.cs'],
     });
     try {
@@ -277,7 +277,7 @@ describe('PicoGK kernel', () => {
     await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: uniform }, render, value);
 
     // The mirror reuses its own walk per operation id.
-    expect(value.mirror.sync.mock.calls.map((call): unknown => call[2])).toEqual([1, 1, 1]);
+    expect(value.mirror.sync.mock.calls.map((call): unknown => call[0])).toEqual([render, render, render]);
     expect(requestedMethods(value.session.request)).toEqual(['resolve', 'analyze', 'build']);
   });
 

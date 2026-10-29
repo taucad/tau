@@ -824,8 +824,8 @@ export class KclUtilities {
 
     if (this.mode === 'offline') {
       // Loaded on demand so online sessions never fetch the libcascade engine.
-      const { OfflineEngineConnection } = await import('#offline/offline-engine-connection.js');
-      return new OfflineEngineConnection({
+      const offline = await import('#offline/offline-engine-connection.js');
+      return new offline.OfflineEngineConnection({
         wasmModule: this.wasmModule,
         fileSystemManager: this.fileSystemManager,
         loadOcct: this.loadOcct,

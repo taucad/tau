@@ -2,13 +2,7 @@ import { HttpStatus } from '@nestjs/common';
 import type { LlmGatewayErrorType } from '#api/llm/llm-gateway.error.js';
 import { readBoundedProviderBody } from '#api/llm/provider-account-refusal.js';
 import type { ProviderAccountOwner } from '#api/llm/provider-account-refusal.js';
-
-/**
- * How much of a refused upstream body reaches the server log. Enough for a
- * provider's own diagnosis (the Vertex schema rejection is ~300 bytes) without
- * putting a provider's HTML error page into the log stream.
- */
-const maximumLoggedBodyBytes = 2 * 1024;
+import { providerDiagnostic } from '#api/llm/provider-diagnostic.js';
 
 /**
  * Credential shapes a provider can echo back in a refusal: the request's own
@@ -42,14 +36,14 @@ export const redactCredentials = (text: string): string => {
 export type UpstreamRefusal = {
   /** The parsed JSON body refusal recognition and the client message read. */
   readonly body: unknown;
-  /** That body re-serialised, credentials removed and bounded, for the server log only. */
+  /** That body's content-free projection, credentials removed and bounded, for the server log only. */
   readonly loggedBody?: string;
 };
 
 /**
  * Reads a non-OK upstream response once and returns both the body refusal
- * recognition classifies and the redacted, bounded copy the operator needs in the
- * log. Total: an absent, already-consumed or torn body simply logs nothing.
+ * recognition classifies and the content-free, bounded projection the operator
+ * needs in the log (the provider's vocabulary, never its sentences). Total: an absent, already-consumed or torn body simply logs nothing.
  *
  * ponytail: the log carries the body only when it is JSON, which is what all four
  * routed wires answer; a provider that answers HTML is diagnosed from its status.
@@ -63,10 +57,7 @@ export const readUpstreamRefusal = async (response: Response): Promise<UpstreamR
     return { body: undefined };
   }
   const body = await readBoundedProviderBody(response);
-  // Redacted before the bound, so a credential straddling it cannot survive as a fragment.
-  return body === undefined
-    ? { body }
-    : { body, loggedBody: redactCredentials(JSON.stringify(body)).slice(0, maximumLoggedBodyBytes) };
+  return body === undefined ? { body } : { body, loggedBody: redactCredentials(providerDiagnostic(body)) };
 };
 
 /* A Google `Duration` as JSON (`"37s"`, `"37.226s"`), and a provider's own sentence

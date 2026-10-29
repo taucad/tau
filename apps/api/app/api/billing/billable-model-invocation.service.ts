@@ -23,12 +23,12 @@ import {
   classifyUpstreamRefusal,
   cloudUpstreamRefusalMessage,
   isContextWindowRefusal,
-  maximumRefusalMessageCharacters,
   readUpstreamRefusal,
   upstreamRetryAfterSeconds,
 } from '#api/llm/upstream-refusal.js';
 import { createProviderAccountFrameFilter } from '#api/llm/provider-account-stream.js';
 import type { ProviderTerminalFailure } from '#api/llm/provider-account-stream.js';
+import { errorDiagnostic, textMarker } from '#api/llm/provider-diagnostic.js';
 import { isGatewayProviderId } from '#api/providers/provider-gateway.js';
 import type { GatewayProviderId } from '#api/providers/provider-gateway.js';
 import { billableModelQualificationResolverKey } from '#api/billing/billable-model-invocation.types.js';
@@ -298,7 +298,7 @@ export class BillableModelInvocationService {
          * ruling it must not break is the other direction — never a larger bound after a count
          * succeeded — and `qualification` is still the byte-bound one here. */
         this.logger.warn(
-          `Exact input count unavailable for ${qualification.routeId}; admitting at the byte bound: ${error instanceof Error ? error.message : String(error)}`,
+          `Exact input count unavailable for ${qualification.routeId}; admitting at the byte bound: ${errorDiagnostic(error)}`,
         );
         countSignal = undefined;
         executionDeadline = undefined;
@@ -891,8 +891,8 @@ export class BillableModelInvocationService {
    * any status-coded in-band error. The frame filter replaces those bytes with a
    * Tau frame, so without this line the funded path, the one where Tau pays for
    * the tokens, keeps no trace at all of why the turn ended (R6). The supplier's
-   * own sentence stays here, where only Tau reads it, and is clamped the way
-   * every relayed reason is.
+   * sentence can quote the request it rejected, so only its length and digest
+   * are logged, beside the code that classifies it.
    *
    * @param intent - The invocation whose stream failed.
    * @param qualification - The route the request took.
@@ -906,7 +906,7 @@ export class BillableModelInvocationService {
     this.logger.warn(
       `Provider stream failed on ${qualification.providerId} ${qualification.modelId} ` +
         `(${failure.code ?? failure.type ?? 'no code'}) in ${intent.environment}: ` +
-        `${failure.message?.slice(0, maximumRefusalMessageCharacters) ?? 'no message'}`,
+        `${failure.message === undefined ? 'no message' : textMarker(failure.message)}`,
     );
   }
 

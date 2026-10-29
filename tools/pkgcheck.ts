@@ -1054,11 +1054,11 @@ function validateStrictConsumerTypes(): CheckResult {
 
   try {
     const nodeModules = join(directory, 'node_modules');
-    failures.push(
-      ...timing.measureSync('stage-published-closure', () =>
-        stagePublishedPackage(absoluteRoot, nodeModules, new Set()),
-      ),
-    );
+    const staging = timing.measureSync('stage-published-closure', () => {
+      const issues = stagePublishedPackage(absoluteRoot, nodeModules, new Set());
+      return { status: issues.length > 0 ? 'fail' : 'pass', issues };
+    });
+    failures.push(...staging.issues);
     writeFileSync(join(directory, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
     writeFileSync(join(directory, 'probe.ts'), consumerProbeSource(specifiers));
 

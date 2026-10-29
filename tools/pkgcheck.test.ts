@@ -100,6 +100,34 @@ describe('pkgcheck', () => {
           report.spans.some((span) => span.phase === 'validateStrictConsumerTypes' && span.outcome === 'failure'),
         ),
       ).toBe(true);
+      const manifestPath = join(fixture, 'package.json');
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+      manifest.dependencies = { '@taucad/pkgcheck-missing-fixture': '1.0.0' };
+      writeFileSync(manifestPath, JSON.stringify(manifest));
+      const stagingDirectory = join(fixture, 'staging-timings');
+      const missingDependency = spawnSync(
+        join(workspaceRoot, 'node_modules/.bin/tsx'),
+        ['tools/pkgcheck.ts', fixture],
+        {
+          cwd: workspaceRoot,
+          encoding: 'utf8',
+          timeout: 45_000,
+          env: { ...process.env, TAU_CI_TIMING_DIRECTORY: stagingDirectory },
+        },
+      );
+      expect(missingDependency.status).toBe(1);
+      expect(`${missingDependency.stdout}${missingDependency.stderr}`).toContain(
+        'installed dependency is missing: @taucad/pkgcheck-missing-fixture',
+      );
+      const stagingReport = JSON.parse(
+        readFileSync(join(stagingDirectory, readdirSync(stagingDirectory)[0]!), 'utf8'),
+      ) as { spans: { phase: string; outcome: string }[] };
+      expect(stagingReport.spans).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ phase: 'stage-published-closure', outcome: 'failure' }),
+          expect.objectContaining({ phase: 'validateStrictConsumerTypes', outcome: 'failure' }),
+        ]),
+      );
     } finally {
       rmSync(fixture, { recursive: true, force: true });
     }

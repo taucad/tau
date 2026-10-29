@@ -80,7 +80,7 @@ export function ChatEarlyInput({
         placeholder='Ask Tau to build anything…'
         rows={2}
         className={cn(
-          'min-h-20 resize-none rounded-2xl bg-transparent px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          'min-h-20 resize-none rounded-2xl bg-transparent px-4 py-3 outline-none focus-visible:focus-outline',
           chatInputTextClassName,
         )}
       />

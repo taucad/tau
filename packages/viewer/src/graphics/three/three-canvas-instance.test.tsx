@@ -454,7 +454,7 @@ describe('ThreeCanvasInstance', () => {
     }
 
     await act(async () => {
-      // Never settles by design: R3F keeps waiting while the owner swaps in its fallback.
+      // Pending while the canvas is mounted: R3F keeps waiting while the owner swaps in its fallback.
       void glFactory({ canvas: document.createElement('canvas') });
       await Promise.resolve();
     });

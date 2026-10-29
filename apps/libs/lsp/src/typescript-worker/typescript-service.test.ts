@@ -121,24 +121,22 @@ describe('TypeScriptProjectService with real TypeScript language service', () =>
     expect(totals.every((entry) => source.slice(entry.start, entry.start + entry.length) === 'total')).toBe(true);
 
     const callers = service.getIncomingCallLocations('file:///shapes.ts', source.indexOf('area'));
-    expect(callers).toEqual([
-      expect.objectContaining({
-        name: 'report',
-        kind: 'function',
-        location: expect.objectContaining({ uri: 'file:///shapes.ts', line: 7, preview: 'return area(3);' }),
-      }),
-    ]);
+    expect(callers).toHaveLength(1);
+    expect(callers[0]).toMatchObject({
+      name: 'report',
+      kind: 'function',
+      location: { uri: 'file:///shapes.ts', line: 7, preview: 'return area(3);' },
+    });
     const callees = service.getOutgoingCallLocations('file:///shapes.ts', source.indexOf('report'));
-    expect(callees).toEqual([
-      expect.objectContaining({ name: 'area', location: expect.objectContaining({ line: 1 }) }),
-    ]);
-    expect(service.getWorkspaceSymbolLocations('area')).toContainEqual(
-      expect.objectContaining({
-        name: 'area',
-        kind: 'function',
-        location: expect.objectContaining({ preview: 'export function area(width: number): number {' }),
-      }),
-    );
+    expect(callees).toHaveLength(1);
+    expect(callees[0]).toMatchObject({ name: 'area', location: { line: 1 } });
+    const areaSymbol = service
+      .getWorkspaceSymbolLocations('area')
+      .find((entry) => entry.location.uri === 'file:///shapes.ts');
+    expect(areaSymbol).toMatchObject({
+      kind: 'function',
+      location: { preview: 'export function area(width: number): number {' },
+    });
     expect(
       service.getReferenceLocations('file:///shapes.ts', source.indexOf('area')).map((entry) => entry.preview),
     ).toEqual(['export function area(width: number): number {', 'return area(3);']);

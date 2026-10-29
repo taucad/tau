@@ -665,6 +665,51 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     },
   );
 
+  it.each(['submitted', 'streaming'] as const)(
+    'should offer Send instead of a second Stop while dictating a follow-up as a chat is %s',
+    async (status) => {
+      const createRange = document.createRange.bind(document);
+      vi.spyOn(document, 'createRange').mockImplementation(() =>
+        Object.assign(createRange(), {
+          getClientRects: () => [],
+          getBoundingClientRect: () => new DOMRect(),
+        }),
+      );
+      dictationDependencies.available = true;
+      dictationDependencies.capture.mockResolvedValue({
+        finish: async () => new Blob([], { type: 'audio/wav' }),
+        cancel: noop,
+      });
+      dictationDependencies.transcribe.mockResolvedValue('Then fillet the edges.');
+      const submit = vi.fn().mockResolvedValue(undefined);
+      const cancelChat = vi.fn();
+      renderComposer('', codexSession, {
+        status,
+        isSubmitting: status === 'submitted',
+        handleSubmit: submit,
+        handleCancelClick: cancelChat,
+      });
+      await userEvent.click(await screen.findByRole('button', { name: 'Dictate' }));
+      await screen.findByRole('button', { name: 'Stop dictation' });
+      // The pill's stop square is the only stop: the turn's Stop yields to Send while dictating.
+      expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+      const send = screen.getByRole('button', { name: 'Send' });
+      if (status === 'submitted') {
+        // A send still in flight refuses the next one until it lands.
+        expect(send).toHaveAttribute('aria-disabled', 'true');
+        await userEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
+      } else {
+        await userEvent.click(send);
+        await waitFor(() => {
+          expect(submit).toHaveBeenCalledExactlyOnceWith('Then fillet the edges.');
+        });
+      }
+      expect(cancelChat).not.toHaveBeenCalled();
+      // Once dictation ends, the running turn offers Stop again.
+      expect(await screen.findByRole('button', { name: 'Stop' })).toBeVisible();
+    },
+  );
+
   it('should place the microphone beside Send and send the final transcript exactly once after recording', async () => {
     const createRange = document.createRange.bind(document);
     vi.spyOn(document, 'createRange').mockImplementation(() =>

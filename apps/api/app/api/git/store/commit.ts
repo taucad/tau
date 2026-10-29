@@ -2,7 +2,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Logger } from '@nestjs/common';
 import { createReadStream } from 'node:fs';
-import { open, readdir, stat } from 'node:fs/promises';
+import { open, readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type {
@@ -19,6 +19,7 @@ import { readLeaseReferences, runGit } from '#api/git/store/lease.js';
 import type { RepositoryLease } from '#api/git/store/lease.js';
 import {
   commitDeadlineMilliseconds,
+  deferredCompactionPackLimit,
   livePackBound,
   repositoryByteCeiling,
   retentionWindowMilliseconds,
@@ -29,10 +30,12 @@ import {
   ManifestError,
   assertGenerationSucceeds,
   assertSameIncarnation,
+  compactionCommitter,
   decodeManifest,
   indexKeyFor,
   encodeManifest,
   isTombstoned,
+  onlyCompactedSince,
   spilledPushLog,
   succeedManifest,
   tombstoneManifest,
@@ -41,7 +44,9 @@ import type { Manifest, ManifestPack } from '#api/git/store/manifest.js';
 
 /**
  * The commit protocol: what happens after stock `receive-pack` exits and
- * before the client is acknowledged (north star write path, steps 5–7).
+ * before the client is acknowledged (north star write path, steps 5–7), and
+ * the compaction a push may leave owed for after that acknowledgement
+ * ({@link compactCommitted}).
  *
  * Two things this file will not do, both from AR-A:
  *
@@ -71,7 +76,15 @@ export type CommitResult =
       readonly committed: true;
       readonly manifest: Manifest;
       readonly token: CommitToken;
+      /** Whether this commit's own manifest write carried a compaction. */
       readonly compacted: boolean;
+      /**
+       * The compaction this commit owes, when it left more than the pack bound
+       * live because its caller deferred compaction past the reply: run it over
+       * the same lease, before disposing it ({@link compactCommitted}).
+       * Absent when nothing is owed.
+       */
+      readonly compaction?: (options?: DeferredCompactionOptions) => Promise<DeferredCompactionOutcome>;
       /**
        * The compacting holder's housekeeping (NI4), for the caller to run once
        * its reply no longer waits on it (W13b): the sweep lists `packs/` and
@@ -94,6 +107,18 @@ export type CommitLeaseArguments = {
   viaDevice?: string;
   /** Live packs tolerated before this committer compacts. */
   packBound?: number;
+  /**
+   * Leave a compaction this commit would make to the caller, to run after its
+   * reply ({@link CommitResult}'s `compaction`), unless the repository would
+   * then hold more than {@link deferredCompactionPackLimit} packs or pass the
+   * byte ceiling uncompacted. Off by default: the commit compacts inline.
+   */
+  deferCompaction?: boolean;
+  /**
+   * Live packs past which a deferring commit compacts inline anyway; this
+   * build's {@link deferredCompactionPackLimit} by default.
+   */
+  deferredPackLimit?: number;
   /** Per-repository ceiling on non-LFS bytes (D20). */
   byteCeiling?: number;
   /** The clock, injectable so the retention and orphan windows are testable. */
@@ -228,6 +253,16 @@ const assertCommittable = async (lease: RepositoryLease): Promise<void> => {
   }
 };
 
+/** The bytes a commit of `live` plus `uploads` would hold. */
+const committedBytesOf = (live: ReadonlyArray<{ bytes: number }>, uploads: ReadonlyArray<{ bytes: number }>): number =>
+  live.reduce((total, pack) => total + pack.bytes, 0) + uploads.reduce((total, upload) => total + upload.bytes, 0);
+
+const withinCeiling = (
+  live: ReadonlyArray<{ bytes: number }>,
+  uploads: ReadonlyArray<{ bytes: number }>,
+  byteCeiling: number,
+): boolean => committedBytesOf(live, uploads) <= byteCeiling;
+
 /**
  * The D20 ceiling, as a backstop behind `pre-receive`: the hook measures what
  * this push added, and this measures what the repository would then hold.
@@ -237,8 +272,7 @@ const assertWithinCeiling = (
   uploads: ReadonlyArray<{ bytes: number }>,
   byteCeiling: number,
 ): void => {
-  const committedBytes =
-    live.reduce((total, pack) => total + pack.bytes, 0) + uploads.reduce((total, upload) => total + upload.bytes, 0);
+  const committedBytes = committedBytesOf(live, uploads);
   if (committedBytes > byteCeiling) {
     throw new RepositoryStoreError(
       'ceiling-exceeded',
@@ -247,7 +281,7 @@ const assertWithinCeiling = (
   }
 };
 
-/** Everything this module logs: a sweep that could not finish, and nothing else. */
+/** Everything this module logs: a sweep that could not finish, and a commit that rebased or could not tell whether it may. */
 const logger = new Logger('RepositoryCommit');
 
 /** `packs/<git pack name>-<upload nonce>.pack`: unique to this upload, always (D16, NI4). */
@@ -258,7 +292,8 @@ const uploadKeyFor = (packFile: string): string =>
  * Commits whatever the push left in the lease, or nothing.
  *
  * The caller withholds the entire HTTP response — headers included — until
- * this resolves (D4, NI2), and starts the result's `sweep` only after that. A
+ * this resolves (D4, NI2), and starts the result's `sweep`, and the
+ * `compaction` a deferring caller is owed, only after that. A
  * thrown `RepositoryStoreError` with code `lost` is the 503 signal; every
  * other code is a refusal the client should see.
  */
@@ -290,21 +325,27 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
   const { references } = prepared;
 
   const hydrated = lease.manifest?.packs ?? [];
-  const { compacted, keptPack, toUpload, retainedLive } = await planPacks({
-    lease,
-    hydrated,
-    arrived: prepared.arrived,
-    packBound,
-    ...(args.faults === undefined ? {} : { faults: args.faults }),
-    ...(args.onPhase === undefined ? {} : { onPhase: args.onPhase }),
-  });
-  const uploads = await Promise.all(
-    toUpload.map(async (name) => {
-      const file = path.join(lease.directory, 'objects/pack', name);
-      const stats = await stat(file);
-      return { name, bytes: stats.size, file, key: uploadKeyFor(name) };
-    }),
-  );
+  const plan = async (defer: boolean): Promise<PackPlan & { uploads: PlannedUpload[] }> => {
+    const planned = await planPacks({
+      lease,
+      hydrated,
+      arrived: prepared.arrived,
+      packBound,
+      deferredPackLimit: args.deferredPackLimit ?? deferredCompactionPackLimit,
+      defer,
+      ...(args.faults === undefined ? {} : { faults: args.faults }),
+      ...(args.onPhase === undefined ? {} : { onPhase: args.onPhase }),
+    });
+    return { ...planned, uploads: await plannedUploads(lease, planned.toUpload) };
+  };
+  let planned = await plan(args.deferCompaction === true);
+  if (planned.owed && !withinCeiling(planned.retainedLive, planned.uploads, byteCeiling)) {
+    /* Compaction can bring a repository back under the ceiling that its
+       uncompacted packs pass, so a push near it compacts now rather than being
+       refused for bytes the deferred compaction would have saved. */
+    planned = await plan(false);
+  }
+  const { compacted, keptPack, retainedLive, uploads } = planned;
   assertWithinCeiling(retainedLive, uploads, byteCeiling);
 
   // Every upload key is chosen before anything is sent, so the successor
@@ -376,32 +417,428 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
 
   await args.faults?.('before-manifest-commit');
   assertDeadline();
-  const token = await writeManifest({
-    store,
-    locator: lease.locator,
-    next,
-    expected: lease.token,
-    hydrated: lease.manifest,
-    ...(args.onPhase === undefined ? {} : { onPhase: args.onPhase }),
-  });
+  let committed = next;
+  let expected = lease.token;
+  let base = lease.manifest;
+  let rebased = false;
+  let token: CommitToken;
+  for (let rebases = 0; ; rebases += 1) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- each write follows the manifest the one before lost to
+      token = await writeManifest({
+        store,
+        locator: lease.locator,
+        next: committed,
+        expected,
+        hydrated: base,
+        ...(args.onPhase === undefined ? {} : { onPhase: args.onPhase }),
+      });
+      break;
+    } catch (error) {
+      const rebasable =
+        error instanceof RepositoryStoreError &&
+        error.code === 'lost' &&
+        !compacted &&
+        lease.manifest !== undefined &&
+        rebases < maximumRebases;
+      const over = rebasable
+        ? // oxlint-disable-next-line no-await-in-loop -- as above
+          await rebaseOverCompaction({ ...args, references, uploaded, arrived: prepared.arrived, at, byteCeiling })
+        : undefined;
+      if (over === undefined) {
+        throw error;
+      }
+      assertDeadline();
+      ({ next: committed, expected, base } = over);
+      rebased = true;
+    }
+  }
   await args.faults?.('after-manifest-commit');
+
+  /* A rebased commit's lease holds packs its manifest no longer names, so it
+     owes no compaction: the one it rebased over already ran. */
+  const owedFiles =
+    planned.owed && !rebased
+      ? new Map([
+          ...hydrated.map((pack): [string, string] => [pack.key, leasePackFile(pack.key)]),
+          ...uploads.map((upload): [string, string] => [upload.key, upload.name]),
+        ])
+      : undefined;
 
   return {
     committed: true,
-    manifest: next,
+    manifest: committed,
     token,
     compacted,
+    ...(owedFiles === undefined
+      ? {}
+      : {
+          compaction: async (options: DeferredCompactionOptions = {}) =>
+            compactCommitted({
+              ...options,
+              store,
+              lease,
+              committed,
+              token,
+              packFiles: owedFiles,
+              ...(options.faults === undefined && args.faults !== undefined ? { faults: args.faults } : {}),
+            }),
+        }),
     sweep: async () =>
       compacted
         ? sweepQuietly({
             store,
             locator: lease.locator,
-            committed: next,
+            committed,
             at,
             ...(args.faults === undefined ? {} : { faults: args.faults }),
           })
         : undefined,
     moved: movedReferences(lease.manifest?.refs ?? {}, references),
+  };
+};
+
+/** Rebases one commit makes over deferred compactions before it reports its race lost. */
+const maximumRebases = 2;
+
+/**
+ * The successor a commit that lost its conditional write may write instead,
+ * when what it lost to is only deferred compactions of the generation it
+ * hydrated (review of push latency F2, finding 1).
+ *
+ * A deferred compaction runs after its push was answered, and only this
+ * process's own pushes make it give way; a push spilled to another storage
+ * member, a ref removal, or a push that arrived after its last check hydrated
+ * the push's generation and would otherwise lose to a commit that moved no
+ * ref. Rebasing is safe exactly when these hold, and is refused — the race is
+ * lost as before — when any does not:
+ *
+ * - every generation since the lease's is a compaction's
+ *   ({@link onlyCompactedSince}): same incarnation, same refs, and the objects
+ *   those refs reach are all still in the newer manifest's packs;
+ * - this commit compacted nothing itself, so its own uploads are the only
+ *   packs it adds and it retires none;
+ * - every object the new refs reach that the old refs did not is in this
+ *   commit's own uploads ({@link carriesWhatItAdds}). A push that named an
+ *   object the repository held unreferenced — which a compaction may have
+ *   dropped — is refused here;
+ * - the rebased repository still fits the byte ceiling.
+ *
+ * @returns The successor of the newer manifest, its token and that manifest; `undefined` to lose the race.
+ */
+const rebaseOverCompaction = async (args: {
+  store: RepositoryStore;
+  lease: RepositoryLease;
+  committedBy: string;
+  viaDevice?: string;
+  references: Manifest['refs'];
+  uploaded: readonly ManifestPack[];
+  arrived: readonly string[];
+  at: Date;
+  byteCeiling: number;
+}): Promise<{ next: Manifest; expected: CommitToken; base: Manifest } | undefined> => {
+  const { store, lease } = args;
+  const hydrated = lease.manifest;
+  if (hydrated === undefined) {
+    return undefined;
+  }
+  const current = await store.readManifest(lease.locator);
+  if (current === undefined) {
+    return undefined;
+  }
+  const newer = decodeManifest(current.manifest);
+  if (!onlyCompactedSince(newer, hydrated) || !sameReferences(newer.refs, hydrated.refs)) {
+    return undefined;
+  }
+  if (!withinCeiling(newer.packs, args.uploaded, args.byteCeiling)) {
+    return undefined;
+  }
+  if (!(await carriesWhatItAdds({ lease, before: hydrated.refs, after: args.references, arrived: args.arrived }))) {
+    return undefined;
+  }
+  const next = succeedManifest(
+    newer,
+    {
+      refs: args.references,
+      packs: [...newer.packs, ...args.uploaded],
+      committedBy: args.committedBy,
+      ...(args.viaDevice === undefined ? {} : { viaDevice: args.viaDevice }),
+    },
+    args.at,
+  );
+  assertGenerationSucceeds(newer, next);
+  await writeSpilledPushLog({ store, locator: lease.locator, base: newer, next });
+  logger.log(
+    `generation ${String(newer.generation)} of ${lease.locator.projectId} is a deferred compaction of ` +
+      `${String(hydrated.generation)}; this commit rebases onto it`,
+  );
+  return { next, expected: current.token, base: newer };
+};
+
+/**
+ * Whether the packs this commit uploads hold every object its new refs reach
+ * that its old refs did not. The rest of what the new refs reach, the old
+ * refs reach too, and a compaction keeps all of that.
+ *
+ * Read from the lease: `rev-list --objects <new tips> --not <old tips>`, then
+ * the uploaded packs' own indexes. Any failure answers `false`, which loses
+ * the race as the commit would have without rebasing.
+ */
+const carriesWhatItAdds = async (args: {
+  lease: RepositoryLease;
+  before: Manifest['refs'];
+  after: Manifest['refs'];
+  arrived: readonly string[];
+}): Promise<boolean> => {
+  const added = [
+    ...new Set(
+      Object.entries(args.after)
+        .filter(([name, tip]) => args.before[name]?.oid !== tip.oid)
+        .map(([, tip]) => tip.oid),
+    ),
+  ];
+  if (added.length === 0) {
+    return true;
+  }
+  const old = [...new Set(Object.values(args.before).map((tip) => tip.oid))];
+  try {
+    const listed = await runGit(args.lease.directory, ['rev-list', '--objects', ...added, '--not', ...old]);
+    const reached = listed
+      .split('\n')
+      .map((line) => line.split(' ', 1)[0] ?? '')
+      .filter((oid) => oid.length > 0);
+    if (reached.length === 0) {
+      return true;
+    }
+    const held = new Set<string>();
+    for (const name of args.arrived) {
+      // oxlint-disable-next-line no-await-in-loop -- a push brings one pack, rarely two
+      for (const oid of await packIndexNames(
+        path.join(args.lease.directory, 'objects/pack', `${name.slice(0, -'.pack'.length)}.idx`),
+        (reached[0]?.length ?? 40) / 2,
+      )) {
+        held.add(oid);
+      }
+    }
+    return reached.every((oid) => held.has(oid));
+  } catch (error) {
+    logger.warn(`could not tell whether a commit to ${args.lease.locator.projectId} can rebase: ${String(error)}`);
+    return false;
+  }
+};
+
+/** The object names a version 2 pack index lists (`gitformat-pack`): after its header and fan-out table. */
+const packIndexNames = async (file: string, hashBytes: number): Promise<string[]> => {
+  const bytes = await readFile(file);
+  const headerBytes = 8;
+  const fanoutBytes = 256 * 4;
+  if (bytes.readUInt32BE(0) !== 0xff_74_4f_63 || bytes.readUInt32BE(4) !== 2) {
+    throw new Error(`${path.basename(file)} is not a version 2 pack index`);
+  }
+  const count = bytes.readUInt32BE(headerBytes + fanoutBytes - 4);
+  const start = headerBytes + fanoutBytes;
+  return Array.from({ length: count }, (_, index) =>
+    bytes.subarray(start + index * hashBytes, start + (index + 1) * hashBytes).toString('hex'),
+  );
+};
+
+/** What the caller of a deferred compaction controls. */
+export type DeferredCompactionOptions = {
+  /**
+   * Asked before the repack, before the object puts and before the manifest
+   * write: `true` gives up there, so a compaction never races a push this
+   * process already knows is on its way. A give-up leaves at most unnamed
+   * uploads and markers on live packs, which the sweep's rules already cover.
+   */
+  shouldAbandon?: () => boolean;
+  /** The clock: the retirement markers' time. */
+  now?: () => Date;
+  /** Epoch milliseconds; past it the compaction gives up without a manifest write (NI5). */
+  deadlineAt?: number;
+  faults?: FaultInjector;
+  /** Told how long each phase took, in seconds, as with a push. */
+  onPhase?: CommitPhaseObserver;
+};
+
+/** How a deferred compaction ended. */
+export type DeferredCompactionOutcome =
+  | {
+      readonly outcome: 'committed';
+      readonly manifest: Manifest;
+      readonly token: CommitToken;
+      /** This compaction's sweep (NI4), as a compacting commit's; never rejects. */
+      readonly sweep: () => Promise<SweepOutcome | undefined>;
+    }
+  /** Given up before its manifest write: told to, or past its deadline. */
+  | { readonly outcome: 'abandoned' }
+  /**
+   * Given up because the manifest is no longer the push's generation: a
+   * later writer committed first, so this compaction could only lose, and it
+   * stopped before the repack or before any upload or retirement marker.
+   */
+  | { readonly outcome: 'superseded' }
+  /** Another writer committed first; the next push past the bound owes it again. */
+  | { readonly outcome: 'lost' };
+
+/**
+ * The compaction a push left owed, run over the push's own lease after the
+ * client was answered (push latency F2/F4: a compacting commit's repack and
+ * re-upload were the >5 s tail of the push reply).
+ *
+ * It is the inline compaction moved one manifest write later, and it keeps
+ * every rule that one keeps:
+ *
+ * - **The same conditional write.** Its successor follows the push's
+ *   committed manifest and is written against the push's token, so it either
+ *   wins against exactly that generation or loses to whatever committed after.
+ *   It reads the manifest before its repack and before its first put, and
+ *   stops (`superseded`) once a later writer has committed. A writer that
+ *   hydrated the push's generation and then finds the compaction committed
+ *   rebases onto it rather than losing ({@link rebaseOverCompaction}).
+ * - **Retirement before the manifest that drops a pack**, in the same round as
+ *   the uploads, so no committed manifest leaves a live-until-now pack without
+ *   its marker. A compaction that then loses leaves markers on packs that stay
+ *   live, which only ever lengthen a retention (`sweep.ts`).
+ * - **The refs do not move.** The lease holds exactly the refs and packs the
+ *   push committed, and `repack -a -d --keep-pack` is reachability-preserving
+ *   (W0a: `fsck --strict` clean), so the successor names the same refs over
+ *   fewer packs and appends a push record that moved nothing.
+ * - **The sweep follows its own committed manifest**, as a compacting push's
+ *   does.
+ *
+ * @param args - The store and the push's lease, its committed manifest and
+ *   token, and the lease file of every pack that manifest names.
+ * @returns How it ended. Throws only for a failure of its own (a repack or a put).
+ */
+// oxlint-disable-next-line max-lines-per-function -- one sequence, in the order the push's own commit keeps
+export const compactCommitted = async (
+  args: DeferredCompactionOptions & {
+    store: RepositoryStore;
+    lease: RepositoryLease;
+    committed: Manifest;
+    token: CommitToken;
+    /** Lease file name of every pack `committed` names, by key. */
+    packFiles: ReadonlyMap<string, string>;
+  },
+): Promise<DeferredCompactionOutcome> => {
+  const { store, lease, committed } = args;
+  const at = (args.now ?? (() => new Date()))();
+  const deadlineAt = args.deadlineAt ?? Date.now() + commitDeadlineMilliseconds;
+  const abandoned = (): boolean => (args.shouldAbandon?.() ?? false) || Date.now() > deadlineAt;
+  /* One manifest read before the repack and one before the first put: a
+     compaction that can only lose its write spends neither, and leaves no
+     marker on a pack the newer manifest still names. */
+  const superseded = async (): Promise<boolean> => {
+    const read = await store.readManifest(lease.locator);
+    const current = read === undefined ? undefined : decodeManifest(read.manifest);
+    return current?.generation !== committed.generation || current.incarnation !== committed.incarnation;
+  };
+  if (abandoned()) {
+    return { outcome: 'abandoned' };
+  }
+  if (await superseded()) {
+    return { outcome: 'superseded' };
+  }
+
+  const keptPack = [...committed.packs].sort((left, right) => right.bytes - left.bytes)[0];
+  const keptFile = keptPack === undefined ? undefined : args.packFiles.get(keptPack.key);
+  if (keptPack !== undefined && keptFile === undefined) {
+    throw new Error(`the lease holds no file for ${keptPack.key}, which the committed manifest names`);
+  }
+  await timed(args.onPhase, 'compaction', async () => compactLease(lease, keptFile));
+  await args.faults?.('mid-compaction');
+
+  const remaining = await packFilesIn(lease.directory);
+  const uploads = await plannedUploads(
+    lease,
+    remaining.filter((name) => name !== keptFile),
+  );
+  const next = succeedManifest(
+    committed,
+    {
+      refs: committed.refs,
+      packs: [
+        ...(keptPack === undefined ? [] : [keptPack]),
+        ...uploads.map((upload) => ({ key: upload.key, bytes: upload.bytes, indexStored: true })),
+      ],
+      committedBy: compactionCommitter,
+    },
+    at,
+  );
+  if (abandoned()) {
+    return { outcome: 'abandoned' };
+  }
+  if (await superseded()) {
+    return { outcome: 'superseded' };
+  }
+
+  const files = await timed(args.onPhase, 'hash', async () =>
+    readyFiles(
+      uploads.flatMap((upload) => [
+        { key: upload.key, file: upload.file },
+        { key: indexKeyFor(upload.key), file: `${upload.file.slice(0, -'.pack'.length)}.idx` },
+      ]),
+    ),
+  );
+  await timed(args.onPhase, 'object_puts', async () =>
+    putAll([
+      ...files.map(
+        (ready) => async (signal: AbortSignal) =>
+          store.putObject(
+            lease.locator,
+            ready.key,
+            ready.body,
+            { contentLength: ready.contentLength, sha256: ready.sha256 },
+            signal,
+          ),
+      ),
+      ...committed.packs
+        .filter((pack) => pack.key !== keptPack?.key)
+        .map(
+          (pack) => async (signal: AbortSignal) =>
+            putRetirementMarker({ store, locator: lease.locator, packKey: pack.key, at }, signal),
+        ),
+      async (signal: AbortSignal) =>
+        writeSpilledPushLog({ store, locator: lease.locator, base: committed, next, signal }),
+    ]),
+  );
+  await args.faults?.('after-pack-upload');
+  assertGenerationSucceeds(committed, next);
+
+  await args.faults?.('before-manifest-commit');
+  if (abandoned()) {
+    return { outcome: 'abandoned' };
+  }
+  let token: CommitToken;
+  try {
+    token = await writeManifest({
+      store,
+      locator: lease.locator,
+      next,
+      expected: args.token,
+      hydrated: committed,
+      ...(args.onPhase === undefined ? {} : { onPhase: args.onPhase }),
+    });
+  } catch (error) {
+    if (error instanceof RepositoryStoreError && error.code === 'lost') {
+      return { outcome: 'lost' };
+    }
+    throw error;
+  }
+  await args.faults?.('after-manifest-commit');
+
+  return {
+    outcome: 'committed',
+    manifest: next,
+    token,
+    sweep: async () =>
+      sweepQuietly({
+        store,
+        locator: lease.locator,
+        committed: next,
+        at,
+        ...(args.faults === undefined ? {} : { faults: args.faults }),
+      }),
   };
 };
 
@@ -443,16 +880,30 @@ const planPacks = async (args: {
   hydrated: readonly ManifestPack[];
   arrived: readonly string[];
   packBound: number;
+  /** Leave the compaction owed rather than run it, within `deferredPackLimit`. */
+  defer: boolean;
+  deferredPackLimit: number;
   faults?: FaultInjector;
   onPhase?: CommitPhaseObserver;
-}): Promise<{
-  compacted: boolean;
-  keptPack: ManifestPack | undefined;
-  toUpload: readonly string[];
-  retainedLive: readonly ManifestPack[];
-}> => {
-  if (!shouldCompact(args.hydrated.length + args.arrived.length, args.packBound)) {
-    return { compacted: false, keptPack: undefined, toUpload: args.arrived, retainedLive: args.hydrated };
+}): Promise<PackPlan> => {
+  const live = args.hydrated.length + args.arrived.length;
+  if (!shouldCompact(live, args.packBound)) {
+    return {
+      compacted: false,
+      owed: false,
+      keptPack: undefined,
+      toUpload: args.arrived,
+      retainedLive: args.hydrated,
+    };
+  }
+  if (args.defer && live <= args.deferredPackLimit) {
+    return {
+      compacted: false,
+      owed: true,
+      keptPack: undefined,
+      toUpload: args.arrived,
+      retainedLive: args.hydrated,
+    };
   }
 
   const keptPack = [...args.hydrated].sort((left, right) => right.bytes - left.bytes)[0];
@@ -466,11 +917,35 @@ const planPacks = async (args: {
   const remaining = await packFilesIn(args.lease.directory);
   return {
     compacted: true,
+    owed: false,
     keptPack,
     toUpload: remaining.filter((name) => name !== keptFile),
     retainedLive: keptPack === undefined ? [] : [keptPack],
   };
 };
+
+/** What a commit uploads and keeps: {@link planPacks}' answer. */
+type PackPlan = {
+  /** The commit compacts in its own manifest write. */
+  compacted: boolean;
+  /** The commit leaves more than the bound live, and its caller compacts after the reply. */
+  owed: boolean;
+  keptPack: ManifestPack | undefined;
+  toUpload: readonly string[];
+  retainedLive: readonly ManifestPack[];
+};
+
+/** One lease pack a commit uploads, under the key chosen for it before anything is sent. */
+type PlannedUpload = { name: string; bytes: number; file: string; key: string };
+
+const plannedUploads = async (lease: RepositoryLease, names: readonly string[]): Promise<PlannedUpload[]> =>
+  Promise.all(
+    names.map(async (name) => {
+      const file = path.join(lease.directory, 'objects/pack', name);
+      const stats = await stat(file);
+      return { name, bytes: stats.size, file, key: uploadKeyFor(name) };
+    }),
+  );
 
 /** Read size for hashing a lease file: one buffer, reused for every read. */
 const hashReadBytes = 1024 * 1024;

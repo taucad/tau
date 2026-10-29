@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
 import {
   createObservabilityRunId,
+  harnessNavigationTimeout,
+  observeHarnessPage,
   observabilityUrl,
   pollSentryEventIds,
   stagingOrigin,
@@ -19,7 +21,12 @@ import {
  */
 
 const sentryApi = 'https://us.sentry.io/api/0';
-const harnessRouteId = 'routes/[__debug].observability/route';
+// React Router gives a folder route the folder's path as its id, so
+// `routes/[__debug].observability/route.tsx` is `routes/[__debug].observability`
+// with no `/route` suffix. The unit-test fixtures in `sentry.server.test.ts` and
+// `sentry.server-sdk.test.ts` carry a `/route` suffix, but those are arbitrary
+// strings the code under test only passes through; they do not describe the real id.
+const harnessRouteId = 'routes/[__debug].observability';
 /** The blueprint's bound on waiting for Sentry to index an event. */
 const pollTimeout = 180_000;
 const pollInterval = 5000;
@@ -96,8 +103,10 @@ const stagingRelease = async (): Promise<string> => {
 const pollApiEventIds = async (requestId: string, token: string): Promise<string[]> => {
   const query = new URLSearchParams({ query: `request_id:${requestId}`, statsPeriod: '1h' });
   const deadline = Date.now() + pollTimeout;
+  let attempts = 0;
   // oxlint-disable no-await-in-loop -- Polls are sequential and share one bounded deadline.
   while (Date.now() < deadline) {
+    attempts += 1;
     const rows = (await sentryGet(`/projects/taucad/tau-api/events/?${query.toString()}`, token)) as Array<{
       eventID?: string;
       id?: string;
@@ -109,6 +118,7 @@ const pollApiEventIds = async (requestId: string, token: string): Promise<string
     await sleep(Math.min(pollInterval, Math.max(0, deadline - Date.now())));
   }
   // oxlint-enable no-await-in-loop
+  console.info('API correlation not indexed', { requestId, attempts });
   throw new Error('tau-api event query exceeded its bounded observation window');
 };
 
@@ -116,7 +126,9 @@ describe('P2 staging signal acceptance: SSR errors and API correlation', () => {
   it('A9: a loader that throws produces one runtime:ssr event with a resolved stack', async () => {
     const token = readToken();
     const runId = createObservabilityRunId();
+    console.info('SSR observation started', { runId, phase: 'build' });
     const release = await stagingRelease();
+    console.info('SSR observation started', { runId, phase: 'trigger' });
 
     const response = await fetch(observabilityUrl(runId, 'ssr-loader'), {
       headers: { cookie: 'tau-entry=app' },
@@ -124,6 +136,7 @@ describe('P2 staging signal acceptance: SSR errors and API correlation', () => {
       signal: AbortSignal.timeout(30_000),
     });
     await response.body?.cancel();
+    console.info('SSR trigger answered', { runId, status: response.status });
     expect(response.status).toBe(500);
 
     const event = await eventDetail('tau-ui', await singleRunEvent(runId, token), token);
@@ -159,14 +172,20 @@ describe('P2 staging signal acceptance: SSR errors and API correlation', () => {
         },
       ]);
       const page = await context.newPage();
+      observeHarnessPage(page, runId);
       const failed = page.waitForResponse((answer) => answer.url().includes('/v1/__debug/observability/failure'), {
         timeout: 60_000,
       });
-      await page.goto(observabilityUrl(runId, 'api-failure'), { waitUntil: 'domcontentloaded' });
+      await page.goto(observabilityUrl(runId, 'api-failure'), {
+        timeout: harnessNavigationTimeout,
+        waitUntil: 'domcontentloaded',
+      });
       const answer = await failed;
+      console.info('API trigger answered', { runId, status: answer.status() });
       expect(answer.ok()).toBe(false);
       requestId = answer.headers()['request-id'];
       expect(requestId ?? '').toMatch(requestIdPattern);
+      console.info('API correlation observed', { runId, requestId });
       await page.getByRole('status').filter({ hasText: 'API failure reported' }).waitFor({ timeout: 60_000 });
       // The page read the id through CORS, so the same id is on the reported error.
       await expect(page.getByRole('status').textContent()).resolves.toContain(requestId);

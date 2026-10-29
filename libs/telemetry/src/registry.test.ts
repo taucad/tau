@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Metric names use OTEL dot notation. */
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import { toPrometheusName } from '#prometheus.js';
 import { TauMetrics } from '#registry.js';
 
@@ -7,7 +8,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(183);
+    expect(metrics).toHaveLength(194);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -300,6 +301,38 @@ describe('TauMetrics', () => {
     expect(attempt('proj_1')).toBe(false);
   });
 
+  /* Load-path audit: an open's hydrate, which the pull attempt settles before. */
+  it('should label client large-object fetches by placement, cache state and source only', () => {
+    expect(TauMetrics.syncClientLfsDuration).toMatchObject({ name: 'tau.sync.client.lfs.duration', unit: 's' });
+    expect(TauMetrics.syncClientLfsDuration.buckets).toEqual([0.5, 1, 2, 3, 5, 7.5, 10, 15, 20, 30, 60, 120, 300, 900]);
+    expect(
+      TauMetrics.syncClientLfsDuration.attributes.safeParse({ 'agent.placement': 'browser', cache: 'cold' }).success,
+    ).toBe(true);
+    expect(
+      TauMetrics.syncClientLfsDuration.attributes.safeParse({ 'agent.placement': 'browser', cache: 'warm' }).success,
+    ).toBe(false);
+    for (const metric of [TauMetrics.syncClientLfsObjects, TauMetrics.syncClientLfsBytes]) {
+      expect(metric.attributes.safeParse({ 'agent.placement': 'desktop', source: 'local' }).success).toBe(true);
+      expect(metric.attributes.safeParse({ 'agent.placement': 'desktop', source: 'proj_1' }).success).toBe(false);
+    }
+  });
+
+  /* STO-25: a hosted project's open, by phase and by whether it fetched from the network. */
+  it('should label project opens by phase and cache state only', () => {
+    expect(TauMetrics.projectOpenDuration).toMatchObject({ name: 'tau.project.open.duration', unit: 's' });
+    expect(TauMetrics.projectOpenDuration.buckets).toContain(5);
+    expect(TauMetrics.projectOpenDuration.attributes.safeParse({ phase: 'first_view', cache: 'cold' }).success).toBe(
+      true,
+    );
+    expect(TauMetrics.projectOpenDuration.attributes.safeParse({ phase: 'fully_fetched', cache: 'warm' }).success).toBe(
+      true,
+    );
+    expect(TauMetrics.projectOpenDuration.attributes.safeParse({ phase: 'first_view', cache: 'partial' }).success).toBe(
+      false,
+    );
+    expect(TauMetrics.projectOpenDuration.attributes.safeParse({ phase: 'proj_1', cache: 'cold' }).success).toBe(false);
+  });
+
   it('should bound a refusal to a declared code, never a free-form one', () => {
     const refusal = (code: string): boolean =>
       TauMetrics.syncRefusals.attributes.safeParse({
@@ -570,6 +603,43 @@ describe('TauMetrics', () => {
     ).toBe(false);
     expect(TauMetrics.agentTurns.attributes.shape).toHaveProperty(['kernel.id']);
     expect(TauMetrics.agentErrors.attributes.shape).not.toHaveProperty(['kernel.id']);
+  });
+
+  /* Tau Agent observability T14: evidence health is counts and bounded codes, never a receipt, trace, project or account. */
+  it('should declare the agent-evidence instruments with label sets of enums alone', () => {
+    const series = [
+      TauMetrics.agentEvidenceAdmissions,
+      TauMetrics.agentEvidenceDeliveries,
+      TauMetrics.agentEvidenceBacklogRows,
+      TauMetrics.agentEvidenceBacklogHeldBytes,
+      TauMetrics.agentEvidenceErasureTraces,
+      TauMetrics.agentEvidenceLifecycleRecords,
+      TauMetrics.agentEvidencePasses,
+    ];
+    expect(
+      Object.fromEntries(series.map((metric) => [toPrometheusName(metric.name, metric.type), metric.type])),
+    ).toEqual({
+      tau_agent_evidence_admissions_total: 'counter',
+      tau_agent_evidence_deliveries_total: 'counter',
+      tau_agent_evidence_backlog_rows: 'gauge',
+      tau_agent_evidence_backlog_held_bytes: 'gauge',
+      tau_agent_evidence_erasure_traces_total: 'counter',
+      tau_agent_evidence_lifecycle_records_total: 'counter',
+      tau_agent_evidence_passes_total: 'counter',
+    });
+    for (const metric of series) {
+      for (const label of Object.values(metric.attributes.shape)) {
+        expect(label).toBeInstanceOf(z.ZodEnum);
+      }
+    }
+    expect(
+      TauMetrics.agentEvidenceAdmissions.attributes.safeParse({
+        'tau.agent_evidence.authority': 'host',
+        'tau.agent_evidence.plane': 'content',
+        outcome: 'fenced',
+      }).success,
+    ).toBe(true);
+    expect(TauMetrics.agentEvidenceDeliveries.attributes.safeParse({ outcome: 'http-503' }).success).toBe(false);
   });
 
   it('should use lowercase dot-delimited names for all metrics', () => {

@@ -151,3 +151,6 @@ for (const [candidate, scope] of [
   );
 }
 console.log('Trusted workflow and artifact provenance checks passed');
+
+// oxlint-disable-next-line no-restricted-imports -- Include the producer-to-publisher regression in this existing Nx target.
+await import('./qualification-binding.test.mjs');

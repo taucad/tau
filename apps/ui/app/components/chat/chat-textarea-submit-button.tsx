@@ -51,6 +51,8 @@ type ChatTextareaSubmitButtonProperties = {
   readonly status: string;
   readonly canResume?: boolean;
   readonly isSubmitting: boolean;
+  /** Dictation is under way: a running turn offers Send (queue the dictated follow-up) beside the dictation's own stop. */
+  readonly isDictating?: boolean;
   /** Why Send refuses right now, or `undefined` when it would send. */
   readonly refusal: string | undefined;
   /** The id of the text beside the attachments saying why Send refuses, when there is one (S14). */
@@ -61,7 +63,8 @@ type ChatTextareaSubmitButtonProperties = {
 };
 
 /**
- * Send a draft, Resume interrupted work, or Stop while a turn runs.
+ * Send a draft, Resume interrupted work, or Stop while a turn runs. While dictating, a running turn still offers
+ * Send, so the dictation pill's stop square never sits beside a second Stop.
  *
  * A refusing Send stays focusable (F14): it is `aria-disabled`, not
  * `disabled`, so a keyboard reaches it and its tooltip says why.
@@ -70,13 +73,14 @@ export const ChatTextareaSubmitButton = memo(function ({
   status,
   canResume = false,
   isSubmitting,
+  isDictating = false,
   refusal,
   describedBy,
   formattedCancelKeyCombination,
   onSubmit,
   onCancel,
 }: ChatTextareaSubmitButtonProperties): React.JSX.Element {
-  if (['streaming', 'submitted'].includes(status)) {
+  if (!isDictating && ['streaming', 'submitted'].includes(status)) {
     return (
       <ChatStreamingStopButton formattedCancelKeyCombination={formattedCancelKeyCombination} onCancel={onCancel} />
     );

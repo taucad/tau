@@ -4,9 +4,9 @@
  * the way to not being offered.
  */
 
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -178,6 +178,81 @@ describe.skipIf(process.platform === 'win32')('executable resolution', () => {
     );
     const probed = await probeAcpAgents(discovery, { environment });
     expect(probed.refused).toEqual([expect.objectContaining({ id: 'claude', code: 'CLI_NOT_FOUND' })]);
+  });
+
+  describe('app-bundled Codex', () => {
+    const chatGptCodex = 'Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex';
+    const codexProfiles = acpAgentProfiles.filter((profile) => profile.id === 'codex');
+
+    /**
+     * A home directory holding a stub Codex where the ChatGPT desktop app bundles it.
+     *
+     * @param version - Version the bundled stub reports.
+     * @returns The home directory and the stub's absolute path.
+     */
+    const bundledCodexHome = async (version: string): Promise<{ home: string; bundled: string }> => {
+      const home = await mkdtemp(join(tmpdir(), 'tau-acp-home-'));
+      stubRoots.push(home);
+      const bundled = join(home, chatGptCodex);
+      await mkdir(dirname(bundled), { recursive: true });
+      await writeFile(bundled, `#!/bin/sh\necho 'codex-cli ${version}'\n`);
+      await chmod(bundled, 0o755);
+      return { home, bundled };
+    };
+
+    it('declares the ChatGPT desktop app bundle, system-wide before per-user, on macOS only', () => {
+      expect(codexProfiles[0]?.fallbackExecutables).toEqual({
+        darwin: [`/${chatGptCodex}`, `~/${chatGptCodex}`],
+      });
+    });
+
+    it('finds the Codex the ChatGPT desktop app bundles when PATH has none, and runs that file', async () => {
+      const { home, bundled } = await bundledCodexHome('0.164.0-alpha.11.1');
+      const environment = { PATH: await stubCliDirectory({}), HOME: home };
+      const discovery = resolveAcpAdapters({ resolveFrom, pins: codexProfiles, environment, platform: 'darwin' });
+
+      expect(discovery.agents[0]?.executablePath).toBe(bundled);
+      expect(acpAdapterEnvironment(environment, discovery.agents[0] ?? { configEnv: [] })).toMatchObject({
+        CODEX_PATH: bundled,
+      });
+      const probed = await probeAcpAgents(discovery, { environment });
+      expect(probed.refused).toEqual([]);
+      expect(probed.agents.map((agent) => agent.id)).toEqual(['codex']);
+    });
+
+    it('prefers a Codex on PATH over the bundled one', async () => {
+      const { home } = await bundledCodexHome('0.164.0');
+      const directory = await stubCliDirectory({ codex: '0.162.1' });
+      const discovery = resolveAcpAdapters({
+        resolveFrom,
+        pins: codexProfiles,
+        environment: { PATH: directory, HOME: home },
+        platform: 'darwin',
+      });
+
+      expect(discovery.agents[0]?.executablePath).toBe(join(directory, 'codex'));
+    });
+
+    it('still refuses a bundled Codex older than the adapter drives', async () => {
+      const { home } = await bundledCodexHome('0.140.0');
+      const environment = { PATH: await stubCliDirectory({}), HOME: home };
+      const discovery = resolveAcpAdapters({ resolveFrom, pins: codexProfiles, environment, platform: 'darwin' });
+      const probed = await probeAcpAgents(discovery, { environment });
+
+      expect(probed.agents).toEqual([]);
+      expect(probed.refused).toEqual([expect.objectContaining({ id: 'codex', code: 'CLI_TOO_OLD' })]);
+      expect(probed.refused[0]?.message).toContain('0.148.0');
+    });
+
+    it('ignores the macOS bundle paths on other platforms', async () => {
+      const { home } = await bundledCodexHome('0.164.0');
+      const environment = { PATH: await stubCliDirectory({}), HOME: home };
+      const discovery = resolveAcpAdapters({ resolveFrom, pins: codexProfiles, environment, platform: 'linux' });
+
+      expect(discovery.agents[0]?.executablePath).toBeUndefined();
+      const probed = await probeAcpAgents(discovery, { environment });
+      expect(probed.refused).toEqual([expect.objectContaining({ id: 'codex', code: 'CLI_NOT_FOUND' })]);
+    });
   });
 });
 

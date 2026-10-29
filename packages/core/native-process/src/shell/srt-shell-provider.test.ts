@@ -371,6 +371,48 @@ describe.runIf(process.platform === 'linux')('createSandboxShellProvider termina
 });
 
 describe('shellSandboxProfile', () => {
+  it('should keep absent Linux containers uncreatable without applying macOS literal read denies', () => {
+    const root = fixtureRoot();
+    const missing = join(root, '.tau');
+    const profile = shellSandboxProfile({
+      filesystem: { readable: [], writable: [root], denied: [], masked: [missing] },
+      network: { domains: [] },
+    });
+    const filesystem = profile['filesystem'] as { denyRead: string[]; denyWrite: string[] };
+    if (process.platform === 'linux') {
+      expect(filesystem.denyRead).toContain(missing);
+      expect(filesystem.denyWrite).not.toContain(missing);
+      expect(filesystem.denyWrite).toContain(join(missing, '.tau-mask-boundary'));
+    } else {
+      expect(filesystem.denyRead).not.toContain(missing);
+      expect(filesystem.denyWrite).not.toContain(missing);
+    }
+  });
+
+  it.runIf(process.platform === 'linux')('should pin authored descendants without rebinding a masked container', () => {
+    const root = fixtureRoot();
+    const masked = join(root, '.tau');
+    const authored = join(masked, 'parameters');
+    const nested = join(authored, 'nested');
+    mkdirSync(nested, { recursive: true });
+    const denied = join(nested, 'private');
+    const profile = shellSandboxProfile({
+      filesystem: {
+        readable: [],
+        writable: [root, authored],
+        readOnly: [join(masked, 'chats')],
+        denied: [denied],
+        masked: [masked],
+      },
+      network: { domains: [] },
+    });
+    const filesystem = profile['filesystem'] as { allowWrite: string[]; denyRead: string[]; denyWrite: string[] };
+    expect(filesystem.allowWrite).not.toContain(masked);
+    expect(filesystem.allowWrite).toEqual(expect.arrayContaining([root, authored, nested]));
+    expect(filesystem.denyRead).toEqual(expect.arrayContaining([masked, denied]));
+    expect(filesystem.denyWrite).toContain(denied);
+  });
+
   it('should allow exactly the granted names and deny every other destination', () => {
     const profile = shellSandboxProfile({
       filesystem: { readable: [], writable: [], denied: [] },
@@ -572,31 +614,50 @@ describe.runIf(process.platform === 'linux')('Linux runtime working directory an
     const root = fixtureRoot();
     const home = join(root, 'home');
     mkdirSync(home);
-    // A writable private home puts the baseline denies inside a writable root, next to the checkout's own rows.
-    const profile = shellSandboxProfile(
-      {
-        filesystem: {
-          readable: [],
-          writable: [root],
-          readOnly: [join(root, 'project', '.tau', 'runs')],
-          denied: [join(root, 'project', '.git'), join(root, 'project', '.tau', 'binding.json')],
-        },
-        network: { domains: [] },
+    const project = join(root, 'project');
+    const second = join(root, 'second');
+    // A writable private home puts the baseline denies inside a writable root, next to the checkout's own rows; a
+    // second checkout's reserved container is masked and absent.
+    const launch = {
+      filesystem: {
+        readable: [],
+        writable: [root],
+        readOnly: [join(project, '.tau', 'runs')],
+        denied: [join(project, '.git'), join(project, '.tau', 'binding.json'), join(second, '.tau', 'binding.json')],
+        directories: [join(project, '.tau', 'runs'), join(project, '.git')],
+        masked: [join(second, '.tau')],
       },
-      { home },
-    ) as { filesystem: { denyWrite: string[]; allowWrite: string[] } };
-    const inside = profile.filesystem.denyWrite.filter((path) =>
-      profile.filesystem.allowWrite.some((writable) => path !== writable && path.startsWith(`${writable}/`)),
+      network: { domains: [] },
+    };
+    type Lists = { filesystem: { denyWrite: string[]; allowWrite: string[] } };
+    const hold = (profile: Lists) =>
+      holdProtectedStandIns({
+        ...profile.filesystem,
+        directories: launch.filesystem.directories,
+        masked: launch.filesystem.masked,
+        writable: launch.filesystem.writable,
+      });
+    // As a launch does: hold from the first profile, compute the profile again once the stand-ins exist, hold from it.
+    const releaseFirst = hold(shellSandboxProfile(launch, { home }) as Lists);
+    const profile = shellSandboxProfile(launch, { home }) as Lists;
+    const releaseSecond = hold(profile);
+    const mounted = profile.filesystem.denyWrite.filter(
+      (path) =>
+        profile.filesystem.allowWrite.some((writable) => path !== writable && path.startsWith(`${writable}/`)) &&
+        // A masked container's children lie under the runtime's own mask, never on the host.
+        !path.startsWith(`${join(second, '.tau')}/`),
     );
-    expect(inside).toStrictEqual(expect.arrayContaining([join(home, '.ssh'), join(root, 'project', '.git')]));
-
-    const release = holdProtectedStandIns(profile.filesystem);
     try {
+      expect(mounted).toStrictEqual(expect.arrayContaining([join(home, '.ssh'), join(project, '.git')]));
+      expect(existsSync(join(second, '.tau'))).toBe(true);
       // Every entry of the runtime's own deny list inside a writable root is now present: no runtime mount point.
-      expect(inside.filter((path) => !existsSync(path))).toStrictEqual([]);
+      expect(mounted.filter((path) => !existsSync(path))).toStrictEqual([]);
+      expect(existsSync(join(second, '.tau', 'binding.json'))).toBe(false);
     } finally {
-      release();
+      releaseSecond();
+      releaseFirst();
     }
-    expect(inside.filter((path) => existsSync(path))).toStrictEqual([]);
+    expect(mounted.filter((path) => existsSync(path))).toStrictEqual([]);
+    expect(existsSync(join(second, '.tau'))).toBe(false);
   });
 });

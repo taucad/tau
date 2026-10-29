@@ -561,6 +561,10 @@ type InternalSession = ChatSession & {
   /** A storage invalidation waits for host settlement, independently of SDK reattachment readiness. */
   refreshDeferred: boolean;
   restoredStoppedRunId: string | undefined;
+  /** The live run this page saw before it had model text, so its first text can be timed (T10). */
+  presentationWatch: string | undefined;
+  /** The newest live run whose first model text this page has timed, or found already showing (T10). */
+  presentedRunId: string | undefined;
   status: ChatStatus;
   /** The project this chat belongs to, from its caller (PV-S4, L3 D9); never from focus. */
   readonly projectId: string;
@@ -691,6 +695,8 @@ type ProjectHostConnector = Readonly<{
     }
   >;
   stoppability?: (chatId: string) => Promise<'stoppable' | 'other-build' | 'background-window'>;
+  /** The page showed a live run's model text at `at` (T10); best effort, and only the project's host reports it. */
+  presented?: (chatId: string, runId: string, at: number) => Promise<void>;
 }>;
 
 /** A client that may say when a file last changed on this device (the worker filesystem's head-only stat). */
@@ -984,9 +990,9 @@ export class ChatSessionStore {
   public publishProjectHostConnector(
     projectId: string,
     connect: ProjectHostConnector['connect'],
-    stoppability?: ProjectHostConnector['stoppability'],
+    extras: Pick<ProjectHostConnector, 'stoppability' | 'presented'> = {},
   ): () => void {
-    const connector = { connect, stoppability };
+    const connector = { connect, ...extras };
     this.#projectHostConnectors.set(projectId, connector);
     this.#projectRunKeys.delete(projectId);
     this.#refreshProjectRuns(projectId);
@@ -3143,6 +3149,12 @@ export class ChatSessionStore {
     if (selectCaughtUp(projection)) {
       this.#materializeProjectedTranscript(session, projection);
     }
+    if (run !== undefined && view !== undefined && opensRun(phase) && !run.opaque) {
+      this.#timePresentation(session, run.runId, [
+        view.chunks,
+        ...(projection.live?.runId === run.runId ? [projection.live.chunks] : []),
+      ]);
+    }
     if (
       run?.lifecycle === 'cancelled' &&
       run.failure?.code !== 'USER_STOPPED' &&
@@ -3200,6 +3212,42 @@ export class ChatSessionStore {
     ) {
       void this.refreshFromStorage(chatId);
     }
+  }
+
+  /**
+   * Time when the page first shows a live run's model text (T10): the frame after the projection first carries text,
+   * while the page is visible. This is the UI's clock, kept apart from the API's model-text time; it reads the
+   * projection, not any one component, and a run that was already streaming or ended before this page saw it is not
+   * timed, so replayed history never counts as shown.
+   */
+  #timePresentation(
+    session: InternalSession,
+    runId: string,
+    sources: ReadonlyArray<Parameters<typeof chunksSince>[0]>,
+  ): void {
+    if (session.presentedRunId === runId) {
+      return;
+    }
+    const hasText = sources.some((chunks) =>
+      [...chunksSince(chunks)].some((chunk) => chunk.type === 'text-delta' && chunk.delta !== ''),
+    );
+    if (!hasText) {
+      session.presentationWatch = runId;
+      return;
+    }
+    session.presentedRunId = runId;
+    if (session.presentationWatch !== runId) {
+      return;
+    }
+    const presented = this.#projectHostConnectors.get(session.projectId)?.presented;
+    if (presented === undefined || typeof requestAnimationFrame === 'undefined') {
+      return;
+    }
+    requestAnimationFrame(() => {
+      if (document.visibilityState === 'visible') {
+        void presented(session.chatId, runId, Date.now());
+      }
+    });
   }
 
   /** Reattach a viewed live run through its projection, never through the old host stream. */
@@ -4196,6 +4244,8 @@ export class ChatSessionStore {
       stopOrigin: undefined,
       refreshDeferred: false,
       restoredStoppedRunId: undefined,
+      presentationWatch: undefined,
+      presentedRunId: undefined,
       status: chat.status,
       turnSubscriptions: [],
       dispose: () => {

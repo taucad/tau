@@ -40,6 +40,13 @@ function run(command: TypeScriptWorkerCommand): unknown {
     current.assertVersion(command.uri, command.expectedVersion);
   }
   switch (command.kind) {
+    case 'setModuleAlias': {
+      current.setModuleAlias(command.specifier, command.uri);
+      return;
+    }
+    case 'declarationImports': {
+      return current.declarationImports(command.text);
+    }
     case 'open': {
       current.open(command.uri, command.text, command.version);
       return;

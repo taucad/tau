@@ -55,22 +55,22 @@
           },
           {
             "name": "smlibpy",
-            "integrity": "sha256-+rab1vaXJO6IKqjm9DAOEXDfdtVNb351jqklyoKPZfE=",
-            "byteLength": 6667795,
+            "integrity": "sha256-y0wI0UvonKv7DUN+fhp5npczX0z0YnG4ILBwmCrJguw=",
+            "byteLength": 8315609,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/95/94/3a1cce022396b3839c97e4da111094c74fc77c9b90ca9108ba7b5a83f010/smlibpy-0.3.5-cp313-cp313-macosx_11_0_arm64.whl"
+                "https://files.pythonhosted.org/packages/f8/63/be80cb9af19aaec4add61a02f8ae836fddd6d1ffc6fa6b793fa31756c419/smlibpy-0.6.2-cp313-cp313-macosx_11_0_arm64.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 16449204
+            "unpackedByteLength": 20278387
           },
           {
             "name": "worker.py",
-            "integrity": "sha256-aiLrWpcnEu0wgOxGqCH1XNVbddh4Sy6aQ9iK0OCHm84=",
-            "byteLength": 33333,
+            "integrity": "sha256-mHw44T/hN5MRoCXLVSXlowgc5b7pcJ/6PvLuc7tUM70=",
+            "byteLength": 32009,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -199,22 +199,22 @@
           },
           {
             "name": "smlibpy",
-            "integrity": "sha256-9vL+XNjEOE0CY3Rwd4O+p98INHicbjHiZRSxFU2jpjk=",
-            "byteLength": 7242047,
+            "integrity": "sha256-3+Hb6o6boToC1zpYQLe8ho54lySwR0QfWqTQqEkIr+c=",
+            "byteLength": 9075530,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/82/3d/a5c9861f4e51c883b3f1fbf374f557f19263ccf6df2875ae5df23cd996d7/smlibpy-0.3.5-cp313-cp313-macosx_11_0_x86_64.whl"
+                "https://files.pythonhosted.org/packages/ea/48/17ff5eda9475fa1d49ef08b30a26416216e6565d8a49fa9b883c7a496cad/smlibpy-0.6.2-cp313-cp313-macosx_11_0_x86_64.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 18241061
+            "unpackedByteLength": 22488020
           },
           {
             "name": "worker.py",
-            "integrity": "sha256-aiLrWpcnEu0wgOxGqCH1XNVbddh4Sy6aQ9iK0OCHm84=",
-            "byteLength": 33333,
+            "integrity": "sha256-mHw44T/hN5MRoCXLVSXlowgc5b7pcJ/6PvLuc7tUM70=",
+            "byteLength": 32009,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -344,22 +344,22 @@
           },
           {
             "name": "smlibpy",
-            "integrity": "sha256-aVyllfQthtPpeIIB55rzazcdxc+fCPoHwfv0U+4C/LM=",
-            "byteLength": 8025067,
+            "integrity": "sha256-s3ikpn/qQma5FmEjroCLELrinVWaUVWH7LcGAtAuIRo=",
+            "byteLength": 9832961,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/e9/cb/aeb41cd6c9ba2f78fc78bab729348fcb53ef4d638aae1f8b5a11a57bf3eb/smlibpy-0.3.5-cp313-cp313-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl"
+                "https://files.pythonhosted.org/packages/d7/27/b77b7e16210e20177713a1af23271f72760028c8c4ff8a827c2c0cbeb0aa/smlibpy-0.6.2-cp313-cp313-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 19234737
+            "unpackedByteLength": 23221272
           },
           {
             "name": "worker.py",
-            "integrity": "sha256-aiLrWpcnEu0wgOxGqCH1XNVbddh4Sy6aQ9iK0OCHm84=",
-            "byteLength": 33333,
+            "integrity": "sha256-mHw44T/hN5MRoCXLVSXlowgc5b7pcJ/6PvLuc7tUM70=",
+            "byteLength": 32009,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -489,22 +489,22 @@
           },
           {
             "name": "smlibpy",
-            "integrity": "sha256-pl83II02ZfiU7k3aw01uV76Nr4xUwnREH1R2n9qbhm8=",
-            "byteLength": 8793054,
+            "integrity": "sha256-xc4ZF+6XKRADgGf1hEvSqoQYlT3zAnAZ37ZBqBkbvv0=",
+            "byteLength": 10720185,
             "format": "wheel",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://files.pythonhosted.org/packages/8e/38/92b5eb0cca60f97345a202aec5c977ec7b771d9459834869626e4b01815a/smlibpy-0.3.5-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+                "https://files.pythonhosted.org/packages/3b/a4/c3b55d7c4b740c5353561cd9343a95ddd4fbea0ed8f5e94962682925a914/smlibpy-0.6.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
               ]
             },
             "destination": "python/lib/python3.13/site-packages",
-            "unpackedByteLength": 22462166
+            "unpackedByteLength": 26964805
           },
           {
             "name": "worker.py",
-            "integrity": "sha256-aiLrWpcnEu0wgOxGqCH1XNVbddh4Sy6aQ9iK0OCHm84=",
-            "byteLength": 33333,
+            "integrity": "sha256-mHw44T/hN5MRoCXLVSXlowgc5b7pcJ/6PvLuc7tUM70=",
+            "byteLength": 32009,
             "format": "raw",
             "origin": {
               "kind": "packagePath",

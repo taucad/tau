@@ -1082,6 +1082,210 @@
         "component": "alerting"
       },
       "isPaused": true
+    },
+    {
+      "uid": "agent-evidence-worker-stalled",
+      "title": "P1: Agent Evidence Worker Stalled",
+      "condition": "worker_stalled",
+      "data": [
+        {
+          "refId": "worker_stalled",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 900,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum by (app, tau_worker) (max_over_time(tau_agent_evidence_passes_total{app=~\".*\",service_name=\"tau-api\"}[24h])) unless sum by (app, tau_worker) (increase(tau_agent_evidence_passes_total{app=~\".*\",service_name=\"tau-api\",outcome=\"ok\"}[15m]) > 0)",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "worker_stalled"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "5m",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/agent-observability.md",
+        "summary": "An agent-evidence worker seen in the last 24 h has completed no successful pass in 15 min. lifecycle stalled means sealed payloads past their 180-day retention are not purged and erasures are not sent to Langfuse; delivery stalled means admitted evidence is not delivered. Grouped by Fly `app` and `tau_worker`."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "agent-observability"
+      }
+    },
+    {
+      "uid": "agent-evidence-visibility-gap",
+      "title": "P1: Agent Evidence Never Became Visible",
+      "condition": "visibility_gap",
+      "data": [
+        {
+          "refId": "visibility_gap",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 3600,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum by (app) (increase(tau_agent_evidence_deliveries_total{app=~\".*\",service_name=\"tau-api\",outcome=\"gap\"}[1h])) > 0",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "visibility_gap"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/agent-observability.md",
+        "summary": "At least one acknowledged or uncertain Langfuse send was still invisible 15 min later and was recorded as a gap. It is never resent, because a late write would duplicate it, so Langfuse is missing evidence Tau holds a receipt for."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "agent-observability"
+      }
+    },
+    {
+      "uid": "agent-evidence-key-unavailable",
+      "title": "P1: Agent Evidence Held for a Missing Payload Key",
+      "condition": "key_unavailable",
+      "data": [
+        {
+          "refId": "key_unavailable",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 1800,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum by (app) (increase(tau_agent_evidence_deliveries_total{app=~\".*\",service_name=\"tau-api\",outcome=\"key_unavailable\"}[30m])) > 0",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "key_unavailable"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "15m",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/agent-observability.md",
+        "summary": "Backlog payloads are sealed under a key version this deployment no longer has (`TAU_OBSERVABILITY_PAYLOAD_KEY_VERSION` rotated without the old key). They are held, not sent, until the key returns or retention purges them."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "agent-observability"
+      }
+    },
+    {
+      "uid": "agent-evidence-capacity-refusals",
+      "title": "P1: Agent Evidence Refused at Capacity",
+      "condition": "capacity_refused",
+      "data": [
+        {
+          "refId": "capacity_refused",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 900,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum by (app) (increase(tau_agent_evidence_admissions_total{app=~\".*\",service_name=\"tau-api\",outcome=\"capacity\"}[15m])) > 0",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "capacity_refused"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "15m",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/agent-observability.md",
+        "summary": "Evidence admission has been refusing submissions at the backlog byte budget (`TAU_OBSERVABILITY_BACKLOG_BYTES` or the per-principal budget) for 15 min. Hosts keep their queues and retry; delivery is not draining as fast as evidence arrives."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "agent-observability"
+      }
+    },
+    {
+      "uid": "agent-evidence-erasure-stuck",
+      "title": "P1: Agent Evidence Erasure Not Progressing",
+      "condition": "erasure_stuck",
+      "data": [
+        {
+          "refId": "erasure_stuck",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 3600,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~\".*\",service_name=\"tau-api\",outcome=~\"retry|present\"}[1h])) > 0 unless sum by (app) (increase(tau_agent_evidence_erasure_traces_total{app=~\".*\",service_name=\"tau-api\",outcome=\"absent\"}[1h])) > 0",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "erasure_stuck"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "2h",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/agent-observability.md",
+        "summary": "For 2 h Langfuse trace deletions have been retried or read back as still present, with none confirmed absent. Erasure of a deleted account or project is owed within a day; check Langfuse availability and the deletion API's answer codes in the lifecycle log."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "agent-observability"
+      }
+    },
+    {
+      "uid": "agent-evidence-delivery-rejected",
+      "title": "P1: Agent Evidence Rejected",
+      "condition": "delivery_rejected",
+      "data": [
+        {
+          "refId": "delivery_rejected",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 3600,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum by (app) (increase(tau_agent_evidence_deliveries_total{app=~\".*\",service_name=\"tau-api\",outcome=\"rejected\"}[1h])) > 0",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "delivery_rejected"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/agent-observability.md",
+        "summary": "Langfuse rejected a send, or a backlog payload could not be opened or parsed. The evidence is dropped, never retried; the row's bounded reason says which."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "agent-observability"
+      }
     }
   ]
 }

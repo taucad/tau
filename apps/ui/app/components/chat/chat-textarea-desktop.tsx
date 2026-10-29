@@ -623,9 +623,10 @@ export const ChatTextareaDesktop = memo(function ({
           </div>
         ) : null}
 
-        <DictationFeedback transcript={dictation.transcript} error={dictation.error} />
+        <DictationFeedback transcript={dictation.transcript} />
         <ChatTextareaBar
           dictationControl={dictationControl}
+          isDictating={dictationActive}
           composerMode={mode}
           containerReference={containerReference}
           enableContextActions={enableContextActions}
@@ -797,6 +798,7 @@ function useBarCollapse(barRef: React.RefObject<HTMLDivElement | null>): void {
  */
 export const ChatTextareaBar = memo(function ({
   dictationControl,
+  isDictating = false,
   composerMode,
   containerReference,
   enableContextActions,
@@ -820,6 +822,7 @@ export const ChatTextareaBar = memo(function ({
   handleCancelClick,
 }: {
   readonly dictationControl?: React.ReactNode;
+  readonly isDictating?: boolean;
   readonly composerMode: 'main' | 'edit';
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object
   readonly containerReference: React.RefObject<HTMLDivElement | null>;
@@ -931,6 +934,7 @@ export const ChatTextareaBar = memo(function ({
         <ChatTextareaSubmitButton
           status={status}
           isSubmitting={isSubmitting}
+          isDictating={isDictating}
           canResume={canResume}
           refusal={sendRefusal}
           describedBy={describedBy}

@@ -1,7 +1,13 @@
 import { Agent } from '@earendil-works/pi-agent-core';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
 import type { AgentEvent, AgentMessage, AgentToolResult, StreamFn } from '@earendil-works/pi-agent-core';
-import { createAssistantMessageEventStream, validateToolArguments } from '@earendil-works/pi-ai';
+import {
+  createAssistantMessageEventStream,
+  validateToolArguments,
+  normalizeContext,
+  getCurrentSystemPrompt,
+  getCurrentTools,
+} from '@earendil-works/pi-ai';
 import type {
   Api,
   AssistantMessage,
@@ -49,6 +55,7 @@ import {
 import type { ClientContext, RecentSkillsPort } from '#harness/cad-middleware.js';
 import { installCompaction, isCompactionSummary } from '#harness/compaction.js';
 import type { CompactionOutcome, CompactionSummarizer } from '#harness/compaction.js';
+import { agentHistory } from '#harness/agent-context.js';
 import { composeModelCallMiddleware } from '#harness/model-call-middleware.js';
 import type { ModelCallMiddleware } from '#harness/model-call-middleware.js';
 import { createAgentSafeguards } from '#harness/safeguards.js';
@@ -172,7 +179,7 @@ const providerHistory = (
     readonly createId: () => string;
   },
 ): ProviderMessage[] =>
-  inCallOrder(messages).flatMap((message) => {
+  inCallOrder(messages.filter((message) => message.role !== 'system')).flatMap((message) => {
     const provider = piMessageToProvider(message, options.identities);
     if (message.role !== 'assistant') {
       return [provider];
@@ -196,7 +203,7 @@ const providerHistory = (
   });
 
 const hostTools = (context: Context): HostToolDefinition[] =>
-  (context.tools ?? []).map((tool) => ({
+  getCurrentTools(normalizeContext(context).messages).map((tool) => ({
     name: tool.name,
     description: tool.description,
     inputSchema: tool.parameters as JsonObject,
@@ -572,7 +579,7 @@ export const createTransportStreamFunction =
             committedContext?.model?.reasoning ?? options.reasoning,
           ),
           contextWindow: model.contextWindow,
-          systemPrompt: committedContext?.systemPrompt ?? context.systemPrompt ?? '',
+          systemPrompt: committedContext?.systemPrompt ?? getCurrentSystemPrompt(normalizeContext(context).messages),
           systemPromptBlocks: committedContext?.systemPromptBlocks ?? options.systemPromptBlocks?.(),
           messages: [
             ...(committedContext
@@ -808,7 +815,7 @@ export const createTransportStreamFunction =
               type: 'toolCall',
               id: event.toolCallId,
               name: event.toolName,
-              arguments: event.input as Record<string, unknown>,
+              arguments: toJsonValue(event.input) as ToolCall['arguments'],
               ...(event.thoughtSignature === undefined ? {} : { thoughtSignature: event.thoughtSignature }),
             };
             if (existing?.type !== 'toolCall') {
@@ -932,7 +939,7 @@ const asMiddleware =
   async (request, next) =>
     wrap(async (model, context, streamOptions) => next({ model, context, options: streamOptions }))(
       request.model,
-      request.context,
+      normalizeContext(request.context),
       request.options,
     );
 
@@ -983,7 +990,7 @@ const compactionModelsWithTransport = (options: {
           reasoning: options.reasoning,
           maxTokens: requestedMaxTokens(model.maxTokens, streamOptions?.maxTokens, options.reasoning),
           contextWindow: model.contextWindow,
-          systemPrompt: context.systemPrompt ?? '',
+          systemPrompt: getCurrentSystemPrompt(normalizeContext(context).messages),
           messages: providerHistory(context.messages as AgentMessage[], options),
           tools: [],
           signal,
@@ -1204,7 +1211,7 @@ const appendAgentEvent = async (options: {
       toolCallId: event.toolCallId,
       toolName: event.toolName,
       content: result?.content ?? [],
-      details: result?.details,
+      details: result?.details === undefined ? undefined : toJsonValue(result.details),
       isError: event.isError,
       timestamp: Date.now(),
     };
@@ -1620,7 +1627,9 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       try {
         const prepared = {
           ...toolCall,
-          arguments: tool.prepareArguments?.(toolCall.arguments) ?? toolCall.arguments,
+          arguments: toJsonValue(
+            tool.prepareArguments?.(toolCall.arguments) ?? toolCall.arguments,
+          ) as ToolCall['arguments'],
         };
         input = validateToolArguments(tool, prepared);
       } catch {
@@ -1711,7 +1720,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     afterToolCall: async (context) => applyHostToolResult(context),
     // Pi otherwise follows truncated tool batches with provisional failures. The host
     // must first persist eager tools' real results and make the recovery decision.
-    shouldStopAfterTurn: ({ message }) => message.stopReason === 'length',
+    finishTurn: ({ message }) => (message.stopReason === 'length' ? { action: 'end' } : undefined),
   });
   agent.prepareNextTurn = async () => {
     const reminder = await createInterruptRecoveryMessage({
@@ -1885,7 +1894,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
               message,
             });
             // oxlint-disable-next-line no-await-in-loop -- Replace provisional Pi tool failures with durable results.
-            agent.state.messages = await projectHistory();
+            agent.state.messages = agentHistory(agent, await projectHistory());
             nextLoop = async () => {
               await agent.continue();
               return !wasAbortRequested();
@@ -1950,8 +1959,11 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
           if (wasAbortRequested()) {
             return false;
           }
-          agent.state.systemPrompt = committedContext.systemPrompt;
-          agent.state.messages = hydrateHistory(await materializeHistory(await record.history()));
+          agent.state.messages = agentHistory(
+            agent,
+            hydrateHistory(await materializeHistory(await record.history())),
+            committedContext.systemPrompt,
+          );
           await continueWithoutPreparation();
           return true;
         });

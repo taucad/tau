@@ -1,20 +1,7 @@
-import {
-  compact as compactWithPi,
-  estimateContextTokens,
-  estimateTokens,
-  findCutPoint,
-  findTurnStartIndex,
-  prepareCompaction,
-  shouldCompact,
-} from '@earendil-works/pi-agent-core';
-import type {
-  Agent,
-  AgentContext,
-  AgentMessage,
-  CompactionSettings,
-  Entry,
-  StreamFn,
-} from '@earendil-works/pi-agent-core';
+import type { Agent, AgentContext, AgentMessage, StreamFn } from '@earendil-works/pi-agent-core';
+import { estimateContextTokens, estimateMessageTokens as estimateTokens } from '@earendil-works/pi-ai/utils/estimate';
+import { agentHistory } from '#harness/agent-context.js';
+import { summarizeCompaction } from '#harness/compaction-summary.js';
 import { createAssistantMessageEventStream, isContextOverflow } from '@earendil-works/pi-ai';
 import type { Api, AssistantMessage, Model, Models, Usage, UserMessage } from '@earendil-works/pi-ai';
 import { createTransportFailureDiagnostic, piMessageToProvider } from '#harness/session-record.js';
@@ -159,7 +146,7 @@ const clearOldToolResults = (
   return { messages: next, cleared };
 };
 
-const compactionSettings = (contextWindow: number): CompactionSettings => ({
+const compactionSettings = (contextWindow: number) => ({
   enabled: true,
   reserveTokens: Math.max(64, Math.floor(contextWindow * 0.2)),
   keepRecentTokens: Math.max(32, Math.floor(contextWindow * 0.1)),
@@ -209,66 +196,11 @@ const summaryText = (message: AgentMessage): string | undefined => {
  * Whether a message is a compaction summary: a history holding one sends the committed post-compaction context
  * (RA-S10), a fold over the history rather than a session's latch.
  *
+ * @internal
  * @param message - One projected message.
  * @returns `true` for a summary.
- * @internal
  */
 export const isCompactionSummary = (message: AgentMessage): boolean => summaryText(message) !== undefined;
-
-const summaryFiles = (summary: string, tag: 'read-files' | 'modified-files'): string[] => {
-  const match = new RegExp(`<${tag}>\\n([\\s\\S]*?)\\n</${tag}>`, 'u').exec(summary);
-  return match?.[1]?.split('\n').filter(Boolean) ?? [];
-};
-
-const piFileOperationNames: ReadonlyMap<string, 'read' | 'write' | 'edit'> = new Map([
-  ['read_file', 'read'],
-  ['create_file', 'write'],
-  ['edit_file', 'edit'],
-  ['delete_file', 'edit'],
-]);
-
-const piFileOperationMessage = (message: AgentMessage): AgentMessage => {
-  if (message.role !== 'assistant') {
-    return message;
-  }
-  const content = message.content.map((block) => {
-    if (block.type !== 'toolCall') {
-      return block;
-    }
-    const piName = piFileOperationNames.get(block.name);
-    const arguments_ = block.arguments as Record<string, unknown>;
-    const path = arguments_['targetFile'];
-    if (!piName || typeof path !== 'string') {
-      return block;
-    }
-    return { ...block, name: piName, arguments: { ...arguments_, path } };
-  });
-  return { ...message, content };
-};
-
-const compactionEntries = (messages: readonly AgentMessage[]): Entry[] =>
-  messages.map((message, index) => {
-    const summary = summaryText(message);
-    const base = {
-      id: `tau-compaction-${index}`,
-      parentId: index === 0 ? null : `tau-compaction-${index - 1}`,
-      seq: index,
-      timestamp: message.timestamp,
-    };
-    return summary === undefined
-      ? { ...base, type: 'message', message: piFileOperationMessage(message) }
-      : {
-          ...base,
-          type: 'compaction',
-          summary,
-          retainedTail: [],
-          tokensBefore: 0,
-          details: {
-            readFiles: summaryFiles(summary, 'read-files'),
-            modifiedFiles: summaryFiles(summary, 'modified-files'),
-          },
-        };
-  });
 
 const isValidCutPoint = (message: AgentMessage): boolean => message.role !== 'toolResult';
 
@@ -282,27 +214,26 @@ const laterCutoff = (messages: readonly AgentMessage[], after: number): number |
 };
 
 const tokenBudgetCutoff = (messages: readonly AgentMessage[], keepRecentTokens: number): number => {
-  const entries = compactionEntries(messages);
-  const cut = findCutPoint(entries, 0, entries.length, keepRecentTokens);
-  let cutoff = cut.firstKeptEntryIndex;
-  if (cutoff === 0 && messages.length > 1) {
-    for (let index = messages.length - 1; index > 0; index--) {
-      if (isValidCutPoint(messages[index]!)) {
-        cutoff = index;
-        break;
-      }
+  const cutPoints = messages.flatMap((message, index) =>
+    isValidCutPoint(message) && !isCompactionSummary(message) ? [index] : [],
+  );
+  let cutoff = cutPoints[0] ?? 0;
+  let accumulated = 0;
+  for (let index = messages.length - 1; index >= 0; index--) {
+    if (!isCompactionSummary(messages[index]!)) {
+      accumulated += estimateTokens(messages[index]!);
+    }
+    if (accumulated >= keepRecentTokens) {
+      cutoff = cutPoints.find((cut) => cut >= index) ?? cutoff;
+      break;
     }
   }
-  if (cut.isSplitTurn) {
-    const turnStart = findTurnStartIndex(entries, cutoff, 0);
-    /*
-     * A chat whose whole history is one oversized turn starts that turn at index
-     * 0, so rolling the cut back to the turn start leaves nothing to evict and
-     * the turn is refused for good. Cut inside the turn instead and summarise its
-     * head, the way pi's own `prepareCompaction` handles a split turn. pi never
-     * offers a tool result as a cut point, so the retained tail still opens on the
-     * assistant message that made the call.
-     */
+  if (cutoff === 0 && messages.length > 1) {
+    cutoff = cutPoints.findLast((cut) => cut > 0) ?? 0;
+  }
+  if (messages[cutoff]?.role !== 'user') {
+    const turnStart = messages.slice(0, cutoff + 1).findLastIndex((message) => message.role === 'user');
+    // Keep a whole earlier turn where possible; an oversized single turn must split.
     cutoff = turnStart > 0 ? turnStart : cutoff;
   }
   while (messageTokens(messages.slice(cutoff)) > keepRecentTokens) {
@@ -400,9 +331,9 @@ export type CompactionFold = Readonly<{
  * refusal reset the count; `CIRCUIT_BREAKER_OPEN` does not, so each gesture after the breaker opened costs at most one
  * summary (RA-Q6). The anchor is the last trace's measured overhead; a later assistant that reports usage retires it.
  *
+ * @internal
  * @param events - The chat's rows, in log order.
  * @returns The fold.
- * @internal
  */
 export const compactionFoldOf = (events: readonly SessionLogEvent[]): CompactionFold => {
   let strikes = 0;
@@ -589,7 +520,7 @@ export const installCompaction = (
       strikes = 0;
       throw new HostCompactionError(code, message, trace(tier, cleared));
     };
-    const oversized = (force && !trigger.anchored) || shouldCompact(trigger.tokens, options.contextWindow, settings);
+    const oversized = (force && !trigger.anchored) || trigger.tokens > options.contextWindow - settings.reserveTokens;
     if (!force && !oversized) {
       return { messages: [...input], cleared: 0, evicted: 0 };
     }
@@ -709,34 +640,18 @@ export const installCompaction = (
               signal,
             });
           } else {
-            const sentinel: UserMessage = { role: 'user', content: 'keep', timestamp: now() };
-            const prepared = prepareCompaction(compactionEntries([...evicted, sentinel]), {
-              ...settings,
-              keepRecentTokens: 1,
+            // The host already owns the cut and retained tail; summarize that exact prefix.
+            // oxlint-disable-next-line eslint/no-await-in-loop -- An over-budget result widens the cut in the same pass.
+            const result = await summarizeCompaction({
+              messages: messagesToSummarize,
+              previousSummary: previousSummaryText,
+              models: options.models!,
+              model: agent.state.model as Model<Api>,
+              reserveTokens: settings.reserveTokens,
+              signal,
             });
-            if (prepared.ok && prepared.value) {
-              // oxlint-disable-next-line eslint/no-await-in-loop -- An over-budget result must widen and summarize the new cut in the same pass.
-              const result = await compactWithPi(
-                {
-                  ...prepared.value,
-                  retainedTail: [],
-                  tokensBefore: estimateContextTokens([...tierTwoMessages]).tokens,
-                  settings,
-                },
-                options.models!,
-                agent.state.model as Model<Api>,
-                undefined,
-                signal,
-              );
-              if (result.ok) {
-                compactedSummary = result.value.summary;
-                if (result.value.usage) {
-                  summarizerUsage = combineUsage(summarizerUsage, result.value.usage);
-                }
-              } else {
-                summarizerError = result.error instanceof Error ? result.error.message : String(result.error);
-              }
-            }
+            compactedSummary = result.summary;
+            summarizerUsage = combineUsage(summarizerUsage, result.usage);
           }
         } catch (error) {
           if (signal?.aborted) {
@@ -889,10 +804,10 @@ export const installCompaction = (
     let messages = [...agent.state.messages];
     try {
       messages = await options.projectHistory();
-      agent.state.messages = messages;
+      agent.state.messages = agentHistory(agent, messages);
       const outcome = await compact({ input: messages, lane: 'start_of_turn', signal });
       pendingFailure = undefined;
-      agent.state.messages = outcome.messages;
+      agent.state.messages = agentHistory(agent, outcome.messages);
       return outcome.messages;
     } catch (error) {
       /*
@@ -910,21 +825,20 @@ export const installCompaction = (
   agent.prepareNextTurn = async (signal) => {
     const prior = await priorPrepare?.(signal);
     const priorContext: AgentContext = prior?.context ?? {
-      systemPrompt: agent.state.systemPrompt,
       messages: agent.state.messages,
       tools: agent.state.tools,
     };
     let projected = [...agent.state.messages];
     try {
       projected = await options.projectHistory();
-      agent.state.messages = projected;
+      agent.state.messages = agentHistory(agent, projected);
       const outcome = await compact({ input: projected, lane: 'between_turn', signal });
       pendingFailure = undefined;
-      agent.state.messages = outcome.messages;
-      return { ...prior, context: { ...priorContext, messages: outcome.messages } };
+      agent.state.messages = agentHistory(agent, outcome.messages);
+      return { ...prior, context: { ...priorContext, messages: [...agent.state.messages] } };
     } catch (error) {
       pendingFailure = compactionFailure({ error, lane: 'between_turn', input: projected, signal });
-      return { ...prior, context: { ...priorContext, messages: projected } };
+      return { ...prior, context: { ...priorContext, messages: [...agent.state.messages] } };
     }
   };
 
@@ -956,13 +870,13 @@ export const installCompaction = (
           force: true,
           discardedOverflowError,
         });
-        options.agent.state.messages = emergency.messages;
+        options.agent.state.messages = agentHistory(agent, emergency.messages);
         // Pi already applied convertToLlm/transformContext before this wrapper.
         // The durable projection is hydrated AgentMessage history, so only the
         // inner request-shaping middleware must run again for the bounded retry.
         return await base(
           model,
-          { ...context, messages: emergency.messages as typeof context.messages },
+          { ...context, messages: agent.state.messages as typeof context.messages },
           streamOptions,
         );
       } catch (error) {

@@ -29,9 +29,18 @@ corresponding OCCT source and relink kit, these license texts and the GeoSpec en
 carries the kit inside the app bundle, under `Tau.app/Contents/Resources/SOURCES`. The source of the GeoSpec engine,
 including how it builds and links OCCT, is at [github.com/taucad/geospec](https://github.com/taucad/geospec).
 
+## libfuse
+
+On Linux, the desktop app's private shell projection bridge links dynamically against **libfuse** 3
+(`libfuse3.so.4`), Copyright © Miklos Szeredi and the libfuse contributors. The libfuse library is licensed under
+the [GNU Lesser General Public License version 2.1](#gnu-lesser-general-public-license-version-2.1), reproduced
+in full below. The bridge is built against unmodified libfuse 3.17.2
+([source](https://github.com/libfuse/libfuse/releases/tag/fuse-3.17.2)) and calls only its public
+interface from a separate shared object.
+
 ## Third-Party Packages
 
-The web and desktop apps include the following 875 packages, with the license each declares.
+The web and desktop apps include the following 870 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -48,13 +57,9 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@anthropic-ai/claude-agent-sdk](https://github.com/anthropics/claude-agent-sdk-typescript) | 0.3.232 | SEE LICENSE IN README.md |
 | @anthropic-ai/claude-agent-sdk-{platform} | 0.3.232 | SEE LICENSE IN LICENSE.md |
 | [@anthropic-ai/sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime) | 0.0.75 | Apache-2.0 |
-| [@anthropic-ai/sdk](https://github.com/anthropics/anthropic-sdk-typescript) | 0.91.1 | MIT |
+| [@anthropic-ai/sdk](https://github.com/anthropics/anthropic-sdk-typescript) | 0.129.0 | MIT |
 | [@aurigax-ai/ghostty-web](https://github.com/aurigax-ai/ghostty-web) | 0.3.6 | MIT |
-| [@aws-crypto/sha256-browser](https://github.com/aws/aws-sdk-js-crypto-helpers) | 5.2.0 | Apache-2.0 |
-| [@aws-crypto/sha256-js](https://github.com/aws/aws-sdk-js-crypto-helpers) | 5.2.0 | Apache-2.0 |
-| [@aws-crypto/supports-web-crypto](https://github.com/aws/aws-sdk-js-crypto-helpers) | 5.2.0 | Apache-2.0 |
-| [@aws-crypto/util](https://github.com/aws/aws-sdk-js-crypto-helpers) | 5.2.0 | Apache-2.0 |
-| [@aws-sdk/client-bedrock-runtime](https://github.com/aws/aws-sdk-js-v3) | 3.1048.0 | Apache-2.0 |
+| [@aws-sdk/client-bedrock-runtime](https://github.com/aws/aws-sdk-js-v3) | 3.1127.0 | Apache-2.0 |
 | [@aws-sdk/core](https://github.com/aws/aws-sdk-js-v3) | 3.978.3 | Apache-2.0 |
 | [@aws-sdk/credential-provider-env](https://github.com/aws/aws-sdk-js-v3) | 3.972.74 | Apache-2.0 |
 | [@aws-sdk/credential-provider-http](https://github.com/aws/aws-sdk-js-v3) | 3.972.76 | Apache-2.0 |
@@ -69,10 +74,9 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@aws-sdk/middleware-websocket](https://github.com/aws/aws-sdk-js-v3) | 3.972.56 | Apache-2.0 |
 | [@aws-sdk/nested-clients](https://github.com/aws/aws-sdk-js-v3) | 3.997.48 | Apache-2.0 |
 | [@aws-sdk/signature-v4-multi-region](https://github.com/aws/aws-sdk-js-v3) | 3.996.48 | Apache-2.0 |
-| [@aws-sdk/token-providers](https://github.com/aws/aws-sdk-js-v3) | 3.1048.0 | Apache-2.0 |
+| [@aws-sdk/token-providers](https://github.com/aws/aws-sdk-js-v3) | 3.1127.0 | Apache-2.0 |
 | [@aws-sdk/token-providers](https://github.com/aws/aws-sdk-js-v3) | 3.1150.0 | Apache-2.0 |
 | [@aws-sdk/types](https://github.com/aws/aws-sdk-js-v3) | 3.974.6 | Apache-2.0 |
-| [@aws-sdk/util-locate-window](https://github.com/aws/aws-sdk-js-v3) | 3.965.10 | Apache-2.0 |
 | [@aws-sdk/xml-builder](https://github.com/aws/aws-sdk-js-v3) | 3.972.41 | Apache-2.0 |
 | [@aws/lambda-invoke-store](https://github.com/awslabs/aws-lambda-invoke-store) | 0.3.0 | Apache-2.0 |
 | [@babel/runtime](https://github.com/babel/babel) | 7.29.10 | MIT |
@@ -93,7 +97,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@better-auth/utils](https://github.com/better-auth/utils) | 0.5.0 | MIT |
 | [@better-fetch/fetch](https://github.com/better-auth/better-fetch) | 1.3.2 | MIT |
 | [@cfworker/json-schema](https://github.com/cfworker/cfworker) | 4.1.1 | MIT |
-| [@classcad/smlibwasm](https://github.com/awv-informatik/smlibpy) | 0.3.4 | MIT AND Apache-2.0 AND OFL-1.1 |
+| [@classcad/smlibwasm](https://github.com/awv-informatik/smlibpy) | 0.6.2 | MIT AND Apache-2.0 AND OFL-1.1 |
 | [@codemirror/autocomplete](https://code.haverbeke.berlin/codemirror/autocomplete) | 6.20.4 | MIT |
 | [@codemirror/commands](https://code.haverbeke.berlin/codemirror/commands) | 6.11.1 | MIT |
 | [@codemirror/lang-css](https://github.com/codemirror/lang-css) | 6.3.1 | MIT |
@@ -113,9 +117,9 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@cspotcode/source-map-support](https://github.com/cspotcode/node-source-map-support) | 0.8.1 | MIT |
 | [@date-fns/tz](https://github.com/date-fns/date-fns) | 1.5.0 | MIT |
 | [@dimforge/rapier3d-compat](https://github.com/dimforge/rapier.js) | 0.12.0 | Apache-2.0 |
-| [@earendil-works/pi-agent-core](https://github.com/earendil-works/pi) | 0.84.4 | MIT |
-| [@earendil-works/pi-ai](https://github.com/earendil-works/pi) | 0.84.4 | MIT |
-| [@earendil-works/pi-telemetry](https://github.com/earendil-works/pi) | 0.84.4 | MIT |
+| [@earendil-works/pi-agent-core](https://github.com/earendil-works/pi) | 1.4.0 | MIT |
+| [@earendil-works/pi-ai](https://github.com/earendil-works/pi) | 1.4.0 | MIT |
+| [@earendil-works/pi-telemetry](https://github.com/earendil-works/pi) | 1.4.0 | MIT |
 | [@esbuild/{platform}](https://github.com/evanw/esbuild) | 0.28.2 | MIT |
 | [@floating-ui/core](https://github.com/floating-ui/floating-ui) | 1.8.0 | MIT |
 | [@floating-ui/dom](https://github.com/floating-ui/floating-ui) | 1.8.0 | MIT |
@@ -124,7 +128,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@gltf-transform/core](https://github.com/donmccurdy/glTF-Transform) | 4.5.1 | MIT |
 | [@gltf-transform/extensions](https://github.com/donmccurdy/glTF-Transform) | 4.5.1 | MIT |
 | [@gltf-transform/functions](https://github.com/donmccurdy/glTF-Transform) | 4.5.1 | MIT |
-| [@google/genai](https://github.com/googleapis/js-genai) | 1.52.0 | Apache-2.0 |
+| [@google/genai](https://github.com/googleapis/js-genai) | 2.21.0 | Apache-2.0 |
 | [@hono/node-server](https://github.com/honojs/node-server) | 2.1.4 | MIT |
 | [@img/colour](https://github.com/lovell/colour) | 1.1.0 | MIT |
 | [@img/sharp-{platform}](https://github.com/lovell/sharp) | 0.35.5 | Apache-2.0 |
@@ -273,13 +277,10 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@smithy/core](https://github.com/smithy-lang/smithy-typescript) | 3.35.2 | Apache-2.0 |
 | [@smithy/credential-provider-imds](https://github.com/smithy-lang/smithy-typescript) | 4.5.2 | Apache-2.0 |
 | [@smithy/fetch-http-handler](https://github.com/smithy-lang/smithy-typescript) | 5.8.0 | Apache-2.0 |
-| [@smithy/is-array-buffer](https://github.com/awslabs/smithy-typescript) | 2.2.0 | Apache-2.0 |
 | [@smithy/node-http-handler](https://github.com/smithy-lang/smithy-typescript) | 4.12.1 | Apache-2.0 |
-| [@smithy/node-http-handler](https://github.com/smithy-lang/smithy-typescript) | 4.7.3 | Apache-2.0 |
 | [@smithy/signature-v4](https://github.com/smithy-lang/smithy-typescript) | 5.7.4 | Apache-2.0 |
 | [@smithy/types](https://github.com/smithy-lang/smithy-typescript) | 4.19.0 | Apache-2.0 |
-| [@smithy/util-buffer-from](https://github.com/awslabs/smithy-typescript) | 2.2.0 | Apache-2.0 |
-| [@smithy/util-utf8](https://github.com/awslabs/smithy-typescript) | 2.3.0 | Apache-2.0 |
+| [@stablelib/base64](https://github.com/StableLib/stablelib) | 1.0.1 | MIT |
 | [@standard-schema/spec](https://github.com/standard-schema/standard-schema) | 1.1.0 | MIT |
 | [@standard-schema/utils](https://github.com/standard-schema/standard-schema) | 0.3.0 | MIT |
 | [@tanstack/devtools-event-client](https://github.com/TanStack/devtools) | 0.4.4 | MIT |
@@ -344,6 +345,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [acorn](https://github.com/acornjs/acorn) | 8.19.0 | MIT |
 | [acorn-walk](https://github.com/acornjs/acorn) | 8.3.5 | MIT |
 | [agent-base](https://github.com/TooTallNate/proxy-agents) | 7.1.4 | MIT |
+| [agent-base](https://github.com/TooTallNate/proxy-agents) | 9.0.0 | MIT |
 | [ai](https://github.com/vercel/ai) | 6.0.304 | Apache-2.0 |
 | [ajv](https://github.com/ajv-validator/ajv) | 8.20.0 | MIT |
 | [ajv-formats](https://github.com/ajv-validator/ajv-formats) | 2.1.1 | MIT |
@@ -504,6 +506,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [fast-deep-equal](https://github.com/epoberezkin/fast-deep-equal) | 3.1.3 | MIT |
 | [fast-equals](https://github.com/planttheidea/fast-equals) | 6.1.1 | MIT |
 | [fast-safe-stringify](https://github.com/davidmarkclements/fast-safe-stringify) | 2.1.1 | MIT |
+| [fast-sha256](https://github.com/dchest/fast-sha256-js) | 1.3.0 | Unlicense |
 | [fast-unique-numbers](https://github.com/chrisguttandin/fast-unique-numbers) | 9.0.27 | MIT |
 | [fast-uri](https://github.com/fastify/fast-uri) | 3.1.8 | BSD-3-Clause |
 | [fast-uri](https://github.com/fastify/fast-uri) | 4.2.2 | BSD-3-Clause |
@@ -549,12 +552,12 @@ Their copyright notices and full license texts ship inside each package and are 
 | [hono](https://github.com/honojs/hono) | 4.13.13 | MIT |
 | [html-void-elements](https://github.com/wooorm/html-void-elements) | 3.0.0 | MIT |
 | [http-errors](https://github.com/jshttp/http-errors) | 2.0.1 | MIT |
-| [http-proxy-agent](https://github.com/TooTallNate/proxy-agents) | 7.0.2 | MIT |
+| [http-proxy-agent](https://github.com/TooTallNate/proxy-agents) | 9.1.0 | MIT |
 | [https-proxy-agent](https://github.com/TooTallNate/proxy-agents) | 7.0.6 | MIT |
+| [https-proxy-agent](https://github.com/TooTallNate/proxy-agents) | 9.1.0 | MIT |
 | [iconv-lite](https://github.com/pillarjs/iconv-lite) | 0.7.3 | MIT |
 | [ieee754](https://github.com/feross/ieee754) | 1.2.1 | BSD-3-Clause |
 | [ignore](https://github.com/kaelzhang/node-ignore) | 5.3.2 | MIT |
-| [ignore](https://github.com/kaelzhang/node-ignore) | 7.0.5 | MIT |
 | [immediate](https://github.com/calvinmetcalf/immediate) | 3.0.6 | MIT |
 | [immer](https://github.com/immerjs/immer) | 11.1.21 | MIT |
 | [import-in-the-middle](https://github.com/nodejs/import-in-the-middle) | 3.5.2 | Apache-2.0 |
@@ -693,7 +696,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [oniguruma-parser](https://github.com/slevithan/oniguruma-parser) | 0.12.2 | MIT |
 | [oniguruma-to-es](https://github.com/slevithan/oniguruma-to-es) | 4.3.6 | MIT |
 | [open](https://github.com/sindresorhus/open) | 11.0.4 | MIT |
-| [openai](https://github.com/openai/openai-node) | 6.40.0 | Apache-2.0 |
+| [openai](https://github.com/openai/openai-node) | 7.19.0 | Apache-2.0 |
 | [openapi-types](https://github.com/kogosoftwarellc/open-api/tree/master/packages/openapi-types) | 12.1.3 | MIT |
 | [opentype.js](https://github.com/opentypejs/opentype.js) | 1.3.4 | MIT |
 | [p-retry](https://github.com/sindresorhus/p-retry) | 4.6.2 | MIT |
@@ -723,13 +726,14 @@ Their copyright notices and full license texts ship inside each package and are 
 | [property-information](https://github.com/wooorm/property-information) | 7.2.0 | MIT |
 | [protobufjs](https://github.com/protobufjs/protobuf.js) | 7.6.6 | BSD-3-Clause |
 | [proxy-addr](https://github.com/jshttp/proxy-addr) | 2.0.8 | MIT |
+| [proxy-agent-negotiate](https://github.com/TooTallNate/proxy-agents) | 1.1.0 | MIT |
 | [pump](https://github.com/mafintosh/pump) | 3.0.4 | MIT |
 | [pure-rand](https://github.com/dubzzz/pure-rand) | 8.4.2 | MIT |
 | [qs](https://github.com/ljharb/qs) | 6.16.0 | BSD-3-Clause |
 | [radix-ui](https://github.com/radix-ui/primitives) | 1.8.0 | MIT |
 | [range-parser](https://github.com/jshttp/range-parser) | 1.3.0 | MIT |
 | [raw-body](https://github.com/stream-utils/raw-body) | 3.0.2 | MIT |
-| [react](https://github.com/facebook/react) | 19.2.7 | MIT |
+| [react](https://github.com/react/react) | 19.3.1 | MIT |
 | [react-colorful](https://github.com/omgovich/react-colorful) | 5.8.1 | MIT |
 | [react-day-picker](https://github.com/gpbl/react-day-picker) | 10.0.2 | MIT |
 | [react-is](https://github.com/facebook/react) | 18.3.1 | MIT |
@@ -805,6 +809,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [space-separated-tokens](https://github.com/wooorm/space-separated-tokens) | 2.0.2 | MIT |
 | [split2](https://github.com/mcollina/split2) | 4.2.0 | ISC |
 | [stack-utils](https://github.com/tapjs/stack-utils) | 2.0.6 | MIT |
+| [standardwebhooks](https://github.com/standard-webhooks/standard-webhooks) | 1.1.1 | MIT |
 | [stats-gl](https://github.com/RenaudRohlinger/stats-gl) | 2.4.2 | MIT |
 | [stats.js](https://github.com/mrdoob/stats.js) | 0.17.0 | MIT |
 | [statuses](https://github.com/jshttp/statuses) | 2.0.2 | MIT |
@@ -846,7 +851,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [type-fest](https://github.com/sindresorhus/type-fest) | 4.41.0 | (MIT OR CC0-1.0) |
 | [type-fest](https://github.com/sindresorhus/type-fest) | 5.10.0 | (MIT OR CC0-1.0) |
 | [type-is](https://github.com/jshttp/type-is) | 2.1.0 | MIT |
-| [typebox](https://github.com/sinclairzx81/typebox) | 1.3.7 | MIT |
+| [typebox](https://github.com/sinclairzx81/typebox) | 1.3.27 | MIT |
 | [typed-array-buffer](https://github.com/inspect-js/typed-array-buffer) | 1.0.3 | MIT |
 | [typedarray](https://github.com/substack/typedarray) | 0.0.6 | MIT |
 | [typescript](https://github.com/microsoft/TypeScript) | 5.9.3 | Apache-2.0 |
@@ -900,7 +905,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [xmlchars](https://github.com/lddubeau/xmlchars) | 2.2.0 | MIT |
 | [xmldoc](https://github.com/nfarina/xmldoc) | 0.4.0 | MIT |
 | [xstate](https://github.com/statelyai/xstate) | 6.0.0-alpha.59 | MIT |
-| [yaml](https://github.com/eemeli/yaml) | 2.9.0 | ISC |
 | [yargs-parser](https://github.com/yargs/yargs-parser) | 21.1.1 | ISC |
 | [yn](https://github.com/sindresorhus/yn) | 3.1.1 | MIT |
 | [yoga-layout](https://github.com/facebook/yoga) | 3.2.1 | MIT |
@@ -1002,7 +1006,7 @@ The circuit kernel bundles the following components. Their full license texts ac
 | parseunit | 0.3.1 | MIT |
 | performance-now | 2.1.0 | MIT |
 | polished | 4.3.1 | MIT |
-| react | 19.2.7 | MIT |
+| react | 19.3.1 | MIT |
 | react-reconciler | 0.32.0 | MIT |
 | scheduler | 0.26.0 | MIT |
 | schematic-symbols | 0.0.244 | MIT |

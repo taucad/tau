@@ -1,0 +1,25 @@
+{
+  "name": "agent-observability",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/agent-observability",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:lib"],
+  "targets": {
+    "test:e2e": {
+      "command": "vitest run --config vitest.browser.config.ts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false
+    },
+    "bundle-cloud-host-observer": {
+      "command": "esbuild src/cloud-host-observer.ts --bundle --minify --platform=node --format=esm --target=node24 --legal-comments=none --outfile=../../out/cloud-host-observer/cloud-host-observer.mjs",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "inputs": ["production", "^production"],
+      "outputs": ["{workspaceRoot}/out/cloud-host-observer"],
+      "cache": true
+    }
+  }
+}

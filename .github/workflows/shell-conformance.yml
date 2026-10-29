@@ -128,7 +128,7 @@ jobs:
             --reporter=verbose --no-file-parallelism \
             -t 'G4' src/shell/shell-projection-native.test.ts 2>&1 | tee /tmp/g4.log || true
           echo '===== VERDICT ====='
-          sed -n '/Failed Tests/,/Duration/p' /tmp/g4.log | grep -vE '^\[(wrap|dump|mark|brdg)' | head -45
+          grep -A30 'FAIL.*G4 aborts' /tmp/g4.log | grep -vE '^\[(wrap|dump|mark|brdg)' | head -40
           echo '===== G4 ROWS ====='
           grep -E 'G4 ' /tmp/g4.log || true
 

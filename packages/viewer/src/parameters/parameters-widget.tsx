@@ -180,11 +180,13 @@ export function ParametersWidget(
       if (!Number.isFinite(numericValue)) {
         // An unset field still shows its unit and takes what is typed in that unit.
         return (
-          <InputGroup className='h-8'>
+          // Sized and toned like the set number field beside it, so an unset row does not stand out.
+          <InputGroup className='h-(--param-field-h) rounded-(--param-field-radius) border-transparent bg-muted shadow-none transition-colors hover:text-(--param-field-color-focus) has-[[data-slot=input-group-control]:focus-visible]:bg-background dark:bg-muted'>
             <InputGroupInput
               id={id}
               type='number'
               value=''
+              className='px-2 text-right text-sm text-(--param-field-color) tabular-nums placeholder:text-muted-foreground/60'
               disabled={disabled}
               readOnly={readonly}
               autoFocus={autofocus}

@@ -16,9 +16,9 @@ describe('TelemetryPurposeModule', () => {
       (provider): provider is { provide: symbol; useExisting: new () => TierAssuranceSource } =>
         typeof provider === 'object' && 'provide' in provider && provider.provide === tierAssuranceKey,
     );
-    const SelfHost = binding?.useExisting;
+    expect(binding).toBeDefined();
+    const selfHost: TierAssuranceSource = Reflect.construct(binding!.useExisting, []);
 
-    expect(SelfHost).toBeDefined();
-    await expect(new SelfHost!().getTierAssurance('user-1')).resolves.toEqual({ tier: 'free', assured: false });
+    await expect(selfHost.getTierAssurance('user-1')).resolves.toEqual({ tier: 'free', assured: false });
   });
 });

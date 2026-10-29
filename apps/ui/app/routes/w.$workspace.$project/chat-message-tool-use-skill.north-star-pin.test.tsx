@@ -47,6 +47,11 @@ vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectRef: actorStub, editorRef: { ...actorStub, send: editorSend } }),
 }));
 vi.mock('#hooks/use-cookie.js', () => ({ useCookie: () => [true, vi.fn(), vi.fn()] }));
+// These fixtures describe an already loaded tree; root readiness has its own cases.
+vi.mock('@taucad/fs-client/react/use-directory-listing', () => ({
+  useDirectoryListing: () => ({ kind: 'ready', path: '', entries: [] }),
+}));
+
 vi.mock('#hooks/use-file-tree.js', () => ({
   useFileTreeMap: () => treeSnapshot.current,
   useFileTreeSelector: <T,>(select: (tree: typeof treeSnapshot.current) => T): T => select(treeSnapshot.current),

@@ -371,6 +371,8 @@ catalog:
   '@codemirror/legacy-modes': 6.5.5
   '@lezer/highlight': 1.2.5
   vscode-json-languageservice: 5.7.2
+  compression: 1.8.2
+  '@types/compression': ^1.8.1
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0

@@ -24,6 +24,7 @@ import { admitEvidence } from '#api/agent-observability/evidence-admission.js';
 import type { EvidenceReceipt } from '#api/agent-observability/evidence-admission.js';
 import { sealEvidence } from '#api/agent-observability/evidence-seal.js';
 import type { EvidenceSealKey } from '#api/agent-observability/evidence-seal.js';
+import type { CloudHostReporter } from '#api/hosts/cloud-host-evidence.guard.js';
 
 /** Submissions one principal may have in flight in one process. */
 export const evidenceConcurrencyPerPrincipal = 4;
@@ -102,10 +103,16 @@ export class EvidenceIngressService {
    *
    * @param userId - The authenticated principal.
    * @param body - The envelope bytes, already bounded by the route's body limit.
+   * @param host - The cloud host reporting for `userId`, if one is: its
+   *   evidence must be for its own project and carry its device as uploader.
    * @returns The durable receipt, committed before this resolves.
    */
   @Span()
-  public async admit(userId: string, body: Uint8Array<ArrayBuffer>): Promise<EvidenceReceipt> {
+  public async admit(
+    userId: string,
+    body: Uint8Array<ArrayBuffer>,
+    host?: CloudHostReporter,
+  ): Promise<EvidenceReceipt> {
     const { key } = this;
     if (key === undefined) {
       throw new ServiceUnavailableException({
@@ -122,7 +129,12 @@ export class EvidenceIngressService {
     const evidence = parsed.value;
     /* Only the host reports over HTTP; API-reported facts are written by the
      * API itself. The principal is the session's, never the envelope's. */
-    if (evidence.authority !== 'host-reported' || evidence.scope.principal !== userId) {
+    if (
+      evidence.authority !== 'host-reported' ||
+      evidence.scope.principal !== userId ||
+      (host !== undefined &&
+        (evidence.scope.project !== host.projectId || evidence.delivery.uploader !== host.deviceId))
+    ) {
       throw new ForbiddenException({ code: 'EVIDENCE_SCOPE', message: 'The evidence is outside this session.' });
     }
     if (!(await verifyEvidenceDigest(evidence))) {

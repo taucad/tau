@@ -8,6 +8,8 @@ import {
   patchBrowserThreadMemory,
   patchBrowserThreadMailbox,
   bindBrowserThreadStartup,
+  browserThreadModuleNames,
+  patchBrowserThreadRuntime,
 } from './browser-thread-startup.mjs';
 /* oxlint-enable no-restricted-imports */
 
@@ -87,6 +89,55 @@ describe('pinned Mono worker startup staging', () => {
     for (const invalid of ['', source + source, patchBrowserThreadStartup(source)]) {
       expect(() => patchBrowserThreadStartup(invalid)).toThrow('startup sequence changed');
     }
+  });
+
+  it('should correct one published runtime for every caller that stages a threaded app', () => {
+    // The measured parity apps and the shipped bundle go through this one function, so a figure
+    // taken on one describes the other. The mailbox source carries both anchors the pair needs.
+    const mailbox = `${source}
+      if (!waitAsyncPolyfilled) {
+    // Wait on the thread self pointer.
+      }
+      if (d.targetThread) {}`;
+    const config = {
+      resources: {
+        hash: 'sha256-original',
+        jsModuleNative: [{ name: 'dotnet.native.aaaaaaaaaa.js' }],
+        jsModuleRuntime: [{ name: 'dotnet.runtime.bbbbbbbbbb.js' }],
+        wasmNative: [{ name: 'native.wasm' }],
+      },
+    };
+    const bootstrap = `prefix/*json-start*/${JSON.stringify(config)}/*json-end*/suffix`;
+    expect(browserThreadModuleNames(bootstrap)).toEqual({
+      native: 'dotnet.native.aaaaaaaaaa.js',
+      runtime: 'dotnet.runtime.bbbbbbbbbb.js',
+    });
+    const patched = patchBrowserThreadRuntime({
+      bootstrap,
+      native: mailbox,
+      runtime: 'this.appendULeb(256),this.appendULeb(32768)',
+    });
+    const names = [...patched.modules.keys()];
+    expect(names).toHaveLength(2);
+    // Both corrections are applied, both executables are renamed by content, and the rebound
+    // configuration names the new ones rather than the ones the workload published.
+    for (const name of names) {
+      expect(patched.bootstrap).toContain(name);
+    }
+    expect(patched.bootstrap).not.toContain('dotnet.native.aaaaaaaaaa.js');
+    expect(patched.bootstrap).not.toContain('dotnet.runtime.bbbbbbbbbb.js');
+    expect(patched.bootstrap).toContain('"wasmNative":[{"name":"native.wasm"}]');
+    expect(patched.modules.get(names[0]!)).toContain('ENVIRONMENT_IS_PTHREAD');
+    expect(patched.modules.get(names[1]!)).toContain('appendULeb(65536)');
+    // An already corrected runtime is refused rather than corrected twice.
+    expect(() =>
+      patchBrowserThreadRuntime({
+        bootstrap: patched.bootstrap,
+        native: patched.modules.get(names[0]!)!,
+        runtime: patched.modules.get(names[1]!)!,
+      }),
+    ).toThrow();
+    expect(() => browserThreadModuleNames('')).toThrow('configuration is missing');
   });
 
   it('should bind the changed executable without losing other boot resources', () => {

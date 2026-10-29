@@ -13,13 +13,15 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import type { BinaryLike } from 'node:crypto';
-import { cp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 /* oxlint-disable-next-line no-restricted-imports -- The preparation script's sibling module; scripts have no `#` alias. */
 import { emscriptenEnvironment } from './browser-emscripten.mjs';
+/* oxlint-disable-next-line no-restricted-imports -- The preparation script's sibling module; scripts have no `#` alias. */
+import { browserThreadModuleNames, patchBrowserThreadRuntime } from './browser-thread-startup.mjs';
 
 const absolute = z.string().refine(isAbsolute, 'Preparation paths must be absolute.');
 const configSchema = z.object({
@@ -34,6 +36,13 @@ const configSchema = z.object({
   referencesRoot: absolute,
   outputRoot: absolute,
   modes: z.array(z.enum(['aot', 'dynamic'])).nonempty(),
+  /*
+   * Which engine archive and runtime the measured apps are built from. `threaded` is the execution
+   * the product ships in a browser, so it is the one a qualifying figure has to describe; `serial`
+   * stays measurable because it is the fallback and because it is what every earlier figure in this
+   * program was taken on.
+   */
+  execution: z.enum(['serial', 'threaded']).default('serial'),
 });
 const sha256 = (bytes: BinaryLike): string => createHash('sha256').update(bytes).digest('hex');
 const archiveNames = ['float-trig.o', 'libblosc.a', 'libopenvdb.a', 'libtbb.a', 'libz.a', 'picogk.26.2.a'];
@@ -42,7 +51,7 @@ const authorRepositories = ['ShapeKernel', 'HelixHeatX'] as const;
 
 const config = configSchema.parse(JSON.parse(await readFile(resolve(process.argv[2] ?? ''), 'utf8')) as unknown);
 const projectRoot = resolve(import.meta.dirname, '../dotnet/Tau.PicoGK.Parity');
-const engineRoot = join(config.packageRoot, 'engine/serial');
+const engineRoot = join(config.packageRoot, 'engine', config.execution);
 const archiveRoot = join(engineRoot, 'native');
 
 /*
@@ -168,6 +177,7 @@ for (const mode of config.modes) {
       '--artifacts-path',
       artifacts,
       `-p:TauParityMode=${mode}`,
+      `-p:WasmEnableThreads=${String(config.execution === 'threaded')}`,
       `-p:PicoGKProject=${config.picoGkProject}`,
       `-p:TauPicoGKArchiveRoot=${archiveRoot}`,
       `-p:TauPicoGKRetentionProps=${join(config.packageRoot, 'browser/AuthoringRetention.props')}`,
@@ -182,6 +192,29 @@ for (const mode of config.modes) {
   const published = join(artifacts, 'publish', 'Tau.PicoGK.Parity', 'release', 'wwwroot');
   const app = join(config.outputRoot, mode);
   await cp(published, app, { recursive: true });
+  if (config.execution === 'threaded') {
+    /*
+     * The same corrections the shipped bundle is staged with, from the same module: an unpatched
+     * threaded runtime starts, runs the geometry and reports its time, and then its idle owner
+     * stalls on the first awaited interop call, so the run hands back no captures and no verdict.
+     * A measured app that skipped them would not be the runtime the product ships.
+     */
+    const framework = join(app, '_framework');
+    const bootstrap = await readFile(join(framework, 'dotnet.js'), 'utf8');
+    const names = browserThreadModuleNames(bootstrap);
+    const patched = patchBrowserThreadRuntime({
+      bootstrap,
+      native: await readFile(join(framework, names.native), 'utf8'),
+      runtime: await readFile(join(framework, names.runtime), 'utf8'),
+    });
+    for (const [name, module] of patched.modules) {
+      await writeFile(join(framework, name), module);
+    }
+    // The originals are no longer named by the configuration, and an app serves only what it loads.
+    await rm(join(framework, names.native));
+    await rm(join(framework, names.runtime));
+    await writeFile(join(framework, 'dotnet.js'), patched.bootstrap);
+  }
   await writeFile(join(app, 'parity-mode.json'), `${JSON.stringify({ mode })}\n`);
   if (mode === 'dynamic') {
     await stageProject(app, join(artifacts, 'bin/PicoGK/release/PicoGK.dll'));
@@ -205,7 +238,8 @@ await writeFile(
   join(config.outputRoot, 'parity-apps.json'),
   `${JSON.stringify(
     {
-      schemaVersion: 1,
+      schemaVersion: 2,
+      execution: config.execution,
       // The fixture and the author trees are what a reader needs to tell two runs apart.
       fixtureSha256: sha256(await readFile(fixture)),
       author: Object.fromEntries(

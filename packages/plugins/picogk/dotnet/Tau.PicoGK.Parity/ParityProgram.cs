@@ -99,6 +99,23 @@ internal static partial class ParityProgram
     /// The fixture and every author source below it are compiled into this app ahead of time, which
     /// is the mode a build-time consumer ships.
     /// </summary>
+#if PICOGK_BROWSER_THREADS
+    private static async Task RunAsync(string subject, bool tape)
+    {
+        // There is no compile to time and no registry to withhold: the build already decided both.
+        _ = tape;
+        var run = Stopwatch.StartNew();
+        /*
+         * Off the runtime owner, which is how `Tau.PicoGK.Worker` runs the same geometry on a
+         * threaded build: native geometry can synchronously wait for TBB helpers, so Mono's owner
+         * has to stay free to start those workers and service their proxy requests. Run on the
+         * owner the geometry still finishes and still reports its time, and then the first awaited
+         * upload never completes, so a threaded run produces no captures and no verdict at all.
+         */
+        await Task.Run(() => GeometryParityFixture.Run([Captures, subject]));
+        Report("run", run.Elapsed.TotalMilliseconds);
+    }
+#else
     private static Task RunAsync(string subject, bool tape)
     {
         // There is no compile to time and no registry to withhold: the build already decided both.
@@ -108,6 +125,7 @@ internal static partial class ParityProgram
         Report("run", run.Elapsed.TotalMilliseconds);
         return Task.CompletedTask;
     }
+#endif
 
     /// <summary>An ahead-of-time app cannot be edited, so there is nothing here to measure.</summary>
     private static Task EditAsync(string subject, bool tape)

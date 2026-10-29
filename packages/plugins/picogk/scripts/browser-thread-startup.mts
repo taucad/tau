@@ -86,3 +86,49 @@ export const patchBrowserThreadMemory = (source: string): string => {
   }
   return source.replace(before, 'this.appendULeb(256),this.appendULeb(65536)');
 };
+
+/**
+ * The generated module names this bootstrap loads, as its own embedded configuration records them.
+ * @param bootstrap - Generated dotnet.js containing its embedded configuration.
+ * @returns The native glue and managed runtime file names, refusing a changed workload.
+ */
+export const browserThreadModuleNames = (bootstrap: string): { native: string; runtime: string } => {
+  const embedded = /\/\*json-start\*\/([\s\S]*?)\/\*json-end\*\//u.exec(bootstrap)?.[1];
+  if (!embedded) {
+    throw new Error('The qualified .NET bootstrap configuration is missing.');
+  }
+  const config = configSchema.parse(JSON.parse(embedded));
+  return {
+    native: config.resources.jsModuleNative[0]!.name,
+    runtime: config.resources.jsModuleRuntime[0]!.name,
+  };
+};
+
+/**
+ * Apply every qualified threaded-startup correction to one published runtime, in one place.
+ *
+ * Each correction is one caller's business as much as the other's: the parity apps a measurement
+ * runs and the bundle the product ships have to be the same threaded runtime, or a qualified figure
+ * would not describe the shipped path. An unpatched threaded build starts and runs geometry, and
+ * then its idle runtime owner stalls on the first awaited interop call, which looks like a defect
+ * somewhere else entirely.
+ * @param input - The generated bootstrap and the two modules it names.
+ * @returns The rebound bootstrap and each patched module under the content name it is served at.
+ */
+export const patchBrowserThreadRuntime = (input: {
+  bootstrap: string;
+  native: string;
+  runtime: string;
+}): { bootstrap: string; modules: Map<string, string> } => {
+  const native = patchBrowserThreadMailbox(patchBrowserThreadStartup(input.native));
+  const boundNative = bindBrowserThreadStartup(input.bootstrap, native);
+  const runtime = patchBrowserThreadMemory(input.runtime);
+  const boundRuntime = bindBrowserThreadStartup(boundNative.bootstrap, runtime, 'runtime');
+  return {
+    bootstrap: boundRuntime.bootstrap,
+    modules: new Map([
+      [boundNative.name, native],
+      [boundRuntime.name, runtime],
+    ]),
+  };
+};

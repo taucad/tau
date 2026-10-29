@@ -18,12 +18,7 @@ import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 /* oxlint-disable no-restricted-imports -- The preparation script's sibling modules; scripts have no `#` alias. */
 import { emscriptenEnvironment } from './browser-emscripten.mjs';
-import {
-  patchBrowserThreadMailbox,
-  patchBrowserThreadStartup,
-  patchBrowserThreadMemory,
-  bindBrowserThreadStartup,
-} from './browser-thread-startup.mjs';
+import { browserThreadModuleNames, patchBrowserThreadRuntime } from './browser-thread-startup.mjs';
 /* oxlint-enable no-restricted-imports */
 import { picogkBrowserProtocolVersion } from '#picogk.protocol.js';
 import { picogkBrowserManifestSchema } from '#picogk-browser-assets.js';
@@ -181,32 +176,16 @@ const prepareVariant = async (
   }
   const overrides = new Map<string, Uint8Array<ArrayBuffer>>();
   if (execution === 'threaded') {
-    const configuration = z
-      .object({
-        resources: z.object({
-          jsModuleNative: z.array(z.object({ name: z.string() })).length(1),
-          jsModuleRuntime: z.array(z.object({ name: z.string() })).length(1),
-        }),
-      })
-      .parse(JSON.parse(embedded));
-    const nativeName = configuration.resources.jsModuleNative[0]!.name;
-    if (!/^dotnet\.native\.[\w-]+\.js$/u.test(nativeName)) {
-      throw new Error('The qualified .NET native module name changed.');
+    const names = browserThreadModuleNames(bootstrap);
+    const patched = patchBrowserThreadRuntime({
+      bootstrap,
+      native: await readFile(join(publish, '_framework', names.native), 'utf8'),
+      runtime: await readFile(join(publish, '_framework', names.runtime), 'utf8'),
+    });
+    bootstrap = patched.bootstrap;
+    for (const [name, module] of patched.modules) {
+      overrides.set(`_framework/${name}`, new TextEncoder().encode(module));
     }
-    const native = patchBrowserThreadMailbox(
-      patchBrowserThreadStartup(await readFile(join(publish, '_framework', nativeName), 'utf8')),
-    );
-    const bound = bindBrowserThreadStartup(bootstrap, native);
-    bootstrap = bound.bootstrap;
-    overrides.set(`_framework/${bound.name}`, new TextEncoder().encode(native));
-    const runtimeName = configuration.resources.jsModuleRuntime[0]!.name;
-    if (!/^dotnet\.runtime\.[\w-]+\.js$/u.test(runtimeName)) {
-      throw new Error('The qualified .NET runtime module name changed.');
-    }
-    const runtime = patchBrowserThreadMemory(await readFile(join(publish, '_framework', runtimeName), 'utf8'));
-    const runtimeBound = bindBrowserThreadStartup(bootstrap, runtime, 'runtime');
-    bootstrap = runtimeBound.bootstrap;
-    overrides.set(`_framework/${runtimeBound.name}`, new TextEncoder().encode(runtime));
     overrides.set('_framework/dotnet.js', new TextEncoder().encode(bootstrap));
   }
   const resources = new Set(['dotnet.js']);

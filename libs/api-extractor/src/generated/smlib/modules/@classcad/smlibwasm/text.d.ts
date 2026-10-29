@@ -1,11 +1,13 @@
 import { type AlignLike } from './align.js';
-import { type Segment } from './font.js';
+import { Font } from './font.js';
+import type { BytesLike } from './_bytes.js';
 import { Edge, type Sketch, Wire } from './shapes.js';
 /** How `Text` sets the text. */
 export interface TextOptions {
-    /** A TrueType or OpenType font (.ttf, .otf, .ttc, .woff): the bytes of its file, or its path
-     * (Node). Default: the built-in Lato Regular. */
-    font?: string | Uint8Array | null;
+    /** A TrueType or OpenType font (.ttf, .otf, .ttc, .woff, .woff2): the bytes of its file (a
+     * Uint8Array or an ArrayBuffer), its path (Node), or a `Font` that `loadFont` read. Default: the
+     * built-in Lato Regular. */
+    font?: string | BytesLike | Font | null;
     /** Placement of the text's layout box (from the start to the end of the longest line, and from
      * the baseline of the last line to the cap height of the first). `CENTER` centers it on the
      * origin; `MIN` starts the text at x = 0 with the last baseline on y = 0; `MAX` ends it at
@@ -37,13 +39,7 @@ export interface TextOptions {
  * on-curve points.
  *
  * Throws a RangeError for an empty text, a size that is not positive, a character the font does
- * not have, a font that cannot be read, or a path the text does not fit on.
+ * not have, or a path the text does not fit on; a font that cannot be read throws a `FontError` (a
+ * RangeError).
  */
 export declare function Text(text: string, size: number, options?: TextOptions): Sketch;
-/** Exact signed area contribution of a segment: 1/2 of the integral of x dy - y dx. */
-export declare function _segmentArea(seg: Segment): number;
-/** Python's sum() of floats: Neumaier's compensated summation (Python 3.12 and later). */
-export declare function _sum(values: Iterable<number>): number;
-/** Python's math.hypot of two numbers (its vector_norm: correctly rounded in nearly all cases;
- * JavaScript's Math.hypot can differ in the last bit). */
-export declare function _hypot(a: number, b: number): number;

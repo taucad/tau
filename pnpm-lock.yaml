@@ -55,8 +55,8 @@ catalogs:
       specifier: 4.1.1
       version: 4.1.1
     '@classcad/smlibwasm':
-      specifier: 0.3.4
-      version: 0.3.4
+      specifier: 0.6.2
+      version: 0.6.2
     '@codemirror/autocomplete':
       specifier: 6.20.4
       version: 6.20.4
@@ -3413,7 +3413,7 @@ importers:
     devDependencies:
       '@classcad/smlibwasm':
         specifier: 'catalog:'
-        version: 0.3.4
+        version: 0.6.2
       picovoxel:
         specifier: 'catalog:'
         version: 0.2.1(three@0.184.0(patch_hash=98d7197400bd2d91627d5bfe5154c960352ea36e65de45677738b8ac9e363064))
@@ -3571,7 +3571,7 @@ importers:
     devDependencies:
       '@classcad/smlibwasm':
         specifier: 'catalog:'
-        version: 0.3.4
+        version: 0.6.2
       '@jscad/modeling':
         specifier: 'catalog:'
         version: 2.13.0
@@ -5051,7 +5051,7 @@ importers:
     dependencies:
       '@classcad/smlibwasm':
         specifier: 'catalog:'
-        version: 0.3.4
+        version: 0.6.2
       '@gltf-transform/core':
         specifier: 'catalog:'
         version: 4.5.1
@@ -7368,8 +7368,8 @@ packages:
   '@chevrotain/types@11.1.2':
     resolution: {integrity: sha512-U+HFai5+zmJCkK86QsaJtoITlboZHBqrVketcO2ROv865xfCMSFpELQoz1GkX5GzME8pTa+3kbKrZHQtI0gdbw==}
 
-  '@classcad/smlibwasm@0.3.4':
-    resolution: {integrity: sha512-XS7bLRA6UDxEu2uKhZZZRLClOa8DZeZSRQck4h/ke1KuXJGOIhTY/K6AZu+QHTD7u0+HUNCSnNJRM9avPW6Pxw==}
+  '@classcad/smlibwasm@0.6.2':
+    resolution: {integrity: sha512-JDHQDdX13u1DiXJvNMfAWG7iyUVPpCVIL8Sfuw+p0CZq1E5sqN9VBFeuj+mEGbSFbZ+6/8ftRn6wnwlMWBu3SQ==}
     engines: {node: '>=22.18'}
 
   '@codemirror/autocomplete@6.20.4':
@@ -27867,7 +27867,7 @@ snapshots:
 
   '@chevrotain/types@11.1.2': {}
 
-  '@classcad/smlibwasm@0.3.4': {}
+  '@classcad/smlibwasm@0.6.2': {}
 
   '@codemirror/autocomplete@6.20.4':
     dependencies:

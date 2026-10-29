@@ -1,852 +1,481 @@
 # @classcad/smlibwasm — Classes (2)
 
-16 top-level symbols. Signatures are verbatim typescript.
+3 top-level symbols. Signatures are verbatim typescript.
 
-// A list of shapes with selection helpers
-// Remarks: Every selector returns a new ShapeList, so selectors chain: part.edges().parallelTo(Z).maxBy(X) part.faces().planar().facing(Z.neg()) A one-element list can be used wherever a single shape is expected (`sketch.on(part.faces().top())`). Use `one()` to require exactly one.
-ShapeList: export declare class ShapeList<T = Shape> extends Array<T>
+// A bounded curve
+// Remarks: Edges come from bodies (`part.edges()`) or from curve constructors such as `Line`, `ThreePointArc` and `Spline`. Parameters along an edge (`pointAt(t)`) run from 0 at the start to 1 at the end, proportional to arc length.
+Edge: export declare class Edge extends Shape
 
-  // The only element
-  // ShapeList.one (method)
-  one(): T;
+  // Edge.constructor (constructor)
+  constructor(token?: symbol);
 
-  readonly first: T
+  // Frees the kernel's curve of a standalone edge now, not when the garbage collector gets to it
+  // Edge.dispose (method)
+  dispose(): void;
 
-  readonly last: T
+  // Edge.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
 
-  // Sort by position along an axis, by "length"/"area"/"volume"/"radius", or by any function of a shape
-  // ShapeList.sortBy (method)
-  sortBy(key?: SortKey, reverse?: boolean): ShapeList<T>;
+  // "line", "circle" (also arcs), "ellipse", "bspline" or "other"
+  readonly geomType: string
 
-  // `parallelTo(axis)`, `ofType(name)` or `filter(predicate)`, depending on the argument
-  // ShapeList.filterBy (method)
-  filterBy(criterion: Axis | string | ((s: T) => boolean)): ShapeList<T>;
+  // How far this edge's curve, its ends and the faces it bounds may lie apart
+  readonly tolerance: number
 
-  // ShapeList.sortByDistance (method)
-  sortByDistance(point: VectorLike, reverse?: boolean): ShapeList<T>;
+  // The edge's length
+  readonly length: number
 
-  // Group shapes with equal key (within `tol`), groups in ascending key order
-  // ShapeList.groupBy (method)
-  groupBy(key?: SortKey, tol?: number): ShapeList<T>[];
-
-  // The shapes with the largest key (all of them, if several tie)
-  // ShapeList.maxBy (method)
-  maxBy(key?: SortKey, tol?: number): ShapeList<T>;
-
-  // The shapes with the smallest key (all of them, if several tie)
-  // ShapeList.minBy (method)
-  minBy(key?: SortKey, tol?: number): ShapeList<T>;
-
-  // Highest shapes (largest Z)
-  // ShapeList.top (method)
-  top(): ShapeList<T>;
-
-  // Lowest shapes (smallest Z)
-  // ShapeList.bottom (method)
-  bottom(): ShapeList<T>;
-
-  // Shapes furthest along +X
-  // ShapeList.right (method)
-  right(): ShapeList<T>;
-
-  // Shapes furthest along -X
-  // ShapeList.left (method)
-  left(): ShapeList<T>;
-
-  // Shapes furthest along +Y
-  // ShapeList.back (method)
-  back(): ShapeList<T>;
-
-  // Shapes furthest along -Y
-  // ShapeList.front (method)
-  front(): ShapeList<T>;
-
-  // The biggest shape by volume, area or length
-  // ShapeList.largest (method)
-  largest(): T;
-
-  // The smallest shape by volume, area or length
-  // ShapeList.smallest (method)
-  smallest(): T;
-
-  // The shape whose center is closest to `point`
-  // ShapeList.nearest (method)
-  nearest(point: VectorLike): T;
-
-  // Keep the shapes for which `predicate(shape)` is true
-  // ShapeList.filter (method)
-  filter<S extends T>(predicate: (value: T, index: number, array: T[]) => value is S, thisArg?: unknown): ShapeList<S>;
-  filter(predicate: (value: T, index: number, array: T[]) => unknown, thisArg?: unknown): ShapeList<T>;
-
-  // A plain array of what `fn` gives for each shape
-  // ShapeList.map (method)
-  map<U>(fn: (value: T, index: number, array: T[]) => U, thisArg?: unknown): U[];
-
-  // Keep shapes of the given geometry types, e.g
-  // ShapeList.ofType (method)
-  ofType(...geomTypes: string[]): ShapeList<T>;
-
-  // Straight edges (also straight B-spline edges, such as the edges of a chamfer)
-  // ShapeList.lines (method)
-  lines(): ShapeList<T>;
-
-  // Circular edges (full circles and arcs)
-  // ShapeList.circles (method)
-  circles(): ShapeList<T>;
-
-  // Planar faces (also flat B-spline faces)
-  // ShapeList.planar (method)
-  planar(): ShapeList<T>;
-
-  // Cylindrical faces
-  // ShapeList.cylinders (method)
-  cylinders(): ShapeList<T>;
-
-  // Straight edges along `axis`, or planar faces whose normal is along `axis`
-  // ShapeList.parallelTo (method)
-  parallelTo(axis: Axis | VectorLike): ShapeList<T>;
-
-  // Straight edges perpendicular to `axis`, or planar faces containing it
-  // ShapeList.perpendicularTo (method)
-  perpendicularTo(axis: Axis | VectorLike): ShapeList<T>;
-
-  // Faces whose outward normal points along `direction` (within `maxAngle` degrees)
-  // Remarks: A curved face counts only when its normal does so everywhere on the face: the wall of a hole or a boss faces no direction, and a fillet only with a `maxAngle` that takes in all its normals.
-  // ShapeList.facing (method)
-  facing(direction: Axis | VectorLike, maxAngle?: number): ShapeList<T>;
-
-  // Edges on outside corners (material angle below 180 degrees), and the outside corners of a sketch (vertices where the region's angle is below 180 degrees)
-  // ShapeList.convex (method)
-  convex(): ShapeList<T>;
-
-  // Edges on inside corners (material angle above 180 degrees), and the inside corners of a sketch
-  // ShapeList.concave (method)
-  concave(): ShapeList<T>;
-
-  // Edges where two faces meet tangentially, such as the borders of a fillet, and the vertices of a sketch where two edges meet tangentially
-  // ShapeList.smooth (method)
-  smooth(): ShapeList<T>;
-
-  // Fillet faces
-  // ShapeList.fillets (method)
-  fillets(maxRadius?: number | null): ShapeList<T>;
-
-  // The faces (or bodies) of the list that a ray meets, nearest first
-  // Remarks: The ray starts at `origin` and runs along `direction` (an axis or a vector); an axis alone is a ray from its origin along its direction. A ray through an edge meets the faces on both sides of it.
-  // ShapeList.hitBy (method)
-  hitBy(origin: VectorLike | Axis, direction?: VectorLike | Axis | null): ShapeList<T>;
-
-  // Shapes whose bounding box lies inside `box`
-  // ShapeList.within (method)
-  within(box: BoundBox): ShapeList<T>;
-
-  // Shapes passing through `point` (vertices at, edges/faces touching it)
-  // ShapeList.atPoint (method)
-  atPoint(point: VectorLike, tol?: number): ShapeList<T>;
-
-  // The shapes of both lists, each once (Python's `|`)
-  // ShapeList.union (method)
-  union(other: Iterable<T>): ShapeList<T>;
-
-  // The shapes not in `other` (Python's `-`)
-  // ShapeList.difference (method)
-  difference(other: Iterable<T>): ShapeList<T>;
-
-  // The shapes also in `other` (Python's `&`)
-  // ShapeList.intersection (method)
-  intersection(other: Iterable<T>): ShapeList<T>;
-
-  // ShapeList.vertices (method)
-  vertices(): ShapeList<Vertex>;
-
-  // ShapeList.edges (method)
-  edges(): ShapeList<Edge>;
-
-  // ShapeList.faces (method)
-  faces(): ShapeList<Face>;
-
-  // ShapeList.wires (method)
-  wires(): ShapeList<Wire>;
-
-  // Average of the members' centers
-  // ShapeList.center (method)
-  center(): Vector;
-
-  // ShapeList.bbox (method)
-  bbox(): BoundBox;
-
-  // ShapeList.moved (method)
-  moved(location: Location): ShapeList<T>;
-
-  // Every shape placed onto a plane or face (see `Shape.on`)
-  // ShapeList.on (method)
-  on(target: unknown): ShapeList<T>;
-
-  // ShapeList.translate (method)
-  translate(x?: number | VectorLike, y?: number, z?: number): ShapeList<T>;
-
-  // ShapeList.rotate (method)
-  rotate(axis?: Axis, angle?: number): ShapeList<T>;
-
-  // Returns a string representation of an array
-  // ShapeList.toString (method)
-  toString(): string;
-
-  // ShapeList.[inspect] (method)
-  [inspect](): string;
-
-// A sheet body
-Shell: export declare class Shell extends _Body
-
-  readonly area: number
-
-  // Center of mass (centroid) of the shape
-  // Shell.center (method)
-  center(): Vector;
-
-  // Turn the sheet into a solid of `thickness` (along the face normals
-  // Shell.thicken (method)
-  thicken(thickness: number, options?: {
-          both?: boolean;
-      }): Part;
-
-  // Union with other sheets (Python's `+`)
-  // Shell.fuse (method)
-  fuse(...others: unknown[]): Shell;
-
-  // Shell.toString (method)
-  toString(): string;
-
-// A planar region (with holes, possibly several pieces) on a plane
-// Remarks: Sketch constructors build in the world XY plane around the origin; place a sketch with `.on(planeOrFace)`, `plane.mul(sketch)` or `Pos(...).mul(sketch)`. Combine sketches with `fuse`, `cut`, `intersect` and `xor`, change them with `offset`, `fillet`, `chamfer` and `mirror`, then turn them into parts with `extrude`, `revolve`, `sweep` or `loft`. Outlines that are awkward as combinations of shapes are drawn with `Profile`.
-Sketch: export declare class Sketch extends Shell
-
-  // The sketch plane
-  readonly plane: Plane
-
-  // The union with other sketches (Python's `+`)
-  // Sketch.fuse (method)
-  fuse(...others: unknown[]): Sketch;
-
-  // The region less other sketches (Python's `-`)
-  // Sketch.cut (method)
-  cut(...others: unknown[]): Sketch;
-
-  // The region common to this and other sketches (Python's `&`)
-  // Sketch.intersect (method)
-  intersect(...others: unknown[]): Sketch;
-
-  // The region in exactly one of the sketches (Python's `^`)
-  // Sketch.xor (method)
-  xor(...others: unknown[]): Sketch;
-
-  // Area centroid of the region
-  // Sketch.center (method)
-  center(): Vector;
-
-  // Total length of the boundary
-  readonly perimeter: number
-
-  // Grow (positive `distance`) or shrink (negative) the region
-  // Remarks: `corners` shapes the corners that the offset pulls apart (convex ones when growing, concave ones when shrinking): "round" (arcs of radius |distance|), "sharp" (the sides extended until they meet) or "chamfer" (a straight cut across). Lines stay lines and arcs stay arcs. Parts that grow into each other merge, parts that get too thin vanish; shrinking away the whole region throws ModelingError. `round: false` is the older spelling of `corners: "sharp"`.
-  // Sketch.offset (method)
-  offset(distance: number, options?: {
-          corners?: string;
-          round?: boolean | null;
-      }): Sketch;
-
-  // Round corners of the region with tangent arcs of `radius`
-  // Remarks: `vertices`: the corners to round, as vertices of this sketch (a selection such as `s.vertices().concave()`) or points; null rounds every sharp corner. Corners between lines and arcs are rounded exactly; a corner that does not fit, a point that is not a corner, or a smooth corner throws ModelingError.
-  // Sketch.fillet (method)
-  fillet(radius: number, vertices?: Iterable<VectorLike | Vertex> | null): Sketch;
-
-  // Bevel corners of the region
-  // Sketch.chamfer (method)
-  chamfer(length: number, vertices?: Iterable<VectorLike | Vertex> | null): Sketch;
-
-  // A mirrored copy
-  // Remarks: Lines stay lines and arcs stay arcs. The sketch keeps facing the same way when the mirror is an axis in its own plane, so the mirrored profile extrudes to the same side.
-  // Sketch.mirror (method)
-  mirror(plane?: Plane | Face | Axis | ShapeList<Face>): this;
-
-  // Extrude the region into a solid
-  // Sketch.extrude (method)
-  extrude(amount: number, options?: ExtrudeOptions): Part;
-  //   amount: Distance along the sketch normal (negative goes the other way)
-
-  // Revolve the region about an axis in its plane
-  // Remarks: The default axis is the sketch's local Y axis through its plane origin. For the centered constructors (`Rectangle`, `Circle`, ...) and for `makeFace` that origin is the middle of the region, so pass `axis` unless the sketch was drawn beside its origin (`Polygon([10, 0], [20, 0], ...)`). A negative `angle` turns the other way. The axis must not cross the region (ModelingError).
-  // Sketch.revolve (method)
-  revolve(axis?: Axis | null, angle?: number): Part;
-
-  // Sweep the region along a path
-  // Sketch.sweep (method)
-  sweep(path: Edge | Wire, options?: {
-          sharpCorners?: boolean | null;
-      }): Part;
-
-  // Sketch.toString (method)
-  toString(): string;
-
-// A point
-Vertex: export declare class Vertex extends Shape
-
-  // Vertex.constructor (constructor)
-  constructor(x?: number | VectorLike, y?: number, z?: number);
-
-  readonly point: Vector
-
-  readonly x: number
-
-  readonly y: number
-
-  readonly z: number
-
-  // Center of mass (centroid) of the shape
-  // Vertex.center (method)
-  center(): Vector;
-
-  // Tight axis-aligned bounding box
-  // Vertex.bbox (method)
-  bbox(): BoundBox;
-
-  // All vertices of this shape
-  // Vertex.vertices (method)
-  vertices(): ShapeList<Vertex>;
-
-  // All edges of this shape
-  // Vertex.edges (method)
-  edges(): ShapeList<Edge>;
-
-  // All faces of this shape
-  // Vertex.faces (method)
-  faces(): ShapeList<Face>;
-
-  // Minimum distance to a point (and, for bodies, to another body)
-  // Vertex.distanceTo (method)
-  distanceTo(other: VectorLike | Shape): number;
-
-  // For a corner of a sketch
-  readonly convexity: string
-
-  // Vertex.equals (method)
-  equals(other: unknown): boolean;
-
-  // Vertex.[Symbol.iterator] (method)
-  [Symbol.iterator](): IterableIterator<number>;
-
-  // Vertex.toString (method)
-  toString(): string;
-
-// A chain of edges, open or closed
-Wire: export declare class Wire extends Shape
-
-  // Wire.constructor (constructor)
-  constructor(edges: Edge | Wire | Iterable<Edge | Wire | Iterable<Edge | Wire>>, options?: {
-          sort?: boolean;
-      });
-  //   edges: All edges of this shape
-
-  // All edges of this shape
-  // Wire.edges (method)
-  edges(): ShapeList<Edge>;
-
-  // All vertices of this shape
-  // Wire.vertices (method)
-  vertices(): ShapeList<Vertex>;
-
-  // All wires (closed edge loops of faces, or the shape itself if it is a wire)
-  // Wire.wires (method)
-  wires(): ShapeList<Wire>;
-
-  readonly isClosed: boolean
-
+  // The point where the edge starts (in its direction)
   readonly start: Vector
 
+  // The point where the edge ends (in its direction)
   readonly end: Vector
 
-  readonly length: number
+  // True if the edge ends where it starts (a circle, a closed spline)
+  readonly isClosed: boolean
 
-  // Length-weighted average of the edge midpoints
-  // Wire.center (method)
-  center(): Vector;
+  // True for the seam of a closed surface (an edge used twice by one face)
+  readonly isSeam: boolean
 
-  // Tight axis-aligned bounding box
-  // Wire.bbox (method)
-  bbox(): BoundBox;
+  // "convex" for an outside corner (material angle below 180 degrees), "concave" for an inside corner, "smooth" where the faces meet tangentially (within half a degree) all along the edge
+  readonly convexity: string
 
-  // Point at fraction `t` of the total length
-  // Wire.pointAt (method)
-  pointAt(t?: number): Vector;
+  // The angle between the two faces of the edge through the material, in degrees, at the middle of the edge
+  readonly dihedralAngle: number
 
-  // Wire.tangentAt (method)
-  tangentAt(t?: number): Vector;
+  // True on an outside corner (see `convexity`)
+  // Edge.isConvex (method)
+  isConvex(): boolean;
 
-  // Minimum distance to a point (and, for bodies, to another body)
-  // Wire.distanceTo (method)
-  distanceTo(point: VectorLike | Shape): number;
+  // Unit direction of a straight edge (start to end)
+  readonly direction: Vector
 
-  // This wire closed with a straight line from its end to its start
-  // Wire.close (method)
-  close(): Wire;
-
-  // Wire.reversed (method)
-  reversed(): Wire;
-
-  // A wire of this one and the other (Python's `+`)
-  // Wire.add (method)
-  add(other: Edge | Wire): Wire;
-
-  // The plane of a planar wire (normal by the right-hand rule along the wire)
-  // Wire.plane (method)
-  plane(): Plane;
-
-  // Round the corners between straight edges with tangent arcs (planar wires)
-  // Wire.fillet (method)
-  fillet(radius: number, vertices?: Iterable<VectorLike | Vertex> | null): Wire;
-
-  // The planar region bounded by this closed wire
-  // Wire.toSketch (method)
-  toSketch(): Sketch;
-
-  // Wire.toString (method)
-  toString(): string;
-
-// An indexed triangle mesh
-// Remarks: - `vertices`: positions, x, y, z for each vertex (`Float64Array`). - `triangles`: three vertex indices for each triangle, counterclockwise seen from outside (`Uint32Array`). - `normals`: optional corner normals, three for each triangle (nine numbers per triangle, `Float32Array`), used for shading crisp CAD edges.
-Mesh: export declare class Mesh
-
-  vertices: Float64Array
-
-  triangles: Uint32Array
-
-  normals: Float32Array | null
-
-  // Mesh.constructor (constructor)
-  constructor(vertices: ArrayLike<number>, triangles: ArrayLike<number>, normals?: ArrayLike<number> | null, _poly?: PolyHandle | null);
-
-  // The number of triangles (Python's `len(mesh)`)
-  readonly length: number
-
-  // One unit normal per triangle (x, y, z each)
-  readonly triangleNormals: Float64Array
-
-  readonly area: number
-
-  // Enclosed volume (meaningful for closed meshes)
-  readonly volume: number
-
-  // Mesh.bbox (method)
-  bbox(): BoundBox;
-
-  // Mesh.center (method)
-  center(): Vector;
-
-  // Where a ray meets the mesh's triangles, nearest first (`Hit`
-  // Mesh.raycast (method)
-  raycast(origin: VectorLike | Axis, direction?: VectorLike | Axis | null): Hit[];
-
-  // True if every edge of the mesh is shared by exactly two triangles (a watertight mesh)
-  // Mesh.isClosed (method)
-  isClosed(): boolean;
-
-  // The kernel's mesh union (Python's `+`)
-  // Mesh.fuse (method)
-  fuse(other: Mesh): Mesh;
-
-  // The kernel's mesh difference (Python's `-`)
-  // Mesh.cut (method)
-  cut(other: Mesh): Mesh;
-
-  // The kernel's mesh intersection (Python's `&`)
-  // Mesh.intersect (method)
-  intersect(other: Mesh): Mesh;
-
-  // Write the mesh to a file (stl, obj, glb, ...
-  // Mesh.export (method)
-  export(path: string, options?: Record<string, unknown>): void;
-
-  // Mesh.toString (method)
-  toString(): string;
-
-  // Mesh.[inspect] (method)
-  [inspect](): string;
-
-// A pen that draws an outline in the XY plane, segment by segment
-// Remarks: Start it at a point with a heading (degrees counterclockwise from +X), then move: const section = new Profile([0, 0]) .lineTo(12, 0).lineTo({ y: 4 }).fillet(1.5) .lineTo({ x: 6 }).lineTo({ y: 20 }).chamfer(1) .lineTo({ x: 0 }) .close() // a Sketch: extrude or revolve it Moves: `lineTo` (to a point, or to an x or y), `lineBy` (by an offset), `forward` (along the heading, or until x or y reaches a value), `arc` (tangent, by radius and angle; a positive angle turns left), `arcTo` (tangent to an end point, or through a point). `turn`/`turnTo` change the heading without drawing. `fillet` and `chamfer` round or bevel the corner at the pen, between the segment before and the segment after. `mirror(axis)` adds the mirror image of the path drawn so far. `close()` makes the region, `wire()` the open path. Each call returns a new Profile; `point` and `heading` tell where the pen is. Errors name the segment (the call that drew it) and the numbers that do not fit.
-Profile: export declare class Profile
-
-  // Profile.constructor (constructor)
-  constructor(start?: VectorLike | {
-          heading?: number;
-      }, options?: {
-          heading?: number;
-      });
-
-  // Where the pen is
-  readonly point: Vector
-
-  // Where the drawing started
-  readonly start: Vector
-
-  // The direction the pen moves in, degrees counterclockwise from +X (-180 to 180)
-  readonly heading: number
-
-  // The number of segments drawn (Python's `len(profile)`)
-  readonly length: number
-
-  // A straight line to a point
-  // Profile.lineTo (method)
-  lineTo(...args: (number | VectorLike | Coordinates)[]): Profile;
-
-  // A straight line by an offset from the pen
-  // Profile.lineBy (method)
-  lineBy(dx?: number | VectorLike, dy?: number): Profile;
-
-  // A straight line along the heading
-  // Profile.forward (method)
-  forward(length?: number | null | Coordinates, options?: Coordinates): Profile;
-
-  // Turn the heading by `angle` degrees (positive
-  // Profile.turn (method)
-  turn(angle: number): Profile;
-
-  // Set the heading (degrees counterclockwise from +X) without drawing
-  // Profile.turnTo (method)
-  turnTo(heading: number): Profile;
-
-  // A tangent arc of `radius` that turns the heading by `angle` degrees
-  // Profile.arc (method)
-  arc(radius: number, angle: number): Profile;
-
-  // An arc to an end point
-  // Profile.arcTo (method)
-  arcTo(...args: (number | VectorLike | {
-          through?: VectorLike | null;
-      })[]): Profile;
-
-  // Round the corner at the pen with a tangent arc of `radius`
-  // Profile.fillet (method)
-  fillet(radius: number): Profile;
-
-  // Bevel the corner at the pen
-  // Profile.chamfer (method)
-  chamfer(length: number): Profile;
-
-  // Continue with the mirror image of the path drawn so far, so that the whole outline is symmetric about `axis` (an axis in the XY plane
-  // Profile.mirror (method)
-  mirror(axis: Axis): Profile;
-
-  // The region inside the outline, as a Sketch on XY
-  // Profile.close (method)
-  close(options?: {
-          align?: AlignLike;
-      }): Sketch;
-
-  // The path as drawn, as an open Wire of exact lines and arcs (a sweep path, or a centerline for Stroke)
-  // Profile.wire (method)
-  wire(): Wire;
-
-  // Profile.toString (method)
-  toString(): string;
-
-  // Profile.[inspect] (method)
-  [inspect](): string;
-
-// One font
-Font: export declare class Font
-
-  // The font file (null for a font given as bytes)
-  readonly path: string | null
-
-  // The full name of the font ("Lato Regular")
-  readonly name: string
-
-  readonly unitsPerEm: number
-
-  readonly numGlyphs: number
-
-  // Height of the capital letters in font units
-  readonly capHeight: number
-
-  // Font.constructor (constructor)
-  constructor(source: string | Uint8Array);
-
-  // Font.toString (method)
-  toString(): string;
-
-  // The glyph of a character, or null when the font has none for it
-  // Font.glyphIndex (method)
-  glyphIndex(char: string): number | null;
-
-  // Every character the font maps to a glyph
-  // Font.characters (method)
-  characters(): string[];
-
-  // Advance width of a glyph in font units
-  // Font.advance (method)
-  advance(glyph: number): number;
-
-  // The kerning of two neighbouring glyphs
-  // Font.kerning (method)
-  kerning(left: number, right: number): PairAdjustment;
-
-  // "GPOS", "kern" or null
-  readonly kerningSource: string | null
-
-  // The contours of a glyph in font units (empty for a space)
-  // Font.outline (method)
-  outline(glyph: number): Contour[];
-
-// The data is not a font this reader can use (Python's FontError, a ValueError)
-FontError: export declare class FontError extends RangeError
-
-  // FontError.constructor (constructor)
-  constructor(message: string);
-
-// A list of locations
-Locations: export declare class Locations extends Array<Location>
-
-  static readonly [Symbol.species]: ArrayConstructor
-
-  // Locations.constructor (constructor)
-  constructor(...items: unknown[]);
-
-  // Each location applied to something
-  // Locations.mul (method)
-  mul(other: Location | Locations): Locations;
-  mul<T>(other: Shape | Iterable<T>): ShapeList<Any>;
-
-  // The pattern moved by a location (`location.mul(pattern)`)
-  // Locations.moved (method)
-  moved(location: Location): Locations;
-
-  // The pattern placed onto a plane or face
-  // Locations.on (method)
-  on(target: unknown): Locations;
-
-  readonly points: Vector[]
-
-  // Returns a string representation of an array
-  // Locations.toString (method)
-  toString(): string;
-
-  // Locations.[inspect] (method)
-  [inspect](): string;
-
-// A grid of control points around a part for free-form deformation (exact results)
-// Remarks: The points start evenly spaced over a box (`counts` points per direction, corners included). Move them, then `apply` the lattice to a part: space inside the box moves smoothly with the points (a Bezier volume; space outside the box follows the same polynomial). A lattice whose points were not moved changes nothing. `points` holds the world positions, `points[i][j][k]` = `[x, y, z]`, indexed along X, Y and Z; the arrays are writable: `lat.points[1][1][2][2] += 5` lifts one point. `move`, `scale` and `rotate` take a selection `[i, j, k]` of numbers (negative ones count from the end), `null` for all (Python's `:`) and arrays of numbers, or `layer(...)`; they change the lattice in place and return it.
-Lattice: export declare class Lattice
-
-  // The world positions of the points, `points[i][j][k]` = `[x, y, z]` (writable)
-  points: number[][][][]
-
-  // Lattice.constructor (constructor)
-  constructor(box: BoundBox | {
-          bbox(): BoundBox;
-      }, counts?: number | readonly number[], options?: {
-          margin?: number;
-      });
-  //   box: A BoundBox, or a shape whose bounding box is used
-  //   counts: Points per direction, one number or three, 2 to 12
-  //   options: `margin`
-
-  // Points per direction (X, Y, Z)
-  readonly counts: [number, number, number]
-
-  // The box the points started on
-  readonly box: BoundBox
-
-  // The starting positions (read-only)
-  readonly rest: readonly (readonly (readonly (readonly number[])[])[])[]
-
-  // How far each point was moved (`points - rest`)
-  readonly offsets: number[][][][]
-
-  // The points of one layer across an axis, as a selection
-  // Lattice.layer (method)
-  layer(axis: Axis | string, index: number): [LatticeLayers, LatticeLayers, LatticeLayers];
-
-  // Move the selected points by `offset`
-  // Lattice.move (method)
-  move(index: LatticeIndex, offset: VectorLike): this;
-
-  // Scale the selected points about `center` (default
-  // Lattice.scale (method)
-  scale(index: LatticeIndex, factor: number | VectorLike, center?: VectorLike | null): this;
-
-  // Turn the selected points by `angle` degrees about `axis`
-  // Lattice.rotate (method)
-  rotate(index: LatticeIndex, axis: Axis, angle: number): this;
-
-  // Put every point back where it started
-  // Lattice.reset (method)
-  reset(): this;
-
-  // An independent copy
-  // Lattice.copy (method)
-  copy(): Lattice;
-
-  // Where the lattice moves a point
-  // Lattice.map (method)
-  map(point: VectorLike): Vector;
-
-  // Deform a part (or a shell) with the lattice
-  // Remarks: The result is exact unless a face's image needs a degree above `MAX_DEGREE`; such faces are within `tolerance`. Throws a ModelingError when the lattice folds the part onto itself (a point moved past its neighbours).
-  // Lattice.apply (method)
-  apply(shape: Part, options?: {
-          tolerance?: number | null;
-      }): Part;
-  apply(shape: Shell, options?: {
-          tolerance?: number | null;
-      }): Shell;
-
-  // Lattice.toString (method)
-  toString(): string;
-
-// One bend of a sheet metal part
-// Remarks: `angle` in degrees, `radius` the inside radius, `length` the bend's extent along its axis. From `bends`, `axis` is the axis of the bend's cylinders. In a `FlatPattern`, `line` is the bend line (the middle of the bend's strip, at z = 0) and `direction` "up" or "down": where the sheet beyond the line folds to, seen from above (+Z).
-Bend: export declare class Bend
-
-  readonly angle: number
-
+  // Radius of a circular edge
   readonly radius: number
 
-  readonly thickness: number
+  // Center of a circular edge
+  readonly arcCenter: Vector
 
-  readonly kFactor: number
+  // Axis direction of a circular edge
+  readonly normal: Vector
 
-  readonly length: number
+  // Point at fraction `t` of the edge length (0 = start, 1 = end)
+  // Edge.pointAt (method)
+  pointAt(t?: number): Vector;
 
-  readonly axis: Axis | null
+  // Unit tangent at fraction `t` of the edge length, pointing along the edge
+  // Edge.tangentAt (method)
+  tangentAt(t?: number): Vector;
 
-  readonly line: Edge | null
+  // The point halfway along the edge (use `arcCenter` for a circle's center)
+  // Edge.center (method)
+  center(): Vector;
 
-  readonly direction: string | null
+  // The box along the axes around the edge
+  // Edge.bbox (method)
+  bbox(): BoundBox;
 
-  // Bend.constructor (constructor)
-  constructor(angle: number, radius: number, thickness: number, kFactor: number, length: number, axis?: Axis | null, line?: Edge | null, direction?: string | null);
+  // Distance to a point, or to a body (see `Part.distanceTo`)
+  // Edge.distanceTo (method)
+  distanceTo(point: VectorLike | Shape): number;
 
-  // The bend allowance (the width of the bend's strip in the flat)
-  readonly allowance: number
+  // How the two faces of the edge meet, checked at `samples` points along it (`Continuity`)
+  // Remarks: `angleTolerance` is the largest angle (degrees) between the faces' normals for G1; `curvatureTolerance` the largest difference of their curvatures across the edge for G2, relative to the larger of them (and at least `1e-3 / length`, so that nearly flat faces count as G2). RangeError for an edge that does not lie between two faces.
+  // Edge.continuity (method)
+  continuity(samples?: number, options?: {
+          angleTolerance?: number;
+          curvatureTolerance?: number;
+      }): Continuity;
 
-  // Equal fields (Python's dataclass `==`)
-  // Bend.equals (method)
+  // The point of the edge nearest to `point`
+  // Edge.closestPoint (method)
+  closestPoint(point: VectorLike | Vertex): Vector;
+
+  // Where on the edge the point nearest to `point` lies, as a fraction of the edge's length from its start (0) to its end (1), as `pointAt` takes it
+  // Edge.paramAtPoint (method)
+  paramAtPoint(point: VectorLike | Vertex): number;
+
+  // The part of the edge from `start` to `end`, each a fraction of the length (as in `pointAt`) or a point on the edge
+  // Remarks: const arc = CenterArc([0, 0], 10, 0, 180).trim(0.25, 0.75) // the arc from 45 to 135 degrees
+  // Edge.trim (method)
+  trim(start: number | VectorLike | Vertex, end: number | VectorLike | Vertex): Edge;
+
+  // The edge cut in two at `at`, a fraction of the length or a point on the edge
+  // Remarks: const [a, b] = Line([0, 0], [10, 0]).split(0.3) // 3 and 7 long
+  // Edge.split (method)
+  split(at: number | VectorLike | Vertex): [
+          Edge,
+          Edge
+      ];
+
+  // The edge made longer by `distance` at its `end` ('end', 'start' or 'both'), for cut tools and paths that must run past a body
+  // Remarks: Lines and arcs (circles and ellipses) go on as themselves. Other curves are continued as `continuity` says: 'G1' straight along the end tangent, 'G2' with the curvature at the end, 'natural' as the curve's own polynomial goes on. The added length is `distance` in every case. const groovePath = Spline([0, 0], [20, 8], [40, 0]).extend(5, { end: 'both' })
+  // Edge.extend (method)
+  extend(distance: number, options?: {
+          end?: 'start' | 'end' | 'both';
+          continuity?: 'G1' | 'G2' | 'natural';
+      }): Edge;
+
+  // Points where this edge meets `other`
+  // Remarks: Where the two run along each other, the points where that overlap starts and ends. Points closer than `tolerance` to the other shape count as on it (default: 1e-6, or 1e-9 of the size of the two where that is larger); points closer than that to each other count once. No point is an empty list.
+  // Edge.intersections (method)
+  intersections(other: Shape | Iterable<Shape>, options?: {
+          tolerance?: number | null;
+      }): Vector[];
+
+  // Where this edge meets `other` (see `intersections`), as fractions of its length (as `pointAt` and `split` take them), in order
+  // Edge.intersectionParams (method)
+  intersectionParams(other: Shape | Iterable<Shape>, options?: {
+          tolerance?: number | null;
+      }): number[];
+
+  // Points where the edge crosses itself (a figure eight, a looping spline), in order along it
+  // Edge.selfIntersections (method)
+  selfIntersections(options?: {
+          tolerance?: number | null;
+      }): Vector[];
+
+  // The curvature at fraction `t` of the length (as `pointAt`)
+  // Edge.curvatureAt (method)
+  curvatureAt(t?: number): number;
+
+  // The radius of curvature at fraction `t` of the length (`Infinity` where the edge runs straight)
+  // Edge.radiusAt (method)
+  radiusAt(t?: number): number;
+
+  // The smallest radius of curvature of the edge (as `Face.minRadius` is the face's)
+  // Remarks: const r = path.minRadius() const p = path.pointAt(path.minRadiusAt())
+  // Edge.minRadius (method)
+  minRadius(): number;
+
+  // Where the edge bends most tightly (`minRadius`)
+  // Edge.minRadiusAt (method)
+  minRadiusAt(): number;
+
+  // Where the edge changes the side it bends to (an S-curve has one), as fractions of its length (as `pointAt`), in order
+  // Edge.inflections (method)
+  inflections(): number[];
+
+  // The edge moved `distance` sideways in its plane
+  // Remarks: Lines stay lines and arcs stay arcs, exactly. Splines and ellipses are offset by the kernel within 1e-6 of their size. Where the edge bends toward that side more tightly than the distance (a radius of curvature below it, see `minRadius`), the offset would fold over itself and a ModelingError says where. A closed edge with a corner where it starts and ends (`Spline(...pts, pts[0])`) comes back as one closed edge: rounded at the corner where the offset pulls it apart, cut where its sides cross where it pushes them together (`Wire.offset` gives sharp and chamfered corners). `plane`: the plane the edge lies in, whose normal tells left from right. Default: the XY plane for an edge at one height, else the plane the edge lies in, its normal toward +Z (+Y, then +X, for vertical planes). const rail = Spline([0, 0], [20, 8], [40, 0]).offset(3) // 3 to the left (+Y side)
+  // Edge.offset (method)
+  offset(distance: number, options?: {
+          plane?: Plane | null;
+      }): Edge;
+
+  // The edge as lines and circular arcs within `tolerance` of it, end to end along it
+  // Remarks: const cut = Spline([0, 0], [10, 5], [20, -3], [30, 4]).toArcs(0.01) // 26 arcs
+  // Edge.toArcs (method)
+  toArcs(tolerance?: number): Wire;
+
+  // This edge bent to pass through `point` (and there in the direction `tangent`, if given)
+  // Remarks: Options: `tangent`, the direction of the edge at that point (its length does not count; it is the direction the edge runs in); `at`, where along the edge the point goes, as a fraction of its length (strictly between 0 and 1; default: where the edge comes closest to the point). The change is local: it moves the few control points near `at` (knots are inserted there when the edge has too few), so a point far from the edge makes a bump, not a new curve. const path = Spline([0, 0], [20, 10], [40, 0]).through([20, 15])
+  // Edge.through (method)
+  through(point: VectorLike | Vertex, options?: {
+          tangent?: VectorLike | null;
+          at?: number | null;
+      }): Edge;
+
+  // This edge with its ends moved to `start` and `end` and its directions there set to `startTangent` and `endTangent` (each optional
+  // Remarks: The kernel's own end deformation (`SmCurve::DeformToEndPointTargets`); the ends land on their targets exactly. const snapped = spline.match({ end: other.start, endTangent: other.tangentAt(0) }) // G1 joint
+  // Edge.match (method)
+  match(options?: {
+          start?: VectorLike | Vertex | null;
+          end?: VectorLike | Vertex | null;
+          startTangent?: VectorLike | null;
+          endTangent?: VectorLike | null;
+      }): Edge;
+
+  // The vertices at the edge's ends, start first (one for a closed edge)
+  // Edge.vertices (method)
+  vertices(): ShapeList<Vertex>;
+
+  // This edge, in a list
+  // Edge.edges (method)
+  edges(): ShapeList<Edge>;
+
+  // The faces of the body that meet at this edge (none for an edge of no body)
+  // Edge.faces (method)
+  faces(): ShapeList<Face>;
+
+  // This edge and the edges that continue it tangentially, through vertices where the next edge runs on in the same direction (within 10 degrees) between faces that meet this edge's faces smoothly, and so on along the run
+  // Edge.tangentChain (method)
+  tangentChain(): ShapeList<Edge>;
+
+  // The same edge traversed the other way
+  // Edge.reversed (method)
+  reversed(): Edge;
+
+  // This edge as a NURBS curve, from its start to its end
+  // Edge.nurbs (method)
+  nurbs(): Nurbs;
+
+  // The edge of a NURBS curve given by its data
+  // Remarks: `nurbs`: a `Nurbs`, or `{ degree, knots, points, weights }`: the degree (1 to 32), the knot vector with every knot as often as its multiplicity (`points.length + degree + 1` knots, not decreasing; the ends need not repeat), the control points (2D points lie at z = 0) and a positive weight per point, or `null` for a non-rational curve. The curve runs from `knots[degree]` to `knots[knots.length - degree - 1]`; where the ends do not repeat `degree + 1` times, it starts and ends inside the control polygon. const n = edge.nurbs() const points = [...n.points] points[2] = points[2].add([0, 0, 5]) // pull one control point up const bent = Edge.fromNurbs(new Nurbs(n.degree, n.knots, points, n.weights))
+  // Edge.fromNurbs (method)
+  static fromNurbs(nurbs: Nurbs | {
+          degree: number;
+          knots: readonly number[];
+          points: readonly VectorLike[];
+          weights?: readonly number[] | null;
+      }): Edge;
+
+  // The same curve with the knots it does not need taken out
+  // Edge.removeKnots (method)
+  removeKnots(): Edge;
+
+  // A wire of this edge and the other (Python's `+`)
+  // Edge.add (method)
+  add(other: Edge | Wire): Wire;
+
+  // Edge.equals (method)
   equals(other: unknown): boolean;
 
-  // Bend.toString (method)
+  // Edge.toString (method)
   toString(): string;
 
-  // Bend.[inspect] (method)
-  [inspect](): string;
+// A bounded piece of a surface, belonging to a body (a part, shell or sketch)
+Face: export declare class Face extends Shape
 
-// The unfolded part, laid on the XY plane
-// Remarks: `outline` is the cut contour (outer boundary and holes) as a sketch at z = 0; `bends` carry the bend lines (at z = 0) with angle, radius, direction and allowance.
-FlatPattern: export declare class FlatPattern
+  // Face.constructor (constructor)
+  constructor(owner: _Body | null, kface: number);
 
-  readonly part: Part
+  // The body this face belongs to
+  readonly owner: Part | Shell | null
 
-  readonly outline: Sketch
+  // The face's own color as [r, g, b] from 0 to 1, or null
+  // Remarks: Faces get one with `body.colored(color, { faces })` and from STEP files that color single faces. It stays with the face through later operations (kernel plan T5): with both pieces of a face a Boolean splits, with the walls of a hole cut by a tool whose faces have one, with a face moved, mirrored or scaled, with the offsets of a face in a shell; faces an operation makes anew (a fillet's round, the rim around a shell's opening) have none.
+  readonly color: [
+          number,
+          number,
+          number
+      ] | null
 
-  readonly bends: Bend[]
+  // The face's name (`body.named(name, { faces })`, or from the `ADVANCED_FACE` of a STEP file), or null
+  readonly name: string | null
 
-  readonly thickness: number
+  // The cells of its part that this face bounds, as indices into `Part.cells()`
+  readonly cells: number[]
 
-  readonly kFactor: number
+  // "plane", "cylinder", "cone", "sphere", "torus", "revolution", "extrusion", "bspline", "offset" or "other"
+  readonly geomType: string
 
-  // FlatPattern.constructor (constructor)
-  constructor(part: Part, outline: Sketch, bends: Bend[], thickness: number, kFactor: number);
+  // The face's area
+  readonly area: number
 
-  // The bend lines (middle of each bend's strip), at z = 0
-  readonly bendLines: ShapeList<Edge>
+  // Area centroid
+  // Face.center (method)
+  center(): Vector;
 
-  // Size of the blank
-  readonly size: Vector
+  // A point guaranteed to lie on the face
+  // Face.interiorPoint (method)
+  interiorPoint(): Vector;
 
-  // Equal fields (Python's dataclass `==`)
-  // FlatPattern.equals (method)
-  equals(other: unknown): boolean;
+  // Outward unit normal at the face point closest to `point` (default
+  // Face.normalAt (method)
+  normalAt(point?: VectorLike | null): Vector;
 
-  // FlatPattern.toString (method)
-  toString(): string;
+  // True for planes and for flat B-spline faces (control points in one plane)
+  readonly isPlanar: boolean
 
-  // FlatPattern.[inspect] (method)
-  [inspect](): string;
-
-// Everything `readStep` reads from a STEP file
-StepModel: export declare class StepModel
-
-  readonly bodies: ShapeList<Part | Shell>
-
-  readonly frames: StepFrame[]
-
-  readonly curves: StepCurve[]
-
-  readonly points: StepPoint[]
-
-  // StepModel.constructor (constructor)
-  constructor(bodies: ShapeList<Part | Shell>, frames?: StepFrame[], curves?: StepCurve[], points?: StepPoint[]);
-
-  // The coordinate system called `name` as a `Plane`
-  // StepModel.frame (method)
-  frame(name: string, product?: string | null): Plane;
-
-  // StepModel.equals (method)
-  equals(other: unknown): boolean;
-
-  // StepModel.toString (method)
-  toString(): string;
-
-  // StepModel.[inspect] (method)
-  [inspect](): string;
-
-// A curve of a STEP file that belongs to no body (wireframe geometry, contours), at its place in the assembly
-StepCurve: export declare class StepCurve
-
-  readonly name: string
-
-  readonly shape: Edge | Wire
-
-  readonly product: string
-
-  // [r, g, b] from 0 to 1, or null
-  readonly color: readonly number[] | null
-
-  // StepCurve.constructor (constructor)
-  constructor(name: string, shape: Edge | Wire, product?: string, color?: readonly number[] | null);
-
-  // StepCurve.equals (method)
-  equals(other: unknown): boolean;
-
-  // StepCurve.toString (method)
-  toString(): string;
-
-  // StepCurve.[inspect] (method)
-  [inspect](): string;
-
-// A coordinate system of a STEP file (a named `AXIS2_PLACEMENT_3D`) at its place in the assembly
-StepFrame: export declare class StepFrame
-
-  readonly name: string
-
+  // The face's plane
   readonly plane: Plane
 
-  readonly product: string
+  // Radius of a cylinder, sphere or cone (at its base), minor radius of a torus
+  readonly radius: number
 
-  // [r, g, b] from 0 to 1, or null
-  readonly color: readonly number[] | null
+  // Major radius of a torus
+  readonly majorRadius: number
 
-  // StepFrame.constructor (constructor)
-  constructor(name: string, plane: Plane, product?: string, color?: readonly number[] | null);
+  // Half the opening angle of a cone, in degrees
+  readonly coneAngle: number
 
-  // The placement that moves the world origin onto this coordinate system
-  readonly location: Location
+  // Axis of a cylinder, cone, sphere, torus or surface of revolution
+  readonly axis: Axis
 
-  // StepFrame.equals (method)
+  // The box along the axes around the face
+  // Face.bbox (method)
+  bbox(): BoundBox;
+
+  // Distance to a point, or to a body (see `Part.distanceTo`)
+  // Face.distanceTo (method)
+  distanceTo(point: VectorLike | Shape): number;
+
+  // The point of the face nearest to `point` (within its boundary)
+  // Face.closestPoint (method)
+  closestPoint(point: VectorLike): Vector;
+
+  // The parameters `[u, v]` of the face's point nearest to `point`, as fractions (0 to 1) of the face's parameter box
+  // Face.uvAt (method)
+  uvAt(point: VectorLike): [
+          number,
+          number
+      ];
+
+  // The point of the face's surface at `(u, v)`, fractions (0 to 1) of the face's parameter box
+  // Face.positionAt (method)
+  positionAt(u: number, v: number): Vector;
+
+  // The curvature of the face at its point nearest to `point` (default
+  // Face.curvatureAt (method)
+  curvatureAt(point?: VectorLike | null): Curvature;
+
+  // The smallest radius of curvature on the face, `1 / max(|k1|, |k2|)`
+  // Face.minRadius (method)
+  minRadius(): number;
+
+  // The face's surface as a NURBS (`NurbsSurface`)
+  // Face.nurbs (method)
+  nurbs(): NurbsSurface;
+
+  // Where a ray meets this face, nearest first (see `Part.raycast`)
+  // Face.raycast (method)
+  raycast(origin: VectorLike | Axis, direction?: VectorLike | Axis | null): Hit<Face>[];
+
+  // The curve projected onto this face along its normals
+  // Face.project (method)
+  project(curve: Edge | Wire): ShapeList<Edge>;
+
+  // The curve of the face along which one of its surface parameters is constant
+  // Face.iso (method)
+  iso(options?: IsoOptions): ShapeList<Edge>;
+
+  // A drawing on XY wrapped onto this face, as a label onto a can
+  // Remarks: `shape`: an edge, a wire, a sketch or edges, drawn on XY (z is ignored). `at`: where the drawing's origin goes, a point of the face's surface (default: the middle of the face's parameter range). Options: `direction`, where its X axis points (projected onto the face). const label = can.faces().cylinders()[0].wrap(Text('SMLIB', 8), [0, -20, 0], { direction: [1, 0, 0] })
+  // Face.wrap (method)
+  wrap(shape: Edge | Wire | Sketch | Iterable<Edge>, at?: VectorLike | Vertex | null, options?: {
+          direction?: VectorLike | null;
+      }): ShapeList<Edge>;
+
+  // The face's outer boundary
+  // Face.outerWire (method)
+  outerWire(): Wire;
+
+  // The boundaries of the face's holes
+  // Face.innerWires (method)
+  innerWires(): ShapeList<Wire>;
+
+  // The face's boundaries
+  // Face.wires (method)
+  wires(): ShapeList<Wire>;
+
+  // The face's edges (seam edges only with `seams`)
+  // Face.edges (method)
+  edges(options?: {
+          seams?: boolean;
+      }): ShapeList<Edge>;
+
+  // The face's vertices
+  // Face.vertices (method)
+  vertices(): ShapeList<Vertex>;
+
+  // This face, in a list
+  // Face.faces (method)
+  faces(): ShapeList<Face>;
+
+  // Faces sharing an edge with this one
+  // Face.neighbors (method)
+  neighbors(): ShapeList<Face>;
+
+  // A sketch holding a copy of this (planar) face
+  // Face.toSketch (method)
+  toSketch(): Sketch;
+
+  // A sheet body holding a copy of this face
+  // Face.toShell (method)
+  toShell(): Shell;
+
+  // A sheet of this face moved by `distance` along its normal (`normalAt`
+  // Face.offset (method)
+  offset(distance: number): Shell;
+
+  // The pieces of this face cut along curves that lie on it, as the faces of a new sheet
+  // Face.split (method)
+  split(curves: Edge | Wire | Iterable<Edge | Wire>): ShapeList<Face>;
+  //   curves: Edges or wires on the face (see `Shell.trim`)
+
+  // A copy of this face, turned over
+  // Face.flipped (method)
+  flipped(): Shell;
+
+  // The whole surface this face lies on, as a sheet of one face
+  // Remarks: A cylindrical face cut out of a box comes back as the whole cylinder the cut left it on (its full height and all around), a B-spline face as its whole surface. A plane has no border of its own: it comes back as the smallest rectangle around the face, along the plane's own directions. The sheet's normal follows this face's (`normalAt`).
+  // Face.untrimmed (method)
+  untrimmed(): Shell;
+
+  // The face's surface grown past its sides, as a sheet of one face
+  // Face.extend (method)
+  extend(distance: number, options?: {
+          sides?: Edge | Iterable<Edge> | null;
+          continuity?: 'natural' | 'G1' | 'G2';
+      }): Shell;
+  //   distance: How far past each side, measured along the surface (across the middle of the side)
+  //   options: `sides`
+
+  // Extrude a planar face along its normal (see `Sketch.extrude`)
+  // Face.extrude (method)
+  extrude(amount: number, options?: ExtrudeOptions): Part;
+
+  // Face.equals (method)
   equals(other: unknown): boolean;
 
-  // StepFrame.toString (method)
+  // Face.toString (method)
   toString(): string;
 
-  // StepFrame.[inspect] (method)
+MassProperties: export declare class MassProperties
+
+  // The mass
+  readonly mass: number
+
+  // The volume (mm³)
+  readonly volume: number
+
+  // The surface area (mm²)
+  readonly area: number
+
+  // The center of mass
+  readonly center: Vector
+
+  // The inertia tensor about the center of mass, axes parallel to the world axes (3 × 3)
+  readonly inertia: number[][]
+
+  // The density the mass was computed with
+  readonly density: number
+
+  // MassProperties.constructor (constructor)
+  constructor(mass: number, volume: number, area: number, center: Vector, inertia: number[][], density: number);
+
+  // The principal moments of inertia, smallest first
+  readonly principalMoments: [
+          number,
+          number,
+          number
+      ]
+
+  // The principal axes of inertia (directions), in the order of `principalMoments`
+  readonly principalAxes: [
+          Vector,
+          Vector,
+          Vector
+      ]
+
+  // The radius of gyration about each principal axis, `sqrt(moment / mass)`, in the order of `principalMoments`
+  readonly radiiOfGyration: [
+          number,
+          number,
+          number
+      ]
+
+  // The inertia tensor about `point` (axes parallel to the world axes)
+  // MassProperties.inertiaAbout (method)
+  inertiaAbout(point: VectorLike): number[][];
+
+  // The moment of inertia about an axis (for example a shaft's axis or a pivot)
+  // MassProperties.momentAbout (method)
+  momentAbout(axis: Axis): number;
+
+  // MassProperties.toString (method)
+  toString(): string;
+
+  // MassProperties.[inspect] (method)
   [inspect](): string;

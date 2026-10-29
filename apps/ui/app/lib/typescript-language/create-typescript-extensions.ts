@@ -182,7 +182,11 @@ export function createTypeScriptActions(options: TypeScriptExtensionOptions): Ty
   const { client } = options.service;
   const { uri } = options.document;
   const navigateTarget = async (target: TypeScriptLocation): Promise<void> => {
-    if (target.uri.startsWith('file:///__typescript_lib__/') || target.uri.startsWith('file:///cdn-types/')) {
+    if (
+      target.uri.startsWith('file:///__typescript_lib__/') ||
+      target.uri.startsWith('file:///cdn-types/') ||
+      target.uri.startsWith('file:///node_modules/')
+    ) {
       const text = await client.request<string | undefined>({ kind: 'readDeclaration', uri: target.uri });
       if (text === undefined) {
         throw new Error(`TypeScript declaration unavailable: ${target.uri}`);
@@ -344,6 +348,8 @@ export function createTypeScriptActions(options: TypeScriptExtensionOptions): Ty
   };
 }
 
+const environmentChanged = StateEffect.define<number>();
+
 const signatureEffect = StateEffect.define<Tooltip | undefined>();
 const signatureField = StateField.define<Tooltip | undefined>({
   create: () => undefined,
@@ -378,6 +384,7 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
   const { client } = options.service;
   const { uri } = options.document;
   const actions = createTypeScriptActions(options);
+  const attachedViews = new WeakSet<EditorView>();
   let outlineSpans: readonly ts.OutliningSpan[] = [];
   let latestDiagnostics: readonly TsDiagnostic[] = [];
   let diagnosticsVersion = -1;
@@ -567,16 +574,40 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
         return null;
       }
     }),
+    ViewPlugin.define((view) => {
+      attachedViews.add(view);
+      const unsubscribe = options.service.subscribeEnvironment(() => {
+        diagnosticsVersion = -1;
+        latestDiagnostics = [];
+        view.dispatch({ effects: environmentChanged.of(options.service.environmentRevision) });
+      });
+      return {
+        destroy: () => {
+          attachedViews.delete(view);
+          unsubscribe();
+        },
+      };
+    }),
     linter(
       async (view) => {
         try {
           const version = await revision(options);
-          const result = await client.request<readonly TsDiagnostic[]>({
-            kind: 'diagnostics',
-            uri,
-            expectedVersion: version,
-          });
-          if (!unchanged(options, version)) {
+          let environmentRevision: number;
+          let result: readonly TsDiagnostic[];
+          do {
+            environmentRevision = options.service.environmentRevision;
+            // oxlint-disable-next-line no-await-in-loop -- retry a response invalidated by newly acquired declarations.
+            result = await client.request<readonly TsDiagnostic[]>({
+              kind: 'diagnostics',
+              uri,
+              expectedVersion: version,
+            });
+          } while (
+            attachedViews.has(view) &&
+            unchanged(options, version) &&
+            environmentRevision !== options.service.environmentRevision
+          );
+          if (!attachedViews.has(view) || !unchanged(options, version)) {
             return [];
           }
           const { length } = view.state.doc;
@@ -590,10 +621,11 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
           if (!unchanged(options, version)) {
             return [];
           }
+
           latestDiagnostics = result;
           diagnosticsVersion = version;
           options.publishDiagnostics?.(uri, version, diagnostics);
-          if (!diagnosticsMarked) {
+          if (!diagnosticsMarked && !result.some((entry) => entry.code === 2307)) {
             diagnosticsMarked = true;
             performance.mark('tau.editor.first-correct-diagnostic', { detail: { viewId: view.dom.dataset['viewId'] } });
           }
@@ -603,7 +635,13 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
           return [];
         }
       },
-      { delay: 250 },
+      {
+        delay: 250,
+        needsRefresh: (update) =>
+          update.transactions.some((transaction) =>
+            transaction.effects.some((effect) => effect.is(environmentChanged)),
+          ),
+      },
     ),
     signatureField,
     inlayHints,

@@ -5,6 +5,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { and, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { lockProjectLifecycle, readProjectDeletion } from '#database/project-lifecycle.js';
 import { withOwnerLock } from '#database/owner-lock.js';
+import { admitEvidenceErasure } from '#api/agent-observability/evidence-erasure.js';
 import type { Database } from '#database/owner-lock.js';
 import {
   project,
@@ -137,6 +138,8 @@ export async function requestProjectDeletion(input: {
       .set({ unpublishedAt: at })
       .where(and(eq(publication.projectId, row.id), isNull(publication.unpublishedAt)));
     await transaction.update(project).set({ currentPublicationId: null }).where(eq(project.id, row.id));
+    /* In the same transaction as the fence, so no agent evidence is sent after it and every trace sent before is named for deletion (T13). */
+    await admitEvidenceErasure(transaction, { scope: 'project', subjectId: row.id });
   });
 }
 

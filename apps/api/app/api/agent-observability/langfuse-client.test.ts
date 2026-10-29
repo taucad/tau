@@ -98,4 +98,35 @@ describe('LangfuseClient', () => {
       client(vi.fn<typeof fetch>().mockRejectedValue(failure('ECONNREFUSED'))).lookup(identity, from),
     ).resolves.toBe('unavailable');
   });
+
+  it('should request a bulk trace deletion and retry anything but a 2xx', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json(200, { message: 'queued' }));
+    const client = (fetch: typeof globalThis.fetch) => new LangfuseClient(target, 1000, fetch);
+
+    await expect(client(fetcher).deleteTraces(['t1', 't2'])).resolves.toEqual({ kind: 'requested' });
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(url instanceof URL ? url.href : url).toBe('https://langfuse.test.invalid/api/public/traces');
+    expect(init).toMatchObject({
+      method: 'DELETE',
+      body: JSON.stringify({ traceIds: ['t1', 't2'] }),
+      redirect: 'error',
+    });
+    await expect(client(vi.fn<typeof fetch>().mockResolvedValue(json(429, {}))).deleteTraces(['t1'])).resolves.toEqual({
+      kind: 'retry',
+      reason: 'http-429',
+    });
+    await expect(
+      client(vi.fn<typeof fetch>().mockRejectedValue(failure('ECONNREFUSED'))).deleteTraces(['t1']),
+    ).resolves.toEqual({ kind: 'retry', reason: 'unreachable' });
+  });
+
+  it('should read a trace back as absent only on a 404', async () => {
+    const client = (status: number) =>
+      new LangfuseClient(target, 1000, vi.fn<typeof fetch>().mockResolvedValue(json(status, {})));
+
+    await expect(client(200).traceExists('t1')).resolves.toBe('present');
+    await expect(client(404).traceExists('t1')).resolves.toBe('absent');
+    await expect(client(500).traceExists('t1')).resolves.toBe('unavailable');
+    await expect(client(401).traceExists('t1')).resolves.toBe('unavailable');
+  });
 });

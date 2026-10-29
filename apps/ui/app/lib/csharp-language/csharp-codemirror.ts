@@ -99,7 +99,7 @@ export class CsharpBackend {
   readonly #documents = new Map<EditorDocument, OpenDocument>();
   readonly #failures = new Topic<Error>({ name: 'CsharpBackend.failures' });
   readonly #bootFailure = Promise.withResolvers<never>();
-  #unsubscribeTree: () => void = () => undefined;
+  #unsubscribeTree: (() => void) | undefined;
   #diagnosticsTimer: ReturnType<typeof setTimeout> | undefined;
   #refreshTimer: ReturnType<typeof setTimeout> | undefined;
   #refs = 0;
@@ -203,7 +203,7 @@ export class CsharpBackend {
     }
     clearTimeout(this.#diagnosticsTimer);
     clearTimeout(this.#refreshTimer);
-    this.#unsubscribeTree();
+    this.#unsubscribeTree?.();
     for (const entry of this.#documents.values()) {
       entry.unsubscribe();
     }

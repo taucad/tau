@@ -244,11 +244,15 @@ jobs:
         run: pnpm nx run picogk:test:native-darwin
       - name: Record the verdict
         if: always() && steps.suites.conclusion != 'skipped'
+        # The invariant report reads `passed` or anything else as a failure, which is the vocabulary
+        # every other evidence file in that directory uses. A step's own outcome says `success`, so
+        # recording it verbatim made I5 unpassable: this translates the one word rather than
+        # teaching the reader a second spelling of it.
         run: |
           mkdir -p out/evidence
           cat > out/evidence/desktop-neutrality.json <<JSON
           {
-            "status": "${{ steps.suites.outcome }}",
+            "status": "${{ steps.suites.outcome == 'success' && 'passed' || 'failed' }}",
             "host": "darwin-arm64",
             "suite": "picogk:test:native-darwin"
           }

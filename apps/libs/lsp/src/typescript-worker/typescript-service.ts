@@ -22,6 +22,9 @@ export type TypeScriptLocation = Readonly<{
   length: number;
 }>;
 
+const completionPreferences: ts.UserPreferences = { includeCompletionsForModuleExports: true };
+const completionFormatSettings: ts.FormatCodeSettings = { indentSize: 2, tabSize: 2, convertTabsToSpaces: true };
+
 /** A documentation part; `{@link}` names carry the resolved location of their target. */
 export type TypeScriptDocumentationPart = ts.SymbolDisplayPart & Readonly<{ location?: TypeScriptLocation }>;
 
@@ -238,7 +241,7 @@ export class TypeScriptProjectService {
   }
 
   public getCompletions(uri: string, position: number): ts.WithMetadata<ts.CompletionInfo> | undefined {
-    return this.service.getCompletionsAtPosition(toPath(uri), position, { includeCompletionsForModuleExports: true });
+    return this.service.getCompletionsAtPosition(toPath(uri), position, completionPreferences);
   }
 
   public getCompletionDetails(
@@ -251,13 +254,14 @@ export class TypeScriptProjectService {
     }>,
   ): ts.CompletionEntryDetails | undefined {
     const { uri, position, name, source, data } = request;
+    // Auto-import code actions format their edits, so details need format settings and the same preferences.
     const details = this.service.getCompletionEntryDetails(
       toPath(uri),
       position,
       name,
-      undefined,
+      completionFormatSettings,
       source,
-      undefined,
+      completionPreferences,
       data,
     );
     return details && this.withLinkLocations(details);

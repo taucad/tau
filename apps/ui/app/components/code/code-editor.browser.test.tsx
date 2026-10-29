@@ -448,6 +448,83 @@ it('opens TypeScript definitions on Mod-click and from {@link} references in hov
   }
 }, 60_000);
 
+it('adds the import when a TypeScript auto-import completion is accepted with Enter after more typing', async () => {
+  const [{ createTypeScriptService }, { createTypeScriptExtensions }] = await Promise.all([
+    import('#lib/typescript-language/typescript-service.js'),
+    import('#lib/typescript-language/create-typescript-extensions.js'),
+  ]);
+  const sourceDocument = new EditorDocument(
+    'layout.ts',
+    "import type { MechanismSource } from '@taucad/kinematics';\n\nexport type Test = M",
+  );
+  const service = await createTypeScriptService({ dynamicTypes: false });
+  let view: EditorView | undefined;
+  try {
+    await service.client.setExtraLib(
+      'file:///node_modules/@taucad/kinematics/index.d.ts',
+      'export interface Mechanism { name: string }\nexport interface MechanismSource { id: string }\nexport type MechanismUnits = "mm";\n',
+    );
+    await service.attach(sourceDocument);
+    const extensions = createTypeScriptExtensions({
+      document: sourceDocument,
+      service,
+      navigate: () => undefined,
+      applyWorkspaceEdits: async (edits) => {
+        for (const edit of edits) {
+          if (edit.uri !== sourceDocument.uri || edit.baseText !== sourceDocument.text) {
+            return false;
+          }
+          sourceDocument.apply({
+            expectedVersion: sourceDocument.version,
+            origin: 'workspace-edit',
+            changes: edit.changes,
+          });
+        }
+        return true;
+      },
+    });
+    render(
+      <div className='h-72'>
+        <CodeEditor
+          document={sourceDocument}
+          viewId='auto-import'
+          languageId='typescript'
+          extensions={extensions}
+          onMount={(mounted) => {
+            view = mounted;
+          }}
+        />
+      </div>,
+    );
+    await expect.poll(() => view).toBeDefined();
+    view!.dispatch({ selection: { anchor: sourceDocument.text.length } });
+    view!.focus();
+    startCompletion(view!);
+    await expect.poll(() => document.querySelector('.cm-tooltip-autocomplete')?.textContent).toContain('Mechanism');
+    await userEvent.keyboard('ec');
+    await expect
+      .poll(() => document.querySelector('.cm-tooltip-autocomplete [aria-selected="true"]')?.textContent)
+      .toBeTruthy();
+    await expect
+      .poll(() => document.querySelector('.cm-tooltip-autocomplete')?.textContent)
+      .toContain('MechanismUnits');
+    for (let index = 0; index < 5; index += 1) {
+      const selected = document.querySelector('.cm-tooltip-autocomplete [aria-selected="true"]')?.textContent ?? '';
+      if (/^Mechanism(?!Source|Units)/u.test(selected)) {
+        break;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- arrow through the open list one row at a time.
+      await userEvent.keyboard('{ArrowDown}');
+    }
+    await userEvent.keyboard('{Enter}');
+    await expect
+      .poll(() => sourceDocument.text)
+      .toBe("import type { Mechanism, MechanismSource } from '@taucad/kinematics';\n\nexport type Test = Mechanism");
+  } finally {
+    service.dispose();
+  }
+}, 60_000);
+
 it('colors JSON keys by seven nesting levels and cycles brace colors', async () => {
   const keys = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
   let source = '"value"';

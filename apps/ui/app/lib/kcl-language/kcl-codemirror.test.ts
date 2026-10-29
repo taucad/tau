@@ -7,6 +7,7 @@ import type { Completion } from '@codemirror/autocomplete';
 import type * as LSP from 'vscode-languageserver-protocol';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { EditorDocument } from '#lib/editor-document.js';
+import type { TextChange } from '#lib/editor-document.js';
 import { EditorDiagnostics } from '#lib/editor-diagnostics.js';
 import type { KclLspClient } from '#lib/kcl-language/lsp/kcl-lsp-client.js';
 import type { KclSymbol, KclSymbolService } from '#lib/kcl-language/lsp/kcl-symbol-service.js';
@@ -99,6 +100,54 @@ describe('KCL completion parity', () => {
         expect(currentCompletions(view.state)).toHaveLength(1);
       });
       expect(currentCompletions(view.state)[0]).toMatchObject({ label: 'stringLength', displayLabel: 'length' });
+    } finally {
+      view.destroy();
+    }
+  });
+
+  it('applies an accepted completion and its import edit after typing narrowed the open list', () => {
+    const source = 'import thing from "a.kcl"\n\nx = ge';
+    const document = new EditorDocument('main.kcl', source);
+    const view = new EditorView({
+      state: EditorState.create({ doc: source, selection: { anchor: source.length } }),
+      parent: globalThis.document.body,
+      dispatchTransactions: (transactions, current) => {
+        current.update(transactions);
+        for (const transaction of transactions) {
+          const changes: TextChange[] = [];
+          // oxlint-disable-next-line max-params -- CodeMirror's iterator supplies five positional values.
+          transaction.changes.iterChanges((from, to, _fromB, _toB, inserted) => {
+            changes.push({ from, to, insert: inserted.toString() });
+          });
+          if (changes.length > 0) {
+            document.apply({ expectedVersion: document.version, origin: 'view', changes });
+          }
+        }
+      },
+    });
+    const completion = kclLspCompletion(
+      {
+        label: 'gear',
+        textEdit: { range: { start: { line: 2, character: 4 }, end: { line: 2, character: 6 } }, newText: 'gear' },
+        additionalTextEdits: [
+          {
+            range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+            newText: 'import gear from "gear.kcl"\n',
+          },
+        ],
+      },
+      { document, version: document.version, isDisposed: () => false },
+    );
+    try {
+      view.dispatch({ changes: { from: source.length, insert: 'a' } });
+      const from = source.indexOf('ge');
+      const { apply } = completion;
+      if (typeof apply !== 'function') {
+        throw new TypeError('KCL completions apply through a function');
+      }
+      apply(view, completion, from, view.state.doc.length);
+      expect(view.state.doc.toString()).toBe('import gear from "gear.kcl"\nimport thing from "a.kcl"\n\nx = gear');
+      expect(document.text).toBe(view.state.doc.toString());
     } finally {
       view.destroy();
     }

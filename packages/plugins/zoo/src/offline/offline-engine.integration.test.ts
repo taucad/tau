@@ -120,6 +120,14 @@ describe('offline KCL execution', () => {
       { type: 'gltf', storage: 'binary' },
       ([file]) => {
         expect(text(file!.contents.subarray(0, 4))).toBe('glTF');
+        const jsonLength = new DataView(file!.contents.buffer, file!.contents.byteOffset).getUint32(12, true);
+        const json = JSON.parse(text(file!.contents.subarray(20, 20 + jsonLength))) as {
+          meshes: Array<{ primitives: Array<{ mode?: number; extras?: { edgeGroups?: unknown[] } }> }>;
+        };
+        const lines = json.meshes.flatMap((mesh) => mesh.primitives).filter((primitive) => primitive.mode === 1);
+        // A box with a through hole: 12 box edges, plus two circles and the cylinder's seam.
+        expect(lines).toHaveLength(1);
+        expect(lines[0]!.extras?.edgeGroups?.length).toBeGreaterThanOrEqual(15);
       },
     ],
     [

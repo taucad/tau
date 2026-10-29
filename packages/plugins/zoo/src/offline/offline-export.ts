@@ -10,6 +10,8 @@ import type { Oc, TopoDS_Shape } from '#offline/offline-occt.js';
 import { compound } from '#offline/offline-occt.js';
 import type { SolidEntity } from '#offline/offline-scene.js';
 import { OfflineEngineError } from '#offline/offline-engine.types.js';
+import { appendEdgesToGlb, appendEdgesToGltf, extractShapeEdges } from '#offline/offline-edges.js';
+import type { GltfJson, ShapeEdges } from '#offline/offline-edges.js';
 
 type Axis = { axis: 'x' | 'y' | 'z'; direction: 'positive' | 'negative' };
 type Coords = { forward: Axis; up: Axis };
@@ -191,13 +193,21 @@ const exportGltf = (
     throw new OfflineEngineError('glTF export failed', 'internal_engine');
   }
 
+  // The B-rep edge overlay the Replicad and OpenCascade kernels draw, read from the same triangulation.
+  const edges = new Map<string, ShapeEdges>();
+  for (const solid of solids) {
+    if (!solid.shape.IsNull()) {
+      edges.set(solid.id, extractShapeEdges(oc, solid.shape, { linear: linearDeflection, angular: angularDeflection }));
+    }
+  }
+
   if (binary) {
-    return [{ name: 'output.glb', bytes: readAndUnlink(oc, path) }];
+    return [{ name: 'output.glb', bytes: appendEdgesToGlb(readAndUnlink(oc, path), edges) }];
   }
 
   const binPath = path.replace(/\.gltf$/, '.bin');
-  const json = JSON.parse(new TextDecoder().decode(readAndUnlink(oc, path))) as { buffers?: Array<{ uri?: string }> };
-  const bin = fileExists(oc, binPath) ? readAndUnlink(oc, binPath) : new Uint8Array();
+  const json = JSON.parse(new TextDecoder().decode(readAndUnlink(oc, path))) as GltfJson;
+  const bin = appendEdgesToGltf(json, fileExists(oc, binPath) ? readAndUnlink(oc, binPath) : new Uint8Array(), edges);
   for (const buffer of json.buffers ?? []) {
     buffer.uri = `data:application/octet-stream;base64,${toBase64(bin)}`;
   }

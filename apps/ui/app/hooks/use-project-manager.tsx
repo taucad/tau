@@ -768,6 +768,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   const workspaceTelemetry = useWorkspaceTelemetry();
   const projectNameClient = useProjectNameClient();
   const discoveryReadinessRef = useRef<Promise<void> | undefined>(undefined);
+  const journalReadinessRef = useRef<Promise<PendingProjectOperation[]> | undefined>(undefined);
   /** Only callers already waiting for bootstrap may reuse its completed discovery generation. */
   const discoveryBootstrapCompleteRef = useRef(false);
   const recoveryLoopRef = useRef<Promise<void> | undefined>(undefined);
@@ -2026,6 +2027,28 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [getReadiedWorker, invalidateProjectsList],
   );
 
+  const ensureJournalReady = useCallback(async (): Promise<PendingProjectOperation[]> => {
+    if (journalReadinessRef.current) {
+      return journalReadinessRef.current;
+    }
+    const pending = (async () => {
+      const worker = await getReadiedWorker();
+      const operations = await worker.getPendingProjectOperations();
+      recoveriesRef.current = new Map(
+        operations.map((operation) => [operation.operationId, pendingOperationRecovery(operation)]),
+      );
+      setRecoveries([...recoveriesRef.current.values()]);
+      return operations;
+    })();
+    journalReadinessRef.current = pending;
+    try {
+      return await pending;
+    } catch (error) {
+      journalReadinessRef.current = undefined;
+      throw error;
+    }
+  }, [getReadiedWorker]);
+
   const ensureDiscoveryReady = useCallback(async (): Promise<void> => {
     if (discoveryReadinessRef.current) {
       return discoveryReadinessRef.current;
@@ -2033,11 +2056,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     discoveryBootstrapCompleteRef.current = false;
     const promise = (async () => {
       const worker = await getReadiedWorker();
-      const operations = await worker.getPendingProjectOperations();
-      recoveriesRef.current = new Map(
-        operations.map((operation) => [operation.operationId, pendingOperationRecovery(operation)]),
-      );
-      setRecoveries([...recoveriesRef.current.values()]);
+      const operations = await ensureJournalReady();
       await discoverProjects({ quarantinedLocators: quarantinedLocatorsOf(recoveriesRef.current.values()) });
 
       const loop = (async (): Promise<void> => {
@@ -2058,7 +2077,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       discoveryBootstrapCompleteRef.current = false;
       throw error;
     }
-  }, [discoverProjects, getReadiedWorker, settleRecovery]);
+  }, [discoverProjects, ensureJournalReady, getReadiedWorker, settleRecovery]);
 
   /**
    * Release the rows a cleared browser left behind for a project id (R14).
@@ -2232,7 +2251,11 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       let accessOutcome: ProjectOpenOutcome = 'error';
       let cacheHits = 0;
       try {
-        await ensureDiscoveryReady();
+        const operations = await ensureJournalReady();
+        // Pending operations retain the existing discovery-before-replay contract.
+        if (operations.length > 0) {
+          await ensureDiscoveryReady();
+        }
         const worker = await getReadiedWorker();
         // A manifest/root event can supersede a shared pass while it is in flight.
         /* oxlint-disable no-await-in-loop -- A route must retry sequentially until its discovery epoch is current. */
@@ -2246,6 +2269,28 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
             accessOutcome = 'unavailable';
             return { status: 'recovery-failed', recovery };
           }
+          const verificationEpoch = discoveryEpochRef.current;
+          const verification =
+            operations.length === 0 && recoveriesRef.current.size === 0
+              ? await fileManager.client.verifyProjectRoute({ projectId })
+              : ({ status: 'discovery-required' } as const);
+          if (verification.status === 'superseded' || verificationEpoch !== discoveryEpochRef.current) {
+            continue;
+          }
+          if (verification.status === 'unavailable') {
+            accessOutcome = 'unavailable';
+            return { status: 'unavailable' };
+          }
+          if (verification.status === 'verified') {
+            const library = await ensureProjectLibraryState(worker, projectId);
+            if (verificationEpoch !== discoveryEpochRef.current) {
+              continue;
+            }
+            accessOutcome = 'ok';
+            const project = { ...verification.project.manifest, id: verification.project.projectId };
+            return library.deletedAt === undefined ? { status: 'ready', project } : { status: 'trashed', project };
+          }
+          await ensureDiscoveryReady();
           const snapshot = discoverySnapshotRef.current;
           let epoch = discoveryEpochRef.current;
           let discovery: ProjectDiscoveryResult;
@@ -2318,7 +2363,14 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         accessSpan?.finish(accessOutcome, { cacheHits });
       }
     },
-    [discoverProjects, ensureDiscoveryReady, ensureProjectLibraryState, getReadiedWorker],
+    [
+      discoverProjects,
+      ensureDiscoveryReady,
+      ensureJournalReady,
+      ensureProjectLibraryState,
+      fileManager.client,
+      getReadiedWorker,
+    ],
   );
 
   const updateProject = useCallback(

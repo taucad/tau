@@ -94,6 +94,13 @@ export type ResolvedProjectManifest = {
   readonly manifest: ProjectManifest;
 };
 
+/** Read-only verification of an already installed project binding. @public */
+export type ProjectRouteVerification =
+  | { readonly status: 'verified'; readonly project: ResolvedProjectManifest }
+  | { readonly status: 'discovery-required' }
+  | { readonly status: 'unavailable' }
+  | { readonly status: 'superseded' };
+
 /**
  * Validated or quarantined result from project discovery.
  *
@@ -733,6 +740,45 @@ export class ProjectDirectories {
             this._crossTabCoordinator.notifyDirectoryChange(logicalRoot, this._scopedPhysicalAuthority(scope, path));
           }
           throw error;
+        }
+      }),
+    );
+  }
+
+  /**
+   * Verify declaration and identity without conversion, adoption or repair.
+   * @param input - Captured exact-mount provider and its physical lock identity.
+   * @returns Verified bytes or a truthful fallback outcome; topology fencing belongs to the service.
+   */
+  public async verifyProjectRoute(input: {
+    readonly projectId: string;
+    readonly provider: FileSystemProvider;
+    readonly directory: string;
+    readonly storageRootKey: string;
+  }): Promise<ProjectRouteVerification> {
+    const directory = assertRootedPath(input.directory);
+    const locks = [`project:${input.projectId}`, `${input.storageRootKey}:${directory}`];
+    return this._crossTabCoordinator.withLocks(locks, async () =>
+      this._resourceQueue.queueForMany(locks, async (): Promise<ProjectRouteVerification> => {
+        try {
+          await input.provider.refresh?.();
+          const manifestBytes = await input.provider.readFile(joinRelativePath(directory, 'tau.json'));
+          const manifest = parseProjectManifestBytes(manifestBytes);
+          if (!manifest.success) {
+            return { status: 'discovery-required' };
+          }
+          const identityBytes = await input.provider.readFile(joinRelativePath(directory, projectIdentityPath));
+          let identity: ProjectIdentityRecord;
+          try {
+            identity = parseProjectIdentityBytes(identityBytes);
+          } catch {
+            return { status: 'discovery-required' };
+          }
+          return identity.projectId === input.projectId
+            ? { status: 'verified', project: { projectId: input.projectId, manifest: manifest.data } }
+            : { status: 'discovery-required' };
+        } catch (error) {
+          return { status: isNotFoundError(error) ? 'discovery-required' : 'unavailable' };
         }
       }),
     );

@@ -134,6 +134,7 @@ type WorkspaceBridgeMethodName =
   | 'unmount'
   | 'configureProjectRoots'
   | 'listProjectManifests'
+  | 'verifyProjectRoute'
   | 'commitPendingProjectDirectory'
   | 'adoptProjectDirectory'
   | 'permanentlyDeleteProjectDirectory'
@@ -949,6 +950,18 @@ const callSchemas = {
   unmount: { args: oneStringArgument, result: voidResult },
   configureProjectRoots: { args: z.tuple([projectRootConfigurationSchema]), result: voidResult },
   listProjectManifests: { args: noArgs, result: projectDiscoveryResultSchema },
+  verifyProjectRoute: {
+    args: z.tuple([z.object({ projectId: projectIdSchema })]),
+    result: z.discriminatedUnion('status', [
+      z.object({
+        status: z.literal('verified'),
+        project: z.object({ projectId: projectIdSchema, manifest: projectManifestSchema }),
+      }),
+      z.object({ status: z.literal('discovery-required') }),
+      z.object({ status: z.literal('unavailable') }),
+      z.object({ status: z.literal('superseded') }),
+    ]),
+  },
   commitPendingProjectDirectory: {
     args: z.tuple([pendingProjectCommitInputSchema]),
     result: pendingProjectCommitResultSchema,

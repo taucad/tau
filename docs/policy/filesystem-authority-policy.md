@@ -3,7 +3,7 @@ title: 'Filesystem Authority Policy'
 description: 'The single-filesystem-authority invariant: one FM-worker authority per host, one provider instance per storage root, mounts as pure routing from persistent config, manifest-based discovery, cross-tab coherence, and webaccess handle lifecycle rules.'
 status: active
 created: '2026-07-13'
-updated: '2026-10-19'
+updated: '2026-10-29'
 related:
   - docs/policy/filesystem-policy.md
   - docs/policy/revisions-policy.md
@@ -106,7 +106,7 @@ Project bootstrap MUST establish pending-operation quarantine before locator rec
 
 A linked remote bootstrap uses this same quarantine and recovery loop. Persist its exact operation id, storage locator, source and target ref identities, reviewed setup digest, and phase before exposing a provisional directory. Mark the operation-owned physical directory in protected control-plane metadata so a second client also quarantines it; a missing manifest is never permission to remove an unowned directory. Only the project revision actor may access the provisional rooted view, and only its checkout actor may mint the zero-or-one setup revision. Publish the verified authored tree and `tau.json` manifest last, then clear the bootstrap marker and journal in replay-safe order. Remote push acknowledgement is not part of local project publication.
 
-Route access and project listing classify against a current discovery pass after this discovery-readiness barrier; they do not await recovery completion. A slow or failed operation produces a typed recovery state for only its own project. Failure to initialize the worker, read the journal, synchronize roots, or perform discovery remains a systemic error and must reject rather than appear as an empty library. Root-configuration changes synchronize authority routes and invalidate the React Query listing; they do not restart the session recovery loop.
+Project listing classifies against a current discovery pass after this discovery-readiness barrier. Route access may instead use `verifyProjectRoute` only after journal quarantine is established and the complete configured topology is ready: the operation reads the exact installed project mount's current strict manifest and matching generated identity under the existing project/physical-directory locks, performs no repair or rebinding, and rejects replaced mounts or superseded configuration. The manager rechecks its discovery epoch after verification and library-state enrichment. Missing, malformed, legacy, or mismatched bytes require complete discovery before deciding absence or rebinding; storage failure remains unavailable. Pending recovery operations retain the discovery-before-replay path. Neither path awaits recovery completion. A slow or failed operation produces a typed recovery state for only its own project. Failure to initialize the worker, read the journal, synchronize roots, or perform discovery remains a systemic error and must reject rather than appear as an empty library. Root-configuration changes synchronize authority routes and invalidate the React Query listing; they do not restart the session recovery loop.
 
 **Why**: Existence is the manifest on disk (manifest policy Rule 1); a registry that must be told about projects locks out disk-level and agent-driven creation.
 

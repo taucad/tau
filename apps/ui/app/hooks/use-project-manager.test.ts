@@ -11,6 +11,7 @@ import type {
   FileTreeNode,
   ProjectDiscoveryEntry,
   ProjectDiscoveryResult,
+  ProjectRouteVerification,
   ProjectLocator,
   WatchEvent,
   WatchRequest,
@@ -224,6 +225,7 @@ const recordWatch: ReturnType<typeof useFileManager>['watchRecordFile'] = (absol
 const mockWatchRecordFile = vi.fn(recordWatch);
 /* The authority's physical-scope listing, one level per call (R14 orphan check). */
 const mockReadScopedShallowDirectory = vi.fn<(path: string) => Promise<FileTreeNode[]>>();
+const mockVerifyProjectRoute = vi.fn<(input: { projectId: string }) => Promise<ProjectRouteVerification>>();
 const mockFileManager = {
   workerChangeChannel: mockWorkerChangeChannel,
   watchRecordFile: mockWatchRecordFile,
@@ -241,6 +243,7 @@ const mockFileManager = {
   },
   client: {
     listProjectManifests: mockListProjectManifests,
+    verifyProjectRoute: mockVerifyProjectRoute,
     adoptProjectDirectory: mockAdoptProjectDirectory,
     permanentlyDeleteProjectDirectory: mockPermanentlyDeleteProjectDirectory,
     commitPendingProjectDirectory: mockCommitPendingProjectDirectory,
@@ -627,6 +630,7 @@ const seedHomeAttachment = async (bytes: Uint8Array<ArrayBuffer>, mediaType: str
 
 describe('useProjectManager.createProject', () => {
   beforeEach(() => {
+    mockVerifyProjectRoute.mockResolvedValue({ status: 'discovery-required' });
     vi.clearAllMocks();
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', {
@@ -660,6 +664,7 @@ describe('useProjectManager.createProject', () => {
     // inherits an unconsumed `mockResolvedValueOnce` from the previous one.
     for (const mock of [
       mockListProjectManifests,
+      mockVerifyProjectRoute,
       mockGetPendingProjectOperations,
       mockGetProjectLibraryState,
       mockCommitPendingProjectDirectory,
@@ -683,6 +688,7 @@ describe('useProjectManager.createProject', () => {
       mock.mockReset();
     }
     mockListProjectManifests.mockResolvedValue({ roots: [], entries: [] });
+    mockVerifyProjectRoute.mockResolvedValue({ status: 'discovery-required' });
     mockReadScopedShallowDirectory.mockReset();
     mockReadScopedShallowDirectory.mockRejectedValue(new Error('ENOENT: unreadable'));
     mockReadFile.mockImplementation(async (path: string) => {
@@ -785,6 +791,50 @@ describe('useProjectManager.createProject', () => {
       watch.mockRestore();
     },
   );
+
+  it('admits an exact verified target without scanning the project catalog', async () => {
+    mockVerifyProjectRoute.mockResolvedValue({
+      status: 'verified',
+      project: { projectId: fakeProject.id, manifest: projectToManifest(fakeProject) },
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({
+      status: 'ready',
+      project: { id: fakeProject.id },
+    });
+    expect(mockVerifyProjectRoute).toHaveBeenCalledWith({ projectId: fakeProject.id });
+    expect(mockListProjectManifests).not.toHaveBeenCalled();
+  });
+
+  it('retries superseded target verification without publishing its old result', async () => {
+    mockVerifyProjectRoute.mockResolvedValueOnce({ status: 'superseded' }).mockResolvedValueOnce({
+      status: 'verified',
+      project: { projectId: fakeProject.id, manifest: projectToManifest(fakeProject) },
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({ status: 'ready' });
+    expect(mockVerifyProjectRoute).toHaveBeenCalledTimes(2);
+    expect(mockListProjectManifests).not.toHaveBeenCalled();
+  });
+
+  it('keeps pending recovery on the discovery path even when the target could verify', async () => {
+    mockGetPendingProjectOperations.mockResolvedValue([pendingCreate]);
+    mockVerifyProjectRoute.mockResolvedValue({
+      status: 'verified',
+      project: { projectId: fakeProject.id, manifest: projectToManifest(fakeProject) },
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await result.current.getProjectRouteAccess(fakeProject.id);
+    expect(mockListProjectManifests).toHaveBeenCalled();
+    expect(mockVerifyProjectRoute).not.toHaveBeenCalled();
+  });
+
+  it('preserves unavailable selected storage without using catalog fallback', async () => {
+    mockVerifyProjectRoute.mockResolvedValue({ status: 'unavailable' });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({ status: 'unavailable' });
+    expect(mockListProjectManifests).not.toHaveBeenCalled();
+  });
 
   it('publishes connected-workspace projects into the one listing key before resolving', async () => {
     mockIsFileSystemAccessSupported = true;

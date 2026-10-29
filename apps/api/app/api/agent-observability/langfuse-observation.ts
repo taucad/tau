@@ -1,5 +1,6 @@
 import { createHash, createHmac, hkdfSync } from 'node:crypto';
 import type { Evidence } from '@taucad/agent-observability/contract';
+import { phaseDurations } from '@taucad/agent-observability/scorecard';
 import type { SourceProtection } from '#api/agent-observability/evidence-admission.js';
 
 /** One OTLP attribute in the JSON encoding Langfuse's v4 endpoint accepts. */
@@ -32,7 +33,28 @@ export type ObservationContext = Readonly<{
 export type ObservationIdentity = Readonly<{ traceId: string; spanId: string }>;
 
 /** Bumped whenever the attributes written for the same evidence change. */
-export const observationMapperVersion = 'langfuse-v4.1';
+export const observationMapperVersion = 'langfuse-v4.2';
+
+/**
+ * Fact fields that name a Tau record (a run, message, call, attempt or ledger
+ * entry) rather than a vocabulary value. They reach the vendor only as the
+ * trace's keyed digest, which still joins one field to another.
+ */
+const referenceFields: ReadonlySet<string> = new Set([
+  'assessment',
+  'attempt',
+  'billing',
+  'call',
+  'dispatch',
+  'evidence',
+  'invocation',
+  'ledger',
+  'logicalCall',
+  'message',
+  'modelAttempt',
+  'modelCall',
+  'response',
+]);
 
 const sha256 = (...parts: readonly string[]): string =>
   createHash('sha256').update(JSON.stringify(parts)).digest('hex');
@@ -99,13 +121,18 @@ const failed = (evidence: Evidence): boolean => {
   return (fact.kind === 'provider' && fact.stop === 'error') || (fact.kind === 'tool' && fact.outcome === 'failed');
 };
 
-const factAttributes = (evidence: Evidence): OtlpAttribute[] => {
+const factAttributes = (evidence: Evidence, group: (value: string) => string): OtlpAttribute[] => {
   if (evidence.payload.plane === 'content') {
     return [];
   }
   const { fact } = evidence.payload;
   const attributes = Object.entries(fact)
-    .map(([key, value]) => scalar(`langfuse.observation.metadata.fact.${key}`, value))
+    .map(([key, value]) =>
+      scalar(
+        `langfuse.observation.metadata.fact.${key}`,
+        referenceFields.has(key) && typeof value === 'string' ? group(value) : value,
+      ),
+    )
     .filter((attribute) => attribute !== undefined);
   if (fact.kind === 'provider') {
     const { usage } = fact;
@@ -123,6 +150,17 @@ const factAttributes = (evidence: Evidence): OtlpAttribute[] => {
     attributes.push(...model.filter((attribute) => attribute !== undefined));
   }
   return attributes;
+};
+
+/* Each phase's closed time in one clock domain, as the scorecard times it; an open interval is only counted. */
+const phaseAttributes = (evidence: Evidence): OtlpAttribute[] => {
+  const { durations, open } = phaseDurations(evidence.clocks.intervals);
+  return [
+    ...Object.entries(durations).map(([key, milliseconds]) =>
+      intAttribute(`langfuse.observation.metadata.phase.${key}`, Math.round(milliseconds)),
+    ),
+    intAttribute('langfuse.observation.metadata.openIntervals', open),
+  ];
 };
 
 const contentAttributes = (evidence: Evidence): OtlpAttribute[] => {
@@ -147,7 +185,8 @@ const contentAttributes = (evidence: Evidence): OtlpAttribute[] => {
  * Map admitted evidence to the one complete observation Langfuse v4 stores for
  * its receipt. Every grouping attribute is copied onto the observation itself,
  * because v4 observations are immutable and there is no separate trace entity.
- * Account, run and task ids reach the vendor only as keyed or one-way digests.
+ * Account, run, attempt, task and record ids reach the vendor only as keyed or
+ * one-way digests.
  *
  * @param evidence - The opened, previously validated evidence.
  * @param context - Server facts about the receipt.
@@ -177,6 +216,7 @@ export const langfuseObservation = (
     stringAttribute('langfuse.observation.type', observationType(evidence.semantic.kind)),
     stringAttribute('langfuse.observation.metadata.receipt', context.receipt),
     stringAttribute('langfuse.observation.metadata.run', group(evidence.run)),
+    stringAttribute('langfuse.observation.metadata.attempt', group(evidence.execution.attempt)),
     stringAttribute('langfuse.observation.metadata.plane', evidence.payload.plane),
     stringAttribute('langfuse.observation.metadata.family', evidence.semantic.kind),
     stringAttribute('langfuse.observation.metadata.authority', evidence.authority),
@@ -191,7 +231,8 @@ export const langfuseObservation = (
     ...(evidence.task === null
       ? []
       : [stringAttribute('langfuse.observation.metadata.taskBasis', evidence.task.basis)]),
-    ...factAttributes(evidence),
+    ...factAttributes(evidence, group),
+    ...phaseAttributes(evidence),
     ...contentAttributes(evidence),
   ];
   return {

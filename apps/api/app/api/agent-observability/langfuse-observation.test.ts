@@ -63,8 +63,45 @@ describe('langfuseObservation', () => {
     expect(attribute(span, 'langfuse.observation.metadata.plane')).toBe('feedback');
     expect(attribute(span, 'langfuse.observation.metadata.fact.value')).toBe('negative');
     expect(attribute(span, 'langfuse.observation.metadata.fact.scale')).toBe('thumbs.1');
+    expect(attribute(span, 'langfuse.observation.metadata.fact.evidence')).toMatch(/^[a-f\d]{32}$/u);
+    expect(otlpBody(span)).not.toContain('presented-1');
     expect(attribute(span, 'langfuse.observation.input')).toBeUndefined();
     expect(otlpBody(span)).not.toContain(privateMarker);
+  });
+
+  it('should name the attempt and time each closed phase per clock domain, with no raw ids', async () => {
+    const evidence = await evidenceFixture();
+    const timed = {
+      ...evidence,
+      clocks: {
+        ...evidence.clocks,
+        intervals: [
+          { phase: 'tool', domain: 'host-recorded', start: 0, end: 10 },
+          { phase: 'tool', domain: 'host-recorded', start: 5, end: 20 },
+          { phase: 'provider-wait', domain: 'api-recorded', start: 0, end: 7 },
+          { phase: 'tool', domain: 'host-recorded', start: 30, end: null },
+        ],
+      },
+    } satisfies typeof evidence;
+    const { span } = langfuseObservation(timed, context, pseudonym);
+    const resumed = langfuseObservation(
+      { ...timed, execution: { ...timed.execution, attempt: 'attempt-b' } },
+      { ...context, receipt: 'evr_2' },
+      pseudonym,
+    ).span;
+
+    expect(attribute(span, 'langfuse.observation.metadata.mapper')).toBe('langfuse-v4.2');
+    expect(attribute(span, 'langfuse.observation.metadata.phase.tool@host-recorded')).toBe('20');
+    expect(attribute(span, 'langfuse.observation.metadata.phase.provider-wait@api-recorded')).toBe('7');
+    expect(attribute(span, 'langfuse.observation.metadata.openIntervals')).toBe('1');
+    expect(attribute(span, 'langfuse.observation.metadata.attempt')).toMatch(/^[a-f\d]{32}$/u);
+    expect(attribute(resumed, 'langfuse.observation.metadata.attempt')).not.toBe(
+      attribute(span, 'langfuse.observation.metadata.attempt'),
+    );
+    expect(attribute(resumed, 'langfuse.observation.metadata.run')).toBe(
+      attribute(span, 'langfuse.observation.metadata.run'),
+    );
+    expect(otlpBody(span)).not.toContain('attempt-a');
   });
 
   it('should send one span per request body', async () => {

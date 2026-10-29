@@ -58,7 +58,7 @@ import { dependencyMountRoot } from '#lib/bundled-types-tree.constants.js';
 import { readBuildIdentity } from '#lib/build-identity.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { reportToApi } from '#runtime/observability/report-to-api.js';
-import { createProjectOpenTimer, isHostedCheckoutApplied } from '#machines/project-open-timer.js';
+import { createProjectOpenTimer, markProjectOpen } from '#machines/project-open-timer.js';
 import type { ProjectOpenTimer } from '#machines/project-open-timer.js';
 import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 
@@ -493,16 +493,12 @@ const revisionRegistry = createWorkerRevisionRegistry({
     pushRecorders.delete(projectId);
     projectOpenTimers.delete(projectId);
   },
-  /* STO-25 checkout boundary: the open pull applied the authored checkout, so
-   * the editor and file tree are usable (`first_view`). `readTree` hydrates
-   * every large object before that checkout is written, so today everything is
-   * local by then too (`fully_fetched`); a background large-object fill moves
-   * the `fullyFetched()` call to where that fill completes. */
+  /* STO-25: `first_view` at the applied checkout, `fully_fetched` once its
+   * background large-object fill has written the last placeholder. */
   observeStatus: (projectId, status) => {
     const timer = projectOpenTimers.get(projectId);
-    if (timer !== undefined && isHostedCheckoutApplied(status)) {
-      timer.firstView();
-      timer.fullyFetched();
+    if (timer !== undefined) {
+      markProjectOpen(timer, status);
     }
   },
   filesystem: (root) => fileService.createRootedFileSystem(root),

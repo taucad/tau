@@ -51,6 +51,7 @@ export type {
   RevisionHead,
   RevisionLogEntry,
   RevisionLogInput,
+  ReadTreeOptions,
   RevisionPort,
   RevisionReceipt,
   RevisionRecord,
@@ -174,6 +175,8 @@ export type {
   PublishVisibility,
 } from '#publish.types.js';
 export type {
+  LargeObjectsFacet,
+  LargeObjectsReport,
   RevisionBranchFacet,
   RevisionConflictFacet,
   RevisionLine,

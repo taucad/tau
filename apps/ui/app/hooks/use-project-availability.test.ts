@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RevisionStatusProjection } from '@taucad/revisions';
-import { projectAvailability } from '#hooks/use-project-availability.js';
+import { modelAvailability, pendingPathSet, projectAvailability } from '#hooks/use-project-availability.js';
 
 vi.mock('#hooks/use-project.js', () => ({ useProject: vi.fn() }));
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: vi.fn() }));
@@ -50,5 +50,31 @@ describe('first-open availability', () => {
   });
   it('keeps cached files available during background checks and failures', () => {
     expect(projectAvailability(false, status({ state: 'queued' }))).toBe('ready');
+  });
+});
+
+/* The operator's "open the UI, model waits": files open with the checkout; the model waits for every large object. */
+describe('model availability', () => {
+  it('follows the project until the project is ready', () => {
+    expect(modelAvailability('downloading', { phase: 'fetching' })).toBe('downloading');
+    expect(modelAvailability('preparing', undefined)).toBe('preparing');
+  });
+  it('waits for the large objects once the files are open', () => {
+    expect(modelAvailability('ready', { phase: 'fetching' })).toBe('files');
+    expect(modelAvailability('ready', { phase: 'failed' })).toBe('filesFailed');
+  });
+  it('is ready when no large object is outstanding', () => {
+    expect(modelAvailability('ready', undefined)).toBe('ready');
+  });
+});
+
+describe('pending large-object paths', () => {
+  it('builds one set per published facet, shared by every row that asks of it', () => {
+    const paths = ['models/a.step', 'models/b.step'];
+    const set = pendingPathSet(paths);
+    expect(set.has('models/b.step')).toBe(true);
+    expect(set.has('main.scad')).toBe(false);
+    expect(pendingPathSet(paths)).toBe(set);
+    expect(pendingPathSet([...paths])).not.toBe(set);
   });
 });

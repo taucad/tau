@@ -425,7 +425,11 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
       intervals: [],
     };
   };
-  /* Like a presentation, a rating is this device's interaction, anchored to the run's ending row. Only the first is kept. */
+  /*
+   * Like a presentation, a rating is this device's interaction, anchored to the run's ending row. Only the first is
+   * kept. Its interaction id is tagged, as `contractId` keeps an id-shaped value as it is: untagged, a rating of a shown
+   * run would claim the presentation's source, and admission would refuse it as a conflict.
+   */
   const ratingCandidate = async (): Promise<Candidate | undefined> => {
     if (run.rating === undefined) {
       return undefined;
@@ -434,7 +438,7 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
       return 'pending';
     }
     const [interaction, rated] = await Promise.all([
-      contractId('rated', `${run.chatId}:${run.runId}`),
+      contractId('rated', `rated:${run.chatId}:${run.runId}`),
       contractId('run', run.runId),
     ]);
     return {

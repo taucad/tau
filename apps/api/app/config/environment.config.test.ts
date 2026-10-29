@@ -533,6 +533,33 @@ describe('environmentSchema', () => {
     }
   });
 
+  it('should refuse evidence delivery without every Langfuse credential and the payload key', () => {
+    const result = environmentSchema.safeParse({
+      ...baseEnvironment(),
+      NODE_ENV: 'development',
+      TAU_OBSERVABILITY_DELIVERY_ENABLED: 'true',
+      LANGFUSE_BASE_URL: 'https://us.cloud.langfuse.com',
+      LANGFUSE_PUBLIC_KEY: '',
+      LANGFUSE_SECRET_KEY: undefined,
+      TAU_OBSERVABILITY_PAYLOAD_KEY: undefined,
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.path.join('.')).toSorted()).toEqual([
+        'LANGFUSE_PUBLIC_KEY',
+        'LANGFUSE_SECRET_KEY',
+        'TAU_OBSERVABILITY_PAYLOAD_KEY',
+      ]);
+    }
+  });
+
+  it('should leave evidence delivery off by default', () => {
+    const result = environmentSchema.safeParse({ ...baseEnvironment(), NODE_ENV: 'development' });
+
+    expect(result.success && result.data.TAU_OBSERVABILITY_DELIVERY_ENABLED).toBe(false);
+  });
+
   it('should treat the empty GitHub repository App values of a copied .env.example as unconfigured', () => {
     const result = environmentSchema.safeParse({
       ...baseEnvironment(),

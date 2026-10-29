@@ -163,7 +163,16 @@ export const agentEvidenceOutbox = pgTable(
     payloadBytes: integer('payload_bytes').notNull(),
     attempts: integer('attempts').default(0).notNull(),
     leaseOwner: text('lease_owner'),
+    /** A lease's end while `sending` or reconciling; otherwise when the row is next due. */
     leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+    /** Langfuse trace id of the observation once sent; with the receipt it names the span (T08). */
+    traceId: text('trace_id'),
+    /** The observation's start time, the lower bound of a reconciliation read. */
+    observedAt: timestamp('observed_at', { withTimezone: true }),
+    /** When the last send began; a reconciliation gap is measured from it. */
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    /** Bounded code for the last outcome (e.g. `http-503`, `gap`, `revoked`); never vendor text. */
+    reason: text('reason'),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true })

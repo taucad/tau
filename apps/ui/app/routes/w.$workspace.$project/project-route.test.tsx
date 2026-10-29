@@ -537,8 +537,8 @@ describe('project route session identity', () => {
       projectA,
       expect.any(Function),
       expect.objectContaining({
-        stoppability: expect.any(Function),
-        presented: expect.any(Function),
+        stoppability: expect.any(Function) as unknown,
+        presented: expect.any(Function) as unknown,
       }),
     );
     const connector = publishProjectHostConnector.mock.calls[0]?.[1] as (chatId: string) => Promise<unknown>;
@@ -571,8 +571,8 @@ describe('project route session identity', () => {
         projectA,
         expect.any(Function),
         expect.objectContaining({
-          stoppability: expect.any(Function),
-          presented: expect.any(Function),
+          stoppability: expect.any(Function) as unknown,
+          presented: expect.any(Function) as unknown,
         }),
       );
     });

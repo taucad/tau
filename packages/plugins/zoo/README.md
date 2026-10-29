@@ -12,7 +12,7 @@ Zoo KCL kernel plugin for Tau
 
 - **KCL as a kernel** — `.kcl` models execute against Zoo's engine and return glTF with BRep topology attached.
 - **Engine over WebSocket** — geometry is computed by Zoo's Design API; `zoo({ kernels: { default: { baseUrl, token } } })` points at your endpoint.
-- **Offline mode (experimental)** — `mode: 'offline'` runs the same KCL locally: the engine's modeling commands execute on [libcascade](https://www.npmjs.com/package/libcascade) in-process, with no WebSocket, and exports (glTF, STEP, STL, OBJ, PLY) come from OpenCascade.
+- **Offline mode (experimental)** — `mode: 'offline'` runs the same KCL locally: the engine's modeling commands execute in-process on the package's own reduced [libcascade](https://www.npmjs.com/package/libcascade) build (only the Open CASCADE bindings the engine calls, plus native helpers; built by `libcascade/build.sh` and checked in under `src/offline/wasm`), with no WebSocket, and exports (glTF, STEP, STL, OBJ, PLY) come from OpenCascade.
 - **KCL diagnostics preserved** — engine and language errors map to runtime issues with source ranges.
 - **No module-scope work** — the KCL WASM module and the connection load in `initialize()`, one per worker.
 

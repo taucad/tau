@@ -7,8 +7,8 @@
  */
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import init from 'libcascade/single/init';
 import { OfflineEngine } from '#offline/offline-engine.js';
+import { loadLibcascade } from '#offline/offline-libcascade.js';
 
 const [tracePath, stopArgument, inspectPath] = process.argv.slice(2) as [
   string,
@@ -27,7 +27,7 @@ const lines = trace
         response?: { data?: Record<string, unknown> };
       },
   );
-const oc = await init();
+const oc = await loadLibcascade();
 // Reuse the ids the original run minted, so later commands that reference them still resolve.
 const minted: string[] = [];
 for (const line of lines) {

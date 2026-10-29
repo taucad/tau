@@ -83,7 +83,6 @@
     "@taucad/kcl-wasm-lib": "catalog:",
     "@taucad/parameters": "workspace:*",
     "deepmerge": "catalog:",
-    "libcascade": "catalog:",
     "type-fest": "catalog:"
   },
   "peerDependencies": {

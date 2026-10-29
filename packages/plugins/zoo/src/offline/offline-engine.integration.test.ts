@@ -63,6 +63,8 @@ describe('offline KCL execution', () => {
     const solids = engine!.scene.visibleSolids();
     expect(solids).toHaveLength(1);
     const oc = await (OfflineEngineConnection as unknown as { occt: Promise<Oc> }).occt;
+    // The default loader is the package's own build, which carries the native helpers.
+    expect((oc as unknown as { TauOffline?: unknown }).TauOffline).toBeDefined();
     const { volume } = massProperties(
       oc,
       compound(

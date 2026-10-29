@@ -115,7 +115,9 @@ libcascade / Open CASCADE Technology
   declared surface, makes use of and is based on facilities provided by the
   Open CASCADE Technology software. The full LGPL-2.1 text and the exception
   text ship with the `libcascade` package as `LICENSE` and
-  `LICENSE.OCCT-Exception`.
+  `LICENSE.OCCT-Exception`. `@taucad/zoo` ships its own reduced Open CASCADE
+  build (`dist/offline/wasm`, built from `packages/plugins/zoo/libcascade`) with
+  the same texts beside it as `LICENSE.OCCT` and `LICENSE.OCCT-Exception`.
 
   The redistributed corpus contains factual API names and signatures only.
   Documentation prose from Open CASCADE headers is excluded.

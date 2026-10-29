@@ -1,7 +1,8 @@
 """Regenerates the bindings list in libcascade-kcl.yml: every libcascade class, enum and constant the offline engine
 calls, plus their base classes and the types in their signatures.
 
-Usage: python3 libcascade/symbols.py  (from packages/plugins/zoo; reads libcascade's types.d.ts from node_modules)
+Usage: python3 libcascade/symbols.py  (from packages/plugins/zoo; reads the full libcascade API from the workspace's
+node_modules, which the opencascade plugin still depends on)
 """
 import os
 import re
@@ -9,7 +10,8 @@ import sys
 
 here = os.path.dirname(os.path.abspath(__file__))
 package = os.path.dirname(here)
-types_path = os.path.join(package, 'node_modules', 'libcascade', 'dist', 'types.d.ts')
+workspace = os.path.dirname(os.path.dirname(os.path.dirname(package)))
+types_path = os.path.join(workspace, 'node_modules', 'libcascade', 'dist', 'types.d.ts')
 yml_path = os.path.join(here, 'libcascade-kcl.yml')
 
 # Reached through return values rather than `oc.<name>`, so the source scan cannot see them.
@@ -25,7 +27,7 @@ unbindable = {'gp_Dir_D', 'gp_Dir2d_D'}
 source = ''
 for directory, _, files in os.walk(os.path.join(package, 'src', 'offline')):
     for name in files:
-        if name.endswith('.ts') and not name.endswith('.test.ts'):
+        if name.endswith('.ts') and not name.endswith(('.test.ts', '.d.ts')):
             source += open(os.path.join(directory, name)).read()
 seeds = (set(re.findall(r'\boc\.([A-Za-z_][A-Za-z0-9_]*)', source)) | extras) - runtime
 

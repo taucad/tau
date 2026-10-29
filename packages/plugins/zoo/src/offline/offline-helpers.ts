@@ -7,7 +7,7 @@
  * The native class leaves array results in a static buffer that is read straight from `wasmMemory`, so one call
  * replaces thousands of per-node and per-edge binding crossings.
  */
-import type { OpenCascadeInstance as Oc, TopoDS_Shape } from 'libcascade/init';
+import type { OpenCascadeInstance as Oc, TopoDS_Shape } from '#offline/offline-libcascade.js';
 
 /** The `TauOffline` class from `libcascade/tau-offline.cpp`. */
 type TauOfflineClass = {

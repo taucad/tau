@@ -5304,9 +5304,6 @@ importers:
       deepmerge:
         specifier: 'catalog:'
         version: 4.3.1
-      libcascade:
-        specifier: 'catalog:'
-        version: 3.1.0
       type-fest:
         specifier: 'catalog:'
         version: 4.41.0

@@ -5,14 +5,10 @@ import { OfflineEngine } from '#offline/offline-engine.js';
 import { OfflineEngineBridge } from '#offline/offline-engine-bridge.js';
 import type { Oc } from '#offline/offline-occt.js';
 import { OfflineProfiler } from '#offline/offline-profiler.js';
+import { loadLibcascade } from '#offline/offline-libcascade.js';
 
 /** Loads a libcascade instance; injectable so hosts can choose the WASM URL and build variant. */
 export type OcctLoader = () => Promise<Oc>;
-
-const defaultLoader: OcctLoader = async () => {
-  const { default: init } = await import('libcascade/single/init');
-  return init();
-};
 
 /**
  * Connects KCL WASM to the in-process libcascade engine instead of the Zoo WebSocket.
@@ -41,7 +37,7 @@ export class OfflineEngineConnection {
   public constructor(options: { wasmModule: WasmModule; fileSystemManager: FileSystemManager; loadOcct?: OcctLoader }) {
     this.wasmModule = options.wasmModule;
     this.fileSystemManager = options.fileSystemManager;
-    this.loadOcct = options.loadOcct ?? defaultLoader;
+    this.loadOcct = options.loadOcct ?? loadLibcascade;
   }
 
   /** @returns the WASM `Context` bound to the offline bridge, once initialized */

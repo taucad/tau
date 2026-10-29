@@ -35,8 +35,8 @@ const fs = {
 type Result = Record<string, unknown>;
 const result: Result = { name: path.basename(sampleDirectory) };
 const t0 = performance.now();
-// OFFLINE_PROFILE=1 times every libcascade call; OFFLINE_LIBCASCADE names another build's glue JS (the engine's own
-// `libcascade/libcascade-kcl.yml` build with native helpers) to load instead of the package's.
+// OFFLINE_PROFILE=1 times every libcascade call; OFFLINE_LIBCASCADE names another build's glue JS (a fresh
+// `libcascade/build.sh` output, say) to load instead of the checked-in `src/offline/wasm` build.
 OfflineEngineConnection.profileOcct = process.env['OFFLINE_PROFILE'] === '1';
 // OFFLINE_VALIDATE=1 topology-checks every solid each command changes and records the invalid ones.
 OfflineEngineConnection.validateSolids = process.env['OFFLINE_VALIDATE'] === '1';

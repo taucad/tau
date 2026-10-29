@@ -17,7 +17,7 @@ import type {
   gp_Dir,
   gp_Pnt,
   gp_Vec,
-} from 'libcascade/init';
+} from '#offline/offline-libcascade.js';
 import type { Frame, Vec3 } from '#offline/offline-math.js';
 import { frameFromAxes, vec3 } from '#offline/offline-math.js';
 import { helpersFor } from '#offline/offline-helpers.js';
@@ -295,4 +295,4 @@ export function solidsOf(oc: Oc, shape: TopoDS_Shape): TopoDS_Shape[] {
 }
 
 // oxlint-disable-next-line no-barrel-files/no-barrel-files -- one import site for libcascade types
-export { type gp_Trsf } from 'libcascade/init';
+export { type gp_Trsf } from '#offline/offline-libcascade.js';

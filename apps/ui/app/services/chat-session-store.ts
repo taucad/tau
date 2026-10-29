@@ -1086,9 +1086,10 @@ export class ChatSessionStore {
       return undefined;
     }
     /* The turn's newest run, as a regenerated turn's earlier run stays in the ledger; an open one is not yet rated. */
-    const [runId, run] = Object.entries(projection.ledger.runs)
-      .filter(([, entry]) => entry.turnId === turnId)
-      .at(-1) ?? [undefined, undefined];
+    const [runId, run] = Object.entries(projection.ledger.runs).findLast(([, entry]) => entry.turnId === turnId) ?? [
+      undefined,
+      undefined,
+    ];
     return run?.appendState === 'terminal' || run?.appendState === 'settled' ? runId : undefined;
   }
 

@@ -95,8 +95,17 @@ const isContained = (base: string, target: string): boolean => {
  *
  * A different entry — or none — means another writer replaced the path after our
  * rename landed, so there is nothing of ours left at it to verify.
+ *
+ * A volume that supplies no physical file identity reports `ino` as `0n` — the
+ * same absence `acquireWindowsAuthorityWriter` refuses an authority root for.
+ * Two entries cannot be told apart there, so this answers that the path is still
+ * ours and the write stays answerable for it: a verification refusal is kept
+ * rather than suppressed on a platform that cannot prove it was superseded.
  */
 const isEntryStillAt = async (target: string, written: BigIntStats): Promise<boolean> => {
+  if (written.ino <= 0n) {
+    return true;
+  }
   const current = await fs.lstat(target, { bigint: true }).catch(() => undefined);
   return current !== undefined && current.dev === written.dev && current.ino === written.ino;
 };

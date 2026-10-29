@@ -422,22 +422,42 @@ describe('NodeFsProvider atomic writes', () => {
     expect(temporaryFiles(root)).toEqual([]);
   });
 
-  it('should settle concurrent writes of one path last-writer-wins, verifying only its own entry', async () => {
+  it('should settle concurrent writes of one path without reporting a superseded write as unapplied', async () => {
     const root = createRoot();
     const provider = new NodeFsProvider(root);
 
     /*
      * Two writers of the same path, interleaved so that each publishes its entry
-     * while the other is still verifying the one it published. Neither may be told
-     * its write might not have applied: both renames land, and the path keeps the
-     * bytes of whichever landed last.
+     * while the other is still verifying the one it published. Whatever the
+     * platform does with the second rename, no writer may be told its own write
+     * might not have applied when it was merely superseded.
      */
     const results = await Promise.allSettled([
       provider.writeFile('target.txt', 'first'),
       provider.writeFile('target.txt', 'second'),
     ]);
 
-    expect(results.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
+    if (process.platform === 'win32') {
+      /*
+       * Windows has no last-writer-wins for this path. `_atomicWrite` keeps the
+       * published file's writable handle open past the rename, because only that
+       * handle's flush commits the entry's metadata there (#1109), and Windows
+       * refuses a rename that would replace a name whose entry a writer still
+       * holds. So the later writer is refused before it publishes anything. The
+       * refusal is the platform's, reported as itself: a write that did land is
+       * never relabelled as one that might not have.
+       */
+      expect(results.some((result) => result.status === 'fulfilled')).toBe(true);
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          expect(result.reason).not.toMatchObject({ code: 'CHECKED_WRITE_POTENTIALLY_APPLIED' });
+          expect(result.reason).not.toMatchObject({ code: 'WRITE_VERIFICATION_FAILED' });
+        }
+      }
+    } else {
+      // Both renames land, and the path keeps the bytes of whichever landed last.
+      expect(results.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
+    }
     expect(['first', 'second']).toContain(readFileSync(join(root, 'target.txt'), 'utf8'));
     expect(temporaryFiles(root)).toEqual([]);
   });

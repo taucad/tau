@@ -94,6 +94,12 @@ describe('langfuseObservation', () => {
     expect(attribute(span, 'langfuse.observation.metadata.phase.tool@host-recorded')).toBe('20');
     expect(attribute(span, 'langfuse.observation.metadata.phase.provider-wait@api-recorded')).toBe('7');
     expect(attribute(span, 'langfuse.observation.metadata.openIntervals')).toBe('1');
+    expect(JSON.parse(String(attribute(span, 'langfuse.observation.metadata.intervals')))).toEqual([
+      ['tool', 'host-recorded', 0, 10],
+      ['tool', 'host-recorded', 5, 20],
+      ['provider-wait', 'api-recorded', 0, 7],
+      ['tool', 'host-recorded', 30, null],
+    ]);
     expect(attribute(span, 'langfuse.observation.metadata.attempt')).toMatch(/^[a-f\d]{32}$/u);
     expect(attribute(resumed, 'langfuse.observation.metadata.attempt')).not.toBe(
       attribute(span, 'langfuse.observation.metadata.attempt'),

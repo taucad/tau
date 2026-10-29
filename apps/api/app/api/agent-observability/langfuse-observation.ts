@@ -153,10 +153,23 @@ const factAttributes = (evidence: Evidence, group: (value: string) => string): O
   return attributes;
 };
 
-/* Each phase's closed time in one clock domain, as the scorecard times it; an open interval is only counted. */
+/*
+ * Each phase's closed time in one clock domain, as the scorecard times it; an open interval is only counted. The
+ * intervals themselves are kept too, because one run's phase time is the union across its facts, which per-fact
+ * durations cannot give when two facts overlap.
+ */
 const phaseAttributes = (evidence: Evidence): OtlpAttribute[] => {
-  const { durations, open } = phaseDurations(evidence.clocks.intervals);
+  const { intervals } = evidence.clocks;
+  const { durations, open } = phaseDurations(intervals);
   return [
+    ...(intervals.length === 0
+      ? []
+      : [
+          stringAttribute(
+            'langfuse.observation.metadata.intervals',
+            JSON.stringify(intervals.map(({ phase, domain, start, end }) => [phase, domain, start, end])),
+          ),
+        ]),
     ...Object.entries(durations).map(([key, milliseconds]) =>
       intAttribute(`langfuse.observation.metadata.phase.${key}`, Math.round(milliseconds)),
     ),

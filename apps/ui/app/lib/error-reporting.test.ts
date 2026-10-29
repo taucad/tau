@@ -99,6 +99,16 @@ afterEach(() => {
 });
 
 describe('error reporting', () => {
+  it('should hand a hidden page error to the live SDK immediately', async () => {
+    vi.stubGlobal('document', { visibilityState: 'hidden' });
+    const reporter = await load();
+    await reporter.startErrorReporting();
+    const failure = new Error('Hidden live error');
+    const reporting = reporter.reportUiError(failure);
+    expect(sentry.captureUiError).toHaveBeenCalledExactlyOnceWith(failure);
+    await reporting;
+  });
+
   it('should send once through the existing fallback without importing the SDK in direct harness mode', async () => {
     harness.direct = true;
     const posted = stubIngest();

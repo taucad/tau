@@ -1,3 +1,4 @@
+import { renderTypeScriptDocumentation } from '#components/code/editor-documentation.js';
 import type ts from 'typescript';
 import { autocompletion, snippet } from '@codemirror/autocomplete';
 import type { Completion, CompletionSource } from '@codemirror/autocomplete';
@@ -425,13 +426,12 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
             if (!unchanged(options, version)) {
               return null;
             }
-            const info = details.details?.documentation?.map((part) => part.text).join('');
-            if (!info) {
+            const info = details.details?.documentation?.map((part) => part.text).join('') ?? '';
+            const parts = details.details?.displayParts ?? [];
+            if (!info && parts.length === 0) {
               return null;
             }
-            const dom =
-              context.view?.dom.ownerDocument.createElement('div') ?? globalThis.document.createElement('div');
-            dom.textContent = info;
+            const dom = renderTypeScriptDocumentation(parts, info, context.view?.dom.ownerDocument);
             return dom;
           } catch (error) {
             report(options, error);
@@ -548,15 +548,16 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
         if (!info || !unchanged(options, version)) {
           return null;
         }
-        const text = [...(info.displayParts ?? []), ...(info.documentation ?? [])].map((part) => part.text).join('');
+        const parts = info.displayParts ?? [];
+        const description = (info.documentation ?? []).map((part) => part.text).join('');
+        const text = parts.length > 0 || description;
         return text
           ? {
               pos: info.textSpan.start,
               end: info.textSpan.start + info.textSpan.length,
               create: () => {
-                const dom = view.dom.ownerDocument.createElement('div');
-                dom.className = 'cm-typescript-hover';
-                dom.textContent = text;
+                const dom = renderTypeScriptDocumentation(parts, description, view.dom.ownerDocument);
+                dom.classList.add('cm-typescript-hover');
                 return { dom };
               },
             }

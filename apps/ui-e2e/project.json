@@ -268,7 +268,7 @@
       "cache": false,
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "vitest run --dir apps/ui-e2e apps/ui-e2e/src/observability.staging.test.ts apps/ui-e2e/src/observability-delivery.staging.test.ts apps/ui-e2e/src/observability-ssr.staging.test.ts apps/ui-e2e/src/observability-runtime.staging.test.ts --environment=node"
+        "command": "vitest run --dir apps/ui-e2e apps/ui-e2e/src/observability.staging.test.ts apps/ui-e2e/src/observability-delivery.staging.test.ts apps/ui-e2e/src/observability-ssr.staging.test.ts apps/ui-e2e/src/observability-runtime.staging.test.ts --environment=node --no-file-parallelism"
       }
     }
   }

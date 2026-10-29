@@ -14,12 +14,13 @@ type WorkerResult = {
   readonly error?: string;
 };
 
+// Each pending recovery now includes six bounded waits (15.75 s); exercise two real worker recoveries.
 it('uses a dedicated-worker OPFS sync handle on a real origin', async () => {
   const worker = new Worker(new URL('opfs-event-log.browser.fixture.ts', import.meta.url), { type: 'module' });
   const result = await new Promise<WorkerResult>((resolve, reject) => {
     const workerTimeout = setTimeout(() => {
       reject(new Error('OPFS worker did not respond'));
-    }, 15_000);
+    }, 40_000);
     worker.addEventListener(
       'message',
       (message: MessageEvent<WorkerResult>) => {
@@ -49,6 +50,6 @@ it('uses a dedicated-worker OPFS sync handle on a real origin', async () => {
   expect(result.partialWriteRejected).toBe(true);
   expect(result.recoveredAppend).toMatchObject({ appended: true });
   expect(result.recoveredCount).toBe(1);
-  expect(result.recoveryLookups).toBe(2);
+  expect(result.recoveryLookups).toBe(14);
   expect(result.providerFetches).toBe(0);
-});
+}, 45_000);

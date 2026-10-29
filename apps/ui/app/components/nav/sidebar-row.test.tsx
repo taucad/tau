@@ -3,7 +3,7 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ResponsiveSurfaceProvider } from '@taucad/ui/hooks/use-mobile';
-import { SidebarRowMenuButton } from '#components/nav/sidebar-row.js';
+import { SidebarRowActions, SidebarRowMenuButton, sidebarRowClass } from '#components/nav/sidebar-row.js';
 import type { SidebarRowMenuItems } from '#components/nav/sidebar-row.js';
 
 const items: SidebarRowMenuItems = ({ Item, Separator }) => (
@@ -45,6 +45,29 @@ describe('SidebarRowMenuButton on a phone', () => {
       'destructive',
     );
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('should keep the row lit while its drawer is open, as it does while its menu is', async () => {
+    render(
+      <ResponsiveSurfaceProvider isMobile container={undefined}>
+        <div data-testid='row' className={sidebarRowClass(false)}>
+          <span>Bracket</span>
+          <SidebarRowActions>
+            <SidebarRowMenuButton isResponsive name='Bracket' items={items} className='w-48' />
+          </SidebarRowActions>
+        </div>
+      </ResponsiveSurfaceProvider>,
+    );
+    const trigger = screen.getByRole('button', { name: 'More actions for Bracket' });
+
+    await userEvent.click(trigger);
+    await screen.findByRole('dialog', { name: 'Bracket' });
+
+    // The drawer's trigger says it opens a dialog; the row's open-state selector takes it as it takes a menu's.
+    const openTrigger = ':is([aria-haspopup=menu],[aria-haspopup=dialog])[data-state=open]';
+    expect(trigger).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(trigger.matches(openTrigger)).toBe(true);
+    expect(screen.getByTestId('row').className).toContain(`has-[${openTrigger}]:bg-sidebar-accent`);
   });
 
   it('should keep the dropdown for a row that does not opt in, as the file tree inside the workbench sheet', async () => {

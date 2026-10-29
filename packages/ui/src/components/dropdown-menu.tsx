@@ -1,7 +1,7 @@
 import { useResponsiveSurfaceContainer } from '#hooks/responsive-surface.js';
 import * as React from 'react';
 import { DropdownMenu as DropdownMenuPrimitive, Slot as SlotPrimitive } from 'radix-ui';
-import { CheckIcon, ChevronRightIcon, CircleIcon, XIcon } from 'lucide-react';
+import { CheckIcon, ChevronRightIcon, CircleIcon, MinusIcon, XIcon } from 'lucide-react';
 import { cn } from '#utils/cn.js';
 import { Button } from '#components/button.js';
 import {
@@ -14,7 +14,7 @@ import {
   useIsInsideDrawer,
 } from '#components/drawer.js';
 import { useIsMobile } from '#hooks/use-mobile.js';
-import { Switch } from '#components/switch.js';
+import { Switch, SwitchIndicator } from '#components/switch.js';
 import { ToggleGroup, ToggleGroupItem } from '#components/toggle-group.js';
 import {
   menuItemVariants,
@@ -49,8 +49,9 @@ function DropdownMenu({
   ...properties
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Root> & {
   /**
-   * Open the items in a bottom drawer on a phone, as `ComboBoxResponsive` does; wide screens keep the menu. A
-   * responsive menu's content holds items, labels, separators, groups and shortcuts only.
+   * Open the items in a bottom drawer on a phone, as `ComboBoxResponsive` does; wide screens keep the menu. Every part
+   * has a drawer form: items, checkbox, radio and switch items as touch rows, a submenu as a group that expands in
+   * place, and labels, separators, groups and shortcuts as they are. Name the drawer with the content's `drawerTitle`.
    */
   readonly isResponsive?: boolean;
 }): React.JSX.Element {
@@ -58,11 +59,52 @@ function DropdownMenu({
   if (isResponsive && isMobile) {
     return <DropdownMenuDrawer {...properties} />;
   }
-  return <DropdownMenuPrimitive.Root data-slot='dropdown-menu' {...properties} />;
+  return (
+    // A menu inside a responsive menu's drawer is a menu again: its parts must not take the drawer's forms.
+    <DropdownMenuDrawerContext.Provider value={undefined}>
+      <DropdownMenuPrimitive.Root data-slot='dropdown-menu' {...properties} />
+    </DropdownMenuDrawerContext.Provider>
+  );
 }
 
-/** Closes the drawer a responsive menu opened in on a phone; absent wherever the menu is a dropdown. */
-const DropdownMenuDrawerContext = React.createContext<{ readonly close: () => void } | undefined>(undefined);
+type DropdownMenuDrawerState = {
+  /** Closes the drawer, as choosing an item closes a menu. */
+  readonly close: () => void;
+  /** The trigger, where focus returns when the drawer closes and nothing else took it. */
+  readonly triggerRef: React.RefObject<HTMLElement | undefined>;
+};
+
+/** A responsive menu's drawer on a phone; absent wherever the menu is a dropdown. */
+const DropdownMenuDrawerContext = React.createContext<DropdownMenuDrawerState | undefined>(undefined);
+
+/**
+ * Selects a drawer row as a menu item selects: `onSelect` gets a cancelable select event, and the drawer closes unless
+ * it was prevented.
+ */
+function selectDrawerRow(onSelect: ((event: Event) => void) | undefined, close: () => void): void {
+  const select = new Event('menu.itemSelect', { cancelable: true });
+  onSelect?.(select);
+  if (!select.defaultPrevented) {
+    close();
+  }
+}
+
+/** A drawer row's shape: a full-width touch row. */
+const drawerRowClass =
+  'min-h-touch-row w-full shrink-0 gap-3 rounded-none px-4 text-left text-sm [&_svg:not([class*=size-])]:size-4';
+
+/** Hands a node to a ref the caller passed, as React would: a callback ref is called, an object ref is set. */
+function assignRef<T>(
+  ref: React.Ref<T> | undefined,
+  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React hands a ref null when its node unmounts.
+  value: T | null,
+): void {
+  if (typeof ref === 'function') {
+    ref(value);
+  } else if (ref) {
+    ref.current = value;
+  }
+}
 
 /**
  * A responsive menu on a phone: the same open state, held by a drawer. One opened from inside another drawer stacks on
@@ -76,6 +118,7 @@ function DropdownMenuDrawer({
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>): React.JSX.Element {
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
   const isInsideDrawer = useIsInsideDrawer();
+  const triggerRef = React.useRef<HTMLElement | undefined>(undefined);
   const open = openProperty ?? uncontrolledOpen;
   const setOpen = React.useCallback(
     (next: boolean) => {
@@ -91,6 +134,7 @@ function DropdownMenuDrawer({
       close() {
         setOpen(false);
       },
+      triggerRef,
     }),
     [setOpen],
   );
@@ -119,7 +163,17 @@ function DropdownMenuDrawer({
 function DropdownMenuPortal({
   ...properties
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Portal>): React.JSX.Element {
+  const drawer = React.useContext(DropdownMenuDrawerContext);
+  if (drawer) {
+    // A drawer's rows are already in its portal.
+    return <DropdownMenuDrawerPortal>{properties.children}</DropdownMenuDrawerPortal>;
+  }
   return <DropdownMenuPrimitive.Portal data-slot='dropdown-menu-portal' {...properties} />;
+}
+
+/** A responsive menu's portal in its drawer: nothing of its own, since the drawer's rows are already portaled. */
+function DropdownMenuDrawerPortal({ children }: { readonly children?: React.ReactNode }): React.JSX.Element {
+  return <div className='contents'>{children}</div>;
 }
 
 /**
@@ -140,11 +194,16 @@ function DropdownMenuTrigger({
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Trigger>): React.JSX.Element {
   const drawer = React.useContext(DropdownMenuDrawerContext);
   if (drawer) {
+    const { ref, ...trigger } = properties;
     return (
       <DrawerTrigger
+        ref={(node) => {
+          drawer.triggerRef.current = node ?? undefined;
+          assignRef(ref, node);
+        }}
         data-slot='dropdown-menu-trigger'
         className={cn('outline-none focus-visible:focus-outline', className)}
-        {...properties}
+        {...trigger}
       />
     );
   }
@@ -178,7 +237,10 @@ function DropdownMenuContent({
   drawerTitle = 'Options',
   ...properties
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content> & {
-  /** The heading of a responsive menu's drawer on a phone, which also names it. */
+  /**
+   * The heading of a responsive menu's drawer on a phone, which also names it. Every responsive menu should name it
+   * after what it holds (`Help`, the row's name); `Options` is only the fallback.
+   */
   readonly drawerTitle?: string;
 }): React.JSX.Element {
   const fullscreenElement = useFullscreenElement();
@@ -188,6 +250,7 @@ function DropdownMenuContent({
     return (
       <DropdownMenuDrawerContent
         title={drawerTitle}
+        triggerRef={drawer.triggerRef}
         onCloseAutoFocus={properties.onCloseAutoFocus}
         onEscapeKeyDown={properties.onEscapeKeyDown}
       >
@@ -229,19 +292,44 @@ function DropdownMenuContent({
  */
 function DropdownMenuDrawerContent({
   title,
+  triggerRef,
   children,
   onCloseAutoFocus,
   onEscapeKeyDown,
 }: Pick<React.ComponentProps<typeof DrawerContent>, 'children' | 'onCloseAutoFocus' | 'onEscapeKeyDown'> & {
   readonly title: string;
+  readonly triggerRef: React.RefObject<HTMLElement | undefined>;
 }): React.JSX.Element {
   return (
     <DrawerContent
       aria-describedby={undefined}
       className='z-110'
       overlayClassName='z-110'
-      onCloseAutoFocus={onCloseAutoFocus}
+      onCloseAutoFocus={(event) => {
+        onCloseAutoFocus?.(event);
+        if (!event.defaultPrevented) {
+          // The drawer returns focus to its trigger itself.
+          return;
+        }
+        /* A menu that keeps focus from returning (its item may open what takes focus next) leaves it on the page in a
+           drawer, where nothing moves it: back to the trigger, unless something took it or the trigger is gone. */
+        const focused = document.activeElement;
+        const drawer = event.currentTarget instanceof HTMLElement ? event.currentTarget : undefined;
+        const isFocusLost = !focused || focused === document.body || drawer?.contains(focused) === true;
+        if (isFocusLost && triggerRef.current?.isConnected) {
+          triggerRef.current.focus({ preventScroll: true });
+        }
+      }}
       onEscapeKeyDown={onEscapeKeyDown}
+      onOpenAutoFocus={(event) => {
+        // As a menu opens: focus on its first item that can take it, so the keys reach the items at once.
+        event.preventDefault();
+        const drawer = event.currentTarget instanceof HTMLElement ? event.currentTarget : undefined;
+        const first = drawer?.querySelector<HTMLElement>(
+          '[data-slot=dropdown-menu-drawer-items] :is(button, a[href]):not(:disabled, [aria-disabled=true], [tabindex="-1"])',
+        );
+        (first ?? drawer)?.focus({ preventScroll: true });
+      }}
     >
       <div className='flex items-center gap-2 px-4 py-2'>
         <DrawerTitle className='min-w-0 flex-1 truncate text-base font-medium'>{title}</DrawerTitle>
@@ -251,7 +339,13 @@ function DropdownMenuDrawerContent({
           </Button>
         </DrawerClose>
       </div>
-      <div data-slot='dropdown-menu-drawer-items' className='flex min-h-0 flex-col overflow-y-auto border-t py-1 pb-3'>
+      {/* A group, so the checkbox and radio rows have the parent their roles need. */}
+      <div
+        role='group'
+        aria-label={title}
+        data-slot='dropdown-menu-drawer-items'
+        className='flex min-h-0 flex-col overflow-y-auto border-t py-1 pb-3'
+      >
         {children}
       </div>
     </DrawerContent>
@@ -362,23 +456,22 @@ function DropdownMenuDrawerItem({
       type={asChild ? undefined : 'button'}
       disabled={asChild ? undefined : disabled}
       aria-disabled={disabled || undefined}
-      className={cn(
-        menuItemVariants({ variant, inset: isInset }),
-        'min-h-touch-row w-full shrink-0 gap-3 rounded-none px-4 text-left text-sm [&_svg:not([class*=size-])]:size-4',
-        className,
-      )}
+      className={cn(menuItemVariants({ variant, inset: isInset }), drawerRowClass, className)}
       {...(properties as React.ComponentProps<'button'>)}
+      // A disabled link is out of the tab order, as a disabled button is.
+      tabIndex={asChild && disabled ? -1 : properties.tabIndex}
       onClick={(event: React.MouseEvent<HTMLButtonElement>) => {
-        // The caller's handler is typed for the menu's div item; in a drawer the row is a button (or its child).
-        onClick?.(event as unknown as React.MouseEvent<HTMLDivElement>);
-        if (event.defaultPrevented || disabled) {
+        if (disabled) {
+          // A disabled button fires no click; a disabled link must not follow its href either.
+          event.preventDefault();
           return;
         }
-        const select = new Event('menu.itemSelect', { cancelable: true });
-        onSelect?.(select);
-        if (!select.defaultPrevented) {
-          close();
+        // The caller's handler is typed for the menu's div item; in a drawer the row is a button (or its child).
+        onClick?.(event as unknown as React.MouseEvent<HTMLDivElement>);
+        if (event.defaultPrevented) {
+          return;
         }
+        selectDrawerRow(onSelect, close);
       }}
     />
   );
@@ -402,6 +495,14 @@ function DropdownMenuCheckboxItem({
   checked,
   ...properties
 }: React.ComponentProps<typeof DropdownMenuPrimitive.CheckboxItem>): React.JSX.Element {
+  const drawer = React.useContext(DropdownMenuDrawerContext);
+  if (drawer) {
+    return (
+      <DropdownMenuDrawerCheckboxItem className={className} checked={checked} close={drawer.close} {...properties}>
+        {children}
+      </DropdownMenuDrawerCheckboxItem>
+    );
+  }
   return (
     <DropdownMenuPrimitive.CheckboxItem
       data-slot='dropdown-menu-checkbox-item'
@@ -420,6 +521,62 @@ function DropdownMenuCheckboxItem({
 }
 
 /**
+ * A checkbox item as a drawer's touch row (`menuitemcheckbox`): choosing it toggles it, as a menu's does, then closes
+ * the drawer unless `onSelect` prevented that.
+ */
+function DropdownMenuDrawerCheckboxItem({
+  className,
+  children,
+  checked = false,
+  onCheckedChange,
+  onSelect,
+  onClick,
+  disabled = false,
+  close,
+  asChild: _asChild,
+  textValue: _textValue,
+  ...properties
+}: React.ComponentProps<typeof DropdownMenuPrimitive.CheckboxItem> & {
+  readonly close: () => void;
+}): React.JSX.Element {
+  const isIndeterminate = checked === 'indeterminate';
+  return (
+    <button
+      type='button'
+      role='menuitemcheckbox'
+      aria-checked={isIndeterminate ? 'mixed' : checked}
+      data-slot='dropdown-menu-checkbox-item'
+      data-state={isIndeterminate ? 'indeterminate' : checked ? 'checked' : 'unchecked'}
+      data-disabled={disabled ? '' : undefined}
+      disabled={disabled}
+      className={cn(menuItemVariants(), drawerRowClass, 'pl-11', className)}
+      {...(properties as React.ComponentProps<'button'>)}
+      onClick={(event) => {
+        onClick?.(event as unknown as React.MouseEvent<HTMLDivElement>);
+        if (event.defaultPrevented) {
+          return;
+        }
+        // As a menu's: the toggle happens even when `onSelect` keeps the menu open.
+        selectDrawerRow((select) => {
+          onSelect?.(select);
+          onCheckedChange?.(isIndeterminate ? true : !checked);
+        }, close);
+      }}
+    >
+      <span className='pointer-events-none absolute left-4 flex size-4 items-center justify-center'>
+        {isIndeterminate ? <MinusIcon className='size-4' /> : checked ? <CheckIcon className='size-4' /> : null}
+      </span>
+      {children}
+    </button>
+  );
+}
+
+/** A drawer's radio group: its value and how a row changes it. */
+const DropdownMenuDrawerRadioContext = React.createContext<
+  Pick<React.ComponentProps<typeof DropdownMenuPrimitive.RadioGroup>, 'value' | 'onValueChange'> | undefined
+>(undefined);
+
+/**
  * Coordinates a mutually exclusive set of radio menu items.
  *
  * @public
@@ -435,12 +592,37 @@ function DropdownMenuRadioGroup({
   className,
   ...properties
 }: React.ComponentProps<typeof DropdownMenuPrimitive.RadioGroup>): React.JSX.Element {
+  const drawer = React.useContext(DropdownMenuDrawerContext);
+  if (drawer) {
+    return <DropdownMenuDrawerRadioGroup className={className} {...properties} />;
+  }
   return (
     <DropdownMenuPrimitive.RadioGroup
       data-slot='dropdown-menu-radio-group'
       className={cn('flex flex-col gap-0.5', className)}
       {...properties}
     />
+  );
+}
+
+/** A radio group in a drawer: a group of `menuitemradio` rows that share its value. */
+function DropdownMenuDrawerRadioGroup({
+  className,
+  value,
+  onValueChange,
+  asChild: _asChild,
+  ...properties
+}: React.ComponentProps<typeof DropdownMenuPrimitive.RadioGroup>): React.JSX.Element {
+  const radio = React.useMemo(() => ({ value, onValueChange }), [value, onValueChange]);
+  return (
+    <DropdownMenuDrawerRadioContext.Provider value={radio}>
+      <div
+        role='group'
+        data-slot='dropdown-menu-radio-group'
+        className={cn('flex flex-col', className)}
+        {...(properties as React.ComponentProps<'div'>)}
+      />
+    </DropdownMenuDrawerRadioContext.Provider>
   );
 }
 
@@ -461,6 +643,43 @@ function DropdownMenuRadioItem({
   children,
   ...properties
 }: React.ComponentProps<typeof DropdownMenuPrimitive.RadioItem>): React.JSX.Element {
+  const drawer = React.useContext(DropdownMenuDrawerContext);
+  const radio = React.useContext(DropdownMenuDrawerRadioContext);
+  if (drawer) {
+    const { value, onSelect, onClick, disabled = false, asChild: _asChild, textValue: _textValue, ...row } = properties;
+    const isChecked = radio?.value === value;
+    return (
+      <button
+        type='button'
+        role='menuitemradio'
+        aria-checked={isChecked}
+        data-slot='dropdown-menu-radio-item'
+        data-state={isChecked ? 'checked' : 'unchecked'}
+        data-disabled={disabled ? '' : undefined}
+        disabled={disabled}
+        className={cn(menuItemVariants(), drawerRowClass, 'pl-11', className)}
+        {...(row as React.ComponentProps<'button'>)}
+        onClick={(event) => {
+          onClick?.(event as unknown as React.MouseEvent<HTMLDivElement>);
+          if (event.defaultPrevented) {
+            return;
+          }
+          selectDrawerRow((select) => {
+            onSelect?.(select);
+            radio?.onValueChange?.(value);
+          }, drawer.close);
+        }}
+      >
+        <span
+          data-slot='dropdown-menu-radio-item-indicator'
+          className='pointer-events-none absolute left-4 flex size-4 items-center justify-center'
+        >
+          {isChecked ? <CircleIcon className='size-2 fill-current' /> : null}
+        </span>
+        {children}
+      </button>
+    );
+  }
   return (
     <DropdownMenuPrimitive.RadioItem
       data-slot='dropdown-menu-radio-item'
@@ -510,6 +729,46 @@ function DropdownMenuSwitchItem({
   readonly onIsCheckedChange?: (checked: boolean) => void;
 }): React.JSX.Element {
   const id = React.useId();
+  const drawer = React.useContext(DropdownMenuDrawerContext);
+  if (drawer) {
+    const { onClick, disabled = false, asChild: _asChild, textValue: _textValue, ...row } = properties;
+    // The row is the control (`menuitemcheckbox`); the switch only shows its state. Toggling keeps the drawer open.
+    return (
+      <button
+        type='button'
+        role='menuitemcheckbox'
+        aria-checked={isChecked}
+        aria-labelledby={`${id}-title`}
+        {...(description === undefined ? {} : { 'aria-describedby': `${id}-description` })}
+        data-slot='dropdown-menu-switch-item'
+        data-disabled={disabled ? '' : undefined}
+        disabled={disabled}
+        className={cn(
+          menuItemVariants(),
+          menuSwitchRowVariants({ described: description !== undefined }),
+          drawerRowClass,
+          className,
+        )}
+        {...(row as React.ComponentProps<'button'>)}
+        onClick={(event) => {
+          onClick?.(event as unknown as React.MouseEvent<HTMLDivElement>);
+          if (!event.defaultPrevented) {
+            onIsCheckedChange?.(!isChecked);
+          }
+        }}
+      >
+        <SwitchRowLabel
+          icon={icon}
+          description={description}
+          titleId={`${id}-title`}
+          descriptionId={`${id}-description`}
+        >
+          {children}
+        </SwitchRowLabel>
+        <SwitchIndicator isChecked={isChecked} />
+      </button>
+    );
+  }
   return (
     <DropdownMenuPrimitive.Item
       data-slot='dropdown-menu-switch-item'
@@ -720,7 +979,48 @@ function DropdownMenuShortcut({ className, ...properties }: React.ComponentProps
  * ```
  */
 function DropdownMenuSub({ ...properties }: React.ComponentProps<typeof DropdownMenuPrimitive.Sub>): React.JSX.Element {
+  const drawer = React.useContext(DropdownMenuDrawerContext);
+  if (drawer) {
+    return <DropdownMenuDrawerSub {...properties} />;
+  }
   return <DropdownMenuPrimitive.Sub data-slot='dropdown-menu-sub' {...properties} />;
+}
+
+type DropdownMenuDrawerSubState = {
+  readonly isOpen: boolean;
+  readonly setOpen: (open: boolean) => void;
+  readonly contentId: string;
+};
+
+/** A submenu in a drawer: its trigger expands its items in place, under it. */
+const DropdownMenuDrawerSubContext = React.createContext<DropdownMenuDrawerSubState | undefined>(undefined);
+
+function DropdownMenuDrawerSub({
+  open: openProperty,
+  defaultOpen = false,
+  onOpenChange,
+  children,
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Sub>): React.JSX.Element {
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
+  const contentId = React.useId();
+  const isOpen = openProperty ?? uncontrolledOpen;
+  const setOpen = React.useCallback(
+    (next: boolean) => {
+      if (openProperty === undefined) {
+        setUncontrolledOpen(next);
+      }
+      onOpenChange?.(next);
+    },
+    [openProperty, onOpenChange],
+  );
+  const sub = React.useMemo(() => ({ isOpen, setOpen, contentId }), [isOpen, setOpen, contentId]);
+  return (
+    <DropdownMenuDrawerSubContext.Provider value={sub}>
+      <div data-slot='dropdown-menu-sub' className='flex flex-col'>
+        {children}
+      </div>
+    </DropdownMenuDrawerSubContext.Provider>
+  );
 }
 
 /**
@@ -743,6 +1043,40 @@ function DropdownMenuSubTrigger({
 }: React.ComponentProps<typeof DropdownMenuPrimitive.SubTrigger> & {
   readonly isInset?: boolean;
 }): React.JSX.Element {
+  const drawer = React.useContext(DropdownMenuDrawerContext);
+  const sub = React.useContext(DropdownMenuDrawerSubContext);
+  if (drawer) {
+    const { onClick, disabled = false, asChild: _asChild, textValue: _textValue, ...row } = properties;
+    return (
+      <button
+        type='button'
+        aria-expanded={sub?.isOpen ?? false}
+        aria-controls={sub?.isOpen ? sub.contentId : undefined}
+        data-slot='dropdown-menu-sub-trigger'
+        data-inset={isInset}
+        data-state={sub?.isOpen ? 'open' : 'closed'}
+        data-disabled={disabled ? '' : undefined}
+        disabled={disabled}
+        className={cn(menuItemVariants({ inset: isInset }), drawerRowClass, className)}
+        {...(row as React.ComponentProps<'button'>)}
+        onClick={(event) => {
+          onClick?.(event as unknown as React.MouseEvent<HTMLDivElement>);
+          if (!event.defaultPrevented) {
+            sub?.setOpen(!sub.isOpen);
+          }
+        }}
+      >
+        {children}
+        <ChevronRightIcon
+          aria-hidden
+          className={cn(
+            'ml-auto size-4 transition-transform motion-reduce:transition-none',
+            sub?.isOpen && 'rotate-90',
+          )}
+        />
+      </button>
+    );
+  }
   return (
     <DropdownMenuPrimitive.SubTrigger
       data-slot='dropdown-menu-sub-trigger'
@@ -772,7 +1106,24 @@ function DropdownMenuSubContent({
   className,
   alignOffset = subMenuSideAlignOffset,
   ...properties
-}: React.ComponentProps<typeof DropdownMenuPrimitive.SubContent>): React.JSX.Element {
+}: React.ComponentProps<typeof DropdownMenuPrimitive.SubContent>): React.JSX.Element | undefined {
+  const drawer = React.useContext(DropdownMenuDrawerContext);
+  const sub = React.useContext(DropdownMenuDrawerSubContext);
+  if (drawer) {
+    if (!sub?.isOpen) {
+      return undefined;
+    }
+    return (
+      <div
+        id={sub.contentId}
+        role='group'
+        data-slot='dropdown-menu-sub-content'
+        className={cn('flex flex-col pl-4', className)}
+      >
+        {properties.children}
+      </div>
+    );
+  }
   return (
     <DropdownMenuPrimitive.SubContent
       data-slot='dropdown-menu-sub-content'

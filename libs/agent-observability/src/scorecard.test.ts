@@ -114,6 +114,12 @@ const settlement = async (
     adjustment: false,
   });
 
+/** The same fact, naming another execution than the projected run's. */
+const inExecution = async (execution: string, fact: Promise<Evidence>): Promise<Evidence> => {
+  const item = await fact;
+  return { ...item, execution: { ...item.execution, attempt: execution } };
+};
+
 describe('scorecard', () => {
   it('counts a run once across uploaders and replays, and never reads content', async () => {
     const first = await project(run({ presentedAt: at + 2000 }));
@@ -244,5 +250,26 @@ describe('scorecard', () => {
     expect(forward).toMatchObject({ settlements: 3, adjustments: 0, supplierCostUnknown: 1 });
     expect(forward.credits).toBeCloseTo(1);
     expect(forward.supplierCost).toBeCloseTo(0.04);
+  });
+
+  it('gives each run the attempts and settlements that name it, and leaves the rest joined to no run', async () => {
+    const card = scorecard([
+      ...(await project(run())),
+      ...(await project(run({ runId: 'run-2', tools: [], ending: { source: row(20), at: at + 20_000 } }))),
+      await attempt('inv-1', 'call-1', { stop: 'error', usage: unreported }),
+      await attempt('inv-2', 'call-1'),
+      await inExecution('inv-3', attempt('inv-3', 'call-2', { purpose: 'helper' })),
+      await settlement('ledger-1', 0.25, null),
+      await settlement('ledger-2', 0.5, 0.02),
+      await inExecution('inv-3', settlement('ledger-3', 0.1, 0.01)),
+    ]);
+
+    expect(card.runs.map((score) => [score.run, score.model])).toEqual([
+      ['run-1', { attempts: 2, calls: 1, settlements: 2, credits: 0.75, supplierCost: 0.02, supplierCostUnknown: 1 }],
+      ['run-2', { attempts: 0, calls: 0, settlements: 0, credits: 0, supplierCost: 0, supplierCostUnknown: 0 }],
+    ]);
+    expect(card.attempts.joined).toEqual({ attempts: 2, settlements: 2 });
+    expect(card.overall.credits).toEqual({ runs: 1, total: 0.75, median: 0.75, p90: 0.75 });
+    expect(card.attempts.cost.settlements).toBe(3);
   });
 });

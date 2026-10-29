@@ -69,6 +69,19 @@ export type RunScore = Readonly<{
   rating: 'positive' | 'negative' | 'none';
   /** Explicit acceptance, rejection or correction, the first one stated. */
   judgement: 'accepted' | 'rejected' | 'corrected' | 'none';
+  /** The supplier attempts and settlements that name this run as their execution. */
+  model: RunModel;
+}>;
+
+/** A run's supplier attempts and what the ledger settled for them. @public */
+export type RunModel = Readonly<{
+  attempts: number;
+  calls: number;
+  settlements: number;
+  credits: number;
+  /** Summed over settlements that reported it, in USD. */
+  supplierCost: number;
+  supplierCostUnknown: number;
 }>;
 
 /** Runs per bucket; an unknown or absent value is its own bucket. @public */
@@ -87,10 +100,14 @@ export type CohortScore = Readonly<{
   /** Per `phase@domain`: how many runs timed it, and their median and 90th percentile, in milliseconds. */
   phases: Readonly<Record<string, Readonly<{ runs: number; median: number; p90: number }>>>;
   openIntervals: number;
+  /** Credits per run, over the runs with a settlement: how many, their sum, median and 90th percentile. */
+  credits: Readonly<{ runs: number; total: number; median: number; p90: number }>;
 }>;
 
 /** One supplier attempt, as its provider fact reports it. @public */
 export type AttemptRecord = Readonly<{
+  /** The execution it names: the host run, or the attempt itself when it named none. */
+  run: string;
   /** The logical call it serves; a retry is another attempt of the same call. */
   call: string;
   provider: string;
@@ -106,7 +123,12 @@ export type AttemptRecord = Readonly<{
 }>;
 
 /** One ledger settlement, as its financial fact reports it. @public */
-export type CostRecord = Readonly<Pick<FinancialFact, 'credits' | 'supplierCost' | 'adjustment'>>;
+export type CostRecord = Readonly<
+  Pick<FinancialFact, 'credits' | 'supplierCost' | 'adjustment'> & {
+    /** The execution its attempt named. */
+    run: string;
+  }
+>;
 
 /** How many attempts reported a time, and its median and 90th percentile, in milliseconds. @public */
 export type Latency = Readonly<{ attempts: number; median: number; p90: number }>;
@@ -145,6 +167,8 @@ export type AttemptScorecard = Readonly<{
   byProvider: Readonly<Record<string, AttemptCohort>>;
   byModel: Readonly<Record<string, AttemptCohort>>;
   cost: CostScore;
+  /** Attempts and settlements whose execution is a scored run; the rest (helpers, other callers) join no run. */
+  joined: Readonly<{ attempts: number; settlements: number }>;
 }>;
 
 /** A scorecard over admitted evidence. @public */
@@ -363,6 +387,7 @@ const scoreOf = (draft: RunDraft): RunScore => {
     presented: draft.presented,
     rating: draft.rating,
     judgement: draft.judgement,
+    model: { attempts: 0, calls: 0, settlements: 0, credits: 0, supplierCost: 0, supplierCostUnknown: 0 },
   };
 };
 
@@ -383,6 +408,10 @@ export const scoreRuns = (facts: readonly Evidence[]): readonly RunScore[] => {
   }
   return [...drafts.values()].map((draft) => scoreOf(draft));
 };
+
+/* Summed in sorted order, so a total never depends on the order facts were read in. */
+const total = (values: readonly number[]): number =>
+  [...values].sort((a, b) => a - b).reduce((sum, value) => sum + value, 0);
 
 const quantile = (sorted: readonly number[], q: number): number =>
   sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(q * sorted.length) - 1))] ?? 0;
@@ -425,6 +454,8 @@ export const scoreCohort = (runs: readonly RunScore[]): CohortScore => {
       return [key, { runs: sorted.length, median: quantile(sorted, 0.5), p90: quantile(sorted, 0.9) }];
     }),
   );
+  const settled = runs.flatMap((run) => (run.model.settlements === 0 ? [] : [run.model.credits]));
+  const credits = [...settled].sort((a, b) => a - b);
   return {
     runs: runs.length,
     termination,
@@ -436,12 +467,14 @@ export const scoreCohort = (runs: readonly RunScore[]): CohortScore => {
     checks,
     phases,
     openIntervals,
+    credits: {
+      runs: credits.length,
+      total: total(credits),
+      median: quantile(credits, 0.5),
+      p90: quantile(credits, 0.9),
+    },
   };
 };
-
-/* Summed in sorted order, so a total never depends on the order facts were read in. */
-const total = (values: readonly number[]): number =>
-  [...values].sort((a, b) => a - b).reduce((sum, value) => sum + value, 0);
 
 const latency = (values: readonly number[]): Latency => {
   const sorted = [...values].sort((a, b) => a - b);
@@ -470,7 +503,12 @@ const attemptCohort = (attempts: readonly AttemptRecord[]): AttemptCohort => {
     ] as const) {
       if (firstOutput !== null && value !== null && value !== undefined) {
         const key = `${measure}@${firstOutput.domain}`;
-        times.set(key, [...(times.get(key) ?? []), value]);
+        const values = times.get(key);
+        if (values === undefined) {
+          times.set(key, [value]);
+        } else {
+          values.push(value);
+        }
       }
     }
   }
@@ -497,7 +535,13 @@ const groupBy = <T, R>(
 ): Readonly<Record<string, R>> => {
   const groups = new Map<string, T[]>();
   for (const item of items) {
-    groups.set(key(item), [...(groups.get(key(item)) ?? []), item]);
+    const name = key(item);
+    const members = groups.get(name);
+    if (members === undefined) {
+      groups.set(name, [item]);
+    } else {
+      members.push(item);
+    }
   }
   return Object.fromEntries([...groups].map(([name, members]) => [name, score(members)]));
 };
@@ -507,12 +551,14 @@ const groupBy = <T, R>(
  *
  * @param attempts - Each attempt once.
  * @param costs - Each settlement once.
+ * @param runs - The scored runs' ids, which an attempt or settlement joins.
  * @returns The attempt cohorts and cost.
  * @public
  */
 export const summarizeAttempts = (
   attempts: readonly AttemptRecord[],
   costs: readonly CostRecord[],
+  runs: ReadonlySet<string> = new Set(),
 ): AttemptScorecard => {
   const known = costs.flatMap((cost) => (cost.supplierCost === null ? [] : [cost.supplierCost]));
   return {
@@ -526,7 +572,53 @@ export const summarizeAttempts = (
       supplierCost: total(known),
       supplierCostUnknown: costs.length - known.length,
     },
+    joined: {
+      attempts: attempts.filter((attempt) => runs.has(attempt.run)).length,
+      settlements: costs.filter((cost) => runs.has(cost.run)).length,
+    },
   };
+};
+
+/**
+ * Give each run the supplier attempts and settlements that name it as their execution.
+ *
+ * @param runs - Each run once, as {@link scoreRuns} or a vendor reader scored it.
+ * @param attempts - Each attempt once.
+ * @param costs - Each settlement once.
+ * @returns The runs, in the same order, each with its model attempts and cost.
+ * @public
+ */
+export const joinAttempts = (
+  runs: readonly RunScore[],
+  attempts: readonly AttemptRecord[],
+  costs: readonly CostRecord[],
+): readonly RunScore[] => {
+  const attemptsOf = groupBy(
+    attempts,
+    (attempt) => attempt.run,
+    (members) => members,
+  );
+  const costsOf = groupBy(
+    costs,
+    (cost) => cost.run,
+    (members) => members,
+  );
+  return runs.map((run) => {
+    const own = attemptsOf[run.run] ?? [];
+    const settled = costsOf[run.run] ?? [];
+    const known = settled.flatMap((cost) => (cost.supplierCost === null ? [] : [cost.supplierCost]));
+    return {
+      ...run,
+      model: {
+        attempts: own.length,
+        calls: new Set(own.map((attempt) => attempt.call)).size,
+        settlements: settled.length,
+        credits: total(settled.map((cost) => cost.credits)),
+        supplierCost: total(known),
+        supplierCostUnknown: settled.length - known.length,
+      },
+    };
+  });
 };
 
 /**
@@ -549,6 +641,7 @@ export const attemptRecords = (
     const { fact } = item.payload;
     if (fact.kind === 'provider') {
       attempts.push({
+        run: item.execution.attempt,
         call: fact.logicalCall,
         provider: fact.provider ?? 'unknown',
         model: fact.requestedModel ?? 'unknown',
@@ -560,7 +653,12 @@ export const attemptRecords = (
         usage: fact.usage,
       });
     } else if (fact.kind === 'financial') {
-      costs.push({ credits: fact.credits, supplierCost: fact.supplierCost, adjustment: fact.adjustment });
+      costs.push({
+        run: item.execution.attempt,
+        credits: fact.credits,
+        supplierCost: fact.supplierCost,
+        adjustment: fact.adjustment,
+      });
     }
   }
   return { attempts, costs };
@@ -593,7 +691,12 @@ export const summarizeRuns = (
  */
 export const scorecard = (evidence: readonly Evidence[]): Scorecard => {
   const { facts, reconciliation } = reconcileEvidence(evidence);
-  const runs = scoreRuns(facts);
   const { attempts, costs } = attemptRecords(facts);
-  return { reconciliation, ...summarizeRuns(runs), runs, attempts: summarizeAttempts(attempts, costs) };
+  const runs = joinAttempts(scoreRuns(facts), attempts, costs);
+  return {
+    reconciliation,
+    ...summarizeRuns(runs),
+    runs,
+    attempts: summarizeAttempts(attempts, costs, new Set(runs.map((run) => run.run))),
+  };
 };

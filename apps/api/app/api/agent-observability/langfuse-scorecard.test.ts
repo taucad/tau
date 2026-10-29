@@ -138,6 +138,11 @@ const settlement = (
   normalization: 'openai-responses-v1',
 });
 
+const forAttempt = (attemptKey: string, observed: ObservedSettlement): ObservedSettlement => ({
+  ...observed,
+  operation: { ...observed.operation, attemptKey },
+});
+
 const withoutIds = ({ run: _run, chat: _chat, ...score }: RunScore) => score;
 
 describe('scoreObservations', () => {
@@ -203,6 +208,33 @@ describe('scoreObservations', () => {
     for (const id of ['attempt-1', 'chat-1', 'user-a', 'project-a', 'op-1']) {
       expect(read).not.toContain(id);
     }
+  });
+
+  it('joins each run to the attempts and settlements its host attempt keys name, exactly as the evidence does', async () => {
+    const authority = { policyEpoch: 'epoch-1', protection: 'free' } as const;
+    const evidence = [
+      ...(await project(run())),
+      ...(await project(run({ runId: 'run-2', tools: [], ending: { source: row(20), at: at + 20_000 } }))),
+      await providerAttemptEvidence(attempt({ attemptKey: 'run-1:1:0', operation: 'op-1' }), authority),
+      await providerAttemptEvidence(attempt({ attemptKey: 'run-1:1:1', operation: 'op-2' }), authority),
+      await providerAttemptEvidence(attempt({ attemptKey: 'helper-1', operation: 'op-3' }), authority),
+      await settlementEvidence(forAttempt('run-1:1:0', settlement('op-1', 2_000_000n, null)), 'user-a', {
+        ...authority,
+        project: 'project-a',
+      }),
+    ];
+
+    const fromLangfuse = scoreObservations(delivered(evidence));
+    const fromEvidence = scorecard(evidence);
+
+    expect(fromLangfuse.runs.map(withoutIds)).toEqual(fromEvidence.runs.map(withoutIds));
+    expect(fromLangfuse.overall.credits).toEqual(fromEvidence.overall.credits);
+    expect(fromLangfuse.attempts.joined).toEqual(fromEvidence.attempts.joined);
+    expect(fromEvidence.runs.map((score) => score.model)).toEqual([
+      { attempts: 2, calls: 2, settlements: 1, credits: 2, supplierCost: 0, supplierCostUnknown: 1 },
+      { attempts: 0, calls: 0, settlements: 0, credits: 0, supplierCost: 0, supplierCostUnknown: 0 },
+    ]);
+    expect(fromEvidence.attempts.joined).toEqual({ attempts: 2, settlements: 1 });
   });
 
   it('counts a fact once across uploaders and replays, and never reads content or another mapper', async () => {

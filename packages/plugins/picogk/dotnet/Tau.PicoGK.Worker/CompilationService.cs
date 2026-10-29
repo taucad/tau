@@ -32,7 +32,14 @@ internal sealed record ParameterDefinition(
     int? Order,
     IReadOnlyList<string>? EnumValues);
 
+#if PICOGK_BROWSER
+internal sealed record CompiledEntryPoint(string TypeName, string MethodName, bool HasArguments);
+#endif
+
 internal sealed record CompiledModel(
+#if PICOGK_BROWSER
+    CompiledEntryPoint EntryPoint,
+#endif
     byte[] Assembly,
     byte[] Pdb,
     IReadOnlyList<ParameterDefinition> Parameters,
@@ -63,6 +70,20 @@ internal sealed record CompilationTimings(
 
 internal static class CompilationService
 {
+#if PICOGK_BROWSER
+    // Async Main's PE entry is a generated blocking wrapper. Invoke the compiler-selected
+    // method instead so the browser can await it without a synchronous runtime wait.
+    private static CompiledEntryPoint DescribeEntryPoint(CSharpCompilation compilation)
+    {
+        var entry = compilation.GetEntryPoint(default)!;
+        var names = new Stack<string>();
+        for (var type = entry.ContainingType; type is not null; type = type.ContainingType)
+            names.Push(type.MetadataName);
+        var prefix = entry.ContainingNamespace.IsGlobalNamespace
+            ? string.Empty : entry.ContainingNamespace.ToDisplayString() + ".";
+        return new CompiledEntryPoint(prefix + string.Join("+", names), entry.MetadataName, entry.Parameters.Length != 0);
+    }
+#endif
     private const string CompilerContractVersion = "4";
     private const int MaximumSyntaxDepth = 512;
     private const int MaximumDiagnostics = 256;
@@ -194,6 +215,9 @@ internal static class CompilationService
         ThrowDiagnostics(emitted.Diagnostics);
 
         var model = new CompiledModel(
+#if PICOGK_BROWSER
+            DescribeEntryPoint(compilation),
+#endif
             assembly.ToArray(),
             pdb.ToArray(),
             parameters,

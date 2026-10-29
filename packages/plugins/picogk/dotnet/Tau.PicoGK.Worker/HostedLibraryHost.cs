@@ -62,7 +62,9 @@ internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
         var initialize = Stopwatch.StartNew();
         Library? library = null;
         Viewer? viewer = null;
+#if !PICOGK_BROWSER
         Task? task = null;
+#endif
         TauComputeRun? reuse = null;
         ExceptionDispatchInfo? failure = null;
         var backend = new CaptureViewerBackend(artifactRoot);
@@ -83,6 +85,10 @@ internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
             // W17: a cancelled build fails the model's next viewer call, which unwinds it at a
             // boundary the host owns. A model that makes no further viewer call runs to its end.
             using var registration = cancellation.Register(backend.Cancel);
+#if PICOGK_BROWSER
+            fnTask.Invoke();
+            cancellation.ThrowIfCancellationRequested();
+#else
             task = Task.Run(fnTask.Invoke);
             // D25: the model's completion wakes this thread. Sleeping the poll interval instead
             // paid up to a whole interval after the model had already finished, on every render.
@@ -99,9 +105,12 @@ internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
                 _ = task.Exception;
                 cancellation.ThrowIfCancellationRequested();
             }
+#endif
             viewer.bPoll();
             backend.Complete();
+#if !PICOGK_BROWSER
             task.GetAwaiter().GetResult();
+#endif
 
             var captured = backend.Extract();
             cancellation.ThrowIfCancellationRequested();
@@ -134,7 +143,9 @@ internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
                 catch (Exception error) { failure ??= ExceptionDispatchInfo.Capture(error); }
             }
             // Native teardown must follow model completion even when polling failed first.
+#if !PICOGK_BROWSER
             Cleanup(() => task?.GetAwaiter().GetResult());
+#endif
             backend.ComputeReuse = null;
             if (library is not null) library.TauComputeReuse = null;
             Cleanup(() => reuse?.Dispose());
@@ -211,8 +222,10 @@ internal sealed class CaptureViewerBackend : IViewerBackend
     internal long GeometryBytes { get { lock (geometryGate) return geometryBytes; } }
     internal long GeometryCopies { get { lock (geometryGate) return geometryCopies; } }
     private readonly string artifactRoot;
+#if !PICOGK_BROWSER
     private readonly BlockingCollection<ViewerCommand> commands;
     private readonly Task pump;
+#endif
     private readonly List<SceneObject> objects = [];
     private readonly Dictionary<object, SceneObject> objectIndex = new(ReferenceEqualityComparer.Instance);
     private readonly ConditionalWeakTable<object, ComponentIdentity> componentIdentities = new();
@@ -238,11 +251,17 @@ internal sealed class CaptureViewerBackend : IViewerBackend
     {
         this.artifactRoot = Path.GetFullPath(artifactRoot);
         Directory.CreateDirectory(this.artifactRoot);
+#if !PICOGK_BROWSER
         commands = new BlockingCollection<ViewerCommand>(MaximumPendingCommands);
         pump = Task.Run(Pump);
+#endif
     }
 
+#if PICOGK_BROWSER
+    public bool IsIdle => true;
+#else
     public bool IsIdle => commands.Count == 0;
+#endif
 
     public bool Poll() { Flush(); return false; }
 
@@ -520,8 +539,10 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             close = !completed;
             completed = true;
         }
+#if !PICOGK_BROWSER
         if (close) commands.CompleteAdding();
         pump.GetAwaiter().GetResult();
+#endif
         RethrowPumpError();
     }
 
@@ -566,11 +587,14 @@ internal sealed class CaptureViewerBackend : IViewerBackend
                 hiddenGroups.Clear();
                 warnings.Clear();
             }
+#if !PICOGK_BROWSER
             commands.Dispose();
+#endif
             admissionCancellation.Dispose();
         }
     }
 
+#if !PICOGK_BROWSER
     [ExcludeFromCodeCoverage]
     private void Pump()
     {
@@ -594,6 +618,8 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             }
         }
     }
+
+#endif
 
     private void ApplyBatch(IReadOnlyList<ViewerCommand> batch)
     {
@@ -622,9 +648,13 @@ internal sealed class CaptureViewerBackend : IViewerBackend
 
     private void Flush()
     {
+#if PICOGK_BROWSER
+        _ = CheckAdmission();
+#else
         using var completion = new ManualResetEventSlim();
         Enqueue(new ViewerCommand(() => { }, completion));
         completion.Wait();
+#endif
         RethrowPumpError();
     }
 
@@ -645,6 +675,10 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         try
         {
             var admission = CheckAdmission();
+#if PICOGK_BROWSER
+            accepted = true; // ApplyBatch owns release even when applying throws.
+            ApplyBatch([command]);
+#else
             try
             {
                 commands.Add(command, admission);
@@ -655,6 +689,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
                 RethrowPumpError();
                 throw;
             }
+#endif
             if (command.Completion is null) RethrowPumpError();
         }
         finally

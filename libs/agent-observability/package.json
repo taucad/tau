@@ -38,6 +38,8 @@
     "./identity": "./src/identity.ts",
     "./pending-stores": "./src/pending-stores.ts",
     "./host-evidence": "./src/host-evidence.ts",
+    "./node-pending-files": "./src/node-pending-files.ts",
+    "./cloud-host-observer": "./src/cloud-host-observer.ts",
     "./projection": "./src/projection.ts",
     "./reporter": "./src/reporter.ts",
     "./pi-telemetry": "./src/pi-telemetry.ts",
@@ -50,7 +52,8 @@
   },
   "dependencies": {
     "@earendil-works/pi-telemetry": "catalog:",
-    "@opentelemetry/api": "catalog:"
+    "@opentelemetry/api": "catalog:",
+    "@taucad/agent-host": "workspace:*"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "catalog:",

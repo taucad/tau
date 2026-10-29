@@ -5,14 +5,13 @@
  * answer for this account and project allows summaries; a signed-out desktop sends nothing and keeps nothing.
  */
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { observeOwnTurns } from '@taucad/agent-host';
 import type { OwnRowsRead } from '@taucad/agent-host';
 import { createHostEvidence } from '@taucad/agent-observability/host-evidence';
 import type { HostEvidence } from '@taucad/agent-observability/host-evidence';
+import { ownerOnlyFiles } from '@taucad/agent-observability/node-pending-files';
 import { filePendingStore } from '@taucad/agent-observability/pending-stores';
-import type { PendingFileSystem } from '@taucad/agent-observability/pending-stores';
 
 /** What one project's observer is composed from. @internal */
 export type DesktopEvidenceOptions = Readonly<{
@@ -27,31 +26,6 @@ export type DesktopEvidenceOptions = Readonly<{
   token: () => string | undefined;
   fetch?: typeof fetch;
 }>;
-
-/** Owner-only, atomic file access for the queue: a crash leaves the old queue or the new one. */
-export const ownerOnlyFiles: PendingFileSystem = {
-  readFile: async (path) => {
-    try {
-      return await readFile(path, 'utf8');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return undefined;
-      }
-      throw error;
-    }
-  },
-  replaceFile: async (path, contents) => {
-    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-    const staged = `${path}.${randomUUID()}.tmp`;
-    try {
-      await writeFile(staged, contents, { encoding: 'utf8', mode: 0o600 });
-      await rename(staged, path);
-    } catch (error) {
-      await rm(staged, { force: true });
-      throw error;
-    }
-  },
-};
 
 /**
  * One desktop project host's chat observer, for `ProjectHostOptions.observeChats`.

@@ -38,6 +38,7 @@ import { resolveZooAuthToken, cliZooProxyUrl } from '#zoo-proxy.js';
 import { requireGitToolchain } from '#commands/revisions.js';
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
 import { cliRuntimeTelemetry } from '#runtime-telemetry.js';
+import { loadCloudHostObserver } from '#cloud-host-observer.js';
 // oxlint-disable-next-line no-restricted-imports -- relative import is the only portable way to load the CLI's own package.json (matches `packages/runtime/src/utils/package-info.ts`).
 import packageJson from '../../package.json' with { type: 'json' };
 import { createComputeStoreHost } from '#compute-store.js';
@@ -1112,6 +1113,7 @@ export const serveCommand = defineCommand({
     process.env['TAU_SERVE_ROLE'] ??= 'serve';
     const runtimeTelemetry =
       process.env['TAU_CLOUD_HOST'] === '1' ? cliRuntimeTelemetry('cloud', packageJson.version) : undefined;
+    const observeChats = await loadCloudHostObserver();
     const daemon = startHostDaemon({
       relayUrl: new URL(apiUrl),
       relay: relay !== undefined,
@@ -1133,6 +1135,7 @@ export const serveCommand = defineCommand({
       ...(runtimeTelemetry === undefined
         ? {}
         : { observeRuntimeClient: (client, caller) => runtimeTelemetry.observe(client, caller) }),
+      ...(observeChats === undefined ? {} : { observeChats }),
       onEvent,
     });
     try {

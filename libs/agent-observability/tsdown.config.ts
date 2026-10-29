@@ -10,6 +10,8 @@ const baseConfig: UserConfig = {
     'src/identity.ts',
     'src/pending-stores.ts',
     'src/host-evidence.ts',
+    'src/node-pending-files.ts',
+    'src/cloud-host-observer.ts',
     'src/projection.ts',
     'src/reporter.ts',
     'src/pi-telemetry.ts',

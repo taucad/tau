@@ -77,9 +77,27 @@ export const preparePicogkBrowserRuntime = async (options: {
       const bytes = await read(url);
       // The pinned generated .NET/Emscripten modules derive resource locations from this expression.
       // Preserve their original base URL while executing only verified bytes, without a second network import.
-      const code = new TextDecoder('utf-8', { fatal: true })
+      let code = new TextDecoder('utf-8', { fatal: true })
         .decode(bytes)
         .replaceAll('import.meta.url', JSON.stringify(url));
+      if (url === bootstrap) {
+        // Mono starts pthreads by loading this bootstrap again. Each worker must execute the
+        // already-verified blob, including when a child runtime requests another worker.
+        // Keep import.meta.url here: it identifies this blob, not the original resource base.
+        code = `{
+  const WorkerBase = globalThis.Worker;
+  globalThis.Worker = class extends WorkerBase {
+    constructor(script, options) {
+      const requested = new URL(script, ${JSON.stringify(bootstrap)}).href;
+      if (requested !== ${JSON.stringify(bootstrap)} && requested !== import.meta.url) {
+        throw new Error('Unlisted PicoGK runtime worker bootstrap.');
+      }
+      super(import.meta.url, options);
+    }
+  };
+}
+${code}`;
+      }
       modules.set(url, URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
     }
     return {

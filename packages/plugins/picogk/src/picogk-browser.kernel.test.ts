@@ -53,5 +53,7 @@ describe('PicoGK browser registration', () => {
   it('should reject desktop launch options at the browser boundary', () => {
     expect(picogkBrowserOptionsSchema.safeParse({ closure: {} }).success).toBe(false);
     expect(picogkBrowserOptionsSchema.safeParse({ wasm: 'threads' }).success).toBe(false);
+    expect(picogkBrowserOptionsSchema.safeParse({ recycleHeapBytes: 0 }).success).toBe(false);
+    expect(picogkBrowserOptionsSchema.parse({}).recycleHeapBytes).toBe(1.5 * 2 ** 30);
   });
 });

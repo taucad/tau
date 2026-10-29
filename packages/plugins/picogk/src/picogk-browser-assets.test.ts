@@ -4,13 +4,14 @@ import { loadPicogkBrowserAssets } from '#picogk-browser-assets.js';
 
 const resource = (path: string) => ({ path, sha256: 'a'.repeat(64), byteLength: 4 });
 const variant = () => ({
+  archiveInputReceipt: 'c'.repeat(64),
   bootstrap: '_framework/dotnet.js',
   compilerIdentity: 'b'.repeat(64),
   runtimeFiles: [resource('_framework/dotnet.js')],
   references: [resource('refs/PicoGK.dll')],
 });
 const manifest = () => ({
-  format: 'tau-picogk-browser-v1',
+  format: 'tau-picogk-browser-v2',
   protocolVersion: 9,
   toolchain: {
     sdk: '11.0.100-rc.3.26522.148',
@@ -18,7 +19,6 @@ const manifest = () => ({
     emscriptenPackage: '6.0.2',
     emscriptenCompiler: '6.0.3',
     emscriptenRevision: '6ea9c28c38cdd40c1032fa04400c9d16230ee180',
-    inputReceipt: 'c'.repeat(64),
   },
   single: variant(),
 });

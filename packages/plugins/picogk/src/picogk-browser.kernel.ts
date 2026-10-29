@@ -28,6 +28,7 @@ export const picogkBrowserKernel = createPicogkKernelDefinition({
     });
     return createPicogkBrowserContext({
       assets,
+      recycleHeapBytes: options.recycleHeapBytes,
       createWorker: () => new Worker(new URL('picogk-browser.worker.mjs', import.meta.url), { type: 'module' }),
       startupTimeout: 120_000,
       requestTimeout: 0,

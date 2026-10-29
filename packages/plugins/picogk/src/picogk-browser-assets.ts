@@ -10,6 +10,7 @@ const path = z
   .refine((value) => value.split('/').every((part) => part !== '' && part !== '.' && part !== '..'));
 const file = z.object({ path, sha256: digest, byteLength: z.number().int().nonnegative() });
 const variant = z.object({
+  archiveInputReceipt: digest,
   bootstrap: path,
   compilerIdentity: digest,
   runtimeFiles: z.array(file).min(1),
@@ -17,7 +18,7 @@ const variant = z.object({
 });
 /** Immutable browser bundle format shared by preparation and admission. @internal */
 export const picogkBrowserManifestSchema = z.object({
-  format: z.literal('tau-picogk-browser-v1'),
+  format: z.literal('tau-picogk-browser-v2'),
   protocolVersion: z.literal(picogkBrowserProtocolVersion),
   toolchain: z.object({
     sdk: z.literal('11.0.100-rc.3.26522.148'),
@@ -25,7 +26,6 @@ export const picogkBrowserManifestSchema = z.object({
     emscriptenPackage: z.literal('6.0.2'),
     emscriptenCompiler: z.literal('6.0.3'),
     emscriptenRevision: z.literal('6ea9c28c38cdd40c1032fa04400c9d16230ee180'),
-    inputReceipt: digest,
   }),
   single: variant,
   multi: variant.optional(),

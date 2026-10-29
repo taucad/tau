@@ -66,6 +66,8 @@ export const picogkWorkerTimingsSchema = z.object({
 export const picogkWorkerMetricsSchema = z.object({
   managedHeapBytes: z.number().int().nonnegative(),
   picoGkNativeBytes: z.number().int().nonnegative(),
+  /** Actual browser WebAssembly heap, including both managed and engine allocations. */
+  wasmHeapBytes: z.number().int().nonnegative().optional(),
   // Browser workers have no process resident-memory measurement.
   processWorkingSetBytes: z.number().int().nonnegative().nullable(),
 });

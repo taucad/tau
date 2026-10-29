@@ -21,6 +21,7 @@
     <WasmEnableSIMD>true</WasmEnableSIMD>
     <WasmEnableExceptionHandling>true</WasmEnableExceptionHandling>
     <WasmEnableThreads Condition="'$(WasmEnableThreads)' == ''">false</WasmEnableThreads>
+    <DefineConstants Condition="'$(WasmEnableThreads)' == 'true'">$(DefineConstants);PICOGK_BROWSER_THREADS</DefineConstants>
     <EmccInitialHeapSize>268435456</EmccInitialHeapSize>
     <EmccMaximumHeapSize>4294967296</EmccMaximumHeapSize>
     <EmccStackSize>8388608</EmccStackSize>

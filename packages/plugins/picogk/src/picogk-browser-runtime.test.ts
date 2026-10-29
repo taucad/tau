@@ -40,7 +40,11 @@ describe('PicoGK browser runtime integrity', () => {
     const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
     const loader = await preparePicogkBrowserRuntime({ bootstrapUrl, files: [bootstrap, binary] });
     expect(loader.bootstrapUrl).toBe('blob:verified-1');
-    expect(await blobs[0]!.text()).toBe(`export const base = ${JSON.stringify(bootstrapUrl)};`);
+    const bootstrapCode = await blobs[0]!.text();
+    expect(bootstrapCode).toContain(`export const base = ${JSON.stringify(bootstrapUrl)};`);
+    expect(bootstrapCode).toContain('super(import.meta.url, options)');
+    expect(bootstrapCode).toContain(`requested !== ${JSON.stringify(bootstrapUrl)}`);
+    expect(bootstrapCode).toContain('Unlisted PicoGK runtime worker bootstrap.');
     expect(loader.loadResource('dotnetjs', 'dotnet.js', bootstrapUrl, integrity(js))).toBe(loader.bootstrapUrl);
     const response = await loader.loadResource('dotnetwasm', 'runtime.wasm', './runtime.wasm', integrity(wasm));
     expect(response).toBeInstanceOf(Response);

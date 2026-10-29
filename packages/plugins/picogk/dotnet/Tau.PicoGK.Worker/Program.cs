@@ -206,7 +206,15 @@ internal static partial class Program
                 var meshing = ParseMeshing(request.Params);
 #if PICOGK_BROWSER
                 using var authored = new AuthoredFileCapture(arguments.Workspace, arguments.Artifacts);
+#if PICOGK_BROWSER_THREADS
+                // Native geometry can synchronously wait for TBB helpers. Keep Mono's runtime
+                // owner free to start those workers and service their proxy requests.
+                var execution = await Task.Run(
+                    () => ModelRunner.ExecuteAsync(compiled, authored.OutputRoot, parameters, cancellation, compute, meshing),
+                    cancellation);
+#else
                 var execution = await ModelRunner.ExecuteAsync(compiled, authored.OutputRoot, parameters, cancellation, compute, meshing);
+#endif
 #else
                 var execution = ModelRunner.Execute(compiled, arguments.Artifacts, parameters, cancellation, compute, meshing);
 #endif

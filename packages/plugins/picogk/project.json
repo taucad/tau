@@ -118,7 +118,7 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "Build the serial browser host from an explicit qualified-input configuration and stage its immutable manifest; no research or optional repository paths are assumed."
+        "description": "Build serial and optional threaded browser hosts from qualified inputs and stage their immutable manifest; no research or optional repository paths are assumed."
       },
       "options": {
         "cwd": "{workspaceRoot}",

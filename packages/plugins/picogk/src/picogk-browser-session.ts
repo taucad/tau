@@ -26,6 +26,7 @@ export type PicogkBrowserAssets = {
 export type PicogkBrowserSessionOptions = {
   readonly createWorker: () => Worker;
   readonly assets: PicogkBrowserAssets;
+  readonly recycleHeapBytes?: number;
   /** Milliseconds. */
   readonly startupTimeout: number;
   /** Milliseconds. Zero waits for completion or an explicit abort. */
@@ -288,6 +289,7 @@ export class PicogkBrowserSession {
             generation: this.generation,
             snapshot,
             assets: this.options.assets,
+            recycleHeapBytes: this.options.recycleHeapBytes,
           },
           snapshot.files.map(({ contents }) => contents.buffer),
         );

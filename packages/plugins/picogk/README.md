@@ -57,6 +57,8 @@ headless capture, parameters and GLB conversion as desktop. Rendering remains in
 Without a prepared manifest, initialization reports `KERNEL_NOT_PREPARED`. `auto` selects a
 threaded variant only when the bundle contains one and the host is cross-origin isolated;
 `single` selects serial execution, and unsupported `multi` requests fail explicitly.
+`recycleHeapBytes` defaults to 1.5 GiB; Tau supplies 512 MiB on memory-constrained devices.
+The worker samples the entire WebAssembly heap and recycles only after its artifacts have been delivered.
 
 See [browser host preparation](dotnet/Tau.PicoGK.Browser/README.md) for the explicit input
 configuration. The currently qualified preparation target produces a serial bundle; automatic

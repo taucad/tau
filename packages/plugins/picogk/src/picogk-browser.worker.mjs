@@ -1,12 +1,13 @@
 /* oxlint-disable jsdoc-js/no-types -- This standalone SDK bootstrap is JavaScript; JSDoc supplies its checked types. */
 import { z } from 'zod';
+import { defaultPicogkRecycleHeapBytes, withPicogkBrowserMemory } from '#picogk-browser-memory.js';
 import { validatePicogkBrowserImage } from '#picogk-browser-images.js';
 import { preparePicogkBrowserRuntime } from '#picogk-browser-runtime.js';
 
 // Isolated .NET host. Only the owner supplies runtime URLs and authorized project bytes.
 /**
  * @typedef {Object} BrowserRuntime
- * @property {{FS: {mkdirTree(path: string): void, chdir(path: string): void, writeFile(path: string, bytes: Uint8Array | string): void, stat(path: string): {size: number}, lstat(path: string): {mode: number}, isDir(mode: number): boolean, readdir(path: string): string[], rmdir(path: string): void, open(path: string, flags: string): unknown, read(stream: unknown, bytes: Uint8Array, offset: number, length: number, position: number): number, close(stream: unknown): void, unlink(path: string): void}}} Module
+ * @property {{HEAPU8: Uint8Array, FS: {mkdirTree(path: string): void, chdir(path: string): void, writeFile(path: string, bytes: Uint8Array | string): void, stat(path: string): {size: number}, lstat(path: string): {mode: number}, isDir(mode: number): boolean, readdir(path: string): string[], rmdir(path: string): void, open(path: string, flags: string): unknown, read(stream: unknown, bytes: Uint8Array, offset: number, length: number, position: number): number, close(stream: unknown): void, unlink(path: string): void}}} Module
  * @property {(name: string, imports: {nextRequest(): Promise<string>, respond(json: string): void, validateImages(artifactPath: string, json: string): Promise<void>}) => void} setModuleImports
  * @property {() => {mainAssemblyName: string}} getConfig
  * @property {(assembly: string, args: string[]) => Promise<number>} runMain
@@ -15,12 +16,14 @@ import { preparePicogkBrowserRuntime } from '#picogk-browser-runtime.js';
  * @typedef {Object} Incoming
  * @property {string} kind
  * @property {number} generation
+ * @property {number | undefined} recycleHeapBytes
  * @property {import('./picogk-browser-session.ts').PicogkBrowserAssets | undefined} assets
  * @property {import('./picogk-browser-session.ts').PicogkBrowserSnapshot | undefined} snapshot
  * @property {{method: string, requestId: string, protocolVersion: number, params: unknown}} frame
  */
 let generation = 0;
 let state = 'new';
+let recycleHeapBytes = defaultPicogkRecycleHeapBytes;
 /** @type {BrowserRuntime} */
 let runtime;
 /** @type {import('./picogk-browser-runtime.ts').PicogkBrowserRuntimeLoader | undefined} */
@@ -117,6 +120,11 @@ const initialize = async (message) => {
   generation = message.generation;
   state = 'initializing';
   const { assets, snapshot } = message;
+  recycleHeapBytes = z
+    .number()
+    .int()
+    .positive()
+    .parse(message.recycleHeapBytes ?? defaultPicogkRecycleHeapBytes);
   if (
     !assets ||
     !/^[a-f\d]{64}$/iu.test(assets.compilerIdentity) ||
@@ -129,6 +137,9 @@ const initialize = async (message) => {
     throw new Error('Invalid PicoGK worker initialization.');
   }
   runtimeLoader = await preparePicogkBrowserRuntime({ bootstrapUrl: assets.bootstrapUrl, files: assets.runtimeFiles });
+  // The pinned Mono loader otherwise treats every worker as a pthread waiting for parent configuration.
+  // This worker owns the runtime; Mono's separately spawned pthreads do not receive the sidecar marker.
+  Object.defineProperty(globalThis, 'dotnetSidecar', { value: true, writable: true, configurable: true });
   const module =
     /** @type {{dotnet: {withResourceLoader(load: import('./picogk-browser-runtime.ts').PicogkBrowserRuntimeLoader['loadResource']): {create(): Promise<BrowserRuntime>}}}} */ (
       await import(runtimeLoader.bootstrapUrl)
@@ -233,6 +244,7 @@ const initialize = async (message) => {
         throw new Error('Invalid managed response.');
       }
       if (activeMethod === 'build' && 'result' in frame) {
+        frame.result = withPicogkBrowserMemory(frame.result, runtime.Module.HEAPU8.byteLength, recycleHeapBytes);
         const receipt = artifactReceipt.parse(frame.result);
         artifacts.set(receipt.artifactPath, receipt);
         registerAuthoredArtifacts(frame.result);

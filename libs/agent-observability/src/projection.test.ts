@@ -67,6 +67,56 @@ describe('projectRun', () => {
     ]);
   });
 
+  describe('test_model checks', () => {
+    const check: NonNullable<ProjectedRun['tools'][number]['check']> = {
+      result: 'passed',
+      revision: [`SYNTHETIC_ENTRY\u0000SYNTHETIC_PATH=sha256:${'a'.repeat(64)}`],
+      requirements: ['SYNTHETIC_SPEC#1', 'SYNTHETIC_SPEC#2'],
+    };
+    const checked = (change: Partial<typeof check> = {}) =>
+      run({ tools: [{ ...run().tools[0]!, check: { ...check, ...change } }] });
+
+    it('writes a cad fact from the output row that names the check only by digest', async () => {
+      const projection = await projectRun(checked(), context());
+
+      expect(projection.evidence.map((evidence) => evidence.semantic.kind)).toEqual(['tool', 'cad', 'outcome']);
+      const cad = projection.evidence[1]!;
+      expect(evidenceSchema.safeParse(cad).success).toBe(true);
+      expect(await verifyEvidenceDigest(cad)).toBe(true);
+      expect(cad.source).toMatchObject({ kind: 'row', sequence: 4 });
+      expect(cad.payload).toMatchObject({
+        plane: 'summary',
+        fact: { kind: 'cad', result: 'passed', exportRequested: false, artifact: null },
+      });
+      /* The run's success stays unknown: a passed check decides its requirements, not the task. */
+      expect(projection.evidence[2]?.payload).toMatchObject({ fact: { kind: 'outcome', success: 'unknown' } });
+      for (const text of ['SYNTHETIC_ENTRY', 'SYNTHETIC_PATH', 'SYNTHETIC_SPEC']) {
+        expect(JSON.stringify(projection)).not.toContain(text);
+      }
+    });
+
+    it('names a different requirement set or revision differently, and the same one identically', async () => {
+      const fact = async (change: Partial<typeof check>) => {
+        const projection = await projectRun(checked(change), context());
+        return projection.evidence[1]?.payload.plane === 'summary' ? projection.evidence[1].payload.fact : undefined;
+      };
+      const base = await fact({});
+      const fewer = await fact({ requirements: ['SYNTHETIC_SPEC#1'] });
+      const edited = await fact({ revision: [`SYNTHETIC_ENTRY\u0000SYNTHETIC_PATH=sha256:${'b'.repeat(64)}`] });
+
+      expect(await fact({})).toEqual(base);
+      expect(fewer).toMatchObject({ sourceRevision: (base as { sourceRevision: string }).sourceRevision });
+      expect(fewer).not.toMatchObject({ requirement: (base as { requirement: string }).requirement });
+      expect(edited).not.toMatchObject({ sourceRevision: (base as { sourceRevision: string }).sourceRevision });
+    });
+
+    it('writes nothing for a check that named no revision', async () => {
+      const projection = await projectRun(checked({ revision: [] }), context());
+
+      expect(projection.evidence.map((evidence) => evidence.semantic.kind)).toEqual(['tool', 'outcome']);
+    });
+  });
+
   it('writes byte-identical facts from any uploader, so a replay or another tab counts once', async () => {
     const first = await projectRun(run(), context());
     const second = await projectRun(run(), context({ uploader: 'device-b' }));

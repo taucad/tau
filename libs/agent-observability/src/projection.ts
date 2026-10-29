@@ -5,8 +5,8 @@ import { canonicalEvidence, contractId, evidenceDigest, sha256Hex } from '#ident
  * Host turn projection (blueprint T09).
  *
  * Turns what a chat's committed rows say about a run into summary evidence the
- * API admits: one `tool` fact per settled tool call and one `outcome` fact per
- * ended run. It reads facts only, never message content, and every value it
+ * API admits: one `tool` fact per settled tool call, one `cad` fact per settled
+ * `test_model` check (T12) and one `outcome` fact per ended run. It reads facts only, never message content, and every value it
  * writes is derived from committed rows, so any device or replay that reads
  * the same rows writes byte-identical evidence and the API counts it once.
  *
@@ -39,6 +39,14 @@ export type ProjectedRun = Readonly<{
       output: ProjectedSource | undefined;
       startedAt: number;
       settledAt: number | undefined;
+      /** A settled `test_model` call's check: its decided status and the file keys of what it checked. */
+      check?:
+        | Readonly<{
+            result: 'passed' | 'failed' | 'inconclusive' | 'unsupported' | 'not-run';
+            revision: readonly string[];
+            requirements: readonly string[];
+          }>
+        | undefined;
     }>
   >;
   intervals: ReadonlyArray<
@@ -264,6 +272,9 @@ const foreignTailsOf = async (
  *
  * - A tool call is written once its output row landed, or once the run ended
  *   without one (then `unknown`); before that it is pending, never `failed`.
+ * - A `test_model` check is written once its output row landed, as a `cad`
+ *   fact whose revision and requirements are digests; only `passed` and
+ *   `failed` are decided, and a check is never a run's success.
  * - An outcome is written once the run has an ending row.
  * - A fact whose row another device led is left to that device (`foreign`),
  *   and one that happened before the grant is never sent (`beforeGrant`).
@@ -314,6 +325,42 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
           : [{ phase: 'tool', domain: 'host-recorded', start: tool.startedAt, end: tool.settledAt }],
     };
   });
+  /*
+   * A check is anchored to its output row, which no other fact uses. It names what was checked only by digest: the
+   * revision's file digests, and the requirement set within that revision, so neither a path nor a requirement's text
+   * leaves the device. A check that named no revision cannot say what it decided about, and writes nothing.
+   */
+  const checkCandidates = run.tools.flatMap((tool) => {
+    const { check, output } = tool;
+    if (check === undefined || output === undefined || check.revision.length === 0) {
+      return [];
+    }
+    return [
+      (async (): Promise<Candidate> => {
+        const [semantic, sourceRevision, requirements] = await Promise.all([
+          contractId('check', `${run.chatId}:${tool.call}`),
+          sha256Hex(canonicalEvidence(['cad-revision', check.revision])),
+          sha256Hex(canonicalEvidence(['cad-requirements', check.revision, check.requirements])),
+        ]);
+        return {
+          source: output,
+          lineage: [tool.input, output],
+          semantic,
+          fact: {
+            kind: 'cad',
+            sourceRevision,
+            requirement: `req-${requirements.slice(0, 48)}`,
+            result: check.result,
+            exportRequested: false,
+            artifact: null,
+          },
+          occurredAt: tool.settledAt ?? tool.startedAt,
+          events: 'complete',
+          intervals: [],
+        };
+      })(),
+    ];
+  });
   const outcomeCandidate = async (): Promise<Candidate> => {
     if (run.ending === undefined) {
       return 'pending';
@@ -359,7 +406,12 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
       intervals: [],
     };
   };
-  const settled = await Promise.all([...toolCandidates, outcomeCandidate(), presentationCandidate()]);
+  const settled = await Promise.all([
+    ...toolCandidates,
+    ...checkCandidates,
+    outcomeCandidate(),
+    presentationCandidate(),
+  ]);
   const candidates = settled.filter((candidate) => candidate !== undefined);
 
   const projected: Array<Promise<Evidence>> = [];

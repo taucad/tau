@@ -1,4 +1,4 @@
-import type { AgentLogEvent, CompactionTrace, ProviderMessage, RowKey } from '#log/event-types.js';
+import type { AgentLogEvent, CompactionTrace, JsonValue, ProviderMessage, RowKey } from '#log/event-types.js';
 import type { EventLogBatch } from '#log/event-log-appender.js';
 
 /*
@@ -14,7 +14,10 @@ import type { EventLogBatch } from '#log/event-log-appender.js';
  * It is a pure fold over rows. It is never on the execution path, writes
  * nothing, and holds nothing between calls. It carries identities, names,
  * counts and times only, never message content, so its output is safe for
- * every purpose that admits summaries. Destination envelopes, scope and
+ * every purpose that admits summaries. The one exception is a `test_model`
+ * call's check (T12), whose revision and requirement keys name files so the
+ * delivery projection can write a digest of what was checked; it never writes
+ * the keys themselves. Destination envelopes, scope and
  * retention belong to the delivery projection (T09); this is its input.
  */
 
@@ -23,6 +26,22 @@ export type ObservedOutcome = 'completed' | 'cancelled' | 'failed' | 'abandoned'
 
 /** A committed row's identity, with the chat it belongs to. @public */
 export type ObservedSource = Readonly<{ chatId: string; leaderEpoch: string; sequence: number }>;
+
+/** A CAD check's decided status, in the evidence contract's vocabulary: only `passed` and `failed` are decided. @public */
+export type ObservedCheckResult = 'passed' | 'failed' | 'inconclusive' | 'unsupported' | 'not-run';
+
+/**
+ * What a `test_model` call's output says it checked (T12). The revision and requirement keys name files: they let
+ * the delivery projection write a digest of what was checked, and nothing else reads them.
+ * @public
+ */
+export type ObservedCheck = Readonly<{
+  result: ObservedCheckResult;
+  /** Every evaluated source closure's entry and file digests, as sorted `entry\u0000path=digest` keys; empty when unnamed. */
+  revision: readonly string[];
+  /** The observed requirements as sorted `file#ordinal` keys, plus `#omitted:<n>` when the output left some out. */
+  requirements: readonly string[];
+}>;
 
 /** One tool call the run dispatched, as its committed rows record it. @public */
 export type ObservedToolCall = Readonly<{
@@ -35,6 +54,8 @@ export type ObservedToolCall = Readonly<{
   /** When the input and the output rows were recorded; `settledAt` is absent with `output`. */
   startedAt: number;
   settledAt: number | undefined;
+  /** A settled `test_model` call's check, when its output records one. */
+  check?: ObservedCheck | undefined;
 }>;
 
 /** One gateway invocation the run prepared, and what the gateway answered for it. @public */
@@ -90,6 +111,84 @@ const terminalStates = new Set(['completed', 'failed', 'cancelled']);
 
 const isExternalAgentTurn = (message: ProviderMessage): boolean =>
   message.role === 'user' && message.metadata?.tauInternal?.['kind'] === 'external-agent';
+
+const isObject = (value: JsonValue | undefined): value is Readonly<Record<string, JsonValue>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const checkResults = new Set<string>(['passed', 'failed', 'inconclusive', 'unsupported', 'not-run']);
+
+/**
+ * A run without a qualified status decides only by its tests: any failure fails, only all passing passes.
+ *
+ * @param statuses - Each observed test's status, a skip read as not run.
+ * @param timedOut - Whether the run's budget expired.
+ * @returns The run's decided or undecided result.
+ */
+const resultOfTests = (statuses: readonly string[], timedOut: boolean): ObservedCheckResult => {
+  if (statuses.includes('failed')) {
+    return 'failed';
+  }
+  if (statuses.length === 0) {
+    return timedOut ? 'inconclusive' : 'not-run';
+  }
+  if (!timedOut && statuses.every((status) => status === 'passed')) {
+    return 'passed';
+  }
+  if (timedOut || statuses.includes('inconclusive')) {
+    return 'inconclusive';
+  }
+  return statuses.includes('unsupported') ? 'unsupported' : 'not-run';
+};
+
+/**
+ * The check a `test_model` output records.
+ *
+ * @param content - The output row's recorded content.
+ * @returns The check, or `undefined` when the output records none Tau can read.
+ */
+const checkOf = (content: JsonValue): ObservedCheck | undefined => {
+  if (!isObject(content) || !Array.isArray(content['tests'])) {
+    return undefined;
+  }
+  const tests = (content['tests'] as readonly JsonValue[]).filter((test) => isObject(test));
+  const requirements = tests.flatMap((test) => {
+    const file = test['targetFile'];
+    const ordinal = test['ordinal'] ?? test['id'];
+    return typeof file === 'string' && (typeof ordinal === 'number' || typeof ordinal === 'string')
+      ? [`${file}#${ordinal}`]
+      : [];
+  });
+  const omitted = content['omittedTests'];
+  if (typeof omitted === 'number' && omitted > 0) {
+    requirements.push(`#omitted:${omitted}`);
+  }
+  const revisions = Array.isArray(content['sourceRevisions']) ? content['sourceRevisions'] : [];
+  const revision = (revisions as readonly JsonValue[])
+    .filter((closure) => isObject(closure))
+    .flatMap((closure) => {
+      const { entry, files } = closure;
+      return typeof entry === 'string' && isObject(files)
+        ? Object.entries(files).flatMap(([path, digest]) =>
+            typeof digest === 'string' ? [`${entry}\u0000${path}=${digest}`] : [],
+          )
+        : [];
+    });
+  const status = content['runStatus'];
+  return {
+    result:
+      typeof status === 'string' && checkResults.has(status)
+        ? (status as ObservedCheckResult)
+        : resultOfTests(
+            tests.map((test) => {
+              const { status: testStatus } = test;
+              return testStatus === 'skipped' ? 'not-run' : typeof testStatus === 'string' ? testStatus : 'unknown';
+            }),
+            content['timeout'] !== undefined,
+          ),
+    revision: [...new Set(revision)].toSorted(),
+    requirements: [...new Set(requirements)].toSorted(),
+  };
+};
 
 const rowKeyOf = (event: RowKey): string => `${event.leaderEpoch}\u0000${event.sequence}`;
 
@@ -196,11 +295,13 @@ const fold = (draft: RunDraft, event: AgentLogEvent, fact: Readonly<{ at: number
         const input = draft.tools.get(message.toolCallId);
         /* An output is a committed result; the first one landed is the call's. */
         if (input !== undefined && input.output === undefined) {
+          const check = message.toolName === 'test_model' && !message.isError ? checkOf(message.content) : undefined;
           draft.tools.set(message.toolCallId, {
             ...input,
             outcome: message.isError ? 'failed' : 'completed',
             output: source,
             settledAt: at,
+            ...(check === undefined ? {} : { check }),
           });
           const started = draft.toolStarted.get(message.toolCallId);
           if (started !== undefined) {

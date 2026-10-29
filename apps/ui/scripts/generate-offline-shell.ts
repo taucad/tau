@@ -46,13 +46,33 @@ const isSameOriginPath = (reference: string): boolean => reference.startsWith('/
 const isExcluded = (reference: string): boolean =>
   excludedExtensions.some((extension) => reference.endsWith(extension));
 
-/** `src="/a.js"` / `href='/b.css'` values of a prerendered document. */
+/** Asset-bearing tags only: links to pages are navigation, not files required by this document. */
 const readDocumentReferences = (html: string): readonly string[] => {
   const references: string[] = [];
-  for (const match of html.matchAll(/(?:src|href)=["']([^"']+)["']/gu)) {
-    const reference = match[1];
-    if (reference !== undefined && isSameOriginPath(reference) && !isExcluded(reference)) {
-      references.push(reference);
+  const assetLinkRelations = new Set(['stylesheet', 'preload', 'modulepreload', 'icon', 'manifest']);
+  for (const tag of html.matchAll(/<(script|link|img|source|video|audio)\b([^>]*)>/giu)) {
+    const name = tag[1]?.toLowerCase();
+    const attributes = tag[2] ?? '';
+    if (name === 'link') {
+      const relation = /(?:^|\s)rel=["']([^"']+)["']/iu.exec(attributes)?.[1];
+      if (
+        !relation
+          ?.toLowerCase()
+          .split(/\s+/u)
+          .some((value) => assetLinkRelations.has(value))
+      ) {
+        continue;
+      }
+    }
+    for (const match of attributes.matchAll(/(?:^|\s)(src|href|poster)=["']([^"']+)["']/giu)) {
+      const attribute = match[1]?.toLowerCase();
+      const reference = match[2];
+      if ((attribute === 'href') !== (name === 'link')) {
+        continue;
+      }
+      if (reference !== undefined && isSameOriginPath(reference) && !isExcluded(reference)) {
+        references.push(reference);
+      }
     }
   }
   return references;

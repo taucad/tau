@@ -87,7 +87,8 @@
     "@taucad/geometry-core": "workspace:*",
     "@taucad/kinematics": "workspace:*",
     "@taucad/native-process-core": "workspace:*",
-    "@taucad/parameters": "workspace:*"
+    "@taucad/parameters": "workspace:*",
+    "uint8array-extras": "catalog:"
   },
   "devDependencies": {
     "@gltf-transform/core": "catalog:",

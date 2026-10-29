@@ -4777,6 +4777,9 @@ importers:
       '@taucad/parameters':
         specifier: workspace:*
         version: link:../../parameters
+      uint8array-extras:
+        specifier: 'catalog:'
+        version: 1.6.0
     devDependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'

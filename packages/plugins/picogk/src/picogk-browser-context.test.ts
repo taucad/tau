@@ -16,7 +16,12 @@ const setup = () => {
     },
     startupTimeout: 1000,
     requestTimeout: 1000,
-    assets: { bootstrapUrl: 'https://example.test/dotnet.js', compilerIdentity: '0'.repeat(64), references: [] },
+    assets: {
+      bootstrapUrl: 'https://example.test/dotnet.js',
+      compilerIdentity: '0'.repeat(64),
+      references: [],
+      runtimeFiles: [],
+    },
   });
   const request = async () =>
     context.session.request({

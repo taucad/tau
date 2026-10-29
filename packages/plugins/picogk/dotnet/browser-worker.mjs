@@ -1,6 +1,7 @@
 /* oxlint-disable jsdoc-js/no-types -- This standalone SDK bootstrap is JavaScript; JSDoc supplies its checked types. */
 import { z } from 'zod';
 import { validatePicogkBrowserImage } from '#picogk-browser-images.js';
+import { preparePicogkBrowserRuntime } from '#picogk-browser-runtime.js';
 
 // Isolated .NET host. Only the owner supplies runtime URLs and authorized project bytes.
 /**
@@ -22,6 +23,8 @@ let generation = 0;
 let state = 'new';
 /** @type {BrowserRuntime} */
 let runtime;
+/** @type {import('../src/picogk-browser-runtime.ts').PicogkBrowserRuntimeLoader | undefined} */
+let runtimeLoader;
 /** @type {string | undefined} */
 let queued;
 /** @type {((frame: string) => void) | undefined} */
@@ -39,6 +42,7 @@ const artifacts = new Map();
 /** @param {unknown} error - Runtime failure. */
 const fail = (error) => {
   state = 'failed';
+  runtimeLoader?.dispose();
   globalThis.postMessage({
     kind: 'failed',
     generation,
@@ -87,8 +91,12 @@ const initialize = async (message) => {
   ) {
     throw new Error('Invalid PicoGK worker initialization.');
   }
-  const module = /** @type {{dotnet: {create(): Promise<BrowserRuntime>}}} */ (await import(assets.bootstrapUrl));
-  runtime = await module.dotnet.create();
+  runtimeLoader = await preparePicogkBrowserRuntime({ bootstrapUrl: assets.bootstrapUrl, files: assets.runtimeFiles });
+  const module =
+    /** @type {{dotnet: {withResourceLoader(load: import('../src/picogk-browser-runtime.ts').PicogkBrowserRuntimeLoader['loadResource']): {create(): Promise<BrowserRuntime>}}}} */ (
+      await import(runtimeLoader.bootstrapUrl)
+    );
+  runtime = await module.dotnet.withResourceLoader(runtimeLoader.loadResource).create();
   const references = [];
   const paths = new Set();
   for (const reference of /** @type {import('../src/picogk-browser-session.ts').PicogkBrowserAssets['references']} */ (

@@ -12,7 +12,12 @@ const sessions: PicogkBrowserSession[] = [];
 const harness = (requestTimeout = 1000) => {
   const workers: Array<MockProxy<Worker>> = [];
   const session = new PicogkBrowserSession({
-    assets: { bootstrapUrl: 'https://example.test/dotnet.js', compilerIdentity: '0'.repeat(64), references: [] },
+    assets: {
+      bootstrapUrl: 'https://example.test/dotnet.js',
+      compilerIdentity: '0'.repeat(64),
+      references: [],
+      runtimeFiles: [],
+    },
     startupTimeout: 1000,
     requestTimeout,
     createWorker: () => {
@@ -235,6 +240,20 @@ describe('PicoGK browser session', () => {
     expect(worker.terminate).toHaveBeenCalledOnce();
   });
 
+  it('should preserve a validated worker initialization failure for the caller', async () => {
+    const { session, workers } = harness();
+    const pending = request(session);
+    const rejected = expect(pending).rejects.toThrow('PicoGK runtime resource integrity mismatch.');
+    await tick();
+    workers[0]!.dispatchEvent(
+      new MessageEvent('message', {
+        data: { generation: 1, kind: 'failed', message: 'PicoGK runtime resource integrity mismatch.' },
+      }),
+    );
+    await rejected;
+    expect(workers[0]!.terminate).toHaveBeenCalledOnce();
+  });
+
   it('should ignore unrelated responses and fence completion after source replacement', async () => {
     const { session, workers } = harness();
     const old = request(session);
@@ -342,7 +361,7 @@ describe('PicoGK browser session', () => {
     const controller = new AbortController();
     const worker = mock<Worker>();
     const session = new PicogkBrowserSession({
-      assets: { bootstrapUrl: '', compilerIdentity: '', references: [] },
+      assets: { bootstrapUrl: '', compilerIdentity: '', references: [], runtimeFiles: [] },
       startupTimeout: 1000,
       requestTimeout: 1000,
       createWorker: () => {
@@ -367,7 +386,7 @@ describe('PicoGK browser session', () => {
         () =>
           new PicogkBrowserSession({
             createWorker: () => mock<Worker>(),
-            assets: { bootstrapUrl: '', compilerIdentity: '', references: [] },
+            assets: { bootstrapUrl: '', compilerIdentity: '', references: [], runtimeFiles: [] },
             startupTimeout: startupTimeout!,
             requestTimeout: requestTimeout!,
           }),

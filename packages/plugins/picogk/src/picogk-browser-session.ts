@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { picogkProtocolVersion, picogkReadySchema, picogkResponseSchema } from '#picogk.protocol.js';
 import { PicogkWorkerError } from '#picogk-worker-error.js';
+import type { PicogkBrowserRuntimeFile } from '#picogk-browser-runtime.js';
 
 /** One immutable, authorized project projection. @internal */
 export type PicogkBrowserSnapshot = {
@@ -13,6 +14,7 @@ export type PicogkBrowserSnapshot = {
 export type PicogkBrowserAssets = {
   readonly bootstrapUrl: string;
   readonly compilerIdentity: string;
+  readonly runtimeFiles: readonly PicogkBrowserRuntimeFile[];
   readonly references: ReadonlyArray<{ readonly path: string; readonly url: string; readonly sha256: string }>;
 };
 
@@ -232,7 +234,8 @@ export class PicogkBrowserSession {
             return;
           }
           if (envelope.kind === 'failed') {
-            throw new Error(envelope.message ?? 'The PicoGK browser worker failed.');
+            this.stop(new Error(envelope.message ?? 'The PicoGK browser worker failed.'));
+            return;
           }
           const frame =
             envelope.kind === 'ready'

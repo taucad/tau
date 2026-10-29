@@ -257,6 +257,18 @@ export type AgentHostWorkerProtocol = {
       readonly result: undefined;
       readonly wireResult: unknown;
     };
+    /** The account rated a run (T12): the host reports it on the feedback plane when ratings are allowed. */
+    readonly runRated: {
+      readonly args: {
+        readonly projectId: string;
+        readonly chatId: string;
+        readonly runId: string;
+        readonly value: 'positive' | 'negative';
+        readonly at: number;
+      };
+      readonly result: undefined;
+      readonly wireResult: unknown;
+    };
     /** The page's visibility: a hidden page never queues for a chat's lock (RH-R16). */
     readonly visibility: {
       readonly args: { readonly visible: boolean };
@@ -468,6 +480,16 @@ export const agentHostWorkerProtocolSchemas = {
         projectId: nonEmptyString,
         chatId: nonEmptyString,
         runId: nonEmptyString,
+        at: z.number().nonnegative(),
+      }),
+      result: z.unknown(),
+    },
+    runRated: {
+      args: z.strictObject({
+        projectId: nonEmptyString,
+        chatId: nonEmptyString,
+        runId: nonEmptyString,
+        value: z.enum(['positive', 'negative']),
         at: z.number().nonnegative(),
       }),
       result: z.unknown(),

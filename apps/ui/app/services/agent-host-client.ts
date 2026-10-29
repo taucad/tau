@@ -529,6 +529,15 @@ type ProjectRegistration = { options: AgentHostClientOptions; clients: number };
 /** When the page showed a live run's model text, on the page's clock (T10). @public */
 export type BrowserRunPresentation = Readonly<{ projectId: string; chatId: string; runId: string; at: number }>;
 
+/** The account's rating of one run, on the page's clock (T12). @public */
+export type BrowserRunRating = Readonly<{
+  projectId: string;
+  chatId: string;
+  runId: string;
+  value: 'positive' | 'negative';
+  at: number;
+}>;
+
 /** The document's resident agent-host worker (RH-S8), as the page drives it. @internal */
 export type ResidentAgentWorker = Readonly<{
   /**
@@ -541,6 +550,8 @@ export type ResidentAgentWorker = Readonly<{
   stoppability: (projectId: string, chatId: string) => Promise<'stoppable' | 'other-build' | 'background-window'>;
   /** Tell an already-open project's host that the page showed a live run's model text at `at`; never boots a worker. */
   presented: (presentation: BrowserRunPresentation) => Promise<void>;
+  /** Tell an already-open project's host that the account rated a run; never boots a worker. */
+  rated: (rating: BrowserRunRating) => Promise<void>;
   /**
    * Count one client of a project and remember its latest bridges and defaults. The returned release, called once,
    * sends `release` for the project's host when it was the last client (T3, RH-R4).
@@ -1079,6 +1090,14 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       await live.ready;
       await live.channel.call('runPresented', presentation);
     },
+    rated: async (rating) => {
+      const live = current;
+      if (live === undefined || live.dead) {
+        return;
+      }
+      await live.ready;
+      await live.channel.call('runRated', rating);
+    },
     recover: async (projectId) => {
       const live = current;
       const opening = live?.provided.get(projectId);
@@ -1145,6 +1164,15 @@ export const readBrowserRunStoppability = async (
  */
 export const noteBrowserRunPresented = async (presentation: BrowserRunPresentation): Promise<void> =>
   residentAgentWorker().presented(presentation);
+
+/**
+ * Tell a browser project's host that the account rated a run (T12). The host reports it only when ratings are allowed,
+ * and only the first rating of a run. Best effort, like a presentation.
+ *
+ * @public
+ */
+export const noteBrowserRunRated = async (rating: BrowserRunRating): Promise<void> =>
+  residentAgentWorker().rated(rating);
 
 /**
  * Keep a browser project's existing host provided while its route is live. Short-lived command and observer clients

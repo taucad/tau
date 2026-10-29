@@ -15,7 +15,11 @@ const run: ProjectedRun = {
   ending: { source: { chatId: 'chat-1', leaderEpoch: 'term-1', sequence: 3 }, at: endedAt },
 };
 
-const setup = (purposes: () => Response, principal: () => string | undefined = () => 'user-1') => {
+const setup = (
+  purposes: () => Response,
+  principal: () => string | undefined = () => 'user-1',
+  feedbackStore: ReturnType<typeof memoryPendingStore> | undefined = undefined,
+) => {
   const submitted: Array<Readonly<{ url: string; authorization: string | undefined }>> = [];
   const planes: string[] = [];
   const facts: Array<Readonly<{ kind: string; occurredAt: number }>> = [];
@@ -45,6 +49,7 @@ const setup = (purposes: () => Response, principal: () => string | undefined = (
     hostBuild: '1.2.3',
     fetch: withBearer,
     store,
+    ...(feedbackStore === undefined ? {} : { feedbackStore }),
     observe: async () => ({ runs: [run], ownsEpoch: () => true }),
   });
   return { evidence, submitted, planes, facts, store };
@@ -65,6 +70,16 @@ const answering = (purposes: Readonly<{ summary: boolean; content: boolean }>) =
         { purpose: 'summary', allowed: purposes.summary },
         { purpose: 'content', allowed: purposes.content },
       ],
+    }),
+    { status: 200 },
+  );
+
+const allowing = (allowed: readonly string[]) => (): Response =>
+  new Response(
+    JSON.stringify({
+      epoch: 'policy-1',
+      projectId: 'project-1',
+      purposes: ['summary', 'feedback'].map((purpose) => ({ purpose, allowed: allowed.includes(purpose) })),
     }),
     { status: 200 },
   );
@@ -121,6 +136,40 @@ describe('createHostEvidence', () => {
       { kind: 'outcome', occurredAt: endedAt },
       { kind: 'response', occurredAt: shown },
     ]);
+  });
+
+  it.each([
+    { allowed: ['feedback'], planes: ['feedback'] },
+    { allowed: ['summary'], planes: ['summary'] },
+    { allowed: ['summary', 'feedback'], planes: ['feedback', 'summary'] },
+  ])('should send a rating under the feedback grant alone: $allowed', async ({ allowed, planes: expected }) => {
+    const { evidence, planes, facts } = setup(allowing(allowed), undefined, memoryPendingStore());
+    await Promise.all([evidence.reporter.refresh(), evidence.feedback!.refresh()]);
+    const at = Date.now() + 1;
+
+    evidence.onRated({ chatId: 'chat-1', runId: 'run-1', value: 'negative', at });
+    evidence.onRated({ chatId: 'chat-1', runId: 'run-1', value: 'positive', at: at + 10 });
+    await vi.waitFor(() => {
+      expect(planes.toSorted()).toEqual(expected);
+    });
+
+    expect(facts.filter((fact) => fact.kind === 'rating')).toEqual(
+      allowed.includes('feedback') ? [{ kind: 'rating', occurredAt: at }] : [],
+    );
+  });
+
+  it('should report no rating from a host composed without the feedback queue', async () => {
+    const { evidence, facts } = setup(allowing(['summary', 'feedback']));
+    await evidence.reporter.refresh();
+
+    evidence.onRated({ chatId: 'chat-1', runId: 'run-1', value: 'positive', at: Date.now() + 1 });
+    evidence.onChatQuiescent('chat-1', true);
+    await vi.waitFor(() => {
+      expect(facts).toHaveLength(1);
+    });
+
+    expect(evidence.feedback).toBeUndefined();
+    expect(facts.map((fact) => fact.kind)).toEqual(['outcome']);
   });
 
   it('should send nothing for a signed-out credential and purge what it held', async () => {

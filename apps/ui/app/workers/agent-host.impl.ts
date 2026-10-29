@@ -56,7 +56,7 @@ import { guardLargeObjectFiles, guardLargeObjectKernel } from '#lib/large-object
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { createIdleRuntimeClient } from '#workers/idle-runtime-client.js';
 import { createWorkerEvidence } from '#workers/agent-host-evidence.js';
-import type { HostEvidence } from '@taucad/agent-observability/host-evidence';
+import type { HostEvidence, RunRating } from '@taucad/agent-observability/host-evidence';
 import { readBuildRelease } from '#lib/build-identity.js';
 import { forwardOperations } from '#telemetry/worker-forwarding.js';
 import type { ForwardEntry, WorkerTelemetry } from '#telemetry/worker-forwarding.js';
@@ -104,6 +104,8 @@ export type BrowserProjectHost = Readonly<{
   stoppability: (chatId: string) => ReturnType<AgentLauncher['stoppability']>;
   /** The page showed a live run's model text at `at`; reported with the run's summaries, when they are allowed (T10). */
   presented: (chatId: string, runId: string, at: number) => void;
+  /** The account rated a run; reported only on the feedback plane, when ratings are allowed (T12). */
+  rated: (rating: RunRating) => void;
   /** Serve one stream; closing it only detaches (D17). */
   connect: (port: MessagePort) => void;
   /** Swap in fresh bridges, as after a file-manager restart; the launcher and its runs stay (RV1-F1). */
@@ -891,6 +893,9 @@ const composeProjectHost = async (
     stoppability: (chatId) => launcher.stoppability(chatId),
     presented: (chatId, runId, at) => {
       evidence?.onPresented(chatId, runId, at);
+    },
+    rated: (rating) => {
+      evidence?.onRated(rating);
     },
     connect: (port) => {
       const channel = serveAgentChannel(port, launcher, {

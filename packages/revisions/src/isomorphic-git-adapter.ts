@@ -1278,11 +1278,12 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   /*
    * The server's own compare-and-set refusing a command: the ref was not at
    * the old value this push sent. Git's receive-pack says `failed to update
-   * ref` (or `failed to lock`, `cannot lock ref`, `stale info`), and an atomic
-   * push's other commands `atomic transaction failed`.
+   * ref` (or `failed to lock`, `cannot lock ref`, `stale info`, and newer Git
+   * `incorrect old value provided`), and an atomic push's other commands
+   * `atomic transaction failed`.
    */
   const serverLockRefusal =
-    /failed to (?:update|lock) ref|cannot lock ref|stale info|is at [\da-f]+ but expected|atomic transaction failed/iu;
+    /failed to (?:update|lock) ref|cannot lock ref|stale info|is at [\da-f]+ but expected|incorrect old value provided|atomic transaction failed/iu;
 
   const requireHttp = (): RevisionHttpClient => {
     if (options.http === undefined) {

@@ -1900,7 +1900,7 @@ export const WorkbenchDockview = memo(function ({
     });
   }, [api, openFiles, activePaneId, isMobile]);
 
-  // Side-effects bound to fileOpened (line-nav + open-editor-on-user-action).
+  // Line navigation stays bound to fileOpened; activation is handed off by the persistent workspace.
   // These were tangled into the old sync effect; they stay event-driven
   // because they encode user intent ("the user just opened a file"),
   // not state convergence.
@@ -1909,15 +1909,6 @@ export const WorkbenchDockview = memo(function ({
       return;
     }
     const openFileSub = editorRef.on('fileOpened', (event) => {
-      if (event.source === 'user') {
-        const existingPanel = api.panels.find((panel) => getFileParameters(panel)?.filePath === event.path);
-        if (existingPanel) {
-          existingPanel.api.setActive();
-          pendingUserFilePathRef.current = undefined;
-        } else {
-          pendingUserFilePathRef.current = event.path;
-        }
-      }
       if (event.source !== 'record' && event.lineNumber) {
         requestEditorNavigation({
           projectId,
@@ -2118,20 +2109,39 @@ export const WorkbenchDockview = memo(function ({
     if (!api) {
       return;
     }
-    return connectWorkbench((panelId) => {
-      if (!isWorkbenchSurfaceAllowed(panelId, profile)) {
-        return;
-      }
-      if ((panelId === 'kernel' || panelId === 'console') && !isTauDebugEnabled) {
-        return;
-      }
-      if (panelId === 'files') {
-        openWorkbenchFiles({ api });
-        return;
-      }
-      openWorkbenchUtility(api, panelId);
-    });
-  }, [api, connectWorkbench, isTauDebugEnabled, profile]);
+    return connectWorkbench(
+      (panelId) => {
+        if (!isWorkbenchSurfaceAllowed(panelId, profile)) {
+          return;
+        }
+        if ((panelId === 'kernel' || panelId === 'console') && !isTauDebugEnabled) {
+          return;
+        }
+        pendingUserFilePathRef.current = undefined;
+        if (panelId === 'files') {
+          openWorkbenchFiles({ api });
+          return;
+        }
+        openWorkbenchUtility(api, panelId);
+      },
+      (path) => {
+        pendingUserFilePathRef.current = path;
+        if (isRestoringLayout.current) {
+          return;
+        }
+        // Connection can follow the first reconcile: consume the retained user intent against the current state.
+        const snapshot = editorRef.getSnapshot().context;
+        pendingUserFilePathRef.current = reconcileWorkbenchFiles({
+          api,
+          openFiles: snapshot.openFiles,
+          activePaneId: snapshot.activePaneId,
+          isMobile,
+          pendingUserFilePath: path,
+          pendingFilePlacements: pendingFilePlacementRef.current,
+        });
+      },
+    );
+  }, [api, connectWorkbench, editorRef, isMobile, isTauDebugEnabled, profile]);
 
   // Handle external file drops and cross-dockview viewer panel drops
   const onDidDrop = useCallback(

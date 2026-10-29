@@ -9,6 +9,7 @@ import { createPortal } from 'react-dom';
 import { Printer } from 'lucide-react';
 import type {
   DockviewApi,
+  DockviewReadyEvent,
   DockviewDidDropEvent,
   DockviewGroupPanel,
   DockviewPanelApi,
@@ -88,9 +89,31 @@ vi.mock('#components/panes/dockview-split-action.js', () => ({
     </button>
   ),
 }));
+const mockConnectWorkbench = vi.fn<
+  (openPanel: (id: string) => void, activateFile?: (path: string) => void) => () => void
+>(() => () => undefined);
+const mockLayoutController = { registerWorkbench: vi.fn(() => () => undefined), personWorkbenchChanged: vi.fn() };
+const mockSetWorkbenchOpen = vi.fn();
+let readyDockviewApi: DockviewApi | undefined;
+vi.mock('#components/panes/dockview.js', () => ({
+  Dockview: ({ onReady }: { onReady: (event: DockviewReadyEvent) => void }) => {
+    useEffect(() => {
+      if (readyDockviewApi) {
+        onReady({ api: readyDockviewApi });
+      }
+    }, [onReady]);
+    return <div data-testid='mounted-dockview' />;
+  },
+}));
+
 vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', async (importOriginal) => ({
   ...(await importOriginal<typeof ProjectWorkspaceContext>()),
-  useProjectWorkspace: () => ({ openPanel: mockOpenPanel }),
+  useProjectWorkspace: () => ({
+    openPanel: mockOpenPanel,
+    connectWorkbench: mockConnectWorkbench,
+    layoutController: mockLayoutController,
+    setWorkbenchOpen: mockSetWorkbenchOpen,
+  }),
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-file-tree.js', () => ({
@@ -338,6 +361,7 @@ vi.mock('#components/files/file-selector.js', () => ({
 
 const {
   FileEditor,
+  WorkbenchDockview,
   handleWorkbenchDrop,
   handleWorkbenchPanelRemoved,
   isWorkbenchPanelFilesContext,
@@ -1243,6 +1267,50 @@ const openFile = (paneId: string, path: string) => ({
   lastAccessedAt: 1,
 });
 
+describe('mounted Workbench user activation handoff', () => {
+  it.each([false, true])('activates a late connected file without a new actor snapshot (mobile=%s)', (isMobile) => {
+    const dockview = createTestDockview([panel('utility')]);
+    const subscribe = () => ({ dispose: vi.fn() });
+    Object.assign(dockview.api, {
+      onDidLayoutChange: subscribe,
+      onDidActivePanelChange: subscribe,
+      onDidRemovePanel: subscribe,
+      onWillDragPanel: subscribe,
+      onUnhandledDragOver: subscribe,
+      onDidAddPanel: subscribe,
+    });
+    readyDockviewApi = dockview.api;
+    mobileState.value = isMobile;
+    currentEditorSnapshot = {
+      ...editorMachineSnapshot,
+      context: { ...editorMachineSnapshot.context, openFiles: [openFile('chosen', 'chosen-folder.md')] },
+    };
+    let activateFile: ((path: string) => void) | undefined;
+    mockConnectWorkbench.mockImplementation((_openPanel, activate) => {
+      activateFile = activate;
+      return () => undefined;
+    });
+    onTestFinished(() => {
+      readyDockviewApi = undefined;
+      mobileState.value = false;
+      currentEditorSnapshot = editorMachineSnapshot;
+      mockConnectWorkbench.mockReset();
+    });
+
+    render(<WorkbenchDockview />);
+    const chosen = dockview.panels.find((entry) => entry.id === 'chosen');
+    expect(chosen).toBeDefined();
+    expect(chosen?.api.setActive).not.toHaveBeenCalled();
+    expect(activateFile).toBeTypeOf('function');
+    const snapshot = currentEditorSnapshot;
+
+    act(() => activateFile?.('chosen-folder.md'));
+
+    expect(currentEditorSnapshot).toBe(snapshot);
+    expect(chosen?.api.setActive).toHaveBeenCalledOnce();
+  });
+});
+
 describe('normalizeFilePaneState', () => {
   const markdownPresentation = {
     defaultViewId: 'preview',
@@ -1900,6 +1968,33 @@ describe('Workbench file reconciliation', () => {
     });
     expect(file.api.setTitle).toHaveBeenCalledWith('after.ts');
     expect(dockview.removePanel).not.toHaveBeenCalledWith(utility);
+  });
+
+  it.each([false, true])('activates the retained user file after cold panel creation on mobile=%s once', (isMobile) => {
+    const launcher = panel('launcher');
+    const dockview = createTestDockview([launcher]);
+    const files = [openFile('pane-old', 'alpha.ts'), openFile('pane-chosen', 'chosen-folder.md')];
+    const pending = reconcileWorkbenchFiles({
+      api: dockview.api,
+      openFiles: files,
+      activePaneId: 'pane-chosen',
+      isMobile,
+      pendingUserFilePath: 'chosen-folder.md',
+      pendingFilePlacements: new Map(),
+    });
+    const chosen = dockview.panels.find((item) => item.id === 'pane-chosen')!;
+    expect(chosen.api.setActive).toHaveBeenCalledOnce();
+    expect(launcher.api.setActive).not.toHaveBeenCalled();
+    expect(pending).toBeUndefined();
+    reconcileWorkbenchFiles({
+      api: dockview.api,
+      openFiles: files,
+      activePaneId: 'pane-chosen',
+      isMobile,
+      pendingUserFilePath: pending,
+      pendingFilePlacements: new Map(),
+    });
+    expect(chosen.api.setActive).toHaveBeenCalledOnce();
   });
 
   it('activates a user-opened file while machine-origin reconciliation stays inactive', () => {

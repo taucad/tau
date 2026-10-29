@@ -90,13 +90,17 @@ describe('Parts route', () => {
     expect(screen.getByLabelText('Current query')).toBeEmptyDOMElement();
   });
 
-  it('should hide catalog access when the flag is disabled and offer its settings', async () => {
+  it('should hide catalog access when the flag is disabled and say Parts is unavailable', () => {
     state.enabled = false;
     renderParts();
-    expect(screen.getByText('Parts is turned off')).toBeInTheDocument();
+    // The state's title sits one level under the page's h1.
+    expect(screen.getByRole('heading', { level: 1, name: 'Parts' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Parts is turned off' })).toBeInTheDocument();
+    expect(screen.getByText('Parts is not available in this version of Tau yet.')).toBeInTheDocument();
+    // No setting turns the flag on, so nothing points to one.
+    expect(screen.queryByText(/Experimental/u)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open settings' })).not.toBeInTheDocument();
     expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
     expect(screen.queryByRole('list')).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Open settings' }));
-    expect(screen.getByLabelText('Current query')).toHaveTextContent('?settings=experimental');
   });
 });

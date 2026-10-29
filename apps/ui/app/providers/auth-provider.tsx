@@ -1,6 +1,7 @@
 import { useContext, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { QueryClientContext } from '@tanstack/react-query';
+import type { AuthProviderProps } from '@better-auth-ui/react';
 // oxlint-disable-next-line import/no-unassigned-import -- side-effect loads `AuthPluginRegister` module augmentation before `<AuthProvider>`
 import '#utils/auth-plugin.js';
 import { AuthProvider } from '#components/auth/auth-provider.js';
@@ -257,6 +258,23 @@ export function AppEntryPreference(): undefined {
   }, [resolved]);
 }
 
+/**
+ * Tau's words for better-auth-ui's strings where its defaults differ: sentence case (page composition Rule 12), and
+ * one name for one action everywhere (I6). Its "Sign In" titled the sign-in card, labelled its submit button and the
+ * links back from sign-up, forgot-password and reset-password, while the command palette, invitations, share and the
+ * user menu say "Sign in". The auth route's document titles read these too.
+ */
+export const authLocalization = {
+  auth: {
+    signIn: 'Sign in',
+    signUp: 'Sign up',
+    signOut: 'Sign out',
+    forgotPassword: 'Forgot password',
+    resetPassword: 'Reset password',
+    verifyEmail: 'Verify email',
+  },
+} as const satisfies AuthProviderProps['localization'];
+
 export function AuthConfigProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   const navigate = useNavigate();
 
@@ -273,6 +291,7 @@ export function AuthConfigProvider({ children }: { readonly children: React.Reac
         void navigate(to, { replace: replace ?? false });
       }}
       Link={AuthConfigLink}
+      localization={authLocalization}
       plugins={[magicLinkPlugin(), apiKeyPlugin()]}
       socialProviders={['github', 'google']}
       redirectTo='/'

@@ -1,4 +1,5 @@
 import { completionTypeFromLsp } from '#components/code/editor-completion-icon.js';
+import { definitionProvider } from '#components/code/editor-definition.js';
 import { editorCompletionInfo, renderEditorDocumentation } from '#components/code/editor-documentation.js';
 import { StateEffect, StateField } from '@codemirror/state';
 import type { Extension, StateEffectType } from '@codemirror/state';
@@ -25,7 +26,7 @@ import { semanticTokenTypes } from '#lib/kcl-language/lsp/kcl-lsp-types.js';
 import { KclSymbolService, formatModuleHover, formatSymbolHover } from '#lib/kcl-language/lsp/kcl-symbol-service.js';
 import type { KclSymbol } from '#lib/kcl-language/lsp/kcl-symbol-service.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
-import { lspSnippetToCodeMirror } from '#lib/lsp-completion-snippet.js';
+import { applyLspCompletion } from '#lib/lsp-completion-apply.js';
 
 type OpenDocument = { count: number; text: string; unsubscribe: () => void };
 type EditBasis = ReadonlyMap<string, Readonly<{ version: number; text: string }>>;
@@ -531,18 +532,8 @@ export function kclLspCompletion(
     boost: item.preselect ? 99 : 4,
     // oxlint-disable-next-line max-params -- CodeMirror completion apply callback contract.
     apply(view, completion, from, to) {
-      if (isDisposed() || document.version !== version) {
-        return;
-      }
-      const edit = item.textEdit;
-      const range = edit && 'range' in edit ? edit.range : undefined;
-      const start = range ? offsetAt(document.text, range.start) : from;
-      const end = range ? offsetAt(document.text, range.end) : to;
-      const insertText = edit ? edit.newText : (item.insertText ?? item.label);
-      if (item.insertTextFormat === 2) {
-        snippet(lspSnippetToCodeMirror(insertText))(view, completion, start, end);
-      } else {
-        view.dispatch({ changes: { from: start, to: end, insert: insertText } });
+      if (!isDisposed()) {
+        applyLspCompletion(view, completion, { item, from, to, current: document.version === version });
       }
     },
   };
@@ -754,18 +745,10 @@ export function kclExtensions({
         }
       },
     ),
+    definitionProvider.of(async (view) =>
+      observeKclOperation(jumpToDefinition(view, client, { document, environment, symbols }), document, isDisposed),
+    ),
     keymap.of([
-      {
-        key: 'F12',
-        run(view) {
-          void observeKclOperation(
-            jumpToDefinition(view, client, { document, environment, symbols }),
-            document,
-            isDisposed,
-          );
-          return true;
-        },
-      },
       {
         key: 'Shift-Alt-f',
         run(view) {

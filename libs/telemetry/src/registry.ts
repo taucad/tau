@@ -1434,11 +1434,14 @@ export const TauMetrics = {
   syncClientLag: defineHistogram({
     name: 'tau.sync.client.lag',
     unit: 's',
-    description: 'Client-reported time from the first unsynced mint to the server acknowledging it',
+    description:
+      'Client-reported time from the first unsynced change (a mint, a record change, or the push request itself) to the server acknowledging it, on every acknowledged push',
     /* Dense through 3–30 s, where a save's debounce, a push and one retry land. */
     buckets: [0.5, 1, 2, 3, 4, 5, 7.5, 10, 15, 20, 30, 60, 120, 300, 900, 3600],
     attributes: z.object({
       'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
+      /* What dated the lag: `request` is a push nothing dated, which measures only its own duration. */
+      'sync.lag.since': z.enum(['change', 'queue', 'request']),
     }),
   }),
 

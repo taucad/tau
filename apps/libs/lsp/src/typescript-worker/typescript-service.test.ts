@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import ts from 'typescript';
 import { TypeScriptProjectService } from '#typescript-worker/typescript-service.js';
+import type { TypeScriptDocumentationPart } from '#typescript-worker/typescript-service.js';
 
 const libraryDirectory = dirname(ts.getDefaultLibFilePath({ target: ts.ScriptTarget.ESNext }));
 const standardLibraries = Object.fromEntries(
@@ -63,6 +64,72 @@ describe('TypeScriptProjectService with real TypeScript language service', () =>
     ).toEqual([]);
     expect(service.getDefinitionLocations('file:///main.ts', source.lastIndexOf('area'))[0]?.uri).toBe(
       'file:///node_modules/shape-kit/index.d.ts',
+    );
+    service.dispose();
+  });
+
+  it('resolves {@link} targets in quick info and completion details to editor locations', () => {
+    const dep = 'export interface Mechanism {\n  teeth: number;\n}\n';
+    const source = [
+      "import type { Mechanism } from './lib/mechanism';",
+      '/**',
+      ' * Same as {@link Mechanism} but {@link https://x.dev docs}.',
+      ' * @see {@link Mechanism}',
+      ' */',
+      'export const gear = 1;',
+      'gear;',
+      '',
+    ].join('\n');
+    const service = fixture({ 'file:///lib/mechanism.ts': dep });
+    service.open('file:///main.ts', source, 1);
+    const linkOf = (parts: readonly TypeScriptDocumentationPart[] | undefined): TypeScriptDocumentationPart[] =>
+      (parts ?? []).filter((part) => part.kind === 'linkName');
+    const expected: unknown = expect.objectContaining({ uri: 'file:///lib/mechanism.ts', line: 1, column: 1 });
+
+    const info = service.getQuickInfo('file:///main.ts', source.lastIndexOf('gear'));
+    expect(linkOf(info?.documentation).map((part) => part.location)).toEqual([expected]);
+    expect(linkOf(info?.tags?.find((tag) => tag.name === 'see')?.text).map((part) => part.location)).toEqual([
+      expected,
+    ]);
+    expect(info?.documentation?.find((part) => part.kind === 'linkText')).toMatchObject({ text: 'https://x.dev docs' });
+
+    const details = service.getCompletionDetails({
+      uri: 'file:///main.ts',
+      position: source.lastIndexOf('gear'),
+      name: 'gear',
+    });
+    expect(linkOf(details?.documentation).map((part) => part.location)).toEqual([expected]);
+    service.dispose();
+  });
+
+  it('returns the import edit for an auto-import completion into an existing import', () => {
+    const source = "import type { MechanismSource } from './lib/mechanism';\n\nexport type Test = Mec";
+    const service = fixture({
+      'file:///lib/mechanism.ts': 'export interface Mechanism {}\nexport interface MechanismSource {}\n',
+    });
+    service.open('file:///main.ts', source, 1);
+    const entry = service
+      .getCompletions('file:///main.ts', source.length)
+      ?.entries.find((candidate) => candidate.name === 'Mechanism' && candidate.hasAction);
+    expect(entry?.data).toBeDefined();
+    const { codeActions } = service.getCompletionDetailsWithBases({
+      uri: 'file:///main.ts',
+      position: source.length,
+      name: 'Mechanism',
+      source: entry?.source,
+      data: entry?.data,
+    });
+    expect(codeActions).toEqual([
+      expect.objectContaining({
+        edits: [expect.objectContaining({ uri: 'file:///main.ts', baseText: source, workerVersion: 1 })],
+      }),
+    ]);
+    const [edit] = codeActions[0]?.edits ?? [];
+    const applied = [...(edit?.changes ?? [])]
+      .sort((left, right) => right.from - left.from)
+      .reduce((text, change) => text.slice(0, change.from) + change.insert + text.slice(change.to), source);
+    expect(applied).toBe(
+      "import type { Mechanism, MechanismSource } from './lib/mechanism';\n\nexport type Test = Mec",
     );
     service.dispose();
   });

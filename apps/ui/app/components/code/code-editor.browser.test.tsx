@@ -3,6 +3,7 @@ import { StateEffect } from '@codemirror/state';
 import { showTooltip } from '@codemirror/view';
 import { openLintPanel, setDiagnostics } from '@codemirror/lint';
 import { gotoLine, openSearchPanel } from '@codemirror/search';
+import { definitionProvider } from '#components/code/editor-definition.js';
 import { renderTypeScriptDocumentation } from '#components/code/editor-documentation.js';
 import '#styles/global.css';
 import { cleanup, fireEvent, render } from '@testing-library/react';
@@ -321,6 +322,204 @@ it('opens a real TypeScript standard-library definition as read-only source', as
     await userEvent.keyboard('corruption');
     expect(declarationDocument.text).toBe(originalText);
     expect(container.querySelector('.cm-content')).toBeNull();
+  } finally {
+    service.dispose();
+  }
+}, 60_000);
+
+function modifierAt(view: EditorView, position: number, modifier = true): MouseEventInit {
+  const coords = view.coordsAtPos(position)!;
+  return {
+    clientX: (coords.left + coords.right) / 2 + 1,
+    clientY: (coords.top + coords.bottom) / 2,
+    button: 0,
+    metaKey: modifier && isMac,
+    ctrlKey: modifier && !isMac,
+  };
+}
+
+it('underlines a symbol under the definition modifier and opens it on Mod-click for any language provider', async () => {
+  const sourceDocument = new EditorDocument('main.scad', 'module ring() {}\nring();\n');
+  const opened: number[] = [];
+  const extensions = [
+    definitionProvider.of((_view, position) => {
+      opened.push(position);
+    }),
+  ];
+  let view: EditorView | undefined;
+  render(
+    <div className='h-72'>
+      <CodeEditor
+        document={sourceDocument}
+        viewId='definition-click'
+        languageId='openscad'
+        extensions={extensions}
+        onMount={(mounted) => {
+          view = mounted;
+        }}
+      />
+    </div>,
+  );
+  await expect.poll(() => view).toBeDefined();
+  const usage = sourceDocument.text.lastIndexOf('ring') + 1;
+  fireEvent.mouseMove(view!.contentDOM, modifierAt(view!, usage));
+  await expect.poll(() => view!.dom.querySelector('.cm-definition-link')?.textContent).toBe('ring');
+  expect(getComputedStyle(view!.dom.querySelector('.cm-definition-link')!).textDecorationLine).toBe('underline');
+  fireEvent.mouseMove(view!.contentDOM, modifierAt(view!, usage, false));
+  await expect.poll(() => view!.dom.querySelector('.cm-definition-link')).toBeNull();
+
+  fireEvent.mouseDown(view!.contentDOM, modifierAt(view!, usage));
+  expect(opened).toEqual([usage]);
+  expect(view!.state.selection.main.head).toBe(usage);
+  fireEvent.mouseDown(view!.contentDOM, modifierAt(view!, usage, false));
+  expect(opened).toHaveLength(1);
+
+  view!.dispatch({ selection: { anchor: 2 } });
+  view!.focus();
+  await userEvent.keyboard('{F12}');
+  expect(opened).toEqual([usage, 2]);
+  fireEvent.contextMenu(view!.contentDOM);
+  await page.getByRole('menuitem', { name: 'Go to Definition' }).click();
+  expect(opened).toEqual([usage, 2, 2]);
+});
+
+it('opens TypeScript definitions on Mod-click and from {@link} references in hover documentation', async () => {
+  const [{ createTypeScriptService }, { createTypeScriptExtensions }] = await Promise.all([
+    import('#lib/typescript-language/typescript-service.js'),
+    import('#lib/typescript-language/create-typescript-extensions.js'),
+  ]);
+  const sourceDocument = new EditorDocument(
+    'main.ts',
+    [
+      'interface Mechanism {',
+      '  teeth: number;',
+      '}',
+      '/**',
+      ' * Identical to {@link Mechanism} but {@link https://x.dev docs}.',
+      ' * @see {@link Mechanism}',
+      ' */',
+      'const gear: Mechanism = { teeth: 12 };',
+      'gear.teeth;',
+      '',
+    ].join('\n'),
+  );
+  const service = await createTypeScriptService({ dynamicTypes: false });
+  let view: EditorView | undefined;
+  let target: EditorNavigationTarget | undefined;
+  try {
+    await service.attach(sourceDocument);
+    const extensions = createTypeScriptExtensions({
+      document: sourceDocument,
+      service,
+      navigate: async (next) => {
+        target = next;
+      },
+    });
+    render(
+      <div className='h-72'>
+        <CodeEditor
+          document={sourceDocument}
+          viewId='definition-links'
+          languageId='typescript'
+          extensions={extensions}
+          onMount={(mounted) => {
+            view = mounted;
+          }}
+        />
+      </div>,
+    );
+    await expect.poll(() => view).toBeDefined();
+    const usage = sourceDocument.text.lastIndexOf('gear') + 1;
+    fireEvent.mouseDown(view!.contentDOM, modifierAt(view!, usage));
+    await expect.poll(() => target).toMatchObject({ uri: sourceDocument.uri, line: 8, column: 7 });
+
+    target = undefined;
+    fireEvent.mouseMove(view!.contentDOM, modifierAt(view!, usage, false));
+    await expect.poll(() => document.querySelector('.cm-typescript-hover')?.textContent).toContain('@see');
+    const links = [...document.querySelectorAll('.cm-typescript-hover a')];
+    expect(links.map((link) => link.textContent)).toEqual(['Mechanism', 'docs', 'Mechanism']);
+    expect(links[1]).toHaveAttribute('href', 'https://x.dev');
+    expect(links[1]).toHaveAttribute('target', '_blank');
+    await page.screenshot();
+    (links[2] as HTMLAnchorElement).click();
+    await expect.poll(() => target).toMatchObject({ uri: sourceDocument.uri, line: 1, column: 1 });
+  } finally {
+    service.dispose();
+  }
+}, 60_000);
+
+it('adds the import when a TypeScript auto-import completion is accepted with Enter after more typing', async () => {
+  const [{ createTypeScriptService }, { createTypeScriptExtensions }] = await Promise.all([
+    import('#lib/typescript-language/typescript-service.js'),
+    import('#lib/typescript-language/create-typescript-extensions.js'),
+  ]);
+  const sourceDocument = new EditorDocument(
+    'layout.ts',
+    "import type { MechanismSource } from '@taucad/kinematics';\n\nexport type Test = M",
+  );
+  const service = await createTypeScriptService({ dynamicTypes: false });
+  let view: EditorView | undefined;
+  try {
+    await service.client.setExtraLib(
+      'file:///node_modules/@taucad/kinematics/index.d.ts',
+      'export interface Mechanism { name: string }\nexport interface MechanismSource { id: string }\nexport type MechanismUnits = "mm";\n',
+    );
+    await service.attach(sourceDocument);
+    const extensions = createTypeScriptExtensions({
+      document: sourceDocument,
+      service,
+      navigate: () => undefined,
+      applyWorkspaceEdits: async (edits) => {
+        for (const edit of edits) {
+          if (edit.uri !== sourceDocument.uri || edit.baseText !== sourceDocument.text) {
+            return false;
+          }
+          sourceDocument.apply({
+            expectedVersion: sourceDocument.version,
+            origin: 'workspace-edit',
+            changes: edit.changes,
+          });
+        }
+        return true;
+      },
+    });
+    render(
+      <div className='h-72'>
+        <CodeEditor
+          document={sourceDocument}
+          viewId='auto-import'
+          languageId='typescript'
+          extensions={extensions}
+          onMount={(mounted) => {
+            view = mounted;
+          }}
+        />
+      </div>,
+    );
+    await expect.poll(() => view).toBeDefined();
+    view!.dispatch({ selection: { anchor: sourceDocument.text.length } });
+    view!.focus();
+    startCompletion(view!);
+    await expect.poll(() => document.querySelector('.cm-tooltip-autocomplete')?.textContent).toContain('Mechanism');
+    await userEvent.keyboard('ec');
+    await expect
+      .poll(() => document.querySelector('.cm-tooltip-autocomplete [aria-selected="true"]')?.textContent)
+      .toBeTruthy();
+    await expect
+      .poll(() => document.querySelector('.cm-tooltip-autocomplete')?.textContent)
+      .toContain('MechanismUnits');
+    for (let index = 0; index < 5; index += 1) {
+      const selected = document.querySelector('.cm-tooltip-autocomplete [aria-selected="true"]')?.textContent ?? '';
+      if (/^Mechanism(?!Source|Units)/u.test(selected)) {
+        break;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- arrow through the open list one row at a time.
+      await userEvent.keyboard('{ArrowDown}');
+    }
+    await userEvent.keyboard('{Enter}');
+    await expect
+      .poll(() => sourceDocument.text)
+      .toBe("import type { Mechanism, MechanismSource } from '@taucad/kinematics';\n\nexport type Test = Mechanism");
   } finally {
     service.dispose();
   }

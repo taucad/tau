@@ -16,6 +16,7 @@ import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { ColorPicker } from '#components/ui/color-picker.js';
 import { Button } from '@taucad/ui/components/button';
 import { Switch } from '@taucad/ui/components/switch';
+import { AgentObservabilitySettings } from '#components/settings/agent-observability-settings.js';
 
 type PrivacyMode = {
   id: 'share' | 'private';
@@ -321,6 +322,10 @@ export function GeneralSettings(): React.JSX.Element {
           </CardContent>
         </SettingsSectionCard>
       </SettingsItem>
+
+      {/* Agent recording. Separate from the switch above: these purposes are
+       * account permissions resolved by the server, not a local preference. */}
+      <AgentObservabilitySettings />
     </div>
   );
 }

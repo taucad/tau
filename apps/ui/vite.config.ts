@@ -134,6 +134,7 @@ const cloudBoundarySpecifiers = new Set([
 ]);
 
 const desktopSourceOverrides = new Map([
+  ['#components/cad/ar-usdz-transcode.js', '#components/cad/ar-usdz-transcode.desktop.js'],
   ['#constants/local-kernel-options.js', '#constants/local-kernel-options.desktop.js'],
   ['#constants/ephemeral-kernel-options.js', '#constants/ephemeral-kernel-options.desktop.js'],
   ['#runtime/converter-client-options.js', '#runtime/converter-client-options.desktop.js'],

@@ -6,6 +6,7 @@ import { ConfigService } from '@nestjs/config';
 import { describe, expect, it, vi } from 'vitest';
 import { BillableModelInvocationService } from '#api/billing/billable-model-invocation.service.js';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
+import { providerDiagnostic, textMarker } from '#api/llm/provider-diagnostic.js';
 import {
   billableModelRouteIds,
   CodeOwnedBillableModelQualificationResolver,
@@ -1576,9 +1577,7 @@ describe('BillableModelInvocationService', () => {
         routeId: 'route',
         modelId: 'model',
         upstreamStatus: 429,
-        upstreamBody: JSON.stringify({
-          error: { ...refusedBody.error, metadata: { authorization: '[redacted]' } },
-        }),
+        upstreamBody: providerDiagnostic(refusedBody),
         operationId: 'operation',
       },
       'Upstream model provider refused the request',
@@ -1694,13 +1693,14 @@ describe('BillableModelInvocationService', () => {
       const relayed = await result.response.text();
       await result.completion;
 
-      // The customer reads Tau's sentence; the operator's log keeps the supplier's.
+      // The customer reads Tau's sentence; the operator's log keeps the supplier's code, not its sentence.
       expect(relayed).toContain('"code":"RATE_LIMITED"');
       expect(relayed).not.toContain(supplierSentence);
       const logged = warn.mock.calls.map((call) => String(call[0]));
       expect(logged).toContainEqual(expect.stringContaining('Provider stream failed on openai'));
       expect(logged).toContainEqual(expect.stringContaining('(429)'));
-      expect(logged).toContainEqual(expect.stringContaining(supplierSentence));
+      expect(logged).toContainEqual(expect.stringContaining(textMarker(supplierSentence)));
+      expect(logged.join('\n')).not.toContain(supplierSentence);
     } finally {
       warn.mockRestore();
     }

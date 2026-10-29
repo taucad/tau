@@ -59,7 +59,13 @@ for (const route of ['windows-nsis', 'macos-zip', 'macos-dmg']) {
   }
   assertQualificationConsumerScope({ ...input, kind: 'ci', scope: 'all', channel: 'production' });
 }
-assertQualificationSource({ sourceCommit: current, workflowCommit: current, scope: 'windows', channel: 'staging' });
+assertQualificationSource({
+  sourceCommit: current,
+  workflowCommit: current,
+  scope: 'windows',
+  channel: 'staging',
+  kind: 'vm',
+});
 for (const change of [{ channel: 'production' }, { sourceCommit: 'a'.repeat(40) }, { scope: 'windows-ci' }]) {
   assert.throws(() => {
     assertQualificationSource({
@@ -67,6 +73,7 @@ for (const change of [{ channel: 'production' }, { sourceCommit: 'a'.repeat(40) 
       workflowCommit: current,
       scope: 'windows',
       channel: 'staging',
+      kind: 'vm',
       ...change,
     });
   });

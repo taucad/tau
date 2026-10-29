@@ -2,7 +2,7 @@
  * Type-level tests for the @jscad/modeling bundled type declarations.
  *
  * Verifies that the generated .d.ts resolves correctly when registered
- * at file:///node_modules/@jscad/modeling/index.d.ts via Monaco's addExtraLib.
+ * at file:///node_modules/@jscad/modeling/index.d.ts via the TypeScript service's addExtraLib.
  */
 
 import { describe, expectTypeOf, it } from 'vitest';

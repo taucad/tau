@@ -252,6 +252,14 @@ vi.mock('#graphics/three/actor-bridge.jsx', () => ({
   ActorBridge: () => <div data-testid='actor-bridge' />,
 }));
 
+/** The bridge's DOM can commit before the stub frame hook's passive effect subscribes. */
+const waitForPresentationObserver = async () =>
+  waitFor(() => {
+    const observer = frameCallbacks.find(({ priority }) => priority === 6);
+    expect(observer).toBeDefined();
+    return observer!;
+  });
+
 function KeyedThreeCanvas({ canvasKey }: { readonly canvasKey: string }) {
   return (
     <ThreeCanvasInstance key={canvasKey} graphicsBackend='webgl' onRetry={() => undefined}>
@@ -584,8 +592,7 @@ describe('ThreeCanvasInstance', () => {
 
   it('reports the first frame only once it has reached the screen, then observes no further frames', async () => {
     render(<KeyedThreeCanvas canvasKey='first-frame' />);
-    await screen.findByTestId('actor-bridge');
-    const observer = frameCallbacks.find(({ priority }) => priority === 6);
+    const observer = await waitForPresentationObserver();
     expect(observer).toBeDefined();
     // The canvas may have drawn before the observer subscribed: it asks for exactly one frame to observe.
     expect(stubInvalidate).toHaveBeenCalledTimes(1);
@@ -594,7 +601,7 @@ describe('ThreeCanvasInstance', () => {
 
     // Submitting the frame is not presenting it: nothing is reported until two animation frames later.
     act(() => {
-      observer?.callback({ size: stubSize });
+      observer.callback({ size: stubSize });
     });
     expect(presented()).toEqual([]);
     await waitFor(() => {
@@ -612,24 +619,22 @@ describe('ThreeCanvasInstance', () => {
   it('waits for the canvas to have area before it observes a frame', async () => {
     stubSize.width = 0;
     render(<KeyedThreeCanvas canvasKey='no-area' />);
-    await screen.findByTestId('actor-bridge');
-    const observer = frameCallbacks.find(({ priority }) => priority === 6);
+    const observer = await waitForPresentationObserver();
     expect(stubInvalidate).not.toHaveBeenCalled();
     const frame = vi.spyOn(globalThis, 'requestAnimationFrame');
     act(() => {
-      observer?.callback({ size: { width: 0, height: 600 } });
+      observer.callback({ size: { width: 0, height: 600 } });
     });
     expect(frame).not.toHaveBeenCalled();
     act(() => {
-      observer?.callback({ size: { width: 800, height: 600 } });
+      observer.callback({ size: { width: 800, height: 600 } });
     });
     expect(frame).toHaveBeenCalledTimes(1);
   });
 
   it('cancels the pending animation frame when it unmounts between the two frames', async () => {
     const view = render(<KeyedThreeCanvas canvasKey='unmount-between' />);
-    await screen.findByTestId('actor-bridge');
-    const observer = frameCallbacks.find(({ priority }) => priority === 6);
+    const observer = await waitForPresentationObserver();
     const callbacks: FrameRequestCallback[] = [];
     vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
       callbacks.push(callback);
@@ -637,10 +642,11 @@ describe('ThreeCanvasInstance', () => {
     });
     const cancel = vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => undefined);
     act(() => {
-      observer?.callback({ size: stubSize });
+      observer.callback({ size: stubSize });
     });
     // The first animation frame arrives and requests the second; the canvas unmounts before it.
-    callbacks[0]?.(0);
+    expect(callbacks).toHaveLength(1);
+    callbacks[0]!(0);
     expect(callbacks).toHaveLength(2);
     view.unmount();
     expect(cancel).toHaveBeenCalledWith(2);

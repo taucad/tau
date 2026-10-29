@@ -14,6 +14,7 @@ import { defaultChatModel } from '#constants/chat.constants.js';
 import { unknownIconId } from '#components/icons/svg-icon.js';
 import { resolveNewChatExecution } from '#utils/new-chat-execution.js';
 import type { ModelCatalog } from '#utils/new-chat-execution.js';
+import { recordApiRequestId } from '#lib/api-request-id.js';
 
 export type Model = ApiModel;
 
@@ -52,7 +53,7 @@ export const getModels = async (): Promise<Model[]> => {
     credentials: 'include',
   });
   if (!response.ok) {
-    throw new Error(`The model catalog answered ${response.status}.`);
+    throw recordApiRequestId(new Error(`The model catalog answered ${response.status}.`), response);
   }
   const data: unknown = await response.json();
   if (!Array.isArray(data)) {

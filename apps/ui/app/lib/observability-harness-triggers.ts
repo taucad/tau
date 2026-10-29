@@ -1,5 +1,7 @@
 import type { runtime } from '#runtime/ui-runtime.definition.js';
 import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
+import { reportRuntimeFailures } from '#lib/runtime-failure-reporting.js';
+import { reportWorkerFailures } from '#lib/worker-error-reporting.js';
 
 /** Allocate and touch WASM pages gradually. Stop releases references and prevents further allocations. */
 export const startObservabilityMemoryPressure = (status: (message: string) => void): (() => void) => {
@@ -32,7 +34,10 @@ export const startObservabilityMemoryPressure = (status: (message: string) => vo
 
 /** A dedicated worker throws; do not substitute a main-thread capture for missing worker instrumentation. */
 export const triggerObservabilityWorkerError = (status: (message: string) => void): (() => void) => {
-  const worker = new Worker(new URL('observability-harness.worker.ts', import.meta.url), { type: 'module' });
+  const worker = reportWorkerFailures(
+    new Worker(new URL('observability-harness.worker.ts', import.meta.url), { type: 'module' }),
+    'observability-harness',
+  );
   worker.addEventListener(
     'error',
     () => {
@@ -62,12 +67,18 @@ export const triggerObservabilityKernelTermination = async (status: (message: st
     import('#runtime/ui-runtime.config.js'),
     import('#environment.config.js'),
   ]);
-  const worker = new Worker(new URL('../runtime/runtime.worker.ts', import.meta.url), { type: 'module' });
+  const worker = reportWorkerFailures(
+    new Worker(new URL('../runtime/runtime.worker.ts', import.meta.url), { type: 'module' }),
+    'kernel',
+  );
   const client = createRuntimeClient<typeof runtime>({
     transport: webWorkerTransport({ createWorker: () => worker, fileSystem: fromMemoryFs() }),
     config: createUiRuntimeConfig(environment),
     operationTimeout: 10_000,
   });
+  /* The product's own reporter, as `observeRuntimeClient` attaches it, reports the failed attempt. It stays
+   * subscribed past cleanup, so an observation the client emits as it terminates is still reported. */
+  reportRuntimeFailures(client);
   try {
     await client.connect();
     const document = client.open({ source: { files: { 'model.scad': 'cube([10, 10, 10]);' } }, watch: false });

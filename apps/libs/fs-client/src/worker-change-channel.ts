@@ -52,7 +52,7 @@ export type WorkerRelativeRenameEvent = {
  * Directory rename notification with workspace-relative paths. Distinct
  * discriminator from {@link WorkerRelativeRenameEvent} so subtree-aware
  * consumers (FileContentService cache subtree migration, FileTreeService
- * subtree re-key, MonacoModelService model batch migrate) can react to
+ * subtree re-key, EditorDocumentSession document batch migration) can react to
  * the structural change without conflating it with a single-file rename.
  *
  * @public

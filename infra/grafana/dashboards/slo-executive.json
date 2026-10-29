@@ -17,6 +17,15 @@
         "hide": 2
       },
       {
+        "name": "mirror_app",
+        "label": "Mirror application",
+        "type": "constant",
+        "query": ".*mirror.*",
+        "description": "Binding contract v2: the local default matches a tau-mirror job. Hosted provisioning binds this to exactly one tau-mirror application.",
+        "current": { "text": ".*mirror.*", "value": ".*mirror.*" },
+        "hide": 2
+      },
+      {
         "name": "service",
         "label": "Service",
         "type": "custom",
@@ -66,12 +75,19 @@
       "id": 1
     },
     {
-      "title": "Tau Sync Availability (24h)",
+      "title": "Tau Sync Availability, SLO-1 Push / SLO-2 Fetch (24h)",
       "type": "gauge",
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
       "targets": [
         {
-          "expr": "(1 - ((sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[24h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[24h])), 1e-10))) * 100"
+          "expr": "(1 - ((sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"push\",outcome=\"error\"}[24h])) or vector(0)) / clamp_min(sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"push\"}[24h])), 1e-10))) * 100",
+          "legendFormat": "SLO-1 push",
+          "refId": "A"
+        },
+        {
+          "expr": "(1 - ((sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"fetch\",outcome=\"error\"}[24h])) or vector(0)) / clamp_min(sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"fetch\"}[24h])), 1e-10))) * 100",
+          "legendFormat": "SLO-2 fetch",
+          "refId": "B"
         }
       ],
       "fieldConfig": {
@@ -89,7 +105,9 @@
           }
         }
       },
-      "id": 2
+      "id": 2,
+      "description": "Git requests not ending outcome=\"error\" (W14 SLO-1, SLO-2; objective 99.9%). Client-caused outcomes (ref_rejected, quota_refused, unauthorized) and retryable refusals (busy, conflict) are not errors. Replaces HTTP 5xx on /v1/git/*, which counted every refusal as a failure.",
+      "links": [{ "title": "Storage — critical", "url": "/d/tau-storage-critical" }]
     },
     {
       "title": "API Latency SLO (p95 < 500ms)",
@@ -192,14 +210,19 @@
       "id": 8
     },
     {
-      "title": "Tau Sync Error Budget Remaining",
+      "title": "Tau Sync Error Budget Remaining (SLO-1 / SLO-2)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
       "targets": [
         {
-          "expr": "1 - ((sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[$__range])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[$__range])), 1e-10)) / 0.001",
-          "legendFormat": "Error Budget Remaining",
+          "expr": "1 - ((sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"push\",outcome=\"error\"}[$__range])) or vector(0)) / clamp_min(sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"push\"}[$__range])), 1e-10)) / 0.001",
+          "legendFormat": "SLO-1 push",
           "refId": "A"
+        },
+        {
+          "expr": "1 - ((sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"fetch\",outcome=\"error\"}[$__range])) or vector(0)) / clamp_min(sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"fetch\"}[$__range])), 1e-10)) / 0.001",
+          "legendFormat": "SLO-2 fetch",
+          "refId": "B"
         }
       ],
       "fieldConfig": {
@@ -217,7 +240,8 @@
           "custom": { "fillOpacity": 20 }
         }
       },
-      "id": 9
+      "id": 9,
+      "description": "1 − (error share over the selected range ÷ the 0.1% budget), per operation (W14 SLO-1 push, SLO-2 fetch)."
     },
     {
       "title": "API Burn Rate (1h)",
@@ -298,14 +322,20 @@
       "id": 12
     },
     {
-      "title": "Tau Sync Burn Rate (6h)",
-      "description": "6h Tau Sync (hosted git and project sync) error budget consumption rate. >1 means burning faster than sustainable.",
+      "title": "Tau Sync Burn Rate (6h, SLO-1 / SLO-2)",
+      "description": "6h error budget consumption of git push (SLO-1) and fetch (SLO-2): outcome=\"error\" share ÷ 0.1%. >1 means burning faster than sustainable; storage-push-slo-fast-burn and storage-fetch-slo-fast-burn page at 14.4× over 1 h and 5 m.",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 18 },
       "targets": [
         {
-          "expr": "((sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[6h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[6h])), 1e-10)) / 0.001",
+          "expr": "((sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"push\",outcome=\"error\"}[6h])) or vector(0)) / clamp_min(sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"push\"}[6h])), 1e-10)) / 0.001",
+          "legendFormat": "SLO-1 push",
           "refId": "A"
+        },
+        {
+          "expr": "((sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"fetch\",outcome=\"error\"}[6h])) or vector(0)) / clamp_min(sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"fetch\"}[6h])), 1e-10)) / 0.001",
+          "legendFormat": "SLO-2 fetch",
+          "refId": "B"
         }
       ],
       "fieldConfig": {
@@ -324,14 +354,20 @@
       "id": 13
     },
     {
-      "title": "Tau Sync Burn Rate (24h)",
-      "description": "24h Tau Sync (hosted git and project sync) error budget consumption rate. >1 means burning faster than sustainable.",
+      "title": "Tau Sync Burn Rate (24h, SLO-1 / SLO-2)",
+      "description": "24h error budget consumption of git push (SLO-1) and fetch (SLO-2): outcome=\"error\" share ÷ 0.1%. >1 means burning faster than sustainable; storage-push-slo-fast-burn and storage-fetch-slo-fast-burn page at 14.4× over 1 h and 5 m.",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 18 },
       "targets": [
         {
-          "expr": "((sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[24h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[24h])), 1e-10)) / 0.001",
+          "expr": "((sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"push\",outcome=\"error\"}[24h])) or vector(0)) / clamp_min(sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"push\"}[24h])), 1e-10)) / 0.001",
+          "legendFormat": "SLO-1 push",
           "refId": "A"
+        },
+        {
+          "expr": "((sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"fetch\",outcome=\"error\"}[24h])) or vector(0)) / clamp_min(sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"fetch\"}[24h])), 1e-10)) / 0.001",
+          "legendFormat": "SLO-2 fetch",
+          "refId": "B"
         }
       ],
       "fieldConfig": {
@@ -348,6 +384,37 @@
         }
       },
       "id": 14
+    },
+    {
+      "id": 17,
+      "title": "B2 Copy Freshness, SLO-6 (30d)",
+      "type": "stat",
+      "description": "Share of one-minute samples with second-copy lag ≤ 15 min over 30 days (W13 B5, W14 SLO-6; objective 99.9%, proposed). Empty until a tau-mirror copier reports.",
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 22 },
+      "targets": [
+        {
+          "expr": "avg_over_time((max(tau_mirror_copy_lag_seconds{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"}) <= bool 900)[30d:1m]) * 100",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2,
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "steps": [
+              { "value": null, "color": "red" },
+              { "value": 99, "color": "yellow" },
+              { "value": 99.9, "color": "green" }
+            ]
+          }
+        }
+      },
+      "links": [{ "title": "Storage capability: B2 second copy", "url": "/d/tau-sync" }]
     },
     {
       "title": "Error Logs",
@@ -386,5 +453,21 @@
       "id": 16
     }
   ],
-  "schemaVersion": 39
+  "schemaVersion": 39,
+  "links": [
+    {
+      "title": "Storage — critical",
+      "type": "link",
+      "url": "/d/tau-storage-critical",
+      "icon": "dashboard",
+      "targetBlank": false
+    },
+    {
+      "title": "System Overview",
+      "type": "link",
+      "url": "/d/tau-system-overview",
+      "icon": "dashboard",
+      "targetBlank": false
+    }
+  ]
 }

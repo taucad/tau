@@ -189,7 +189,7 @@ export function useResizeHandles(
       if (mutation.type === 'attributes') {
         return target === root || target.matches(`${nativeLayoutSelector}, .dv-tab, [data-slot=paneview-header]`);
       }
-      // Titles name the adjacent panes. Content text, Monaco decorations and
+      // Titles name the adjacent panes. Content text, editor decorations and
       // streaming chat have no bearing on sash constraints or accessible labels.
       if (target.closest(headerSelector)) {
         return true;

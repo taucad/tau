@@ -270,6 +270,8 @@ export interface GraphicsContext {
 
   // Measure state
   isMeasureActive: boolean;
+  /** Whether the active tool has attached its input listeners; never persisted. */
+  isMeasureInputReady: boolean;
   measurements: MeasurementRecord[];
   currentMeasurementStart: [number, number, number] | undefined;
   currentMeasurementAnchor?: MeasurementAnchor;
@@ -365,6 +367,7 @@ export type GraphicsEvent =
   | { type: 'commitSectionCuts'; payload: readonly SectionCut[] }
   // Measure events
   | { type: 'setMeasureActive'; payload: boolean }
+  | { type: 'setMeasureInputReady'; ready: boolean }
   | { type: 'adoptPinnedMeasurements'; measurements: readonly PinnedMeasurement[] }
   | { type: 'startMeasurement'; payload: [number, number, number]; anchor?: MeasurementAnchor }
   | {
@@ -876,6 +879,7 @@ const graphicsMachineDefinition = setup({
 
       // Measure state
       isMeasureActive: false,
+      isMeasureInputReady: false,
       measurements: (input.pinnedMeasurements ?? []).map((m) => ({
         ...m,
         isPinned: true,
@@ -1670,7 +1674,11 @@ const graphicsMachineDefinition = setup({
                   event.payload
                     ? {
                         target: 'on',
-                        context: { isMeasureActive: true, ...beginMeasureHoverSuppression(context, enq) },
+                        context: {
+                          isMeasureActive: true,
+                          isMeasureInputReady: false,
+                          ...beginMeasureHoverSuppression(context, enq),
+                        },
                       }
                     : undefined,
               },
@@ -1679,6 +1687,8 @@ const graphicsMachineDefinition = setup({
             on: {
               initial: 'selecting',
               on: {
+                // Listener ownership is synchronous and local to the active tool; late inactive reports are ignored.
+                setMeasureInputReady: { context: ({ event }) => ({ isMeasureInputReady: event.ready }) },
                 // Leaving keeps every measurement; only a half-placed one is dropped.
                 setMeasureActive: ({ context, event }) =>
                   event.payload
@@ -1687,6 +1697,7 @@ const graphicsMachineDefinition = setup({
                         target: 'off',
                         context: {
                           isMeasureActive: false,
+                          isMeasureInputReady: false,
                           currentMeasurementStart: undefined,
                           currentMeasurementAnchor: undefined,
                           measureCandidates: [],

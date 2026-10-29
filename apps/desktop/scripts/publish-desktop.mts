@@ -16,6 +16,9 @@ import { resolve } from 'node:path';
 
 import { z } from 'zod';
 
+// oxlint-disable-next-line no-restricted-imports -- Readback is script-owned, not a runtime export.
+import { verifyMirrorReadback } from './mirror-readback.mjs';
+
 import { desktopArchiveName, desktopReleaseBaseUrl, desktopReleaseIdentity } from '#shared/desktop-release.js';
 import { isNewerVersion } from '#main/updater.js';
 
@@ -189,17 +192,13 @@ const main = async (): Promise<void> => {
       } else {
         put(name, `releases/${tag}`, true);
       }
-      const response = await fetch(`${desktopReleaseBaseUrl(tag)}/${name}`);
-      if (!response.ok || !response.body) {
-        throw new Error(`Public mirror unavailable: ${name} (${response.status})`);
-      }
-      const hash = createHash('sha256');
-      for await (const chunk of response.body) {
-        hash.update(Buffer.from(chunk));
-      }
-      if (hash.digest('hex') !== (await digest(path))) {
-        throw new Error(`Public mirror bytes disagree: ${name}`);
-      }
+      const metadata = await stat(path);
+      await verifyMirrorReadback({
+        url: `${desktopReleaseBaseUrl(tag)}/${name}`,
+        name,
+        sha256: await digest(path),
+        size: metadata.size,
+      });
     }
     return;
   }

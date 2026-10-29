@@ -3,7 +3,7 @@ title: 'Port Allocation Policy'
 description: 'Canonical port assignments for all Tau services across dev, test, production, and infrastructure contexts to prevent collisions and browser-unsafe port errors.'
 status: active
 created: '2026-03-18'
-updated: '2026-09-30'
+updated: '2026-10-27'
 related:
   - docs/research/observability-architecture.md
 ---
@@ -14,7 +14,7 @@ Internal reference for port assignments across all Tau services and environments
 
 ## Rationale
 
-Tau runs multiple services concurrently in development: a UI dev server, an API server, a WebSocket dev server, databases, and an observability stack. Without a canonical registry, port collisions cause silent failures, browser `ERR_UNSAFE_PORT` errors, and wasted debugging time. This policy is the single source of truth.
+Tau runs multiple services concurrently in development: a UI dev server, an API server, a WebSocket dev server, databases, and an observability stack. Without a canonical registry, port collisions cause silent failures, browser `ERR_UNSAFE_PORT` errors, and wasted debugging time. A published port with no host address listens on every interface, so the same registry also keeps local databases and the observability stack off the LAN. This policy is the single source of truth.
 
 ## Rules
 
@@ -29,28 +29,27 @@ All port assignments must match the table below. Never introduce a new port with
 | 3000  | UI Vite dev server                | Dev      | `apps/ui/vite.config.ts`                                           |
 | 3000  | API (Fly.io internal)             | Prod     | `apps/api/fly.prod.toml`, `apps/api/fly.staging.toml`              |
 | 3000  | API (test env)                    | Test     | `apps/api/.env.test`                                               |
+| 3100  | Loki                              | Infra    | `infra/docker-compose.yml` (loopback)                              |
+| 3200  | Tempo                             | Infra    | `infra/docker-compose.yml` (loopback)                              |
 | 4000  | API (NestJS dev server)           | Dev      | `apps/api/.env`                                                    |
 | 4001  | Dev WebSocket server (Socket.IO)  | Dev      | `apps/api/app/api/websocket/dev-websocket.service.ts` (`PORT + 1`) |
-| 4317  | OTLP gRPC receiver                | Infra    | `infra/docker-compose.yml`                                         |
-| 4318  | OTLP HTTP receiver                | Infra    | `infra/docker-compose.yml`                                         |
-| 5432  | PostgreSQL                        | Infra    | `infra/docker-compose.yml`                                         |
-| 6100  | Grafana UI (otel-lgtm)            | Infra    | `infra/docker-compose.yml`                                         |
-| 6379  | Redis                             | Infra    | `infra/docker-compose.yml`                                         |
-| 9090  | Prometheus                        | Infra    | `infra/docker-compose.yml`                                         |
+| 4040  | Pyroscope                         | Infra    | `infra/docker-compose.yml` (loopback)                              |
+| 4317  | OTLP gRPC receiver                | Infra    | `infra/docker-compose.yml` (loopback)                              |
+| 4318  | OTLP HTTP receiver                | Infra    | `infra/docker-compose.yml` (loopback)                              |
+| 5432  | PostgreSQL                        | Infra    | `infra/docker-compose.yml` (loopback)                              |
+| 6100  | Grafana UI (otel-lgtm)            | Infra    | `infra/docker-compose.yml` (loopback)                              |
+| 6379  | Redis                             | Infra    | `infra/docker-compose.yml` (loopback)                              |
+| 9000  | MinIO API                         | Infra    | `infra/docker-compose.yml` (loopback)                              |
+| 9001  | MinIO console                     | Infra    | `infra/docker-compose.yml` (loopback)                              |
+| 9090  | Prometheus                        | Infra    | `infra/docker-compose.yml` (loopback)                              |
 | 9464  | OTEL Prometheus metrics exporter  | Dev/Prod | `apps/api/app/telemetry/otel.ts`, `apps/api/fly.prod.toml`         |
 | 11434 | Ollama (local LLM)                | Dev      | `apps/api/app/api/providers/provider.service.ts`                   |
-| 42114 | SearXNG search                    | Infra    | `infra/search/docker-compose.yml`                                  |
 
 Named localhost previews share the Portless proxy. Their backend ports are allocated by
 Portless from 4000–4999 and passed through `PORT`; do not reserve a fixed port per guide.
 Port 1355 is Portless's unprivileged alternative when an interactive port-443 startup is unavailable.
 
-**Internal-only ports** (inside Docker containers, not exposed to host):
-
-| Port | Service | Container |
-| ---- | ------- | --------- |
-| 3100 | Loki    | otel-lgtm |
-| 3200 | Tempo   | otel-lgtm |
+Loki, Tempo and Pyroscope are published on the host loopback (Rule 9). Grafana's container port 3000 is not a separate host port; the host mapping is 6100. The collector's health listener on 13133 stays inside the container.
 
 ### 2. Never Use Browser-Unsafe Ports
 
@@ -162,7 +161,8 @@ When adding new services, allocate from the appropriate range:
 | 5000–5999   | Reserved (avoid — macOS AirPlay, common OS conflicts) |
 | 6000–6099   | Reserved (avoid — X11, browser-blocked)               |
 | 6100–6999   | Observability, Redis                                  |
-| 9000–9999   | Metrics exporters                                     |
+| 9000–9001   | MinIO API and console                                 |
+| 9002–9999   | Metrics exporters                                     |
 | 10000–19999 | External tool defaults (Ollama, etc.)                 |
 | 40000–49999 | Auxiliary infra                                       |
 
@@ -190,16 +190,42 @@ const port = 3000;
 
 Any PR that introduces a new port binding must update the canonical port map in Rule 1. Reviewers should verify the map is current.
 
+### 9. Bind Local Published Ports to Loopback
+
+Every host port published by a local Compose file or a local service script names `127.0.0.1`. Do not publish a bare `host:container` mapping.
+
+**Why**: Docker treats `5432:5432` as `0.0.0.0:5432`, so Postgres, Redis, MinIO and the observability stack are reachable from other machines on the same network.
+
+CORRECT:
+
+```yaml
+ports:
+  - '127.0.0.1:5432:5432'
+```
+
+INCORRECT:
+
+```yaml
+ports:
+  - '5432:5432'
+```
+
+Processes inside a container keep listening on the container interfaces. Binding the process to the container's `127.0.0.1` drops the published port and other containers. Sibling containers use the Compose DNS name (`postgres`, `redis`, `minio`), not `host.docker.internal`, because a loopback host port is not reachable through the host gateway.
+
+`infra/docker-compose.test.sh` rejects a published port in `infra/docker-compose.yml` whose host address is not `127.0.0.1`, including a bare mapping, a double-quoted mapping, and an explicit `0.0.0.0`. GitHub Actions `services.ports` entries stay `host:container` on the ephemeral runner. Production listeners, including the API's `0.0.0.0` bind inside Fly, are outside this rule. The UI's explicit `--host` LAN mode stays available for device testing.
+
 ## Anti-Patterns
 
 - **Using browser-unsafe ports (6000, 6666, 10080, etc.)**: Browsers silently block HTTP to these ports with `ERR_UNSAFE_PORT`. There is no server-side workaround — users must launch Chrome with `--explicitly-allowed-ports` or the service is simply inaccessible. Always cross-check Rule 2 before picking a port for any browser-facing service.
 - **Using port 5000**: macOS AirPlay Receiver binds to 5000/5001 by default. Avoid the entire 5000–5999 range.
 - **Picking "random" high ports**: Use the range table in Rule 6. Ad-hoc ports like 8080 or 8888 are common defaults for other tools and will collide.
 - **Port-per-feature in dev**: The API serves REST, WebSocket (prod via Redis adapter), and metrics on separate ports. Do not add more ports unless the protocol genuinely requires a separate listener.
+- **Publishing a Compose port without a host address**: `5432:5432` listens on every interface. Bind `127.0.0.1` (Rule 9).
 
 ## Summary Checklist
 
 - [ ] New port added to the canonical port map (Rule 1)
+- [ ] Local Compose or script host ports bind to `127.0.0.1` (Rule 9)
 - [ ] Port is not in the browser-unsafe list (Rule 2)
 - [ ] Port configured via env var with default (Rule 7)
 - [ ] Tests use port 0 (Rule 4)

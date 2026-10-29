@@ -6,7 +6,9 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { captureDictation, DictationCapture } from '#components/dictation/dictation-capture.js';
 import type { transcribeDictation } from '#components/dictation/dictation-client.js';
 import type { Ask, AskAnswers } from '@taucad/chat';
+import { toast } from 'sonner';
 import { QuestionCard } from '#components/chat/question-card.js';
+import { dictationMessages } from '#components/dictation/dictation-errors.js';
 import type { QuestionCardProperties } from '#components/chat/question-card.js';
 
 const dictationDependencies = vi.hoisted(() => ({
@@ -14,6 +16,7 @@ const dictationDependencies = vi.hoisted(() => ({
   capture: vi.fn<typeof captureDictation>(),
   transcribe: vi.fn<typeof transcribeDictation>(),
 }));
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), info: vi.fn() } }));
 vi.mock('#components/dictation/dictation-capture.js', () => ({ captureDictation: dictationDependencies.capture }));
 vi.mock('#components/dictation/dictation-client.js', () => ({
   fetchDictationStatus: dictationDependencies.status,
@@ -236,7 +239,10 @@ describe('question dictation', () => {
     await user.click(screen.getByRole('button', { name: 'Dictate' }));
     expect(onHold).toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Send answer' })).toHaveAttribute('aria-disabled', 'false');
-    expect(screen.queryByRole('textbox', { name: 'Your answer' })).not.toBeInTheDocument();
+    // The draft stays in view beside the expanded microphone and its cancel button.
+    expect(screen.getByRole('textbox', { name: 'Your answer' })).toHaveValue('A seashell.');
+    expect(screen.getByRole('button', { name: 'Cancel dictation' })).toBeVisible();
+    expect(screen.getByRole('img', { name: 'Microphone waveform' })).toBeInTheDocument();
     expect(onAnswer).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Stop dictation' }));
     await waitFor(() => {
@@ -246,6 +252,24 @@ describe('question dictation', () => {
     expect(onAnswer).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Send answer' }));
     expect(onAnswer).toHaveBeenCalledExactlyOnceWith('form', { text: 'A seashell. Use rounded corners.' });
+  });
+
+  it('should keep keyboard focus on the dictation control as the microphone expands and folds back', async () => {
+    const { user } = await openReply();
+    screen.getByRole('button', { name: 'Dictate' }).focus();
+    await user.keyboard('{Enter}');
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Stop dictation' })).toHaveFocus();
+    });
+    await user.keyboard('{Enter}');
+    await waitFor(() => {
+      expect(screen.getByRole('textbox', { name: 'Your answer' })).toHaveValue('Use rounded corners.');
+    });
+    // The answer takes focus back for review once the transcript lands.
+    expect(screen.getByRole('textbox', { name: 'Your answer' })).toHaveFocus();
+    await user.click(screen.getByRole('button', { name: 'Dictate' }));
+    await user.click(await screen.findByRole('button', { name: 'Cancel dictation' }));
+    expect(screen.getByRole('textbox', { name: 'Your answer' })).toHaveFocus();
   });
 
   it.each(['', 'A seashell. '])('should finish dictation and send once with draft %j', async (draft) => {
@@ -283,7 +307,13 @@ describe('question dictation', () => {
         response.reject(new Error('Transcription failed.'));
       }
     });
-    expect(screen.getByRole('alert', { name: 'Dictation error' })).toBeVisible();
+    // Empty speech ends quietly; a failure shows as a toast, never inside the answer.
+    if (result === 'empty') {
+      expect(toast.error).not.toHaveBeenCalled();
+    } else {
+      expect(toast.error).toHaveBeenCalledWith(dictationMessages.transcriptionFailed, { id: 'dictation-error' });
+    }
+    expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.getByRole('textbox', { name: 'Your answer' })).toHaveValue('Keep this.');
     expect(onAnswer).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Send answer' })).toHaveAttribute('aria-disabled', 'false');
@@ -330,9 +360,9 @@ describe('question dictation', () => {
     const box = screen.getByRole('textbox', { name: 'Your answer' });
     await user.type(box, 'Keep this.');
     await user.click(screen.getByRole('button', { name: 'Dictate' }));
-    expect(await screen.findByRole('alert', { name: 'Dictation error' })).toHaveTextContent(
-      'Microphone access was denied',
-    );
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(dictationMessages.microphoneDenied, { id: 'dictation-error' });
+    });
     expect(box).toHaveValue('Keep this.');
     expect(screen.getByRole('button', { name: 'Send answer' })).toHaveAttribute('aria-disabled', 'false');
   });

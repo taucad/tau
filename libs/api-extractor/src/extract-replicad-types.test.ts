@@ -128,7 +128,7 @@ describe('extract-replicad-types', () => {
 });
 
 describe('Replicad model authoring types', () => {
-  it('compiles the lampshade against the generated Monaco package and rejects invalid materials', () => {
+  it('compiles the lampshade against the generated the TypeScript service package and rejects invalid materials', () => {
     const generated = buildReplicadModelTypes();
     expect(generated).toEqual(
       JSON.parse(readFileSync(new URL('generated/replicad/model.bundled.json', import.meta.url), 'utf8')),

@@ -26,6 +26,7 @@ import { refuseCreateBranch, revisionStatusHarness } from '#hooks/use-revision-s
 import type { TurnOutcomeNotice } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { consumeRevisionReveal, requestRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
+import type { EditorDocument } from '#lib/editor-document.js';
 
 const projectSnapshot = { context: { project: { syncChats: true } } };
 const projectRef = {
@@ -44,10 +45,12 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({ updateProject: vi.fn() }),
 }));
-/* Monaco and Shiki are the editor's, not this pane's: the conflict rows are
+/* CodeMirror and syntax highlighting are the editor's, not this pane's: the conflict rows are
  * asserted by their verbs and the bytes they hand back (P43). */
 vi.mock('#components/code/code-editor.client.js', () => ({
-  CodeEditor: ({ value }: { readonly value?: string }) => <pre data-testid='conflict-buffer'>{value}</pre>,
+  CodeEditor: ({ document }: { readonly document: EditorDocument }) => (
+    <pre data-testid='conflict-buffer'>{document.text}</pre>
+  ),
 }));
 vi.mock('#components/code/diff-viewer.js', () => ({
   DiffViewer: ({

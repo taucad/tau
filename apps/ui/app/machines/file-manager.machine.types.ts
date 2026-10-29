@@ -21,7 +21,7 @@ import type { FileManagerMachine } from '#machines/file-manager.machine.js';
 export type FileManagerRef = ActorRefFrom<FileManagerMachine>;
 
 /**
- * File operations API surface used by Monaco services and UI components.
+ * File operations API surface used by editor services and UI components.
  * This is the superset of methods needed across all consumers.
  * Use `Pick<FileManagerApi, 'exists'>` etc. to narrow in component props.
  */

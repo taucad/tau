@@ -2,7 +2,7 @@
  * Every live project's resource subtree, and the focused project's chat route.
  *
  * Split out of `project-route.tsx` so the root layout does not statically reach it (D19/W21): this
- * module is what pulls in Monaco, three.js, shiki and the chat surface, and none of that belongs in
+ * module is what pulls in the editor, three.js, syntax assets and the chat surface, and none of that belongs in
  * the chunk a page that only lists projects evaluates. `project-route.tsx` loads it lazily the moment
  * a project is live, and the project route imports its own entry point from here directly.
  */
@@ -27,7 +27,7 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
 import { isKernelId } from '@taucad/types/constants';
-import { MonacoModelServiceProvider } from '#hooks/use-monaco-model-service.js';
+import { EditorDocumentSessionProvider } from '#hooks/use-editor-document-session.js';
 import { RevisionConflictChat } from '#routes/w.$workspace.$project/revision-conflict-chat.js';
 import { RevisionRestore } from '#routes/w.$workspace.$project/revision-restore.js';
 import { WorkbenchCheckoutRoot } from '#routes/w.$workspace.$project/workbench-checkout-root.js';
@@ -87,7 +87,7 @@ import {
   isRecordingEditorConflict,
   refuseCloseWhileRecording,
   subscribeEditorConflictRecords,
-} from '#lib/monaco-model-service.js';
+} from '#lib/editor-document-session.js';
 
 export type ProjectSessionFlushRegistration = {
   projectId: string;
@@ -604,7 +604,7 @@ function ProjectSession({
           {focused ? (
             <>
               <RevisionSaveShortcut isFocused={focused} />
-              <MonacoModelServiceProvider>
+              <EditorDocumentSessionProvider>
                 <ChatWorkspaceAuthorityProvider>
                   <ProjectWorkspaceProvider>
                     <WorkbenchRecordHost />
@@ -621,7 +621,7 @@ function ProjectSession({
                     {children}
                   </ProjectWorkspaceProvider>
                 </ChatWorkspaceAuthorityProvider>
-              </MonacoModelServiceProvider>
+              </EditorDocumentSessionProvider>
             </>
           ) : null}
         </ProjectProvider>

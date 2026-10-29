@@ -1,15 +1,46 @@
 {
   "uid": "tau-sync",
-  "title": "Tau Sync & Object Storage (R2)",
-  "tags": ["tau", "sync", "storage", "r2"],
+  "title": "Storage capability",
+  "tags": ["tau", "sync", "storage", "r2", "b2"],
+  "description": "Every storage capability in one place: the git edge, save time, the hop to tau-storage, admission, cache, commit protocol, object store, route table, B2 second copy, capacity, cost and usage by plan. Keeps uid tau-sync so existing links survive.",
   "timezone": "browser",
   "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
+  "links": [
+    {
+      "title": "Storage — critical",
+      "type": "link",
+      "url": "/d/tau-storage-critical",
+      "icon": "dashboard",
+      "targetBlank": false
+    },
+    {
+      "title": "SLO / Executive",
+      "type": "link",
+      "url": "/d/tau-slo-executive",
+      "icon": "dashboard",
+      "targetBlank": false
+    },
+    {
+      "title": "Runtime & Processes",
+      "type": "link",
+      "url": "/d/tau-runtime",
+      "icon": "dashboard",
+      "targetBlank": false
+    },
+    {
+      "title": "Infrastructure",
+      "type": "link",
+      "url": "/d/tau-infrastructure",
+      "icon": "dashboard",
+      "targetBlank": false
+    }
+  ],
   "templating": {
     "list": [
       {
         "name": "app",
-        "label": "Application",
+        "label": "API application",
         "type": "constant",
         "query": ".*",
         "description": "Local default matches unlabeled series. Hosted provisioning binds this to exactly one application.",
@@ -17,11 +48,29 @@
         "hide": 2
       },
       {
+        "name": "storage_app",
+        "label": "Storage application",
+        "type": "constant",
+        "query": ".*storage.*",
+        "description": "Binding contract v2: the local default matches the collector's tau-storage job. Hosted provisioning binds this to exactly one tau-storage application.",
+        "current": { "text": ".*storage.*", "value": ".*storage.*" },
+        "hide": 2
+      },
+      {
+        "name": "mirror_app",
+        "label": "Mirror application",
+        "type": "constant",
+        "query": ".*mirror.*",
+        "description": "Binding contract v2: the local default matches a tau-mirror job. Hosted provisioning binds this to exactly one tau-mirror application.",
+        "current": { "text": ".*mirror.*", "value": ".*mirror.*" },
+        "hide": 2
+      },
+      {
         "name": "service",
         "label": "Service",
         "type": "custom",
         "query": "tau-api",
-        "description": "Tau runs one service. A constant, so panels never lose their filter when the API's own series go stale during an outage.",
+        "description": "A constant, so panels never lose their filter when the API's own series go stale during an outage.",
         "current": { "text": "tau-api", "value": "tau-api" },
         "options": [{ "text": "tau-api", "value": "tau-api", "selected": true }],
         "includeAll": false
@@ -31,7 +80,7 @@
   "schemaVersion": 39,
   "panels": [
     {
-      "title": "Tau Sync — project sync into the API (git smart HTTP)",
+      "title": "API git edge (smart HTTP at tau-api)",
       "type": "row",
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
@@ -39,294 +88,1455 @@
       "id": 1
     },
     {
-      "title": "Sync Requests (5m)",
-      "type": "stat",
+      "title": "Requests by operation and outcome",
+      "type": "timeseries",
+      "description": "busy is a retryable capacity refusal and conflict a lost manifest race; neither counts against SLO-1/SLO-2.",
       "targets": [
         {
-          "expr": "sum(increase(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[5m])) or vector(0)"
+          "expr": "sum by (tau_sync_operation, outcome) (rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{tau_sync_operation}} {{outcome}}",
+          "refId": "A"
         }
       ],
-      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
       "id": 2
     },
     {
-      "title": "Push (receive-pack) p95",
-      "type": "stat",
+      "title": "Latency p50 / p95 / p99 by operation",
+      "type": "timeseries",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_bucket{app=~\"$app\",service_name=~\"$service\",http_route=~\".*git-receive-pack\"}[15m])))"
+          "expr": "histogram_quantile(0.5, sum by (le, tau_sync_operation) (rate(tau_sync_operation_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])))",
+          "legendFormat": "{{tau_sync_operation}} p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, tau_sync_operation) (rate(tau_sync_operation_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])))",
+          "legendFormat": "{{tau_sync_operation}} p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, tau_sync_operation) (rate(tau_sync_operation_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])))",
+          "legendFormat": "{{tau_sync_operation}} p99",
+          "refId": "C"
         }
       ],
-      "fieldConfig": {
-        "defaults": { "unit": "s" }
-      },
-      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
       "id": 3
     },
     {
-      "title": "Fetch (upload-pack) p95",
-      "type": "stat",
+      "title": "Refusals by code and status",
+      "type": "timeseries",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_bucket{app=~\"$app\",service_name=~\"$service\",http_route=~\".*git-upload-pack\"}[15m])))"
+          "expr": "sum by (tau_sync_refusal_code, http_response_status_code) (rate(tau_sync_refusals_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{tau_sync_refusal_code}} {{http_response_status_code}}",
+          "refId": "A"
         }
       ],
-      "fieldConfig": {
-        "defaults": { "unit": "s" }
-      },
-      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 9 },
       "id": 4
     },
     {
-      "title": "Sync Error Rate",
-      "type": "stat",
+      "title": "Push save time by where git ran (p50 / p95)",
+      "type": "timeseries",
+      "description": "Whole acknowledged-push latency at the edge, split by in-process or forwarded git (DC1) and rendezvous affinity (DC2): what a save waits for after the client sends.",
       "targets": [
         {
-          "expr": "(sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[15m])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[15m])), 1e-10)"
+          "expr": "histogram_quantile(0.5, sum by (le, tau_git_execution, tau_git_affinity) (rate(tau_sync_operation_duration_bucket{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"push\",outcome=\"ok\"}[15m])))",
+          "legendFormat": "p50 {{tau_git_execution}} {{tau_git_affinity}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, tau_git_execution, tau_git_affinity) (rate(tau_sync_operation_duration_bucket{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"push\",outcome=\"ok\"}[15m])))",
+          "legendFormat": "p95 {{tau_git_execution}} {{tau_git_affinity}}",
+          "refId": "B"
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 0.01 },
-              { "color": "red", "value": 0.05 }
-            ]
-          }
-        }
-      },
-      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 9 },
       "id": 5
     },
     {
-      "title": "Sync Requests by Route",
+      "title": "Pack bytes p95 (push, fetch)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, tau_sync_operation) (rate(tau_sync_pack_bytes_bucket{app=~\"$app\",service_name=~\"$service\"}[15m])))",
+          "legendFormat": "{{tau_sync_operation}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 9 },
+      "id": 6
+    },
+    {
+      "title": "Sync requests by route",
       "type": "timeseries",
       "targets": [
         {
           "expr": "sum by (http_route, http_request_method) (rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[5m]))",
-          "legendFormat": "{{http_request_method}} {{http_route}}"
+          "legendFormat": "{{http_request_method}} {{http_route}}",
+          "refId": "A"
         }
       ],
-      "fieldConfig": {
-        "defaults": { "unit": "reqps" }
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
-      "id": 6
-    },
-    {
-      "title": "Sync Latency p95 by Route",
-      "type": "timeseries",
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_request_duration_bucket{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[5m])))",
-          "legendFormat": "{{http_route}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": { "unit": "s" }
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
       "id": 7
     },
     {
-      "title": "Sync Responses by Status",
+      "title": "Sync responses by status",
       "type": "timeseries",
       "targets": [
         {
           "expr": "sum by (http_response_status_code) (rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[5m]))",
-          "legendFormat": "{{http_response_status_code}}"
+          "legendFormat": "{{http_response_status_code}}",
+          "refId": "A"
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps",
-          "custom": {
-            "stacking": { "mode": "normal" },
-            "fillOpacity": 20
-          }
-        }
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
       "id": 8
     },
     {
-      "title": "LFS Batch & Verify",
-      "type": "timeseries",
-      "targets": [
-        {
-          "expr": "sum by (http_route) (rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\".*lfs.*\"}[5m]))",
-          "legendFormat": "{{http_route}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": { "unit": "reqps" }
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "title": "Save to synced (client-reported)",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 },
+      "panels": [],
       "id": 9
     },
     {
-      "title": "Object storage — R2 in the cloud, MinIO locally (every API S3 call)",
-      "type": "row",
-      "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 },
-      "panels": [],
+      "title": "Save-to-acknowledged lag p50 / p95 by placement",
+      "type": "timeseries",
+      "description": "Client-reported time from the first unsynced change (a mint, a record change, or the push request itself) to the server acknowledging it, on every acknowledged push: the save time a person sees. Pushes nothing dated (sync.lag.since=request, a bare Sync now or an ahead push) only measure their own duration and are left out.",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le, agent_placement) (rate(tau_sync_client_lag_bucket{app=~\"$app\",service_name=~\"$service\",sync_lag_since!=\"request\"}[15m])))",
+          "legendFormat": "p50 {{agent_placement}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, agent_placement) (rate(tau_sync_client_lag_bucket{app=~\"$app\",service_name=~\"$service\",sync_lag_since!=\"request\"}[15m])))",
+          "legendFormat": "p95 {{agent_placement}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
       "id": 10
     },
     {
-      "title": "Storage Requests (5m)",
-      "type": "stat",
+      "title": "Client attempt duration p95 by direction and outcome",
+      "type": "timeseries",
+      "description": "Wall time of one client push or pull attempt, start to settle.",
       "targets": [
         {
-          "expr": "sum(increase(tau_storage_operation_duration_count{app=~\"$app\",service_name=~\"$service\"}[5m])) or vector(0)"
+          "expr": "histogram_quantile(0.95, sum by (le, direction, outcome) (rate(tau_sync_client_attempt_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[15m])))",
+          "legendFormat": "{{direction}} {{outcome}}",
+          "refId": "A"
         }
       ],
-      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 23 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 26 },
       "id": 11
     },
     {
-      "title": "Storage Error Rate",
-      "type": "stat",
-      "description": "Failed object-storage calls over all calls. Not-found (NoSuchKey, NotFound) is left out: Tau Sync and LFS use it as a normal existence check.",
+      "title": "Client attempts by outcome",
+      "type": "timeseries",
       "targets": [
         {
-          "expr": "(sum(rate(tau_storage_operation_duration_count{app=~\"$app\",service_name=~\"$service\",outcome=\"error\",error_type!~\"NoSuchKey|NotFound\"}[15m])) or vector(0)) / clamp_min(sum(rate(tau_storage_operation_duration_count{app=~\"$app\",service_name=~\"$service\"}[15m])), 1e-10)"
+          "expr": "sum by (direction, outcome) (rate(tau_sync_client_attempts_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{direction}} {{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
+      "id": 12
+    },
+    {
+      "title": "Client pending queue p95 at push start",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, agent_placement) (rate(tau_sync_client_pending_bucket{app=~\"$app\",service_name=~\"$service\"}[15m])))",
+          "legendFormat": "{{agent_placement}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 34 },
+      "id": 13
+    },
+    {
+      "title": "API → tau-storage hop, grants and receipts",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 42 },
+      "panels": [],
+      "id": 14
+    },
+    {
+      "title": "Git requests by execution and affinity",
+      "type": "timeseries",
+      "description": "Forwarded requests are the denominator for spill and hop-error rates.",
+      "targets": [
+        {
+          "expr": "sum by (tau_git_execution, tau_git_affinity) (rate(tau_sync_operation_duration_count{app=~\"$app\",service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{tau_git_execution}} {{tau_git_affinity}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 43 },
+      "id": 15
+    },
+    {
+      "title": "Forward errors by reason",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(tau_git_forward_errors_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 43 },
+      "id": 16
+    },
+    {
+      "title": "Spills, router members and workers up",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(tau_git_spills_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
+          "legendFormat": "spill {{reason}} /s",
+          "refId": "A"
+        },
+        {
+          "expr": "max(tau_git_members{app=~\"$app\",service_name=~\"$service\"})",
+          "legendFormat": "members the router ranks",
+          "refId": "B"
+        },
+        { "expr": "sum(fly_instance_up{app=~\"$storage_app\"})", "legendFormat": "workers up (Fly)", "refId": "C" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 43 },
+      "id": 17
+    },
+    {
+      "title": "Grants rejected by reason (tau-storage)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(tau_git_grants_rejected_total{app=~\"$storage_app\",service_name=\"tau-storage\"}[5m]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 51 },
+      "id": 18
+    },
+    {
+      "title": "Receipts by outcome",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(tau_git_receipts_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 51 },
+      "id": 19
+    },
+    {
+      "title": "Slow-body aborts by operation (tau-storage)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (tau_git_operation) (increase(tau_git_slow_body_aborts_total{app=~\"$storage_app\",service_name=\"tau-storage\"}[15m]))",
+          "legendFormat": "{{tau_git_operation}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 51 },
+      "id": 20
+    },
+    {
+      "title": "Git execution: admission, leases and disk (tau-storage, or tau-api in process)",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 59 },
+      "panels": [],
+      "id": 21
+    },
+    {
+      "title": "Admissions by outcome",
+      "type": "timeseries",
+      "description": "Anything but admitted is a refusal: owner_busy, disk_full, budget_exhausted, restarting, memory, owner_capped.",
+      "targets": [
+        {
+          "expr": "sum by (outcome) ((rate(tau_git_admissions_total{app=~\"$app\",service_name=~\"$service\"}[5m]) or rate(tau_git_admissions_total{app=~\"$storage_app\",service_name=\"tau-storage\"}[5m])))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 60 },
+      "id": 22
+    },
+    {
+      "title": "Active leases per Machine",
+      "type": "timeseries",
+      "description": "Until tau_git_rpcs_inflight exists (OB4), leases per Machine are the load and skew signal.",
+      "targets": [
+        {
+          "expr": "sum by (instance) ((tau_git_leases_active{app=~\"$app\",service_name=~\"$service\"} or tau_git_leases_active{app=~\"$storage_app\",service_name=\"tau-storage\"}))",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 60 },
+      "id": 23
+    },
+    {
+      "title": "Reserved vs free disk per Machine",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (instance) ((tau_git_lease_reserved_bytes{app=~\"$app\",service_name=~\"$service\"} or tau_git_lease_reserved_bytes{app=~\"$storage_app\",service_name=\"tau-storage\"}))",
+          "legendFormat": "{{instance}} reserved",
+          "refId": "A"
+        },
+        {
+          "expr": "min by (instance) ((tau_git_disk_free_bytes{app=~\"$app\",service_name=~\"$service\"} or tau_git_disk_free_bytes{app=~\"$storage_app\",service_name=\"tau-storage\"}))",
+          "legendFormat": "{{instance}} free",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 60 },
+      "id": 24
+    },
+    {
+      "title": "CPU busy per worker",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "1 - (sum by (instance) (rate(fly_instance_cpu{app=~\"$storage_app\",mode=\"idle\"}[5m])) / sum by (instance) (rate(fly_instance_cpu{app=~\"$storage_app\"}[5m])))",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 68 },
+      "id": 25
+    },
+    {
+      "title": "Memory available per worker",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "min by (instance) (fly_instance_memory_mem_available{app=~\"$storage_app\"})",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 68 },
+      "id": 26
+    },
+    {
+      "title": "Worker restarts (30m)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (instance) (resets(process_uptime{app=~\"$storage_app\",service_name=\"tau-storage\"}[30m]))",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 68 },
+      "id": 27
+    },
+    {
+      "title": "Pack cache and hydrate",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 76 },
+      "panels": [],
+      "id": 28
+    },
+    {
+      "title": "Cache lookups by result",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (result) (rate(tau_git_cache_lookups_total{app=~\"$storage_app\",service_name=\"tau-storage\"}[5m]))",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 77 },
+      "id": 29
+    },
+    {
+      "title": "Hydrate bytes by source",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (tau_git_hydrate_source) ((rate(tau_git_hydrate_bytes_sum{app=~\"$app\",service_name=~\"$service\"}[5m]) or rate(tau_git_hydrate_bytes_sum{app=~\"$storage_app\",service_name=\"tau-storage\"}[5m])))",
+          "legendFormat": "{{tau_git_hydrate_source}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "Bps" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 77 },
+      "id": 30
+    },
+    {
+      "title": "Lease phase p95 (hydrate, commit)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, tau_sync_lease_phase) ((rate(tau_sync_lease_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m]) or rate(tau_sync_lease_duration_bucket{app=~\"$storage_app\",service_name=\"tau-storage\"}[5m]))))",
+          "legendFormat": "{{tau_sync_lease_phase}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 77 },
+      "id": 31
+    },
+    {
+      "title": "Cache bytes vs budget per Machine",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (instance, state) (tau_git_cache_bytes{app=~\"$storage_app\",service_name=\"tau-storage\"})",
+          "legendFormat": "{{instance}} {{state}}",
+          "refId": "A"
+        },
+        {
+          "expr": "max by (instance) (tau_git_cache_budget_bytes{app=~\"$storage_app\",service_name=\"tau-storage\"})",
+          "legendFormat": "{{instance}} budget",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 85 },
+      "id": 32
+    },
+    {
+      "title": "Evictions",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(tau_git_cache_evictions_total{app=~\"$storage_app\",service_name=\"tau-storage\"}[5m]))",
+          "legendFormat": "entries/s",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(tau_git_cache_evicted_bytes_total{app=~\"$storage_app\",service_name=\"tau-storage\"}[5m]))",
+          "legendFormat": "bytes/s",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 85 },
+      "id": 33
+    },
+    {
+      "title": "Full-hydrate fallbacks by reason",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (reason) (increase(tau_git_cache_fallbacks_total{app=~\"$storage_app\",service_name=\"tau-storage\"}[15m]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 85 },
+      "id": 34
+    },
+    {
+      "title": "Commit protocol (manifest compare-and-swap)",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 93 },
+      "panels": [],
+      "id": 35
+    },
+    {
+      "title": "CAS attempts by outcome and kind",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (outcome, tau_git_commit_kind) ((rate(tau_git_commit_attempts_total{app=~\"$app\",service_name=~\"$service\"}[5m]) or rate(tau_git_commit_attempts_total{app=~\"$storage_app\",service_name=\"tau-storage\"}[5m])))",
+          "legendFormat": "{{outcome}} {{tau_git_commit_kind}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 94 },
+      "id": 36
+    },
+    {
+      "title": "CAS phase p50 / p95",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le, tau_git_commit_phase) ((rate(tau_git_commit_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[15m]) or rate(tau_git_commit_duration_bucket{app=~\"$storage_app\",service_name=\"tau-storage\"}[15m]))))",
+          "legendFormat": "{{tau_git_commit_phase}} p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, tau_git_commit_phase) ((rate(tau_git_commit_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[15m]) or rate(tau_git_commit_duration_bucket{app=~\"$storage_app\",service_name=\"tau-storage\"}[15m]))))",
+          "legendFormat": "{{tau_git_commit_phase}} p95",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 94 },
+      "id": 37
+    },
+    {
+      "title": "Measured per-project ceiling",
+      "type": "timeseries",
+      "description": "DB2's definition. S2-1 fires when the hottest project passes half of it.",
+      "targets": [
+        {
+          "expr": "1 / (histogram_quantile(0.5, sum by (le) (rate(tau_git_commit_duration_bucket{app=~\"$app\",service_name=~\"$service\",tau_git_commit_phase=\"manifest_read\"}[1h]) or rate(tau_git_commit_duration_bucket{app=~\"$storage_app\",service_name=\"tau-storage\",tau_git_commit_phase=\"manifest_read\"}[1h]))) + histogram_quantile(0.5, sum by (le) (rate(tau_git_commit_duration_bucket{app=~\"$app\",service_name=~\"$service\",tau_git_commit_phase=\"manifest_write\"}[1h]) or rate(tau_git_commit_duration_bucket{app=~\"$storage_app\",service_name=\"tau-storage\",tau_git_commit_phase=\"manifest_write\"}[1h]))))",
+          "legendFormat": "commits/s ceiling (1 / (p50 read + p50 write))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 94 },
+      "id": 38
+    },
+    {
+      "title": "Hottest projects: commit rate by rank",
+      "type": "timeseries",
+      "description": "Top ten by rank only; the git.hot_projects log line names the projects.",
+      "targets": [
+        {
+          "expr": "max by (rank) ((tau_git_hot_project_commit_rate{app=~\"$app\",service_name=~\"$service\"} or tau_git_hot_project_commit_rate{app=~\"$storage_app\",service_name=\"tau-storage\"}))",
+          "legendFormat": "rank {{rank}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 102 },
+      "id": 39
+    },
+    {
+      "title": "Hottest projects: writers by rank",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "max by (rank) ((tau_git_hot_project_writers{app=~\"$app\",service_name=~\"$service\"} or tau_git_hot_project_writers{app=~\"$storage_app\",service_name=\"tau-storage\"}))",
+          "legendFormat": "rank {{rank}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 102 },
+      "id": 40
+    },
+    {
+      "title": "Repository size at commit p50 / p95",
+      "type": "timeseries",
+      "description": "Weighted by write heat; the whole-fleet distribution is in Usage by plan.",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le) ((rate(tau_git_repository_size_bucket{app=~\"$app\",service_name=~\"$service\"}[1h]) or rate(tau_git_repository_size_bucket{app=~\"$storage_app\",service_name=\"tau-storage\"}[1h]))))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) ((rate(tau_git_repository_size_bucket{app=~\"$app\",service_name=~\"$service\"}[1h]) or rate(tau_git_repository_size_bucket{app=~\"$storage_app\",service_name=\"tau-storage\"}[1h]))))",
+          "legendFormat": "p95",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 110 },
+      "id": 42
+    },
+    {
+      "title": "Legacy manifest conflicts and sweeps",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum((increase(tau_sync_manifest_conflicts_total{app=~\"$app\",service_name=~\"$service\"}[15m]) or increase(tau_sync_manifest_conflicts_total{app=~\"$storage_app\",service_name=\"tau-storage\"}[15m])))",
+          "legendFormat": "manifest conflicts (superseded by lost_race)",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (outcome) ((increase(tau_sync_sweeps_total{app=~\"$app\",service_name=~\"$service\"}[15m]) or increase(tau_sync_sweeps_total{app=~\"$storage_app\",service_name=\"tau-storage\"}[15m])))",
+          "legendFormat": "sweeps {{outcome}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 110 },
+      "id": 43
+    },
+    {
+      "title": "Object store (R2 in the cloud, MinIO locally)",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 118 },
+      "panels": [],
+      "id": 44
+    },
+    {
+      "title": "Requests by operation and app",
+      "type": "timeseries",
+      "description": "Readiness probes (HeadBucket, public HeadObject) dominate; tau_storage_purpose arrives with OB2.",
+      "targets": [
+        {
+          "expr": "sum by (service_name, tau_storage_operation) (rate(tau_storage_operation_duration_count{app=~\"$app\",service_name=~\"$service\"}[5m]) or rate(tau_storage_operation_duration_count{app=~\"$storage_app\",service_name=\"tau-storage\"}[5m]) or rate(tau_storage_operation_duration_count{app=~\"$mirror_app\",service_name=\"tau-mirror\"}[5m]))",
+          "legendFormat": "{{service_name}} {{tau_storage_operation}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 119 },
+      "id": 45
+    },
+    {
+      "title": "p95 by operation",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, tau_storage_operation) (rate(tau_storage_operation_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m]) or rate(tau_storage_operation_duration_bucket{app=~\"$storage_app\",service_name=\"tau-storage\"}[5m]) or rate(tau_storage_operation_duration_bucket{app=~\"$mirror_app\",service_name=\"tau-mirror\"}[5m])))",
+          "legendFormat": "{{tau_storage_operation}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 119 },
+      "id": 46
+    },
+    {
+      "title": "Errors by operation and type",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (service_name, tau_storage_operation, error_type) (rate(tau_storage_operation_duration_count{app=~\"$app\",service_name=~\"$service\",outcome=\"error\"}[5m]) or rate(tau_storage_operation_duration_count{app=~\"$storage_app\",service_name=\"tau-storage\",outcome=\"error\"}[5m]) or rate(tau_storage_operation_duration_count{app=~\"$mirror_app\",service_name=\"tau-mirror\",outcome=\"error\"}[5m]))",
+          "legendFormat": "{{service_name}} {{tau_storage_operation}} {{error_type}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 119 },
+      "id": 47
+    },
+    {
+      "title": "Requests by bucket tier",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (tau_storage_tier) (rate(tau_storage_operation_duration_count{app=~\"$app\",service_name=~\"$service\"}[5m]) or rate(tau_storage_operation_duration_count{app=~\"$storage_app\",service_name=\"tau-storage\"}[5m]) or rate(tau_storage_operation_duration_count{app=~\"$mirror_app\",service_name=\"tau-mirror\"}[5m]))",
+          "legendFormat": "{{tau_storage_tier}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 127 },
+      "id": 48
+    },
+    {
+      "title": "Throughput by direction and app",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (service_name, direction) (rate(tau_storage_transferred_bytes_total{app=~\"$app\",service_name=~\"$service\"}[5m]) or rate(tau_storage_transferred_bytes_total{app=~\"$storage_app\",service_name=\"tau-storage\"}[5m]) or rate(tau_storage_transferred_bytes_total{app=~\"$mirror_app\",service_name=\"tau-mirror\"}[5m]))",
+          "legendFormat": "{{service_name}} {{direction}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "Bps" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 127 },
+      "id": 49
+    },
+    {
+      "title": "Bucket requests last hour (Cloudflare analytics)",
+      "type": "timeseries",
+      "description": "Includes presigned traffic the API never sees (OB3).",
+      "targets": [
+        {
+          "expr": "sum by (tau_r2_bucket, tau_r2_class) (max by (tau_r2_bucket, tau_r2_class, tau_r2_action, tau_r2_status, tau_r2_window) (tau_r2_requests{app=~\"$app\",service_name=~\"$service\",tau_r2_window=\"hour\"}))",
+          "legendFormat": "{{tau_r2_bucket}} {{tau_r2_class}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 127 },
+      "id": 50
+    },
+    {
+      "title": "Stored bytes and objects per bucket",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "max by (tau_r2_bucket) (tau_r2_stored_bytes{app=~\"$app\",service_name=~\"$service\"})",
+          "legendFormat": "{{tau_r2_bucket}} bytes",
+          "refId": "A"
+        },
+        {
+          "expr": "max by (tau_r2_bucket) (tau_r2_objects{app=~\"$app\",service_name=~\"$service\"})",
+          "legendFormat": "{{tau_r2_bucket}} objects",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 135 },
+      "id": 51
+    },
+    {
+      "title": "Bucket bandwidth last hour",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (tau_r2_bucket, direction) (max by (tau_r2_bucket, direction, tau_r2_window) (tau_r2_bandwidth_bytes{app=~\"$app\",service_name=~\"$service\",tau_r2_window=\"hour\"}))",
+          "legendFormat": "{{tau_r2_bucket}} {{direction}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 135 },
+      "id": 52
+    },
+    {
+      "title": "LFS batch and verify by route",
+      "type": "timeseries",
+      "description": "LFS has no tau_lfs_* instrument yet; the HTTP routes carry it.",
+      "targets": [
+        {
+          "expr": "sum by (http_route) (rate(http_server_request_duration_count{app=~\"$app\",service_name=~\"$service\",http_route=~\".*lfs.*\"}[5m]))",
+          "legendFormat": "{{http_route}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 135 },
+      "id": 53
+    },
+    {
+      "title": "Route table and freeze",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 143 },
+      "panels": [],
+      "id": 54
+    },
+    {
+      "title": "Freezes holding and oldest freeze",
+      "type": "timeseries",
+      "description": "A migration freeze is a 20 s lease; warns past 60 s (storage-freeze-stuck).",
+      "targets": [
+        {
+          "expr": "max by (tau_git_route_scope) (tau_git_route_frozen{app=~\"$app\",service_name=~\"$service\"})",
+          "legendFormat": "frozen {{tau_git_route_scope}}",
+          "refId": "A"
+        },
+        {
+          "expr": "max by (tau_git_route_scope) (tau_git_route_frozen_oldest{app=~\"$app\",service_name=~\"$service\"})",
+          "legendFormat": "oldest (s) {{tau_git_route_scope}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 144 },
+      "id": 55
+    },
+    {
+      "title": "Freeze holds and hold p95",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(tau_git_route_holds_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
+          "legendFormat": "holds {{outcome}} /s",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(tau_git_route_hold_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[15m])))",
+          "legendFormat": "hold p95 (s)",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 144 },
+      "id": 56
+    },
+    {
+      "title": "Route lookup p95 by source",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, tau_git_route_source) (rate(tau_git_route_lookup_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])))",
+          "legendFormat": "{{tau_git_route_source}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 144 },
+      "id": 57
+    },
+    {
+      "title": "B2 second copy (W13; lag objective B5)",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 152 },
+      "panels": [],
+      "id": 58
+    },
+    {
+      "title": "Copy lag vs B5 lines",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "max(tau_mirror_copy_lag_seconds{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"})",
+          "legendFormat": "lag",
+          "refId": "A"
+        },
+        { "expr": "vector(900)", "legendFormat": "warn 15 min", "refId": "B" },
+        { "expr": "vector(3600)", "legendFormat": "page 60 min", "refId": "C" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 153 },
+      "id": 59
+    },
+    {
+      "title": "Lag in generations",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "max(tau_mirror_copy_lag_generations{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"})",
+          "legendFormat": "generations behind",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 153 },
+      "id": 60
+    },
+    {
+      "title": "SLO-6 copy freshness (30d)",
+      "type": "stat",
+      "description": "Share of 5-minute samples with lag at or under 15 min. Objective 99.9% (W13 B5).",
+      "targets": [
+        {
+          "expr": "avg_over_time((max(tau_mirror_copy_lag_seconds{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"}) <= bool 900)[30d:5m]) * 100",
+          "refId": "A",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit",
+          "unit": "percent",
+          "decimals": 3,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 0.01 },
-              { "color": "red", "value": 0.05 }
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 99.5 },
+              { "color": "green", "value": 99.9 }
             ]
           }
         }
       },
-      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 23 },
-      "id": 12
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 153 },
+      "id": 61
     },
     {
-      "title": "Uploaded (1h)",
+      "title": "Backlog by phase and LFS backlog",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "max by (phase) (tau_mirror_backlog_repositories{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"})",
+          "legendFormat": "repositories {{phase}}",
+          "refId": "A"
+        },
+        {
+          "expr": "max(tau_mirror_lfs_backlog_objects{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"})",
+          "legendFormat": "LFS objects",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 161 },
+      "id": 62
+    },
+    {
+      "title": "Copy delay p50 / p95 / p99",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(tau_mirror_copy_delay_seconds_bucket{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"}[15m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(tau_mirror_copy_delay_seconds_bucket{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"}[15m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(tau_mirror_copy_delay_seconds_bucket{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"}[15m])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 161 },
+      "id": 63
+    },
+    {
+      "title": "Rounds by outcome",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(tau_mirror_rounds_total{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"}[5m]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 161 },
+      "id": 64
+    },
+    {
+      "title": "Objects copied by kind",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (kind) (rate(tau_mirror_objects_copied_total{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"}[5m]))",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 169 },
+      "id": 65
+    },
+    {
+      "title": "Bytes copied by kind",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (kind) (rate(tau_mirror_bytes_copied_total{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"}[5m]))",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "Bps" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 169 },
+      "id": 66
+    },
+    {
+      "title": "Copy failures by stage and reason",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (stage, reason) (increase(tau_mirror_copy_failures_total{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"}[15m]))",
+          "legendFormat": "{{stage}} {{reason}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 169 },
+      "id": 67
+    },
+    {
+      "title": "Retention extensions by outcome",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (outcome) (increase(tau_mirror_retention_extensions_total{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"}[1h]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 177 },
+      "id": 68
+    },
+    {
+      "title": "Lock headroom and furthest lock (days)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "min(tau_mirror_retention_min_remaining_seconds{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"}) / 86400",
+          "legendFormat": "min remaining (live)",
+          "refId": "A"
+        },
+        {
+          "expr": "max(tau_mirror_retention_max_ahead_seconds{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"}) / 86400",
+          "legendFormat": "furthest ahead",
+          "refId": "B"
+        },
+        { "expr": "vector(10)", "legendFormat": "floor 10 d", "refId": "C" },
+        { "expr": "vector(35)", "legendFormat": "overlong 35 d", "refId": "D" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "d" } },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 177 },
+      "id": 69
+    },
+    {
+      "title": "B2 destination up",
       "type": "stat",
       "targets": [
         {
-          "expr": "sum(increase(tau_storage_transferred_bytes_total{app=~\"$app\",service_name=~\"$service\",direction=\"upload\"}[1h])) or vector(0)"
+          "expr": "min(tau_mirror_destination_up{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"})",
+          "refId": "A"
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "bytes" }
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
       },
-      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 23 },
-      "id": 13
+      "gridPos": { "h": 7, "w": 4, "x": 16, "y": 177 },
+      "id": 70
     },
     {
-      "title": "Downloaded (1h)",
+      "title": "Hidden versions (must be 0)",
       "type": "stat",
       "targets": [
         {
-          "expr": "sum(increase(tau_storage_transferred_bytes_total{app=~\"$app\",service_name=~\"$service\",direction=\"download\"}[1h])) or vector(0)"
+          "expr": "max(tau_mirror_reconcile_hidden_versions{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"})",
+          "refId": "A"
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "bytes" }
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
       },
-      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 23 },
-      "id": 14
+      "gridPos": { "h": 7, "w": 4, "x": 20, "y": 177 },
+      "id": 71
     },
     {
-      "title": "Requests by Operation",
+      "title": "Reconcile: hours since last success by scope",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (tau_storage_operation) (rate(tau_storage_operation_duration_count{app=~\"$app\",service_name=~\"$service\"}[5m]))",
-          "legendFormat": "{{tau_storage_operation}}"
-        }
+          "expr": "(time() - max by (scope) (tau_mirror_reconcile_last_success_timestamp_seconds{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"})) / 3600",
+          "legendFormat": "{{scope}}",
+          "refId": "A"
+        },
+        { "expr": "vector(36)", "legendFormat": "stale line (active)", "refId": "B" }
       ],
-      "fieldConfig": {
-        "defaults": { "unit": "reqps" }
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
-      "id": 15
+      "fieldConfig": { "defaults": { "unit": "h" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 184 },
+      "id": 72
     },
     {
-      "title": "p95 by Operation",
+      "title": "Reconcile missing objects by kind",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, tau_storage_operation) (rate(tau_storage_operation_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])))",
-          "legendFormat": "{{tau_storage_operation}}"
+          "expr": "max by (kind) (tau_mirror_reconcile_missing_objects{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"})",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
         }
       ],
-      "fieldConfig": {
-        "defaults": { "unit": "s" }
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
-      "id": 16
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 184 },
+      "id": 73
     },
     {
-      "title": "Errors by Operation and Type",
+      "title": "B2 stored bytes and object versions",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (tau_storage_operation, error_type) (rate(tau_storage_operation_duration_count{app=~\"$app\",service_name=~\"$service\",outcome=\"error\"}[5m]))",
-          "legendFormat": "{{tau_storage_operation}} {{error_type}}"
+          "expr": "max(tau_mirror_destination_stored_bytes{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"})",
+          "legendFormat": "stored bytes",
+          "refId": "A"
+        },
+        {
+          "expr": "max(tau_mirror_destination_object_versions{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"})",
+          "legendFormat": "object versions",
+          "refId": "B"
         }
       ],
-      "fieldConfig": {
-        "defaults": { "unit": "reqps" }
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
-      "id": 17
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 184 },
+      "id": 74
     },
     {
-      "title": "Requests by Bucket Tier",
+      "title": "Drills by outcome and failed checks",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (tau_storage_tier) (rate(tau_storage_operation_duration_count{app=~\"$app\",service_name=~\"$service\"}[5m]))",
-          "legendFormat": "{{tau_storage_tier}}"
+          "expr": "sum by (environment, outcome) (increase(tau_mirror_drill_runs_total{app=~\"$mirror_app\",service_name=\"tau-mirror\"}[1d]))",
+          "legendFormat": "runs {{environment}} {{outcome}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (check) (increase(tau_mirror_drill_check_failures_total{app=~\"$mirror_app\",service_name=\"tau-mirror\"}[1d]))",
+          "legendFormat": "failed {{check}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 192 },
+      "id": 75
+    },
+    {
+      "title": "Last passing drill (age)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "time() - max(max_over_time(tau_mirror_drill_last_success_timestamp_seconds{app=~\"$mirror_app\",service_name=\"tau-mirror\"}[9d]))",
+          "refId": "A"
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "reqps" }
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 604800 },
+              { "color": "red", "value": 691200 }
+            ]
+          }
+        }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
-      "id": 18
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 192 },
+      "id": 76
     },
     {
-      "title": "Throughput by Direction",
+      "title": "Drill duration p95 and bytes verified",
+      "type": "timeseries",
+      "description": "The measured drill time stands in for the RTO until the operator sets one.",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(tau_mirror_drill_duration_seconds_bucket{app=~\"$mirror_app\",service_name=\"tau-mirror\"}[8d])))",
+          "legendFormat": "duration p95 (s)",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(tau_mirror_drill_verified_bytes_total{app=~\"$mirror_app\",service_name=\"tau-mirror\"}[8d]))",
+          "legendFormat": "bytes verified (8 d)",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 192 },
+      "id": 77
+    },
+    {
+      "title": "Capacity and autoscaling",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 200 },
+      "panels": [],
+      "id": 78
+    },
+    {
+      "title": "Workers by state",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "sum(fly_instance_up{app=~\"$storage_app\"})", "legendFormat": "up", "refId": "A" },
+        { "expr": "count(fly_instance_up{app=~\"$storage_app\"})", "legendFormat": "reporting", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 201 },
+      "id": 79
+    },
+    {
+      "title": "Fly proxy soft / hard limit hits",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (direction) (rate(tau_storage_transferred_bytes_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
-          "legendFormat": "{{direction}}"
+          "expr": "sum(increase(fly_app_soft_limit_reached_count{app=~\"$storage_app\"}[5m]))",
+          "legendFormat": "soft",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(fly_app_hard_limit_reached_count{app=~\"$storage_app\"}[5m]))",
+          "legendFormat": "hard",
+          "refId": "B"
         }
       ],
-      "fieldConfig": {
-        "defaults": { "unit": "Bps" }
-      },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 44 },
-      "id": 19
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 201 },
+      "id": 80
     },
     {
-      "title": "Sync & Storage Warnings and Errors",
+      "title": "Postgres connections vs budget",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (tau_db_application) (max by (tau_db_application, state) (tau_db_connections{app=~\"$app\",service_name=~\"$service\"}))",
+          "legendFormat": "{{tau_db_application}}",
+          "refId": "A"
+        },
+        {
+          "expr": "max(tau_db_connection_budget{app=~\"$app\",service_name=~\"$service\"})",
+          "legendFormat": "budget",
+          "refId": "B"
+        },
+        {
+          "expr": "max(tau_db_connection_budget{app=~\"$app\",service_name=~\"$service\"}) * 0.6",
+          "legendFormat": "stage-3 trigger (60%)",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 201 },
+      "id": 81
+    },
+    {
+      "title": "Accounting tasks: seconds since last success",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "time() - max by (tau_storage_accounting_task) (tau_storage_accounting_last_success{app=~\"$app\",service_name=~\"$service\"})",
+          "legendFormat": "{{tau_storage_accounting_task}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 209 },
+      "id": 82
+    },
+    {
+      "title": "Accounting passes by task and outcome",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (tau_storage_accounting_task, outcome) (increase(tau_storage_accounting_passes_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
+          "legendFormat": "{{tau_storage_accounting_task}} {{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 209 },
+      "id": 83
+    },
+    {
+      "title": "Cost (estimates at list price)",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 217 },
+      "panels": [],
+      "id": 84
+    },
+    {
+      "title": "R2 cost by component, month to date",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(max by (tau_r2_bucket, tau_r2_class, tau_r2_action, tau_r2_status, tau_r2_window) (tau_r2_requests{app=~\"$app\",service_name=~\"$service\",tau_r2_window=\"month\",tau_r2_class=\"A\"})) * 4.5e-06",
+          "legendFormat": "Class A",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(max by (tau_r2_bucket, tau_r2_class, tau_r2_action, tau_r2_status, tau_r2_window) (tau_r2_requests{app=~\"$app\",service_name=~\"$service\",tau_r2_window=\"month\",tau_r2_class=\"B\"})) * 3.6e-07",
+          "legendFormat": "Class B",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(max by (tau_r2_bucket) (tau_r2_stored_bytes{app=~\"$app\",service_name=~\"$service\"})) / 1e9 * 0.015",
+          "legendFormat": "storage (one month)",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 218 },
+      "id": 85
+    },
+    {
+      "title": "Projected monthly Class A from the last hour",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (tau_r2_bucket) (max by (tau_r2_bucket, tau_r2_class, tau_r2_action, tau_r2_status, tau_r2_window) (tau_r2_requests{app=~\"$app\",service_name=~\"$service\",tau_r2_window=\"hour\",tau_r2_class=\"A\"})) * 720 * 4.5e-06",
+          "legendFormat": "{{tau_r2_bucket}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 218 },
+      "id": 86
+    },
+    {
+      "title": "B2 storage cost (estimate)",
+      "type": "timeseries",
+      "description": "US$6.95 per TB-month, every locked version included.",
+      "targets": [
+        {
+          "expr": "max(tau_mirror_destination_stored_bytes{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"}) / 1e12 * 6.95",
+          "legendFormat": "per 30 days",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 218 },
+      "id": 87
+    },
+    {
+      "title": "Usage by plan (accounting scheduler, OB3)",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 226 },
+      "panels": [],
+      "id": 88
+    },
+    {
+      "title": "Stored bytes by class",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (tau_storage_class) (max by (tau_storage_class, tau_plan) (tau_storage_usage_bytes{app=~\"$app\",service_name=~\"$service\"}))",
+          "legendFormat": "{{tau_storage_class}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 227 },
+      "id": 89
+    },
+    {
+      "title": "Stored bytes by plan",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (tau_plan) (max by (tau_storage_class, tau_plan) (tau_storage_usage_bytes{app=~\"$app\",service_name=~\"$service\"}))",
+          "legendFormat": "{{tau_plan}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 227 },
+      "id": 90
+    },
+    {
+      "title": "Repositories by plan",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "max by (tau_plan) (tau_storage_usage_repositories{app=~\"$app\",service_name=~\"$service\"})",
+          "legendFormat": "{{tau_plan}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 227 },
+      "id": 91
+    },
+    {
+      "title": "Repository size distribution",
+      "type": "barchart",
+      "description": "Cumulative repositories at or under each size, the whole fleet (W9 Q9, W10 Q1).",
+      "targets": [
+        {
+          "expr": "max by (tau_size_le) (tau_git_repository_size_distribution{app=~\"$app\",service_name=~\"$service\"})",
+          "legendFormat": "{{tau_size_le}}",
+          "instant": true,
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 235 },
+      "id": 92
+    },
+    {
+      "title": "Owners by quota band",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (band) (max by (band, tau_plan) (tau_storage_quota_owners{app=~\"$app\",service_name=~\"$service\"}))",
+          "legendFormat": "{{band}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 235 },
+      "id": 93
+    },
+    {
+      "title": "Repositories near the 1 GiB ceiling",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "max by (threshold) (tau_git_repository_ceiling_proximity{app=~\"$app\",service_name=~\"$service\"})",
+          "legendFormat": ">= {{threshold}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 235 },
+      "id": 94
+    },
+    {
+      "title": "Logs",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 243 },
+      "panels": [],
+      "id": 95
+    },
+    {
+      "title": "Sync and storage warnings and errors (tau-api)",
       "type": "logs",
       "datasource": { "type": "loki", "uid": "loki" },
       "targets": [
         {
-          "expr": "{service_name=~\"$service\"} |~ \"(?i)(git|lfs|storage|s3|manifest|lease)\" | detected_level=~\"error|fatal|critical|warn\"",
+          "expr": "{service_name=~\"$service\"} |~ \"(?i)(git|lfs|storage|s3|manifest|lease|mirror|freeze)\" | detected_level=~\"error|fatal|critical|warn\"",
           "refId": "A"
         }
       ],
       "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 52 },
-      "id": 20
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 244 },
+      "id": 96
+    },
+    {
+      "title": "Hot projects (top-N by rank)",
+      "type": "logs",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{ "expr": "{service_name=~\"$service\"} |= \"git.hot_projects\"", "refId": "A" }],
+      "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 244 },
+      "id": 97
     }
   ]
 }

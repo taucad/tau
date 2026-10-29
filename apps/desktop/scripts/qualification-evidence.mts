@@ -67,8 +67,155 @@ export const qualificationRendererObservationSchema = z.strictObject({
     )
     .min(1),
   saveObservedAt: z.number().positive(),
+  softwareRenderer: z.string().min(1).optional(),
 });
 export type QualificationRendererObservation = z.infer<typeof qualificationRendererObservationSchema>;
+/** Raw Windows observations: null means unavailable, never an enabled default. */
+export const windowsConsumerHostSchema = z.strictObject({
+  runner: z.string().min(1),
+  identity: digest,
+  osVersion: z.string(),
+  productType: z.number().int(),
+  build: z.number().int(),
+  nativeMachine: z.number().int(),
+  processMachine: z.number().int(),
+  elevated: z.number().int(),
+  elevationType: z.number().int(),
+  administrator: z.boolean(),
+  uacEnabled: z.number().int().nullable(),
+  defender: z
+    .strictObject({
+      service: z.boolean().nullable(),
+      antivirus: z.boolean().nullable(),
+      realTime: z.boolean().nullable(),
+      mode: z.string().nullable(),
+    })
+    .nullable(),
+  existing: z.array(z.string()),
+});
+export type WindowsConsumerHost = z.infer<typeof windowsConsumerHostSchema>;
+const windowsManualBindingSchema = z.strictObject({
+  nonce: z.uuid(),
+  hostSha256: digest,
+  stage: z.enum(['initial', 'reinstall']),
+  artifactSha256: digest,
+  requestedAt: z.number().positive(),
+});
+export const windowsConsumerManualSchema = windowsManualBindingSchema.extend({
+  observedAt: z.number().positive(),
+  observer: z.string().min(1),
+  launchedFrom: z.enum(['explorer', 'browser-downloads']),
+  defaultDestination: z.literal(true),
+  freshCapturesForRequest: z.literal(true),
+  smartScreen: z.strictObject({
+    checkAppsAndFiles: z.enum(['enabled', 'disabled', 'unknown']),
+    result: z.enum(['not-shown', 'warning-approved', 'blocked', 'unknown']),
+    publisher: z.string().nullable(),
+  }),
+  uac: z.enum(['not-shown', 'credentials-requested', 'unknown']),
+  installer: z.enum(['completed', 'refused', 'unknown']),
+  screenshots: z
+    .array(
+      z.strictObject({
+        kind: z.enum(['security-settings', 'installer-result', 'smart-screen']),
+        name: z.string().regex(/^[a-zA-Z0-9_-]+\.(?:png|jpg)$/u),
+        capturedAt: z.number().positive(),
+        sha256: digest,
+        size: z.number().int().positive(),
+      }),
+    )
+    .min(2),
+});
+export type WindowsConsumerManual = z.infer<typeof windowsConsumerManualSchema>;
+export const windowsConsumerInstallSchema = z.strictObject({
+  stage: z.enum(['initial', 'reinstall']),
+  artifact: z.strictObject({ name: z.string().min(1), sha256: digest, size: z.number().int().positive() }),
+  download: z.strictObject({
+    browser: z.string().min(1),
+    url: z.url(),
+    sha256: digest,
+    size: z.number().int().positive(),
+    zoneIdentifier: z.string(),
+  }),
+  installedPath: z.string().min(1),
+  requestedAt: z.number().positive(),
+  completedAt: z.number().positive(),
+  manual: windowsConsumerManualSchema,
+});
+export type WindowsConsumerInstall = z.infer<typeof windowsConsumerInstallSchema>;
+export type WindowsConsumerAcceptance = {
+  kind: 'vm';
+  host: WindowsConsumerHost;
+  installs: readonly WindowsConsumerInstall[];
+};
+
+/** Require one unambiguous Internet-zone marker; never manufacture or repair MOTW. */
+export const hasWindowsInternetZone = (value: string): boolean =>
+  /^\[ZoneTransfer\]\r?$/mu.test(value) &&
+  [...value.matchAll(/^ZoneId=(.*)\r?$/gmu)].map((match) => match[1]!.trim()).join(',') === '3';
+
+/** Require native Windows 11 and a non-administrator token, not merely an unelevated administrator. */
+export const assertWindowsConsumerHost = (input: unknown, requireClean = true): WindowsConsumerHost => {
+  const host = windowsConsumerHostSchema.parse(input);
+  if (
+    host.productType !== 1 ||
+    host.build < 22_000 ||
+    !/^Microsoft Windows 11\b/u.test(host.osVersion) ||
+    host.nativeMachine !== 0x86_64 ||
+    host.processMachine !== 0 ||
+    host.elevated !== 0 ||
+    host.elevationType !== 1 ||
+    host.administrator ||
+    host.uacEnabled !== 1 ||
+    host.defender?.service !== true ||
+    host.defender.antivirus !== true ||
+    host.defender.realTime !== true ||
+    host.defender.mode !== 'Normal' ||
+    (requireClean && host.existing.length > 0)
+  ) {
+    throw new Error('Qualification undecided: Windows consumer host is not native, standard-user, protected and clean');
+  }
+  return host;
+};
+/** Bind human observations to the exact machine/user snapshot without retaining their identifying source strings. */
+export const windowsConsumerHostDigest = (input: unknown): string =>
+  createHash('sha256')
+    .update(JSON.stringify(windowsConsumerHostSchema.parse(input)))
+    .digest('hex');
+/** Validate testimony as testimony; file hashes bind screenshots but cannot prove what the human saw. */
+export const assertWindowsConsumerManual = (
+  input: unknown,
+  binding: z.infer<typeof windowsManualBindingSchema>,
+  publisher: string,
+): WindowsConsumerManual => {
+  const manual = windowsConsumerManualSchema.parse(input);
+  const expected = windowsManualBindingSchema.parse(binding);
+  if (
+    Object.entries(expected).some(([key, value]) => Reflect.get(manual, key) !== value) ||
+    manual.observedAt < expected.requestedAt ||
+    manual.screenshots.some(
+      (entry) => entry.capturedAt < expected.requestedAt || entry.capturedAt > manual.observedAt,
+    ) ||
+    manual.smartScreen.checkAppsAndFiles !== 'enabled' ||
+    !['not-shown', 'warning-approved'].includes(manual.smartScreen.result) ||
+    manual.uac !== 'not-shown' ||
+    manual.installer !== 'completed' ||
+    new Set(manual.screenshots.map((entry) => entry.name)).size !== manual.screenshots.length ||
+    !['security-settings', 'installer-result'].every((kind) =>
+      manual.screenshots.some((entry) => entry.kind === kind),
+    ) ||
+    (manual.smartScreen.result === 'warning-approved' &&
+      (manual.smartScreen.publisher !== publisher ||
+        !manual.screenshots.some((entry) => entry.kind === 'smart-screen'))) ||
+    (manual.smartScreen.result === 'not-shown' && manual.smartScreen.publisher !== null)
+  ) {
+    throw new Error(
+      'Qualification undecided: manual Windows installation observations are missing, refused or mismatched',
+    );
+  }
+  return manual;
+};
+
 /** Raw host observations taken before the clean-host run touches the machine. */
 export const macosCleanHostSchema = z.strictObject({
   runner: z.string().min(1),
@@ -134,7 +281,7 @@ export type QualificationStageEvidence = {
   security: QualificationSecurity;
 };
 export type QualificationEvidence = {
-  mode: 'release' | 'fixture';
+  mode: 'release' | 'fixture' | 'software-ci';
   route: DesktopAcceptanceRoute;
   target: 'darwin-arm64' | 'darwin-x64' | 'win32-x64' | 'linux-x64';
   stages: readonly [QualificationStageEvidence, QualificationStageEvidence, QualificationStageEvidence];
@@ -171,6 +318,7 @@ export type QualificationEvidence = {
   trustIdentity: string;
   /** Present only for a clean-host run; its receipt is `kind: 'vm'` and carries the observed host facts. */
   acceptance?: QualificationCleanHostAcceptance;
+  windowsAcceptance?: WindowsConsumerAcceptance;
 };
 const requireEvidence = (condition: boolean, message: string): void => {
   if (!condition) {
@@ -287,6 +435,85 @@ const cleanHostReceiptFacts = (
     launch: 'open',
   };
 };
+/** Re-derive the Windows row from native readings and explicitly attributed manual observations. */
+const windowsConsumerReceiptFacts = (
+  input: QualificationEvidence,
+  acceptance: WindowsConsumerAcceptance,
+): NonNullable<DesktopAcceptanceReceipt['environment']['host']> => {
+  requireEvidence(
+    input.route === 'windows-nsis' && input.target === 'win32-x64' && input.suite === 'clean-host-route-a-b-c-v1',
+    'Windows consumer route/suite differs',
+  );
+  const host = assertWindowsConsumerHost(acceptance.host);
+  const installs = acceptance.installs.map((entry) => windowsConsumerInstallSchema.parse(entry));
+  requireEvidence(
+    installs.length === 2 && installs[0]?.stage === 'initial' && installs[1]?.stage === 'reinstall',
+    'Windows initial and reinstall observations required',
+  );
+  for (const [install, stage] of [
+    [installs[0]!, input.stages[0]],
+    [installs[1]!, input.stages[2]],
+  ] as const) {
+    const artifact = stage.candidate.artifacts.find(
+      (entry) => entry.kind === 'windows-nsis' && entry.target === 'win32-x64',
+    );
+    requireEvidence(
+      install.artifact.name === artifact?.name &&
+        install.artifact.sha256 === artifact.sha256 &&
+        install.artifact.size === artifact.size &&
+        install.download.sha256 === artifact.sha256 &&
+        install.download.size === artifact.size &&
+        new URL(install.download.url).origin === stage.probe.mirrorOrigin &&
+        new URL(install.download.url).pathname ===
+          `/releases/${encodeURIComponent(stage.candidate.tag)}/${artifact.name}` &&
+        hasWindowsInternetZone(install.download.zoneIdentifier) &&
+        install.installedPath === stage.installed.installationPath,
+      'Windows browser artifact, Internet MOTW or installed location differs',
+    );
+    const manual = assertWindowsConsumerManual(
+      install.manual,
+      {
+        nonce: stage.probe.nonce,
+        hostSha256: windowsConsumerHostDigest(host),
+        stage: install.stage,
+        artifactSha256: install.artifact.sha256,
+        requestedAt: install.requestedAt,
+      },
+      input.trustIdentity,
+    );
+    requireEvidence(manual.observedAt <= install.completedAt, 'manual observation is after installation capture');
+  }
+  for (const stage of input.stages) {
+    const measured = assertWindowsConsumerHost(
+      JSON.parse(stage.security.measurements['consumerHost'] ?? 'null'),
+      false,
+    );
+    requireEvidence(
+      measured.identity === host.identity && measured.runner === host.runner,
+      'Windows consumer host changed',
+    );
+  }
+  return {
+    platform: 'win32',
+    runner: host.runner,
+    nativeArch: 'x64',
+    osBuild: host.build,
+    account: 'standard-user',
+    uac: 'enabled',
+    defender: 'enabled',
+    download: 'browser-internet-zone',
+    reputationScope: 'qualification-mirror',
+    manualEvidence: installs.map((entry) => ({
+      stage: entry.stage,
+      nonce: entry.manual.nonce,
+      artifactSha256: entry.artifact.sha256,
+      hostSha256: entry.manual.hostSha256,
+      observedAt: entry.manual.observedAt,
+      smartScreen: z.enum(['not-shown', 'warning-approved']).parse(entry.manual.smartScreen.result),
+      screenshots: entry.manual.screenshots,
+    })),
+  };
+};
 const equalInstallation = (left: QualificationInstallation, right: QualificationInstallation): boolean =>
   left.route === right.route &&
   left.tag === right.tag &&
@@ -370,7 +597,10 @@ const checkSecurity = (stage: QualificationStageEvidence, target: QualificationE
     if (!process) {
       continue;
     }
-    requireEvidence(!/--no-sandbox|--disable-setuid-sandbox/u.test(process.commandLine), 'sandbox bypass command line');
+    requireEvidence(
+      !/--no-sandbox|--disable-setuid-sandbox|--disable-gpu-sandbox/u.test(process.commandLine),
+      'sandbox bypass command line',
+    );
     requireEvidence(
       !Object.values(process.measurements).some((value) => value.startsWith('unavailable:')),
       'security measurement unavailable',
@@ -456,8 +686,7 @@ const checkSecurity = (stage: QualificationStageEvidence, target: QualificationE
 };
 
 /** Called by the native runner after independently reading OS processes, installed bytes and retained project files. */
-export const collectQualificationReceipt = (input: QualificationEvidence): DesktopAcceptanceReceipt => {
-  requireEvidence(input.mode === 'release', 'fixture runs cannot qualify releases');
+const validateQualificationEvidence = (input: QualificationEvidence): DesktopAcceptanceReceipt => {
   const [a, b, c] = input.stages;
   const stages = input.stages.map((stage) => ({
     ...stage,
@@ -689,7 +918,12 @@ export const collectQualificationReceipt = (input: QualificationEvidence): Deskt
     (artifact) => artifact.target === input.target && kinds.includes(artifact.kind),
   );
   requireEvidence(baseline !== undefined, 'baseline artifact missing');
-  const host = input.acceptance ? cleanHostReceiptFacts(input, input.acceptance) : undefined;
+  requireEvidence(!(input.acceptance && input.windowsAcceptance), 'mixed consumer platforms');
+  const host = input.windowsAcceptance
+    ? windowsConsumerReceiptFacts(input, input.windowsAcceptance)
+    : input.acceptance
+      ? cleanHostReceiptFacts(input, input.acceptance)
+      : undefined;
   return parseDesktopAcceptanceReceipt(
     {
       schemaVersion: 1,
@@ -717,4 +951,39 @@ export const collectQualificationReceipt = (input: QualificationEvidence): Deskt
     },
     c.candidate,
   );
+};
+
+/** Release receipts require stock graphics; isolated software runs never produce acceptance receipts. */
+export const collectQualificationReceipt = (input: QualificationEvidence): DesktopAcceptanceReceipt => {
+  requireEvidence(input.mode === 'release', 'fixture runs and software runs cannot qualify releases');
+  requireEvidence(
+    input.stages.every(
+      (stage) =>
+        !stage.renderer.softwareRenderer &&
+        stage.security.processes.every(
+          (process) =>
+            !/--enable-unsafe-swiftshader|--ignore-gpu-blocklist|--use-angle=swiftshader|--use-gl=swiftshader/u.test(
+              process.commandLine,
+            ),
+        ),
+    ),
+    'software graphics cannot qualify stock GPU acceptance',
+  );
+  return validateQualificationEvidence(input);
+};
+
+/** Validate the same installed upgrade observations, retaining stock GPU acceptance as an open gate. */
+export const validateSoftwareCiEvidence = (input: QualificationEvidence): void => {
+  requireEvidence(
+    input.mode === 'software-ci' &&
+      input.target === 'linux-x64' &&
+      input.route.startsWith('linux-') &&
+      !input.acceptance &&
+      !input.windowsAcceptance &&
+      input.stages.every(
+        (stage) => stage.candidate.channel === 'staging' && /SwiftShader/iu.test(stage.renderer.softwareRenderer ?? ''),
+      ),
+    'isolated software CI requires Linux staging SwiftShader observations',
+  );
+  validateQualificationEvidence(input);
 };

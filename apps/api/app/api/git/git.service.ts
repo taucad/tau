@@ -60,7 +60,7 @@ import { writeLfsReachability } from '#api/git/lfs-reachability-marks.js';
 import { RepositoryRouteGuard } from '#api/git/routing/route-guard.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
-import { decodeManifest, isTombstoned } from '#api/git/store/manifest.js';
+import { decodeManifest, isTombstoned, onlyCompactedSince } from '#api/git/store/manifest.js';
 import type { Manifest } from '#api/git/store/manifest.js';
 import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
 import { materializePublishedTags } from '#api/publications/publication-materializer.js';
@@ -180,6 +180,16 @@ export type AffectedPublication = {
   readonly title: string;
   readonly visibility: string;
 };
+
+/**
+ * Whether `manifest` is `receipt`'s generation with only deferred compactions
+ * after it ({@link onlyCompactedSince}) and still holds every ref where the
+ * receipt says it moved it — so what the receipt derived from its generation
+ * is true of `manifest`.
+ */
+const compactedOver = (receipt: StorageReceipt, manifest: Manifest): boolean =>
+  onlyCompactedSince(manifest, receipt) &&
+  receipt.movedRefs.every((moved) => manifest.refs[moved.ref]?.oid === moved.after);
 
 /**
  * What the removal verb answered (D24): a live publication to show the owner
@@ -738,7 +748,10 @@ export class GitRepositoryService {
    * tau-storage withholds git's report-status until `commitLease` resolves
    * (D4, NI2), and this API relays it only once the receipt is applied, so a
    * client that reads `ok refs/heads/main` finds the generation, the
-   * announcement and the derived state already behind it, as before.
+   * announcement and the derived state already behind it, as before. That
+   * holds when tau-storage's deferred compaction of this push committed
+   * before the receipt was applied: the receipt is then applied against the
+   * compacted manifest ({@link applyReceipt}).
    *
    * @param args - The access, the pusher, the request body and the abort signal.
    * @returns Git's report-status, verbatim (NI13).
@@ -939,7 +952,9 @@ export class GitRepositoryService {
    * manifest, re-read here with this API's own read credential, whose SHA-256,
    * generation and incarnation must equal the receipt's. A `retained` receipt,
    * known only after a sweep, needs the same incarnation and a manifest at or
-   * past its generation. Only then is the `(rid, kind)` claimed in the shared
+   * past its generation. A `commit` or `repair` receipt whose generation only
+   * deferred compactions followed is checked against the push records instead
+   * and applied to the compacted manifest. Only then is the `(rid, kind)` claimed in the shared
    * ledger, so a replay to any API Machine changes no row, and the derived
    * state written: the generation, the D13 announcement, the publications the
    * manifest's tags leave stale, the LFS reachability marks from the receipt's
@@ -1062,9 +1077,18 @@ export class GitRepositoryService {
         return 'manifest_mismatch';
       }
     } else if (digestOf(read.manifest) !== receipt.manifestSha256 || manifest.generation !== receipt.generation) {
-      /* A later commit already moved the manifest on: that one's receipt says
-         everything this one would, so this one is stale rather than forged. */
-      return manifest.generation > receipt.generation ? 'stale' : 'manifest_mismatch';
+      if (manifest.generation <= receipt.generation) {
+        return 'manifest_mismatch';
+      }
+      /* A later commit already moved the manifest on. When that is only
+         tau-storage's deferred compactions, which move no ref, nothing else
+         will say what this receipt says — the compaction's own receipt names
+         no moved ref, and may never arrive — so it is applied against the
+         compacted manifest. Any other later commit says everything this one
+         would, so this one is stale rather than forged. */
+      if (!compactedOver(receipt, manifest)) {
+        return 'stale';
+      }
     }
 
     let claimed: boolean;
@@ -1086,7 +1110,7 @@ export class GitRepositoryService {
       if (receipt.kind === 'retained') {
         await this.recordRetainedBytes(receipt);
       } else {
-        await this.recordGenerationQuietly(receipt.project, receipt.generation);
+        await this.recordGenerationQuietly(receipt.project, manifest.generation);
         await this.derive(receipt, manifest);
       }
     } catch (error) {
@@ -1367,8 +1391,11 @@ export class GitRepositoryService {
     }
     /* D13: tell every open client of this project that the remote moved. First
        and whatever the rebuild below does, because the manifest is already
-       durable. Tracked rather than awaited, as before. */
-    this.track(this.announce(access, manifest.generation, receipt.movedRefs));
+       durable. Tracked rather than awaited, as before. A receipt that moved no
+       ref — a deferred compaction's — has nothing to announce. */
+    if (receipt.movedRefs.length > 0) {
+      this.track(this.announce(access, manifest.generation, receipt.movedRefs));
+    }
     const storageBytes = manifest.packs.reduce((total, pack) => total + pack.bytes, 0);
     try {
       await this.materializeStalePublications(access, manifest);

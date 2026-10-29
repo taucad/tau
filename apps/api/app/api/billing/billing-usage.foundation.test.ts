@@ -932,20 +932,20 @@ it('should return a gateway operation with the project and chat it was attribute
   });
 });
 
-it('should recover only the authenticated original attempt and void every other key without changing credit', async () => {
+it('should recover a legacy completion attempt only for its original owner without changing credit', async () => {
   const fixture = await createFixture();
   const key = randomUUID();
-  const request = { ...admission(fixture, key), surface: 'gateway' };
+  const request = { ...admission(fixture, key), surface: 'code_completion' };
   const admitted = await ledger.admitOperation(request);
   if (admitted.status !== 'admitted') {
-    throw new Error('Expected admitted invocation');
+    throw new Error('Expected admitted legacy invocation');
   }
   const before = await database.select().from(creditAccount).where(eq(creditAccount.id, fixture.accountId));
   const otherOwner = `unfunded-unknown-owner-${key}`;
   await database.insert(user).values({ id: otherOwner, name: 'Other', email: `${otherOwner}@test.invalid` });
   const recovered = await usage.getAttemptReceipt({
     authUserId: fixture.userId,
-    surface: 'gateway',
+    surface: 'code_completion',
     attemptKey: key,
     rawQuery: {},
   });
@@ -953,7 +953,7 @@ it('should recover only the authenticated original attempt and void every other 
   expect(
     await usage.getAttemptReceipt({
       authUserId: otherOwner,
-      surface: 'gateway',
+      surface: 'code_completion',
       attemptKey: key,
       rawQuery: {},
     }),
@@ -974,7 +974,7 @@ it('should recover only the authenticated original attempt and void every other 
   await expect(
     usage.getAttemptReceipt({
       authUserId: fixture.userId,
-      surface: 'gateway',
+      surface: 'code_completion',
       attemptKey: key,
       rawQuery: { ownerId: fixture.userId },
     }),

@@ -1,5 +1,8 @@
 import { isObservabilityHarnessDirect } from '#lib/observability-harness-context.js';
 import { ENV } from '#environment.config.js';
+import { drainEarlyErrors } from '#lib/early-error-buffer.js';
+import { recordErrorDetails } from '#lib/error-details.js';
+import type { ErrorDetails } from '#lib/error-details.js';
 import type * as SentryLibrary from '#lib/sentry.lib.js';
 import { hasPageExited, isPageHidden } from '#lib/page-visibility.js';
 import { sendSentryEventDirectly, sendSentryEventsOnHide } from '#lib/sentry-event.lib.js';
@@ -46,7 +49,7 @@ type LoadOutcome = { readonly sentry?: typeof SentryLibrary; readonly failure?: 
 let started: Promise<LoadOutcome> | undefined;
 /** The load's outcome once it is in ({@link isSdkLoadFailure} reads it without waiting). */
 let loadOutcome: LoadOutcome | undefined;
-/** The SDK once it has started on this page; captures go straight to it from then on. */
+/** The SDK once it has started on this page; captures use it from then on. */
 let liveSentry: typeof SentryLibrary | undefined;
 /** Whether the SDK cannot be used on this page (its load or start failed): errors go out without it. */
 let isSdkUnavailable = false;
@@ -294,19 +297,33 @@ const loadAndStart = async (): Promise<LoadOutcome> => {
   return { sentry };
 };
 
+/**
+ * Report what the early buffer caught before the SDK's handlers were in (`#lib/early-error-buffer`)
+ * and remove its listeners. Runs in the same turn the load settles, so no failure reaches both the
+ * buffer and the SDK's own handlers.
+ */
+const reportEarlyErrors = (): void => {
+  for (const error of drainEarlyErrors()) {
+    // async-iife: bootstrap -- each goes as any reported error does; reporting never rejects.
+    void reportUiError(error);
+  }
+};
+
 /** Start the SDK once per page ({@link loadAndStart}), noting how it ended. */
 const start = async (): Promise<LoadOutcome> => {
   started ??= (async (): Promise<LoadOutcome> => {
     const outcome = await loadAndStart();
     loadOutcome = outcome;
+    reportEarlyErrors();
     return outcome;
   })();
   return started;
 };
 
 /**
- * Start reporting uncaught errors and unhandled rejections. Never rejects. The SDK is loaded once
- * per page: a failed load goes to `onLoadFailure`, once, as its rejection used to reach the global
+ * Start reporting uncaught errors and unhandled rejections. Never rejects. What reached `window`
+ * before the SDK's handlers (the early buffer, at most 20) is reported once the load settles, and the
+ * buffer's listeners removed. The SDK is loaded once per page: a failed load goes to `onLoadFailure`, once, as its rejection used to reach the global
  * handler (the entry hands it to the stale-build recovery, since a deploy may have replaced the
  * SDK's own chunk), and errors reported from then on are sent without the SDK.
  *
@@ -371,12 +388,21 @@ export const isSdkLoadFailure = (value: unknown): boolean | Promise<boolean> => 
  * {@link directErrorLimit} per page), or when the page goes before it loads. On a hidden page it
  * waits for nothing: it goes at once, within the keepalive budget. Nothing is stored on the device.
  * An error is marked reported only once it is captured, kept or sent, so one dropped while the SDK
- * loads can be reported again. Never rejects.
+ * loads can be reported again. Never rejects. What the caller knows of the error (`details`: tags such as
+ * `worker`, contexts such as React's component stack, a fingerprint) is recorded on it, so its event carries it on
+ * either delivery path; a second report of an error already handed over only adds to them.
  *
  * @param error - The caught value.
+ * @param details - Tags, contexts and grouping the caller knows; a primitive cannot carry them.
  */
-export const reportUiError = async (error: unknown): Promise<void> => {
-  if (!ENV.SENTRY_DSN || (isWeakKey(error) && reported.has(error))) {
+export const reportUiError = async (error: unknown, details?: ErrorDetails): Promise<void> => {
+  if (!ENV.SENTRY_DSN) {
+    return;
+  }
+  if (details !== undefined) {
+    recordErrorDetails(error, details);
+  }
+  if (isWeakKey(error) && reported.has(error)) {
     return;
   }
   const markReported = (): void => {
@@ -386,6 +412,10 @@ export const reportUiError = async (error: unknown): Promise<void> => {
   };
   if (liveSentry !== undefined) {
     markReported();
+    // React reports to the root before componentDidCatch adds the boundary details in the same turn.
+    if (!isPageHidden()) {
+      await Promise.resolve();
+    }
     capture(liveSentry, error);
     return;
   }

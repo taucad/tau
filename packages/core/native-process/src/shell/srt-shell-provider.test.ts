@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
 // @vitest-environment node
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -308,6 +308,49 @@ describe('shellSandboxProfile', () => {
     expect(profile.filesystem['denyRead']).toContain(join(root, 'target'));
     expect(profile.filesystem['denyRead']).not.toContain(join(root, 'link'));
   });
+
+  it.runIf(process.platform === 'linux')(
+    'should mask a denied or read-only path under a symbolic-link ancestor through its physical spelling only',
+    () => {
+      /* `/var/run/docker.sock` on Ubuntu: the leaf is a file, its parent `/var/run` links to `/run`. */
+      const root = fixtureRoot();
+      mkdirSync(join(root, 'run'));
+      symlinkSync(join(root, 'run'), join(root, 'var-run'));
+      writeFileSync(join(root, 'run', 'docker.sock'), '');
+      writeFileSync(join(root, 'run', 'pinned'), '');
+      const profile = shellSandboxProfile({
+        filesystem: {
+          readable: [],
+          writable: [],
+          readOnly: [join(root, 'var-run', 'pinned')],
+          denied: [join(root, 'var-run', 'docker.sock')],
+        },
+        network: { domains: [] },
+      }) as { filesystem: Record<string, string[]> };
+
+      for (const facet of ['denyRead', 'denyWrite']) {
+        expect(profile.filesystem[facet]).toContain(join(root, 'run', 'docker.sock'));
+        expect(profile.filesystem[facet]).not.toContain(join(root, 'var-run', 'docker.sock'));
+      }
+      expect(profile.filesystem['denyWrite']).toContain(join(root, 'run', 'pinned'));
+      expect(profile.filesystem['denyWrite']).not.toContain(join(root, 'var-run', 'pinned'));
+    },
+  );
+
+  it.runIf(process.platform === 'linux')(
+    'should keep a denied path that does not exist under its literal spelling',
+    () => {
+      const root = fixtureRoot();
+      mkdirSync(join(root, 'run'));
+      symlinkSync(join(root, 'run'), join(root, 'var-run'));
+      const profile = shellSandboxProfile({
+        filesystem: { readable: [], writable: [], denied: [join(root, 'var-run', 'absent.sock')] },
+        network: { domains: [] },
+      }) as { filesystem: Record<string, string[]> };
+
+      expect(profile.filesystem['denyRead']).toContain(join(root, 'var-run', 'absent.sock'));
+    },
+  );
 
   it('should let the sandbox read the supervisor runtime directory but not write it', () => {
     const profile = shellSandboxProfile(

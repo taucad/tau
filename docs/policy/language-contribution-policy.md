@@ -1,9 +1,9 @@
 ---
 title: 'Language Contribution Policy'
-description: 'Monaco and Shiki language registration, shared workspace filesystem tiers, and TypeScript worker ownership'
+description: 'CodeMirror and Shiki language support, code-pane admission, shared filesystem tiers, checked edits and TypeScript worker ownership'
 status: active
 created: '2026-05-07'
-updated: '2026-10-19'
+updated: '2026-10-26'
 related:
   - docs/research/language-fs-bridge-implementation.md
   - docs/research/scalable-language-contribution-fs-architecture.md
@@ -13,7 +13,11 @@ related:
 
 # Language Contribution Policy
 
-Language contributions share one workspace filesystem contract and activate only when their language is needed. Monaco, Shiki, LSP workers, and the custom TypeScript worker may expose different capabilities, but they must agree on language identity, URI semantics, and declaration ownership.
+Language contributions share one workspace filesystem contract and activate only when their language is needed. CodeMirror, Shiki, LSP workers, and the custom TypeScript worker may expose different capabilities, but they must agree on language identity, URI semantics, and declaration ownership.
+
+## Rationale
+
+Editor loading must follow actual source-pane use, while document persistence and language services retain independent lifetimes. Shared filesystem and grammar owners keep split views, closed-file edits and documentation consistent.
 
 ## Rules
 
@@ -23,7 +27,7 @@ The shared protocol owns `fs/content`, `fs/stat`, `fs/readDir`, and `fs/findFile
 
 ### 2. Use `file://` URIs across the asynchronous wire
 
-Tier 1 JSON-RPC requests carry Monaco-style `file://` URIs. Convert them to workspace-relative paths only in the main-thread bridge through `monacoFileUriToWorkspaceRelative` and `WorkspacePathResolver`.
+Tier 1 JSON-RPC requests carry canonical `file://` URIs. Convert them to workspace-relative paths only in the main-thread bridge through `languageFileUriToWorkspaceRelative` and `WorkspacePathResolver`.
 
 Do not send ambiguous raw paths or probe multiple guessed workspace keys.
 
@@ -43,35 +47,41 @@ Filesystem authority events update the pool and worker view. Polling may detect 
 
 ### 5. Keep the TypeScript worker entry explicit
 
-`apps/libs/lsp/src/monaco-ts-worker/monaco-ts-worker.entry.ts` owns Monaco's worker boot sequence. It must bind the sync filesystem before initializing `TauSyncTsWorker`, and it must avoid the upstream double-initialize race.
+`apps/libs/lsp/src/typescript-worker/worker.entry.ts` owns module-worker boot and the actual TypeScript language service. Bind the rooted synchronous filesystem before admitting requests that need closed-file reads. Use the worker protocol's versioned UTF-16 document changes; never run the TypeScript service on the main thread as a silent fallback.
 
-Use the exported Monaco worker surface and module-worker entry. Do not configure `customWorkerPath`, `importScripts`, or other classic-worker loading paths for this worker.
+Do not configure `customWorkerPath`, `importScripts` or other classic-worker paths.
 
 ### 6. Preserve TypeScript host fallback order
 
-`TauSyncTsWorker` checks Monaco mirror models and static/extra libraries before Tier 2. Closed workspace files may then use the synchronous client. Preserve stable script versions and the synthetic `node_modules` and `@types` directory behavior required by module resolution.
+The TypeScript host checks versioned open documents and standard/static/extra libraries before Tier 2. Closed workspace files may then use the synchronous client. Preserve stable script versions and the synthetic `node_modules` and `@types` directory behavior required by module resolution.
 
 Mount generated dependency declarations at their canonical `/node_modules` paths. Do not copy declarations into each workspace or make optional `repos/` checkouts a runtime requirement. When a generator projects a canonical virtual-module map into a directory, remove the prior projection before writing the current map so deleted modules cannot survive as stale declarations.
 
 ### 7. Activate contributions on demand
 
-Register language loaders through Monaco's `onLanguage` or the existing extension-driven contribution registry. Do not import every grammar, WASM server, declaration set, or worker during editor startup.
+Import CodeMirror only when a real source pane renders. Import the matching syntax family through `editor-syntax.ts`, and acquire its semantic service separately through `editor-language-runtime.ts`. Metadata modules must not import runtime editor code.
 
-Start no Monaco model, contribution activation, or language worker (TypeScript, JavaScript, JSON, editor, or LSP) before a code pane mounts. Warming Monaco on intent may load and configure the editor only; kernel prefetch waits for the first code pane.
+Before admission, request no editor-only JavaScript, CSS, grammar, worker or declarations. This applies to link hover, route prefetch, service-worker precache, viewer-only and shared-model surfaces, Markdown preview and hidden mobile tabs. Do not activate unrelated language families or preload every kernel's declarations.
 
-Dispose registrations and workers when their owning editor or project scope ends.
+Share backend services per project session and mirror each document once. Abort pending acquisition on pane closure; dispose per-view extensions and release the backend when its last view closes. Cached code modules do not justify keeping workers alive.
 
 ### 8. Keep editor and documentation grammars aligned
 
-Precompile shared TextMate grammars in `libs/grammars`. Monaco contributions and the docs Shiki highlighter must use the same canonical language ID, extensions, aliases, and upstream grammar revision.
+Precompile shared TextMate grammars in `libs/grammars`. CodeMirror syntax adapters and the docs Shiki highlighter must use the same canonical language ID, extensions, aliases, and upstream grammar revision.
 
-Do not fetch grammars at runtime. Follow the `add-monaco-language` skill for a new language.
+Do not fetch grammars at runtime. Follow the `add-editor-language` skill for a new language.
 
 ### 9. Fail visibly without breaking basic editing
 
 If an optional LSP or materializing provider cannot start, report a diagnostic and keep syntax highlighting and ordinary text editing available. Do not swallow initialization failures or silently run heavy worker code on the main thread.
 
-### 10. Test each boundary
+### 10. Preserve document and edit authority
+
+`EditorDocumentSession` owns checked persistence, conflict recording and the shared document history. Views retain independent selection, scroll, focus and decorations. Language workers mirror versioned text; they do not become the filesystem authority.
+
+Before applying a semantic workspace edit, verify every target against the exact worker text used to compute it, validate offsets and read-only provenance, then use the session's checked save path. Refuse stale results before changing any target. Do not acknowledge a failed save as durable success.
+
+### 11. Test each boundary
 
 Cover URI normalization, Tier 0 and Tier 1 fallback, Tier 2 closed-file reads, version lookup, synthetic dependency directories, worker boot ordering, lazy activation, and disposal. Use the smallest real worker integration needed to prove the browser boundary.
 
@@ -80,7 +90,8 @@ Cover URI normalization, Tier 0 and Tier 1 fallback, Tier 2 closed-file reads, v
 - Shared protocol and clients: `apps/libs/lsp-fs/src`
 - Tier 2 client/server: `apps/libs/lsp-fs/src/sync`
 - Main-thread bridge: `apps/libs/lsp/src/language-fs-bridge.ts`
-- TypeScript worker: `apps/libs/lsp/src/monaco-ts-worker`
+- TypeScript worker: `apps/libs/lsp/src/typescript-worker`
 - UI language contributions: `apps/ui/app/lib/*-language`
-- TypeScript materializing providers: `apps/ui/app/lib/monaco-typescript-extras`
+- TypeScript view adapters and declarations: `apps/ui/app/lib/typescript-language`
+- Neutral document and checked-edit owners: `apps/ui/app/lib/editor-document-session.ts`, `editor-workspace-edits.ts`
 - Shared grammars: `libs/grammars`

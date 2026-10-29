@@ -71,7 +71,7 @@ describe('OfflineShell', () => {
   });
 
   /* B-27, D-UI-26: the precache downloads the usage shell's whole asset list,
-   * which competed with the kernel, WASM and Monaco downloads of an opening
+   * which competed with the kernel, WASM and editor downloads of an opening
    * project. */
   it('should not install while a project workspace is open, and install once the reader leaves it', async () => {
     readyState = 'complete';

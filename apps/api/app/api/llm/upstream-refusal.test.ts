@@ -40,7 +40,7 @@ describe('redactCredentials', () => {
 });
 
 describe('readUpstreamRefusal', () => {
-  it('should parse the body for recognition and keep a redacted copy for the log', async () => {
+  it('should parse the body for recognition and keep a content-free copy for the log', async () => {
     const body = { error: { code: 400, status: 'INVALID_ARGUMENT', message: 'Bearer ya29.secret-token' } };
 
     const refusal = await readUpstreamRefusal(jsonResponse(body, 400));
@@ -51,7 +51,9 @@ describe('readUpstreamRefusal', () => {
   });
 
   it('should bound the logged copy at 2 KiB', async () => {
-    const refusal = await readUpstreamRefusal(jsonResponse({ error: { message: 'x'.repeat(8 * 1024) } }, 400));
+    const refusal = await readUpstreamRefusal(
+      jsonResponse({ error: { details: Array.from({ length: 16 }, () => ({ code: 'x'.repeat(128) })) } }, 400),
+    );
 
     expect(refusal.loggedBody).toHaveLength(2 * 1024);
   });

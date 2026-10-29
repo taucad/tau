@@ -8,13 +8,13 @@ import ts from 'typescript';
 import type { BundledTypesPackageMap } from '#bundled-types.types.js';
 
 /**
- * Bundle PicoVoxel's declaration graph for Monaco and the generated `cad-picovoxel` skill.
+ * Bundle PicoVoxel's declaration graph for the TypeScript service and the generated `cad-picovoxel` skill.
  *
  * PicoVoxel ships unbundled declarations that mirror its sources (`dist/session.d.ts`,
  * `dist/shapekernel/basePipe.d.ts`, …) and import each other relatively, across directories too
  * (`../numerics/frame.js`). The bundle keeps that topology: every author entry plus every file it
  * reaches, keyed by its path under `dist/`. `picovoxel/multi` and `picovoxel/raw` are session
- * internals Tau owns, and `picovoxel/three` needs `three` types Monaco does not mount, so none of
+ * internals Tau owns, and `picovoxel/three` needs `three` types the TypeScript service does not mount, so none of
  * them are authoring surface (blueprint Q-C10, R21).
  *
  * Nx cannot hash `node_modules`, so the target's real input is `pnpm-lock.yaml`.
@@ -35,7 +35,7 @@ type PicovoxelManifest = Readonly<{
 /** The installed package root, found through picovoxel's exported `./package.json` (blueprint D13). */
 const packageRoot = (): string => dirname(fileURLToPath(import.meta.resolve('picovoxel/package.json')));
 
-/** Real type-only dependencies of the author model; runtime host declarations stay outside Monaco. */
+/** Real type-only dependencies of the author model; runtime host declarations stay outside the TypeScript service. */
 const authorDeclarations = (): Readonly<Record<string, string>> => {
   const root = join(import.meta.dirname, '../../..');
   const sources = {

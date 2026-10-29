@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Artifact, RuntimeDocument } from '@taucad/runtime';
+import type { Artifact } from '@taucad/runtime';
 import { mimeTypes } from '@taucad/types/constants';
+import { transcodeGlbToUsdz, UsdzTranscodeError } from '#components/cad/ar-usdz-transcode.js';
 import { startWebXrAr } from '#components/cad/ar-webxr-session.js';
 import type { WebXrArPresentation } from '#components/cad/ar-webxr-session.js';
 
 /**
- * How this device opens the model in the room. Both paths keep the geometry on the device: Quick Look opens a
- * same-origin `blob:` USDZ, and WebXR renders the in-memory GLB inside the page. Scene Viewer is deliberately not a
+ * How this device opens the model in the room. Both paths show the GLB the viewer holds and keep it on the device:
+ * Quick Look opens a same-origin `blob:` USDZ converted from it, and WebXR renders it inside the page. Scene Viewer is deliberately not a
  * path, because it needs a URL the Google app can fetch, which would publish private geometry (charter EQ4).
  */
 export type ArMode = 'quick-look' | 'webxr';
@@ -99,10 +100,8 @@ export async function detectArMode(): Promise<ArMode | undefined> {
   return (await isWebXrArSupported()) ? 'webxr' : undefined;
 }
 
-class ArExportError extends Error {}
-
 function describeFailure(error: unknown): ArFailure {
-  if (error instanceof ArExportError) {
+  if (error instanceof UsdzTranscodeError) {
     return { kind: 'export', title: 'Couldn’t prepare the model for AR', detail: error.message };
   }
 
@@ -150,35 +149,21 @@ function launchQuickLook(usdzBlobUrl: string): void {
   anchor.remove();
 }
 
-async function exportUsdzBlobUrl(runtimeDocument: RuntimeDocument): Promise<string> {
-  const result = await runtimeDocument.export('usdz');
-  if (!result.success) {
-    throw new ArExportError(result.issues[0]?.message ?? 'USDZ export failed');
-  }
-
-  if (
-    result.files.length !== 1 ||
-    !result.files[0].name.endsWith('.usdz') ||
-    result.files[0].mimeType !== mimeTypes.usdz
-  ) {
-    throw new ArExportError(
-      `USDZ export expected exactly one .usdz artifact (${mimeTypes.usdz}), received ${result.files.length}: ${result.files.map((file) => `${file.name} (${file.mimeType})`).join(', ')}`,
-    );
-  }
-
-  const file = result.files[0];
-  return URL.createObjectURL(new Blob([file.bytes], { type: file.mimeType }));
+async function usdzBlobUrl(glb: Uint8Array<ArrayBuffer>): Promise<string> {
+  const usdz = await transcodeGlbToUsdz(glb);
+  return URL.createObjectURL(new Blob([usdz], { type: mimeTypes.usdz }));
 }
 
 /**
  * Hook providing AR capability detection, launch and failure recovery.
  *
  * Detection runs on the client after mount, so the server render and hydration never show AR. `canActivateAr` is
- * true only when the device has a launch path and the current model fits it: Quick Look needs the runtime document
- * to export USDZ, and WebXR needs the GLB bytes. Call `activateAr()` from a click handler, because both paths need
+ * true only when the device has a launch path and the viewer holds GLB bytes. Neither path exports the document:
+ * Quick Look converts the viewer's GLB to USDZ in a short-lived worker, as captures convert it to images, so a launch
+ * never rebuilds the model at export resolution beside the one on screen. Call `activateAr()` from a click handler, because both paths need
  * the person's gesture. A failure stays in `failure` until `dismissFailure()` or the next `activateAr()`.
  */
-export function useAr(artifact: Artifact | undefined, runtimeDocument?: RuntimeDocument): ArCapability {
+export function useAr(artifact: Artifact | undefined): ArCapability {
   const [mode, setMode] = useState<ArMode | undefined>(undefined);
   const [isPreparing, setIsPreparing] = useState(false);
   const [isPresenting, setIsPresenting] = useState(false);
@@ -214,8 +199,7 @@ export function useAr(artifact: Artifact | undefined, runtimeDocument?: RuntimeD
 
   const glb =
     artifact?.mimeType === 'model/gltf-binary' && typeof artifact.content !== 'string' ? artifact.content : undefined;
-  const canActivateAr =
-    mode === 'quick-look' ? Boolean(glb) && Boolean(runtimeDocument) : mode === 'webxr' && Boolean(glb);
+  const canActivateAr = mode !== undefined && glb !== undefined;
 
   const activateAr = useCallback(async () => {
     if (!canActivateAr || isPreparing || isPresenting) {
@@ -225,7 +209,7 @@ export function useAr(artifact: Artifact | undefined, runtimeDocument?: RuntimeD
     setFailure(undefined);
     setIsPreparing(true);
 
-    if (mode === 'webxr' && glb) {
+    if (mode === 'webxr') {
       try {
         const presentation = await startWebXrAr({
           glb,
@@ -259,14 +243,9 @@ export function useAr(artifact: Artifact | undefined, runtimeDocument?: RuntimeD
       return;
     }
 
-    if (!runtimeDocument) {
-      setIsPreparing(false);
-      return;
-    }
-
     let blobUrl: string | undefined;
     try {
-      blobUrl = await exportUsdzBlobUrl(runtimeDocument);
+      blobUrl = await usdzBlobUrl(glb);
       launchQuickLook(blobUrl);
     } catch (error) {
       setFailure(describeFailure(error));
@@ -277,7 +256,7 @@ export function useAr(artifact: Artifact | undefined, runtimeDocument?: RuntimeD
 
       setIsPreparing(false);
     }
-  }, [canActivateAr, glb, isPreparing, isPresenting, mode, runtimeDocument]);
+  }, [canActivateAr, glb, isPreparing, isPresenting, mode]);
 
   const dismissFailure = useCallback(() => {
     setFailure(undefined);

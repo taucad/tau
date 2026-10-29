@@ -4,7 +4,7 @@ import { createSyncRequestClient } from '@taucad/fs-bridge/sync';
 
 import type { SyncFsOp, TauSyncFsWireMessage } from '#sync/sync-fs-protocol.js';
 import { slotIndex, slotInt32Length, syncError } from '#sync/sync-fs-protocol.js';
-import { monacoFileUriToWorkspaceRelative } from '#uri.js';
+import { languageFileUriToWorkspaceRelative } from '#uri.js';
 
 /**
  * Synchronous filesystem shim used from a worker that blocks on {@link Atomics.wait}.
@@ -33,7 +33,7 @@ export type SyncFsProbe = Readonly<{
   /** Raw input as received from the TS worker host (e.g. a `file://` URI). */
   fileName: string;
   /**
-   * Workspace-relative path after {@link monacoFileUriToWorkspaceRelative}.
+   * Workspace-relative path after {@link languageFileUriToWorkspaceRelative}.
    * `undefined` when path translation threw (non-`file:` URI, etc.).
    */
   relativePath: string | undefined;
@@ -109,7 +109,7 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
 
   const resolveTarget = (fileName: string): ResolvedTarget => {
     try {
-      const relativePath = monacoFileUriToWorkspaceRelative(fileName);
+      const relativePath = languageFileUriToWorkspaceRelative(fileName);
       return { relativePath, absolutePath: joinPath(root, relativePath), translationError: undefined };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

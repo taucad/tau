@@ -6,13 +6,12 @@ import { join } from 'node:path';
 import process from 'node:process';
 
 /**
- * Bundle manifold-3d type declarations as raw `.d.ts` content for Monaco's
- * `addExtraLib`.
+ * Bundle manifold-3d type declarations as raw `.d.ts` content for the browser TypeScript service.
  *
  * Unlike JSCAD (which needs full TS Compiler API extraction), manifold-3d
  * already ships self-contained `.d.ts` files. This script reads them,
  * strips relative imports, and outputs raw module `.d.ts` content that
- * Monaco registers at virtual file paths via standard module resolution.
+ * the TypeScript service registers at virtual file paths via standard module resolution.
  */
 
 // =============================================================================
@@ -126,7 +125,7 @@ function buildManifoldCadContent(): string {
 
 /**
  * Build the bundled type declarations as a map of module path to raw `.d.ts`
- * content. Each entry is registered at its own virtual file path in Monaco.
+ * content. Each entry is registered at its own virtual file path in the TypeScript service.
  * Exported for testing.
  */
 export function buildBundledTypes(): Record<string, string> {

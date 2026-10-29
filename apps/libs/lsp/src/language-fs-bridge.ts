@@ -18,7 +18,7 @@ import {
   lspFsErrorCode,
 } from '@taucad/lsp-fs/protocol';
 import type { FileStat as WireFileStat, FileType } from '@taucad/lsp-fs/protocol';
-import { monacoFileUriToWorkspaceRelative } from '@taucad/lsp-fs/uri';
+import { languageFileUriToWorkspaceRelative } from '@taucad/lsp-fs/uri';
 import { getErrno } from '@taucad/utils/error';
 import type { z } from 'zod';
 
@@ -96,7 +96,7 @@ export function serveLanguageFileSystemRequests(
     }
 
     try {
-      const relative = monacoFileUriToWorkspaceRelative(parsed.params.uri);
+      const relative = languageFileUriToWorkspaceRelative(parsed.params.uri);
       const absolute = options.paths.toAbsolutePath(relative);
       if (pool) {
         const cached = pool.resolveCopy(absolute);
@@ -120,7 +120,7 @@ export function serveLanguageFileSystemRequests(
     }
 
     try {
-      const relative = monacoFileUriToWorkspaceRelative(parsed.params.uri);
+      const relative = languageFileUriToWorkspaceRelative(parsed.params.uri);
       const stat = await options.treeService.stat(relative);
       return { jsonrpc: '2.0', id: parsed.id, result: toWireFileStat(stat) };
     } catch (error) {
@@ -140,7 +140,7 @@ export function serveLanguageFileSystemRequests(
     }
 
     try {
-      const relative = monacoFileUriToWorkspaceRelative(parsed.params.uri);
+      const relative = languageFileUriToWorkspaceRelative(parsed.params.uri);
       const entries = await options.treeService.listDirectory(relative);
       const tuples: Array<[string, FileType]> = entries.map((entry) => [
         entry.name,

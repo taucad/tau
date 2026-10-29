@@ -60,59 +60,6 @@
     filter: brightness(1.08);
   }
 
-  :where(
-    .monaco-scrollable-element > .scrollbar > .scra,
-    .mtkoverflow,
-    .monaco-select-box,
-    .monaco-list.mouse-support .monaco-list-row,
-    .monaco-select-box-dropdown-container .monaco-list-row,
-    .monaco-action-bar .action-item,
-    .monaco-component.diff-review .revertButton,
-    .monaco-dropdown > .dropdown-label,
-    .monaco-editor .diff-hidden-lines .breadcrumb-item,
-    .monaco-editor .fold-unchanged,
-    .monaco-editor .arrow-revert-change,
-    .monaco-editor .lightbulb-glyph,
-    .monaco-text-button,
-    .monaco-button-dropdown,
-    .action-widget .monaco-list-row,
-    .monaco-editor .lightBulbWidget,
-    .monaco-editor .glyph-margin-widgets .cgmr,
-    .monaco-hover .action-container,
-    .monaco-hover a:not([href]),
-    .monaco-custom-toggle,
-    .monaco-editor .find-widget .button,
-    .colorpicker-color-decoration,
-    .colorpicker-header .picked-color,
-    .colorpicker-header .original-color,
-    .colorpicker-header .close-button,
-    .colorpicker-body .insert-button,
-    .monaco-editor .peekview-title.clickable,
-    .monaco-tree-sticky-row,
-    .monaco-editor .marker-widget .filename,
-    .monaco-editor .verbosity-actions-inner .codicon,
-    .monaco-editor .hover-copy-button,
-    .monaco-editor .margin-view-overlays [class*='codicon-folding-'],
-    .monaco-editor .inline-folded,
-    .monaco-editor .suggest-widget .monaco-list-row,
-    .monaco-editor .suggest-details .codicon-close,
-    .monaco-editor .suggest-widget .readMore,
-    .monaco-editor .suggest-preview-additional-widget .button,
-    .monaco-editor .ghost-text-decoration.clickable,
-    .monaco-editor .ghost-text-decoration-preview.clickable,
-    .monaco-editor .suggest-preview-text.clickable .ghost-text,
-    .monaco-editor .sticky-line-content,
-    .monaco-editor .inlineCompletions-char-insert,
-    .monaco-menu-option,
-    .monaco-editor .goto-definition-link,
-    .monaco-editor .detected-link-active,
-    .monaco-editor .parameter-hints-widget .button,
-    .monaco-editor .rename-suggestions-button,
-    .monaco-component.multiDiffEditor .collapse-button
-  ):not(:any-link) {
-    cursor: var(--cursor-action) !important;
-  }
-
   :where([data-sonner-toast] [data-button], [data-sonner-toast] [data-close-button]) {
     cursor: var(--cursor-action) !important;
   }

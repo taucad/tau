@@ -1,6 +1,6 @@
 import { URI } from 'vscode-uri';
 
-import { monacoFileUriToWorkspaceRelative } from '@taucad/lsp-fs/uri';
+import { workspacePathFromFileUri } from '#lib/editor-workspace-fs/editor-workspace-fs.js';
 
 export function posixDirname(relativePath: string): string {
   const n = relativePath.replaceAll('\\', '/');
@@ -27,7 +27,7 @@ export function posixJoin(base: string, segment: string): string {
  * model's directory in workspace-relative space, returning a `file://` URI.
  */
 export function openscadAnglePathToFileUri(currentModelUri: string, anglePath: string): string {
-  const currentWorkspacePath = monacoFileUriToWorkspaceRelative(currentModelUri);
+  const currentWorkspacePath = workspacePathFromFileUri(URI.parse(currentModelUri));
   const resolvedWorkspacePath = posixJoin(posixDirname(currentWorkspacePath), anglePath);
   return URI.file(`/${resolvedWorkspacePath}`).toString();
 }

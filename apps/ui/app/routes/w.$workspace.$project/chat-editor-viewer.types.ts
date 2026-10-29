@@ -1,26 +1,12 @@
-import type { editor } from 'monaco-editor';
-import { assertRootedPath } from '@taucad/utils/path';
+import type { EditorDocument, DocumentChange, DocumentTransaction } from '#lib/editor-document.js';
 
 export type ChatEditorViewerProps = {
-  /**
-   * Stable identity of the editor pane hosting this viewer. Use for any
-   * viewer-local state that must survive a file rename.
-   */
+  /** Stable pane identity; split panes own distinct selections and scroll. */
   readonly paneId: string;
   readonly filePath: string;
   readonly content: string;
   readonly language: string;
-  /** Whether a Monaco editor may mount for this file yet (see `FileViewerRenderRequest.textEditor`). */
-  readonly isEditorReady: boolean;
-  readonly onChange: (value: string | undefined) => void;
-  readonly onValidate: (markers: editor.IMarkerData[]) => void;
-  /** When true, Monaco is read-only and `onChange` is not invoked for edits. */
+  readonly onApply: (document: EditorDocument, transaction: DocumentTransaction) => DocumentChange | undefined;
+  readonly onHistory: (document: EditorDocument, kind: 'undo' | 'redo') => DocumentChange | undefined;
   readonly readOnly?: boolean;
 };
-
-/**
- * Translate a Tau rooted path into Monaco's private `file://` URI path form.
- */
-export function createMonacoPath(relativePath: string): string {
-  return `/${assertRootedPath(relativePath)}`;
-}

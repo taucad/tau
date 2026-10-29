@@ -1,7 +1,8 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback } from 'react';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { Columns2, Copy, FileCode, FolderTree, Plus, Printer, Rows2, X, XCircle } from 'lucide-react';
 import { ContextMenuItem, ContextMenuSeparator } from '@taucad/ui/components/context-menu';
+import { DropdownMenuItem, DropdownMenuSeparator } from '@taucad/ui/components/dropdown-menu';
 import { isPrinterFileName } from '#components/printer/printer-file.js';
 import {
   closeOtherPanels,
@@ -28,8 +29,15 @@ type ViewerPanelParameters = {
  * Provides close operations, path copying, split controls,
  * and cross-dock navigation (open in editor, reveal in file tree).
  */
-function ViewerTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.Element {
-  const { api } = properties;
+export function ViewerTabContextMenu(
+  properties: Pick<IDockviewPanelHeaderProps, 'api' | 'params'> & {
+    readonly variant?: 'context' | 'dropdown';
+    readonly onNavigate?: (surface: 'editor' | 'files') => void;
+  },
+): React.JSX.Element {
+  const { api, onNavigate, variant = 'context' } = properties;
+  const Item = variant === 'dropdown' ? DropdownMenuItem : ContextMenuItem;
+  const Separator = variant === 'dropdown' ? DropdownMenuSeparator : ContextMenuSeparator;
   const { editorRef, projectRef } = useProject();
   const projectId = useSelector(projectRef, (state) => state.context.project?.id);
   const revealInFileManager = useRevealInFileManager(projectId);
@@ -37,16 +45,11 @@ function ViewerTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.
 
   const entryPath = (properties.params as ViewerPanelParameters | undefined)?.entryPath;
 
-  const { hasOthers, hasRight, hasLeft } = useMemo(() => {
-    const { panels } = api.group;
-    const currentIndex = panels.findIndex((panel) => panel.id === api.id);
-
-    return {
-      hasOthers: panels.length > 1,
-      hasRight: currentIndex < panels.length - 1,
-      hasLeft: currentIndex > 0,
-    };
-  }, [api]);
+  const { panels } = api.group;
+  const currentIndex = panels.findIndex((panel) => panel.id === api.id);
+  const hasOthers = panels.length > 1;
+  const hasRight = currentIndex < panels.length - 1;
+  const hasLeft = currentIndex > 0;
 
   // ── Close actions ──
   const handleClose = useCallback(() => {
@@ -89,70 +92,79 @@ function ViewerTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.
   const handleOpenInEditor = useCallback(() => {
     if (entryPath) {
       editorRef.send({ type: 'openFile', path: entryPath, source: 'user' });
+      onNavigate?.('editor');
     }
-  }, [editorRef, entryPath]);
+  }, [editorRef, entryPath, onNavigate]);
 
   const handleRevealInFileTree = useCallback(() => {
     if (entryPath) {
-      workspace?.openPanel('files');
+      if (onNavigate) {
+        onNavigate('files');
+      } else {
+        workspace?.openPanel('files');
+      }
       requestAnimationFrame(() => {
         editorRef.send({ type: 'revealFileInTree', path: entryPath });
       });
     }
-  }, [editorRef, entryPath, workspace]);
+  }, [editorRef, entryPath, onNavigate, workspace]);
 
   return (
     <>
       {/* ── Close group ── */}
-      <ContextMenuItem onSelect={handleClose}>
+      <Item onSelect={handleClose}>
         <X />
         Close
-      </ContextMenuItem>
-      <ContextMenuItem disabled={!hasOthers} onSelect={handleCloseOthers}>
+      </Item>
+      <Item disabled={!hasOthers} onSelect={handleCloseOthers}>
         <XCircle />
         Close Others
-      </ContextMenuItem>
-      <ContextMenuItem disabled={!hasRight} onSelect={handleCloseRight}>
+      </Item>
+      <Item disabled={!hasRight} onSelect={handleCloseRight}>
         Close to the Right
-      </ContextMenuItem>
-      <ContextMenuItem disabled={!hasLeft} onSelect={handleCloseLeft}>
+      </Item>
+      <Item disabled={!hasLeft} onSelect={handleCloseLeft}>
         Close to the Left
-      </ContextMenuItem>
-      <ContextMenuItem onSelect={handleCloseAll}>Close All</ContextMenuItem>
+      </Item>
+      <Item onSelect={handleCloseAll}>Close All</Item>
 
-      <ContextMenuSeparator />
+      <Separator />
 
       {/* ── Copy path ── */}
-      <ContextMenuItem disabled={!entryPath} onSelect={handleCopyPath}>
+      <Item disabled={!entryPath} onSelect={handleCopyPath}>
         <Copy />
         Copy Path
-      </ContextMenuItem>
+      </Item>
 
-      <ContextMenuSeparator />
+      <Separator />
 
-      {/* ── Split group ── */}
-      <ContextMenuItem onSelect={handleSplitRight}>
-        <Columns2 />
-        Split Right
-      </ContextMenuItem>
-      <ContextMenuItem onSelect={handleSplitDown}>
-        <Rows2 />
-        Split Down
-      </ContextMenuItem>
+      {variant === 'context' ? (
+        <>
+          {/* ── Split group ── */}
+          <Item onSelect={handleSplitRight}>
+            <Columns2 />
+            Split Right
+          </Item>
+          <Item onSelect={handleSplitDown}>
+            <Rows2 />
+            Split Down
+          </Item>
 
-      <ContextMenuSeparator />
+          <Separator />
+        </>
+      ) : null}
 
       {/* ── Navigation group ── */}
-      <ContextMenuItem disabled={!entryPath} onSelect={handleOpenInEditor}>
+      <Item disabled={!entryPath} onSelect={handleOpenInEditor}>
         <FileCode />
         Open in Editor
-      </ContextMenuItem>
-      <ContextMenuItem disabled={!entryPath} onSelect={handleRevealInFileTree}>
+      </Item>
+      <Item disabled={!entryPath} onSelect={handleRevealInFileTree}>
         <FolderTree />
         Reveal in File Tree
-      </ContextMenuItem>
+      </Item>
       {revealInFileManager ? (
-        <ContextMenuItem
+        <Item
           disabled={!entryPath}
           onSelect={() => {
             if (entryPath) {
@@ -162,7 +174,7 @@ function ViewerTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.
         >
           <NativeFileManagerIcon icon={revealInFileManager.icon} />
           {revealInFileManager.label}
-        </ContextMenuItem>
+        </Item>
       ) : null}
     </>
   );

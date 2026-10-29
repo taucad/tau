@@ -1,4 +1,5 @@
 // oxlint-disable max-lines -- TODO: refactor this component to be more manageable
+import { subscribeWorkbenchFileReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { useCallback, useId, useState, useRef, useMemo, useEffect, memo } from 'react';
@@ -1172,58 +1173,59 @@ export const ChatEditorFileTree = memo(function ({
   // Reveal a file in the tree when requested from the tab context menu.
   // Expands all parent directories, focuses the item, and scrolls it into view.
   useEffect(() => {
-    const subscription = editorRef.on('fileRevealRequested', (event) => {
-      if (shouldHandleReveal && !shouldHandleReveal()) {
-        return;
-      }
-      const targetPath = event.path;
+    const unsubscribe = subscribeWorkbenchFileReveal(
+      editorRef,
+      (event) => {
+        const targetPath = event.path;
 
-      // Ensure the file-explorer panel is open before revealing the item
-      onRequestOpen?.();
+        // Ensure the file-explorer panel is open before revealing the item
+        onRequestOpen?.();
 
-      // Expand all parent directories
-      const parts = targetPath.split('/');
-      parts.pop(); // Remove the filename
-      const parentPaths: string[] = [];
-      let current = '';
-      for (const part of parts) {
-        if (!part) {
-          continue;
-        }
-
-        current = current ? `${current}/${part}` : part;
-        parentPaths.push(current);
-      }
-
-      const pathsToExpand = event.expandTarget && targetPath ? [...parentPaths, targetPath] : parentPaths;
-
-      if (pathsToExpand.length > 0) {
-        setExpandedItems((previous) => {
-          const newExpanded = new Set(previous);
-          for (const path of pathsToExpand) {
-            newExpanded.add(path);
+        // Expand all parent directories
+        const parts = targetPath.split('/');
+        parts.pop(); // Remove the filename
+        const parentPaths: string[] = [];
+        let current = '';
+        for (const part of parts) {
+          if (!part) {
+            continue;
           }
 
-          return [...newExpanded];
-        });
-      }
-
-      // Focus the item and scroll into view after the tree re-renders
-      setFocusedItem(targetPath);
-      setSelectedItems([targetPath]);
-
-      requestAnimationFrame(() => {
-        try {
-          const item = tree.getItemInstance(targetPath);
-          void item.scrollTo({ block: 'center' });
-        } catch {
-          // Item may not exist in the tree yet
+          current = current ? `${current}/${part}` : part;
+          parentPaths.push(current);
         }
-      });
-    });
+
+        const pathsToExpand = event.expandTarget && targetPath ? [...parentPaths, targetPath] : parentPaths;
+
+        if (pathsToExpand.length > 0) {
+          setExpandedItems((previous) => {
+            const newExpanded = new Set(previous);
+            for (const path of pathsToExpand) {
+              newExpanded.add(path);
+            }
+
+            return [...newExpanded];
+          });
+        }
+
+        // Focus the item and scroll into view after the tree re-renders
+        setFocusedItem(targetPath);
+        setSelectedItems([targetPath]);
+
+        requestAnimationFrame(() => {
+          try {
+            const item = tree.getItemInstance(targetPath);
+            void item.scrollTo({ block: 'center' });
+          } catch {
+            // Item may not exist in the tree yet
+          }
+        });
+      },
+      shouldHandleReveal,
+    );
 
     return () => {
-      subscription.unsubscribe();
+      unsubscribe();
     };
   }, [editorRef, onRequestOpen, shouldHandleReveal, tree, setExpandedItems, setFocusedItem, setSelectedItems]);
 

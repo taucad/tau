@@ -423,8 +423,8 @@ vi.mock('#hooks/use-flush-on-close.js', () => ({
   useFlushOnClose: () => undefined,
   useFlushProducers: () => flushProducers,
 }));
-vi.mock('#hooks/use-monaco-model-service.js', () => ({
-  MonacoModelServiceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+vi.mock('#hooks/use-editor-document-session.js', () => ({
+  EditorDocumentSessionProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock('@taucad/viewer/hooks/use-webgl-context-tracker', () => ({
   WebglContextTrackerProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,

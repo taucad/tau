@@ -321,8 +321,8 @@ export const mechanism = {
 `;
   await openCommand('Open files');
   await target.click(selectors.getByCss('[data-testid="file-tree-item"][data-file-tree-path="main.ts"]'));
-  await target.expectVisible(selectors.getByCss('.monaco-editor:visible .view-lines').last(), 60_000);
-  await target.click(selectors.getByCss('.monaco-editor:visible').last(), { position: { x: 80, y: 50 } });
+  await target.expectVisible(selectors.getByCss('.cm-editor:visible .cm-content').last(), 60_000);
+  await target.click(selectors.getByCss('.cm-editor:visible').last(), { position: { x: 80, y: 50 } });
   await target.keyboardPress('ControlOrMeta+a');
   await target.evaluate(async (text) => navigator.clipboard.writeText(text), invalidSource);
   await target.keyboardPress('ControlOrMeta+v');

@@ -1,12 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { TauLanguageFileManagerRef } from '#language-fs-sync-host.js';
-import {
-  clearTauLanguageHostPortFactory,
-  createTauLanguageHostInit,
-  openTauLanguageHostPort,
-  setTauLanguageHostPortFactory,
-} from '#language-fs-sync-host.js';
+import { openTauLanguageHostPort } from '#language-fs-sync-host.js';
 
 const readyRef = (postMessage: () => void, filePoolBuffer?: SharedArrayBuffer): TauLanguageFileManagerRef => {
   const snap = {
@@ -75,16 +70,20 @@ describe('lsp-fs-sync-host', () => {
     expect(openTauLanguageHostPort(ref)).toBeUndefined();
   });
 
-  it('createTauLanguageHostInit delegates to the registered factory', () => {
-    const init = {
-      port: new MessageChannel().port1,
-      slotSab: new SharedArrayBuffer(16),
-      arenaSab: new SharedArrayBuffer(64),
-      workspaceRootAbsolute: '/x',
-    };
-    setTauLanguageHostPortFactory(() => init);
-    expect(createTauLanguageHostInit()).toBe(init);
-    clearTauLanguageHostPortFactory();
-    expect(createTauLanguageHostInit()).toBeUndefined();
+  it('should attach each language service to its own project worker', () => {
+    vi.stubGlobal('crossOriginIsolated', true);
+    const firstPost = vi.fn();
+    const secondPost = vi.fn();
+    const first = openTauLanguageHostPort(readyRef(firstPost));
+    const second = openTauLanguageHostPort(readyRef(secondPost));
+    try {
+      expect(firstPost).toHaveBeenCalledOnce();
+      expect(secondPost).toHaveBeenCalledOnce();
+      expect(first?.port).not.toBe(second?.port);
+      expect(first?.slotSab).not.toBe(second?.slotSab);
+    } finally {
+      first?.port.close();
+      second?.port.close();
+    }
   });
 });

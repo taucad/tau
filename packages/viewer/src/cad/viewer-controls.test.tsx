@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { userEvent } from '@testing-library/user-event';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor } from 'xstate';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -72,5 +73,57 @@ describe('ViewerControls host action', () => {
     const names = controlNames();
     expect(names).not.toContain('Enter fullscreen');
     expect(names[names.indexOf('Fit view') + 1]).toBe('View in your space');
+  });
+});
+
+describe('ViewerControls measurement readiness', () => {
+  it('should show preparing until input is ready without admitting measurement actions', () => {
+    renderBar();
+    act(() => {
+      actor!.send({ type: 'setMeasureActive', payload: true });
+    });
+
+    expect(screen.getByRole('status', { name: 'Preparing measurement' })).toHaveTextContent('Preparing measurement…');
+    expect(screen.queryByRole('group', { name: 'Measuring options' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Targets:/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Measure' })).toHaveAttribute('aria-busy', 'true');
+    const done = screen.getByRole('button', { name: 'Done with measure' });
+    done.focus();
+
+    act(() => {
+      actor!.send({ type: 'setMeasureInputReady', ready: true });
+    });
+
+    expect(screen.queryByRole('status', { name: 'Preparing measurement' })).not.toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Measuring options' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Targets:/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Measure' })).toHaveAttribute('aria-busy', 'false');
+    expect(screen.getByRole('button', { name: 'Done with measure' })).toBe(done);
+    expect(done).toHaveFocus();
+    const targets = screen.getByRole('button', { name: /^Targets:/ });
+    targets.focus();
+    act(() => {
+      actor!.send({ type: 'setMeasureInputReady', ready: false });
+      actor!.send({ type: 'setMeasureInputReady', ready: true });
+    });
+    expect(screen.getByRole('button', { name: /^Targets:/ })).toBe(targets);
+    expect(targets).toHaveFocus();
+  });
+
+  it('should cancel preparation and require readiness again when reopened', async () => {
+    renderBar();
+    const user = userEvent.setup();
+    act(() => {
+      actor!.send({ type: 'setMeasureActive', payload: true });
+    });
+    await user.click(screen.getByRole('button', { name: 'Done with measure' }));
+    expect(actor!.getSnapshot().context.isMeasureActive).toBe(false);
+    expect(screen.queryByRole('status', { name: 'Preparing measurement' })).not.toBeInTheDocument();
+    act(() => {
+      actor!.send({ type: 'setMeasureInputReady', ready: true });
+      actor!.send({ type: 'setMeasureActive', payload: true });
+    });
+    expect(screen.getByRole('status', { name: 'Preparing measurement' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Targets:/ })).not.toBeInTheDocument();
   });
 });

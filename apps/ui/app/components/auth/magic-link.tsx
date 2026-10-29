@@ -93,7 +93,9 @@ export function MagicLink({ className, socialLayout, socialPosition = 'bottom' }
   return (
     <Card className={cn('w-full max-w-sm', className)}>
       <CardHeader>
-        <CardTitle className='text-xl'>{localization.auth.signIn}</CardTitle>
+        <CardTitle className='text-xl'>
+          <h1>{localization.auth.signIn}</h1>
+        </CardTitle>
       </CardHeader>
 
       <CardContent>

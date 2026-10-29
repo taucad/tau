@@ -42,6 +42,7 @@ import {
   runHourlyOperationsJobs,
 } from '#billing-command.operations.js';
 import type { DatabaseService } from '#database/database.service.js';
+import { applicationNameOf } from '#database/application-name.js';
 
 /**
  * Recovery notices become email only when this worker knows where the app lives (`TAU_FRONTEND_URL`) and
@@ -122,7 +123,11 @@ async function main(): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- postgres.js option name
     connect_timeout: 10,
     backoff: () => 1,
-    ...(role === undefined ? {} : { connection: { role } }),
+    connection: {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- PostgreSQL startup parameter name
+      application_name: applicationNameOf('billing-operations'),
+      ...(role === undefined ? {} : { role }),
+    },
   });
   /* One routine for `sync` and for the tariff half of `migrate`, so local and cloud bootstraps
    * derive and publish the same way. */

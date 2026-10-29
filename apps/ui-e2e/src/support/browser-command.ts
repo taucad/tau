@@ -1586,6 +1586,42 @@ export const uiEmulateReducedMotion: BrowserCommand<
   await pageFor(sessionFor(commandContext), surface).emulateMedia({ reducedMotion });
 };
 
+/** CDP sessions holding a page's safe-area override; an override lasts only while its session stays attached. */
+const safeAreaSessions = new WeakMap<TargetPage, CdpSession>();
+
+/**
+ * Emulate a device's safe-area insets (`env(safe-area-inset-*)`, CSS pixels) through Chromium's
+ * `Emulation.setSafeAreaInsetsOverride`, or clear the override with `null`. Chromium reports the override through
+ * `env()` whatever the page's `viewport-fit`, where iOS reports insets only under `viewport-fit=cover`.
+ */
+export const uiEmulateSafeAreaInsets: BrowserCommand<
+  [
+    insets: { readonly top?: number; readonly right?: number; readonly bottom?: number; readonly left?: number } | null,
+    surface?: TargetSurface,
+  ]
+> = async (commandContext, insets, surface) => {
+  const session = sessionFor(commandContext);
+  const page = pageFor(session, surface);
+  let cdp = safeAreaSessions.get(page);
+  if (!cdp) {
+    cdp = await session.context.newCDPSession(page);
+    safeAreaSessions.set(page, cdp);
+  }
+  const values = insets ?? {};
+  await cdp.send('Emulation.setSafeAreaInsetsOverride', {
+    insets: {
+      top: values.top ?? 0,
+      topMax: values.top ?? 0,
+      right: values.right ?? 0,
+      rightMax: values.right ?? 0,
+      bottom: values.bottom ?? 0,
+      bottomMax: values.bottom ?? 0,
+      left: values.left ?? 0,
+      leftMax: values.left ?? 0,
+    },
+  });
+};
+
 export const uiEmulateForcedColors: BrowserCommand<[forcedColors: 'active' | 'none', surface?: TargetSurface]> = async (
   commandContext,
   forcedColors,
@@ -3111,6 +3147,7 @@ export const uiBrowserCommands = {
   uiEmulateContrast,
   uiEmulateForcedColors,
   uiEmulateReducedMotion,
+  uiEmulateSafeAreaInsets,
   uiEvaluateTarget,
   uiEvaluateTargetLocator,
   uiFillTarget,

@@ -56,7 +56,9 @@ vi.mock('#routes/w.$workspace.$project/chat-agents.js', panel('AgentsPanelBody',
 vi.mock('#routes/w.$workspace.$project/chat-jobs.js', panel('JobsPanelBody', 'Jobs'));
 vi.mock('#routes/w.$workspace.$project/chat-kernel.js', panel('TelemetryPanelContent', 'Telemetry'));
 vi.mock('#routes/w.$workspace.$project/chat-console.js', panel('ChatConsole', 'Console'));
-vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'project-1' }) }));
+vi.mock('#hooks/use-project.js', () => ({
+  useProject: () => ({ projectId: 'project-1', viewRecords: new Map() }),
+}));
 vi.mock('#hooks/use-sidebar-status.js', () => ({
   useProjectSidebarRow: () => ({ attention: 0, conflicted: false, settings: 0, failed: 0 }),
 }));

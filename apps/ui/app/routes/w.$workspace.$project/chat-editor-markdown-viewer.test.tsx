@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
-vi.mock('#components/code/code-editor.client.js', () => ({
-  CodeEditor: () => <div data-testid='code-editor' />,
+vi.mock('#routes/w.$workspace.$project/chat-editor-code-viewer.js', () => ({
+  ChatEditorCodeViewer: () => <div role='textbox' aria-label='Source editor' />,
 }));
 vi.mock('#components/markdown/markdown-viewer-chat.js', () => ({
   MarkdownViewerChat: ({ children }: { readonly children: React.ReactNode }) => (
@@ -11,14 +11,13 @@ vi.mock('#components/markdown/markdown-viewer-chat.js', () => ({
 }));
 const { ChatEditorMarkdownViewer } = await import('#routes/w.$workspace.$project/chat-editor-markdown-viewer.js');
 
-const noop = (): void => undefined;
+const noop = (): undefined => undefined;
 
 const baseProps = {
   content: '# hello',
   language: 'markdown',
-  isEditorReady: true,
-  onChange: noop,
-  onValidate: noop,
+  onApply: noop,
+  onHistory: noop,
 };
 
 describe('ChatEditorMarkdownViewer', () => {
@@ -27,28 +26,13 @@ describe('ChatEditorMarkdownViewer', () => {
 
     expect(screen.getByTestId('markdown-preview')).toHaveTextContent('# hello');
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('code-editor')).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Source editor' })).not.toBeInTheDocument();
   });
 
   it('should render the source editor when controlled by the pane view', () => {
     render(<ChatEditorMarkdownViewer paneId='pane-doc' filePath='README.md' viewId='source' {...baseProps} />);
 
-    expect(screen.getByTestId('code-editor')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Source editor' })).toBeInTheDocument();
     expect(screen.queryByTestId('markdown-preview')).not.toBeInTheDocument();
-  });
-
-  it('should show the pane placeholder until the source editor may mount', () => {
-    render(
-      <ChatEditorMarkdownViewer
-        paneId='pane-doc'
-        filePath='docs/README.md'
-        viewId='source'
-        {...baseProps}
-        isEditorReady={false}
-      />,
-    );
-
-    expect(screen.getByRole('status')).toHaveTextContent('Loading README.md');
-    expect(screen.queryByTestId('code-editor')).not.toBeInTheDocument();
   });
 });

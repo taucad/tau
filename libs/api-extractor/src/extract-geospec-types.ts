@@ -4,7 +4,7 @@ import { join, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 
 /**
- * Bundle the installed `geospec` package's declarations for Monaco.
+ * Bundle the installed `geospec` package's declarations for the TypeScript service.
  *
  * `geospec` is published from taucad/geospec and installed here at its pnpm catalog pin. Its tarball ships
  * unbundled declarations under `dist/` (`dist/index.d.mts`, `dist/model/types.d.mts`, …) that import each other

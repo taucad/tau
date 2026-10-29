@@ -12,6 +12,7 @@ import { Button } from '@taucad/ui/components/button';
 import { useAnalytics } from '#hooks/use-analytics.js';
 import { useRevisionClient, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import { revisionWarningCodes } from '#lib/revision-failure-reporting.js';
 import type { RevisionFailureSubject } from '#lib/revision-failure-copy.js';
 import type { BranchOperation } from '@taucad/revisions';
 import { needsDecision, revisionName } from '#routes/w.$workspace.$project/revision-vocabulary.js';
@@ -89,8 +90,8 @@ export function RevisionRestore(): React.JSX.Element {
          * sentence naming a checkout — goes where someone can act on it, which
          * is not a toast (E5). */
         const copy = describeRevisionFailure(entry.subject, entry.code, { revisionNumber: entry.revisionNumber });
+        // Outcome fields only: the diagnostic goes to error reporting with these tags (SB4, `reportRevisionToast`).
         analytics.capture(revisionFailureEvent[entry.subject], {
-          message: entry.message,
           code: entry.code,
           ...(entry.subject === 'connection'
             ? { generation: entry.generation, operation: entry.connectionOperation }
@@ -98,12 +99,7 @@ export function RevisionRestore(): React.JSX.Element {
         });
         console.error('[revisions]', entry.subject, entry.code, entry.message);
         /* W0 N1, M1, D15: files that are back, and an undo with nothing here to undo, lost nothing; they are not failures. */
-        if (
-          entry.code === 'RESTORE_UNRECORDED' ||
-          entry.code === 'UNDO_UNAVAILABLE' ||
-          entry.code === 'NOTHING_TO_UNDO' ||
-          entry.code === 'UNDO_PAST_MERGE'
-        ) {
+        if (entry.code !== undefined && revisionWarningCodes.has(entry.code)) {
           toast.warning(copy.title, { description: copy.description });
           return;
         }

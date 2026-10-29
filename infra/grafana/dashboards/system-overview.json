@@ -81,7 +81,15 @@
       "url": "/d/tau-infrastructure",
       "icon": "dashboard",
       "targetBlank": false
-    }
+    },
+    {
+      "title": "Storage — critical",
+      "type": "link",
+      "url": "/d/tau-storage-critical",
+      "icon": "dashboard",
+      "targetBlank": false
+    },
+    { "title": "Storage capability", "type": "link", "url": "/d/tau-sync", "icon": "dashboard", "targetBlank": false }
   ],
   "panels": [
     {
@@ -303,7 +311,7 @@
     },
     {
       "title": "Tau Sync p95",
-      "description": "Hosted git and project sync request latency (95th percentile)",
+      "description": "Hosted git and project sync request latency (95th percentile). Detail: the Storage capability dashboard (title link).",
       "type": "timeseries",
       "gridPos": { "h": 7, "w": 6, "x": 6, "y": 14 },
       "targets": [
@@ -318,7 +326,8 @@
           "custom": { "fillOpacity": 10, "lineWidth": 2 }
         }
       },
-      "id": 13
+      "id": 13,
+      "links": [{ "title": "Storage capability", "url": "/d/tau-sync" }]
     },
     {
       "title": "PostgreSQL Transactions",
@@ -498,7 +507,7 @@
     },
     {
       "title": "Object Storage p95 by Operation",
-      "description": "R2 / MinIO request latency by S3 operation (95th percentile)",
+      "description": "R2 / MinIO request latency by S3 operation (95th percentile). Detail: the Storage capability dashboard (title link).",
       "type": "timeseries",
       "gridPos": { "h": 7, "w": 8, "x": 8, "y": 38 },
       "targets": [
@@ -510,7 +519,8 @@
       "fieldConfig": {
         "defaults": { "unit": "s" }
       },
-      "id": 25
+      "id": 25,
+      "links": [{ "title": "Storage capability", "url": "/d/tau-sync" }]
     },
     {
       "title": "Event Loop Utilization",

@@ -17,7 +17,7 @@ type AuthLinks = {
  * @example
  * ```tsx
  * const { signIn, signUp, signOut } = useAuthLinks();
- * return <NavLink to={signIn}>Sign In</NavLink>;
+ * return <NavLink to={signIn}>Sign in</NavLink>;
  * ```
  */
 export function useAuthLinks(options?: { readonly redirectTo?: string }): AuthLinks {

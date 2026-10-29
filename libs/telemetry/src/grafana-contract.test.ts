@@ -310,78 +310,11 @@ const storageInstruments = (registry: Registry): MetricDefinition[] =>
 
 /**
  * Storage-family instruments read by no dashboard panel yet, as `prometheus_name: 'package that adds
- * the panel'`. The live git-edge family predates W14; OB9 replaces `tau-sync.json` with the capability
- * dashboard that reads it. Each entry goes when a panel reads the name; the test fails until it does.
+ * the panel'`. Since OB9 (`storage-critical.json` and the capability dashboard `tau-sync.json`) every
+ * declared one is read; a later package that declares an instrument adds its panel in the same change,
+ * or lists it here until it does. Each entry goes when a panel reads the name; the test fails until it does.
  */
-const awaitingPanel: Readonly<Record<string, string>> = {
-  tau_sync_operations_total: 'OB9',
-  tau_sync_operation_duration: 'OB9',
-  tau_sync_pack_bytes: 'OB9',
-  tau_sync_lease_duration: 'OB9',
-  tau_sync_manifest_conflicts_total: 'OB9',
-  tau_sync_sweeps_total: 'OB9',
-  tau_sync_client_attempts_total: 'OB9',
-  tau_sync_client_lag: 'OB9',
-  tau_sync_client_attempt_duration: 'OB9',
-  tau_sync_client_pending: 'OB9',
-  // DA2 (#1032) shipped these without panels; OB2's storage-critical rows read them.
-  tau_sync_refusals_total: 'OB2',
-  tau_git_admissions_total: 'OB2',
-  tau_git_leases_active: 'OB2',
-  tau_git_lease_reserved_bytes: 'OB2',
-  tau_git_disk_free_bytes: 'OB2',
-  tau_git_hydrate_bytes: 'OB2',
-  tau_git_commit_attempts_total: 'OB2',
-  tau_git_commit_duration: 'OB2',
-  tau_git_repository_size: 'OB2',
-  tau_git_hot_project_commit_rate: 'OB2',
-  tau_git_hot_project_writers: 'OB2',
-  // DM1 ships the copier's instruments; OB9's storage-critical B2 row reads them (W14 OB6).
-  tau_mirror_copy_lag_seconds: 'OB9',
-  tau_mirror_copy_lag_generations: 'OB9',
-  tau_mirror_backlog_repositories: 'OB9',
-  tau_mirror_lfs_backlog_objects: 'OB9',
-  tau_mirror_copy_delay_seconds: 'OB9',
-  tau_mirror_rounds_total: 'OB9',
-  tau_mirror_objects_copied_total: 'OB9',
-  tau_mirror_bytes_copied_total: 'OB9',
-  tau_mirror_copy_failures_total: 'OB9',
-  tau_mirror_retention_extensions_total: 'OB9',
-  tau_mirror_retention_min_remaining_seconds: 'OB9',
-  tau_mirror_retention_max_ahead_seconds: 'OB9',
-  tau_mirror_destination_up: 'OB9',
-  tau_mirror_reconcile_last_success_timestamp_seconds: 'OB9',
-  tau_mirror_reconcile_missing_objects: 'OB9',
-  tau_mirror_reconcile_hidden_versions: 'OB9',
-  tau_mirror_destination_stored_bytes: 'OB9',
-  tau_mirror_destination_object_versions: 'OB9',
-  // DR2-lite ships the verify drill's series; OB9's B2 row adds the drill freshness and failure panels.
-  tau_mirror_drill_runs_total: 'OB9',
-  tau_mirror_drill_check_failures_total: 'OB9',
-  tau_mirror_drill_last_success_timestamp_seconds: 'OB9',
-  tau_mirror_drill_duration_seconds: 'OB9',
-  tau_mirror_drill_verified_bytes_total: 'OB9',
-  // DW1/DW2 ship the route table and freeze series; OB5's migration panels read them.
-  tau_git_route_frozen: 'OB5',
-  tau_git_route_frozen_oldest: 'OB5',
-  tau_git_route_holds_total: 'OB5',
-  tau_git_route_hold_duration: 'OB5',
-  tau_git_route_lookup_duration: 'OB5',
-  // DC1 ships the hop's grant, forward and receipt series; OB4's hop row reads them.
-  tau_git_grants_rejected_total: 'OB4',
-  tau_git_forward_errors_total: 'OB4',
-  tau_git_receipts_total: 'OB4',
-  tau_git_slow_body_aborts_total: 'OB4',
-  // DC2 ships the pack cache and router series; OB4's cache and hop rows read them.
-  tau_git_cache_lookups_total: 'OB4',
-  tau_git_cache_bytes: 'OB4',
-  tau_git_cache_budget_bytes: 'OB4',
-  tau_git_cache_evictions_total: 'OB4',
-  tau_git_cache_evicted_bytes_total: 'OB4',
-  tau_git_cache_fallbacks_total: 'OB4',
-  tau_git_spills_total: 'OB4',
-  tau_git_members: 'OB4',
-};
+const awaitingPanel: Readonly<Record<string, string>> = {};
 
 /**
  * Storage-family labels that still admit any string, as `metric: { label: 'package that bounds it' }`.
@@ -876,9 +809,17 @@ const lokiSources = (root: string): LokiSource[] => [
  * T32 (FR-27, FR-28): Tau Cloud rewrites exactly `service_name=~"$service"` (dashboards) and
  * `service_name="tau-api"` (alerts) to the environment's `fly_app_name`, and refuses at plan an alert
  * selector without it, so every Loki selector is written exactly so and none names `fly_app_name`.
- * Every Prometheus rule selector carries `service_name="tau-api"`, so a second exporter cannot match;
- * Grafana's own `grafana_*` series are not the API's.
+ * Every Prometheus rule selector carries the `service_name` of the app it binds (binding contract v2:
+ * `app=~".*"` is `tau-api`, `app=~".*storage.*"` is `tau-storage`, `app=~".*mirror.*"` is `tau-mirror`), so
+ * a second exporter in that app cannot match. Grafana's own `grafana_*` series and Fly's platform `fly_*`
+ * series carry no `service_name`; the `app` matcher alone binds them.
  */
+const ruleServices: Readonly<Record<string, string>> = {
+  [appPlaceholders.rule.api]: appNames.api,
+  [appPlaceholders.rule.storage]: appNames.storage,
+  [appPlaceholders.rule.mirror]: appNames.mirror,
+};
+
 const selectorSourceProblems = (root: string): string[] => [
   ...lokiSources(root).flatMap(({ file, query, where }) => {
     const expected = where === 'dashboard' ? 'service_name=~"$service"' : 'service_name="tau-api"';
@@ -894,16 +835,24 @@ const selectorSourceProblems = (root: string): string[] => [
     .flatMap(({ query, file }) =>
       [...query.matchAll(/(?<metric>[A-Za-z_:][\w:]*)?\s*\{(?<body>[^{}]*)\}/gu)]
         .filter(({ groups }) => !(groups?.['metric'] ?? '').startsWith('grafana_'))
-        .filter(
-          ({ groups }) =>
-            !selectorMatchers(groups?.['body'] ?? '').some(
-              ({ label, op, value }) => label === 'service_name' && op === '=' && value === 'tau-api',
-            ),
-        )
-        .map(
-          ({ groups }) =>
-            `${file}: ${groups?.['metric'] ?? ''}{${groups?.['body'] ?? ''}} lacks service_name="tau-api"`,
-        ),
+        .flatMap(({ groups }) => {
+          const matchers = selectorMatchers(groups?.['body'] ?? '');
+          if ((groups?.['metric'] ?? '').startsWith('fly_')) {
+            // Fly's series carry no service_name, so the app placeholder alone keeps one app's Machines.
+            const apps = matchers.filter(({ label }) => label === 'app');
+            const placeholders: readonly string[] = Object.values(appPlaceholders.rule);
+            return apps.length === 1 && apps[0]!.op === '=~' && placeholders.includes(apps[0]!.value)
+              ? []
+              : [
+                  `${file}: ${groups?.['metric'] ?? ''}{${groups?.['body'] ?? ''}} needs exactly one app matcher from ${placeholders.map((value) => `app=~"${value}"`).join(', ')}`,
+                ];
+          }
+          const app = matchers.find(({ label, op }) => label === 'app' && op === '=~');
+          const service = ruleServices[app?.value ?? appPlaceholders.rule.api] ?? appNames.api;
+          return matchers.some(({ label, op, value }) => label === 'service_name' && op === '=' && value === service)
+            ? []
+            : [`${file}: ${groups?.['metric'] ?? ''}{${groups?.['body'] ?? ''}} lacks service_name="${service}"`];
+        }),
     ),
 ];
 
@@ -982,6 +931,8 @@ describe('Runtime observability dashboards and rules (T13, T32)', () => {
       'alerts/runtime-unbound.json: Loki selector {service_name=~"$service"} must be exactly {service_name="tau-api"}',
       "dashboards/runtime-product.json: names fly_app_name, which bypasses Tau Cloud's rewrite",
       'alerts/runtime-unbound.json: tau_telemetry_ingest_entries_total{app=~".*",disposition="recorded"} lacks service_name="tau-api"',
+      'alerts/runtime-unbound.json: tau_mirror_copy_lag_seconds{app=~".*mirror.*",service_name="tau-api"} lacks service_name="tau-mirror"',
+      'alerts/runtime-unbound.json: fly_instance_up{} needs exactly one app matcher from app=~".*", app=~".*storage.*", app=~".*mirror.*"',
     ]);
     expect(populationProblems(path.join(seeded, 'dashboards/runtime-product.json'))).toEqual([
       'population must default to signed-in (has "$__all")',
@@ -994,7 +945,7 @@ describe('Runtime observability dashboards and rules (T13, T32)', () => {
     expect(rulesIn(grafanaRoot).some(({ rule }) => rule.uid === 'telemetry-runtime-absent')).toBe(true);
   });
 
-  it('should write every Loki selector as Tau Cloud rewrites it and pin every rule to the API exporter', () => {
+  it('should write every Loki selector as Tau Cloud rewrites it and pin every rule to its app exporter', () => {
     expect(selectorSourceProblems(grafanaRoot)).toEqual([]);
   });
 

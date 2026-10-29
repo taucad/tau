@@ -1253,7 +1253,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
     });
     const panel = document.createElement('details');
     panel.className =
-      'pointer-events-auto absolute top-2 left-2 z-10 max-w-sm rounded-sm bg-background p-2 text-xs text-foreground';
+      'pointer-events-auto absolute top-10 left-2 z-10 max-w-sm rounded-sm bg-background p-2 text-xs text-foreground';
     const heading = document.createElement('summary');
     heading.textContent = 'Renderer diagnostics';
     const output = document.createElement('output');

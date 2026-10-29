@@ -338,7 +338,7 @@ export const billableModelRequestSchema = z
                   name: z.string().min(1).max(128),
                   description: z.string().max(4096).optional(),
                   parameters: z.record(z.string(), z.unknown()),
-                  strict: z.literal(false),
+                  strict: z.literal(false).optional(),
                 })
                 .strict(),
             })
@@ -556,7 +556,7 @@ const completionsWireSchema = z
                 name: z.string(),
                 description: z.string().optional(),
                 parameters: z.record(z.string(), z.unknown()),
-                strict: z.literal(false),
+                strict: z.literal(false).optional(),
               })
               .strict(),
           })

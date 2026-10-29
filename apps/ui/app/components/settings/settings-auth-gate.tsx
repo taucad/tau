@@ -35,7 +35,7 @@ export function SettingsAuthGate({ children }: { readonly children: React.ReactN
         </div>
         <Button asChild>
           <NavLink to={signIn} tabIndex={-1}>
-            {({ isPending: isNavigating }) => (isNavigating ? <Loader /> : 'Sign In')}
+            {({ isPending: isNavigating }) => (isNavigating ? <Loader /> : 'Sign in')}
           </NavLink>
         </Button>
       </div>

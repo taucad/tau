@@ -99,13 +99,15 @@ export function MagicLinkVerify({ className }: MagicLinkVerifyProps): React.JSX.
         </div>
 
         <CardTitle className='text-xl font-semibold'>
-          {status === 'verified'
-            ? 'Magic link verified'
-            : status === 'verifying'
-              ? 'Verifying your magic link'
-              : status === 'missing-token'
-                ? 'Magic link is missing'
-                : "We couldn't verify your magic link"}
+          <h1>
+            {status === 'verified'
+              ? 'Magic link verified'
+              : status === 'verifying'
+                ? 'Verifying your magic link'
+                : status === 'missing-token'
+                  ? 'Magic link is missing'
+                  : "We couldn't verify your magic link"}
+          </h1>
         </CardTitle>
 
         <CardDescription>

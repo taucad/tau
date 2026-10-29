@@ -62,6 +62,7 @@ export type {
   RevisionPushRef,
   RevisionPushRefResult,
   RevisionPushResult,
+  RevisionPushSession,
   RevisionRef,
   RevisionTag,
   UpdateRevisionRefInput,

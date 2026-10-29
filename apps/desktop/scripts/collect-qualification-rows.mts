@@ -7,6 +7,8 @@ import { parseDesktopAcceptanceReceipt, parseDesktopArtifactManifest } from '#sh
 import type { DesktopAcceptanceReceipt } from '#shared/desktop-release.js';
 /* oxlint-disable no-restricted-imports -- Share the installed runner's trusted source admission and the publication gate's exact Mac-only candidate shape. */
 import { desktopCandidateRoutes } from './desktop-route-publication.mjs';
+import { fetchInstallerCandidate } from './fetch-desktop-installer-candidate.mjs';
+import { usesQualificationBinding, createQualificationBinding } from './qualification-binding.mjs';
 import { assertQualificationSource } from './qualification-candidates.mjs';
 /* oxlint-enable no-restricted-imports */
 
@@ -21,14 +23,14 @@ const rows = [
   ['debian-apt-x11', 'linux-apt', 'linux-x64'],
   ['debian-appimage-x11', 'linux-appimage', 'linux-x64'],
 ] as const;
-const scopes = ['all', 'linux', 'macos'] as const;
+const scopes = ['all', 'linux', 'macos', 'windows'] as const;
 type QualificationScope = (typeof scopes)[number];
 /** Rows each explicit scope must produce; a scoped run can neither omit nor add another platform's host. */
 const scopeRows = (scope: QualificationScope) =>
-  scope === 'all' ? rows : rows.filter(([, route]) => route.startsWith(scope === 'linux' ? 'linux-' : 'macos-'));
+  scope === 'all' ? rows : rows.filter(([, route]) => route.startsWith(`${scope}-`));
 const inputSchema = z.strictObject({
   scope: z.enum(scopes).default('all'),
-  /** `vm` collects clean-host acceptance rows from the Mac-only staging producer; never inferred from receipts. */
+  /** `vm` collects clean-host acceptance rows from the Mac- or Windows-scoped staging producer; never inferred from receipts. */
   kind: z.enum(['ci', 'vm']).default('ci'),
   candidate: z.unknown(),
   sourceCommit: z.string().regex(/^[a-f\d]{40}$/u),
@@ -69,8 +71,11 @@ export const collectQualificationRows = (
   if (request.scope !== 'all' && manifest.channel !== 'staging') {
     throw new Error('Platform-scoped evidence is staging qualification only');
   }
-  if (request.kind === 'vm' && (request.scope !== 'macos' || manifest.channel !== 'staging')) {
-    throw new Error('Clean-host receipts come only from the Mac-scoped staging producer');
+  if (request.kind === 'vm' && (!['macos', 'windows'].includes(request.scope) || manifest.channel !== 'staging')) {
+    throw new Error('Clean-host receipts come only from a Mac- or Windows-scoped staging producer');
+  }
+  if (request.scope === 'windows' && request.kind !== 'vm') {
+    throw new Error('Windows scope requires consumer VM evidence');
   }
   if (request.scope === 'macos') {
     // The final candidate must be exactly the Mac-only candidate that publication will later admit.
@@ -133,30 +138,41 @@ const main = async (): Promise<void> => {
   if (JSON.stringify([...directories].sort()) !== JSON.stringify(expected)) {
     throw new Error('Qualification artifact directories differ from the complete host matrix');
   }
+  const kind = z.enum(['ci', 'vm']).parse(process.env['TAU_DESKTOP_ACCEPTANCE_KIND'] ?? 'ci');
+  const candidateProvenance =
+    kind === 'ci'
+      ? await fetchInstallerCandidate({
+          runId: required('TAU_INSTALLER_CANDIDATE_RUN_ID'),
+          workflowCommit: required('GITHUB_SHA'),
+          scope,
+          directory: 'out/qualification-candidate',
+        })
+      : undefined;
   const candidate = parseDesktopArtifactManifest(await readJson('out/qualification-candidate/desktop-artifacts.json'));
   assertQualificationSource({
     sourceCommit: candidate.sourceCommit,
     workflowCommit: required('GITHUB_SHA'),
     scope,
     channel: required('TAU_QUALIFICATION_CHANNEL'),
+    kind,
   });
   const result = collectQualificationRows({
     scope,
-    kind: z.enum(['ci', 'vm']).parse(process.env['TAU_DESKTOP_ACCEPTANCE_KIND'] ?? 'ci'),
+    kind,
     candidate,
     sourceCommit: candidate.sourceCommit,
     channel: required('TAU_QUALIFICATION_CHANNEL'),
     runId: required('GITHUB_RUN_ID'),
     // Only the selected platforms' protected identities are read; a Mac-only run needs no Linux or Windows trust.
     trustIdentities: {
-      ...(scope === 'linux'
+      ...(scope === 'linux' || scope === 'windows'
         ? {}
         : {
             'macos-zip': required('APPLE_TEAM_ID'),
             'macos-dmg': required('APPLE_TEAM_ID'),
           }),
-      ...(scope === 'all' ? { 'windows-nsis': required('TAU_WINDOWS_PUBLISHER') } : {}),
-      ...(scope === 'macos'
+      ...(scope === 'all' || scope === 'windows' ? { 'windows-nsis': required('TAU_WINDOWS_PUBLISHER') } : {}),
+      ...(scope === 'macos' || scope === 'windows'
         ? {}
         : {
             'linux-apt': `${required('TAU_APT_PRIMARY_FINGERPRINT')}/${required('TAU_APT_SIGNING_FINGERPRINT')}`,
@@ -171,6 +187,18 @@ const main = async (): Promise<void> => {
     ),
   });
   await mkdir('out/qualification-receipts', { recursive: false });
+  if (usesQualificationBinding(scope, candidate.channel, kind)) {
+    if (!candidateProvenance) {
+      throw new Error('Missing authenticated CI candidate');
+    }
+    const binding = createQualificationBinding({
+      manifest: candidate,
+      candidate: candidateProvenance,
+      workflowCommit: required('GITHUB_SHA'),
+      runId: Number(required('GITHUB_RUN_ID')),
+    });
+    await writeFile('out/qualification-receipts/qualification-binding.json', JSON.stringify(binding), { flag: 'wx' });
+  }
   await writeFile('out/qualification-receipts/host-matrix.json', JSON.stringify(result.hostMatrix, undefined, 2), {
     flag: 'wx',
   });

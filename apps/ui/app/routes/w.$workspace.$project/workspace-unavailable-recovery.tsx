@@ -109,7 +109,7 @@ export function WorkspaceUnavailableRecovery({
       await projectManager.refreshWorkspaceCatalog();
       toast.success(`Connected workspace "${connected.workspace.name}"`);
     } catch (error) {
-      telemetry.workspaceOpenFailed({ workspaceId, reason: 'unknown' });
+      telemetry.workspaceOpenFailed({ workspaceId, reason: 'unknown', error });
       toast.error('Failed to connect workspace.');
       throw error;
     } finally {
@@ -139,7 +139,7 @@ export function WorkspaceUnavailableRecovery({
         telemetry.workspaceOpenFailed({ workspaceId, reason: 'aborted' });
         return;
       }
-      telemetry.workspaceOpenFailed({ workspaceId, reason: 'unknown' });
+      telemetry.workspaceOpenFailed({ workspaceId, reason: 'unknown', error });
       toast.error(
         isWorkspaceIdentityConflictError(error) ? workspaceIdentityConflictCopy : 'Failed to reconnect workspace.',
       );

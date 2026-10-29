@@ -105,6 +105,65 @@ describe('fetchVerified', () => {
     expect(transport).toHaveBeenCalledTimes(3);
   });
 
+  it('should retain only nested and aggregate transport codes after three attempts', async () => {
+    const failure = new TypeError('secret URL https://user:password@example.test', {
+      cause: new AggregateError(
+        [
+          Object.assign(new Error('address 192.0.2.1'), { code: 'ETIMEDOUT' }),
+          Object.assign(new Error('address 2001:db8::1'), { code: 'ENETUNREACH' }),
+        ],
+        'private aggregate',
+      ),
+    });
+    const fail = (): never => {
+      throw failure;
+    };
+    const { transport } = scriptedFetch(fail, fail, fail);
+    const outcome = fetchVerified({ url, integrity, fetch: transport, signal: new AbortController().signal });
+    await expect(outcome).rejects.toMatchObject({
+      reason: 'transport',
+      detail: 'Transport attempt 3/3; codes: ETIMEDOUT, ENETUNREACH',
+      cause: { message: 'Transport attempt 3/3; codes: ETIMEDOUT, ENETUNREACH' },
+    });
+    expect(transport).toHaveBeenCalledTimes(3);
+  });
+
+  it('should bound cyclic aggregate diagnostics without reading getters or untrusted messages', async () => {
+    const getter = vi.fn(() => {
+      throw new Error('must not inspect');
+    });
+    const cyclic = Object.assign(new Error('private'), {
+      code: 'ECONNRESET',
+      cause: undefined as unknown,
+      errors: new Array<unknown>(),
+    });
+    cyclic.cause = cyclic;
+    cyclic.errors = Array.from({ length: 1000 }, () => ({ code: 'SECRET_TOKEN' }));
+    cyclic.errors.push({ code: 'EPIPE' });
+    Object.defineProperty(cyclic, 'message', { get: getter });
+    Object.defineProperty(cyclic.errors, '0', { get: getter });
+    const fail = (): never => {
+      throw cyclic;
+    };
+    const { transport } = scriptedFetch(fail, fail, fail);
+    await expect(
+      fetchVerified({ url, integrity, fetch: transport, signal: new AbortController().signal }),
+    ).rejects.toMatchObject({ detail: 'Transport attempt 3/3; codes: ECONNRESET' });
+    expect(getter).not.toHaveBeenCalled();
+  });
+
+  it('should tolerate a revoked aggregate proxy and omit unknown codes', async () => {
+    const proxy = Proxy.revocable([], {});
+    proxy.revoke();
+    const fail = (): never => {
+      throw Object.assign(new Error('private'), { code: 'TOKEN', errors: proxy.proxy });
+    };
+    const { transport } = scriptedFetch(fail, fail, fail);
+    await expect(
+      fetchVerified({ url, integrity, fetch: transport, signal: new AbortController().signal }),
+    ).rejects.toMatchObject({ detail: 'Transport attempt 3/3; codes: unknown' });
+  });
+
   it('should not retry a 404 and report the status', async () => {
     const { transport } = scriptedFetch(() => new Response('missing', { status: 404 }));
 

@@ -46,6 +46,7 @@ export default flatRoutes({
     // Server proxies and resource routes: the daemon serves static files and
     // an SPA fallback, and nothing else.
     '../../app/routes/api.ph.$/**',
+    '../../app/routes/api.monitoring/**',
     '../../app/routes/assets.$/**',
     '../../app/routes/health.build.ts',
     '../../app/routes/health.live.ts',

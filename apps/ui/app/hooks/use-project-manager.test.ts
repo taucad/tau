@@ -1587,6 +1587,76 @@ describe('useProjectManager.createProject', () => {
       ).rejects.toThrow('This folder no longer holds that project.');
     });
 
+    /* PG-PROJ-5: a copy scanned before its identity file arrived was minted its own id and route; once the copy
+       finished it carries the original's id, so that route is stale and must go before this folder is chosen. */
+    it('retires a stale route to the chosen folder so choosing it cannot collide with its own route', async () => {
+      const staleId = 'proj_sssssssssssssssssssss';
+      const configs = new Map<string, ProjectFileSystemConfig>([
+        [fakeProject.id, boundToOriginal],
+        [staleId, { projectId: staleId, backend: 'opfs', providerBasePath: copyLocator.relativeDirectory }],
+      ]);
+      mockGetAllProjectFileSystemConfigs.mockImplementation(async () => [...configs.values()]);
+      mockSetProjectFileSystemConfig.mockImplementation(async (config: ProjectFileSystemConfig) => {
+        configs.set(config.projectId, config);
+      });
+      mockDeleteProjectFileSystemConfig.mockImplementationOnce(async (projectId: string) => {
+        configs.delete(projectId);
+      });
+      mockListProjectManifests.mockResolvedValue({
+        roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+        entries: [
+          {
+            status: 'duplicate-id',
+            projectId: fakeProject.id,
+            manifest: projectToManifest(fakeProject),
+            locator: fakeLocator,
+          },
+          {
+            status: 'duplicate-id',
+            projectId: fakeProject.id,
+            manifest: projectToManifest(fakeProject),
+            locator: copyLocator,
+          },
+        ],
+      });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await result.current.chooseProjectDirectory(copyLocator, fakeProject.id);
+
+      expect(mockDeleteProjectResources).toHaveBeenCalledWith(staleId);
+      // One route per physical directory, which is what the workspace service admits.
+      expect([...configs.values()]).toEqual([
+        { projectId: fakeProject.id, backend: 'opfs', providerBasePath: copyLocator.relativeDirectory },
+      ]);
+    });
+
+    it('keeps a route whose directory carries its own identity, or none it can read', async () => {
+      const unreadableLocator: ProjectLocator = { ...fakeLocator, relativeDirectory: 'unreadable' };
+      const unreadableId = 'proj_uuuuuuuuuuuuuuuuuuuuu';
+      mockGetAllProjectFileSystemConfigs.mockResolvedValue([
+        boundToOriginal,
+        { projectId: unreadableId, backend: 'opfs', providerBasePath: unreadableLocator.relativeDirectory },
+      ]);
+      mockListProjectManifests.mockResolvedValue({
+        roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+        entries: [
+          {
+            status: 'valid',
+            projectId: fakeProject.id,
+            manifest: projectToManifest(fakeProject),
+            locator: fakeLocator,
+          },
+          { status: 'invalid', locator: unreadableLocator, issue: { code: 'identity-unavailable', message: 'busy' } },
+        ],
+      });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await result.current.getProjectListing();
+
+      expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
+      expect(mockDeleteProjectResources).not.toHaveBeenCalled();
+    });
+
     it('restores the id a route last bound when adopting its identity-less directory', async () => {
       mockGetAllProjectFileSystemConfigs.mockResolvedValue([boundToOriginal]);
       mockListProjectManifests.mockResolvedValue({

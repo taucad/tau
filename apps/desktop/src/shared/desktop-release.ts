@@ -231,6 +231,43 @@ const macosCleanHostReceiptSchema = z.strictObject({
   launch: z.literal('open'),
 });
 
+/** Windows consumer facts remain separate from hosted-CI and Mac clean-host evidence. */
+const windowsConsumerReceiptSchema = z.strictObject({
+  platform: z.literal('win32'),
+  runner: z.string().min(1),
+  nativeArch: z.literal('x64'),
+  osBuild: z.number().int().min(22_000),
+  account: z.literal('standard-user'),
+  uac: z.literal('enabled'),
+  defender: z.literal('enabled'),
+  download: z.literal('browser-internet-zone'),
+  // This producer uses exact candidate bytes on its temporary mirror, not a public-origin reputation test.
+  reputationScope: z.literal('qualification-mirror'),
+  manualEvidence: z
+    .array(
+      z.strictObject({
+        stage: z.enum(['initial', 'reinstall']),
+        nonce: z.uuid(),
+        artifactSha256: digestSchema,
+        hostSha256: digestSchema,
+        observedAt: z.number().positive(),
+        smartScreen: z.enum(['not-shown', 'warning-approved']),
+        screenshots: z
+          .array(
+            z.strictObject({
+              kind: z.enum(['security-settings', 'installer-result', 'smart-screen']),
+              name: z.string().regex(/^[a-zA-Z0-9_-]+\.(?:png|jpg)$/u),
+              capturedAt: z.number().positive(),
+              sha256: digestSchema,
+              size: z.number().int().positive(),
+            }),
+          )
+          .min(2),
+      }),
+    )
+    .length(2),
+});
+
 const receiptSchema = z.strictObject({
   schemaVersion: z.literal(1),
   status: z.literal('passed'),
@@ -248,7 +285,7 @@ const receiptSchema = z.strictObject({
     arch: z.enum(['arm64', 'x64']),
     kind: z.enum(['ci', 'vm']),
     sandbox: z.literal('enabled'),
-    host: macosCleanHostReceiptSchema.optional(),
+    host: z.discriminatedUnion('platform', [macosCleanHostReceiptSchema, windowsConsumerReceiptSchema]).optional(),
   }),
   trust: z.strictObject({ kind: z.enum(['test', 'release']), identity: z.string().min(1) }),
   checks: z.strictObject({ cleanInstall: z.literal(true), upgrade: z.literal(true), dataPreserved: z.literal(true) }),
@@ -272,12 +309,32 @@ export const parseDesktopAcceptanceReceipt = (input: unknown, candidate: unknown
     throw new TypeError('Acceptance receipt identity disagrees with candidate');
   }
   const { host } = receipt.environment;
-  // A Mac clean-host receipt must carry its observed host facts; CI receipts and other platforms never claim them.
+  // Each supported consumer platform requires its own facts; CI receipts never claim them.
   if (
-    (receipt.environment.kind === 'vm' && receipt.target.startsWith('darwin-') && !host) ||
-    (host && (receipt.environment.kind !== 'vm' || `darwin-${host.nativeArch}` !== receipt.target))
+    (receipt.environment.kind === 'vm' &&
+      (receipt.target.startsWith('darwin-') || receipt.target === 'win32-x64') &&
+      !host) ||
+    (host && (receipt.environment.kind !== 'vm' || `${host.platform}-${host.nativeArch}` !== receipt.target))
   ) {
     throw new TypeError('Clean-host receipt facts disagree with its environment');
+  }
+  if (
+    host?.platform === 'win32' &&
+    (receipt.route !== 'windows-nsis' ||
+      host.manualEvidence[0]?.stage !== 'initial' ||
+      host.manualEvidence[1]?.stage !== 'reinstall' ||
+      host.manualEvidence[0].artifactSha256 !== receipt.baseline.artifactSha256 ||
+      !receipt.artifacts.some((entry) => entry.sha256 === host.manualEvidence[1]?.artifactSha256) ||
+      host.manualEvidence[0].nonce !== host.manualEvidence[1].nonce ||
+      host.manualEvidence[0].hostSha256 !== host.manualEvidence[1].hostSha256 ||
+      host.manualEvidence.some(
+        (entry) =>
+          !['security-settings', 'installer-result'].every((kind) =>
+            entry.screenshots.some((screenshot) => screenshot.kind === kind),
+          ),
+      ))
+  ) {
+    throw new TypeError('Windows consumer manual evidence disagrees with its candidate or run');
   }
   const baseline = receipt.baseline.version.split('.').map(Number);
   const next = receipt.version.split('.').map(Number);

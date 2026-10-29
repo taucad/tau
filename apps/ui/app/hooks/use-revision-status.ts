@@ -55,6 +55,7 @@ import type { GithubProjectBinding } from '#lib/github-project-binding.js';
 import type { AgentChannelClient, JsonValue } from '@taucad/agent-host';
 import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import { reportRevisionToast } from '#lib/revision-failure-reporting.js';
 
 /** One project's live connection to its revision root. @public */
 export type RevisionClient = Readonly<{
@@ -234,6 +235,8 @@ export const createHostRevisionClient = (input: {
     name: 'HostRevisionClientEvents',
   });
   const toasts = new Topic<RevisionToast>({ name: 'HostRevisionClientToasts' });
+  // SB4: every client's error toasts reach error reporting, whichever page surface shows them.
+  toasts.subscribe(reportRevisionToast);
   const projectedChatIds = new Set<string>();
   let status: RevisionStatusProjection | undefined;
   let channel: AgentChannelClient | undefined;
@@ -996,6 +999,8 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
     name: 'RevisionClientEvents',
   });
   const toasts = new Topic<RevisionToast>({ name: 'RevisionClientToasts' });
+  // SB4: every client's error toasts reach error reporting, whichever page surface shows them.
+  toasts.subscribe(reportRevisionToast);
   const projectedChatIds = new Set<string>();
   const pending = new Map<number, PromiseWithResolvers<WorkerRevisionResult>>();
   let status: RevisionStatusProjection | undefined;

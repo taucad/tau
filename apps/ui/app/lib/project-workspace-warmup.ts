@@ -1,17 +1,10 @@
-import { warmMonaco } from '#lib/monaco-warmup.js';
-import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
-
 let isWarming = false;
 
-/** Start the workspace and editor imports when a project link shows intent. */
+/** Start the workspace shell import when a project link shows intent. */
 export const warmProjectWorkspace = (): void => {
   // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- absent during SSR
   if (globalThis.window === undefined) {
     return;
-  }
-  /* B-16: a phone opens on the Model tab; the Editor tab configures Monaco when it is opened. */
-  if (!isMemoryConstrainedDevice()) {
-    warmMonaco();
   }
   if (isWarming) {
     return;

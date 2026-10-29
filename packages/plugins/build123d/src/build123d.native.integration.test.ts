@@ -341,14 +341,29 @@ def main(params):
     180_000,
   );
 
-  it('should round-trip all 34 native planetary STEP solids and their placements', async () => {
+  it('should round-trip all 34 native planetary STEP solids and their placements', async ({
+    annotate,
+    onTestFailed,
+  }) => {
+    const started = performance.now();
+    /** Phase start offsets in milliseconds. */
+    const phases: Array<{ phase: string; elapsed: number }> = [];
+    const mark = (phase: string): void => {
+      phases.push({ phase, elapsed: Math.round(performance.now() - started) });
+    };
+    onTestFailed(async () => {
+      await annotate(JSON.stringify({ phases, elapsed: Math.round(performance.now() - started) }), 'native-round-trip');
+    });
+    mark('create-client');
     const client = createTestRuntimeClient({
       runtime,
       files: { 'main.py': planetarySource },
     });
     const document = client.open({ source: { path: 'main.py' } });
     try {
+      mark('export-step');
       const step = await document.export('step');
+      mark('export-complete');
       assert.ok(step.success);
       const restored = client.open({
         source: {
@@ -403,7 +418,9 @@ def main(params):
         },
       });
       try {
+        mark('render-restored-and-compare-native-shapes');
         const outcome = await restored.view('model').rendering();
+        mark('render-complete');
         expect(outcome.superseded).toBe(false);
         if (outcome.superseded) {
           throw new Error('STEP reimport was superseded');
@@ -413,11 +430,14 @@ def main(params):
         assert.ok(restoredBytes);
         expect(readTopology(restoredBytes).payload.components.filter(({ kind }) => kind === 'part')).toHaveLength(34);
       } finally {
+        mark('close-restored');
         restored.close();
       }
     } finally {
+      mark('shutdown-client');
       document.close();
       await client.shutdown();
+      mark('shutdown-complete');
     }
   }, 180_000);
 

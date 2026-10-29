@@ -19,8 +19,8 @@ import {
 import type { RecordFile } from '#support/chat-attachments.js';
 
 const source = 'public/models/honeycomb.js';
-const editor = () => selectors.getByCss('.monaco-editor:visible').last();
-const lines = () => editor().getByCss('.view-lines');
+const editor = () => selectors.getByCss('.cm-editor:visible').last();
+const lines = () => editor().getByCss('.cm-content');
 const visibleEditorText = async (): Promise<string | undefined> => {
   const text = await target.textContent(lines());
   return text?.replaceAll('\u00A0', ' ');
@@ -34,10 +34,10 @@ afterEach(async (context) => {
     active: document.activeElement
       ? { tag: document.activeElement.tagName, className: document.activeElement.className }
       : undefined,
-    editors: [...document.querySelectorAll('.monaco-editor')].slice(0, 4).map((element) => ({
+    editors: [...document.querySelectorAll('.cm-editor')].slice(0, 4).map((element) => ({
       rect: { width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height },
-      visibleLines: element.querySelector('.view-lines')?.textContent.slice(0, 4096),
-      input: element.querySelector('.native-edit-context, textarea.inputarea')?.outerHTML.slice(0, 1024),
+      visibleLines: element.querySelector('.cm-content')?.textContent.slice(0, 4096),
+      input: element.querySelector('.cm-content[contenteditable="true"]')?.outerHTML.slice(0, 1024),
     })),
     statuses: [...document.querySelectorAll('[role="status"], [role="alert"], [role="dialog"]')]
       .slice(0, 8)
@@ -85,14 +85,14 @@ const captureObservationPrecondition = async (stage: string, config: StoredProje
               : {}),
           }
         : null,
-      editors: [...document.querySelectorAll('.monaco-editor')].slice(0, 4).map((element) => ({
+      editors: [...document.querySelectorAll('.cm-editor')].slice(0, 4).map((element) => ({
         width: element.getBoundingClientRect().width,
         height: element.getBoundingClientRect().height,
         scrollTop: element.scrollTop,
         scrollLeft: element.scrollLeft,
         scrollHeight: element.scrollHeight,
         scrollWidth: element.scrollWidth,
-        text: element.querySelector('.view-lines')?.textContent.slice(0, 4096),
+        text: element.querySelector('.cm-content')?.textContent.slice(0, 4096),
         cursors: [...element.querySelectorAll('.cursor')].slice(0, 4).map((cursor) => ({
           top: cursor.getBoundingClientRect().top,
           left: cursor.getBoundingClientRect().left,
@@ -100,7 +100,7 @@ const captureObservationPrecondition = async (stage: string, config: StoredProje
           height: cursor.getBoundingClientRect().height,
         })),
       })),
-      editorClickTargets: [...document.querySelectorAll('.monaco-editor .view-lines')].slice(0, 4).map((element) => {
+      editorClickTargets: [...document.querySelectorAll('.cm-editor .cm-content')].slice(0, 4).map((element) => {
         const rect = element.getBoundingClientRect();
         const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
         return {
@@ -253,12 +253,12 @@ test('keeps the actual editor mounted through watch closure and acknowledged aut
     await writeProjectionProjectFile(config, source, `// external retry observation\n${original}`);
     await controlWorkbenchObservation('hold', source);
     await target.click(selectors.getByRole('button', { name: 'Retry file updates', exact: true }));
-    await target.expectCount(selectors.getByCss('.monaco-editor[data-observation-retained="yes"]'), 1);
+    await target.expectCount(selectors.getByCss('.cm-editor[data-observation-retained="yes"]'), 1);
     const acquiredValue4 = await visibleEditorText();
     expect(acquiredValue4).toContain('external first observation');
     await controlWorkbenchObservation('release', source);
     await expect.poll(async () => visibleEditorText(), { timeout: 30_000 }).toContain('external retry observation');
-    await target.expectCount(selectors.getByCss('.monaco-editor[data-observation-retained="yes"]'), 1);
+    await target.expectCount(selectors.getByCss('.cm-editor[data-observation-retained="yes"]'), 1);
     await target.expectCount(selectors.getByText('File updates unavailable', { exact: true }), 0);
   } finally {
     await restoreWorkbenchObservation();
@@ -524,7 +524,7 @@ test('projects independent persistent directory mutations and exposes the browse
   }
 });
 
-test('preserves actual unsaved Monaco bytes through closure and a held acknowledged retry', async () => {
+test('preserves actual unsaved CodeMirror bytes through closure and a held acknowledged retry', async () => {
   const config = await openFixture();
   expect(config.backend).toBe('opfs');
   try {
@@ -543,7 +543,7 @@ test('preserves actual unsaved Monaco bytes through closure and a held acknowled
       }
       await hold(path);
     }, source);
-    // Match the existing revision-session fixture: activate Monaco through its rendered source, then real keyboard gestures.
+    // Activate CodeMirror through its rendered source, then use real keyboard gestures.
     try {
       await target.click(lines());
     } catch (error) {
@@ -697,7 +697,7 @@ test('acknowledges the mounted FileSelector directory and retries its isolated w
       const peerTab = selectors.getByCss(`.dv-tab[aria-label="${peer}"]`);
       await target.expectAttribute(peerTab, 'aria-selected', 'true');
       const peerLines = selectors.getByCss(
-        `.dv-groupview:has(.dv-tab[aria-label="${peer}"]) .monaco-editor:visible .view-lines`,
+        `.dv-groupview:has(.dv-tab[aria-label="${peer}"]) .cm-editor:visible .cm-content`,
       );
       await target.expectVisible(peerLines);
       await expect
@@ -712,14 +712,14 @@ test('acknowledges the mounted FileSelector directory and retries its isolated w
             (element) => element.getAttribute('aria-label') === path,
           );
           const group = tab?.closest('.dv-groupview');
-          const monaco = group?.querySelector<HTMLElement>('.monaco-editor');
-          const pane = monaco?.closest('[data-file-pane-id]');
-          const parent = [...(pane?.children ?? [])].find((element) => monaco && element.contains(monaco));
-          const overflow = monaco?.querySelector('.overflow-guard');
-          const line = monaco?.querySelector('.view-line');
+          const editor = group?.querySelector<HTMLElement>('.cm-editor');
+          const pane = editor?.closest('[data-file-pane-id]');
+          const parent = [...(pane?.children ?? [])].find((element) => editor && element.contains(editor));
+          const scroller = editor?.querySelector('.cm-scroller');
+          const line = editor?.querySelector('.cm-line');
           return {
-            editorHeight: monaco?.getBoundingClientRect().height ?? 0,
-            overflowHeight: overflow?.getBoundingClientRect().height ?? 0,
+            editorHeight: editor?.getBoundingClientRect().height ?? 0,
+            scrollerHeight: scroller?.getBoundingClientRect().height ?? 0,
             parentHeight: parent?.getBoundingClientRect().height ?? 0,
             lineHeight: line?.getBoundingClientRect().height ?? 0,
           };
@@ -732,7 +732,7 @@ test('acknowledges the mounted FileSelector directory and retries its isolated w
             return (
               geometry.lineHeight > 0 &&
               geometry.editorHeight >= geometry.lineHeight * 3 &&
-              geometry.overflowHeight >= geometry.lineHeight * 3 &&
+              geometry.scrollerHeight >= geometry.lineHeight * 3 &&
               geometry.editorHeight <= geometry.parentHeight + 1
             );
           },

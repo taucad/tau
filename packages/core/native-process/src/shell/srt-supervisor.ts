@@ -12,6 +12,7 @@
  * Nothing runs unsandboxed: a missing prerequisite, a seccomp helper the runtime would only warn about, or a vector
  * that does not start the platform's sandbox is answered as `unavailable`.
  */
+import { accessSync, constants } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 import { SandboxManager } from '@anthropic-ai/sandbox-runtime';
@@ -83,6 +84,9 @@ const prepare = async (job: SupervisorJob): Promise<SupervisorReply> => {
   const fatal = [...dependencies.errors, ...dependencies.warnings.filter((warning) => /seccomp/iu.test(warning))];
   if (fatal.length > 0) {
     return { status: 'unavailable', message: fatal.join('; ') };
+  }
+  if (profile.seccomp?.applyPath) {
+    accessSync(profile.seccomp.applyPath, constants.X_OK);
   }
   if (job.guard) {
     guard = await startGuardProxy();

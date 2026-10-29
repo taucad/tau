@@ -143,7 +143,14 @@ describe('TelemetryController', () => {
           {
             name: IngestEntryName.SYNC_ATTEMPT,
             duration: 120,
-            detail: { direction: 'push', outcome: 'ok', placement: 'browser', lagMilliseconds: 2500, pending: 3 },
+            detail: {
+              direction: 'push',
+              outcome: 'ok',
+              placement: 'browser',
+              lagMilliseconds: 2500,
+              lagSince: 'request',
+              pending: 3,
+            },
           },
           {
             name: IngestEntryName.SYNC_ATTEMPT,
@@ -169,8 +176,9 @@ describe('TelemetryController', () => {
         [0, { direction: 'pull', outcome: 'offline', 'agent.placement': 'desktop' }],
       ]);
       expect(mockMetrics.syncClientLag.record.mock.calls).toEqual([
-        [2.5, { 'agent.placement': 'browser' }],
-        [86_400, { 'agent.placement': 'daemon' }],
+        [2.5, { 'agent.placement': 'browser', 'sync.lag.since': 'request' }],
+        /* A client that predates `lagSince` dated its lag from a change. */
+        [86_400, { 'agent.placement': 'daemon', 'sync.lag.since': 'change' }],
       ]);
       expect(mockMetrics.syncClientPending.record.mock.calls).toEqual([
         [3, { 'agent.placement': 'browser' }],
@@ -459,6 +467,10 @@ describe('TelemetryController', () => {
       ['an unknown placement', { direction: 'push', outcome: 'ok', placement: 'mars' }],
       ['a fractional queue depth', { direction: 'push', outcome: 'ok', placement: 'browser', pending: 1.5 }],
       ['a negative lag', { direction: 'push', outcome: 'ok', placement: 'browser', lagMilliseconds: -1 }],
+      [
+        'an unknown lag origin',
+        { direction: 'push', outcome: 'ok', placement: 'browser', lagMilliseconds: 1, lagSince: 'mint' },
+      ],
     ])('should reject a sync attempt with %s', (_label, detail) => {
       expect(() =>
         // oxlint-disable-next-line @typescript-eslint/no-unsafe-return -- pipe.transform return type is any from NestJS ValidationPipe

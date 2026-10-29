@@ -43,14 +43,11 @@ const assimpTranscoderOptionsSchema = z
   .object({ backend: z.enum(['auto', 'native', 'wasm']).default('auto') })
   .strict();
 
-const outputName = (name: string, format: TauAssimpRoute['to']): string =>
-  format === 'step' ? name.replace(/\.stp$/u, '.step') : name;
-
 /** Assimp-backed glTF/GLB mesh export transcoder. @public */
 export const assimpTranscoder = defineTranscoder({
   id: 'assimp',
   name: 'AssimpTranscoder',
-  version: '0.1.0',
+  version: '0.1.1',
   edges,
   optionsSchema: assimpTranscoderOptionsSchema,
 
@@ -86,14 +83,11 @@ export const assimpTranscoder = defineTranscoder({
         input.files.map(({ name, bytes }) => ({ name, bytes })),
         options,
       );
-      const output = files.map((file) => {
-        const name = outputName(file.name, input.to);
-        return {
-          name,
-          bytes: new Uint8Array(file.bytes),
-          mimeType: lookupMimeType(name.split('.').pop() ?? ''),
-        };
-      });
+      const output = files.map(({ name, bytes }) => ({
+        name,
+        bytes: new Uint8Array(bytes),
+        mimeType: lookupMimeType(name.split('.').pop() ?? ''),
+      }));
       services.logger.log(`Successfully transcoded to ${input.to}`);
       return { success: true, data: output, issues: [] };
     } catch (error) {
@@ -106,6 +100,6 @@ export const assimpTranscoder = defineTranscoder({
   },
 
   async onDispose(context) {
-    context.assimp.dispose();
+    await context.assimp.dispose();
   },
 });

@@ -1,7 +1,7 @@
 {
   "name": "@taucad/lsp",
   "version": "0.0.1",
-  "description": "Monaco LSP bindings and language filesystem bridge for the web editor",
+  "description": "Language services and rooted filesystem bridges for the source editor",
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
@@ -21,25 +21,20 @@
       "import": "./src/language-fs-sync-host.ts",
       "default": "./src/language-fs-sync-host.ts"
     },
-    "./monaco-lsp-binding": {
-      "types": "./src/monaco-lsp-binding.ts",
-      "import": "./src/monaco-lsp-binding.ts",
-      "default": "./src/monaco-lsp-binding.ts"
+    "./typescript-worker/client": {
+      "types": "./src/typescript-worker/client.ts",
+      "import": "./src/typescript-worker/client.ts",
+      "default": "./src/typescript-worker/client.ts"
     },
-    "./monaco-ts-worker/lsp-diagnostic": {
-      "types": "./src/monaco-ts-worker/lsp-diagnostic.ts",
-      "import": "./src/monaco-ts-worker/lsp-diagnostic.ts",
-      "default": "./src/monaco-ts-worker/lsp-diagnostic.ts"
+    "./typescript-worker/protocol": {
+      "types": "./src/typescript-worker/protocol.ts",
+      "import": "./src/typescript-worker/protocol.ts",
+      "default": "./src/typescript-worker/protocol.ts"
     },
-    "./monaco-ts-worker/tau-sync-ts-worker": {
-      "types": "./src/monaco-ts-worker/tau-sync-ts-worker.ts",
-      "import": "./src/monaco-ts-worker/tau-sync-ts-worker.ts",
-      "default": "./src/monaco-ts-worker/tau-sync-ts-worker.ts"
-    },
-    "./monaco-ts-worker-entry": {
-      "types": "./src/monaco-ts-worker/monaco-ts-worker.entry.ts",
-      "import": "./src/monaco-ts-worker/monaco-ts-worker.entry.ts",
-      "default": "./src/monaco-ts-worker/monaco-ts-worker.entry.ts"
+    "./typescript-worker/typescript-service": {
+      "types": "./src/typescript-worker/typescript-service.ts",
+      "import": "./src/typescript-worker/typescript-service.ts",
+      "default": "./src/typescript-worker/typescript-service.ts"
     }
   },
   "dependencies": {
@@ -49,7 +44,7 @@
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
     "json-rpc-2.0": "^1.7.1",
-    "monaco-editor": "^0.55.1",
+    "typescript": "catalog:",
     "vscode-languageserver-protocol": "^3.18.0",
     "vscode-uri": "catalog:"
   },

@@ -31,7 +31,7 @@ import { stringParameter } from '#utils/search-parameter.codecs.js';
 
 /*
  * D19/W21: the CAD workspace is not in the root layout's module graph. Everything a live project
- * needs — Monaco, three.js, the chat surface — is behind this boundary, which mounts only once a
+ * needs — three.js and the chat surface — is behind this boundary, which mounts only once a
  * project is live. Project links warm it on navigation intent.
  */
 const LiveProjectSessions = lazy(async () => {

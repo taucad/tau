@@ -1,5 +1,5 @@
 /**
- * KCL LSP Client for Monaco Editor.
+ * KCL worker-backed LSP client for the workspace editor.
  *
  * This client:
  * 1. Manages the Web Worker hosting the WASM LSP
@@ -99,6 +99,8 @@ export type KclLspClientOptions = Readonly<{
   onInitialized?: () => void;
   /** Callback for handling notifications (e.g., diagnostics) */
   onNotification?: NotificationHandler;
+  /** Fatal worker transport failure after startup or during initialization. */
+  onError?: (error: Error) => void;
 }>;
 
 /** Narrow read API used by the symbol service for import resolution. */
@@ -115,6 +117,7 @@ export class KclLspClient {
   private serverCapabilities: LSP.ServerCapabilities = {};
   private readonly notificationHandler: NotificationHandler | undefined;
   private isReady = false;
+  private failed = false;
   private nextSymbolRequestId = 0;
   private readonly pendingSymbolRequests = new Map<
     number,
@@ -301,6 +304,13 @@ export class KclLspClient {
     return this.request('textDocument/codeAction', parameters);
   }
 
+  public async executeCommand(parameters: LSP.ExecuteCommandParams): Promise<unknown> {
+    if (!this.serverCapabilities.executeCommandProvider) {
+      return undefined;
+    }
+    return this.request('workspace/executeCommand', parameters);
+  }
+
   /**
    * Parse KCL source on the LSP worker's WASM instance, for the symbol service.
    *
@@ -359,8 +369,11 @@ export class KclLspClient {
     };
 
     this.worker.addEventListener('message', handleWorkerMessage);
-    this.worker.addEventListener('error', (error) => {
-      log.error('Worker error:', error);
+    this.worker.addEventListener('error', (event) => {
+      this.failWorker(new Error(event.message || 'KCL LSP worker failed'));
+    });
+    this.worker.addEventListener('messageerror', () => {
+      this.failWorker(new Error('KCL LSP worker sent an unreadable message'));
     });
 
     const sendRequest = async (request: JSONRPCRequest): Promise<void> => {
@@ -428,12 +441,23 @@ export class KclLspClient {
     this.languageFsServer = undefined;
     this.worker?.terminate();
     this.worker = undefined;
+    this.fromServer?.responses.clear(new Error('KCL LSP client disposed'));
     for (const pending of this.pendingSymbolRequests.values()) {
       pending.reject(new Error('KCL LSP client disposed'));
     }
     this.pendingSymbolRequests.clear();
     this.jsonRpcClient = undefined;
     this.isReady = false;
+  }
+
+  private failWorker(error: Error): void {
+    if (this.failed) {
+      return;
+    }
+    this.failed = true;
+    log.error('Worker error:', error);
+    this.options.onError?.(error);
+    this.dispose();
   }
 
   private async symbolRequest(call: KclSymbolCall): Promise<unknown> {
@@ -501,7 +525,7 @@ export class KclLspClient {
   private async initializeLsp(): Promise<void> {
     const initializeParameters: LSP.InitializeParams = {
       processId: null,
-      clientInfo: { name: 'monaco-kcl-lsp', version: '1.0.0' },
+      clientInfo: { name: 'tau-kcl-lsp', version: '1.0.0' },
       capabilities: clientCapabilities,
       rootUri: null,
       workspaceFolders: null,

@@ -1840,6 +1840,20 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       const occupiedLocators = new Set(
         result.entries.map((entry) => locatorKey(entry.locator.storageRootKey, entry.locator.relativeDirectory)),
       );
+      /* A directory names its own identity. A route still pointing at it under another id is stale (a copy scanned
+       * before its identity file arrived was minted a fresh id, then the copy overwrote it), so it goes: kept, it
+       * would claim the same physical directory as the route that now binds that identity there (PG-PROJ-5). */
+      const identityAtLocator = new Map(
+        result.entries.flatMap((entry) =>
+          'projectId' in entry
+            ? [[locatorKey(entry.locator.storageRootKey, entry.locator.relativeDirectory), entry.projectId] as const]
+            : [],
+        ),
+      );
+      const isOrphanedAt = (locator: string, projectId: string): boolean => {
+        const identity = identityAtLocator.get(locator);
+        return identity === undefined ? !occupiedLocators.has(locator) : identity !== projectId;
+      };
       const orphanCandidates = [...configs.values()];
       // Only the newest epoch may prune: an older snapshot would delete configs
       // a newer pass — or another tab — has already written.
@@ -1858,7 +1872,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           if (
             completeRoots.has(storageRootKey) &&
             !validRoutes.has(`${storageRootKey}\0${config.projectId}`) &&
-            !occupiedLocators.has(locatorKey(storageRootKey, config.providerBasePath)) &&
+            isOrphanedAt(locatorKey(storageRootKey, config.providerBasePath), config.projectId) &&
             !quarantinedLocators.has(locatorKey(storageRootKey, config.providerBasePath))
           ) {
             // Chats, editor layout and library rows are keyed by project id, so

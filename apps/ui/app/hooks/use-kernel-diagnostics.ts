@@ -1,109 +1,15 @@
-/**
- * Kernel Diagnostics Hook
- *
- * Subscribes to kernel issues from the CAD machine and pushes them as
- * Monaco markers through the MonacoMarkerService. Handles all files
- * (not just the active file) and clears stale markers when issues resolve.
- *
- * Also provides handleValidate callback for forwarding Monaco TS markers
- * to the CAD actor (Monaco-to-kernel direction).
- */
-
-import { useCallback, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useSelector } from '@xstate/react';
-import type * as Monaco from 'monaco-editor';
 import type { AnyActorRef } from 'xstate';
-import type { IssueSeverity, KernelStackFrame } from '@taucad/runtime';
-import type { MonacoMarkerService } from '#lib/monaco-marker-service.js';
+import type { IssueSeverity } from '@taucad/runtime';
+import type { CodeIssue } from '@taucad/types';
+import { URI } from 'vscode-uri';
+import type { EditorDocumentSession } from '#lib/editor-document-session.js';
+import type { EditorDiagnostic } from '#lib/editor-diagnostics.js';
 
-const kernelMarkerOwner = 'kernel';
+const kernelOwner = 'kernel';
 
-/**
- * Map IssueSeverity to Monaco MarkerSeverity.
- */
-function getMarkerSeverity(monaco: typeof Monaco, severity: IssueSeverity | undefined): Monaco.MarkerSeverity {
-  switch (severity) {
-    case 'warning': {
-      return monaco.MarkerSeverity.Warning;
-    }
-
-    case 'info': {
-      return monaco.MarkerSeverity.Info;
-    }
-
-    case 'error': {
-      return monaco.MarkerSeverity.Error;
-    }
-
-    default: {
-      return monaco.MarkerSeverity.Error;
-    }
-  }
-}
-
-/**
- * Build Monaco relatedInformation from kernel stack frames.
- * Includes user and library frames that have file/line info, skipping
- * the primary error frame (which is already the marker location).
- */
-function buildRelatedInformation(
-  monaco: typeof Monaco,
-  stackFrames: KernelStackFrame[] | undefined,
-): Monaco.editor.IRelatedInformation[] | undefined {
-  if (!stackFrames || stackFrames.length === 0) {
-    return undefined;
-  }
-
-  // Build related info from visible frames (user + library), skipping the first user frame
-  // (it's the primary marker location). Include subsequent call sites and library frames.
-  let skippedPrimary = false;
-  const related: Monaco.editor.IRelatedInformation[] = [];
-
-  for (const frame of stackFrames) {
-    if (frame.context !== 'user' && frame.context !== 'library') {
-      continue;
-    }
-
-    if (!frame.fileName || !frame.lineNumber) {
-      continue;
-    }
-
-    // Skip the first user frame (it's already the marker location)
-    if (!skippedPrimary && frame.context === 'user') {
-      skippedPrimary = true;
-      continue;
-    }
-
-    const functionLabel = frame.functionName ?? '<anonymous>';
-    const isLibrary = frame.context === 'library';
-    const message = isLibrary
-      ? `${functionLabel} (${frame.fileName}:${frame.lineNumber})`
-      : `called from ${functionLabel}`;
-
-    // For user frames, resolve against Monaco's file:// URI scheme.
-    // Library frames use their display path directly.
-    const resource = isLibrary ? monaco.Uri.parse(`file:///${frame.fileName}`) : monaco.Uri.file(`/${frame.fileName}`);
-
-    related.push({
-      resource,
-      message,
-      startLineNumber: frame.lineNumber,
-      startColumn: frame.columnNumber ?? 1,
-      endLineNumber: frame.lineNumber,
-      endColumn: frame.columnNumber ?? 1,
-    });
-  }
-
-  return related.length > 0 ? related : undefined;
-}
-
-type UseKernelDiagnosticsOptions = {
-  monaco: typeof Monaco | undefined;
-  cadActor: AnyActorRef | undefined;
-  markerService: MonacoMarkerService | undefined;
-};
-
-type KernelDiagnosticsIssue = {
+type KernelIssue = Readonly<{
   message: string;
   location?: {
     fileName: string;
@@ -112,122 +18,138 @@ type KernelDiagnosticsIssue = {
     endLineNumber?: number;
     endColumn?: number;
   };
-  stackFrames?: KernelStackFrame[];
   severity: IssueSeverity;
-};
+}>;
 
-type UseKernelDiagnosticsReturn = {
-  handleValidate: () => void;
-};
+function offsetAt(text: string, line: number, column: number): number {
+  let offset = 0;
+  for (let current = 1; current < line && offset < text.length; current += 1) {
+    const next = text.indexOf('\n', offset);
+    if (next === -1) {
+      return text.length;
+    }
+    offset = next + 1;
+  }
+  const end = text.indexOf('\n', offset);
+  return Math.min(offset + Math.max(0, column - 1), end === -1 ? text.length : end);
+}
 
-/**
- * Hook to sync kernel diagnostics to/from Monaco markers.
- *
- * Kernel-to-Monaco: Subscribes to cadActor.context.kernelIssues for ALL files,
- * pushes markers through MarkerService.
- *
- * Monaco-to-Kernel: Reads Monaco TS markers and forwards errors to cadActor.
- */
-export function useKernelDiagnostics(options: UseKernelDiagnosticsOptions): UseKernelDiagnosticsReturn {
-  const { monaco, cadActor, markerService } = options;
+function severityOf(value: IssueSeverity): EditorDiagnostic['severity'] {
+  return value === 'warning' ? 'warning' : value === 'info' ? 'info' : 'error';
+}
 
-  // Track previous set of files with issues to clear stale markers
-  const previousFilesRef = useRef<Set<string>>(new Set());
+function positionAt(text: string, offset: number): { line: number; column: number } {
+  const before = text.slice(0, Math.max(0, Math.min(offset, text.length)));
+  const line = before.split('\n');
+  return { line: line.length, column: (line.at(-1)?.length ?? 0) + 1 };
+}
 
-  // Subscribe to ALL kernel issues (not just active file)
-  const kernelIssues = useSelector(cadActor, (state): Map<string, KernelDiagnosticsIssue[]> => {
-    const issues = state?.context.kernelIssues as Map<string, KernelDiagnosticsIssue[]> | undefined;
-    return issues ?? new Map<string, KernelDiagnosticsIssue[]>();
+/** Keep diagnostics for every source file, including files with no mounted editor. */
+export function useKernelDiagnostics(options: {
+  cadActor: AnyActorRef | undefined;
+  session: EditorDocumentSession | undefined;
+}): void {
+  const { cadActor, session } = options;
+  const previousUris = useRef(new Set<string>());
+  const issues = useSelector(cadActor, (state): Map<string, KernelIssue[]> => {
+    return (state?.context.kernelIssues as Map<string, KernelIssue[]> | undefined) ?? new Map<string, KernelIssue[]>();
   });
 
-  // Sync kernel issues to Monaco markers via MarkerService
   useEffect(() => {
-    if (!monaco || !markerService) {
+    if (!session) {
       return;
     }
-
-    const currentFiles = new Set<string>();
-
-    // Set markers for all files with issues.
-    // Issues may reference files different from the entry path (cross-file errors),
-    // so we group by location.fileName to place markers on the correct file.
-    for (const [filePath, issues] of kernelIssues) {
-      // Group issues by their actual source file (from location.fileName),
-      // falling back to the entry pathPath for issues without location.
-      const issuesByFile = new Map<string, Monaco.editor.IMarkerData[]>();
-
-      for (const issue of issues) {
-        if (!issue.location) {
-          continue;
+    let active = true;
+    const current = new Set<string>();
+    // Diagnostics materialize neutral text on demand, independently of a view.
+    const load = async (): Promise<void> => {
+      const byFile = new Map<string, KernelIssue[]>();
+      for (const [entryPath, entries] of issues) {
+        for (const issue of entries) {
+          const path = issue.location?.fileName ?? entryPath;
+          const list = byFile.get(path) ?? [];
+          list.push(issue);
+          byFile.set(path, list);
         }
-
-        const targetFile = issue.location.fileName;
-        if (!issuesByFile.has(targetFile)) {
-          issuesByFile.set(targetFile, []);
+      }
+      await Promise.all(
+        [...byFile].map(async ([path, entries]) => {
+          const document = await session.getOrEnsureDocument(path);
+          // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cleanup can happen while materialization awaits.
+          if (!active || !document) {
+            return;
+          }
+          const diagnostics = entries.map((issue): EditorDiagnostic => {
+            const { location } = issue;
+            const from = location ? offsetAt(document.text, location.startLineNumber, location.startColumn) : 0;
+            const to = location
+              ? offsetAt(
+                  document.text,
+                  location.endLineNumber ?? location.startLineNumber,
+                  location.endColumn ?? location.startColumn + 1,
+                )
+              : from;
+            return {
+              from,
+              to: Math.max(from, to),
+              message: issue.message,
+              severity: severityOf(issue.severity),
+              source: 'kernel',
+            };
+          });
+          current.add(document.uri);
+          session.diagnostics.set(document.uri, kernelOwner, diagnostics);
+        }),
+      );
+      // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cleanup can happen while materialization awaits.
+      if (!active) {
+        return;
+      }
+      for (const uri of previousUris.current) {
+        if (!current.has(uri)) {
+          session.diagnostics.set(uri, kernelOwner, []);
         }
-
-        issuesByFile.get(targetFile)!.push({
-          startLineNumber: issue.location.startLineNumber,
-          startColumn: issue.location.startColumn,
-          endLineNumber: issue.location.endLineNumber ?? issue.location.startLineNumber,
-          endColumn: issue.location.endColumn ?? issue.location.startColumn + 1,
-          message: issue.message,
-          severity: getMarkerSeverity(monaco, issue.severity),
-          source: 'kernel',
-          relatedInformation: buildRelatedInformation(monaco, issue.stackFrames),
-        });
       }
+      previousUris.current = current;
+    };
+    void load();
+    return () => {
+      active = false;
+    };
+  }, [issues, session]);
 
-      // Apply markers to each target file
-      for (const [targetFile, markers] of issuesByFile) {
-        currentFiles.add(targetFile);
-        const uri = monaco.Uri.file(`/${targetFile}`).toString();
-        markerService.setMarkers(uri, kernelMarkerOwner, markers);
-      }
-
-      // If no issues had location, still track the entry path to clear stale markers
-      if (issuesByFile.size === 0) {
-        currentFiles.add(filePath);
-      }
-    }
-
-    // Clear markers for files that no longer have issues
-    for (const previousFile of previousFilesRef.current) {
-      if (!currentFiles.has(previousFile)) {
-        const uri = monaco.Uri.file(`/${previousFile}`).toString();
-        markerService.clearMarkers(uri, kernelMarkerOwner);
-      }
-    }
-
-    previousFilesRef.current = currentFiles;
-  }, [monaco, markerService, kernelIssues]);
-
-  // Monaco-to-Kernel: forward TS error markers to CAD actor
-  const handleValidate = useCallback(() => {
-    if (!monaco || !cadActor) {
+  useEffect(() => {
+    if (!session || !cadActor) {
       return;
     }
-
-    const errors = monaco.editor.getModelMarkers({});
-    // oxlint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison -- monaco has import issues. This is safe.
-    const filteredErrors = errors.filter((error) => error.severity === 8);
-
-    if (filteredErrors.length > 0) {
-      cadActor.send({
-        type: 'setCodeIssues',
-        errors: filteredErrors.map((error) => ({
-          startLineNumber: error.startLineNumber,
-          startColumn: error.startColumn,
-          message: error.message,
-          severity: error.severity,
-          endLineNumber: error.endLineNumber,
-          endColumn: error.endColumn,
-        })),
-      });
-    } else {
-      cadActor.send({ type: 'setCodeIssues', errors: [] });
-    }
-  }, [monaco, cadActor]);
-
-  return { handleValidate };
+    const byUri = new Map<string, CodeIssue[]>();
+    return session.diagnostics.subscribe((event) => {
+      if (event.owner !== 'typescript') {
+        return;
+      }
+      const uri = URI.parse(event.uri);
+      const document = uri.scheme === 'file' ? session.get(uri.path.slice(1)) : undefined;
+      if (document) {
+        byUri.set(
+          event.uri,
+          event.diagnostics
+            .filter((item) => item.severity === 'error')
+            .map((item) => {
+              const start = positionAt(document.text, item.from);
+              const end = positionAt(document.text, item.to);
+              return {
+                message: item.message,
+                startLineNumber: start.line,
+                startColumn: start.column,
+                endLineNumber: end.line,
+                endColumn: end.column,
+              };
+            }),
+        );
+      } else {
+        byUri.delete(event.uri);
+      }
+      cadActor.send({ type: 'setCodeIssues', errors: [...byUri.values()].flat() });
+    });
+  }, [cadActor, session]);
 }

@@ -70,10 +70,12 @@ brew services start redis
 wait_for Redis redis-cli -h localhost ping
 
 # MinIO with the compose root user, then the bootstrap the compose minio-bootstrap service runs.
+# Homebrew PostgreSQL and Redis already listen on loopback. MinIO's default address is every
+# interface, so pin it to loopback the same way infra/docker-compose.yml publishes 9000/9001.
 MINIO_ROOT_USER=tauminio MINIO_ROOT_PASSWORD=tauminio-dev-secret \
-  nohup minio server "$WORK/minio" --address :9000 --console-address :9001 > "$WORK/minio.log" 2>&1 &
-wait_for MinIO curl -fs http://localhost:9000/minio/health/live
-mc alias set local http://localhost:9000 tauminio tauminio-dev-secret
+  nohup minio server "$WORK/minio" --address 127.0.0.1:9000 --console-address 127.0.0.1:9001 > "$WORK/minio.log" 2>&1 &
+wait_for MinIO curl -fs http://127.0.0.1:9000/minio/health/live
+mc alias set local http://127.0.0.1:9000 tauminio tauminio-dev-secret
 mc mb --ignore-existing local/tau-content
 mc anonymous set download local/tau-content
 mc mb --ignore-existing local/tau-content-private

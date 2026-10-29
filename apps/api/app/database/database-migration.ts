@@ -6,6 +6,7 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 import { installBillingProtections } from '#database/billing-protections.js';
 import { installMaintenanceRole, installMirrorRole } from '#database/service-roles.js';
+import { applicationNameOf } from '#database/application-name.js';
 
 /** Drizzle's generated journal; `when` is the millisecond stamp the migrator stores as `created_at`. */
 type MigrationJournal = { entries: Array<{ readonly tag: string; readonly when: number }> };
@@ -143,6 +144,8 @@ const migrateOnce = async (
     max: 1,
     prepare: false,
     connection: {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- PostgreSQL startup parameter name
+      application_name: applicationNameOf('release'),
       // eslint-disable-next-line @typescript-eslint/naming-convention -- PostgreSQL startup parameter name
       lock_timeout: options.lockTimeoutMilliseconds ?? 5000,
     },

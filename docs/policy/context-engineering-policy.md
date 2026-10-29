@@ -3,8 +3,9 @@ title: 'Context Engineering Policy'
 description: 'Comprehensive guide to optimizing system prompts, tool definitions, and context pipelines for LLM agents. Covers foundational principles, placement framework, cache economics, compaction safety, subagent criteria, untrusted content, and eval discipline.'
 status: active
 created: '2026-03-09'
-updated: '2026-10-23'
+updated: '2026-10-29'
 related:
+  - docs/policy/agent-observability-policy.md
   - docs/policy/filesystem-context-policy.md
   - docs/research/desktop-bash-terminal-blueprint.md
   - docs/research/transcript-search-architecture.md
@@ -25,6 +26,8 @@ Internal reference for optimizing system prompts, tool definitions, and context 
 > **Size exception**: This policy intentionally exceeds the 500-line budget in `create-policy` (approved 2026-07-03, single-file decision). It is the aggregate rulebook for the agent harness; splitting was considered and declined to keep one canonical document.
 >
 > **Citation rule**: Every numeric claim below cites a `docs/reference/<slug>.md` file in which the number appears verbatim (grep-verifiable). Claims that failed verification during the July 2026 adversarial audit were removed; see `docs/research/agent-harness-overhaul-charter.md` for the audit trail. The October 2026 review (two passes, 2026-10-23) re-grepped every number and added nine 2026 sources (Anthropic, Claude Code and Claude Platform docs, Google ADK).
+
+For capability changes, harness/provider upgrades and telemetry acceptance, follow [Agent Observability Policy](agent-observability-policy.md).
 
 ## Rationale
 

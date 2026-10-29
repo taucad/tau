@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
  * Guards the API's LangChain Google path, which is the server-side helper
- * surface only: `project_name`, `commit_name` and `code_completion` reach
+ * surface only: `project_name` and `commit_name` reach
  * `DirectModelInvocationService.invokeHelper` -> `ModelService.buildModel` ->
  * `ProviderService` -> `ChatVertexAI`, so a self-host deployment whose only
  * configured provider is Vertex runs those helpers on `@langchain/google-*`.

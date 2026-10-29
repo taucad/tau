@@ -386,7 +386,7 @@ try {
   const baseline = git('rev-parse', 'HEAD');
   git('-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'protected main advanced');
   const workflowCommit = git('rev-parse', 'HEAD');
-  const admitted = { sourceCommit: baseline, workflowCommit, scope: 'linux', channel: 'staging' };
+  const admitted = { sourceCommit: baseline, workflowCommit, scope: 'linux', channel: 'staging', kind: 'ci' } as const;
   assertQualificationSource(admitted);
   assertQualificationSource({ ...admitted, sourceCommit: workflowCommit });
   assertQualificationSource({ ...admitted, sourceCommit: workflowCommit, scope: 'all', channel: 'production' });
@@ -399,10 +399,11 @@ try {
   assert.throws(() => {
     assertQualificationSource({ ...admitted, scope: 'unknown' });
   }, /scope\/channel/u);
-  // Mac-only receipts feed publication, so they stay bound to the exact workflow source and to staging.
+  // Mac CI may test an ancestor; its publisher requires an authenticated binding. VM remains exact-source.
   assertQualificationSource({ ...admitted, sourceCommit: workflowCommit, scope: 'macos' });
+  assertQualificationSource({ ...admitted, scope: 'macos' });
   assert.throws(() => {
-    assertQualificationSource({ ...admitted, scope: 'macos' });
+    assertQualificationSource({ ...admitted, scope: 'macos', kind: 'vm' });
   }, /exact source/u);
   assert.throws(() => {
     assertQualificationSource({ ...admitted, sourceCommit: workflowCommit, scope: 'macos', channel: 'production' });
@@ -423,3 +424,66 @@ try {
   rmSync(repository, { recursive: true, force: true });
 }
 console.log('PASS real Git ancestry, Linux staging pinning and unchanged all-platform/production exact-source guards');
+
+const consumerScope = fixture();
+consumerScope.rows = consumerScope.rows.filter((row) => row.id === 'windows-nsis-x64');
+assert.throws(() => collectQualificationRows({ ...consumerScope, scope: 'windows' }), /consumer VM/u);
+assert.throws(() => collectQualificationRows({ ...consumerScope, scope: 'windows', kind: 'vm' }));
+assert.throws(() => collectQualificationRows({ ...consumerScope, scope: 'all', kind: 'vm' }));
+assert.throws(() => collectQualificationRows({ ...consumerScope, scope: 'windows', kind: 'vm', rows: [] }));
+
+const windowsRow = consumerScope.rows[0]!;
+const windowsReceipt: DesktopAcceptanceReceipt = {
+  ...windowsRow.receipts[0]!,
+  suite: 'clean-host-route-a-b-c-v1',
+  environment: {
+    os: 'Microsoft Windows 11 Pro',
+    arch: 'x64',
+    kind: 'vm',
+    sandbox: 'enabled',
+    host: {
+      platform: 'win32',
+      runner: 'synthetic',
+      nativeArch: 'x64',
+      osBuild: 26_100,
+      account: 'standard-user',
+      uac: 'enabled',
+      defender: 'enabled',
+      download: 'browser-internet-zone',
+      reputationScope: 'qualification-mirror',
+      manualEvidence: ['initial', 'reinstall'].map((stage, index) => ({
+        stage: index === 0 ? 'initial' : 'reinstall',
+        nonce: '123e4567-e89b-42d3-a456-426614174000',
+        hostSha256: 'd'.repeat(64),
+        artifactSha256: index === 0 ? 'b'.repeat(64) : windowsRow.receipts[0]!.artifacts[0]!.sha256,
+        observedAt: 200,
+        smartScreen: 'not-shown',
+        screenshots: [
+          {
+            kind: 'security-settings',
+            name: `${stage}-security.png`,
+            capturedAt: 150,
+            sha256: 'e'.repeat(64),
+            size: 10,
+          },
+          { kind: 'installer-result', name: `${stage}-result.png`, capturedAt: 150, sha256: 'f'.repeat(64), size: 10 },
+        ],
+      })),
+    },
+  },
+};
+const windowsInput = {
+  ...consumerScope,
+  scope: 'windows',
+  kind: 'vm',
+  rows: [{ id: windowsRow.id, receipts: [windowsReceipt] }],
+};
+assert.deepEqual(
+  collectQualificationRows(windowsInput).hostMatrix.map(({ id }) => id),
+  ['windows-nsis-x64'],
+);
+assert.throws(
+  () => collectQualificationRows({ ...windowsInput, rows: [...windowsInput.rows, ...windowsInput.rows] }),
+  /duplicated/u,
+);
+assert.throws(() => collectQualificationRows({ ...windowsInput, scope: 'all' }), /Clean-host/u);

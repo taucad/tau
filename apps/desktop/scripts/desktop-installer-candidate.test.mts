@@ -339,6 +339,79 @@ const main = async (): Promise<void> => {
     assert.equal(run('stage', { ...staging, TAU_DESKTOP_SOURCE_SHA: 'b'.repeat(40) }).status, 1);
     await writeFile(archive, 'tampered');
     assert.equal(run('stage', { ...staging, DESKTOP_CANDIDATE_STAGE: join(root, 'tamper-stage') }).status, 1);
+
+    // Exercise the actual fetch executable: Windows consumers fetch the existing all-platform archive.
+    const fetchedName = 'inert-candidate.txt';
+    await writeFile(join(root, fetchedName), 'authenticated fixture bytes');
+    const fetchArchive = join(root, 'fetch.zip');
+    execFileSync('zip', ['-q', fetchArchive, fetchedName], { cwd: root });
+    const archiveDigest = `sha256:${createHash('sha256')
+      .update(await readFile(fetchArchive))
+      .digest('hex')}`;
+    await writeFile(
+      gh,
+      '#!/usr/bin/env node\nimport fs from "node:fs";\nconst path=process.argv[3];\nif(path.endsWith("/zip")) process.stdout.write(fs.readFileSync(process.env.TEST_ARCHIVE));\nelse console.log(path.includes("/artifacts?") ? process.env.TEST_ARTIFACTS : process.env.TEST_RUN);\n',
+    );
+    const candidateRun = {
+      ...successful,
+      id: 123,
+      path: '.github/workflows/desktop-installer-candidate.yml',
+      head_branch: 'main',
+      event: 'workflow_dispatch',
+    };
+    const candidateArtifact = {
+      id: 456,
+      name: 'desktop-installer-candidate',
+      expired: false,
+      digest: archiveDigest,
+      workflow_run: { id: 123, head_sha: source },
+    };
+    let fetchAttempt = 0;
+    const fetchCandidate = (scope: string, changes: Record<string, unknown> = {}) => {
+      const directory = join(root, `fetch-${fetchAttempt++}`);
+      const result = spawnSync(
+        process.execPath,
+        ['--import', '@oxc-node/core/register', resolve('apps/desktop/scripts/fetch-desktop-installer-candidate.mts')],
+        {
+          env: {
+            ...environment,
+            TAU_INSTALLER_CANDIDATE_RUN_ID: '123',
+            GITHUB_SHA: source,
+            DESKTOP_ASSETS_DIR: directory,
+            TAU_DESKTOP_QUALIFICATION_SCOPE: scope,
+            TEST_RUN: JSON.stringify(candidateRun),
+            TEST_ARTIFACTS: JSON.stringify({ artifacts: [{ ...candidateArtifact, ...changes }] }),
+            TEST_ARCHIVE: fetchArchive,
+          },
+          encoding: 'utf8',
+        },
+      );
+      return { result, directory };
+    };
+    for (const [scope, name] of [
+      ['all', 'desktop-installer-candidate'],
+      ['windows', 'desktop-installer-candidate'],
+      ['macos', 'desktop-macos-installer-candidate'],
+      ['linux', 'desktop-linux-installer-candidate'],
+    ]) {
+      const fetched = fetchCandidate(scope!, { name });
+      assert.equal(fetched.result.status, 0, fetched.result.stderr);
+      // oxlint-disable-next-line no-await-in-loop -- Verify each subprocess's extracted bytes before advancing scopes.
+      assert.equal(await readFile(join(fetched.directory, fetchedName), 'utf8'), 'authenticated fixture bytes');
+    }
+    for (const changes of [
+      { name: 'desktop-windows-installer-candidate' },
+      { name: 'desktop-linux-installer-candidate' },
+      { name: 'desktop-macos-installer-candidate' },
+      { expired: true },
+      { digest: `sha256:${'f'.repeat(64)}` },
+      { workflow_run: { id: 999, head_sha: source } },
+    ]) {
+      const fetched = fetchCandidate('windows', changes);
+      assert.equal(fetched.result.status, 1);
+      assert.match(fetched.result.stderr, /Candidate artifact provenance refused|Candidate archive digest differs/u);
+    }
+    assert.equal(fetchCandidate('windows-ci').result.status, 1);
     console.log(
       'Passed candidate source-run, Linux and Mac prerequisite, Mac-only scope and exact archive admission scenarios.',
     );

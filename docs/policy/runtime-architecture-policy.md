@@ -318,7 +318,7 @@ A realm is one JavaScript global environment: one ESM graph and one `globalThis`
 ## Data Flow: File Edit to Geometry Display
 
 ```
-1. User edits code in Monaco editor
+1. User edits code in a mounted CodeMirror view
    │
 2. Filesystem authority writes the file and emits a concrete runtime-path watch event
    │  (not the exclusive source: a watch-capable adapter such as `fromNodeFs` also
@@ -716,9 +716,9 @@ Hard termination closes promptly without a remote cleanup guarantee. Graceful dr
 
 Kernel-level cancellation remains cooperative at safe yield points and inside kernels that expose a synchronous WASM cancellation hook. Serialization protects shared ownership even when a native call cannot stop immediately.
 
-## Monaco IntelliSense Type Pipeline
+## TypeScript Language-Service Type Pipeline
 
-The editor provides IntelliSense (autocompletion, hover, diagnostics) for kernel imports via bundled `.d.ts` files registered with Monaco's TypeScript language service.
+The editor provides IntelliSense (autocompletion, hover, diagnostics) for kernel imports via bundled `.d.ts` files loaded on demand into the project TypeScript worker.
 
 ### Architecture
 
@@ -731,9 +731,9 @@ Kernel package .d.ts files
         └─ package projection (root content + relative files)
           → file-manager worker
             → strict /node_modules mount
-              → recursive loadKernelStaticTypesFromMount
-                → TypeAcquisitionService
-                  → TypeScript and JavaScript Monaco defaults
+              → selected/imported package declaration load
+                → TypeAcquisitionController
+                  → project TypeScript worker (shared by TS/JS source views)
 ```
 
 ### Why JSON Maps
@@ -744,7 +744,7 @@ Each kernel exports a JSON map of `Record<string, string>` where keys are module
 - **No `declare module` wrappers**: Earlier versions wrapped content in `declare module '<pkg>' { ... }` blocks. This caused TS1038 errors (`'declare' modifier cannot be used in an already ambient context`) because the source `.d.ts` files already use `export declare`. Raw module files registered at the correct virtual path avoid this entirely.
 - **Filesystem containment**: `BundledTypesMountEntry.packageName` is always a root npm package. Subpath declarations live only in its validated relative `files` map.
 - **Two intentional projections**: Individual raw `KernelTypesMap` values remain available to prompt consumers. `kernelTypePackageMaps` groups the same strings into package-shaped filesystem payloads without regenerating artifacts.
-- **Canonical metadata**: Each package has one root `package.json`. `TypeAcquisitionService` registers that metadata once and receives the real content regardless of declaration enumeration order.
+- **Canonical metadata**: Each package has one root `package.json`. `TypeAcquisitionController` registers that metadata once and receives the real content regardless of declaration enumeration order.
 
 ### Adding Types for a New Kernel
 

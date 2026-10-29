@@ -31,27 +31,11 @@ export type TauLanguageFileManagerRef = Readonly<{
   getSnapshot(): TauLanguageFileManagerSnapshot;
 }>;
 
-let portFactory: (() => TauLanguageHostInit | undefined) | undefined;
-
-/**
- * Register how the Monaco TS worker obtains Tier-2 sync FS ports (called when FM is ready).
- *
- * @public
- */
-export function setTauLanguageHostPortFactory(factory: () => TauLanguageHostInit | undefined): void {
-  portFactory = factory;
-}
-
-/** @public */
-export function clearTauLanguageHostPortFactory(): void {
-  portFactory = undefined;
-}
-
 /**
  * Allocate a fresh sync {@link MessageChannel} + SABs and attach the server port to the FM worker.
  *
- * Returns `undefined` — the stock-worker fallback in `MonacoEnvironment.getWorker`
- * — when the FM is not ready or shared memory is unreachable.
+ * Returns `undefined` when this project's FM is not ready or shared memory is unreachable.
+ * Callers retain worker-backed open-document editing and report unavailable closed-file capabilities.
  *
  * @public
  */
@@ -96,13 +80,4 @@ export function openTauLanguageHostPort(fileManagerRef: TauLanguageFileManagerRe
     filePoolBuffer: snap.context.filePoolBuffer,
     workspaceRootAbsolute,
   };
-}
-
-/**
- * Called from `MonacoEnvironment.getWorker` (once per TS/JS worker instance).
- *
- * @public
- */
-export function createTauLanguageHostInit(): TauLanguageHostInit | undefined {
-  return portFactory?.();
 }

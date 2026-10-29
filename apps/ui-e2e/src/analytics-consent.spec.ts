@@ -188,7 +188,7 @@ test('blocks replay from mounted editor, chat and file surfaces', async () => {
   const sourceTab = selectors.getByRole('tab', { name: 'main.scad', exact: true }).last();
   await target.expectVisible(sourceTab, 60_000);
   await target.click(sourceTab);
-  await target.expectVisible(selectors.getByCss('.monaco-editor .view-lines').first(), 60_000);
+  await target.expectVisible(selectors.getByCss('.cm-editor .cm-content').first(), 60_000);
   if (!(await target.isVisible(filesPane()))) {
     await target.click(selectors.getByRole('button', { name: /Search/u }));
     const search = selectors.getByPlaceholder('Search projects, chats, and actions…');

@@ -12,7 +12,7 @@ const appRoot = join(import.meta.dirname, '..');
  */
 describe('session replay privacy', () => {
   it.each([
-    'components/code/code-editor.client.tsx',
+    'components/code/code-editor-view.client.tsx',
     'routes/w.$workspace.$project/chat-history.tsx',
     'routes/w.$workspace.$project/chat-editor-file-tree.tsx',
   ])('should block replay of %s', (path) => {

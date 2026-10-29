@@ -1,363 +1,163 @@
-import { Editor } from '@monaco-editor/react';
-import type { EditorProps } from '@monaco-editor/react';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { OctagonAlert, RefreshCw } from 'lucide-react';
-import type { CompletionRegistration } from 'monacopilot';
-import type * as Monaco from 'monaco-editor';
-import { Button } from '@taucad/ui/components/button';
-import { cn } from '@taucad/ui/utils/cn';
-import { configureMonaco, registerCompletions } from '#lib/monaco.lib.client.js';
-import { useMonacoConfiguration } from '#hooks/use-monaco-configuration.js';
-import { useCodePanePresence } from '#hooks/use-code-pane-presence.js';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ComponentType, ReactNode } from 'react';
+import type { Extension } from '@codemirror/state';
+import type { EditorView } from '@codemirror/view';
+import type { DocumentChange, DocumentTransaction, EditorDocument } from '#lib/editor-document.js';
+import type { EditorDiagnostics } from '#lib/editor-diagnostics.js';
 import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
-import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
-import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
-import { Theme, useTheme } from '#hooks/use-theme.js';
-import { useCookie } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
+import { loadEditorSyntax } from '#lib/editor-syntax.js';
+import { Button } from '@taucad/ui/components/button';
 
-type CodeEditorProperties = EditorProps & {
-  readonly onChange: (value: string) => void;
-};
-
-// Cap synchronous tokenization to avoid blocking the main thread on very large
-// files. For typical engineering code files (< 500 lines) this is < 5 ms.
-const maxForceTokenizeLines = 5000;
-
-/**
- * Shared overflow widgets container for all Monaco editors.
- *
- * Monaco's hover tooltip, suggest widget, and parameter hints use
- * `position: fixed` when `fixedOverflowWidgets` is enabled. Inside
- * Dockview panels, CSS `contain: layout` and GPU-acceleration properties
- * (`transform`, `will-change`, `backface-visibility`) on ancestor elements
- * create new containing blocks that break fixed positioning — widgets get
- * clipped by `overflow: hidden` on the group view instead of rendering
- * above everything.
- *
- * Placing the overflow container on `document.body` (outside the Dockview
- * DOM hierarchy) avoids all CSS containment issues. Each Monaco editor
- * appends its own child `overflowingContentWidgets` container inside this
- * shared node. Combined with `fixedOverflowWidgets: true`, widgets use
- * viewport coordinates and render above all panes.
- */
-function createOverflowWidgetsDomNode(): HTMLDivElement {
-  const node = document.createElement('div');
-  node.className = 'monaco-editor';
-  node.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;overflow:visible;z-index:50;';
-  document.body.append(node);
-  return node;
+/** Browser timing marks carry pane identity but never document text or paths. */
+export function markCodeEditorMilestone(name: string, viewId: string): void {
+  if (typeof performance.mark === 'function') {
+    performance.mark(`tau.editor.${name}`, { detail: { viewId } });
+  }
 }
 
-const overflowWidgetsDomNode = createOverflowWidgetsDomNode();
+export type CodeEditorProps = Readonly<{
+  document: EditorDocument;
+  viewId: string;
+  languageId: string;
+  className?: string;
+  readOnly?: boolean;
+  loading?: ReactNode;
+  extensions?: Extension;
+  syntaxExtension?: Extension;
+  diagnostics?: EditorDiagnostics;
+  showLineNumbers?: boolean;
+  lineHighlights?: ReadonlyArray<Readonly<{ fromLine: number; toLine: number; tone: 'mine' | 'theirs' }>>;
+  onApply?: (transaction: DocumentTransaction) => DocumentChange | undefined;
+  onHistory?: (kind: 'undo' | 'redo') => DocumentChange | undefined;
+  /** Re-registers when the mounted view's document path changes. */
+  onMount?: (view: EditorView, path: string) => void | (() => void);
+}>;
 
-// Scrollbar styling shared between the editor wrapper and the overflow
-// container (hover/suggest/parameter hints live on document.body).
-const monacoScrollbarStyles = [
-  '[&_.monaco-scrollable-element_>_.scrollbar]:!bg-(--scrollbar-track)',
-  '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:!bg-(--scrollbar-thumb)/80',
-] as const;
+export type CodeEditorBoundaryProps = Omit<CodeEditorProps, 'document' | 'syntaxExtension'> &
+  Readonly<{ document?: EditorDocument }>;
 
-// Restore native list/blockquote/heading rendering inside Monaco overflow
-// widgets. Tailwind v4 Preflight strips list-style globally; hover, suggest,
-// and parameter-hints widgets render JSDoc Markdown that needs them back.
-// Applied directly to overflowWidgetsDomNode (lives on document.body, outside
-// the editor wrapper DOM, so Tailwind descendant selectors from `classNames`
-// would never reach it).
-// JSDoc in hovers must render list styles — Preflight strips them on body-owned overlay DOM.
-const monacoOverlayRestoreStyles = [
-  // Lists — restore bullets/numbers, indent, vertical rhythm
-  '[&_.monaco-hover_ul]:[list-style:revert]',
-  '[&_.monaco-hover_ol]:[list-style:revert]',
-  '[&_.monaco-hover_ul]:ps-5',
-  '[&_.monaco-hover_ol]:ps-5',
-  '[&_.monaco-hover_ul]:[margin-block:0.25rem]',
-  '[&_.monaco-hover_ol]:[margin-block:0.25rem]',
-  '[&_.monaco-hover_li+li]:[margin-block-start:0.125rem]',
-  '[&_.suggest-widget_ul]:[list-style:revert]',
-  '[&_.suggest-widget_ol]:[list-style:revert]',
-  '[&_.suggest-widget_ul]:ps-5',
-  '[&_.suggest-widget_ol]:ps-5',
-  '[&_.suggest-widget_ul]:[margin-block:0.25rem]',
-  '[&_.suggest-widget_ol]:[margin-block:0.25rem]',
-  '[&_.suggest-widget_li+li]:[margin-block-start:0.125rem]',
-  '[&_.parameter-hints-widget_ul]:[list-style:revert]',
-  '[&_.parameter-hints-widget_ol]:[list-style:revert]',
-  '[&_.parameter-hints-widget_ul]:ps-5',
-  '[&_.parameter-hints-widget_ol]:ps-5',
-  '[&_.parameter-hints-widget_ul]:[margin-block:0.25rem]',
-  '[&_.parameter-hints-widget_ol]:[margin-block:0.25rem]',
-  '[&_.parameter-hints-widget_li+li]:[margin-block-start:0.125rem]',
-  // Blockquotes — themed left rule using Monaco's own VS Code tokens
-  '[&_.monaco-hover_blockquote]:border-s-2',
-  '[&_.monaco-hover_blockquote]:border-s-(--vscode-editorHoverWidget-border)',
-  '[&_.monaco-hover_blockquote]:ps-2',
-  '[&_.monaco-hover_blockquote]:[margin-block:0.25rem]',
-  '[&_.monaco-hover_blockquote]:text-(--vscode-descriptionForeground)',
-  '[&_.suggest-widget_blockquote]:border-s-2',
-  '[&_.suggest-widget_blockquote]:border-s-(--vscode-editorHoverWidget-border)',
-  '[&_.suggest-widget_blockquote]:ps-2',
-  '[&_.suggest-widget_blockquote]:[margin-block:0.25rem]',
-  '[&_.suggest-widget_blockquote]:text-(--vscode-descriptionForeground)',
-  '[&_.parameter-hints-widget_blockquote]:border-s-2',
-  '[&_.parameter-hints-widget_blockquote]:border-s-(--vscode-editorHoverWidget-border)',
-  '[&_.parameter-hints-widget_blockquote]:ps-2',
-  '[&_.parameter-hints-widget_blockquote]:[margin-block:0.25rem]',
-  '[&_.parameter-hints-widget_blockquote]:text-(--vscode-descriptionForeground)',
-  // Headings — restore weight + vertical rhythm for @example / section headers
-  '[&_.monaco-hover_:is(h1,h2,h3,h4)]:font-semibold',
-  '[&_.monaco-hover_:is(h1,h2,h3,h4)]:[margin-block:0.5rem_0.25rem]',
-  '[&_.suggest-widget_:is(h1,h2,h3,h4)]:font-semibold',
-  '[&_.suggest-widget_:is(h1,h2,h3,h4)]:[margin-block:0.5rem_0.25rem]',
-  '[&_.parameter-hints-widget_:is(h1,h2,h3,h4)]:font-semibold',
-  '[&_.parameter-hints-widget_:is(h1,h2,h3,h4)]:[margin-block:0.5rem_0.25rem]',
-] as const;
-
-/**
- * A Monaco editor with Tau's theme, fonts and widget placement.
- *
- * It mounts `Editor` only once Monaco is configured — `Editor` calls
- * `loader.init()`, which would otherwise fetch the loader's CDN Monaco — and
- * shows the pane placeholder until then. It never suspends, so no Suspense
- * boundary above it has to stand in for the surrounding UI.
- */
-export function CodeEditor({ className, options: optionsFromProps, ...rest }: CodeEditorProperties): React.JSX.Element {
-  const configuration = useMonacoConfiguration();
-  /* A mounted editor is a code pane: the project's language services start with it (B-16). */
-  useCodePanePresence();
-  const { theme, isHighContrast } = useTheme();
-  const [areInlayHintsEnabled] = useCookie(cookieName.codeInlayHints, false);
-  const completionRef = useRef<CompletionRegistration | undefined>(null);
-  const isMobile = useIsMobile();
-  const monacoBaseTheme = cn(
-    theme === Theme.LIGHT && !isHighContrast && 'vs',
-    theme === Theme.DARK && !isHighContrast && 'vs-dark',
-    theme === Theme.LIGHT && isHighContrast && 'hc-light',
-    theme === Theme.DARK && isHighContrast && 'hc-black',
-  );
-  const monacoTheme = `github-${theme}${isHighContrast ? '-high-contrast' : ''}`;
-
-  // Sync the shared overflow widgets container with the current theme and
-  // styling overrides. This container lives on document.body (outside the
-  // editor wrapper DOM), so Tailwind descendant selectors from the wrapper
-  // don't reach it — styles are applied directly since it IS .monaco-editor.
-  useEffect(() => {
-    overflowWidgetsDomNode.className = cn(
-      'monaco-editor',
-      monacoBaseTheme,
-      // Override Monaco's default SF Mono/system sans-serif with app fonts
-      '![--monaco-monospace-font:var(--font-mono)]',
-      '![font-family:var(--font-sans)]',
-      ...monacoScrollbarStyles,
-      ...monacoOverlayRestoreStyles,
-    );
-  }, [monacoBaseTheme]);
-
-  const handleMount = useCallback((editor: Monaco.editor.IStandaloneCodeEditor) => {
-    completionRef.current = registerCompletions();
-
-    // Force immediate tokenization of visible lines.
-    // Monaco schedules background tokenization via requestIdleCallback, which
-    // can be indefinitely delayed during initial page load when the browser is
-    // busy with layout, React hydration, and Dockview initialization. This
-    // causes code to appear without syntax highlighting until the user scrolls.
-    // Forcing synchronous tokenization here ensures highlighting is visible
-    // from the first render.
-    const model = editor.getModel();
-    if (model) {
-      const targetLine = Math.min(model.getLineCount(), maxForceTokenizeLines);
-      // Monaco's tokenization.forceTokenization is a stable internal API used
-      // extensively by its own features (colorizer, auto-indent, comment commands,
-      // etc.) but not exposed in public type declarations.
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- Monaco internal API not exposed in public type declarations
-      const tokenization = model as unknown as {
-        tokenization?: { forceTokenization?: (lineNumber: number) => void };
-      };
-      tokenization.tokenization?.forceTokenization?.(targetLine);
+/** The source pane boundary; importing this file does not request CodeMirror. */
+export function CodeEditor(props: CodeEditorBoundaryProps): React.ReactNode {
+  const [View, setView] = useState<ComponentType<CodeEditorProps>>();
+  const [failure, setFailure] = useState<Error>();
+  const [syntax, setSyntax] = useState<{ languageId: string; extension: Extension }>();
+  const [syntaxFailure, setSyntaxFailure] = useState<Error>();
+  const runtimeLoadSequence = useRef(0);
+  const syntaxController = useRef<AbortController | undefined>(undefined);
+  const loadRuntime = useCallback(async (): Promise<void> => {
+    const request = ++runtimeLoadSequence.current;
+    try {
+      const { CodeEditorView } = await import('#components/code/code-editor-view.client.js');
+      if (request === runtimeLoadSequence.current) {
+        setFailure(undefined);
+        setView(() => CodeEditorView);
+      }
+    } catch (error) {
+      if (request === runtimeLoadSequence.current) {
+        setFailure(error instanceof Error ? error : new Error(String(error)));
+      }
     }
   }, []);
-
-  useEffect(() => {
-    return () => {
-      completionRef.current?.deregister();
-    };
+  const loadSyntax = useCallback(async (languageId: string): Promise<void> => {
+    syntaxController.current?.abort();
+    const controller = new AbortController();
+    syntaxController.current = controller;
+    try {
+      const extension = await loadEditorSyntax(languageId, controller.signal);
+      if (!controller.signal.aborted) {
+        setSyntax({ languageId, extension });
+        setSyntaxFailure(undefined);
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        console.error('Editor syntax failed to load', error);
+        setSyntaxFailure(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
   }, []);
-
-  const baseOptions = useMemo(
-    () =>
-      ({
-        fontSize: isMobile ? 16 : 14,
-        fontFamily: 'var(--font-mono)',
-        tabSize: 2,
-        minimap: { enabled: false },
-        // Explicitly configure line numbers
-        lineNumbers: 'on',
-        lineNumbersMinChars: 4,
-        renderLineHighlight: 'line',
-        renderLineHighlightOnlyWhenFocus: false,
-        // Disable horizontal scroll beyond last line
-        scrollBeyondLastColumn: 1,
-        // Disable vertical scroll beyond last line
-        scrollBeyondLastLine: false,
-        wordWrap: 'off',
-        // Render overflow widgets (hover, suggest, parameter hints) in a shared
-        // container on document.body so they escape Dockview's CSS containment.
-        // fixedOverflowWidgets uses position:fixed with viewport coordinates;
-        // overflowWidgetsDomNode places the container outside the Dockview hierarchy.
-        fixedOverflowWidgets: true,
-        overflowWidgetsDomNode,
-        // Enable smooth cursor animation when typing and keying left/right/up/down
-        cursorSmoothCaretAnimation: 'on',
-        // Disable the sticky scrolling which displays the parent closure at the top of the editor for better performance.
-        stickyScroll: {
-          enabled: false,
-        },
-        // Configure gutter and margin properly
-        glyphMargin: false,
-        folding: true,
-        // Custom scrollbar styling to match global scrollbar styles
-        scrollbar: {
-          // Applying to ensure that other elements that use the scrollbar
-          // dimensions are styled correctly.
-          verticalScrollbarSize: 14,
-          horizontalScrollbarSize: 14,
-          verticalSliderSize: 14,
-          horizontalSliderSize: 14,
-          // Ensure browser back and forward navigation scroll does not take effect,
-          // as it causes janky editor behavior resulting in poor UX.
-          alwaysConsumeMouseWheel: true,
-        },
-        // Intellisense
-        suggest: {
-          localityBonus: true,
-          showStatusBar: true,
-          preview: true,
-        },
-        parameterHints: {
-          enabled: true,
-          // Controls whether the parameter hints menu cycles or closes when reaching the end of the list.
-          cycle: true,
-        },
-        inlayHints: {
-          enabled: areInlayHintsEnabled ? 'on' : 'off',
-        },
-        automaticLayout: true,
-        // Word-based suggestions are redundant for typed languages
-        wordBasedSuggestions: 'off',
-      }) as const satisfies Monaco.editor.IStandaloneEditorConstructionOptions,
-    [areInlayHintsEnabled, isMobile],
-  );
-
-  const options = useMemo(() => ({ ...baseOptions, ...optionsFromProps }), [baseOptions, optionsFromProps]);
-
-  const classNames = useMemo(
-    () =>
-      cn(
-        // Override Monaco CSS variables to match the app theme
-        '[&_.monaco-editor]:![--vscode-editor-background:var(--background)]',
-        '[&_.monaco-editor-background]:bg-background!',
-        '[&_.monaco-editor]:![--vscode-editorStickyScroll-background:var(--background)]',
-        '[&_.monaco-editor]:![--vscode-breadcrumb-background:transparent]',
-        '[&_.monaco-editor]:![--vscode-multiDiffEditor-background:var(--background)]',
-        '[&_.monaco-editor]:![--vscode-editorMarkerNavigation-background:var(--background)]',
-        '[&_.monaco-editor]:![--vscode-editorGutter-background:var(--background)]',
-
-        // Peek view: replace Monaco's default orange match highlights with
-        // the app's primary color (teal). The result list highlight (30%
-        // opacity) and editor preview highlight (40% opacity) mirror VS
-        // Code's opacity levels but use the primary hue.
-        '[&_.monaco-editor]:![--vscode-peekViewResult-matchHighlightBackground:oklch(0.75_0.15_var(--hue-primary)_/_0.3)]',
-        '[&_.monaco-editor]:![--vscode-peekViewEditor-matchHighlightBackground:oklch(0.75_0.15_var(--hue-primary)_/_0.4)]',
-
-        // Override Monaco's default system fonts with app fonts.
-        // --monaco-monospace-font: used by code blocks in hover, suggest
-        //   details, parameter hints, and go-to-error widgets.
-        // font-family: sets the base UI font for prose/labels in all widgets;
-        //   Monaco's inline styles on .view-line elements override it for code.
-        '[&_.monaco-editor]:![--monaco-monospace-font:var(--font-mono)]',
-        '[&_.monaco-editor]:![font-family:var(--font-sans)]',
-
-        // Hide the redundant text area cover element
-        '[&_.monaco-editor-background.textAreaCover.line-numbers]:!hidden',
-        // Disable ::before pseudo-elements on line numbers
-        '[&_.line-numbers::before]:!hidden',
-
-        // Peek view: increase the close-button right padding from Monaco's
-        // default 2px so it doesn't appear flush with the transparent scrollbar
-        // track (which makes the gap invisible and the button look cut off).
-        '[&_.peekview-widget_.head_.peekview-actions]:!pr-2',
-        // Peek view: the ref-tree (definitions list) doesn't inherit the
-        // editor's font settings — force monospace at the editor font size.
-        '[&_.reference-zone-widget_.ref-tree]:![font-size:13px]',
-        '[&_.reference-zone-widget_.ref-tree]:!font-mono',
-        // Peek view: filename in the title bar should use monospace
-        '[&_.peekview-title_.filename]:!font-mono',
-
-        // Find widget: Monaco sets its inputs to 13px, and iOS zooms the page into a field under 16px.
-        'pointer-coarse:[&_.find-widget_.monaco-findInput_.input]:!text-base',
-
-        // Go-to-error: code spans in marker messages should use monospace
-        '[&_.marker-widget_.message_.code]:!font-mono',
-
-        // Scrollbar styling (shared with the overflow container)
-        ...monacoScrollbarStyles,
-
-        className,
-      ),
-    [className],
-  );
-
-  const placeholder = rest.loading ?? <EditorPanePlaceholder label='Loading editor' />;
-
-  if (configuration.status === 'failed') {
+  useEffect(() => {
+    markCodeEditorMilestone('code-pane-admission', props.viewId);
+    let active = true;
+    queueMicrotask(() => {
+      if (active) {
+        void loadRuntime();
+      }
+    });
+    return () => {
+      active = false;
+      runtimeLoadSequence.current += 1;
+    };
+  }, [loadRuntime, props.viewId]);
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (active) {
+        void loadSyntax(props.languageId);
+      }
+    });
+    return () => {
+      active = false;
+      syntaxController.current?.abort();
+    };
+  }, [loadSyntax, props.languageId]);
+  useEffect(() => {
+    if (props.document) {
+      markCodeEditorMilestone('document-ready', props.viewId);
+    }
+  }, [props.document, props.viewId]);
+  if (failure && !View) {
     return (
-      <div role='alert' className='size-full bg-background'>
-        <PanelEmptyState
-          icon={OctagonAlert}
-          iconClassName='text-feature'
-          title="Couldn't load the code editor"
-          description='Check your connection, then try again.'
+      <div
+        role='alert'
+        className='flex size-full flex-col items-center justify-center gap-3 bg-background p-4 text-sm text-foreground'
+      >
+        <span>Code editor could not load.</span>
+        <Button
+          type='button'
+          size='sm'
+          variant='outline'
+          onClick={() => {
+            setFailure(undefined);
+            void loadRuntime();
+          }}
         >
-          <Button
-            type='button'
-            onClick={() => {
-              // async-iife: bootstrap -- a click handler cannot await; the snapshot carries the outcome.
-              void (async () => {
-                try {
-                  await configureMonaco();
-                } catch {
-                  // `configureMonaco` records the failure on the configuration snapshot.
-                }
-              })();
-            }}
-          >
-            <RefreshCw />
-            Try again
-          </Button>
-        </PanelEmptyState>
+          Retry editor
+        </Button>
       </div>
     );
   }
-
-  if (configuration.status !== 'ready') {
-    // oxlint-disable-next-line react/jsx-no-useless-fragment -- forwarding the caller's node
-    return <>{placeholder}</>;
-  }
-
-  return (
-    <Editor
-      keepCurrentModel
-      className={classNames}
-      theme={monacoTheme}
-      wrapperProps={{
-        // `ph-no-capture`: session replay never records source code.
-        className: 'editor-container ph-no-capture',
-        style: { height: '100%' },
-      }}
-      options={options}
-      onMount={handleMount}
-      {...rest}
-      loading={placeholder}
-    />
+  const body =
+    View && props.document ? (
+      <View
+        {...props}
+        document={props.document}
+        syntaxExtension={syntax?.languageId === props.languageId ? syntax.extension : undefined}
+      />
+    ) : (
+      (props.loading ?? <EditorPanePlaceholder label='Loading editor' />)
+    );
+  return syntaxFailure && View && props.document ? (
+    <div className='relative size-full'>
+      {body}
+      <div
+        role='status'
+        className='absolute right-3 bottom-3 z-20 flex items-center gap-2 rounded-md border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-sm'
+      >
+        <span>Syntax colors could not load. Editing is still available.</span>
+        <Button
+          type='button'
+          size='xs'
+          variant='outline'
+          onClick={() => {
+            setSyntaxFailure(undefined);
+            void loadSyntax(props.languageId);
+          }}
+        >
+          Retry syntax
+        </Button>
+      </div>
+    </div>
+  ) : (
+    body
   );
 }

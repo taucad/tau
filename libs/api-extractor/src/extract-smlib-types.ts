@@ -8,7 +8,7 @@ import ts from 'typescript';
 import type { BundledTypesPackageMap } from '#bundled-types.types.js';
 
 /**
- * Bundle smlibwasm's declaration graph and Tau's SMLib model types for Monaco and the generated
+ * Bundle smlibwasm's declaration graph and Tau's SMLib model types for the TypeScript service and the generated
  * `cad-smlib` skill.
  *
  * `@classcad/smlibwasm` ships one flat `dist/` of declarations that import each other with `.ts`
@@ -18,7 +18,7 @@ import type { BundledTypesPackageMap } from '#bundled-types.types.js';
  * call) becomes `any`, because the editor mounts no Node declarations.
  *
  * `@taucad/smlib/model` is the authored return contract (`ShapeConfig`, `Model`, `Material`, …),
- * printed type-only so no runtime host declaration reaches Monaco.
+ * printed type-only so no runtime host declaration reaches the TypeScript service.
  *
  * Nx cannot hash `node_modules`, so the target's real input is `pnpm-lock.yaml`.
  */
@@ -76,7 +76,7 @@ export const collectSmlibDeclarations = (directory: string, entry: string): Read
   return Object.fromEntries([...files].toSorted(([left], [right]) => left.localeCompare(right)));
 };
 
-/** Real type-only dependencies of the author model; runtime host declarations stay outside Monaco. */
+/** Real type-only dependencies of the author model; runtime host declarations stay outside the TypeScript service. */
 const authorDeclarations = (): Readonly<Record<string, string>> => {
   const root = join(import.meta.dirname, '../../..');
   const sources = {

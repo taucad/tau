@@ -7,8 +7,7 @@ import process from 'node:process';
 import ts from 'typescript';
 
 /**
- * Bundle libcascade type declarations as raw `.d.ts` for Monaco's
- * `addExtraLib`.
+ * Bundle libcascade type declarations as raw `.d.ts` for the browser TypeScript service.
  *
  * Reads `libcascade`'s own `dist/types.d.ts` (emitted by `libcascade
  * assemble`) from the installed package and shards it into one module per OCCT
@@ -16,7 +15,7 @@ import ts from 'typescript';
  * convention (blueprint ruling R14). Declaration text is passed through
  * byte-for-byte; only the module framing (imports, export lists) is generated.
  *
- * Monaco registers the root at `file:///node_modules/libcascade/index.d.ts`
+ * the TypeScript service registers the root at `file:///node_modules/libcascade/index.d.ts`
  * and each shard at `file:///node_modules/libcascade/<Package>/index.d.ts`,
  * relying on standard TypeScript module resolution.
  */
@@ -311,7 +310,7 @@ export function buildShardTiers(bundledTypes: Record<string, string>): { eager: 
 
 /**
  * Write the bundled declaration map, its shard tier manifest and the exact
- * filesystem projection Monaco mounts.
+ * filesystem projection the TypeScript service mounts.
  *
  * @param options - Generated output root and optional declaration map.
  */

@@ -1,14 +1,15 @@
 import { z } from 'zod';
 import { quantity, quantityKinds } from '@taucad/runtime/transcoder';
-import { assimpCapabilities } from 'libassimp';
-import type { ExportFormat, ExportOptionsFor, OptionDescriptor } from 'libassimp';
+import { assimpCapabilities } from 'libassimp/capabilities';
+import type { DescribedOptionDescriptor } from 'libassimp/capabilities';
+import type { ExportFormat, ExportOptionsFor } from 'libassimp';
 
 /** Registry options that are physical quantities rather than bare numbers, keyed by descriptor name. */
 const quantityOptions: Readonly<Record<string, () => z.ZodNumber>> = {
   identityMatrixEpsilon: () => quantity({ unit: '1', quantityKind: quantityKinds.dimensionlessRatio, space: 'linear' }),
 };
 
-const schemaFromDescriptor = (name: string, descriptor: OptionDescriptor): z.ZodType => {
+const schemaFromDescriptor = (name: string, descriptor: DescribedOptionDescriptor): z.ZodType => {
   let schema: z.ZodType;
   if (descriptor.values === undefined) {
     switch (descriptor.kind) {
@@ -56,7 +57,7 @@ export const assimpEdgeSchemas = Object.fromEntries(
     format,
     z.strictObject(
       Object.fromEntries(
-        (Object.entries(exportOptions) as Array<[string, OptionDescriptor]>).map(([name, descriptor]) => [
+        (Object.entries(exportOptions) as Array<[string, DescribedOptionDescriptor]>).map(([name, descriptor]) => [
           name,
           schemaFromDescriptor(name, descriptor),
         ]),

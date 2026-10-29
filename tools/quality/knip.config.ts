@@ -216,10 +216,6 @@ const config: KnipConfig = {
         'nanoraster',
       ],
     },
-    'apps/libs/lsp': {
-      // Ambient module declaration for Monaco's TypeScript worker import.
-      entry: ['src/monaco-ts-worker/ts-worker.module.d.ts'],
-    },
     'apps/react-e2e/apps/electron': {
       // electron-vite inputs (main, kernel host, preload) and the renderer's index.html script.
       entry: [

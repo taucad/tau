@@ -118,7 +118,7 @@ export type EditorStateContext = {
    * the actor is re-invoked.
    */
   focusedChatError: Error | undefined;
-  /** Optional: awaited before new tabs emit `fileOpened` (Monaco model materialisation). */
+  /** Optional: awaited before new tabs emit `fileOpened` (editor document acquisition). */
   materialiseModel?: (path: string) => Promise<void>;
   /** In-flight deferred open (only set while materialising). */
   pendingOpenFile?: PendingOpenFile;

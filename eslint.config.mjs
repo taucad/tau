@@ -88,21 +88,6 @@ const dreiDeepJsImportRestriction = {
     'Do not value-import Drei deep .js modules from app code. Netlify SSR can classify typeless Drei .js files as CommonJS; import from the Drei barrel or a direct dependency instead. See docs/research/netlify-drei-camera-controls-ssr-crash.md.',
 };
 
-/*
- * `useMonaco`, `Editor` and `DiffEditor` call `loader.init()` on mount, and a
- * first `init()` before `configureMonaco` has run `loader.config` binds the page
- * to the loader's CDN Monaco for good. Only the two owners may touch them:
- * `lib/monaco.lib.client.ts` (configures the loader) and
- * `components/code/code-editor.client.tsx` (mounts `Editor` once configured).
- */
-const monacoLoaderImportRestriction = {
-  name: '@monaco-editor/react',
-  importNames: ['default', 'DiffEditor', 'Editor', 'loader', 'useMonaco'],
-  allowTypeImports: true,
-  message:
-    'Read Monaco with `useConfiguredMonaco` (#hooks/use-monaco-configuration) and render editors with `CodeEditor`; these exports run `loader.init()`, which fetches Monaco from a CDN if it runs before `configureMonaco`. See docs/research/editor-loading-splash-removal-blueprint.md.',
-};
-
 /**
  * Minimal ESLint config -- only rules that cannot run in oxlint.
  *
@@ -875,7 +860,6 @@ const config = [
     ignores: ['**/*.test.ts', '**/*.test.tsx', '**/*.spec.ts', '**/*.spec.tsx', '**/*.test-d.ts', '**/__tests__/**'],
     plugins: { 'tau-lint': tauLintPlugin },
     rules: {
-      'tau-lint/no-monaco-create-model': 'error',
       'no-restricted-imports': [
         'error',
         {
@@ -948,24 +932,7 @@ const config = [
     },
   },
 
-  /**
-   * Quarantine SSR-hostile runtime imports from shared app modules.
-   *
-   * `monaco-editor/esm/*` transitively imports `codicon/codicon.css`, which
-   * Node's ESM loader cannot resolve during the React Router v7 SSR build
-   * (`react-router build` → Rolldown). The only way to keep that subgraph
-   * out of `build/server` is to confine every static value import of
-   * `monaco-editor` to a `*.client.{ts,tsx}` module — React Router v7
-   * replaces those modules with empty exports during the server build,
-   * terminating the static graph at the boundary.
-   *
-   * Drei deep `.js` value imports have a similar runtime hazard on Netlify
-   * functions when the package lacks `"type": "module"` / `exports`.
-   *
-   * Type-only imports are erased at compile time and remain legal everywhere.
-   *
-   * See docs/policy/ssr-bundle-policy.md and docs/research/ssr-bundle-audit.md.
-   */
+  /** Keep SSR-hostile Drei deep imports out of app modules; type-only imports remain legal. */
   {
     files: ['apps/ui/app/**/*.{ts,tsx}'],
     ignores: [
@@ -979,23 +946,11 @@ const config = [
       'apps/ui/app/**/*.test-d.ts',
     ],
     rules: {
-      // The `allowTypeImports` option is a `@typescript-eslint` extension to
-      // the core rule — keeping `import type * as Monaco from 'monaco-editor'`
-      // legal everywhere while banning value imports outside `.client` files.
       'no-restricted-imports': 'off',
       '@typescript-eslint/no-restricted-imports': [
         'error',
         {
-          paths: [monacoLoaderImportRestriction],
-          patterns: [
-            {
-              group: ['monaco-editor', 'monaco-editor/*'],
-              allowTypeImports: true,
-              message:
-                'Static value imports of `monaco-editor` pull `languageFeatures.js` → `codicon.css` into the SSR build (Node ESM loader rejects `.css`). Put runtime monaco usage in a `*.client.ts`/`*.client.tsx` module so React Router v7 replaces it with empty exports on the server. See docs/policy/ssr-bundle-policy.md.',
-            },
-            dreiDeepJsImportRestriction,
-          ],
+          patterns: [dreiDeepJsImportRestriction],
         },
       ],
     },
@@ -1017,26 +972,6 @@ const config = [
       '@typescript-eslint/no-restricted-imports': [
         'error',
         {
-          patterns: [dreiDeepJsImportRestriction],
-        },
-      ],
-    },
-  },
-  {
-    /* Client and worker modules may value-import `monaco-editor`, but not the
-     * loader-bound React exports — except their two owners. */
-    files: [
-      'apps/ui/app/**/*.client.ts',
-      'apps/ui/app/**/*.client.tsx',
-      'apps/ui/app/**/*.worker.ts',
-      'apps/ui/app/**/*.worker.tsx',
-    ],
-    ignores: ['apps/ui/app/components/code/code-editor.client.tsx', 'apps/ui/app/lib/monaco.lib.client.ts'],
-    rules: {
-      '@typescript-eslint/no-restricted-imports': [
-        'error',
-        {
-          paths: [monacoLoaderImportRestriction],
           patterns: [dreiDeepJsImportRestriction],
         },
       ],

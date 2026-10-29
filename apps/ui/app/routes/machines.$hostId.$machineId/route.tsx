@@ -113,6 +113,7 @@ function ConnectedMachine({
       ) : entry === undefined ? (
         <PanelEmptyState
           icon={Printer}
+          titleLevel={2}
           title={
             directory.snapshot.cursor.hostId === hostId
               ? 'Machine is no longer connected'
@@ -168,6 +169,7 @@ export default function MachineRoute(): React.JSX.Element {
       <PageHeader title='Machine' />
       <PanelEmptyState
         icon={Printer}
+        titleLevel={2}
         title='Open this machine in Tau desktop'
         description='This browser cannot connect to the machine host.'
       >

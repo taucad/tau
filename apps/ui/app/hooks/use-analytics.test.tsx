@@ -9,7 +9,6 @@ describe('useAnalytics', () => {
 
     expect(() => {
       result.current.capture('example');
-      result.current.captureException(new Error('example'));
     }).not.toThrow();
   });
 });

@@ -6,6 +6,7 @@
 
 import { createActor, createAsyncLogic } from 'xstate';
 import type { AnyEventObject, AnyMachineSnapshot } from 'xstate';
+import type { ContentBlock } from '@agentclientprotocol/sdk';
 import { describe, expect, it } from 'vitest';
 
 import { StepClock, flush } from '@taucad/xstate-testing/clock';
@@ -101,6 +102,32 @@ const openAndLend = async (harness: Harness): Promise<void> => {
   expect(harness.lastCall()).toMatchObject({ method: 'session/prompt' });
 };
 
+/**
+ * What current `grok agent stdio` returns from `initialize`: image and audio
+ * stay false while embedded context is on. The CLI still accepts image blocks.
+ */
+const grokPromptCapabilities = {
+  loadSession: true,
+  promptCapabilities: { image: false, audio: false, embeddedContext: true },
+};
+
+const png: ContentBlock = { type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=' };
+const wav: ContentBlock = { type: 'audio', mimeType: 'audio/wav', data: 'UklGRg==' };
+
+/* Initialize a native Grok session and pass its planning-mode call, stopping at the prompt decision. */
+const openGrok = async (harness: Harness): Promise<void> => {
+  await flush();
+  harness.answer({
+    protocolVersion,
+    agentCapabilities: grokPromptCapabilities,
+    _meta: { grokShell: true, agentVersion: '1.0.52' },
+  });
+  harness.answer({ sessionId: 'acp-1', configOptions: [] });
+  harness.fakes.sendBack('lentTurn', { type: 'lentReady' });
+  expect(harness.lastCall()).toMatchObject({ method: 'session/set_mode' });
+  harness.answer({});
+};
+
 describe('acpSession', () => {
   it('should apply isolated Grok controls, acknowledge planning, and downgrade permissions on the next turn', async () => {
     const harness = start({
@@ -165,6 +192,67 @@ describe('acpSession', () => {
           expect.objectContaining({ id: grokPlanningConfigId, currentValue: 'plan' }),
         ]),
       );
+    } finally {
+      harness.actor.stop();
+    }
+  });
+
+  it('should send an image prompt to Grok when initialize leaves image support off', async () => {
+    const harness = start({
+      opening: { ...input().opening, adapter: { ...adapter, id: 'grok' } },
+      lend: { ...lent, prompt: { fresh: [png, { type: 'text', text: 'What color is this?' }] } },
+    });
+    try {
+      await openGrok(harness);
+      expect(harness.lastCall()).toMatchObject({
+        method: 'session/prompt',
+        params: { prompt: [png, { type: 'text', text: 'What color is this?' }] },
+      });
+    } finally {
+      harness.actor.stop();
+    }
+  });
+
+  it('should refuse an image when a non-Grok agent does not advertise image input', async () => {
+    const harness = start({
+      opening: { ...input().opening, adapter: { ...adapter, id: 'codex' } },
+      lend: { ...lent, prompt: { fresh: [png, { type: 'text', text: 'What color is this?' }] } },
+    });
+    try {
+      await flush();
+      harness.answer({ protocolVersion, agentCapabilities: grokPromptCapabilities });
+      harness.answer({ sessionId: 'acp-1', configOptions: [] });
+      harness.fakes.sendBack('lentTurn', { type: 'lentReady' });
+      expect(harness.commands('connection').some((event) => event['method'] === 'session/prompt')).toBe(false);
+      expect(harness.actor.getSnapshot().context['outcome']).toMatchObject({
+        ok: false,
+        failure: {
+          code: 'EXTERNAL_AGENT_CONTENT_UNSUPPORTED',
+          message:
+            'codex cannot read image content, so this turn was not sent. Describe it in text, or run it on an agent that can.',
+        },
+      });
+    } finally {
+      harness.actor.stop();
+    }
+  });
+
+  it('should refuse audio for Grok when audio input is not advertised', async () => {
+    const harness = start({
+      opening: { ...input().opening, adapter: { ...adapter, id: 'grok' } },
+      lend: { ...lent, prompt: { fresh: [wav, { type: 'text', text: 'What did I say?' }] } },
+    });
+    try {
+      await openGrok(harness);
+      expect(harness.commands('connection').some((event) => event['method'] === 'session/prompt')).toBe(false);
+      expect(harness.actor.getSnapshot().context['outcome']).toMatchObject({
+        ok: false,
+        failure: {
+          code: 'EXTERNAL_AGENT_CONTENT_UNSUPPORTED',
+          message:
+            'grok cannot read audio content, so this turn was not sent. Describe it in text, or run it on an agent that can.',
+        },
+      });
     } finally {
       harness.actor.stop();
     }

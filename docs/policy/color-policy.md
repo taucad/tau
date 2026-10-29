@@ -243,7 +243,7 @@ CORRECT:
 
 ### Inline OKLCH in Components
 
-Define raw `oklch()` color tokens in the owning shared or app-specific stylesheet described in Section 1. Components that need dynamic colors (e.g., Monaco editor peek highlights) should reference CSS variables within the `oklch()` call: `oklch(0.75 0.15 var(--hue-primary) / 0.3)`.
+Define raw `oklch()` color tokens in the owning shared or app-specific stylesheet described in Section 1. Components that need dynamic colors (e.g., editor definition highlights) should reference CSS variables within the `oklch()` call: `oklch(0.75 0.15 var(--hue-primary) / 0.3)`.
 
 ### Separate Dark Mode Authoring
 

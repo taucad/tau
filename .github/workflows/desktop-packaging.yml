@@ -60,6 +60,8 @@ jobs:
               summary.write('Hosted KVM capability only; no stock guest or signed app tested.\n```json\n' + json.dumps(result) + '\n```\n')
           PYTHON
       - uses: ./.github/actions/setup-nx
+      - name: Shared ASAR runtime payloads and executable permissions
+        run: pnpm nx run desktop:test-desktop-package
       - name: Native filesystem authority exclusion and mutations
         env:
           TAU_WINDOWS_DISPOSABLE_HOST: ${{ runner.os == 'Windows' && '1' || '' }}

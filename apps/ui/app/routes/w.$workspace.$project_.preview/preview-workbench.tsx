@@ -11,7 +11,7 @@ import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { downloadBlob } from '@taucad/utils/file';
 import { PreviewWorkbenchLayout } from '#components/share/preview-workbench-layout.js';
 import { desktopTitlebarInset } from '#components/layout/page.js';
-import { MonacoModelServiceProvider } from '#hooks/use-monaco-model-service.js';
+import { EditorDocumentSessionProvider } from '#hooks/use-editor-document-session.js';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
 import { useProjectKernelOptions } from '#hooks/use-project-kernel-options.js';
 import { nativeKernelRequirementForEntryPath } from '#constants/available-kernel-configurations.js';
@@ -47,7 +47,7 @@ export function OwnedPreviewProviders({
             previewParameterService={previewParameterService}
             kernelOptionsFactory={selection.kernelOptionsFactory}
           >
-            <MonacoModelServiceProvider>{children}</MonacoModelServiceProvider>
+            <EditorDocumentSessionProvider>{children}</EditorDocumentSessionProvider>
           </ProjectProvider>
         )}
       </PreviewParameterScope>

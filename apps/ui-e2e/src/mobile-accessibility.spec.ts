@@ -828,6 +828,7 @@ describe('phone project route keyboard-only completion (T6)', () => {
       // All → a pane by keyboard: focus moves into the opened surface.
       await target.keyboardPress('Enter');
       await target.expectVisible(allSheet());
+      await sheetSettled();
       const files = await tabTo('Files', { limit: 30 });
       expectFocusShown(files, 'Files in All');
       await target.keyboardPress('Enter');

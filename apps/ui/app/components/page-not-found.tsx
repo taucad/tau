@@ -3,6 +3,10 @@ import { useNavigate, Link, useLocation } from 'react-router';
 import { Button, buttonVariants } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import { InlineCode } from '@taucad/ui/components/inline-code';
+import { PageHeader } from '#components/layout/page-header.js';
+
+/** The not-found page's one `h1`, and the name its document title carries. */
+export const pageNotFoundTitle = 'Page not found';
 
 export function PageNotFound(): React.JSX.Element {
   const navigate = useNavigate();
@@ -22,8 +26,8 @@ export function PageNotFound(): React.JSX.Element {
               <MapPin className='size-6 text-muted-foreground' />
             </div>
           </div>
-          <h1 className='mb-2 text-6xl font-bold text-muted-foreground'>404</h1>
-          <h2 className='text-2xl font-semibold'>Page Not Found</h2>
+          <p className='mb-2 text-6xl font-bold text-muted-foreground'>404</p>
+          <PageHeader title={pageNotFoundTitle} className='justify-center' />
         </div>
 
         {/* Content Card */}

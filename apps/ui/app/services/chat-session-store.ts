@@ -44,6 +44,7 @@ import { idPrefix } from '@taucad/types/constants';
 import { chatRecordsPath } from '@taucad/revisions';
 import { getErrno } from '@taucad/utils/error';
 import { sendHostCommand } from '#chat-clients/_internal/host-command.js';
+import { isUnownedChatObservation } from '#lib/chat-observation-guard.js';
 import type { MachineActors } from '#lib/xstate.lib.js';
 import { waitUnlessGone } from '#lib/xstate.lib.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
@@ -912,6 +913,10 @@ export class ChatSessionStore {
 
   /** Observe a listed chat's log without acquiring its SDK transcript or composer. @public */
   public observe(chatId: string, projectId: string): () => void {
+    // The registration probe, and a chat this tab already crashed on, is not owned by one project.
+    if (isUnownedChatObservation(chatId)) {
+      return () => undefined;
+    }
     this.#inactiveProjections.delete(chatId);
     const existing = this.#observed.get(chatId);
     if (existing !== undefined && existing.projectId !== projectId) {

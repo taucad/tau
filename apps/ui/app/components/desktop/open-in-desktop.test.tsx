@@ -128,6 +128,43 @@ describe('OpenInDesktop', () => {
     expect(screen.getByRole('button', { name: 'Tau Desktop didn’t open' })).toBeInTheDocument();
   });
 
+  it.each([
+    ['Android', { platform: 'Linux armv8l', userAgent: 'Android', maxTouchPoints: 5 }],
+    ['iPhone', { platform: 'iPhone', userAgent: 'iPhone', maxTouchPoints: 5 }],
+    ['iPad desktop mode', { platform: 'MacIntel', userAgent: 'Macintosh', maxTouchPoints: 5 }],
+  ])('offers no desktop handoff on %s, even with a saved preference and fine pointer', (_name, navigator) => {
+    vi.stubGlobal('navigator', navigator);
+    vi.stubGlobal('matchMedia', () => ({ matches: false }));
+    globalThis.localStorage.setItem('tau.open-links-in-desktop', 'true');
+    mountAt('/invitations/tok_abcdef');
+
+    expect(assign).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Open in Tau Desktop' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Opening Tau Desktop')).not.toBeInTheDocument();
+  });
+
+  it('keeps the offer, opening and recovery usable on a coarse-pointer Windows computer', async () => {
+    vi.stubGlobal('navigator', { platform: 'Win32', userAgent: 'Windows', maxTouchPoints: 10 });
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(pointer: coarse)' }));
+    mountAt('/invitations/tok_abcdef');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Open in Tau Desktop' }));
+    expect(assign).toHaveBeenCalledWith('tau://invitations/tok_abcdef');
+    expect(screen.getByText('Opening Tau Desktop')).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: 'Tau Desktop didn’t open' }));
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeVisible();
+  });
+
+  it('honors the saved preference on a coarse-pointer Windows computer', () => {
+    vi.stubGlobal('navigator', { platform: 'Win32', userAgent: 'Windows', maxTouchPoints: 10 });
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(pointer: coarse)' }));
+    globalThis.localStorage.setItem('tau.open-links-in-desktop', 'true');
+    mountAt('/invitations/tok_abcdef');
+
+    expect(assign).toHaveBeenCalledWith('tau://invitations/tok_abcdef');
+    expect(screen.getByText('Opening Tau Desktop')).toBeVisible();
+  });
+
   it('hands off nothing on load while the preference is unset', () => {
     mountAt('/invitations/tok_abcdef');
 

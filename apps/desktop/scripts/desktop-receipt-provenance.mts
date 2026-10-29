@@ -1,4 +1,4 @@
-/** Fetch receipts only from trusted same-source GitHub qualification runs; never trust receipt labels alone. */
+/** Fetch receipts from trusted GitHub qualification runs with authenticated application and harness identities. */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
@@ -8,6 +8,10 @@ import { parseDesktopAcceptanceReceipt } from '#shared/desktop-release.js';
 import type { DesktopArtifactManifest } from '#shared/desktop-release.js';
 // oxlint-disable-next-line no-restricted-imports -- Publication scope is owned by the adjacent admission gate.
 import type { DesktopPublicationScope } from './desktop-route-publication.mjs';
+/* oxlint-disable no-restricted-imports -- Reuse authenticated candidate admission and the producer's binding contract. */
+import { admitInstallerCandidate } from './fetch-desktop-installer-candidate.mjs';
+import { usesQualificationBinding, verifyQualificationBinding } from './qualification-binding.mjs';
+/* oxlint-enable no-restricted-imports */
 /** Fixed trusted producer workflows; each publication scope admits only its own receipt artifact names. */
 const producer = {
   ci: {
@@ -25,7 +29,7 @@ export const verifyDesktopReceiptProvenance = (
   runInput: unknown,
   artifactInput: unknown,
   options: { environment: 'ci' | 'vm'; manifest: DesktopArtifactManifest; scope?: DesktopPublicationScope },
-): { id: number; digest: string } => {
+): { id: number; digest: string; workflowCommit: string; runId: number } => {
   const { environment, manifest } = options;
   const scope = options.scope ?? 'all';
   const run = z
@@ -38,7 +42,9 @@ export const verifyDesktopReceiptProvenance = (
       conclusion: z.literal('success'),
       path: z.literal(producer[environment].path),
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
-      head_sha: z.literal(manifest.sourceCommit),
+      head_sha: usesQualificationBinding(scope, manifest.channel, environment)
+        ? z.string().regex(/^[a-f\d]{40}$/u)
+        : z.literal(manifest.sourceCommit),
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
       repository: z.object({ full_name: z.literal('taucad/tau') }),
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
@@ -52,10 +58,15 @@ export const verifyDesktopReceiptProvenance = (
       expired: z.literal(false),
       digest: z.string().regex(/^sha256:[a-f\d]{64}$/u),
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
-      workflow_run: z.object({ id: z.literal(run.id), head_sha: z.literal(manifest.sourceCommit) }),
+      workflow_run: z.object({ id: z.literal(run.id), head_sha: z.literal(run.head_sha) }),
     })
     .parse(artifactInput);
-  return { id: artifact.id, digest: artifact.digest.slice('sha256:'.length) };
+  return {
+    id: artifact.id,
+    digest: artifact.digest.slice('sha256:'.length),
+    workflowCommit: run.head_sha,
+    runId: run.id,
+  };
 };
 
 /**
@@ -91,6 +102,9 @@ export const fetchDesktopQualifiedReceipts = async (
       throw new Error('Missing or ambiguous trusted qualification artifact');
     }
     const admitted = verifyDesktopReceiptProvenance(run, matches[0], { environment, manifest, scope });
+    if (String(admitted.runId) !== id) {
+      throw new Error('Qualification API returned another run');
+    }
     const archive = api(`actions/artifacts/${admitted.id}/zip`);
     if (createHash('sha256').update(archive).digest('hex') !== admitted.digest) {
       throw new Error('GitHub receipt archive digest differs');
@@ -99,8 +113,35 @@ export const fetchDesktopQualifiedReceipts = async (
     // oxlint-disable-next-line no-await-in-loop -- Persist only each authenticated bounded archive.
     await writeFile(path, archive);
     const names = execFileSync('unzip', ['-Z1', path], { encoding: 'utf8', timeout: 30_000 }).trim().split('\n');
-    if (names.length !== 1 || names[0] !== 'route-receipts.json') {
+    const bound = usesQualificationBinding(scope, manifest.channel, environment);
+    const expectedNames = bound ? ['qualification-binding.json', 'route-receipts.json'] : ['route-receipts.json'];
+    if (JSON.stringify([...names].sort()) !== JSON.stringify(expectedNames)) {
       throw new Error('Unexpected qualification archive members');
+    }
+    if (bound) {
+      const publicationCommit = z
+        .string()
+        .regex(/^[a-f\d]{40}$/u)
+        .parse(process.env['GITHUB_SHA']);
+      const candidate = admitInstallerCandidate({
+        runId: z.string().parse(process.env['TAU_INSTALLER_CANDIDATE_RUN_ID']),
+        workflowCommit: publicationCommit,
+        scope,
+      });
+      const binding: unknown = JSON.parse(
+        execFileSync('unzip', ['-p', path, 'qualification-binding.json'], {
+          encoding: 'utf8',
+          maxBuffer: 64 * 1024,
+          timeout: 30_000,
+        }),
+      );
+      verifyQualificationBinding(binding, {
+        manifest,
+        candidate,
+        runId: admitted.runId,
+        workflowCommit: admitted.workflowCommit,
+        publicationCommit,
+      });
     }
     const data = execFileSync('unzip', ['-p', path, 'route-receipts.json'], {
       encoding: 'utf8',
@@ -110,7 +151,10 @@ export const fetchDesktopQualifiedReceipts = async (
     const parsed = z.array(z.unknown()).parse(JSON.parse(data));
     for (const input of parsed) {
       const receipt = parseDesktopAcceptanceReceipt(input, manifest);
-      if (receipt.environment.kind !== environment) {
+      if (
+        receipt.environment.kind !== environment ||
+        receipt.logs !== `https://github.com/taucad/tau/actions/runs/${id}`
+      ) {
         throw new Error('Receipt kind differs from trusted producer');
       }
       // The Mac clean-host producer writes only its own suite, with host facts the receipt parser already required.

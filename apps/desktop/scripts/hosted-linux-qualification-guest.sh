@@ -107,7 +107,9 @@ if mode == 'tooling':
         lock.stdout.close()
     print('Native APT signature and lock-contention fixtures passed', flush=True)
     subprocess.run(['pnpm', 'nx', 'run', 'desktop:test-appimage-package', '--skip-nx-cache'], cwd=root, env=env, check=True)
-    subprocess.run(['pnpm', 'nx', 'run', 'desktop:test-qualification-electron-writer'], cwd=root, env=env, check=True)
+    # Explicit isolated software preflight; it produces no stock GPU or release acceptance receipt.
+    subprocess.run(['pnpm', 'nx', 'run', 'desktop:test-qualification-electron-writer'], cwd=root,
+                   env=dict(env, TAU_QUALIFICATION_GRAPHICS='isolated-software'), check=True)
     subprocess.run(['pnpm', 'nx', 'run', 'desktop:test-qualification-appimage-sandbox'], cwd=root, env=env, check=True)
     result = subprocess.run(['pnpm', 'nx', 'run-many', '-p', 'desktop', '-t', 'test-qualification-linux',
                              'test-qualification-metadata', 'test-qualification-evidence', 'test-qualification-probe-process'], cwd=root, env=env)

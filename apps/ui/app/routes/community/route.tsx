@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { RefCallback } from 'react';
 import type { MetaFunction } from 'react-router';
 import { PageContent } from '#components/layout/page-content.js';
 import { NavLink, useLocation, useNavigate } from 'react-router';
@@ -82,6 +83,24 @@ export default function CadCommunity(): React.JSX.Element {
   const { hash } = useLocation();
   const [pageSize, setPageSize] = useCookie<number>(cookieName.examplePageSize, defaultPageSize);
   const searchInput = useRef<HTMLInputElement>(null);
+  const earlySearch = useRef<string | undefined>(undefined);
+  const adoptSearch = useCallback<RefCallback<HTMLInputElement>>(
+    (input) => {
+      searchInput.current = input;
+      if (input && input.value !== input.defaultValue) {
+        earlySearch.current = input.value;
+        showQuery(input.value);
+      }
+    },
+    [showQuery],
+  );
+  useEffect(() => {
+    const value = earlySearch.current;
+    earlySearch.current = undefined;
+    if (value !== undefined) {
+      setQuery(value);
+    }
+  }, [setQuery]);
 
   const term = query.trim().toLowerCase();
   const isFiltered = kernel !== allKernels || term !== '';
@@ -164,7 +183,7 @@ export default function CadCommunity(): React.JSX.Element {
         action={
           <div className='ml-auto flex w-full items-center gap-2 sm:w-auto'>
             <SearchInput
-              ref={searchInput}
+              ref={adoptSearch}
               aria-label='Search examples'
               placeholder='Search examples…'
               value={query}

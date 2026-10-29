@@ -1,4 +1,6 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { hydrateRoot } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -75,6 +77,43 @@ const cardNames = (): string[] =>
 describe('Community route', () => {
   beforeEach(() => {
     localStorage.clear();
+  });
+
+  it('should keep a pre-hydration search and synchronize its URL filter', async () => {
+    const content = (
+      <KeyboardProvider>
+        <TooltipProvider>
+          <MemoryRouter initialEntries={['/community']}>
+            <CadCommunity />
+            <LocationProbe />
+          </MemoryRouter>
+        </TooltipProvider>
+      </KeyboardProvider>
+    );
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(content);
+    document.body.append(container);
+    const input = within(container).getByRole<HTMLInputElement>('searchbox', { name: 'Search examples' });
+    input.value = 'zz-early-no-match';
+    input.focus();
+    input.setSelectionRange(3, 7);
+    const onRecoverableError = vi.fn();
+    const root = hydrateRoot(container, content, { onRecoverableError });
+    try {
+      await waitFor(() => {
+        expect(within(container).getByTestId('location')).toHaveTextContent('q=zz-early-no-match');
+      });
+      expect(input).toHaveValue('zz-early-no-match');
+      expect(input).toHaveFocus();
+      expect([input.selectionStart, input.selectionEnd]).toEqual([3, 7]);
+      expect(within(container).queryByRole('listitem')).not.toBeInTheDocument();
+      expect(onRecoverableError).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
   });
 
   it('should name the document and describe the gallery', () => {

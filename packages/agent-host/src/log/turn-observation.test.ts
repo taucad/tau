@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { AgentLogEvent, UserProviderMessage } from '#log/event-types.js';
-import { observeTurns } from '#log/turn-observation.js';
+import { observeOwnTurns, observeTurns } from '#log/turn-observation.js';
 
 const chatId = 'chat-1';
 const start = Date.parse('2026-10-29T00:00:00.000Z');
@@ -259,5 +259,24 @@ describe('observeTurns', () => {
     const tau = term('t1', toolTurn, external.length);
 
     expect(observeTurns(chatId, [...external, ...tau]).map((observation) => observation.runId)).toEqual(['run-1']);
+  });
+});
+
+describe('observeOwnTurns', () => {
+  it('should read every page of a chat’s own rows and own every term they name', async () => {
+    const rows = term('t1', toolTurn);
+    const read = vi.fn(async ({ cursor }: Readonly<{ cursor: number }>) => ({
+      cursor,
+      nextCursor: Math.min(cursor + 3, rows.length),
+      endCursor: rows.length,
+      events: rows.slice(cursor, cursor + 3),
+    }));
+
+    const { runs, ownsEpoch } = await observeOwnTurns(read, chatId);
+
+    expect(read.mock.calls.length).toBe(Math.ceil(rows.length / 3));
+    expect(runs).toEqual(observeTurns(chatId, rows));
+    expect(ownsEpoch('t1')).toBe(true);
+    expect(ownsEpoch('t2')).toBe(false);
   });
 });

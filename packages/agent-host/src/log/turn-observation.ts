@@ -1,4 +1,5 @@
 import type { AgentLogEvent, CompactionTrace, ProviderMessage, RowKey } from '#log/event-types.js';
+import type { EventLogBatch } from '#log/event-log-appender.js';
 
 /*
  * Tau's own turn facts for agent observability (T05), read from committed rows.
@@ -349,4 +350,47 @@ export const observeTurns = (chatId: string, rows: readonly AgentLogEvent[]): Tu
     fold(draft, event, { at: Number.isFinite(at) ? at : draft.lastFactAt, source });
   }
   return [...runs.values()].filter((draft) => !draft.external).map((draft) => settle(draft));
+};
+
+/** A chat's own turns, and which leader epochs this device held while writing them. @public */
+export type OwnTurns = Readonly<{
+  runs: TurnObservation[];
+  /** Whether this device led the term: true for every term its own rows name. */
+  ownsEpoch: (leaderEpoch: string) => boolean;
+}>;
+
+/** How a host reads its own rows of a chat, one bounded page at a time (`TauAgentHost.readEvents`). @public */
+export type OwnRowsRead = (
+  input: Readonly<{ chatId: string; cursor: number; limit: number; maxBytes?: number | undefined }>,
+) => Promise<EventLogBatch>;
+
+const ownPageLimit = 256;
+const ownPageBytes = 4 * 1024 * 1024;
+
+/**
+ * Read every one of this device's own rows of a chat and observe its turns.
+ *
+ * Own rows are what this device wrote (XD1), so every term they name is one it
+ * led: it reports those facts, and another device reports its own. Nothing is
+ * read from another device's segment.
+ *
+ * @param read - The host's own-row read.
+ * @param chatId - The chat.
+ * @returns Its turns and the epochs this device led.
+ * @public
+ */
+export const observeOwnTurns = async (read: OwnRowsRead, chatId: string): Promise<OwnTurns> => {
+  const rows: AgentLogEvent[] = [];
+  let cursor = 0;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- each page starts where the one before it ended.
+    const batch = await read({ chatId, cursor, limit: ownPageLimit, maxBytes: ownPageBytes });
+    rows.push(...batch.events);
+    if (batch.events.length === 0 || batch.nextCursor >= batch.endCursor) {
+      break;
+    }
+    cursor = batch.nextCursor;
+  }
+  const epochs = new Set(rows.map((row) => row.leaderEpoch));
+  return { runs: observeTurns(chatId, rows), ownsEpoch: (leaderEpoch) => epochs.has(leaderEpoch) };
 };

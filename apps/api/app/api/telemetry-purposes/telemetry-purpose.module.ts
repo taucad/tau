@@ -2,6 +2,7 @@ import { Global, Injectable, Module } from '@nestjs/common';
 import type { DynamicModule } from '@nestjs/common';
 import { DatabaseModule } from '#database/database.module.js';
 import { BillingModule } from '#api/billing/billing.module.js';
+import { HostsModule } from '#api/hosts/hosts.module.js';
 import { BillingService } from '#api/billing/billing.service.js';
 import type { TierAssurance } from '#api/billing/subscription-tier.js';
 import { TelemetryPurposeController } from '#api/telemetry-purposes/telemetry-purpose.controller.js';
@@ -43,7 +44,7 @@ export class TelemetryPurposeModule {
     return {
       global: true,
       module: TelemetryPurposeModule,
-      imports: options.tauCloudEnabled ? [DatabaseModule, BillingModule] : [DatabaseModule],
+      imports: options.tauCloudEnabled ? [DatabaseModule, HostsModule, BillingModule] : [DatabaseModule, HostsModule],
       controllers: [TelemetryPurposeController],
       providers: [implementation, { provide: tierAssuranceKey, useExisting: implementation }, TelemetryPurposeService],
       exports: [TelemetryPurposeService],

@@ -162,6 +162,32 @@ describe('EvidenceIngressService', () => {
     expect(admitted).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { name: 'another project', overrides: { project: 'project-b' } },
+    { name: 'another uploader', overrides: { uploader: 'device-b' } },
+  ])('refuses a cloud host reporting for $name before any database work', async ({ overrides }) => {
+    const { service, purposes } = createService();
+    const host = { deviceId: 'device-a', projectId: 'project-a' };
+
+    const answer = await refusal(service.admit('user-a', encodeEvidence(await evidenceFixture(overrides)), host));
+
+    expect(answer).toMatchObject({ status: 403, body: { code: 'EVIDENCE_SCOPE' } });
+    expect(purposes.getAdmissionAuthority).not.toHaveBeenCalled();
+    expect(admitted).not.toHaveBeenCalled();
+  });
+
+  it('admits a cloud host’s own project under its owner’s grant', async () => {
+    const { service, purposes } = createService();
+
+    await expect(
+      service.admit('user-a', encodeEvidence(await evidenceFixture()), {
+        deviceId: 'device-a',
+        projectId: 'project-a',
+      }),
+    ).resolves.toEqual(receipt);
+    expect(purposes.getAdmissionAuthority).toHaveBeenCalledWith('user-a', 'project-a');
+  });
+
   it('refuses every admission while no payload key is configured', async () => {
     const { service } = createService({ key: false });
 

@@ -228,7 +228,7 @@ describe('PicoGK browser session', () => {
       worker.dispatchEvent(new MessageEvent('message', { data: null }));
     }
     if (failure === 'crash') {
-      worker.dispatchEvent(new ErrorEvent('error', { message: 'Crashed' }));
+      worker.dispatchEvent(Object.assign(new Event('error'), { message: 'Crashed' }));
     }
     if (failure === 'message-error') {
       worker.dispatchEvent(new MessageEvent('messageerror'));
@@ -336,7 +336,7 @@ describe('PicoGK browser session', () => {
     const next = request(session, { source: { ...snapshot, revision: 'b' } });
     await tick();
     if (typeof callback === 'function') {
-      callback.call(old, new ErrorEvent(kind));
+      callback.call(old, new Event(kind));
     }
     ready(workers[1]!, 2);
     await tick();
@@ -351,7 +351,7 @@ describe('PicoGK browser session', () => {
     await tick();
     workers[0]!.dispatchEvent(
       kind === 'error'
-        ? new ErrorEvent('error')
+        ? Object.assign(new Event('error'), { message: '' })
         : new MessageEvent('message', { data: { generation: 1, kind: 'failed' } }),
     );
     await rejected;

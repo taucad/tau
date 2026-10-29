@@ -39,6 +39,7 @@ import {
 import type { CaptureMemo, RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import { parseTemporarySibling } from '#revision-temporary-sibling.js';
 import { createApplyTreeEffects } from '#apply-tree.js';
+import { createLargeObjectFill, largeObjectPlaceholders } from '#large-object-fill.js';
 import {
   prepareProjectManifest,
   validateLegacyProjectIdentity,
@@ -1281,7 +1282,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if (memos.basis?.revisionId === head) {
       return memos.basis.tree;
     }
-    const tree = await port.readTree(revisionId(head));
+    /* Modes only, so nothing is fetched: a placeholder's mode is its file's (load-path audit, open first). */
+    const tree = await port.readTree(revisionId(head), { largeObjects: 'local' });
     const held = tree === undefined ? undefined : heldTree(tree);
     memos.basis = held === undefined ? undefined : { revisionId: head, tree: held };
     return tree;
@@ -1297,6 +1299,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   ): Promise<ImmutableRevisionTree> =>
     useFileSystem(place, async (rooted) => {
       await sweepTemporarySiblings(place, rooted);
+      /* The project directory, where an open writes placeholders; a pull resumes any other checkout's. */
+      if (place.kind === 'live') {
+        resumeFill(place);
+      }
       const { modeBasis, bypassMemo, changed } = captureOptions;
       const memos = memosOf(place.id);
       const ignored = await port.ignoredPaths?.(place.kind === 'live' ? undefined : place.root);
@@ -1369,6 +1375,35 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     validateLegacyProjectIdentity(target.get('tau.json'), options.projectId);
     return applyMaterializedTree(place, target, materialization);
   };
+  /* The files open before their large objects arrive; the fill writes each one as it lands. */
+  const largeObjects = createLargeObjectFill({
+    port,
+    capture: async (place) => capture(place),
+    withCheckoutFence,
+    materializeTree,
+    report: options.onLargeObjects,
+  });
+  /* Once per checkout per session: placeholders a reload left mid-download are picked up again. */
+  const resumedFills = new Set<string>();
+  const resumeFill = (place: Checkout): void => {
+    if (resumedFills.has(place.id)) {
+      return;
+    }
+    resumedFills.add(place.id);
+    setTimeout(() => {
+      // async-iife: bootstrap -- a background fill; its failures are reported through `onLargeObjects`.
+      void (async (): Promise<void> => {
+        try {
+          const head = await headOf(place);
+          if (head !== undefined) {
+            await largeObjects.resume(place, revisionId(head));
+          }
+        } catch (error) {
+          console.warn('[revisions] large-object placeholders could not be checked', error);
+        }
+      })();
+    }, 0);
+  };
 
   /**
    * The project's *Sync chats* answer, read per push (D25, W17).
@@ -1434,7 +1469,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       return false;
     }
     const head = await port.readRef(remoteTrackingRef(remote, `refs/heads/${branch}`));
-    const tree = head === undefined ? undefined : await port.readTree(head);
+    const tree = head === undefined ? undefined : await port.readTree(head, { largeObjects: 'local' });
     const manifest = tree?.get('tau.json');
     if (manifest === undefined) {
       return false;
@@ -2452,7 +2487,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       return undefined;
     }
     const branch = `refs/heads/${input.branch}`;
-    const target = await port.readTree(head);
+    /* From this store alone: a large object not here yet is written as its
+     * pointer, and the fill below writes its bytes as they land. The pointer
+     * is what the store records either way, so the checkout is clean at once. */
+    const target = await port.readTree(head, { largeObjects: 'local' });
     signal.throwIfAborted();
     if (target === undefined) {
       throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${head}.`);
@@ -2520,6 +2558,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         throw error;
       }
       return held;
+    }
+    const placeholders = largeObjectPlaceholders(target);
+    if (placeholders.size > 0) {
+      resumedFills.add(place.id);
+      void largeObjects.fill(place, head, placeholders);
     }
     const treeId = await treeIdOf(head);
     if (treeId === undefined) {
@@ -4466,6 +4509,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           port.listRefs(`refs/remotes/${input.remote}`),
           listPlaces(),
         ]);
+        const active = places.find((place) => place.branch === input.branch);
+        if (active !== undefined) {
+          resumeFill(active);
+        }
         /* Operation logs are pushed, never pulled: *Undo* reads only this host's
          * own, and fetching every device's on every pull is two requests each,
          * forever (RV-W7 #1). */

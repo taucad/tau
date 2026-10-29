@@ -8,7 +8,11 @@ import type * as AgentProjectionsModule from '#hooks/use-agent-projections.js';
 import { useAgentProjections } from '#hooks/use-agent-projections.js';
 import { AgentList, AgentsPanelBody, ChatAgents } from '#routes/w.$workspace.$project/chat-agents.js';
 
-vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
+vi.mock('#hooks/use-project-availability.js', () => ({
+  useProjectAvailability: () => 'ready',
+  useModelAvailability: () => 'ready',
+  useLargeObjectPending: () => false,
+}));
 
 vi.mock('#components/icons/svg-icon.js', () => ({
   SvgIcon: ({ id }: { readonly id: string }) => <span data-testid={`model-icon-${id}`} />,

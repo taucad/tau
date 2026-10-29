@@ -24,7 +24,8 @@ import type { FileStatEntry } from '@taucad/filesystem';
 import { classify, unlistedPathClassification } from '@taucad/filesystem/path-registry';
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
-import { lfsObjectPath, lfsPointerFor } from '#lfs.js';
+import { cleanLargeObjects, lfsObjectPath, lfsPointerFor } from '#lfs.js';
+import type { LargeObjectsReport } from '#project-revisions.types.js';
 import { writeChatRef } from '#chat-ref.js';
 import { materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { RevisionPortError } from '#revision-port.js';
@@ -4375,4 +4376,77 @@ describe('the fact a released turn publishes', () => {
     expect(describeTurnRelease({ ...released, outcome: 'finalized' })).toBeUndefined();
     expect(describeTurnRelease({ ...released, outcome: 'conflicted' })).toBeUndefined();
   });
+});
+
+/*
+ * The operator's "open the UI, model waits": a pull writes the checkout before
+ * its large objects arrive, a missing object as its pointer, and fills each one
+ * as it lands. The pointer is what the store records, so nothing is owed meanwhile.
+ */
+describe('opening before large objects arrive', () => {
+  it('writes the checkout at once, holds a missing object as its pointer, and fills it as it lands', async () => {
+    const reports: LargeObjectsReport[] = [];
+    const part = 'solid part\n';
+    const { pointer, bytes: pointerBytes } = lfsPointerFor(new TextEncoder().encode(part));
+    let release: () => void = () => undefined;
+    const arrived = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { port: real, filesystem } = await fixture();
+    await real.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await real.setHead('main');
+    const receipt = await real.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([
+        ['main.scad', 'import("models/part.step");\n'],
+        ['models/part.step', part],
+      ]),
+      provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 9, 29) },
+      summary: { generated: 'Remote' },
+    });
+    const remote = revisionId(receipt.commitId);
+    await real.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: remote });
+    /* As a fetch leaves it: the pointer is recorded, the bytes are not here yet. */
+    const objectFile = `.git/${lfsObjectPath(pointer.oid)}`;
+    await filesystem.unlink(objectFile);
+    /* The transfer lands when the test says so. */
+    const port: RevisionPort = {
+      ...real,
+      readTree: async (id, options) => {
+        if (options?.largeObjects === 'local') {
+          return real.readTree(id, options);
+        }
+        await arrived;
+        await filesystem.writeFile(objectFile, part);
+        options?.onLargeObject?.(pointer.oid, new TextEncoder().encode(part));
+        return real.readTree(id);
+      },
+    };
+    const actors = createRevisionActors({
+      port,
+      projectId: 'project-1',
+      filesystem: async () => filesystem,
+      onLargeObjects: (report) => reports.push(report),
+    });
+
+    await expect(run(actors.sync.fastForward, { remote: 'tau', branch: 'main' })).resolves.toMatchObject({
+      checkoutId: 'live',
+      revisionId: remote,
+    });
+    expect(await filesystem.readFile('main.scad', 'utf8')).toBe('import("models/part.step");\n');
+    expect(await filesystem.readFile('models/part.step')).toStrictEqual(pointerBytes);
+    await vi.waitFor(() => {
+      expect(reports.at(-1)?.facet).toMatchObject({ phase: 'fetching', paths: ['models/part.step'], totalObjects: 1 });
+    });
+    /* A placeholder is not work: the checkout records exactly the head's tree. */
+    const live = await captureRevisionTree(filesystem, { exclude: (path) => !classify(path).versioned });
+    const recorded = await real.readRevision(remote);
+    expect(revisionTreeId(cleanLargeObjects(live).tree, 'sha1')).toBe(recorded?.treeId);
+
+    release();
+    await vi.waitFor(() => {
+      expect(reports.at(-1)?.facet).toBeUndefined();
+    });
+    expect(await filesystem.readFile('models/part.step', 'utf8')).toBe(part);
+  }, 30_000);
 });

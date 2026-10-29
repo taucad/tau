@@ -97,6 +97,7 @@ import type {
   RevisionHead,
   RevisionLogEntry,
   RevisionLogInput,
+  ReadTreeOptions,
   RevisionPort,
   RevisionReceipt,
   RevisionRecord,
@@ -858,10 +859,12 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    * arrives, so a reload part-way through fetches only what is still missing.
    *
    * @param pointers - The pointers, in tree order; repeats are resolved once.
+   * @param delivered - Told about each object this read fetched, as it lands.
    * @returns The bytes by oid, and what the phase cost.
    */
   const hydrate = async (
     pointers: readonly LfsPointer[],
+    delivered?: ReadTreeOptions['onLargeObject'],
   ): Promise<Readonly<{ contents: ReadonlyMap<string, Uint8Array<ArrayBuffer>>; report: LfsFetchReport }>> => {
     const startedAt = Date.now();
     const contents = new Map<string, Uint8Array<ArrayBuffer>>();
@@ -893,6 +896,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           networkBytes += content.byteLength;
           pending.get(pointer.oid)?.resolve(content);
           pending.delete(pointer.oid);
+          delivered?.(pointer.oid, content);
         },
       });
     };
@@ -905,6 +909,16 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         const inFlight = downloads.get(pointer.oid);
         if (inFlight !== undefined) {
           shared.set(pointer.oid, { pointer, inFlight });
+          if (delivered !== undefined) {
+            // async-iife: bootstrap -- the first reader's transfer, told to this one as it lands; a failure is collected below.
+            void (async (): Promise<void> => {
+              try {
+                delivered(pointer.oid, await inFlight);
+              } catch {
+                /* Collected below, where this reader fetches what the other did not deliver. */
+              }
+            })();
+          }
           continue;
         }
         const file = lfsObjectFile(pointer.oid);
@@ -1508,7 +1522,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       });
     },
 
-    readTree: async (id: RevisionId): Promise<ImmutableRevisionTree | undefined> => {
+    readTree: async (id: RevisionId, readOptions?: ReadTreeOptions): Promise<ImmutableRevisionTree | undefined> => {
       const commit = await commitOf(id);
       if (commit === undefined) {
         return undefined;
@@ -1527,7 +1541,26 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         read.push({ path, content, mode: mode as FileMode, pointer: readLfsPointer(content) });
       }
       const pointers = read.flatMap(({ pointer }) => (pointer === undefined ? [] : [pointer]));
-      const hydrated = pointers.length === 0 ? undefined : await hydrate(pointers);
+      if (readOptions?.largeObjects === 'local') {
+        /* No transfer: what is here already is read, and the rest stay pointers for the caller to track. */
+        const local = new Map<string, Uint8Array<ArrayBuffer>>();
+        for (const { oid } of pointers) {
+          const file = lfsObjectFile(oid);
+          // oxlint-disable-next-line no-await-in-loop -- one local read at a time, as the hydrate's own scan does.
+          if (!local.has(oid) && (await filesystem.exists(file))) {
+            // oxlint-disable-next-line no-await-in-loop -- as above.
+            local.set(oid, await filesystem.readFile(file));
+          }
+        }
+        return new ImmutableRevisionTree(
+          read.map(({ path, content, mode, pointer }) => [
+            path,
+            (pointer === undefined ? undefined : local.get(pointer.oid)) ?? content,
+            mode,
+          ]),
+        );
+      }
+      const hydrated = pointers.length === 0 ? undefined : await hydrate(pointers, readOptions?.onLargeObject);
       if (hydrated !== undefined && hydrated.report.networkObjects > 0) {
         options.onLfsFetch?.(hydrated.report);
       }

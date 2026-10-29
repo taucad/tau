@@ -643,4 +643,49 @@ describe('reading a tree with large objects', () => {
     await filesystem.unlink(`.git/${lfsObjectPath(oidOf(parts[0]![1]!))}`);
     await expect(port.readTree(revisionId(receipt.commitId))).rejects.toMatchObject({ code: 'MISSING_LARGE_OBJECT' });
   });
+
+  /* Open first, model waits: the checkout is written from this store alone, and the rest are filled as they land. */
+  it('answers a local read from this store alone, leaving a missing object its pointer', async () => {
+    const { port, head, asked, transfer, evict } = await lfsStore();
+    await evict(parts[0]![1]!);
+    const read = await port.readTree(head, { largeObjects: 'local' });
+    expect(read?.get(parts[0]![0]!)).toStrictEqual(lfsPointerFor(encoder.encode(parts[0]![1])).bytes);
+    expect(read?.get(parts[1]![0]!)).toStrictEqual(encoder.encode(parts[1]![1]));
+    expect(read?.get('main.scad')).toStrictEqual(encoder.encode('cube(1);\n'));
+    expect(asked).toStrictEqual([]);
+    expect(transfer).not.toHaveBeenCalled();
+  });
+
+  it('tells a fetching read about each object as it lands', async () => {
+    const { port, head, evict } = await lfsStore();
+    await evict(parts[0]![1]!, parts[2]![1]!);
+    const landed: Array<[string, string]> = [];
+    await port.readTree(head, {
+      onLargeObject: (oid, content) => landed.push([oid, new TextDecoder().decode(content)]),
+    });
+    expect(landed).toHaveLength(2);
+    expect(landed).toStrictEqual(
+      expect.arrayContaining([
+        [oidOf(parts[0]![1]!), parts[0]![1]],
+        [oidOf(parts[2]![1]!), parts[2]![1]],
+      ]),
+    );
+  });
+
+  it('tells a second reader about an object the first reader is fetching', async () => {
+    const { port, head, asked, transfer, evict } = await lfsStore();
+    await evict(parts[1]![1]!);
+    /* The transfer is held until both readers have scanned, so the second finds it in flight rather than stored. */
+    const deliver = transfer.getMockImplementation()!;
+    transfer.mockImplementation(async (url, init) => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+      return deliver(url, init);
+    });
+    const landed: string[] = [];
+    await Promise.all([port.readTree(head), port.readTree(head, { onLargeObject: (oid) => landed.push(oid) })]);
+    expect(asked).toHaveLength(1);
+    expect(landed).toStrictEqual([oidOf(parts[1]![1]!)]);
+  });
 });

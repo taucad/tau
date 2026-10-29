@@ -1928,8 +1928,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         );
       }
       /* The one advertisement (E4), shared by the pushes of this attempt's session (F5). */
-      const advertisement = await takeAdvertisement(http, url, input);
-      const { advertised } = advertisement;
+      let advertisement = await takeAdvertisement(http, url, input);
       const ordered = [...input.refs].toSorted(
         (left, right) => Number(left.name === refOf(defaultBranch)) - Number(right.name === refOf(defaultBranch)),
       );
@@ -1962,7 +1961,14 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       }
       input.signal?.throwIfAborted();
       const atomic = input.atomic === true;
-      const { results, commands } = await planPush(ordered, advertised, atomic);
+      let { results, commands } = await planPush(ordered, advertisement.advertised, atomic);
+      /* A reused copy that says a ref is already there may only mean another writer moved it
+       * since: nothing would be sent to find out, so `upToDate` is read again before it is reported. */
+      if (advertisement.reused === true && [...results.values()].some((result) => result.status === 'upToDate')) {
+        advertisement = await takeAdvertisement(http, url, { ...input, session: undefined });
+        ({ results, commands } = await planPush(ordered, advertisement.advertised, atomic));
+      }
+      const { advertised } = advertisement;
       if (commands.length > 0) {
         const capabilities = ['report-status', 'side-band-64k', ...(atomic ? ['atomic'] : [])].filter(
           (capability) => capability in advertisement.capabilities,

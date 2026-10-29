@@ -2418,10 +2418,12 @@ const syncMachineDefinition = setup({
                    * same pull just took (P18, P44). */
                   localHead: event.revisionId ?? context.localHead,
                   pendingMint: true,
+                  /* The decision is an unsent change: it dates the lag as the root's handler would. */
+                  ...markUnsyncedRecords(context),
                 },
               }
             : /* Another line's resolution: remembered as the root would, for the next push. */
-              { context: { pendingMint: true } },
+              { context: { pendingMint: true, ...markUnsyncedRecords(context) } },
       },
     },
 

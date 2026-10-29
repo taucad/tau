@@ -422,7 +422,7 @@ describe('parallel uploads', () => {
     });
     while (transfer.mock.calls.length < pointers.length || releases.length > 0) {
       releases.shift()?.(new Response(''));
-      // eslint-disable-next-line no-await-in-loop -- let the pool admit the next object.
+      // oxlint-disable-next-line no-await-in-loop -- let the pool admit the next object.
       await new Promise((resolve) => {
         setTimeout(resolve, 0);
       });

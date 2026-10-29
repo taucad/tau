@@ -1701,6 +1701,34 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
+  /* `conflicted` answers `conflictResolved` itself, so it dates the decision as the root's handler would. */
+  it.each([
+    ['on this branch', mainRef],
+    ['on another branch', 'refs/heads/other'],
+  ])('dates a decision landed %s while conflicted for the lag report', async (_label, ref) => {
+    const now = vi.spyOn(Date, 'now');
+    try {
+      const harness = start();
+      await settleWhenRunning(harness.effects, 'fetch', {
+        output: { leases: {}, integration: 'diverged' } satisfies SyncFetchActorOutput,
+      });
+      await settleWhenRunning(harness.effects, 'merge', { output: mergeConflict });
+      await vi.waitFor(() => {
+        expect(harness.actor.getSnapshot().matches('conflicted')).toBe(true);
+      });
+      expect(harness.actor.getSnapshot().context.unsyncedSince).toBeUndefined();
+      now.mockReturnValue(4_000_000);
+      harness.actor.send({ type: 'conflictResolved', ref });
+      expect(harness.actor.getSnapshot().context).toMatchObject({
+        unsyncedSince: 4_000_000,
+        changedSincePushAt: 4_000_000,
+      });
+      harness.stop();
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it('row 32b (D14): a conflict pushes its line alone, and a remote move pulls the decision in', async () => {
     const harness = start();
     await settleWhenRunning(harness.effects, 'fetch', {

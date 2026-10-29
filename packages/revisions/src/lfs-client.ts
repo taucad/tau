@@ -475,6 +475,69 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
     }
   };
 
+  /*
+   * A few at once, admitted in order under a byte budget (F5). The first
+   * failure stops the rest: nothing new starts, the ones in flight are
+   * aborted, and that failure is what the push reports.
+   */
+  const uploadAll = async (
+    wanted: readonly BatchObject[],
+    read: LfsUploadInput['read'],
+    signal: AbortSignal | undefined,
+  ): Promise<void> => {
+    const failed = new AbortController();
+    const transfer = signal === undefined ? failed.signal : AbortSignal.any([signal, failed.signal]);
+    const requested = options.uploadConcurrency ?? lfsUploadConcurrency;
+    /* A malformed setting (NaN, a fraction, below one) falls back to something that still uploads. */
+    const limit = Number.isFinite(requested) ? Math.max(1, Math.floor(requested)) : lfsUploadConcurrency;
+    const running = new Map<number, Promise<void>>();
+    let resident = 0;
+    let failure: { error: unknown } | undefined;
+    const stopped = (): boolean => failure !== undefined;
+    const sendOne = async (answer: BatchObject, index: number): Promise<void> => {
+      /* A turn first, so the pool has recorded this task before its `finally` removes it, even if `read` throws at once. */
+      await Promise.resolve();
+      try {
+        const content = await read(answer.oid);
+        transfer.throwIfAborted();
+        if (content.byteLength !== answer.size || lfsPointerFor(content).pointer.oid !== answer.oid) {
+          throw new Error(`Large object ${answer.oid} did not hash to its own id.`);
+        }
+        await uploadObject(answer, content, transfer);
+      } catch (error) {
+        failure ??= { error: signal?.aborted === true ? signal.reason : error };
+        failed.abort();
+      } finally {
+        resident -= answer.size;
+        running.delete(index);
+      }
+    };
+    for (const [index, answer] of wanted.entries()) {
+      while (
+        !stopped() &&
+        running.size > 0 &&
+        (running.size >= limit || resident + answer.size > lfsUploadResidentBytes)
+      ) {
+        await Promise.race(running.values());
+      }
+      /* An abort from outside stops admission like a failure does, so the ones in flight are still awaited. */
+      if (!stopped() && signal?.aborted === true) {
+        failure = { error: signal.reason };
+        failed.abort();
+      }
+      if (stopped()) {
+        break;
+      }
+      resident += answer.size;
+      running.set(index, sendOne(answer, index));
+    }
+    await Promise.all(running.values());
+    if (failure !== undefined) {
+      throw failure.error;
+    }
+    signal?.throwIfAborted();
+  };
+
   return Object.freeze({
     upload: async ({ pointers, read, signal }: LfsUploadInput): Promise<readonly string[]> => {
       signal?.throwIfAborted();
@@ -492,60 +555,7 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
         throw new Error(`The remote refused large object ${refused.oid}: ${refused.error?.message}`);
       }
       const wanted = answers.filter((answer) => answer.actions?.upload !== undefined);
-      /* A few at once, admitted in order under a byte budget (F5). The first
-       * failure stops the rest: nothing new starts, the ones in flight are
-       * aborted, and that failure is what the push reports. */
-      const failed = new AbortController();
-      const transfer = signal === undefined ? failed.signal : AbortSignal.any([signal, failed.signal]);
-      const requested = options.uploadConcurrency ?? lfsUploadConcurrency;
-      /* A malformed setting (NaN, a fraction, below one) falls back to something that still uploads. */
-      const limit = Number.isFinite(requested) ? Math.max(1, Math.floor(requested)) : lfsUploadConcurrency;
-      const running = new Map<number, Promise<void>>();
-      let resident = 0;
-      let failure: { error: unknown } | undefined;
-      const stopped = (): boolean => failure !== undefined;
-      const sendOne = async (answer: BatchObject, index: number): Promise<void> => {
-        /* A turn first, so the pool has recorded this task before its `finally` removes it, even if `read` throws at once. */
-        await Promise.resolve();
-        try {
-          const content = await read(answer.oid);
-          transfer.throwIfAborted();
-          if (content.byteLength !== answer.size || lfsPointerFor(content).pointer.oid !== answer.oid) {
-            throw new Error(`Large object ${answer.oid} did not hash to its own id.`);
-          }
-          await uploadObject(answer, content, transfer);
-        } catch (error) {
-          failure ??= { error: signal?.aborted === true ? signal.reason : error };
-          failed.abort();
-        } finally {
-          resident -= answer.size;
-          running.delete(index);
-        }
-      };
-      for (const [index, answer] of wanted.entries()) {
-        while (
-          !stopped() &&
-          running.size > 0 &&
-          (running.size >= limit || resident + answer.size > lfsUploadResidentBytes)
-        ) {
-          await Promise.race(running.values());
-        }
-        /* An abort from outside stops admission like a failure does, so the ones in flight are still awaited. */
-        if (!stopped() && signal?.aborted === true) {
-          failure = { error: signal.reason };
-          failed.abort();
-        }
-        if (stopped()) {
-          break;
-        }
-        resident += answer.size;
-        running.set(index, sendOne(answer, index));
-      }
-      await Promise.all(running.values());
-      if (failure !== undefined) {
-        throw failure.error;
-      }
-      signal?.throwIfAborted();
+      await uploadAll(wanted, read, signal);
       return Object.freeze(wanted.map((answer) => answer.oid));
     },
 

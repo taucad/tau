@@ -1046,6 +1046,47 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
     180_000,
   );
 
+  /* Review: a kept copy saying a ref is already there is read again, since nothing sent would find out. */
+  it.skipIf(leg.name === 'native git')(
+    'row 9d: a session reads the remote again before calling a ref another writer moved up to date',
+    async () => {
+      const remote = await startGitHttpBackend({ root: await temporaryRoot('remote-stale-up-to-date') });
+      try {
+        const one = await device({ leg, label: 'a-stale-up-to-date', remoteUrl: remote.url, files: { 'a.ts': '1\n' } });
+        const first = await record({ device: one, files: { 'a.ts': '1\n' }, summary: 'First' });
+        const session: RevisionPushSession = {};
+        const adverts = (): number => remote.trail().filter((entry) => entry.endsWith('/info/refs')).length;
+        const before = adverts();
+        const pushed = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }], session });
+        expect(pushed.refs[0]).toMatchObject({ status: 'updated', head: first });
+        /* A second writer moves the branch; this device still holds `first`, which the kept copy names. */
+        const tree = await remote.git(['rev-parse', `${first}^{tree}`]);
+        const other = await remote.git([
+          '-c',
+          'user.name=Another writer',
+          '-c',
+          'user.email=another@example.test',
+          'commit-tree',
+          tree,
+          '-p',
+          first,
+          '-m',
+          'Another writer',
+        ]);
+        await remote.git(['update-ref', mainRef, other]);
+
+        const again = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }], session });
+        /* Not `upToDate`: the fresh read sees the remote ahead, and the remote is left as it is. */
+        expect(again.refs[0]).toMatchObject({ status: 'rejected' });
+        expect(adverts() - before).toBe(2);
+        await expect(remote.git(['rev-parse', mainRef])).resolves.toBe(other);
+      } finally {
+        await remote.close();
+      }
+    },
+    180_000,
+  );
+
   it('row 4 (red pin e): a device whose work the remote never took drains its queue on the next open', async () => {
     const remoteRoot = await temporaryRoot('remote-drain');
     const first = await startGitHttpBackend({ root: remoteRoot });

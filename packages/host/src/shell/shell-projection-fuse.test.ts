@@ -326,7 +326,7 @@ const families: ReadonlyArray<readonly [label: string, script: string, allowed: 
   ['rename a directory with a protected child onto .tAu', 'mkdir e && printf c > e/chats && mv e .tAu', false],
   ['Unicode long s exportſ', 'mkdir exportſ && printf x > exportſ/model.step', false],
   ['rename the container alias .taU away', 'mkdir .taU && mv .taU gone', false],
-  ['remove the container alias .tau:x', 'mkdir .tau:x && rmdir .tau:x', false],
+  ['create the container alias .tau:x', 'mkdir .tau:x && rmdir .tau:x', false],
 ];
 /** Paths that must never exist on the backing checkout when the classifier is in place. */
 const protectedLanded = [
@@ -429,7 +429,9 @@ describe.runIf(enabled)('G5 PP3 spelling families through the FUSE path', () => 
     const top = await readdir(root);
     expect(top).not.toContain('.TAU.');
     expect(top).toContain('.tau');
-    expect(top).toContain('.tau:x');
+    /* The mkdir is what the classifier refuses, so the alias never becomes visible in the mount and never
+     * reaches the checkout; the rmdir that follows fails as a consequence, not as a second refusal. */
+    expect(top).not.toContain('.tau:x');
   }, 30_000);
 
   it('derives what a directory rename carries, so a harness that drops descendants is refused the same', async () => {

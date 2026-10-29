@@ -1,5 +1,8 @@
-import { parse } from 'es-module-lexer/js';
-import { extractPackageFromCdnUrl, isBareSpecifier } from '@taucad/utils/import';
+import { installedDeclarations } from '#lib/typescript-language/installed-declarations.js';
+import type { DeclarationImport } from '#lib/typescript-language/declaration-graph.js';
+import { declarationPath, loadDeclarationGraph } from '#lib/typescript-language/declaration-graph.js';
+import { Topic } from '@taucad/events';
+import { extractPackageInfoFromCdnUrl, isBareSpecifier } from '@taucad/utils/import';
 import type { TypeScriptWorkerClient } from '@taucad/lsp/typescript-worker/client';
 import type { EditorDocument } from '#lib/editor-document.js';
 import { readStaticTypePackage } from '#lib/typescript-language/static-types.js';
@@ -7,10 +10,12 @@ import type { DependencyReader, StaticTypeDefinition } from '#lib/typescript-lan
 
 // oxlint-disable eslint/no-await-in-loop -- declaration registration and import acquisition are ordered to bound worker and network work.
 
+type AcquisitionRequest = { key: string; packageName: string; subpath: string; version?: string };
+
 type ProjectReader = (path: string) => Promise<string | undefined>;
 
 type AcquisitionOptions = Readonly<{
-  client: Pick<TypeScriptWorkerClient, 'setExtraLib'>;
+  client: Pick<TypeScriptWorkerClient, 'setExtraLib' | 'request'>;
   staticTypes: readonly StaticTypeDefinition[];
   dependencyReader?: DependencyReader;
   dynamicTypes: boolean;
@@ -46,17 +51,21 @@ function jsonObject(text: string | undefined): Record<string, unknown> | undefin
 
 /** Acquisition is project-scoped and inserts declarations into the actual TS worker. */
 export class TypeAcquisitionController {
+  public revision = 0;
   // oxlint-disable-next-line typescript/parameter-properties -- erasableSyntaxOnly rejects constructor parameter properties.
   private readonly options: AcquisitionOptions;
+  private readonly mountedPackages = new Set<string>();
+  private readonly declarationSources = new Map<string, string>();
   private readonly knownPackages = new Set<string>();
+  private retryTimer: ReturnType<typeof setTimeout> | undefined;
+  private retryAttempts = 0;
   private readonly failures = new Map<string, number>();
   private readonly pending = new Map<string, Promise<void>>();
-  private readonly cache = new Map<string, string>();
   private readonly timers = new Map<EditorDocument, ReturnType<typeof setTimeout>>();
   private readonly subscriptions = new Map<EditorDocument, () => void>();
   private readonly injectedUris = new Set<string>();
-  private readonly aliases = new Map<string, Set<string>>();
-  private readonly staticLookups = new Set<string>();
+  private readonly changes = new Topic<number>({ name: 'TypeAcquisition.changes' });
+
   private readonly abort = new AbortController();
   private disposed = false;
 
@@ -64,15 +73,24 @@ export class TypeAcquisitionController {
     this.options = options;
   }
 
+  public subscribe(listener: (revision: number) => void): () => void {
+    return this.changes.subscribe(listener);
+  }
+
   public async initialize(): Promise<void> {
     for (const definition of this.options.staticTypes) {
       const uri = definition.filePath ?? `file:///node_modules/${definition.packageName}/index.d.ts`;
       await this.inject(uri, definition.content);
       this.knownPackages.add(definition.packageName);
+      this.mountedPackages.add(definition.packageName);
+      this.declarationSources.set(uri, definition.content);
       const manifestUri = `file:///node_modules/${definition.packageName}/package.json`;
       if (definition.packageJsonContent && !this.injectedUris.has(manifestUri)) {
         await this.inject(manifestUri, definition.packageJsonContent);
       }
+    }
+    for (const definition of this.options.staticTypes) {
+      await this.scan(definition.content);
     }
   }
 
@@ -98,23 +116,38 @@ export class TypeAcquisitionController {
   }
 
   public dispose(): void {
-    if (this.disposed) {
+    if (this.isDisposed()) {
       return;
     }
     this.disposed = true;
     this.abort.abort();
+    clearTimeout(this.retryTimer);
     for (const document of this.subscriptions.keys()) {
       this.unwatch(document);
     }
     this.pending.clear();
+    this.changes.dispose();
+  }
+
+  private isDisposed(): boolean {
+    return this.disposed;
   }
 
   private async inject(uri: string, text: string): Promise<void> {
+    if (this.isDisposed()) {
+      return;
+    }
     await this.options.client.setExtraLib(uri, text);
+    if (this.isDisposed()) {
+      return;
+    }
+    this.revision += 1;
+    this.changes.emit(this.revision);
     this.injectedUris.add(uri);
   }
 
   private schedule(document: EditorDocument): void {
+    this.retryAttempts = 0;
     const previous = this.timers.get(document);
     if (previous) {
       clearTimeout(previous);
@@ -134,43 +167,52 @@ export class TypeAcquisitionController {
     }
   }
 
+  private async imports(text: string): Promise<DeclarationImport[]> {
+    return this.options.client.request({ kind: 'declarationImports', text });
+  }
+
   private async scan(text: string): Promise<void> {
-    const [imports] = parse(text);
+    if (this.isDisposed()) {
+      return;
+    }
+    const imports = await this.imports(text);
     for (const entry of imports) {
-      const specifier = entry.n;
+      const specifier =
+        entry.reference === 'types' ? `@types/${entry.name.replace('@', '').replace('/', '__')}` : entry.name;
       if (!specifier) {
         continue;
       }
-      const packageName = isBareSpecifier(specifier) ? packageNameOf(specifier) : extractPackageFromCdnUrl(specifier);
+      if (this.isDisposed() || this.knownPackages.has(specifier)) {
+        continue;
+      }
+      const bare = isBareSpecifier(specifier);
+      const cdn = bare ? undefined : extractPackageInfoFromCdnUrl(specifier);
+      const packageName = bare ? packageNameOf(specifier) : cdn?.name;
       if (!packageName) {
         continue;
       }
-      if (!isBareSpecifier(specifier)) {
-        const aliases = this.aliases.get(packageName) ?? new Set<string>();
-        aliases.add(specifier);
-        this.aliases.set(packageName, aliases);
-        const cached = this.cache.get(packageName);
-        if (cached) {
-          await this.injectModule(specifier, cached);
-        }
-      }
-      if (!this.knownPackages.has(packageName)) {
+      if (bare) {
         await this.tryMountedTypes(packageName);
       }
-      if (this.options.dynamicTypes && !this.knownPackages.has(packageName)) {
-        await this.acquire(packageName);
+      if (this.options.dynamicTypes && !(bare && this.mountedPackages.has(packageName))) {
+        await this.acquire({
+          key: specifier,
+          packageName,
+          subpath: bare ? specifier.slice(packageName.length) : (cdn?.path ?? ''),
+          version: cdn?.version,
+        });
       }
     }
   }
 
   private async tryMountedTypes(packageName: string): Promise<void> {
     const reader = this.options.dependencyReader;
-    if (!reader || this.staticLookups.has(packageName)) {
+    if (!reader || this.mountedPackages.has(packageName)) {
       return;
     }
-    this.staticLookups.add(packageName);
     const definitions = await readStaticTypePackage(reader, packageName);
     if (definitions.length === 0) {
+      this.scheduleRetry();
       return;
     }
     for (const definition of definitions) {
@@ -182,91 +224,195 @@ export class TypeAcquisitionController {
       await this.inject(`file:///node_modules/${packageName}/package.json`, manifest);
     }
     this.knownPackages.add(packageName);
+    this.mountedPackages.add(packageName);
+    for (const definition of definitions) {
+      this.declarationSources.set(definition.filePath ?? packageName, definition.content);
+      await this.scan(definition.content);
+    }
   }
 
-  private async acquire(packageName: string): Promise<void> {
-    const inFlight = this.pending.get(packageName);
+  private async acquire(request: AcquisitionRequest): Promise<void> {
+    const { key } = request;
+    const inFlight = this.pending.get(key);
     if (inFlight) {
       return inFlight;
     }
-    const failedAt = this.failures.get(packageName);
+    const failedAt = this.failures.get(key);
     if (failedAt !== undefined && Date.now() - failedAt < retryDelay) {
       return;
     }
-    const promise = this.fetchTypes(packageName);
-    this.pending.set(packageName, promise);
+    const promise = this.fetchTypes(request);
+    this.pending.set(key, promise);
     try {
       await promise;
     } finally {
-      this.pending.delete(packageName);
+      this.pending.delete(key);
     }
   }
 
-  private async fetchTypes(packageName: string): Promise<void> {
-    const reader = this.options.readProjectFile;
-    const lock = reader ? jsonObject(await reader('package-lock.json')) : undefined;
-    const packages = lock?.['packages'];
-    const locked =
-      typeof packages === 'object' && packages !== null
-        ? (packages as Record<string, unknown>)[`node_modules/${packageName}`]
-        : undefined;
-    const lockedRow = typeof locked === 'object' && locked !== null ? (locked as Record<string, unknown>) : undefined;
-    const version = typeof lockedRow?.['version'] === 'string' ? lockedRow['version'] : undefined;
-    const realName = typeof lockedRow?.['name'] === 'string' ? lockedRow['name'] : packageName;
-    const cacheKey = version ? `${realName}@${version}` : packageName;
-    let content = this.cache.get(cacheKey);
-    if (!content && version && reader) {
-      const manifest = jsonObject(await reader(`node_modules/${packageName}/package.json`));
-      const typesFile = manifest?.['types'] ?? manifest?.['typings'];
-      if (manifest?.['version'] === version && typeof typesFile === 'string') {
-        content = await reader(`node_modules/${packageName}/${typesFile.replace(/^\.\//u, '')}`);
-      }
-    }
-    if (!content) {
-      try {
-        const moduleResponse = await fetch(`${esmShBase}/${cacheKey}`, { signal: this.abort.signal });
-        if (!moduleResponse.ok) {
-          throw new Error(`Type acquisition returned ${moduleResponse.status} for ${cacheKey}`);
-        }
-        const typesUrl = moduleResponse.headers.get('X-TypeScript-Types');
-        if (!typesUrl) {
-          // Missing declarations remain missing; never report a synthetic type as semantic success.
-          this.knownPackages.add(packageName);
-          return;
-        }
-        const url = typesUrl.startsWith('http') ? typesUrl : `${esmShBase}${typesUrl}`;
-        const typesResponse = await fetch(url, { signal: this.abort.signal });
-        if (!typesResponse.ok) {
-          throw new Error(`Type declarations returned ${typesResponse.status} for ${cacheKey}`);
-        }
-        content = await typesResponse.text();
-      } catch (error) {
-        if (this.abort.signal.aborted) {
-          return;
-        }
-        this.failures.set(packageName, Date.now());
-        this.report(error);
-        return;
-      }
-    }
-    if (this.disposed || !content) {
+  private async register(specifier: string, uri: string, files: Map<string, string>): Promise<void> {
+    if (this.isDisposed()) {
       return;
     }
-    this.cache.set(cacheKey, content);
-    this.cache.set(packageName, content);
-    await this.injectModule(packageName, content);
-    this.knownPackages.add(packageName);
-    await Promise.all(
-      [...(this.aliases.get(packageName) ?? [])].map(async (alias) => this.injectModule(alias, content)),
-    );
-    this.failures.delete(packageName);
+    for (const [path, text] of files) {
+      await this.inject(`file://${path}`, text);
+    }
+    if (this.isDisposed()) {
+      return;
+    }
+    await this.options.client.request({ kind: 'setModuleAlias', specifier, uri });
+    if (this.isDisposed()) {
+      return;
+    }
+    this.knownPackages.add(specifier);
+    this.failures.delete(specifier);
+    this.revision += 1;
+    this.changes.emit(this.revision);
+    for (const [path, text] of files) {
+      this.declarationSources.set(path, text);
+      await this.scan(text);
+    }
   }
 
-  private async injectModule(name: string, content: string): Promise<void> {
-    const uri = name.startsWith('http')
-      ? `file:///cdn-types/${encodeURIComponent(name)}.d.ts`
-      : `file:///node_modules/${name}/index.d.ts`;
-    await this.inject(uri, `declare module '${name}' {\n${content}\n}`);
+  private async fetchTypes({ key, packageName, subpath, version: explicitVersion }: AcquisitionRequest): Promise<void> {
+    try {
+      const reader = this.options.readProjectFile;
+      const lock = reader ? jsonObject(await reader('package-lock.json')) : undefined;
+      const packages = lock?.['packages'];
+      const locked =
+        typeof packages === 'object' && packages !== null
+          ? (packages as Record<string, unknown>)[`node_modules/${packageName}`]
+          : undefined;
+      const row = typeof locked === 'object' && locked !== null ? (locked as Record<string, unknown>) : undefined;
+      const version = explicitVersion ?? (typeof row?.['version'] === 'string' ? row['version'] : undefined);
+      const realName = typeof row?.['name'] === 'string' ? row['name'] : packageName;
+      const packageId = version ? `${realName}@${version}` : packageName;
+      if (version && reader) {
+        const manifest = jsonObject(await reader(`node_modules/${packageName}/package.json`));
+        if (manifest?.['version'] === version) {
+          try {
+            const installed = await installedDeclarations({
+              packageName,
+              subpath,
+              manifest,
+              read: reader,
+              imports: async (text) => this.imports(text),
+            });
+            if (installed) {
+              await this.register(key, installed.uri, installed.files);
+              return;
+            }
+          } catch (error) {
+            this.report(error);
+          }
+        }
+      }
+      const moduleUrl = `${esmShBase}/${packageId}${subpath.startsWith('/') || !subpath ? subpath : `/${subpath}`}`;
+      const moduleResponse = await fetch(moduleUrl, { signal: this.abort.signal });
+      this.abort.signal.throwIfAborted();
+      const header = moduleResponse.headers.get('X-TypeScript-Types');
+      if (!moduleResponse.ok || !header) {
+        throw new Error(`No declarations for ${key}: ${moduleResponse.status}`);
+      }
+      const url = new URL(header, moduleUrl).href;
+      const texts = new Map<string, string>();
+      const read = async (target: string): Promise<string> => {
+        this.abort.signal.throwIfAborted();
+        const cached = texts.get(target);
+        if (cached !== undefined) {
+          return cached;
+        }
+        const response = await fetch(target, { signal: this.abort.signal });
+        if (!response.ok) {
+          throw new Error(`Declaration fetch failed: ${target}: ${response.status}`);
+        }
+        const text = await response.text();
+        texts.set(target, text);
+        return text;
+      };
+      const graph = await loadDeclarationGraph({
+        entry: url,
+        imports: async (text) => this.imports(text),
+        read,
+        resolve: async (specifier, parent, reference) => {
+          if (reference === 'path' && !specifier.startsWith('/')) {
+            specifier = `./${specifier}`;
+          }
+          if (reference === 'types') {
+            specifier = `@types/${specifier.replace('@', '').replace('/', '__')}`;
+          }
+          if (specifier.startsWith('.') || specifier.startsWith('/') || specifier.startsWith('https://')) {
+            const target = new URL(specifier, parent);
+            if (/\.d\.(?:ts|mts|cts)$/u.test(target.pathname)) {
+              return target.href;
+            }
+            const base = target.pathname.replace(/\.(?:m?js|cjs)$/u, '');
+            const suffix = target.pathname.endsWith('.mjs')
+              ? '.d.mts'
+              : target.pathname.endsWith('.cjs')
+                ? '.d.cts'
+                : '.d.ts';
+            let failure: unknown;
+            for (const path of [`${base}${suffix}`, `${base}/index.d.ts`]) {
+              target.pathname = path;
+              try {
+                await read(target.href);
+                return target.href;
+              } catch (error) {
+                failure = error;
+              }
+            }
+            throw failure;
+          }
+          // Preserve the project's locked version for bare transitive dependencies.
+          const dependency = packageNameOf(specifier);
+          const lockedDependency: unknown =
+            typeof packages === 'object' && packages !== null
+              ? Reflect.get(packages, `node_modules/${dependency}`)
+              : undefined;
+          const dependencyVersion =
+            typeof lockedDependency === 'object' &&
+            lockedDependency !== null &&
+            'version' in lockedDependency &&
+            typeof lockedDependency.version === 'string'
+              ? lockedDependency.version
+              : undefined;
+          const request =
+            dependency && dependencyVersion
+              ? `${dependency}@${dependencyVersion}${specifier.slice(dependency.length)}`
+              : specifier;
+          const response = await fetch(`${esmShBase}/${request}`, { signal: this.abort.signal });
+          const target = response.headers.get('X-TypeScript-Types');
+          if (!response.ok || !target) {
+            throw new Error(`No declarations for ${specifier}`);
+          }
+          return new URL(target, esmShBase).href;
+        },
+      });
+      await this.register(key, `file://${declarationPath(url)}`, graph);
+    } catch (error) {
+      if (!this.isDisposed()) {
+        this.failures.set(key, Date.now());
+        this.scheduleRetry();
+        this.report(error);
+      }
+    }
+  }
+
+  private scheduleRetry(): void {
+    if (this.isDisposed() || this.retryTimer !== undefined || this.retryAttempts >= 3) {
+      return;
+    }
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = undefined;
+      this.retryAttempts += 1;
+      for (const text of this.declarationSources.values()) {
+        void this.runScan(text);
+      }
+      for (const document of this.subscriptions.keys()) {
+        void this.runScan(document.text);
+      }
+    }, retryDelay);
   }
 
   private report(error: unknown): void {

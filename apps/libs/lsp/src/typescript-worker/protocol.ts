@@ -37,6 +37,8 @@ export type TypeScriptRequestKind =
   | 'outgoingCalls';
 
 export type TypeScriptWorkerCommand = Readonly<
+  | { kind: 'setModuleAlias'; specifier: string; uri: string }
+  | { kind: 'declarationImports'; text: string }
   | { kind: 'open'; uri: string; text: string; version: number }
   | { kind: 'change'; uri: string; previousVersion: number; version: number; changes: readonly TypeScriptTextChange[] }
   | { kind: 'close'; uri: string }

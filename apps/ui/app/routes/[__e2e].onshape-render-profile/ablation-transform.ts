@@ -195,6 +195,14 @@ function MainSceneFallback(): undefined { useDiagnosticFrame((state) => { state.
       if (calibrationMode) rootScene.userData.calibrationEmphasis = { mode: calibrationMode, selectedIndex: calibrationIndex, hover: calibrationEmphasis.hover.map((mesh) => mesh.name), selected: calibrationEmphasis.selected.map((mesh) => mesh.name) };
       setModelEmphasisSet(rootScene, calibrationEmphasis);`,
     );
+  } else if (file.endsWith('/graphics/three/utils/section-stencil-caps.ts')) {
+    // `capOutline=off` removes the cap outline pass only: a query choice, so an outline ablation no longer needs a
+    // source edit that an already-open `hmr:false` page would silently ignore. It drops required CAD edges and is
+    // diagnostic-only; the draw count must fall before a comparison is admitted.
+    replace(
+      'if (allFaces.length > 0 && frame.outlineWidthPixels > 0) {',
+      "if (allFaces.length > 0 && frame.outlineWidthPixels > 0 && tauAblation.get('capOutline') !== 'off') {",
+    );
   } else if (file.endsWith('/graphics/three/scene-overlay.tsx')) {
     replace('restoreDepth();', "if (tauAblation.get('depthRestore') !== 'off') restoreDepth();");
   } else if (file.endsWith('/[__e2e].onshape-render-profile/route.tsx')) {

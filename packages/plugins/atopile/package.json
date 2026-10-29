@@ -103,5 +103,9 @@
     "nanoid": "catalog:",
     "react": "catalog:",
     "schematic-symbols": "catalog:"
+  },
+  "tau": {
+    "skills": null,
+    "reason": "Spike kernel; atopile authoring skills land with the production integration"
   }
 }

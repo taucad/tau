@@ -4,6 +4,7 @@
 /** Runtime plugin-kernel ids (`KernelPlugin.id`), the `kernel.id` of runtime entries. Not the product `kernelIds`. @public */
 export const runtimeKernelIds = [
   'assimp',
+  'atopile',
   'brep',
   'build123d',
   'gltf',
@@ -54,6 +55,7 @@ export const exportFormats = [
   'gltf',
   'jpeg',
   'json',
+  'kicad_pcb',
   'obj',
   'ply',
   'png',
@@ -73,6 +75,7 @@ export const fileFormats = [
   'ac',
   'amf',
   'ase',
+  'ato',
   'brep',
   'bvh',
   'cob',
@@ -92,6 +95,7 @@ export const fileFormats = [
   'json',
   'jsx',
   'kcl',
+  'kicad_pcb',
   'lwo',
   'md2',
   'md5mesh',

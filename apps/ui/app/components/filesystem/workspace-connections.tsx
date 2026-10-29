@@ -359,7 +359,7 @@ export function WorkspaceConnections({
             <Loader className='size-4' />
           </div>
         ) : rows.length === 0 ? (
-          <SettingsRow title='No workspaces' description='Add a folder on your disk to keep projects there.' />
+          <SettingsRow title='No workspaces' description='Add a folder on your disk to keep projects there' />
         ) : (
           rows.map((row) => {
             const isBusyRow = busyWorkspaceId !== undefined || isAddingWorkspace;

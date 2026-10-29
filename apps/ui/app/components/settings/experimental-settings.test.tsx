@@ -42,7 +42,7 @@ describe('ExperimentalSettings', () => {
     render(<ExperimentalSettings />);
 
     expect(screen.getByRole('switch', { name: 'Prefer WebGPU' })).toBeChecked();
-    expect(screen.getByText('Falls back to WebGL2 when WebGPU is unavailable.')).toBeInTheDocument();
+    expect(screen.getByText('Falls back to WebGL2 when WebGPU is unavailable')).toBeInTheDocument();
     expect(screen.getByText('Debug tools')).toBeInTheDocument();
     for (const hidden of [
       'Marketing Landing',

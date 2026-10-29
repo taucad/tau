@@ -108,7 +108,7 @@ function TauCloudProjectsSetting({ workspaces }: { readonly workspaces: readonly
     <SettingsGroup>
       <SettingsRow
         title='Tau Cloud projects'
-        description='Where your cloud projects appear when you sign in.'
+        description='Where your cloud projects appear when you sign in'
         info='Each project downloads the first time you open it.'
         control={
           <Select

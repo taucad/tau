@@ -55,7 +55,7 @@ export function AgentSettings(): React.JSX.Element {
           <SwitchSetting
             settingId='show-credits'
             title='Show credits'
-            description='Show the credits each message used.'
+            description='Show the credits each message used'
             isChecked={showCredits}
             onIsCheckedChange={setShowCredits}
           />
@@ -63,7 +63,7 @@ export function AgentSettings(): React.JSX.Element {
         <SwitchSetting
           settingId='testing-tools'
           title='Testing tools'
-          description='Let the agent run and edit tests.'
+          description='Let the agent run and edit tests'
           isChecked={testingEnabled}
           onIsCheckedChange={setTestingEnabled}
         />
@@ -73,21 +73,21 @@ export function AgentSettings(): React.JSX.Element {
         <SwitchSetting
           settingId='filesystem-context'
           title='Project files'
-          description='Include the project file tree.'
+          description='Include the project file tree'
           isChecked={includeFileSystem}
           onIsCheckedChange={setIncludeFileSystem}
         />
         <SwitchSetting
           settingId='active-file'
           title='Active file'
-          description='Include the file you are editing.'
+          description='Include the file you are editing'
           isChecked={includeActiveFile}
           onIsCheckedChange={setIncludeActiveFile}
         />
         <SwitchSetting
           settingId='open-tabs'
           title='Open tabs'
-          description='Include every open editor tab.'
+          description='Include every open editor tab'
           isChecked={includeOpenFiles}
           onIsCheckedChange={setIncludeOpenFiles}
         />

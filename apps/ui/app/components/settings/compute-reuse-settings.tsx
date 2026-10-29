@@ -18,18 +18,18 @@ const modes: ReadonlyArray<{
   {
     value: 'durable',
     label: 'On this device',
-    description: 'Kept across sessions and restarts.',
+    description: 'Kept across sessions and restarts',
   },
   // Memory reuse lives in the kernel worker, which a heap recycle or a mode change also restarts.
   {
     value: 'memory',
     label: 'This session',
-    description: 'Kept until the project closes or its kernel restarts.',
+    description: 'Kept until the project closes or its kernel restarts',
   },
   {
     value: 'off',
     label: 'Off',
-    description: 'Every change recomputes from scratch.',
+    description: 'Every change recomputes from scratch',
   },
 ];
 
@@ -107,7 +107,7 @@ export function ComputeReuseSettings(): React.JSX.Element {
     <SettingsGroup title='Compute reuse'>
       <SettingsRow
         title='Reuse results'
-        description='Skip recomputing CAD work that has not changed.'
+        description='Skip recomputing CAD work that has not changed'
         info={
           <dl className='space-y-1.5'>
             {modes.map((mode) => (

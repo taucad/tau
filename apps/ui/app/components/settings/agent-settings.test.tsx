@@ -76,7 +76,7 @@ describe('AgentSettings', () => {
   it('should toggle a switch when its row text is tapped', async () => {
     renderAgentSettings();
 
-    await userEvent.click(screen.getByText('Include every open editor tab.'));
+    await userEvent.click(screen.getByText('Include every open editor tab'));
 
     expect(mockSetIncludeOpenFiles).toHaveBeenCalledTimes(1);
     expect(mockSetIncludeOpenFiles).toHaveBeenCalledWith(false);

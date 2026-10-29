@@ -34,25 +34,25 @@ export const flagRegistry = {
     schema: z.boolean().default(isMachinesFeatureEnabled(ENV.TAU_MACHINES_ENABLED)),
     showInExperimental: false,
     label: 'Machines',
-    description: 'Connect machines and use the Print workbench.',
+    description: 'Connect machines and use the Print workbench',
   },
   automaticReload: {
     schema: z.boolean().default(false),
     showInExperimental: false,
     label: 'Automatic reload',
-    description: 'Show automatic credit reload controls in Billing.',
+    description: 'Show automatic credit reload controls in Billing',
   },
   partsWarehouse: {
     showInExperimental: false,
     schema: z.boolean().default(false),
     label: 'Parts warehouse',
-    description: 'Browse and remix reusable parametric parts.',
+    description: 'Browse and remix reusable parametric parts',
   },
   webGpu: {
     showInExperimental: true,
     schema: z.boolean().default(true),
     label: 'Prefer WebGPU',
-    description: 'Falls back to WebGL2 when WebGPU is unavailable.',
+    description: 'Falls back to WebGL2 when WebGPU is unavailable',
   },
   webGpuShaderStacks: {
     showInExperimental: false,
@@ -64,19 +64,19 @@ export const flagRegistry = {
     showInExperimental: false,
     schema: z.boolean().default(false),
     label: 'WebGPU inspector',
-    description: 'Load the Three.js pipeline inspector for WebGPU diagnostics.',
+    description: 'Load the Three.js pipeline inspector for WebGPU diagnostics',
   },
   pluginsStore: {
     showInExperimental: false,
     schema: z.boolean().default(false),
     label: 'Plugin store',
-    description: 'Browse plugins and skills.',
+    description: 'Browse plugins and skills',
   },
   tauDebug: {
     showInExperimental: true,
     schema: z.boolean().default(tauDebugDefault),
     label: 'Debug tools',
-    description: 'Show diagnostic panels and geometry inspectors.',
+    description: 'Show diagnostic panels and geometry inspectors',
   },
 } as const satisfies Record<string, FlagDefinition>;
 

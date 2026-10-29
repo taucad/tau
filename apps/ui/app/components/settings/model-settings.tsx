@@ -146,7 +146,7 @@ function ModelsEmptyState({
       <PanelEmptyState
         icon={SearchX}
         title={`No models match “${search}”`}
-        description='Try another model or provider name.'
+        description='Try another model or provider name'
         className={className}
       >
         <Button variant='outline' size='sm' onClick={onClearSearch}>
@@ -161,7 +161,7 @@ function ModelsEmptyState({
       <PanelEmptyState
         icon={Bot}
         title='No recommended models'
-        description='Browse the full catalog to choose the models you want available.'
+        description='Browse the full catalog to choose the models you want available'
         className={className}
       >
         <Button variant='outline' size='sm' onClick={onShowAll}>
@@ -175,7 +175,7 @@ function ModelsEmptyState({
     <PanelEmptyState
       icon={Bot}
       title='No models available'
-      description='The model catalog is empty or could not be reached.'
+      description='The model catalog is empty or could not be reached'
       className={className}
     />
   );

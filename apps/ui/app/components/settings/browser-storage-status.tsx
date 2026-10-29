@@ -8,15 +8,15 @@ const statusCopy: Record<PersistentStorageStatus, { title: string; description: 
   },
   persistent: {
     title: 'Protected from automatic cleanup',
-    description: 'Clearing site data still removes Home projects.',
+    description: 'Clearing site data still removes Home projects',
   },
   unknown: {
     title: 'Protection not confirmed',
-    description: 'Tau could not check whether the browser may clear Home projects.',
+    description: 'Tau could not check whether the browser may clear Home projects',
   },
   unavailable: {
     title: 'Protection unavailable',
-    description: 'This browser does not say whether it may clear Home projects.',
+    description: 'This browser does not say whether it may clear Home projects',
   },
 };
 

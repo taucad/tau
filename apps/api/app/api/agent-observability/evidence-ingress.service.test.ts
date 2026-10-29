@@ -4,6 +4,7 @@ import type { ConfigService } from '@nestjs/config';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import type { DatabaseService } from '#database/database.service.js';
+import type { MetricsService } from '#telemetry/metrics.js';
 import type { TelemetryPurposeService } from '#api/telemetry-purposes/telemetry-purpose.service.js';
 import type { TelemetryPurpose, TelemetryPurposeState } from '#api/telemetry-purposes/telemetry-purpose.schema.js';
 import { admitEvidence } from '#api/agent-observability/evidence-admission.js';
@@ -61,12 +62,14 @@ const createService = (
     },
     protection: 'pro',
   });
+  const metrics = mockDeep<MetricsService>();
   const service = new EvidenceIngressService(
     mockDeep<DatabaseService>(),
     config as unknown as ConstructorParameters<typeof EvidenceIngressService>[1],
     purposes,
+    metrics,
   );
-  return { service, purposes };
+  return { service, purposes, metrics };
 };
 
 const admitted = vi.mocked(admitEvidence);
@@ -187,6 +190,33 @@ describe('EvidenceIngressService', () => {
       body: { code: 'EVIDENCE_POLICY_STALE' },
     });
     expect(admitted.mock.calls[1]![0].allowed).toEqual({ replay: true, admit: false });
+    expect(withdrawn.metrics.agentEvidenceAdmissions.add).toHaveBeenCalledExactlyOnceWith(1, {
+      'tau.agent_evidence.authority': 'host',
+      'tau.agent_evidence.plane': 'summary',
+      outcome: 'refused',
+    });
+    expect(stale.metrics.agentEvidenceAdmissions.add).toHaveBeenCalledExactlyOnceWith(
+      1,
+      expect.objectContaining({ outcome: 'policy_stale' }),
+    );
+  });
+
+  it.each([
+    [{ ...receipt }, 'accepted'],
+    [{ ...receipt, duplicate: true }, 'duplicate'],
+    [{ ...receipt, duplicate: true, disposition: 'revoked' }, 'revoked'],
+    [{ ...receipt, duplicate: true, disposition: 'expired' }, 'expired'],
+  ] as const)('counts a receipt by its disposition, never by its id', async (answer, outcome) => {
+    admitted.mockResolvedValue({ kind: 'receipt', receipt: answer });
+    const { service, metrics } = createService();
+
+    await service.admit('user-a', encodeEvidence(await evidenceFixture()));
+
+    expect(metrics.agentEvidenceAdmissions.add).toHaveBeenCalledExactlyOnceWith(1, {
+      'tau.agent_evidence.authority': 'host',
+      'tau.agent_evidence.plane': 'summary',
+      outcome,
+    });
   });
 
   it.each([
@@ -195,21 +225,30 @@ describe('EvidenceIngressService', () => {
     ['capacity', 503, 'EVIDENCE_CAPACITY'],
   ] as const)('answers %s with a bounded refusal', async (kind, status, code) => {
     admitted.mockResolvedValue({ kind });
-    const { service } = createService();
+    const { service, metrics } = createService();
 
     expect(await refusal(service.admit('user-a', encodeEvidence(await evidenceFixture())))).toMatchObject({
       status,
       body: { code },
     });
+    expect(metrics.agentEvidenceAdmissions.add).toHaveBeenCalledExactlyOnceWith(
+      1,
+      expect.objectContaining({ outcome: kind }),
+    );
   });
 
   it('reports a database failure by name and SQLSTATE only', async () => {
     const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     admitted.mockRejectedValue(Object.assign(new Error(`insert failed: ${privateMarker}`), { code: '23505' }));
-    const { service } = createService();
+    const { service, metrics } = createService();
 
     const answer = await refusal(service.admit('user-a', encodeEvidence(await evidenceFixture({ plane: 'content' }))));
 
+    expect(metrics.agentEvidenceAdmissions.add).toHaveBeenCalledExactlyOnceWith(1, {
+      'tau.agent_evidence.authority': 'host',
+      'tau.agent_evidence.plane': 'content',
+      outcome: 'error',
+    });
     expect(answer).toMatchObject({ status: 503, body: { code: 'EVIDENCE_UNAVAILABLE' } });
     expect(warn).toHaveBeenCalledWith({ name: 'Error', sqlState: '23505' }, 'Evidence admission failed');
     expect(JSON.stringify([answer, warn.mock.calls])).not.toContain(privateMarker);

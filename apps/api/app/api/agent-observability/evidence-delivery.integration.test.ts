@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { mock } from 'vitest-mock-extended';
+import { mock, mockDeep, mockReset } from 'vitest-mock-extended';
 import { admitEvidence } from '#api/agent-observability/evidence-admission.js';
 import { deliveryTiming, EvidenceDeliveryService } from '#api/agent-observability/evidence-delivery.service.js';
 import { leasePending, settleDelivery, sweepBacklog } from '#api/agent-observability/evidence-delivery.js';
@@ -17,6 +17,7 @@ import type { TelemetryPurpose, TelemetryPurposeState } from '#api/telemetry-pur
 import type { DatabaseService, DatabaseType } from '#database/database.service.js';
 import * as schema from '#database/schema.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import type { MetricsService } from '#telemetry/metrics.js';
 import { createScratchDatabase } from '#testing/scratch-database.js';
 import type { ScratchDatabase } from '#testing/scratch-database.js';
 import { databaseReachable } from '#testing/database-reachable.js';
@@ -39,7 +40,9 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     await client?.end();
     await scratch?.drop();
   });
+  const metrics = mockDeep<MetricsService>();
   afterEach(() => {
+    mockReset(metrics);
     vi.unstubAllGlobals();
   });
 
@@ -117,6 +120,7 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
       config as unknown as ConstructorParameters<typeof EvidenceDeliveryService>[1],
       purposes,
       new ShutdownService(),
+      metrics,
     );
   };
 
@@ -155,6 +159,9 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
 
     await delivery.drain(new Date(now.getTime() + 10_000));
     expect(sent).toHaveLength(1);
+    expect(metrics.agentEvidenceDeliveries.add).toHaveBeenCalledWith(1, { outcome: 'acknowledged' });
+    expect(metrics.agentEvidenceDeliveries.add).toHaveBeenCalledWith(1, { outcome: 'confirmed' });
+    expect(metrics.agentEvidencePasses.add).toHaveBeenCalledWith(1, { 'tau.worker': 'delivery', outcome: 'ok' });
   });
 
   it('should never resend an uncertain send, and record a gap once it stays invisible', async () => {
@@ -178,6 +185,9 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     await delivery.drain(new Date(now.getTime() + deliveryTiming.gapAfterMilliseconds + 1));
     expect(await row(receiptId)).toMatchObject({ state: 'expired', reason: 'gap' });
     expect(posts).toBe(1);
+    for (const outcome of ['uncertain', 'recheck', 'gap'] as const) {
+      expect(metrics.agentEvidenceDeliveries.add).toHaveBeenCalledWith(1, { outcome });
+    }
   });
 
   it('should retry only a send that never connected, after a backoff', async () => {
@@ -192,6 +202,8 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     expect(retried).toMatchObject({ state: 'pending', reason: 'econnrefused', traceId: null });
     expect(retried.payload).not.toBeNull();
     expect(retried.leaseExpiresAt!.getTime()).toBeGreaterThan(now.getTime());
+    /* The vendor's reason stays on the row; the series carries only the bounded outcome. */
+    expect(metrics.agentEvidenceDeliveries.add).toHaveBeenCalledWith(1, { outcome: 'retry' });
   });
 
   it('should purge without sending when the purpose was withdrawn or the project deleted', async () => {
@@ -207,6 +219,7 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     expect(fetcher).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ method: 'POST' }));
     expect(await row(withdrawn.receiptId)).toMatchObject({ state: 'expired', payload: null, reason: 'revoked' });
     expect(await row(deleted.receiptId)).toMatchObject({ state: 'expired', payload: null, reason: 'deleted' });
+    expect(metrics.agentEvidenceDeliveries.add).toHaveBeenCalledWith(1, { outcome: 'revoked' });
   });
 
   it('should fence a settlement to the lease holder and reconcile a send whose worker died', async () => {

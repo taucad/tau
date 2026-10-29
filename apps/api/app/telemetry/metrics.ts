@@ -772,6 +772,49 @@ export class MetricsService {
     description: TauMetrics.billingWorkerPasses.description,
     unit: TauMetrics.billingWorkerPasses.unit,
   });
+
+  // --- Agent evidence ---
+
+  public readonly agentEvidenceAdmissions = this.apiMeter.createCounter(TauMetrics.agentEvidenceAdmissions.name, {
+    description: TauMetrics.agentEvidenceAdmissions.description,
+    unit: TauMetrics.agentEvidenceAdmissions.unit,
+  });
+
+  public readonly agentEvidenceDeliveries = this.apiMeter.createCounter(TauMetrics.agentEvidenceDeliveries.name, {
+    description: TauMetrics.agentEvidenceDeliveries.description,
+    unit: TauMetrics.agentEvidenceDeliveries.unit,
+  });
+
+  public readonly agentEvidenceBacklogRows = this.apiMeter.createGauge(TauMetrics.agentEvidenceBacklogRows.name, {
+    description: TauMetrics.agentEvidenceBacklogRows.description,
+    unit: TauMetrics.agentEvidenceBacklogRows.unit,
+  });
+
+  public readonly agentEvidenceBacklogHeldBytes = this.apiMeter.createGauge(
+    TauMetrics.agentEvidenceBacklogHeldBytes.name,
+    {
+      description: TauMetrics.agentEvidenceBacklogHeldBytes.description,
+      unit: TauMetrics.agentEvidenceBacklogHeldBytes.unit,
+    },
+  );
+
+  public readonly agentEvidenceErasureTraces = this.apiMeter.createCounter(TauMetrics.agentEvidenceErasureTraces.name, {
+    description: TauMetrics.agentEvidenceErasureTraces.description,
+    unit: TauMetrics.agentEvidenceErasureTraces.unit,
+  });
+
+  public readonly agentEvidenceLifecycleRecords = this.apiMeter.createCounter(
+    TauMetrics.agentEvidenceLifecycleRecords.name,
+    {
+      description: TauMetrics.agentEvidenceLifecycleRecords.description,
+      unit: TauMetrics.agentEvidenceLifecycleRecords.unit,
+    },
+  );
+
+  public readonly agentEvidencePasses = this.apiMeter.createCounter(TauMetrics.agentEvidencePasses.name, {
+    description: TauMetrics.agentEvidencePasses.description,
+    unit: TauMetrics.agentEvidencePasses.unit,
+  });
 }
 
 /** `ws.gateway` on the `ws.*` connection series: one value per upgrade route. */
@@ -782,6 +825,20 @@ export type WsCloseReason = NonNullable<z.infer<typeof TauMetrics.wsDisconnectio
 
 /** Attributes of one `ws.upgrade.rejections` increment. */
 export type WsUpgradeRejection = z.infer<typeof TauMetrics.wsUpgradeRejections.attributes>;
+
+/** Attributes of one `tau.agent_evidence.admissions` increment. */
+export type AgentEvidenceAdmissionAttributes = z.infer<typeof TauMetrics.agentEvidenceAdmissions.attributes>;
+
+/** `outcome` of one `tau.agent_evidence.deliveries` increment. */
+export type AgentEvidenceDeliveryOutcome = z.infer<typeof TauMetrics.agentEvidenceDeliveries.attributes>['outcome'];
+
+/** `outcome` of one `tau.agent_evidence.erasure_traces` increment. */
+export type AgentEvidenceErasureOutcome = z.infer<typeof TauMetrics.agentEvidenceErasureTraces.attributes>['outcome'];
+
+/** `tau.agent_evidence.state` of one backlog row-count sample. */
+export type AgentEvidenceBacklogState = z.infer<
+  typeof TauMetrics.agentEvidenceBacklogRows.attributes
+>['tau.agent_evidence.state'];
 
 /** Attributes of one `tau.sync.operations` increment. */
 export type SyncOperationAttributes = z.infer<typeof TauMetrics.syncOperations.attributes>;

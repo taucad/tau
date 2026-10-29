@@ -2,9 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { TauMetrics } from '@taucad/telemetry';
 import { DatabaseService } from '#database/database.service.js';
 import type { Environment } from '#config/environment.config.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { MetricsService } from '#telemetry/metrics.js';
+import type { AgentEvidenceBacklogState, AgentEvidenceErasureOutcome } from '#telemetry/metrics.js';
 import {
   completeErasures,
   leaseErasureTraces,
@@ -12,7 +15,7 @@ import {
   settleErasureTraces,
 } from '#api/agent-observability/evidence-erasure.js';
 import type { LeasedErasureTrace } from '#api/agent-observability/evidence-erasure.js';
-import { expireBacklog } from '#api/agent-observability/evidence-delivery.js';
+import { backlogCounts, expireBacklog } from '#api/agent-observability/evidence-delivery.js';
 import { reapExpiredEvidence } from '#api/agent-observability/evidence-expiry.js';
 import { LangfuseClient } from '#api/agent-observability/langfuse-client.js';
 
@@ -40,6 +43,9 @@ export const erasureTiming = Object.freeze({
 export const erasureRetryDelay = (attempts: number): number =>
   Math.min(erasureTiming.maxBackoffMilliseconds, 60_000 * 2 ** Math.max(0, attempts));
 
+const backlogStates: readonly AgentEvidenceBacklogState[] =
+  TauMetrics.agentEvidenceBacklogRows.attributes.shape['tau.agent_evidence.state'].options;
+
 const runInPool = async <T>(items: readonly T[], width: number, task: (item: T) => Promise<void>): Promise<void> => {
   let next = 0;
   const worker = async (): Promise<void> => {
@@ -63,8 +69,9 @@ const runInPool = async <T>(items: readonly T[], width: number, task: (item: T) 
  * trace still present is requested again with backoff, and an unanswered
  * read is retried without counting as absence. That half runs whenever
  * Langfuse credentials are configured, whether or not delivery is enabled,
- * so pausing delivery never pauses erasure. Only counts and bounded codes
- * are logged.
+ * so pausing delivery never pauses erasure. Each pass also samples the
+ * backlog for the health series (T14). Only counts and bounded codes are
+ * logged or recorded.
  */
 @Injectable()
 export class EvidenceErasureService implements OnModuleInit, OnModuleDestroy {
@@ -78,6 +85,7 @@ export class EvidenceErasureService implements OnModuleInit, OnModuleDestroy {
     private readonly databaseService: DatabaseService,
     configService: ConfigService<Environment, true>,
     private readonly shutdown: ShutdownService,
+    private readonly metrics: MetricsService,
   ) {
     const baseUrl = configService.get('LANGFUSE_BASE_URL', { infer: true });
     const publicKey = configService.get('LANGFUSE_PUBLIC_KEY', { infer: true });
@@ -111,34 +119,40 @@ export class EvidenceErasureService implements OnModuleInit, OnModuleDestroy {
       counts[key] = (counts[key] ?? 0) + value;
     };
     const { database } = this.databaseService;
+    const retired = this.metrics.agentEvidenceLifecycleRecords;
     try {
-      add('expired', await expireBacklog(database, now));
-      add(
-        'reaped',
-        await reapExpiredEvidence(database, {
-          before: new Date(now.getTime() - erasureTiming.receiptGraceMilliseconds),
-          limit: erasureTiming.reapBatch,
-        }),
-      );
-      if (client === undefined) {
-        return counts;
-      }
-      const lease = {
-        owner: this.owner,
-        leaseMilliseconds: erasureTiming.leaseMilliseconds,
-        limit: erasureTiming.batch,
-        now,
-      };
-      const pending = await leaseErasureTraces(database, { ...lease, state: 'pending' });
-      if (pending.length > 0) {
-        add(...(await this.request(client, pending, now)));
-      }
-      const requested = await leaseErasureTraces(database, { ...lease, state: 'requested' });
-      await runInPool(requested, erasureTiming.concurrency, async (trace) => {
-        add(await this.confirm(client, trace, now), 1);
+      const purged = await expireBacklog(database, now);
+      add('expired', purged);
+      retired.add(purged, { action: 'purged' });
+      const reaped = await reapExpiredEvidence(database, {
+        before: new Date(now.getTime() - erasureTiming.receiptGraceMilliseconds),
+        limit: erasureTiming.reapBatch,
       });
-      add('completed', await completeErasures(database, now));
+      add('reaped', reaped);
+      retired.add(reaped, { action: 'reaped' });
+      await this.recordBacklog();
+      if (client !== undefined) {
+        const lease = {
+          owner: this.owner,
+          leaseMilliseconds: erasureTiming.leaseMilliseconds,
+          limit: erasureTiming.batch,
+          now,
+        };
+        const pending = await leaseErasureTraces(database, { ...lease, state: 'pending' });
+        if (pending.length > 0) {
+          add(...(await this.request(client, pending, now)));
+        }
+        const requested = await leaseErasureTraces(database, { ...lease, state: 'requested' });
+        await runInPool(requested, erasureTiming.concurrency, async (trace) => {
+          add(await this.confirm(client, trace, now), 1);
+        });
+        const completed = await completeErasures(database, now);
+        add('completed', completed);
+        retired.add(completed, { action: 'erased' });
+      }
+      this.metrics.agentEvidencePasses.add(1, { 'tau.worker': 'lifecycle', outcome: 'ok' });
     } catch (error) {
+      this.metrics.agentEvidencePasses.add(1, { 'tau.worker': 'lifecycle', outcome: 'error' });
       this.logger.warn({ name: error instanceof Error ? error.name : typeof error }, 'Evidence lifecycle pass failed');
     } finally {
       if (Object.values(counts).some((value) => value > 0)) {
@@ -146,6 +160,15 @@ export class EvidenceErasureService implements OnModuleInit, OnModuleDestroy {
       }
     }
     return counts;
+  }
+
+  /** Samples the shared backlog by state, every state each pass so a drained one reads zero. */
+  private async recordBacklog(): Promise<void> {
+    const { states, heldBytes } = await backlogCounts(this.databaseService.database);
+    for (const state of backlogStates) {
+      this.metrics.agentEvidenceBacklogRows.record(states[state] ?? 0, { 'tau.agent_evidence.state': state });
+    }
+    this.metrics.agentEvidenceBacklogHeldBytes.record(heldBytes);
   }
 
   /** Starts a pass unless one is running or the process is stopping. */
@@ -183,6 +206,8 @@ export class EvidenceErasureService implements OnModuleInit, OnModuleDestroy {
           ? { kind: 'requested', recheckAt: new Date(now.getTime() + erasureTiming.recheckAfterMilliseconds) }
           : { kind: 'retry', reason: outcome.reason, notBefore: new Date(now.getTime() + erasureRetryDelay(attempts)) },
     });
+    this.countTraces(outcome.kind, held);
+    this.countTraces('lease_lost', traces.length - held);
     return [outcome.kind === 'requested' ? 'requested' : `retry:${outcome.reason}`, held];
   }
 
@@ -195,6 +220,7 @@ export class EvidenceErasureService implements OnModuleInit, OnModuleDestroy {
         owner: this.owner,
         notBefore: new Date(now.getTime() + erasureTiming.unavailableRecheckMilliseconds),
       });
+      this.countTraces(held ? 'recheck' : 'lease_lost', 1);
       return held ? 'recheck' : 'lease-lost';
     }
     const held = await settleErasureTraces(database, {
@@ -210,6 +236,13 @@ export class EvidenceErasureService implements OnModuleInit, OnModuleDestroy {
               notBefore: new Date(now.getTime() + erasureRetryDelay(trace.attempts)),
             },
     });
+    this.countTraces(held === 0 ? 'lease_lost' : found, 1);
     return held === 0 ? 'lease-lost' : found;
+  }
+
+  private countTraces(outcome: AgentEvidenceErasureOutcome, traces: number): void {
+    if (traces > 0) {
+      this.metrics.agentEvidenceErasureTraces.add(traces, { outcome });
+    }
   }
 }

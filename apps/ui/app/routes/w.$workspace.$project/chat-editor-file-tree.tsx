@@ -240,6 +240,8 @@ function buildRowPresentation(fileTreeMap: ReadonlyMap<string, FileEntry>): Map<
 }
 
 const rootId = fileTreeRootId;
+/** How long a reveal waits for its row to render before scrolling to it: as long as a held reveal lives. Milliseconds. */
+const revealScrollWaitMilliseconds = 10_000;
 const keyboardDragStartHotkey = 'Control+ShiftLeft+KeyD';
 const keyboardDragStartRightShiftHotkey = 'Control+ShiftRight+KeyD';
 const keyboardDragStartLabel = 'Control+Shift+D';
@@ -1208,14 +1210,26 @@ export const ChatEditorFileTree = memo(function ({
         setFocusedItem(targetPath);
         setSelectedItems([targetPath]);
 
-        requestAnimationFrame(() => {
-          try {
-            const item = tree.getItemInstance(targetPath);
-            void item.scrollTo({ block: 'center' });
-          } catch {
-            // Item may not exist in the tree yet
-          }
-        });
+        /* A cold Files pane renders the item only once its parents have loaded, which on a phone can take seconds
+         * (the lazy pane, then each directory listing), well past `scrollTo`'s own one-second wait. Scroll once the row
+         * is rendered, for as long as a held reveal lives. */
+        const deadline = performance.now() + revealScrollWaitMilliseconds;
+        const scrollWhenRendered = (): void => {
+          requestAnimationFrame(() => {
+            let item: ReturnType<typeof tree.getItemInstance> | undefined;
+            try {
+              item = tree.getItemInstance(targetPath);
+            } catch {
+              // Not in the tree yet: its parents are still loading.
+            }
+            if (item?.getElement()) {
+              void item.scrollTo({ block: 'center' });
+            } else if (performance.now() < deadline) {
+              scrollWhenRendered();
+            }
+          });
+        };
+        scrollWhenRendered();
       },
       shouldHandleReveal,
     );

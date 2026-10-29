@@ -120,6 +120,18 @@ describe('createEvidenceReporter', () => {
     expect(sent).toHaveLength(1);
   });
 
+  it('should project a run again when its evidence could not be queued', async () => {
+    const { reporter, store, sent } = setup([grant()]);
+    const hold = vi.spyOn(store, 'hold').mockRejectedValueOnce(new Error('quota'));
+
+    await reporter.refresh();
+    await expect(reporter.report([run(0)], () => true)).rejects.toThrow('quota');
+    hold.mockRestore();
+    await reporter.report([run(0)], () => true);
+
+    expect(sent).toHaveLength(1);
+  });
+
   it('should leave rows another device led to it', async () => {
     const { reporter, sent } = setup([grant()]);
 

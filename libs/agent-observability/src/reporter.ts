@@ -245,10 +245,7 @@ export const createEvidenceReporter = (options: EvidenceReporterOptions): Eviden
     };
     const unsettled = runs.filter((run) => !settled.has(settledKey(run)));
     const projections = await Promise.all(unsettled.map(async (run) => projectRun(run, context)));
-    for (const [index, projection] of projections.entries()) {
-      if (projection.pending === 0 && !projection.foreignTails.some((tail) => tail.open)) {
-        remember(settledKey(unsettled[index]!));
-      }
+    for (const projection of projections) {
       counts.projected += projection.evidence.length;
       counts.foreign += projection.foreign;
       counts.beforeGrant += projection.beforeGrant;
@@ -256,6 +253,12 @@ export const createEvidenceReporter = (options: EvidenceReporterOptions): Eviden
       counts.openForeignTails += projection.foreignTails.filter((tail) => tail.open).length;
     }
     await outbox.enqueue(projections.flatMap((projection) => projection.evidence));
+    /* Only once held: a run whose evidence could not be queued is projected again next time. */
+    for (const [index, projection] of projections.entries()) {
+      if (projection.pending === 0 && !projection.foreignTails.some((tail) => tail.open)) {
+        remember(settledKey(unsettled[index]!));
+      }
+    }
     await drain();
   };
 

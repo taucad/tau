@@ -1,3 +1,4 @@
+import { editorHighlightStyle } from '#components/code/editor-highlight-style.js';
 import { createEditorSearchPanel } from '#components/code/editor-search-panel.js';
 import { editorSurfaceTheme } from '#components/code/editor-surface-theme.js';
 import '@vscode/codicons/dist/codicon.css';
@@ -22,7 +23,6 @@ import {
 } from '@codemirror/view';
 import {
   bracketMatching,
-  HighlightStyle,
   foldGutter,
   foldCode,
   foldKeymap,
@@ -32,7 +32,6 @@ import {
   unfoldCode,
 } from '@codemirror/language';
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
-import { tags } from '@lezer/highlight';
 import { defaultKeymap, indentWithTab, selectAll, toggleComment } from '@codemirror/commands';
 import { gotoLine, openSearchPanel, searchKeymap, highlightSelectionMatches, search } from '@codemirror/search';
 import { forceLinting, linter, lintGutter, lintKeymap } from '@codemirror/lint';
@@ -139,18 +138,6 @@ const editorTheme = EditorView.theme({
   '.cm-gutter-lint .cm-gutterElement': { padding: '0' },
 });
 
-const tokenColors = HighlightStyle.define([
-  { tag: [tags.keyword, tags.controlKeyword, tags.moduleKeyword, tags.operatorKeyword], color: 'var(--cm-keyword)' },
-  { tag: [tags.definition(tags.variableName), tags.variableName], color: 'var(--cm-variable)' },
-  { tag: [tags.propertyName], color: 'var(--cm-number)' },
-  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: 'var(--cm-function)' },
-  { tag: [tags.number, tags.bool, tags.null], color: 'var(--cm-number)' },
-  { tag: [tags.string, tags.special(tags.string)], color: 'var(--cm-string)' },
-  { tag: [tags.comment, tags.lineComment, tags.blockComment], color: 'var(--cm-comment)' },
-  { tag: [tags.typeName, tags.className], color: 'var(--cm-type)' },
-  { tag: [tags.bracket, tags.paren, tags.brace], color: 'var(--cm-punctuation)' },
-]);
-
 function changesFromView(update: ViewUpdate): TextChange[] {
   const changes: TextChange[] = [];
   // eslint-disable-next-line max-params -- CodeMirror iterChanges supplies five positional fields.
@@ -251,7 +238,7 @@ export function CodeEditorView({
           highlightSelectionMatches(),
           lintGutter(),
           diagnostics ? linter(() => diagnostics.get(document.uri).get('kernel') ?? [], { delay: 100 }) : [],
-          syntaxHighlighting(tokenColors, { fallback: true }),
+          syntaxHighlighting(editorHighlightStyle, { fallback: true }),
           tooltips({ parent: overlay, position: 'fixed' }),
           Prec.highest(
             keymap.of([

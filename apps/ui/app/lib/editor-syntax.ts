@@ -31,9 +31,38 @@ export const loadEditorSyntax = async (languageId: string, signal?: AbortSignal)
       return json();
     }
     case 'markdown': {
-      const { markdown } = await import('@codemirror/lang-markdown');
+      const [
+        { markdown },
+        { Language: languageClass, LanguageDescription: languageDescription, LanguageSupport: languageSupport },
+        { supportedHighlightLanguages, highlightLanguageAliases },
+      ] = await Promise.all([
+        import('@codemirror/lang-markdown'),
+        import('@codemirror/language'),
+        import('#lib/code-language-resolution.js'),
+      ]);
       assertActive();
-      return markdown();
+      return markdown({
+        codeLanguages: supportedHighlightLanguages
+          .filter((id) => id !== 'markdown')
+          .map((id) =>
+            languageDescription.of({
+              name: id,
+              alias: Object.entries(highlightLanguageAliases)
+                .filter(([, language]) => language === id)
+                .map(([alias]) => alias),
+              load: async () => {
+                const syntax = await loadEditorSyntax(id);
+                if (syntax instanceof languageSupport) {
+                  return syntax;
+                }
+                if (syntax instanceof languageClass) {
+                  return new languageSupport(syntax);
+                }
+                throw new Error(`No fenced-code parser for ${id}`);
+              },
+            }),
+          ),
+      });
     }
     case 'yaml': {
       const { yaml } = await import('@codemirror/lang-yaml');

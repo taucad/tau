@@ -1,3 +1,4 @@
+import { editorSyntaxFixtures } from '#lib/editor-syntax.fixtures.js';
 import { StateEffect } from '@codemirror/state';
 import { showTooltip } from '@codemirror/view';
 import { openLintPanel, setDiagnostics } from '@codemirror/lint';
@@ -673,5 +674,39 @@ it.each(
   openSearchPanel(view);
   gotoLine(view);
   await expect.poll(() => container.querySelector('.cm-panel-lint')).not.toBeNull();
+  await page.screenshot();
+});
+
+it.each(editorSyntaxFixtures)('renders visible syntax styles for %s', async (language, source) => {
+  await page.viewport(1000, 600);
+  document.documentElement.className = 'dark';
+  const sourceDocument = new EditorDocument(`fixture-${language}`, source);
+  const { container } = render(
+    <div className='h-72'>
+      <CodeEditor document={sourceDocument} viewId={`syntax-${language}`} languageId={language} />
+    </div>,
+  );
+  const editor = page.getByRole('textbox', { name: 'Code editor' });
+  await expect.element(editor).toBeVisible();
+  // Inspect rendered token styles rather than parser tags alone: a parsed token can still lack a theme rule.
+  await expect
+    .poll(() => {
+      const root = editor.element();
+      const base = getComputedStyle(root).color;
+      return [...root.querySelectorAll('span')].filter((node) => getComputedStyle(node).color !== base).length;
+    })
+    .toBeGreaterThan(0);
+  if (language === 'markdown') {
+    await expect.element(page.getByText('# Title', { exact: true })).toBeVisible();
+    const strong = [...container.querySelectorAll('span')].find((node) => node.textContent === 'strong');
+    expect(strong).toBeDefined();
+    expect(Number(getComputedStyle(strong!).fontWeight)).toBeGreaterThanOrEqual(600);
+    await expect
+      .poll(() => {
+        const keyword = [...editor.element().querySelectorAll('span')].find((node) => node.textContent === 'const');
+        return keyword ? getComputedStyle(keyword).color !== getComputedStyle(editor.element()).color : false;
+      })
+      .toBe(true);
+  }
   await page.screenshot();
 });

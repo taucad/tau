@@ -61,6 +61,10 @@ export type RunScore = Readonly<{
   /** Tool classes in the order the run first used each. */
   pattern: string;
   checks: Readonly<Record<string, number>>;
+  /** How the run's decided checks went, in the order they ran. */
+  checkPath: CheckPath;
+  /** Checks of a revision the run had already checked, after checking another: a return to an earlier state. */
+  revisits: number;
   /** Milliseconds per `phase@domain`, as the union of that phase's closed intervals. */
   phases: Readonly<Record<string, number>>;
   /** Intervals with no end: censored, never timed. */
@@ -86,6 +90,54 @@ export type FeedbackGrant = 'granted' | 'withheld' | 'unknown';
  */
 export type FeedbackGrants = (account: string, at: number) => FeedbackGrant;
 
+/**
+ * How a run's decided (`passed` or `failed`) checks went, in order: `none` decided nothing; `passed` and `failed`
+ * never changed; `recovered` ended passed after a failure; `regressed` ended failed after a pass. @public
+ */
+export type CheckPath = 'none' | 'passed' | 'failed' | 'recovered' | 'regressed';
+
+/** One CAD check as a run reported it. @public */
+export type CheckRecord = Readonly<{
+  /** When it settled, in milliseconds. */
+  at: number;
+  result: string;
+  /** The digest of the revision it checked. */
+  revision: string;
+}>;
+
+/**
+ * Read a run's checks as a sequence.
+ *
+ * @param records - The run's checks, in any order; ties keep the order given.
+ * @returns Its check path and how many checks returned to a revision checked before another.
+ * @public
+ */
+export const checkSequence = (records: readonly CheckRecord[]): Readonly<{ path: CheckPath; revisits: number }> => {
+  const ordered = [...records].sort((a, b) => a.at - b.at);
+  const seen = new Set<string>();
+  let last: string | undefined;
+  let revisits = 0;
+  for (const { revision } of ordered) {
+    if (revision !== last && seen.has(revision)) {
+      revisits++;
+    }
+    seen.add(revision);
+    last = revision;
+  }
+  const decided = ordered.flatMap(
+    ({ result }): Array<'passed' | 'failed'> => (result === 'passed' || result === 'failed' ? [result] : []),
+  );
+  const first = decided[0];
+  const final = decided.at(-1);
+  if (first === undefined || final === undefined) {
+    return { path: 'none', revisits };
+  }
+  if (decided.every((result) => result === first)) {
+    return { path: first, revisits };
+  }
+  return { path: final === 'passed' ? 'recovered' : 'regressed', revisits };
+};
+
 /** A run's supplier attempts and what the ledger settled for them. @public */
 export type RunModel = Readonly<{
   attempts: number;
@@ -110,6 +162,9 @@ export type CohortScore = Readonly<{
   presented: number;
   patterns: Distribution;
   checks: Distribution;
+  checkPaths: Distribution;
+  /** Runs that checked a revision again after checking another. */
+  revisited: number;
   /** Per `phase@domain`: how many runs timed it, and their median and 90th percentile, in milliseconds. */
   phases: Readonly<Record<string, Readonly<{ runs: number; median: number; p90: number }>>>;
   openIntervals: number;
@@ -297,6 +352,7 @@ type RunDraft = {
   tools: ToolFact[];
   firstUse: Array<Readonly<{ at: number; toolClass: string }>>;
   checks: Record<string, number>;
+  checkRecords: CheckRecord[];
   intervals: Interval[];
   presented: boolean;
   rating: RunScore['rating'];
@@ -319,6 +375,7 @@ const draftOf = (drafts: Map<string, RunDraft>, item: Evidence, run: string): Ru
       tools: [],
       firstUse: [],
       checks: {},
+      checkRecords: [],
       intervals: [],
       presented: false,
       rating: 'none',
@@ -369,6 +426,11 @@ const applyFact = (draft: RunDraft, item: Evidence): void => {
     }
     case 'cad': {
       increment(draft.checks, fact.result);
+      draft.checkRecords.push({
+        at: item.clocks.occurredAt ?? Number.MAX_SAFE_INTEGER,
+        result: fact.result,
+        revision: fact.sourceRevision,
+      });
       break;
     }
     case 'outcome': {
@@ -395,6 +457,7 @@ const scoreOf = (draft: RunDraft, grants: FeedbackGrants | undefined): RunScore 
   }
   const pattern = [...new Set([...draft.firstUse].sort((a, b) => a.at - b.at).map((use) => use.toolClass))].join('>');
   const { durations, open } = phaseDurations(draft.intervals);
+  const { path, revisits } = checkSequence(draft.checkRecords);
   return {
     run: draft.run,
     chat: draft.chat,
@@ -405,6 +468,8 @@ const scoreOf = (draft: RunDraft, grants: FeedbackGrants | undefined): RunScore 
     tools: { total: draft.tools.length, byClass, byOutcome },
     pattern: pattern === '' ? 'none' : pattern,
     checks: draft.checks,
+    checkPath: path,
+    revisits,
     phases: durations,
     openIntervals: open,
     presented: draft.presented,
@@ -455,11 +520,13 @@ export const scoreCohort = (runs: readonly RunScore[]): CohortScore => {
   const judgement: Record<string, number> = {};
   const patterns: Record<string, number> = {};
   const checks: Record<string, number> = {};
+  const checkPaths: Record<string, number> = {};
   const feedback: Record<string, number> = {};
   const grantedRating: Record<string, number> = {};
   const grantedJudgement: Record<string, number> = {};
   const timings = new Map<string, number[]>();
   let presented = 0;
+  let revisited = 0;
   let granted = 0;
   let openIntervals = 0;
   for (const run of runs) {
@@ -468,6 +535,8 @@ export const scoreCohort = (runs: readonly RunScore[]): CohortScore => {
     increment(rating, run.rating);
     increment(judgement, run.judgement);
     increment(patterns, run.pattern);
+    increment(checkPaths, run.checkPath);
+    revisited += run.revisits > 0 ? 1 : 0;
     increment(feedback, run.feedback);
     if (run.feedback === 'granted') {
       granted++;
@@ -500,6 +569,8 @@ export const scoreCohort = (runs: readonly RunScore[]): CohortScore => {
     presented,
     patterns,
     checks,
+    checkPaths,
+    revisited,
     phases,
     openIntervals,
     credits: {

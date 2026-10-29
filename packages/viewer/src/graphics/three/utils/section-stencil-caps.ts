@@ -757,7 +757,7 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
 
     // The outline follows every face, from either side, over every source a face plane crosses.
     const allFaces: SectionFace[] = resolveSectionFaces(frame.pieces);
-    if (allFaces.length > 0) {
+    if (allFaces.length > 0 && frame.outlineWidthPixels > 0) {
       writeSectionCapOutlineFaces(outlineFaces, allFaces, frame.outlineWidthPixels);
       writeSectionCapOutlineCamera(outlineFaces, frame.camera, frame.viewportHeightPixels);
       writeSectionCapOutlineFaces(openChainFaces, allFaces, frame.outlineWidthPixels * sectionCapOpenChainWidthScale);

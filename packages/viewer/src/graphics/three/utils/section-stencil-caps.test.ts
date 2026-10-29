@@ -209,6 +209,25 @@ describe('createSectionStencilCaps', () => {
     caps.dispose();
   });
 
+  it('should omit zero-width outline draws while retaining cap fills', () => {
+    const caps = createSectionStencilCaps('webgpu');
+    const renderer = createRecordingRenderer();
+    const source = createSource('a', 'owner-a', new THREE.BoxGeometry());
+    try {
+      const stats = caps.render(renderer, { ...frameFor([source]), outlineWidthPixels: 0 });
+      expect(stats.outlineSourceCount).toBe(0);
+      expect(stats.polygonDrawCount).toBeGreaterThan(0);
+      expect(
+        renderer.frames[0]!.objects.some(
+          ({ material }) => (material as THREE.Material).name === 'TauSectionCapOutline',
+        ),
+      ).toBe(false);
+    } finally {
+      caps.dispose();
+      source.meshes[0]!.geometry.dispose();
+    }
+  });
+
   it('should retain unchanged polygon uploads during orbit and update changed cut payloads', () => {
     for (const backend of ['webgl', 'webgpu'] as const) {
       const caps = createSectionStencilCaps(backend);

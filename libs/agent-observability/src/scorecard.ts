@@ -122,10 +122,10 @@ export const reconcileEvidence = (
     const seen = bySource.get(keys.source);
     if (seen !== undefined) {
       /* Another projector version of the same source is the same fact; only a changed claim conflicts. */
-      if (compareEvidence(seen, item) !== 'conflict') {
-        duplicates++;
-      } else {
+      if (compareEvidence(seen, item) === 'conflict') {
         conflicts++;
+      } else {
+        duplicates++;
       }
       continue;
     }
@@ -158,6 +158,29 @@ const unionLength = (intervals: ReadonlyArray<Readonly<{ start: number; end: num
     reach = Math.max(reach, end);
   }
   return total;
+};
+
+/**
+ * Time each phase as the union of its closed intervals within one clock domain.
+ *
+ * @param intervals - Phase intervals, from any number of facts.
+ * @returns Milliseconds per `phase@domain`, and how many intervals had no end and were left untimed.
+ * @public
+ */
+export const phaseDurations = (
+  intervals: readonly Interval[],
+): Readonly<{ durations: Readonly<Record<string, number>>; open: number }> => {
+  const closed = new Map<string, Array<Readonly<{ start: number; end: number }>>>();
+  let open = 0;
+  for (const phaseInterval of intervals) {
+    if (phaseInterval.end === null) {
+      open++;
+      continue;
+    }
+    const key = `${phaseInterval.phase}@${phaseInterval.domain}`;
+    closed.set(key, [...(closed.get(key) ?? []), { start: phaseInterval.start, end: phaseInterval.end }]);
+  }
+  return { durations: Object.fromEntries([...closed].map(([key, members]) => [key, unionLength(members)])), open };
 };
 
 type RunDraft = {
@@ -261,16 +284,7 @@ const scoreOf = (draft: RunDraft): RunScore => {
     increment(byOutcome, tool.outcome);
   }
   const pattern = [...new Set([...draft.firstUse].sort((a, b) => a.at - b.at).map((use) => use.toolClass))].join('>');
-  const closed = new Map<string, Array<Readonly<{ start: number; end: number }>>>();
-  let openIntervals = 0;
-  for (const phaseInterval of draft.intervals) {
-    if (phaseInterval.end === null) {
-      openIntervals++;
-      continue;
-    }
-    const key = `${phaseInterval.phase}@${phaseInterval.domain}`;
-    closed.set(key, [...(closed.get(key) ?? []), { start: phaseInterval.start, end: phaseInterval.end }]);
-  }
+  const { durations, open } = phaseDurations(draft.intervals);
   return {
     run: draft.run,
     chat: draft.chat,
@@ -281,8 +295,8 @@ const scoreOf = (draft: RunDraft): RunScore => {
     tools: { total: draft.tools.length, byClass, byOutcome },
     pattern: pattern === '' ? 'none' : pattern,
     checks: draft.checks,
-    phases: Object.fromEntries([...closed].map(([key, intervals]) => [key, unionLength(intervals)])),
-    openIntervals,
+    phases: durations,
+    openIntervals: open,
     presented: draft.presented,
     rating: draft.rating,
     judgement: draft.judgement,

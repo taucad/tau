@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Evidence } from '#contract.js';
 import type { ProjectedRun, ProjectionContext } from '#projection.js';
 import { projectRun } from '#projection.js';
-import { reconcileEvidence, scoreCohort, scorecard } from '#scorecard.js';
+import { phaseDurations, reconcileEvidence, scoreCohort, scorecard } from '#scorecard.js';
 
 const at = Date.parse('2026-10-29T00:00:00.000Z');
 const row = (sequence: number, leaderEpoch = 'epoch-a') => ({ chatId: 'chat-1', leaderEpoch, sequence });
@@ -95,6 +95,14 @@ describe('scorecard', () => {
 
     expect(score?.phases).toEqual({ 'admission@host-recorded': 1000, 'tool@host-recorded': 3000 });
     expect(score?.openIntervals).toBe(0);
+
+    expect(
+      phaseDurations([
+        { phase: 'tool', domain: 'host-recorded', start: 0, end: 10 },
+        { phase: 'tool', domain: 'api-recorded', start: 5, end: 10 },
+        { phase: 'tool', domain: 'host-recorded', start: 20, end: null },
+      ]),
+    ).toEqual({ durations: { 'tool@host-recorded': 10, 'tool@api-recorded': 5 }, open: 1 });
 
     const open = scoreCohort([
       { ...score!, phases: {}, openIntervals: 1 },

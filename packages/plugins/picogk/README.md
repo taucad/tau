@@ -61,8 +61,9 @@ threaded variant only when the bundle contains one and the host is cross-origin 
 The worker samples the entire WebAssembly heap and recycles only after its artifacts have been delivered.
 
 See [browser host preparation](dotnet/Tau.PicoGK.Browser/README.md) for the explicit input
-configuration. The currently qualified preparation target produces a serial bundle; automatic
-package provisioning and threaded-host qualification are separate implementation gates.
+configuration. Preparation stages its inputs from the `PicoVoxel.PicoGK` package restored from a
+local directory feed, and produces a serial and a threaded bundle from one payload. Both are
+qualified; [Browser qualification](#browser-qualification) lists the engines and the cases.
 Tau UI builds consume that bundle through `PICOGK_BROWSER_ASSETS_ROOT`, verify its bytes and
 preserve its resource directory layout. Default native imports and desktop preparation are unchanged.
 
@@ -193,6 +194,42 @@ Native requests run until completion or cancellation by default (`requestTimeout
 set a positive deadline in milliseconds or a `maxArtifactBytes` policy under `kernels.default`.
 The default artifact allowance is `Number.MAX_SAFE_INTEGER`; actual allocation and filesystem
 limits still apply. Workspace mirroring has no fixed byte, file-count or directory-depth quota.
+
+## Browser qualification
+
+Each claim below rests on a run in the engine named, not on a capability check.
+
+| Engine   | Version      | Serial | Threaded | Not cross-origin isolated        |
+| -------- | ------------ | ------ | -------- | -------------------------------- |
+| Chromium | 156.0.8078.4 | Passes | Passes   | Serial, explicit `multi` refused |
+| Firefox  | 157.0        | Passes | Passes   | Serial, explicit `multi` refused |
+| WebKit   | 27.2         | Passes | Passes   | Serial, explicit `multi` refused |
+
+An unchanged PicoGK example produces byte-identical meshes and STL files on the native desktop
+comparator, on a browser build that compiled it ahead of time and on a browser build that compiled
+it at run time, in all three engines.
+
+### What the browser costs
+
+- Threads need cross-origin isolation, which means `Cross-Origin-Opener-Policy: same-origin` and
+  `Cross-Origin-Embedder-Policy: require-corp` on the documents and the assets. Without it the host
+  selects serial execution; a `multi` request fails rather than degrading quietly.
+- The engine's own heap on the qualified runs measured 256 MiB. `recycleHeapBytes` bounds how much
+  the worker keeps between runs, not how much one model may use.
+- A large export cannot cross from the runtime to the page in one piece: the bytes exist twice while
+  they do, so half a gigabyte is enough to end the renderer. Exports stream in pieces instead.
+- Geometry runs slower in the browser than on the matched native comparator on every path measured
+  so far, between 1.3 and 2.5 times the native run on a short subject. Read the browser as the
+  authoring runtime and the desktop as the fast one until that gap closes.
+- Compiling in the browser resolves the author's sources against the bundle's own pinned reference
+  set, which is 176 framework reference assemblies and SkiaSharp. Nothing is fetched at run time.
+
+### One program, two runtimes
+
+The C# project template targets `net10.0` and pins PicoGK 2.3.0. That framework selects the run
+outside Tau alone, where the program runs against its own native PicoGK. In the browser the same
+sources compile against the prepared bundle's pinned `net11.0` references, so a project carries one
+program and no per-target configuration.
 
 ## Environment
 

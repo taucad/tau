@@ -648,6 +648,25 @@ describe('createProjectHost', () => {
   }, 30_000);
 
   /* W6.r2 H5: a second close while the first runs waits for it; the host's resources close once. */
+  it('should hand its chat observer the host’s own-row read and close it with the host', async () => {
+    const close = vi.fn();
+    let read: Parameters<NonNullable<ProjectHostOptions['observeChats']>>[0] | undefined;
+    const options = await desktopProjectHostOptions();
+    const project = createProjectHost({
+      ...options,
+      observeChats: (ownRows) => {
+        read = ownRows;
+        return { onChatQuiescent: () => undefined, close };
+      },
+    });
+
+    const batch = await read!({ chatId: 'chat-1', cursor: 0, limit: 16 });
+    await project.close();
+
+    expect(batch.events).toEqual([]);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it('should close once when two closes run together', async () => {
     const { project } = await desktopProjectHost();
     seams.closes = 0;

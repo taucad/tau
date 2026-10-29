@@ -43,7 +43,7 @@ const defaultStore = (projectId: string): PendingEvidenceStore =>
 export const createWorkerEvidence = (options: WorkerEvidenceOptions): HostEvidence =>
   createHostEvidence({
     apiBaseUrl: options.apiBaseUrl,
-    principal: options.principal,
+    principal: () => options.principal,
     project: options.projectId,
     uploader: `browser-${randomUuid()}`,
     hostBuild: options.hostBuild,

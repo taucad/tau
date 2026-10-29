@@ -1,0 +1,85 @@
+/**
+ * Agent-observability summaries from the desktop services host (blueprint T11): the shared host composition over a
+ * project host's own rows, the signed-in session's bearer, and an owner-only queue file per project under the app's
+ * user data. It works the same whether or not a renderer is open. A project only reports when the server's current
+ * answer for this account and project allows summaries; a signed-out desktop sends nothing and keeps nothing.
+ */
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { observeOwnTurns } from '@taucad/agent-host';
+import type { OwnRowsRead } from '@taucad/agent-host';
+import { createHostEvidence } from '@taucad/agent-observability/host-evidence';
+import type { HostEvidence } from '@taucad/agent-observability/host-evidence';
+import { filePendingStore } from '@taucad/agent-observability/pending-stores';
+import type { PendingFileSystem } from '@taucad/agent-observability/pending-stores';
+
+/** What one project's observer is composed from. @internal */
+export type DesktopEvidenceOptions = Readonly<{
+  /** `<userData>/agent-evidence`: where each project's queue file lives. */
+  directory: string;
+  apiBaseUrl: string;
+  /** The renderer's project id, which the API lists. */
+  projectId: string;
+  /** The signed-in account, read per report. */
+  principal: () => string | undefined;
+  /** The session's bearer, read per request: main refreshes it. */
+  token: () => string | undefined;
+  fetch?: typeof fetch;
+}>;
+
+/** Owner-only, atomic file access for the queue: a crash leaves the old queue or the new one. */
+export const ownerOnlyFiles: PendingFileSystem = {
+  readFile: async (path) => {
+    try {
+      return await readFile(path, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return undefined;
+      }
+      throw error;
+    }
+  },
+  replaceFile: async (path, contents) => {
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    const staged = `${path}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(staged, contents, { encoding: 'utf8', mode: 0o600 });
+      await rename(staged, path);
+    } catch (error) {
+      await rm(staged, { force: true });
+      throw error;
+    }
+  },
+};
+
+/**
+ * One desktop project host's chat observer, for `ProjectHostOptions.observeChats`.
+ *
+ * @param options - The queue directory, API, project, account and bearer.
+ * @returns The observer factory the project host calls with its own-row read.
+ * @internal
+ */
+export const desktopChatObserver =
+  (options: DesktopEvidenceOptions): ((read: OwnRowsRead) => HostEvidence) =>
+  (read) => {
+    const baseFetch = options.fetch ?? fetch;
+    const withBearer: typeof fetch = async (input, init) => {
+      const token = options.token();
+      const headers = new Headers(init?.headers);
+      if (token !== undefined) {
+        headers.set('authorization', `Bearer ${token}`);
+      }
+      return baseFetch(input, { ...init, headers });
+    };
+    return createHostEvidence({
+      apiBaseUrl: options.apiBaseUrl.replace(/\/+$/u, ''),
+      principal: options.principal,
+      project: options.projectId,
+      uploader: `desktop-${randomUUID()}`,
+      hostBuild: undefined,
+      fetch: withBearer,
+      store: filePendingStore(join(options.directory, `${encodeURIComponent(options.projectId)}.json`), ownerOnlyFiles),
+      observe: async (chatId) => observeOwnTurns(read, chatId),
+    });
+  };

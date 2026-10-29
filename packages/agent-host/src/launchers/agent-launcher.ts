@@ -103,7 +103,8 @@ export type AgentLauncherOptions = Readonly<{
   /**
    * Told each time a chat this process leads becomes quiescent (`true`) or stops being so (`false`), after the
    * leadership has heard it (`CreateTauAgentHostOptions.onChatQuiescent`). A run's rows are settled here when it is
-   * `true`: what an observer reads them at. It runs synchronously in the host and must not throw.
+   * `true`: what an observer reads them at. It runs synchronously in the host; what it throws is logged, never the
+   * host's.
    */
   onChatQuiescent?: ((chatId: string, quiescent: boolean) => void) | undefined;
 }>;
@@ -629,7 +630,11 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     },
     onChatQuiescent: (chatId, quiescent) => {
       leading.port?.quiescent(chatId, quiescent);
-      options.onChatQuiescent?.(chatId, quiescent);
+      try {
+        options.onChatQuiescent?.(chatId, quiescent);
+      } catch (error) {
+        console.error('[agent-launcher] a quiescence observer threw', chatId, error);
+      }
     },
   });
 

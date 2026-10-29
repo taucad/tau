@@ -587,6 +587,37 @@ describe('createAgentLauncher', () => {
     expect(quiescence).toContainEqual(['chat-1', false]);
   });
 
+  it('settles a run although its quiescence observer throws', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-node-launcher-'));
+    roots.push(workspaceRoot);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    launcher = createNodeLauncher({
+      workspaceRoot,
+      model,
+      systemPrompt: 'You are Tau.',
+      toolRegistry: emptyTools,
+      modelTransport: createTauCloudGatewayModelTransport({
+        baseUrl: 'https://gateway.example',
+        model,
+        auth: () => 'daemon-bearer',
+        fetch: scriptedGateway(),
+      }),
+      onChatQuiescent: () => {
+        throw new Error('observer failed');
+      },
+    });
+
+    await start(launcher, { chatId: 'chat-1', runId: 'run-1' });
+    await settle(launcher, 'chat-1');
+
+    await vi.waitFor(() => {
+      expect(logged).toHaveBeenCalledWith('[agent-launcher] a quiescence observer threw', 'chat-1', expect.any(Error));
+    });
+    await launcher.close();
+    launcher = undefined;
+    logged.mockRestore();
+  });
+
   /*
    * A second `start` on a chat that already has an admitted run is a refusal,
    * not a second run, and it names the run in the way.

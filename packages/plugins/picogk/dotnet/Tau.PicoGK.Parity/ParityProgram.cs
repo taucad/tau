@@ -19,13 +19,22 @@ namespace Tau.PicoGK.Parity;
 
 internal static partial class ParityProgram
 {
-    /// <summary>Hands one capture file to the page, which puts it where the gate can read it.</summary>
+    /// <summary>Hands the page one piece of one capture, which it puts where the gate reads it.</summary>
     /// <remarks>
     /// Through the page rather than <c>HttpClient</c>: the upload is the gate's own contract, and a
     /// test backend should not pull a trimmed HTTP stack into the measured app to satisfy it.
+    /// <para>
+    /// In pieces because a whole capture does not fit beside itself in a wasm heap: the long
+    /// subject exports half a gigabyte, and reading it whole and then marshalling it to the page
+    /// holds two copies at once, which crashed the renderer. <paramref name="offset"/> is the byte
+    /// the piece starts at and <paramref name="more"/> says whether another piece follows.
+    /// </para>
     /// </remarks>
     [JSImport("upload", "tau-picogk-parity")]
-    private static partial Task Upload(string name, byte[] bytes);
+    private static partial Task Upload(string name, byte[] piece, double offset, bool more);
+
+    /// <summary>Bytes per piece: large enough to keep the request count low, small beside the heap.</summary>
+    private const int PieceBytes = 32 * 1024 * 1024;
 
     /// <summary>Reports one stage's cost, so the page records the whole run in one place.</summary>
     [JSImport("report", "tau-picogk-parity")]
@@ -55,9 +64,18 @@ internal static partial class ParityProgram
             // Ordered, so a reader comparing two runs' logs compares the same sequence.
             foreach (var path in Directory.GetFiles(Captures).Order(StringComparer.Ordinal))
             {
-                var bytes = File.ReadAllBytes(path);
-                await Upload(Path.GetFileName(path), bytes);
-                Console.WriteLine($"PARITY_UPLOADED {Path.GetFileName(path)} {bytes.Length}");
+                var name = Path.GetFileName(path);
+                await using var capture = File.OpenRead(path);
+                var piece = new byte[(int)Math.Clamp(capture.Length, 1, PieceBytes)];
+                // At least one piece, so an empty capture still arrives as an empty file.
+                for (long offset = 0; ; )
+                {
+                    var read = await capture.ReadAsync(piece);
+                    await Upload(name, read == piece.Length ? piece : piece[..read], offset, offset + read < capture.Length);
+                    offset += read;
+                    if (offset >= capture.Length || read == 0) break;
+                }
+                Console.WriteLine($"PARITY_UPLOADED {name} {capture.Length}");
             }
             if (options.Contains("edit=on"))
             {

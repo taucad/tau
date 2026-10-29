@@ -59,9 +59,18 @@
         }
         mark('stage', performance.now() - staging);
         runtime.setModuleImports('tau-picogk-parity', {
-          upload: async (name, bytes) => {
-            const response = await fetch(`capture/${encodeURIComponent(name)}`, { method: 'PUT', body: bytes });
-            if (!response.ok) throw new Error(`The gate refused ${name}: ${String(response.status)}`);
+          // One piece of a capture: `offset` is the byte it starts at, and the gate takes the
+          // absence of `x-capture-more` as the end, so a whole capture is still one plain PUT.
+          upload: async (name, piece, offset, more) => {
+            const headers = { 'x-capture-offset': String(offset) };
+            if (more) headers['x-capture-more'] = '1';
+            const response = await fetch(`capture/${encodeURIComponent(name)}`, {
+              method: 'PUT',
+              headers,
+              body: piece,
+            });
+            if (!response.ok)
+              throw new Error(`The gate refused ${name} at ${String(offset)}: ${String(response.status)}`);
           },
           compilerReferences: () => referenceList,
           buildIdentity: () => identity,

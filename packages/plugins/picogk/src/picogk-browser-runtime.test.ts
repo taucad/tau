@@ -76,30 +76,27 @@ describe('PicoGK browser runtime integrity', () => {
     await preparePicogkBrowserRuntime({ bootstrapUrl, files: [bootstrap, binary] });
     // The guard is injected code, so proving it means running it: a worker destination is the one
     // place the runtime would otherwise fetch the bootstrap again, unverified.
-    const spawned: { script: unknown; type: unknown }[] = [];
-    vi.stubGlobal(
-      'Worker',
-      class {
-        constructor(script: unknown, options?: { type?: string }) {
-          spawned.push({ script, type: options?.type });
-        }
-      },
-    );
+    const spawned: Array<{ script: unknown; type: unknown }> = [];
+    function workerStub(script: unknown, options?: { type?: string }): void {
+      spawned.push({ script, type: options?.type });
+    }
+    vi.stubGlobal('Worker', workerStub);
     const evaluated = `data:text/javascript;base64,${Buffer.from(await blobs[0]!.text()).toString('base64')}`;
     await import(/* @vite-ignore */ evaluated);
-    const Guarded = globalThis.Worker;
-    new Guarded(bootstrapUrl, { type: 'module' });
-    new Guarded('./dotnet.js', { type: 'module' });
-    new Guarded(evaluated, { type: 'module' });
+    // The bootstrap's own URL, a relative reference to it, and the blob the page is executing.
+    const workers = [bootstrapUrl, './dotnet.js', evaluated].map(
+      (script) => new globalThis.Worker(script, { type: 'module' }),
+    );
+    expect(workers).toHaveLength(3);
     expect(spawned).toEqual([
       { script: evaluated, type: 'module' },
       { script: evaluated, type: 'module' },
       { script: evaluated, type: 'module' },
     ]);
-    expect(() => new Guarded('https://example.test/_framework/other.js', { type: 'module' })).toThrow(
+    expect(() => new globalThis.Worker('https://example.test/_framework/other.js', { type: 'module' })).toThrow(
       'Unlisted PicoGK runtime worker bootstrap.',
     );
-    expect(() => new Guarded('https://elsewhere.test/dotnet.js', { type: 'module' })).toThrow(
+    expect(() => new globalThis.Worker('https://elsewhere.test/dotnet.js', { type: 'module' })).toThrow(
       'Unlisted PicoGK runtime worker bootstrap.',
     );
     expect(spawned).toHaveLength(3);

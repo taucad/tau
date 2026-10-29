@@ -50,7 +50,7 @@ const createService = (
   purposes.getAdmissionAuthority.mockResolvedValue({
     effective: {
       epoch: options.epoch ?? 'epoch-a',
-      purposes: (['summary', 'content', 'diagnosis', 'reuse', 'training'] as const).map(
+      purposes: (['summary', 'feedback', 'content', 'diagnosis', 'reuse', 'training'] as const).map(
         (purpose): TelemetryPurposeState => ({
           purpose,
           allowed: allowed.has(purpose),
@@ -224,6 +224,21 @@ describe('EvidenceIngressService', () => {
     expect(stale.metrics.agentEvidenceAdmissions.add).toHaveBeenCalledExactlyOnceWith(
       1,
       expect.objectContaining({ outcome: 'policy_stale' }),
+    );
+  });
+
+  it.each<{ allowed: readonly TelemetryPurpose[]; admit: boolean }>([
+    { allowed: ['summary', 'content'], admit: false },
+    { allowed: ['feedback'], admit: true },
+  ])('admits a rating under the feedback purpose alone: $allowed', async ({ allowed, admit }) => {
+    const { service, metrics } = createService({ allowed });
+
+    await service.admit('user-a', encodeEvidence(await evidenceFixture({ plane: 'feedback' })));
+
+    expect(admitted.mock.calls[0]![0].allowed).toEqual({ replay: admit, admit });
+    expect(metrics.agentEvidenceAdmissions.add).toHaveBeenCalledExactlyOnceWith(
+      1,
+      expect.objectContaining({ 'tau.agent_evidence.plane': 'feedback' }),
     );
   });
 

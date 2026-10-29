@@ -160,7 +160,7 @@ const databaseApplications = ['api', 'billing-operations', 'maintenance', 'mirro
 const accountingTasks = ['usage', 'r2_analytics', 'db', 'hot_projects', 'route'] as const;
 
 /** `tau.agent_evidence.plane`: the purpose plane a piece of agent evidence was captured under. */
-const agentEvidencePlanes = ['summary', 'content'] as const;
+const agentEvidencePlanes = ['summary', 'feedback', 'content'] as const;
 
 /**
  * `outcome` of one agent-evidence admission. `duplicate` answered a held receipt, `revoked` and

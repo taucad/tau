@@ -104,7 +104,7 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     purposes.getAdmissionAuthority.mockResolvedValue({
       effective: {
         epoch: 'epoch-a',
-        purposes: (['summary', 'content', 'diagnosis', 'reuse', 'training'] as const).map(
+        purposes: (['summary', 'feedback', 'content', 'diagnosis', 'reuse', 'training'] as const).map(
           (purpose): TelemetryPurposeState => ({
             purpose,
             allowed: allowed.includes(purpose),

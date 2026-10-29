@@ -57,6 +57,16 @@ describe('langfuseObservation', () => {
     expect(attribute(content.span, 'langfuse.observation.output')).toBeUndefined();
   });
 
+  it('should send a rating as its closed fields, with no input or output', async () => {
+    const { span } = langfuseObservation(await evidenceFixture({ plane: 'feedback' }), context, pseudonym);
+
+    expect(attribute(span, 'langfuse.observation.metadata.plane')).toBe('feedback');
+    expect(attribute(span, 'langfuse.observation.metadata.fact.value')).toBe('negative');
+    expect(attribute(span, 'langfuse.observation.metadata.fact.scale')).toBe('thumbs.1');
+    expect(attribute(span, 'langfuse.observation.input')).toBeUndefined();
+    expect(otlpBody(span)).not.toContain(privateMarker);
+  });
+
   it('should send one span per request body', async () => {
     const { span } = langfuseObservation(await evidenceFixture(), context, pseudonym);
     const body = JSON.parse(otlpBody(span)) as { resourceSpans: Array<{ scopeSpans: Array<{ spans: unknown[] }> }> };

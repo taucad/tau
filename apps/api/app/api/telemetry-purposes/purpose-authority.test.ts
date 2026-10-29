@@ -53,6 +53,8 @@ describe('resolvePurposeAuthority', () => {
   it('decides each purpose independently, so a summary grant is not a content grant', () => {
     expect(allowed(authority({ decisions: [decided('summary', true)] }))).toEqual(['summary']);
     expect(refusalOf(authority({ decisions: [decided('summary', true)] }), 'content')).toBe('no-decision');
+    expect(refusalOf(authority({ decisions: [decided('summary', true)] }), 'feedback')).toBe('no-decision');
+    expect(allowed(authority({ decisions: [decided('feedback', true)] }))).toEqual(['feedback']);
   });
 
   it('refuses a decision taken against a superseded notice', () => {
@@ -87,7 +89,7 @@ describe('resolvePurposeAuthority', () => {
       for (const tier of ['pro', 'enterprise'] as const) {
         const input = authority({ decisions: granted, tier });
 
-        expect(allowed(input)).toEqual(['summary', 'content', 'diagnosis']);
+        expect(allowed(input)).toEqual(['summary', 'feedback', 'content', 'diagnosis']);
         expect(refusalOf(input, 'reuse')).toBe('tier-excluded');
         expect(refusalOf(input, 'training')).toBe('tier-excluded');
       }
@@ -99,7 +101,7 @@ describe('resolvePurposeAuthority', () => {
       /* Billing access semantics are unchanged: capture purposes still resolve
        * from the account's own decision. Only the reuse purposes need the
        * entitlement established affirmatively. */
-      expect(allowed(input)).toEqual(['summary', 'content', 'diagnosis']);
+      expect(allowed(input)).toEqual(['summary', 'feedback', 'content', 'diagnosis']);
       expect(refusalOf(input, 'reuse')).toBe('tier-unverified');
       expect(refusalOf(input, 'training')).toBe('tier-unverified');
     });
@@ -137,9 +139,9 @@ describe('resolvePurposeAuthority', () => {
     it('refuses content-bearing purposes when the project carries another account’s material', () => {
       const input = authority({ decisions: granted, project: { ...project, mixedSource: true } });
 
-      /* Counts and timings stay available; prompts, designs and anything copied
+      /* Counts, timings and the account's own ratings stay available; prompts, designs and anything copied
        * out of them fail closed while the inherited protection is unknown. */
-      expect(allowed(input)).toEqual(['summary']);
+      expect(allowed(input)).toEqual(['summary', 'feedback']);
       for (const purpose of ['content', 'diagnosis', 'reuse', 'training'] as const) {
         expect(refusalOf(input, purpose)).toBe('project-mixed-source');
       }

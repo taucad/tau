@@ -22,6 +22,12 @@ export type TypeScriptLocation = Readonly<{
   length: number;
 }>;
 
+const completionPreferences: ts.UserPreferences = { includeCompletionsForModuleExports: true };
+const completionFormatSettings: ts.FormatCodeSettings = { indentSize: 2, tabSize: 2, convertTabsToSpaces: true };
+
+/** A documentation part; `{@link}` names carry the resolved location of their target. */
+export type TypeScriptDocumentationPart = ts.SymbolDisplayPart & Readonly<{ location?: TypeScriptLocation }>;
+
 /** Exact worker text used for an edit; the document owner compares it before mutation. */
 export type TypeScriptEditBasis = Readonly<{
   uri: string;
@@ -235,7 +241,7 @@ export class TypeScriptProjectService {
   }
 
   public getCompletions(uri: string, position: number): ts.WithMetadata<ts.CompletionInfo> | undefined {
-    return this.service.getCompletionsAtPosition(toPath(uri), position, { includeCompletionsForModuleExports: true });
+    return this.service.getCompletionsAtPosition(toPath(uri), position, completionPreferences);
   }
 
   public getCompletionDetails(
@@ -248,7 +254,17 @@ export class TypeScriptProjectService {
     }>,
   ): ts.CompletionEntryDetails | undefined {
     const { uri, position, name, source, data } = request;
-    return this.service.getCompletionEntryDetails(toPath(uri), position, name, undefined, source, undefined, data);
+    // Auto-import code actions format their edits, so details need format settings and the same preferences.
+    const details = this.service.getCompletionEntryDetails(
+      toPath(uri),
+      position,
+      name,
+      completionFormatSettings,
+      source,
+      completionPreferences,
+      data,
+    );
+    return details && this.withLinkLocations(details);
   }
 
   public getCompletionDetailsWithBases(
@@ -274,7 +290,8 @@ export class TypeScriptProjectService {
   }
 
   public getQuickInfo(uri: string, position: number): ts.QuickInfo | undefined {
-    return this.service.getQuickInfoAtPosition(toPath(uri), position);
+    const info = this.service.getQuickInfoAtPosition(toPath(uri), position);
+    return info && this.withLinkLocations(info);
   }
 
   /** Read only declarations already installed in this worker's virtual library map. */
@@ -536,6 +553,22 @@ export class TypeScriptProjectService {
 
   private getDirectories(path: string): string[] {
     return this.syncFs.getDirectories(toUri(path));
+  }
+
+  /** Resolve `{@link}` targets here, where the program can turn their offsets into lines. */
+  private withLinkLocations<T extends Readonly<{ documentation?: ts.SymbolDisplayPart[]; tags?: ts.JSDocTagInfo[] }>>(
+    info: T,
+  ): T {
+    const resolve = (parts: readonly ts.SymbolDisplayPart[]): TypeScriptDocumentationPart[] =>
+      parts.map((part) => {
+        const { target } = part as Partial<ts.JSDocLinkDisplayPart>;
+        return target ? { ...part, location: this.locationOf(target) } : part;
+      });
+    return {
+      ...info,
+      documentation: info.documentation && resolve(info.documentation),
+      tags: info.tags?.map((tag) => ({ ...tag, text: tag.text && resolve(tag.text) })),
+    };
   }
 
   private locationOf(entry: { fileName: string; textSpan: ts.TextSpan }): TypeScriptLocation {

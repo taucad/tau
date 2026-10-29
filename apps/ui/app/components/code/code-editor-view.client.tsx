@@ -4,7 +4,8 @@ import { editorSurfaceTheme } from '#components/code/editor-surface-theme.js';
 import '@vscode/codicons/dist/codicon.css';
 import '#components/code/code-editor.css';
 import { renderCompletionIcon } from '#components/code/editor-completion-icon.js';
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { definitionNavigation, goToDefinition, hasDefinitionProvider } from '#components/code/editor-definition.js';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { EditorState, Compartment, Prec } from '@codemirror/state';
 import type { ViewUpdate } from '@codemirror/view';
 import {
@@ -191,6 +192,7 @@ export function CodeEditorView({
   const historyRef = useRef<{ kind: 'typing' | 'composition'; groupId: string; at: number } | undefined>(undefined);
   const historySequence = useRef(0);
   const markedFirstEdit = useRef(false);
+  const [canGoToDefinition, setCanGoToDefinition] = useState(false);
   useEffect(() => {
     callbacksRef.current = { onApply, onHistory, onMount, readOnly };
   }, [onApply, onHistory, onMount, readOnly]);
@@ -240,6 +242,7 @@ export function CodeEditorView({
           diagnostics ? linter(() => diagnostics.get(document.uri).get('kernel') ?? [], { delay: 100 }) : [],
           syntaxHighlighting(editorHighlightStyle, { fallback: true }),
           tooltips({ parent: overlay, position: 'fixed' }),
+          definitionNavigation(),
           Prec.highest(
             keymap.of([
               { key: 'Mod-z', run: () => applyHistory('undo') },
@@ -469,7 +472,13 @@ export function CodeEditorView({
   };
 
   return (
-    <ContextMenu>
+    <ContextMenu
+      onOpenChange={(open) => {
+        if (open) {
+          setCanGoToDefinition(viewRef.current ? hasDefinitionProvider(viewRef.current.state) : false);
+        }
+      }}
+    >
       <ContextMenuTrigger className='contents'>
         <div ref={hostRef} className={cn('editor-container ph-no-capture size-full overflow-hidden', className)} />
       </ContextMenuTrigger>
@@ -512,6 +521,15 @@ export function CodeEditorView({
         >
           Go to Line
         </ContextMenuItem>
+        {canGoToDefinition && (
+          <ContextMenuItem
+            onSelect={() => {
+              runCommand(goToDefinition);
+            }}
+          >
+            Go to Definition
+          </ContextMenuItem>
+        )}
         {typeScriptLanguages.has(languageId) && extensions !== undefined && (
           <ContextMenuItem onSelect={runTypeDefinition}>Go to Type Definition</ContextMenuItem>
         )}

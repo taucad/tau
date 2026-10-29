@@ -24,7 +24,10 @@ const contentTypes: Readonly<Record<string, string>> = {
 /**
  * Admit the C# language server stage that `csharp-language:prepare` writes, verifying every file against its
  * manifest, and serve it content-addressed under `/csharp-language/<manifest sha256>/`. Every UI build and dev target
- * depends on that prepare step, so a missing stage is an error; only test runs pass no stage and go without the service.
+ * depends on that prepare step, so a missing or changed stage fails the build; only test runs pass no stage and go
+ * without the service. The failure surfaces when a dev server starts or a build emits, not when the config resolves:
+ * Nx resolves this config to build its project graph before any target has run `csharp-language:prepare`, and React
+ * Router's child compiler runs `buildStart` during that resolve (it drops `configureServer`).
  */
 export const createCsharpLanguageAssets = (
   stage: string | undefined,
@@ -32,7 +35,8 @@ export const createCsharpLanguageAssets = (
   const files = new Map<string, Uint8Array<ArrayBuffer>>();
   let assets: CsharpLanguageAssets | undefined;
   let prefix = '';
-  if (stage !== undefined) {
+  let failure: Error | undefined;
+  const admit = (stage: string): void => {
     if (!existsSync(path.join(stage, manifestName))) {
       throw new Error(`The C# language server is not staged at ${stage}; run \`pnpm nx run csharp-language:prepare\`.`);
     }
@@ -64,6 +68,13 @@ export const createCsharpLanguageAssets = (
     const identity = sha256(manifestBytes);
     prefix = `csharp-language/${identity}/`;
     assets = { url: `/${prefix}${manifestName}`, sha256: identity };
+  };
+  if (stage !== undefined) {
+    try {
+      admit(stage);
+    } catch (error) {
+      failure = error instanceof Error ? error : new Error(String(error));
+    }
   }
   return {
     assets,
@@ -71,6 +82,9 @@ export const createCsharpLanguageAssets = (
       name: 'tau:csharp-language-assets',
       applyToEnvironment: (environment) => environment.config.consumer === 'client',
       configureServer(server) {
+        if (failure) {
+          throw failure;
+        }
         server.middlewares.use((request, response, next) => {
           const pathname = (request.url ?? '').split('?', 1)[0] ?? '';
           const bytes =
@@ -86,6 +100,9 @@ export const createCsharpLanguageAssets = (
         });
       },
       generateBundle() {
+        if (failure) {
+          throw failure;
+        }
         for (const [name, bytes] of files) {
           this.emitFile({ type: 'asset', fileName: `${prefix}${name}`, source: bytes });
         }

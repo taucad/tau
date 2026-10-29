@@ -8,15 +8,30 @@ import { createCsharpLanguageAssets } from './csharp-language-assets.vite-plugin
 
 const hash = (bytes: string): string => createHash('sha256').update(bytes).digest('hex');
 
+/** Emit the plugin's bundle, where a build finds out its stage is unusable. */
+const emitBundle = (stage: string): void => {
+  const { generateBundle, buildStart } = createCsharpLanguageAssets(stage).plugin;
+  if (typeof generateBundle !== 'function') {
+    throw new TypeError('The C# language assets plugin has no generateBundle hook.');
+  }
+  // React Router's child compiler runs buildStart while Nx resolves the config, so the plugin must not fail there.
+  expect(buildStart).toBeUndefined();
+  // A failing stage throws before the hook touches its plugin context or arguments.
+  Reflect.apply(generateBundle, undefined, []);
+};
+
 describe('C# language server assets', () => {
   it('carries no C# language service in a test run, which passes no stage', () => {
     expect(createCsharpLanguageAssets(undefined).assets).toBeUndefined();
   });
 
-  it('fails a build whose stage is missing instead of shipping without the service', () => {
+  it('fails a build whose stage is missing, but still loads the config for the Nx project graph', () => {
     const stage = mkdtempSync(path.join(tmpdir(), 'csharp-language-ui-'));
     try {
-      expect(() => createCsharpLanguageAssets(stage)).toThrow(/csharp-language:prepare/u);
+      expect(createCsharpLanguageAssets(stage).assets).toBeUndefined();
+      expect(() => {
+        emitBundle(stage);
+      }).toThrow(/csharp-language:prepare/u);
     } finally {
       rmSync(stage, { recursive: true, force: true });
     }
@@ -47,7 +62,9 @@ describe('C# language server assets', () => {
       });
 
       writeFileSync(path.join(stage, 'references.bin'), 'changed bundle!!');
-      expect(() => createCsharpLanguageAssets(stage)).toThrow(/does not match its manifest: references\.bin/u);
+      expect(() => {
+        emitBundle(stage);
+      }).toThrow(/does not match its manifest: references\.bin/u);
     } finally {
       rmSync(stage, { recursive: true, force: true });
     }

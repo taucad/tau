@@ -592,6 +592,11 @@ describe('composite fields', () => {
       cameraBody,
     );
     expect(screen.getByRole('button', { name: 'Group: Projection' })).toBeInTheDocument();
+    // Projection closes the Camera card, so it takes the group gap below it rather than stacking the two borders.
+    expect(screen.getByRole('button', { name: 'Group: Projection' }).closest('[data-slot="field-group"]')).toBe(
+      cameraBody?.lastElementChild,
+    );
+    expect(cameraBody).toHaveClass('[&>[data-slot=field-group]:last-child]:pb-1');
     expect(screen.getByRole('combobox', { name: 'Select for Kind' })).toHaveTextContent('Perspective');
     expect(screen.queryByText('Option 1')).toBeNull();
     expect(screen.queryByLabelText('Parameter: Framing')).toBeNull();
@@ -943,7 +948,12 @@ describe('root presentation', () => {
     const { container } = renderForm({ rootPresentation: 'embedded' });
 
     const root = container.querySelector('[data-slot="embedded-form-root"]');
-    expect(root).toHaveClass('py-1', '[&>.field-group]:mx-1');
+    expect(root).toHaveClass(
+      'py-1',
+      '[&>.field-group]:mx-1',
+      '[&>[data-slot=field-group]:first-child]:pt-1',
+      '[&>[data-slot=field-group]:last-child]:pb-1',
+    );
     expect(screen.getByLabelText('Group: Tessellation').closest('[data-slot="field-group"]')?.parentElement).toBe(root);
   });
 

@@ -29,7 +29,7 @@ import { ModifiedIndicator } from '@taucad/ui/components/modified-indicator';
 import { HighlightText } from '@taucad/ui/components/highlight-text';
 import { PaneVirtualList } from '@taucad/ui/components/pane-virtual-list';
 import { paneFieldGroupSpacingClassName } from '@taucad/ui/components/pane-spacing.variants';
-import { ParameterGroupCard } from '#parameters/parameter-group-card.jsx';
+import { ParameterGroupCard, edgeCardGapClassName } from '#parameters/parameter-group-card.jsx';
 import { FieldLabelContext, ParametersWidget, useFieldLabel } from '#parameters/parameters-widget.jsx';
 import {
   isSchemaMatchingSearch,
@@ -500,10 +500,14 @@ function ObjectFieldTemplate(
 
   if (isRoot) {
     if (formContext.rootPresentation === 'embedded') {
-      // The same 4 px inset on every side as the catalog's `p-1` and a group body's `py-1`, so a card that opens or
-      // closes the form keeps a gap above or below it instead of stacking its border on the host's.
+      // The same 4 px inset on every side as the catalog's `p-1` and a group body's `py-1`; a card that opens or
+      // closes the form takes the group gap above or below it, as in a group body, instead of stacking its border
+      // on the host's.
       return (
-        <div data-slot='embedded-form-root' className='properties py-1 empty:hidden [&>.field-group]:mx-1'>
+        <div
+          data-slot='embedded-form-root'
+          className={cn('properties py-1 empty:hidden [&>.field-group]:mx-1', edgeCardGapClassName)}
+        >
           <ParameterPropertyList
             properties={properties}
             schema={schema}

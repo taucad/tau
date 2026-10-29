@@ -455,7 +455,8 @@ export function ProjectWorkspaceProvider({
     () => {
       openPanel('model');
     },
-    { enabled: !isMobile },
+    // Ctrl+A selects editable text on Windows and Linux.
+    { enabled: !isMobile, ignoreInputs: true },
   );
   useKeybinding(
     projectWorkspaceKeyCombinations.parameters,

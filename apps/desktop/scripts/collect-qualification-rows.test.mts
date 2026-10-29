@@ -386,7 +386,7 @@ try {
   const baseline = git('rev-parse', 'HEAD');
   git('-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'protected main advanced');
   const workflowCommit = git('rev-parse', 'HEAD');
-  const admitted = { sourceCommit: baseline, workflowCommit, scope: 'linux', channel: 'staging' };
+  const admitted = { sourceCommit: baseline, workflowCommit, scope: 'linux', channel: 'staging', kind: 'ci' } as const;
   assertQualificationSource(admitted);
   assertQualificationSource({ ...admitted, sourceCommit: workflowCommit });
   assertQualificationSource({ ...admitted, sourceCommit: workflowCommit, scope: 'all', channel: 'production' });
@@ -399,10 +399,11 @@ try {
   assert.throws(() => {
     assertQualificationSource({ ...admitted, scope: 'unknown' });
   }, /scope\/channel/u);
-  // Mac-only receipts feed publication, so they stay bound to the exact workflow source and to staging.
+  // Mac CI may test an ancestor; its publisher requires an authenticated binding. VM remains exact-source.
   assertQualificationSource({ ...admitted, sourceCommit: workflowCommit, scope: 'macos' });
+  assertQualificationSource({ ...admitted, scope: 'macos' });
   assert.throws(() => {
-    assertQualificationSource({ ...admitted, scope: 'macos' });
+    assertQualificationSource({ ...admitted, scope: 'macos', kind: 'vm' });
   }, /exact source/u);
   assert.throws(() => {
     assertQualificationSource({ ...admitted, sourceCommit: workflowCommit, scope: 'macos', channel: 'production' });

@@ -7,9 +7,14 @@ import type { RepositoryLease } from '#api/git/store/lease.js';
  * are refused for every ref family, so a committed object never becomes
  * unreachable and there is nothing to collect.
  *
- * It is explicit, synchronous and writer-side: the worker that already holds a
- * lease runs it, and the result rides the same manifest write as the push it
- * came in with. git's own automatic maintenance is off in a lease (AR-A E6).
+ * It is explicit and writer-side: the worker that already holds a lease runs
+ * it, over that lease. A push that takes the repository past the bound leaves
+ * it owed and runs it after the client is answered, under its own conditional
+ * manifest write (`compactCommitted` in `commit.ts`); past
+ * `deferredCompactionPackLimit`, or when the uncompacted packs would pass the
+ * byte ceiling, the result rides the same manifest write as the push it came
+ * in with, as every compaction once did. git's own automatic maintenance is
+ * off in a lease (AR-A E6).
  */
 export const shouldCompact = (livePackCount: number, bound: number): boolean => livePackCount > bound;
 

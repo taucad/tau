@@ -1,6 +1,6 @@
 import { fork, spawnSync } from 'node:child_process';
 import type { SpawnSyncReturns } from 'node:child_process';
-import { access, mkdir, mkdtemp, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { createConnection, Server } from 'node:net';
@@ -322,6 +322,63 @@ describe.runIf(['darwin', 'linux', 'win32'].includes(process.platform))('Node au
       } finally {
         // eslint-disable-next-line @typescript-eslint/naming-convention -- Child fixture environment boundary.
         runNetworkFixture(fixture, 'cleanup', { ...environment, TAU_AUTHORITY_TEST_DRIVE: drive });
+      }
+    },
+    50_000,
+  );
+
+  it.runIf(process.platform === 'win32' && process.env['TAU_WINDOWS_DISPOSABLE_HOST'] === '1')(
+    'should preserve a foreign SMB fixture share and mapping on setup and cleanup collisions',
+    async () => {
+      const authorityRoot = await root('network-owner-');
+      const otherRoot = await root('network-collision-');
+      const fixture = join(import.meta.dirname, 'authority-writer-network.fixture.ps1');
+      const environment = {
+        ...process.env,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Child fixture environment boundary.
+        TAU_AUTHORITY_TEST_SHARE: `tau-authority-${randomUUID().replaceAll('-', '')}`,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Child fixture environment boundary.
+        TAU_AUTHORITY_TEST_ROOT: authorityRoot,
+      };
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Child fixture environment boundary.
+      const collision = { ...environment, TAU_AUTHORITY_TEST_ROOT: otherRoot };
+      await writeFile(join(authorityRoot, 'owner.txt'), 'original owner bytes');
+      let cleaned = false;
+      try {
+        const setup: unknown = JSON.parse(runNetworkFixture(fixture, 'setup', environment));
+        if (
+          typeof setup !== 'object' ||
+          setup === null ||
+          !('status' in setup) ||
+          setup.status !== 'ready' ||
+          !('unc' in setup) ||
+          typeof setup.unc !== 'string' ||
+          !('drive' in setup) ||
+          typeof setup.drive !== 'string'
+        ) {
+          throw new TypeError('Disposable SMB collision regression requires a ready share and mapping');
+        }
+        const uncFile = `${setup.unc}\\owner.txt`;
+        const mappedFile = `${setup.drive}:\\owner.txt`;
+        expect(() => runNetworkFixture(fixture, 'setup', collision)).toThrow(
+          'Fixture share name already bound elsewhere',
+        );
+        expect(await readFile(uncFile, 'utf8')).toBe('original owner bytes');
+        expect(await readFile(mappedFile, 'utf8')).toBe('original owner bytes');
+        expect(() => runNetworkFixture(fixture, 'cleanup', collision)).toThrow(
+          'Fixture share name already bound elsewhere',
+        );
+        expect(await readFile(uncFile, 'utf8')).toBe('original owner bytes');
+        expect(await readFile(mappedFile, 'utf8')).toBe('original owner bytes');
+        runNetworkFixture(fixture, 'cleanup', environment);
+        cleaned = true;
+        await expect(access(uncFile)).rejects.toThrow();
+        await expect(access(mappedFile)).rejects.toThrow();
+        expect(await readFile(join(authorityRoot, 'owner.txt'), 'utf8')).toBe('original owner bytes');
+      } finally {
+        if (!cleaned) {
+          runNetworkFixture(fixture, 'cleanup', environment);
+        }
       }
     },
     50_000,

@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import type { SigningKey } from '#api/git/forwarding/contract/keys.js';
-import { signReceipt } from '#api/git/forwarding/contract/receipt.js';
+import { maximumPostedReceiptLength, signReceipt } from '#api/git/forwarding/contract/receipt.js';
 import type { StorageReceiptFacts } from '#api/git/forwarding/contract/receipt.js';
 import type { ReceiptChannel } from '#api/git/worker/storage-git.service.js';
 
@@ -26,8 +26,8 @@ const retryAfterMilliseconds = (response: Response): number => {
  * How tau-storage's receipts leave it (DC1).
  *
  * Most receipts ride back on the response the API is waiting for, so only a
- * receipt known after the reply — the `retained` bytes a compacting commit's
- * sweep kept (D18) — is posted. The post goes to the API's own URL and is
+ * receipt known after the reply — a deferred compaction's `commit`, and the
+ * `retained` bytes a compacting commit's sweep kept (D18) — is posted. The post goes to the API's own URL and is
  * accepted on the signature alone, so it needs no other credential.
  *
  * @param args - The receipt signing key, the API's receipt URL (unset: posts are dropped and logged), the logger and, for tests, `fetch`.
@@ -50,7 +50,25 @@ export const createReceiptChannel = (args: {
         );
         return;
       }
-      const receipt = signReceipt(facts, { key: args.key });
+      let receipt: string;
+      try {
+        receipt = signReceipt(facts, { key: args.key });
+      } catch (error) {
+        /* Never rejects: a caller posts after a durable commit, with its sweep still to run. */
+        args.logger.warn(
+          { kind: facts.kind, projectId: facts.project, err: error },
+          'A receipt could not be signed for posting; it was dropped',
+        );
+        return;
+      }
+      if (receipt.length > maximumPostedReceiptLength) {
+        /* The route would refuse it; the next grant's recorded generation repairs what it says. */
+        args.logger.warn(
+          { kind: facts.kind, projectId: facts.project, length: receipt.length },
+          'A posted receipt is longer than the receipt route reads; it was dropped',
+        );
+        return;
+      }
       for (let attempt = 1; attempt <= postAttempts; attempt += 1) {
         let wait = attempt * 500;
         try {

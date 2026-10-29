@@ -710,3 +710,77 @@ it.each(editorSyntaxFixtures)('renders visible syntax styles for %s', async (lan
   }
   await page.screenshot();
 });
+
+it.each([false, true])('refreshes delayed acquisition without editing (stale response: %s)', async (delayResponse) => {
+  const [{ createTypeScriptService }, { createTypeScriptExtensions }] = await Promise.all([
+    import('#lib/typescript-language/typescript-service.js'),
+    import('#lib/typescript-language/create-typescript-extensions.js'),
+  ]);
+  let release: () => void = () => undefined;
+  const ready = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const sourceDocument = new EditorDocument(
+    'main.ts',
+    "import type { Shape } from 'delayed'; export const shape: Shape = {size: 'wrong'};",
+  );
+  const dependencyReader = {
+    readFile: vi.fn(async (path: string) =>
+      new TextEncoder().encode(
+        path.endsWith('package.json') ? '{"types":"index.d.ts"}' : 'export type Shape = {size: number};',
+      ),
+    ),
+    readdir: vi.fn(async (path: string) => {
+      await ready;
+      return path === '/node_modules/delayed' ? ['index.d.ts'] : [];
+    }),
+  };
+  const service = await createTypeScriptService({ dynamicTypes: false, staticPackageNames: [], dependencyReader });
+  let releaseResponse: () => void = () => undefined;
+  const responseReady = new Promise<void>((resolve) => {
+    releaseResponse = resolve;
+  });
+  let captured = false;
+  const request = service.client.request.bind(service.client);
+  if (delayResponse) {
+    vi.spyOn(service.client, 'request').mockImplementation(async (command) => {
+      const result = await request(command);
+      if (command.kind === 'diagnostics' && !captured) {
+        captured = true;
+        await responseReady;
+      }
+      return result;
+    });
+  }
+  let messages: string[] = [];
+  try {
+    await service.attach(sourceDocument);
+    const extensions = createTypeScriptExtensions({
+      document: sourceDocument,
+      service,
+      navigate: async () => undefined,
+      publishDiagnostics: (_uri, _version, diagnostics) => {
+        messages = diagnostics.map((row) => row.message);
+      },
+    });
+    render(
+      <div className='h-72'>
+        <CodeEditor document={sourceDocument} viewId='delayed-types' languageId='typescript' extensions={extensions} />
+      </div>,
+    );
+    await expect
+      .poll(() => (delayResponse ? captured : messages.some((message) => message.includes('Cannot find module'))))
+      .toBe(true);
+    const { version } = sourceDocument;
+    release();
+    await expect.poll(() => service.environmentRevision).toBeGreaterThan(0);
+    releaseResponse();
+    await expect.poll(() => messages.some((message) => message.includes("not assignable to type 'number'"))).toBe(true);
+    expect(messages.some((message) => message.includes('Cannot find module'))).toBe(false);
+    expect(sourceDocument.version).toBe(version);
+  } finally {
+    release();
+    releaseResponse();
+    service.dispose();
+  }
+});

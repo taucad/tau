@@ -8,12 +8,12 @@ type Language = 'csharp' | 'kcl' | 'openscad' | 'typescript';
 /**
  * The downloads that only a language service needs: its CodeMirror adapter chunk, its worker and its staged server
  * assets. Syntax highlighting and the CAD kernels are separate owners and may load without a code pane. The C# and
- * OpenSCAD servers stage their WebAssembly under their own directories.
+ * OpenSCAD servers stage their manifest and WebAssembly under `<language>-language` directory or file names.
  */
 const languageResources: Readonly<Record<Language, readonly RegExp[]>> = {
-  csharp: [/\/csharp-codemirror-[\w-]+\.js$/u, /^\/csharp-language\//u],
+  csharp: [/\/csharp-codemirror-[\w-]+\.js$/u, /\/csharp[-_]language[-/]/u],
   kcl: [/\/kcl-codemirror-[\w-]+\.js$/u, /\/kcl-lsp-worker-[\w-]+\.js$/u],
-  openscad: [/\/openscad-codemirror-[\w-]+\.js$/u, /^\/openscad-language\//u],
+  openscad: [/\/openscad-codemirror-[\w-]+\.js$/u, /\/(?:tau_)?openscad[-_]language[-/]/u],
   typescript: [/\/typescript-codemirror-[\w-]+\.js$/u, /\/worker\.entry-[\w-]+\.js$/u],
 };
 /** The dispatcher every language service is imported through. */

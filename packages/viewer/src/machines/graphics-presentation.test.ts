@@ -1,6 +1,7 @@
 import { createActor, createAsyncLogic } from 'xstate';
 import { describe, expect, it } from 'vitest';
-import { clearRendererSpans, rendererSpans } from '#lib/renderer-telemetry.js';
+import { clearRendererSpans, onViewerEvent, rendererSpans } from '#lib/renderer-telemetry.js';
+import type { ViewerTelemetryEvent } from '#lib/viewer-events.js';
 import type { GeometryComponentManifest } from '@taucad/types';
 import type { GltfPresentationTelemetry } from '#machines/graphics.machine.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
@@ -166,13 +167,22 @@ describe('graphics GLTF presentation projection', () => {
 
   it('measures a presentation onto the shared span model rather than a private ring', () => {
     clearRendererSpans();
+    const viewerEvents: ViewerTelemetryEvent[] = [];
+    const stopListening = onViewerEvent((event) => viewerEvents.push(event));
     const actor = createGraphicsActor();
     actor.start();
     try {
       actor.send({
         type: 'gltfPresentationMeasured',
-        telemetry: { ...telemetry(7), durations: { parse: 3, receiptToFirstFrame: 40 } },
+        telemetry: { ...telemetry(7), triangleCount: 900, durations: { parse: 3, receiptToFirstFrame: 40 } },
       });
+      actor.send({
+        type: 'gltfPresentationMeasured',
+        telemetry: { ...telemetry(8), outcome: 'failed', durations: { receiptToFirstFrame: 5 } },
+      });
+
+      /* FR-17: one closed first-frame event per presented model; a failed one is not a frame. */
+      expect(viewerEvents).toEqual([{ event: 'first-frame', backend: 'webgl', duration: 40, triangles: 900 }]);
 
       /* D21: the frame that presented the geometry lands beside the worker spans that produced it,
        * under the renderer's own producer identity, instead of in a context field nothing read. */
@@ -183,8 +193,10 @@ describe('graphics GLTF presentation projection', () => {
           origin: { label: 'renderer' },
           detail: { revision: 7, outcome: 'presented', backend: 'webgl', parse: 3, receiptToFirstFrame: 40 },
         },
+        { name: 'renderer.presentation', detail: { revision: 8, outcome: 'failed' } },
       ]);
     } finally {
+      stopListening();
       actor.stop();
       clearRendererSpans();
     }

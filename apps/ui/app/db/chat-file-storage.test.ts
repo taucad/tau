@@ -1140,6 +1140,22 @@ describe('chat file store — log ownership boundary', () => {
     expect(metadata.find((chat) => chat.id === logOnlyId)?.name).toBe('New chat');
   });
 
+  it('should not list the desktop registration probe as a chat in either project', async () => {
+    const { store, write } = createStoreWithFiles();
+    const probeChatId = '00000000-0000-4000-8000-000000000000';
+    const home = 'proj_home';
+    const workspace = 'proj_workspace';
+    await write(`/projects/${home}/.tau/chats/${probeChatId}/events.jsonl`, '');
+    await write(`/projects/${home}/.tau/chats/${chatId}/events.jsonl`, 'local host events');
+    await write(`/projects/${workspace}/.tau/chats/${probeChatId}/events.jsonl`, '');
+    await write(`/projects/${workspace}/.tau/chats/${probeChatId}/events/device-b.jsonl`, '');
+
+    const homeRecords = await store.getChatRecordsForResource(home);
+    expect(homeRecords.map((chat) => chat.id)).toEqual([chatId]);
+    expect(await store.getChatRecordsForResource(workspace)).toEqual([]);
+    expect(await store.getChat(probeChatId)).toBeUndefined();
+  });
+
   it('reads changed projected metadata on the next listing', async () => {
     const { store, write } = createStoreWithFiles();
     await write(`/projects/${projectId}/.tau/chats/${chatId}/chat.json`, record);
@@ -1177,5 +1193,222 @@ describe('chat file store — log ownership boundary', () => {
     await write(`/projects/${projectId}/.tau/chats/${chatId}/events/device-b.jsonl`, 'remote host events');
     const listed = await store.getChatsForResource(projectId);
     expect(listed.map((chat) => chat.id)).toEqual([chatId]);
+  });
+});
+
+/*
+ * XD2: `chat.json` syncs to every device, so it keeps the chat's intent and no
+ * device's placement. `desktop`, `origin` and a loopback id each name a host on
+ * the device that wrote them; read anywhere, they mean "local placement".
+ */
+describe('chat file store — device-relative placement never reaches chat.json', () => {
+  const projectId = 'proj_handoff';
+  const model = 'anthropic-claude-opus-4.8';
+  const recordOf = (chatId: string): string => `/projects/${projectId}/.tau/chats/${chatId}/chat.json`;
+
+  it.each([
+    ['desktop', 'desktop'],
+    ['origin', 'origin'],
+    ['loopback', 'loopback:http://127.0.0.1:4100'],
+  ])('should read a %s placement another device wrote as local placement', async (_label, hostId) => {
+    const files = createStoreWithFiles();
+    const chatId = `chat_${_label}`;
+    await files.write(
+      recordOf(chatId),
+      `${JSON.stringify({
+        id: chatId,
+        resourceId: projectId,
+        name: 'From the desktop',
+        createdAt: 1,
+        updatedAt: 1,
+        activeExecution: { kind: 'tau', model, hostId, effort: 'high' },
+      })}\n`,
+    );
+
+    const chat = await files.reopen().getChat(chatId, projectId);
+
+    expect(chat?.activeExecution).toEqual({ kind: 'tau', model, effort: 'high' });
+  });
+
+  /*
+   * A legacy record's daemon is adopted only by the session that opens it where the daemon is reachable (never on a
+   * list read), and only that adopting write drops it from the record: every other write keeps it for the device it
+   * names.
+   */
+  it.each([
+    ['origin', 'origin'],
+    ['loopback', 'loopback:http://127.0.0.1:4100'],
+  ])(
+    'should keep a legacy %s placement through unrelated writes and through every device that adopts it',
+    async (_label, hostId) => {
+      const files = createStoreWithFiles();
+      const chatId = `chat_legacy_${_label}`;
+      await files.write(
+        recordOf(chatId),
+        `${JSON.stringify({
+          id: chatId,
+          resourceId: projectId,
+          name: 'Pinned to a daemon',
+          createdAt: 1,
+          updatedAt: 1,
+          activeExecution: { kind: 'tau', model, hostId },
+        })}\n`,
+      );
+      const store = files.reopen();
+      const storedHost = async (): Promise<unknown> =>
+        (JSON.parse(await files.read(recordOf(chatId))) as { activeExecution?: { hostId?: unknown } }).activeExecution
+          ?.hostId;
+
+      const listed = await store.getChatRecordsForResource(projectId);
+      expect(listed.map((chat) => chat.activeExecution)).toEqual([{ kind: 'tau', model }]);
+
+      /* A recency touch and a rename keep it. */
+      await store.touchChatRecency(chatId, Date.now());
+      await store.updateChat(chatId, { name: 'Renamed' });
+      expect(await storedHost()).toBe(hostId);
+
+      /* A device that cannot reach it never adopts it; every one that can adopts it into its own placements, and the
+       * synced record keeps it for the device it was really written on (no device can prove it is that one). */
+      await expect(store.adoptLegacyChatPlacement?.(chatId, projectId, async () => false)).resolves.toBeUndefined();
+      expect(await storedHost()).toBe(hostId);
+      await expect(store.adoptLegacyChatPlacement?.(chatId, projectId, async () => true)).resolves.toBe(hostId);
+      expect(await storedHost()).toBe(hostId);
+      await expect(store.adoptLegacyChatPlacement?.(chatId, projectId, async () => true)).resolves.toBe(hostId);
+    },
+  );
+
+  /* An explicit choice of the chat's execution supersedes a legacy pin, even one that names the same model. */
+  it.each([
+    ['another model', { kind: 'tau', model: 'openai-gpt-5.5' }],
+    ['the same model', { kind: 'tau', model }],
+  ] as const)('should drop a legacy placement when the execution is chosen again, with %s', async (_label, chosen) => {
+    const files = createStoreWithFiles();
+    const chatId = 'chat_legacy_superseded';
+    await files.write(
+      recordOf(chatId),
+      `${JSON.stringify({
+        id: chatId,
+        resourceId: projectId,
+        name: 'Pinned',
+        createdAt: 1,
+        updatedAt: 1,
+        activeExecution: { kind: 'tau', model, hostId: 'origin' },
+      })}\n`,
+    );
+    const store = files.reopen();
+
+    await store.patchChat(chatId, 'activeExecution', chosen);
+
+    const stored = JSON.parse(await files.read(recordOf(chatId))) as { activeExecution?: unknown };
+    expect(stored.activeExecution).toEqual(chosen);
+    await expect(store.adoptLegacyChatPlacement?.(chatId, projectId, async () => true)).resolves.toBeUndefined();
+  });
+
+  /* A session's open reads the chat record once: the legacy host is answered from that read, not a second one. */
+  it('should answer the legacy host from the record the open already read', async () => {
+    const files = createStoreWithFiles();
+    const chatId = 'chat_legacy_read_once';
+    await files.write(
+      recordOf(chatId),
+      `${JSON.stringify({
+        id: chatId,
+        resourceId: projectId,
+        name: 'Pinned',
+        createdAt: 1,
+        updatedAt: 1,
+        activeExecution: { kind: 'tau', model, hostId: 'origin' },
+      })}\n`,
+    );
+    const store = files.reopen();
+    await store.getChat(chatId, projectId);
+    const before = files.reads.filter((path) => path.endsWith(`${chatId}/chat.json`)).length;
+
+    await expect(store.adoptLegacyChatPlacement?.(chatId, projectId, async () => true)).resolves.toBe('origin');
+
+    expect(files.reads.filter((path) => path.endsWith(`${chatId}/chat.json`)).length).toBe(before);
+  });
+
+  /* Every writer that sets the chat's execution supersedes a legacy pin, not just a patch of it. */
+  it('should drop a legacy placement when an update sets a new execution', async () => {
+    const files = createStoreWithFiles();
+    const chatId = 'chat_legacy_updated';
+    await files.write(
+      recordOf(chatId),
+      `${JSON.stringify({
+        id: chatId,
+        resourceId: projectId,
+        name: 'Pinned',
+        createdAt: 1,
+        updatedAt: 1,
+        activeExecution: { kind: 'tau', model, hostId: 'origin' },
+      })}\n`,
+    );
+    const store = files.reopen();
+
+    await store.updateChat(chatId, { activeExecution: { kind: 'tau', model: 'openai-gpt-5.5' } });
+
+    expect((JSON.parse(await files.read(recordOf(chatId))) as { activeExecution?: unknown }).activeExecution).toEqual({
+      kind: 'tau',
+      model: 'openai-gpt-5.5',
+    });
+    await expect(store.adoptLegacyChatPlacement?.(chatId, projectId, async () => true)).resolves.toBeUndefined();
+  });
+
+  it('should write a local placement row as no hostId at all', async () => {
+    const files = createStoreWithFiles();
+    const chat = await files.store.createChat(projectId, {
+      name: 'Desktop chat',
+      messages: [],
+      activeExecution: { kind: 'tau', model, hostId: 'desktop' },
+    });
+    await files.store.patchChat(chat.id, 'activeExecution', { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'origin' });
+
+    const written = JSON.parse(await files.read(recordOf(chat.id))) as Record<string, unknown>;
+    expect(written['activeExecution']).toEqual({ kind: 'tau', model: 'openai-gpt-5.5' });
+  });
+
+  it('should treat a device-relative placement over an absent one as no change', async () => {
+    const files = createStoreWithFiles();
+    const chat = await files.store.createChat(projectId, {
+      name: 'Web chat',
+      messages: [],
+      activeExecution: { kind: 'tau', model },
+    });
+
+    await expect(
+      files.store.patchChat(chat.id, 'activeExecution', { kind: 'tau', model, hostId: 'desktop' }),
+    ).resolves.toBeUndefined();
+    const reread = await files.store.getChat(chat.id);
+    expect(reread?.updatedAt).toBe(chat.updatedAt);
+  });
+
+  it('should keep a paired device id and an external agent’s host, which name real machines', async () => {
+    const files = createStoreWithFiles();
+    const paired = await files.store.createChat(projectId, {
+      name: 'On the studio',
+      messages: [],
+      activeExecution: { kind: 'tau', model, hostId: 'dev_studio_mini' },
+    });
+    const external = await files.store.createChat(projectId, {
+      name: 'Codex on the desktop',
+      messages: [],
+      activeExecution: { kind: 'acp', hostId: 'desktop', agentId: 'codex' },
+    });
+
+    const reader = files.reopen();
+    const [pairedChat, externalChat] = await Promise.all([
+      reader.getChat(paired.id, projectId),
+      reader.getChat(external.id, projectId),
+    ]);
+    expect(pairedChat?.activeExecution).toEqual({
+      kind: 'tau',
+      model,
+      hostId: 'dev_studio_mini',
+    });
+    expect(externalChat?.activeExecution).toEqual({
+      kind: 'acp',
+      hostId: 'desktop',
+      agentId: 'codex',
+    });
   });
 });

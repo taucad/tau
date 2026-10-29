@@ -2,10 +2,12 @@ import * as THREE from 'three';
 import { WebGPUBackend, WebGPURenderer as ThreeWebGPURenderer } from 'three/webgpu';
 import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
 import { reversedDepthTransparentSort } from '#graphics/three/reversed-depth-transparent-sort.js';
+import { installLogarithmicGeometryDepth } from '#graphics/three/logarithmic-depth.js';
 import { syncGltfSurfaceDepthBias } from '#graphics/three/materials/gltf-surface-depth-bias.js';
 import { installWebGpuDepthSampling } from '#graphics/three/webgpu-depth-sampling.js';
 import { installWebGpuStencilState } from '#graphics/three/webgpu-stencil-state.js';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
+import { reportWebGpuCanvasLoss } from '#graphics/graphics-backend.js';
 
 /**
  * WebGL renderer instantiated by Tau helpers.
@@ -31,7 +33,7 @@ export type RendererInstance = WebGlRenderer | WebGpuRenderer;
 /**
  * Tau-owned renderer presets for disparate surfaces:
  *
- * - **`viewport`** — Interactive CAD `<Canvas>`: the lean node candidate uses single-sample targets with reversed-Z + GTAO;
+ * - **`viewport`** — Interactive CAD `<Canvas>`: the node pipeline uses single-sample targets with GTAO and reversed-Z (WebGPU) or logarithmic depth (WebGL2);
  *   classic WebGL retains MSAA, log-depth + N8AO and `powerPreference: 'high-performance'` (matches @react-three/fiber defaults
  *   for object-form `gl` props; factory `gl` must set it explicitly). TRAA/temporal AA is intentionally absent because the viewport runs
  *   `frameloop='demand'` (see `docs/policy/graphics-backend-policy.md`) and temporal effects cannot
@@ -90,6 +92,98 @@ const destroyAllocatedDevice = (backend: WebGpuRenderer['backend']): void => {
     gpuBackend.device?.destroy();
   }
 };
+
+/** The parts of Three's WebGPU backend a presentation check uses; the published Backend declaration omits them. */
+type PresentableWebGpuBackend = Readonly<{
+  device?: Readonly<{
+    lost: Promise<Readonly<{ reason: string; message: string }>>;
+    createCommandEncoder: () => {
+      beginRenderPass: (descriptor: unknown) => { end: () => void };
+      finish: () => unknown;
+    };
+    queue: Readonly<{ submit: (buffers: unknown[]) => void; onSubmittedWorkDone: () => Promise<void> }>;
+  }>;
+  context?: Readonly<{ getCurrentTexture: () => { createView: () => unknown } }>;
+}>;
+
+/**
+ * The longest wait for the first presented frame's work to finish. A clear completes within milliseconds, a software
+ * adapter's within a few; the bound only keeps a stalled queue from holding the renderer's creation. Milliseconds.
+ * @public
+ */
+export const firstCanvasFrameTimeout = 2000;
+
+/** How long a failed first frame waits for the device loss that usually follows it. Milliseconds. */
+const firstCanvasFrameLossGrace = 100;
+
+const delay = async (milliseconds: number): Promise<void> =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+
+/**
+ * Present one cleared frame and report whether the device survived it. A browser that cannot allocate the canvas's
+ * swap chain (Chromium on a software adapter, whose compositor has no backing to share with the WebGPU canvas)
+ * destroys the device within milliseconds of the first presented texture. Checking here, before the scene compiles a
+ * single pipeline, lets the viewer start on WebGL at once; found later, the scene's pipeline builds hold the GPU
+ * process for tens of seconds on a software adapter before anything can draw again.
+ * @param renderer - The initialized renderer, on Three's WebGPU backend.
+ * @returns The loss's message when the device was lost, otherwise `undefined`.
+ * @throws {WebGpuInitializationError} When the frame could not be presented though the device was not lost: an
+ * ordinary failed start, which says nothing about later WebGPU starts on the page.
+ */
+async function presentFirstCanvasFrame(renderer: WebGpuRenderer): Promise<string | undefined> {
+  const backend = renderer.backend as unknown as PresentableWebGpuBackend;
+  const { device, context } = backend;
+  if (device === undefined || context === undefined) {
+    return undefined;
+  }
+  let lossMessage: string | undefined;
+  // Settles only if the device is lost; a healthy device leaves it pending with nothing to release.
+  const loss = (async (): Promise<void> => {
+    const info = await device.lost;
+    lossMessage = info.message || info.reason;
+  })();
+  let failure: unknown;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const encoder = device.createCommandEncoder();
+    encoder
+      .beginRenderPass({
+        colorAttachments: [
+          {
+            view: context.getCurrentTexture().createView(),
+            loadOp: 'clear',
+            storeOp: 'store',
+            clearValue: { r: 0, g: 0, b: 0, a: 0 },
+          },
+        ],
+      })
+      .end();
+    device.queue.submit([encoder.finish()]);
+    const stalled = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, firstCanvasFrameTimeout);
+    });
+    await Promise.race([device.queue.onSubmittedWorkDone(), loss, stalled]);
+  } catch (error) {
+    // A dropped device rejects the work-done promise; only the device's own loss says the canvas cannot present.
+    failure = error;
+  } finally {
+    clearTimeout(timer);
+  }
+  // The loss is delivered as its own task; let it land before answering.
+  await (failure === undefined ? delay(0) : Promise.race([loss, delay(firstCanvasFrameLossGrace)]));
+  if (lossMessage !== undefined) {
+    return lossMessage;
+  }
+  if (failure !== undefined) {
+    throw new WebGpuInitializationError(
+      `The WebGPU canvas could not present its first frame: ${failure instanceof Error ? failure.message : JSON.stringify(failure)}`,
+      { cause: failure },
+    );
+  }
+  return undefined;
+}
 
 /**
  * Instantiate a Tau-normalised Three.js renderer for the given GPU backend and UI surface.
@@ -168,7 +262,7 @@ export async function createRenderer(
         reversedDepthBuffer: backend === 'webgpu',
         // eslint-disable-next-line @typescript-eslint/naming-convention -- Three constructor option.
         forceWebGL: backend === 'webgl',
-        logarithmicDepthBuffer: false,
+        logarithmicDepthBuffer: backend === 'webgl',
         stencil: true,
       } satisfies Partial<ConstructorParameters<typeof ThreeWebGPURenderer>[0]>);
     } else {
@@ -195,11 +289,31 @@ export async function createRenderer(
       throw new WebGpuInitializationError('WebGPU initialization did not select a native WebGPU backend');
     }
 
+    if (useCase === 'viewport' && backend === 'webgpu') {
+      let lossMessage: string | undefined;
+      try {
+        lossMessage = await presentFirstCanvasFrame(renderer);
+      } catch (error) {
+        renderer.dispose();
+        destroyAllocatedDevice(requestedBackend);
+        throw error;
+      }
+      if (lossMessage !== undefined) {
+        renderer.dispose();
+        destroyAllocatedDevice(requestedBackend);
+        reportWebGpuCanvasLoss();
+        throw new WebGpuInitializationError(`The WebGPU canvas could not present a frame: ${lossMessage}`);
+      }
+    }
+
     if (useCase === 'viewport') {
       // NodeRenderer does not invoke Material.onBeforeRender. Use its supported
       // draw callback for renderer-dependent surface bias, without per-draw arrays.
       // oxlint-disable-next-line max-params -- Three draw callback signature; avoid a rest-array allocation per draw.
       renderer.setRenderObjectFunction((object, scene, camera, geometry, material, group, lights, clipping, passId) => {
+        if (renderer.logarithmicDepthBuffer) {
+          installLogarithmicGeometryDepth(material);
+        }
         syncGltfSurfaceDepthBias.call(material, renderer);
         renderer.renderObject(object, scene, camera, geometry, material, group, lights, clipping, passId);
       });

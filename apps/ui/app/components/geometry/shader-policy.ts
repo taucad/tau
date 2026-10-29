@@ -86,8 +86,11 @@ export const shaderSites = [
   },
   {
     id: 'surface-depth-bias',
-    modules: ['packages/viewer/src/graphics/three/materials/gltf-surface-depth-bias.ts'],
-    authoring: ['on-before-compile', 'fixed-function'],
+    modules: [
+      'packages/viewer/src/graphics/three/materials/gltf-surface-depth-bias.ts',
+      'packages/viewer/src/graphics/three/logarithmic-depth.ts',
+    ],
+    authoring: ['on-before-compile', 'tsl', 'fixed-function'],
     backends: ['webgl', 'webgpu'],
     risks: ['camera', 'depth', 'clipping', 'upstream-drift'],
   },
@@ -130,6 +133,7 @@ export const shaderSites = [
     // Internal graph and lifecycle helpers share this site's contract.
     helpers: [
       'packages/viewer/src/graphics/three/ao-normal.ts',
+      'packages/viewer/src/graphics/three/gtao-log-depth.ts',
       'packages/viewer/src/graphics/three/surface-reuse.ts',
       'packages/viewer/src/graphics/three/camera-preparation.ts',
       'packages/viewer/src/graphics/three/transmission-retirement.ts',
@@ -374,6 +378,8 @@ export const shaderEvidence = {
       'packages/viewer/src/graphics/three/materials/gltf-surface-depth-bias.test.ts::sizes node surface separation to actual DPR and reversed depth',
     ],
     pixels: [
+      'packages/viewer/src/graphics/three/viewport-depth.browser.test.ts::keeps rear surfaces occluded at the deployed close-up clip interval on %s',
+      'packages/viewer/src/graphics/three/viewport-depth.browser.test.ts::preserves opaque ownership on the reported planetary close-up on %s',
       'packages/viewer/src/graphics/three/materials/gltf-edge-end-bleed.browser.test.ts::should keep a hidden edge that ends on a face boundary behind that face',
     ],
   },
@@ -516,6 +522,7 @@ export const shaderEvidence = {
       'packages/viewer/src/graphics/three/post-processing-antialias.browser.test.tsx::should keep contact AO smooth without erasing it',
     ],
     'depth-clipping': [
+      'packages/viewer/src/graphics/three/viewport-depth.browser.test.ts::reconstructs logarithmic AO depth across tiny-near perspective and signed orthographic cameras',
       'packages/viewer/src/graphics/three/post-processing-antialias.browser.test.tsx::should occlude grid and hidden outlines through actual stencil caps',
       'packages/viewer/src/graphics/three/post-processing-antialias.browser.test.tsx::should retain scene and cap depth before later overlays',
     ],
@@ -558,8 +565,8 @@ export const shaderEvidence = {
       'packages/viewer/src/graphics/three/post-processing-webgpu.test.tsx::should retain one linear stencil frame through overlays and encode only at frame completion',
       'packages/viewer/src/graphics/three/canvas-three-gl.test.ts::should leave canvas depth to the composed frame without changing standalone renderers',
       'packages/viewer/src/graphics/three/post-processing-webgpu.test.tsx::should keep AO active without multisampled scene attachments or a native-resolution AA intermediate',
-      'packages/viewer/src/graphics/three/post-processing-webgpu.test.tsx::should budget AO in CSS pixels independently of device pixel ratio',
-      'packages/viewer/src/graphics/three/post-processing-webgpu.test.tsx::should resize the AO budget only for CSS size changes and retain it across DPR changes',
+      'packages/viewer/src/graphics/three/post-processing-webgpu.test.tsx::should budget AO at half drawing-buffer resolution',
+      'packages/viewer/src/graphics/three/post-processing-webgpu.test.tsx::should resize AO with CSS size and DPR without rebuilding the pipeline',
       'packages/viewer/src/graphics/three/post-processing-webgpu.test.tsx::should prepare only the active beauty endpoint when AO is disabled',
       'packages/viewer/src/graphics/three/post-processing-webgpu.test.tsx::should retain scene depth for overlays without a final antialias target',
     ],

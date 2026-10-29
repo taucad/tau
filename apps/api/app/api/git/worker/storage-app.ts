@@ -12,7 +12,9 @@ import { storageKeepAliveTimeoutMilliseconds } from '#api/git/forwarding/contrac
 import { parsePublicKeys, parseSigningKey } from '#api/git/forwarding/contract/keys.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
+import { gitVersionProbe } from '#api/git/worker/git-toolchain.js';
 import { createReceiptChannel } from '#api/git/worker/receipt-channel.js';
+import { dnsMembers } from '#api/git/worker/storage-members.js';
 import { StorageGitService } from '#api/git/worker/storage-git.service.js';
 import { createStorageRequestHandler } from '#api/git/worker/storage-server.js';
 import { objectStoragePreviewWriter } from '#api/projects/project-preview-store.js';
@@ -63,6 +65,7 @@ export const startStorageApp = async (args: {
     store,
     shutdown,
     metrics,
+    packCacheFraction: environment.TAU_STORAGE_PACK_CACHE_FRACTION,
     previews: objectStoragePreviewWriter(objects),
     receipts: createReceiptChannel({
       key: parseSigningKey(environment.TAU_STORAGE_RECEIPT_SIGNING_KEY, 'TAU_STORAGE_RECEIPT_SIGNING_KEY'),
@@ -86,6 +89,12 @@ export const startStorageApp = async (args: {
       metrics,
       logger,
       stopping: () => shutdown.signal.aborted,
+      ...(environment.FLY_MACHINE_ID === undefined ? {} : { member: environment.FLY_MACHINE_ID }),
+      ...(environment.TAU_STORAGE_MEMBERS_DNS === undefined
+        ? {}
+        : { members: dnsMembers(environment.TAU_STORAGE_MEMBERS_DNS) }),
+      /* No git-lfs here by design. */
+      gitVersion: gitVersionProbe(),
     }),
   );
   /* No host: Node binds the unspecified IPv6 address, dual-stack, where the

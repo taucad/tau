@@ -13,9 +13,10 @@ describe('document worker dispatcher', () => {
     let emitLog: OnWorkerLog | undefined;
     const worker = {
       setTelemetrySend: vi.fn(),
+      setObservation: vi.fn(),
       setDevtoolsTelemetryEnabled: vi.fn(),
       setCompiledWasmModules: vi.fn(),
-      flushTelemetry: vi.fn(),
+      afterTerminalReply: vi.fn(),
       capabilitiesManifest: { registrations: [], routes: [], renderCapabilities: {} },
       async initialize(input: Parameters<KernelWorker['initialize']>[0]) {
         emitLog = input.callbacks.onLog;
@@ -58,6 +59,7 @@ describe('document worker dispatcher', () => {
     await vi.waitFor(() => {
       expect(delivered).toEqual(['log', 'evaluated']);
     });
+    worker.onOperationSettled?.({ operation: 'evaluate', operationId: 'evaluate:d1:e1', outcome: 'succeeded' });
     delivered.length = 0;
     client.notify('open', {
       documentId: 'd1',
@@ -91,15 +93,82 @@ describe('document worker dispatcher', () => {
       artifact: { content: { delivery: 'inline', bytes: new Uint8Array([3, 4]) } },
     });
     expect(delivered).toEqual(['log', 'rendered']);
+    worker.onOperationSettled?.({ operation: 'render', operationId: 'render:v1:e1:r1', outcome: 'succeeded' });
     const exported = await client.call('export', { documentId: 'd1', operationId: 'op1', target: 'bom' });
     expect(exported).toMatchObject({
       success: true,
       exportId: 'bom',
       files: [{ bytes: { delivery: 'inline', bytes: new Uint8Array([1, 2]) } }],
     });
-    expect(worker.flushTelemetry).toHaveBeenCalledTimes(3);
+    expect(worker.afterTerminalReply).toHaveBeenCalledTimes(4);
     client.close();
     server.dispose();
+  });
+
+  it("should flush an operation's spans only after its terminal reply, whichever comes first", async () => {
+    const ports = new MessageChannel();
+    const order: string[] = [];
+    const worker = {
+      setTelemetrySend: vi.fn(),
+      setObservation: vi.fn(),
+      setDevtoolsTelemetryEnabled: vi.fn(),
+      setCompiledWasmModules: vi.fn(),
+      afterTerminalReply: vi.fn(() => order.push('flush')),
+      capabilitiesManifest: { registrations: [], routes: [], renderCapabilities: {} },
+      initialize: vi.fn(async () => undefined),
+      async describe() {
+        order.push('describe-settled');
+        return { success: false, issues: [] };
+      },
+      permitComputePublication: vi.fn(),
+    } as unknown as KernelWorker;
+    const server = createDocumentWorkerDispatcher(worker, wrapMessagePort(ports.port1));
+    const client = createChannelClient<RuntimeDocumentProtocol>({
+      port: wrapMessagePort(ports.port2),
+      sessionKey: 'tau.runtime/v1',
+      protocolSchemas: runtimeDocumentProtocolSchemas,
+    });
+    try {
+      await client.ready;
+      await client.call('initialize', {});
+      expect(order).toEqual(['flush']);
+      order.length = 0;
+      const evaluated = (id: string): void =>
+        worker.onEvaluated?.({
+          documentId: 'd1',
+          intent: 0,
+          id,
+          success: true,
+          transient: false,
+          views: [],
+          exports: [],
+          issues: [],
+        });
+
+      // Settled before its reply: the flush waits for the evaluated notify.
+      worker.onOperationSettled?.({ operation: 'evaluate', operationId: 'evaluate:d1:e1', outcome: 'succeeded' });
+      expect(order).toEqual([]);
+      evaluated('e1');
+      expect(order).toEqual(['flush']);
+
+      // Replied before it settled: the flush waits for the settlement.
+      evaluated('e2');
+      expect(order).toEqual(['flush']);
+      worker.onOperationSettled?.({ operation: 'evaluate', operationId: 'evaluate:d1:e2', outcome: 'succeeded' });
+      expect(order).toEqual(['flush', 'flush']);
+
+      // Abandoned: no reply will come, so the spans leave at settlement.
+      worker.onOperationSettled?.({ operation: 'render', operationId: 'render:v1:e3:r1', outcome: 'cancelled' });
+      expect(order).toEqual(['flush', 'flush', 'flush']);
+      order.length = 0;
+
+      // A call flushes after the channel posts its result.
+      await client.call('describe', { file: { path: '/', filename: 'main.ts' } });
+      expect(order).toEqual(['describe-settled', 'flush']);
+    } finally {
+      client.close();
+      server.dispose();
+    }
   });
 
   it('rejects duplicate initialization and acknowledges pooled bytes through the host owner', async () => {
@@ -108,6 +177,7 @@ describe('document worker dispatcher', () => {
     const acknowledgeBinary = vi.fn();
     const worker = {
       setTelemetrySend: vi.fn(),
+      setObservation: vi.fn(),
       setDevtoolsTelemetryEnabled: vi.fn(),
       setCompiledWasmModules: vi.fn(),
       initialize,
@@ -144,6 +214,7 @@ describe('document worker dispatcher', () => {
     const setComputeBinding = vi.fn();
     const worker = {
       setTelemetrySend: vi.fn(),
+      setObservation: vi.fn(),
       setDevtoolsTelemetryEnabled: vi.fn(),
       setCompiledWasmModules: vi.fn(),
       setComputeBinding,
@@ -179,6 +250,7 @@ describe('document worker dispatcher', () => {
     }));
     const worker = {
       setTelemetrySend: vi.fn(),
+      setObservation: vi.fn(),
       transcode,
       permitComputePublication: vi.fn(),
     } as unknown as KernelWorker;

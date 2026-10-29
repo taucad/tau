@@ -56,6 +56,7 @@ const createContextData = () => ({
     isHandleGenerationValid: vi.fn().mockReturnValue(true),
     release: vi.fn(),
     cleanup: vi.fn().mockResolvedValue(undefined),
+    sampleResident: vi.fn().mockResolvedValue(64 * 1024 * 1024),
   },
   resident: {
     contains: vi.fn().mockReturnValue(false),
@@ -397,7 +398,13 @@ describe('Build123d kernel lifecycle errors', () => {
     expect(context.session.request).toHaveBeenLastCalledWith(
       expect.objectContaining({
         method: 'mesh',
-        params: { handleId: 'shape', linearTolerance: 0.05, angularTolerance: 20, maxTriangles: 20_000_000 },
+        params: {
+          handleId: 'shape',
+          linearTolerance: 0.05,
+          angularTolerance: 20,
+          includeEdges: false,
+          maxTriangles: 20_000_000,
+        },
         signal: runtime.signal,
       }),
     );
@@ -406,6 +413,38 @@ describe('Build123d kernel lifecycle errors', () => {
     await expect(definition.export!({ exportId: 'step', handle, options: {} }, runtime, context)).rejects.toThrow(
       /export failed/,
     );
+  });
+
+  it('asks the worker for edge lines only when the caller asks for includeEdges', async () => {
+    const context = createContext();
+    const handle = { sessionGeneration: 2, handleId: 'shape' };
+    const meshed = { artifactPath: '/private/model.glb', byteLength: 3, triangles: 12, vertices: 36 };
+    context.session.request.mockResolvedValue(meshed);
+    const exportOptions = { ...renderOptions, coordinateSystem: 'y-up', unit: { length: 'meter' } } as const;
+
+    await definition.render?.({ view: 'model', handle, options: renderOptions }, runtime, context);
+    await definition.render?.(
+      { view: 'model', handle, options: renderOptions, content: { includeEdges: false } },
+      runtime,
+      context,
+    );
+    await definition.render?.(
+      { view: 'model', handle, options: renderOptions, content: { includeEdges: true } },
+      runtime,
+      context,
+    );
+    await definition.export!({ exportId: 'glb', handle, options: exportOptions }, runtime, context);
+    await definition.export!(
+      { exportId: 'glb', handle, options: exportOptions, content: { includeEdges: true } },
+      runtime,
+      context,
+    );
+
+    expect(
+      context.session.request.mock.calls.map(
+        ([call]) => (call as { params: { includeEdges?: unknown } }).params.includeEdges,
+      ),
+    ).toEqual([false, false, true, false, true]);
   });
 
   it('meshes a preset render from the measured diagonal and reports its cost', async () => {
@@ -425,7 +464,13 @@ describe('Build123d kernel lifecycle errors', () => {
       expect.objectContaining({ method: 'measure', params: { handleId: 'shape' } }),
       expect.objectContaining({
         method: 'mesh',
-        params: { handleId: 'shape', linearTolerance: 1, angularTolerance: 20, maxTriangles: 2_000_000 },
+        params: {
+          handleId: 'shape',
+          linearTolerance: 1,
+          angularTolerance: 20,
+          includeEdges: false,
+          maxTriangles: 2_000_000,
+        },
       }),
     ]);
     expect(rendered).toMatchObject({
@@ -452,10 +497,10 @@ describe('Build123d kernel lifecycle errors', () => {
     );
 
     expect(context.session.request.mock.calls.map(([call]) => (call as { params: unknown }).params)).toEqual([
-      { handleId: 'shape', linearTolerance: 0.5, angularTolerance: 20, maxTriangles: 2_000_000 },
-      { handleId: 'shape', linearTolerance: 1, angularTolerance: 24, maxTriangles: 2_000_000 },
-      { handleId: 'shape', linearTolerance: 2, angularTolerance: 28, maxTriangles: 2_000_000 },
-      { handleId: 'shape', linearTolerance: 4, angularTolerance: 32 },
+      { handleId: 'shape', linearTolerance: 0.5, angularTolerance: 20, includeEdges: false, maxTriangles: 2_000_000 },
+      { handleId: 'shape', linearTolerance: 1, angularTolerance: 24, includeEdges: false, maxTriangles: 2_000_000 },
+      { handleId: 'shape', linearTolerance: 2, angularTolerance: 28, includeEdges: false, maxTriangles: 2_000_000 },
+      { handleId: 'shape', linearTolerance: 4, angularTolerance: 32, includeEdges: false },
     ]);
     expect(rendered).toMatchObject({
       tessellation: { requested: 'explicit', linearTolerance: 4, angularTolerance: 32, downgraded: 3 },
@@ -632,6 +677,15 @@ describe('Build123d kernel lifecycle errors', () => {
       ],
     });
     expect(project.filesystem.mocks.readFile).toHaveBeenCalledWith('pyproject.toml', 'utf8');
+  });
+
+  it("reports its worker tree's resident set through the observation hook and never through heapBytes", async () => {
+    const context = createContext();
+    await expect(definition.observedChildResidentBytes?.(context)).resolves.toBe(64 * 1024 * 1024);
+    expect(context.session.sampleResident).toHaveBeenCalledOnce();
+    // The recycling input stays unimplemented, so `rendering.heapBytes` and the recycle policy are unchanged.
+    expect(definition.heapBytes).toBeUndefined();
+    expect(definition.observedHeapBytes).toBeUndefined();
   });
 
   it('delegates handle validity/disposal and always removes the mirror', async () => {

@@ -1,4 +1,6 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import type { DockviewApi } from 'dockview-react';
 import { XIcon } from 'lucide-react';
 import { ChatHistory } from '#routes/w.$workspace.$project/chat-history.js';
 import { ProjectUnavailableOverlay } from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
@@ -10,7 +12,9 @@ import type { MobileWorkbenchDestinationCue } from '#components/mobile-workbench
 import { mobileDrawerOpenSnapPoint, mobileDrawerPeekSnapPoint } from '#constants/editor.constants.js';
 import type { MobilePanelId } from '#constants/editor.constants.js';
 import { useChatInterfaceState } from '#routes/w.$workspace.$project/use-chat-interface-state.js';
+import { viewName } from '#workbench-records/view-titles.js';
 import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
+import type { ViewerFileActions } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '@taucad/ui/components/drawer';
 import { ChatHistoryGate, ChatInterfaceSessionGate } from '#routes/w.$workspace.$project/focused-chat-gate.js';
 import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
@@ -26,11 +30,13 @@ import {
 import { useFeature } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectSidebarRow } from '#hooks/use-sidebar-status.js';
+import { TerminalCloseContext } from '#components/terminal/terminal-close.js';
+import type { TerminalCloseHost } from '#components/terminal/terminal-close.js';
 import { MobileProjectTopBar } from '#routes/w.$workspace.$project/mobile-project-top-bar.js';
 
 /* B-27, D-UI-16: every panel but the chat is its own chunk, loaded when its surface
- * first opens. Only the active surface is mounted, so a phone that
- * stays on the chat never downloads the editor (Monaco and the dockview
+ * first opens. Only the active surface is mounted (Terminal survives hiding), so a phone that
+ * stays on the chat never downloads the editor (CodeMirror and the dockview
  * workbench), parameters, converter or revision panels. */
 const ChatFileTree = lazy(async () => {
   const module = await import('#routes/w.$workspace.$project/chat-file-tree.js');
@@ -94,18 +100,24 @@ const ChatConsole = lazy(async () => {
   const module = await import('#routes/w.$workspace.$project/chat-console.js');
   return { default: module.ChatConsole };
 });
+const ProjectTerminalPane = lazy(async () => {
+  const module = await import('#components/terminal/terminal-pane.js');
+  return { default: module.ProjectTerminalPane };
+});
 
 /** A Workbench pane in the sheet: its title, a named Close, then the body the desktop pane renders (D4). */
 function MobilePane({
   id,
   children,
+  onOpenChange,
 }: {
+  readonly onOpenChange?: (open: boolean) => void;
   readonly id: MobilePanelId;
   readonly children: React.ReactNode;
 }): React.ReactNode {
   const title = surfaceTitle(id);
   return (
-    <FloatingPanel isOpen side='right'>
+    <FloatingPanel isOpen side='right' onOpenChange={onOpenChange}>
       <FloatingPanelContent>
         <FloatingPanelContentHeader>
           <FloatingPanelContentTitle>{title}</FloatingPanelContentTitle>
@@ -233,6 +245,10 @@ function MobileSurface({ id }: { readonly id: MobilePanelId }): React.ReactNode 
         </MobilePane>
       );
     }
+    case 'terminal': {
+      // The shell owns this pane above the drawer so hiding it preserves the session.
+      return null;
+    }
     case 'viewer': {
       return null;
     }
@@ -255,24 +271,147 @@ function isEditingTarget(target: EventTarget | undefined): boolean {
   if (target instanceof HTMLInputElement) {
     return textEntryInputTypes.has(target.type);
   }
-  return target instanceof HTMLTextAreaElement || target.isContentEditable || target.closest('.monaco-editor') !== null;
+  return target instanceof HTMLTextAreaElement || target.isContentEditable || target.closest('.cm-editor') !== null;
+}
+
+const clippingOverflow = new Set(['auto', 'scroll', 'hidden', 'clip']);
+
+/**
+ * What can raise the sheet (I5): the run's error card (`data-decision=run-error`, which rides the transcript's last
+ * turn), an approval waiting above the composer (`data-decision=approval`), and an agent question waiting for an answer
+ * (`data-ask-state=open`), in the transcript or in the tray above the composer. Other alerts (a job's outcome, a form
+ * error, a tool note) are records a person scrolls through, never a reason to move the sheet.
+ */
+const decisionSelector = '[data-decision], [data-ask-state=open]';
+
+/** A decision that settled (an answered question, a resolved approval): its identity can retire. */
+const settledSelector = '[data-ask-state=settled][data-ask-id], [data-decision-state=settled][data-decision-id]';
+
+/** The fixed rows' overflow at the peek, as an acknowledgement key. */
+const fixedRowsKey = 'fixed-rows';
+
+/** How often a scroll re-checks at most, while a list is still catching up with its content. Milliseconds. */
+const scrollCheckInterval = 100;
+
+/**
+ * A decision's identity across a remount and a surface switch: the same ask in either home, the same failure or
+ * approval. Never its text, which a countdown changes and a retry repeats; a decision without an identity is ignored.
+ */
+function decisionKey(decision: HTMLElement): string | undefined {
+  const { askId, decisionId } = decision.dataset;
+  return askId === undefined ? decisionId : `ask:${askId}`;
+}
+
+function hasBox(element: HTMLElement): boolean {
+  const box = element.getBoundingClientRect();
+  return box.width > 0 && box.height > 0;
 }
 
 /**
- * Never fold away a decision (I5): at the peek, a surface whose fixed rows (a title, a composer with an approval or a
- * question above it) no longer fit is raised to half height instead of being clipped under the nav.
+ * Whether a scroller sits where it rests with nothing scrolled by hand: a list that says it rests at its start
+ * (`data-scroll-rest=start`, the question tray) at its top, any other (a transcript) at its end.
  */
-function useRaiseWhenClipped(section: HTMLElement | undefined, isAtPeek: boolean, raise: () => void): void {
+function isAtRest(scroller: HTMLElement): boolean {
+  if (scroller.dataset['scrollRest'] === 'start') {
+    return scroller.scrollTop <= 1;
+  }
+  return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 1;
+}
+
+/**
+ * Whether the detent itself cuts the decision off: it is taller than the box that clips it, or that box is resting
+ * (nothing scrolled by hand) and still cannot show all of it. A decision the person scrolled past is not cut off by
+ * the detent, and neither is one that is not displayed.
+ */
+function isCutOffByDetent(decision: HTMLElement, section: HTMLElement): boolean {
+  if (!hasBox(decision)) {
+    return false;
+  }
+  const box = decision.getBoundingClientRect();
+  for (let parent = decision.parentElement; parent && parent !== section; parent = parent.parentElement) {
+    if (!clippingOverflow.has(getComputedStyle(parent).overflowY)) {
+      continue;
+    }
+    const clip = parent.getBoundingClientRect();
+    if (box.top >= clip.top - 1 && box.bottom <= clip.bottom + 1) {
+      continue;
+    }
+    // The nearest box that cuts it decides: a taller decision never fits; otherwise only a resting scroller's size counts.
+    const scrolls = parent.scrollHeight > parent.clientHeight + 1;
+    return box.height > clip.height + 1 || !scrolls || isAtRest(parent);
+  }
+  return false;
+}
+
+/** The identified decisions on screen, each with its identity. */
+function decisionsIn(section: HTMLElement): Array<[string, HTMLElement]> {
+  const found: Array<[string, HTMLElement]> = [];
+  for (const decision of section.querySelectorAll<HTMLElement>(decisionSelector)) {
+    const key = decisionKey(decision);
+    if (key !== undefined) {
+      found.push([key, decision]);
+    }
+  }
+  return found;
+}
+
+/**
+ * Never fold away a decision (I5). When a decision arrives and the detent cuts it off, the sheet rises one detent, and
+ * again from half if half still cuts it off; at the peek the same holds for fixed rows (a title, a composer with an
+ * approval or a question above it) that no longer fit. A detent the person chooses is theirs: the decisions on screen
+ * when they move the sheet are acknowledged, on any surface and for as long as they wait, and only a decision that
+ * arrives after can raise it again.
+ *
+ * @returns The acknowledgement to call when the person moves the sheet.
+ */
+function useRaiseWhenClipped(
+  section: HTMLElement | undefined,
+  detent: 'peek' | 'half' | undefined,
+  raise: () => void,
+): () => void {
+  const acknowledged = useRef(new Set<string>());
+  const acknowledge = useCallback(() => {
+    // Added to, never replaced: a move on another surface keeps what the person already saw on Chat.
+    acknowledged.current.add(fixedRowsKey);
+    for (const [key] of section ? decisionsIn(section) : []) {
+      acknowledged.current.add(key);
+    }
+  }, [section]);
   useEffect(() => {
-    if (!section || !isAtPeek || typeof ResizeObserver === 'undefined') {
+    if (!section || detent === undefined || typeof ResizeObserver === 'undefined') {
       return;
     }
     const check = (): void => {
+      const open = decisionsIn(section);
+      const openKeys = new Set(open.map(([key]) => key));
+      for (const settled of section.querySelectorAll<HTMLElement>(settledSelector)) {
+        const key = decisionKey(settled);
+        // One copy can settle before another (an approval shows in the banner and in its message): the identity
+        // retires only once no copy is still waiting.
+        if (key !== undefined && !openKeys.has(key)) {
+          acknowledged.current.delete(key);
+        }
+      }
+      const fresh = open.filter(([key, decision]) => !acknowledged.current.has(key) && hasBox(decision));
+      if (fresh.length > 0) {
+        // Something new arrived: the person has not chosen a detent for it.
+        acknowledged.current.delete(fixedRowsKey);
+      }
       for (const panel of section.querySelectorAll<HTMLElement>('[data-slot=floating-panel-content]')) {
-        if (panel.scrollHeight > panel.clientHeight + 1) {
+        if (
+          detent === 'peek' &&
+          !acknowledged.current.has(fixedRowsKey) &&
+          panel.scrollHeight > panel.clientHeight + 1
+        ) {
           raise();
           return;
         }
+      }
+      // One decision may show in two homes (a question's transcript card and its tray row): it is folded away only
+      // when every copy is cut off.
+      const copies = Map.groupBy(fresh, ([key]) => key);
+      if ([...copies.values()].some((group) => group.every(([, copy]) => isCutOffByDetent(copy, section)))) {
+        raise();
       }
     };
     const resize = new ResizeObserver(check);
@@ -291,13 +430,34 @@ function useRaiseWhenClipped(section: HTMLElement | undefined, isAtPeek: boolean
       frame = requestAnimationFrame(observe);
     });
     mutations.observe(section, { childList: true, subtree: true });
+    // A virtualized transcript settles at its end over a few scrolls after its rows mount; re-check as it goes.
+    let scrollTimer: ReturnType<typeof setTimeout> | undefined;
+    const scrolled = (): void => {
+      scrollTimer ??= setTimeout(() => {
+        scrollTimer = undefined;
+        check();
+      }, scrollCheckInterval);
+    };
+    section.addEventListener('scroll', scrolled, { capture: true, passive: true });
     observe();
     return () => {
       cancelAnimationFrame(frame);
+      clearTimeout(scrollTimer);
+      section.removeEventListener('scroll', scrolled, { capture: true });
       resize.disconnect();
       mutations.disconnect();
     };
-  }, [section, isAtPeek, raise]);
+  }, [section, detent, raise]);
+  return acknowledge;
+}
+
+/** The detents a decision can raise the sheet from; full has nowhere higher to go. */
+// oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
+function raisableDetent(point: number | string | null): 'peek' | 'half' | undefined {
+  if (point === mobileDrawerPeekSnapPoint) {
+    return 'peek';
+  }
+  return point === mobileDrawerOpenSnapPoint ? 'half' : undefined;
 }
 
 /** A decision or unseen failure waiting in this project's chats, for the Chat destination (I5). */
@@ -322,12 +482,75 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
   const { activeTab, handleTabChange, drawerOpen, handleDrawerChange, snapPoints, activeSnapPoint, handleSnapChange } =
     useChatInterfaceState();
   const chatCue = useChatCue();
+  const [viewerApi, setViewerApi] = useState<DockviewApi>();
+  const [viewerFileActions, setViewerFileActions] = useState<ViewerFileActions>();
+  const { viewRecords } = useProject();
+  const viewerNames = useMemo(
+    () => new Map([...viewRecords].map(([id, record]) => [id, viewName(record)])),
+    [viewRecords],
+  );
   const navigationRef = useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const [section, setSection] = useState<HTMLElement>();
   const attachSection = useCallback<React.RefCallback<HTMLElement>>((element) => {
     setSection(element ?? undefined);
   }, []);
+
+  // React keeps the pane in one portal; only its host DOM node moves with the drawer's transient slot.
+  const [terminalHost, setTerminalHost] = useState<HTMLDivElement>();
+  const [terminalSlot, setTerminalSlot] = useState<HTMLDivElement>();
+  const attachTerminalSlot = useCallback<React.RefCallback<HTMLDivElement>>((element) => {
+    setTerminalSlot(element ?? undefined);
+    if (element) {
+      setTerminalHost((host) => {
+        if (host) {
+          return host;
+        }
+        const container = document.createElement('div');
+        container.className = 'size-full';
+        return container;
+      });
+    }
+  }, []);
+  useEffect(() => {
+    if (!terminalHost || !terminalSlot) {
+      return;
+    }
+    terminalSlot.append(terminalHost);
+    return () => {
+      terminalHost.remove();
+    };
+  }, [terminalHost, terminalSlot]);
+  // The named Close asks a running Terminal first; hiding the sheet keeps the portal, and with it the session.
+  const terminalCloseRequest = useRef<(() => boolean) | undefined>(undefined);
+  const terminalCloseHost = useMemo<TerminalCloseHost>(
+    () => ({
+      close() {
+        setTerminalHost(undefined);
+        handleDrawerChange(false);
+      },
+      hide() {
+        handleDrawerChange(false);
+      },
+      register(request) {
+        terminalCloseRequest.current = request;
+        return () => {
+          if (terminalCloseRequest.current === request) {
+            terminalCloseRequest.current = undefined;
+          }
+        };
+      },
+    }),
+    [handleDrawerChange],
+  );
+  const closeTerminal = useCallback(
+    (open: boolean) => {
+      if (!open && !terminalCloseRequest.current?.()) {
+        terminalCloseHost.close();
+      }
+    },
+    [terminalCloseHost],
+  );
 
   // A surface the person chooses takes focus; one restored from storage or opened by the app does not.
   const surfaceToFocus = useRef<MobilePanelId | undefined>(undefined);
@@ -347,10 +570,26 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
     }
   }, [activeTab, drawerOpen, section]);
 
-  const raiseFromPeek = useCallback(() => {
-    handleSnapChange(mobileDrawerOpenSnapPoint);
-  }, [handleSnapChange]);
-  useRaiseWhenClipped(section, drawerOpen && activeSnapPoint === mobileDrawerPeekSnapPoint, raiseFromPeek);
+  const raiseOneDetent = useCallback(() => {
+    handleSnapChange(activeSnapPoint === mobileDrawerPeekSnapPoint ? mobileDrawerOpenSnapPoint : 1);
+  }, [activeSnapPoint, handleSnapChange]);
+  const acknowledgeDecisions = useRaiseWhenClipped(
+    section,
+    drawerOpen ? raisableDetent(activeSnapPoint) : undefined,
+    raiseOneDetent,
+  );
+  const chooseSnapPoint = useCallback(
+    // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
+    (value: number | string | null): void => {
+      // The person moved the sheet (a drag or the grabber's keys): their detent holds over what is on screen now. Vaul's
+      // reset after the sheet closes is not a move.
+      if (drawerOpen) {
+        acknowledgeDecisions();
+      }
+      handleSnapChange(value);
+    },
+    [acknowledgeDecisions, drawerOpen, handleSnapChange],
+  );
 
   const isViewerTab = activeTab === 'viewer';
   const sheetHeight = snapPointLength(activeSnapPoint);
@@ -377,7 +616,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
             paddingBottom: isViewerTab ? 'var(--nav-offset)' : `calc(${sheetHeight})`,
           }}
         >
-          <ViewerDockview />
+          <ViewerDockview onApiChange={setViewerApi} onFileActionsChange={setViewerFileActions} />
           <ProjectManifestIssueBanner />
 
           {/* Renders the shared failure notice or WorkspaceUnavailableRecovery
@@ -391,7 +630,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
           open={drawerOpen}
           snapPoints={snapPoints}
           activeSnapPoint={activeSnapPoint}
-          setActiveSnapPoint={handleSnapChange}
+          setActiveSnapPoint={chooseSnapPoint}
           onOpenChange={handleDrawerChange}
         >
           <DrawerTitle className='sr-only' id='drawer-title'>
@@ -451,14 +690,29 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
                 }}
               >
                 <div className='flex h-full flex-1 flex-col'>
-                  <Suspense fallback={null}>
-                    <MobileSurface id={activeTab} />
-                  </Suspense>
+                  {activeTab === 'terminal' ? (
+                    <div ref={attachTerminalSlot} className='size-full' />
+                  ) : (
+                    <Suspense fallback={null}>
+                      <MobileSurface id={activeTab} />
+                    </Suspense>
+                  )}
                 </div>
               </section>
             </DrawerContent>
           ) : null}
         </Drawer>
+
+        {terminalHost
+          ? createPortal(
+              <MobilePane id='terminal' onOpenChange={closeTerminal}>
+                <TerminalCloseContext.Provider value={terminalCloseHost}>
+                  <ProjectTerminalPane />
+                </TerminalCloseContext.Provider>
+              </MobilePane>,
+              terminalHost,
+            )
+          : null}
 
         {/* Navigation tabs - Always visible and sticky to bottom */}
         <div
@@ -469,7 +723,14 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
             '[:root:has([data-slot=drawer-content][data-keyboard=open])_&]:hidden',
           )}
         >
-          <ChatInterfaceNav activeTab={activeTab} chatCue={chatCue} onTabChange={chooseSurface} />
+          <ChatInterfaceNav
+            activeTab={activeTab}
+            chatCue={chatCue}
+            viewerApi={viewerApi}
+            viewerNames={viewerNames}
+            fileActions={viewerFileActions}
+            onTabChange={chooseSurface}
+          />
         </div>
       </div>
     </ChatInterfaceSessionGate>

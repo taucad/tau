@@ -138,4 +138,60 @@ describe('RuntimeTracer', () => {
       detail: { parentSpanId: undefined },
     });
   });
+
+  it('should parent a span started after an earlier sibling ended to the still-open root', () => {
+    const entries: TelemetryEntry[] = [];
+    const tracer = new RuntimeTracer();
+    tracer.setEntrySink((entry) => entries.push(entry));
+    const root = tracer.startSpan('kernel.render', { 'operation.id': 'render:v1:e1:r1' });
+
+    tracer.startSpan('kernel.select').end();
+    tracer.startSpan('kernel.compute').end();
+    root.end();
+
+    expect(entries.map((entry) => [entry.name, entry.detail?.['parentSpanId']])).toEqual([
+      ['kernel.select', '0'],
+      ['kernel.compute', '0'],
+      ['kernel.render', undefined],
+    ]);
+  });
+
+  it('should not parent a later span to a parent that ended before its child', () => {
+    const entries: TelemetryEntry[] = [];
+    const tracer = new RuntimeTracer();
+    tracer.setEntrySink((entry) => entries.push(entry));
+    const root = tracer.startSpan('kernel.evaluate');
+    const parent = tracer.startSpan('kernel.compute');
+    const deferred = tracer.startSpan('kernel.bundle');
+
+    parent.end();
+    const next = tracer.startSpan('kernel.extract-params');
+    next.end();
+    deferred.end();
+    root.end();
+
+    const byName = Object.fromEntries(entries.map((entry) => [entry.name, entry.detail?.['parentSpanId']]));
+    expect(byName).toEqual({
+      'kernel.compute': '0',
+      'kernel.extract-params': '0',
+      'kernel.bundle': '1',
+      'kernel.evaluate': undefined,
+    });
+  });
+
+  it('should count a span that ends after reset as dropped and start the next epoch without a parent', () => {
+    const entries: TelemetryEntry[] = [];
+    const onDropped = vi.fn();
+    const tracer = new RuntimeTracer();
+    tracer.setEntrySink((entry) => entries.push(entry), onDropped);
+    const stale = tracer.startSpan('kernel.render');
+
+    tracer.reset();
+    tracer.startSpan('kernel.bootstrap').end();
+    stale.end();
+
+    expect(onDropped).toHaveBeenCalledOnce();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ name: 'kernel.bootstrap', detail: { parentSpanId: undefined } });
+  });
 });

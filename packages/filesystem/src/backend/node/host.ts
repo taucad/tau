@@ -191,13 +191,13 @@ export class NodeFsAuthorityHost {
     }
     entry.operations += 1;
     try {
+      const writer = await entry.writer;
       const resources = await Promise.all(
         snapshot.paths.map(async (resource) => canonicalResource(canonicalRoot, resource)),
       );
       return await this._mutations.queueForClaims(
         resources.flatMap(({ collision, exact }) => [subtreeClaim(exact), subtreeClaim(collision)]),
         async () => {
-          const writer = await entry.writer;
           await writer.assertCurrent();
           return operation(writer);
         },
@@ -406,6 +406,9 @@ const runOperation = async (
         }
         throw error;
       }
+    }
+    case 'hashFiles': {
+      return provider.hashFiles(request.paths);
     }
     case 'readdir': {
       return provider.readdir(request.path);

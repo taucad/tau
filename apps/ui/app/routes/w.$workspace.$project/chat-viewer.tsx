@@ -113,9 +113,12 @@ function usePaneRuntimeView({
   // including while the person switches views or a new view fails.
   const pictureKey = document?.id ?? '';
   const subscriptionKey = `${document?.id ?? ''}:${requestedId ?? ''}:${optionsKey}:${instance ?? ''}:${includeEdges}`;
+  // The offered view, its MIME type and the kernel are unknown until the document first evaluates, so a view opened
+  // earlier would be closed and reopened under its real key as soon as the evaluation lands.
+  const evaluated = evaluation !== undefined;
 
   useEffect(() => {
-    if (!document || Boolean(unavailable) || isEmpty) {
+    if (!document || !evaluated || Boolean(unavailable) || isEmpty) {
       return;
     }
     let closed = false;
@@ -198,7 +201,18 @@ function usePaneRuntimeView({
       unstatus();
       view.close();
     };
-  }, [document, isEmpty, requestedId, includeEdges, optionsKey, instance, unavailable, pictureKey, subscriptionKey]);
+  }, [
+    document,
+    evaluated,
+    isEmpty,
+    requestedId,
+    includeEdges,
+    optionsKey,
+    instance,
+    unavailable,
+    pictureKey,
+    subscriptionKey,
+  ]);
 
   const captureRendering = useCallback(async (): Promise<Rendering> => {
     const active = activeView.current;
@@ -852,7 +866,7 @@ const ViewerContent = memo(function ({
         if (
           !(target instanceof HTMLElement) ||
           target.isContentEditable ||
-          target.closest('input, textarea, select, [contenteditable], [role="textbox"], .monaco-editor')
+          target.closest('input, textarea, select, [contenteditable], [role="textbox"], .cm-editor')
         ) {
           return;
         }
@@ -911,7 +925,7 @@ const ViewerContent = memo(function ({
           >
             {({ segment, list }) => (
               <ChatViewerControls
-                mobileAction={<ArButton artifact={artifact} runtimeDocument={runtimeDocument} />}
+                mobileAction={<ArButton artifact={artifact} />}
                 captureRendering={captureRendering}
                 kernelSettings={
                   cadRef ? <ViewerKernelSettings viewId={viewId} entryPath={entryPath} cadActor={cadRef} /> : undefined
@@ -928,7 +942,7 @@ const ViewerContent = memo(function ({
           </ViewerIssues>
         ) : (
           <ChatViewerControls
-            mobileAction={<ArButton artifact={artifact} runtimeDocument={runtimeDocument} />}
+            mobileAction={<ArButton artifact={artifact} />}
             shouldEnableCapture={false}
             captureRendering={captureRendering}
           />

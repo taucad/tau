@@ -73,8 +73,13 @@ export function toOtlpJson(batch: TelemetryBatch): string {
     }),
   );
 
-  /* A trace is named by its root. A span whose parent did not come in this batch is treated as a
-   * root: the alternative is emitting a traceId the collector can never join to anything. */
+  const droppedRoots = batch.droppedRoots ?? {};
+
+  /* A trace is named by its operation: the hash of the root's `operation.id`, or of the id the
+   * collector recorded when it had to drop that root, so a root lost under pressure leaves one
+   * trace with a missing parent rather than one parentless fragment per child. A span with no
+   * operation above it in this batch is treated as a root: the alternative is emitting a traceId
+   * the collector can never join to anything. */
   const traceOf = (entry: TelemetryEntry): string => {
     let current = entry;
     const seen = new Set<string>();
@@ -85,6 +90,12 @@ export function toOtlpJson(batch: TelemetryBatch): string {
       }
       seen.add(parent);
       current = next;
+    }
+    const rootParent = parentKey(current);
+    const operationId =
+      current.detail?.['operation.id'] ?? (rootParent === undefined ? undefined : droppedRoots[rootParent]);
+    if (typeof operationId === 'string') {
+      return `${hex64(`operation:${operationId}`)}${hex64(`trace:operation:${operationId}`)}`;
     }
     const root = spanKey(current) ?? `${current.name}:${String(current.startTime)}`;
     return `${identity(root)}${identity(`trace:${root}`)}`;
@@ -103,7 +114,9 @@ export function toOtlpJson(batch: TelemetryBatch): string {
     return {
       traceId: traceOf(entry),
       spanId: identity(spanKey(entry) ?? `${entry.name}:${String(entry.startTime)}`),
-      ...(parent !== undefined && present.has(parent) ? { parentSpanId: identity(parent) } : {}),
+      ...(parent !== undefined && (present.has(parent) || Object.hasOwn(droppedRoots, parent))
+        ? { parentSpanId: identity(parent) }
+        : {}),
       name: entry.name,
       kind: 1,
       startTimeUnixNano: nanoseconds(entry.startTime),

@@ -38,7 +38,7 @@ import type { RefusalCode } from '#wire/refusals.js';
 import { chatStoreBinding, requireChatPathSegment } from '#launchers/chat-store.js';
 import { createReplayView, isBytePrefix } from '#launchers/replay-view.js';
 import type { ReplayView } from '#launchers/replay-view.js';
-import type { ChatStore, LeadershipPort } from '#launchers/chat-store.js';
+import type { ChatStore, ChatWriterOpen, LeadershipPort } from '#launchers/chat-store.js';
 
 /**
  * Whether this host may admit a Tau run (RH-R13): only `unpaired` refuses, with `HOST_NOT_PAIRED`. `principal` is the
@@ -78,6 +78,8 @@ export type AgentLauncherOptions = Readonly<{
   toolRegistry: ToolRegistry;
   /** External agents; omit and a `start` naming one is refused `EXTERNAL_AGENT_UNAVAILABLE`. */
   externalAgents?: ExternalAgentPort | undefined;
+  /** Which device this host is: stamped on external turns' markers (`CreateTauAgentHostOptions.deviceId`). */
+  deviceId?: CreateTauAgentHostOptions['deviceId'];
   createId?: (() => string) | undefined;
   clientContext?: CreateTauAgentHostOptions['clientContext'];
   /**
@@ -321,6 +323,8 @@ const runOf = async (chatId: string, view: ChatView): Promise<HostRunSnapshot | 
  */
 export const createAgentLauncher = (options: AgentLauncherOptions): AgentLauncher => {
   const binding = chatStoreBinding(options.chats);
+  /* A writer's open reads the other devices' segments under the admission's own bound (round 27). */
+  const writerOpen: ChatWriterOpen = { segmentReadMilliseconds: options.delays?.segmentRefresh };
   const createId = options.createId ?? createPortableId;
   const liveOwners = new Map<string, number>();
   const live = createFanOut<SourceLiveEvent>((chatId) => {
@@ -541,7 +545,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     requireChatPathSegment(chatId);
     const handed = views.get(chatId);
     views.delete(chatId);
-    const log = await (handed ?? binding.openWriter(chatId));
+    const log = await (handed ?? binding.openWriter(chatId, writerOpen));
     writers.add(chatId);
     writerGenerations.set(chatId, createPortableId());
     acquiring.delete(chatId);
@@ -570,9 +574,21 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       },
       read: async () => log.read(),
       readBatch: async (input) => log.readBatch(input),
+      /* The chat's history over every device's segment; `read` above stays this device's rows (XD1). */
       messages: async () => log.messages(),
       historyIntact: async () => log.historyIntact(),
       anomalies: async () => log.anomalies(),
+      ...(log.refresh === undefined ? {} : { refresh: log.refresh.bind(log) }),
+      /* Other devices' unsettled runs, which the cross-device run fence reads (XD3). */
+      ...(log.foreignRuns === undefined ? {} : { foreignRuns: log.foreignRuns.bind(log) }),
+      /* When another device last wrote the chat: a turn after it opens a new term (XD1). */
+      ...(log.stampAfterRead === undefined ? {} : { stampAfterRead: log.stampAfterRead.bind(log) }),
+      ...(log.foreignWroteSinceTermBegan === undefined
+        ? {}
+        : { foreignWroteSinceTermBegan: log.foreignWroteSinceTermBegan.bind(log) }),
+      ...(log.historyUnknown === undefined ? {} : { historyUnknown: log.historyUnknown.bind(log) }),
+      /* Whether another device said this device's run's turn and went on past it (XD3). */
+      ...(log.runTakenOver === undefined ? {} : { runTakenOver: log.runTakenOver.bind(log) }),
       close: async () => {
         writers.delete(chatId);
         writerGenerations.delete(chatId);
@@ -592,6 +608,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     createId,
     ...(options.clientContext === undefined ? {} : { clientContext: options.clientContext }),
     ...(options.externalAgents ? { externalRunners: { acp: options.externalAgents } } : {}),
+    ...(options.deviceId === undefined ? {} : { deviceId: options.deviceId }),
     ...(options.turnPlacement === undefined ? {} : { placement: options.turnPlacement }),
     ...(options.delays === undefined ? {} : { delays: options.delays }),
     ...(options.clock === undefined ? {} : { clock: options.clock }),
@@ -671,7 +688,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
 
   const port: LeadershipPort = binding.leadership({
     openView: async (chatId) => {
-      const opening = views.get(chatId) ?? binding.openWriter(chatId);
+      const opening = views.get(chatId) ?? binding.openWriter(chatId, writerOpen);
       views.set(chatId, opening);
       try {
         const log = await opening;
@@ -924,6 +941,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       passes.set(chatId, pass);
       pass.count += 1;
       const woken = pass.wakes;
+      const sourceWoken = pass.sourceWakes;
       let answer: Awaited<ReturnType<ChatView['log']['readBatch']>>;
       let sourceGeneration: string;
       let sourceHealth: ProjectionSourceHealth;
@@ -964,17 +982,20 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
         endCursor: answer.endCursor,
         events: [...answer.events],
       };
-      /* A wake while this pass read the bytes (a writer opened, or the holder changed) has no waiter to reach: answer
-       * now, and the reader's next read is routed anew. */
+      /* Routing changes answer now so the next read can find the new holder. A source-only wake must instead
+       * reacquire an empty captured prefix: the appended rows may have arrived after its bytes were read. */
       if (
         answer.events.length > 0 ||
         input.sourceGeneration !== sourceGeneration ||
         !sameSourceHealth(input.sourceHealth, sourceHealth) ||
         closed ||
         signal?.aborted === true ||
-        pass.wakes !== woken
+        pass.wakes - woken !== pass.sourceWakes - sourceWoken
       ) {
         return batch;
+      }
+      if (pass.sourceWakes !== sourceWoken) {
+        continue;
       }
       // oxlint-disable-next-line no-await-in-loop -- the park is the long poll.
       if ((await park(chatId, signal)) === 'reroute') {

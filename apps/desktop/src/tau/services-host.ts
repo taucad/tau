@@ -8,11 +8,13 @@
 
 import { createDiagnosticsLog } from '#main/diagnostics.js';
 import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 
 import type { HostPrepareKernel } from '@taucad/host';
 import { preparableKernels } from '@taucad/native-process-core/store';
 
 import { createServicesHost, refusedRuntimePortMessage } from '#tau/services-host.impl.js';
+import { createDesktopShell } from '#tau/services-host-shell.js';
 import { desktopNativeDeployments } from '#tau/desktop-native-deployments.js';
 import type { UtilityMessage } from '#tau/services-host.impl.js';
 
@@ -39,6 +41,8 @@ if (!authorityDirectory) {
  * directory only when it is not the store itself. */
 const machinesDirectory = process.env['TAU_DESKTOP_MACHINES_DIR'];
 const legacyMachinesDirectory = process.env['TAU_DESKTOP_LEGACY_MACHINES_DIR'];
+/* The permission store's home (W9); absent, permission requests are refused and every chat reads Ask. */
+const permissionsDirectory = process.env['TAU_DESKTOP_PERMISSIONS_DIR'];
 const diagnostics =
   logDirectory === undefined ? undefined : createDiagnosticsLog({ directory: logDirectory, producer: 'services' });
 const pendingRuntimePorts = new Map<
@@ -148,15 +152,38 @@ const prepareNativeKernel: HostPrepareKernel = async ({ kernel }, { signal, onPr
 /* The `git` main resolved from the bundle, when this build ships one (OQ3);
  * absent, the toolchain comes from `PATH` and says so once if it is not there. */
 const gitExecutable = process.env['TAU_GIT_EXECUTABLE'];
+/* The contained shell the agent's tool and the human Terminal share, probed on first use (desktop shell W4, W5). */
+const shell = createDesktopShell({
+  appDataRoots: [process.env['TAU_DESKTOP_USER_DATA_DIR'], process.env['TAU_CONFIG_DIR'], authorityDirectory].filter(
+    (root): root is string => root !== undefined && root !== '',
+  ),
+  bwrapPath: process.env['TAU_DESKTOP_SHELL_BWRAP'] === '' ? undefined : process.env['TAU_DESKTOP_SHELL_BWRAP'],
+  /* Host-owned, denied to every shell: the stand-ins a crashed services host left behind are swept from here. */
+  standInJournal: join(authorityDirectory, 'shell-stand-ins.json'),
+  ...(diagnostics === undefined
+    ? {}
+    : {
+        log: (event: string, detail?: unknown, level?: 'info' | 'warn') => {
+          diagnostics.log(level ?? 'info', `services.${event}`, detail);
+        },
+      }),
+});
 
 const host = createServicesHost({
   authorityDirectory,
   ...(machinesDirectory === undefined || machinesDirectory === '' ? {} : { machinesDirectory }),
   ...(legacyMachinesDirectory === undefined || legacyMachinesDirectory === '' ? {} : { legacyMachinesDirectory }),
+  ...(permissionsDirectory === undefined || permissionsDirectory === '' ? {} : { permissionsDirectory }),
+  permissionsAnswered: (frame) => {
+    parentPort.postMessage(frame);
+  },
   requestRuntimePort,
   requestGeometryPort,
   nativeKernels: { prepare: prepareNativeKernel, preparable: preparableKernels(desktopNativeDeployments) },
   ...(gitExecutable === undefined || gitExecutable === '' ? {} : { gitExecutable }),
+  shell,
+  /* The human Terminal (W5) opens its sessions through the same memoized probe. */
+  terminalShell: shell.probe,
   runtimeContext: (action, workspaceRoot, projectRoot) => {
     parentPort.postMessage({ type: `runtime-context-${action}`, workspaceRoot, projectRoot });
   },
@@ -173,6 +200,9 @@ const host = createServicesHost({
   },
   machinesStreaming: (requestId, machines) => {
     parentPort.postMessage({ type: 'machines-streaming-answered', requestId, machines });
+  },
+  terminalSessionsAnswered: (requestId, sessions) => {
+    parentPort.postMessage({ type: 'terminal-sessions-answered', requestId, sessions });
   },
   machineBindingCompleted: (requestId, result) => {
     parentPort.postMessage(

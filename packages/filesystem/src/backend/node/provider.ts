@@ -16,9 +16,10 @@
  */
 
 import fs from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import type { Dirent, Stats } from 'node:fs';
 import { realpathSync, statSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 import { assertRootedPath, VirtualPathError } from '@taucad/utils/path';
@@ -41,6 +42,13 @@ import type { NodeFsWatchEvent } from '#backend/node/protocol.js';
 import { streamChunkSize, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 
 /** The name `_atomicWrite` gives its temp file: `.<target>.<pid>.<uuid>.tmp`. */
+/**
+ * Files one `hashFiles` call digests at once. Each holds a descriptor and at
+ * most one bounded chunk, and the call is not nested in a tree walk, so this
+ * stays far inside a default 256-descriptor limit.
+ */
+const hashConcurrency = 32;
+
 const inFlightTemporaryName = /^\..+\.\d+\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/u;
 
 const isContained = (base: string, target: string): boolean => {
@@ -617,6 +625,61 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     return unsubscribe;
   }
 
+  /**
+   * Digest each file here, streaming it through SHA-256 in bounded chunks, so
+   * neither a body nor a whole large asset is held or shipped.
+   *
+   * @param paths - Root-relative file paths.
+   * @returns Each path's lowercase hexadecimal SHA-256, or `'missing'` when absent.
+   */
+  public async hashFiles(paths: readonly string[]): Promise<Record<string, string>> {
+    for (const path_ of paths) {
+      this._assertRootedPath(path_);
+    }
+    const digestOne = async (path_: string): Promise<string> => {
+      let handle: Awaited<ReturnType<typeof fs.open>>;
+      try {
+        handle = await fs.open(await this._resolve(path_), 'r');
+      } catch (error) {
+        const { code } = error as NodeJS.ErrnoException;
+        if (code === 'ENOENT' || code === 'ENOTDIR') {
+          return 'missing';
+        }
+        throw error;
+      }
+      try {
+        const hash = createHash('sha256');
+        const { size } = await handle.stat();
+        if (size <= streamChunkSize) {
+          return hash.update(await handle.readFile()).digest('hex');
+        }
+        const chunk = new Uint8Array(streamChunkSize);
+        for (;;) {
+          // oxlint-disable-next-line no-await-in-loop -- one bounded chunk at a time is the point.
+          const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, null);
+          if (bytesRead === 0) {
+            return hash.digest('hex');
+          }
+          hash.update(chunk.subarray(0, bytesRead));
+        }
+      } finally {
+        await handle.close();
+      }
+    };
+    /* A rolling window, not chunks: one slow file must not stall the files behind it. */
+    const digests: string[] = [];
+    let next = 0;
+    const lane = async (): Promise<void> => {
+      while (next < paths.length) {
+        const index = next++;
+        // oxlint-disable-next-line no-await-in-loop -- each lane digests one file at a time.
+        digests[index] = await digestOne(paths[index]!);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(hashConcurrency, paths.length) }, lane));
+    return Object.fromEntries(paths.map((path_, index) => [path_, digests[index]!]));
+  }
+
   /** Close every watcher this provider opened. */
   public override dispose(): void {
     for (const unsubscribe of this._openSubscriptions) {
@@ -927,8 +990,12 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
 
     let replaced = false;
     let failure: unknown;
+    let retainedHandle: FileHandle | undefined;
     try {
       const handle = await fs.open(temporaryPath, 'wx', existingMode ?? 0o666);
+      if (process.platform === 'win32') {
+        retainedHandle = handle;
+      }
       try {
         await handle.writeFile(bytes);
         if (existingMode !== undefined) {
@@ -936,7 +1003,9 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         }
         await handle.sync();
       } finally {
-        await handle.close();
+        if (retainedHandle === undefined) {
+          await handle.close();
+        }
       }
 
       const currentDirectory = await fs.realpath(path.dirname(targetPath));
@@ -951,11 +1020,19 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       await beforeReplace?.();
       await fs.rename(temporaryPath, admittedTarget);
       replaced = true;
-      const directoryHandle = await fs.open(admittedDirectory, 'r');
-      try {
-        await directoryHandle.sync();
-      } finally {
-        await directoryHandle.close();
+      if (retainedHandle === undefined) {
+        const directoryHandle = await fs.open(admittedDirectory, 'r');
+        try {
+          await directoryHandle.sync();
+        } finally {
+          await directoryHandle.close();
+        }
+      } else {
+        // Windows FlushFileBuffers commits file metadata as well as content.
+        // Keep the writable handle through rename to flush the same file object,
+        // without reopening a replaced path or trying to sync a read-only directory.
+        // https://learn.microsoft.com/en-us/windows/win32/fileio/file-caching
+        await retainedHandle.sync();
       }
 
       const committed = new Uint8Array(await fs.readFile(admittedTarget));
@@ -964,6 +1041,12 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       }
     } catch (error) {
       failure = error;
+    } finally {
+      try {
+        await retainedHandle?.close();
+      } catch (error) {
+        failure ??= error;
+      }
     }
     try {
       await fs.unlink(temporaryPath);

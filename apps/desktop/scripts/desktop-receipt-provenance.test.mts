@@ -8,7 +8,7 @@ import {
   parseDesktopArtifactManifest,
 } from '#shared/desktop-release.js';
 // oxlint-disable-next-line no-restricted-imports -- Test provenance admission itself.
-import { verifyDesktopReceiptProvenance } from './desktop-receipt-provenance.mjs';
+import { fetchDesktopQualifiedReceipts, verifyDesktopReceiptProvenance } from './desktop-receipt-provenance.mjs';
 const tag = 'desktop-staging@0.1.0-staging.102';
 const identity = desktopReleaseIdentity(tag);
 const { platform: _platform, ...definition } = desktopArtifactKinds['windows-nsis'];
@@ -83,4 +83,74 @@ for (const difference of [
   );
 }
 assert.throws(() => verifyDesktopReceiptProvenance(run, artifact, { environment: 'vm', manifest }));
+// The Mac-only scope keeps the same trusted workflows and same-source admission under its own artifact names.
+const macCi = { ...artifact, name: 'desktop-macos-ci-receipts' };
+assert.equal(verifyDesktopReceiptProvenance(run, macCi, { environment: 'ci', manifest, scope: 'macos' }).id, 456);
+for (const name of ['desktop-route-ci-receipts', 'desktop-linux-ci-receipts', 'desktop-macos-vm-receipts']) {
+  assert.throws(() =>
+    verifyDesktopReceiptProvenance(run, { ...artifact, name }, { environment: 'ci', manifest, scope: 'macos' }),
+  );
+}
+assert.throws(() => verifyDesktopReceiptProvenance(run, macCi, { environment: 'ci', manifest }));
+const vmRun = { ...run, path: '.github/workflows/desktop-route-vm-acceptance.yml' };
+const macVm = { ...artifact, name: 'desktop-macos-vm-receipts' };
+assert.equal(verifyDesktopReceiptProvenance(vmRun, macVm, { environment: 'vm', manifest, scope: 'macos' }).id, 456);
+// A receipt artifact forged by another producer workflow, a fork, another source or another run is refused.
+assert.throws(() => verifyDesktopReceiptProvenance(run, macVm, { environment: 'vm', manifest, scope: 'macos' }));
+assert.throws(() => verifyDesktopReceiptProvenance(vmRun, macCi, { environment: 'ci', manifest, scope: 'macos' }));
+for (const difference of [
+  { path: '.github/workflows/desktop-installer-candidate.yml' },
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
+  { head_sha: 'd'.repeat(40) },
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
+  { head_repository: { full_name: 'fork/tau' } },
+  { event: 'push' },
+  { event: 'workflow_run' },
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
+  { head_branch: 'claude/vm-acceptance' },
+  { status: 'in_progress' },
+  { conclusion: 'failure' },
+  { path: '.github/workflows/qualify-desktop-macos.yml' },
+  { path: '.github/workflows/local-macos.yml' },
+]) {
+  assert.throws(() =>
+    verifyDesktopReceiptProvenance({ ...vmRun, ...difference }, macVm, { environment: 'vm', manifest, scope: 'macos' }),
+  );
+}
+for (const difference of [
+  { expired: true },
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
+  { workflow_run: { id: 999, head_sha: manifest.sourceCommit } },
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
+  { workflow_run: { id: 123, head_sha: 'd'.repeat(40) } },
+  { digest: 'sha256:short' },
+]) {
+  assert.throws(() =>
+    verifyDesktopReceiptProvenance(vmRun, { ...macVm, ...difference }, { environment: 'vm', manifest, scope: 'macos' }),
+  );
+}
+// Partial-architecture and per-row clean-host artifacts are never admitted as the Mac clean-host receipt set.
+for (const name of ['desktop-route-row-macos-dmg-arm64', 'desktop-route-vm-receipts', 'desktop-macos-ci-receipts']) {
+  assert.throws(() =>
+    verifyDesktopReceiptProvenance(vmRun, { ...macVm, name }, { environment: 'vm', manifest, scope: 'macos' }),
+  );
+}
+// Only a staging Mac-only publication may omit the clean-host VM run; every other omission fails before any fetch.
+// The guard reads only the channel, so a production-labelled copy suffices without five-route fixtures.
+const production: typeof manifest = { ...manifest, channel: 'production' };
+for (const [candidate, scope] of [
+  [manifest, 'all'],
+  [manifest, undefined],
+  [production, 'all'],
+  [production, 'macos'],
+] as const) {
+  // oxlint-disable-next-line no-await-in-loop -- Each refusal is independent and must not reach the GitHub API.
+  await assert.rejects(
+    fetchDesktopQualifiedReceipts(candidate, '/nonexistent', { ci: '1', vm: undefined, ...(scope ? { scope } : {}) }),
+    /Clean-host VM acceptance run is required/u,
+  );
+}
 console.log('Trusted workflow and artifact provenance checks passed');
+
+// oxlint-disable-next-line no-restricted-imports -- Include the producer-to-publisher regression in this existing Nx target.
+await import('./qualification-binding.test.mjs');

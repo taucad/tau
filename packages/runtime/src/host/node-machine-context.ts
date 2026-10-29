@@ -97,8 +97,29 @@ export type NodeMachineSupervisor = Readonly<{
   done: Promise<void>;
 }>;
 
+/**
+ * One new machine operation, as a host's runtime telemetry reads it (runtime observability AR-W22-04): the provider,
+ * the kind, an action's standard family, how it ended and who asked. Never the machine's id, name, serial, address,
+ * parameters or job file.
+ * @public
+ */
+export type MachineOperationTelemetry = Readonly<{
+  provider: string;
+  kind: 'action' | 'stop' | 'hold' | 'transfer' | 'start';
+  /** The standard action id, for an `action`. */
+  action?: string;
+  /** `refused`: turned away before the journal planned it. */
+  status: 'accepted' | 'rejected' | 'refused' | 'unknown';
+  code?: string;
+  requester: 'person' | 'agent';
+  /** Milliseconds from the request to its receipt. */
+  duration: number;
+}>;
+
 /** The state one Node machine host's parts share, built once by `createNodeMachineHost`. @internal */
 export type NodeMachineHostContext = Readonly<{
+  /** Told once per new operation of every kind; never on a replayed receipt. Must not throw. */
+  onOperation?: ((operation: MachineOperationTelemetry) => void) | undefined;
   /** The host's provider runtime; a host without one serves only the operations it was given. */
   runtime: NodeMachineRuntime | undefined;
   /** Each provider the host serves, by id, carrying its executable definition. */

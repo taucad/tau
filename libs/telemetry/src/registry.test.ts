@@ -7,7 +7,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(119);
+    expect(metrics).toHaveLength(183);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -40,6 +40,54 @@ describe('TauMetrics', () => {
       tau_git_hot_project_commit_rate: { type: 'gauge', unit: '{commit}/s' },
       tau_git_hot_project_writers: { type: 'gauge', unit: '{writer}' },
     });
+  });
+
+  /* W14 OB3: the storage accounting scheduler's series, exported as the catalogue (N43–N55) lists them. */
+  it('should declare the storage accounting instruments by their catalogue names', () => {
+    const exported = Object.fromEntries(
+      [
+        TauMetrics.storageUsageBytes,
+        TauMetrics.storageUsageRepositories,
+        TauMetrics.gitRepositorySizeDistribution,
+        TauMetrics.gitRepositoryCeilingProximity,
+        TauMetrics.storageQuotaOwners,
+        TauMetrics.databaseConnections,
+        TauMetrics.databaseConnectionBudget,
+        TauMetrics.r2Requests,
+        TauMetrics.r2StoredBytes,
+        TauMetrics.r2Objects,
+        TauMetrics.r2BandwidthBytes,
+        TauMetrics.storageAccountingPasses,
+        TauMetrics.storageAccountingLastSuccess,
+      ].map((metric) => [toPrometheusName(metric.name, metric.type), { type: metric.type, unit: metric.unit }]),
+    );
+    expect(exported).toEqual({
+      tau_storage_usage_bytes: { type: 'gauge', unit: 'By' },
+      tau_storage_usage_repositories: { type: 'gauge', unit: '{repository}' },
+      tau_git_repository_size_distribution: {
+        type: 'gauge',
+        unit: '{repository}',
+      },
+      tau_git_repository_ceiling_proximity: {
+        type: 'gauge',
+        unit: '{repository}',
+      },
+      tau_storage_quota_owners: { type: 'gauge', unit: '{owner}' },
+      tau_db_connections: { type: 'gauge', unit: '{connection}' },
+      tau_db_connection_budget: { type: 'gauge', unit: '{connection}' },
+      tau_r2_requests: { type: 'gauge', unit: '{request}' },
+      tau_r2_stored_bytes: { type: 'gauge', unit: 'By' },
+      tau_r2_objects: { type: 'gauge', unit: '{object}' },
+      tau_r2_bandwidth_bytes: { type: 'gauge', unit: 'By' },
+      tau_storage_accounting_passes_total: { type: 'counter', unit: '{pass}' },
+      tau_storage_accounting_last_success: { type: 'gauge', unit: 's' },
+    });
+  });
+
+  it('should bound the R2 bucket label to roles, so a bucket name never becomes a label value', () => {
+    const bucket = TauMetrics.r2StoredBytes.attributes.shape['tau.r2.bucket'];
+    expect(bucket.options).toEqual(['public', 'private', 'other']);
+    expect(bucket.safeParse('tau-content-staging').success).toBe(false);
   });
 
   /* W13 Finding 8 / W14 OB6: the B2 copier's series, exactly as the catalogue and its rules name them. */
@@ -129,6 +177,36 @@ describe('TauMetrics', () => {
     expect(TauMetrics.gitRouteLookupDuration.buckets.at(0)).toBeLessThanOrEqual(0.0001);
   });
 
+  /* Hosted Remote Storage DC2: the pack cache and the router's spill and membership series (W14 OB4 names). */
+  it('should declare the pack cache and router instruments under the W14 catalogue names', () => {
+    const exported = Object.fromEntries(
+      [
+        TauMetrics.gitCacheLookups,
+        TauMetrics.gitCacheBytes,
+        TauMetrics.gitCacheBudgetBytes,
+        TauMetrics.gitCacheEvictions,
+        TauMetrics.gitCacheEvictedBytes,
+        TauMetrics.gitCacheFallbacks,
+        TauMetrics.gitSpills,
+        TauMetrics.gitMembers,
+      ].map((metric) => [toPrometheusName(metric.name, metric.type), { type: metric.type, unit: metric.unit }]),
+    );
+    expect(exported).toEqual({
+      tau_git_cache_lookups_total: { type: 'counter', unit: '{lookup}' },
+      tau_git_cache_bytes: { type: 'gauge', unit: 'By' },
+      tau_git_cache_budget_bytes: { type: 'gauge', unit: 'By' },
+      tau_git_cache_evictions_total: { type: 'counter', unit: '{entry}' },
+      tau_git_cache_evicted_bytes_total: { type: 'counter', unit: 'By' },
+      tau_git_cache_fallbacks_total: { type: 'counter', unit: '{lease}' },
+      tau_git_spills_total: { type: 'counter', unit: '{request}' },
+      tau_git_members: { type: 'gauge', unit: '{member}' },
+    });
+    expect(TauMetrics.gitCacheLookups.attributes.safeParse({ result: 'proj_1' }).success).toBe(false);
+    expect(TauMetrics.gitSpills.attributes.safeParse({ reason: 'admission' }).success).toBe(true);
+    expect(TauMetrics.gitSpills.attributes.safeParse({ reason: 'start_wait' }).success).toBe(true);
+    expect(TauMetrics.gitCacheFallbacks.attributes.safeParse({ reason: 'over_budget' }).success).toBe(true);
+  });
+
   /* Hosted Remote Storage DC1: the grant, forward and receipt series between tau-api and tau-storage. */
   it('should declare the storage grant, forward and receipt instruments with bounded reasons', () => {
     const exported = Object.fromEntries(
@@ -159,14 +237,67 @@ describe('TauMetrics', () => {
   });
 
   it('should split retryable refusals out of error as busy on the sync edge', () => {
-    for (const metric of [TauMetrics.syncOperations, TauMetrics.syncOperationDuration]) {
-      expect(
-        metric.attributes.safeParse({
-          'tau.sync.operation': 'push',
-          outcome: 'busy',
-        }).success,
-      ).toBe(true);
-    }
+    expect(
+      TauMetrics.syncOperations.attributes.safeParse({
+        'tau.sync.operation': 'push',
+        outcome: 'busy',
+      }).success,
+    ).toBe(true);
+    expect(
+      TauMetrics.syncOperationDuration.attributes.safeParse({
+        'tau.sync.operation': 'push',
+        outcome: 'busy',
+        'tau.git.execution': 'forwarded',
+        'tau.git.affinity': 'rendezvous',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('should label sync request latency by where git ran and how tau-storage was chosen, from enums alone', () => {
+    const latency = (execution: string, affinity: string): boolean =>
+      TauMetrics.syncOperationDuration.attributes.safeParse({
+        'tau.sync.operation': 'push',
+        outcome: 'ok',
+        'tau.git.execution': execution,
+        'tau.git.affinity': affinity,
+      }).success;
+    expect(latency('in_process', 'off')).toBe(true);
+    expect(latency('forwarded', 'off')).toBe(true);
+    expect(latency('forwarded', 'rendezvous')).toBe(true);
+    expect(latency('storage-1', 'off')).toBe(false);
+    expect(latency('forwarded', 'member-2')).toBe(false);
+    expect(
+      TauMetrics.syncOperationDuration.attributes.safeParse({ 'tau.sync.operation': 'push', outcome: 'ok' }).success,
+    ).toBe(false);
+  });
+
+  it('should resolve the 3–5 s server push band and the 3–30 s client save band', () => {
+    expect(TauMetrics.syncOperationDuration.buckets).toEqual([0.05, 0.1, 0.25, 0.5, 1, 2, 3, 4, 5, 10, 30, 60, 120]);
+    expect(TauMetrics.syncClientLag.buckets).toEqual([
+      0.5, 1, 2, 3, 4, 5, 7.5, 10, 15, 20, 30, 60, 120, 300, 900, 3600,
+    ]);
+    expect(TauMetrics.syncClientAttemptDuration.buckets).toEqual([
+      0.1, 0.25, 0.5, 1, 2, 3, 4, 5, 7.5, 10, 15, 20, 30, 60, 120, 300, 900,
+    ]);
+  });
+
+  it('should label client attempt durations as the attempt counter does', () => {
+    expect(TauMetrics.syncClientAttemptDuration).toMatchObject({
+      name: 'tau.sync.client.attempt.duration',
+      type: 'histogram',
+      unit: 's',
+    });
+    expect(Object.keys(TauMetrics.syncClientAttemptDuration.attributes.shape)).toEqual(
+      Object.keys(TauMetrics.syncClientAttempts.attributes.shape),
+    );
+    const attempt = (outcome: string): boolean =>
+      TauMetrics.syncClientAttemptDuration.attributes.safeParse({
+        direction: 'push',
+        outcome,
+        'agent.placement': 'browser',
+      }).success;
+    expect(attempt('retry')).toBe(true);
+    expect(attempt('proj_1')).toBe(false);
   });
 
   it('should bound a refusal to a declared code, never a free-form one', () => {
@@ -222,6 +353,19 @@ describe('TauMetrics', () => {
         'tau.git.commit.kind': 'push',
       }).success,
     ).toBe(true);
+    /* Push-latency Task 1: each commitLease phase is a series, and the buckets resolve where commits land. */
+    expect(
+      ['prepare', 'compaction', 'hash', 'object_puts', 'manifest_write', 'manifest_read'].map(
+        (phase) =>
+          TauMetrics.gitCommitDuration.attributes.safeParse({
+            'tau.git.commit.phase': phase,
+            'tau.git.commit.kind': 'push',
+          }).success,
+      ),
+    ).toStrictEqual([true, true, true, true, true, true]);
+    expect(TauMetrics.gitCommitDuration.buckets.filter((bound) => bound >= 0.25 && bound <= 5)).toStrictEqual([
+      0.25, 0.5, 0.75, 1, 1.5, 2, 2.5, 3, 4, 5,
+    ]);
     expect(Object.keys(TauMetrics.gitRepositorySize.attributes.shape)).toEqual([]);
     expect(TauMetrics.gitRepositorySize.buckets.at(0)).toBe(64 * 1024);
     expect(TauMetrics.gitRepositorySize.buckets.at(-1)).toBe(1024 ** 3);
@@ -451,9 +595,14 @@ describe('TauMetrics', () => {
     const counters = metrics.filter((m) => m.type === 'counter');
     // `copied`: W13's catalogue fixes `tau_mirror_{objects,bytes}_copied_total` (W14 OB6).
     // `rejected`: the W14 catalogue's `tau_git_grants_rejected_total` (Hosted Remote Storage DC1, OB4).
-    const validSuffixes = /s$|cost$|microusd$|picousd$|flagged$|copied$|rejected$/;
+    // `usage`, `missing`, `attention`, `reuse`, `dropped`, `unavailable`, `partial`: Runtime Observability package §1
+    // fixes `tau.runtime.{kernel_usage,facts_missing,job_attention,reuse}` and `tau.telemetry.{client.dropped,
+    // spans.dropped,ingest.unavailable,ingest.partial}`; dashboards and named views use those names.
+    const validSuffixes =
+      /s$|cost$|microusd$|picousd$|flagged$|copied$|rejected$|usage$|missing$|attention$|reuse$|dropped$|unavailable$|partial$/;
     for (const counter of counters) {
-      const lastSegment = counter.name.split('.').at(-1) ?? '';
+      // A `_by_<dimension>` tail names the breakdown, not the counted thing: `operations_by_release`.
+      const lastSegment = (counter.name.split('.').at(-1) ?? '').replace(/_by_\w+$/u, '');
       expect(lastSegment).toMatch(validSuffixes);
     }
   });

@@ -60,12 +60,17 @@ const recorder = (): {
 
 const build = (
   storageUrl: string | undefined,
-  options: { readonly log?: ReturnType<typeof recorder>; readonly nodeEnvironment?: string } = {},
+  options: {
+    readonly log?: ReturnType<typeof recorder>;
+    readonly nodeEnvironment?: string;
+    readonly affinity?: 'off' | 'rendezvous';
+  } = {},
 ): GitExecution =>
   createGitExecution({
     nodeEnvironment: options.nodeEnvironment ?? 'development',
     storageUrl,
     grantSigningKey: undefined,
+    ...(options.affinity === undefined ? {} : { affinity: options.affinity }),
     metrics: new MetricsService(),
     store: createMemoryRepositoryStore(),
     shutdown: new ShutdownService(),
@@ -80,6 +85,7 @@ describe('git execution without TAU_STORAGE_URL (DC1 in_process)', () => {
     const execution = build(undefined, { log, nodeEnvironment: 'production' });
 
     expect(execution.mode).toBe('in_process');
+    expect(execution.affinity).toBe('off');
     expect(log.lines).toHaveLength(1);
     expect(log.lines[0]).toContain('git_execution=in_process');
     /* A real git child answers: the installed git's dialect. */
@@ -123,6 +129,11 @@ describe('git execution with TAU_STORAGE_URL (DC1 forwarded)', () => {
     expect(refused).toBeInstanceOf(HttpException);
     expect((refused as HttpException).getStatus()).toBe(503);
   }, 30_000);
+
+  it('should report the affinity in effect, off unless rendezvous is asked for', () => {
+    expect(build('http://127.0.0.1:1').affinity).toBe('off');
+    expect(build('http://127.0.0.1:1', { affinity: 'rendezvous' }).affinity).toBe('rendezvous');
+  });
 
   it('should refuse the development grant key in production', () => {
     expect(() => build('http://127.0.0.1:1', { nodeEnvironment: 'production' })).toThrow(/development key/u);

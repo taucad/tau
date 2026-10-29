@@ -52,6 +52,7 @@ import {
 } from '#lib/share-providers.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { recordApiRequestId } from '#lib/api-request-id.js';
 
 /**
  * What wraps the shared Share pane with the host it reads: the project's workbench host in the workbench, or a
@@ -730,7 +731,10 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
       });
 
       if (!response.ok) {
-        throw new Error(response.status === 401 ? 'SIGN_IN_REQUIRED' : 'SHARE_ENVELOPE_FAILED');
+        throw recordApiRequestId(
+          new Error(response.status === 401 ? 'SIGN_IN_REQUIRED' : 'SHARE_ENVELOPE_FAILED'),
+          response,
+        );
       }
 
       const nextEnvelope = parseProjectShareEnvelope(await response.json());
@@ -847,7 +851,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
       });
 
       if (!response.ok) {
-        throw new Error('VISIBILITY_UPDATE_FAILED');
+        throw recordApiRequestId(new Error('VISIBILITY_UPDATE_FAILED'), response);
       }
 
       await loadEnvelope();

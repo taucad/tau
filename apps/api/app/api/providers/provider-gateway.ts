@@ -155,6 +155,81 @@ export const isGatewayProviderConfigured = (config: GatewayConfig, providerId: G
     : typeof value === 'string' && value.length > 0;
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const pdfDataUrlPrefix = 'data:application/pdf;base64,';
+
+/**
+ * A Vertex `image_url` part for one completions PDF, when the part is one.
+ *
+ * @param part - One completions content element.
+ * @returns The Vertex part, or `undefined` when `part` is not an inline PDF.
+ */
+const vertexPdfPart = (
+  part: unknown,
+): { readonly type: 'image_url'; readonly image_url: { readonly url: string } } | undefined => {
+  if (!isRecord(part) || part['type'] !== 'file' || !isRecord(part['file'])) {
+    return undefined;
+  }
+  const fileData = part['file']['file_data'];
+  if (typeof fileData !== 'string' || !fileData.startsWith(pdfDataUrlPrefix)) {
+    return undefined;
+  }
+  // Vertex's documented user part. The key is the provider's, not ours.
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- provider wire key
+  return { type: 'image_url', image_url: { url: fileData } };
+};
+
+/**
+ * The Vertex chat body, with each PDF `file` part rewritten to an `image_url` data URI.
+ *
+ * Vertex's OpenAI-compatible user message accepts `text` and `image_url`. Blob
+ * `image_url` data carries any GenerateContent MIME type, including
+ * `application/pdf`. A completions `file` part is not one of those types, so it
+ * is rewritten only on this hop, after billing has counted the original `file`
+ * part as a document. The caller's body is left unchanged.
+ *
+ * @param body - The admitted completions request.
+ * @returns The body Vertex should receive.
+ */
+export const vertexUpstreamBody = (body: unknown): unknown => {
+  if (!isRecord(body) || !Array.isArray(body['messages'])) {
+    return body;
+  }
+  const messages: readonly unknown[] = body['messages'];
+  const rewritten: unknown[] = [];
+  let changed = false;
+  for (const message of messages) {
+    if (!isRecord(message) || !Array.isArray(message['content'])) {
+      rewritten.push(message);
+      continue;
+    }
+    const content: readonly unknown[] = message['content'];
+    const parts: unknown[] = [];
+    let messageChanged = false;
+    for (const part of content) {
+      const pdfPart = vertexPdfPart(part);
+      if (pdfPart === undefined) {
+        parts.push(part);
+      } else {
+        messageChanged = true;
+        parts.push(pdfPart);
+      }
+    }
+    if (messageChanged) {
+      changed = true;
+      rewritten.push({ ...message, content: parts });
+    } else {
+      rewritten.push(message);
+    }
+  }
+  if (!changed) {
+    return body;
+  }
+  return { ...body, messages: rewritten };
+};
+
 export const executeGatewayProviderRequest = async (input: {
   readonly config: GatewayConfig;
   readonly providerId: GatewayProviderId;
@@ -179,7 +254,7 @@ export const executeGatewayProviderRequest = async (input: {
     method: 'POST',
     redirect: 'error',
     signal: input.signal,
-    body: JSON.stringify(input.body),
+    body: JSON.stringify(input.providerId === 'vertexai' ? vertexUpstreamBody(input.body) : input.body),
     headers:
       input.providerId === 'anthropic'
         ? { 'content-type': 'application/json', 'x-api-key': accessToken, ...input.headers }

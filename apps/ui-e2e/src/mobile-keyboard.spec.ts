@@ -90,6 +90,11 @@ test('keeps the details fields above the keyboard, scrolling a low one into view
 });
 
 test('keeps a picker drawer search above the keyboard', async () => {
-  await target.click(selectors.getByRole('button', { name: 'Open file' }).first(), { touch: true });
+  await target.click(navButton('All'), { touch: true });
+  await target.click(
+    selectors.getByRole('dialog', { name: 'All surfaces' }).getByRole('button', { name: 'Open file', exact: true }),
+    { touch: true },
+  );
+  await target.expectVisible(selectors.getByRole('dialog', { name: 'Open File', exact: true }));
   await expectTypable(selectors.getByCss(`${drawer} [cmdk-input]`).last());
 });

@@ -27,6 +27,7 @@ export default defineConfig({
       ),
     },
     include: [
+      'src/graphics/three/viewport-depth.browser.test.ts',
       'src/graphics/three/react/model-emphasis-overlay.browser.test.ts',
       'src/graphics/three/utils/gltf-surface-batches.browser.test.ts',
       'src/graphics/three/utils/gltf-edge-batches.browser.test.ts',

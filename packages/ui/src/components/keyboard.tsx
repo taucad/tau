@@ -40,6 +40,11 @@ type KeybindingOptions = {
   priority?: number;
   /** `'global'` fires everywhere; `'app'` is suppressed inside dialogs. Default: `'app'`. */
   scope?: 'global' | 'app';
+  /**
+   * Dialogs, named by their `data-shortcut-scope`, where this `'app'` shortcut still fires: an allow-list, so a dialog
+   * that is app chrome (the phone sidebar sheet, `'sidebar'`) keeps its own shortcuts and no others. Default: none.
+   */
+  allowedScopes?: readonly string[];
   /** When `true`, prevents lower-priority handlers for the same combo from firing. Default: `true`. */
   consume?: boolean;
 };
@@ -76,6 +81,7 @@ const defaultOptions: Required<KeybindingOptions> = {
   enabled: true,
   priority: 0,
   scope: 'app',
+  allowedScopes: [],
   consume: true,
 };
 
@@ -85,9 +91,11 @@ const defaultOptions: Required<KeybindingOptions> = {
 const nonEditableInputTypes = new Set(['button', 'submit', 'reset', 'checkbox', 'radio']);
 
 /**
- * Selector for scoped containers where 'app'-scoped shortcuts are suppressed.
+ * Selector for scoped containers where 'app'-scoped shortcuts are suppressed. A terminal (`data-slot="terminal"`)
+ * owns ordinary keys such as Ctrl+D and Ctrl+I, so app shortcuts must not take them from the shell.
  */
-const scopedContainerSelector = '[role="dialog"], [role="alertdialog"], [data-slot="command-dialog"]';
+const scopedContainerSelector =
+  '[role="dialog"], [role="alertdialog"], [data-slot="command-dialog"], [data-slot="terminal"]';
 
 // ---------------------------------------------------------------------------
 // Context
@@ -192,15 +200,21 @@ function isEditableTarget(target: EventTarget | undefined): boolean {
 }
 
 /**
- * Check if the event target is inside a scoped container (dialog, etc.).
+ * Check if the event target is inside a scoped container (dialog, etc.) that does not allow the shortcut: the nearest
+ * one decides, by its `data-shortcut-scope`.
  */
-function isInsideScopedContainer(target: EventTarget | undefined): boolean {
+function isInsideScopedContainer(target: EventTarget | undefined, allowedScopes: readonly string[]): boolean {
   const Element = (target as { ownerDocument?: Document } | undefined)?.ownerDocument?.defaultView?.HTMLElement;
   if (!Element || !(target instanceof Element)) {
     return false;
   }
 
-  return target.closest(scopedContainerSelector) !== null;
+  const container = target.closest<HTMLElement>(scopedContainerSelector);
+  if (container === null) {
+    return false;
+  }
+  const scope = container.dataset['shortcutScope'];
+  return scope === undefined || !allowedScopes.includes(scope);
 }
 
 /**
@@ -345,7 +359,7 @@ export function KeyboardProvider({ children }: { readonly children: ReactNode })
         }
 
         // Scope guard
-        if (options.scope === 'app' && isInsideScopedContainer(event.target ?? undefined)) {
+        if (options.scope === 'app' && isInsideScopedContainer(event.target ?? undefined, options.allowedScopes)) {
           continue;
         }
 

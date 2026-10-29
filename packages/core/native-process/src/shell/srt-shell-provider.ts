@@ -8,18 +8,25 @@
  */
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { closeSync, existsSync, lstatSync, mkdtempSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { isAbsolute, join, relative } from 'node:path';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import { createInterface } from 'node:readline';
 import { ReadStream } from 'node:tty';
 import { fileURLToPath } from 'node:url';
 
-import { deniedReadRoots, deniedWriteRoots, physicalVariants, sandboxRuntimeReadRoots } from '#native-sandbox.js';
-import { processTable, terminateOwnedProcesses } from '#shell/process-tree.js';
-import type { ProcessRow } from '#shell/process-tree.js';
+import {
+  deniedReadRoots,
+  deniedWriteRoots,
+  physicalVariants,
+  sandboxRuntimeReadRoots,
+  sandboxRuntimeJavaAgent,
+  sandboxRuntimeSeccomp,
+} from '#native-sandbox.js';
+import { terminateOwnedProcesses, trackDescendants } from '#shell/process-tree.js';
 import { shellBaselineDenied } from '#shell/shell-baseline.js';
 import { refusedShellEnvironment } from '#shell/shell-environment.js';
+import { holdProtectedStandIns, useStandInJournal } from '#shell/shell-stand-ins.js';
 import type {
   ShellExit,
   ShellLaunch,
@@ -28,7 +35,7 @@ import type {
   ShellProvider,
   ShellTerminalSize,
 } from '#shell/shell-provider.js';
-import type { SupervisorJob, SupervisorReply } from '#shell/srt-supervisor.js';
+import type { SupervisorControl, SupervisorJob, SupervisorReply } from '#shell/srt-supervisor.js';
 
 /**
  * The parts of node-pty this provider uses. `native` is node-pty's own POSIX binding (`openpty` and `TIOCSWINSZ`),
@@ -104,15 +111,17 @@ export type SandboxShellProviderOptions = Readonly<{
   loadPty?: () => Promise<PtyBinding>;
   /** How long a supervisor may take to answer. */
   startupMilliseconds?: number;
+  /**
+   * On Linux, a file under host-owned state (never inside a checkout) journalling the stand-ins this process holds, so
+   * the next start sweeps the ones a crash left behind.
+   */
+  standInJournal?: string;
 }>;
 
 const quote = (value: string): string => `'${value.replaceAll("'", String.raw`'\''`)}'`;
 
 /** How long termination may take before survivors are reported. */
 const terminationMilliseconds = 5000;
-
-/** How often the macOS provider records the process tree, so a job that leaves the group is still owned. */
-const trackingMilliseconds = 250;
 
 /** The util-linux `setsid`, which makes the session's own PTY the controlling terminal that `bwrap --new-session` dropped. */
 const linuxSetsid = '/usr/bin/setsid';
@@ -150,9 +159,10 @@ const inside = (path: string, root: string): boolean => {
 /**
  * The sandbox-runtime configuration for one launch.
  *
- * Reads are denied under homes, volumes and shared temporary storage, then re-allowed for the launch's readable and
- * writable roots; `denied`, with the baseline set, stays denied for reads and writes inside them. Writes are allowed
- * only in the writable roots, and the runtime's own broad default write roots are denied back off. The network
+ * Reads are denied under homes, volumes and shared temporary storage, then re-allowed for the launch's readable,
+ * writable and read-only roots; `denied`, with the baseline set, stays denied for reads and writes inside them. Writes
+ * are allowed only in the writable roots, the read-only roots inside them are denied back to reads, and the runtime's
+ * own broad default write roots are denied back off. The network
  * allows exactly the granted names through the launch's own proxy.
  *
  * @public
@@ -161,21 +171,62 @@ const inside = (path: string, root: string): boolean => {
  * @returns A complete sandbox-runtime configuration.
  */
 /**
- * The spellings of each denied path the runtime can mask. Bubblewrap masks a directory by mounting over it, which it
- * cannot do through a symbolic link (`/var/run` is one to `/run` on current distributions), so on Linux a link is
- * replaced by its target. Seatbelt matches both spellings, so macOS keeps them.
+ * The spellings of each denied path the runtime can mask. Bubblewrap masks a file by binding `/dev/null` over it, and
+ * it refuses that bind through a symbolic link, whether at the leaf or at an ancestor (`/var/run` is a link to `/run`
+ * on current distributions, so it refuses `/var/run/docker.sock`). On Linux a spelling whose physical
+ * path differs is therefore dropped, but only when that physical spelling is itself in the set, so the target stays
+ * masked; a path that cannot be resolved keeps its literal spelling. Seatbelt matches both spellings, so macOS keeps
+ * them.
+ *
+ * @param paths - The denied or read-only paths.
+ * @returns The spellings to hand the runtime.
  */
-const deniedVariants = (paths: readonly string[]): string[] =>
-  physicalVariants(paths).filter((path) => {
-    if (process.platform !== 'linux') {
-      return true;
-    }
+const deniedVariants = (paths: readonly string[]): string[] => {
+  const variants = physicalVariants(paths);
+  if (process.platform !== 'linux') {
+    return variants;
+  }
+  const spelled = new Set(variants);
+  return variants.filter((path) => {
     try {
-      return !lstatSync(path).isSymbolicLink();
+      const physical = realpathSync(path);
+      return physical === path || !spelled.has(physical);
     } catch {
       return true;
     }
   });
+};
+
+/**
+ * Every directory between a writable root and a protected path inside it (D20, E04). On Linux each is bound onto itself,
+ * so it is a mount point the shell can neither rename nor remove: a read-only or denied path never moves away with its
+ * parent (`mv .tau elsewhere`). macOS needs none, because the runtime already denies moving a protected path's
+ * ancestors. Binding a directory that is already writable onto itself widens nothing.
+ *
+ * @param writable - The launch's writable roots.
+ * @param protectedPaths - Its read-only and denied paths.
+ * @returns The ancestors to bind, outermost first.
+ */
+const pinnedAncestors = (writable: readonly string[], protectedPaths: readonly string[]): string[] => {
+  if (process.platform !== 'linux') {
+    return [];
+  }
+  const pinned = new Set<string>();
+  for (const path of protectedPaths) {
+    const root = writable.find((candidate) => candidate !== path && inside(path, candidate));
+    if (root === undefined) {
+      continue;
+    }
+    const chain: string[] = [];
+    for (let ancestor = dirname(path); ancestor !== root && inside(ancestor, root); ancestor = dirname(ancestor)) {
+      chain.unshift(ancestor);
+    }
+    for (const ancestor of chain) {
+      pinned.add(ancestor);
+    }
+  }
+  return [...pinned].toSorted((left, right) => left.length - right.length);
+};
 
 export const shellSandboxProfile = (
   launch: Pick<ShellLaunch, 'filesystem' | 'network'>,
@@ -186,19 +237,26 @@ export const shellSandboxProfile = (
     ...launch.filesystem.denied,
     ...shellBaselineDenied({ platform: process.platform, home: options.home ?? homedir(), environment: process.env }),
   ]);
+  const readOnly = launch.filesystem.readOnly ?? [];
   const { domains } = launch.network;
   return {
+    seccomp: sandboxRuntimeSeccomp(),
+    javaAgentJarPath: sandboxRuntimeJavaAgent(),
     network: { allowedDomains: [...domains], deniedDomains: domains.length > 0 ? [] : ['*'], strictAllowlist: true },
     filesystem: {
       denyRead: [...new Set([...deniedReadRoots(), ...denied])],
       allowRead: physicalVariants([
         ...launch.filesystem.readable,
         ...launch.filesystem.writable,
+        ...readOnly,
         ...sandboxRuntimeReadRoots(),
         ...(runtimeDirectory === undefined ? [] : [runtimeDirectory]),
       ]),
-      allowWrite: physicalVariants(launch.filesystem.writable),
-      denyWrite: [...new Set([...deniedWriteRoots(), ...denied])],
+      allowWrite: physicalVariants([
+        ...launch.filesystem.writable,
+        ...pinnedAncestors(launch.filesystem.writable, [...readOnly, ...launch.filesystem.denied]),
+      ]),
+      denyWrite: [...new Set([...deniedWriteRoots(), ...denied, ...deniedVariants(readOnly)])],
     },
     allowPty: false,
     ripgrep: { command: options.ripgrepPath ?? 'rg' },
@@ -264,7 +322,12 @@ export const bindOwnPty = (argv: readonly string[]): readonly string[] | undefin
   return [shell, flag, `${guard} ${profiled.trimStart()}`];
 };
 
-type Supervisor = Readonly<{ reply: SupervisorReply; close: () => Promise<void> }>;
+type Supervisor = Readonly<{
+  reply: SupervisorReply;
+  /** Hand the supervisor the launch's process group, which it kills if this process dies before releasing it. */
+  own: (group: number) => void;
+  close: () => Promise<void>;
+}>;
 
 /**
  * On Linux the runtime bridges the sandbox's network to its proxies through Unix sockets it creates under `TMPDIR`,
@@ -282,6 +345,8 @@ const startSupervisor = async (
   const { executablePath, arguments: supervisorArguments } = options.supervisor ?? defaultSupervisor();
   const temporaryDirectory = runtimeDirectory ?? process.env['TMPDIR'];
   const child = spawn(executablePath, supervisorArguments, {
+    /* The runtime resolves its mandatory deny names against this directory: never a checkout. */
+    ...(runtimeDirectory === undefined ? {} : { cwd: runtimeDirectory }),
     /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
     env: {
       PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
@@ -305,7 +370,16 @@ const startSupervisor = async (
     });
   });
   child.stdin.on('error', () => undefined);
+  const own = (group: number): void => {
+    if (group > 0 && child.stdin.writable) {
+      child.stdin.write(`${JSON.stringify({ own: group } satisfies SupervisorControl)}\n`);
+    }
+  };
   const close = async (): Promise<void> => {
+    /* An orderly release: the launch's tree is already gone, so the supervisor has nothing to kill. */
+    if (child.stdin.writable) {
+      child.stdin.write(`${JSON.stringify({ released: true } satisfies SupervisorControl)}\n`);
+    }
     child.stdin.end();
     const timer = setTimeout(() => child.kill('SIGKILL'), terminationMilliseconds);
     await exited;
@@ -340,7 +414,7 @@ const startSupervisor = async (
       });
     });
   });
-  return { reply, close };
+  return { reply, own, close };
 };
 
 /** How long an emptied stream may stay quiet after termination before it is closed. */
@@ -434,50 +508,6 @@ const queueStream = (stream: NodeJS.ReadableStream & { destroy: () => void }): B
   return queue;
 };
 
-/**
- * Descendant tracking on macOS: every process ever seen in the tree is remembered with its group, so a job that moves
- * to its own process group (interactive job control) and is reparented when the shell exits is still terminated.
- */
-const trackDescendants = (root: number): { stop: () => Promise<void>; table: () => Promise<readonly ProcessRow[]> } => {
-  const seen = new Map<number, number>();
-  const remember = async (): Promise<readonly ProcessRow[]> => {
-    const rows = await processTable();
-    const tree = new Set([root, ...seen.keys()]);
-    let grew = true;
-    while (grew) {
-      grew = false;
-      for (const row of rows) {
-        if (!tree.has(row.pid) && tree.has(row.ppid)) {
-          tree.add(row.pid);
-          seen.set(row.pid, row.pgid);
-          grew = true;
-        }
-      }
-    }
-    /* A remembered process still owned shows up as a child of the root, whatever its parent is now. */
-    return rows.map((row) => (seen.get(row.pid) === row.pgid ? { ...row, ppid: root } : row));
-  };
-  const poll = async (): Promise<void> => {
-    try {
-      await remember();
-    } catch {
-      /* A failed poll is retried on the next tick; termination takes a fresh table of its own. */
-    }
-  };
-  let latest: Promise<void> = Promise.resolve();
-  const timer = setInterval(() => {
-    latest = poll();
-  }, trackingMilliseconds);
-  timer.unref();
-  return {
-    stop: async () => {
-      clearInterval(timer);
-      await latest;
-    },
-    table: remember,
-  };
-};
-
 type Started = Readonly<{
   pid: number;
   exited: Promise<ShellExit>;
@@ -493,6 +523,7 @@ const settle = (
   signal: AbortSignal,
 ): Pick<ShellProcess, 'exited' | 'terminate' | typeof Symbol.asyncDispose> => {
   const tracker = process.platform === 'darwin' ? trackDescendants(started.pid) : undefined;
+  supervisor.own(started.pid);
   let terminating: Promise<void> | undefined;
   const stopTree = async (): Promise<void> => {
     terminating ??= (async () => {
@@ -553,6 +584,20 @@ const wrapperEnvironment = (launch: ShellLaunch): Record<string, string> => ({
   // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
   PATH: '/usr/bin:/bin',
 });
+
+/**
+ * The vector this process spawns. On Linux the wrapper shell execs bubblewrap instead of waiting on it, so bwrap's own
+ * `--die-with-parent` binds the sandbox to this process: a host that is killed takes every process in the sandbox with
+ * it (E11), where a waiting `/bin/sh` would be orphaned and keep bwrap and the shell running.
+ *
+ * @param argv - The supervisor's `[shell, '-c', wrapped]` vector.
+ * @param bwrapPath - The bubblewrap the wrapped command must start with; any other vector is spawned as it is.
+ * @returns The vector to spawn.
+ */
+const hostBound = (argv: readonly string[], bwrapPath: string): readonly string[] =>
+  process.platform === 'linux' && argv.length === 3 && argv[1] === '-c' && argv[2]!.startsWith(`${bwrapPath} `)
+    ? [argv[0]!, '-c', `exec ${argv[2]!}`]
+    : argv;
 
 const startPipes = (argv: readonly string[], launch: ShellLaunch, supervisor: Supervisor): ShellProcess => {
   const child = spawn(argv[0]!, argv.slice(1), {
@@ -696,13 +741,16 @@ const admit = (launch: ShellLaunch, options: SandboxShellProviderOptions): Shell
   if (refused.length > 0) {
     return unsupported('environment', `the shell may not receive ${refused.join(', ')}.`);
   }
-  const { readable, writable, denied } = launch.filesystem;
-  const paths = [launch.executablePath, launch.workingDirectory, ...readable, ...writable, ...denied];
+  const { readable, writable, denied, readOnly = [] } = launch.filesystem;
+  const paths = [launch.executablePath, launch.workingDirectory, ...readable, ...writable, ...readOnly, ...denied];
   if (paths.some((path) => !isAbsolute(path) || path.includes('\0'))) {
     return unsupported('filesystem-mask', 'every launch path must be absolute.');
   }
   if (writable.some((root) => denied.some((deny) => inside(root, deny)))) {
     return unsupported('filesystem-mask', 'a writable root lies inside a denied path, so it could not be written.');
+  }
+  if (writable.some((root) => readOnly.some((path) => inside(root, path)))) {
+    return unsupported('filesystem-mask', 'a writable root lies inside a read-only path, so it could not be written.');
   }
   if (launch.network.domains.some((domain) => !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/u.test(domain))) {
     return unsupported('network-isolation', 'network grants name exact lowercase host names only.');
@@ -725,7 +773,14 @@ const admit = (launch: ShellLaunch, options: SandboxShellProviderOptions): Shell
  * @param options - Supervisor, prerequisite paths and the macOS Terminal flag.
  * @returns A provider; each launch is fully contained or refused.
  */
-export const createSandboxShellProvider = (options: SandboxShellProviderOptions = {}): ShellProvider => ({
+export const createSandboxShellProvider = (options: SandboxShellProviderOptions = {}): ShellProvider => {
+  if (process.platform === 'linux' && options.standInJournal !== undefined) {
+    useStandInJournal(options.standInJournal);
+  }
+  return createProvider(options);
+};
+
+const createProvider = (options: SandboxShellProviderOptions): ShellProvider => ({
   name: 'srt-0.0.75',
   launch: async (launch) => {
     launch.signal.throwIfAborted();
@@ -747,18 +802,64 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
         return { status: 'sandbox-unavailable', message: 'node-pty has no POSIX binding on this host.' };
       }
     }
+    // The runtime also masks its own mandatory names relative to the supervisor's working directory. The supervisor
+    // runs in its private runtime directory; a host that itself runs inside a writable root is refused as well.
+    if (
+      process.platform === 'linux' &&
+      physicalVariants(launch.filesystem.writable).some((root) => inside(process.cwd(), root))
+    ) {
+      return {
+        status: 'sandbox-unavailable',
+        message: `the host process runs inside a writable root (${process.cwd()}); start it outside every project.`,
+      };
+    }
     const runtimeDirectory = createRuntimeDirectory();
-    const supervisor = await startSupervisor(
-      {
-        profile: shellSandboxProfile(launch, options, runtimeDirectory),
-        command: shellSandboxCommand(launch),
-        workingDirectory: launch.workingDirectory,
-        commandId: launch.commandId,
-        guard: launch.network.domains.length > 0,
+    const profile = shellSandboxProfile(launch, options, runtimeDirectory);
+    // Absent protected paths get shared stand-ins, computed from exactly the lists the runtime is handed, before it
+    // observes the filesystem; released only once this launch's supervisor is gone (see holdProtectedStandIns).
+    let releaseStandIns: () => void;
+    try {
+      const { denyWrite, allowWrite } = profile['filesystem'] as Readonly<{
+        denyWrite: readonly string[];
+        allowWrite: readonly string[];
+      }>;
+      releaseStandIns = holdProtectedStandIns({ denyWrite, allowWrite, directories: launch.filesystem.directories });
+    } catch (error) {
+      if (runtimeDirectory !== undefined) {
+        rmSync(runtimeDirectory, { recursive: true, force: true });
+      }
+      return {
+        status: 'sandbox-unavailable',
+        message: `a protected path could not be prepared: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    let started: Supervisor;
+    try {
+      started = await startSupervisor(
+        {
+          profile,
+          command: shellSandboxCommand(launch),
+          workingDirectory: launch.workingDirectory,
+          commandId: launch.commandId,
+          guard: launch.network.domains.length > 0,
+        },
+        options,
+        runtimeDirectory,
+      );
+    } catch (error) {
+      releaseStandIns();
+      throw error;
+    }
+    const supervisor: Supervisor = {
+      ...started,
+      close: async () => {
+        try {
+          await started.close();
+        } finally {
+          releaseStandIns();
+        }
       },
-      options,
-      runtimeDirectory,
-    );
+    };
     if (supervisor.reply.status !== 'ready') {
       await supervisor.close();
       return { status: 'sandbox-unavailable', message: supervisor.reply.message };
@@ -767,7 +868,7 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
       await supervisor.close();
       launch.signal.throwIfAborted();
     }
-    const { argv } = supervisor.reply;
+    const argv = hostBound(supervisor.reply.argv, options.bwrapPath ?? '/usr/bin/bwrap');
     if (launch.stdio.kind === 'pipes') {
       return { status: 'started', process: startPipes(argv, launch, supervisor) };
     }

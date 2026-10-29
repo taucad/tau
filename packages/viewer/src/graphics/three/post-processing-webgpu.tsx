@@ -58,6 +58,7 @@ import { defaultPostProcessingSettings, resolveAoRadiusCssPixels } from '#graphi
 import type { PostProcessingSettings } from '#graphics/three/post-processing-settings.js';
 import { retireTransmissionCopy } from '#graphics/three/transmission-retirement.js';
 import { createGtaoCameraAdapter } from '#graphics/three/gtao-depth-camera.js';
+import { createLogDepthAoAdapter } from '#graphics/three/gtao-log-depth.js';
 
 type PostProcessingPipelineResources = Readonly<{
   camera: ThreeCamera;
@@ -256,12 +257,15 @@ const createPipelineResources = ({
   scene,
   toneMapping,
   withAo,
+  antialias,
 }: {
   readonly camera: ThreeCamera;
   readonly gpuRenderer: WebGPURenderer;
   readonly scene: Scene;
   readonly toneMapping: ToneMapping;
   readonly withAo: boolean;
+  /** Filter the beauty-only output with FXAA; off draws the tone-mapped scene pass as it is. */
+  readonly antialias: boolean;
 }): PostProcessingPipelineResources => {
   // Four decoded normal taps save memory on native GPU, but cost more than
   // hardware filtering on node WebGL2 in the matched 5K comparison.
@@ -418,11 +422,10 @@ const createPipelineResources = ({
     const displayMode = uniform(0);
     const compositeStage = uniform(0);
     if (!withAo) {
+      const toneMapped = (uv: Node<'vec2'>): Node<'vec4'> =>
+        renderOutput(scenePassColor.sample(uv), toneMapping, LinearSRGBColorSpace) as Node<'vec4'>;
       outputQuad = createOutputQuad(
-        createViewportFxaa(
-          scenePassColor,
-          (uv) => renderOutput(scenePassColor.sample(uv), toneMapping, LinearSRGBColorSpace) as Node<'vec4'>,
-        ),
+        antialias ? createViewportFxaa(scenePassColor, toneMapped) : toneMapped(screenUV),
         frame.sharedDepth ? undefined : depthRestoreMaterial,
       );
       updatePerComposition(outputQuad, [scenePass]);
@@ -451,17 +454,25 @@ const createPipelineResources = ({
 
     // GTAONode rejects forward depth >= 1 as background. Pair 1-depth with
     // forward projection matrices; changing only the samples corrupts positions.
-    const aoCamera = createGtaoCameraAdapter(camera, gpuRenderer.reversedDepthBuffer);
+    const logDepth = gpuRenderer.logarithmicDepthBuffer
+      ? createLogDepthAoAdapter(
+          camera,
+          sample((uv) => scenePassDepth.sample(uv).r),
+        )
+      : undefined;
+    const aoCamera = logDepth ?? createGtaoCameraAdapter(camera, gpuRenderer.reversedDepthBuffer);
     // oxlint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access -- TSL texture node fluent API.
-    const aoDepth = sample((uv) =>
-      gpuRenderer.reversedDepthBuffer ? scenePassDepth.sample(uv).r.oneMinus() : scenePassDepth.sample(uv).r,
-    );
-    aoNode = ao(aoDepth, scenePassNormal, aoCamera.camera as Camera);
+    const aoDepth =
+      logDepth?.forwardDepth ??
+      sample((uv) =>
+        gpuRenderer.reversedDepthBuffer ? scenePassDepth.sample(uv).r.oneMinus() : scenePassDepth.sample(uv).r,
+      );
+    aoNode = ao(logDepth?.gtaoDepth ?? aoDepth, scenePassNormal, aoCamera.camera as Camera);
     aoNode.resolutionScale = 0.5;
     // Temporal direction rotation shimmers under `frameloop='demand'` because the
     // viewport never accumulates frame-to-frame.
     aoNode.useTemporalFiltering = false;
-    aoNode.samples.value = 8;
+    aoNode.samples.value = 16;
     aoNode.distanceFallOff.value = defaultPostProcessingSettings.gtaoDistanceFalloff;
 
     const aoTexture = aoNode.getTextureNode();
@@ -592,12 +603,25 @@ const disposePipelineResources = (
 
 type PostProcessingWebGpuProperties = Readonly<{
   settings?: Partial<PostProcessingSettings>;
-  /** The viewer's post-processing toggle: off keeps the tone-mapped scene pass and drops AO. */
+  /** Off keeps the tone-mapped scene pass and drops AO (a software adapter cannot afford it). */
   aoAllowed: boolean;
+  /** Render the alternate projection once after a quiet frame, so the first camera switch is warm. Default on. */
+  speculativePreparation?: boolean;
+  /**
+   * Filter the beauty-only output with FXAA. Default on. Off for a software rasterizer: the filter's unrolled taps,
+   * each tone-mapping its sample, take a software adapter tens of seconds to compile before the first frame shows.
+   */
+  antialiasAllowed?: boolean;
   toneMapping: ToneMapping;
 }>;
 
-function PostProcessingWebGpuActive({ settings, aoAllowed, toneMapping }: PostProcessingWebGpuProperties): ReactNode {
+function PostProcessingWebGpuActive({
+  settings,
+  aoAllowed,
+  speculativePreparation = true,
+  antialiasAllowed = true,
+  toneMapping,
+}: PostProcessingWebGpuProperties): ReactNode {
   const { gl, scene, invalidate, size, viewport } = useThree();
   const { aoEnabled, aoCompositeStage, radiusCssPixels, gtaoIntensity, gtaoDistanceFalloff, displayMode } = {
     ...defaultPostProcessingSettings,
@@ -626,6 +650,7 @@ function PostProcessingWebGpuActive({ settings, aoAllowed, toneMapping }: PostPr
           scene,
           toneMapping,
           withAo,
+          antialias: antialiasAllowed,
         }),
       );
       invalidate();
@@ -637,24 +662,24 @@ function PostProcessingWebGpuActive({ settings, aoAllowed, toneMapping }: PostPr
       frameRef.current = undefined;
       resources.clear();
     };
-  }, [gl, invalidate, scene, toneMapping, withAo]);
+  }, [antialiasAllowed, gl, invalidate, scene, toneMapping, withAo]);
 
   const updateAoSettings = useCallback(
     (selected: PostProcessingPipelineResources): void => {
       if (!selected.aoNode) {
         return;
       }
-      selected.aoNode.resolutionScale = 0.5 / viewport.dpr;
+      selected.aoNode.resolutionScale = 0.5;
       if (selected.denoiseNode) {
-        // Keep the reconstruction footprint in CSS pixels at every DPR.
-        selected.denoiseNode.step.value.set(3 / size.width, 3 / size.height);
+        // One AO texel per tap, matching the half drawing-buffer estimate.
+        selected.denoiseNode.step.value.set(2 / (size.width * viewport.dpr), 2 / (size.height * viewport.dpr));
       }
       if (selected.denoiseInput) {
-        // Estimate and smooth at half CSS resolution, independent of display DPR.
+        // Estimate and smooth at half drawing-buffer resolution, including on Retina displays.
         // r184 RTTNode has no resolutionScale. Own physical dimensions explicitly;
         // its pixelRatio stays 1 and ordinary frames never resize the allocation.
-        const width = Math.max(1, Math.ceil(size.width * 0.5));
-        const height = Math.max(1, Math.ceil(size.height * 0.5));
+        const width = Math.max(1, Math.ceil(size.width * viewport.dpr * 0.5));
+        const height = Math.max(1, Math.ceil(size.height * viewport.dpr * 0.5));
         if (selected.denoiseInput.width !== width || selected.denoiseInput.height !== height) {
           selected.denoiseInput.setSize(width, height);
         }
@@ -688,7 +713,7 @@ function PostProcessingWebGpuActive({ settings, aoAllowed, toneMapping }: PostPr
 
   useLayoutEffect(() => {
     const renderer = gl as unknown as WebGPURenderer;
-    if (!(renderer.domElement instanceof HTMLCanvasElement)) {
+    if (!speculativePreparation || !(renderer.domElement instanceof HTMLCanvasElement)) {
       return;
     }
     const preparation = scheduleCameraPreparation(renderer.domElement, () => {
@@ -744,7 +769,7 @@ function PostProcessingWebGpuActive({ settings, aoAllowed, toneMapping }: PostPr
       preparation.dispose();
       preparationRef.current = undefined;
     };
-  }, [cameraRig, gl, invalidate, scene, toneMapping, withAo]);
+  }, [cameraRig, gl, invalidate, scene, speculativePreparation, toneMapping, withAo]);
 
   const retarget = useCallback(
     (camera: ThreeCamera, snapshot: CameraDriverSnapshot): void => {
@@ -807,6 +832,7 @@ function PostProcessingWebGpuActive({ settings, aoAllowed, toneMapping }: PostPr
         scene,
         toneMapping,
         withAo,
+        antialias: antialiasAllowed,
       });
       resourcesRef.current.set(camera, selected);
     }

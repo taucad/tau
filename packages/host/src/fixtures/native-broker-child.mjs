@@ -2,8 +2,9 @@
 // argv[2] is the proof file, argv[3] a JSON list of `{ name, launch }` and argv[4] how many closure requests to send
 // first (default one); a launch's workspace and artifact paths that start with `<private>` are made inside this
 // child's own temp directory first. Each worker is read to its end after one line is written to its stdin. The proof
-// records the child's flags, its own spawn refusal, the `native` flag its start frame carried, the daemon's answer
-// frame to each closure request, and each launch's outcome.
+// records the child's flags, its own spawn refusal, the `native` flag and native worker frames its start frame carried,
+// the daemon's answer frame to each closure request, and each launch's outcome, with the worker's resident sample where
+// the daemon serves one.
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,7 +12,8 @@ import { join } from 'node:path';
 const { createRuntimeChildWorkerLauncher } = await import('../runtime-child-workers.ts');
 
 const [outputPath = '', requests, inspections = '1'] = process.argv.slice(2);
-const launcher = createRuntimeChildWorkerLauncher();
+/** @type {ReturnType<typeof createRuntimeChildWorkerLauncher> | undefined} */
+let launcher;
 
 /** @type {Map<string, (answer: unknown) => void>} */
 const answers = new Map();
@@ -66,26 +68,32 @@ const attempt = async (/** @type {import('../runtime-child-supervisor.ts').Runti
     }
   }
   try {
-    const worker = await launcher({ ...launch, workspacePath, artifactPath });
+    const worker = await launcher?.({ ...launch, workspacePath, artifactPath });
+    if (worker === undefined) {
+      throw new Error('No launcher before start.');
+    }
+    const resident = worker.sampleResident === undefined ? {} : { resident: (await worker.sampleResident()) ?? null };
     let stdout = '';
     worker.stdout.on('data', (chunk) => {
       stdout += Buffer.from(chunk).toString('utf8');
     });
     worker.stdin.end('echoed through the daemon\n');
     const end = await worker.ended;
-    return { started: true, stdout, end };
+    return { started: true, stdout, end, ...resident };
   } catch (error) {
     return { started: false, refusal: error instanceof Error ? error.message : String(error) };
   }
 };
 
-process.on('message', async (/** @type {{ type?: string; native?: unknown } | undefined} */ message) => {
+/** @typedef {{ type?: string; native?: unknown; nativeWorkerFrames?: string[] }} StartMessage */
+process.on('message', async (/** @type {StartMessage | undefined} */ message) => {
   if (message?.type === 'close') {
     process.exit(0);
   }
   if (message?.type !== 'start') {
     return;
   }
+  launcher = createRuntimeChildWorkerLauncher(undefined, { nativeWorkerFrames: message.nativeWorkerFrames ?? [] });
   process.send?.({ type: 'native-deployments', report: [{ package: '@acme/fixture' }] });
   const closures = [];
   for (let index = 0; index < Number(inspections); index += 1) {
@@ -111,6 +119,7 @@ process.on('message', async (/** @type {{ type?: string; native?: unknown } | un
         'no permission model',
       ownSpawn: ownSpawn(),
       native: message.native,
+      nativeWorkerFrames: message.nativeWorkerFrames,
       closures,
       outcomes,
     }),

@@ -6,15 +6,18 @@
  * profile, and answers one {@link SupervisorReply} line on stdout: the wrapped spawn vector, or why the sandbox is
  * unavailable. It then holds the runtime, and with it this launch's own network proxy and that proxy's per-process
  * credential, until its stdin closes; then it cleans up and exits. It never spawns the shell itself, so the shell
- * never inherits this control channel.
+ * never inherits this control channel. If the channel closes while it owns the launch's process group and before the
+ * provider released it, the host died: the supervisor terminates the retained descendant tree first (E11).
  *
  * Nothing runs unsandboxed: a missing prerequisite, a seccomp helper the runtime would only warn about, or a vector
  * that does not start the platform's sandbox is answered as `unavailable`.
  */
+import { accessSync, constants } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 import { SandboxManager } from '@anthropic-ai/sandbox-runtime';
 
+import { terminateOwnedProcesses, trackDescendants } from '#shell/process-tree.js';
 import { startGuardProxy } from '#shell/srt-guard-proxy.js';
 import type { GuardProxy } from '#shell/srt-guard-proxy.js';
 
@@ -29,6 +32,15 @@ export type SupervisorJob = Readonly<{
   /** Route granted names through the address guard (D26); set whenever the profile allows any domain. */
   guard: boolean;
 }>;
+
+/**
+ * A later line from the provider (E11): `own` hands over a started launch's process group; `released` says the
+ * launch ended in order. A channel that closes with a group owned and never released means the host died, and the
+ * supervisor terminates its retained tree before it exits (the macOS A24 residual remains disclosed).
+ *
+ * @public
+ */
+export type SupervisorControl = Readonly<{ own: number }> | Readonly<{ released: true }>;
 
 /** @public */
 export type SupervisorReply =
@@ -73,6 +85,9 @@ const prepare = async (job: SupervisorJob): Promise<SupervisorReply> => {
   if (fatal.length > 0) {
     return { status: 'unavailable', message: fatal.join('; ') };
   }
+  if (profile.seccomp?.applyPath) {
+    accessSync(profile.seccomp.applyPath, constants.X_OK);
+  }
   if (job.guard) {
     guard = await startGuardProxy();
     (profile.network as Record<string, unknown>)['parentProxy'] = { http: guard.url, https: guard.url };
@@ -104,13 +119,50 @@ if (first.done !== true) {
   }
 }
 /* Hold the runtime, and its proxy, until the provider closes the channel: the launch has ended or the host died. */
+let owned: number | undefined;
+let released = false;
+let tracker: ReturnType<typeof trackDescendants> | undefined;
 for (;;) {
-  // oxlint-disable-next-line no-await-in-loop -- lines are drained only to observe the channel closing.
+  // oxlint-disable-next-line no-await-in-loop -- lines are read until the channel closes.
   const next = await iterator.next();
   if (next.done === true) {
     break;
   }
+  try {
+    const control = JSON.parse(next.value) as Partial<{ own: number; released: boolean }>;
+    if (owned === undefined && Number.isInteger(control.own) && control.own! > 1) {
+      owned = control.own;
+      if (process.platform === 'darwin') {
+        tracker = trackDescendants(owned!);
+      }
+    } else if (control.released === true) {
+      released = true;
+    }
+  } catch {
+    /* Not a control line. */
+  }
 }
+if (owned !== undefined && !released) {
+  try {
+    await terminateOwnedProcesses({
+      root: owned,
+      group: owned,
+      deadlineMilliseconds: 5000,
+      ...(tracker === undefined ? {} : { table: tracker.table }),
+    });
+  } catch {
+    /* The tree helper kills every process already frozen; retain the backstop and runtime cleanup on read failure. */
+  } finally {
+    /* Keep the group backstop even if reading the process table fails during crash cleanup. */
+    try {
+      process.kill(-owned, 'SIGKILL');
+    } catch {
+      /* The group is already gone. */
+    }
+    await tracker?.stop();
+  }
+}
+await tracker?.stop();
 if (initialized) {
   SandboxManager.cleanupAfterCommand();
 }

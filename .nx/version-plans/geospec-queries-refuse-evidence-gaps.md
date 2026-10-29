@@ -1,5 +1,4 @@
 ---
-geospec: minor
 cli: minor
 host: minor
 ---

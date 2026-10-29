@@ -100,10 +100,8 @@ const createGeometrySource = async (sizeX: number, sizeY = 1, sizeZ = 1): Promis
   return { format: 'glb', source: await new WebIO().writeBinary(document), name: 'box' };
 };
 
-const brepFixture = resolve(
-  import.meta.dirname,
-  '../../../../packages/geospec/fixtures/contact/valve-seat-cone-positive/model.step',
-);
+// A byte-for-byte copy of taucad/geospec's `fixtures/contact/valve-seat-cone-positive/model.step`.
+const brepFixture = resolve(import.meta.dirname, '__fixtures__/valve-seat-cone-positive.step');
 
 describe('runTauGeoSpecTests', () => {
   it('releases renderer results that arrive after a test timeout', async () => {
@@ -504,5 +502,49 @@ describe('runTauGeoSpecTests', () => {
     expect(result.passed).toBe(1);
     expect(result.total).toBe(1);
     expect(rendererCalls).toEqual([expect.objectContaining({ file: 'main.ts', format: 'step' })]);
+  });
+});
+
+describe('Tau GeoSpec harness module VM', () => {
+  it('should resolve a bare npm import from the locked project tree through the injected Tau VM', async () => {
+    const filesystem = new MemoryFileSystem();
+    const dependencies = { 'esm-pkg': '^1.0.0' };
+    filesystem.setText('package.json', JSON.stringify({ name: 'model', dependencies }));
+    filesystem.setText(
+      'package-lock.json',
+      JSON.stringify({
+        lockfileVersion: 3,
+        requires: true,
+        packages: { '': { name: 'model', dependencies }, 'node_modules/esm-pkg': { version: '1.0.0' } },
+      }),
+    );
+    filesystem.setText(
+      'node_modules/esm-pkg/package.json',
+      JSON.stringify({ name: 'esm-pkg', version: '1.0.0', type: 'module', exports: './index.js' }),
+    );
+    filesystem.setText('node_modules/esm-pkg/index.js', 'export const answer = 42;');
+    filesystem.setText(
+      'main.geospec.ts',
+      [
+        "import { describe, it } from 'geospec';",
+        "import { answer } from 'esm-pkg';",
+        "describe('package import', () => {",
+        "  it('should see the installed package', () => {",
+        "    if (answer !== 42) throw new Error('wrong package');",
+        '  });',
+        '});',
+      ].join('\n'),
+    );
+
+    const result = await runTauGeoSpecTests({
+      filesystem,
+      entryPaths: ['main.geospec.ts'],
+      renderer: async () => {
+        throw new Error('No model is loaded.');
+      },
+    });
+
+    expect(result.failures).toEqual([]);
+    expect(result.passed).toBe(1);
   });
 });

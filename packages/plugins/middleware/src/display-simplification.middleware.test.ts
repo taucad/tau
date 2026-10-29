@@ -368,7 +368,7 @@ describe('displaySimplification', () => {
     expect(displaySimplificationMaxTriangles).toBe(2_000_000);
     expect(displaySimplificationVoxelErrorRatio).toBe(0.5);
     expect(definition.optionsSchema!.parse({})).toEqual({ maxTriangles: 2_000_000 });
-    expect(definition.version).toBe('1.1.0');
+    expect(definition.version).toBe('1.2.0');
   });
 
   it('should leave exports to the kernel, so export and GeoSpec bytes never pass through it', () => {
@@ -422,8 +422,21 @@ describe('displaySimplification', () => {
         elapsed: expect.any(Number) as number,
       },
     });
-    expect(issue.message).toContain('within 0.25 mm (half the 0.5 mm voxel size)');
+    expect(issue.message).toContain(
+      'targeting at most 0.25 mm (half the 0.5 mm voxel size) of deviation from the delivered mesh. The target is measured, not guaranteed.',
+    );
     expect(issue.message).not.toContain('still over');
+  });
+
+  it('should name the adaptivity of an adaptive delivered mesh in the warning', async () => {
+    const report = { ...voxelReport(sphereTriangles, sphereVertices), adaptivity: 0.25, relax: false };
+
+    const { output } = await run(renderSuccess(await createSphereGlb(), report));
+
+    const issue = issueOf(output);
+    expect(issue.details).toMatchObject({ maxErrorMm: 0.25, voxelSize: 0.5, adaptivity: 0.25 });
+    expect(issue.message).toContain('of deviation from the delivered adaptive mesh (adaptivity 0.25).');
+    expect(dataOf(output).tessellation).toMatchObject({ adaptivity: 0.25, relax: false });
   });
 
   it('should keep every vertex it delivers from the original mesh', async () => {

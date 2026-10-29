@@ -213,7 +213,8 @@ type MockCadActorOptions = {
   readonly tags?: ReadonlyArray<'cad-loading' | 'cad-runtime-error'>;
   readonly fileManagerReady?: boolean;
   readonly runtime?: MockRuntimeDocumentFixture;
-  readonly evaluation?: Evaluation;
+  /** `undefined` stands for an opened document whose first evaluation has not landed. */
+  readonly evaluation?: Evaluation | undefined;
 };
 
 function createMockCadActor(options: MockCadActorOptions = {}): ActorRefFrom<typeof cadMachine> {
@@ -229,7 +230,7 @@ function createMockCadActor(options: MockCadActorOptions = {}): ActorRefFrom<typ
       context: {
         entryPath: helperEntryPath,
         rendering,
-        evaluation: options.evaluation ?? runtime.evaluation,
+        evaluation: 'evaluation' in options ? options.evaluation : runtime.evaluation,
         document: runtime.document,
         units: { length: 'mm' },
         latestRenderingOutcome: options.latestRenderingOutcome,
@@ -693,6 +694,35 @@ describe('ChatViewer reopen-renderer overlay', () => {
     viewer.unmount();
     expect(runtime.view.close).toHaveBeenCalledTimes(2);
     expect(runtime.document.close).not.toHaveBeenCalled();
+  });
+
+  it('should open the pane view once, under the offered view, when the first evaluation lands', () => {
+    const runtime = createMockRuntimeDocument();
+    const actor = createMockCadActor({ runtime, evaluation: undefined, rendering: undefined });
+    mockGeometryUnits.set(helperEntryPath, actor);
+    const viewer = renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    // The document is open and evaluating: no offer is known yet, so no view is opened to be replaced later.
+    expect(runtime.viewSpy).not.toHaveBeenCalled();
+
+    const opening = actor.getSnapshot();
+    vi.mocked(actor.getSnapshot).mockReturnValue({
+      ...opening,
+      context: { ...opening.context, evaluation: runtime.evaluation },
+    } as typeof opening);
+    // The selector mock delivers no store notification; a draft for another kernel view re-renders the pane instead.
+    act(() => {
+      setLiveViewOptions('view-1', { viewId: 'drawing', options: {} });
+    });
+
+    expect(runtime.viewSpy).toHaveBeenCalledTimes(1);
+    expect(runtime.viewSpy).toHaveBeenCalledWith('model', expect.objectContaining({ options: {} }));
+    expect(runtime.view.close).not.toHaveBeenCalled();
+    act(() => {
+      setLiveViewOptions('view-1', undefined);
+    });
+    viewer.unmount();
+    expect(runtime.view.close).toHaveBeenCalledTimes(1);
   });
 
   it('re-renders the view from the options panel live draft before the record saves it', () => {

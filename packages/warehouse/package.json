@@ -65,7 +65,7 @@
     "@taucad/replicad": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/types": "workspace:*",
-    "geospec": "workspace:*",
+    "geospec": "catalog:",
     "replicad": "catalog:"
   },
   "dependencies": {

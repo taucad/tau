@@ -109,7 +109,8 @@ vi.mock('electron', () => {
     utilityProcess: {
       fork: vi.fn(() => {
         const utility = {
-          kill: vi.fn(),
+          // Electron answers whether the signal was delivered.
+          kill: vi.fn(() => true),
           on: vi.fn(),
           postMessage: vi.fn(),
           stdout: createStream(),
@@ -1285,6 +1286,69 @@ describe('Electron main runtime memory supervision', () => {
       expect(onError).toHaveBeenCalledOnce();
       const [reported] = onError.mock.calls[0] as [Error];
       expect(reported.message).toMatch(/resident memory 1001 bytes exceeds 1000/u);
+    } finally {
+      handle.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('should relay the limit and the peak it killed a utility for to the renderer frame', async () => {
+    vi.useFakeTimers();
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    const onUtilityExit = vi.fn();
+    const handle = registerElectronRuntimeMain({
+      onError: vi.fn(),
+      onUtilityExit,
+      residentLimit: { maxBytes: 1000, intervalMilliseconds: 5000, sample: () => 1500 },
+      utilityEntry: '/dist/main/kernel-host.js',
+    });
+    try {
+      const frame = requestRuntimePort({ once: vi.fn(), removeListener: vi.fn() }, { postMessage: vi.fn() });
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(liveUtilities.at(-1)!.kill).toHaveBeenCalledOnce();
+      lastUtilityExitHandler()(1);
+      liveUtilities.at(-1)?.stderr?.end();
+      await vi.advanceTimersByTimeAsync(1000);
+
+      const exceeded = {
+        limit: 'host.utility.resident',
+        unit: 'By',
+        maximum: 1000,
+        demand: { kind: 'measured', value: 1500 },
+        origin: 'host-option',
+      };
+      expect(frame.postMessage).toHaveBeenLastCalledWith(
+        'taucad:connect-runtime:host-exit',
+        expect.objectContaining({ exitCode: 1, released: false, exceeded, peakResidentBytes: 1500 }),
+      );
+      expect(onUtilityExit).toHaveBeenCalledWith(expect.objectContaining({ exceeded, peakResidentBytes: 1500 }));
+    } finally {
+      handle.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('should not name the limit as the exit cause when its kill was refused', async () => {
+    vi.useFakeTimers();
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    const onUtilityExit = vi.fn();
+    const handle = registerElectronRuntimeMain({
+      onError: vi.fn(),
+      onUtilityExit,
+      residentLimit: { maxBytes: 1000, intervalMilliseconds: 5000, sample: () => 1500 },
+      utilityEntry: '/dist/main/kernel-host.js',
+    });
+    try {
+      requestRuntimePort({ once: vi.fn(), removeListener: vi.fn() }, { postMessage: vi.fn() });
+      liveUtilities.at(-1)!.kill.mockReturnValue(false);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(liveUtilities.at(-1)!.kill).toHaveBeenCalled();
+      lastUtilityExitHandler()(1);
+      liveUtilities.at(-1)?.stderr?.end();
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(onUtilityExit).toHaveBeenCalledOnce();
+      expect(onUtilityExit.mock.calls[0]?.[0]).not.toHaveProperty('exceeded');
     } finally {
       handle.dispose();
       vi.useRealTimers();

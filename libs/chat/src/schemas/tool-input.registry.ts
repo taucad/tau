@@ -40,6 +40,7 @@ import {
   stopMachineInputSchema,
   stopMachineOutputSchema,
 } from '#schemas/tools/machine.tool.schema.js';
+import { shellInputSchema, shellOutputSchema } from '#schemas/tools/shell.tool.schema.js';
 import {
   applyParameterOperationInputSchema,
   applyParameterOperationOutputSchema,
@@ -179,6 +180,10 @@ export const uiMessageTools = {
   [toolName.checkJob]: {
     inputSchema: checkJobInputSchema,
     outputSchema: checkJobOutputSchema,
+  },
+  [toolName.shell]: {
+    inputSchema: shellInputSchema,
+    outputSchema: shellOutputSchema,
   },
 } as const;
 

@@ -1,0 +1,16 @@
+{
+  "name": "agent-observability",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/agent-observability",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:lib"],
+  "targets": {
+    "test:e2e": {
+      "command": "vitest run --config vitest.browser.config.ts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false
+    }
+  }
+}

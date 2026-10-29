@@ -206,13 +206,13 @@ const analyzeEntry = async (
 /**
  * The worker's mesh and measure requests for one retained handle, in millimetres and degrees.
  *
- * @param handleId - The retained shapes to mesh.
+ * @param target - The retained shapes to mesh, and whether the worker writes their B-rep edge lines beside the surfaces.
  * @param runtime - Kernel runtime, for its abort signal.
  * @param session - The Python session holding the handle.
  * @returns The mesh request and the diagonal measurement.
  */
 const meshRequests = (
-  handleId: string,
+  { handleId, includeEdges }: { readonly handleId: string; readonly includeEdges: boolean },
   runtime: Pick<KernelServices, 'signal'>,
   session: PythonSession,
 ): {
@@ -226,6 +226,7 @@ const meshRequests = (
         handleId,
         linearTolerance: tolerances.linearTolerance,
         angularTolerance: tolerances.angularTolerance,
+        includeEdges,
         ...(maxTriangles === undefined ? {} : { maxTriangles }),
       },
       schema: build123dMeshSchema,
@@ -246,9 +247,17 @@ const build123dKernelDefinition = defineKernel({
   id: 'build123d',
   extensions: ['py'],
   name: 'Build123dKernel',
-  version: '0.13.0+python3.13.ocp8.0.1.0.0.protocol1.topology1.nativeMotion1.tessellation1',
+  version: '0.13.0+python3.13.ocp8.0.1.0.0.protocol1.topology1.nativeMotion1.tessellation1.edges1',
   optionsSchema: build123dOptionsSchema,
-  views: { model: { title: 'Model', mimeType: 'model/gltf-binary', optionsSchema: build123dRenderSchema } },
+  // The worker writes exact B-rep edge lines when asked, so the fallback edge pass never runs for this kernel.
+  views: {
+    model: {
+      title: 'Model',
+      mimeType: 'model/gltf-binary',
+      optionsSchema: build123dRenderSchema,
+      content: ['includeEdges'],
+    },
+  },
   // D2: the Python worker answers `cancelMethod: 'cancel'` itself and keeps its resident prefix.
   cancellation: 'cooperative',
   exports: {
@@ -257,6 +266,7 @@ const build123dKernelDefinition = defineKernel({
       mimeType: 'model/gltf-binary',
       extension: 'glb',
       optionsSchema: build123dExportSchemas.glb,
+      content: ['includeEdges'],
     },
     step: {
       title: 'STEP',
@@ -426,12 +436,16 @@ const build123dKernelDefinition = defineKernel({
     }
   },
 
-  async render({ handle, options }, runtime, context) {
+  async render({ handle, options, content }, runtime, context) {
     if (!context.session.isHandleGenerationValid(handle.sessionGeneration)) {
       throw new Build123dKernelError(issuesFrom(new Error('Build123d native handle is stale.')));
     }
     try {
-      const { mesh, measureDiagonal } = meshRequests(handle.handleId, runtime, context.session);
+      const { mesh, measureDiagonal } = meshRequests(
+        { handleId: handle.handleId, includeEdges: content?.includeEdges === true },
+        runtime,
+        context.session,
+      );
       // The render hook cannot tell a viewer preview from a capture, so every render takes the preview budget.
       const meshed = await meshPreviewWithinBudget(
         {
@@ -460,7 +474,11 @@ const build123dKernelDefinition = defineKernel({
     }
     try {
       if (input.exportId === 'glb') {
-        const { mesh, measureDiagonal } = meshRequests(input.handle.handleId, runtime, context.session);
+        const { mesh, measureDiagonal } = meshRequests(
+          { handleId: input.handle.handleId, includeEdges: input.content?.includeEdges === true },
+          runtime,
+          context.session,
+        );
         const meshed = await meshExportWithinBudget(
           {
             tessellation: input.options.tessellation,
@@ -498,6 +516,10 @@ const build123dKernelDefinition = defineKernel({
   releaseHandle({ handle }, _runtime, context) {
     context.session.release(handle.handleId, handle.sessionGeneration);
   },
+
+  // Observation only: the resident set of the worker's process tree; `heapBytes` stays unimplemented, so recycling
+  // and `rendering.heapBytes` are unchanged.
+  observedChildResidentBytes: async (context) => context.session.sampleResident?.(),
 
   async onDispose(context) {
     try {

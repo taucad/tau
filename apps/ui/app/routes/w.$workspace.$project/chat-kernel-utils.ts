@@ -13,6 +13,8 @@ import { categoryLabels, phaseLabels, phaseOrder } from '#routes/w.$workspace.$p
 
 const traceKindsByRootName: Record<string, TelemetryTraceKind> = {
   'kernel.bootstrap': 'bootstrap',
+  'kernel.describe': 'describe',
+  'kernel.evaluate': 'evaluate',
   'kernel.render': 'render',
   'kernel.export': 'export',
   'kernel.transcode': 'transcode',
@@ -219,7 +221,7 @@ function collectPhaseIntervals(node: SpanNode, trace: TelemetryTrace, byPhase: M
 }
 
 export function buildPipelineLanes(trace: TelemetryTrace): PipelineLane[] {
-  if (trace.kind !== 'render' || trace.duration <= 0) {
+  if ((trace.kind !== 'render' && trace.kind !== 'evaluate') || trace.duration <= 0) {
     return [];
   }
 

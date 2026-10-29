@@ -1,5 +1,6 @@
 # The native shell conformance rows (desktop Bash/Terminal blueprint W2, testing contract
-# `native-process-core:test:shell-conformance`): the real sandbox provider and the machine's own Bash on each
+# `native-process-core:test:shell-conformance`, extended by the W3 service rows `host:test:shell-conformance` and the
+# W5 desktop Terminal rows `desktop:test:terminal-conformance`): the real sandbox provider and the machine's own Bash on each
 # row, positive controls before negatives, network negatives judged by canaries outside the sandbox, and one
 # JSON receipt per row binding source, host, runtime, Bash and node-pty identities (I12).
 #
@@ -19,6 +20,14 @@ on:
   pull_request:
     paths:
       - 'packages/core/native-process/**'
+      - 'packages/host/src/shell/**'
+      - 'packages/host/src/agent-tools.ts'
+      - 'libs/agent-tools/src/registry/shell-tool.ts'
+      - 'libs/chat/src/schemas/tools/shell.tool.schema.ts'
+      - 'packages/host/project.json'
+      - 'apps/desktop/src/tau/services-host.terminal*.ts'
+      - 'apps/desktop/src/tau/services-host.impl.ts'
+      - 'libs/types/src/desktop-terminal.ts'
       - 'apps/desktop/scripts/linux-apt-package.mts'
       - 'apps/desktop/scripts/hosted-linux-bwrap-fixture.mts'
       - 'apps/desktop/src/shared/linux-installation.ts'
@@ -28,6 +37,12 @@ on:
     branches: [main]
     paths:
       - 'packages/core/native-process/**'
+      - 'packages/host/src/shell/**'
+      - 'packages/host/src/agent-tools.ts'
+      - 'libs/agent-tools/src/registry/shell-tool.ts'
+      - 'libs/chat/src/schemas/tools/shell.tool.schema.ts'
+      - 'apps/desktop/src/tau/services-host.terminal*.ts'
+      - 'libs/types/src/desktop-terminal.ts'
       - 'apps/desktop/scripts/linux-apt-package.mts'
       - 'pnpm-lock.yaml'
       - '.github/workflows/shell-conformance.yml'
@@ -116,6 +131,22 @@ jobs:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/receipt.json
         run: pnpm nx run native-process-core:test:shell-conformance --skip-nx-cache
+
+      - name: Run the shell service conformance target
+        if: success() || failure()
+        env:
+          TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
+          TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/service-receipt.json
+        run: pnpm nx run host:test:shell-conformance --skip-nx-cache
+
+      # The desktop Terminal rows (W5): probe and refusal rows run; the PTY rows are recorded unverified on macOS
+      # until the operator's own-pty run, which this workflow never performs.
+      - name: Run the desktop terminal conformance target
+        if: success() || failure()
+        env:
+          TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
+          TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/terminal-receipt.json
+        run: pnpm nx run desktop:test:terminal-conformance --skip-nx-cache
 
       - name: Upload the receipt
         if: always()

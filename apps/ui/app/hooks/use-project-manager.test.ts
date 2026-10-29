@@ -1403,6 +1403,76 @@ describe('useProjectManager.createProject', () => {
       ).rejects.toThrow('This folder no longer holds that project.');
     });
 
+    /* PG-PROJ-5: a copy scanned before its identity file arrived was minted its own id and route; once the copy
+       finished it carries the original's id, so that route is stale and must go before this folder is chosen. */
+    it('retires a stale route to the chosen folder so choosing it cannot collide with its own route', async () => {
+      const staleId = 'proj_sssssssssssssssssssss';
+      const configs = new Map<string, ProjectFileSystemConfig>([
+        [fakeProject.id, boundToOriginal],
+        [staleId, { projectId: staleId, backend: 'opfs', providerBasePath: copyLocator.relativeDirectory }],
+      ]);
+      mockGetAllProjectFileSystemConfigs.mockImplementation(async () => [...configs.values()]);
+      mockSetProjectFileSystemConfig.mockImplementation(async (config: ProjectFileSystemConfig) => {
+        configs.set(config.projectId, config);
+      });
+      mockDeleteProjectFileSystemConfig.mockImplementationOnce(async (projectId: string) => {
+        configs.delete(projectId);
+      });
+      mockListProjectManifests.mockResolvedValue({
+        roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+        entries: [
+          {
+            status: 'duplicate-id',
+            projectId: fakeProject.id,
+            manifest: projectToManifest(fakeProject),
+            locator: fakeLocator,
+          },
+          {
+            status: 'duplicate-id',
+            projectId: fakeProject.id,
+            manifest: projectToManifest(fakeProject),
+            locator: copyLocator,
+          },
+        ],
+      });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await result.current.chooseProjectDirectory(copyLocator, fakeProject.id);
+
+      expect(mockDeleteProjectResources).toHaveBeenCalledWith(staleId);
+      // One route per physical directory, which is what the workspace service admits.
+      expect([...configs.values()]).toEqual([
+        { projectId: fakeProject.id, backend: 'opfs', providerBasePath: copyLocator.relativeDirectory },
+      ]);
+    });
+
+    it('keeps a route whose directory carries its own identity, or none it can read', async () => {
+      const unreadableLocator: ProjectLocator = { ...fakeLocator, relativeDirectory: 'unreadable' };
+      const unreadableId = 'proj_uuuuuuuuuuuuuuuuuuuuu';
+      mockGetAllProjectFileSystemConfigs.mockResolvedValue([
+        boundToOriginal,
+        { projectId: unreadableId, backend: 'opfs', providerBasePath: unreadableLocator.relativeDirectory },
+      ]);
+      mockListProjectManifests.mockResolvedValue({
+        roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+        entries: [
+          {
+            status: 'valid',
+            projectId: fakeProject.id,
+            manifest: projectToManifest(fakeProject),
+            locator: fakeLocator,
+          },
+          { status: 'invalid', locator: unreadableLocator, issue: { code: 'identity-unavailable', message: 'busy' } },
+        ],
+      });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await result.current.getProjectListing();
+
+      expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
+      expect(mockDeleteProjectResources).not.toHaveBeenCalled();
+    });
+
     it('restores the id a route last bound when adopting its identity-less directory', async () => {
       mockGetAllProjectFileSystemConfigs.mockResolvedValue([boundToOriginal]);
       mockListProjectManifests.mockResolvedValue({
@@ -3225,6 +3295,36 @@ describe('useProjectManager.createProject', () => {
       expect(mockCompletePending).toHaveBeenCalledWith(operationId);
     });
 
+    it.each([
+      ['an explicit daemon on this device', { kind: 'tau', model: 'gpt-test', hostId: 'origin' }, 'origin'],
+      ['this device’s default', { kind: 'tau', model: 'gpt-test' }, undefined],
+      ['a paired device the chat names itself', { kind: 'tau', model: 'gpt-test', hostId: 'dev_studio' }, undefined],
+    ] as const)('should keep the new chat’s placement on this device for %s (XD2)', async (_label, execution, kept) => {
+      mockPrepareProjectCreation.mockImplementationOnce(prepareWithChat);
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () =>
+        result.current.createProject({
+          kernel: 'openscad',
+          activeExecution: execution,
+          initialMessage: { content: 'Build it', attachments: [] },
+          location: { kind: 'home' },
+        }),
+      );
+
+      const recordPath = `/.tau/composers/chats/${fakeProject.id}/placements.json`;
+      const written = mockWriteFile.mock.calls.filter(([path]) => path === recordPath);
+      expect(
+        written.map(
+          ([, bytes]) =>
+            (JSON.parse(new TextDecoder().decode(bytes)) as { placements?: Record<string, string> }).placements?.[
+              'cht_create'
+            ],
+        ),
+      ).toEqual(kept === undefined ? [] : [kept]);
+      expect(mockPrepareProjectCreation.mock.calls.at(-1)?.[0].chat?.activeExecution).toEqual(execution);
+    });
+
     it('completes the copy when an operation persisted before it is resumed', async () => {
       const image = await seedHomeAttachment(new Uint8Array([4, 5, 6]), 'image/png');
       const startup: MyUIMessage = {
@@ -3249,6 +3349,34 @@ describe('useProjectManager.createProject', () => {
       });
       expect(attachmentFiles.has(`${chatAttachments}/${image.hash}.png`)).toBe(true);
       expect(mockPutChatRecord).toHaveBeenCalledWith(persisted.chat);
+    });
+
+    /* XD2: a creation replayed after a crash keeps its first chat's placement on this device, as the first try would. */
+    it('keeps the first chat’s placement when an interrupted creation is replayed', async () => {
+      const persisted = {
+        ...pendingCreate,
+        chat: {
+          ...pendingCreate.chat!,
+          activeExecution: { kind: 'tau', model: 'gpt-test', hostId: 'origin' } as const,
+        },
+      };
+      mockGetPendingProjectOperations.mockResolvedValue([persisted]);
+      mockResumeResources.mockResolvedValueOnce([persisted.chat]);
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+      await result.current.getProjectListing();
+
+      await vi.waitFor(() => {
+        expect(mockCompletePending).toHaveBeenCalledWith(operationId);
+      });
+      const recordPath = `/.tau/composers/chats/${persisted.projectId}/placements.json`;
+      await vi.waitFor(() => {
+        const written = mockWriteFile.mock.calls.findLast(([path]) => path === recordPath);
+        expect(
+          written === undefined
+            ? undefined
+            : (JSON.parse(new TextDecoder().decode(written[1])) as { placements?: Record<string, string> }).placements,
+        ).toEqual({ [persisted.chat.id]: 'origin' });
+      });
     });
 
     // New (W6, P39): the operation names its source, and resume copies from that directory only.

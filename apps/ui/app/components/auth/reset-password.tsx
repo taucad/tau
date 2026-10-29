@@ -80,7 +80,9 @@ export function ResetPassword({ className }: ResetPasswordProps): React.JSX.Elem
   return (
     <Card className={cn('w-full max-w-sm', className)}>
       <CardHeader>
-        <CardTitle className='text-xl font-semibold'>{localization.auth.resetPassword}</CardTitle>
+        <CardTitle className='text-xl font-semibold'>
+          <h1>{localization.auth.resetPassword}</h1>
+        </CardTitle>
       </CardHeader>
 
       <CardContent>

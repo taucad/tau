@@ -33,7 +33,9 @@ CONSTANTS
   ClockSkew,  \* whether one device's clock may step back once
   Copies,     \* whether one segment may be read twice
   MergeFixed, \* W3's merge (TRUE) or today's (FALSE)
-  Repair      \* the candidate read-side rule for concurrent runs and settlements
+  Repair,     \* the candidate read-side rule for concurrent runs and settlements
+  Rehome,     \* XD1 handoff: a device opens a new term before admitting a turn another device's rows came before
+  Handoff     \* whether to keep the ghost AdmittedAfterSeen reads (off where it is not checked: it only adds states)
 
 Devices == 1..NDevices
 
@@ -46,9 +48,11 @@ VARIABLES
   clock,   \* clock[d]: d's wall clock, the rows' recordedAt
   stepped, \* whether the one backwards clock step has happened
   syncs,   \* syncs so far
-  duped    \* whether the one stale second copy exists
+  duped,   \* whether the one stale second copy exists
+  seen,    \* seen[d]: the other devices' rows d's view held when d wrote its current term's first row
+  admitted \* ghost: each admission row's key, with the keys of the other devices' rows its device saw when it admitted
 
-vars == <<file, got, dup, termNo, seqNo, clock, stepped, syncs, duped>>
+vars == <<file, got, dup, termNo, seqNo, clock, stepped, syncs, duped, seen, admitted>>
 
 Kinds == {"admit", "run", "complete", "settle"}
 
@@ -120,7 +124,9 @@ FixedView(segs) ==
       keys    == {KeyOf(r) : r \in rows}
       rowsOf(k) == {r \in rows : KeyOf(r) = k}
       start(k)  == Min({r.at : r \in rowsOf(k)})
-      \* One clamp per owner device, in the owner's own term order.
+      \* One clamp per owner device, in the owner's own term order. A row carries its owner here; segments.ts and
+      \* ChatLedger.lean read it as the writer, the first term of a segment holding the row, so every copy of one
+      \* file (a projection, a stale prefix, a file left under an old id) names the same owner and ties break alike.
       clamped(k) == Max({start(j) : j \in {x \in keys : x[1] = k[1] /\ x[2] <= k[2]}})
       before(a, b) ==
         \/ clamped(a) < clamped(b)
@@ -157,15 +163,42 @@ UsedRuns == UNION {{file[d][i].run : i \in 1..Len(file[d])} : d \in Devices}
 
 (* ---------------- Actions ------------------------------------------------- *)
 
-Write(d, r, kind) ==
+RowKey(x) == <<x.dev, x.tn, x.seq>>
+
+\* The other devices' rows d's view holds.
+Foreign(d) == {x \in ToSet(View(d)) : x.dev # d}
+
+\* The one clock assumption Rehome keeps is the merge's (`segments.ts` orders terms by their start): a term's first row
+\* is stamped after every row its device has read (clocks agree within the staleness bound; ClockStep models the
+\* exception). Deciding to rehome reads no clock (Stale).
+Stamp(d) == IF Rehome /\ seqNo[d] = 0 THEN Max({clock[d]} \cup {x.at + 1 : x \in Foreign(d)}) ELSE clock[d]
+
+\* A term's first row records what d had read of the other devices then: the frontier the term check compares.
+\* Tracked only under Rehome, where it is read, so the other configurations keep their state spaces.
+WriteRow(d, r, kind) ==
   /\ Len(file[d]) < MaxRows
-  /\ file' = [file EXCEPT ![d] = Append(@, [dev |-> d, tn |-> termNo[d], seq |-> seqNo[d], run |-> r, kind |-> kind, at |-> clock[d], out |-> d])]
+  /\ file' = [file EXCEPT ![d] = Append(@, [dev |-> d, tn |-> termNo[d], seq |-> seqNo[d], run |-> r, kind |-> kind, at |-> Stamp(d), out |-> d])]
   /\ seqNo' = [seqNo EXCEPT ![d] = @ + 1]
-  /\ clock' = [clock EXCEPT ![d] = @ + 1]
+  /\ clock' = [clock EXCEPT ![d] = Stamp(d) + 1]
+  /\ seen' = IF Rehome /\ seqNo[d] = 0 THEN [seen EXCEPT ![d] = {RowKey(x) : x \in Foreign(d)}] ELSE seen
   /\ UNCHANGED <<got, dup, termNo, stepped, syncs, duped>>
 
-\* The host admits only when its own view shows no live run; the run id is minted on the device.
-Admit(d, r) == r = d /\ r \notin UsedRuns /\ Live(View(d)) = {} /\ Write(d, r, "admit")
+Write(d, r, kind) == WriteRow(d, r, kind) /\ UNCHANGED admitted
+
+\* XD1 (`foreignWroteSinceTermBegan`): d's view holds another device's row it had not read when its current term wrote
+\* its first row, so a turn written under that term would merge first. It compares what d read, never two clocks; a
+\* term with no row yet is never stale.
+Stale(d) == seqNo[d] > 0 /\ \E x \in Foreign(d) : RowKey(x) \notin seen[d]
+
+\* The host admits only when its own view shows no live run; the run id is minted on the device. With Rehome it
+\* also admits only under a term that had read, at its first row, every other device's row it sees now.
+Admit(d, r) ==
+  /\ r = d /\ r \notin UsedRuns /\ Live(View(d)) = {}
+  /\ Rehome => ~Stale(d)
+  /\ WriteRow(d, r, "admit")
+  /\ admitted' = IF Handoff
+                 THEN admitted \cup {[key |-> <<d, termNo[d], seqNo[d]>>, saw |-> {RowKey(x) : x \in Foreign(d)}]}
+                 ELSE admitted
 
 \* Also a resume: a run admitted on the other device continues here.
 Run(d, r) == LastLife(View(d), r) = "admit" /\ Write(d, r, "run")
@@ -180,7 +213,7 @@ Sync(d, e) ==
   /\ got[d][e] < Len(file[e])
   /\ got' = [got EXCEPT ![d][e] = Len(file[e])]
   /\ syncs' = syncs + 1
-  /\ UNCHANGED <<file, dup, termNo, seqNo, clock, stepped, duped>>
+  /\ UNCHANGED <<file, dup, termNo, seqNo, clock, stepped, duped, seen, admitted>>
 
 \* A second, stale copy of a segment d already holds: its own file projected back, or an old projection.
 Duplicate(d, e) ==
@@ -190,21 +223,31 @@ Duplicate(d, e) ==
        /\ n > 0
        /\ dup' = [dup EXCEPT ![d][e] = n]
   /\ duped' = TRUE
-  /\ UNCHANGED <<file, got, termNo, seqNo, clock, stepped, syncs>>
+  /\ UNCHANGED <<file, got, termNo, seqNo, clock, stepped, syncs, seen, admitted>>
 
 ClockStep(d) ==
   /\ ClockSkew
   /\ ~stepped
   /\ clock' = [clock EXCEPT ![d] = @ - 2]
   /\ stepped' = TRUE
-  /\ UNCHANGED <<file, got, dup, termNo, seqNo, syncs, duped>>
+  /\ UNCHANGED <<file, got, dup, termNo, seqNo, syncs, duped, seen, admitted>>
+
+\* XD1 (`rehomeStaleTerm`): a device whose term has rows and whose view has since gained another device's rows closes
+\* its incarnation; the next one writes under a new term, its first row stamped after what it has read (Stamp).
+RehomeTerm(d) ==
+  /\ Rehome
+  /\ Stale(d)
+  /\ termNo[d] < MaxTerms
+  /\ termNo' = [termNo EXCEPT ![d] = @ + 1]
+  /\ seqNo' = [seqNo EXCEPT ![d] = 0]
+  /\ UNCHANGED <<file, got, dup, clock, stepped, syncs, duped, seen, admitted>>
 
 NewTerm(d) ==
   /\ termNo[d] < MaxTerms
   /\ seqNo[d] > 0
   /\ termNo' = [termNo EXCEPT ![d] = @ + 1]
   /\ seqNo' = [seqNo EXCEPT ![d] = 0]
-  /\ UNCHANGED <<file, got, dup, clock, stepped, syncs, duped>>
+  /\ UNCHANGED <<file, got, dup, clock, stepped, syncs, duped, seen, admitted>>
 
 Init ==
   /\ file = [d \in Devices |-> <<>>]
@@ -216,6 +259,8 @@ Init ==
   /\ stepped = FALSE
   /\ syncs = 0
   /\ duped = FALSE
+  /\ seen = [d \in Devices |-> {}]
+  /\ admitted = {}
 
 Next ==
   \E d \in Devices :
@@ -223,6 +268,7 @@ Next ==
     \/ \E e \in Devices : Sync(d, e) \/ Duplicate(d, e)
     \/ ClockStep(d)
     \/ NewTerm(d)
+    \/ RehomeTerm(d)
 
 Spec == Init /\ [][Next]_vars /\ \A d, e \in Devices : WF_vars(Sync(d, e))
 
@@ -257,4 +303,13 @@ RepairHolds ==
            => Settlements(View(d), r) # {}
 
 EventuallyConverged == <>[](\A d, e \in Devices : View(d) = View(e))
+
+\* XD1 handoff: every view puts each admission after every row of another device its device had seen when it admitted.
+AdmittedAfterSeen ==
+  \A d \in Devices :
+    LET v == View(d)
+        at(k) == {i \in DOMAIN v : RowKey(v[i]) = k}
+    IN \A a \in admitted :
+         \A k \in a.saw :
+           (at(a.key) # {} /\ at(k) # {}) => Min(at(k)) < Min(at(a.key))
 =============================================================================

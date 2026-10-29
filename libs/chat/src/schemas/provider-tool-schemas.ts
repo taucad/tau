@@ -11,9 +11,10 @@ import { modelSupportsInput, modelSupportsTools } from '#types/model.types.js';
  *
  * Internal browser RPC schemas are intentionally
  * excluded: they are not serialized into provider function declarations.
- * The machine tools are admitted unconditionally: a host lists them only when a
- * machine is negotiated and granted, and a turn is offered only what its host
- * lists.
+ * The machine tools and `shell` are admitted unconditionally: a host lists the
+ * machine tools only when a machine is negotiated and granted, and `shell` only
+ * when its contained shell probed ready (desktop), and a turn is offered only
+ * what its host lists.
  *
  * @public
  */
@@ -46,6 +47,7 @@ export const cadProviderFacingToolNames = [
   toolName.getPrintProfiles,
   toolName.requestJob,
   toolName.checkJob,
+  toolName.shell,
 ] as const satisfies readonly ToolName[];
 
 const requiredModelInputModalities: Partial<Record<ToolName, readonly ModelInputModality[]>> = {

@@ -93,6 +93,46 @@
       "owner": "W5"
     },
     {
+      "id": "A10P",
+      "bound": "Run heartbeat: a live run (admitted, running, or paused and held by an open incarnation) whose chat went a minute without a row writes a run.heartbeat and asks the placement to publish the chat's ref, so another device's run fence sees it alive (XD3)",
+      "site": "packages/agent-host/src/host/tau-agent-host.ts",
+      "token": "runHeartbeatMilliseconds",
+      "class": "Debounce",
+      "owner": "XD3"
+    },
+    {
+      "id": "SEGMENT-REFRESH",
+      "bound": "An admission (a start, a Resume or an approval) waits at most ten seconds to read the other devices' segments, then is refused SEGMENTS_UNREADABLE (wait) and releases the chat's dispatch turn, instead of running on a fence it could not check or holding the commands behind it",
+      "site": "packages/agent-host/src/host/tau-agent-host.ts",
+      "token": "segmentRefreshMilliseconds",
+      "class": "Liveness",
+      "owner": "XD3"
+    },
+    {
+      "id": "SEGMENT-OPEN",
+      "bound": "Opening a chat log waits at most ten seconds for its first read of the other devices' segments, then opens with them unread (SEGMENTS_UNREADABLE at admission) and applies the read whenever it ends; every segment read runs outside the log's write queue, so a read that never returns holds no append, Stop or denial (round 27)",
+      "site": "packages/agent-host/src/log/event-log-appender.ts",
+      "token": "segmentRefreshMilliseconds",
+      "class": "Liveness",
+      "owner": "XD3"
+    },
+    {
+      "id": "CHAT-CLOSING-WAIT",
+      "bound": "A command that reaches a chat whose incarnation is closing waits at most ten seconds for its log to close, then is refused WRITER_LOCKED (wait)",
+      "site": "packages/agent-host/src/host/chat-run-registry.ts",
+      "token": "chatClosingWaitMilliseconds",
+      "class": "Liveness",
+      "owner": "XD3"
+    },
+    {
+      "id": "XD4-OPEN",
+      "bound": "Turn placement waits at most thirty seconds for a branch's checkout to open on this device, then refuses REVISIONS_UNAVAILABLE (wait) (XD4)",
+      "site": "packages/revisions/src/turn-placement.ts",
+      "token": "checkoutOpenMilliseconds",
+      "class": "External edge",
+      "owner": "XD4"
+    },
+    {
       "id": "A11",
       "bound": "Sync backoff",
       "site": "packages/revisions/src/sync.machine.ts",
@@ -463,6 +503,14 @@
       "token": "textIdleFlushDelay",
       "class": "Debounce",
       "owner": "W10"
+    },
+    {
+      "id": "RUNTIME-OBS-CHILD-RESIDENT",
+      "bound": "Native worker resident-memory sample answer: 1 s, then the sample reports none",
+      "site": "packages/host/src/runtime-child-workers.ts",
+      "token": "sampleAnswerTimeout",
+      "class": "External edge",
+      "owner": "Runtime Observability PR-1c"
     },
     {
       "id": "E24",
@@ -950,6 +998,14 @@
       "owner": "machines"
     },
     {
+      "id": "SHELL-TERMINAL-COUNT-TIMEOUT",
+      "bound": "Desktop quit, window close and reload question to the services utility: how many Terminal sessions are live (bound derived from the quit assessment bound)",
+      "site": "apps/desktop/src/main/services-broker.ts",
+      "token": "The desktop shell service did not say whether a Terminal is running.",
+      "class": "External edge",
+      "owner": "desktop-bash-terminal W7"
+    },
+    {
       "id": "ACP-PERMISSION-READBACK",
       "bound": "Optional native Grok version/repository probes and settings snapshot, 2 s; expiry reports unverified state and never decides approval",
       "site": "packages/host/src/acp/grok-permission-readback.ts",
@@ -988,6 +1044,30 @@
       "token": "await delay(pollInterval, undefined, { signal })",
       "class": "External edge",
       "owner": "CLI-A1"
+    },
+    {
+      "id": "SHELL-COMMAND-TIMEOUT",
+      "bound": "Agent shell command deadline: the call's timeoutMs clamped to 1 s..600 s (default 120 s); on expiry the provider stops the command and every descendant and the call returns timed-out",
+      "site": "packages/host/src/shell/shell-service.ts",
+      "token": "admitted.commandTimeout",
+      "class": "External edge",
+      "owner": "desktop-bash-terminal W3"
+    },
+    {
+      "id": "SHELL-PROBE-TIMEOUT",
+      "bound": "30-second bound on the shell availability probe's version command",
+      "site": "packages/host/src/shell/shell-service.ts",
+      "token": "AbortSignal.timeout(30_000)",
+      "class": "External edge",
+      "owner": "desktop-bash-terminal W3"
+    },
+    {
+      "id": "TERMINAL-OPEN-TIMEOUT",
+      "bound": "30-second bound on a fresh desktop terminal port's open frame; a port that never opens is closed before any shell starts",
+      "site": "apps/desktop/src/tau/services-host.terminal.ts",
+      "token": "setTimeout(abandonUnopened, openMilliseconds)",
+      "class": "External edge",
+      "owner": "desktop-bash-terminal W5"
     }
   ]
 }

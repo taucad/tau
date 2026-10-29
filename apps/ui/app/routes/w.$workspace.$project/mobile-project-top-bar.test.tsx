@@ -324,6 +324,7 @@ describe('MobileProjectTopBar', () => {
     expect(line).toHaveClass('text-muted-foreground');
     const glyph = line.querySelector('[data-slot=status-line-icon]');
     expect(glyph?.getAttribute('class')).not.toMatch(/text-(feature|warning|destructive)/u);
+    expect(within(titleButton()).queryByRole('img')).not.toBeInTheDocument();
   });
 
   it('reads Saving… with a turning glyph that stops for reduced motion (HDR-04)', () => {
@@ -349,6 +350,8 @@ describe('MobileProjectTopBar', () => {
     expect(line).toHaveTextContent('Save not confirmed · 1 issue');
     expect(line.querySelector('[data-slot=status-line-icon]')).toHaveClass('text-feature');
     expect(line.lastElementChild).not.toHaveClass('text-feature');
+    // The colour says something; the glyph says it too, for a person who does not see it.
+    expect(within(titleButton()).getByRole('img', { name: 'Needs attention' })).toBeInTheDocument();
     /* The bar announces the records as the desktop trigger does; no second trigger draws them. */
     expect(screen.getByRole('status')).toHaveTextContent('Save not confirmed · 1 record');
     expect(within(topBar()).getAllByRole('button')).toHaveLength(3);
@@ -367,6 +370,49 @@ describe('MobileProjectTopBar', () => {
     const line = statusLine(titleButton());
     expect(line).toHaveTextContent(/^Conflict$/u);
     expect(line.querySelector('[data-slot=status-line-icon]')).toHaveClass('text-warning');
+  });
+
+  it('moves Revisions first in the project sheet as the conflict’s decision, once, and opens it (HDR-05, I4, I5)', async () => {
+    revisionStatusHarness.status = status({ attention: 1, conflicts: [conflict] });
+    render(<MobileProjectTopBar />, { wrapper });
+    expect(within(topBar()).getAllByRole('button')).toHaveLength(3);
+
+    fireEvent.click(titleButton());
+    const sheet = await screen.findByRole('dialog', { name: projectName });
+    const first = within(sheet)
+      .getAllByRole('button')
+      .find((button) => button.dataset['slot'] === 'project-sheet-row');
+    expect(first).toHaveAccessibleName('Revisions');
+    expect(first).toHaveAccessibleDescription('Needs your decision on main');
+    expect(first?.closest('ul')).toHaveAccessibleName('Decision');
+    // One way to Revisions on the sheet (I4).
+    expect(within(sheet).getAllByRole('button', { name: 'Revisions' })).toHaveLength(1);
+    fireEvent.click(first!);
+    expect(openPanel).toHaveBeenLastCalledWith('revisions');
+    expect(titleButton()).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('keeps the decision first while a more urgent fact holds the status line (I5)', async () => {
+    // An unconfirmed save outranks the conflict on the line; the decision still waits.
+    revisionStatusHarness.status = status({ attention: 2, conflicts: [conflict] });
+    render(<MobileProjectTopBar />, { wrapper });
+    expect(titleButton()).toHaveTextContent('Save not confirmed');
+    fireEvent.click(titleButton());
+    const sheet = await screen.findByRole('dialog', { name: projectName });
+    const decision = within(sheet).getByRole('list', { name: 'Decision' });
+    expect(within(decision).getByRole('button', { name: 'Revisions' })).toHaveAccessibleDescription(
+      'Needs your decision on main',
+    );
+  });
+
+  it('keeps Revisions in the project list while nothing conflicts', async () => {
+    render(<MobileProjectTopBar />, { wrapper });
+    fireEvent.click(titleButton());
+    const sheet = await screen.findByRole('dialog', { name: projectName });
+    expect(within(sheet).queryByRole('list', { name: 'Decision' })).toBeNull();
+    expect(
+      within(within(sheet).getByRole('list', { name: 'Project' })).getByRole('button', { name: 'Revisions' }),
+    ).toBeInTheDocument();
   });
 
   it('says Follow chat as a fact and puts the verb in the project sheet (HDR-06)', async () => {
@@ -508,6 +554,17 @@ describe('MobileProjectTopBar', () => {
       expect(document.activeElement).toBe(document.querySelector('[data-slot=mobile-surface]'));
     });
     expect(document.activeElement).not.toBe(titleButton());
+  });
+
+  it('moves focus into the project sheet as it opens, so a keyboard user is inside the modal sheet', async () => {
+    render(<MobileProjectTopBar />, { wrapper });
+
+    titleButton().focus();
+    fireEvent.click(titleButton());
+    const sheet = await screen.findByRole('dialog', { name: projectName });
+    await waitFor(() => {
+      expect(sheet).toContainElement(document.activeElement as HTMLElement);
+    });
   });
 
   it.each(['Close', 'Escape'])('returns focus to the title when the sheet is dismissed with %s', async (how) => {

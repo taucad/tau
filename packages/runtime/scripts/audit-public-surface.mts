@@ -57,6 +57,9 @@ const allowedMembers: ReadonlySet<string> = new Set([
   'transport',
   'routesFor',
   'bestRouteFor',
+  // Operation observation (runtime observability PR-1).
+  'observe',
+  'workerObservation',
 ]);
 
 /**

@@ -1587,6 +1587,191 @@ describe('v2 kernel boundary with the current client', () => {
   });
 
   it.each([
+    ['the kernel reports the export options', (): Record<string, unknown> => ({ fidelity: 0 }), 1],
+    ['the kernel reports nothing', (): undefined => undefined, 2],
+    ['the kernel reports other options', (): Record<string, unknown> => ({ fidelity: 0.5 }), 2],
+    ['the kernel reports options its schema refuses', (): Record<string, unknown> => ({ fidelity: 'x' }), 2],
+    [
+      'the hook throws',
+      (): never => {
+        throw new Error('hook failed');
+      },
+      2,
+    ],
+  ])('should export from a view built with other options only when %s', async (_case, effectiveOptions, builds) => {
+    const evaluate = vi.fn(async ({ options }: { options: { fidelity?: number } }) => ({
+      handle: { fidelity: options.fidelity },
+      views: ['view'] as const,
+      exports: ['data'] as const,
+    }));
+    const effective = vi.fn(effectiveOptions);
+    const exportFiles = vi.fn(async ({ handle }: { handle: { fidelity?: number } }) => ({
+      files: [
+        { name: 'data.csv', mimeType: 'text/csv', bytes: new TextEncoder().encode(String(handle.fidelity)) },
+      ] as const,
+    }));
+    const kernel = defineKernelV2({
+      id: 'v2-effective',
+      extensions: ['circuit'] as const,
+      name: 'Effective',
+      version: '1.0.0',
+      evaluateOptionsSchema: z.object({ fidelity: z.number().min(0).lt(1).optional() }),
+      views: { view: { title: 'View', mimeType: 'image/svg+xml' } },
+      exports: {
+        data: {
+          title: 'Data',
+          mimeType: 'text/csv',
+          extension: 'csv',
+          optionsSchema: z.object({ fidelity: z.literal(0).default(0) }),
+        },
+      },
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      evaluate,
+      async render() {
+        return { content: '<svg xmlns="http://www.w3.org/2000/svg"/>' };
+      },
+      export: exportFiles,
+      effectiveOptions: effective,
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    try {
+      const rendered: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
+      worker.onRendered = (event) => {
+        rendered.push(event);
+      };
+      worker.handleOpenDocument({
+        documentId: 'effective-doc',
+        intent: 1,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      worker.handleOpenView({
+        documentId: 'effective-doc',
+        subscriptionId: 'effective-view',
+        requestId: 'effective-render',
+        view: 'view',
+        options: {},
+      });
+      await vi.waitFor(() => {
+        expect(rendered).toHaveLength(1);
+      });
+      const exported = await worker.exportDocument({
+        documentId: 'effective-doc',
+        operationId: 'effective-export',
+        target: 'data',
+        options: {},
+      });
+      expect(exported.success, JSON.stringify(exported.issues)).toBe(true);
+      // The view's build asked for no fidelity; the hook is asked about that build with the options it had.
+      expect(effective).toHaveBeenCalledWith(
+        { handle: { fidelity: undefined }, options: {} },
+        expect.any(Object),
+        expect.any(Object),
+      );
+      expect(evaluate).toHaveBeenCalledTimes(builds);
+      // A served export reads the view's handle; any other export reads the handle built with the export's options.
+      expect(exportFiles).toHaveBeenCalledWith(
+        expect.objectContaining({ handle: { fidelity: builds === 1 ? undefined : 0 } }),
+        expect.any(Object),
+        expect.any(Object),
+      );
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('should offer the kernel evaluate options on an evaluation and rebuild with an updated value', async () => {
+    const evaluate = vi.fn(async ({ options }: { options: { fidelity?: number } }) => ({
+      handle: { fidelity: options.fidelity },
+      views: ['view'] as const,
+      exports: [] as const,
+    }));
+    const kernel = defineKernelV2({
+      id: 'v2-evaluate-offer',
+      extensions: ['circuit'] as const,
+      name: 'Evaluate offer',
+      version: '1.0.0',
+      evaluateOptionsSchema: z.object({
+        fidelity: z
+          .number()
+          .min(0)
+          .lt(1)
+          .optional()
+          .meta({ examples: [0.25] }),
+      }),
+      views: { view: { title: 'View', mimeType: 'image/svg+xml' } },
+      exports: {},
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      evaluate,
+      async render() {
+        return { content: '<svg xmlns="http://www.w3.org/2000/svg"/>' };
+      },
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
+    worker.onEvaluated = (event) => {
+      evaluated.push(event);
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'offer-doc',
+        intent: 1,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(1);
+      });
+      const [first] = evaluated;
+      expect(first?.success, JSON.stringify(first?.issues)).toBe(true);
+      if (first?.success) {
+        expect(Object.keys(first.evaluateOptions?.schema.properties ?? {})).toEqual(['fidelity']);
+        expect(first.evaluateOptions?.schema.properties?.['fidelity']).toMatchObject({
+          type: 'number',
+          minimum: 0,
+          exclusiveMaximum: 1,
+          examples: [0.25],
+        });
+        // A view without options of its own offers none.
+        expect(first.views[0]?.options).toBeUndefined();
+      }
+      worker.handleUpdateDocument({ documentId: 'offer-doc', intent: 2, evaluateOptions: { fidelity: 0.5 } });
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(2);
+      });
+      expect(evaluate).toHaveBeenLastCalledWith(
+        expect.objectContaining({ options: { fidelity: 0.5 } }),
+        expect.any(Object),
+        expect.any(Object),
+      );
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it.each([
     [{ views: 'a' }, 'invalid views'],
     [{ exports: 'bom' }, 'invalid exports'],
     [{ instances: 'a' }, 'invalid instances'],
@@ -2280,7 +2465,7 @@ describe('effective tessellation on the render span', () => {
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
     await initializeWorkerForTesting(worker);
     const telemetry: Array<{ readonly name: string; readonly detail?: Record<string, unknown> }> = [];
-    worker.setTelemetrySend((entries) => telemetry.push(...entries));
+    worker.setTelemetrySend(({ entries }) => telemetry.push(...entries));
     const rendered: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
     worker.onRendered = (event) => {
       rendered.push(event);

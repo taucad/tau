@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { useSyncExternalStore } from 'react';
+import { useContext, useEffect, useState, useSyncExternalStore } from 'react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ChatInterfaceMobile } from '#routes/w.$workspace.$project/chat-interface-mobile.js';
+import { TerminalCloseContext } from '#components/terminal/terminal-close.js';
 import { mobileDrawerOpenSnapPoint, mobileDrawerPeekSnapPoint } from '#constants/editor.constants.js';
 import type { WorkbenchPanelId } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { mobilePanelByWorkbenchPanel } from '#routes/w.$workspace.$project/project-workspace-context.js';
@@ -69,7 +70,7 @@ vi.mock('#routes/w.$workspace.$project/use-chat-interface-state.js', () => ({
 }));
 // The shell only mounts on a phone, where a pane's Close is the sheet's own close.
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => true }));
-vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'project-1' }) }));
+vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'project-1', viewRecords: new Map() }) }));
 vi.mock('#hooks/use-sidebar-status.js', () => ({ useProjectSidebarRow: () => state.row }));
 vi.mock('#flags/use-feature.js', () => ({
   useFeature: (flag: 'machines' | 'tauDebug') => state.flags[flag],
@@ -108,6 +109,65 @@ vi.mock('#routes/w.$workspace.$project/chat-agents.js', () => ({ AgentsPanelBody
 vi.mock('#routes/w.$workspace.$project/chat-jobs.js', () => ({ JobsPanelBody: () => <p>Job list</p> }));
 vi.mock('#routes/w.$workspace.$project/chat-kernel.js', () => ({ TelemetryPanelContent: () => <p>Kernel spans</p> }));
 vi.mock('#routes/w.$workspace.$project/chat-console.js', () => ({ ChatConsole: () => <p>Console log</p> }));
+const terminal = vi.hoisted(() => ({ mounted: vi.fn(), closed: vi.fn(), running: false }));
+/* Stands in for the pane's side of the close host: a running session holds the close and offers the choices. */
+vi.mock('#components/terminal/terminal-pane.js', () => ({
+  ProjectTerminalPane: () => {
+    const [input, setInput] = useState('');
+    const [isAsking, setIsAsking] = useState(false);
+    const host = useContext(TerminalCloseContext);
+    useEffect(() => {
+      terminal.mounted();
+      return terminal.closed;
+    }, []);
+    useEffect(
+      () =>
+        host?.register(() => {
+          if (!terminal.running) {
+            return false;
+          }
+          setIsAsking(true);
+          return true;
+        }),
+      [host],
+    );
+    return (
+      <>
+        <label>
+          Shell session
+          <input
+            value={input}
+            onChange={(event) => {
+              setInput(event.target.value);
+            }}
+          />
+        </label>
+        {isAsking ? (
+          <div role='alertdialog' aria-label='Close the Terminal?'>
+            <button
+              type='button'
+              onClick={() => {
+                setIsAsking(false);
+                host?.hide();
+              }}
+            >
+              Hide
+            </button>
+            <button
+              type='button'
+              onClick={() => {
+                setIsAsking(false);
+                host?.close();
+              }}
+            >
+              Close and stop
+            </button>
+          </div>
+        ) : null}
+      </>
+    );
+  },
+}));
 vi.mock('#routes/w.$workspace.$project/project-unavailable-overlay.js', () => ({
   ProjectUnavailableOverlay: () => null,
 }));
@@ -199,6 +259,9 @@ afterEach(() => {
   state.listeners.clear();
   state.generation += 1;
   vi.unstubAllGlobals();
+  terminal.mounted.mockClear();
+  terminal.closed.mockClear();
+  terminal.running = false;
 });
 
 /* Vaul returns a closed drawer to its first snap point on a 500ms timer that outlives the test that closed it. Let the
@@ -210,6 +273,111 @@ afterAll(async () => {
 });
 
 describe('ChatInterfaceMobile', () => {
+  it('should preserve the Terminal across sheet hiding and surface switches until named Close', async () => {
+    const viewport = Object.assign(new EventTarget(), {
+      height: globalThis.innerHeight,
+      offsetTop: 0,
+      scale: 1,
+    });
+    vi.stubGlobal('visualViewport', viewport);
+    const { unmount } = renderShell();
+    expect(terminal.mounted).not.toHaveBeenCalled();
+    act(() => {
+      selectSurface('terminal');
+    });
+    const input = await screen.findByRole('textbox', { name: 'Shell session' });
+    input.scrollIntoView = vi.fn();
+    act(() => {
+      input.focus();
+      viewport.height = globalThis.innerHeight - 300;
+      viewport.dispatchEvent(new Event('resize'));
+    });
+    expect(screen.getByRole('dialog')).toHaveAttribute('data-keyboard', 'open');
+    expect(screen.getByRole('dialog').style.getPropertyValue('--keyboard-frame-height')).toBe(`${viewport.height}px`);
+    fireEvent.change(input, { target: { value: 'running shell state' } });
+    expect(terminal.mounted).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      screen.getByRole('region', { name: 'Terminal' }).focus();
+    });
+    expect(screen.getByRole('dialog')).not.toHaveAttribute('data-keyboard');
+    fireEvent.keyDown(screen.getByRole('region', { name: 'Terminal' }), { key: 'Escape' });
+    expect(state.drawerOpen).toBe(false);
+    expect(screen.queryByRole('textbox', { name: 'Shell session' })).not.toBeInTheDocument();
+    expect(terminal.closed).not.toHaveBeenCalled();
+    act(() => {
+      selectSurface('terminal');
+    });
+    expect(await screen.findByRole('textbox', { name: 'Shell session' })).toBe(input);
+    expect(input).toHaveValue('running shell state');
+    act(() => {
+      input.focus();
+    });
+    expect(screen.getByRole('dialog')).toHaveAttribute('data-keyboard', 'open');
+
+    act(() => {
+      selectSurface('chat');
+    });
+    expect(await screen.findByRole('textbox', { name: 'Message' })).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Shell session' })).not.toBeInTheDocument();
+    expect(terminal.closed).not.toHaveBeenCalled();
+    act(() => {
+      selectSurface('terminal');
+    });
+    expect(await screen.findByRole('textbox', { name: 'Shell session' })).toBe(input);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close Terminal' }));
+    expect(terminal.closed).toHaveBeenCalledTimes(1);
+    expect(state.drawerOpen).toBe(false);
+    act(() => {
+      selectSurface('terminal');
+    });
+    expect(await screen.findByRole('textbox', { name: 'Shell session' })).toHaveValue('');
+    expect(terminal.mounted).toHaveBeenCalledTimes(2);
+    act(() => {
+      selectSurface('viewer');
+    });
+    unmount();
+    expect(terminal.closed).toHaveBeenCalledTimes(2);
+  });
+
+  it('should ask a running Terminal before its named Close removes it, keeping it on Hide (T15)', async () => {
+    renderShell();
+    act(() => {
+      selectSurface('terminal');
+    });
+    const input = await screen.findByRole('textbox', { name: 'Shell session' });
+    fireEvent.change(input, { target: { value: 'running shell state' } });
+    terminal.running = true;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close Terminal' }));
+    expect(terminal.closed).not.toHaveBeenCalled();
+    expect(state.drawerOpen).toBe(true);
+    const decision = screen.getByRole('alertdialog', { name: 'Close the Terminal?' });
+
+    fireEvent.click(within(decision).getByRole('button', { name: 'Hide' }));
+    expect(state.drawerOpen).toBe(false);
+    expect(terminal.closed).not.toHaveBeenCalled();
+    act(() => {
+      selectSurface('terminal');
+    });
+    expect(await screen.findByRole('textbox', { name: 'Shell session' })).toHaveValue('running shell state');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close Terminal' }));
+    fireEvent.click(
+      within(screen.getByRole('alertdialog', { name: 'Close the Terminal?' })).getByRole('button', {
+        name: 'Close and stop',
+      }),
+    );
+    expect(terminal.closed).toHaveBeenCalledOnce();
+    expect(state.drawerOpen).toBe(false);
+    act(() => {
+      selectSurface('terminal');
+    });
+    expect(await screen.findByRole('textbox', { name: 'Shell session' })).toHaveValue('');
+    expect(terminal.mounted).toHaveBeenCalledTimes(2);
+  });
+
   it('should name the open surface by its title, with no tab panel left pointing at a missing tab', async () => {
     state.drawerOpen = true;
     state.activeTab = 'revisions';
@@ -323,6 +491,7 @@ describe('ChatInterfaceMobile', () => {
     details: 'Project details',
     kernel: 'Kernel spans',
     console: 'Console log',
+    terminal: 'Shell session',
   } as const satisfies Record<WorkbenchPanelId, string>;
   const paneTitles = {
     browser: 'Browser',
@@ -339,6 +508,7 @@ describe('ChatInterfaceMobile', () => {
     details: 'Details',
     kernel: 'Telemetry',
     console: 'Console',
+    terminal: 'Terminal',
   } as const satisfies Record<WorkbenchPanelId, string>;
 
   it.each(Object.keys(paneBodies) as WorkbenchPanelId[])(
@@ -527,6 +697,369 @@ describe('ChatInterfaceMobile', () => {
         observer();
       }
     });
+    expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+  });
+
+  /** Stub the ResizeObserver and hand back a driver that runs every registered callback, as a content change would. */
+  const driveableObservers = (): (() => void) => {
+    const observing = new Set<() => void>();
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        readonly #callback: () => void;
+        public constructor(callback: () => void) {
+          this.#callback = callback;
+        }
+        public observe(): void {
+          // The test drives the callback itself, for observers still observing.
+          observing.add(this.#callback);
+        }
+        public disconnect(): void {
+          observing.delete(this.#callback);
+        }
+      },
+    );
+    return () => {
+      act(() => {
+        // oxlint-disable-next-line unicorn/no-useless-spread -- a callback re-observes, which re-adds it to the set mid-loop.
+        for (const observer of [...observing]) {
+          observer();
+        }
+      });
+    };
+  };
+  const rect = (top: number, bottom: number): DOMRect =>
+    DOMRect.fromRect({ x: 0, y: top, width: 300, height: bottom - top });
+  /** A scroller in the open Jobs surface whose fixed rows fit; `scrolled` puts it away from where it rests. */
+  const scrollerInSurface = async (
+    options: Readonly<{ tray?: boolean; box: DOMRect; scrolled?: boolean }>,
+  ): Promise<HTMLElement> => {
+    const surface = await screen.findByRole('region', { name: 'Jobs' });
+    const content = surface.querySelector<HTMLElement>('[data-slot=floating-panel-content]')!;
+    Object.defineProperty(content, 'clientHeight', { configurable: true, value: 300 });
+    Object.defineProperty(content, 'scrollHeight', { configurable: true, value: 300 });
+    const scroller = document.createElement(options.tray ? 'ul' : 'div');
+    if (options.tray) {
+      scroller.dataset['scrollRest'] = 'start';
+    }
+    scroller.style.overflowY = 'auto';
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: options.box.height });
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: options.box.height + 400 });
+    // The tray rests at its top, a transcript at its end.
+    const rest = options.tray ? 0 : 400;
+    scroller.scrollTop = options.scrolled ? (options.tray ? 200 : 100) : rest;
+    vi.spyOn(scroller, 'getBoundingClientRect').mockReturnValue(options.box);
+    content.append(scroller);
+    return scroller;
+  };
+  const decision = (
+    scroller: HTMLElement,
+    attributes: Readonly<Record<string, string>>,
+    box: (snapPoint: number | string) => DOMRect,
+  ): HTMLElement => {
+    const element = document.createElement('div');
+    for (const [name, value] of Object.entries(attributes)) {
+      element.setAttribute(name, value);
+    }
+    element.textContent = 'Refused once.';
+    vi.spyOn(element, 'getBoundingClientRect').mockImplementation(() => box(state.activeSnapPoint));
+    scroller.append(element);
+    return element;
+  };
+
+  it('should raise the sheet from the peek when the resting transcript cuts off a run failure (I5, PN-CHAT-7)', async () => {
+    const drive = driveableObservers();
+    state.drawerOpen = true;
+    state.activeTab = 'jobs';
+    state.activeSnapPoint = mobileDrawerPeekSnapPoint;
+    renderShell();
+    const transcript = await scrollerInSurface({ box: rect(40, 140) });
+    // At the peek the failure runs past the transcript's foot; at half the transcript holds it.
+    decision(transcript, { 'data-decision': 'run-error', 'data-decision-id': 'run-error-1' }, (point) =>
+      point === mobileDrawerPeekSnapPoint ? rect(100, 180) : rect(60, 120),
+    );
+
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+  });
+
+  it('should re-check on a scroll, at most every 100ms, while a list settles at its end (I5)', async () => {
+    driveableObservers();
+    state.drawerOpen = true;
+    state.activeTab = 'jobs';
+    state.activeSnapPoint = mobileDrawerPeekSnapPoint;
+    renderShell();
+    // Still settling: the transcript is short of its end, so the failure below its foot is not the detent's doing.
+    const transcript = await scrollerInSurface({ box: rect(40, 140), scrolled: true });
+    decision(transcript, { 'data-decision': 'run-error', 'data-decision-id': 'run:r1:1' }, (point) =>
+      point === mobileDrawerPeekSnapPoint ? rect(100, 180) : rect(60, 120),
+    );
+    await act(async () => {
+      await new Promise((resolve) => {
+        requestAnimationFrame(resolve);
+      });
+    });
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      // The list reaches its end over a few scrolls; the check runs once, 100ms after the first.
+      transcript.scrollTop = 400;
+      fireEvent.scroll(transcript);
+      fireEvent.scroll(transcript);
+      act(() => {
+        vi.advanceTimersByTime(99);
+      });
+      expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should not count the closed sheet returning to its first detent as the person moving it (I5)', async () => {
+    const drive = driveableObservers();
+    state.drawerOpen = true;
+    state.activeTab = 'jobs';
+    state.activeSnapPoint = mobileDrawerOpenSnapPoint;
+    renderShell();
+    await scrollerInSurface({ box: rect(40, 140) });
+    drive();
+
+    // Closed with Escape, the sheet goes back to its first detent on Vaul's own timer: not a move the person made.
+    fireEvent.keyDown(screen.getByRole('region', { name: 'Jobs' }), { key: 'Escape' });
+    expect(state.drawerOpen).toBe(false);
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 600);
+      });
+    });
+
+    // Reopened at the peek with rows that no longer fit there, which the person never chose: the sheet rises.
+    act(() => {
+      state.activeSnapPoint = mobileDrawerPeekSnapPoint;
+      selectSurface('jobs');
+    });
+    const transcript = await scrollerInSurface({ box: rect(40, 140) });
+    Object.defineProperty(transcript.parentElement!, 'scrollHeight', { configurable: true, value: 360 });
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+  });
+
+  it('should retire a settled approval only once no copy of it still waits (I5)', async () => {
+    const drive = driveableObservers();
+    state.drawerOpen = true;
+    state.activeTab = 'jobs';
+    state.activeSnapPoint = mobileDrawerOpenSnapPoint;
+    renderShell();
+    const grabber = screen.getByRole('slider', { name: 'Drawer height' });
+    const tray = await scrollerInSurface({ tray: true, box: rect(200, 260) });
+    const atPeek = (point: number | string): DOMRect =>
+      point === mobileDrawerPeekSnapPoint ? rect(210, 330) : rect(205, 255);
+    const waiting = { 'data-decision': 'approval', 'data-decision-id': 'approval:i1', 'data-decision-state': 'open' };
+    const settled = { 'data-decision-id': 'approval:i1', 'data-decision-state': 'settled' };
+    // The banner's copy and the message's copy of one approval.
+    const banner = decision(tray, waiting, atPeek);
+    const message = decision(tray, waiting, atPeek);
+    drive();
+    fireEvent.keyDown(grabber, { key: 'Home' });
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+
+    // The message's copy settles first; the banner's still waits, still acknowledged.
+    delete message.dataset['decision'];
+    message.dataset['decisionState'] = 'settled';
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+
+    // Both settled: the identity retires, so the same approval waiting again is a new decision.
+    banner.remove();
+    message.remove();
+    decision(tray, settled, () => rect(0, 0));
+    drive();
+    decision(tray, waiting, atPeek);
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+  });
+
+  it('should keep a detent chosen on Chat after the person moves the sheet on another surface (I5)', async () => {
+    const drive = driveableObservers();
+    state.drawerOpen = true;
+    state.activeTab = 'jobs';
+    state.activeSnapPoint = mobileDrawerOpenSnapPoint;
+    renderShell();
+    const grabber = screen.getByRole('slider', { name: 'Drawer height' });
+    const tray = await scrollerInSurface({ tray: true, box: rect(200, 260) });
+    const atPeek = (point: number | string): DOMRect =>
+      point === mobileDrawerPeekSnapPoint ? rect(210, 330) : rect(205, 255);
+    const question = decision(tray, { 'data-ask-id': 'ask-1', 'data-ask-state': 'open' }, atPeek);
+    drive();
+    fireEvent.keyDown(grabber, { key: 'Home' });
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+
+    // Another surface, without the question: the person moves the sheet up and back down there.
+    question.remove();
+    fireEvent.keyDown(grabber, { key: 'End' });
+    expect(state.activeSnapPoint).toBe(1);
+    fireEvent.keyDown(grabber, { key: 'Home' });
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+
+    // Back on Chat, the same question is still the one they moved the sheet below.
+    decision(tray, { 'data-ask-id': 'ask-1', 'data-ask-state': 'open' }, atPeek);
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+  });
+
+  it.each<Readonly<{ name: string; scrolled: boolean; attributes: Readonly<Record<string, string>>; box: DOMRect }>>([
+    {
+      // Scrolled up past the failure: it sits below the transcript's foot, but the person put it there.
+      name: 'a failure the person scrolled past',
+      scrolled: true,
+      attributes: { 'data-decision': 'run-error', 'data-decision-id': 'run-error-1' },
+      box: rect(150, 210),
+    },
+    {
+      // At rest, but not displayed: a zero box is not cut off.
+      name: 'a failure with no box',
+      scrolled: false,
+      attributes: { 'data-decision': 'run-error', 'data-decision-id': 'run-error-1' },
+      box: rect(0, 0),
+    },
+    {
+      // A job's outcome or a form error is a record a person scrolls through, never a reason to move the sheet.
+      name: 'an alert that is no decision',
+      scrolled: false,
+      attributes: { role: 'alert' },
+      box: rect(100, 200),
+    },
+  ])('should hold the detent for $name (I5)', async ({ scrolled, attributes, box }) => {
+    const drive = driveableObservers();
+    state.drawerOpen = true;
+    state.activeTab = 'jobs';
+    state.activeSnapPoint = mobileDrawerOpenSnapPoint;
+    renderShell();
+    const transcript = await scrollerInSurface({ box: rect(40, 140), scrolled });
+    decision(transcript, attributes, () => box);
+
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+  });
+
+  it('should keep a failure acknowledged while its text changes, and raise for the same words as a new failure (I5)', async () => {
+    const drive = driveableObservers();
+    state.drawerOpen = true;
+    state.activeTab = 'jobs';
+    state.activeSnapPoint = mobileDrawerOpenSnapPoint;
+    renderShell();
+    const transcript = await scrollerInSurface({ box: rect(40, 140) });
+    const atPeek = (point: number | string): DOMRect =>
+      point === mobileDrawerPeekSnapPoint ? rect(100, 180) : rect(60, 120);
+    const failure = decision(transcript, { 'data-decision': 'run-error', 'data-decision-id': 'run-error-1' }, atPeek);
+    failure.textContent = 'Rate limited. Retrying in 30s.';
+    drive();
+    fireEvent.keyDown(screen.getByRole('slider', { name: 'Drawer height' }), { key: 'Home' });
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+
+    // A countdown rewrites the card every second: still the failure the person moved the sheet below.
+    failure.textContent = 'Rate limited. Retrying in 29s.';
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+
+    // Try again fails the same way: the same words, a new failure.
+    failure.remove();
+    const again = decision(transcript, { 'data-decision': 'run-error', 'data-decision-id': 'run-error-2' }, atPeek);
+    again.textContent = 'Rate limited. Retrying in 29s.';
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+  });
+
+  it('should keep the fixed rows acknowledged when an empty failure marker has no box (I5)', async () => {
+    const drive = driveableObservers();
+    state.drawerOpen = true;
+    state.activeTab = 'jobs';
+    state.activeSnapPoint = mobileDrawerOpenSnapPoint;
+    renderShell();
+    const transcript = await scrollerInSurface({ box: rect(40, 140) });
+    const content = transcript.parentElement!;
+    Object.defineProperty(content, 'scrollHeight', { configurable: true, value: 360 });
+    fireEvent.keyDown(screen.getByRole('slider', { name: 'Drawer height' }), { key: 'Home' });
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+
+    decision(transcript, { 'data-decision': 'run-error', 'data-decision-id': 'run-error-1' }, () => rect(0, 0));
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+  });
+
+  it('should raise the sheet from half to full when the resting tray cuts off a waiting question (I5, WB-09)', async () => {
+    const drive = driveableObservers();
+    state.drawerOpen = true;
+    state.activeTab = 'jobs';
+    state.activeSnapPoint = mobileDrawerOpenSnapPoint;
+    renderShell();
+    const tray = await scrollerInSurface({ tray: true, box: rect(200, 350) });
+    // An answered question past the tray's foot is a record, not a decision.
+    decision(tray, { 'data-ask-id': 'ask-0', 'data-ask-state': 'settled' }, () => rect(210, 420));
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+
+    // A waiting question's answers past the resting tray's foot: the sheet rises rather than scroll them away.
+    decision(tray, { 'data-ask-id': 'ask-1', 'data-ask-state': 'open' }, (point) =>
+      point === 1 ? rect(210, 340) : rect(210, 420),
+    );
+    drive();
+    expect(state.activeSnapPoint).toBe(1);
+  });
+
+  it('should hold the detent while one copy of a waiting question is wholly shown (I5)', async () => {
+    const drive = driveableObservers();
+    state.drawerOpen = true;
+    state.activeTab = 'jobs';
+    state.activeSnapPoint = mobileDrawerOpenSnapPoint;
+    renderShell();
+    // The transcript, resting at its end, cuts off the question's card; the tray shows the same question whole.
+    const transcript = await scrollerInSurface({ box: rect(40, 140) });
+    const tray = await scrollerInSurface({ tray: true, box: rect(150, 300) });
+    // Both copies land together, as one render puts them on screen.
+    decision(transcript, { 'data-ask-id': 'ask-1', 'data-ask-state': 'open' }, () => rect(100, 200));
+    const trayCopy = decision(tray, { 'data-ask-id': 'ask-1', 'data-ask-state': 'open' }, () => rect(160, 280));
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+
+    // Both copies cut off: the question is folded away, and the sheet rises.
+    vi.mocked(trayCopy.getBoundingClientRect).mockImplementation(() =>
+      state.activeSnapPoint === 1 ? rect(160, 280) : rect(160, 340),
+    );
+    drive();
+    expect(state.activeSnapPoint).toBe(1);
+  });
+
+  it('should hold a detent the person chooses below a waiting question, until a new decision arrives (I5)', async () => {
+    const drive = driveableObservers();
+    state.drawerOpen = true;
+    state.activeTab = 'jobs';
+    state.activeSnapPoint = 1;
+    renderShell();
+    const tray = await scrollerInSurface({ tray: true, box: rect(200, 260) });
+    decision(tray, { 'data-ask-id': 'ask-1', 'data-ask-state': 'open' }, (point) =>
+      point === 1 ? rect(205, 255) : rect(210, 330),
+    );
+    drive();
+    expect(state.activeSnapPoint).toBe(1);
+
+    // The person takes the sheet down to the peek: the question no longer fits, and the sheet stays where they put it.
+    fireEvent.keyDown(screen.getByRole('slider', { name: 'Drawer height' }), { key: 'Home' });
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+    drive();
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+
+    // A second question arrives and is cut off: that one has not been seen, so the sheet rises for it.
+    decision(tray, { 'data-ask-id': 'ask-2', 'data-ask-state': 'open' }, (point) =>
+      point === mobileDrawerPeekSnapPoint ? rect(240, 320) : rect(205, 255),
+    );
+    drive();
     expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
   });
 

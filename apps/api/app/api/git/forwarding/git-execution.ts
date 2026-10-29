@@ -6,6 +6,7 @@ import type { VerificationKeys } from '#api/git/forwarding/contract/keys.js';
 import type { GitExecutor } from '#api/git/forwarding/git-executor.js';
 import { startInProcessStorage } from '#api/git/forwarding/in-process-executor.js';
 import { StorageForwarder } from '#api/git/forwarding/storage-forwarder.js';
+import { StorageRouter } from '#api/git/forwarding/storage-router.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
 import type { PreviewWriter } from '#api/projects/project-preview-store.js';
 
@@ -26,8 +27,13 @@ import type { PreviewWriter } from '#api/projects/project-preview-store.js';
 
 type GitExecutionMode = 'forwarded' | 'in_process';
 
+/** DC2: how a forwarded request picks its tau-storage member. */
+type GitAffinity = 'off' | 'rendezvous';
+
 export type GitExecution = {
   readonly mode: GitExecutionMode;
+  /** The affinity in effect: `off` in process, where there is no member to choose. Labels `tau.sync.operation.duration`. */
+  readonly affinity: GitAffinity;
   readonly executor: GitExecutor;
   /** In process only: the keys its receipts verify with, which replace the configured receipt keys. */
   readonly receiptKeys: VerificationKeys | undefined;
@@ -53,6 +59,8 @@ export const createGitExecution = (args: {
   readonly nodeEnvironment: string;
   readonly storageUrl: string | undefined;
   readonly grantSigningKey: string | undefined;
+  /** DC2 affinity; absent or `off` forwards as DC1 did. */
+  readonly affinity?: GitAffinity;
   readonly metrics: MetricsService;
   readonly store: RepositoryStore;
   readonly shutdown: ShutdownService;
@@ -78,20 +86,31 @@ export const createGitExecution = (args: {
       { gitExecution: 'in_process' },
       'git_execution=in_process: TAU_STORAGE_URL is unset, so git runs in this process',
     );
-    return { mode: 'in_process', executor: storage.executor, receiptKeys: storage.receiptKeys };
+    return { mode: 'in_process', affinity: 'off', executor: storage.executor, receiptKeys: storage.receiptKeys };
   }
   const key = parseSigningKey(
     args.grantSigningKey ?? developmentSigningKeyJson('grant'),
     'TAU_STORAGE_GRANT_SIGNING_KEY',
   );
   refuseDevelopmentKid(args.nodeEnvironment, [key.kid], 'TAU_STORAGE_GRANT_SIGNING_KEY');
+  const affinity = args.affinity ?? 'off';
   args.logger.log(
-    { gitExecution: 'forwarded', storageTargets: urls.length },
+    { gitExecution: 'forwarded', storageTargets: urls.length, affinity },
     'git_execution=forwarded: every git RPC goes to tau-storage',
   );
+  const router =
+    affinity === 'rendezvous'
+      ? new StorageRouter({
+          urls,
+          recordMembers: (count) => {
+            args.metrics.gitMembers.record(count);
+          },
+        })
+      : undefined;
   return {
     mode: 'forwarded',
-    executor: new StorageForwarder({ urls, key, metrics: args.metrics }),
+    affinity,
+    executor: new StorageForwarder({ urls, key, metrics: args.metrics, ...(router === undefined ? {} : { router }) }),
     receiptKeys: undefined,
   };
 };

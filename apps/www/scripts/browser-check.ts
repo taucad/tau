@@ -170,11 +170,24 @@ try {
   await navigationContext.close();
   await serial(
     [
-      { platform: 'MacIntel', label: 'Mac', file: 'Tau-macos-arm64.zip', intel: true },
-      { platform: 'Win32', label: 'Windows', file: 'Tau-win32-x64.zip', intel: false },
-      { platform: 'Linux x86_64', label: 'Linux', file: 'Tau-linux-x64.tar.gz', intel: false },
+      // A direct Mac file link names the ZIP it serves; page links and other platforms keep their platform label.
+      {
+        platform: 'MacIntel',
+        label: 'Mac',
+        direct: 'Download ZIP for Apple silicon',
+        file: 'Tau-macos-arm64.zip',
+        intel: true,
+      },
+      { platform: 'Win32', label: 'Windows', direct: 'Download for Windows', file: 'Tau-win32-x64.zip', intel: false },
+      {
+        platform: 'Linux x86_64',
+        label: 'Linux',
+        direct: 'Download for Linux',
+        file: 'Tau-linux-x64.tar.gz',
+        intel: false,
+      },
     ],
-    async ({ platform, label, file, intel }) => {
+    async ({ platform, label, direct, file, intel }) => {
       const downloadContext = await browser.newContext({ reducedMotion: 'reduce' });
       await downloadContext.addInitScript((hostPlatform: string) => {
         Object.defineProperty(navigator, 'platform', { value: hostPlatform });
@@ -182,6 +195,24 @@ try {
         Object.defineProperty(navigator, 'userAgent', { value: hostPlatform });
       }, platform);
       const downloadPage = await downloadContext.newPage();
+      const assertDownloadIcons = async (): Promise<void> => {
+        const icons = await downloadPage
+          .getByRole('link', { name: /^Download (?:ZIP |DMG )?for /u })
+          .evaluateAll((links) =>
+            links.map((link) => ({
+              label: link.textContent,
+              color: getComputedStyle(link).color,
+              fills: [...link.querySelectorAll('svg path')].map((path) => getComputedStyle(path).fill),
+            })),
+          );
+        assert.ok(icons.length > 0, `${platform} has download links`);
+        for (const icon of icons) {
+          assert.ok(icon.fills.length > 0, `${platform} ${icon.label} has a logo`);
+          for (const fill of icon.fills) {
+            assert.equal(fill, icon.color, `${platform} ${icon.label} logo matches its label`);
+          }
+        }
+      };
       const errors: string[] = [];
       downloadPage.on('pageerror', (error) => errors.push(error.message));
       await downloadPage.goto(origin);
@@ -189,12 +220,20 @@ try {
         .locator('[data-placement="hero"]')
         .filter({ hasText: `Download for ${label}` })
         .waitFor();
+      await assertDownloadIcons();
       await downloadPage.locator('[data-placement="hero"]').click();
       await downloadPage.waitForURL(`${origin}/download/`);
       const primaryDownload = downloadPage.locator('[data-host-download="direct"]');
-      await primaryDownload.filter({ hasText: `Download for ${label}` }).waitFor();
+      await primaryDownload.filter({ hasText: direct }).waitFor();
       assert.equal(await primaryDownload.getAttribute('href'), `https://downloads.tau.new/latest/${file}`);
       assert.equal(await downloadPage.locator('[data-mac-intel]').isVisible(), intel);
+      await assertDownloadIcons();
+      await primaryDownload.hover();
+      await primaryDownload.focus();
+      await assertDownloadIcons();
+      await downloadPage.goto(`${origin}/pricing/`);
+      await downloadPage.getByRole('link', { name: `Download for ${label}` }).waitFor();
+      await assertDownloadIcons();
       await downloadPage.getByRole('link', { name: 'Tau home' }).first().click();
       await downloadPage.waitForURL(`${origin}/`);
       await downloadPage

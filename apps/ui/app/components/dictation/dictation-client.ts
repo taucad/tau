@@ -1,6 +1,8 @@
 import { dictationEventSchema, dictationStatusSchema } from '@taucad/chat/schemas';
 import type { DictationStatus } from '@taucad/chat/schemas';
 import { ENV } from '#environment.config.js';
+import { recordApiRequestId } from '#lib/api-request-id.js';
+import { DictationError, SilentDictationError, dictationMessages } from '#components/dictation/dictation-errors.js';
 
 const unavailable: DictationStatus = { available: false };
 
@@ -14,16 +16,50 @@ export async function fetchDictationStatus(signal?: AbortSignal): Promise<Dictat
   return parsed.success ? parsed.data : unavailable;
 }
 
-const errorMessage = async (response: Response): Promise<string> => {
+/** The API's refusal of an unusable recording, already worded for people. */
+const recordingRejected = 'The recording could not be transcribed. Try recording again.';
+
+const refusalBody = async (response: Response): Promise<string | undefined> => {
   try {
     const body: unknown = await response.json();
     if (typeof body === 'object' && body !== null && 'error' in body && typeof body.error === 'string') {
       return body.error;
     }
   } catch {
-    // A body that is not the API's error shape falls through to the generic message.
+    // A body that is not the API's error shape carries no reason to show.
   }
-  return 'Could not transcribe dictation. Try again.';
+  return undefined;
+};
+
+/**
+ * Words the API's refusal by its status, so a raw status text or proxy page never reaches people.
+ *
+ * @returns The error to throw: silent when another tab is already transcribing.
+ */
+const refusal = async (response: Response): Promise<Error> => {
+  switch (response.status) {
+    case 401: {
+      return new DictationError(dictationMessages.sessionExpired);
+    }
+    case 413: {
+      return new DictationError(dictationMessages.recordingTooLong);
+    }
+    case 429: {
+      return new SilentDictationError('A dictation is already being transcribed.');
+    }
+    case 503: {
+      return new DictationError(
+        (await refusalBody(response)) === recordingRejected
+          ? dictationMessages.transcriptionFailed
+          : dictationMessages.serviceUnavailable,
+      );
+    }
+    default: {
+      return new DictationError(
+        response.status >= 500 ? dictationMessages.serviceUnavailable : dictationMessages.transcriptionFailed,
+      );
+    }
+  }
 };
 
 /**
@@ -43,7 +79,7 @@ export async function transcribeDictation(
     signal: options.signal,
   });
   if (!response.ok || !response.body) {
-    throw new Error(await errorMessage(response));
+    throw recordApiRequestId(await refusal(response), response);
   }
   let preview = '';
   let buffered = '';
@@ -63,14 +99,17 @@ export async function transcribeDictation(
         if (line.trim() === '') {
           continue;
         }
-        const event = dictationEventSchema.parse(JSON.parse(line));
-        if (event.type === 'error') {
-          throw new Error(event.message);
+        const event = dictationEventSchema.safeParse(JSON.parse(line) as unknown);
+        if (!event.success) {
+          throw new DictationError(dictationMessages.transcriptionFailed);
         }
-        if (event.type === 'done') {
-          return event.text;
+        if (event.data.type === 'error') {
+          throw new DictationError(dictationMessages.transcriptionStopped);
         }
-        preview += event.text;
+        if (event.data.type === 'done') {
+          return event.data.text;
+        }
+        preview += event.data.text;
         options.onPreview(preview);
       }
     }
@@ -78,5 +117,5 @@ export async function transcribeDictation(
     // Releases the connection when a done or error event ends the read early, as `for await` did.
     void reader.cancel();
   }
-  throw new Error('Transcription ended before it finished. Try dictation again.');
+  throw new DictationError(dictationMessages.transcriptionUnfinished);
 }

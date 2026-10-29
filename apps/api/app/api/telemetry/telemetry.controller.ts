@@ -1,14 +1,18 @@
 /* oxlint-disable new-cap -- NestJS decorators use PascalCase */
-import { Body, Controller, Post, HttpCode, UseGuards } from '@nestjs/common';
-import { IngestEntryName, AttributeKey, knownAgentIds } from '@taucad/telemetry';
-import type { AgentTurnContext, ClientMetricEntry } from '@taucad/telemetry';
+import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { IngestEntryName, AttributeKey, knownAgentIds, runtimeEntryNames } from '@taucad/telemetry';
+import type { AgentTurnContext, ClientMetricEntry, IngestReceipt, TelemetryPolicyAnswer } from '@taucad/telemetry';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { AuthGuard } from '#auth/auth.guard.js';
 import { OptionalAuth, OptionalUser } from '#auth/decorators/auth.decorator.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { IngestPayloadDto } from '#api/telemetry/telemetry.dto.js';
+import { RuntimeIngestService } from '#api/telemetry/runtime-ingest.service.js';
 
 const maximumSyncLagMilliseconds = 24 * 60 * 60 * 1000;
 const maximumSyncPending = 10_000;
+/* A push or pull is aborted at its 15-minute deadline; an hour bounds a skewed client clock. */
+const maximumSyncAttemptMilliseconds = 60 * 60 * 1000;
 
 /**
  * Receives batched telemetry from the client runtime (web workers).
@@ -17,29 +21,83 @@ const maximumSyncPending = 10_000;
 @UseGuards(AuthGuard)
 @Controller({ path: 'telemetry', version: '1' })
 export class TelemetryController {
-  public constructor(private readonly metrics: MetricsService) {}
+  public constructor(
+    private readonly metrics: MetricsService,
+    private readonly runtimeIngest: RuntimeIngestService,
+  ) {}
 
   /**
-   * Record a batch of client metrics.
+   * Record a batch of client metrics and runtime entries.
    *
-   * A signed-out page still runs the client runtime that reports them, so the
-   * route accepts its batch rather than answering every flush with a 401. It
-   * records only signed-in batches, which keeps the series bounded to real
-   * accounts.
+   * Legacy client metric entries keep today's behaviour exactly: recorded only
+   * for a signed-in request, untouched by the runtime gate, budgets and dedupe
+   * (AR-W5-09). A batch with no runtime entries and no batch id answers 204 as
+   * before. Runtime entries go through the runtime ingest, which records
+   * signed-out batches too under its own abuse controls, and answer 200 with a
+   * receipt (or 400, 413, 425, 429).
    *
-   * @param body - The validated metric batch.
+   * @param body - The validated batch.
    * @param userId - The signed-in user, when there is one.
+   * @param request - The request (address and body size).
+   * @param reply - The reply, for the status and `Retry-After`.
+   * @returns The receipt, for a batch that carries runtime entries.
    */
+  // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest parameter decorators bind body, session user, request and reply independently.
   @Post('ingest')
-  @HttpCode(204)
   @OptionalAuth()
-  public ingest(@Body() body: IngestPayloadDto, @OptionalUser('id') userId: string | undefined): void {
-    if (userId === undefined) {
-      return;
-    }
+  public async ingest(
+    @Body() body: IngestPayloadDto,
+    @OptionalUser('id') userId: string | undefined,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<IngestReceipt | undefined> {
+    const legacy: ClientMetricEntry[] = [];
+    const runtime: unknown[] = [];
     for (const entry of body.entries) {
-      this.recordEntry(entry, entry.duration / 1000);
+      if (isLegacyEntry(entry)) {
+        legacy.push(entry);
+      } else {
+        runtime.push(entry);
+      }
     }
+    if (userId !== undefined) {
+      for (const entry of legacy) {
+        this.recordEntry(entry, entry.duration / 1000);
+      }
+    }
+    if (runtime.length === 0 && body.batch === undefined) {
+      void reply.status(204);
+      return undefined;
+    }
+    const declared = Number(request.headers['content-length']);
+    const result = await this.runtimeIngest.ingest({
+      batch: body.batch,
+      entries: runtime,
+      principal: userId,
+      ip: request.ip,
+      bodyBytes: Number.isFinite(declared) ? declared : Buffer.byteLength(JSON.stringify(body)),
+      now: new Date(),
+    });
+    void reply.status(result.status);
+    if (result.retryAfterSeconds !== undefined) {
+      void reply.header('retry-after', String(result.retryAfterSeconds));
+    }
+    return result.receipt;
+  }
+
+  /**
+   * The entry-free policy probe (AR-W17-02): what this deployment does with runtime entries and how long a client may
+   * cache the answer. No body, no entry; the session, if any, is ignored for the answer.
+   *
+   * @param reply - The reply, for `Cache-Control`.
+   * @returns The policy answer.
+   */
+  @Get('policy')
+  @OptionalAuth()
+  public policy(@Res({ passthrough: true }) reply: FastifyReply): TelemetryPolicyAnswer {
+    const answer = this.runtimeIngest.policy(new Date());
+    void reply.header('cache-control', `max-age=${String(answer.maxAge)}`);
+    return answer;
   }
 
   private recordEntry(entry: ClientMetricEntry, durationSeconds: number): void {
@@ -242,7 +300,12 @@ export class TelemetryController {
     const { direction, outcome, placement, lagMilliseconds, pending } = entry.detail;
     const attributes = { 'agent.placement': placement };
     this.metrics.syncClientAttempts.add(1, { direction, outcome, ...attributes });
-    /* A client clock or a corrupt queue must not stretch the histograms: clamp to a day and a bounded depth. */
+    /* A client clock or a corrupt queue must not stretch the histograms: clamp to an hour, a day and a bounded depth. */
+    this.metrics.syncClientAttemptDuration.record(Math.min(entry.duration, maximumSyncAttemptMilliseconds) / 1000, {
+      direction,
+      outcome,
+      ...attributes,
+    });
     if (lagMilliseconds !== undefined) {
       this.metrics.syncClientLag.record(Math.min(lagMilliseconds, maximumSyncLagMilliseconds) / 1000, attributes);
     }
@@ -251,6 +314,17 @@ export class TelemetryController {
     }
   }
 }
+
+const runtimeNames: ReadonlySet<string> = new Set(runtimeEntryNames);
+
+/**
+ * Whether an entry is a legacy client metric, not one of the four runtime entries (validated by the runtime ingest).
+ *
+ * @param entry - The entry.
+ * @returns `true` for a client metric entry.
+ */
+const isLegacyEntry = (entry: IngestPayloadDto['entries'][number]): entry is ClientMetricEntry =>
+  !runtimeNames.has(entry.name);
 
 /** The ingest validates an id's shape; only known agents are recorded as themselves (bounded cardinality). */
 const recordedAgentId = (agentId: string): string => (knownAgentIds.has(agentId) ? agentId : 'other');

@@ -32,6 +32,7 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import process from 'node:process';
 import { createNodeVmFileSystem } from 'geospec/runner/node';
+import { createEsbuildModuleVm } from '@taucad/esbuild/vm';
 import { Engine } from 'geospec-engine/node';
 import { createExampleGeoSpecExporter } from '@taucad/tau-examples/runtime';
 import { createGeoSpecNativeModelLoader, createNativeGeoSpecRunner } from 'geospec/runner/native';
@@ -123,6 +124,7 @@ const createRunner = async (observations: Map<string, ModelObservation>): Promis
   );
   const runner = createNativeGeoSpecRunner({
     filesystem: createNodeVmFileSystem(examplesRoot),
+    createModuleVm: createEsbuildModuleVm,
     nativeAssertions: { engine },
     nativeModelLoader,
   });
@@ -313,7 +315,7 @@ const main = async (): Promise<void> => {
       corpusFingerprint: fingerprintBefore,
       corpusUnchanged: fingerprintBefore === (await corpusFingerprint(corpusPaths)),
       packageHashes: {
-        geospec: await digest(resolve(repoRoot, 'packages/geospec/package.json')),
+        geospec: await digest(resolve(repoRoot, 'node_modules/geospec/package.json')),
         geospecEngineNative: await digest(createRequire(import.meta.url).resolve('geospec-engine/package.json')),
         runtime: await digest(resolve(repoRoot, 'packages/runtime/package.json')),
       },

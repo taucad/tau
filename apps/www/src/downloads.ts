@@ -84,6 +84,24 @@ export const desktopDownloadHref = (platform: keyof typeof desktopDownloads): st
 export const desktopDownloadLabel = (platform: keyof typeof desktopDownloads): string =>
   `${desktopDownloads[platform].icon}<span>Download for ${desktopDownloads[platform].label}</span>`;
 
+/** Mac file links name the chip, because one Mac label cannot say which architecture a direct file serves. */
+const macFileLabels = { mac: 'Apple silicon', macIntel: 'Intel Mac' } as const;
+
+/**
+ * Label a link that downloads a file directly. A Mac label names the format it serves, so a link only says DMG while
+ * its URL is a DMG; Windows and Linux keep their platform label.
+ * @param platform - Published desktop build.
+ * @param format - The format the link's URL serves; Mac archive links default to their ZIP.
+ * @returns Label markup from checked-in icon and product constants only.
+ */
+export const desktopFileLabel = (platform: keyof typeof desktopDownloads, format: 'DMG' | 'ZIP' = 'ZIP'): string =>
+  platform === 'mac' || platform === 'macIntel'
+    ? `${desktopDownloads[platform].icon}<span>Download ${format} for ${macFileLabels[platform]}</span>`
+    : desktopDownloadLabel(platform);
+
+const macDiskImageInstall =
+  'Open the DMG to mount it, drag Tau to Applications, eject the disk image, then launch Tau from Applications and sign in.';
+
 /** Promoted installer catalog is opt-in; legacy callers above keep their existing downloads. */
 export type QualifiedDesktopDownload = {
   readonly platform: keyof typeof desktopDownloads | 'linuxPortable';
@@ -92,6 +110,10 @@ export type QualifiedDesktopDownload = {
   readonly install: string;
   readonly updates: string;
   readonly href: string;
+  /** The primary artifact's kind; only `macos-dmg` is a disk image. */
+  readonly primaryKind: string;
+  /** Whether clean-host (operator VM) acceptance passed; `pending` is admitted only on staging Mac routes. */
+  readonly cleanHost: 'passed' | 'pending';
   readonly sha256: string;
   readonly size: number;
   readonly alternatives: ReadonlyArray<{ name: string; href: string; sha256: string; size: number }>;
@@ -164,7 +186,7 @@ export const createDesktopDownloadCatalog = (options: {
       primary: 'macos-dmg',
       names: { 'macos-dmg': 'Tau-macos-arm64.dmg', 'macos-zip': 'Tau-macos-arm64.zip' },
       detail: 'Apple silicon · DMG installer',
-      install: 'Open the DMG, drag Tau to Applications, eject the disk image, then launch Tau.',
+      install: macDiskImageInstall,
       updates: desktopDownloads.mac.updates,
     },
     'macos-zip:darwin-x64': {
@@ -172,7 +194,7 @@ export const createDesktopDownloadCatalog = (options: {
       primary: 'macos-dmg',
       names: { 'macos-dmg': 'Tau-macos-x64.dmg', 'macos-zip': 'Tau-macos-x64.zip' },
       detail: 'Intel Mac · DMG installer',
-      install: 'Open the DMG, drag Tau to Applications, eject the disk image, then launch Tau.',
+      install: macDiskImageInstall,
       updates: desktopDownloads.macIntel.updates,
     },
     'windows-nsis:win32-x64': {
@@ -221,7 +243,10 @@ export const createDesktopDownloadCatalog = (options: {
     seen.add(key);
     const definition = routeDefinitions[key as keyof typeof routeDefinitions];
     const proof = catalogRecord(route['qualification'], ['ci', 'vm', 'trust']);
-    if (proof['ci'] !== true || proof['vm'] !== true || proof['trust'] !== 'release') {
+    // Clean-host acceptance may be pending only for a staging Mac route the publisher admitted on CI evidence alone.
+    const cleanHostPending =
+      proof['vm'] === 'pending' && options.channel === 'staging' && definition.primary === 'macos-dmg';
+    if (proof['ci'] !== true || (proof['vm'] !== true && !cleanHostPending) || proof['trust'] !== 'release') {
       throw new TypeError('Installer route has not passed release qualification');
     }
     if (!Array.isArray(route['artifacts']) || route['artifacts'].length !== Object.keys(definition.names).length) {
@@ -260,10 +285,12 @@ export const createDesktopDownloadCatalog = (options: {
     result.push({
       platform: definition.platform,
       label: definition.platform === 'linuxPortable' ? 'Linux portable' : desktopDownloads[definition.platform].label,
-      detail: definition.detail,
+      detail: cleanHostPending ? `${definition.detail} · clean-Mac install testing pending` : definition.detail,
       install: definition.install,
       updates: definition.updates,
       href: definition.platform === 'linux' ? '#linux-installation' : primary.href,
+      primaryKind: definition.primary,
+      cleanHost: cleanHostPending ? 'pending' : 'passed',
       sha256: primary.sha256,
       size: primary.size,
       alternatives: [...artifacts.entries()]

@@ -10,9 +10,12 @@ import { signReceipt } from '#api/git/forwarding/contract/receipt.js';
 import type { StorageReceiptFacts } from '#api/git/forwarding/contract/receipt.js';
 import type { GitExecutor, GrantFacts } from '#api/git/forwarding/git-executor.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
+import { probeGitToolchain } from '#api/git/worker/git-toolchain.js';
+import type { GitToolchain } from '#api/git/worker/git-toolchain.js';
 import { StorageGitService } from '#api/git/worker/storage-git.service.js';
 import type { ReceiptChannel } from '#api/git/worker/storage-git.service.js';
 import { objectStoragePreviewWriter } from '#api/projects/project-preview-store.js';
+
 import type { PreviewWriter } from '#api/projects/project-preview-store.js';
 
 /**
@@ -139,3 +142,11 @@ export const startInProcessStorage = (args: {
     receiptKeys: receipt.verifying,
   };
 };
+
+/**
+ * The git and git-lfs probe the API's readiness runs while git runs in this
+ * process (DC3). It goes with this module when production has tau-storage.
+ *
+ * @returns The versions found, or `undefined` for a missing binary.
+ */
+export const inProcessGitToolchain = async (): Promise<GitToolchain> => probeGitToolchain(true);

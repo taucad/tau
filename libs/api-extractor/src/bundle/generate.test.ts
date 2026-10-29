@@ -60,26 +60,6 @@ const digest = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').
 const referencedFiles = (body: string): readonly string[] =>
   [...body.matchAll(/`([\w.-]+\.md)`/gu)].map(([, file]) => file ?? '');
 
-describe('GeoSpec reference roles', () => {
-  it('should retain canonical authoring and complete public host reference separately', () => {
-    const owner = bundleOwners.find((entry) => entry.slug === 'geospec-authoring');
-    const primary = owner?.corpus?.();
-    const supplemental = owner?.supplementalApi?.corpus();
-    expect(primary?.entries.some((entry) => entry.name === 'expectGeo')).toBe(true);
-    expect(primary?.entries.some((entry) => entry.name === 'loadModel')).toBe(true);
-    expect(primary?.entries.some((entry) => entry.name === 'GeoSpecAssertionClient')).toBe(false);
-    expect(supplemental?.entries.some((entry) => entry.name === 'GeoSpecAssertionClient')).toBe(true);
-    expect(supplemental?.entries.some((entry) => entry.name === 'expectGeo')).toBe(true);
-    expect(owner?.supplementalApi?.prefix).toBe('public');
-    expect(owner?.description).toContain('TypeScript or JavaScript');
-    const [classEntry] = primary?.entries.filter((entry) => entry.kind === 'class') ?? [];
-    if (classEntry === undefined || owner?.groupBy === undefined) {
-      throw new Error('Expected a public class');
-    }
-    expect(owner.groupBy(classEntry)).toBe('Classes');
-  }, 120_000);
-});
-
 describe('generateBundles', () => {
   beforeAll(async () => {
     await generateBundles({ outputRoot: scratch });
@@ -375,7 +355,6 @@ describe('skill declarations', () => {
     })
       .filter((entry) => entry.isDirectory())
       .map((entry) => `packages/plugins/${entry.name}`),
-    'packages/geospec',
     'packages/workbench',
   ];
 

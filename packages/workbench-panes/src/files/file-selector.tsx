@@ -455,14 +455,14 @@ export function FileBrowser({
         ref={setScrollParent}
         className={cn('scroll-shadows-y', fill ? 'max-h-none min-h-0 flex-1' : 'max-h-75')}
       >
-        {!isSearching && status.kind === 'error' ? (
+        {status.kind === 'error' ? (
           <div className='flex flex-col items-center gap-2 p-4 text-center text-sm'>
             <p className='text-feature'>{status.message}</p>
             <Button type='button' variant='outline' size='sm' onClick={onRetry}>
               Retry
             </Button>
           </div>
-        ) : !isSearching && status.kind === 'loading' ? (
+        ) : status.kind === 'loading' ? (
           <div className='flex items-center justify-center p-4'>
             <Loader className='size-4' />
           </div>
@@ -529,6 +529,7 @@ export function useFileBrowser({
   const [items, setItems] = useState<readonly FilesEntry[]>([]);
   const [status, setStatus] = useState<FileBrowserStatus>({ kind: 'loading' });
   const [searchResults, setSearchResults] = useState<readonly FilesEntry[]>([]);
+  const [searchStatus, setSearchStatus] = useState<FileBrowserStatus>({ kind: 'ready' });
   const describeRef = useRef(describeError);
   describeRef.current = describeError;
   /** The folder the entries on screen belong to; listing it again keeps them on screen meanwhile. */
@@ -567,15 +568,23 @@ export function useFileBrowser({
   }, [isActive, dataSource, currentPath, reloadToken, revision]);
 
   useEffect(() => {
-    if (searchAdapter === undefined || searchQuery === '') {
+    if (!isActive || searchAdapter === undefined || searchQuery === '') {
       return;
     }
     let cancelled = false;
+    setSearchStatus({ kind: 'loading' });
     const find = async (): Promise<void> => {
-      // ponytail: a search that fails finds nothing; the folder listing reports failures.
-      const results = await searchAdapter.searchFiles(searchQuery).catch(() => []);
-      if (!cancelled) {
-        setSearchResults(results);
+      try {
+        const results = await searchAdapter.searchFiles(searchQuery);
+        if (!cancelled) {
+          setSearchResults(results);
+          setSearchStatus({ kind: 'ready' });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSearchResults([]);
+          setSearchStatus({ kind: 'error', message: describeRef.current(error, searchQuery) });
+        }
       }
     };
     // async-iife: bootstrap — a newer query cancels this search.
@@ -583,7 +592,7 @@ export function useFileBrowser({
     return () => {
       cancelled = true;
     };
-  }, [searchAdapter, searchQuery, revision]);
+  }, [isActive, searchAdapter, searchQuery, revision, reloadToken]);
 
   const onNavigate = useCallback((path: string) => {
     setCurrentPath(path);
@@ -605,7 +614,7 @@ export function useFileBrowser({
     searchQuery,
     onSearchChange: setSearchQuery,
     entries: searchQuery === '' ? items : searchResults,
-    status,
+    status: searchQuery === '' ? status : searchStatus,
     onRetry,
     reset,
   };

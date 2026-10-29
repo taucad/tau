@@ -43,6 +43,7 @@ import { useSessions } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
 import { actorSessionIdOf } from '#lib/xstate.lib.js';
+import { isQuestionTool } from '#utils/question-tool.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import {
   selectCaughtUp,
@@ -174,7 +175,8 @@ const chatRunState = (snapshot: ChatSnapshot): ChatSidebarState => {
     return 'question';
   }
   if (snapshot.matches({ run: { running: 'tool' } })) {
-    return 'tool';
+    /* A question waits as its call in flight, not as a paused run; it is a decision all the same (I5). */
+    return isQuestionTool(snapshot.context.toolName) ? 'question' : 'tool';
   }
   if (snapshot.matches({ run: { running: 'generating' } })) {
     return 'working';
@@ -224,7 +226,9 @@ export const selectProjectedChatStatus = (
         ? 'queued'
         : run.lifecycle === 'running'
           ? tools.count > 0
-            ? 'tool'
+            ? isQuestionTool(tools.toolName)
+              ? 'question'
+              : 'tool'
             : 'working'
           : run.lifecycle === 'paused'
             ? approvals > 0

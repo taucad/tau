@@ -4,9 +4,10 @@ import type { EnqueueObject, EventObject, SystemRegistry } from 'xstate';
 import type { FileSystemBackend } from '@taucad/types';
 import type { FileSystemBridgeConnection, RootedBridgeConsumer } from '@taucad/fs-bridge';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime';
-import { connectComputeStoreChannel } from '@taucad/runtime/host';
+import { fromComputeStoreChannel } from '@taucad/runtime/host';
 import { safeDispose } from '@taucad/utils/dispose';
 import FileManagerWorker from '#machines/file-manager.worker.js?worker';
+import { reportWorkerFailures } from '#lib/worker-error-reporting.js';
 import {
   getProjectFileSystemConfig,
   getWorkspace,
@@ -61,9 +62,22 @@ const computeOpeners = (worker: Worker, admittedProjectId: string | undefined) =
     worker.postMessage({ type: 'computeStoreConnect', projectId, port: channel.port1 }, [channel.port1]);
     return channel.port2;
   };
+  /* The runtime transport opens one port per runtime binding and hands it to the kernel worker, so store
+   * calls go worker to worker; this page relays none of them (geometry-cache blueprint T4). */
   const openComputeBinding = (projectId: string) => {
-    const connection = connectComputeStoreChannel(openComputeStorePort(projectId));
-    return { compute: { mode: 'durable', store: connection.store } as const, dispose: connection.dispose };
+    let disposed = false;
+    const store = fromComputeStoreChannel(() => {
+      if (disposed) {
+        throw new Error('Compute store binding was disposed.');
+      }
+      return openComputeStorePort(projectId);
+    });
+    return {
+      compute: { mode: 'durable', store } as const,
+      dispose: () => {
+        disposed = true;
+      },
+    };
   };
   const computeControl = <Name extends keyof ComputeStoreControl>(
     projectId: string,
@@ -252,7 +266,10 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     let worker = context.sharedWorker;
     if (!worker) {
       const homeBackend = await getHomeStorageBackend();
-      worker = new FileManagerWorker({ name: fileManagerWorkerName(homeBackend) });
+      worker = reportWorkerFailures(
+        new FileManagerWorker({ name: fileManagerWorkerName(homeBackend) }),
+        'file-manager',
+      );
       // A node-backed Home needs its provider host before the worker can mount
       // `/`, so the brokered port is handed over immediately after construction
       // and the worker's module evaluation waits on it. One port per concern:

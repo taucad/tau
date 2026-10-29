@@ -105,13 +105,48 @@ describe('picovoxelOptionsSchema', () => {
 
 describe('lane schemas', () => {
   it('should render in the fast lane by default', () => {
-    expect(picovoxelRenderSchema.parse({})).toEqual({ lane: 'fast' });
+    // The installed PicoVoxel meshes adaptively, so an unset adaptivity resolves to the Balanced preview
+    // default on the fast lane and to the uniform mesh on the exact lane.
+    expect(picovoxelRenderSchema.parse({})).toEqual({ lane: 'fast', meshAdaptivity: 0.25, meshRelax: false });
+    expect(picovoxelRenderSchema.parse({ lane: 'exact' })).toEqual({
+      lane: 'exact',
+      meshAdaptivity: 0,
+      meshRelax: false,
+    });
   });
 
   it('should export exact by default in every native format', () => {
     expect(picovoxelExportSchemas.glb.parse({})).toMatchObject({ lane: 'exact' });
     expect(picovoxelExportSchemas.gltf.parse({})).toEqual(picovoxelExportSchemas.glb.parse({}));
-    expect(picovoxelExportSchemas.stl.parse({})).toEqual({ lane: 'exact', unit: 'mm', scale: 1, offset: [0, 0, 0] });
+    expect(picovoxelExportSchemas.stl.parse({})).toEqual({
+      lane: 'exact',
+      meshAdaptivity: 0,
+      meshRelax: false,
+      unit: 'mm',
+      scale: 1,
+      offset: [0, 0, 0],
+    });
+  });
+
+  it('should resolve an unset view adaptivity, keep an explicit one and mesh every export uniformly unless it asks', () => {
+    expect(picovoxelRenderSchema.parse({ lane: 'exact', meshAdaptivity: 0.5 })).toMatchObject({ meshAdaptivity: 0.5 });
+    expect(picovoxelRenderSchema.parse({ meshAdaptivity: 0.5, meshRelax: true })).toMatchObject({
+      meshAdaptivity: 0.5,
+      meshRelax: true,
+    });
+    for (const meshAdaptivity of [-0.1, 1]) {
+      expect(picovoxelRenderSchema.safeParse({ meshAdaptivity }).success).toBe(false);
+    }
+    for (const schema of Object.values(picovoxelExportSchemas)) {
+      expect(schema.parse({})).toMatchObject({ meshAdaptivity: 0, meshRelax: false });
+      expect(schema.parse({ meshAdaptivity: 0.5, meshRelax: true })).toMatchObject({
+        meshAdaptivity: 0.5,
+        meshRelax: true,
+      });
+      for (const meshAdaptivity of [-0.1, 1]) {
+        expect(schema.safeParse({ meshAdaptivity }).success).toBe(false);
+      }
+    }
   });
 
   it('should accept no lane Tau does not expose', () => {
@@ -136,7 +171,12 @@ describe('region schema', () => {
   const region = { min: [-1, -2, -3], max: [1, 2, 3] };
 
   it('should accept an optional crop box on renders and every native export', () => {
-    expect(picovoxelRenderSchema.parse({ region })).toEqual({ lane: 'fast', region });
+    expect(picovoxelRenderSchema.parse({ region })).toEqual({
+      lane: 'fast',
+      region,
+      meshAdaptivity: 0.25,
+      meshRelax: false,
+    });
     for (const schema of Object.values(picovoxelExportSchemas)) {
       expect(schema.parse({ region })).toMatchObject({ lane: 'exact', region });
       expect(schema.parse({})).not.toHaveProperty('region');

@@ -96,7 +96,18 @@ export function createRuntimeFileSystem(base: RuntimeFileSystemBase): KernelFile
     await mkdir(canonicalPath, { recursive: true });
   };
 
+  const { hashFiles } = base;
+
   return {
+    ...(hashFiles === undefined
+      ? {}
+      : {
+          hashFiles: async (paths: readonly string[]): Promise<Record<string, string>> =>
+            hashFiles.call(
+              base,
+              paths.map((path) => assertRootedPath(path)),
+            ),
+        }),
     id: base.id,
     capabilities: base.capabilities,
     dispose: base.dispose.bind(base),

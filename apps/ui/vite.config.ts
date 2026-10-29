@@ -1,3 +1,5 @@
+// oxlint-disable-next-line eslint/no-restricted-imports -- Route/build configuration runs before app aliases are installed.
+import { isObservabilityHarnessBuild } from './app/lib/observability-harness-gate.js';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -14,8 +16,13 @@ import { defineConfig } from 'vite';
 import type { Plugin, UserConfig } from 'vite';
 import { tauRuntime } from '@taucad/runtime/vite';
 import { base64Loader } from '@taucad/vite/base64-loader';
-// oxlint-disable-next-line eslint/no-restricted-imports -- Vite configuration lives outside the app alias root.
-import { resolveTauCloudBuildEnabled } from './build-environment.js';
+/* oxlint-disable eslint/no-restricted-imports -- Vite configuration lives outside the app alias root. */
+import {
+  resolveTauBuildRelease,
+  resolveTauCloudBuildEnabled,
+  resolveTauTelemetryHostCloud,
+} from './build-environment.js';
+/* oxlint-enable eslint/no-restricted-imports */
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createGeoSpecMtAssets } from './geospec-mt-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
@@ -39,6 +46,9 @@ const toOriginOrRaw = (value: string | undefined): string | undefined => {
     return value;
   }
 };
+
+/** Netlify sets `CONTEXT` for builds only; the error tracker's `deploy_context` tag (`resolveDeployContext`). */
+const buildDeployContext = (environment: NodeJS.ProcessEnv): string => environment['CONTEXT'] ?? '';
 
 const resolveBuildFrontendUrl = (environment: NodeJS.ProcessEnv): string | undefined => {
   if (environment['TAU_FRONTEND_URL']) {
@@ -100,9 +110,15 @@ export const uiResolveAlias = [
 
 type UiSourceAliasPluginOptions = {
   readonly emitModuleGraph?: boolean;
+  readonly observabilityHarnessEnabled?: boolean;
   readonly tauCloudEnabled?: boolean;
   readonly target?: 'web' | 'desktop';
 };
+
+const harnessDisabledOverrides = new Map([
+  ['#lib/observability-harness-context.js', '#lib/observability-harness-disabled.js'],
+  ['#lib/observability-harness-hydration.js', '#lib/observability-harness-hydration-disabled.js'],
+]);
 
 const cloudBoundarySpecifiers = new Set([
   '#cloud/commercial-features.js',
@@ -126,6 +142,7 @@ const desktopSourceOverrides = new Map([
   ['#services/browser-geospec-worker.js', '#services/browser-geospec-worker.desktop.js'],
   ['#workers/measurement-exact.transport.js', '#workers/measurement-exact.transport.desktop.js'],
   ['#components/cookie-preferences.js', '#components/cookie-preferences.desktop.js'],
+  ['#hooks/use-cookie-consent.js', '#hooks/use-cookie-consent.desktop.js'],
 ]);
 
 const selfHostSourceOverrides = new Map([
@@ -193,10 +210,14 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
         }
 
         const [requestedSpecifier, query] = source.split('?', 2);
+        const harnessSpecifier =
+          options.observabilityHarnessEnabled === true
+            ? requestedSpecifier
+            : (harnessDisabledOverrides.get(requestedSpecifier ?? '') ?? requestedSpecifier);
         const hostSpecifier =
-          options.target === 'desktop' && requestedSpecifier
-            ? (desktopSourceOverrides.get(requestedSpecifier) ?? requestedSpecifier)
-            : requestedSpecifier;
+          options.target === 'desktop' && harnessSpecifier
+            ? (desktopSourceOverrides.get(harnessSpecifier) ?? harnessSpecifier)
+            : harnessSpecifier;
         const targetSpecifier =
           options.tauCloudEnabled === false && hostSpecifier
             ? (selfHostSourceOverrides.get(hostSpecifier) ?? hostSpecifier)
@@ -401,6 +422,21 @@ export const createUiReactCompilerPlugin = (): Plugin => {
   };
 };
 
+/**
+ * Publish `/tau-release.json` (`{ release }`) beside the client assets, which the API polls to admit this release.
+ *
+ * @param release - The short commit.
+ * @returns The plugin.
+ */
+const createReleaseManifestPlugin = (release: string): Plugin => ({
+  name: 'tau-release-manifest',
+  apply: 'build',
+  applyToEnvironment: (environment) => environment.config.consumer === 'client',
+  generateBundle() {
+    this.emitFile({ type: 'asset', fileName: 'tau-release.json', source: `${JSON.stringify({ release })}\n` });
+  },
+});
+
 export default defineConfig(({ command, mode }) => {
   const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
   const isTest = mode === 'test';
@@ -417,6 +453,13 @@ export default defineConfig(({ command, mode }) => {
    */
   const buildIdDefine = { tauBuildId: JSON.stringify(Date.now()) };
   const isProductionBuild = command === 'build' && !isTest;
+  /*
+   * The release label runtime telemetry stamps (short commit). Server graph only, like `tauBuildId`: the page reads
+   * `window.ENV.TAU_RELEASE`, so client chunk hashes do not change per commit. The same value is published as
+   * `/tau-release.json`, the only place the API learns UI releases from.
+   */
+  const buildRelease = isProductionBuild ? resolveTauBuildRelease(process.env) : undefined;
+  const serverDefine = { ...buildIdDefine, tauBuildRelease: JSON.stringify(buildRelease ?? '') };
   // Netlify's own CI sets NETLIFY=true; `netlify deploy` from GitHub Actions
   // (deploy-ui.yml) builds with NETLIFY_LOCAL=true instead. Both need the SSR function.
   const isNetlify = process.env['NETLIFY'] === 'true' || process.env['NETLIFY_LOCAL'] === 'true';
@@ -427,9 +470,22 @@ export default defineConfig(({ command, mode }) => {
     root: __dirname,
     cacheDir: '../../node_modules/.vite/apps/ui',
     define: {
+      // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
+      ...(isTest
+        ? {}
+        : {
+            'import.meta.env.TAU_OBSERVABILITY_HARNESS': JSON.stringify(
+              isObservabilityHarnessBuild(process.env) ? 'enabled' : 'disabled',
+            ),
+          }),
       tauBuildFrontendUrl: JSON.stringify(buildFrontendUrl ?? ''),
+      tauBuildDeployContext: JSON.stringify(buildDeployContext(process.env)),
       ...(isProductionBuild ? {} : buildIdDefine),
       tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
+      /* Telemetry's own Cloud-host signal, beside the billing gate and never derived from it; tests stub the module. */
+      tauTelemetryHostCloudBuild: JSON.stringify(
+        !isTest && resolveTauTelemetryHostCloud(process.env['TAU_TELEMETRY_HOST']),
+      ),
       tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
       /*
        * Compile-time host seam (charter D2). `desktop/vite.config.ts` sets
@@ -471,9 +527,14 @@ export default defineConfig(({ command, mode }) => {
     },
     plugins: [
       mtAssets.plugin,
-      createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
+      createUiSourceAliasPlugin({
+        emitModuleGraph: true,
+        tauCloudEnabled,
+        observabilityHarnessEnabled: isTest || isObservabilityHarnessBuild(process.env),
+      }),
       // WASM `fetch` integrity and the asset receipt (charter D26): build only.
       createAssetIntegrity({ receipt: true }),
+      ...(buildRelease === undefined ? [] : [createReleaseManifestPlugin(buildRelease)]),
 
       /*
        * @taucad/runtime contract: COOP/COEP for SharedArrayBuffer, keep .wasm
@@ -512,12 +573,16 @@ export default defineConfig(({ command, mode }) => {
       // Workers need their own plugins.
       // https://vite.dev/config/worker-options.html#worker-plugins
       plugins: () => [
-        createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
+        createUiSourceAliasPlugin({
+          emitModuleGraph: true,
+          tauCloudEnabled,
+          observabilityHarnessEnabled: isTest || isObservabilityHarnessBuild(process.env),
+        }),
         createAssetIntegrity({ receipt: false }),
       ],
     },
     // Merged over the shared `define` for the server graph only (see `buildIdDefine`).
-    ...(isProductionBuild ? { environments: { ssr: { define: buildIdDefine } } } : {}),
+    ...(isProductionBuild ? { environments: { ssr: { define: serverDefine } } } : {}),
     resolve: {
       alias: [
         ...uiResolveAlias,
@@ -543,9 +608,11 @@ export default defineConfig(({ command, mode }) => {
     },
     build: {
       /*
-       * Source maps: client uses `react-router build --sourcemapClient hidden`
-       * (apps/ui/project.json). Omit server maps by not passing `--sourcemapServer`
-       * so the SSR `sourcemap` option stays unset (Rolldown rejects boolean `false`).
+       * Source maps: `ui:build` passes `--sourcemapClient hidden --sourcemapServer hidden`
+       * (apps/ui/project.json; Rolldown rejects boolean `false` for the SSR `sourcemap`).
+       * Server maps are moved out of `build/server` into `build/server-sourcemaps` and never
+       * ship in the function; `ui:sourcemaps` uploads them to Sentry and deletes them (SSR bundle
+       * policy rule 5).
        */
       /*
        * SVGs are forced out of the base64 inline path so the icon sprite

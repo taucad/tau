@@ -1,3 +1,4 @@
+import { chatComposerTrayHeaderClassName } from '#components/chat/chat-input-styles.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, MessageCircleQuestionMark } from 'lucide-react';
 import { askStatus } from '@taucad/chat';
@@ -246,7 +247,7 @@ export function ChatQuestionQueue({
 
   if (questions?.recordFailure !== undefined) {
     return (
-      <p role='alert' className='px-2 text-xs/5'>
+      <p role='alert' className='px-2 py-2 text-xs/5'>
         {questions.recordFailure}
       </p>
     );
@@ -265,17 +266,13 @@ export function ChatQuestionQueue({
     <Collapsible
       ref={trayRef}
       open={isOpen}
-      className='group/tray-section not-first:border-t'
+      className='group/tray-section'
       onOpenChange={(open) => {
         setIsOpen(open);
       }}
     >
       <CollapsibleTrigger asChild>
-        <Button
-          variant='ghost'
-          size='xs'
-          className='relative flex h-auto min-h-8 w-full min-w-0 items-center justify-start gap-1.5 rounded-none px-2 py-1.5 text-left font-normal text-foreground group-first/tray-section:rounded-t-lg hover:bg-accent/50 hover:text-foreground focus-visible:z-10'
-        >
+        <Button variant='ghost' size='xs' className={cn(chatComposerTrayHeaderClassName, 'text-foreground')}>
           <MessageCircleQuestionMark aria-hidden='true' className='size-3.5 shrink-0 text-primary' />
           <span className='min-w-0 flex-1 truncate text-xs' title={summary}>
             {summary}
@@ -297,6 +294,8 @@ export function ChatQuestionQueue({
       <CollapsibleContent>
         <ul
           aria-label='Questions'
+          // The list rests at its start; the phone sheet reads this to tell its own clipping from a person's scroll (I5).
+          data-scroll-rest='start'
           // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable list must be keyboard reachable (WCAG 2.1.1)
           tabIndex={0}
           className='flex max-h-[min(22rem,45cqh)] scroll-shadows-y flex-col divide-y overflow-y-auto overscroll-contain border-t bg-background px-2 pb-2 focus-visible:focus-outline'

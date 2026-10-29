@@ -1,7 +1,8 @@
 import { useThree } from '@react-three/fiber';
-import { useLayoutEffect } from 'react';
+import { useLayoutEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { ACESFilmicToneMapping, LinearToneMapping, NeutralToneMapping, NoToneMapping } from 'three';
+import { rendererUsesSoftwareRasterizer } from '#graphics/three/utils/software-rasterizer.js';
 import { useThreeGraphicsBackend } from '#graphics/three/three-graphics-backend-context.jsx';
 import { PostProcessingWebGPU } from '#graphics/three/post-processing-webgpu.jsx';
 import { PostProcessingWebGL } from '#graphics/three/post-processing-webgl.jsx';
@@ -15,11 +16,22 @@ const rendererToneMappingModes = {
   none: NoToneMapping,
 } as const;
 
-/** Always-on composition; explicit diagnostic settings can still isolate AO and output transforms. */
+/**
+ * Always-on composition; explicit diagnostic settings can still isolate AO and output transforms. A software adapter
+ * (WebGPU, or the WebGL 2 backend on a software rasterizer) rasterizes every pass on the CPU, where the AO graph (normal attachment, GTAO, denoise) and the speculative
+ * alternate-camera render saturate the GPU process and starve the page's compositor. There the composition stays
+ * beauty-only: the tone-mapped scene pass, which also owns the canvas's depth, without the FXAA filter, whose shader
+ * alone holds the GPU process for over thirty seconds of compiling on SwiftShader.
+ */
 export function PostProcessing({ settings }: { readonly settings?: Partial<PostProcessingSettings> }): ReactNode {
   const backend = useThreeGraphicsBackend();
   const { gl, invalidate } = useThree();
   const toneMapping = settings?.toneMapping ?? defaultPostProcessingSettings.toneMapping;
+  const softwareAdapter = useMemo(
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- R3F types `gl` as the classic renderer; the WebGPU backend context guarantees the node renderer.
+    () => backend === 'webgpu' && rendererUsesSoftwareRasterizer(gl),
+    [backend, gl],
+  );
 
   useLayoutEffect(() => {
     // WebGPU tone-maps the scene inside its own pass, so the renderer's output pass only
@@ -30,7 +42,15 @@ export function PostProcessing({ settings }: { readonly settings?: Partial<PostP
   }, [backend, gl, invalidate, toneMapping]);
 
   if (backend === 'webgpu') {
-    return <PostProcessingWebGPU settings={settings} aoAllowed toneMapping={rendererToneMappingModes[toneMapping]} />;
+    return (
+      <PostProcessingWebGPU
+        settings={settings}
+        aoAllowed={!softwareAdapter}
+        speculativePreparation={!softwareAdapter}
+        antialiasAllowed={!softwareAdapter}
+        toneMapping={rendererToneMappingModes[toneMapping]}
+      />
+    );
   }
 
   return <PostProcessingWebGL settings={settings} />;

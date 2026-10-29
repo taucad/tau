@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useId } from 'react';
 import { Box, Eye, EyeOff, Target } from 'lucide-react';
 import type { GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
 import { ContextMenu, ContextMenuTrigger } from '@taucad/ui/components/context-menu';
@@ -138,6 +138,13 @@ export const ComponentRow = memo(function ComponentRow({
 }): React.JSX.Element {
   const source = useWorkbenchPanesHost().model;
   const isHovered = hoveredComponentId === node.id;
+  const previewStatusId = useId();
+  const previewStatus =
+    preview?.status === 'pending'
+      ? 'Preview loading'
+      : preview?.status === 'failed'
+        ? 'Preview unavailable'
+        : undefined;
   const normalizedQuery = query.trim().toLowerCase();
   const materialMatchName =
     normalizedQuery && !node.name.toLowerCase().includes(normalizedQuery)
@@ -214,9 +221,10 @@ export const ComponentRow = memo(function ComponentRow({
       className={cn(
         // The sidebar row's lit states and inset: `pr-0.5` gives a 24 px action the 2 px it has above and below.
         'group/part relative flex w-full items-center justify-between rounded-md py-1 pr-0.5 pl-2 text-sm leading-5',
-        // A part row leads with its 80 px preview; groups stay compact.
+        // A part row leads with its 80 px preview and is exactly that tall plus its `py-1`; groups stay compact. The
+        // preview is a picture, not text, so it stays 80 px under enlarged text while the name grows beside it.
         // Under a coarse pointer a compact row grows 4px so its 20px part button reaches the 24px floor (I3).
-        isPreviewRow ? 'h-22 gap-2' : 'h-7 pointer-coarse:h-8',
+        isPreviewRow ? 'h-[calc(80px+--spacing(2))] gap-2' : 'h-7 pointer-coarse:h-8',
         'focus-within:bg-sidebar-accent focus-within:text-sidebar-accent-foreground has-[[aria-haspopup=menu][data-state=open]]:bg-sidebar-accent',
         isSelected ? 'bg-primary/10 text-foreground' : 'text-sidebar-foreground',
         !isSelected && isFocused ? 'bg-sidebar-accent/70 text-foreground ring-1 ring-inset ring-primary/30' : undefined,
@@ -249,7 +257,7 @@ export const ComponentRow = memo(function ComponentRow({
         <PartPreviewFrame
           name={node.name}
           preview={preview}
-          className='size-20'
+          className='size-[80px]'
           fallback={swatch}
           tabIndex={-1}
           onOpen={
@@ -269,7 +277,10 @@ export const ComponentRow = memo(function ComponentRow({
         data-model-component-id={node.id}
         tabIndex={activeRowId === undefined || activeRowId === node.id ? 0 : -1}
         className='flex h-full min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none focus-visible:focus-outline'
+        // The name stays the part's (and whether it is hidden) as its preview loads and fails; the preview status is
+        // the button's description, so a row is found by its name whatever its preview is doing.
         aria-label={isHidden ? `${node.name}, hidden` : node.name}
+        aria-describedby={previewStatus === undefined ? undefined : previewStatusId}
         aria-pressed={isSelected}
         aria-busy={preview?.status === 'pending' || undefined}
         onClick={toggleSelection}
@@ -298,15 +309,18 @@ export const ComponentRow = memo(function ComponentRow({
         <span className='truncate'>
           <HighlightText text={node.name} searchTerm={query} />
         </span>
-        {preview?.status === 'pending' || preview?.status === 'failed' ? (
-          <span className='sr-only'>Preview {preview.status === 'pending' ? 'loading' : 'unavailable'}</span>
-        ) : undefined}
         {materialMatchName ? (
           <span className='truncate text-xs text-muted-foreground'>· {materialMatchName}</span>
         ) : undefined}
         {/* A hidden part is labelled, not only dimmed (PN-TREE-2). */}
         {isHidden ? <span className='shrink-0 text-xs text-muted-foreground'>Hidden</span> : undefined}
       </button>
+      {/* Hidden, so the status is read once, as the selection button's description, not again as row text. */}
+      {previewStatus === undefined ? undefined : (
+        <span hidden id={previewStatusId}>
+          {previewStatus}
+        </span>
+      )}
       <Tooltip>
         <TooltipTrigger asChild>
           <button

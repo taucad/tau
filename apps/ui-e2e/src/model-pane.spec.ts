@@ -2,6 +2,7 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
+import { waitForStageReady } from '#support/viewer-stage.js';
 
 const seedRoute = '/__e2e/project-file-tree';
 const seedProjectName = 'sgenoud/models file-tree e2e';
@@ -11,7 +12,70 @@ const secondaryPath = 'public/models/box-corner.js';
 const treeItem = (path: string): Locator =>
   selectors.getByCss(`[data-testid="file-tree-item"][data-file-tree-path="${path}"]`);
 
+/**
+ * A deferred automatic preview, as the Model row reports it: the row's selection button is described by its preview
+ * status. The part menu no longer repeats the preview or its status (its header names the part; "the part's image
+ * lives in the gallery"), so the row's description and the menu's Retry preview item are where a deferred preview
+ * shows.
+ */
+const expectDeferredPreviewStatus = async (list: Locator, name: string): Promise<void> => {
+  // The part's own row, by its accessible name; its status passes through "Preview loading" while the deferral is
+  // decided, so the description is polled until it settles on the deferred status.
+  await target.expectAccessibleDescription(
+    list.getByRole('button', { name, exact: true }),
+    'Preview unavailable',
+    30_000,
+  );
+};
+
+/** The first part row's name, read from its actions button ("Actions for <part>"). */
+const firstPartName = async (list: Locator): Promise<string> => {
+  const actions = await target.getAttribute(list.getByRole('button', { name: /^Actions for /u }).first(), 'aria-label');
+  const name = actions?.replace(/^Actions for /u, '');
+  if (!name) {
+    throw new Error('The Model list has no part row.');
+  }
+  return name;
+};
+
+/**
+ * The part menu names the part in its header and carries no image of it: the 80px preview lives on the row, in
+ * Properties and in the gallery.
+ */
+const expectMenuNamesPartWithoutImage = async (partName: string): Promise<void> => {
+  const menu = selectors.getByRole('menu');
+  await target.expectVisible(menu.getByText(partName, { exact: true }).first());
+  await target.expectCount(menu.getByCss('img'), 0);
+};
+
+/** A shown part's Model row, whose accessible name is the part's name whatever its preview is doing. */
+const partRow = (list: Locator, name: string): Locator => list.getByRole('button', { name, exact: true });
+
+/**
+ * A part row's rendered preview. The 80px preview frame is the selection button's sibling, never inside it, and is a
+ * button named for the part once the preview has bytes; its image is the decoded blob.
+ */
+const partPreviewImage = (list: Locator, name: string): Locator =>
+  list.getByRole('button', { name: `Preview ${name}`, exact: true }).getByCss('img[src^="blob:"]');
+
 const disclosure = (path: string): Locator => selectors.getByRole('button', { name: path, exact: true });
+/** A unit's body, the region its header discloses. */
+const unitRegion = (path: string): Locator =>
+  selectors.getByRole('region', { name: `Model unit ${path}`, exact: true });
+
+/**
+ * The distance from a unit's body to the disclosure of the unit below it. The 8px unit gap sits above the next header,
+ * not inside the unit's own pane, and the disclosure sits inside the header's 1px border (transparent while closed), so
+ * the expected distance is 8 + 1. The header root deliberately carries no role, so the disclosure is its named edge.
+ */
+const unitGapAbove = async (path: string, nextPath: string): Promise<number> => {
+  const body = await target.boundingBox(unitRegion(path));
+  const next = await target.boundingBox(disclosure(nextPath));
+  if (!body || !next) {
+    throw new Error('The unit body or the next unit header has no geometry.');
+  }
+  return next.y - (body.y + body.height);
+};
 
 const openCommand = async (name: string): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
@@ -32,6 +96,7 @@ const openSeededProject = async (): Promise<void> => {
   }
 
   await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first(), 60_000);
+  await waitForStageReady();
   await target.click(selectors.getByRole('button', { name: /^decline$/iu }), { timeout: 5000 }).catch(() => undefined);
 };
 
@@ -54,12 +119,12 @@ const openSecondGeometryUnit = async (path = secondaryPath): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: `More actions for ${fileName}`, exact: true }));
   await target.click(selectors.getByRole('menuitem', { name: 'Open in Viewer' }));
   await target.expectVisible(selectors.getByCss('.dv-tab').filter({ hasText: fileName }), 60_000);
+  await waitForStageReady();
 };
 
 type ModelSurfaceState = {
   readonly bodyBackground: string;
   readonly bodyBottomPadding: number;
-  readonly bodyToPaneBottomGap: number;
   readonly bottomRadius: number;
   readonly filterBackground: string;
   readonly filterHeight: number;
@@ -81,12 +146,11 @@ const readModelSurfaceState = async (header: Locator): Promise<ModelSurfaceState
     const pane = element.closest<HTMLElement>('.dv-pane');
     const body = pane?.querySelector<HTMLElement>('[data-slot="model-unit-surface"]');
     const scroller = body?.querySelector<HTMLElement>('[data-slot="model-unit-scroller"]');
-    const paneBody = body?.closest<HTMLElement>('.dv-pane-body');
     const panel = document.querySelector<HTMLElement>('[data-slot="model-panel-body"]');
     const toolbar = document.querySelector<HTMLElement>('[data-slot="model-filter"]');
     const filter = document.querySelector<HTMLInputElement>('[aria-label="Filter parts"]');
     const row = body?.querySelector<HTMLElement>('[data-model-component-row]');
-    if (!headerRoot || !body || !scroller || !paneBody || !panel || !toolbar || !filter || !row) {
+    if (!headerRoot || !body || !scroller || !panel || !toolbar || !filter || !row) {
       throw new Error('Model attached surface was incomplete.');
     }
 
@@ -98,7 +162,6 @@ const readModelSurfaceState = async (header: Locator): Promise<ModelSurfaceState
     return {
       bodyBackground: getComputedStyle(body).backgroundColor,
       bodyBottomPadding: Number.parseFloat(scrollerStyle.paddingBottom),
-      bodyToPaneBottomGap: paneBody.getBoundingClientRect().bottom - bodyBounds.bottom,
       bottomRadius: Number.parseFloat(getComputedStyle(body).borderBottomLeftRadius),
       filterBackground: getComputedStyle(filter).backgroundColor,
       filterHeight: filterBounds.height,
@@ -164,7 +227,8 @@ test('keeps the Model hierarchy filterable, accessible, and reorderable through 
   const lightSurface = await readModelSurfaceState(main);
   expect(lightSurface.seamDelta).toBeLessThanOrEqual(1);
   expect(lightSurface.horizontalEdgeDelta).toBeLessThanOrEqual(1);
-  expect(lightSurface.bodyToPaneBottomGap).toBeCloseTo(8, 0);
+  /* The 8px unit gap, plus the next header's 1px border around its disclosure. */
+  expect(await unitGapAbove(mainPath, secondaryPath)).toBeCloseTo(8 + 1, 0);
   expect(lightSurface.bodyBottomPadding).toBe(8);
   expect(lightSurface.bottomRadius).toBeGreaterThan(0);
   expect(lightSurface.rowRadius).toBeGreaterThan(0);
@@ -351,8 +415,9 @@ test('shows decoded part previews in the real Model rows and selected Properties
   /** Milliseconds. */
   let automaticDeferDuration: number | undefined;
   if (target.currentWebGpuProfile() === 'software') {
-    await target.click(list.getByRole('button', { name: /^Actions for /u }).first());
-    await target.expectVisible(selectors.getByRole('alert', { name: 'Preview status' }));
+    const deferredPart = await firstPartName(list);
+    await target.click(list.getByRole('button', { name: `Actions for ${deferredPart}`, exact: true }));
+    await expectDeferredPreviewStatus(list, deferredPart);
     await target.expectVisible(selectors.getByRole('menuitem', { name: 'Retry preview' }));
     automaticDeferDuration = await target.evaluate(() => {
       const state = (globalThis as typeof globalThis & { __TAU_PART_PREVIEW_PROBE__?: { startedAt: number } })
@@ -393,7 +458,7 @@ test('shows decoded part previews in the real Model rows and selected Properties
       decoded: element.naturalWidth > 0,
     };
   });
-  expect(rowImageState).toEqual({ width: 20, height: 20, decoded: true });
+  expect(rowImageState).toEqual({ width: 80, height: 80, decoded: true });
   const cold = await target.evaluate(() => {
     const state = (
       globalThis as typeof globalThis & {
@@ -447,20 +512,18 @@ test('shows decoded part previews in the real Model rows and selected Properties
       decoded: element.naturalWidth > 0,
     };
   });
-  expect(propertiesImageState).toEqual({ width: 40, height: 40, decoded: true });
+  expect(propertiesImageState).toEqual({ width: 80, height: 80, decoded: true });
   expect(await target.evaluateLocator(propertiesImage, (image) => (image as HTMLImageElement).alt)).toMatch(
     /^Rendered /u,
   );
 
   await target.hover(part);
   const action = list.getByRole('button', { name: /^Actions for /u }).first();
+  const partName = ((await target.getAttribute(action, 'aria-label')) ?? '').replace(/^Actions for /u, '');
+  expect(partName).not.toBe('');
   await target.click(action);
   await target.expectVisible(selectors.getByRole('menuitem', { name: /add to chat/iu }));
-  const menuPreview = selectors.getByRole('menu').getByCss('img[src^="blob:"]').first();
-  await target.expectVisible(menuPreview);
-  expect(
-    await target.evaluateLocator(menuPreview, (image) => (image as HTMLImageElement).getBoundingClientRect().width),
-  ).toBe(24);
+  await expectMenuNamesPartWithoutImage(partName);
   await target.writeArtifact(`c2-part-preview-${coldMetrics.profile}.json`, JSON.stringify(coldMetrics, undefined, 2));
   await target.screenshot(selectors.getByCss('body'), 'model-pane-part-previews.png');
   const adapter = await target.qualifyWebGpu(coldMetrics.profile);
@@ -728,8 +791,10 @@ test('defers a cold part preview worker and resumes automatic previews after exp
       2,
     ),
   );
-  await target.click(list.getByRole('button', { name: /^Actions for /u }).first());
-  await target.expectVisible(selectors.getByRole('alert', { name: 'Preview status' }));
+  const deferredPart = await firstPartName(list);
+  await target.click(list.getByRole('button', { name: `Actions for ${deferredPart}`, exact: true }));
+  await expectDeferredPreviewStatus(list, deferredPart);
+  await target.expectVisible(selectors.getByRole('menuitem', { name: 'Retry preview' }));
   await target.keyboardPress('Escape');
   await dragViewport();
   await beginProbe();
@@ -754,8 +819,8 @@ test('defers a cold part preview worker and resumes automatic previews after exp
   // Limit explicit startup to one part, then measure new automatic demand on a warm worker.
   const filter = selectors.getByRole('searchbox', { name: 'Filter parts' });
   await target.fill(filter, 'Preview part 7');
-  await target.click(list.getByRole('button', { name: /^Actions for /u }).first());
-  await target.expectVisible(selectors.getByRole('alert', { name: 'Preview status' }));
+  await target.click(list.getByRole('button', { name: 'Actions for Preview part 7', exact: true }));
+  await expectDeferredPreviewStatus(list, 'Preview part 7');
   await target.click(selectors.getByRole('menuitem', { name: 'Retry preview' }));
   await target.waitFor(
     () =>
@@ -887,14 +952,14 @@ test('admits previews for newly mounted virtual Model rows after scrolling', asy
   ).toBe(true);
   const filter = selectors.getByRole('searchbox', { name: 'Filter parts' });
   await target.fill(filter, 'Preview part 1');
-  const first = list.getByRole('button', { name: 'Preview part 1', exact: true });
+  const first = partRow(list, 'Preview part 1');
   await target.expectVisible(first);
   await target.click(first);
   await target.hover(first);
   await target.click(list.getByRole('button', { name: 'Actions for Preview part 1', exact: true }));
   await target.click(selectors.getByRole('menuitem', { name: /Retry preview/iu }));
   await target.keyboardPress('Escape');
-  await target.expectVisible(first.getByCss('img[src^="blob:"]'), 60_000);
+  await target.expectVisible(partPreviewImage(list, 'Preview part 1'), 60_000);
   await target.fill(filter, '');
   await target.expectVisible(list.getByCss('[data-virtuoso-scroller]'));
   await target.evaluateLocator(list, (element) => {
@@ -904,21 +969,29 @@ test('admits previews for newly mounted virtual Model rows after scrolling', asy
     }
     scroller.scrollTop = scroller.scrollHeight;
   });
-  const last = list.getByRole('button', { name: 'Preview part 48', exact: true });
+  const last = partRow(list, 'Preview part 48');
   await target.expectVisible(last, 60_000);
-  const lastImage = last.getByCss('img[src^="blob:"]');
+  const lastImage = partPreviewImage(list, 'Preview part 48');
+  if (target.currentWebGpuProfile() === 'software') {
+    // A software adapter makes no automatic previews, by policy (each costs about 20 s of CPU and would stall the
+    // page): the newly mounted row shows its deferred status and no image, and asking for its preview still renders it.
+    await target.expectAccessibleDescription(last, 'Preview unavailable');
+    await target.expectCount(lastImage, 0);
+    await target.hover(last);
+    await target.click(list.getByRole('button', { name: 'Actions for Preview part 48', exact: true }));
+    await target.click(selectors.getByRole('menuitem', { name: /Retry preview/iu }));
+    await target.keyboardPress('Escape');
+  }
   await target.expectVisible(lastImage, 60_000);
   await target.click(last);
   const propertiesImage = selectors.getByCss('[data-slot="part-properties"] img[src^="blob:"]').first();
   await target.expectVisible(propertiesImage, 60_000);
   expect(
     await target.evaluateLocator(propertiesImage, (image) => (image as HTMLImageElement).getBoundingClientRect().width),
-  ).toBe(40);
+  ).toBe(80);
   await target.hover(last);
   await target.click(list.getByRole('button', { name: 'Actions for Preview part 48', exact: true }));
-  const menuImage = selectors.getByRole('menu').getByCss('img[src^="blob:"]').first();
-  await target.expectVisible(menuImage);
-  expect(await target.evaluateLocator(menuImage, (image) => image.getBoundingClientRect().width)).toBe(24);
+  await expectMenuNamesPartWithoutImage('Preview part 48');
   await target.writeArtifact(
     'c2-virtual-model-preview-smoke.json',
     JSON.stringify(

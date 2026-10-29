@@ -208,6 +208,7 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
         process.kill();
         await ended;
       },
+      sampleResident: async () => 64 * 1024 * 1024,
     };
   };
 
@@ -251,6 +252,7 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
       started: z.literal(true),
       stdout: z.string(),
       end: z.object({ exitCode: z.number().optional(), signal: z.string().optional() }),
+      resident: z.number().nullable().optional(),
     }),
     z.object({ started: z.literal(false), refusal: z.string() }),
   ]);
@@ -259,6 +261,7 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
     childPermission: z.boolean(),
     ownSpawn: z.string(),
     native: z.unknown().optional(),
+    nativeWorkerFrames: z.array(z.string()).optional(),
     closures: z.array(z.unknown()),
     outcomes: z.record(z.string(), outcomeSchema),
   });
@@ -311,10 +314,13 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
       packageRoot: 'file:///fixture/',
     });
     expect(reported).toHaveBeenCalledWith([{ package: '@acme/fixture' }]);
+    /* The daemon names the resident sample frame it serves, and answers it from its own worker (observation only). */
+    expect(proof.nativeWorkerFrames).toEqual(['native-worker:sample']);
     expect(proof.outcomes['sealed']).toEqual({
       started: true,
       stdout: 'worker ready\nechoed through the daemon\n',
       end: { exitCode: 0 },
+      resident: 64 * 1024 * 1024,
     });
     expect(proof.outcomes['unsealed']).toEqual({
       started: false,
@@ -461,7 +467,12 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
     const proof = brokerProofSchema.parse(JSON.parse(await readFile(proofPath, 'utf8')));
     await child.close();
 
-    const ran = { started: true, stdout: 'worker ready\nechoed through the daemon\n', end: { exitCode: 0 } };
+    const ran = {
+      started: true,
+      stdout: 'worker ready\nechoed through the daemon\n',
+      end: { exitCode: 0 },
+      resident: 64 * 1024 * 1024,
+    };
     expect(proof.outcomes['linked']).toEqual(ran);
     expect(proof.outcomes['real']).toEqual(ran);
     expect(proof.outcomes['escaping']).toEqual({

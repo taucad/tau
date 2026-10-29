@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import { monacoFileUriToWorkspaceRelative } from '#uri.js';
+import { languageFileUriToWorkspaceRelative } from '#uri.js';
 
 describe('uri', () => {
-  it('monacoFileUriToWorkspaceRelative strips file scheme and leading slash', () => {
-    expect(monacoFileUriToWorkspaceRelative('file:///src/a.ts')).toBe('src/a.ts');
-    expect(monacoFileUriToWorkspaceRelative('file:///projects/x/y/z.ts')).toBe('projects/x/y/z.ts');
+  it('should strip file scheme and leading slash', () => {
+    expect(languageFileUriToWorkspaceRelative('file:///src/a.ts')).toBe('src/a.ts');
+    expect(languageFileUriToWorkspaceRelative('file:///projects/x/y/z.ts')).toBe('projects/x/y/z.ts');
   });
+  it.each(['file://remote/a.ts', 'file:///a.ts?version=1', 'file:///a.ts#fragment', 'https://example.com/a.ts'])(
+    'should reject ambiguous language URI %s',
+    (uri) => {
+      expect(() => languageFileUriToWorkspaceRelative(uri)).toThrow(TypeError);
+    },
+  );
 });

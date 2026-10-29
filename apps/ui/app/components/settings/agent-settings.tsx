@@ -4,6 +4,8 @@ import { Switch } from '@taucad/ui/components/switch';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
+import { DefaultPermissionsSetting } from '#components/settings/default-permissions-setting.js';
+import { desktopPermissions } from '#filesystem/desktop-permissions.js';
 
 function SettingRow({
   label,
@@ -88,6 +90,19 @@ export function AgentSettings(): React.JSX.Element {
           </SettingsItem>
         </CardContent>
       </SettingsSectionCard>
+
+      {desktopPermissions() === undefined ? null : (
+        <SettingsItem settingId='default-permissions'>
+          <SettingsSectionCard>
+            <CardHeader>
+              <CardTitle>Permissions</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <DefaultPermissionsSetting />
+            </CardContent>
+          </SettingsSectionCard>
+        </SettingsItem>
+      )}
     </div>
   );
 }

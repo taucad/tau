@@ -2,7 +2,14 @@ import { execFile } from 'node:child_process';
 import { readdir, readFile } from 'node:fs/promises';
 
 /** One row of the host process table. @public */
-export type ProcessRow = Readonly<{ pid: number; ppid: number; pgid: number; zombie: boolean }>;
+export type ProcessRow = Readonly<{
+  pid: number;
+  ppid: number;
+  pgid: number;
+  zombie: boolean;
+  /** Process creation identity, used to discard retained ownership after PID reuse. */
+  started?: string;
+}>;
 
 /**
  * Parse one `/proc/<pid>/stat` line. The command name sits in parentheses and may itself hold spaces or parentheses,
@@ -15,7 +22,7 @@ const parseStat = (pid: number, line: string): ProcessRow | undefined => {
   if (close === -1 || state === undefined || ppid === undefined || pgid === undefined) {
     return undefined;
   }
-  return { pid, ppid: Number(ppid), pgid: Number(pgid), zombie: state === 'Z' || state === 'X' };
+  return { pid, ppid: Number(ppid), pgid: Number(pgid), zombie: state === 'Z' || state === 'X', started: fields[19] };
 };
 
 const linuxTable = async (): Promise<readonly ProcessRow[]> => {
@@ -39,7 +46,7 @@ const darwinTable = async (): Promise<readonly ProcessRow[]> =>
   new Promise((resolve, reject) => {
     execFile(
       '/bin/ps',
-      ['-A', '-o', 'pid=,ppid=,pgid=,stat='],
+      ['-A', '-o', 'pid=,ppid=,pgid=,stat=,lstart='],
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
       { env: { PATH: '/usr/bin:/bin', LC_ALL: 'C' }, maxBuffer: 16 * 1024 * 1024 },
       (error, stdout) => {
@@ -52,11 +59,12 @@ const darwinTable = async (): Promise<readonly ProcessRow[]> =>
             .split('\n')
             .map((line) => line.trim().split(/\s+/u))
             .filter((fields) => fields.length >= 4)
-            .map(([pid, ppid, pgid, stat]) => ({
+            .map(([pid, ppid, pgid, stat, ...started]) => ({
               pid: Number(pid),
               ppid: Number(ppid),
               pgid: Number(pgid),
               zombie: stat!.startsWith('Z'),
+              started: started.join(' '),
             })),
         );
       },
@@ -149,22 +157,26 @@ export const terminateOwnedProcesses = async (options: TerminateTreeOptions): Pr
   }
   const read = options.table ?? processTable;
   const frozen = new Set<number>();
-  for (let round = 0; round < freezeRounds; round += 1) {
-    // oxlint-disable-next-line no-await-in-loop -- each round must see the processes the previous one froze.
-    const owned = ownedProcesses(await read(), options.root, options.group);
-    const fresh = [...owned].filter((pid) => !frozen.has(pid));
-    if (fresh.length === 0) {
-      break;
+  try {
+    for (let round = 0; round < freezeRounds; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- each round must see the processes the previous one froze.
+      const owned = ownedProcesses(await read(), options.root, options.group);
+      const fresh = [...owned].filter((pid) => !frozen.has(pid));
+      if (fresh.length === 0) {
+        break;
+      }
+      for (const pid of fresh) {
+        signal(pid, 'SIGSTOP');
+        frozen.add(pid);
+      }
     }
-    for (const pid of fresh) {
-      signal(pid, 'SIGSTOP');
-      frozen.add(pid);
+  } finally {
+    /* A failed table read must not leave processes frozen without terminating them. */
+    for (const pid of frozen) {
+      signal(pid, 'SIGKILL');
     }
+    signal(-options.group, 'SIGKILL');
   }
-  for (const pid of frozen) {
-    signal(pid, 'SIGKILL');
-  }
-  signal(-options.group, 'SIGKILL');
   const deadline = Date.now() + options.deadlineMilliseconds;
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- polled until the deadline.
@@ -185,4 +197,66 @@ export const terminateOwnedProcesses = async (options: TerminateTreeOptions): Pr
       setTimeout(resolve, pollMilliseconds);
     });
   }
+};
+
+/** How often a surviving launch owner remembers the macOS process tree. */
+const trackingMilliseconds = 250;
+
+/**
+ * Descendant tracking on macOS: every process ever seen in the tree is remembered with its group, so a job that moves
+ * to its own process group (interactive job control) and is reparented when the shell exits is still terminated.
+ *
+ * @public
+ * @param root - The launch process whose descendants this owner retains.
+ * @param read - The process table reader; injectable for identity regression tests.
+ * @returns A process table retaining observed descendants and an explicit polling disposer.
+ */
+export const trackDescendants = (
+  root: number,
+  read: () => Promise<readonly ProcessRow[]> = processTable,
+): { stop: () => Promise<void>; table: () => Promise<readonly ProcessRow[]> } => {
+  const seen = new Map<number, Readonly<{ pgid: number; started: string }>>();
+  const remember = async (): Promise<readonly ProcessRow[]> => {
+    const rows = await read();
+    for (const [pid, identity] of seen) {
+      if (!rows.some((row) => row.pid === pid && row.pgid === identity.pgid && row.started === identity.started)) {
+        seen.delete(pid);
+      }
+    }
+    const tree = new Set([root, ...seen.keys()]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const row of rows) {
+        if (!tree.has(row.pid) && tree.has(row.ppid)) {
+          tree.add(row.pid);
+          if (row.started !== undefined && row.started.length > 0) {
+            seen.set(row.pid, { pgid: row.pgid, started: row.started });
+          }
+          grew = true;
+        }
+      }
+    }
+    /* A remembered process still owned shows up as a child of the root, whatever its parent is now. */
+    return rows.map((row) => (seen.has(row.pid) ? { ...row, ppid: root } : row));
+  };
+  const poll = async (): Promise<void> => {
+    try {
+      await remember();
+    } catch {
+      /* A failed poll is retried on the next tick; termination takes a fresh table of its own. */
+    }
+  };
+  let latest: Promise<void> = Promise.resolve();
+  const timer = setInterval(() => {
+    latest = poll();
+  }, trackingMilliseconds);
+  timer.unref();
+  return {
+    stop: async () => {
+      clearInterval(timer);
+      await latest;
+    },
+    table: remember,
+  };
 };

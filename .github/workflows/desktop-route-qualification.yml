@@ -4,16 +4,21 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: All platforms, or Linux-only staging evidence (not public promotion)
+        description: All platforms, Linux-only staging evidence (not public promotion), or Mac-only staging ZIP/DMG evidence
         required: true
         default: all
         type: choice
-        options: [all, linux]
+        options: [all, linux, macos]
       channel:
         description: Exact candidate channel; all three candidates must agree
         required: true
         type: choice
         options: [staging, production]
+      graphics:
+        description: Stock GPU acceptance, or isolated Linux software CI that cannot produce release receipts
+        type: choice
+        default: stock
+        options: [stock, isolated-software]
       candidate_a:
         description: Successful trusted installer-candidate run for baseline A
         required: true
@@ -23,7 +28,7 @@ on:
         required: true
         type: string
       candidate_c:
-        description: Successful trusted installer-candidate run for latest update C at this exact main source
+        description: Successful trusted C run; staging Mac CI and Linux may pin a trusted ancestor
         required: true
         type: string
 
@@ -37,6 +42,7 @@ concurrency:
 
 env:
   TAU_DESKTOP_QUALIFICATION_SCOPE: ${{ inputs.scope }}
+  TAU_QUALIFICATION_GRAPHICS: ${{ inputs.graphics }}
   NX_NO_CLOUD: 'true'
   pnpm_config_verify_deps_before_run: error
 
@@ -63,7 +69,9 @@ jobs:
           node --input-type=module <<'NODE'
           import { appendFileSync } from 'node:fs';
           const scope = process.env.TAU_DESKTOP_QUALIFICATION_SCOPE;
-          if (!['all', 'linux'].includes(scope) || (scope === 'linux' && process.env.CHANNEL !== 'staging')) throw new Error('Invalid qualification scope/channel');
+          if (!['all', 'linux', 'macos'].includes(scope) || (scope !== 'all' && process.env.CHANNEL !== 'staging')) throw new Error('Invalid qualification scope/channel');
+          const graphics = process.env.TAU_QUALIFICATION_GRAPHICS;
+          if (!['stock', 'isolated-software'].includes(graphics) || (graphics === 'isolated-software' && (scope !== 'linux' || process.env.CHANNEL !== 'staging'))) throw new Error('Software CI requires Linux staging');
           const rows = [
             {"id": "macos-zip-arm64", "route": "macos-zip", "host": "[\"macos-26\"]"},
             {"id": "macos-dmg-arm64", "route": "macos-dmg", "host": "[\"macos-26\"]"},
@@ -75,7 +83,8 @@ jobs:
             {"id": "debian-apt-x11", "route": "linux-apt", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-debian13-x11\"]"},
             {"id": "debian-appimage-x11", "route": "linux-appimage", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-debian13-x11\"]"},
           ];
-          const selected = scope === 'linux' ? rows.filter(row => row.route.startsWith('linux-')) : rows;
+          // A scoped run selects exactly its own platform's rows: Mac-only is ZIP and DMG on both native architectures.
+          const selected = scope === 'all' ? rows : rows.filter(row => row.route.startsWith(scope === 'linux' ? 'linux-' : 'macos-'));
           appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(selected)}\n`);
           NODE
 
@@ -100,7 +109,8 @@ jobs:
       TAU_QUALIFICATION_RUN_C: ${{ inputs.candidate_c }}
       APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
       TAU_WINDOWS_PUBLISHER: ${{ vars.TAU_WINDOWS_PUBLISHER }}
-      TAU_APPIMAGE_PUBLIC_KEYS: ${{ vars.TAU_APPIMAGE_PUBLIC_KEYS }}
+      # Linux trust is only read by Linux rows; other rows get an inert empty key set instead of a Linux prerequisite.
+      TAU_APPIMAGE_PUBLIC_KEYS: ${{ !startsWith(matrix.route, 'linux-') && '{}' || vars.TAU_APPIMAGE_PUBLIC_KEYS }}
       TAU_APPIMAGE_KEY_ID: ${{ vars.TAU_APPIMAGE_KEY_ID }}
       TAU_APT_PRIMARY_FINGERPRINT: ${{ vars.TAU_APT_PRIMARY_FINGERPRINT }}
       TAU_APT_SIGNING_FINGERPRINT: ${{ vars.TAU_APT_SIGNING_FINGERPRINT }}
@@ -126,7 +136,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: desktop-route-diagnostics-${{ matrix.id }}
+          name: ${{ inputs.graphics == 'isolated-software' && 'desktop-linux-software-ci-diagnostics' || 'desktop-route-diagnostics' }}-${{ matrix.id }}
           path: |
             out/route-qualification/qualification-*.json
             out/route-qualification/renderer-*.json
@@ -134,13 +144,24 @@ jobs:
             out/route-qualification/mirror-trust.json
           if-no-files-found: warn
       - name: Keep passed row separate until every required host succeeds
+        if: inputs.graphics != 'isolated-software'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-route-row-${{ matrix.id }}
           path: out/route-qualification/route-receipts.json
           if-no-files-found: error
+      - name: Retain isolated software CI observations without acceptance receipts
+        if: inputs.graphics == 'isolated-software'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-linux-software-ci-${{ matrix.id }}
+          path: |
+            out/route-qualification/software-ci-evidence.json
+            out/route-qualification/qualification-evidence.json
+          if-no-files-found: error
 
   receipts:
+    if: inputs.graphics != 'isolated-software'
     needs: installed
     environment: desktop-qualification-${{ inputs.channel }}
     runs-on: ubuntu-24.04
@@ -158,10 +179,9 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-nx
-      - name: Re-admit the exact final candidate
-        run: pnpm nx run desktop:fetch-installer-candidate
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: desktop-route-row-*
@@ -170,11 +190,13 @@ jobs:
         run: pnpm nx run desktop:collect-qualification-rows
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ inputs.scope == 'linux' && 'desktop-linux-host-matrix' || 'desktop-route-host-matrix' }}
+          name: ${{ inputs.scope == 'linux' && 'desktop-linux-host-matrix' || inputs.scope == 'macos' && 'desktop-macos-host-matrix' || 'desktop-route-host-matrix' }}
           path: out/qualification-receipts/host-matrix.json
           if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ inputs.scope == 'linux' && 'desktop-linux-ci-receipts' || 'desktop-route-ci-receipts' }}
-          path: out/qualification-receipts/route-receipts.json
+          name: ${{ inputs.scope == 'linux' && 'desktop-linux-ci-receipts' || inputs.scope == 'macos' && 'desktop-macos-ci-receipts' || 'desktop-route-ci-receipts' }}
+          path: |
+            out/qualification-receipts/route-receipts.json
+            ${{ inputs.scope == 'macos' && 'out/qualification-receipts/qualification-binding.json' || '' }}
           if-no-files-found: error

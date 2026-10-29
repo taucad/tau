@@ -10,6 +10,7 @@ import type { MyMessagePart } from '@taucad/chat';
 import { isRecord } from '@taucad/utils/schema';
 import { agentApprovalToolName } from '#services/agent-host-event-projection.js';
 import { summarizeExternalCall } from '#utils/external-call-summary.js';
+import { isQuestionTool } from '#utils/question-tool.js';
 
 export type ActivityCategory = 'text' | 'reasoning' | 'research' | 'write' | 'data' | 'skip';
 
@@ -68,6 +69,7 @@ const staticFamilies = new Map<string, ActivityFamily>([
   ['tool-get_kernel_result', 'render'],
   ['tool-screenshot', 'screenshot'],
   ['tool-test_model', 'test'],
+  ['tool-shell', 'execute'],
 ]);
 
 const nativeFamilies = new Map<string, ActivityFamily>([
@@ -90,6 +92,7 @@ const nativeFamilies = new Map<string, ActivityFamily>([
   ['get_kernel_result', 'render'],
   ['screenshot', 'screenshot'],
   ['test_model', 'test'],
+  ['shell', 'execute'],
 ]);
 
 const externalFamilies = new Map<string, ActivityFamily>([
@@ -183,9 +186,6 @@ const familyLabels: Record<Exclude<ActivityFamily, 'other'>, Record<ActivityStat
   },
 };
 
-/** External agents' own question tools, whose forms Tau presents as question cards. */
-const questionToolNames = new Set(['AskUserQuestion', 'request_user_input']);
-
 const tauFacts = (part: MyMessagePart): Record<string, unknown> | undefined =>
   part.type === 'dynamic-tool' && isRecord(part.toolMetadata?.['tau']) ? part.toolMetadata['tau'] : undefined;
 
@@ -248,7 +248,7 @@ export const classifyActivityPart = (part: MyMessagePart): ActivityCategory => {
     }
     const nativeName = tauMcpToolName(part);
     /* A question is a decision, never folded into routine activity (agent questions blueprint D7). */
-    if (nativeName === 'ask_questions' || questionToolNames.has(String(tauFacts(part)?.['nativeName']))) {
+    if (isQuestionTool(nativeName ?? tauFacts(part)?.['nativeName'])) {
       return 'data';
     }
     return nativeName === 'export_model' || nativeName === 'export_geometry' || nativeName === 'arrange_workbench'

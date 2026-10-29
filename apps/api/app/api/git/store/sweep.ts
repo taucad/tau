@@ -27,6 +27,24 @@ export const retirementMarkerKey = (packKey: string, at: Date): string =>
 
 const markerPattern = /^retired\/(\d+)-(pack-[\w.-]+\.pack)$/u;
 
+const emptySha256 = createHash('sha256').digest('base64');
+
+/**
+ * Writes the marker for one retired pack. The committer sends each marker as
+ * its own put in its upload round, so the round's cap and abort cover it.
+ */
+export const putRetirementMarker = async (
+  args: { store: RepositoryStore; locator: RepositoryLocator; packKey: string; at: Date },
+  signal?: AbortSignal,
+): Promise<void> =>
+  args.store.putObject(
+    args.locator,
+    retirementMarkerKey(args.packKey, args.at),
+    new Uint8Array(new ArrayBuffer(0)),
+    { contentLength: 0, sha256: emptySha256 },
+    signal,
+  );
+
 /** Writes the markers for `packKeys`. Every one must land before the manifest that drops them is committed. */
 export const markRetired = async (args: {
   store: RepositoryStore;
@@ -34,11 +52,9 @@ export const markRetired = async (args: {
   packKeys: readonly string[];
   at: Date;
 }): Promise<void> => {
-  const empty = new Uint8Array(new ArrayBuffer(0));
-  const sha256 = createHash('sha256').update(empty).digest('base64');
   await Promise.all(
-    args.packKeys.map(async (key) =>
-      args.store.putObject(args.locator, retirementMarkerKey(key, args.at), empty, { contentLength: 0, sha256 }),
+    args.packKeys.map(async (packKey) =>
+      putRetirementMarker({ store: args.store, locator: args.locator, packKey, at: args.at }),
     ),
   );
 };

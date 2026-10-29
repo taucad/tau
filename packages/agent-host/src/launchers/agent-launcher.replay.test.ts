@@ -308,6 +308,60 @@ describe('launcher replay source ownership', () => {
     expect(acquisitions).toBe(1);
   });
 
+  it('should reacquire an empty ordinary batch when an append wake overlaps its captured bytes', async () => {
+    const captured = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let acquisitions = 0;
+    let changed: (() => void) | undefined;
+    const reader = await makeLauncher(
+      async () => {
+        if (++acquisitions === 2) {
+          captured.resolve();
+          await release.promise;
+        }
+      },
+      async (_chatId, input) => {
+        changed = input.onChange;
+        return () => undefined;
+      },
+    );
+    const directory = join(currentRoot(), '.tau/chats/ordinary-overlap');
+    await mkdir(directory, { recursive: true });
+    const path = join(directory, 'events.jsonl');
+    const line = (sequence: number) =>
+      JSON.stringify({
+        version: 1,
+        leaderEpoch: 'ordinary-overlap',
+        sequence,
+        recordedAt: '2026-10-09T00:00:00.000Z',
+        runId: 'r',
+        type: 'future.row',
+      }) + '\n';
+    await writeFile(path, line(0));
+    const first = await read(reader, 'ordinary-overlap');
+    if (first.status !== 'batch') {
+      throw new Error('The opening row was not readable.');
+    }
+    const waiting = reader.read({
+      chatId: 'ordinary-overlap',
+      cursor: 1,
+      sourceGeneration: first.sourceGeneration,
+      sourceHealth: first.sourceHealth,
+      limit: 16,
+      maxBytes: 1024,
+      signal: AbortSignal.timeout(2000),
+    });
+    await captured.promise;
+    try {
+      await appendFile(path, line(1));
+      changed?.();
+    } finally {
+      release.resolve();
+    }
+    await expect(waiting).resolves.toMatchObject({ status: 'batch', cursor: 1, nextCursor: 2 });
+    expect(acquisitions).toBe(3);
+  });
+
   it('reacquires held opening bytes after an acknowledged append wake before catch-up publication', async () => {
     const held = Promise.withResolvers<void>();
     const captured = Promise.withResolvers<void>();

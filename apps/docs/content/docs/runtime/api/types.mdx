@@ -27,6 +27,8 @@ Operation results and plugin-author contracts share issues and artifacts.
 
 `KernelIssueType` (`'compilation' | 'runtime' | 'kernel' | 'connection' | 'unknown'`) and `IssueSeverity` (`'error' | 'warning' | 'info'`) classify each issue. `kernelIssueCodeValues` enumerates the stable codes; `isKernelIssueCode` guards one.
 
+A resource-bound refusal carries `ResourceLimitDetails` in `details`: `limit`, `unit`, `maximum`, `demand` (unknown is not zero) and `origin`.
+
 ## Document Results
 
 <auto-type-table path='./props/types.ts' name='Description' />
@@ -132,6 +134,8 @@ Document results always carry `issues`. Successful evaluations offer ordered vie
 <auto-type-table path='./props/types.ts' name='SpanHandle' />
 
 <auto-type-table path='./props/types.ts' name='RuntimeSpanTracer' />
+
+Node hosts persist batches through `openTelemetryFileSink()`, a non-blocking `TelemetryExporter`; `telemetryDirectory()` and `telemetryFormat()` (a `TelemetryFileFormat`) read `TAU_TELEMETRY_DIR` and `TAU_TELEMETRY_FORMAT`. Spans arrive after their operation's reply.
 
 ## Artifacts and Plugin Results
 

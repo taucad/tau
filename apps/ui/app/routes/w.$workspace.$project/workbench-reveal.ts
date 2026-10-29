@@ -15,6 +15,9 @@ export type WorkbenchRevealKind = 'model' | 'kinematics';
 /** The component a reveal names. */
 export type WorkbenchRevealTarget = Readonly<{ entryPath: string; unitId: string; componentId: string }>;
 
+/** The file or directory a Files reveal names. */
+export type WorkbenchFileRevealTarget = Readonly<{ path: string; expandTarget?: boolean }>;
+
 /**
  * A held reveal older than this is stale: the pane it opened has had time to mount, so nothing is waiting for it. Long
  * enough for a cold lazy chunk on a slow phone connection, which can take several seconds; short of a person opening
@@ -22,18 +25,29 @@ export type WorkbenchRevealTarget = Readonly<{ entryPath: string; unitId: string
  */
 const heldRevealLifetimeMilliseconds = 10_000;
 
-type HeldReveal = { readonly target: WorkbenchRevealTarget; readonly heldAt: number };
-type Channel = { subscribers: number; held: HeldReveal | undefined };
+type HeldReveal<T> = { readonly target: T; readonly heldAt: number };
+type Channel<T> = { subscribers: number; held: HeldReveal<T> | undefined };
+type FileChannel = {
+  held: HeldReveal<WorkbenchFileRevealTarget> | undefined;
+  handled: WorkbenchFileRevealTarget | undefined;
+};
 
-const channels = new WeakMap<EditorStateMachineRef, Record<WorkbenchRevealKind, Channel>>();
+const channels = new WeakMap<
+  EditorStateMachineRef,
+  Record<WorkbenchRevealKind, Channel<WorkbenchRevealTarget>> & { files: FileChannel }
+>();
 
-function channelOf(editorRef: EditorStateMachineRef, kind: WorkbenchRevealKind): Channel {
+function channelsOf(editorRef: EditorStateMachineRef) {
   let byKind = channels.get(editorRef);
   if (!byKind) {
-    byKind = { model: { subscribers: 0, held: undefined }, kinematics: { subscribers: 0, held: undefined } };
+    byKind = {
+      model: { subscribers: 0, held: undefined },
+      kinematics: { subscribers: 0, held: undefined },
+      files: { held: undefined, handled: undefined },
+    };
     channels.set(editorRef, byKind);
   }
-  return byKind[kind];
+  return byKind;
 }
 
 const targetOf = ({ entryPath, unitId, componentId }: WorkbenchRevealTarget): WorkbenchRevealTarget => ({
@@ -54,7 +68,7 @@ export function holdUnheardReveal(
   kind: WorkbenchRevealKind,
   target: WorkbenchRevealTarget,
 ): void {
-  const channel = channelOf(editorRef, kind);
+  const channel = channelsOf(editorRef)[kind];
   channel.held = channel.subscribers === 0 ? { target: targetOf(target), heldAt: performance.now() } : undefined;
 }
 
@@ -71,7 +85,7 @@ export function subscribeWorkbenchReveal(
   kind: WorkbenchRevealKind,
   listener: (target: WorkbenchRevealTarget) => void,
 ): () => void {
-  const channel = channelOf(editorRef, kind);
+  const channel = channelsOf(editorRef)[kind];
   channel.subscribers += 1;
   const subscription =
     kind === 'model'
@@ -88,6 +102,41 @@ export function subscribeWorkbenchReveal(
   }
   return () => {
     channel.subscribers -= 1;
+    subscription.unsubscribe();
+  };
+}
+
+/** Keeps a file reveal for a Files pane that has not mounted yet. */
+export function holdUnheardFileReveal(editorRef: EditorStateMachineRef, target: WorkbenchFileRevealTarget): void {
+  const channel = channelsOf(editorRef).files;
+  // A mounted tree may hear the same editor event before the workspace listener.
+  // Its acknowledgement prevents that event being held again, regardless of subscription order.
+  channel.held = channel.handled === target ? undefined : { target, heldAt: performance.now() };
+}
+
+/** Subscribes Files to a pending reveal once, then to the editor's live file reveals. */
+export function subscribeWorkbenchFileReveal(
+  editorRef: EditorStateMachineRef,
+  listener: (target: WorkbenchFileRevealTarget) => void,
+  shouldHandleReveal?: () => boolean,
+): () => void {
+  const channel = channelsOf(editorRef).files;
+  const deliver = (target: WorkbenchFileRevealTarget): void => {
+    if (shouldHandleReveal && !shouldHandleReveal()) {
+      return;
+    }
+    channel.handled = target;
+    channel.held = undefined;
+    listener({ path: target.path, expandTarget: target.expandTarget });
+  };
+  const subscription = editorRef.on('fileRevealRequested', deliver);
+  const { held } = channel;
+  if (held && performance.now() - held.heldAt <= heldRevealLifetimeMilliseconds) {
+    deliver(held.target);
+  } else {
+    channel.held = undefined;
+  }
+  return () => {
     subscription.unsubscribe();
   };
 }

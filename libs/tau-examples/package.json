@@ -45,7 +45,7 @@
     "@taucad/geometry-core": "workspace:*",
     "@taucad/kinematics": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
-    "geospec": "workspace:*",
+    "geospec": "catalog:",
     "libcascade": "catalog:",
     "manifold-3d": "catalog:",
     "picovoxel": "catalog:",

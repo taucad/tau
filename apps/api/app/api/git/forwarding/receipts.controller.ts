@@ -12,25 +12,29 @@ import {
 } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { maximumPostedReceiptLength } from '#api/git/forwarding/contract/receipt.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 
-/** The longest receipt this route reads: a `retained` receipt carries no oid list. */
-const maximumPostedReceiptLength = 64 * 1024;
-
 /**
- * Posts one address may make per window. tau-storage posts one receipt per
- * compacting sweep, so this is far above any real rate and only bounds what a
- * caller replaying receipts can make the API re-read.
+ * Posts one address may make per window. tau-storage posts two receipts per
+ * compaction it runs after a reply — the compaction's `commit` and its sweep's
+ * `retained` — where it posted one per compacting push before compaction
+ * moved off the reply, so the budget doubled with it (240 from 120). At the
+ * observed 13% of pushes compacting, that is still ~900 pushes a minute from
+ * one storage address before a `429`, which the poster waits out
+ * (`Retry-After`); it only bounds what a caller replaying receipts can make
+ * the API re-read.
  */
-export const receiptPostsPerWindow = 120;
+export const receiptPostsPerWindow = 240;
 
 /** The receipt route's window, in seconds. */
 export const receiptPostWindowSeconds = 60;
 
 /**
  * The receipt route (DC1): where tau-storage posts a receipt nothing was
- * waiting for, which today is only the `retained` bytes a compacting commit's
- * sweep kept (D18). Every other receipt rides back on the response it follows.
+ * waiting for — a deferred compaction's `commit`, and the `retained` bytes a
+ * compacting commit's sweep kept (D18). Every other receipt rides back on the
+ * response it follows. A body is at most {@link maximumPostedReceiptLength}.
  *
  * It carries no session: the receipt's signature, under a key only
  * tau-storage holds, is the authentication, and `applyReceipt` re-reads the

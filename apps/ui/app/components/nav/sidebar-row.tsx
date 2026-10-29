@@ -215,7 +215,7 @@ export function SidebarRowLink({
       aria-busy={isPending}
       aria-describedby={sentence === undefined ? undefined : descriptionId}
       className='flex h-full min-w-0 flex-1 items-center rounded-sm outline-hidden focus-visible:focus-outline'
-      /* Every row opens a project route, whose editors need Monaco: start it on intent. */
+      /* Warm the project shell on navigation intent; source panes load their editor when mounted. */
       onPointerEnter={warmProjectWorkspace}
       onPointerDown={warmProjectWorkspace}
       onFocus={warmProjectWorkspace}

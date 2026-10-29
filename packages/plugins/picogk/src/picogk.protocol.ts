@@ -128,6 +128,15 @@ export const picogkOccurrenceSchema = z
   })
   .strict();
 
+/**
+ * Adaptive display meshing for one build: OpenVDB adaptivity in (0, 1) and its relax pass. The host sends it
+ * only above 0, and a worker that applied it echoes it in the build result.
+ */
+export const picogkMeshingSchema = z.object({ adaptivity: z.number().gt(0).lt(1), relax: z.boolean() }).strict();
+
+/** Adaptive meshing requested of, and echoed by, the worker. */
+export type PicogkMeshing = z.output<typeof picogkMeshingSchema>;
+
 export const picogkBuildSchema = z
   .object({
     artifactPath: z.string().min(1),
@@ -167,6 +176,8 @@ export const picogkBuildSchema = z
     metrics: picogkWorkerMetricsSchema,
     /** Voxel edge length in millimetres the model's `Library.Go` ran with; absent without a voxel library. */
     voxelSize: z.number().positive().optional(),
+    /** The adaptive meshing the worker applied to captured Voxels; absent for the uniform mesh. */
+    meshing: picogkMeshingSchema.optional(),
   })
   .strict()
   .superRefine((scene, context) => {

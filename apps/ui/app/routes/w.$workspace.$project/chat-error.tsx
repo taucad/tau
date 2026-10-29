@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import type React from 'react';
-import { Bot, CircleAlert, RefreshCcw, WifiOff } from 'lucide-react';
+import { Bot, CircleAlert, MonitorSmartphone, RefreshCcw, WifiOff } from 'lucide-react';
 import { errorCategory } from '@taucad/types/constants';
 import type { ChatError as NormalizedChatError } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
@@ -30,10 +30,37 @@ import { selectCaughtUp, selectCurrentRun, selectRunFailure } from '#machines/ch
 
 const projectedFailureErrors = new WeakMap<Readonly<{ runId: string; text: string }>, NormalizedChatError>();
 
+type VisibleChatError = Readonly<{
+  error: NormalizedChatError;
+  /**
+   * The failure's identity from durable data, the same across a rerender, a remount and a projection rebuild: the
+   * failed run's attempt, or the refused command's request. Only a live error with neither falls back to the error
+   * object's own identity.
+   */
+  id: string;
+}>;
+
+const liveErrorIds = new WeakMap<Error | NormalizedChatError, string>();
+let lastLiveErrorId = 0;
+
+/** A live error's identity for as long as the chat holds that error object. */
+function liveErrorId(error: Error | NormalizedChatError): string {
+  let id = liveErrorIds.get(error);
+  if (id === undefined) {
+    lastLiveErrorId += 1;
+    id = `live:${String(lastLiveErrorId)}`;
+    liveErrorIds.set(error, id);
+  }
+  return id;
+}
+
+const refusalId = (refusal: NormalizedChatError): string | undefined =>
+  refusal.requestId === undefined ? undefined : `refusal:${refusal.requestId}`;
+
 /** Only the caught-up host log can retire a legacy chat-wide error. */
-export function selectVisibleChatError(
+function selectVisibleChatErrorEntry(
   state: Pick<CombinedChatState, 'projection' | 'attachmentStatus' | 'error' | 'persistedError'>,
-): NormalizedChatError | undefined {
+): VisibleChatError | undefined {
   const { projection } = state;
   const caughtUp = projection !== undefined && selectCaughtUp(projection);
   const run = projection === undefined || !caughtUp ? undefined : selectCurrentRun(projection);
@@ -50,7 +77,8 @@ export function selectVisibleChatError(
           parsed = parseErrorForPersistence(new Error(failure));
           projectedFailureErrors.set(key, parsed);
         }
-        return parsed;
+        // A resumed run that fails again is a new failure: its attempt is part of the identity.
+        return { error: parsed, id: `run:${key.runId}:${String(run.attempt)}` };
       }
     }
   }
@@ -72,9 +100,28 @@ export function selectVisibleChatError(
     ) {
       return undefined;
     }
-    return refusal;
+    return { error: refusal, id: `refusal:${refusal.requestId}` };
   }
-  return state.error ? parseErrorForPersistence(state.error) : state.persistedError;
+  if (state.error) {
+    const error = parseErrorForPersistence(state.error);
+    return { error, id: refusalId(error) ?? liveErrorId(state.error) };
+  }
+  const persisted = state.persistedError;
+  return persisted === undefined ? undefined : { error: persisted, id: refusalId(persisted) ?? liveErrorId(persisted) };
+}
+
+/** The chat's visible failure, if any. */
+export function selectVisibleChatError(
+  state: Pick<CombinedChatState, 'projection' | 'attachmentStatus' | 'error' | 'persistedError'>,
+): NormalizedChatError | undefined {
+  return selectVisibleChatErrorEntry(state)?.error;
+}
+
+/** The visible failure's durable identity (`run:…`, `refusal:…`), which the phone sheet acknowledges by (I5). */
+export function selectVisibleChatErrorId(
+  state: Pick<CombinedChatState, 'projection' | 'attachmentStatus' | 'error' | 'persistedError'>,
+): string | undefined {
+  return selectVisibleChatErrorEntry(state)?.id;
 }
 
 /**
@@ -204,24 +251,32 @@ function codedErrorCard({
   if (category === 'pausedTurn') {
     // The orphan rule records why the driver went (`orphanRows`): an agent left waiting for approval asks again.
     const awaitingApproval = code === 'RUN_ABANDONED' && error.details?.['cause'] === 'awaiting-approval';
+    /* A `wait` refusal that ended an admitted run is recorded RUN_ABANDONED with its code kept (RA-R1, XD3/XD4). */
+    const abandonedCode = code === 'RUN_ABANDONED' ? error.details?.['code'] : undefined;
+    const waitingOnSync =
+      typeof abandonedCode === 'string' && cardOf(abandonedCode, error.category).category === 'waitingOnSync';
     return (
       <ChatErrorPausedTurn
         className={className}
         title={
           awaitingApproval
             ? 'Tau closed while the agent waited for your approval'
-            : code === 'RUN_ABANDONED'
-              ? 'Chat paused'
-              : code === 'NETWORK_ERROR'
-                ? 'Connection lost'
-                : undefined
+            : waitingOnSync
+              ? 'Waiting on sync from another device'
+              : code === 'RUN_ABANDONED'
+                ? 'Chat paused'
+                : code === 'NETWORK_ERROR'
+                  ? 'Connection lost'
+                  : undefined
         }
         reason={
           awaitingApproval
             ? 'Resume and the agent asks for it again.'
-            : code === 'RUN_ABANDONED' || code === 'NETWORK_ERROR'
-              ? undefined
-              : error.message
+            : waitingOnSync
+              ? 'Resume once sync brings what another device wrote.'
+              : code === 'RUN_ABANDONED' || code === 'NETWORK_ERROR'
+                ? undefined
+                : error.message
         }
         resumable={retry === 'resume' && resumable}
         icon={error.category === errorCategory.overloaded ? WifiOff : CircleAlert}
@@ -308,6 +363,34 @@ function codedErrorCard({
         icon={Bot}
         title='This chat continued in another tab'
         description='Keep working there. Reload this page to follow along here.'
+      />
+    );
+  }
+
+  // Another device is running this chat (XD3). Its run cannot be moved or stopped from here (OQ-N21); the composer
+  // holds its send until sync brings that run's ending, and the draft that was refused is kept.
+  if (category === 'otherDevice') {
+    return (
+      <ChatErrorCard
+        className={className}
+        tone='neutral'
+        icon={MonitorSmartphone}
+        title='This chat is running on another device'
+        description='Send again here once that run finishes.'
+      />
+    );
+  }
+
+  // Another device's copy of the chat, or the branch it ran on, has not reached this device yet (XD3, XD4). Both are
+  // refused `wait`: the same send is admitted once sync brings it, and nothing here can hurry it.
+  if (category === 'waitingOnSync') {
+    return (
+      <ChatErrorCard
+        className={className}
+        tone='neutral'
+        icon={MonitorSmartphone}
+        title='Waiting on sync from another device'
+        description='This chat continues once sync brings what another device wrote. Send again then.'
       />
     );
   }
@@ -424,9 +507,31 @@ const rateLimitAutoResume = (
 ): Readonly<{ runId: string; attempt: number }> | undefined =>
   code === autoResumableRateLimitCode && runId !== undefined && attempt !== undefined ? { runId, attempt } : undefined;
 
+/**
+ * The run's failure, a decision the phone sheet never folds away (I5, `chat-interface-mobile.tsx`): the marker renders
+ * only while a card does.
+ */
 export const ChatError = memo(function ({ className }: { readonly className?: string }): React.ReactNode {
   // Derive parsed error inside selector - prefer runtime error, fallback to persisted
   const parsedError = useChatSelector(selectVisibleChatError);
+  const decisionId = useChatSelector(selectVisibleChatErrorId);
+  if (!parsedError) {
+    return null;
+  }
+  return (
+    <div data-decision='run-error' data-decision-id={decisionId} className='shrink-0'>
+      <ChatErrorBody parsedError={parsedError} className={className} />
+    </div>
+  );
+});
+
+function ChatErrorBody({
+  parsedError,
+  className,
+}: {
+  readonly parsedError: NormalizedChatError;
+  readonly className: string | undefined;
+}): React.ReactNode {
   /* One decision, the turn host's own: a card may promise the turn and say Resume only where `continue` will be
    * admitted, which reads the caught-up log's current run — never the error text, which can outlive the run it names
    * or describe a refusal that left no run. Every other card keeps *Try again* and makes no promise. */
@@ -444,10 +549,6 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
   );
   const { regenerate } = useChatActions();
   const { openNewChat, isReady: canOpenNewChat } = useOpenNewChat();
-
-  if (!parsedError) {
-    return null;
-  }
 
   // Try again is an explicit replay. Specialized components own auth,
   // credits, rate-limit, and tool-error actions. Credits remain the
@@ -581,4 +682,4 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
       return renderGenericError();
     }
   }
-});
+}

@@ -12,11 +12,13 @@
  * `operator-validation-pending` and never run here (ruling 2026-10-24T05:39Z).
  */
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -30,6 +32,7 @@ import { createServer } from 'node:net';
 import type { AddressInfo, Server } from 'node:net';
 import { arch, networkInterfaces, platform, release, tmpdir, version } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -327,6 +330,147 @@ describe.runIf(enabled)('shell conformance', () => {
     ).toStrictEqual(before);
   });
 
+  conformance(
+    'C10',
+    'a read-only path inside a writable root reads but cannot be written, moved or replaced',
+    async () => {
+      const records = join(work, 'records');
+      const record = join(records, 'chat.json');
+      mkdirSync(records, { recursive: true });
+      writeFileSync(record, 'RECORD-ORIGINAL\n');
+      const filesystem = { readable: [readonly, home], writable: [work], readOnly: [records], denied: [secret] };
+      const positive = await run('cat records/chat.json && printf WROTE > beside.txt', { filesystem });
+
+      expect(positive.exitCode, positive.stderr).toBe(0);
+      expect(positive.stdout).toBe('RECORD-ORIGINAL\n');
+      expect(readFileSync(join(work, 'beside.txt'), 'utf8')).toBe('WROTE');
+
+      const before = digestOf(record);
+      const refused = [
+        'printf X > records/chat.json',
+        'printf X > records/new.json',
+        'rm records/chat.json',
+        'mv records/chat.json moved.json',
+        'mv records records-moved',
+        'rm -rf records',
+      ];
+      const outcomes = await Promise.all(refused.map(async (probe) => run(probe, { filesystem })));
+
+      expect(outcomes.map((outcome) => outcome.exitCode !== 0)).toStrictEqual(refused.map(() => true));
+      expect(digestOf(record)).toBe(before);
+      /* A move out of a read-only mount falls back to copy-then-unlink: the copy a read allows may land, the unlink
+       * never does, so the record stays where it was. */
+      expect(existsSync(join(records, 'new.json'))).toBe(false);
+      expect(existsSync(join(work, 'records-moved'))).toBe(false);
+    },
+  );
+
+  conformance(
+    'C17',
+    'an absent protected path shared by overlapping launches stays covered until the last of them ends',
+    async () => {
+      const project = join(work, 'shared-absent');
+      const sync = join(work, 'shared-sync');
+      mkdirSync(project);
+      mkdirSync(sync);
+      const reserved = join(project, '.tau');
+      const control = join(project, '.git');
+      const filesystem = {
+        readable: [readonly, home],
+        writable: [project, sync],
+        readOnly: [join(reserved, 'chats')],
+        denied: [secret, join(reserved, 'binding.json'), control],
+      };
+      const signal = (name: string): string => join(sync, name);
+      const waitFor = (name: string): string => `while [ ! -f ${signal(name)} ]; do sleep 0.02; done`;
+      const until = async (name: string): Promise<void> => {
+        for (let attempt = 0; attempt < 1500 && !existsSync(signal(name)); attempt++) {
+          // oxlint-disable-next-line no-await-in-loop -- a bounded wait for the sandbox's own signal file.
+          await delay(20);
+        }
+        expect(existsSync(signal(name)), name).toBe(true);
+      };
+      // The first launch stays up while the second is configured, then ends before the second writes.
+      const first = run(`printf ready > ${signal('first-ready')}; ${waitFor('first-release')}; printf FIRST`, {
+        filesystem,
+        workingDirectory: project,
+        commandId: 'conformance#c17-first',
+      });
+      await until('first-ready');
+      const second = run(
+        [
+          `printf ready > ${signal('second-ready')}`,
+          waitFor('second-write'),
+          'printf LEAK > .tau/binding.json 2>/dev/null',
+          'printf LEAK > .git 2>/dev/null',
+          'printf SECOND',
+        ].join('; '),
+        { filesystem, workingDirectory: project, commandId: 'conformance#c17-second' },
+      );
+      await until('second-ready');
+      writeFileSync(signal('first-release'), '');
+      const ended = await first;
+      expect(ended.exitCode, ended.stderr).toBe(0);
+      expect(ended.stdout).toBe('FIRST');
+      writeFileSync(signal('second-write'), '');
+      const written = await second;
+      expect(written.exitCode, written.stderr).toBe(0);
+      expect(written.stdout).toBe('SECOND');
+      expect(existsSync(join(reserved, 'binding.json'))).toBe(false);
+      expect(existsSync(control) ? readFileSync(control, 'utf8') : 'absent').not.toContain('LEAK');
+      // Nothing either launch relied on is left behind on the host.
+      expect(existsSync(reserved)).toBe(false);
+      expect(existsSync(control)).toBe(false);
+    },
+  );
+
+  conformance(
+    'C18',
+    'an absent protected directory row is never a file on the host while a launch is live',
+    async () => {
+      const project = join(work, 'runs-row');
+      const sync = join(work, 'runs-sync');
+      mkdirSync(join(project, '.tau', 'parameters'), { recursive: true });
+      mkdirSync(sync);
+      const runs = join(project, '.tau', 'runs');
+      const filesystem = {
+        readable: [readonly, home],
+        writable: [project, sync],
+        readOnly: [runs],
+        denied: [secret],
+        directories: [runs],
+      };
+      const live = run(
+        [
+          `printf ready > ${join(sync, 'ready')}`,
+          `while [ ! -f ${join(sync, 'release')} ]; do sleep 0.02; done`,
+          '(printf FORGED > .tau/runs/forged.json) 2>/dev/null || printf REFUSED',
+        ].join('; '),
+        { filesystem, workingDirectory: project, commandId: 'conformance#c18-live' },
+      );
+      for (let attempt = 0; attempt < 1500 && !existsSync(join(sync, 'ready')); attempt++) {
+        // oxlint-disable-next-line no-await-in-loop -- a bounded wait for the sandbox's own signal file.
+        await delay(20);
+      }
+      expect(existsSync(join(sync, 'ready'))).toBe(true);
+      // What the revisions engine does with its records while the session is live: test, list, then write.
+      const during = lstatSync(runs, { throwIfNoEntry: false });
+      expect(during === undefined || during.isDirectory(), 'a file stands where a directory row belongs').toBe(true);
+      if (during !== undefined) {
+        expect(readdirSync(runs)).toStrictEqual([]);
+      }
+      mkdirSync(runs, { recursive: true });
+      writeFileSync(join(runs, 'lease.json'), '{"lease":"HOST"}\n');
+      writeFileSync(join(sync, 'release'), '');
+      const ended = await live;
+      expect(ended.exitCode, ended.stderr).toBe(0);
+      expect(ended.stdout).toBe('REFUSED');
+      expect(existsSync(join(runs, 'forged.json'))).toBe(false);
+      // The host's own record survives the launch's release.
+      expect(readFileSync(join(runs, 'lease.json'), 'utf8')).toBe('{"lease":"HOST"}\n');
+    },
+  );
+
   conformance('C03', 'startup hooks are refused and the shell sees only the environment it was given', async () => {
     const positive = await run('printf %s "$GIVEN"', {
       environment: { PATH: '/usr/bin:/bin', HOME: work, LANG: 'C', GIVEN: 'GIVEN-VALUE' },
@@ -438,6 +582,93 @@ describe.runIf(enabled)('shell conformance', () => {
 
     expect(exit).toStrictEqual({ signal: 'SIGKILL' });
     expect(Date.now() - startedAt).toBeLessThan(10_000);
+  });
+
+  conformance(
+    'C11',
+    "a protected path's ancestors cannot be renamed or removed, so the path never moves (E04)",
+    async () => {
+      const project = join(work, 'c11');
+      const chats = join(project, '.tau', 'chats');
+      mkdirSync(chats, { recursive: true });
+      mkdirSync(join(project, '.tau', 'parameters'), { recursive: true });
+      writeFileSync(join(chats, 'chat-1.json'), 'RECORD\n');
+      const before = digestOf(join(chats, 'chat-1.json'));
+      const filesystem = { readable: [], writable: [work], readOnly: [chats], denied: [] };
+      const positive = await run("printf '{}' > c11/.tau/parameters/main.json", { filesystem });
+
+      expect(positive.exitCode, positive.stderr).toBe(0);
+      expect(readFileSync(join(project, '.tau', 'parameters', 'main.json'), 'utf8')).toBe('{}');
+      for (const command of [
+        'mv c11/.tau c11/.tau-moved',
+        'mv c11 c11-moved',
+        'rm -rf c11/.tau',
+        'mv c11/.tau/chats c11/stolen',
+      ]) {
+        // oxlint-disable-next-line no-await-in-loop -- one escape at a time, each judged outside.
+        await run(command, { filesystem });
+
+        expect(digestOf(join(chats, 'chat-1.json')), command).toBe(before);
+      }
+      expect(existsSync(join(project, '.tau-moved')) || existsSync(join(work, 'c11-moved'))).toBe(false);
+    },
+  );
+
+  conformance('C12', 'a host killed mid-command takes its whole sandbox with it (E11)', async () => {
+    const marker = `tau-c12-${String(process.pid)}`;
+    const folder = join(work, 'c12');
+    mkdirSync(folder, { recursive: true });
+    const host = spawn(process.execPath, [fileURLToPath(new URL('host-death.fixture.ts', import.meta.url))], {
+      cwd: dirname(fileURLToPath(import.meta.url)),
+      env: {
+        ...process.env,
+        TAU_HOST_DEATH_BWRAP: bwrapPath,
+        TAU_HOST_DEATH_WORK: folder,
+        TAU_HOST_DEATH_MARKER: marker,
+      },
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    let output = '';
+    host.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+      output += chunk;
+    });
+    const beat = join(folder, 'beat.txt');
+    for (const deadline = Date.now() + 30_000; !(existsSync(beat) && statSync(beat).size > 0); ) {
+      if (Date.now() > deadline) {
+        host.kill('SIGKILL');
+        throw new Error(`the fixture never started: ${output}`);
+      }
+      // oxlint-disable-next-line no-await-in-loop -- polls until the writer beats.
+      await delay(50);
+    }
+
+    expect(output).toBe('started\n');
+    if (!linux) {
+      const shellPid = Number(readFileSync(join(folder, 'shell.pid'), 'utf8').trim());
+      const writerPid = Number(readFileSync(join(folder, 'writer.pid'), 'utf8').trim());
+      const groupOf = (pid: number): number =>
+        Number(execFileSync('/bin/ps', ['-o', 'pgid=', '-p', String(pid)], { encoding: 'utf8' }).trim());
+
+      expect(groupOf(writerPid)).not.toBe(groupOf(shellPid));
+    }
+    host.kill('SIGKILL');
+    await new Promise((resolve) => {
+      host.once('exit', resolve);
+    });
+    const survivors = (): string[] =>
+      execFileSync('ps', ['-axww', '-o', 'pid=,command='], { encoding: 'utf8' })
+        .split('\n')
+        .filter((line) => line.includes(marker) && !line.includes('ps -axww'));
+    for (const deadline = Date.now() + 10_000; survivors().length > 0 && Date.now() < deadline; ) {
+      // oxlint-disable-next-line no-await-in-loop -- polls the process table until the sandbox is gone.
+      await delay(100);
+    }
+
+    expect(survivors()).toStrictEqual([]);
+    const { size } = statSync(beat);
+    await delay(1000);
+
+    expect(statSync(beat).size).toBe(size);
   });
 
   if (linux) {

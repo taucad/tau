@@ -1,5 +1,4 @@
 ---
-geospec: patch
 cli: patch
 ---
 

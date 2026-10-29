@@ -2,7 +2,14 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { dictationMaxAudioBytes } from '@taucad/chat/schemas';
 import { captureDictation } from '#components/dictation/dictation-capture.js';
 import type { DictationCapture } from '#components/dictation/dictation-capture.js';
+import { toast } from 'sonner';
 import { fetchDictationStatus, transcribeDictation } from '#components/dictation/dictation-client.js';
+import {
+  SilentDictationError,
+  dictationMessages,
+  microphoneErrorMessage,
+  transcriptionErrorMessage,
+} from '#components/dictation/dictation-errors.js';
 
 export type DictationPhase = 'idle' | 'requesting' | 'recording' | 'stopping' | 'transcribing';
 
@@ -46,7 +53,6 @@ export type Dictation = {
   /** Whether the Tau API offers dictation to this user; undefined while checking. */
   readonly available: boolean | undefined;
   readonly phase: DictationPhase;
-  readonly error: string | undefined;
   /** Streamed text while the provider transcribes; replaced by the final transcript. */
   readonly transcript: string;
   readonly waveform: DictationWaveform;
@@ -63,7 +69,6 @@ export type Dictation = {
 export function useDictation(onTranscript: (text: string) => void, draftOwner: unknown): Dictation {
   const [available, setAvailable] = useState<boolean>();
   const [phase, setPhase] = useState<DictationPhase>('idle');
-  const [error, setError] = useState<string>();
   const [transcript, setTranscript] = useState('');
   const [waveform, setWaveform] = useState(emptyWaveform);
   const current = useRef<Session | undefined>(undefined);
@@ -91,6 +96,7 @@ export function useDictation(onTranscript: (text: string) => void, draftOwner: u
     };
   }, []);
 
+  /** Ends the session; a failure's message, when there is one, shows as a toast. */
   const reset = useCallback((session: Session, success: boolean, message?: string): void => {
     if (current.current !== session) {
       return;
@@ -105,7 +111,10 @@ export function useDictation(onTranscript: (text: string) => void, draftOwner: u
     setPhase('idle');
     setTranscript('');
     setWaveform(emptyWaveform);
-    setError(message);
+    if (message !== undefined) {
+      // One dictation error at a time: a newer failure replaces the toast instead of stacking.
+      toast.error(message, { id: 'dictation-error' });
+    }
   }, []);
 
   const cancel = useCallback((): void => {
@@ -145,7 +154,8 @@ export function useDictation(onTranscript: (text: string) => void, draftOwner: u
           return;
         }
         if (text === '') {
-          reset(session, false, 'No speech was recognized. Check your microphone and try again.');
+          // Silence transcribes to nothing; people know they did not speak, so it ends quietly.
+          reset(session, false);
           return;
         }
         receiveTranscript.current(text);
@@ -155,7 +165,7 @@ export function useDictation(onTranscript: (text: string) => void, draftOwner: u
           reset(
             session,
             false,
-            stopError instanceof Error ? stopError.message : 'Could not finish dictation. Try again.',
+            stopError instanceof SilentDictationError ? undefined : transcriptionErrorMessage(stopError),
           );
         }
       }
@@ -181,7 +191,7 @@ export function useDictation(onTranscript: (text: string) => void, draftOwner: u
       return;
     }
     if (activeSession !== undefined) {
-      setError('Finish or cancel dictation in the other input first.');
+      // Another input is already dictating; its pill is in view, so starting again does nothing.
       return;
     }
     let settle: (success: boolean) => void = () => undefined;
@@ -191,7 +201,6 @@ export function useDictation(onTranscript: (text: string) => void, draftOwner: u
     const session: Session = { owner: draftOwner, abort: new AbortController(), done, settle, phase: 'requesting' };
     current.current = session;
     activeSession = session;
-    setError(undefined);
     setTranscript('');
     setWaveform({ levels: silentLevels, batch: 0 });
     setPhase('requesting');
@@ -208,10 +217,11 @@ export function useDictation(onTranscript: (text: string) => void, draftOwner: u
           }
         },
         onLimit: () => {
+          toast.info(dictationMessages.recordingLimit, { id: 'dictation-limit' });
           void stop();
         },
         onError: (captureError) => {
-          reset(session, false, captureError.message);
+          reset(session, false, microphoneErrorMessage(captureError));
         },
       });
       if (current.current !== session) {
@@ -221,15 +231,9 @@ export function useDictation(onTranscript: (text: string) => void, draftOwner: u
       session.phase = 'recording';
       setPhase('recording');
     } catch (captureError) {
-      const message =
-        captureError instanceof DOMException && captureError.name === 'NotAllowedError'
-          ? 'Microphone access was denied. Allow microphone access in system settings and try again.'
-          : captureError instanceof Error
-            ? captureError.message
-            : 'Could not start dictation. Check your microphone and try again.';
-      reset(session, false, message);
+      reset(session, false, microphoneErrorMessage(captureError));
     }
   }, [available, draftOwner, reset, stop]);
 
-  return { available, phase, error, transcript, waveform, start, stop, cancel };
+  return { available, phase, transcript, waveform, start, stop, cancel };
 }

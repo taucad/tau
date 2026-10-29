@@ -1,6 +1,6 @@
 # Privacy Policy - TauCAD Limited
 
-*Effective date: October 9, 2026*
+*Effective date: October 25, 2026*
 
 ## 1. Introduction
 
@@ -41,6 +41,8 @@ When you are signed in, the web and desktop apps also report two kinds of metric
 
 - **Operational telemetry**: performance and outcome metrics such as kernel execution timing, sync outcomes, agent turn counts and durations, tool-call counts by kind, token counts, and error codes. We use these to keep the Service healthy, and they are sent regardless of the setting below.
 - **Anonymous usage metrics** (Optional): counts describing how the AI agent works during a turn, such as the CAD kernel, which built-in skills were used, how many calls and reference lookups happened before the first model change, lookup outcomes, evaluation outcome classes, and GeoSpec test pass and fail counts. We use these to improve Tau. They are on by default; switch them off under **Settings → General → Privacy** by disabling "Share anonymous usage metrics." On the web, an active Global Privacy Control signal also switches them off.
+
+**Error and crash reports**: When the web app, desktop app or API hits an error or crash, it sends a report to Sentry so we can find and fix the fault. A report contains the error message and stack trace, the app version, the page route without query strings or fragments, browser, operating system and device information, and recent technical events leading up to the error. Desktop crash reports may also contain a memory snapshot of the crashed app process. When you are signed in, a report may carry your internal Tau account identifier so we can tell how many people an error affects; it never carries your name or email address. Reports are scrubbed of cookies, authorization headers and tokens before they are sent. They do not depend on analytics consent or a Global Privacy Control signal, because they are needed to keep the Service working and secure and are not used for tracking or advertising.
 
 ### 3.4 Location Data
 
@@ -158,6 +160,7 @@ We may use your prompts and generated designs to improve our AI features. This i
 ### 9.3 Analytics and Observability
 
 - **PostHog (Cloud)**: Web product analytics and session replay after consent, and desktop app product analytics (USA). [Privacy Policy](https://posthog.com/privacy)
+- **Sentry (Functional Software, Inc.)**: Error and crash reporting for the web app, desktop app and API (USA). [Privacy Policy](https://sentry.io/privacy/)
 - **LangSmith**: AI feature monitoring. [Privacy Policy](https://www.langchain.com/privacy)
 
 ### 9.4 Payment Processing

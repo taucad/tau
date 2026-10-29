@@ -149,6 +149,9 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/desktop-e2e/src/support/two-client/git-faults.test.ts',
       'apps/desktop-e2e/src/support/two-client/git-faults.ts',
       'apps/desktop-e2e/src/two-client.spec.ts',
+      // Clean-host Mac acceptance downloads candidate bytes in a real browser so macOS applies its own quarantine,
+      // which Browser Mode cannot host.
+      'apps/desktop/scripts/qualification-browser-download.mts',
       'apps/docs/scripts/verify-browser.mts',
       'apps/react-e2e/browser-command.ts',
       'apps/react-e2e/scripts/benchmark-bundler-products.mts',
@@ -159,6 +162,19 @@ describe('Vitest Browser test-runner ownership', () => {
       // The TAU-UI-6 deploy-skew check serves two deploys from Node and switches them under one page across a
       // document reload, which Browser Mode's iframe cannot host.
       'apps/ui-e2e/src/stale-deploy-recovery.test.ts',
+      // The hosted staging observability gate owns isolated browser contexts and cross-document failure
+      // scenarios, which Browser Mode's iframe cannot host.
+      'apps/ui-e2e/src/observability.staging.test.ts',
+      // Its P2 delivery acceptance blocks the Sentry ingest host per context and drives the direct path (A1, A5, A10).
+      'apps/ui-e2e/src/observability-delivery.staging.test.ts',
+      // Its P2 SSR and API-correlation acceptance drives a staging page whose API call fails (A12).
+      'apps/ui-e2e/src/observability-ssr.staging.test.ts',
+      // Its A2/A6 acceptance watches PostHog requests per context across a hydration and a kernel worker kill.
+      'apps/ui-e2e/src/observability-runtime.staging.test.ts',
+      // The hosted gate's shared diagnostics use Page/request types; its offline privacy test stubs those emitters.
+      // Neither helper owns another browser runner.
+      'apps/ui-e2e/src/support/observability-staging.ts',
+      'apps/ui-e2e/src/support/observability-staging.test.ts',
       // Composer and pane-resize acceptance emulate a coarse pointer through the browser session.
       'apps/ui/app/components/chat/chat-textarea.vitest.browser.config.ts',
       'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',
@@ -196,11 +212,15 @@ describe('Vitest Browser test-runner ownership', () => {
     // for check-pack-install's browser checks.
     // The S31 and S32 native-dependency spikes install the three engines they measure.
     // The UI asset-integrity workflow and its gate's usage note install the three engines the gate measures.
+    // The hosted staging observability workflow installs Chromium and WebKit for its isolated contexts.
+    // The clean-host Mac acceptance workflow installs the Chromium its browser download uses.
     expect(installFiles.sort()).toEqual(
       [
         '.agents/skills/create-repo/templates/ci.yml',
         '.github/workflows/ci.yml',
+        '.github/workflows/desktop-route-vm-acceptance.yml',
         '.github/workflows/e2e-nightly.yml',
+        '.github/workflows/observability-staging.yml',
         '.github/workflows/preview-packages.yml',
         '.github/workflows/publish.yml',
         '.github/workflows/spike-publish-dry-run.yml',
@@ -258,6 +278,7 @@ describe('Vitest Browser test-runner ownership', () => {
     const configs = vitestPlaywrightConfigs();
     expect(configs.map(([path]) => path).sort()).toEqual(
       [
+        'apps/libs/lsp/src/typescript-worker/vitest.browser.config.ts',
         'apps/react-e2e/vitest.bundlers.config.ts',
         'apps/react-e2e/vitest.config.ts',
         'apps/ui-e2e/vitest.config.ts',
@@ -269,12 +290,14 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',
         'apps/ui/app/components/printer/printer.vitest.browser.config.ts',
         'apps/ui/app/components/project-library/project-cloud-delete.vitest.browser.config.ts',
+        'apps/ui/app/components/terminal/terminal-renderer.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-viewer.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/use-follow-latest-output.vitest.browser.config.ts',
         'apps/ui/app/workers/agent-host.vitest.browser.config.ts',
         'apps/ui/chat-revision-marker.vitest.browser.config.ts',
+        'libs/agent-observability/vitest.browser.config.ts',
         'packages/agent-host/vitest.browser.config.ts',
         'packages/core/bundler/vitest.browser.config.ts',
         'packages/plugins/openrscad/e2e/vitest.config.ts',

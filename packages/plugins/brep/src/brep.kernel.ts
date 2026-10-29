@@ -23,7 +23,10 @@ const glbOptionsSchema = coordinateSystemSchema
 const basename = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
 const extension = (path: string): string => path.slice(path.lastIndexOf('.') + 1).toLowerCase();
 
-const loadBackend = async (): Promise<OcctImportJs> => {
+/** The occt-import-js module: the loader's import API plus Emscripten's view over its linear memory. */
+type OcctBackend = OcctImportJs & { readonly HEAPU8: Uint8Array<ArrayBuffer> };
+
+const loadBackend = async (): Promise<OcctBackend> => {
   const { default: factory } = await import('occt-import-js');
   return withoutEmscriptenProcessListeners(async () =>
     factory({
@@ -74,7 +77,7 @@ export const brepKernel = defineKernel({
     });
   },
 
-  async evaluate({ entryPath }, { filesystem }, context: { occt: OcctImportJs }) {
+  async evaluate({ entryPath }, { filesystem }, context: { occt: OcctBackend }) {
     const inventory = await createImportFileInventory(filesystem, entryPath);
     const glb = await new OcctLoader(context.occt)
       .initialize({ format: extension(entryPath) })
@@ -108,4 +111,8 @@ export const brepKernel = defineKernel({
 
   serializeHandle: ({ handle }) => new Uint8Array(handle),
   deserializeHandle: ({ serialized }) => new Uint8Array(serialized),
+
+  // Observation only (PR-1b): occt-import-js exports no `WebAssembly.Memory`, so its byte view over the whole
+  // linear memory, which Emscripten replaces on every growth, gives the same `buffer.byteLength`.
+  observedHeapBytes: (context: { occt: OcctBackend }) => context.occt.HEAPU8.byteLength,
 });

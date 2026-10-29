@@ -18,7 +18,7 @@ import type { MachineBindingOutcome } from '@taucad/runtime/machine';
 import type { DesktopKernelPreparation, DesktopKernelProgress } from '@taucad/types/desktop-native-kernels';
 
 /** Concerns the services utility serves, one dedicated port each. */
-export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem', 'machines'] as const;
+export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem', 'machines', 'terminal'] as const;
 
 /**
  * A concern the renderer may ask for a port to.
@@ -115,6 +115,8 @@ export type ServicesBrokerOptions = {
   readonly onSpawn?: (utility: UtilityProcess) => void;
   /** Diagnostics sink. */
   readonly log?: (level: 'info' | 'warn' | 'error', event: string, detail?: unknown) => void;
+  /** A utility frame the broker does not own, such as a permission answer (W9); true when it was consumed. */
+  readonly onUtilityFrame?: (frame: Readonly<Record<string, unknown>>) => boolean;
 };
 
 /** The singleton services utility, seen from main. */
@@ -150,6 +152,17 @@ export type ServicesBroker = {
    * @returns The machines' names.
    */
   streamingMachines(boundMilliseconds: number, attemptId: string): Promise<readonly StreamingMachine[]>;
+  /**
+   * How many human Terminal sessions the utility holds now (T15), so quit can ask before it stops them. No utility, no
+   * session. Asked for a quit attempt, the utility also holds new shell starts until
+   * {@link ServicesBroker.resumeMachineStarts} calls the quit off or quiesce stops every Terminal, so the count cannot
+   * grow before the sessions are stopped.
+   *
+   * @param boundMilliseconds - How long to wait for the utility's answer before rejecting.
+   * @param attemptId - The quit attempt asking, which holds starts; absent, the question only reads.
+   * @returns The utility's own session count.
+   */
+  terminalSessions(boundMilliseconds: number, attemptId?: string): Promise<number>;
   /** Quit was called off after {@link ServicesBroker.streamingMachines}: the utility starts machine jobs again. */
   resumeMachineStarts(attemptId: string): void;
   /** Recover only after utility teardown has actually settled; never kill a pending save. */
@@ -164,6 +177,8 @@ export type ServicesBroker = {
   peekStreamingMachines(boundMilliseconds: number): Promise<readonly string[]>;
   /** Send a control frame (root admission, credential updates) to the utility. */
   post(message: unknown): void;
+  /** Send one request frame to the utility, forking it if needed; never replayed onto a later fork (W9). */
+  send(message: Readonly<Record<string, unknown> & { type: string }>): void;
   /** Whether a directory contains a retained, running or closing project host. */
   hasActiveDirectory(directory: string): boolean;
   /** Original project identity retained for an admitted execution root. */
@@ -225,6 +240,8 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   let bindingRequest = 0;
   const streamingWaiters = new Map<string, ReturnType<typeof Promise.withResolvers<readonly StreamingMachine[]>>>();
   let streamingRequest = 0;
+  const terminalWaiters = new Map<string, ReturnType<typeof Promise.withResolvers<number>>>();
+  let terminalRequest = 0;
   /* Roots with a release in flight, by how many. `releaseAgentHost` awaits the
    * utility, and a window that remounts inside that wait re-adopts the project
    * under the attachment id that is releasing. */
@@ -270,6 +287,29 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     } finally {
       clearTimeout(bound);
       streamingWaiters.delete(requestId);
+    }
+  };
+
+  /** Ask the utility how many Terminal sessions it holds; it answers from the sessions it serves, nothing else. */
+  const askTerminalSessions = async (boundMilliseconds: number, attemptId?: string): Promise<number> => {
+    const spawned = utility;
+    if (spawned === undefined) {
+      return 0;
+    }
+    terminalRequest += 1;
+    const requestId = `terminal-sessions-${String(terminalRequest)}`;
+    const pending = Promise.withResolvers<number>();
+    terminalWaiters.set(requestId, pending);
+    const bound = setTimeout(() => {
+      pending.reject(new Error('The desktop shell service did not say whether a Terminal is running.'));
+    }, boundMilliseconds);
+    bound.unref();
+    try {
+      spawned.postMessage({ type: 'terminal-sessions', requestId, ...(attemptId === undefined ? {} : { attemptId }) });
+      return await pending.promise;
+    } finally {
+      clearTimeout(bound);
+      terminalWaiters.delete(requestId);
     }
   };
 
@@ -360,6 +400,9 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     if (!frame || typeof frame !== 'object') {
       return;
     }
+    if (options.onUtilityFrame?.(frame as Record<string, unknown>) === true) {
+      return;
+    }
     const { requestId, type, workspaceRoot } = frame as Record<string, unknown>;
     if ((type === 'agent-host-released' || type === 'agent-host-release-failed') && typeof requestId === 'string') {
       const pending = releaseWaiters.get(requestId);
@@ -407,6 +450,19 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         waiter?.resolve(machines);
       } else {
         waiter?.reject(new Error('The machine host returned an invalid streaming assessment.'));
+      }
+      return;
+    }
+    if (type === 'terminal-sessions-answered' && typeof requestId === 'string') {
+      if (utility !== spawned) {
+        return;
+      }
+      const { sessions } = frame as Record<string, unknown>;
+      const waiter = terminalWaiters.get(requestId);
+      if (typeof sessions === 'number' && Number.isSafeInteger(sessions) && sessions >= 0) {
+        waiter?.resolve(sessions);
+      } else {
+        waiter?.reject(new Error('The desktop shell service returned an invalid Terminal count.'));
       }
       return;
     }
@@ -830,6 +886,9 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     async streamingMachines(boundMilliseconds, attemptId) {
       return askStreaming('machines-streaming', boundMilliseconds, attemptId);
     },
+    async terminalSessions(boundMilliseconds, attemptId) {
+      return askTerminalSessions(boundMilliseconds, attemptId);
+    },
     async peekStreamingMachines(boundMilliseconds) {
       const machines = await askStreaming('machines-streaming-peek', boundMilliseconds);
       return machines.map(({ name }) => name);
@@ -878,6 +937,12 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       utilityInFlight = false;
       utilityTeardown = false;
       acceptingConnections = true;
+    },
+    send(message) {
+      if (!acceptingConnections) {
+        throw new Error('The services broker is quiescing and sends no requests.');
+      }
+      ensure().postMessage(message);
     },
     post(message) {
       const { type } = message as { type?: unknown };

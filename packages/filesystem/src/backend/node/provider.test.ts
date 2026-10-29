@@ -42,7 +42,7 @@ const createRoot = (): string => {
 
 const temporaryFiles = (root: string): string[] => readdirSync(root).filter((name) => name.endsWith('.tmp'));
 
-type FailureStage = 'temp-write' | 'file-fsync' | 'rename' | 'directory-fsync' | 'read-back';
+type FailureStage = 'temp-write' | 'file-fsync' | 'rename' | 'post-rename-fsync' | 'read-back';
 
 const injectFailureAfter = (stage: FailureStage): void => {
   const failure = new Error(`injected ${stage} failure`);
@@ -78,11 +78,15 @@ const injectFailureAfter = (stage: FailureStage): void => {
         await sync();
         throw failure;
       });
-    } else if (flags === 'r' && stage === 'directory-fsync') {
+    } else if (stage === 'post-rename-fsync' && flags === (process.platform === 'win32' ? 'wx' : 'r')) {
       const sync = handle.sync.bind(handle);
+      let calls = 0;
       vi.spyOn(handle, 'sync').mockImplementation(async () => {
         await sync();
-        throw failure;
+        calls += 1;
+        if (calls === (process.platform === 'win32' ? 2 : 1)) {
+          throw failure;
+        }
       });
     }
     return handle;
@@ -337,7 +341,7 @@ describe('NodeFsProvider atomic writes', () => {
     },
   );
 
-  it.each(['temp-write', 'file-fsync', 'rename', 'directory-fsync', 'read-back'] as const)(
+  it.each(['temp-write', 'file-fsync', 'rename', 'post-rename-fsync', 'read-back'] as const)(
     'should leave old or new bytes and no temporary file after a %s failure',
     async (stage) => {
       const root = createRoot();
@@ -346,7 +350,9 @@ describe('NodeFsProvider atomic writes', () => {
 
       await expect(provider.writeFile('target.txt', 'new')).rejects.toBeInstanceOf(Error);
 
-      expect(['old', 'new']).toContain(readFileSync(join(root, 'target.txt'), 'utf8'));
+      expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe(
+        stage === 'temp-write' || stage === 'file-fsync' ? 'old' : 'new',
+      );
       expect(temporaryFiles(root)).toEqual([]);
     },
   );

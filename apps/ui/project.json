@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/ui",
   "projectType": "application",
-  "tags": ["scope:ui", "type:app", "layer:feature", "release:app", "deploy:staging"],
+  "tags": ["scope:ui", "type:app", "layer:feature", "release:app", "deploy:staging", "ci:browser"],
   "targets": {
     "formal:lean": {},
     "formal": {},
@@ -66,6 +66,15 @@
           "env": "TAU_CLOUD_ENABLED"
         },
         {
+          "env": "TAU_TELEMETRY_HOST"
+        },
+        {
+          "env": "COMMIT_REF"
+        },
+        {
+          "env": "GITHUB_SHA"
+        },
+        {
           "env": "TAU_DESKTOP_RELEASED"
         },
         {
@@ -90,6 +99,9 @@
           "env": "TAU_DEBUG"
         },
         {
+          "env": "SENTRY_ENVIRONMENT"
+        },
+        {
           "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
         },
         {
@@ -111,7 +123,7 @@
           "env": "STATS"
         }
       ],
-      "command": "node ../../tools/build-lock.mjs build -- sh -c \"'react-router build --sourcemapClient hidden && node scripts/compress-static-assets.mts'\"",
+      "command": "node ../../tools/build-lock.mjs build -- sh -c \"'react-router build --sourcemapClient hidden --sourcemapServer hidden && node scripts/compress-static-assets.mts && rm -rf build/server-sourcemaps && cp -R build/server build/server-sourcemaps && find build/server -name \\*.map -delete && find build/server-sourcemaps -type f ! -name \\*.map -delete'\"",
       "options": {
         "cwd": "{projectRoot}",
         "env": {
@@ -126,8 +138,12 @@
       "inputs": [
         "production",
         "^production",
+        "{workspaceRoot}/apps/desktop/package.json",
         {
           "env": "TAU_CLOUD_ENABLED"
+        },
+        {
+          "env": "TAU_TELEMETRY_HOST"
         },
         {
           "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
@@ -154,6 +170,9 @@
         "^production",
         {
           "env": "TAU_CLOUD_ENABLED"
+        },
+        {
+          "env": "TAU_TELEMETRY_HOST"
         },
         {
           "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
@@ -294,6 +313,17 @@
         }
       }
     },
+    "verify-browser": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Real-browser source editor acceptance on the affected CI browser lane."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config app/components/code/code-editor.vitest.browser.config.ts"
+      }
+    },
     "test:e2e": {
       "executor": "nx:run-commands",
       "metadata": {
@@ -309,7 +339,8 @@
           "../../node_modules/.bin/vitest run --config app/components/chat/chat-message-queue.vitest.browser.config.ts",
           "../../node_modules/.bin/vitest run --config app/components/geometry/viewer-resize.vitest.browser.config.ts",
           "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts'",
-          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/use-follow-latest-output.vitest.browser.config.ts'"
+          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/use-follow-latest-output.vitest.browser.config.ts'",
+          "../../node_modules/.bin/vitest run --config app/components/terminal/terminal-renderer.vitest.browser.config.ts"
         ],
         "parallel": false
       }
@@ -321,6 +352,7 @@
           "npx -y @posthog/cli sourcemap inject --directory {projectRoot}/build/client --project tau-ui",
           "scripts/node_modules/.bin/sentry-cli sourcemaps inject {projectRoot}/build/client",
           "scripts/node_modules/.bin/sentry-cli sourcemaps upload --validate --wait --org taucad --project tau-ui {projectRoot}/build/client",
+          "cp -R {projectRoot}/build/server-sourcemaps/. {projectRoot}/build/server/ && scripts/node_modules/.bin/sentry-cli sourcemaps inject {projectRoot}/build/server && scripts/node_modules/.bin/sentry-cli sourcemaps upload --validate --wait --org taucad --project tau-ui {projectRoot}/build/server; status=$?; find {projectRoot}/build/server -name '*.map' -delete; rm -rf {projectRoot}/build/server-sourcemaps; exit $status",
           "npx -y @posthog/cli sourcemap upload --directory {projectRoot}/build/client --delete-after"
         ],
         "parallel": false

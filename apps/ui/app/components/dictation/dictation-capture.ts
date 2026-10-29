@@ -1,4 +1,5 @@
 import processorUrl from '#components/dictation/dictation-processor.js?worker&url';
+import { DictationError, dictationMessages } from '#components/dictation/dictation-errors.js';
 
 export type DictationCapture = {
   /** Stops the microphone, drains the worklet and returns the whole recording as WAV. */
@@ -123,12 +124,12 @@ export async function captureDictation({
     });
     processor.port.start();
     processor.addEventListener('processorerror', () => {
-      onError(new Error('Microphone capture stopped unexpectedly. Try dictation again.'));
+      onError(new DictationError(dictationMessages.microphoneStopped));
       cancel();
     });
     const microphoneEnded = (): void => {
       if (!released && finishCapture === undefined) {
-        onError(new Error('The microphone disconnected. Reconnect it and try again.'));
+        onError(new DictationError(dictationMessages.microphoneDisconnected));
         cancel();
       }
     };
@@ -151,7 +152,7 @@ export async function captureDictation({
             await new Promise<void>((resolve, reject) => {
               resolveFlushed = resolve;
               flushTimer = setTimeout(() => {
-                reject(new Error('Microphone did not finish recording. Try again.'));
+                reject(new DictationError(dictationMessages.microphoneUnfinished));
               }, flushWait);
               processor?.port.postMessage({ type: 'flush' });
             });

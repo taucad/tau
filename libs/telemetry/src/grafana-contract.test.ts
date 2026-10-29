@@ -40,14 +40,26 @@ const declared = new Set([
 ]);
 
 type Target = { expr?: unknown; datasource?: { type?: string } };
-type Panel = { targets?: Target[]; datasource?: { type?: string }; panels?: Panel[] };
+type Panel = {
+  targets?: Target[];
+  datasource?: { type?: string };
+  panels?: Panel[];
+};
 type Variable = { name?: string; query?: unknown };
 type Dashboard = { panels?: Panel[]; templating?: { list?: Variable[] } };
-type RuleGroup = { rules?: Array<{ data?: Array<{ datasourceUid?: string; model?: { expr?: unknown } }> }> };
+type RuleGroup = {
+  rules?: Array<{
+    data?: Array<{ datasourceUid?: string; model?: { expr?: unknown } }>;
+  }>;
+};
 
 /** Where a PromQL string lives: dashboard panels and variables bind through `$app`-style variables, rules through regex placeholders. */
 type QueryKind = 'panel' | 'variable' | 'rule' | 'provisioned';
-type QuerySource = { readonly query: string; readonly file: string; readonly kind: QueryKind };
+type QuerySource = {
+  readonly query: string;
+  readonly file: string;
+  readonly kind: QueryKind;
+};
 
 const strings = (values: readonly unknown[]): string[] =>
   values.filter((value): value is string => typeof value === 'string');
@@ -170,9 +182,17 @@ const localVariables: Readonly<Record<string, string>> = {
   mirror_app: '.*mirror.*',
 };
 
-const appNames: Readonly<Record<AppRole, string>> = { api: 'tau-api', storage: 'tau-storage', mirror: 'tau-mirror' };
+const appNames: Readonly<Record<AppRole, string>> = {
+  api: 'tau-api',
+  storage: 'tau-storage',
+  mirror: 'tau-mirror',
+};
 
-type Matcher = { readonly label: string; readonly op: string; readonly value: string };
+type Matcher = {
+  readonly label: string;
+  readonly op: string;
+  readonly value: string;
+};
 
 const selectorMatchers = (body: string): Matcher[] =>
   [...body.matchAll(/(?<label>[A-Za-z_]\w*)\s*(?<op>=~|!~|!=|=)\s*"(?<value>(?:[^"\\]|\\.)*)"/gu)].map(
@@ -290,68 +310,11 @@ const storageInstruments = (registry: Registry): MetricDefinition[] =>
 
 /**
  * Storage-family instruments read by no dashboard panel yet, as `prometheus_name: 'package that adds
- * the panel'`. The live git-edge family predates W14; OB9 replaces `tau-sync.json` with the capability
- * dashboard that reads it. Each entry goes when a panel reads the name; the test fails until it does.
+ * the panel'`. Since OB9 (`storage-critical.json` and the capability dashboard `tau-sync.json`) every
+ * declared one is read; a later package that declares an instrument adds its panel in the same change,
+ * or lists it here until it does. Each entry goes when a panel reads the name; the test fails until it does.
  */
-const awaitingPanel: Readonly<Record<string, string>> = {
-  tau_sync_operations_total: 'OB9',
-  tau_sync_operation_duration: 'OB9',
-  tau_sync_pack_bytes: 'OB9',
-  tau_sync_lease_duration: 'OB9',
-  tau_sync_manifest_conflicts_total: 'OB9',
-  tau_sync_sweeps_total: 'OB9',
-  tau_sync_client_attempts_total: 'OB9',
-  tau_sync_client_lag: 'OB9',
-  tau_sync_client_pending: 'OB9',
-  // DA2 (#1032) shipped these without panels; OB2's storage-critical rows read them.
-  tau_sync_refusals_total: 'OB2',
-  tau_git_admissions_total: 'OB2',
-  tau_git_leases_active: 'OB2',
-  tau_git_lease_reserved_bytes: 'OB2',
-  tau_git_disk_free_bytes: 'OB2',
-  tau_git_hydrate_bytes: 'OB2',
-  tau_git_commit_attempts_total: 'OB2',
-  tau_git_commit_duration: 'OB2',
-  tau_git_repository_size: 'OB2',
-  tau_git_hot_project_commit_rate: 'OB2',
-  tau_git_hot_project_writers: 'OB2',
-  // DM1 ships the copier's instruments; OB9's storage-critical B2 row reads them (W14 OB6).
-  tau_mirror_copy_lag_seconds: 'OB9',
-  tau_mirror_copy_lag_generations: 'OB9',
-  tau_mirror_backlog_repositories: 'OB9',
-  tau_mirror_lfs_backlog_objects: 'OB9',
-  tau_mirror_copy_delay_seconds: 'OB9',
-  tau_mirror_rounds_total: 'OB9',
-  tau_mirror_objects_copied_total: 'OB9',
-  tau_mirror_bytes_copied_total: 'OB9',
-  tau_mirror_copy_failures_total: 'OB9',
-  tau_mirror_retention_extensions_total: 'OB9',
-  tau_mirror_retention_min_remaining_seconds: 'OB9',
-  tau_mirror_retention_max_ahead_seconds: 'OB9',
-  tau_mirror_destination_up: 'OB9',
-  tau_mirror_reconcile_last_success_timestamp_seconds: 'OB9',
-  tau_mirror_reconcile_missing_objects: 'OB9',
-  tau_mirror_reconcile_hidden_versions: 'OB9',
-  tau_mirror_destination_stored_bytes: 'OB9',
-  tau_mirror_destination_object_versions: 'OB9',
-  // DR2-lite ships the verify drill's series; OB9's B2 row adds the drill freshness and failure panels.
-  tau_mirror_drill_runs_total: 'OB9',
-  tau_mirror_drill_check_failures_total: 'OB9',
-  tau_mirror_drill_last_success_timestamp_seconds: 'OB9',
-  tau_mirror_drill_duration_seconds: 'OB9',
-  tau_mirror_drill_verified_bytes_total: 'OB9',
-  // DW1/DW2 ship the route table and freeze series; OB5's migration panels read them.
-  tau_git_route_frozen: 'OB5',
-  tau_git_route_frozen_oldest: 'OB5',
-  tau_git_route_holds_total: 'OB5',
-  tau_git_route_hold_duration: 'OB5',
-  tau_git_route_lookup_duration: 'OB5',
-  // DC1 ships the hop's grant, forward and receipt series; OB4's hop row reads them.
-  tau_git_grants_rejected_total: 'OB4',
-  tau_git_forward_errors_total: 'OB4',
-  tau_git_receipts_total: 'OB4',
-  tau_git_slow_body_aborts_total: 'OB4',
-};
+const awaitingPanel: Readonly<Record<string, string>> = {};
 
 /**
  * Storage-family labels that still admit any string, as `metric: { label: 'package that bounds it' }`.
@@ -359,7 +322,10 @@ const awaitingPanel: Readonly<Record<string, string>> = {
  * touches `storage-metrics.ts`. Each entry goes when its label becomes an enum.
  */
 const freeFormPending: Readonly<Record<string, Readonly<Record<string, string>>>> = {
-  'tau.storage.operation.duration': { 'tau.storage.operation': 'OB2', 'error.type': 'OB2' },
+  'tau.storage.operation.duration': {
+    'tau.storage.operation': 'OB2',
+    'error.type': 'OB2',
+  },
   'tau.storage.transferred_bytes': { 'tau.storage.operation': 'OB2' },
 };
 
@@ -499,13 +465,18 @@ const seededLabels: Registry = {
     unit: 's',
     description: 'seeded: a compute digest',
     buckets: [0.01, 0.1],
-    attributes: z.object({ 'tau.compute.digest': z.enum(['sha256-a', 'other']) }),
+    attributes: z.object({
+      'tau.compute.digest': z.enum(['sha256-a', 'other']),
+    }),
   }),
   requestLabel: defineCounter({
     name: 'tau.mirror.rounds',
     unit: '{round}',
     description: 'seeded: a request id and a user',
-    attributes: z.object({ request_id: z.enum(['r1', 'other']), 'enduser.id': z.enum(['u1', 'other']) }),
+    attributes: z.object({
+      request_id: z.enum(['r1', 'other']),
+      'enduser.id': z.enum(['u1', 'other']),
+    }),
   }),
   deviceLabel: defineCounter({
     name: 'tau.sync.client.retries',
@@ -518,7 +489,10 @@ const seededLabels: Registry = {
     unit: 's',
     description: 'seeded: a free-form operation name',
     buckets: [0.01, 0.1],
-    attributes: z.object({ 'tau.r2.action': z.string().optional(), outcome: z.enum(['ok', 'error']) }),
+    attributes: z.object({
+      'tau.r2.action': z.string().optional(),
+      outcome: z.enum(['ok', 'error']),
+    }),
   }),
   outsideFamily: defineCounter({
     name: 'tau.billing.seeded',
@@ -606,7 +580,9 @@ describe('Grafana dashboards and alert rules', () => {
 describe('Grafana environment binding', () => {
   it('should give every dashboard a local app binding without hosted app names', () => {
     for (const file of jsonFiles(grafanaRoot, 'dashboards')) {
-      const dashboard = read<{ templating: { list: Array<{ name: string; query: string }> } }>(file);
+      const dashboard = read<{
+        templating: { list: Array<{ name: string; query: string }> };
+      }>(file);
       expect(dashboard.templating.list.find((variable) => variable.name === 'app')?.query, file).toBe('.*');
       expect(readFileSync(file, 'utf8'), file).not.toContain('tau-api-staging');
     }
@@ -621,6 +597,386 @@ describe('Grafana environment binding', () => {
           .map(() => `${file}: ${query}`),
       );
     expect(unscoped).toEqual([]);
+  });
+});
+
+// --- Runtime observability contracts (package.md T13, T32) ---
+
+/** Runtime observability series: the instruments the Runtime operations and product dashboards read. */
+const isRuntimeSeries = (name: string): boolean => /^tau_(?:runtime|telemetry)_/u.test(name);
+
+/** Labels every API series carries beyond its attributes: Fly's scrape labels, the exporter's resource constants and the SDK's overflow marker. */
+const seriesLabels = ['app', 'instance', 'job', 'service_name', 'tau_process', 'otel_metric_overflow'];
+
+/** The exported label of an attribute key: the exporter replaces every invalid character with `_`. */
+const labelOf = (attribute: string): string => attribute.replaceAll(/[^\w]/gu, '_');
+
+const registryLabels = new Map(
+  Object.values(TauMetrics).map((metric) => [
+    toPrometheusName(metric.name, metric.type),
+    Object.keys(metric.attributes.shape).map((attribute) => labelOf(attribute)),
+  ]),
+);
+
+/** The labels a series may be selected or grouped by: its definition's, plus `le` on a histogram's buckets. */
+const labelsOf = (series: string): readonly string[] | undefined => {
+  const base = series.replace(/_(?:bucket|sum|count)$/u, '');
+  const own = registryLabels.get(base);
+  return own && [...own, ...seriesLabels, ...(series.endsWith('_bucket') ? ['le'] : [])];
+};
+
+/** The text of the parenthesised group that opens at `open`, without its parentheses. */
+const groupAt = (query: string, open: number): string => {
+  let depth = 0;
+  for (let index = open; index < query.length; index++) {
+    depth += query[index] === '(' ? 1 : query[index] === ')' ? -1 : 0;
+    if (depth === 0) {
+      return query.slice(open + 1, index);
+    }
+  }
+  return query.slice(open + 1);
+};
+
+const labelList = (list: string): string[] =>
+  list
+    .split(',')
+    .map((label) => label.trim())
+    .filter((label) => label !== '');
+
+/** A query with its strings, selector bodies and label lists emptied, so what remains named is a series. */
+const seriesText = (query: string): string =>
+  query
+    .replaceAll(/"(?:[^"\\]|\\.)*"/gu, '""')
+    .replaceAll(/\{[^}]*\}/gu, '{}')
+    .replaceAll(/\b(?:by|without|on|ignoring|group_left|group_right)\s*\([^)]*\)/gu, '')
+    .replaceAll(/(label_values\([^,()]*),[^)]*\)/gu, '$1)');
+
+/** Runtime series a query reads, with their bucket/sum/count suffix. */
+const runtimeSeries = (query: string): string[] =>
+  [...seriesText(query).matchAll(/\b(tau_(?:runtime|telemetry)_\w+)/gu)].map(([, name]) => name!);
+
+/**
+ * T13 (AR-W4-11, AR-W5-05): every runtime series reference carries a selector with an `app` matcher,
+ * and every label a selector, a `by` clause, an `on`/`ignoring` clause or `label_values` names exists
+ * on the definition of the runtime metric it reads.
+ */
+/** A runtime series named without a selector carries no app matcher, so hosted provisioning cannot bind it. */
+const bareSeriesProblems = (file: string, query: string): string[] =>
+  [...seriesText(query).matchAll(/\b(tau_(?:runtime|telemetry)_\w+)\b(?!\s*\{)/gu)].map(
+    ([, name]) => `${file}: ${name} has no selector, so it carries no app matcher`,
+  );
+
+/** One selector: bound to an app when it reads a runtime series or names none, and matching only labels its metric has. */
+const selectorLabelProblems = (file: string, metric: string, body: string): string[] => {
+  const matchers = selectorMatchers(body);
+  const runtime = isRuntimeSeries(metric);
+  const known = runtime ? labelsOf(metric) : undefined;
+  return [
+    ...((metric === '' || runtime) && !matchers.some(({ label }) => label === 'app')
+      ? [`${file}: ${metric}{${body}} has no app matcher`]
+      : []),
+    ...(runtime && known === undefined
+      ? [`${file}: ${metric} is not a runtime metric the registry or PR-2 defines`]
+      : []),
+    ...(known === undefined
+      ? []
+      : matchers
+          .filter(({ label }) => !known.includes(label))
+          .map(({ label }) => `${file}: ${metric} has no label ${label}`)),
+  ];
+};
+
+/**
+ * `by (…)` labels exist on every runtime series inside the aggregated expression. Runtime queries
+ * write `by (…)` before the expression, because only that form names the series the check reads.
+ */
+const groupingProblems = (file: string, unquoted: string): string[] => [
+  ...(runtimeSeries(unquoted).length > 0 && /\)\s*by\s*\(/u.test(unquoted)
+    ? [`${file}: write by (…) before the aggregated expression so its labels are checked`]
+    : []),
+  ...[...unquoted.matchAll(/\bby\s*\((?<labels>[^)]*)\)\s*\(/gu)].flatMap((match) =>
+    runtimeSeries(groupAt(unquoted, match.index + match[0].length - 1)).flatMap((series) =>
+      labelList(match.groups?.['labels'] ?? '')
+        .filter((label) => !(labelsOf(series) ?? []).includes(label))
+        .map((label) => `${file}: by (${label}) over ${series}, which has no label ${label}`),
+    ),
+  ),
+];
+
+/** `on (…)` and `ignoring (…)` labels exist on at least one runtime series of the query. */
+const matchingProblems = (file: string, unquoted: string, query: string): string[] => {
+  const everySeries = runtimeSeries(query);
+  return everySeries.length === 0
+    ? []
+    : [...unquoted.matchAll(/\b(?:on|ignoring)\s*\((?<labels>[^)]*)\)/gu)].flatMap((match) =>
+        labelList(match.groups?.['labels'] ?? '')
+          .filter((label) => !everySeries.some((series) => labelsOf(series)?.includes(label)))
+          .map((label) => `${file}: on/ignoring (${label}) names a label no runtime series in the query has`),
+      );
+};
+
+/** `label_values(series{…}, label)` names a label the runtime series has. */
+const labelValuesProblems = (file: string, query: string): string[] =>
+  [...query.matchAll(/label_values\((?<series>tau_\w+)\{[^}]*\},\s*(?<label>\w+)\)/gu)]
+    .map(({ groups }) => ({
+      series: groups?.['series'] ?? '',
+      label: groups?.['label'] ?? '',
+    }))
+    .filter(({ series, label }) => isRuntimeSeries(series) && !(labelsOf(series) ?? []).includes(label))
+    .map(({ series, label }) => `${file}: label_values over ${series} names ${label}, which it lacks`);
+
+/**
+ * T13 (AR-W4-11, AR-W5-05): every runtime series reference carries a selector with an `app` matcher,
+ * and every label a selector, a `by` clause, an `on`/`ignoring` clause or `label_values` names exists
+ * on the definition of the runtime metric it reads.
+ */
+const runtimeLabelProblems = (sources: readonly QuerySource[]): string[] =>
+  sources
+    .filter(({ kind }) => kind !== 'provisioned')
+    .flatMap(({ query, file }) => {
+      const unquoted = query.replaceAll(/"(?:[^"\\]|\\.)*"/gu, '""');
+      return [
+        ...bareSeriesProblems(file, query),
+        ...[...query.matchAll(/(?<metric>[A-Za-z_:][\w:]*)?\s*\{(?<body>[^{}]*)\}/gu)].flatMap(({ groups }) =>
+          selectorLabelProblems(file, groups?.['metric'] ?? '', groups?.['body'] ?? ''),
+        ),
+        ...groupingProblems(file, unquoted),
+        ...matchingProblems(file, unquoted, query),
+        ...labelValuesProblems(file, query),
+      ];
+    });
+
+/** The clause every absence rule carries, so a self-hosted, unset or paused API is silent (package.md §12.2). */
+const enabledClause = /and on\s*\(\)\s*\(max\(tau_telemetry_runtime_enabled\{[^}]*app=~"\.\*"[^}]*\}\)\s*==\s*1\)/u;
+
+type Rule = {
+  uid?: string;
+  isPaused?: boolean;
+  labels?: Record<string, string>;
+  data?: Array<{ datasourceUid?: string; model?: { expr?: unknown } }>;
+};
+
+const rulesIn = (root: string): Array<{ file: string; rule: Rule }> =>
+  jsonFiles(root, 'alerts').flatMap((file) =>
+    (read<{ rules?: Rule[] }>(file).rules ?? []).map((rule) => ({
+      file: path.relative(root, file),
+      rule,
+    })),
+  );
+
+/** T13: a rule that fires on absence (`absent`, `absent_over_time`) is conditioned on the enabled gauge. */
+const absenceProblems = (root: string): string[] =>
+  rulesIn(root).flatMap(({ file, rule }) =>
+    strings((rule.data ?? []).map((query) => query.model?.expr))
+      .filter((expr) => /\babsent(?:_over_time)?\s*\(/u.test(expr) && !enabledClause.test(expr))
+      .map(() => `${file}: rule "${rule.uid ?? ''}" fires on absence without the tau_telemetry_runtime_enabled clause`),
+  );
+
+type LokiSource = {
+  readonly file: string;
+  readonly query: string;
+  readonly where: 'dashboard' | 'alert';
+};
+
+const lokiSources = (root: string): LokiSource[] => [
+  ...jsonFiles(root, 'dashboards').flatMap((file) => {
+    const dashboard = read<Dashboard>(file);
+    return (dashboard.panels ?? [])
+      .flatMap((panel) => [panel, ...(panel.panels ?? [])])
+      .flatMap((panel) =>
+        (panel.targets ?? []).filter((target) => (target.datasource ?? panel.datasource)?.type === 'loki'),
+      )
+      .flatMap((target): LokiSource[] =>
+        typeof target.expr === 'string'
+          ? [
+              {
+                file: path.relative(root, file),
+                query: target.expr,
+                where: 'dashboard',
+              },
+            ]
+          : [],
+      );
+  }),
+  ...rulesIn(root).flatMap(({ file, rule }) =>
+    strings((rule.data ?? []).filter((query) => query.datasourceUid === 'loki').map((query) => query.model?.expr)).map(
+      (query): LokiSource => ({ file, query, where: 'alert' }),
+    ),
+  ),
+];
+
+/**
+ * T32 (FR-27, FR-28): Tau Cloud rewrites exactly `service_name=~"$service"` (dashboards) and
+ * `service_name="tau-api"` (alerts) to the environment's `fly_app_name`, and refuses at plan an alert
+ * selector without it, so every Loki selector is written exactly so and none names `fly_app_name`.
+ * Every Prometheus rule selector carries the `service_name` of the app it binds (binding contract v2:
+ * `app=~".*"` is `tau-api`, `app=~".*storage.*"` is `tau-storage`, `app=~".*mirror.*"` is `tau-mirror`), so
+ * a second exporter in that app cannot match. Grafana's own `grafana_*` series and Fly's platform `fly_*`
+ * series carry no `service_name`; the `app` matcher alone binds them.
+ */
+const ruleServices: Readonly<Record<string, string>> = {
+  [appPlaceholders.rule.api]: appNames.api,
+  [appPlaceholders.rule.storage]: appNames.storage,
+  [appPlaceholders.rule.mirror]: appNames.mirror,
+};
+
+const selectorSourceProblems = (root: string): string[] => [
+  ...lokiSources(root).flatMap(({ file, query, where }) => {
+    const expected = where === 'dashboard' ? 'service_name=~"$service"' : 'service_name="tau-api"';
+    return [...query.matchAll(/\{(?<body>[^{}]*)\}/gu)]
+      .filter(({ groups }) => groups?.['body']?.trim() !== expected)
+      .map(({ groups }) => `${file}: Loki selector {${groups?.['body'] ?? ''}} must be exactly {${expected}}`);
+  }),
+  ...[...jsonFiles(root, 'dashboards'), ...jsonFiles(root, 'alerts')]
+    .filter((file) => readFileSync(file, 'utf8').includes('fly_app_name'))
+    .map((file) => `${path.relative(root, file)}: names fly_app_name, which bypasses Tau Cloud's rewrite`),
+  ...promqlSources(root)
+    .filter(({ kind }) => kind === 'rule')
+    .flatMap(({ query, file }) =>
+      [...query.matchAll(/(?<metric>[A-Za-z_:][\w:]*)?\s*\{(?<body>[^{}]*)\}/gu)]
+        .filter(({ groups }) => !(groups?.['metric'] ?? '').startsWith('grafana_'))
+        .flatMap(({ groups }) => {
+          const matchers = selectorMatchers(groups?.['body'] ?? '');
+          if ((groups?.['metric'] ?? '').startsWith('fly_')) {
+            // Fly's series carry no service_name, so the app placeholder alone keeps one app's Machines.
+            const apps = matchers.filter(({ label }) => label === 'app');
+            const placeholders: readonly string[] = Object.values(appPlaceholders.rule);
+            return apps.length === 1 && apps[0]!.op === '=~' && placeholders.includes(apps[0]!.value)
+              ? []
+              : [
+                  `${file}: ${groups?.['metric'] ?? ''}{${groups?.['body'] ?? ''}} needs exactly one app matcher from ${placeholders.map((value) => `app=~"${value}"`).join(', ')}`,
+                ];
+          }
+          const app = matchers.find(({ label, op }) => label === 'app' && op === '=~');
+          const service = ruleServices[app?.value ?? appPlaceholders.rule.api] ?? appNames.api;
+          return matchers.some(({ label, op, value }) => label === 'service_name' && op === '=' && value === service)
+            ? []
+            : [`${file}: ${groups?.['metric'] ?? ''}{${groups?.['body'] ?? ''}} lacks service_name="${service}"`];
+        }),
+    ),
+];
+
+type ProductVariable = { name?: string; current?: { value?: unknown } };
+
+/**
+ * T13 (AR-W4-07, AR-W5-07): the product dashboard opens on the signed-in population, and every selector
+ * on a metric that carries `tau_runtime_population` filters it, by the variable or explicitly.
+ */
+const populationProblems = (file: string): string[] => {
+  const dashboard = read<{ templating?: { list?: ProductVariable[] } }>(file);
+  const population = dashboard.templating?.list?.find((variable) => variable.name === 'population');
+  return [
+    ...(population?.current?.value === 'signed-in'
+      ? []
+      : [`population must default to signed-in (has ${JSON.stringify(population?.current?.value)})`]),
+    ...promqlSources(path.dirname(path.dirname(file)))
+      .filter(
+        (source) => source.kind === 'panel' && source.file === path.relative(path.dirname(path.dirname(file)), file),
+      )
+      .flatMap(({ query }) =>
+        [...query.matchAll(/(?<metric>tau_\w+)\{(?<body>[^{}]*)\}/gu)]
+          .filter(({ groups }) => labelsOf(groups!['metric']!)?.includes('tau_runtime_population'))
+          .filter(
+            ({ groups }) => !selectorMatchers(groups!['body']!).some(({ label }) => label === 'tau_runtime_population'),
+          )
+          .map(({ groups }) => `${groups!['metric']}{${groups!['body']}} does not filter tau_runtime_population`),
+      ),
+  ];
+};
+
+describe('Runtime observability dashboards and rules (T13, T32)', () => {
+  it('should bind every runtime series to an app and read only labels its metric defines', () => {
+    expect(runtimeLabelProblems(promqlSources())).toEqual([]);
+  });
+
+  it('should reject a bare runtime series and a label its metric lacks', () => {
+    expect(
+      runtimeLabelProblems([
+        {
+          file: 'seeded.json',
+          kind: 'rule',
+          query:
+            'max(tau_telemetry_runtime_enabled) + sum by (error_type) (rate(tau_runtime_operations_total{app=~".*",tau_runtime_route="cli"}[5m])) / ignoring(tau_runtime_set) group_left count({otel_metric_overflow="true"})',
+        },
+      ]),
+    ).toEqual([
+      'seeded.json: tau_telemetry_runtime_enabled has no selector, so it carries no app matcher',
+      'seeded.json: tau_runtime_operations_total has no label tau_runtime_route',
+      'seeded.json: {otel_metric_overflow="true"} has no app matcher',
+      'seeded.json: by (error_type) over tau_runtime_operations_total, which has no label error_type',
+      'seeded.json: on/ignoring (tau_runtime_set) names a label no runtime series in the query has',
+    ]);
+  });
+
+  it('should reject a postfix by clause on a runtime query', () => {
+    expect(
+      runtimeLabelProblems([
+        {
+          file: 'seeded.json',
+          kind: 'rule',
+          query: 'sum(rate(tau_runtime_operations_total{app=~"$app"}[5m])) by (error_type)',
+        },
+      ]),
+    ).toEqual(['seeded.json: write by (…) before the aggregated expression so its labels are checked']);
+  });
+
+  it('should reject the seeded runtime tree: an unconditioned absence rule, unbound selectors and an all-population default', () => {
+    const seeded = path.join(fixtureRoot, 'runtime-bad');
+
+    expect(absenceProblems(seeded)).toEqual([
+      'alerts/runtime-unbound.json: rule "seeded-absent-unconditioned" fires on absence without the tau_telemetry_runtime_enabled clause',
+    ]);
+    expect(selectorSourceProblems(seeded)).toEqual([
+      'dashboards/runtime-product.json: Loki selector {fly_app_name="tau-api-staging"} must be exactly {service_name=~"$service"}',
+      'alerts/runtime-unbound.json: Loki selector {service_name=~"$service"} must be exactly {service_name="tau-api"}',
+      "dashboards/runtime-product.json: names fly_app_name, which bypasses Tau Cloud's rewrite",
+      'alerts/runtime-unbound.json: tau_telemetry_ingest_entries_total{app=~".*",disposition="recorded"} lacks service_name="tau-api"',
+      'alerts/runtime-unbound.json: tau_mirror_copy_lag_seconds{app=~".*mirror.*",service_name="tau-api"} lacks service_name="tau-mirror"',
+      'alerts/runtime-unbound.json: fly_instance_up{} needs exactly one app matcher from app=~".*", app=~".*storage.*", app=~".*mirror.*"',
+    ]);
+    expect(populationProblems(path.join(seeded, 'dashboards/runtime-product.json'))).toEqual([
+      'population must default to signed-in (has "$__all")',
+      'tau_runtime_exports_total{app=~"$app"} does not filter tau_runtime_population',
+    ]);
+  });
+
+  it('should condition every absence rule on the enabled gauge', () => {
+    expect(absenceProblems(grafanaRoot)).toEqual([]);
+    expect(rulesIn(grafanaRoot).some(({ rule }) => rule.uid === 'telemetry-runtime-absent')).toBe(true);
+  });
+
+  it('should write every Loki selector as Tau Cloud rewrites it and pin every rule to its app exporter', () => {
+    expect(selectorSourceProblems(grafanaRoot)).toEqual([]);
+  });
+
+  it('should default the product dashboard to the signed-in population', () => {
+    expect(populationProblems(path.join(grafanaRoot, 'dashboards/runtime-product.json'))).toEqual([]);
+  });
+
+  it('should keep the process dashboard beside the runtime operations dashboard', () => {
+    const uids = jsonFiles(grafanaRoot, 'dashboards').map((file) => [
+      path.basename(file),
+      read<{ uid: string }>(file).uid,
+    ]);
+    expect(uids).toContainEqual(['runtime.json', 'tau-runtime']);
+    expect(uids).toContainEqual(['runtime-operations.json', 'tau-runtime-operations']);
+    expect(uids).toContainEqual(['runtime-product.json', 'tau-runtime-product']);
+    expect(new Set(uids.map(([, uid]) => uid)).size).toBe(uids.length);
+  });
+
+  it('should add the info rules and the heartbeat paused until Tau Cloud routes them (PR-5a)', () => {
+    const unpaused = rulesIn(grafanaRoot)
+      .filter(({ rule }) => rule.labels?.['severity'] === 'info' && rule.labels['package'] === 'runtime-observability')
+      .filter(({ rule }) => rule.isPaused !== true)
+      .map(({ rule }) => rule.uid);
+    expect(unpaused).toEqual([]);
+    expect(rulesIn(grafanaRoot).find(({ rule }) => rule.uid === 'telemetry-heartbeat')?.rule.isPaused).toBe(true);
+  });
+
+  it('should repeat the heartbeat weekly, since Tau Cloud renders a missing repeat_interval as the 24 h info default', () => {
+    expect(
+      rulesIn(grafanaRoot).find(({ rule }) => rule.uid === 'telemetry-heartbeat')?.rule.labels?.['repeat_interval'],
+    ).toBe('7d');
   });
 });
 

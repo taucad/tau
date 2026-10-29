@@ -294,6 +294,12 @@ export type HostDaemonOptions = {
    * refused `HOST_NOT_PAIRED`.
    */
   readonly relay?: boolean;
+  /**
+   * Runtime telemetry (runtime observability PR-3): told each agent runtime client this daemon opens, under the
+   * `agent` caller, and returns its unsubscribe. The cloud host container composes it with route `cloud`; every other
+   * `tau serve` leaves it out.
+   */
+  readonly observeRuntimeClient?: (client: RuntimeClient, caller: 'agent') => () => void;
 };
 
 /** Final daemon closure result. @public */
@@ -727,10 +733,12 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
             : {}),
         }),
       });
+      const unobserve = options.observeRuntimeClient?.(client, 'agent');
       /* The client is bound to this child's port: once the child is gone, its next use gets a new child. */
       // async-iife: bootstrap -- the child's exit only retires its client.
       void (async (): Promise<void> => {
         await child.closed;
+        unobserve?.();
         client.terminate();
       })();
       return { child, client };

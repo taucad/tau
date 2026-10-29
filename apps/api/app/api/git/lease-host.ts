@@ -20,6 +20,7 @@ import type { LeaseKind } from '#api/git/admission/reservation.js';
 import { refusalFor } from '#api/git/git-refusals.js';
 import { hydrateLease } from '#api/git/store/lease.js';
 import type { PrereadManifest, RepositoryLease } from '#api/git/store/lease.js';
+import { PackCache } from '#api/git/store/pack-cache.js';
 import { repositoryByteCeiling } from '#api/git/store/limits.js';
 import { decodeManifest } from '#api/git/store/manifest.js';
 import type { Manifest } from '#api/git/store/manifest.js';
@@ -175,15 +176,23 @@ export class GitLeaseHost {
    */
   readonly #admission = new LeaseAdmission({ readFreeBytes: async () => this.recordedLeaseDiskFreeBytes() });
 
+  /**
+   * The pack cache of tau-storage (DC2), on the lease filesystem so a lease can
+   * hard-link from it; `undefined` where leases read the store every time (the
+   * API's in-process fallback). It lives under this process's lease directory,
+   * so the boot sweep that reclaims a dead run's leases clears it too.
+   */
+  readonly #packCache: PackCache | undefined;
+
   /** The boot sweep, which admission waits on so it never builds a lease the sweep is removing. */
   readonly #bootSweep: Promise<void>;
 
   /**
    * Work a request started that outlives its response: the lease disposal
    * that follows a fetch, whose child closes after the bytes are on the wire,
-   * a compacting commit's sweep. Held in a set rather than fired and
-   * forgotten, so a failure has somewhere to be logged and a caller can wait
-   * for it.
+   * a push's deferred compaction, a compacting commit's sweep. Held in a set
+   * rather than fired and forgotten, so a failure has somewhere to be logged
+   * and a caller can wait for it.
    */
   readonly #background = new Set<Promise<void>>();
 
@@ -197,11 +206,19 @@ export class GitLeaseHost {
     readonly shutdown: ShutdownService;
     readonly metrics: MetricsService;
     readonly loggerName: string;
+    /**
+     * The share of the lease filesystem the pack cache may hold, from 0 to 1
+     * (DC2); 0 or absent runs without one. The budget is this fraction of the
+     * free bytes `statfs` reads plus what the cache already holds.
+     */
+    readonly packCacheFraction?: number;
   }) {
     this.store = args.store;
     this.shutdown = args.shutdown;
     this.metrics = args.metrics;
     this.logger = new Logger(args.loggerName);
+    const fraction = Math.min(1, Math.max(0, args.packCacheFraction ?? 0));
+    this.#packCache = fraction > 0 ? this.#createPackCache(fraction) : undefined;
     /* A crash restarts a Machine in place on the same rootfs, so boot is the
        first chance to give the dead process's disk back (W10 defect 2). Tracked
        rather than awaited: nothing may wait on a sweep to serve a request. */
@@ -220,14 +237,25 @@ export class GitLeaseHost {
     return bavail * bsize;
   }
 
+  /** The pack cache, when this host runs one (DC2). */
+  public get packCache(): PackCache | undefined {
+    return this.#packCache;
+  }
+
   /** Lease disk this process holds reserved now; 0 once every lease is released (DA3, DC1's slow-body suite). */
   public get reservedLeaseBytes(): number {
     return this.#admission.reservedBytes;
   }
 
-  /** Waits for the work a finished request left running. */
+  /**
+   * Waits for the work a finished request left running, and for any that
+   * work started in turn (a deferred compaction starts its sweep).
+   */
   public async settled(): Promise<void> {
-    await Promise.all(this.#background);
+    while (this.#background.size > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- each round waits for what the round before started
+      await Promise.all(this.#background);
+    }
   }
 
   /**
@@ -359,6 +387,14 @@ export class GitLeaseHost {
       release();
       throw refusalFor(error, this.logger);
     }
+    /* Admission counted the cache's idle bytes as free; make them so before the
+       hydrate writes into them (DC2). */
+    try {
+      await this.#packCache?.reclaim(this.#admission.owedBytes, async () => this.readLeaseDiskFreeBytes());
+    } catch (error) {
+      /* An unlink that failed leaves the bytes where they were; the hydrate may still fit. */
+      this.logger.warn({ err: error }, 'The pack cache could not evict for an admitted lease');
+    }
     admission('admitted');
     active = true;
     this.metrics.gitLeasesActive.add(1, { 'tau.git.operation': operation });
@@ -379,12 +415,17 @@ export class GitLeaseHost {
         locator: admitted.locator,
         parentDirectory: this.#leaseParent,
         preread: admitted.preread,
+        ...(this.#packCache === undefined ? {} : { cache: this.#packCache }),
       });
       admitted.ticket.landed(hydratedBytes((lease.manifest?.packs ?? []).map((pack) => pack.bytes)));
-      /* Every hydrate reads its packs from the object store today; `cache` arrives with DC2. */
-      this.metrics.gitHydrateBytes.record(manifestPackBytes(lease.manifest), {
-        'tau.git.hydrate.source': 'object_store',
-      });
+      /* The cache's share is the hydrate bytes DC2 saved; an empty repository reads as one store draw of 0. */
+      const { cache, objectStore } = lease.drawnBytes;
+      if (cache > 0) {
+        this.metrics.gitHydrateBytes.record(cache, { 'tau.git.hydrate.source': 'cache' });
+      }
+      if (objectStore > 0 || cache === 0) {
+        this.metrics.gitHydrateBytes.record(objectStore, { 'tau.git.hydrate.source': 'object_store' });
+      }
       return lease;
     } finally {
       this.metrics.syncLeaseDuration.record((performance.now() - startedAt) / 1000, {
@@ -407,11 +448,57 @@ export class GitLeaseHost {
     request: LeaseRequest,
     work: (lease: RepositoryLease, digest: string | undefined) => Promise<T>,
   ): Promise<T> {
+    return this.runLeaseThen(operation, request, async (lease, digest) => ({ value: await work(lease, digest) }));
+  }
+
+  /**
+   * {@link runLease}, where `work` may hand back an `after` step that still
+   * needs the lease once the request has its answer: the answer is returned at
+   * once, and the lease is disposed and its admission given back as soon as
+   * `after` settles, tracked like every other post-reply step ({@link track}).
+   * A push's deferred compaction is one: it runs over the push's lease, inside
+   * the reservation the push was admitted with.
+   *
+   * `after` may answer a last step that needs no lease — posting a receipt,
+   * sweeping the store — which runs, still tracked, only once the lease is
+   * disposed and its disk reservation and owner share are back.
+   *
+   * @param operation - What the lease is for.
+   * @param request - What admission needs.
+   * @param work - The request's work, answering its value and an optional step to run after it.
+   * @returns The value `work` answered.
+   */
+  protected async runLeaseThen<T>(
+    operation: GitOperation,
+    request: LeaseRequest,
+    work: (
+      lease: RepositoryLease,
+      digest: string | undefined,
+    ) => Promise<{ readonly value: T; readonly after?: () => Promise<(() => Promise<void>) | undefined> }>,
+  ): Promise<T> {
     const admitted = await this.admitLeaseSlot(request, operation);
     let lease: RepositoryLease | undefined;
+    let handedOver = false;
     try {
       lease = await this.hydrate(admitted);
-      return await work(lease, admitted.preread.digest);
+      const { value, after } = await work(lease, admitted.preread.digest);
+      if (after !== undefined) {
+        const held = lease;
+        handedOver = true;
+        this.track(
+          (async (): Promise<void> => {
+            let then: (() => Promise<void>) | undefined;
+            try {
+              then = await after();
+            } finally {
+              await this.disposeQuietly(held, admitted.locator.projectId);
+              admitted.release();
+            }
+            await then?.();
+          })(),
+        );
+      }
+      return value;
     } catch (error) {
       throw refusalFor(error, this.logger);
     } finally {
@@ -420,9 +507,12 @@ export class GitLeaseHost {
          (review F2). `rm -rf` suppresses ENOENT but not EBUSY, EACCES or
          EPERM, and a throw here used to skip `release()` for the life of the
          process — after which every request on this host answered
-         `GIT_LEASE_DISK_FULL` forever. */
-      await this.disposeQuietly(lease, admitted.locator.projectId);
-      admitted.release();
+         `GIT_LEASE_DISK_FULL` forever. A lease handed to an `after` step is
+         that step's to dispose. */
+      if (!handedOver) {
+        await this.disposeQuietly(lease, admitted.locator.projectId);
+        admitted.release();
+      }
     }
   }
 
@@ -451,11 +541,15 @@ export class GitLeaseHost {
     }
   }
 
-  /** {@link readLeaseDiskFreeBytes}, recorded on the free-bytes gauge at every admission attempt (DA2). */
+  /**
+   * {@link readLeaseDiskFreeBytes}, recorded on the free-bytes gauge at every
+   * admission attempt (DA2). Admission sees the pack cache's idle bytes as
+   * free too, because it evicts them before a lease needs the room (DC2).
+   */
   private async recordedLeaseDiskFreeBytes(): Promise<number> {
     const free = await this.readLeaseDiskFreeBytes();
     this.metrics.gitDiskFreeBytes.record(free);
-    return free;
+    return free + (this.#packCache?.evictableBytes ?? 0);
   }
 
   /** The lease disk this process has reserved now: the sum of admitted leases' real-byte reservations (DA3). */
@@ -513,5 +607,31 @@ export class GitLeaseHost {
       { directories: abandoned.length, bytes: reclaimed },
       'Reclaimed the lease directories of workers that are no longer running',
     );
+  }
+
+  /** The cache under this process's lease directory, its budget from `statfs`, its events on `tau.git.cache.*`. */
+  #createPackCache(fraction: number): PackCache {
+    const cache: PackCache = new PackCache({
+      root: path.join(this.#leaseParent, 'pack-cache'),
+      budgetBytes: async () => fraction * ((await this.readLeaseDiskFreeBytes()) + cache.bytes),
+      events: {
+        lookup: (result) => {
+          this.metrics.gitCacheLookups.add(1, { result });
+        },
+        evicted: (bytes) => {
+          this.metrics.gitCacheEvictions.add(1);
+          this.metrics.gitCacheEvictedBytes.add(bytes);
+        },
+        fallback: (reason) => {
+          this.metrics.gitCacheFallbacks.add(1, { reason });
+        },
+        occupancy: ({ pinnedBytes, idleBytes, budgetBytes }) => {
+          this.metrics.gitCacheBytes.record(pinnedBytes, { state: 'pinned' });
+          this.metrics.gitCacheBytes.record(idleBytes, { state: 'idle' });
+          this.metrics.gitCacheBudgetBytes.record(budgetBytes);
+        },
+      },
+    });
+    return cache;
   }
 }

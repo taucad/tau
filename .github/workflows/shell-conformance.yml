@@ -128,9 +128,9 @@ jobs:
             --reporter=verbose --no-file-parallelism \
             -t 'G4' src/shell/shell-projection-native.test.ts 2>&1 | tee /tmp/g4.log || true
           echo '===== VERDICT ====='
-          grep -E 'G4 |Test Files|  Tests ' /tmp/g4.log || true
-          echo '===== TRACEBACKS ====='
-          grep -A16 'Traceback (most recent call last)' /tmp/g4.log || echo 'no traceback'
+          sed -n '/Failed Tests/,/Duration/p' /tmp/g4.log | grep -vE '^\[(wrap|dump|mark|brdg)' | head -45
+          echo '===== G4 ROWS ====='
+          grep -E 'G4 ' /tmp/g4.log || true
 
       - name: Post-run kernel state
         if: always()

@@ -80,7 +80,7 @@ describe('PostHog proxy boundary', () => {
 
   it('should forward a gzip capture payload byte for byte, declared as binary', async () => {
     const upstream = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('ok'));
-    const payload = gzipSync(Buffer.from(JSON.stringify({ event: '$pageview' })));
+    const payload = new Uint8Array(gzipSync(Buffer.from(JSON.stringify({ event: '$pageview' }))));
 
     await posthogProxy(
       new Request('https://tau.new/api/ph/i/v0/e/?compression=gzip-js', {
@@ -93,7 +93,7 @@ describe('PostHog proxy boundary', () => {
     const [, init] = upstream.mock.calls[0] ?? [];
     // Declared as text, the hosted path decodes and re-encodes the body and the gzip stream is lost.
     expect(new Headers(init?.headers).get('content-type')).toBe('application/octet-stream');
-    expect(Buffer.from(init?.body as Uint8Array<ArrayBuffer>)).toStrictEqual(payload);
+    expect(init?.body as Uint8Array<ArrayBuffer>).toStrictEqual(payload);
   });
 
   it('should keep a textual body and its own content type', async () => {

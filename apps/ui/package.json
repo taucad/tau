@@ -133,6 +133,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@fumadocs/tailwind": "catalog:",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
     "@taucad/spatial": "workspace:*",

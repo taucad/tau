@@ -746,7 +746,7 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     mounted.unmount();
   });
 
-  it('should budget AO in CSS pixels independently of device pixel ratio', async () => {
+  it('should budget AO at half drawing-buffer resolution', async () => {
     const mounted = await mount();
     expect(mocks.antialiasTargetOptions).toHaveBeenCalledWith(1, 1, {
       type: HalfFloatType,
@@ -754,8 +754,8 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
       depthBuffer: false,
       stencilBuffer: false,
     });
-    expect(mocks.denoiseSize).toHaveBeenCalledWith(750, 500);
-    expect(mocks.aoNodes[0]!.resolutionScale).toBe(0.25);
+    expect(mocks.denoiseSize).toHaveBeenCalledWith(1500, 1000);
+    expect(mocks.aoNodes[0]!.resolutionScale).toBe(0.5);
     mocks.denoiseSize.mockClear();
     mocks.getFrame()?.(mocks.state, 0);
     expect(mocks.denoiseSize).not.toHaveBeenCalled();
@@ -775,7 +775,7 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     expect(mocks.antialiasTargetDispose).toHaveBeenCalledOnce();
   });
 
-  it('should resize the AO budget only for CSS size changes and retain it across DPR changes', async () => {
+  it('should resize AO with CSS size and DPR without rebuilding the pipeline', async () => {
     mocks.state.size.width = 1501;
     mocks.state.size.height = 1001;
     mocks.state.viewport.dpr = 1;
@@ -785,13 +785,14 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     mocks.denoiseSize.mockClear();
     mocks.state.viewport.dpr = 2;
     mocks.getFrame()?.(mocks.state, 0);
-    expect(mocks.aoNodes[0]!.resolutionScale).toBe(0.25);
-    expect(mocks.denoiseSize).not.toHaveBeenCalled();
+    expect(mocks.aoNodes[0]!.resolutionScale).toBe(0.5);
+    expect(mocks.denoiseSize).toHaveBeenLastCalledWith(1501, 1001);
+    mocks.denoiseSize.mockClear();
     mocks.state.size.width = 2560;
     mocks.state.size.height = 1440;
     mocks.getFrame()?.(mocks.state, 0);
     expect(mocks.denoiseSize).toHaveBeenCalledOnce();
-    expect(mocks.denoiseSize).toHaveBeenLastCalledWith(1280, 720);
+    expect(mocks.denoiseSize).toHaveBeenLastCalledWith(2560, 1440);
     expect(mocks.pass).toHaveBeenCalledOnce();
     expect(mocks.aoNodes).toHaveLength(1);
     mounted.unmount();
@@ -815,7 +816,7 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
         { kind: 'scene-alpha' },
       ],
     });
-    expect(mocks.denoise.mock.results[0]!.value.step.value.set).toHaveBeenCalledWith(3 / 1500, 3 / 1000);
+    expect(mocks.denoise.mock.results[0]!.value.step.value.set).toHaveBeenCalledWith(1 / 1500, 1 / 1000);
     mounted.unmount();
     expect(mocks.noiseDispose).toHaveBeenCalledOnce();
   });
@@ -926,10 +927,11 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     expect(mocks.normalTexture.type).toBe(1009);
     expect(mocks.normalTexture.format).toBe(1030);
     expect(mocks.aoNodes[0]).toMatchObject({
-      resolutionScale: 0.25,
+      resolutionScale: 0.5,
       useTemporalFiltering: false,
-      samples: { value: 8 },
+      samples: { value: 16 },
     });
+    expect(mocks.aoNodes[0]!.scale.value).toBe(0.75);
     expect(mocks.aoNodes[0]!.radius.value).toBeCloseTo(0.3605551275, 9);
     expect(mocks.updateAoCamera).toHaveBeenCalledTimes(2);
   });

@@ -12,7 +12,7 @@ export type PostProcessingSettings = Readonly<{
   aoCompositeStage: 'scene' | 'display';
   /** WebGL/N8AO visibility exponent. Zero leaves the surface unoccluded. */
   intensity: number;
-  /** WebGPU/GTAO visibility exponent, configured independently from denoised N8AO. */
+  /** Node WebGPU/WebGL2 GTAO visibility exponent, configured independently from denoised N8AO. */
   gtaoIntensity: number;
   /** N8AO's screen-space distance attenuation, expressed as a fraction of its radius. */
   distanceFalloff: number;
@@ -38,7 +38,7 @@ export const defaultPostProcessingSettings: PostProcessingSettings = {
   radiusCssPixels: 'viewport',
   aoCompositeStage: 'display',
   intensity: 3,
-  gtaoIntensity: 1,
+  gtaoIntensity: 0.75,
   distanceFalloff: 0.2,
   gtaoDistanceFalloff: 1,
   webglHalfResolution: false,

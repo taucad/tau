@@ -16,7 +16,7 @@
     "dashboards/slo-executive.json": "0688587613d3ed6948a8e527fd3cbd83889cc6fcff6e95822dcf8fdc3d4ed9f0",
     "dashboards/storage-critical.json": "c4ee80b5c3d5b72d0de405ee0b0bd70c2153f64163b1a63a876497eafdcdb7ad",
     "dashboards/system-overview.json": "2afdc87e4865404619fc64fa4e54ae3c32f8e91a48110c7ff8c8626499fa3894",
-    "dashboards/tau-sync.json": "979e60247badf0efa230ffcf813d17d945dcaea3020064b70f9abf2c1206a771",
+    "dashboards/tau-sync.json": "d669f1db7b60d0215c09e4148eb674169b2829b1bc257a95dc748e437a3d059d",
     "dashboards/websocket-rpc.json": "4b79c58efc8e1ae5215b956e1346d4629a4f83a50215eb1b5ba4fc0fcd05a3fd",
     "alerts/tau-critical.json": "7e1d068831320238c0f118308a13471061ee83120f7b78ccc97ce69abe5ffca1",
     "alerts/tau-storage-critical.json": "910b07725e2cd4c1ab91be80e074989f3db00be2f4a536e1cc1b4e2dd6ae2914",

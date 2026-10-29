@@ -41,6 +41,21 @@ describe('clientMetricEntrySchema', () => {
     expect(clientMetricEntrySchema.parse(entry)).toEqual(entry);
   });
 
+  it('should accept a large-object fetch of counts only, and refuse one that names an object', () => {
+    const entry = {
+      name: IngestEntryName.LFS_FETCH,
+      duration: 17_500,
+      detail: { placement: 'browser', networkObjects: 295, networkBytes: 69_960_000, localObjects: 0, localBytes: 0 },
+    };
+    expect(clientMetricEntrySchema.parse(entry)).toEqual(entry);
+    expect(
+      clientMetricEntrySchema.safeParse({ ...entry, detail: { ...entry.detail, networkObjects: -1 } }).success,
+    ).toBe(false);
+    expect(
+      clientMetricEntrySchema.safeParse({ ...entry, detail: { ...entry.detail, placement: 'proj_1' } }).success,
+    ).toBe(false);
+  });
+
   it('should accept an entry without detail', () => {
     const entry = { name: 'observability.createGeometry', duration: 10 };
     expect(clientMetricEntrySchema.parse(entry)).toEqual(entry);

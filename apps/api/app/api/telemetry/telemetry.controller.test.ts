@@ -35,6 +35,9 @@ function createMockMetrics() {
     syncClientLag: { record: vi.fn() },
     syncClientAttemptDuration: { record: vi.fn() },
     syncClientPending: { record: vi.fn() },
+    syncClientLfsDuration: { record: vi.fn() },
+    syncClientLfsObjects: { add: vi.fn() },
+    syncClientLfsBytes: { add: vi.fn() },
   };
 }
 
@@ -183,6 +186,44 @@ describe('TelemetryController', () => {
       expect(mockMetrics.syncClientPending.record.mock.calls).toEqual([
         [3, { 'agent.placement': 'browser' }],
         [10_000, { 'agent.placement': 'daemon' }],
+      ]);
+    });
+
+    it('should record a tree read’s large-object fetch by cache state and source, minting no series for an unused source', () => {
+      ingestSignedIn({
+        entries: [
+          {
+            name: IngestEntryName.LFS_FETCH,
+            duration: 17_500,
+            detail: {
+              placement: 'browser',
+              networkObjects: 295,
+              networkBytes: 69_960_000,
+              localObjects: 0,
+              localBytes: 0,
+            },
+          },
+          {
+            name: IngestEntryName.LFS_FETCH,
+            duration: 1e12,
+            detail: { placement: 'browser', networkObjects: 1e9, networkBytes: 1e15, localObjects: 3, localBytes: 300 },
+          },
+        ],
+      });
+
+      expect(mockMetrics.syncClientLfsDuration.record.mock.calls).toEqual([
+        [17.5, { 'agent.placement': 'browser', cache: 'cold' }],
+        [3600, { 'agent.placement': 'browser', cache: 'partial' }],
+      ]);
+      expect(mockMetrics.syncClientLfsObjects.add.mock.calls).toEqual([
+        [295, { 'agent.placement': 'browser', source: 'network' }],
+        [100_000, { 'agent.placement': 'browser', source: 'network' }],
+        [3, { 'agent.placement': 'browser', source: 'local' }],
+      ]);
+      expect(mockMetrics.syncClientLfsBytes.add.mock.calls).toEqual([
+        [69_960_000, { 'agent.placement': 'browser', source: 'network' }],
+        [64 * 1024 * 1024 * 1024, { 'agent.placement': 'browser', source: 'network' }],
+        [300, { 'agent.placement': 'browser', source: 'local' }],
       ]);
     });
   });

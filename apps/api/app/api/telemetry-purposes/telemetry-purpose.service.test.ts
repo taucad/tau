@@ -5,7 +5,7 @@ import type { ConfigService } from '@nestjs/config';
 import type { DatabaseService } from '#database/database.service.js';
 import type { TierAssuranceSource } from '#api/telemetry-purposes/tier-assurance.js';
 import type { project, projectDeletion, projectInvitation, telemetryPurposeDecision } from '#database/schema.js';
-import { TelemetryPurposeService } from '#api/telemetry-purposes/telemetry-purpose.service.js';
+import { TelemetryPurposeService, grantAt } from '#api/telemetry-purposes/telemetry-purpose.service.js';
 import type { TelemetryPurpose } from '#api/telemetry-purposes/telemetry-purpose.schema.js';
 
 const notice = 'observability-notice-2026-10-29';
@@ -306,6 +306,50 @@ describe('TelemetryPurposeService', () => {
       await service.withdrawAll('user-a');
 
       expect(values).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('feedbackGrants', () => {
+    const at = Date.parse('2026-10-29T00:00:00.000Z');
+
+    it('answers each account by its last feedback decision at the time asked, and any other account as unknown', async () => {
+      const { service, database } = createService();
+      database.database.query.telemetryPurposeDecision.findMany.mockResolvedValue([
+        { userId: 'user-a', granted: true, decidedAt: new Date(at + 1000) },
+        { userId: 'user-a', granted: false, decidedAt: new Date(at + 5000) },
+      ] as DecisionRow[]);
+
+      const grants = await service.feedbackGrants(['user-a', 'user-b']);
+
+      expect([at, at + 1000, at + 4999, at + 5000].map((time) => grants('user-a', time))).toEqual([
+        'withheld',
+        'granted',
+        'granted',
+        'withheld',
+      ]);
+      expect(grants('user-b', at + 2000)).toBe('withheld');
+      expect(grants('user-c', at + 2000)).toBe('unknown');
+    });
+
+    it('asks nothing of the database for no accounts', async () => {
+      const { service, database } = createService();
+
+      const grants = await service.feedbackGrants([]);
+
+      expect(database.database.query.telemetryPurposeDecision.findMany).not.toHaveBeenCalled();
+      expect(grants('user-a', Date.now())).toBe('unknown');
+    });
+
+    it('takes the later of two decisions at the same instant', () => {
+      expect(
+        grantAt(
+          [
+            { granted: true, decidedAt: at },
+            { granted: false, decidedAt: at },
+          ],
+          at,
+        ),
+      ).toBe('withheld');
     });
   });
 });

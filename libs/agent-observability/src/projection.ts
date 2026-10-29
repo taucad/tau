@@ -57,6 +57,8 @@ export type ProjectedRun = Readonly<{
   sources?: readonly ProjectedSource[];
   /** When this device's UI first showed the run's model text, if it was watching while the run streamed. */
   presentedAt?: number;
+  /** The account's rating of the run's reply on this device, the first one given (T12). */
+  rating?: Readonly<{ value: 'positive' | 'negative'; at: number }>;
 }>;
 
 type ToolFact = Extract<Evidence['payload'], { plane: 'summary' }>['fact'] & { kind: 'tool' };
@@ -78,6 +80,8 @@ export type ProjectionContext = Readonly<{
   hostBuild: string | undefined;
   /** Maps a tool name to its class; the name itself never leaves the device. */
   toolClass?: (toolName: string) => ToolFact['toolClass'];
+  /** The plane, and so the purpose, this projection writes for; each answers to its own grant. `summary` when absent. */
+  plane?: 'summary' | 'feedback';
 }>;
 
 /**
@@ -118,6 +122,10 @@ export const hostTurnMapper = 'host-turn-v1';
 const retentionMilliseconds = 180 * 86_400_000;
 
 type Fact = Extract<Evidence['payload'], { plane: 'summary' }>['fact'];
+type FeedbackFact = Extract<Evidence['payload'], { plane: 'feedback' }>['fact'];
+
+/** The rating scale a run's reply is rated on: one positive or negative answer. @public */
+export const ratingScale = 'thumbs.1';
 
 type Candidate =
   | 'pending'
@@ -127,7 +135,7 @@ type Candidate =
       interaction?: string;
       lineage: readonly ProjectedSource[];
       semantic: string;
-      fact: Fact;
+      payload: Readonly<{ plane: 'summary'; fact: Fact }> | Readonly<{ plane: 'feedback'; fact: FeedbackFact }>;
       occurredAt: number;
       events: Evidence['coverage']['events'];
       intervals: Evidence['clocks']['intervals'];
@@ -148,8 +156,8 @@ const envelope = async (
   const sourceDigest = await sha256Hex(
     canonicalEvidence(
       item.interaction === undefined
-        ? ['host-row', run.chatId, item.source.leaderEpoch, item.source.sequence, item.fact]
-        : ['host-interaction', run.chatId, item.interaction, item.occurredAt, item.fact],
+        ? ['host-row', run.chatId, item.source.leaderEpoch, item.source.sequence, item.payload.fact]
+        : ['host-interaction', run.chatId, item.interaction, item.occurredAt, item.payload.fact],
     ),
   );
   const expiresAt = item.occurredAt + retentionMilliseconds;
@@ -171,7 +179,7 @@ const envelope = async (
       item.interaction === undefined
         ? { kind: 'row', chat, leaderEpoch, sequence: item.source.sequence, digest: sourceDigest }
         : { kind: 'interaction', interaction: item.interaction, digest: sourceDigest },
-    semantic: { kind: item.fact.kind, id: item.semantic },
+    semantic: { kind: item.payload.fact.kind, id: item.semantic },
     projection: { version: hostTurnMapper, redactor: 'summary-only', digest: '0'.repeat(64) },
     delivery: {
       uploader: context.uploader,
@@ -214,7 +222,7 @@ const envelope = async (
       artifacts: 'unsupported',
       permission: 'complete',
     },
-    payload: { plane: 'summary', fact: item.fact },
+    payload: item.payload,
   };
   return { ...evidence, projection: { ...evidence.projection, digest: await evidenceDigest(evidence) } };
 };
@@ -285,6 +293,8 @@ const foreignTailsOf = async (
  *   order and bound phases, and are not a duration clock.
  * - A presentation is written once the run has ended, as an interaction of
  *   this device's at the time its UI showed the run's text.
+ * - A rating is the feedback plane's alone: a `feedback` projection writes
+ *   only it, once the run has ended, and a summary projection never does.
  *
  * @param run - The host's observation of one run.
  * @param context - The account, project and grant the evidence is for.
@@ -305,17 +315,20 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
       source: tool.input,
       lineage: tool.output === undefined ? [tool.input] : [tool.input, tool.output],
       semantic: call,
-      fact: {
-        kind: 'tool',
-        call,
-        dispatch,
-        toolClass: classOf(tool.toolName),
-        toolVersion: null,
-        schemaVersion: null,
-        modelCall: null,
-        outcome: tool.output === undefined ? 'unknown' : tool.outcome,
-        revisionBefore: null,
-        revisionAfter: null,
+      payload: {
+        plane: 'summary',
+        fact: {
+          kind: 'tool',
+          call,
+          dispatch,
+          toolClass: classOf(tool.toolName),
+          toolVersion: null,
+          schemaVersion: null,
+          modelCall: null,
+          outcome: tool.output === undefined ? 'unknown' : tool.outcome,
+          revisionBefore: null,
+          revisionAfter: null,
+        },
       },
       occurredAt: tool.startedAt,
       events: tool.output === undefined ? 'missing' : 'complete',
@@ -346,13 +359,16 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
           source: output,
           lineage: [tool.input, output],
           semantic,
-          fact: {
-            kind: 'cad',
-            sourceRevision,
-            requirement: `req-${requirements.slice(0, 48)}`,
-            result: check.result,
-            exportRequested: false,
-            artifact: null,
+          payload: {
+            plane: 'summary',
+            fact: {
+              kind: 'cad',
+              sourceRevision,
+              requirement: `req-${requirements.slice(0, 48)}`,
+              result: check.result,
+              exportRequested: false,
+              artifact: null,
+            },
           },
           occurredAt: tool.settledAt ?? tool.startedAt,
           events: 'complete',
@@ -369,7 +385,10 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
       source: run.ending.source,
       lineage: [run.ending.source],
       semantic: await contractId('run', run.runId),
-      fact: { kind: 'outcome', termination: run.termination, success: 'unknown', assessment: null },
+      payload: {
+        plane: 'summary',
+        fact: { kind: 'outcome', termination: run.termination, success: 'unknown', assessment: null },
+      },
       occurredAt: run.ending.at,
       events: 'complete',
       intervals: run.intervals
@@ -400,18 +419,44 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
       interaction,
       lineage: [run.ending.source],
       semantic: interaction,
-      fact: { kind: 'response', action: 'presented', evidence: presented },
+      payload: { plane: 'summary', fact: { kind: 'response', action: 'presented', evidence: presented } },
       occurredAt: run.presentedAt,
       events: 'complete',
       intervals: [],
     };
   };
-  const settled = await Promise.all([
-    ...toolCandidates,
-    ...checkCandidates,
-    outcomeCandidate(),
-    presentationCandidate(),
-  ]);
+  /* Like a presentation, a rating is this device's interaction, anchored to the run's ending row. Only the first is kept. */
+  const ratingCandidate = async (): Promise<Candidate | undefined> => {
+    if (run.rating === undefined) {
+      return undefined;
+    }
+    if (run.ending === undefined) {
+      return 'pending';
+    }
+    const [interaction, rated] = await Promise.all([
+      contractId('rated', `${run.chatId}:${run.runId}`),
+      contractId('run', run.runId),
+    ]);
+    return {
+      source: run.ending.source,
+      interaction,
+      lineage: [run.ending.source],
+      semantic: interaction,
+      payload: {
+        plane: 'feedback',
+        fact: { kind: 'rating', scale: ratingScale, value: run.rating.value, evidence: rated },
+      },
+      occurredAt: run.rating.at,
+      events: 'complete',
+      intervals: [],
+    };
+  };
+  const feedback = context.plane === 'feedback';
+  const settled = await Promise.all(
+    feedback
+      ? [ratingCandidate()]
+      : [...toolCandidates, ...checkCandidates, outcomeCandidate(), presentationCandidate()],
+  );
   const candidates = settled.filter((candidate) => candidate !== undefined);
 
   const projected: Array<Promise<Evidence>> = [];
@@ -432,7 +477,8 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
   return {
     evidence: await Promise.all(projected),
     foreign,
-    foreignTails: await foreignTailsOf(run, context, candidates),
+    /* Gaps are the summary plane's to report; a rating names no rows but its anchor. */
+    foreignTails: feedback ? [] : await foreignTailsOf(run, context, candidates),
     beforeGrant,
     pending,
   };

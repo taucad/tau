@@ -151,6 +151,34 @@ describe('projectRun', () => {
     ).toEqual(['duplicate', 'duplicate']);
   });
 
+  it('writes a rating only on the feedback plane, as this device’s interaction, with no row fact beside it', async () => {
+    const rated = run({ rating: { value: 'negative', at: at + 7000 } });
+    const feedback = await projectRun(rated, context({ plane: 'feedback' }));
+    const summary = await projectRun(rated, context());
+
+    expect(feedback).toMatchObject({ foreign: 0, foreignTails: [], beforeGrant: 0, pending: 0 });
+    expect(feedback.evidence).toHaveLength(1);
+    const [rating] = feedback.evidence;
+    expect(evidenceSchema.safeParse(rating).success).toBe(true);
+    expect(await verifyEvidenceDigest(rating!)).toBe(true);
+    expect(rating!.source).toMatchObject({
+      kind: 'interaction',
+      interaction: await contractId('rated', 'chat a/1:run-1'),
+    });
+    expect(rating!.payload).toEqual({
+      plane: 'feedback',
+      fact: { kind: 'rating', scale: 'thumbs.1', value: 'negative', evidence: await contractId('run', 'run-1') },
+    });
+    expect(summary.evidence.map((evidence) => evidence.payload.plane)).toEqual(['summary', 'summary']);
+    expect(await projectRun(run(), context({ plane: 'feedback' }))).toMatchObject({ evidence: [], pending: 0 });
+    expect(
+      await projectRun(
+        run({ rating: { value: 'positive', at: at + 7000 }, ending: undefined }),
+        context({ plane: 'feedback' }),
+      ),
+    ).toMatchObject({ evidence: [], pending: 1 });
+  });
+
   it('holds a presentation back until the run ends, and never sends one shown before the grant', async () => {
     const open = await projectRun(run({ presentedAt: at + 2500, ending: undefined, tools: [] }), context());
     const early = await projectRun(run({ presentedAt: at - 1 }), context());

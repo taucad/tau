@@ -179,6 +179,11 @@ workerScope.addEventListener('message', (event) => {
           hosts.hostOf(projectId)?.presented(chatId, runId, at);
           return undefined;
         }
+        case 'runRated': {
+          const { projectId, ...rating } = args as Calls['runRated']['args'];
+          hosts.hostOf(projectId)?.rated(rating);
+          return undefined;
+        }
         case 'visibility': {
           visible = (args as Calls['visibility']['args']).visible;
           visibilityTopic.emit(visible);

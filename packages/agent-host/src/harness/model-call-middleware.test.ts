@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
-import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
+import { createAssistantMessageEventStream, normalizeContext } from '@earendil-works/pi-ai';
 import { composeModelCallMiddleware } from '#harness/model-call-middleware.js';
 import type { ModelCallMiddleware } from '#harness/model-call-middleware.js';
 import { stubModel } from '#harness/harness.fixture.js';
@@ -23,7 +23,7 @@ describe('composeModelCallMiddleware', () => {
       };
     const composed = composeModelCallMiddleware(base, [middleware('outer'), middleware('inner')]);
 
-    await composed(stubModel, { messages: [] });
+    await composed(stubModel, normalizeContext({ messages: [] }));
 
     expect(trace).toEqual(['outer:in', 'inner:in', 'base', 'inner:out', 'outer:out']);
   });

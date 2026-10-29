@@ -176,13 +176,21 @@ const replay = async (options?: ChatRunHarnessOptions, agreement?: string[]) =>
 const withoutAppliedSet: ChatRunHarnessOptions = { ledgerView: (ledger) => ({ ...ledger, applied: {} }) };
 
 describe('chatRun conforms to ChatRunSlot.tla', () => {
-  it('should replay the TLC covering suite without divergence, answering every delivery', async () => {
-    /* Every delivery is answered, and nothing is dead-lettered (RA-A2). */
-    const guard = guardActors({ ignore: { 'chat-run': chatRunIgnoredEvents } });
-
+  it('should retain every TLC covering behaviour', () => {
     expect(behaviours).toHaveLength(suite.behaviours.length);
-    expect(await replay({ inspect: guard.inspect })).toEqual([]);
+    expect(behaviours.length).toBeGreaterThan(0);
   });
+
+  it.for(behaviours.map((behaviour, index) => ({ behaviour, index })))(
+    'should replay TLC covering behaviour $index without divergence, answering every delivery',
+    async ({ behaviour }) => {
+      /* Each independent trace gets its own guard and deadline; no trace or delivery is omitted. */
+      const guard = guardActors({ ignore: { 'chat-run': chatRunIgnoredEvents } });
+      expect(
+        await replaySuite([behaviour], chatRunAdapter({ inspect: guard.inspect }), (state) => [state['act'], state]),
+      ).toEqual([]);
+    },
+  );
 
   it.runIf(simulated !== undefined && !existsSync(path.join(simulated, '.skipped')))(
     'should replay the simulated behaviours without divergence',

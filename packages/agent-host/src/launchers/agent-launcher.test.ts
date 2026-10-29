@@ -913,13 +913,16 @@ describe('createAgentLauncher', () => {
     expect(log).toContain('"type":"interrupt.recorded"');
     expect(log).toContain('"phase":"requested"');
 
-    const resolved = await host.execute({
-      type: 'resolve-interrupt',
-      commandId: 'cmd-resolve',
-      payload: { chatId: 'chat-2', runId: 'run-2', interruptId: 'int-1', outcome: 'denied', optionId: 'reject' },
+    // A durable pause can precede driver settlement. CHAT_RUN_LIVE is a retryable, non-applied answer.
+    await vi.waitFor(async () => {
+      const resolved = await host.execute({
+        type: 'resolve-interrupt',
+        commandId: 'cmd-resolve',
+        payload: { chatId: 'chat-2', runId: 'run-2', interruptId: 'int-1', outcome: 'denied', optionId: 'reject' },
+      });
+      // Answered only once the resolution row is durable (SC-R9).
+      expect(resolved).toMatchObject({ status: 'applied', effect: 'durable' });
     });
-    // Answered only once the resolution row is durable (SC-R9).
-    expect(resolved).toMatchObject({ status: 'applied', effect: 'durable' });
     expect(await host.pendingInterrupts('run-2')).toEqual([]);
     const after = await readFile(join(currentRoot(), '.tau', 'chats', 'chat-2', 'events.jsonl'), 'utf8');
     expect(after).toContain('"phase":"resolved"');

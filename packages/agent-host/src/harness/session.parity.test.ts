@@ -1,3 +1,4 @@
+import { normalizeContext } from '@earendil-works/pi-ai';
 import { describe, expect, it, vi } from 'vitest';
 import type { Api, Model, Usage } from '@earendil-works/pi-ai';
 import type { AgentLogEvent, JsonObject, LogEventBase, ProviderMessage } from '#log/event-types.js';
@@ -83,7 +84,7 @@ const seedHistory = (): AgentLogEvent[] => {
           role: 'tool-output',
           toolCallId,
           toolName: 'read_file',
-          content: index < 2 ? 'x'.repeat(24_000) : `small-${index}`,
+          content: index < 2 ? 'x'.repeat(21_000) : `small-${index}`,
           isError: false,
           metadata: { timestamp: index },
         },
@@ -1469,7 +1470,7 @@ describe('transport stream state', () => {
         preparing.resolve();
         return release.promise;
       },
-    })(stubModel, { messages: [] }, { signal: controller.signal });
+    })(stubModel, normalizeContext({ messages: [] }), { signal: controller.signal });
     const reading = (async (): Promise<void> => {
       for await (const event of output) {
         void event;
@@ -1498,7 +1499,7 @@ describe('transport stream state', () => {
       toolInputIds: new Map(),
       createId: () => 'stream-id',
       onLiveDelta,
-    })(stubModel, { messages: [] });
+    })(stubModel, normalizeContext({ messages: [] }));
 
   it('should preserve interleaved text, tool, and thinking blocks in arrival order', async () => {
     const stream = await streamFor([
@@ -1743,7 +1744,7 @@ describe('transport stream state', () => {
       identities: new MessageIdentities(() => 'sized-message'),
       toolInputIds: new Map(),
       createId: () => 'sized-id',
-    })(sizedModel, { messages: [] }, streamOptions);
+    })(sizedModel, normalizeContext({ messages: [] }), streamOptions);
     for await (const event of stream) {
       void event;
     }

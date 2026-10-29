@@ -186,6 +186,13 @@ type SyncMachineContextFields = Readonly<{
   unsyncedSince: number | undefined;
   /** The first mint since the current push was assembled: what is still unsynced once that push is acknowledged. */
   mintedSincePushAt: number | undefined;
+  /**
+   * The first unsynced change of any kind — a mint, a record change, a landed
+   * decision — since the current push was assembled. `mintedSincePushAt` is a
+   * mint alone (D98); this is what the lag of whatever that push left unsent
+   * runs from once it is acknowledged.
+   */
+  changedSincePushAt: number | undefined;
   /** When the push or pull under way started, and the queue depth a push started with (`syncAttempt`). */
   attemptStartedAt: number;
   pushPending: number;
@@ -304,7 +311,7 @@ export type SyncMachineEmitted =
       direction: 'push' | 'pull';
       outcome: SyncAttemptOutcome;
       durationMilliseconds: number;
-      /** First unsynced mint to the server's ack; on an acknowledged push only. */
+      /** First unsynced change (or the push request) to the server's ack; on every acknowledged push, never another. */
       lagMilliseconds?: number;
       /** `.git/sync-pending` depth when the push started; on a push only. */
       pending?: number;
@@ -843,20 +850,33 @@ const nextProjectionPending = (
 type SyncEnqueue = EnqueueObject<SyncMachineEvent, SyncMachineEmitted>;
 type SyncContextPatch = Partial<SyncMachineContext>;
 
-const rememberHead = (context: SyncMachineContext, event: SyncMachineEvent): SyncContextPatch => ({
-  /* A mint on another branch is pushed with the history set, but it is not this branch's head (RM-S3). */
-  localHead: event.type === 'revisionMinted' && event.branch === context.branch ? event.revisionId : context.localHead,
-  pendingMint: event.type === 'revisionMinted' ? true : context.pendingMint,
-  unsyncedSince: event.type === 'revisionMinted' ? (context.unsyncedSince ?? Date.now()) : context.unsyncedSince,
-  mintedSincePushAt:
-    event.type === 'revisionMinted' ? (context.mintedSincePushAt ?? Date.now()) : context.mintedSincePushAt,
-  /* The trigger travels with the fact, because the state that *acts* on the
-   * remembered mint is never the state the event arrived in (C17). */
-  pendingFlush:
-    event.type === 'revisionMinted' && (event.trigger === 'close' || event.trigger === 'hidden')
-      ? true
-      : context.pendingFlush,
+/*
+ * A local change the remote has not acknowledged, for the lag report: the
+ * first one starts both clocks and a later one moves neither. A mint, a record
+ * change and a landed decision all count, so a push that carries only records
+ * still reports how long they waited.
+ */
+const markUnsynced = (context: SyncMachineContext, now: number): SyncContextPatch => ({
+  unsyncedSince: context.unsyncedSince ?? now,
+  changedSincePushAt: context.changedSincePushAt ?? now,
 });
+
+const rememberHead = (context: SyncMachineContext, event: SyncMachineEvent): SyncContextPatch => {
+  if (event.type !== 'revisionMinted') {
+    return {};
+  }
+  const now = Date.now();
+  return {
+    /* A mint on another branch is pushed with the history set, but it is not this branch's head (RM-S3). */
+    localHead: event.branch === context.branch ? event.revisionId : context.localHead,
+    pendingMint: true,
+    ...markUnsynced(context, now),
+    mintedSincePushAt: context.mintedSincePushAt ?? now,
+    /* The trigger travels with the fact, because the state that *acts* on the
+     * remembered mint is never the state the event arrived in (C17). */
+    pendingFlush: event.trigger === 'close' || event.trigger === 'hidden' ? true : context.pendingFlush,
+  };
+};
 
 /* `close` and `hidden` are the last moment an `await` means anything, so
  * they skip the window the other triggers coalesce in (D28, S41). */
@@ -1215,6 +1235,7 @@ const syncMachineDefinition = setup({
     reason: undefined,
     unsyncedSince: undefined,
     mintedSincePushAt: undefined,
+    changedSincePushAt: undefined,
     attemptStartedAt: 0,
     pushPending: 0,
     debounceMilliseconds: input.debounceMilliseconds ?? defaultDebounceMilliseconds,
@@ -1257,7 +1278,7 @@ const syncMachineDefinition = setup({
      * states that have none — `reading`, `opening`, `recording` — so a cut is
      * never dropped for arriving at a busy moment. */
     revisionMinted: { context: ({ context, event }) => rememberHead(context, event) },
-    recordsChanged: { context: { pendingMint: true } },
+    recordsChanged: { context: ({ context }) => ({ pendingMint: true, ...markUnsynced(context, Date.now()) }) },
     /* The same fallback for a remote move (D13): a busy state remembers it and
      * the state that finishes fetches. The idle states fetch at once. */
     remoteMoved: { context: ({ context }) => ({ pendingFetch: !context.quiescing }) },
@@ -1284,7 +1305,7 @@ const syncMachineDefinition = setup({
     /* A decision landed while this machine was not `conflicted` — one fetched
      * from another device (D14): the merge it minted is this device's own and
      * unsent, so it is pushed like a mint. `conflicted` answers it itself. */
-    conflictResolved: { context: { pendingMint: true } },
+    conflictResolved: { context: ({ context }) => ({ pendingMint: true, ...markUnsynced(context, Date.now()) }) },
     /* The same fallback once more (L2-F3): `reading`, `opening` and `minting`
      * are effects with no push edge of their own, and dropping a
      * correlated request there left `publish.machine` waiting out its 60 s and
@@ -1859,6 +1880,7 @@ const syncMachineDefinition = setup({
           attemptStartedAt: Date.now(),
           pushPending: context.pending.length,
           mintedSincePushAt: undefined,
+          changedSincePushAt: undefined,
         },
       }),
       invoke: {
@@ -1918,19 +1940,22 @@ const syncMachineDefinition = setup({
           const owed = owedPushes({ ...context, pending });
           const quota = isQuotaAnswer(owed, event.output.overQuota);
           const acknowledged = owed.length === 0;
-          /* A device that reopened with a queue and minted nothing since still owes its oldest entry. */
-          const since = context.unsyncedSince ?? Math.min(...owedPushes(context).map((entry) => entry.recordedAt));
+          /* Every acknowledged push reports its lag, from the first unsynced change; a device that
+           * reopened with a queue and changed nothing since owes its oldest entry; and a push nothing
+           * dated — a bare *Sync now*, a pull that found this device ahead — runs from its own start. */
+          const oldestOwed = Math.min(...owedPushes(context).map((entry) => entry.recordedAt));
+          const since = context.unsyncedSince ?? (Number.isFinite(oldestOwed) ? oldestOwed : context.attemptStartedAt);
           reportPushAttempt(context, enq, {
             outcome: acknowledged ? 'ok' : quota ? 'quota_refused' : 'retry',
-            ...(acknowledged && Number.isFinite(since) ? { lagMilliseconds: Math.max(0, now - since) } : {}),
+            ...(acknowledged ? { lagMilliseconds: Math.max(0, now - since) } : {}),
           });
           return {
             target: 'recording',
             context: {
               leases,
               pending,
-              /* A revision minted while this push was on the wire is still unsent, from its own mint. */
-              unsyncedSince: acknowledged ? context.mintedSincePushAt : context.unsyncedSince,
+              /* A change made while this push was on the wire is still unsent, from its own moment. */
+              unsyncedSince: acknowledged ? context.changedSincePushAt : context.unsyncedSince,
               /* Rule 19: a refused history is terminal, as the thrown class is; a
                * record's refusal never blocks history, so it keeps retrying. */
               failure: quota && refusedHistory !== undefined ? 'fatal' : acknowledged ? 'none' : 'retry',

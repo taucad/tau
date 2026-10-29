@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- LFS wire fields use expires_in. */
 import { describe, expect, it, vi } from 'vitest';
 import { lfsPointerFor } from '#lfs.js';
-import { createLfsClient } from '#lfs-client.js';
+import { createLfsClient, lfsUploadConcurrency, lfsUploadResidentBytes } from '#lfs-client.js';
 import type { RevisionHttpClient, RevisionHttpResponse } from '#http-client.js';
 
 const encoder = new TextEncoder();
@@ -236,8 +236,10 @@ describe('bounded private transfers', () => {
     const controller = new AbortController();
     const request = vi.fn<RevisionHttpClient['request']>().mockResolvedValueOnce(batchResponse());
     const transfer = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
-      expect(init?.signal).toBe(controller.signal);
+      expect(init?.signal?.aborted).toBe(false);
       controller.abort();
+      /* The transfer's signal follows the caller's. */
+      expect(init?.signal?.aborted).toBe(true);
       throw new TypeError('disconnected');
     });
     await expect(
@@ -314,7 +316,13 @@ describe('bounded private transfers', () => {
       return new Response('');
     });
     try {
-      await createLfsClient({ url: 'https://api.tau.test/git', http: { request }, fetch: transfer }).upload({
+      /* Serial, so the second object's capability is checked after the first object's transfer. */
+      await createLfsClient({
+        url: 'https://api.tau.test/git',
+        http: { request },
+        fetch: transfer,
+        uploadConcurrency: 1,
+      }).upload({
         pointers: [pointer, next],
         read: async (oid) => (oid === pointer.oid ? bytes : nextBytes),
       });
@@ -354,5 +362,125 @@ describe('bounded private transfers', () => {
     ).resolves.toEqual(bytes);
     expect(request).toHaveBeenCalledTimes(2);
     expect(transfer).toHaveBeenCalledTimes(2);
+  });
+});
+
+/* F5: a push's large objects upload a few at a time, not one after another. */
+describe('parallel uploads', () => {
+  const objects = Array.from({ length: 7 }, (_, index) => encoder.encode(`object ${String(index)}`));
+  const pointers = objects.map((content) => lfsPointerFor(content).pointer);
+  const contentOf = new Map(pointers.map((pointer, index) => [pointer.oid, objects[index]!]));
+  const batchOf = (listed: ReadonlyArray<{ oid: string; size: number }>): RevisionHttpClient['request'] =>
+    vi.fn<RevisionHttpClient['request']>().mockResolvedValue(
+      response(
+        JSON.stringify({
+          objects: listed.map((pointer) => ({
+            ...pointer,
+            actions: { upload: { href: `https://o.test/${pointer.oid}` } },
+          })),
+        }),
+      ),
+    );
+
+  /* Transfers that wait until released, so how many are in flight at once is observable. */
+  const heldTransfers = () => {
+    const releases: Array<(response: Response) => void> = [];
+    let inFlight = 0;
+    let peak = 0;
+    const transfer = vi.fn<typeof fetch>(
+      async () =>
+        new Promise<Response>((resolve) => {
+          inFlight += 1;
+          peak = Math.max(peak, inFlight);
+          releases.push((answer) => {
+            inFlight -= 1;
+            resolve(answer);
+          });
+        }),
+    );
+    return { transfer, releases, peak: () => peak };
+  };
+
+  it('uploads at most the bounded number of objects at once, and reports every oid in order', async () => {
+    const { transfer, releases, peak } = heldTransfers();
+    const uploading = createLfsClient({
+      url: 'https://api.tau.test/git',
+      http: { request: batchOf(pointers) },
+      fetch: transfer,
+    }).upload({
+      pointers,
+      read: async (oid) => contentOf.get(oid)!,
+    });
+    await vi.waitFor(() => {
+      expect(transfer).toHaveBeenCalledTimes(lfsUploadConcurrency);
+    });
+    expect(peak()).toBe(lfsUploadConcurrency);
+    /* Releasing one admits exactly one more. */
+    releases.shift()?.(new Response(''));
+    await vi.waitFor(() => {
+      expect(transfer).toHaveBeenCalledTimes(lfsUploadConcurrency + 1);
+    });
+    while (transfer.mock.calls.length < pointers.length || releases.length > 0) {
+      releases.shift()?.(new Response(''));
+      // eslint-disable-next-line no-await-in-loop -- let the pool admit the next object.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    }
+    await expect(uploading).resolves.toEqual(pointers.map((pointer) => pointer.oid));
+    expect(peak()).toBe(lfsUploadConcurrency);
+  });
+
+  it('keeps objects whose bytes together exceed the resident budget from uploading side by side', async () => {
+    const half = Math.floor(lfsUploadResidentBytes / 2) + 1;
+    const large = [new Uint8Array(half), new Uint8Array(half).fill(1)];
+    const largePointers = large.map((content) => lfsPointerFor(content).pointer);
+    const { transfer, releases, peak } = heldTransfers();
+    const uploading = createLfsClient({
+      url: 'https://api.tau.test/git',
+      http: { request: batchOf(largePointers) },
+      fetch: transfer,
+    }).upload({ pointers: largePointers, read: async (oid) => large[largePointers.findIndex((p) => p.oid === oid)]! });
+    await vi.waitFor(() => {
+      expect(transfer).toHaveBeenCalledTimes(1);
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10);
+    });
+    expect(transfer).toHaveBeenCalledTimes(1);
+    releases.shift()?.(new Response(''));
+    await vi.waitFor(() => {
+      expect(transfer).toHaveBeenCalledTimes(2);
+    });
+    releases.shift()?.(new Response(''));
+    await expect(uploading).resolves.toHaveLength(2);
+    expect(peak()).toBe(1);
+  });
+
+  it('stops admitting objects after the first failure, aborts the ones in flight and reports that failure', async () => {
+    const read = vi.fn(async (oid: string) => contentOf.get(oid)!);
+    const signals: AbortSignal[] = [];
+    const transfer = vi.fn<typeof fetch>(async (url, init) => {
+      signals.push(init!.signal!);
+      if ((typeof url === 'string' ? url : url instanceof URL ? url.href : url.url).endsWith(pointers[0]!.oid)) {
+        return new Response('', { status: 400 });
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('aborted', 'AbortError'));
+        });
+      });
+    });
+    await expect(
+      createLfsClient({
+        url: 'https://api.tau.test/git',
+        http: { request: batchOf(pointers) },
+        fetch: transfer,
+        uploadConcurrency: 2,
+      }).upload({ pointers, read }),
+    ).rejects.toThrow('400');
+    /* The failing object and the one beside it; nothing after. */
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
   });
 });

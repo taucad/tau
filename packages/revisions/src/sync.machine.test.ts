@@ -3292,6 +3292,88 @@ describe('syncMachine telemetry (W36 D1)', () => {
     harness.stop();
   });
 
+  /* Every acknowledged push reports a lag: before, only one that followed a mint or owed a queued entry did. */
+  it('reports the lag of a push that carried only records, from the record change', async () => {
+    const now = vi.spyOn(Date, 'now');
+    try {
+      const harness = start();
+      await openCleanly(harness);
+      await vi.waitFor(() => {
+        expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+      });
+
+      now.mockReturnValue(1_000_000);
+      harness.actor.send({ type: 'recordsChanged' });
+      expect(harness.actor.getSnapshot().context.unsyncedSince).toBe(1_000_000);
+      harness.clock.advance(2000);
+      await vi.waitFor(() => {
+        expect(harness.effects.running('push')).toBe(1);
+      });
+      now.mockReturnValue(1_007_500);
+      harness.effects.settle('push', { output: pushResult({ name: chatRef, status: 'updated', head: 'c1' }) });
+      await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+
+      await vi.waitFor(() => {
+        expect(attempts(harness).at(-1)).toMatchObject({ direction: 'push', outcome: 'ok' });
+      });
+      expect(attempts(harness).at(-1)?.['lagMilliseconds']).toBe(7500);
+      expect(harness.actor.getSnapshot().context.unsyncedSince).toBeUndefined();
+      harness.stop();
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it('reports the lag of a push nothing dated, from the attempt start', async () => {
+    const now = vi.spyOn(Date, 'now');
+    try {
+      const harness = start();
+      await openCleanly(harness);
+
+      now.mockReturnValue(2_000_000);
+      harness.actor.send({ type: 'syncNow' });
+      await vi.waitFor(() => {
+        expect(harness.effects.running('push')).toBe(1);
+      });
+      now.mockReturnValue(2_004_000);
+      harness.effects.settle('push', { output: pushResult() });
+      await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+
+      await vi.waitFor(() => {
+        expect(attempts(harness).at(-1)).toMatchObject({ direction: 'push', outcome: 'ok' });
+      });
+      expect(attempts(harness).at(-1)?.['lagMilliseconds']).toBe(4000);
+      harness.stop();
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it('keeps the lag of a record change made while the previous push was on the wire', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.actor.send({ type: 'recordsChanged' });
+    const changedMidPush = harness.actor.getSnapshot().context.changedSincePushAt;
+    expect(changedMidPush).toEqual(expect.any(Number) as unknown);
+    /* A record change is not a mint: D98's unrecorded-mint check must not see it. */
+    expect(harness.actor.getSnapshot().context.mintedSincePushAt).toBeUndefined();
+    harness.effects.settle('push', { output: pushResult() });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+
+    await vi.waitFor(() => {
+      expect(attempts(harness).at(-1)).toMatchObject({ direction: 'push', outcome: 'ok' });
+    });
+    expect(attempts(harness).at(-1)?.['lagMilliseconds']).toEqual(expect.any(Number));
+    expect(harness.actor.getSnapshot().context.unsyncedSince).toBe(changedMidPush);
+
+    harness.stop();
+  });
+
   it('reports a push the remote refused for storage as quota_refused', async () => {
     const harness = start();
     await openCleanly(harness);

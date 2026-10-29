@@ -180,6 +180,7 @@ import type {
   RevisionEngineDescriptor,
   RevisionPort,
   RevisionPushResult,
+  RevisionPushSession,
   RevisionRemoteAddress,
   RevisionReceipt,
   RevisionRecord,
@@ -4202,6 +4203,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           throw new RevisionPortError('INVALID_TRANSPORT', 'GitHub requires an explicit Push request.');
         }
         const { syncChats, syncLargeExports } = await projectSyncPreferences();
+        /* One attempt, one advertisement (F5): the history push and the record set's read the remote once. */
+        const session: RevisionPushSession = {};
         const wanted = input.refs === undefined ? undefined : new Set(input.refs);
         const offered = (name: string): boolean => wanted === undefined || wanted.has(name);
         /* A narrowed retry owes exactly the refs it names, so capturing and
@@ -4289,6 +4292,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                 signal,
                 atomic: true,
                 refs: offeredHistory.map((name) => offerOf(name, input.leases)),
+                session,
               });
             // An explicit GitHub gesture must never arm a pagehide resend.
             const pushed = await (input.explicit === true ? offerHistory() : recordHistoryPush(offerHistory));
@@ -4325,6 +4329,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                 signal,
                 leases: input.leases,
                 offered: localHeads,
+                session,
               })
             : undefined;
         for (const name of records) {
@@ -4341,6 +4346,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                   signal,
                   leases: input.leases,
                   offered: localHeads,
+                  session,
                 })
               : { outcome: joint };
           const { outcome } = offered_;

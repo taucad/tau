@@ -213,7 +213,7 @@
     {
       "title": "Save-to-acknowledged lag p50 / p95 by placement",
       "type": "timeseries",
-      "description": "Client-reported time from the first unsynced mint to the server acknowledging it: the save time a person sees.",
+      "description": "Client-reported time from the first unsynced change (a mint, a record change, or the push request itself) to the server acknowledging it, on every acknowledged push: the save time a person sees.",
       "targets": [
         {
           "expr": "histogram_quantile(0.5, sum by (le, agent_placement) (rate(tau_sync_client_lag_bucket{app=~\"$app\",service_name=~\"$service\"}[15m])))",

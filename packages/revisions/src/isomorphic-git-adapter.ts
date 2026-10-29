@@ -107,6 +107,7 @@ import type {
   RevisionPushRef,
   RevisionPushRefResult,
   RevisionPushResult,
+  RevisionPushSession,
   SetRevisionRemoteInput,
   RevisionRef,
   RevisionTag,
@@ -1231,6 +1232,48 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     };
   };
 
+  /*
+   * One receive-pack advertisement per sync attempt (F5). A push takes its
+   * session's copy, by URL, and hands it back only when every offered ref was
+   * accepted, with each accepted command applied, so the next push's old values
+   * and haves are what the remote now holds. A refusal or a failure keeps it
+   * taken: whatever made the remote say no may have moved refs this copy cannot
+   * see, so the next push reads a fresh one.
+   */
+  type PushAdvertisement = Readonly<{
+    capabilities: Awaited<ReturnType<typeof getRemoteInfo2>>['capabilities'];
+    advertised: Map<string, string>;
+  }>;
+  const sessionAdvertisements = new WeakMap<RevisionPushSession, Map<string, PushAdvertisement>>();
+  const takeAdvertisement = async (
+    http: ReturnType<typeof boundBy>,
+    url: string,
+    input: RevisionPushInput,
+  ): Promise<PushAdvertisement> => {
+    const kept = input.session === undefined ? undefined : sessionAdvertisements.get(input.session);
+    const taken = kept?.get(url);
+    if (taken !== undefined) {
+      kept?.delete(url);
+      return taken;
+    }
+    /* `receive-pack`'s own, which carries the capabilities the request may use
+     * as well as the refs. Seam 1 of 3 (N1), exactly as in `advertisedReferences`. */
+    const read = await getRemoteInfo2({ http, url, forPush: true, protocolVersion: 1 }).catch((error: unknown) => {
+      throw http.refused(error, input.remote);
+    });
+    return {
+      capabilities: read.capabilities,
+      advertised: new Map((read.refs ?? []).map((reference) => [reference.ref, reference.oid])),
+    };
+  };
+  const keepAdvertisement = (session: RevisionPushSession | undefined, url: string, kept: PushAdvertisement): void => {
+    if (session !== undefined) {
+      const byUrl = sessionAdvertisements.get(session) ?? new Map<string, PushAdvertisement>();
+      byUrl.set(url, kept);
+      sessionAdvertisements.set(session, byUrl);
+    }
+  };
+
   const requireHttp = (): RevisionHttpClient => {
     if (options.http === undefined) {
       throw new RevisionPortError(
@@ -1874,15 +1917,9 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           'The repository destination changed. Review it before pushing.',
         );
       }
-      /* The one advertisement (E4): `receive-pack`'s own, which carries the
-       * capabilities the request below may use as well as the refs. Seam 1 of 3
-       * (N1), exactly as in `advertisedReferences`. */
-      const advertisement = await getRemoteInfo2({ http, url, forPush: true, protocolVersion: 1 }).catch(
-        (error: unknown) => {
-          throw http.refused(error, input.remote);
-        },
-      );
-      const advertised = new Map((advertisement.refs ?? []).map((reference) => [reference.ref, reference.oid]));
+      /* The one advertisement (E4), shared by the pushes of this attempt's session (F5). */
+      const advertisement = await takeAdvertisement(http, url, input);
+      const { advertised } = advertisement;
       const ordered = [...input.refs].toSorted(
         (left, right) => Number(left.name === refOf(defaultBranch)) - Number(right.name === refOf(defaultBranch)),
       );
@@ -1952,6 +1989,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
             );
             continue;
           }
+          /* The kept advertisement now says what the remote holds, for the session's next push. */
+          advertised.set(command.remoteName, command.head);
           /* Where `fetch` would have put it, which is where `git push` puts it. */
           // eslint-disable-next-line no-await-in-loop -- one tracking ref per accepted ref.
           await writeRef({
@@ -1967,7 +2006,11 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           );
         }
       }
-      return Object.freeze({ refs: Object.freeze(input.refs.map((ref) => results.get(ref.name)!)) });
+      const pushed = Object.freeze({ refs: Object.freeze(input.refs.map((ref) => results.get(ref.name)!)) });
+      if (pushed.refs.every((entry) => entry.status !== 'rejected')) {
+        keepAdvertisement(input.session, url, advertisement);
+      }
+      return pushed;
     },
 
     listRemotes: async (): Promise<readonly Remote[]> => {

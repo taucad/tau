@@ -26,7 +26,7 @@
 
 /* eslint-disable @typescript-eslint/naming-convention -- the git-lfs batch body (`hash_algo`) and HTTP header names (`Accept`) are spelled by their own specifications, not by ours. */
 
-/* oxlint-disable no-await-in-loop -- sequential object transfers and bounded retries keep one object resident. */
+/* oxlint-disable no-await-in-loop -- bounded retries, and an upload pool that admits objects in order under a byte budget. */
 
 import { lfsPointerFor } from '#lfs.js';
 import { remoteTransportError } from '#remotes.js';
@@ -82,7 +82,31 @@ export type LfsClientOptions = Readonly<{
   remote?: string;
   /** Optional remote-specific per-file upload ceiling. Omit to defer to the remote. */
   maximumUploadBytes?: number;
+  /** How many objects upload at once. Defaults to {@link lfsUploadConcurrency}; `1` is serial. */
+  uploadConcurrency?: number;
 }>;
+
+/**
+ * How many large objects one push uploads at once (F5).
+ *
+ * Each transfer is one presigned `PUT` whose time is mostly round trips, so a
+ * few in flight cut a multi-object push to about its slowest object. Small,
+ * because every one holds its bytes in memory and the object store and the
+ * batch endpoint are shared with the owner's other devices.
+ *
+ * @public
+ */
+export const lfsUploadConcurrency = 4;
+
+/**
+ * The bytes concurrent uploads may hold in memory together (F5).
+ *
+ * An object is admitted alone when nothing else is in flight, so one at the
+ * per-file ceiling still uploads, without another read beside it.
+ *
+ * @public
+ */
+export const lfsUploadResidentBytes = 64 * 1024 * 1024;
 
 /** What one upload offers the remote. @public */
 export type LfsUploadInput = Readonly<{
@@ -467,21 +491,55 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
       if (refused !== undefined) {
         throw new Error(`The remote refused large object ${refused.oid}: ${refused.error?.message}`);
       }
-      const sent: string[] = [];
-      for (const answer of answers) {
-        signal?.throwIfAborted();
-        if (answer.actions?.upload === undefined) {
-          continue;
+      const wanted = answers.filter((answer) => answer.actions?.upload !== undefined);
+      /* A few at once, admitted in order under a byte budget (F5). The first
+       * failure stops the rest: nothing new starts, the ones in flight are
+       * aborted, and that failure is what the push reports. */
+      const failed = new AbortController();
+      const transfer = signal === undefined ? failed.signal : AbortSignal.any([signal, failed.signal]);
+      const limit = Math.max(1, options.uploadConcurrency ?? lfsUploadConcurrency);
+      const running = new Map<number, Promise<void>>();
+      let resident = 0;
+      let failure: { error: unknown } | undefined;
+      const stopped = (): boolean => failure !== undefined;
+      const sendOne = async (answer: BatchObject, index: number): Promise<void> => {
+        try {
+          const content = await read(answer.oid);
+          transfer.throwIfAborted();
+          if (content.byteLength !== answer.size || lfsPointerFor(content).pointer.oid !== answer.oid) {
+            throw new Error(`Large object ${answer.oid} did not hash to its own id.`);
+          }
+          await uploadObject(answer, content, transfer);
+        } catch (error) {
+          failure ??= { error: signal?.aborted === true ? signal.reason : error };
+          failed.abort();
+        } finally {
+          resident -= answer.size;
+          /* `read` is awaited first, so the pool has recorded this task before it settles. */
+          running.delete(index);
         }
-        const content = await read(answer.oid);
-        signal?.throwIfAborted();
-        if (content.byteLength !== answer.size || lfsPointerFor(content).pointer.oid !== answer.oid) {
-          throw new Error(`Large object ${answer.oid} did not hash to its own id.`);
+      };
+      for (const [index, answer] of wanted.entries()) {
+        while (
+          !stopped() &&
+          running.size > 0 &&
+          (running.size >= limit || resident + answer.size > lfsUploadResidentBytes)
+        ) {
+          await Promise.race(running.values());
         }
-        await uploadObject(answer, content, signal);
-        sent.push(answer.oid);
+        if (stopped()) {
+          break;
+        }
+        signal?.throwIfAborted();
+        resident += answer.size;
+        running.set(index, sendOne(answer, index));
       }
-      return Object.freeze(sent);
+      await Promise.all(running.values());
+      if (failure !== undefined) {
+        throw failure.error;
+      }
+      signal?.throwIfAborted();
+      return Object.freeze(wanted.map((answer) => answer.oid));
     },
 
     download: async (pointer: LfsDownloadInput): Promise<Uint8Array<ArrayBuffer>> => {

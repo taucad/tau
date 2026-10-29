@@ -340,6 +340,19 @@ export type RevisionPushRef = Readonly<{
 }>;
 
 /**
+ * Identity of one sync attempt's pushes (F5): any fresh object, kept for that attempt and dropped after it.
+ *
+ * An attempt offers the history set and the record set as separate pushes
+ * (A39). A leg that reads the remote's ref advertisement itself reads it once
+ * per session and keeps it current with what each push of the session moved,
+ * instead of once per push; a leg whose transport advertises on its own (native
+ * Git) ignores it. The object carries nothing: its identity is the key.
+ *
+ * @public
+ */
+export type RevisionPushSession = Readonly<Record<string, never>>;
+
+/**
  * What one push asks of a remote.
  *
  * The caller splits the two sets (A39) and this is where the difference is
@@ -358,6 +371,8 @@ export type RevisionPushInput = Readonly<{
   refs: readonly RevisionPushRef[];
   /** All-or-nothing across the listed refs. Default `false`. */
   atomic?: boolean;
+  /** Share one advertisement with the other pushes of the same sync attempt. Absent, this push reads its own. */
+  session?: RevisionPushSession;
 }>;
 
 /** How one ref of a push ended. @public */

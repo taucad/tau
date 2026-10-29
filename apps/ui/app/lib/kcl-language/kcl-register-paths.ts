@@ -1,21 +1,21 @@
 /**
- * URI/path helpers for KCL document and import resolution in the Monaco stack.
+ * URI/path helpers for KCL document and import resolution.
  */
 
 import { URI, Utils } from 'vscode-uri';
 import { VirtualPathError } from '@taucad/utils/path';
-import { workspaceRelativePathFromFileUri } from '#lib/monaco-workspace-fs/workspace-path-from-uri.js';
+import { workspacePathFromFileUri } from '#lib/editor-workspace-fs/editor-workspace-fs.js';
 
 /**
  * Convert URI to workspace-relative path key (no leading slash), matching
- * virtual Monaco `file:///public/...` paths and the file manager layout.
+ * rooted `file:///public/...` paths and the file manager layout.
  */
 export function kclUriToWorkspacePath(uri: string): string {
   const parsed = URI.parse(uri);
   if (parsed.scheme !== 'file' || parsed.authority !== '') {
     throw new VirtualPathError('INVALID_PATH', uri);
   }
-  return workspaceRelativePathFromFileUri(parsed.path);
+  return workspacePathFromFileUri(parsed);
 }
 
 /**

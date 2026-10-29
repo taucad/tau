@@ -2,6 +2,8 @@ receivers:
   otlp:
     protocols:
       grpc:
+        # In-container listener. The host mapping is 127.0.0.1; 127.0.0.1 here
+        # would refuse both that mapping and other containers.
         endpoint: 0.0.0.0:4317
       http:
         endpoint: 0.0.0.0:4318
@@ -43,10 +45,12 @@ receivers:
           static_configs:
             - targets: ['host.docker.internal:9467']
               labels: { app: 'tau-storage' }
-  # Server-side views of the local dependencies. The API's postgres.js client has no OTel metrics, so
-  # pool and query health come from PostgreSQL itself. Credentials are the compose dev defaults.
+  # Server-side views of the local dependencies, via Compose DNS. The host publication is
+  # loopback-only, so host.docker.internal cannot reach these ports. The API's postgres.js client
+  # has no OTel metrics, so pool and query health come from PostgreSQL itself. Credentials are the
+  # compose dev defaults.
   postgresql:
-    endpoint: host.docker.internal:5432
+    endpoint: postgres:5432
     transport: tcp
     username: dev_user
     password: dev_password
@@ -56,7 +60,7 @@ receivers:
     tls:
       insecure: true
   redis:
-    endpoint: host.docker.internal:6379
+    endpoint: redis:6379
     collection_interval: 15s
   # The machine the stack runs on (the Docker VM under Colima/Docker Desktop): the local stand-in for
   # Fly's per-machine CPU, memory, load, network and disk I/O.

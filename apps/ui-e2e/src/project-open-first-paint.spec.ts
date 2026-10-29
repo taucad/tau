@@ -9,7 +9,7 @@ import * as target from '#support/external-target.js';
  *
  * - I2: the words "Loading editor…" never stand in for the workspace; the only
  *   loading state a code pane owns is its placeholder.
- * - I1: Monaco is never fetched from the loader's CDN default.
+ * - I1: editor assets are never fetched from the old loader's CDN default.
  * - I4: once the workspace container exists it is never an empty frame.
  * - R3: once anything has painted on a project URL, the window never goes back
  *   to nothing — every gate before the live workspace shows the skeleton.
@@ -48,7 +48,7 @@ const recordFirstPaint = (): void => {
         element.closest('[data-slot="editor-pane-placeholder"]') === null,
     );
     const skeleton = document.querySelector('[data-testid="workspace-skeleton"]') !== null;
-    const editor = document.querySelector('.monaco-editor .view-lines') !== null;
+    const editor = document.querySelector('.cm-editor .cm-content') !== null;
     const next: FirstPaintSample = {
       path: location.pathname,
       splashOutsidePlaceholder,
@@ -84,9 +84,9 @@ const readFirstPaint = async (): Promise<FirstPaintRecord> =>
     () => (globalThis as typeof globalThis & { __TAU_FIRST_PAINT__: FirstPaintRecord }).__TAU_FIRST_PAINT__,
   );
 
-const editorLines = selectors.getByCss('.monaco-editor .view-lines').first();
+const editorLines = selectors.getByCss('.cm-editor .cm-content').first();
 
-test('opens a project without a page-wide editor splash, a blank workspace, or CDN Monaco', async () => {
+test('opens a project without a page-wide editor splash, a blank workspace, or CDN editor assets', async () => {
   await target.setViewport({ width: 1440, height: 960 });
   await target.addInitScript(recordFirstPaint);
   await target.navigate('/projects/new');

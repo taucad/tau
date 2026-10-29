@@ -1,6 +1,6 @@
 import { memo, useEffect, useId, useRef } from 'react';
 import { Loader2, Scan } from 'lucide-react';
-import type { Artifact, RuntimeDocument } from '@taucad/runtime';
+import type { Artifact } from '@taucad/runtime';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import { Popover, PopoverAnchor, PopoverContent } from '@taucad/ui/components/popover';
@@ -21,17 +21,12 @@ export function ArIcon({ className }: { readonly className?: string }): React.JS
  */
 export const ArButton = memo(function ({
   artifact,
-  runtimeDocument,
   className,
 }: {
   readonly artifact: Artifact | undefined;
-  readonly runtimeDocument?: RuntimeDocument;
   readonly className?: string;
 }): React.ReactNode {
-  const { canActivateAr, isPreparing, isPresenting, failure, activateAr, dismissFailure } = useAr(
-    artifact,
-    runtimeDocument,
-  );
+  const { canActivateAr, isPreparing, isPresenting, failure, activateAr, dismissFailure } = useAr(artifact);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const wasBusyRef = useRef(false);
   const isBusy = isPreparing || isPresenting;

@@ -3,6 +3,7 @@ import { wirePaymentActionSchema } from '@taucad/billing';
 import type { WirePaymentAction } from '@taucad/billing';
 import type { FinancialSessionRequest } from '#providers/financial-session-provider.js';
 import { recordBillingRevisionMinimum } from '#db/billing-snapshot-store.js';
+import { recordApiRequestId } from '#lib/api-request-id.js';
 
 export type PaymentActionBinding = {
   readonly apiBaseUrl: string;
@@ -114,10 +115,11 @@ const actionRequest = async (
   if (!response.ok) {
     const conflict = await parseConflict(response, binding);
     if (conflict) {
-      throw conflict;
+      throw recordApiRequestId(conflict, response);
     }
-    throw (
-      (await parseCollectionRefusal(response)) ?? new Error(`Billing payment request failed with ${response.status}`)
+    throw recordApiRequestId(
+      (await parseCollectionRefusal(response)) ?? new Error(`Billing payment request failed with ${response.status}`),
+      response,
     );
   }
   const body: unknown = await response.json();
@@ -214,7 +216,7 @@ export const getUnresolvedPaymentActions = async (
   );
   assertCurrentSession(binding);
   if (!response.ok) {
-    throw new Error(`Billing payment request failed with ${response.status}`);
+    throw recordApiRequestId(new Error(`Billing payment request failed with ${response.status}`), response);
   }
   const body: unknown = await response.json();
   assertCurrentSession(binding);

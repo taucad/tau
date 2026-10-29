@@ -80,7 +80,10 @@ export const deniedReadRoots = (): string[] =>
  */
 export const sandboxRuntimeReadRoots = (): string[] => {
   const helper = sandboxRuntimeSeccomp();
-  return helper === undefined ? [] : [dirname(dirname(helper.applyPath))];
+  const javaAgent = sandboxRuntimeJavaAgent();
+  return helper === undefined || javaAgent === undefined
+    ? []
+    : [dirname(dirname(helper.applyPath)), dirname(javaAgent)];
 };
 
 /**
@@ -107,6 +110,25 @@ export const sandboxRuntimeSeccomp = (
 };
 
 /**
+ * Resolve the Linux proxy agent on the physical filesystem for bubblewrap mounts.
+ *
+ * @internal
+ * @param entry - Installed sandbox-runtime entry.
+ * @param platform - Host operating system.
+ * @returns Physical JAR path on Linux; absent elsewhere.
+ */
+export const sandboxRuntimeJavaAgent = (
+  entry = fileURLToPath(import.meta.resolve('@anthropic-ai/sandbox-runtime')),
+  platform: NodeJS.Platform = process.platform,
+): string | undefined => {
+  if (platform !== 'linux') {
+    return undefined;
+  }
+  const physicalEntry = entry.replace(/\.asar(?=[/\\])/u, '.asar.unpacked');
+  return join(dirname(dirname(physicalEntry)), 'vendor', 'java-proxy-agent', 'srt-proxy-agent.jar');
+};
+
+/**
  * Shared roots the sandbox runtime grants every command by default, which a CAD worker must not have.
  *
  * The runtime unions {@link getDefaultWritePaths} into the emitted write allowance, so the profile
@@ -128,6 +150,7 @@ export const deniedWriteRoots = (): string[] => getDefaultWritePaths().filter((p
  */
 export type NativeSandboxProfile = {
   seccomp?: { applyPath: string };
+  javaAgentJarPath?: string;
   network: { allowedDomains: string[]; deniedDomains: string[]; strictAllowlist: boolean };
   filesystem: { denyRead: string[]; allowRead: string[]; allowWrite: string[]; denyWrite: string[] };
 };
@@ -155,6 +178,7 @@ export const nativeSandboxPolicy = (
   launch?: Pick<NativeSandboxLaunch, 'readablePaths' | 'writablePath'>,
 ): NativeSandboxProfile => ({
   seccomp: sandboxRuntimeSeccomp(),
+  javaAgentJarPath: sandboxRuntimeJavaAgent(),
   network: { allowedDomains: [], deniedDomains: ['*'], strictAllowlist: true },
   filesystem: {
     denyRead: deniedReadRoots(),

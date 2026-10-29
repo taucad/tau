@@ -8,7 +8,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
 import { FileManagerProvider, useFileManager } from '#hooks/use-file-manager.js';
 import { ProjectProvider, useParameterSetActor } from '#hooks/use-project.js';
-import { MonacoModelServiceProvider } from '#hooks/use-monaco-model-service.js';
+import { EditorDocumentSessionProvider } from '#hooks/use-editor-document-session.js';
 import { WebglContextTrackerProvider } from '@taucad/viewer/hooks/use-webgl-context-tracker';
 import { PublicationTopbar } from '#components/share/publication-topbar.js';
 import { ephemeralKernelOptions, ephemeralPreviewStage } from '#constants/ephemeral-kernel-options.js';
@@ -260,7 +260,7 @@ export const SharedProjectWorkbench = ({
             kernelOptionsFactory={ephemeralKernelOptions}
             input={projectInput}
           >
-            <MonacoModelServiceProvider>
+            <EditorDocumentSessionProvider>
               <SharedProjectLayout
                 publication={publication}
                 files={files}
@@ -269,7 +269,7 @@ export const SharedProjectWorkbench = ({
                 sourceLabel={sourceLabel}
                 managementActions={managementActions}
               />
-            </MonacoModelServiceProvider>
+            </EditorDocumentSessionProvider>
           </ProjectProvider>
         </WebglContextTrackerProvider>
       </SharedProjectHydrator>

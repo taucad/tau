@@ -1,6 +1,6 @@
 # @taucad/api-extractor
 
-`@taucad/api-extractor` packages public TypeScript declarations that Tau mounts into the in-browser `/node_modules` workspace. The output is consumed by Monaco, the file manager bundled-types tree, and agent-authored project files that import first-party authoring APIs.
+`@taucad/api-extractor` packages public TypeScript declarations that Tau mounts into the in-browser `/node_modules` workspace. The output is consumed by the TypeScript service, the file manager bundled-types tree, and agent-authored project files that import first-party authoring APIs.
 
 The root package intentionally stays asset-light. Use the dedicated subpaths:
 
@@ -9,7 +9,7 @@ The root package intentionally stays asset-light. Use the dedicated subpaths:
 
 ## GeoSpec Authoring Types
 
-`geospec` is published from taucad/geospec and installed here at its pnpm catalog pin. Its declarations are generated from the installed package's `dist/**/*.d.mts` into `src/generated/geospec/geospec.bundled.json`, keyed under `.d.ts` names. The generated bundle is package-shaped so Monaco can mount it exactly like a local package:
+`geospec` is published from taucad/geospec and installed here at its pnpm catalog pin. Its declarations are generated from the installed package's `dist/**/*.d.mts` into `src/generated/geospec/geospec.bundled.json`, keyed under `.d.ts` names. The generated bundle is package-shaped so the workspace can mount it exactly like a local package:
 
 - `/node_modules/geospec/package.json`
 - `/node_modules/geospec/index.d.ts`
@@ -52,7 +52,7 @@ The raw generated JSON format stays module-specifier-shaped. The package project
 
 ## Runtime Integration
 
-`apps/ui/app/machines/file-manager.worker.ts` imports `kernelTypePackageMaps` and `authoringTypeMaps`, then calls `populateBundledTypesMount(...)`. Every package name is a true npm package root; import subpaths are written beneath it through the bundle's `files` map. Monaco recursively reads that mounted tree and registers each declaration with both TypeScript and JavaScript defaults before network acquisition is needed.
+`apps/ui/app/machines/file-manager.worker.ts` imports `kernelTypePackageMaps` and `authoringTypeMaps`, then calls `populateBundledTypesMount(...)`. Every package name is a true npm package root; import subpaths are written beneath it through the bundle's `files` map. The shared TypeScript/JavaScript worker resolves selected and imported package declarations from that mounted tree on demand before network acquisition is needed.
 
 GeoSpec stays in `authoring-types` rather than `kernel-types` because it is a test-authoring package used across kernels.
 

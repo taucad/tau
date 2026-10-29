@@ -65,7 +65,7 @@ export const openSourceFile = async (): Promise<void> => {
 
 /** Put the caret in the source editor. Once: a save does not move focus. */
 export const focusSource = async (): Promise<void> => {
-  const lines = selectors.getByCss('.monaco-editor .view-lines').last();
+  const lines = selectors.getByCss('.cm-editor .cm-content').last();
   await target.expectVisible(lines, 60_000);
   await target.click(lines);
 };
@@ -91,7 +91,7 @@ const awaitModified = async (): Promise<void> => {
 /**
  * One character into the open file, then wait for the chip to say *Modified*.
  *
- * `Escape` closes Monaco's suggest widget, which otherwise covers the editor
+ * `Escape` closes CodeMirror's completion tooltip, which otherwise covers the editor
  * and swallows the next gesture.
  */
 export const editSource = async (): Promise<void> => {
@@ -105,13 +105,11 @@ export const editSource = async (): Promise<void> => {
  * lines that each replace it with a different line conflict on a merge, where
  * one character typed at a clicked caret may not.
  *
- * @param line - The file's new contents; no brackets or quotes, which Monaco would close.
+ * @param line - The file's new contents; no brackets or quotes, which CodeMirror would close.
  */
 export const replaceSource = async (line: string): Promise<void> => {
   await target.keyboardPress('ControlOrMeta+a');
-  /* Whatever Monaco focused: its EditContext host where the browser has one;
-   * its hidden textarea only receives input where it does not. */
-  await target.type(selectors.getByCss('.monaco-editor :focus'), line);
+  await target.type(selectors.getByCss('.cm-editor .cm-content[contenteditable="true"]'), line);
   await target.keyboardPress('Escape');
   await awaitModified();
 };

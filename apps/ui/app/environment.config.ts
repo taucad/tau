@@ -23,6 +23,23 @@ const toOriginOrRaw = (value: string | undefined): string | undefined => {
   }
 };
 
+/** The Netlify deploy contexts the error tracker's `deploy_context` tag names (browser observability SB1). */
+const deployContexts: ReadonlySet<string> = new Set(['production', 'deploy-preview', 'branch-deploy']);
+
+/**
+ * The Netlify deploy context this build was made for. Netlify sets `CONTEXT` for builds only, never for a
+ * Function at runtime, so the web build compiles it in (`tauBuildDeployContext`); a runtime `CONTEXT` (a
+ * local Netlify dev server) is read first. Anything else (`dev`, a non-Netlify host) is unset.
+ *
+ * @param rawEnvironment - The process environment.
+ * @returns `production`, `deploy-preview` or `branch-deploy`, or `undefined`.
+ */
+export const resolveDeployContext = (rawEnvironment: RawEnvironment): string | undefined => {
+  const context =
+    rawEnvironment['CONTEXT'] ?? (typeof tauBuildDeployContext === 'string' ? tauBuildDeployContext : undefined);
+  return context !== undefined && deployContexts.has(context) ? context : undefined;
+};
+
 export const resolveFrontendUrl = (rawEnvironment: RawEnvironment): string | undefined => {
   if (rawEnvironment['TAU_FRONTEND_URL']) {
     return rawEnvironment['TAU_FRONTEND_URL'];
@@ -54,6 +71,7 @@ const environmentSchema = z.preprocess(
       ...rawEnvironment,
       /* eslint-disable @typescript-eslint/naming-convention -- environment variable names */
       TAU_FRONTEND_URL: frontendUrl,
+      TAU_DEPLOY_CONTEXT: resolveDeployContext(rawEnvironment),
       /* A build product, not deployment configuration: the web build defines it for the server graph
        * only, so client chunks keep stable hashes across rebuilds (`#lib/build-identity`). */
       TAU_BUILD_ID: typeof tauBuildId === 'number' ? String(tauBuildId) : undefined,
@@ -72,6 +90,8 @@ const environmentSchema = z.preprocess(
     TAU_BUILD_ID: z.string().optional(),
     /** The build's release label (short commit) for runtime telemetry; set by the build, never the host. */
     TAU_RELEASE: z.string().optional(),
+    /** Netlify deploy context of the build (`resolveDeployContext`), the error tracker's `deploy_context` tag. */
+    TAU_DEPLOY_CONTEXT: z.enum(['production', 'deploy-preview', 'branch-deploy']).optional(),
     /** Deployment opt-in while machine qualification is incomplete. Never a localStorage override. */
     TAU_MACHINES_ENABLED: z.string().optional().transform(isMachinesFeatureEnabled),
     /**
@@ -161,6 +181,7 @@ const baseClientEnvironmentKeys = [
   'TAU_FRONTEND_URL',
   'TAU_BUILD_ID',
   'TAU_RELEASE',
+  'TAU_DEPLOY_CONTEXT',
   'TAU_DEBUG',
   'TAU_MACHINES_ENABLED',
   'TAU_GIT_REMOTE_ALLOW_PRIVATE',

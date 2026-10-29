@@ -14,7 +14,6 @@ import { createAssimp, defaultPostProcess } from 'libassimp';
 import type { Assimp, ConvertOptions, ResolveFile } from 'libassimp';
 
 const extensions = [
-  '3ds',
   '3mf',
   'ac',
   'amf',
@@ -38,11 +37,6 @@ const extensions = [
   'stl',
   'usda',
   'usdz',
-  'wrl',
-  'x',
-  'x3d',
-  'x3db',
-  'x3dv',
   'xgl',
 ] as const;
 
@@ -64,7 +58,7 @@ export const assimpKernel = defineKernel({
   id: 'assimp',
   extensions: [...extensions],
   name: 'AssimpKernel',
-  version: '0.1.1',
+  version: '0.1.2',
   views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
   exports: {
     glb: { title: 'glTF binary', mimeType: 'model/gltf-binary', extension: 'glb', optionsSchema: glbOptionsSchema },
@@ -162,6 +156,6 @@ export const assimpKernel = defineKernel({
   deserializeHandle: ({ serialized }) => new Uint8Array(serialized),
 
   async onDispose(context) {
-    context.assimp.dispose();
+    await context.assimp.dispose();
   },
 });

@@ -21,7 +21,7 @@ type TsExtractionContext = {
  * exports through barrel files, and emits structured `declare module` blocks
  * for both the main package and each subpath (e.g. `@jscad/modeling/primitives`).
  *
- * The output is consumed by Monaco's `addExtraLib` for IntelliSense support.
+ * The output is consumed by the browser TypeScript service for IntelliSense support.
  */
 
 // =============================================================================
@@ -872,7 +872,7 @@ export function buildApiData(): ApiData {
 
 /**
  * Build the bundled type declarations as a map of module path to raw `.d.ts`
- * content. Each entry is registered at its own virtual file path in Monaco.
+ * content. Each entry is registered at its own virtual file path in the TypeScript service.
  * Exported for testing.
  */
 export function buildNamespaceBundle(): Record<string, string> {

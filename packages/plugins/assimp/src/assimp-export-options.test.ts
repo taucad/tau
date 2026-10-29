@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { assimpCapabilities } from 'libassimp';
-import type { OptionDescriptor } from 'libassimp';
+import { assimpCapabilities } from 'libassimp/capabilities';
+import type { DescribedOptionDescriptor } from 'libassimp/capabilities';
 import { toJSONSchema } from 'zod';
 import { quantityKinds } from '@taucad/runtime/transcoder';
 import { assimpEdgeSchemas } from '#assimp-export-options.js';
@@ -66,9 +66,9 @@ describe('assimp export option schemas', () => {
       text: { kind: 'string', default: 'Tau', description: 'String value' },
       matrix: { kind: 'matrix', default: matrix, description: 'Matrix value' },
       choice: { kind: 'string', default: 'first', values: ['first', 'second'], description: 'Choice value' },
-    } satisfies Record<string, OptionDescriptor>;
+    } satisfies Record<string, DescribedOptionDescriptor>;
     vi.resetModules();
-    vi.doMock('libassimp', () => ({ assimpCapabilities: { export: { '3mf': { exportOptions } } } }));
+    vi.doMock('libassimp/capabilities', () => ({ assimpCapabilities: { export: { '3mf': { exportOptions } } } }));
 
     try {
       const { assimpEdgeSchemas: isolatedSchemas } = await import('#assimp-export-options.js');
@@ -91,7 +91,7 @@ describe('assimp export option schemas', () => {
       expect(schema.safeParse({ matrix: matrix.slice(1) }).success).toBe(false);
       expect(schema.safeParse({ choice: 'third' }).success).toBe(false);
     } finally {
-      vi.doUnmock('libassimp');
+      vi.doUnmock('libassimp/capabilities');
       vi.resetModules();
     }
   });

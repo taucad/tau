@@ -209,6 +209,74 @@ describe('createSectionStencilCaps', () => {
     caps.dispose();
   });
 
+  it('should omit zero-width outline draws while retaining cap fills', () => {
+    const caps = createSectionStencilCaps('webgpu');
+    const renderer = createRecordingRenderer();
+    const source = createSource('a', 'owner-a', new THREE.BoxGeometry());
+    try {
+      const stats = caps.render(renderer, { ...frameFor([source]), outlineWidthPixels: 0 });
+      expect(stats.outlineSourceCount).toBe(0);
+      expect(stats.polygonDrawCount).toBeGreaterThan(0);
+      expect(
+        renderer.frames[0]!.objects.some(
+          ({ material }) => (material as THREE.Material).name === 'TauSectionCapOutline',
+        ),
+      ).toBe(false);
+    } finally {
+      caps.dispose();
+      source.meshes[0]!.geometry.dispose();
+    }
+  });
+
+  it('should retain unchanged polygon uploads during orbit and update changed cut payloads', () => {
+    for (const backend of ['webgl', 'webgpu'] as const) {
+      const caps = createSectionStencilCaps(backend);
+      const renderer = createRecordingRenderer();
+      const source = createSource('a', 'owner-a', new THREE.BoxGeometry());
+      const frame = frameFor([source]);
+      try {
+        caps.render(renderer, frame);
+        const polygons = renderer.frames[0]!.objects.filter((mesh) => mesh.geometry.hasAttribute('aPlaneUv'));
+        expect(polygons.length).toBeGreaterThan(0);
+        const attributes = polygons.flatMap(({ geometry }) =>
+          Object.values(geometry.attributes)
+            .filter((attribute): attribute is THREE.BufferAttribute => attribute instanceof THREE.BufferAttribute)
+            .map((attribute) => ({ attribute, version: attribute.version })),
+        );
+        frame.camera.position.x += 0.1;
+        frame.camera.updateMatrixWorld();
+        caps.render(renderer, frame);
+        expect(attributes.map(({ attribute }) => attribute.version)).toEqual(attributes.map(({ version }) => version));
+        const before = polygons.map(({ geometry }) => [...geometry.getAttribute('position').array]);
+        caps.render(renderer, {
+          ...frame,
+          pieces: resolveSectionPieces([{ ...planeCut, offset: 0.2 }]),
+        });
+        expect(polygons.map(({ geometry }) => [...geometry.getAttribute('position').array])).not.toEqual(before);
+        expect(attributes.some(({ attribute, version }) => attribute.version > version)).toBe(true);
+        const geometryVersions = polygons.map(
+          ({ geometry }) => (geometry.getAttribute('position') as THREE.BufferAttribute).version,
+        );
+        caps.render(renderer, {
+          ...frame,
+          sources: [{ ...source, tintHex: 0xaa_55_22 }],
+          pieces: resolveSectionPieces([{ ...planeCut, offset: 0.2 }]),
+        });
+        expect(
+          polygons.map(({ geometry }) => (geometry.getAttribute('position') as THREE.BufferAttribute).version),
+        ).toEqual(geometryVersions);
+        const recolored = polygons.some(({ geometry }) => {
+          const color = geometry.getAttribute('aCapBaseColor') as THREE.BufferAttribute;
+          return color.version > attributes.find(({ attribute }) => attribute === color)!.version;
+        });
+        expect(recolored).toBe(true);
+      } finally {
+        caps.dispose();
+        source.meshes[0]!.geometry.dispose();
+      }
+    }
+  });
+
   it('should reuse its pooled draws frame after frame, and let go of a source that left', () => {
     const caps = createSectionStencilCaps('webgl');
     const renderer = createRecordingRenderer();

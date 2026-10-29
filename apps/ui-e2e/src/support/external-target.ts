@@ -286,6 +286,8 @@ export type UiBrowserCommands = {
   uiReadObservedDownloads(): Promise<readonly TargetDownload[]>;
   uiStartObservedWasm(): Promise<void>;
   uiReadObservedWasm(settle?: boolean): Promise<readonly string[]>;
+  uiStartObservedRequests(): Promise<void>;
+  uiReadObservedRequests(settle?: boolean): Promise<readonly string[]>;
   uiEmulateColorScheme(colorScheme: 'dark' | 'light' | 'no-preference', surface?: TargetSurface): Promise<void>;
   uiEmulateContrast(contrast: 'more' | 'no-preference', surface?: TargetSurface): Promise<void>;
   uiEmulateForcedColors(forcedColors: 'active' | 'none', surface?: TargetSurface): Promise<void>;
@@ -947,3 +949,8 @@ export const startObservedWasm = (): Promise<void> => server.commands.uiStartObs
 /** Drain the WASM URLs the target transferred since the last read, by default after its network settles. */
 export const readObservedWasm = (settle?: boolean): Promise<readonly string[]> =>
   server.commands.uiReadObservedWasm(settle);
+/** Start recording the path of every request of the target, its frames and their workers. */
+export const startObservedRequests = (): Promise<void> => server.commands.uiStartObservedRequests();
+/** Drain the request paths the target started since the last read, by default after its network settles. */
+export const readObservedRequests = (settle?: boolean): Promise<readonly string[]> =>
+  server.commands.uiReadObservedRequests(settle);

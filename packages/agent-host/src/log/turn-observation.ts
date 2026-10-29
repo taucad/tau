@@ -54,6 +54,8 @@ export type ObservedToolCall = Readonly<{
   /** When the input and the output rows were recorded; `settledAt` is absent with `output`. */
   startedAt: number;
   settledAt: number | undefined;
+  /** The generation invocation that issued it: the run's last one prepared before its input row. */
+  modelCall: string | undefined;
   /** A settled `test_model` call's check, when its output records one. */
   check?: ObservedCheck | undefined;
 }>;
@@ -201,6 +203,8 @@ type RunDraft = {
   terminal: Map<number, Readonly<{ outcome: ObservedOutcome; source: ObservedSource; at: number }>>;
   revision: TurnObservation['revision'];
   invocations: Map<string, ObservedInvocation>;
+  /** The generation invocation prepared last; a tool call that follows it is its output. */
+  lastGeneration: string | undefined;
   tools: Map<string, ObservedToolCall>;
   toolStarted: Map<string, number>;
   transformations: ObservedTransformation[];
@@ -222,6 +226,7 @@ const draftFor = (runs: Map<string, RunDraft>, chatId: string, runId: string): R
       terminal: new Map(),
       revision: undefined,
       invocations: new Map(),
+      lastGeneration: undefined,
       tools: new Map(),
       toolStarted: new Map(),
       transformations: [],
@@ -289,6 +294,7 @@ const fold = (draft: RunDraft, event: AgentLogEvent, fact: Readonly<{ at: number
           output: undefined,
           startedAt: at,
           settledAt: undefined,
+          modelCall: draft.lastGeneration,
         });
         draft.toolStarted.set(message.toolCallId, at);
       } else if (message.role === 'tool-output') {
@@ -341,6 +347,9 @@ const fold = (draft: RunDraft, event: AgentLogEvent, fact: Readonly<{ at: number
       break;
     }
     case 'model.invocation-prepared': {
+      if (event.purpose === 'generation') {
+        draft.lastGeneration = event.attemptId;
+      }
       if (!draft.invocations.has(event.attemptId)) {
         draft.invocations.set(event.attemptId, {
           attemptId: event.attemptId,

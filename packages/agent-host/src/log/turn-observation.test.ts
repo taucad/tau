@@ -112,6 +112,7 @@ describe('observeTurns', () => {
           outcome: 'completed',
           input: { chatId, leaderEpoch: 't1', sequence: 5 },
           output: { chatId, leaderEpoch: 't1', sequence: 6 },
+          modelCall: 'inv-1',
         },
       ],
       intervals: [
@@ -325,6 +326,31 @@ describe('observeTurns', () => {
         omitted: 3,
         source: { chatId, leaderEpoch: 't1', sequence: 1 },
       },
+    ]);
+  });
+
+  it('names each tool call by the generation prepared last before it, never a compaction', () => {
+    const input = (call: string): Body => ({
+      type: 'message.appended',
+      message: { id: `in-${call}`, role: 'tool-input', toolCallId: call, toolName: 'read_file', content: {} },
+    });
+    const rows = term('t1', [
+      input('call-0'),
+      { type: 'model.invocation-prepared', attemptId: 'inv-1', purpose: 'generation', modelId: 'fixture-model' },
+      input('call-1'),
+      { type: 'model.invocation-prepared', attemptId: 'inv-c', purpose: 'compaction', modelId: 'fixture-model' },
+      input('call-2'),
+      { type: 'model.invocation-prepared', attemptId: 'inv-2', purpose: 'generation', modelId: 'fixture-model' },
+      input('call-3'),
+    ]);
+
+    const [observation] = observeTurns(chatId, rows);
+
+    expect(observation?.tools.map((tool) => [tool.call, tool.modelCall])).toEqual([
+      ['call-0', undefined],
+      ['call-1', 'inv-1'],
+      ['call-2', 'inv-1'],
+      ['call-3', 'inv-2'],
     ]);
   });
 

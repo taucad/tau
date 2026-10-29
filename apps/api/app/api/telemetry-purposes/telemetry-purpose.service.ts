@@ -38,6 +38,25 @@ export class TelemetryPurposeService {
    */
   @Span()
   public async getEffectivePurposes(userId: string, projectId?: string): Promise<EffectiveTelemetryPurposes> {
+    const { effective } = await this.getAdmissionAuthority(userId, projectId);
+    return effective;
+  }
+
+  /**
+   * The effective purposes together with the protection the account's
+   * material carries now, as evidence ingress records it at receipt (T06).
+   * Paid tiers are `pro`; a tier that was not established affirmatively is
+   * `unknown`, never `free`.
+   *
+   * @param userId - The authenticated principal.
+   * @param projectId - A project to resolve against, when the question has one.
+   * @returns The effective state and the current source protection.
+   */
+  @Span()
+  public async getAdmissionAuthority(
+    userId: string,
+    projectId?: string,
+  ): Promise<Readonly<{ effective: EffectiveTelemetryPurposes; protection: 'pro' | 'free' | 'unknown' }>> {
     const noticeVersion = this.noticeVersion();
     const [decisions, assurance, projectAuthority] = await Promise.all([
       this.decisionsFor(userId),
@@ -46,16 +65,19 @@ export class TelemetryPurposeService {
     ]);
 
     return {
-      epoch: purposeEpoch({ userId, projectId, noticeVersion, decisions }),
-      ...(noticeVersion === undefined ? {} : { noticeVersion }),
-      ...(projectId === undefined ? {} : { projectId }),
-      purposes: resolvePurposeAuthority({
-        noticeVersion,
-        decisions,
-        tier: assurance.tier,
-        tierAssured: assurance.assured,
-        project: projectAuthority,
-      }),
+      effective: {
+        epoch: purposeEpoch({ userId, projectId, noticeVersion, decisions }),
+        ...(noticeVersion === undefined ? {} : { noticeVersion }),
+        ...(projectId === undefined ? {} : { projectId }),
+        purposes: resolvePurposeAuthority({
+          noticeVersion,
+          decisions,
+          tier: assurance.tier,
+          tierAssured: assurance.assured,
+          project: projectAuthority,
+        }),
+      },
+      protection: assurance.assured ? (assurance.tier === 'free' ? 'free' : 'pro') : 'unknown',
     };
   }
 

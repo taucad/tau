@@ -11,6 +11,7 @@ import { KernelsModule } from '#api/kernels/kernels.module.js';
 import { ModelModule } from '#api/models/model.module.js';
 import { PrivacyModule } from '#api/privacy/privacy.module.js';
 import { TelemetryPurposeModule } from '#api/telemetry-purposes/telemetry-purpose.module.js';
+import { AgentObservabilityModule } from '#api/agent-observability/agent-observability.module.js';
 import { ProjectsModule } from '#api/projects/projects.module.js';
 import { ProviderModule } from '#api/providers/provider.module.js';
 import { TestApiModule } from '#api/test-api/test-api.module.js';
@@ -49,6 +50,7 @@ export class ApiModule {
         ModelModule,
         PrivacyModule,
         TelemetryPurposeModule.forRoot(options),
+        AgentObservabilityModule.forRoot(),
         ProjectsModule,
         ProviderModule,
         PublicationsModule,

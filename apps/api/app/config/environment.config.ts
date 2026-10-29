@@ -72,6 +72,29 @@ export const environmentSchemaBase = z.object({
   TAU_OBSERVABILITY_NOTICE_VERSION: unsetWhenEmpty(z.string().min(1).optional()).describe(
     'The approved agent-observability purpose notice in force. Unset keeps every new purpose unavailable.',
   ),
+  /*
+   * Blueprint T06: the key sealing accepted evidence in the delivery backlog.
+   * Unset refuses new evidence admission; it never affects inference.
+   */
+  TAU_OBSERVABILITY_PAYLOAD_KEY: unsetWhenEmpty(
+    z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{43}$/u, 'must be an unpadded base64url-encoded 32-byte key')
+      .optional(),
+  ),
+  TAU_OBSERVABILITY_PAYLOAD_KEY_VERSION: z.coerce.number().int().positive().default(1),
+  TAU_OBSERVABILITY_BACKLOG_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(1024 * 1024 * 1024)
+    .describe('Sealed evidence the delivery backlog may hold before new admission is refused.'),
+  TAU_OBSERVABILITY_PRINCIPAL_BACKLOG_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(64 * 1024 * 1024)
+    .describe('Sealed evidence one principal may hold in the backlog before their admission is refused.'),
   PORT: z.string().default('3000'),
   DATABASE_URL: z.string(),
   // Bounded runtime pool (B8 R3). Every value fails closed: a non-numeric or out-of-range

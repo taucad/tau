@@ -929,7 +929,7 @@ await held.close(); await mount[Symbol.asyncDispose](); process.stdout.write('cl
     }
   }, 20_000);
 
-  it('G4 aborts only the interrupted request and answers its caller with EINTR', async () => {
+  it('G4 aborts only the interrupted request, answers it EINTR and fails its caller closed', async () => {
     const reading = Promise.withResolvers<void>();
     let reason: unknown;
     let other: AbortSignal | undefined;
@@ -945,6 +945,9 @@ await held.close(); await mount[Symbol.asyncDispose](); process.stdout.write('cl
           reason = signal.reason;
           throw signal.reason as Error;
         });
+        // Python runs the handler at the first bytecode boundary after the read has already returned, so the Stop can
+        // land anywhere in the reporting clause. Only one SIGUSR1 is ever sent, so wrapping the clauses keeps exactly
+        // one of them in charge of the first reported line, which is the line this test reads.
         const child = python(
           `
 import os, signal, sys
@@ -954,10 +957,15 @@ signal.signal(signal.SIGUSR1, stop)
 fd = os.open(sys.argv[1], os.O_RDONLY)
 print("ready", flush=True)
 try:
-    os.pread(fd, 1, 0)
-    print("read", flush=True)
+    try:
+        os.pread(fd, 1, 0)
+        print("read", flush=True)
+    except Stop:
+        print("interrupted", flush=True)
+    except OSError as error:
+        print("failed", error.errno, flush=True)
 except Stop:
-    print("interrupted", flush=True)
+    print("interrupted late", flush=True)
 `,
           join(mountpoint, 'blocked'),
         );
@@ -966,7 +974,16 @@ except Stop:
         await reading.promise;
         expect(await readFile(join(mountpoint, 'free'), 'utf8')).toBe('free');
         child.kill('SIGUSR1');
-        expect(await next()).toBe('interrupted');
+        // The projection's own contract is per-request, and the two assertions after this one prove it: the interrupt
+        // aborts only this request's handler signal, and `settle` answers that request EINTR because the handler
+        // rejected without committing anything. What the caller then observes is a kernel property, not a projection
+        // one. The projection keeps the page cache deliberately -- the F4 and G2 rows exercise shared mappings and
+        // page-cache invalidation through it -- so this one-byte pread is served as a 4096-byte folio fill. A folio
+        // fill answered EINTR is retried by the kernel (a second READ of the same inode and offset arrives, and is
+        // itself interrupted) and then failed closed, so the caller is handed EIO, never EINTR. Asserting EINTR at the
+        // caller would take FOPEN_DIRECT_IO, which would retire the page-cache behaviour those other rows depend on.
+        // The invariant this row owns is that the interrupted caller always fails and never reads.
+        expect(['interrupted', 'interrupted late', 'failed 4', 'failed 5']).toContain(await next());
         expect(await exited(child)).toBe(0);
         expect((reason as Error).message).toBe('Projection request interrupted.');
         expect(other?.aborted).toBe(false);

@@ -175,6 +175,50 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+  # THROWAWAY DIAGNOSTIC JOB, on a scratch branch only. It is not a conformance row, it gates nothing, and it adds
+  # no assertion to LNX-U, LNX-D, LNX-P, MAC-A or MAC-X. It answers one open D8 question: inside the same stock
+  # guests LNX-U and LNX-D boot, with AppArmor and kernel.apparmor_restrict_unprivileged_userns exactly as the
+  # distro ships them, can an unprivileged user mount the projection bridge and can the distro's own bwrap bind
+  # that mountpoint into its mount namespace for a sandboxed read? A failure here is a real negative, never a skip.
+  # Delete this job and its three scripts once the answer is recorded.
+  linux-projection-guest-probe:
+    name: D8 guest FUSE probe on ${{ matrix.row }} (throwaway, stock ${{ matrix.distro }} guest)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: ubuntu
+            row: LNX-U-PROBE
+          - distro: debian
+            row: LNX-D-PROBE
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Probe the unprivileged mount and the bwrap bind in the stock guest
+        env:
+          TAU_VM_DISTRO: ${{ matrix.distro }}
+        run: bash packages/core/native-process/scripts/shell-projection-probe-vm.sh
+
+      - name: Upload the probe transcript
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: shell-projection-probe-${{ matrix.row }}
+          path: out/test-results/shell-projection-probe/${{ matrix.row }}/
+          retention-days: 14
+          if-no-files-found: error
+
   macos:
     name: Shell conformance on ${{ matrix.row }} (${{ matrix.runner }})
     if: github.event_name != 'pull_request' || github.triggering_actor != 'dependabot[bot]'

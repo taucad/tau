@@ -7,7 +7,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(183);
+    expect(metrics).toHaveLength(186);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -298,6 +298,22 @@ describe('TauMetrics', () => {
       }).success;
     expect(attempt('retry')).toBe(true);
     expect(attempt('proj_1')).toBe(false);
+  });
+
+  /* Load-path audit: an open's hydrate, which the pull attempt settles before. */
+  it('should label client large-object fetches by placement, cache state and source only', () => {
+    expect(TauMetrics.syncClientLfsDuration).toMatchObject({ name: 'tau.sync.client.lfs.duration', unit: 's' });
+    expect(TauMetrics.syncClientLfsDuration.buckets).toEqual([0.5, 1, 2, 3, 5, 7.5, 10, 15, 20, 30, 60, 120, 300, 900]);
+    expect(
+      TauMetrics.syncClientLfsDuration.attributes.safeParse({ 'agent.placement': 'browser', cache: 'cold' }).success,
+    ).toBe(true);
+    expect(
+      TauMetrics.syncClientLfsDuration.attributes.safeParse({ 'agent.placement': 'browser', cache: 'warm' }).success,
+    ).toBe(false);
+    for (const metric of [TauMetrics.syncClientLfsObjects, TauMetrics.syncClientLfsBytes]) {
+      expect(metric.attributes.safeParse({ 'agent.placement': 'desktop', source: 'local' }).success).toBe(true);
+      expect(metric.attributes.safeParse({ 'agent.placement': 'desktop', source: 'proj_1' }).success).toBe(false);
+    }
   });
 
   it('should bound a refusal to a declared code, never a free-form one', () => {

@@ -4,6 +4,8 @@ import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileSystemProvider } from '@taucad/filesystem';
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
+import type { LfsFetchReport } from '#isomorphic-git-adapter.js';
+import { lfsObjectPath, lfsPointerFor } from '#lfs.js';
 import { generatedGitattributesPath, generatedIgnoreContent, generatedIgnorePath } from '#workspace-config.js';
 import type { RevisionHttpClient, RevisionHttpRequest, RevisionHttpResponse } from '#http-client.js';
 
@@ -478,5 +480,147 @@ describe('advertisement cancellation', () => {
     controller.abort();
     await rejected;
     await expect(port.listRemoteRefs('tau', { signal: AbortSignal.abort() })).rejects.toThrow();
+  });
+});
+
+/*
+ * Load-path audit fix 1: a tree read collects the pointers its store does not
+ * hold, then fetches them together, where it used to make one batch call and
+ * one transfer per object, one after another.
+ */
+describe('reading a tree with large objects', () => {
+  const parts = Array.from({ length: 3 }, (_, part) => [
+    `models/part-${String(part)}.step`,
+    `solid part ${String(part)}`,
+  ]);
+  const partTree = (): ImmutableRevisionTree =>
+    new ImmutableRevisionTree([
+      ['main.scad', encoder.encode('cube(1);\n')],
+      ...parts.map(([path, content]) => [path!, encoder.encode(content)] as const),
+    ]);
+  const oidOf = (content: string): string => lfsPointerFor(encoder.encode(content)).pointer.oid;
+
+  /* A Tau remote whose batch endpoint answers whatever it is asked; transfers go to the stubbed global fetch. */
+  const lfsStore = async (onLfsFetch?: (report: LfsFetchReport) => void) => {
+    const asked: string[][] = [];
+    const contentOf = new Map(parts.map(([, content]) => [oidOf(content!), encoder.encode(content)]));
+    const http: RevisionHttpClient = {
+      request: async (request) => {
+        let json = '';
+        for await (const chunk of request.body ?? []) {
+          json += new TextDecoder().decode(chunk);
+        }
+        const { objects } = JSON.parse(json) as { objects: Array<{ oid: string; size: number }> };
+        asked.push(objects.map((object) => object.oid));
+        const answer = encoder.encode(
+          JSON.stringify({
+            objects: objects.map((object) => ({
+              ...object,
+              actions: { download: { href: `https://objects.test/${object.oid}` } },
+            })),
+          }),
+        );
+        return {
+          url: request.url,
+          method: 'POST',
+          headers: {},
+          body: (async function* () {
+            await Promise.resolve();
+            yield answer;
+          })(),
+          statusCode: 200,
+          statusMessage: 'OK',
+        };
+      },
+    };
+    const transfer = vi.fn<typeof fetch>(
+      async (url) =>
+        new Response(
+          contentOf.get(
+            (typeof url === 'string' ? url : url instanceof URL ? url.href : url.url).slice(
+              'https://objects.test/'.length,
+            ),
+          ),
+        ),
+    );
+    vi.stubGlobal('fetch', transfer);
+    const filesystem = new MemoryProvider();
+    providers.push(filesystem);
+    const port = createIsomorphicGitRevisionPort({
+      filesystem,
+      http,
+      ...(onLfsFetch === undefined ? {} : { onLfsFetch }),
+    });
+    await port.init({ author });
+    const receipt = await port.writeRevision({
+      parents: [],
+      tree: partTree(),
+      provenance,
+      summary: { generated: 'Parts' },
+    });
+    await port.setRemote({ name: 'tau', url: 'https://api.tau.new/v1/git/p1.git' });
+    /* As a fetch leaves it: the pointers are recorded, the bytes are not here. */
+    const evict = async (...contents: readonly string[]): Promise<void> => {
+      await Promise.all(contents.map(async (content) => filesystem.unlink(`.git/${lfsObjectPath(oidOf(content))}`)));
+    };
+    return { port, head: revisionId(receipt.commitId), asked, transfer, evict };
+  };
+
+  it('fetches only the objects its store lacks, in one batch call, and reports what it cost', async () => {
+    const reports: LfsFetchReport[] = [];
+    const { port, head, asked, transfer, evict } = await lfsStore((report) => reports.push(report));
+    await evict(parts[0]![1]!, parts[2]![1]!);
+    const read = await port.readTree(head);
+    expect(read?.entries().map(({ path }) => path)).toStrictEqual(
+      expect.arrayContaining(
+        partTree()
+          .entries()
+          .map(({ path }) => path),
+      ),
+    );
+    expect(read?.get('main.scad')).toStrictEqual(encoder.encode('cube(1);\n'));
+    for (const [path, content] of parts) {
+      expect(read?.get(path!)).toStrictEqual(encoder.encode(content));
+    }
+    expect(asked).toStrictEqual([[oidOf(parts[0]![1]!), oidOf(parts[2]![1]!)]]);
+    expect(transfer).toHaveBeenCalledTimes(2);
+    expect(reports).toStrictEqual([
+      expect.objectContaining({
+        networkObjects: 2,
+        networkBytes: encoder.encode(parts[0]![1]).byteLength + encoder.encode(parts[2]![1]).byteLength,
+        localObjects: 1,
+        localBytes: encoder.encode(parts[1]![1]).byteLength,
+      }),
+    ]);
+
+    /* Each object was stored as it arrived, so the next read asks for nothing and reports nothing. */
+    await port.readTree(head);
+    expect(asked).toHaveLength(1);
+    expect(reports).toHaveLength(1);
+  });
+
+  it('shares one download between two readers of the same tree', async () => {
+    const { port, head, asked, transfer, evict } = await lfsStore();
+    await evict(...parts.map(([, content]) => content!));
+    const [first, second] = await Promise.all([port.readTree(head), port.readTree(head)]);
+    expect(first?.get(parts[1]![0]!)).toStrictEqual(encoder.encode(parts[1]![1]));
+    expect(second?.get(parts[1]![0]!)).toStrictEqual(encoder.encode(parts[1]![1]));
+    expect(asked).toHaveLength(1);
+    expect(transfer).toHaveBeenCalledTimes(parts.length);
+  });
+
+  it('fails closed, with no pointer in the tree, when there is no remote to ask', async () => {
+    const filesystem = new MemoryProvider();
+    providers.push(filesystem);
+    const port = createIsomorphicGitRevisionPort({ filesystem });
+    await port.init({ author });
+    const receipt = await port.writeRevision({
+      parents: [],
+      tree: partTree(),
+      provenance,
+      summary: { generated: 'Parts' },
+    });
+    await filesystem.unlink(`.git/${lfsObjectPath(oidOf(parts[0]![1]!))}`);
+    await expect(port.readTree(revisionId(receipt.commitId))).rejects.toMatchObject({ code: 'MISSING_LARGE_OBJECT' });
   });
 });

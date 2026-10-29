@@ -1468,6 +1468,44 @@ export const TauMetrics = {
     }),
   }),
 
+  /*
+   * The large-object phase of a client tree read that fetched from the remote: an open's hydrate,
+   * which the pull attempt above settles before (load-path audit). `cache` is cold when nothing was
+   * local yet, partial when some objects were; a read that fetched nothing is not reported.
+   */
+  syncClientLfsDuration: defineHistogram({
+    name: 'tau.sync.client.lfs.duration',
+    unit: 's',
+    description:
+      'Client-reported wall time of one tree read’s large-object phase (local reads, batch calls and transfers), on reads that fetched from the remote',
+    buckets: [0.5, 1, 2, 3, 5, 7.5, 10, 15, 20, 30, 60, 120, 300, 900],
+    attributes: z.object({
+      'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
+      cache: z.enum(['cold', 'partial']),
+    }),
+  }),
+
+  syncClientLfsObjects: defineCounter({
+    name: 'tau.sync.client.lfs.objects',
+    unit: '{object}',
+    description:
+      'Large objects a client tree read resolved, by whether they came from the remote or the local store, on reads that fetched from the remote',
+    attributes: z.object({
+      'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
+      source: z.enum(['network', 'local']),
+    }),
+  }),
+
+  syncClientLfsBytes: defineCounter({
+    name: 'tau.sync.client.lfs.bytes',
+    unit: 'By',
+    description: 'Large-object bytes a client tree read resolved, by source, on reads that fetched from the remote',
+    attributes: z.object({
+      'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
+      source: z.enum(['network', 'local']),
+    }),
+  }),
+
   // --- B2 second copy: the `tau-mirror` copier and reconciler (W13 Finding 8, W14 OB6) ---
   // W13's Prometheus names end in their unit, so the unit word is part of the OTel name. No label
   // carries an owner or project; the busiest-lagging repositories are logged, not labelled.

@@ -68,6 +68,7 @@ import { walkRevisionLog } from '#revision-log-order.js';
 import { RevisionPortError } from '#revision-port.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
 import { cleanLargeObjects, lfsObjectPath, readLfsPointer } from '#lfs.js';
+import type { LfsPointer } from '#lfs.js';
 import { createTreeIdMemo } from '#tree-id-memo.js';
 import type { TreeObject } from '#tree-id-memo.js';
 import { createLfsClient, LfsQuotaError, withQuotaPaths } from '#lfs-client.js';
@@ -177,6 +178,30 @@ export type IsomorphicGitRevisionPortOptions = Readonly<{
    * open-pull `signal` and the `Authorization` header are set (I8).
    */
   http?: RevisionHttpClient;
+  /**
+   * Told what a tree read's large objects cost, whenever one had to fetch any
+   * from the remote: the open's hydrate, made visible to the host's telemetry.
+   */
+  onLfsFetch?: (report: LfsFetchReport) => void;
+}>;
+
+/**
+ * What one tree read's large-object phase did, for the host's telemetry.
+ *
+ * Counts and bytes only: no oid, path or project, so the host can report it
+ * with bounded cardinality.
+ *
+ * @public
+ */
+export type LfsFetchReport = Readonly<{
+  /** Wall time of the phase: local reads, batch calls and transfers. Milliseconds. */
+  durationMilliseconds: number;
+  /** Objects fetched from the remote, and their bytes. */
+  networkObjects: number;
+  networkBytes: number;
+  /** Objects already in this store's LFS cache, and their bytes. */
+  localObjects: number;
+  localBytes: number;
 }>;
 
 const defaultGitDirectory = '.git';
@@ -820,51 +845,110 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         });
   };
 
-  /** Large-object downloads in flight, by oid; see {@link smudged}. */
+  /** Large-object downloads in flight, by oid; see {@link hydrate}. */
   const downloads = new Map<string, Promise<Uint8Array<ArrayBuffer>>>();
 
   /**
-   * One blob as a caller reads it: a pointer resolved back to its content.
+   * The real bytes behind every pointer a tree read found.
    *
-   * @param content - Bytes as the object store holds them.
-   * @returns The real bytes.
+   * The ones already in this store are read from it, one at a time; the rest
+   * are fetched together (load-path audit, fix 1): one batch call per hundred
+   * objects and several transfers at once, where one per object one after
+   * another made a 295-object open take minutes. Each object is stored as it
+   * arrives, so a reload part-way through fetches only what is still missing.
+   *
+   * @param pointers - The pointers, in tree order; repeats are resolved once.
+   * @returns The bytes by oid, and what the phase cost.
    */
-  const smudged = async (content: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> => {
-    const pointer = readLfsPointer(content);
-    if (pointer === undefined) {
-      return content;
+  const hydrate = async (
+    pointers: readonly LfsPointer[],
+  ): Promise<Readonly<{ contents: ReadonlyMap<string, Uint8Array<ArrayBuffer>>; report: LfsFetchReport }>> => {
+    const startedAt = Date.now();
+    const contents = new Map<string, Uint8Array<ArrayBuffer>>();
+    const shared = new Map<string, Promise<Uint8Array<ArrayBuffer>>>();
+    const missing = new Map<string, LfsPointer>();
+    let localBytes = 0;
+    for (const pointer of pointers) {
+      if (contents.has(pointer.oid) || shared.has(pointer.oid) || missing.has(pointer.oid)) {
+        continue;
+      }
+      /* One download per object across concurrent tree readers: a second reader waits on the first one's transfer. */
+      const inFlight = downloads.get(pointer.oid);
+      if (inFlight !== undefined) {
+        shared.set(pointer.oid, inFlight);
+        continue;
+      }
+      const file = lfsObjectFile(pointer.oid);
+      // oxlint-disable-next-line no-await-in-loop -- local reads stay one at a time; the returned tree already retains every object.
+      if (await filesystem.exists(file)) {
+        // oxlint-disable-next-line no-await-in-loop -- as above.
+        const content = await filesystem.readFile(file);
+        contents.set(pointer.oid, content);
+        localBytes += content.byteLength;
+      } else {
+        missing.set(pointer.oid, pointer);
+      }
     }
-    const file = lfsObjectFile(pointer.oid);
-    if (await filesystem.exists(file)) {
-      return filesystem.readFile(file);
-    }
-    /* One download per object across concurrent tree readers. The map holds the in-flight promise, so the second caller waits
-     * on the first request rather than starting its own. */
-    const inFlight = downloads.get(pointer.oid);
-    if (inFlight !== undefined) {
-      return inFlight;
-    }
-    const client = await lfsClient();
-    if (client === undefined) {
-      /* Fail closed: no pointer ever reaches a tree or a working copy. The
-       * revision is perfectly well known — its bytes are not here, and there is
-       * no remote to ask (D16). */
-      throw new RevisionPortError(
-        'MISSING_LARGE_OBJECT',
-        'A large object this revision references is not in this store yet.',
+    const localObjects = contents.size;
+    let networkBytes = 0;
+    if (missing.size > 0) {
+      const client = await lfsClient();
+      if (client === undefined) {
+        /* Fail closed: no pointer ever reaches a tree or a working copy. The
+         * revision is perfectly well known — its bytes are not here, and there is
+         * no remote to ask (D16). */
+        throw new RevisionPortError(
+          'MISSING_LARGE_OBJECT',
+          'A large object this revision references is not in this store yet.',
+        );
+      }
+      const pending = new Map(
+        [...missing.keys()].map((oid) => {
+          const settled = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+          /* Only a concurrent reader awaits this; with none, a failure is reported by `downloadMany` below. */
+          // oxlint-disable-next-line promise/prefer-await-to-then -- marks the rejection handled without awaiting it.
+          settled.promise.catch(() => undefined);
+          downloads.set(oid, settled.promise);
+          return [oid, settled] as const;
+        }),
       );
+      try {
+        await client.downloadMany({
+          pointers: [...missing.values()],
+          received: async (pointer, content) => {
+            await storeLfsObject(pointer.oid, content);
+            contents.set(pointer.oid, content);
+            networkBytes += content.byteLength;
+            pending.get(pointer.oid)?.resolve(content);
+          },
+        });
+      } catch (error) {
+        for (const settled of pending.values()) {
+          settled.reject(error);
+        }
+        throw error;
+      } finally {
+        for (const [oid, settled] of pending) {
+          if (downloads.get(oid) === settled.promise) {
+            downloads.delete(oid);
+          }
+        }
+      }
     }
-    const download = (async (): Promise<Uint8Array<ArrayBuffer>> => {
-      const downloaded = await client.download(pointer);
-      await storeLfsObject(pointer.oid, downloaded);
-      return downloaded;
-    })();
-    downloads.set(pointer.oid, download);
-    try {
-      return await download;
-    } finally {
-      downloads.delete(pointer.oid);
+    for (const [oid, inFlight] of shared) {
+      // oxlint-disable-next-line no-await-in-loop -- another reader's transfers, already running together.
+      contents.set(oid, await inFlight);
     }
+    return Object.freeze({
+      contents,
+      report: Object.freeze({
+        durationMilliseconds: Math.max(0, Date.now() - startedAt),
+        networkObjects: missing.size,
+        networkBytes,
+        localObjects,
+        localBytes,
+      }),
+    });
   };
 
   /**
@@ -1413,15 +1497,28 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         return undefined;
       }
       const paths = await flatTree(commit.tree);
-      const entries: RevisionTreeInput[] = [];
-      // The returned tree retains its contents; transient transfer buffers must not fan out as well.
+      /* Pointers first, then their bytes together: the files keep tree order,
+       * and only the large objects' transfers run side by side, under the LFS
+       * client's own count and byte bounds. */
+      const read: Array<
+        Readonly<{ path: string; content: Uint8Array<ArrayBuffer>; mode: FileMode; pointer: LfsPointer | undefined }>
+      > = [];
       for (const [path, { oid, mode }] of paths) {
-        // oxlint-disable-next-line no-await-in-loop -- resolve one file before admitting the next transfer.
+        // oxlint-disable-next-line no-await-in-loop -- resolve one file before reading the next; a pointer is a few bytes.
         const { blob } = await readBlob({ fs, cache: objectCache(), gitdir, oid });
-        // oxlint-disable-next-line no-await-in-loop -- only one LFS transfer per tree read is active.
-        const content = await smudged(new Uint8Array(blob));
-        entries.push([path, content, mode as FileMode]);
+        const content = new Uint8Array(blob);
+        read.push({ path, content, mode: mode as FileMode, pointer: readLfsPointer(content) });
       }
+      const pointers = read.flatMap(({ pointer }) => (pointer === undefined ? [] : [pointer]));
+      const hydrated = pointers.length === 0 ? undefined : await hydrate(pointers);
+      if (hydrated !== undefined && hydrated.report.networkObjects > 0) {
+        options.onLfsFetch?.(hydrated.report);
+      }
+      const entries: RevisionTreeInput[] = read.map(({ path, content, mode, pointer }) => [
+        path,
+        pointer === undefined ? content : hydrated!.contents.get(pointer.oid)!,
+        mode,
+      ]);
       return new ImmutableRevisionTree(entries);
     },
 

@@ -67,6 +67,9 @@ const entryFiles = { a: 'alpha.ts', b: 'beta.ts' } as const;
 const cycles = 10;
 const phone = phoneViewports[1];
 
+/** The CDN the editor's type acquisition reads declarations from. */
+const esmShOrigin = 'https://esm.sh';
+
 type ConsoleMessage = Readonly<{ text: string; type: string; url?: string }>;
 
 /**
@@ -89,6 +92,14 @@ const benignConsole: ReadonlyArray<
       text === 'Failed to load resource: net::ERR_CONNECTION_REFUSED' &&
       url !== undefined &&
       new URL(url).origin === apiOrigin,
+  },
+  {
+    // The browser's own log line for a type-acquisition fetch that failed in the network (see benignRequests).
+    name: 'type-acquisition fetch to esm.sh cut off in the network',
+    matches: ({ text, url }) =>
+      /^Failed to load resource: net::ERR_[A-Z_]+$/u.test(text) &&
+      url !== undefined &&
+      new URL(url).origin === esmShOrigin,
   },
   {
     // The served Content-Security-Policy-Report-Only header names a directive that only an enforced policy can carry.
@@ -127,13 +138,14 @@ const benignRequests: ReadonlyArray<
       new URL(url).origin === apiOrigin && failure === 'net::ERR_CONNECTION_REFUSED',
   },
   {
-    /* The editor's type acquisition (`type-acquisition.ts`) fetches declarations from esm.sh with its own
-     * AbortController and aborts them when it is disposed, as the Editor closes or the project changes; one such fetch
-     * cut off mid-flight was seen in cycle 7 of a run. Only an aborted fetch to esm.sh: any other esm.sh failure is a
-     * fault. */
-    name: 'type acquisition fetch aborted on dispose',
+    /* The editor's type acquisition (`type-acquisition.ts`) fetches declarations from the esm.sh CDN, through this
+     * environment's proxy, aborts them when it is disposed (the Editor closes or the project changes) and retries a
+     * failed one later. Seen in the recorded runs: `net::ERR_ABORTED` (cycle 7 of one run) and
+     * `net::ERR_TUNNEL_CONNECTION_FAILED` from the proxy (cycle 9 of another). Only a fetch to esm.sh that failed in the
+     * network: an HTTP error from esm.sh, or a script or any other origin's failure, is a fault. */
+    name: 'editor type-acquisition fetch to esm.sh cut off in the network',
     matches: ({ url, resourceType, failure }) =>
-      new URL(url).origin === 'https://esm.sh' && resourceType === 'fetch' && failure === 'net::ERR_ABORTED',
+      new URL(url).origin === esmShOrigin && resourceType === 'fetch' && /^net::ERR_[A-Z_]+$/u.test(failure),
   },
 ];
 

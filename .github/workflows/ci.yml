@@ -8,6 +8,11 @@ on:
         required: true
         type: choice
         options: [baseline, candidate]
+      attribution-project:
+        description: 'Optional package-check target for a same-runner on/off calibration'
+        required: false
+        type: string
+        default: ''
   push:
     branches: [main] # Only run on pushes to main branch
   pull_request:
@@ -159,6 +164,59 @@ jobs:
             fi
           done
 
+  # Bounded opt-in experiment; ordinary PR/push gates and their fan-in are unchanged.
+  attribution-calibration:
+    name: Package-check attribution calibration
+    if: github.event_name == 'workflow_dispatch' && inputs.attribution-project != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Compare attribution on and off on the same runner
+        env:
+          SAMPLE: ${{ inputs.attribution-project }}
+          NX_SKIP_REMOTE_CACHE: 'true'
+          NX_CACHE_DIRECTORY: node_modules/.cache/ci-calibration
+        run: |
+          set -euo pipefail
+          root=out/reports/ci/calibration
+          mkdir -p "$root"
+          pnpm nx show projects --with-target pkgcheck --json | tail -1 > "$root/projects.json"
+          jq -e --arg project "$SAMPLE" 'index($project) != null' "$root/projects.json" > /dev/null
+          lscpu > "$root/cpu.txt"
+          free -b > "$root/memory.txt"
+          git rev-parse HEAD > "$root/source.txt"
+          # Warm-up is excluded. Both modes rerun the same complete validators;
+          # compare the pkgcheck task in the Nx profiles, excluding prerequisite builds.
+          TAU_CI_TIMING_DIRECTORY= pnpm nx run-many -t pkgcheck --projects "$SAMPLE" --parallel=1 --skip-nx-cache --outputStyle=static
+          index=0
+          for mode in off on on off off on on off; do
+            index=$((index + 1))
+            directory="$root/$index-$mode"
+            mkdir -p "$directory"
+            timing=
+            if [ "$mode" = on ]; then timing="$GITHUB_WORKSPACE/$directory/phases"; fi
+            TAU_CI_TIMING_DIRECTORY="$timing" NX_PROFILE="$directory/profile.json" /usr/bin/time -v -o "$directory/resource.txt" pnpm nx run-many -t pkgcheck --projects "$SAMPLE" --parallel=1 --skip-nx-cache --outputStyle=static
+          done
+
+      - name: Retain calibration evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-calibration-${{ github.run_attempt }}
+          path: out/reports/ci/calibration
+          retention-days: 14
+
   # Every workspace invariant is a `scripts:validate-*` target; `scripts:validate`
   # is the wildcard umbrella over all of them (frontmatter, workspace root,
   # project names and tags, tsgo runtime references, quickstart budget, license
@@ -249,7 +307,10 @@ jobs:
       # a few minutes into `test` (tau#306 and tau#299, 2026-10-04).
       - name: Prepare timing output
         if: matrix.lane == 'pkgcheck' || startsWith(matrix.lane, 'test-')
-        run: mkdir -p out/reports/ci/pkgcheck
+        run: |
+          mkdir -p out/reports/ci/pkgcheck
+          lscpu > out/reports/ci/cpu.txt
+          free -b > out/reports/ci/memory.txt
 
       - name: Build affected package prerequisites
         if: matrix.lane == 'pkgcheck'

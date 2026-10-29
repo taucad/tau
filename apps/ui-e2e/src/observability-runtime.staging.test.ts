@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
 import {
   createObservabilityRunId,
+  harnessNavigationTimeout,
   observeHarnessPage,
   observabilityUrl,
   pollSentryEventIds,
@@ -189,7 +190,7 @@ const triggerAndAwaitDelivery = async ({
     const delivered = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/monitoring', {
       timeout: 120_000,
     });
-    await page.goto(observabilityUrl(runId, trigger), { waitUntil: 'load' });
+    await page.goto(observabilityUrl(runId, trigger), { timeout: harnessNavigationTimeout, waitUntil: 'load' });
     await ready?.(page);
     await delivered;
     if (requirePosthog) {

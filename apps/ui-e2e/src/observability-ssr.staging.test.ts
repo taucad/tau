@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
 import {
   createObservabilityRunId,
+  harnessNavigationTimeout,
   observeHarnessPage,
   observabilityUrl,
   pollSentryEventIds,
@@ -175,7 +176,10 @@ describe('P2 staging signal acceptance: SSR errors and API correlation', () => {
       const failed = page.waitForResponse((answer) => answer.url().includes('/v1/__debug/observability/failure'), {
         timeout: 60_000,
       });
-      await page.goto(observabilityUrl(runId, 'api-failure'), { waitUntil: 'domcontentloaded' });
+      await page.goto(observabilityUrl(runId, 'api-failure'), {
+        timeout: harnessNavigationTimeout,
+        waitUntil: 'domcontentloaded',
+      });
       const answer = await failed;
       console.info('API trigger answered', { runId, status: answer.status() });
       expect(answer.ok()).toBe(false);

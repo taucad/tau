@@ -37,6 +37,7 @@ import type {
   TargetWorker,
   TargetWorkerFlowEvidence,
 } from './external-target.ts';
+import { maskAutomationFromAnalytics } from './analytics-bot-mask.ts';
 import { testBaseURL } from './base-url.ts';
 import { classifyWebGpuAdapter, webGpuLaunchArguments } from './webgpu-profile.ts';
 import { listTauServeChats, readTauServeFile, startTauServeFixture } from './tau-serve-fixture.ts';
@@ -987,13 +988,9 @@ export const uiInstallPostHogFixture: BrowserCommand<[apiKey: string]> = async (
   const deadClicks = await readFile(
     resolve(import.meta.dirname, '../../../../node_modules/posthog-js/dist/dead-clicks-autocapture.js'),
   );
+  await session.context.addInitScript(maskAutomationFromAnalytics);
   await session.context.addInitScript(
     ({ key }) => {
-      Object.defineProperty(navigator, 'webdriver', { configurable: true, value: false });
-      Object.defineProperty(navigator, 'userAgent', {
-        configurable: true,
-        value: navigator.userAgent.replace('HeadlessChrome', 'Chrome'),
-      });
       (globalThis as typeof globalThis & { ENV?: Record<string, unknown> }).ENV = {
         ...(globalThis as typeof globalThis & { ENV?: Record<string, unknown> }).ENV,
         // eslint-disable-next-line @typescript-eslint/naming-convention -- client environment wire name

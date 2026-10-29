@@ -93,6 +93,20 @@ assert.equal(desktopPackagePlans['win32-x64'].icon, 'icon.ico');
 assert.ok(desktopPackagePlans['win32-x64'].branding.includes('icon.ico'), 'main loads branding/icon.ico on Windows');
 console.log('✓ each plan names its archive and icon');
 
+/* The ASAR unpack-directory glob is a union, and every group is load-bearing: `@agentclientprotocol` adapters are
+ * spawned from disk, `@img` carries libvips, `node-pty` carries the Terminal addon and the `spawn-helper` its fork
+ * path runs from `app.asar.unpacked`, and the sandbox runtime's vendored `seccomp` and `java-proxy-agent` payloads
+ * are containment-relevant. Pin each entry so a later edit cannot silently drop one. */
+const unpackedPackageDirectories = [
+  '@agentclientprotocol',
+  '@img',
+  'node-pty',
+  '@anthropic-ai/sandbox-runtime/vendor/{seccomp,java-proxy-agent}',
+];
+assert.equal(runtimeAsarOptions.unpackDir, `**/node_modules/{${unpackedPackageDirectories.join(',')}}`);
+assert.equal(runtimeAsarOptions.unpack, '{*.node,*.dll,esbuild,esbuild.exe}');
+console.log('✓ the ASAR unpack globs keep every spawned adapter, libvips, node-pty and sandbox-runtime vendor payload');
+
 /* ASAR matches absolute filenames: hidden checkout ancestors must not hide spawned payloads. */
 const fixtureParent = fileURLToPath(new URL('../../../out/test-results/desktop-package/', import.meta.url));
 await mkdir(fixtureParent, { recursive: true });

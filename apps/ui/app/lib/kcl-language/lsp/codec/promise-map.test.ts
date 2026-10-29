@@ -2,6 +2,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { PromiseMap, PromiseMapDeletedError, PromiseMapTimeoutError } from '#lib/kcl-language/lsp/codec/promise-map.js';
 
 describe('PromiseMap', () => {
+  it('rejects all pending responses when their transport fails', async () => {
+    const map = new PromiseMap<number, string>();
+    const first = map.get(1);
+    const second = map.get(2);
+    map.clear(new Error('worker failed'));
+    await expect(first).rejects.toThrow('worker failed');
+    await expect(second).rejects.toThrow('worker failed');
+    expect(map.size).toBe(0);
+  });
   beforeEach(() => {
     vi.useFakeTimers();
   });

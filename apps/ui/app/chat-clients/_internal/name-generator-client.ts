@@ -6,6 +6,7 @@ import type { MyUIMessage } from '@taucad/chat';
 import { messageRole } from '@taucad/chat/constants';
 import { ENV } from '#environment.config.js';
 import { parseErrorForPersistence } from '#utils/error.utils.js';
+import { recordApiRequestId } from '#lib/api-request-id.js';
 
 /**
  * Error thrown by the project-name / commit-name client when the
@@ -61,10 +62,13 @@ const nameGeneratorFetch: typeof globalThis.fetch = async (input, init) => {
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
     const parsed = parseErrorForPersistence(new Error(detail));
-    throw new NameGeneratorRequestError(
-      response.status,
-      `POST /v1/chat failed with ${response.status} ${response.statusText}: ${parsed.message}`,
-      parsed.code,
+    throw recordApiRequestId(
+      new NameGeneratorRequestError(
+        response.status,
+        `POST /v1/chat failed with ${response.status} ${response.statusText}: ${parsed.message}`,
+        parsed.code,
+      ),
+      response,
     );
   }
 

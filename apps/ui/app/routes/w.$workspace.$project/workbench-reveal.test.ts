@@ -1,11 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EditorStateMachineRef } from '#machines/editor.machine.js';
-import { holdUnheardReveal, subscribeWorkbenchReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
+import {
+  holdUnheardFileReveal,
+  holdUnheardReveal,
+  subscribeWorkbenchFileReveal,
+  subscribeWorkbenchReveal,
+} from '#routes/w.$workspace.$project/workbench-reveal.js';
 
+const fileTarget = { path: 'parts/nested/wheel.ts', expandTarget: false };
 const target = { entryPath: 'main.ts', unitId: 'unit-1', componentId: 'wheel' };
 
 /** An editor whose reveal emits also reach the workspace, as `ProjectWorkspaceProvider` wires it. */
-function createEditor(): { editorRef: EditorStateMachineRef; emit: (type: string) => void } {
+function createEditor(workspaceFirst = true): { editorRef: EditorStateMachineRef; emit: (type: string) => void } {
   const handlers = new Map<string, Set<(event: unknown) => void>>();
   const editorRef = {
     on(type: string, handler: (event: unknown) => void) {
@@ -20,9 +26,22 @@ function createEditor(): { editorRef: EditorStateMachineRef; emit: (type: string
     },
   } as unknown as EditorStateMachineRef;
   const emit = (type: string): void => {
-    holdUnheardReveal(editorRef, type === 'modelComponentRevealRequested' ? 'model' : 'kinematics', target);
+    const event = { type, ...(type === 'fileRevealRequested' ? fileTarget : target) };
+    const hold = (): void => {
+      if ('path' in event) {
+        holdUnheardFileReveal(editorRef, event);
+      } else {
+        holdUnheardReveal(editorRef, type === 'modelComponentRevealRequested' ? 'model' : 'kinematics', target);
+      }
+    };
+    if (workspaceFirst) {
+      hold();
+    }
     for (const handler of handlers.get(type) ?? []) {
-      handler({ type, ...target });
+      handler(event);
+    }
+    if (!workspaceFirst) {
+      hold();
     }
   };
   return { editorRef, emit };
@@ -93,5 +112,68 @@ describe('subscribeWorkbenchReveal', () => {
     const kinematics = vi.fn();
     subscribeWorkbenchReveal(editorRef, 'kinematics', kinematics);
     expect(kinematics).toHaveBeenCalledExactlyOnceWith(target);
+  });
+});
+
+describe('subscribeWorkbenchFileReveal', () => {
+  it('should hand a cold Files pane the latest exact target once, including folder expansion', () => {
+    const { editorRef, emit } = createEditor();
+    emit('fileRevealRequested');
+    const folder = { path: 'parts/nested', expandTarget: true };
+    holdUnheardFileReveal(editorRef, folder);
+    const heard = vi.fn();
+    const unsubscribe = subscribeWorkbenchFileReveal(editorRef, heard);
+    expect(heard).toHaveBeenCalledExactlyOnceWith(folder);
+    unsubscribe();
+    const remounted = vi.fn();
+    subscribeWorkbenchFileReveal(editorRef, remounted)();
+    expect(remounted).not.toHaveBeenCalled();
+  });
+
+  it('should keep file reveals separate from component reveals and other editors', () => {
+    const first = createEditor();
+    const second = createEditor();
+    first.emit('fileRevealRequested');
+    const unrelated = vi.fn();
+    subscribeWorkbenchReveal(first.editorRef, 'model', unrelated)();
+    subscribeWorkbenchFileReveal(second.editorRef, unrelated)();
+    expect(unrelated).not.toHaveBeenCalled();
+    const heard = vi.fn();
+    subscribeWorkbenchFileReveal(first.editorRef, heard)();
+    expect(heard).toHaveBeenCalledExactlyOnceWith(fileTarget);
+  });
+
+  it('should leave a held file reveal for the next eligible tree', () => {
+    const { editorRef, emit } = createEditor();
+    const inactive = vi.fn();
+    const stopInactive = subscribeWorkbenchFileReveal(editorRef, inactive, () => false);
+    emit('fileRevealRequested');
+    const active = vi.fn();
+    subscribeWorkbenchFileReveal(editorRef, active, () => true)();
+    expect(inactive).not.toHaveBeenCalled();
+    expect(active).toHaveBeenCalledExactlyOnceWith(fileTarget);
+    stopInactive();
+  });
+
+  it('should drop a stale file reveal after ten seconds', () => {
+    vi.useFakeTimers();
+    const { editorRef, emit } = createEditor();
+    emit('fileRevealRequested');
+    vi.advanceTimersByTime(10_001);
+    const heard = vi.fn();
+    subscribeWorkbenchFileReveal(editorRef, heard)();
+    expect(heard).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])('should not replay live file reveals when workspace-first is %s', (workspaceFirst) => {
+    const { editorRef, emit } = createEditor(workspaceFirst);
+    const heard = vi.fn();
+    const unsubscribe = subscribeWorkbenchFileReveal(editorRef, heard);
+    emit('fileRevealRequested');
+    expect(heard).toHaveBeenCalledExactlyOnceWith(fileTarget);
+    unsubscribe();
+    const remounted = vi.fn();
+    subscribeWorkbenchFileReveal(editorRef, remounted)();
+    expect(remounted).not.toHaveBeenCalled();
   });
 });

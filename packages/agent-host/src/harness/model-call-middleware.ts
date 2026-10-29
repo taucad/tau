@@ -1,3 +1,4 @@
+import { normalizeContext } from '@earendil-works/pi-ai';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 import type { Api, AssistantMessageEventStream, Context, Model, SimpleStreamOptions } from '@earendil-works/pi-ai';
 
@@ -17,7 +18,7 @@ export type ModelCallMiddleware = (
 /** Compose ordered middleware onto pi's single `streamFn` slot. @public */
 export const composeModelCallMiddleware = (base: StreamFn, middleware: readonly ModelCallMiddleware[]): StreamFn => {
   const terminal = async (request: ModelCallRequest): Promise<AssistantMessageEventStream> =>
-    base(request.model, request.context, request.options);
+    base(request.model, normalizeContext(request.context), request.options);
   let chain = terminal;
   for (let index = middleware.length - 1; index >= 0; index--) {
     const current = middleware[index]!;

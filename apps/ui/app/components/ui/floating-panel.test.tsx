@@ -9,6 +9,7 @@ import {
   FloatingPanelContentHeaderActions,
   FloatingPanelMenuButton,
   FloatingPanelContentTitle,
+  FloatingPanelContent,
 } from '#components/ui/floating-panel.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
@@ -33,6 +34,9 @@ vi.mock('@taucad/ui/components/drawer', () => ({
     </div>
   ),
 }));
+
+const reportUiError = vi.hoisted(() => vi.fn(async () => undefined));
+vi.mock('#lib/error-reporting.js', () => ({ reportUiError }));
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -382,5 +386,28 @@ describe('FloatingPanelContentHeaderActions', () => {
       expect(handleClick).toHaveBeenCalledOnce();
       expect(handleParentClick).toHaveBeenCalledOnce();
     });
+  });
+});
+
+describe('FloatingPanelContent error boundary', () => {
+  it('reports what its content throws once, with the component stack, and shows the fallback (SB4)', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const failure = new Error('panel content failed');
+    function Failing(): React.JSX.Element {
+      throw failure;
+    }
+
+    renderInPanel(
+      <FloatingPanelContent errorFallback={() => <p>Panel failed</p>}>
+        <Failing />
+      </FloatingPanelContent>,
+    );
+
+    expect(screen.getByText('Panel failed')).toBeInTheDocument();
+    expect(reportUiError).toHaveBeenCalledExactlyOnceWith(failure, {
+      contexts: { react: { componentStack: expect.stringContaining('Failing') as unknown } },
+      tags: { boundary: 'floating-panel' },
+    });
+    consoleError.mockRestore();
   });
 });

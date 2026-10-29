@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type * as VerifyEmailModule from '#components/auth/verify-email.js';
 import * as Cookies from 'es-cookie';
-import AuthPage from '#routes/auth.$/route.js';
+import AuthPage, { meta } from '#routes/auth.$/route.js';
 
 const routeMocks = vi.hoisted(() => ({
   segment: 'sign-in',
@@ -302,6 +302,35 @@ describe('Auth session continuation', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('Auth page naming', () => {
+  afterEach(() => {
+    routeMocks.isSuccess = true;
+    routeMocks.isFetching = false;
+  });
+
+  it.each([
+    ['sign-in', 'Sign in · Tau'],
+    ['sign-up', 'Sign up · Tau'],
+    ['forgot-password', 'Forgot password · Tau'],
+    ['reset-password', 'Reset password · Tau'],
+    ['magic-link/verify', 'Magic link · Tau'],
+    ['verify-email', 'Verify email · Tau'],
+    ['sign-out', 'Sign out · Tau'],
+  ])('titles /auth/%s as %s, not the bare app name', (segment, title) => {
+    expect(meta({ params: { '*': segment } } as unknown as Parameters<typeof meta>[0])).toEqual([{ title }]);
+  });
+
+  it('names the page with one h1 while the session is checked', () => {
+    routeMocks.segment = 'sign-in';
+    routeMocks.isSuccess = false;
+    routeMocks.isFetching = true;
+    render(<AuthPage />);
+
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole('heading', { level: 1, name: 'Sign in' })).toBeInTheDocument();
   });
 });
 

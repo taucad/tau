@@ -235,6 +235,8 @@ const runAll = async <T>(
  * ```typescript
  * import { createPreparationHost, parsePluginDeployment } from '@taucad/runtime/preparation/node';
  *
+ * declare const manifest: unknown;
+ *
  * const host = createPreparationHost({
  *   store: '/var/lib/tau/payloads',
  *   plugins: [{ package: '@taucad/build123d', deployment: parsePluginDeployment(manifest) }],

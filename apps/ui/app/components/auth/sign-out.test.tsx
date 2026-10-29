@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import * as Cookies from 'es-cookie';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SignOut } from '#components/auth/sign-out.js';
@@ -16,6 +16,7 @@ vi.mock('@better-auth-ui/react', () => ({
   useAuth: () => ({
     authClient: {},
     basePaths: { auth: '/auth' },
+    localization: { auth: { signOut: 'Sign out' } },
     viewPaths: { auth: { signIn: 'sign-in' } },
     navigate,
   }),
@@ -47,6 +48,12 @@ describe('SignOut', () => {
     expect(purge).toHaveBeenCalledWith('logout');
     expect(signOut).toHaveBeenCalledOnce();
     expect(purge.mock.invocationCallOrder[0]).toBeLessThan(signOut.mock.invocationCallOrder[0] ?? 0);
+  });
+
+  it('names the page with one h1 while the session ends', () => {
+    render(<SignOut />);
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole('heading', { level: 1, name: 'Sign out' })).toBeInTheDocument();
   });
 
   it('purges exactly once across re-renders so it cannot re-announce to other tabs', () => {

@@ -705,7 +705,7 @@ try {
   const result=await engine.convert({name:"triangle.obj",bytes:new TextEncoder().encode("v 0 0 0\\nv 1 0 0\\nv 0 1 0\\nf 1 2 3\\n")},{to:"glb"});
   if(engine.backend!=="wasm" || !result.files.some(file=>file.bytes.length>0)) throw Error("Intel Assimp conversion failed");
   process.stdout.write("wasm-conversion-passed");
-} finally {engine.dispose();}`,
+} finally {await engine.dispose();}`,
   ]);
   if (conversion !== 'wasm-conversion-passed') {
     throw new Error(`The packaged Intel Assimp backend failed conversion: ${conversion}`);

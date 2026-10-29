@@ -38,7 +38,16 @@ export type ExportOffer<Id extends string = string> = Readonly<{
 /** One admitted evaluation; a failed evaluation never silently retains an older export source. @public */
 export type Evaluation<ViewId extends string = string, ExportId extends string = string> = Readonly<
   (
-    | { success: true; views: ReadonlyArray<ViewOffer<ViewId>>; exports: ReadonlyArray<ExportOffer<ExportId>> }
+    | {
+        success: true;
+        views: ReadonlyArray<ViewOffer<ViewId>>;
+        exports: ReadonlyArray<ExportOffer<ExportId>>;
+        /**
+         * The kernel's evaluate options, which every view of this evaluation shares; absent when it takes none. A host
+         * changes them with `update({ evaluateOptions })`, which re-evaluates the document.
+         */
+        evaluateOptions?: Readonly<{ schema: JSONSchema7; defaults: Readonly<Record<string, unknown>> }>;
+      }
     | { success: false }
   ) & {
     id: string;

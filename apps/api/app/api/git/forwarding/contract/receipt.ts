@@ -28,7 +28,18 @@ export const maximumReceiptClockSkewSeconds = 30;
 export const maximumReceiptAgeSeconds = 600;
 
 /**
- * What the receipt is for: a committed push or removal (`commit`), derived
+ * The longest receipt the API's receipt route reads, and so the longest one
+ * tau-storage posts. A posted receipt is a `retained` one, which carries no oid
+ * list, or a deferred compaction's `commit`, which carries the push's whole LFS
+ * walk: 1 MiB holds about eleven thousand LFS oids once signed. tau-storage
+ * drops a longer one, and the next grant's recorded generation repairs what it
+ * would have said.
+ */
+export const maximumPostedReceiptLength = 1024 * 1024;
+
+/**
+ * What the receipt is for: a committed push, removal or deferred compaction
+ * (`commit`; a compaction's names the push's moved refs and LFS walk), derived
  * state a worker found the API behind on (`repair`), or the retired bytes a
  * compacting commit's sweep kept (`retained`, D18), which is known only after
  * the reply.

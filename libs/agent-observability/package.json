@@ -1,0 +1,56 @@
+{
+  "name": "@taucad/agent-observability",
+  "version": "0.1.0-beta.0",
+  "description": "Shared agent evidence contract and portable Pi telemetry adapter",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "libs/agent-observability"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/libs/agent-observability#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./contract": "./src/contract.ts",
+    "./authority": "./src/authority.ts",
+    "./identity": "./src/identity.ts",
+    "./pi-telemetry": "./src/pi-telemetry.ts",
+    "./telemetry-policy": "./src/telemetry-policy.ts",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@earendil-works/pi-telemetry": "catalog:",
+    "@opentelemetry/api": "catalog:"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "catalog:",
+    "@opentelemetry/sdk-metrics": "catalog:",
+    "@opentelemetry/sdk-trace-base": "catalog:",
+    "zod": "catalog:"
+  }
+}

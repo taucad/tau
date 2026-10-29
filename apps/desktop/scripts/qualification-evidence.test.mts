@@ -5,7 +5,11 @@ import { randomUUID, createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { parseDesktopArtifactManifest, desktopArtifactKinds, desktopArtifactName } from '#shared/desktop-release.js';
 /* oxlint-disable no-restricted-imports -- Test the actual collector decision boundary. */
-import { collectQualificationReceipt } from './qualification-evidence.mjs';
+import {
+  collectQualificationReceipt,
+  validateSoftwareCiEvidence,
+  windowsConsumerHostDigest,
+} from './qualification-evidence.mjs';
 import type { QualificationEvidence, QualificationStageEvidence } from './qualification-evidence.mjs';
 /* oxlint-enable no-restricted-imports */
 const hash = (value: number): string => value.toString(16).padStart(64, '0');
@@ -359,7 +363,7 @@ const cleanHostRefusals = (): void => {
     const admitted = collectQualificationReceipt(cleanHostFixture(route));
     assert.equal(admitted.environment.kind, 'vm');
     const { host } = admitted.environment;
-    assert.ok(host);
+    assert.ok(host?.platform === 'darwin');
     assert.equal(host.sip, 'enabled');
     assert.equal(host.nativeArch, 'x64');
   }
@@ -652,6 +656,52 @@ const main = (): void => {
   assert.equal(collectQualificationReceipt(debian).environment.kind, 'ci');
   const apt = platformFixture('linux-apt');
   assert.equal(collectQualificationReceipt(apt).route, 'linux-apt');
+  const software = platformFixture('linux-appimage');
+  software.mode = 'software-ci';
+  for (const stage of software.stages) {
+    stage.renderer.softwareRenderer = 'ANGLE (Google, Vulkan SwiftShader Device)';
+    stage.security.processes[0]!.commandLine += ' --use-angle=swiftshader --enable-unsafe-swiftshader';
+  }
+  assert.doesNotThrow(() => {
+    validateSoftwareCiEvidence(software);
+  });
+  assert.throws(() => collectQualificationReceipt(software), /software runs cannot qualify releases/u);
+  software.mode = 'release';
+  assert.throws(() => collectQualificationReceipt(software), /stock GPU acceptance/u);
+  for (const stage of software.stages) {
+    delete stage.renderer.softwareRenderer;
+  }
+  assert.throws(() => collectQualificationReceipt(software), /stock GPU acceptance/u);
+  software.mode = 'software-ci';
+  assert.throws(() => {
+    validateSoftwareCiEvidence(software);
+  }, /SwiftShader observations/u);
+  for (const stage of software.stages) {
+    stage.renderer.softwareRenderer = 'SwiftShader';
+  }
+  software.stages[0].security.processes[0]!.commandLine += ' --disable-gpu-sandbox';
+  assert.throws(() => {
+    validateSoftwareCiEvidence(software);
+  }, /sandbox bypass/u);
+  software.stages[0].security.processes[0]!.commandLine = software.stages[0].security.processes[0]!.commandLine.replace(
+    ' --disable-gpu-sandbox',
+    '',
+  );
+  software.stages[0].renderer.projectSha256 = hash(999);
+  assert.throws(() => {
+    validateSoftwareCiEvidence(software);
+  }, /project/u);
+  const wrongPlatform = fixture();
+  wrongPlatform.mode = 'software-ci';
+  assert.throws(() => {
+    validateSoftwareCiEvidence(wrongPlatform);
+  }, /Linux staging/u);
+  const productionSoftware = platformFixture('linux-appimage');
+  productionSoftware.mode = 'software-ci';
+  productionSoftware.stages[0].candidate.channel = 'production';
+  assert.throws(() => {
+    validateSoftwareCiEvidence(productionSoftware);
+  }, /Linux staging/u);
   apt.scheduler![0]!.scheduler['invocation'] = apt.scheduler![0]!.scheduler['beforeInvocation']!;
   assert.throws(() => collectQualificationReceipt(apt), /real unattended scheduler/u);
   const cycle = fixture();
@@ -666,4 +716,92 @@ try {
 } catch (error) {
   console.error(error);
   process.exitCode = 1;
+}
+
+// Synthetic inputs exercise admission only; they are never persisted as qualification evidence.
+const windowsConsumerFixture = (): QualificationEvidence => {
+  const input = fixture();
+  input.suite = 'clean-host-route-a-b-c-v1';
+  const host = {
+    runner: 'consumer',
+    identity: hash(55),
+    osVersion: 'Microsoft Windows 11 Pro 10.0.26100',
+    productType: 1,
+    build: 26_100,
+    nativeMachine: 34_404,
+    processMachine: 0,
+    elevated: 0,
+    elevationType: 1,
+    administrator: false,
+    uacEnabled: 1,
+    defender: { service: true, antivirus: true, realTime: true, mode: 'Normal' },
+    existing: [],
+  };
+  for (const stage of input.stages) {
+    stage.security.measurements['consumerHost'] = JSON.stringify(host);
+  }
+  input.windowsAcceptance = {
+    kind: 'vm',
+    host,
+    installs: [input.stages[0], input.stages[2]].map((stage, index) => {
+      const artifact = stage.candidate.artifacts[0]!;
+      const phase = index === 0 ? 'initial' : 'reinstall';
+      return {
+        stage: phase,
+        artifact: { name: artifact.name, sha256: artifact.sha256, size: artifact.size },
+        download: {
+          browser: 'Chromium synthetic',
+          url: `${stage.probe.mirrorOrigin}/releases/${encodeURIComponent(stage.candidate.tag)}/${artifact.name}`,
+          sha256: artifact.sha256,
+          size: artifact.size,
+          zoneIdentifier: '[ZoneTransfer]\r\nZoneId=3\r\n',
+        },
+        installedPath: stage.installed.installationPath,
+        requestedAt: 100,
+        completedAt: 300,
+        manual: {
+          nonce: stage.probe.nonce,
+          hostSha256: windowsConsumerHostDigest(host),
+          stage: phase,
+          artifactSha256: artifact.sha256,
+          requestedAt: 100,
+          observedAt: 200,
+          observer: 'synthetic',
+          launchedFrom: 'explorer',
+          defaultDestination: true,
+          freshCapturesForRequest: true,
+          smartScreen: { checkAppsAndFiles: 'enabled', result: 'not-shown', publisher: null },
+          uac: 'not-shown',
+          installer: 'completed',
+          screenshots: [
+            { kind: 'security-settings', name: 'security.png', capturedAt: 150, sha256: hash(60), size: 10 },
+            { kind: 'installer-result', name: 'result.png', capturedAt: 150, sha256: hash(61), size: 10 },
+          ],
+        },
+      };
+    }),
+  };
+  return input;
+};
+assert.equal(collectQualificationReceipt(windowsConsumerFixture()).environment.host?.platform, 'win32');
+for (const mutate of [
+  (input: QualificationEvidence) => {
+    input.windowsAcceptance!.host.elevationType = 3;
+  },
+  (input: QualificationEvidence) => {
+    input.windowsAcceptance!.installs[0]!.download.zoneIdentifier = '[ZoneTransfer]\nZoneId=1';
+  },
+  (input: QualificationEvidence) => {
+    input.windowsAcceptance!.installs[0]!.manual.nonce = randomUUID();
+  },
+  (input: QualificationEvidence) => {
+    input.windowsAcceptance!.installs[0]!.manual.smartScreen.result = 'unknown';
+  },
+  (input: QualificationEvidence) => {
+    input.stages[1].security.measurements['consumerHost'] = 'null';
+  },
+]) {
+  const input = windowsConsumerFixture();
+  mutate(input);
+  assert.throws(() => collectQualificationReceipt(input));
 }

@@ -351,10 +351,11 @@ describe('handOffLink', () => {
     );
   });
 
-  it('should carry both in the fragment for a website, where its server never sees them', () => {
+  it('should open the application route with both values in the fragment, never the server request', () => {
     const link = new URL(handOffLink({ kind: 'website', origin: 'https://tau.new' }, 'http://127.0.0.1:7180/', 'c0de'));
 
     expect(link.origin).toBe('https://tau.new');
+    expect(link.pathname).toBe('/projects');
     expect(link.search).toBe('');
     expect(Object.fromEntries(new URLSearchParams(link.hash.slice(1)))).toEqual({
       'tau-host': 'http://127.0.0.1:7180',

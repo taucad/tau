@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import type { MetaFunction } from 'react-router';
 import { useSession } from '@better-auth-ui/react';
 import { Auth } from '#components/auth/auth.js';
 import { AuthEmailDraftProvider } from '#components/auth/auth-email-draft.js';
@@ -13,13 +14,29 @@ import { setEntryPreference } from '#lib/entry-preference.js';
 import { authClient } from '#lib/auth-client.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import type { ShellAuthHandoff } from '#providers/auth-provider.js';
-import { callDesktopShell, useShellAuthHandoff } from '#providers/auth-provider.js';
+import { authLocalization, callDesktopShell, useShellAuthHandoff } from '#providers/auth-provider.js';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 
 export const handle: Handle = {
   enablePageWrapper: false,
 };
+
+/** Each auth page's name, for its document title and the session check's heading. */
+const authPageTitles: Readonly<Record<string, string>> = {
+  'sign-in': authLocalization.auth.signIn,
+  'sign-up': authLocalization.auth.signUp,
+  'magic-link': authLocalization.auth.signIn,
+  'magic-link/verify': 'Magic link',
+  'forgot-password': authLocalization.auth.forgotPassword,
+  'reset-password': authLocalization.auth.resetPassword,
+  'verify-email': authLocalization.auth.verifyEmail,
+  'sign-out': authLocalization.auth.signOut,
+};
+
+const authPageTitle = (segment: string | undefined): string => authPageTitles[segment ?? ''] ?? 'Account';
+
+export const meta: MetaFunction = ({ params }) => [{ title: `${authPageTitle(params['*'])} · Tau` }];
 
 /**
  * What the desktop window shows once the shell owns the flow.
@@ -125,6 +142,8 @@ export default function AuthPage(): React.JSX.Element {
     return (
       <main className='flex min-h-svh flex-col items-center justify-center gap-6 bg-background p-6 text-foreground'>
         <TauWordmark className='h-7 text-primary' />
+        {/* The form's own title is the heading once it shows; until then the page still names itself. */}
+        <h1 className='sr-only'>{authPageTitle(segment)}</h1>
         <div className='w-full max-w-md text-center'>
           {!isSignedIn && (isError || hasWaitExpired) ? (
             <>

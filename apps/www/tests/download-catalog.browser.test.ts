@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { build } from 'esbuild';
 import tailwindcss from '@tailwindcss/vite';
 import { createElement } from 'react';
@@ -80,7 +81,11 @@ describe('shipping installer catalog browser behavior', () => {
 
   beforeAll(async () => {
     const bundle = await build({
-      entryPoints: ['src/download-catalog.client.ts'],
+      stdin: {
+        contents:
+          "export * from './src/download-catalog.client.ts'; export { environmentHref } from './src/environment.ts';",
+        resolveDir: appRoot,
+      },
       bundle: true,
       write: false,
       format: 'iife',
@@ -126,7 +131,11 @@ describe('shipping installer catalog browser behavior', () => {
       if (catalog === 'network-failure') {
         await route.abort('internetdisconnected');
       } else if (typeof catalog === 'number') {
-        await route.fulfill({ status: catalog, body: 'unavailable' });
+        await route.fulfill({
+          status: catalog,
+          body: 'unavailable',
+          headers: { 'Access-Control-Allow-Origin': origin },
+        });
       } else {
         await route.fulfill({
           contentType: 'application/json',
@@ -138,7 +147,13 @@ describe('shipping installer catalog browser behavior', () => {
     await page.goto(`${origin}/download/`);
     await page.addStyleTag({ content: css });
     await page.addScriptTag({ content: script });
-    await page.evaluate(`TauDownloads.initializeHostDownload(location.hostname)`);
+    // Match initializePage's environment routing before testing the optional catalog enhancement.
+    await page.evaluate(`
+      for (const link of document.querySelectorAll('a[href^="https://"]')) {
+        link.setAttribute('href', TauDownloads.environmentHref(link.getAttribute('href') ?? '', location.hostname));
+      }
+      TauDownloads.initializeHostDownload(location.hostname);
+    `);
     const before = await surface(page);
     if (visit.enabled ?? true) {
       await page.evaluate('document.body.dataset.installerCatalog="true"');
@@ -305,6 +320,54 @@ describe('shipping installer catalog browser behavior', () => {
     expect(after.text).not.toContain('pending');
     expect(await page.locator('[data-qualified-downloads]').isHidden()).toBe(true);
     await close();
+  }, 60_000);
+
+  it('should keep fresh staging visitors on truthful downloadable ZIPs after a catalog 404', async () => {
+    const { page, requests, before, close } = await open({ origin: 'https://taucad.dev', catalog: 404 });
+    try {
+      expect(requests).toEqual(['https://downloads.taucad.dev/latest/installers.json']);
+      const after = await surface(page);
+      expect(after).toEqual(before);
+      expectTruthfulMacLabels(after.links, 'ZIP');
+      expect(after.text).not.toContain('DMG');
+      expect(await page.locator('[data-qualified-downloads]').isHidden()).toBe(true);
+      expect(await page.locator('[data-install-instructions]').textContent()).toMatch(/ZIP/u);
+
+      for (const [platform, architecture] of [
+        ['mac', 'arm64'],
+        ['macIntel', 'x64'],
+      ]) {
+        const filename = `Tau-macos-${architecture}.zip`;
+        const url = `https://downloads.taucad.dev/latest/${filename}`;
+        const bytes = `ZIP fixture for ${architecture}`;
+        // oxlint-disable-next-line no-await-in-loop -- Each real button download is observed before starting the next.
+        await page.route(url, async (route) =>
+          route.fulfill({
+            body: bytes,
+            headers: {
+              'Content-Type': 'application/zip',
+              'Content-Disposition': `attachment; filename="${filename}"`,
+            },
+          }),
+        );
+        // oxlint-disable-next-line no-await-in-loop -- As above.
+        const [downloaded] = await Promise.all([
+          page.waitForEvent('download'),
+          page.locator(`#downloads a[data-download-platform="${platform}"]`).click(),
+        ]);
+        expect(downloaded.url()).toBe(url);
+        expect(downloaded.suggestedFilename()).toBe(filename);
+        // oxlint-disable-next-line no-await-in-loop -- Verify the completed file before the context is closed.
+        expect(await downloaded.failure()).toBeNull();
+        // oxlint-disable-next-line no-await-in-loop -- As above.
+        const path = await downloaded.path();
+        expect(path).not.toBeNull();
+        // oxlint-disable-next-line no-await-in-loop -- As above.
+        expect(await readFile(path, 'utf8')).toBe(bytes);
+      }
+    } finally {
+      await close();
+    }
   }, 60_000);
 
   it.each([

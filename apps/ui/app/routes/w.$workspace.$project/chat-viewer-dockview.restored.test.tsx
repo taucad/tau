@@ -41,15 +41,12 @@ vi.mock('#hooks/use-project-availability.js', () => ({
   },
 }));
 
-vi.mock('@xstate/react', () => ({
-  useSelector: (actor: { getSnapshot: () => unknown }, selector: (state: unknown) => unknown) =>
-    selector(actor.getSnapshot()),
-}));
-
 vi.mock('#hooks/use-project.js', () => {
+  const projectSnapshot = { matches: (state: string) => state === 'ready' };
   const projectRef = {
     send: fixture.projectSend,
-    getSnapshot: () => ({ matches: (state: string) => state === 'ready' }),
+    getSnapshot: () => projectSnapshot,
+    subscribe: () => ({ unsubscribe: () => undefined }),
     on: () => ({ unsubscribe: () => undefined }),
   };
   const nextProjectRef = { ...projectRef, send: fixture.nextProjectSend };
@@ -58,6 +55,7 @@ vi.mock('#hooks/use-project.js', () => {
     editorRef: {
       send: fixture.editorSend,
       getSnapshot: () => fixture.editorSnapshot,
+      subscribe: () => ({ unsubscribe: () => undefined }),
     },
     get mainEntryPath() {
       return fixture.mainEntryPath;

@@ -10,8 +10,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import { DrawerClose, useIsInsideDrawer } from '@taucad/ui/components/drawer';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { CollapsibleCodeBlock } from '#components/ui/collapsible-code-block.js';
-import { useAnalytics } from '#hooks/use-analytics.js';
-import type { Analytics } from '#hooks/use-analytics.js';
+import { reportUiError } from '#lib/error-reporting.js';
+import { reactErrorDetails } from '#lib/react-root-errors.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 
 type Side = 'left' | 'right';
@@ -318,7 +318,6 @@ type FloatingPanelErrorBoundaryState = {
 class FloatingPanelErrorBoundary extends React.Component<
   {
     readonly children: ReactNode;
-    readonly analytics: Analytics;
     readonly fallback: (props: FloatingPanelErrorFallbackProps) => ReactNode;
   },
   FloatingPanelErrorBoundaryState
@@ -333,9 +332,10 @@ class FloatingPanelErrorBoundary extends React.Component<
   };
 
   public override componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
-    this.props.analytics.captureException(error, {
-      errorInfo,
-      context: { component: 'FloatingPanel' },
+    // SB4: one Sentry event per error, with its component stack; `onCaughtError` reporting it too is a no-op.
+    void reportUiError(error, {
+      ...reactErrorDetails(errorInfo),
+      tags: { boundary: 'floating-panel' },
     });
     console.error('FloatingPanel content error:', error, errorInfo);
   }
@@ -363,12 +363,9 @@ class FloatingPanelErrorBoundary extends React.Component<
 
 function FloatingPanelContent({ children, className, errorFallback }: FloatingPanelContentProps): React.JSX.Element {
   const fallback = errorFallback ?? ((props) => <FloatingPanelErrorContent {...props} />);
-  const analytics = useAnalytics();
   return (
     <div className={cn('flex size-full flex-col bg-sidebar/50', className)} data-slot='floating-panel-content'>
-      <FloatingPanelErrorBoundary fallback={fallback} analytics={analytics}>
-        {children}
-      </FloatingPanelErrorBoundary>
+      <FloatingPanelErrorBoundary fallback={fallback}>{children}</FloatingPanelErrorBoundary>
     </div>
   );
 }

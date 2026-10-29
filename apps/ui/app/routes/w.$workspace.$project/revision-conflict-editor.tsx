@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type * as Monaco from 'monaco-editor';
+import { useEffect, useMemo, useState } from 'react';
+import { EditorDocument } from '#lib/editor-document.js';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import { CodeEditor } from '#components/code/code-editor.client.js';
+import type { CodeEditorProps } from '#components/code/code-editor.client.js';
 
 /** One `<<<<<<< / ======= / >>>>>>>` block, by zero-based line index. */
 type ConflictHunk = Readonly<{ open: number; middle: number; close: number }>;
@@ -67,7 +68,7 @@ export const keepHunkSide = (
  *
  * A conflicted file has no bytes on disk to open — the markers exist only as a
  * value the worker renders from the three recorded terms (A22) — so this is a
- * buffer, not a file: Monaco holds the materialized text, the markers are
+ * buffer, not a file: a local document holds the materialized text, the markers are
  * decorated so the blocks are findable, and *Mark resolved* hands the bytes
  * back through `resolvedInEditor`. Nothing here writes a tree, and the file's
  * row closes when the machine records the choice.
@@ -92,40 +93,36 @@ export function RevisionConflictEditor({
   readonly onResolved: (content: string) => void;
   readonly className?: string;
 }): React.JSX.Element {
+  const [document, setDocument] = useState(() => new EditorDocument(`conflict/${path}`, text));
   const [draft, setDraft] = useState(text);
-  const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor>(undefined);
-  const decorationsRef = useRef<Monaco.editor.IEditorDecorationsCollection>(undefined);
 
-  /* A new materialization is a new file's worth of text, not an edit of this
-     one: the buffer follows it rather than stranding a person on stale bytes. */
-  const [seen, setSeen] = useState(text);
-  if (seen !== text) {
-    setSeen(text);
+  useEffect(() => {
+    const next = new EditorDocument(`conflict/${path}`, text);
+    // oxlint-disable-next-line react/set-state-in-effect -- a new conflict materialization replaces the entire local draft.
+    setDocument(next);
     setDraft(text);
-  }
+  }, [path, text]);
 
   const lines = useMemo(() => draft.split('\n'), [draft]);
   const hunks = useMemo(() => conflictHunks(lines), [lines]);
-
-  useEffect(() => {
-    const editor = editorRef.current;
-    if (editor === undefined) {
-      return;
-    }
-    decorationsRef.current?.clear();
-    decorationsRef.current = editor.createDecorationsCollection(
+  const lineHighlights = useMemo<NonNullable<CodeEditorProps['lineHighlights']>>(
+    () =>
       hunks.flatMap((hunk) => [
-        {
-          range: { startLineNumber: hunk.open + 1, startColumn: 1, endLineNumber: hunk.middle, endColumn: 1 },
-          options: { isWholeLine: true, className: 'bg-success/20', linesDecorationsClassName: 'border-l-2' },
-        },
-        {
-          range: { startLineNumber: hunk.middle + 1, startColumn: 1, endLineNumber: hunk.close + 1, endColumn: 1 },
-          options: { isWholeLine: true, className: 'bg-destructive/20', linesDecorationsClassName: 'border-l-2' },
-        },
+        { fromLine: hunk.open + 1, toLine: hunk.middle, tone: 'mine' },
+        { fromLine: hunk.middle + 1, toLine: hunk.close + 1, tone: 'theirs' },
       ]),
-    );
-  }, [hunks]);
+    [hunks],
+  );
+  const replaceDraft = (next: string): void => {
+    const accepted = document.apply({
+      changes: [{ from: 0, to: document.text.length, insert: next }],
+      origin: 'conflict-resolution',
+      expectedVersion: document.version,
+    });
+    if (accepted) {
+      setDraft(document.text);
+    }
+  };
 
   return (
     <div className={cn('flex flex-col gap-1', className)}>
@@ -139,7 +136,7 @@ export function RevisionConflictEditor({
               disabled={isBusy}
               aria-label={`Keep mine in change ${String(index + 1)} of ${path}`}
               onClick={() => {
-                setDraft(keepHunkSide(lines, hunk, 'mine').join('\n'));
+                replaceDraft(keepHunkSide(lines, hunk, 'mine').join('\n'));
               }}
             >
               Keep mine
@@ -150,7 +147,7 @@ export function RevisionConflictEditor({
               disabled={isBusy}
               aria-label={`Keep theirs in change ${String(index + 1)} of ${path}`}
               onClick={() => {
-                setDraft(keepHunkSide(lines, hunk, 'theirs').join('\n'));
+                replaceDraft(keepHunkSide(lines, hunk, 'theirs').join('\n'));
               }}
             >
               Keep theirs
@@ -174,15 +171,24 @@ export function RevisionConflictEditor({
       </div>
       <CodeEditor
         className='h-64 rounded-md border'
-        defaultLanguage='plaintext'
-        path={`conflict/${path}`}
-        value={draft}
-        options={{ minimap: { enabled: false }, lineNumbers: 'off', scrollBeyondLastLine: false }}
-        onMount={(editor) => {
-          editorRef.current = editor;
+        document={document}
+        viewId={`conflict/${path}`}
+        languageId='plaintext'
+        showLineNumbers={false}
+        lineHighlights={lineHighlights}
+        onApply={(transaction) => {
+          const accepted = document.apply(transaction);
+          if (accepted) {
+            setDraft(document.text);
+          }
+          return accepted;
         }}
-        onChange={(next) => {
-          setDraft(next ?? '');
+        onHistory={(kind) => {
+          const changed = document[kind](`conflict/${path}`);
+          if (changed) {
+            setDraft(document.text);
+          }
+          return changed;
         }}
       />
     </div>

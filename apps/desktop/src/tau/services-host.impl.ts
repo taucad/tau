@@ -313,6 +313,8 @@ export type ServicesHostOptions = {
   ) => void;
   /** Reply to main with the machines a streamed run is feeding now, by name, so quit can refuse (Q-streamed-host). */
   readonly machinesStreaming?: (requestId: string, machines: readonly StreamingMachine[]) => void;
+  /** Reply to main with how many human Terminal sessions this utility serves, so quit can ask first (T15). */
+  readonly terminalSessionsAnswered?: (requestId: string, sessions: number) => void;
   /** The contained shell the agent's `shell` tool runs on (`services-host-shell.ts`); absent, no project offers it. */
   readonly shell?: DesktopShell | undefined;
   /** The desktop shell probe the `terminal` concern opens human sessions through; absent, each is refused. */
@@ -399,6 +401,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     machineBindingCompleted,
     machinesDirectory,
     machinesStreaming,
+    terminalSessionsAnswered,
     nativeKernels,
     onRevisionsUnavailable,
     quiesced,
@@ -447,6 +450,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   /* Counts main's quit questions and call-offs, so a hold that lands after its quit was called off lets go at once. */
   let quitAttempt = 0;
   let activeQuitRequest: string | undefined;
+  /** The quit attempt whose Terminal question holds new shell starts (T15). */
+  let terminalHoldAttempt: string | undefined;
   const releaseHeldStarts = (): void => {
     heldStarts?.();
     heldStarts = undefined;
@@ -1263,6 +1268,21 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         }
         return;
       }
+      case 'terminal-sessions': {
+        /* Quit's Terminal question (T15): the sessions this utility serves now. Asked for a quit attempt, it also
+         * holds new shell starts until the quit is called off or quiesce stops every Terminal, so the count main
+         * asks about cannot grow before then. */
+        const { requestId, attemptId } = frame;
+        if (typeof requestId !== 'string') {
+          return;
+        }
+        if (typeof attemptId === 'string') {
+          terminals.holdStarts();
+          terminalHoldAttempt = attemptId;
+        }
+        terminalSessionsAnswered?.(requestId, terminals.sessions());
+        return;
+      }
       case 'machines-streaming': {
         const { requestId } = frame;
         if (typeof requestId !== 'string') {
@@ -1334,6 +1354,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       }
       case 'machines-resume': {
         /* Main called its quit off after asking: admit starts again. */
+        if (terminalHoldAttempt !== undefined && frame['attemptId'] === terminalHoldAttempt) {
+          terminalHoldAttempt = undefined;
+          terminals.releaseStarts();
+        }
         if (frame['attemptId'] !== activeQuitRequest) {
           return;
         }

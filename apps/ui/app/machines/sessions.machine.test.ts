@@ -34,12 +34,17 @@ const isMachine = (value: unknown): boolean =>
 const harness = (options?: {
   readonly budget?: number;
   readonly closeNever?: boolean;
+  /** Hold the real close flush until the test releases it. */
+  readonly closeFlush?: Promise<void> | (() => Promise<void>);
+  /** Hold a producer refusal until navigation has requested the closing project again. */
+  readonly producerFlush?: Promise<void>;
   /** The producer flush refuses, as it does while an editor's conflict is being recorded. */
   readonly flushRefuses?: boolean;
   readonly inspect?: ReturnType<typeof guardActors>['inspect'];
 }) => {
   const started: string[] = [];
   const stopped: string[] = [];
+  const closeSteps: string[] = [];
   const readyChild = (region: ProjectSessionRegion) =>
     createCallbackLogic<EventObject, { projectId: string }>(({ sendBack }) => {
       sendBack({ type: 'childReady', region });
@@ -55,13 +60,19 @@ const harness = (options?: {
 
   const projectSession = projectSessionMachine.provide({
     actors: {
-      cancelRuns: fromSafeAsync<void, { projectId: string; runs: readonly string[] }>(async () => undefined),
-      flushProducers: fromSafeAsync<void, { projectId: string }>(async () => {
+      cancelRuns: fromSafeAsync<void, { projectId: string; runs: readonly string[] }>(async ({ input }) => {
+        closeSteps.push(`cancel:${input.projectId}`);
+      }),
+      flushProducers: fromSafeAsync<void, { projectId: string }>(async ({ input }) => {
+        closeSteps.push(`producers:${input.projectId}`);
+        await options?.producerFlush;
         if (options?.flushRefuses === true) {
           throw new Error('An editor conflict is being recorded');
         }
       }),
-      flushSync: fromSafeAsync<void, { projectId: string; boundMilliseconds: number }>(async () => {
+      flushSync: fromSafeAsync<void, { projectId: string; boundMilliseconds: number }>(async ({ input }) => {
+        closeSteps.push(`flush:${input.projectId}`);
+        await (typeof options?.closeFlush === 'function' ? options.closeFlush() : options?.closeFlush);
         if (options?.closeNever === true) {
           await new Promise<void>(() => {
             /* Never settles: the session that cannot finish closing. */
@@ -85,7 +96,7 @@ const harness = (options?: {
     actor.on(type, (event) => emitted.push(event));
   }
   actor.start();
-  return { actor, started, stopped, emitted };
+  return { actor, started, stopped, emitted, closeSteps };
 };
 
 /** Let the session's own promise actors settle. */
@@ -143,6 +154,200 @@ describe('sessionsMachine', async () => {
 
     expect(started).toEqual(['projA']);
     expect(Object.keys(actor.getSnapshot().context.refs)).toEqual(['projA']);
+    actor.stop();
+  });
+
+  it('waits for a closing slot without restarting its flush or closing another live project', async () => {
+    const closeFlush = Promise.withResolvers<void>();
+    const guard = guardActors({
+      ignore: { sessions: sessionsIgnoredEvents, 'project-session': projectSessionIgnoredEvents },
+    });
+    const { actor, started, stopped, closeSteps } = harness({
+      budget: 2,
+      closeFlush: closeFlush.promise,
+      inspect: guard.inspect,
+    });
+    await openIdle(actor, 'projA');
+    await openIdle(actor, 'projB');
+    actor.send({ type: 'releaseMemory', keepProjectId: 'projB' });
+    await settle();
+    expect(closeSteps).toEqual(['cancel:projA', 'producers:projA', 'flush:projA']);
+
+    actor.send({ type: 'open', projectId: 'projC' });
+    actor.send({ type: 'releaseMemory', keepProjectId: 'projB' });
+    actor.send({ type: 'idleExpired', projectId: 'projA' });
+    await settle();
+    expect(closeSteps).toEqual(['cancel:projA', 'producers:projA', 'flush:projA']);
+    expect(started).toEqual(['projA', 'projB']);
+    expect(stopped).toEqual([]);
+    expect(actor.getSnapshot().context.pendingOpen).toBe('projC');
+    expect(sessionsCloseSuggestions(actor.getSnapshot().context)).toEqual(['projB']);
+
+    closeFlush.resolve();
+    await settle();
+    expect(stopped).toEqual(['projA']);
+    expect(started).toEqual(['projA', 'projB', 'projC']);
+    expect(Object.keys(actor.getSnapshot().context.refs)).toEqual(['projB', 'projC']);
+    expect(actor.getSnapshot().context.status['projC']?.state).toBe('live');
+    expect(actor.getSnapshot().context.pendingOpen).toBeUndefined();
+    actor.stop();
+  });
+
+  it('reopens a project requested while its memory close is still flushing', async () => {
+    const closeFlush = Promise.withResolvers<void>();
+    const guard = guardActors({
+      ignore: { sessions: sessionsIgnoredEvents, 'project-session': projectSessionIgnoredEvents },
+    });
+    const { actor, started, stopped } = harness({
+      budget: 1,
+      closeFlush: closeFlush.promise,
+      inspect: guard.inspect,
+    });
+    await openIdle(actor, 'projA');
+    const firstRef = actor.getSnapshot().context.refs['projA'];
+    actor.send({ type: 'releaseMemory' });
+    await settle();
+    expect(actor.getSnapshot().context.status['projA']?.state).toBe('closing');
+
+    actor.send({ type: 'open', projectId: 'projB' });
+    actor.send({ type: 'open', projectId: 'projA' });
+    actor.send({ type: 'open', projectId: 'projA' });
+    expect(started).toEqual(['projA']);
+    expect(stopped).toEqual([]);
+    expect(Object.keys(actor.getSnapshot().context.refs)).toEqual(['projA']);
+
+    closeFlush.resolve();
+    await settle();
+
+    expect(stopped).toEqual(['projA']);
+    expect(started).toEqual(['projA', 'projA']);
+    expect(Object.keys(actor.getSnapshot().context.refs)).toEqual(['projA']);
+    expect(actor.getSnapshot().context.status['projA']?.state).toBe('live');
+    expect(actor.getSnapshot().context.refs['projA']).not.toBe(firstRef);
+    actor.stop();
+  });
+
+  it.each(['existing', 'new'] as const)(
+    'forgets a queued reopen when navigation selects an %s destination',
+    async (destination) => {
+      const closeFlush = Promise.withResolvers<void>();
+      const guard = guardActors({
+        ignore: { sessions: sessionsIgnoredEvents, 'project-session': projectSessionIgnoredEvents },
+      });
+      const { actor, started, stopped } = harness({
+        budget: 2,
+        closeFlush: closeFlush.promise,
+        inspect: guard.inspect,
+      });
+      await openIdle(actor, 'projA');
+      if (destination === 'existing') {
+        await openIdle(actor, 'projB');
+      }
+      actor.send({ type: 'releaseMemory', keepProjectId: 'projB' });
+      await settle();
+      actor.send({ type: 'open', projectId: 'projA' });
+      actor.send({ type: 'open', projectId: 'projB' });
+      closeFlush.resolve();
+      await settle();
+
+      expect(started).toEqual(['projA', 'projB']);
+      expect(stopped).toEqual(['projA']);
+      expect(Object.keys(actor.getSnapshot().context.refs)).toEqual(['projB']);
+      expect(actor.getSnapshot().context.pendingOpen).toBeUndefined();
+      actor.stop();
+    },
+  );
+
+  it('keeps a reopened project live when its producer refuses close without a stale pending open', async () => {
+    const producerFlush = Promise.withResolvers<void>();
+    const guard = guardActors({
+      ignore: { sessions: sessionsIgnoredEvents, 'project-session': projectSessionIgnoredEvents },
+    });
+    const { actor, started, stopped, emitted } = harness({
+      budget: 2,
+      producerFlush: producerFlush.promise,
+      inspect: guard.inspect,
+    });
+    await openIdle(actor, 'projA');
+    actor.send({ type: 'releaseMemory' });
+    await settle();
+    actor.send({ type: 'open', projectId: 'projA' });
+    producerFlush.reject(new Error('Editor save refused'));
+    await settle();
+
+    expect(started).toEqual(['projA']);
+    expect(stopped).toEqual([]);
+    expect(actor.getSnapshot().context.status['projA']?.state).toBe('live');
+    expect(actor.getSnapshot().context.pendingOpen).toBeUndefined();
+    expect(emitted.filter((event) => event.type === 'budgetRefused')).toEqual([]);
+    actor.stop();
+  });
+
+  it('should retain a failed close and queued reopen until an explicit close retry succeeds', async () => {
+    const closeFlush = Promise.withResolvers<void>();
+    const flush = vi
+      .fn<() => Promise<void>>()
+      .mockImplementationOnce(async () => closeFlush.promise)
+      .mockResolvedValue(undefined);
+    const guard = guardActors({
+      ignore: { sessions: sessionsIgnoredEvents, 'project-session': projectSessionIgnoredEvents },
+    });
+    const { actor, started, stopped, emitted } = harness({
+      budget: 1,
+      closeFlush: flush,
+      inspect: guard.inspect,
+    });
+    try {
+      await openIdle(actor, 'projA');
+      const firstRef = actor.getSnapshot().context.refs['projA'];
+      actor.send({ type: 'releaseMemory' });
+      await settle();
+      expect(actor.getSnapshot().context.status['projA']?.state).toBe('closing');
+      actor.send({ type: 'open', projectId: 'projA' });
+      closeFlush.reject(new Error('Sync flush failed'));
+      await settle();
+
+      expect(actor.getSnapshot().context.status['projA']?.state).toBe('failed');
+      expect(actor.getSnapshot().context.refs['projA']).toBe(firstRef);
+      expect(started).toEqual(['projA']);
+      expect(stopped).toEqual([]);
+      expect(flush).toHaveBeenCalledTimes(1);
+      expect(actor.getSnapshot().context.pendingOpen).toBe('projA');
+      expect(emitted.filter((event) => event.type === 'budgetRefused')).toEqual([
+        { type: 'budgetRefused', projectId: 'projA', suggestions: ['projA'] },
+      ]);
+
+      actor.send({ type: 'close', projectId: 'projA', reason: 'user' });
+      await settle();
+      expect(flush).toHaveBeenCalledTimes(2);
+      expect(stopped).toEqual(['projA']);
+      expect(started).toEqual(['projA', 'projA']);
+      expect(Object.keys(actor.getSnapshot().context.refs)).toEqual(['projA']);
+      expect(actor.getSnapshot().context.refs['projA']).not.toBe(firstRef);
+      expect(actor.getSnapshot().context.status['projA']?.state).toBe('live');
+      expect(actor.getSnapshot().context.pendingOpen).toBeUndefined();
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('drains a closing project at quit without starting its queued reopen', async () => {
+    const closeFlush = Promise.withResolvers<void>();
+    const guard = guardActors({
+      ignore: { sessions: sessionsIgnoredEvents, 'project-session': projectSessionIgnoredEvents },
+    });
+    const { actor, started, stopped } = harness({ budget: 1, closeFlush: closeFlush.promise, inspect: guard.inspect });
+    await openIdle(actor, 'projA');
+    actor.send({ type: 'releaseMemory' });
+    await settle();
+    actor.send({ type: 'open', projectId: 'projA' });
+    actor.send({ type: 'quit' });
+    closeFlush.resolve();
+    await settle();
+
+    expect(started).toEqual(['projA']);
+    expect(stopped).toEqual(['projA']);
+    expect(actor.getSnapshot().matches('quiesced')).toBe(true);
     actor.stop();
   });
 

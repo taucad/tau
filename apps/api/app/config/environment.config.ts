@@ -283,6 +283,18 @@ export const environmentSchemaBase = z.object({
     ),
 
   /*
+   * W14 OB3: R2 usage from Cloudflare's GraphQL Analytics API. Both optional: with either unset the
+   * storage accounting scheduler's `r2_analytics` task counts a skipped pass and exports no `tau_r2_*`
+   * series, and every other accounting task runs as usual.
+   */
+  TAU_CLOUDFLARE_ACCOUNT_ID: unsetWhenEmpty(z.string().optional()).describe(
+    'Cloudflare account id whose R2 analytics the storage accounting scheduler reads (W14 OB3)',
+  ),
+  TAU_CLOUDFLARE_ANALYTICS_TOKEN: unsetWhenEmpty(z.string().optional()).describe(
+    'Cloudflare API token with Account Analytics read, for R2 usage in Grafana (W14 OB3); unset leaves the R2 task off',
+  ),
+
+  /*
    * Tau Hosted Remote (charter D1). Retired: a repository's durable state is
    * its manifest and packs in object storage, and every request builds a
    * disposable lease on the worker's own ephemeral disk. There is no root

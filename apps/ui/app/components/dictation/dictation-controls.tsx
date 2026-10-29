@@ -1,4 +1,5 @@
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useLayoutEffect, useRef } from 'react';
+import type { RefObject } from 'react';
 import { Mic, Square, X } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
@@ -7,64 +8,76 @@ import { cn } from '@taucad/ui/utils/cn';
 import { dictationLabels } from '#components/dictation/use-dictation.js';
 import type { DictationPhase, DictationWaveform } from '#components/dictation/use-dictation.js';
 
-type DictationControls = {
-  readonly phase: DictationPhase;
-  readonly onStart: () => Promise<void>;
-  readonly onStop: () => Promise<boolean>;
-};
+/** The composer's 28px pill (as `ghostPillClass`), so the expanded microphone lines up with Send. */
+const stopPillClass = 'h-7 rounded-full px-2.5 text-muted-foreground hover:text-foreground';
 
-export const DictationButton = memo(function ({ phase, onStart, onStop }: DictationControls): React.JSX.Element {
-  const recording = phase === 'recording';
-  const busy = phase !== 'idle' && !recording;
-  const label = recording ? 'Stop dictation' : busy ? dictationLabels[phase] : 'Dictate';
-  const handleClick = useCallback(() => {
-    if (busy) {
-      return;
-    }
-    if (recording) {
-      void onStop();
-    } else {
-      void onStart();
-    }
-  }, [busy, onStart, onStop, recording]);
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type='button'
-          variant='ghost'
-          size='icon-sm'
-          aria-label={label}
-          aria-disabled={busy}
-          aria-busy={busy}
-          className={cn('shrink-0 rounded-full', phase !== 'idle' && 'bg-muted')}
-          onClick={handleClick}
-        >
-          {busy ? (
-            <Loader className='size-4' />
-          ) : recording ? (
-            <Square aria-hidden='true' className='size-3.5 fill-current' />
-          ) : (
-            <Mic aria-hidden='true' className='size-4' />
-          )}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
-  );
-});
-
-export const DictationRecording = memo(function ({
-  phase,
-  waveform: { levels, batch },
-  onCancel,
-}: {
+type DictationControlProperties = {
   readonly phase: DictationPhase;
   readonly waveform: DictationWaveform;
+  readonly onStart: () => Promise<void>;
+  readonly onStop: () => Promise<boolean>;
   readonly onCancel: () => void;
-}): React.JSX.Element {
+};
+
+/**
+ * The one dictation control every input shares. At rest it is the microphone; once started it expands in place
+ * into an outlined pill holding the live waveform and a stop square, the whole pill stopping the recording, with
+ * a cancel button on its left. The input and its other controls stay where they are.
+ */
+export const DictationControl = memo(function ({
+  phase,
+  waveform,
+  onStart,
+  onStop,
+  onCancel,
+}: DictationControlProperties): React.JSX.Element {
+  const active = phase !== 'idle';
+  const microphoneRef = useRef<HTMLButtonElement>(null);
+  const stopRef = useRef<HTMLButtonElement>(null);
+  /* Pressing the microphone, cancel or the pill unmounts the pressed button; carry focus to its counterpart
+   * instead of dropping it to the page. Send, Escape or the input's own focus keep it where they put it. */
+  const carryFocus = useRef(false);
+  const pressed = useCallback(() => {
+    carryFocus.current = true;
+  }, []);
+  useLayoutEffect(() => {
+    if (!carryFocus.current) {
+      return;
+    }
+    carryFocus.current = false;
+    if (document.activeElement === null || document.activeElement === document.body) {
+      (active ? stopRef : microphoneRef).current?.focus();
+    }
+  }, [active]);
+  if (!active) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            ref={microphoneRef}
+            type='button'
+            variant='ghost'
+            size='icon-sm'
+            aria-label={dictationLabels.idle}
+            aria-disabled={false}
+            className='shrink-0 rounded-full'
+            onClick={() => {
+              pressed();
+              void onStart();
+            }}
+          >
+            <Mic aria-hidden='true' className='size-4' />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{dictationLabels.idle}</TooltipContent>
+      </Tooltip>
+    );
+  }
   return (
-    <>
+    <div
+      data-slot='dictation-control'
+      className='flex shrink-0 animate-in items-center gap-1 duration-200 ease-out fade-in motion-reduce:animate-none'
+    >
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -72,79 +85,122 @@ export const DictationRecording = memo(function ({
             variant='ghost'
             size='icon-sm'
             aria-label='Cancel dictation'
-            className='shrink-0 rounded-full bg-muted'
-            onClick={onCancel}
+            className='shrink-0 rounded-full text-muted-foreground'
+            onClick={() => {
+              pressed();
+              onCancel();
+            }}
           >
             <X aria-hidden='true' className='size-4' />
           </Button>
         </TooltipTrigger>
         <TooltipContent>Cancel dictation</TooltipContent>
       </Tooltip>
-      {phase === 'recording' ? (
-        <div
-          role='img'
-          aria-label='Microphone waveform'
-          data-slot='dictation-waveform'
-          data-level={levels.at(-1) ?? 0}
-          className='flex h-7 min-w-0 flex-1 items-center justify-end overflow-hidden mask-x-from-[calc(100%-var(--spacing)*4)] mask-x-to-100% text-muted-foreground/70 motion-reduce:hidden'
-        >
-          {/* Each batch shifts the levels one slot left, where the finished glide already shows them. Swapping
-              between two identical glides restarts it in that same frame, so the row travels continuously
-              instead of stepping, even through silence. */}
-          <div
-            className={cn(
-              'flex h-full shrink-0 items-center gap-0.75',
-              batch % 2 === 0 ? 'animate-dictation-scroll' : 'animate-dictation-scroll-alternate',
-            )}
-          >
-            {levels.map((level, index) => (
-              <span
-                // Fixed time slots, never interactive or reordered.
-                // oxlint-disable-next-line react/no-array-index-key -- Fixed waveform time slots shift levels, not DOM identity.
-                key={index}
-                className='max-h-6 min-h-0.75 w-0.75 shrink-0 rounded-full bg-current'
-                style={{ height: `${Math.max(0, Math.min(1, level * 8)) * 100}%` }}
-              />
-            ))}
-          </div>
-        </div>
-      ) : null}
-      <span
-        role='status'
-        aria-label={dictationLabels[phase]}
-        aria-busy={phase !== 'recording'}
-        className={
-          phase === 'recording'
-            ? 'sr-only motion-reduce:not-sr-only motion-reduce:flex motion-reduce:h-7 motion-reduce:flex-1 motion-reduce:items-center motion-reduce:justify-center motion-reduce:text-sm motion-reduce:text-muted-foreground'
-            : 'flex h-7 min-w-0 flex-1 items-center justify-center text-sm text-muted-foreground'
-        }
-      >
-        <span className='truncate'>{dictationLabels[phase]}</span>
-      </span>
-    </>
+      <DictationStopPill
+        buttonRef={stopRef}
+        phase={phase}
+        waveform={waveform}
+        onStop={async () => {
+          pressed();
+          return onStop();
+        }}
+      />
+    </div>
   );
 });
 
-/** Shared preview and recoverable error feedback; neither changes the input value. */
-export function DictationFeedback({
-  transcript,
-  error,
-}: {
-  readonly transcript: string;
-  readonly error: string | undefined;
+/** The expanded microphone: an outlined pill whose whole face stops recording. */
+function DictationStopPill({
+  buttonRef,
+  phase,
+  waveform: { levels, batch },
+  onStop,
+}: Pick<DictationControlProperties, 'phase' | 'waveform' | 'onStop'> & {
+  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object
+  readonly buttonRef: RefObject<HTMLButtonElement | null>;
 }): React.JSX.Element {
+  const recording = phase === 'recording';
+  const label = recording ? 'Stop dictation' : dictationLabels[phase];
+  const handleClick = useCallback(() => {
+    if (recording) {
+      void onStop();
+    }
+  }, [onStop, recording]);
   return (
     <>
-      {transcript === '' ? null : (
-        <p data-slot='dictation-transcript' className='px-3 py-1 text-sm text-muted-foreground'>
-          {transcript}
-        </p>
-      )}
-      {error === undefined ? null : (
-        <p role='alert' aria-label='Dictation error' className='px-3 py-1 text-xs text-muted-foreground'>
-          {error}
-        </p>
-      )}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            ref={buttonRef}
+            type='button'
+            variant='outline'
+            size='sm'
+            aria-label={label}
+            aria-disabled={!recording}
+            aria-busy={!recording}
+            className={cn(
+              stopPillClass,
+              'shrink-0 origin-right shadow-none',
+              // The microphone grows into the pill from its own corner: transform and opacity only.
+              'animate-in duration-200 ease-out fade-in zoom-in-50 motion-reduce:animate-none',
+            )}
+            onClick={handleClick}
+          >
+            {recording ? (
+              <>
+                <span
+                  role='img'
+                  aria-label='Microphone waveform'
+                  data-slot='dictation-waveform'
+                  data-level={levels.at(-1) ?? 0}
+                  className='flex h-4 w-12 items-center justify-end overflow-hidden mask-l-from-[calc(100%-var(--spacing)*3)] mask-l-to-100% text-muted-foreground motion-reduce:invisible'
+                >
+                  {/* Each batch shifts the levels one slot left, where the finished glide already shows them. Swapping
+                    between two identical glides restarts it in that same frame, so the row travels continuously
+                    instead of stepping, even through silence. */}
+                  <span
+                    className={cn(
+                      'flex h-full shrink-0 items-center gap-0.75',
+                      batch % 2 === 0 ? 'animate-dictation-scroll' : 'animate-dictation-scroll-alternate',
+                    )}
+                  >
+                    {levels.map((level, index) => (
+                      <span
+                        // Fixed time slots, never interactive or reordered.
+                        // oxlint-disable-next-line react/no-array-index-key -- Fixed waveform time slots shift levels, not DOM identity.
+                        key={index}
+                        className='min-h-0.75 w-0.75 shrink-0 rounded-full bg-current'
+                        style={{
+                          height: `${Math.max(0, Math.min(1, level * 8)) * 100}%`,
+                        }}
+                      />
+                    ))}
+                  </span>
+                </span>
+                <Square aria-hidden='true' className='size-3 shrink-0 fill-current' />
+              </>
+            ) : (
+              // Same width as the waveform and stop square, so the pill holds its size while it works.
+              <span className='flex w-16.5 justify-center'>
+                <Loader className='size-3.5' />
+              </span>
+            )}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{label}</TooltipContent>
+      </Tooltip>
+      <span role='status' aria-label={dictationLabels[phase]} aria-busy={!recording} className='sr-only'>
+        {dictationLabels[phase]}
+      </span>
     </>
+  );
+}
+
+/** The streamed transcript preview while transcribing; it never changes the input value. Failures show as toasts. */
+export function DictationFeedback({ transcript }: { readonly transcript: string }): React.JSX.Element | undefined {
+  return transcript === '' ? undefined : (
+    <p data-slot='dictation-transcript' className='px-3 py-1 text-sm text-muted-foreground'>
+      {transcript}
+    </p>
   );
 }

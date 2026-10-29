@@ -4,7 +4,7 @@ import type { Editor } from '@tiptap/core';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { AtSign, Paperclip, Plus } from 'lucide-react';
 import { useDictation } from '#components/dictation/use-dictation.js';
-import { DictationButton, DictationRecording, DictationFeedback } from '#components/dictation/dictation-controls.js';
+import { DictationControl, DictationFeedback } from '#components/dictation/dictation-controls.js';
 import type { AcpSessionData } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import type { FileEntry } from '@taucad/types';
@@ -519,19 +519,18 @@ export const ChatTextareaDesktop = memo(function ({
         isSubmitDisabled,
         isEmpty: !dictationActive && !canResume && inputText.trim().length === 0 && attachments.length === 0,
       });
-  const dictationButton = useMemo(
+  const dictationControl = useMemo(
     () =>
       dictation.available === true ? (
-        <DictationButton phase={dictation.phase} onStart={dictation.start} onStop={dictation.stop} />
+        <DictationControl
+          phase={dictation.phase}
+          waveform={dictation.waveform}
+          onStart={dictation.start}
+          onStop={dictation.stop}
+          onCancel={dictation.cancel}
+        />
       ) : undefined,
-    [dictation.available, dictation.phase, dictation.start, dictation.stop],
-  );
-  const dictationRecording = useMemo(
-    () =>
-      dictationActive ? (
-        <DictationRecording phase={dictation.phase} waveform={dictation.waveform} onCancel={dictation.cancel} />
-      ) : undefined,
-    [dictation.cancel, dictation.waveform, dictation.phase, dictationActive],
+    [dictation.available, dictation.phase, dictation.waveform, dictation.start, dictation.stop, dictation.cancel],
   );
   const blockReasonId = useId();
   const collapse = collapsibleClassNames(enableMobileCollapse, dictation.available);
@@ -624,10 +623,10 @@ export const ChatTextareaDesktop = memo(function ({
           </div>
         ) : null}
 
-        <DictationFeedback transcript={dictation.transcript} error={dictation.error} />
+        <DictationFeedback transcript={dictation.transcript} />
         <ChatTextareaBar
-          dictationButton={dictationButton}
-          dictationRecording={dictationRecording}
+          dictationControl={dictationControl}
+          isDictating={dictationActive}
           composerMode={mode}
           containerReference={containerReference}
           enableContextActions={enableContextActions}
@@ -798,8 +797,8 @@ function useBarCollapse(barRef: React.RefObject<HTMLDivElement | null>): void {
  * @internal
  */
 export const ChatTextareaBar = memo(function ({
-  dictationButton,
-  dictationRecording,
+  dictationControl,
+  isDictating = false,
   composerMode,
   containerReference,
   enableContextActions,
@@ -822,8 +821,8 @@ export const ChatTextareaBar = memo(function ({
   handleSubmit,
   handleCancelClick,
 }: {
-  readonly dictationButton?: React.ReactNode;
-  readonly dictationRecording?: React.ReactNode;
+  readonly dictationControl?: React.ReactNode;
+  readonly isDictating?: boolean;
   readonly composerMode: 'main' | 'edit';
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object
   readonly containerReference: React.RefObject<HTMLDivElement | null>;
@@ -887,62 +886,55 @@ export const ChatTextareaBar = memo(function ({
         collapsedBarClassName,
       )}
     >
-      {dictationRecording === undefined ? (
+      <div
+        data-slot='composer-left'
+        className='pointer-events-auto flex shrink-0 flex-row items-center gap-0.5 pointer-coarse:gap-3'
+      >
+        <ChatAddMenu
+          enableContextActions={enableContextActions}
+          isAttachmentSupported={attachmentInputSupported}
+          handleAtButtonClick={handleAtButtonClick}
+          handleFileSelect={handleFileSelect}
+          focusEditor={focusEditor}
+        />
         <div
-          data-slot='composer-left'
-          className='pointer-events-auto flex shrink-0 flex-row items-center gap-0.5 pointer-coarse:gap-3'
+          data-slot='composer-collapsible'
+          className={cn(collapsibleControlsClassName, 'gap-0.5 pointer-coarse:gap-3')}
         >
-          <ChatAddMenu
-            enableContextActions={enableContextActions}
-            isAttachmentSupported={attachmentInputSupported}
-            handleAtButtonClick={handleAtButtonClick}
-            handleFileSelect={handleFileSelect}
-            focusEditor={focusEditor}
-          />
-          <div
-            data-slot='composer-collapsible'
-            className={cn(collapsibleControlsClassName, 'gap-0.5 pointer-coarse:gap-3')}
-          >
-            <ChatAgentModeControl agentConfig={agentConfig} focusEditor={focusEditor} enableShortcut={ownsShortcuts} />
-            {creationLocationControl}
-            {enableKernelSelector ? <ChatTextareaKernelControl focusEditor={focusEditor} /> : null}
-          </div>
-          <input
-            ref={fileInputReference}
-            multiple
-            type='file'
-            accept={attachmentAccept}
-            className='hidden'
-            onChange={handleFileChange}
-          />
+          <ChatAgentModeControl agentConfig={agentConfig} focusEditor={focusEditor} enableShortcut={ownsShortcuts} />
+          {creationLocationControl}
+          {enableKernelSelector ? <ChatTextareaKernelControl focusEditor={focusEditor} /> : null}
         </div>
-      ) : (
-        <div data-slot='composer-left' className='pointer-events-auto flex min-w-0 flex-1 flex-row items-center gap-2'>
-          {dictationRecording}
-        </div>
-      )}
+        <input
+          ref={fileInputReference}
+          multiple
+          type='file'
+          accept={attachmentAccept}
+          className='hidden'
+          onChange={handleFileChange}
+        />
+      </div>
       <div
         data-slot='composer-right'
         className='pointer-events-auto flex min-w-0 flex-row items-center gap-1 pointer-coarse:gap-3'
       >
-        {dictationRecording === undefined ? (
-          <div
-            data-slot='composer-collapsible'
-            className={cn(collapsibleControlsClassName, 'gap-1 pointer-coarse:gap-3')}
-          >
-            <ChatContextIndicator />
-            <ChatAgentSheet
-              agentConfig={agentConfig}
-              placements={placements}
-              focusEditor={focusEditor}
-              enableShortcut={ownsShortcuts}
-            />
-          </div>
-        ) : null}
-        {dictationButton}
+        <div
+          data-slot='composer-collapsible'
+          className={cn(collapsibleControlsClassName, 'gap-1 pointer-coarse:gap-3')}
+        >
+          <ChatContextIndicator />
+          <ChatAgentSheet
+            agentConfig={agentConfig}
+            placements={placements}
+            focusEditor={focusEditor}
+            enableShortcut={ownsShortcuts}
+          />
+        </div>
+        {dictationControl}
         <ChatTextareaSubmitButton
           status={status}
           isSubmitting={isSubmitting}
+          isDictating={isDictating}
           canResume={canResume}
           refusal={sendRefusal}
           describedBy={describedBy}

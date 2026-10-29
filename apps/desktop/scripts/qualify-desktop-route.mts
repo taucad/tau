@@ -13,11 +13,11 @@ import { z } from 'zod';
 import { linuxInstallation } from '#shared/linux-installation.js';
 import { promisify } from 'node:util';
 import { defaultPayloadStore } from '@taucad/host';
-import { fetchQualificationCandidates } from './qualification-candidates.mjs';
+import { assertQualificationConsumerScope, fetchQualificationCandidates } from './qualification-candidates.mjs';
 import { qualificationArtifactObjects, qualificationFeed } from './qualification-feeds.mjs';
 import { startQualificationMirrorProcess } from './qualification-mirror-process.mjs';
 import { assertDisposableQualificationHost, prepareQualificationTls } from './qualification-tls.mjs';
-import { createWindowsQualificationDriver } from './qualification-windows.mjs';
+import { createWindowsQualificationDriver, observeWindowsConsumerHost } from './qualification-windows.mjs';
 import { createLinuxAptQualificationDriver } from './qualification-linux.mjs';
 import { prepareQualificationAptEnrollment } from './qualification-apt-enrollment.mjs';
 import type { QualificationAptEnrollment } from './qualification-apt-enrollment.mjs';
@@ -29,7 +29,9 @@ import { downloadWithBrowser } from './qualification-browser-download.mjs';
 import { discoverQualificationProcesses } from './qualification-processes.mjs';
 import {
   assertMacosCleanHost,
+  assertWindowsConsumerHost,
   collectQualificationReceipt,
+  validateSoftwareCiEvidence,
   macosCleanHostApplication,
   qualificationProbeObservationSchema,
 } from './qualification-evidence.mjs';
@@ -70,6 +72,7 @@ const rendererSchema = z.object({
   observedAt: z.iso.datetime(),
   exported: z.object({ path: z.string(), sha256: z.string(), vertices: z.number().positive() }),
   nativeEngineLogs: z.array(z.string()).min(1),
+  softwareRenderer: z.string().optional(),
 });
 async function waitFor<T>(read: () => Promise<T | undefined>, message: string, timeout = 900_000): Promise<T> {
   const deadline = Date.now() + timeout;
@@ -131,16 +134,38 @@ const main = async (): Promise<void> => {
   const target = z
     .enum(['darwin-arm64', 'darwin-x64', 'win32-x64', 'linux-x64'])
     .parse(`${process.platform}-${process.arch}`);
+  const graphics = z.enum(['stock', 'isolated-software']).parse(process.env['TAU_QUALIFICATION_GRAPHICS'] ?? 'stock');
+  if (
+    graphics === 'isolated-software' &&
+    (process.platform !== 'linux' ||
+      !route.startsWith('linux-') ||
+      process.env['TAU_QUALIFICATION_DISPOSABLE_VM'] !== '1' ||
+      process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] !== 'linux' ||
+      process.env['TAU_QUALIFICATION_CHANNEL'] !== 'staging' ||
+      process.env['TAU_DESKTOP_ACCEPTANCE_KIND'] === 'vm')
+  ) {
+    throw new Error('Isolated software CI is restricted to Linux staging CI');
+  }
+  const graphicsArguments =
+    graphics === 'isolated-software'
+      ? ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']
+      : [];
   if (route === 'linux-appimage' && process.env['APPIMAGE_EXTRACT_AND_RUN']) {
     throw new Error('Qualification requires native AppImage FUSE mode, not extract-and-run');
   }
   if (process.platform === 'linux' && (!process.env['DISPLAY'] || process.env['XDG_SESSION_TYPE'] !== 'x11')) {
     throw new Error('Qualification requires the declared graphical X11 session');
   }
-  // Clean-host (vm) acceptance is a Mac-only staging run on a SIP/Gatekeeper-enabled host; it is never inferred.
+  // Consumer acceptance requires native observations before the run creates its profile.
   const acceptanceKind = z.enum(['ci', 'vm']).parse(process.env['TAU_DESKTOP_ACCEPTANCE_KIND'] ?? 'ci');
+  assertQualificationConsumerScope({
+    kind: acceptanceKind,
+    route,
+    scope: process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'],
+    channel: required('TAU_QUALIFICATION_CHANNEL'),
+  });
   const cleanHost =
-    acceptanceKind === 'vm'
+    acceptanceKind === 'vm' && route.startsWith('macos-')
       ? await (async () => {
           if (!route.startsWith('macos-') || process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] !== 'macos') {
             throw new Error('Clean-host acceptance is a Mac-scoped run only');
@@ -152,12 +177,21 @@ const main = async (): Promise<void> => {
           );
         })()
       : undefined;
+  const windowsHost =
+    acceptanceKind === 'vm' && route === 'windows-nsis'
+      ? assertWindowsConsumerHost(observeWindowsConsumerHost(required('RUNNER_NAME')))
+      : undefined;
+  if (acceptanceKind === 'vm' && !cleanHost && !windowsHost) {
+    throw new Error('Consumer acceptance requires its staging platform scope');
+  }
   const root = resolve(required('TAU_QUALIFICATION_DIRECTORY'));
   await mkdir(root, { recursive: false });
   let cleanHostRun: { host: NonNullable<typeof cleanHost>; directory: string } | undefined;
-  if (cleanHost) {
+  if (cleanHost ?? windowsHost) {
     await mkdir(join(root, 'clean-host'), { recursive: false });
-    cleanHostRun = { host: cleanHost, directory: await realpath(join(root, 'clean-host')) };
+    if (cleanHost) {
+      cleanHostRun = { host: cleanHost, directory: await realpath(join(root, 'clean-host')) };
+    }
   }
   const candidates = await fetchQualificationCandidates({
     runIds: [
@@ -168,6 +202,7 @@ const main = async (): Promise<void> => {
     directory: root,
     sourceCommit: required('GITHUB_SHA'),
     scope: process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all',
+    kind: acceptanceKind,
   });
   const { channel } = candidates[2].manifest;
   if (channel !== required('TAU_QUALIFICATION_CHANNEL')) {
@@ -208,6 +243,7 @@ const main = async (): Promise<void> => {
   let driver: QualificationPlatformDriver & {
     launch?(stage: 'initial' | 'reinstall', args: readonly string[], env: Record<string, string>): Promise<number>;
     acceptance?(): NonNullable<QualificationEvidence['acceptance']>;
+    windowsAcceptance?(): NonNullable<QualificationEvidence['windowsAcceptance']>;
   };
   let apt: QualificationAptEnrollment | undefined;
   let aptDriver: LinuxAptQualificationDriver | undefined;
@@ -273,6 +309,17 @@ const main = async (): Promise<void> => {
             mode: 'release',
             installationPath,
             publisher: required('TAU_WINDOWS_PUBLISHER'),
+            ...(windowsHost
+              ? {
+                  cleanHost: {
+                    host: windowsHost,
+                    nonce,
+                    directory: join(root, 'clean-host'),
+                    origin: transport.origin,
+                    download: downloadWithBrowser,
+                  },
+                }
+              : {}),
           })
         : (aptDriver = createLinuxAptQualificationDriver({
             mode: 'release',
@@ -341,7 +388,7 @@ const main = async (): Promise<void> => {
       }
       const child = spawn(
         route === 'linux-apt' || route === 'linux-appimage' ? installationPath : installedA.executablePath,
-        [`--tau-route-qualification=${nonce}`],
+        [`--tau-route-qualification=${nonce}`, ...graphicsArguments],
         {
           env: { ...process.env, TAU_DESKTOP_UPDATE_FEED: transport.origin },
           // Keep native loader/FUSE/sandbox startup errors in the disposable Linux job log.
@@ -578,6 +625,7 @@ const main = async (): Promise<void> => {
           nativePids: processes.nativeChildPids,
           nativeAncestry: processes.nativeAncestry,
           saveObservedAt: Date.parse(rendered.observedAt),
+          ...(rendered.softwareRenderer ? { softwareRenderer: rendered.softwareRenderer } : {}),
         },
         security,
       });
@@ -636,7 +684,7 @@ const main = async (): Promise<void> => {
     const reinstalled = await driver.reinstall(candidate(2), preserved);
     await rm(join(profile, 'DevToolsActivePort'), { force: true });
     offset = await stat(join(profile, 'logs/desktop.log')).then((info) => info.size);
-    const resumedArgs = ['--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0'];
+    const resumedArgs = ['--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0', ...graphicsArguments];
     let resumedPid: number | undefined;
     if (driver.launch) {
       resumedPid = await driver.launch('reinstall', resumedArgs, { TAU_DESKTOP_UPDATES: 'off' });
@@ -682,7 +730,7 @@ const main = async (): Promise<void> => {
     await driver.remove(preserved);
     await transport.flush();
     const evidence: QualificationEvidence = {
-      mode: 'release',
+      mode: graphics === 'isolated-software' ? 'software-ci' : 'release',
       route,
       target,
       stages: [stages[0]!, stages[1]!, final],
@@ -706,8 +754,9 @@ const main = async (): Promise<void> => {
       ...(apt ? { scheduler } : {}),
       mirrorRequests: transport.requests.map((request) => ({ ...request, at: Date.parse(request.at) })),
       logs: `https://github.com/taucad/tau/actions/runs/${required('GITHUB_RUN_ID')}`,
-      suite: cleanHost ? 'clean-host-route-a-b-c-v1' : 'installed-route-a-b-c-v1',
+      suite: (cleanHost ?? windowsHost) ? 'clean-host-route-a-b-c-v1' : 'installed-route-a-b-c-v1',
       ...(driver.acceptance ? { acceptance: driver.acceptance() } : {}),
+      ...(driver.windowsAcceptance ? { windowsAcceptance: driver.windowsAcceptance() } : {}),
       trustIdentity:
         route === 'windows-nsis'
           ? required('TAU_WINDOWS_PUBLISHER')
@@ -718,7 +767,11 @@ const main = async (): Promise<void> => {
               : required('TAU_APPIMAGE_KEY_ID'),
     };
     await writeFile(join(root, 'qualification-evidence.json'), JSON.stringify(evidence, undefined, 2));
-    acceptedReceipt = collectQualificationReceipt(evidence);
+    if (graphics === 'isolated-software') {
+      validateSoftwareCiEvidence(evidence);
+    } else {
+      acceptedReceipt = collectQualificationReceipt(evidence);
+    }
   } catch (error) {
     failures.push(error);
   } finally {
@@ -744,7 +797,7 @@ const main = async (): Promise<void> => {
       JSON.stringify(
         {
           status: failures.length > 0 ? 'failed' : 'passed',
-          mode: 'release',
+          mode: graphics === 'isolated-software' ? 'software-ci' : 'release',
           stages,
           mirrorRequests: mirror?.requests ?? [],
           failures: failures.map((error) => (error instanceof Error ? error.message : String(error))),
@@ -756,6 +809,24 @@ const main = async (): Promise<void> => {
   }
   if (failures.length > 0) {
     throw new AggregateError(failures, 'Qualification or its cleanup failed');
+  }
+  if (graphics === 'isolated-software') {
+    await writeFile(
+      join(root, 'software-ci-evidence.json'),
+      JSON.stringify(
+        {
+          kind: 'isolated-software-ci',
+          status: 'passed',
+          stockGpuAcceptance: 'open',
+          releaseEligible: false,
+          evidence: 'qualification-evidence.json',
+        },
+        undefined,
+        2,
+      ),
+      { flag: 'wx' },
+    );
+    return;
   }
   if (!acceptedReceipt) {
     throw new Error('No accepted qualification receipt');

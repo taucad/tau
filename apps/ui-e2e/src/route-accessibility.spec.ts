@@ -40,7 +40,9 @@ const openRoute = async (route: string, viewport: { width: number; height: numbe
   // Headings arrive with the route module; a page without one is reported by the rules, not here.
   await target.expectVisible(selectors.getByRole('heading', { level: 1 }), 30_000).catch(() => undefined);
   const { headingOnes } = await readPageSemantics();
-  return headingOnes[0] === '404' ? `${route} is not part of this build (self-host builds omit it).` : undefined;
+  return headingOnes[0] === 'Page not found'
+    ? `${route} is not part of this build (self-host builds omit it).`
+    : undefined;
 };
 
 describe.each(routes)('%s', (route) => {

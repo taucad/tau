@@ -121,7 +121,7 @@ describe('DrawerContent', () => {
 });
 
 describe('drawer grabber target', () => {
-  it('should give the grabber a 36px row and a 44px target that reaches 8px above the sheet edge only (D4, I3)', () => {
+  it('should give the grabber an 8px row, its bar at the row foot, and a target that reaches 8px above the sheet edge only', () => {
     render(
       <Drawer open snapPoints={[0.25, 1]}>
         <DrawerContent>
@@ -133,9 +133,14 @@ describe('drawer grabber target', () => {
     const handle = screen.getByRole('slider', { name: 'Drawer height' });
     const row = handle.parentElement!;
     const content = handle.closest('[data-slot=drawer-content]')!;
-    // 9 × 4px spacing: the row is the grabber box, which the surface below starts after.
-    expect(content).toHaveClass('[--drawer-handle-height:calc(var(--spacing)*9)]');
+    // 2 × 4px spacing: the row is the grabber box, which the surface below starts after.
+    expect(content).toHaveClass('[--drawer-handle-height:calc(var(--spacing)*2)]');
     expect(row).toHaveClass('h-(--drawer-handle-height)', 'relative');
+    // The bar ends where the row does: no empty band between it and a header below, which keeps a header's actions
+    // as far below the bar as above the header's foot.
+    const bar = row.querySelector('[data-slot=drawer-handle-indicator]');
+    expect(bar).toHaveClass('absolute', 'bottom-0', 'h-1');
+    expect(bar).not.toHaveClass('top-1/2');
     // The target spans the row's width, starts 8px (2 × 4px) above it and ends at its foot, never over the header.
     expect(handle).toHaveClass('absolute!', 'inset-x-0!', '-top-2!', 'bottom-0!', 'h-auto!', 'w-full!');
     expect(handle).not.toHaveClass('inset-0!', 'size-full!');
@@ -177,6 +182,22 @@ describe('drawer height keyboard controls', () => {
     );
     const handle = screen.getByRole('slider', { name: 'Drawer height' });
     expect(handle).toHaveAttribute('aria-valuetext', 'Peek');
+    fireEvent.keyDown(handle, { key: 'ArrowUp' });
+    expect(handle).toHaveAttribute('aria-valuetext', 'Full');
+  });
+
+  it('should name a half-and-full drawer’s detents Half and Full', () => {
+    render(
+      <Drawer open snapPoints={[0.5, 1]}>
+        <DrawerContent>
+          <DrawerTitle>Workbench</DrawerTitle>
+          <DrawerDescription>Review panes</DrawerDescription>
+        </DrawerContent>
+      </Drawer>,
+    );
+    const handle = screen.getByRole('slider', { name: 'Drawer height' });
+    expect(handle).toHaveAttribute('aria-valuetext', 'Half');
+    expect(handle).toHaveAttribute('aria-valuemax', '2');
     fireEvent.keyDown(handle, { key: 'ArrowUp' });
     expect(handle).toHaveAttribute('aria-valuetext', 'Full');
   });

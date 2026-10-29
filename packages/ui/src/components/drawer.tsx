@@ -221,14 +221,19 @@ function DrawerClose({ ...properties }: React.ComponentProps<typeof DrawerPrimit
 }
 
 /**
- * The spoken name of a detent, by its place: the lowest is the peek, the tallest is full, and the one between three is
- * half. Names, not percentages, so the same detent reads the same at every viewport height.
+ * The spoken name of a detent: a half-screen detent is half wherever it sits, otherwise by its place: the lowest is the
+ * peek, the tallest is full, and the one between three is half. Names, not percentages, so the same detent reads the
+ * same at every viewport height.
  *
+ * @param point - Where the detent rests: a fraction of the screen, or a CSS length.
  * @param index - The detent's place, from the lowest.
  * @param count - How many detents the drawer has.
- * @returns The detent's name.
+ * @returns Peek, Half or Full.
  */
-function detentName(index: number, count: number): string {
+function detentName(point: SnapPoint | undefined, index: number, count: number): string {
+  if (point === 0.5 && count > 1) {
+    return 'Half';
+  }
   if (index === 0) {
     return 'Peek';
   }
@@ -272,7 +277,7 @@ function DrawerHandle({
             'aria-valuemin': 1,
             'aria-valuemax': snaps.points.length,
             'aria-valuenow': index + 1,
-            'aria-valuetext': detentName(index, snaps.points.length),
+            'aria-valuetext': detentName(snaps.points[index], index, snaps.points.length),
           }
         : {})}
       {...properties}
@@ -305,8 +310,10 @@ function DrawerHandle({
 }
 
 /**
- * The grabber row. Its 44px target (D4) is the 36px row plus 8px above the sheet's edge: the row's foot belongs to the
- * surface's header actions, and content docked above a sheet keeps 8px clear of its edge.
+ * The grabber row: an 8px row whose bar sits 4px below the sheet's edge and ends where the row does, so no empty band
+ * separates it from the header below. A header's actions then keep the same space above them as below. Its 16px
+ * target is the row plus 8px above the sheet's edge: the header's actions are never part of it, and content docked
+ * above a sheet keeps 8px clear of its edge.
  */
 function DrawerHandleIndicator({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
   return (
@@ -315,7 +322,7 @@ function DrawerHandleIndicator({ className, ...properties }: React.ComponentProp
       <div
         data-slot='drawer-handle-indicator'
         className={cn(
-          'pointer-events-none absolute inset-x-0 top-1/2 mx-auto h-1 w-15 -translate-y-1/2 rounded-full bg-accent',
+          'pointer-events-none absolute inset-x-0 bottom-0 mx-auto h-1 w-15 rounded-full bg-accent',
           className,
         )}
         {...properties}
@@ -368,12 +375,16 @@ function DrawerOverlay({
  */
 function DrawerContent({
   className,
+  overlayClassName,
   children,
   style,
   onFocus,
   onBlur,
   ...properties
-}: React.ComponentProps<typeof DrawerPrimitive.Content>): React.JSX.Element {
+}: React.ComponentProps<typeof DrawerPrimitive.Content> & {
+  /** Classes for the overlay behind the drawer, such as a z-index that matches the content's. */
+  readonly overlayClassName?: string;
+}): React.JSX.Element {
   const keyboardFrame = React.useSyncExternalStore(subscribeKeyboardFrame, readKeyboardFrame, readNoKeyboard);
   const [isEditing, setIsEditing] = React.useState(false);
   const keyboard = isEditing ? keyboardFrame : undefined;
@@ -394,13 +405,13 @@ function DrawerContent({
 
   return (
     <DrawerPortal data-slot='drawer-portal'>
-      <DrawerOverlay />
+      <DrawerOverlay className={overlayClassName} />
       <DrawerPrimitive.Content
         data-slot='drawer-content'
         data-keyboard={keyboard ? 'open' : undefined}
         style={frameStyle ? { ...style, ...frameStyle } : style}
         className={cn(
-          'group/drawer-content fixed z-50 flex h-auto flex-col bg-background [--drawer-handle-height:calc(var(--spacing)*9)]',
+          'group/drawer-content fixed z-50 flex h-auto flex-col bg-background [--drawer-handle-height:calc(var(--spacing)*2)]',
           'select-none',
           /* A field is editable text even inside an unselectable drawer: WebKit inherits
              user-select, and iOS will not place a caret in an editor under user-select: none. */

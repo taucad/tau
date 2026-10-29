@@ -1,8 +1,19 @@
 import { useResponsiveSurfaceContainer } from '#hooks/responsive-surface.js';
 import * as React from 'react';
-import { DropdownMenu as DropdownMenuPrimitive } from 'radix-ui';
-import { CheckIcon, ChevronRightIcon, CircleIcon } from 'lucide-react';
+import { DropdownMenu as DropdownMenuPrimitive, Slot as SlotPrimitive } from 'radix-ui';
+import { CheckIcon, ChevronRightIcon, CircleIcon, XIcon } from 'lucide-react';
 import { cn } from '#utils/cn.js';
+import { Button } from '#components/button.js';
+import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerNestedRoot,
+  DrawerTitle,
+  DrawerTrigger,
+  useIsInsideDrawer,
+} from '#components/drawer.js';
+import { useIsMobile } from '#hooks/use-mobile.js';
 import { Switch } from '#components/switch.js';
 import { ToggleGroup, ToggleGroupItem } from '#components/toggle-group.js';
 import {
@@ -33,8 +44,64 @@ import { useFullscreenElement } from '#hooks/use-fullscreen-element.js';
  * createElement(DropdownMenu, { defaultOpen: true });
  * ```
  */
-function DropdownMenu({ ...properties }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>): React.JSX.Element {
+function DropdownMenu({
+  isResponsive = false,
+  ...properties
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Root> & {
+  /**
+   * Open the items in a bottom drawer on a phone, as `ComboBoxResponsive` does; wide screens keep the menu. A
+   * responsive menu's content holds items, labels, separators, groups and shortcuts only.
+   */
+  readonly isResponsive?: boolean;
+}): React.JSX.Element {
+  const isMobile = useIsMobile();
+  if (isResponsive && isMobile) {
+    return <DropdownMenuDrawer {...properties} />;
+  }
   return <DropdownMenuPrimitive.Root data-slot='dropdown-menu' {...properties} />;
+}
+
+/** Closes the drawer a responsive menu opened in on a phone; absent wherever the menu is a dropdown. */
+const DropdownMenuDrawerContext = React.createContext<{ readonly close: () => void } | undefined>(undefined);
+
+/**
+ * A responsive menu on a phone: the same open state, held by a drawer. One opened from inside another drawer stacks on
+ * it.
+ */
+function DropdownMenuDrawer({
+  open: openProperty,
+  defaultOpen = false,
+  onOpenChange,
+  children,
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Root>): React.JSX.Element {
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
+  const isInsideDrawer = useIsInsideDrawer();
+  const open = openProperty ?? uncontrolledOpen;
+  const setOpen = React.useCallback(
+    (next: boolean) => {
+      if (openProperty === undefined) {
+        setUncontrolledOpen(next);
+      }
+      onOpenChange?.(next);
+    },
+    [openProperty, onOpenChange],
+  );
+  const context = React.useMemo(
+    () => ({
+      close() {
+        setOpen(false);
+      },
+    }),
+    [setOpen],
+  );
+  const DrawerRoot = isInsideDrawer ? DrawerNestedRoot : Drawer;
+  return (
+    <DropdownMenuDrawerContext.Provider value={context}>
+      <DrawerRoot open={open} onOpenChange={setOpen}>
+        {children}
+      </DrawerRoot>
+    </DropdownMenuDrawerContext.Provider>
+  );
 }
 
 /**
@@ -71,6 +138,16 @@ function DropdownMenuTrigger({
   className,
   ...properties
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Trigger>): React.JSX.Element {
+  const drawer = React.useContext(DropdownMenuDrawerContext);
+  if (drawer) {
+    return (
+      <DrawerTrigger
+        data-slot='dropdown-menu-trigger'
+        className={cn('outline-none focus-visible:focus-outline', className)}
+        {...properties}
+      />
+    );
+  }
   return (
     <DropdownMenuPrimitive.Trigger
       data-slot='dropdown-menu-trigger'
@@ -98,10 +175,26 @@ function DropdownMenuContent({
   side,
   alignOffset,
   onClick,
+  drawerTitle = 'Options',
   ...properties
-}: React.ComponentProps<typeof DropdownMenuPrimitive.Content>): React.JSX.Element {
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Content> & {
+  /** The heading of a responsive menu's drawer on a phone, which also names it. */
+  readonly drawerTitle?: string;
+}): React.JSX.Element {
   const fullscreenElement = useFullscreenElement();
   const surfaceContainer = useResponsiveSurfaceContainer();
+  const drawer = React.useContext(DropdownMenuDrawerContext);
+  if (drawer) {
+    return (
+      <DropdownMenuDrawerContent
+        title={drawerTitle}
+        onCloseAutoFocus={properties.onCloseAutoFocus}
+        onEscapeKeyDown={properties.onEscapeKeyDown}
+      >
+        {properties.children}
+      </DropdownMenuDrawerContent>
+    );
+  }
   const resolvedAlignOffset = alignOffset ?? (side === 'left' || side === 'right' ? menuSideAlignOffset : undefined);
 
   return (
@@ -131,6 +224,41 @@ function DropdownMenuContent({
 }
 
 /**
+ * A responsive menu's drawer: its title and a circular Close, then the items as touch rows. It sits above the phone
+ * sidebar sheet (z-100), the surface most of these menus open from.
+ */
+function DropdownMenuDrawerContent({
+  title,
+  children,
+  onCloseAutoFocus,
+  onEscapeKeyDown,
+}: Pick<React.ComponentProps<typeof DrawerContent>, 'children' | 'onCloseAutoFocus' | 'onEscapeKeyDown'> & {
+  readonly title: string;
+}): React.JSX.Element {
+  return (
+    <DrawerContent
+      aria-describedby={undefined}
+      className='z-110'
+      overlayClassName='z-110'
+      onCloseAutoFocus={onCloseAutoFocus}
+      onEscapeKeyDown={onEscapeKeyDown}
+    >
+      <div className='flex items-center gap-2 px-4 py-2'>
+        <DrawerTitle className='min-w-0 flex-1 truncate text-base font-medium'>{title}</DrawerTitle>
+        <DrawerClose asChild>
+          <Button variant='outline' size='icon-touch' className='rounded-full' aria-label='Close'>
+            <XIcon aria-hidden className='size-4' />
+          </Button>
+        </DrawerClose>
+      </div>
+      <div data-slot='dropdown-menu-drawer-items' className='flex min-h-0 flex-col overflow-y-auto border-t py-1 pb-3'>
+        {children}
+      </div>
+    </DrawerContent>
+  );
+}
+
+/**
  * Groups related dropdown-menu items.
  *
  * @public
@@ -146,6 +274,11 @@ function DropdownMenuGroup({
   className,
   ...properties
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Group>): React.JSX.Element {
+  const drawer = React.useContext(DropdownMenuDrawerContext);
+  if (drawer) {
+    const { asChild: _asChild, ...group } = properties;
+    return <div role='group' data-slot='dropdown-menu-group' className={cn('flex flex-col', className)} {...group} />;
+  }
   return (
     <DropdownMenuPrimitive.Group
       data-slot='dropdown-menu-group'
@@ -176,6 +309,18 @@ function DropdownMenuItem({
   readonly isInset?: boolean;
   readonly variant?: 'default' | 'destructive';
 }): React.JSX.Element {
+  const drawer = React.useContext(DropdownMenuDrawerContext);
+  if (drawer) {
+    return (
+      <DropdownMenuDrawerItem
+        className={className}
+        isInset={isInset}
+        variant={variant}
+        close={drawer.close}
+        {...properties}
+      />
+    );
+  }
   return (
     <DropdownMenuPrimitive.Item
       data-slot='dropdown-menu-item'
@@ -183,6 +328,58 @@ function DropdownMenuItem({
       data-variant={variant}
       className={cn(menuItemVariants({ variant, inset: isInset }), className)}
       {...properties}
+    />
+  );
+}
+
+/**
+ * A menu item as a drawer's touch row. It selects as a menu item does: `onSelect` runs after `onClick`, and the drawer
+ * closes unless either prevented the default.
+ */
+function DropdownMenuDrawerItem({
+  className,
+  isInset,
+  variant,
+  close,
+  asChild = false,
+  disabled = false,
+  onSelect,
+  onClick,
+  textValue: _textValue,
+  ...properties
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Item> & {
+  readonly isInset?: boolean;
+  readonly variant: 'default' | 'destructive';
+  readonly close: () => void;
+}): React.JSX.Element {
+  const Comp = asChild ? SlotPrimitive.Slot : 'button';
+  return (
+    <Comp
+      data-slot='dropdown-menu-item'
+      data-inset={isInset}
+      data-variant={variant}
+      data-disabled={disabled ? '' : undefined}
+      type={asChild ? undefined : 'button'}
+      disabled={asChild ? undefined : disabled}
+      aria-disabled={disabled || undefined}
+      className={cn(
+        menuItemVariants({ variant, inset: isInset }),
+        'min-h-touch-row w-full shrink-0 gap-3 rounded-none px-4 text-left text-sm [&_svg:not([class*=size-])]:size-4',
+        className,
+      )}
+      {...(properties as React.ComponentProps<'button'>)}
+      onClick={(event: React.MouseEvent<HTMLButtonElement>) => {
+        // The caller's handler is typed for the menu's div item; in a drawer the row is a button (or its child).
+        onClick?.(event as unknown as React.MouseEvent<HTMLDivElement>);
+        if (event.defaultPrevented || disabled) {
+          return;
+        }
+        const select = new Event('menu.itemSelect', { cancelable: true });
+        onSelect?.(select);
+        if (!select.defaultPrevented) {
+          close();
+        }
+      }}
     />
   );
 }
@@ -435,6 +632,18 @@ function DropdownMenuLabel({
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Label> & {
   readonly isInset?: boolean;
 }): React.JSX.Element {
+  const drawer = React.useContext(DropdownMenuDrawerContext);
+  if (drawer) {
+    const { asChild: _asChild, ...label } = properties;
+    return (
+      <div
+        data-slot='dropdown-menu-label'
+        data-inset={isInset}
+        className={cn(menuLabelVariants({ inset: isInset }), 'px-4', className)}
+        {...label}
+      />
+    );
+  }
   return (
     <DropdownMenuPrimitive.Label
       data-slot='dropdown-menu-label'
@@ -461,6 +670,18 @@ function DropdownMenuSeparator({
   className,
   ...properties
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Separator>): React.JSX.Element {
+  const drawer = React.useContext(DropdownMenuDrawerContext);
+  if (drawer) {
+    const { asChild: _asChild, ...separator } = properties;
+    return (
+      <div
+        role='separator'
+        data-slot='dropdown-menu-separator'
+        className={cn(menuSeparatorVariants(), 'mx-0 my-1', className)}
+        {...separator}
+      />
+    );
+  }
   return (
     <DropdownMenuPrimitive.Separator
       data-slot='dropdown-menu-separator'

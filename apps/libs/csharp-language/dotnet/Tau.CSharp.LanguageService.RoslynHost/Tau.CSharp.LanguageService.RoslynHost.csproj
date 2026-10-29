@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Roslyn workspace services Tau's browser host must replace are internal. Roslyn grants internals to this assembly
+    name, so it is public-signed with Roslyn's published public key (roslyn-public-key.snk holds the public key only;
+    no private key exists here). This is the approach DotNetLab uses to host Roslyn's workspace in a browser worker.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Microsoft.CodeAnalysis.Workspaces.UnitTests</AssemblyName>
+    <RootNamespace>Tau.CSharp.LanguageService.RoslynHost</RootNamespace>
+    <KeyOriginatorFile>roslyn-public-key.snk</KeyOriginatorFile>
+    <PublicSign>true</PublicSign>
+    <IsTrimmable>false</IsTrimmable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.Common" Version="$(TauRoslynVersion)" />
+  </ItemGroup>
+</Project>

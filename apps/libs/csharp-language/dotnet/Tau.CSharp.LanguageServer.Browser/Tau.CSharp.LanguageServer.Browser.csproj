@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk.WebAssembly">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Tau.CSharp.LanguageServer.Browser</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>false</UseSystemResourceKeys>
+    <WasmEnableWebcil>true</WasmEnableWebcil>
+    <!-- The worker loads the runtime itself; no Blazor or HTML host. -->
+    <WasmGenerateAppBundle>false</WasmGenerateAppBundle>
+    <CompressionEnabled>false</CompressionEnabled>
+    <!--
+      Partial trimming removes unused framework code only. Roslyn, MEF and this service discover parts and providers
+      by reflection, so they are kept whole (not IsTrimmable, or rooted below) and their analysis warnings, which
+      describe exactly that reflection, are suppressed. The WASM integration test exercises every reflected path.
+    -->
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
+    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Tau.CSharp.LanguageService/Tau.CSharp.LanguageService.csproj" />
+    <!-- The only dependency of Roslyn's netstandard2.0 build that .NET 10 does not supply in-box. -->
+    <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="10.0.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <TrimmerRootAssembly Include="Tau.CSharp.LanguageService" />
+    <TrimmerRootAssembly Include="Microsoft.CodeAnalysis.Workspaces.UnitTests" />
+    <TrimmerRootAssembly Include="System.Composition.AttributedModel" />
+    <TrimmerRootAssembly Include="System.Composition.Convention" />
+    <TrimmerRootAssembly Include="System.Composition.Hosting" />
+    <TrimmerRootAssembly Include="System.Composition.Runtime" />
+    <TrimmerRootAssembly Include="System.Composition.TypedParts" />
+  </ItemGroup>
+  <!--
+    Roslyn 5.9.0's net10.0 assemblies call Volatile.ReadBarrier(), an [Intrinsic] whose managed body calls itself.
+    The browser-wasm Mono interpreter in runtime 10.0.11 has no expansion for it, so the first workspace operation
+    recurses until StackOverflowException. The netstandard2.0 builds of the same version do not call it. Remove this
+    target once the runtime pack expands the intrinsic (see docs/research/csharp-browser-language-server-blueprint.md).
+  -->
+  <Target Name="TauUseNetStandardRoslyn" AfterTargets="ResolvePackageAssets">
+    <ItemGroup>
+      <_TauRoslynNet10 Include="@(RuntimeCopyLocalItems)" Condition="$([System.String]::Copy('%(RuntimeCopyLocalItems.NuGetPackageId)').StartsWith('Microsoft.CodeAnalysis')) And $([System.String]::Copy('%(RuntimeCopyLocalItems.Identity)').Replace('\', '/').Contains('/lib/net10.0/'))" />
+      <RuntimeCopyLocalItems Remove="@(_TauRoslynNet10)" />
+      <RuntimeCopyLocalItems Include="@(_TauRoslynNet10->Replace('/lib/net10.0/', '/lib/netstandard2.0/')->Replace('\lib\net10.0\', '\lib\netstandard2.0\'))" />
+    </ItemGroup>
+    <Error Condition="'@(_TauRoslynNet10)' == ''" Text="No Roslyn net10.0 runtime assets were found to replace." />
+  </Target>
+</Project>

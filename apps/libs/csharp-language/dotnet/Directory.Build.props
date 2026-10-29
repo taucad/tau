@@ -1,0 +1,15 @@
+<Project>
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <LangVersion>latest</LangVersion>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- Publish no localized Roslyn resources: diagnostics stay English, as the PicoGK compiler reports them. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- Roslyn's pinned version is the PicoGK compiler's (apps/desktop/scripts/prepare-picogk-dotnet.mts). -->
+    <TauRoslynVersion>5.9.0</TauRoslynVersion>
+  </PropertyGroup>
+</Project>

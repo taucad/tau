@@ -1,11 +1,18 @@
 import type {
   AttemptRecord,
+  CheckRecord,
   CostRecord,
   FeedbackGrants,
   RunScore,
   Scorecard,
 } from '@taucad/agent-observability/scorecard';
-import { joinAttempts, phaseDurations, summarizeAttempts, summarizeRuns } from '@taucad/agent-observability/scorecard';
+import {
+  checkSequence,
+  joinAttempts,
+  phaseDurations,
+  summarizeAttempts,
+  summarizeRuns,
+} from '@taucad/agent-observability/scorecard';
 import { accountPseudonym, observationMapperVersion } from '#api/agent-observability/langfuse-observation.js';
 
 /**
@@ -55,6 +62,7 @@ type RunDraft = {
   tools: number;
   firstUse: Array<Readonly<{ at: number; toolClass: string }>>;
   checks: Record<string, number>;
+  checkRecords: CheckRecord[];
   intervals: Interval[];
   presented: boolean;
   rating: RunScore['rating'];
@@ -178,6 +186,7 @@ const draftOf = (drafts: Map<string, RunDraft>, row: LangfuseObservationRow, run
       tools: 0,
       firstUse: [],
       checks: {},
+      checkRecords: [],
       intervals: [],
       presented: false,
       rating: 'none',
@@ -221,7 +230,13 @@ const applySummary = (draft: RunDraft, row: LangfuseObservationRow, metadata: Re
       break;
     }
     case 'cad': {
-      increment(draft.checks, text(metadata, 'fact.result') ?? 'unknown');
+      const result = text(metadata, 'fact.result') ?? 'unknown';
+      increment(draft.checks, result);
+      draft.checkRecords.push({
+        at: Date.parse(row.startTime),
+        result,
+        revision: text(metadata, 'fact.sourceRevision') ?? 'unknown',
+      });
       break;
     }
     case 'outcome': {
@@ -242,6 +257,7 @@ const applySummary = (draft: RunDraft, row: LangfuseObservationRow, metadata: Re
 const scoreOf = (draft: RunDraft, grants: FeedbackGrants | undefined): RunScore => {
   const pattern = [...new Set([...draft.firstUse].sort((a, b) => a.at - b.at).map((use) => use.toolClass))].join('>');
   const { durations, open } = phaseDurations(draft.intervals);
+  const { path, revisits } = checkSequence(draft.checkRecords);
   return {
     run: draft.run,
     chat: draft.chat,
@@ -252,6 +268,8 @@ const scoreOf = (draft: RunDraft, grants: FeedbackGrants | undefined): RunScore 
     tools: { total: draft.tools, byClass: draft.byClass, byOutcome: draft.byOutcome },
     pattern: pattern === '' ? 'none' : pattern,
     checks: draft.checks,
+    checkPath: path,
+    revisits,
     phases: durations,
     openIntervals: open,
     presented: draft.presented,

@@ -1,4 +1,5 @@
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useLayoutEffect, useRef } from 'react';
+import type { RefObject } from 'react';
 import { Mic, Square, X } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
@@ -30,11 +31,30 @@ export const DictationControl = memo(function ({
   onStop,
   onCancel,
 }: DictationControlProperties): React.JSX.Element {
-  if (phase === 'idle') {
+  const active = phase !== 'idle';
+  const microphoneRef = useRef<HTMLButtonElement>(null);
+  const stopRef = useRef<HTMLButtonElement>(null);
+  /* Pressing the microphone, cancel or the pill unmounts the pressed button; carry focus to its counterpart
+   * instead of dropping it to the page. Send, Escape or the input's own focus keep it where they put it. */
+  const carryFocus = useRef(false);
+  const pressed = useCallback(() => {
+    carryFocus.current = true;
+  }, []);
+  useLayoutEffect(() => {
+    if (!carryFocus.current) {
+      return;
+    }
+    carryFocus.current = false;
+    if (document.activeElement === null || document.activeElement === document.body) {
+      (active ? stopRef : microphoneRef).current?.focus();
+    }
+  }, [active]);
+  if (!active) {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
+            ref={microphoneRef}
             type='button'
             variant='ghost'
             size='icon-sm'
@@ -42,6 +62,7 @@ export const DictationControl = memo(function ({
             aria-disabled={false}
             className='shrink-0 rounded-full'
             onClick={() => {
+              pressed();
               void onStart();
             }}
           >
@@ -65,24 +86,39 @@ export const DictationControl = memo(function ({
             size='icon-sm'
             aria-label='Cancel dictation'
             className='shrink-0 rounded-full text-muted-foreground'
-            onClick={onCancel}
+            onClick={() => {
+              pressed();
+              onCancel();
+            }}
           >
             <X aria-hidden='true' className='size-4' />
           </Button>
         </TooltipTrigger>
         <TooltipContent>Cancel dictation</TooltipContent>
       </Tooltip>
-      <DictationStopPill phase={phase} waveform={waveform} onStop={onStop} />
+      <DictationStopPill
+        buttonRef={stopRef}
+        phase={phase}
+        waveform={waveform}
+        onStop={async () => {
+          pressed();
+          return onStop();
+        }}
+      />
     </div>
   );
 });
 
 /** The expanded microphone: an outlined pill whose whole face stops recording. */
 function DictationStopPill({
+  buttonRef,
   phase,
   waveform: { levels, batch },
   onStop,
-}: Pick<DictationControlProperties, 'phase' | 'waveform' | 'onStop'>): React.JSX.Element {
+}: Pick<DictationControlProperties, 'phase' | 'waveform' | 'onStop'> & {
+  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object
+  readonly buttonRef: RefObject<HTMLButtonElement | null>;
+}): React.JSX.Element {
   const recording = phase === 'recording';
   const label = recording ? 'Stop dictation' : dictationLabels[phase];
   const handleClick = useCallback(() => {
@@ -95,6 +131,7 @@ function DictationStopPill({
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
+            ref={buttonRef}
             type='button'
             variant='outline'
             size='sm'

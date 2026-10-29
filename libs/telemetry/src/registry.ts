@@ -1506,6 +1506,24 @@ export const TauMetrics = {
     }),
   }),
 
+  /*
+   * STO-25: how long a hosted project takes to open in the browser, from its revision root opening.
+   * `first_view` is the repository checked out, so the editor and file tree are usable; `fully_fetched`
+   * is every large object local, so the viewer can render. `cache` is cold when the open fetched at
+   * least one large object from the network.
+   */
+  projectOpenDuration: defineHistogram({
+    name: 'tau.project.open.duration',
+    unit: 's',
+    description:
+      'Client-reported time from a hosted project opening in the browser to its first usable view, and to every large object being local',
+    buckets: [0.25, 0.5, 1, 2, 3, 5, 7.5, 10, 15, 20, 30, 60, 120, 300, 900],
+    attributes: z.object({
+      phase: z.enum(['first_view', 'fully_fetched']),
+      cache: z.enum(['cold', 'warm']),
+    }),
+  }),
+
   // --- B2 second copy: the `tau-mirror` copier and reconciler (W13 Finding 8, W14 OB6) ---
   // W13's Prometheus names end in their unit, so the unit word is part of the OTel name. No label
   // carries an owner or project; the busiest-lagging repositories are logged, not labelled.

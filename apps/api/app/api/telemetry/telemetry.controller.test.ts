@@ -38,6 +38,7 @@ function createMockMetrics() {
     syncClientLfsDuration: { record: vi.fn() },
     syncClientLfsObjects: { add: vi.fn() },
     syncClientLfsBytes: { add: vi.fn() },
+    projectOpenDuration: { record: vi.fn() },
   };
 }
 
@@ -224,6 +225,22 @@ describe('TelemetryController', () => {
         [69_960_000, { 'agent.placement': 'browser', source: 'network' }],
         [64 * 1024 * 1024 * 1024, { 'agent.placement': 'browser', source: 'network' }],
         [300, { 'agent.placement': 'browser', source: 'local' }],
+      ]);
+    });
+
+    it('should record a hosted project open by phase and cache state, in seconds, bounding a skewed clock', () => {
+      ingestSignedIn({
+        entries: [
+          { name: IngestEntryName.PROJECT_OPEN, duration: 4200, detail: { phase: 'first_view', cache: 'cold' } },
+          { name: IngestEntryName.PROJECT_OPEN, duration: 4200, detail: { phase: 'fully_fetched', cache: 'cold' } },
+          { name: IngestEntryName.PROJECT_OPEN, duration: 1e12, detail: { phase: 'first_view', cache: 'warm' } },
+        ],
+      });
+
+      expect(mockMetrics.projectOpenDuration.record.mock.calls).toEqual([
+        [4.2, { phase: 'first_view', cache: 'cold' }],
+        [4.2, { phase: 'fully_fetched', cache: 'cold' }],
+        [3600, { phase: 'first_view', cache: 'warm' }],
       ]);
     });
   });

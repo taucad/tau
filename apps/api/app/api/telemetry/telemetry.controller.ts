@@ -146,6 +146,10 @@ export class TelemetryController {
         this.recordLfsFetch(entry);
         return;
       }
+      case IngestEntryName.PROJECT_OPEN: {
+        this.recordProjectOpen(entry);
+        return;
+      }
       default: {
         const exhaustive: never = entry;
         throw new Error(`Unhandled ingest entry: ${(exhaustive as { name: string }).name}`);
@@ -343,6 +347,15 @@ export class TelemetryController {
         this.metrics.syncClientLfsBytes.add(Math.min(bytes, maximumLfsBytes), { ...attributes, source });
       }
     }
+  }
+
+  private recordProjectOpen(entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.PROJECT_OPEN }>): void {
+    const { phase, cache } = entry.detail;
+    /* An open waits on the same pull and transfers as a sync attempt, so the same hour bounds a skewed clock. */
+    this.metrics.projectOpenDuration.record(Math.min(entry.duration, maximumSyncAttemptMilliseconds) / 1000, {
+      phase,
+      cache,
+    });
   }
 }
 

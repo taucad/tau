@@ -677,6 +677,12 @@ export class MetricsService {
     unit: TauMetrics.syncClientLfsBytes.unit,
   });
 
+  public readonly projectOpenDuration = this.clientMeter.createHistogram(TauMetrics.projectOpenDuration.name, {
+    description: TauMetrics.projectOpenDuration.description,
+    unit: TauMetrics.projectOpenDuration.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.projectOpenDuration.buckets] },
+  });
+
   // --- Storage accounting scheduler (W14 OB3) ---
 
   /* Observed at collection from the scheduler's shared snapshot, so every Machine exports the same figures. */

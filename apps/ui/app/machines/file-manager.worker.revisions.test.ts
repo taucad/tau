@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
-import type { RevisionPort } from '@taucad/revisions';
+import type { RevisionPort, RevisionStatusProjection } from '@taucad/revisions';
 import { revisionId } from '@taucad/revisions/algorithms';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import type { RootedFileSystem } from '@taucad/filesystem';
@@ -109,7 +109,7 @@ const finish = async (
 const harness = (
   projectIds: readonly string[],
   wrapPort = (port: RevisionPort): RevisionPort => port,
-  extra: Pick<WorkerRevisionRegistryOptions, 'servePlacement' | 'clock'> & {
+  extra: Pick<WorkerRevisionRegistryOptions, 'servePlacement' | 'clock' | 'observeStatus'> & {
     onCreatePort?: () => void;
     observeFileEvents?: boolean;
     wrapFileSystem?: (filesystem: RootedFileSystem) => RootedFileSystem;
@@ -137,6 +137,7 @@ const harness = (
   const registry = createWorkerRevisionRegistry({
     ...(extra.servePlacement === undefined ? {} : { servePlacement: extra.servePlacement }),
     ...(extra.clock === undefined ? {} : { clock: extra.clock }),
+    ...(extra.observeStatus === undefined ? {} : { observeStatus: extra.observeStatus }),
     createPort: (projectId) => {
       extra.onCreatePort?.();
       return wrapPort(
@@ -325,6 +326,28 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     await settle();
     expect(changes).toEqual([['main.ts']]);
     expect(generation()).toBe(before + 1);
+  });
+
+  it('should tell the host each status a root publishes, from its first, under its own project', async () => {
+    const observed: Array<Readonly<{ projectId: string; status: RevisionStatusProjection }>> = [];
+    const fixture = harness(['alpha'], (port) => port, {
+      observeStatus: (projectId, status) => {
+        observed.push({ projectId, status });
+      },
+    });
+    const client = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    await client.settle();
+
+    expect(observed.length).toBeGreaterThan(0);
+    expect(observed.every(({ projectId }) => projectId === 'alpha')).toBe(true);
+    const published = client.frames.flatMap((frame) => (frame.type === 'status' ? [frame.status] : []));
+    /* The projection as it stood when the root attached, then every status the page was sent. */
+    expect(published.length).toBeGreaterThan(0);
+    for (const status of published) {
+      expect(observed.map((entry) => entry.status)).toContainEqual(status);
+    }
+    expect(observed.at(-1)?.status).toEqual(root.status());
   });
 
   it('should start one root per opened project and stop its actor when the last port closes', async () => {

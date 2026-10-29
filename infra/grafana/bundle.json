@@ -16,12 +16,12 @@
     "dashboards/slo-executive.json": "0688587613d3ed6948a8e527fd3cbd83889cc6fcff6e95822dcf8fdc3d4ed9f0",
     "dashboards/storage-critical.json": "c4ee80b5c3d5b72d0de405ee0b0bd70c2153f64163b1a63a876497eafdcdb7ad",
     "dashboards/system-overview.json": "2afdc87e4865404619fc64fa4e54ae3c32f8e91a48110c7ff8c8626499fa3894",
-    "dashboards/tau-sync.json": "d669f1db7b60d0215c09e4148eb674169b2829b1bc257a95dc748e437a3d059d",
+    "dashboards/tau-sync.json": "75f692303160c87114ff53f428a19511b2e06133d8797ce2465f7bddff2d2806",
     "dashboards/websocket-rpc.json": "4b79c58efc8e1ae5215b956e1346d4629a4f83a50215eb1b5ba4fc0fcd05a3fd",
     "alerts/tau-critical.json": "7e1d068831320238c0f118308a13471061ee83120f7b78ccc97ce69abe5ffca1",
     "alerts/tau-storage-critical.json": "910b07725e2cd4c1ab91be80e074989f3db00be2f4a536e1cc1b4e2dd6ae2914",
     "alerts/tau-storage-triggers.json": "38c6ab3d5e70bfc7bdcf6ac29f4154758534c4ce435f3f9b79914ae9fac8d485",
-    "alerts/tau-storage-warning.json": "c6f17d0428beaf0f30f9d96e0c94b2a6a9001e0d18967a33d15fee8c461a0dd3",
+    "alerts/tau-storage-warning.json": "90dc3104e67cba5c3d1d30a588990ce51af5158cc3add5e518c61b25bc3f81d0",
     "alerts/tau-warning.json": "d668a83bcb700d51e37d04dfe260d9515928d42d6d0b11b291006541fe7b9a83"
   }
 }

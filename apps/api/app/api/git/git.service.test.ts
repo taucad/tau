@@ -2313,6 +2313,9 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
   });
 
   it('counts a committed write, its duration and the repository size, and ranks the project by rank alone', async () => {
+    /* Pin the clock first: a real minute boundary between the commit and the read would retire the
+     * bucket the gauges report, so the whole sequence runs on one controlled clock. */
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() });
     const { metrics, on } = recordingMetrics();
     const service = createService(store, caughtUp(), { metrics });
     workerOf(service).leaseReservationFloorBytes = 1024;
@@ -2344,7 +2347,7 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
     expect(on('gitRepositorySize').record).toHaveBeenCalledExactlyOnceWith(stored);
 
     /* The gauges read the last full minute: one commit, one writer, at rank 1 only. */
-    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 60_000 });
+    vi.setSystemTime(Date.now() + 60_000);
     const observe = (instrument: string): Array<[number, Record<string, unknown>]> => {
       const observed: Array<[number, Record<string, unknown>]> = [];
       const callback = on(instrument).addCallback.mock.calls[0]?.[0] as

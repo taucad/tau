@@ -28,6 +28,7 @@
       }
     },
     "test-dotnet": {
+      "dependsOn": ["prepare"],
       "executor": "nx:run-commands",
       "cache": true,
       "inputs": [
@@ -49,7 +50,7 @@
       }
     },
     "test": {
-      "dependsOn": ["prepare", "test-dotnet"]
+      "dependsOn": ["test-dotnet"]
     }
   }
 }

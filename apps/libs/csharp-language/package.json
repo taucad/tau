@@ -49,10 +49,10 @@
     "@taucad/utils": "workspace:*",
     "json-rpc-2.0": "^1.7.1",
     "vscode-languageserver-protocol": "^3.18.0",
-    "vscode-uri": "catalog:",
-    "zod": "catalog:"
+    "vscode-uri": "catalog:"
   },
   "devDependencies": {
-    "@taucad/fs-client": "workspace:*"
+    "@taucad/fs-client": "workspace:*",
+    "zod": "catalog:"
   }
 }

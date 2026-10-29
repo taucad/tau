@@ -265,6 +265,35 @@ describe('scoreObservations', () => {
     expect(scoreObservations(delivered(evidence)).overall.feedback).toEqual({ unknown: 2 });
   });
 
+  it('reads check paths and revisits from Langfuse exactly as from the evidence', async () => {
+    const checked = (
+      call: string,
+      sequence: number,
+      [start, end, result, file]: readonly [number, number, 'passed' | 'failed', string],
+    ): ProjectedRun['tools'][number] => ({
+      ...tool(call, sequence, [start, end]),
+      check: { result, revision: [file], requirements: ['req-a'] },
+    });
+    const evidence = await project(
+      run({
+        tools: [
+          checked('call-1', 3, [1000, 2000, 'failed', 'revision-a']),
+          checked('call-2', 5, [3000, 4000, 'passed', 'revision-b']),
+          checked('call-3', 7, [5000, 6000, 'failed', 'revision-a']),
+        ],
+        ending: { source: row(9), at: at + 9000 },
+      }),
+    );
+
+    const fromLangfuse = scoreObservations(delivered(evidence));
+    const fromEvidence = scorecard(evidence);
+
+    expect(fromLangfuse.runs.map(withoutIds)).toEqual(fromEvidence.runs.map(withoutIds));
+    expect(fromLangfuse.overall).toEqual(fromEvidence.overall);
+    expect(fromEvidence.runs.map((score) => [score.checkPath, score.revisits])).toEqual([['regressed', 1]]);
+    expect(JSON.stringify(fromLangfuse)).not.toContain('revision-a');
+  });
+
   it('counts a fact once across uploaders and replays, and never reads content or another mapper', async () => {
     const first = await project(run());
     const rows = [

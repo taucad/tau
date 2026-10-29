@@ -5,9 +5,10 @@ import type { TerminalReceipt } from '#api/billing/credit-ledger.types.js';
 import type { SourceProtection } from '#api/agent-observability/evidence-admission.js';
 import { evidenceRetentionMilliseconds } from '#api/agent-observability/evidence-admission.js';
 import type { AttemptAuthority } from '#api/agent-observability/model-invocation-evidence.js';
+import { executionOfAttempt } from '#api/agent-observability/model-invocation-evidence.js';
 
 /** Bumped whenever the facts written for the same settlement change. */
-export const apiSettlementMapper = 'api-settlement-v1';
+export const apiSettlementMapper = 'api-settlement-v2';
 
 type FinancialFact = Extract<Evidence['payload'], { plane: 'summary' }>['fact'] & { kind: 'financial' };
 
@@ -45,8 +46,9 @@ export const settlementEvidence = async (
   authority: AttemptAuthority & Readonly<{ project: string }>,
 ): Promise<Evidence> => {
   const { operation, receipt } = settlement;
-  const [invocation, chat, ledger, attempt, tariff, normalization] = await Promise.all([
+  const [invocation, execution, chat, ledger, attempt, tariff, normalization] = await Promise.all([
     contractId('inv', operation.attemptKey),
+    executionOfAttempt(operation.attemptKey),
     operation.chatHint === null ? undefined : contractId('chat', operation.chatHint),
     contractId('ledger', `${operation.id}:${receipt.terminalRevision}`),
     contractId('op', operation.id),
@@ -77,7 +79,7 @@ export const settlementEvidence = async (
     delivery: { uploader: 'api', attempt: 'api-1', cursor: { view: 'own', origin: 'api', position: ledger } },
     scope: { principal, project: authority.project, policyEpoch: authority.policyEpoch, destination: 'langfuse' },
     run,
-    execution: { attempt: invocation, resumedFrom: null, branchedFrom: null },
+    execution: { attempt: execution, resumedFrom: null, branchedFrom: null },
     versions: {
       hostBuild: null,
       apiBuild: null,

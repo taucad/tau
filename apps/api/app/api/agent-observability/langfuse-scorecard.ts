@@ -1,5 +1,5 @@
 import type { AttemptRecord, CostRecord, RunScore, Scorecard } from '@taucad/agent-observability/scorecard';
-import { phaseDurations, summarizeAttempts, summarizeRuns } from '@taucad/agent-observability/scorecard';
+import { joinAttempts, phaseDurations, summarizeAttempts, summarizeRuns } from '@taucad/agent-observability/scorecard';
 import { observationMapperVersion } from '#api/agent-observability/langfuse-observation.js';
 
 /**
@@ -77,6 +77,7 @@ const attemptOf = (metadata: Readonly<Record<string, unknown>>): AttemptRecord =
   const resolved = text(metadata, 'fact.resolvedModel');
   const domain = text(metadata, 'fact.firstOutput.domain');
   return {
+    run: text(metadata, 'attempt') ?? 'unknown',
     call: text(metadata, 'fact.logicalCall') ?? 'unknown',
     provider: text(metadata, 'fact.provider') ?? 'unknown',
     model: requested ?? 'unknown',
@@ -103,6 +104,7 @@ const attemptOf = (metadata: Readonly<Record<string, unknown>>): AttemptRecord =
 };
 
 const costOf = (metadata: Readonly<Record<string, unknown>>): CostRecord => ({
+  run: text(metadata, 'attempt') ?? 'unknown',
   credits: numeric(metadata, 'fact.credits') ?? 0,
   supplierCost: numeric(metadata, 'fact.supplierCost'),
   adjustment: flag(metadata, 'fact.adjustment'),
@@ -242,6 +244,7 @@ const scoreOf = (draft: RunDraft): RunScore => {
     presented: draft.presented,
     rating: draft.rating,
     judgement: draft.judgement,
+    model: { attempts: 0, calls: 0, settlements: 0, credits: 0, supplierCost: 0, supplierCostUnknown: 0 },
   };
 };
 
@@ -302,11 +305,15 @@ export const scoreObservations = (rows: readonly LangfuseObservationRow[]): Obse
       }
     }
   }
-  const runs = [...drafts.values()].map((draft) => scoreOf(draft));
+  const runs = joinAttempts(
+    [...drafts.values()].map((draft) => scoreOf(draft)),
+    attempts,
+    costs,
+  );
   return {
     reconciliation: { read: rows.length, duplicates, replicas, content, unscorable },
     ...summarizeRuns(runs),
     runs,
-    attempts: summarizeAttempts(attempts, costs),
+    attempts: summarizeAttempts(attempts, costs, new Set(runs.map((score) => score.run))),
   };
 };

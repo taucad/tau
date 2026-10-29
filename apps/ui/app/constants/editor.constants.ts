@@ -23,17 +23,14 @@ export const panelMinSizeViewerTight = 200;
 /** Below this workspace width the Viewer takes {@link panelMinSizeViewerTight}: the widest lane beside the full viewer. */
 export const tightWorkspaceWidth = Math.max(panelMinSizeChat, panelMinSizeWorkbench) + panelMinSizeViewer;
 
+/** The detent a surface opens at from the model: half the screen. */
+export const mobileDrawerOpenSnapPoint = 0.5;
+
 /**
- * The phone sheet's lowest detent (peek). A height rather than a fraction, so the surface's title row and the chat
- * composer fit above the workbench nav on the shortest phone (320×640) as on the tallest.
+ * Mobile drawer snap points for the projects interface: half and full. Collapsed is the sheet closed on the model
+ * (the Model destination, or a drag down from half), so the sheet rests at one of three heights: 0, 50% and 100%.
  */
-export const mobileDrawerPeekSnapPoint = '240px';
-
-/** The detent a surface opens at from the model (half). */
-export const mobileDrawerOpenSnapPoint = 0.7;
-
-/** Mobile drawer snap points for the projects interface: peek, half and full (D4). */
-export const mobileDrawerSnapPoints: Array<number | string> = [mobileDrawerPeekSnapPoint, mobileDrawerOpenSnapPoint, 1];
+export const mobileDrawerSnapPoints: Array<number | string> = [mobileDrawerOpenSnapPoint, 1];
 
 /** Default runtime operation timeout. Milliseconds. */
 export const defaultOperationTimeout = 180_000;

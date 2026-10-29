@@ -350,7 +350,7 @@ function ProjectSheet({
           }
         }}
       >
-        <div className='flex items-center gap-2 px-4 pb-2'>
+        <div className='flex items-center gap-2 px-4 py-2'>
           <div className='flex min-w-0 flex-1 flex-col'>
             <DrawerTitle className='truncate text-base font-medium'>{projectName}</DrawerTitle>
             <DrawerDescription asChild>
@@ -361,7 +361,14 @@ function ProjectSheet({
           </div>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button ref={closeRef} variant='outline' size='icon' aria-label='Close project sheet' onClick={close}>
+              <Button
+                ref={closeRef}
+                variant='outline'
+                size='icon'
+                className='rounded-full'
+                aria-label='Close project sheet'
+                onClick={close}
+              >
                 <X aria-hidden className='size-4' />
               </Button>
             </TooltipTrigger>

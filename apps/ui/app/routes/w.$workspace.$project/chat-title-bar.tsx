@@ -190,7 +190,7 @@ function ChatSwitcherSheet({
           }
         }}
       >
-        <div className='flex items-center gap-2 px-4 pb-2'>
+        <div className='flex items-center gap-2 px-4 py-2'>
           <DrawerTitle className='min-w-0 flex-1 truncate text-base font-medium'>{title}</DrawerTitle>
           <DrawerDescription className='sr-only'>
             Switch to another chat in this project or start a new one.
@@ -198,6 +198,7 @@ function ChatSwitcherSheet({
           <Button
             variant='outline'
             size='icon-touch'
+            className='rounded-full'
             aria-label='Close chats'
             onClick={() => {
               setIsOpen(false);

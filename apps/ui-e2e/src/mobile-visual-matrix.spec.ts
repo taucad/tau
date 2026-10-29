@@ -23,7 +23,7 @@ import { readWorkbenchTree, writeWorkbenchFile } from '#support/workbench-files.
  * from layout boxes and hit tests rather than from screenshots alone. At 320, 360 and 390px, at the stage, with the
  * sheet at Half, with All open and with the project sheet open, nothing scrolls sideways, every visible action is at
  * least 24px, wholly inside the viewport and its clip, and is what a tap at its centre reaches; the top bar's and the
- * nav's controls are 40px, the viewer's are 28px and centred, the grabber's target is 40px, nothing blank sits under
+ * nav's controls are 40px, the viewer's are 28px and centred, the grabber's target is 16px, nothing blank sits under
  * the nav, and the composer and Send clear it. The same holds in all four themes, at 200% text, with a 34px
  * home-indicator inset and with reduced motion, which also stills the status glyph and the sheet's slide. 767px is the
  * last phone width and 768px the first desktop one; a coarse-pointer tablet and a landscape phone keep the desktop
@@ -553,7 +553,7 @@ const expectStage = async (viewport: Readonly<{ width: number }>): Promise<void>
 };
 
 /**
- * Chat at Half: the grabber's target is 40px, the sheet reaches down to the nav, and the composer and Send are whole,
+ * Chat at Half: the grabber's target is 16px, the sheet reaches down to the nav, and the composer and Send are whole,
  * reachable and above the nav.
  *
  * @param viewport - The phone's size.
@@ -566,7 +566,8 @@ const expectChatAtHalf = async (viewport: Readonly<{ width: number }>): Promise<
   await expectTopBar(viewport);
   const nav = await expectNavigation();
   const handle = await boxOf(grabber(), 'The grabber');
-  expect(handle.height).toBeGreaterThanOrEqual(40);
+  // The bar's 8px row plus 8px above the sheet's edge: no row of space under the bar (the keys move the sheet too).
+  expect(handle.height).toBeGreaterThanOrEqual(16);
   const chat = await boxOf(selectors.getByRole('region', { name: 'Chat', exact: true }), 'The chat surface');
   expect(chat.bottom).toBeLessThanOrEqual(nav.top + 0.5);
   for (const [what, locator] of [
@@ -644,7 +645,13 @@ const chooseTheme = async (theme: (typeof themes)[number]): Promise<void> => {
   const sidebar = selectors.getByRole('dialog', { name: 'Sidebar' });
   await target.expectVisible(sidebar);
   await target.click(sidebar.getByRole('button', { name: 'Account', exact: true }), { touch: true });
-  await target.click(selectors.getByRole('menuitem', { name: 'Settings', exact: true }), { touch: true });
+  // On a phone the account menu opens in a drawer above the sidebar sheet.
+  await target.click(
+    selectors.getByRole('dialog', { name: 'Account' }).getByRole('button', { name: 'Settings', exact: true }),
+    {
+      touch: true,
+    },
+  );
   const settings = selectors.getByRole('dialog', { name: /^settings$/iu });
   await target.expectVisible(settings, 60_000);
   const themeButton = selectors.getByRole('button', { name: /^(?:light|dark|black|high contrast|system)$/iu });
@@ -1485,7 +1492,6 @@ describe('the phone shell with reduced motion', () => {
 
     // The sheet moves between detents in one step: every transition it starts is the reduced-motion 0.01ms.
     await recordSheetTransitions();
-    await moveSheet('Home', detents.peek);
     await moveSheet('End', detents.full);
     await moveSheet('ArrowDown', detents.half);
     const reduced = await readSheetTransitions();
@@ -1496,8 +1502,8 @@ describe('the phone shell with reduced motion', () => {
     // The same moves with motion allowed do slide, so the recorder sees the sheet's transitions.
     await target.emulateReducedMotion('no-preference');
     await recordSheetTransitions();
-    await moveSheet('Home', detents.peek);
     await moveSheet('End', detents.full);
+    await moveSheet('Home', detents.half);
     const allowed = await readSheetTransitions();
     expect(Math.max(0, ...allowed.map(({ duration }) => duration))).toBeGreaterThan(100);
     expect(reduced.length, 'the reduced moves should have started transitions too').toBeGreaterThan(0);

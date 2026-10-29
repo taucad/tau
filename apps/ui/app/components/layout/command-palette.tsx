@@ -191,6 +191,8 @@ type CommandPaletteResultsProperties = {
   readonly listClassName?: string;
   /** A control on the field's row, after the field so the field stays the first stop. */
   readonly inputAction?: React.ReactNode;
+  /** The field's placeholder; a phone's narrower row takes a shorter one, so it is never cut off. */
+  readonly placeholder?: string;
 };
 
 /** Mounted only while the dialog is open, so the query resets on every open. */
@@ -199,6 +201,7 @@ export function CommandPaletteResults({
   onRun,
   listClassName,
   inputAction,
+  placeholder = 'Search projects, chats, and actions…',
 }: CommandPaletteResultsProperties): React.JSX.Element {
   const [search, setSearch] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
@@ -223,8 +226,8 @@ export function CommandPaletteResults({
 
   const input = (
     <CommandInput
-      className='h-9 border-0 bg-transparent px-3 text-base shadow-none focus-visible:outline-none dark:bg-transparent'
-      placeholder='Search projects, chats, and actions…'
+      className='h-9 border-0 bg-transparent px-3 text-base text-ellipsis shadow-none focus-visible:outline-none dark:bg-transparent'
+      placeholder={placeholder}
       value={search}
       onValueChange={(value) => {
         setSearch(value);
@@ -236,7 +239,7 @@ export function CommandPaletteResults({
   return (
     <>
       {inputAction ? (
-        <div className='flex items-center gap-1 border-b pr-1 [&_[data-slot=command-input-wrapper]]:flex-1 [&_[data-slot=command-input-wrapper]>svg]:hidden'>
+        <div className='flex items-center gap-1 border-b pr-3 [&_[data-slot=command-input-wrapper]]:min-w-0 [&_[data-slot=command-input-wrapper]]:flex-1 [&_[data-slot=command-input-wrapper]>svg]:hidden'>
           {input}
           {inputAction}
         </div>
@@ -449,9 +452,11 @@ function CommandPaletteMobile({
           <CommandPaletteResults
             items={items}
             listClassName='max-h-none min-h-0 flex-1'
+            // Beside Cancel at 320 px the full placeholder needs 263 px of the field's 207.
+            placeholder='Search projects, chats…'
             inputAction={
               <DrawerClose asChild>
-                <Button variant='ghost' size='lg' className='shrink-0'>
+                <Button variant='outline' size='sm' className='shrink-0'>
                   Cancel
                 </Button>
               </DrawerClose>

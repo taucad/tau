@@ -167,12 +167,12 @@ test.each([
 test.each([
   { width: 320, height: 640 },
   { width: 390, height: 844 },
-])('bounds running tool rows to the stage the sheet leaves at each detent at $width×$height', async (viewport) => {
+])('bounds running tool rows to the stage the sheet leaves at half at $width×$height', async (viewport) => {
   await openStage(viewport);
   // A surface opens the sheet at half, leaving a short stage above it.
   await target.click(navButton('Chat'), { touch: true });
   const grabber = selectors.getByRole('slider', { name: 'Drawer height' });
-  await expect.poll(async () => target.getAttribute(grabber, 'aria-valuenow')).toBe('2');
+  await expect.poll(async () => target.getAttribute(grabber, 'aria-valuenow')).toBe('1');
   await target.click(controls().getByRole('button', { name: 'Section view', exact: true }), { touch: true });
   await target.click(controls().getByRole('button', { name: 'Measure', exact: true }), { touch: true });
   await target.expectVisible(selectors.getByRole('group', { name: 'Section view options' }));
@@ -208,13 +208,11 @@ test.each([
   };
 
   await expectBounded('Half');
-  // Down to the peek: the stage grows, and the bound follows it.
+  // Up to full, which covers the stage, and back down to half: the stage returns, and the rows still fit inside it.
+  await target.press(grabber, 'End');
+  await expect.poll(async () => target.getAttribute(grabber, 'aria-valuenow')).toBe('2');
   await target.press(grabber, 'Home');
   await expect.poll(async () => target.getAttribute(grabber, 'aria-valuenow')).toBe('1');
-  await expectBounded('Peek');
-  // Back up to half: the stage shrinks again, and the rows still fit inside it.
-  await target.press(grabber, 'Enter');
-  await expect.poll(async () => target.getAttribute(grabber, 'aria-valuenow')).toBe('2');
   await expectBounded('Half again');
 });
 

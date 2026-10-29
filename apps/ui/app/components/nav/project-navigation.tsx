@@ -14,7 +14,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  useSidebar,
 } from '#components/ui/sidebar.js';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@taucad/ui/components/tooltip';
@@ -256,7 +255,6 @@ function ProjectNavigationItem({
   readonly onShare: () => void;
   readonly onDelete: () => Promise<void>;
 }): React.JSX.Element {
-  const { isMobile } = useSidebar();
   const openInFileManager = useOpenProjectInFileManager(project);
   const navigate = useNavigate();
   const location = useLocation();
@@ -455,13 +453,7 @@ function ProjectNavigationItem({
                 }}
               >
                 <ProjectSyncStatus sync={row.sync} isCloudPending={isCloudPending} onOpenDetails={openSyncDetails} />
-                <SidebarRowMenuButton
-                  name={project.name}
-                  items={menuItems}
-                  className='w-48'
-                  side={isMobile ? 'bottom' : 'right'}
-                  align={isMobile ? 'end' : 'start'}
-                />
+                <SidebarRowMenuButton isResponsive name={project.name} items={menuItems} className='w-48' />
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -536,7 +528,7 @@ function ProjectsLabel(): React.JSX.Element {
       </SidebarGroupLabel>
       {idleProjectIds.length > 0 ? (
         <span className='hidden group-focus-within/label:flex group-hover/label:flex has-[[aria-haspopup=menu][data-state=open]]:flex pointer-coarse:flex'>
-          <DropdownMenu>
+          <DropdownMenu isResponsive>
             <DropdownMenuTrigger asChild>
               <Button
                 type='button'
@@ -548,7 +540,7 @@ function ProjectsLabel(): React.JSX.Element {
                 <EllipsisVertical aria-hidden className='size-3.5' />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent side='right' align='start' className='w-48'>
+            <DropdownMenuContent drawerTitle='Projects' side='right' align='start' className='w-48'>
               <DropdownMenuItem
                 onSelect={() => {
                   for (const projectId of idleProjectIds) {

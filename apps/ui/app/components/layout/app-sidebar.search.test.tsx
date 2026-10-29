@@ -158,7 +158,7 @@ describe('sidebar search trigger', () => {
         'z-110',
       );
       expect(palette).not.toHaveClass('data-[vaul-drawer-direction=bottom]:max-h-[80vh]');
-      const field = within(palette).getByPlaceholderText('Search projects, chats, and actions…');
+      const field = within(palette).getByPlaceholderText('Search projects, chats…');
       await waitFor(() => {
         expect(field).toHaveFocus();
       });
@@ -192,7 +192,7 @@ describe('sidebar search trigger', () => {
       await userEvent.click(within(header).getByRole('button', { name: 'Search' }));
       const palette = await screen.findByRole('dialog', { name: 'Search' });
 
-      const field = within(palette).getByPlaceholderText('Search projects, chats, and actions…');
+      const field = within(palette).getByPlaceholderText('Search projects, chats…');
       await waitFor(() => {
         expect(field).toHaveFocus();
       });

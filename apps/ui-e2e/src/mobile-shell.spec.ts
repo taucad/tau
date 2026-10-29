@@ -71,13 +71,13 @@ test.each([
   }
 
   const detents = Number(await target.getAttribute(grabber(), 'aria-valuemax'));
-  // Peek, half and full (D4); a surface opens at half.
-  expect(detents).toBe(3);
-  expect(await target.getAttribute(grabber(), 'aria-valuenow')).toBe('2');
-  // From the peek up: the chat's composer must clear the nav at the lowest detent too (R4).
+  // Half and full; collapsed is the sheet closed. A surface opens at half.
+  expect(detents).toBe(2);
+  expect(await target.getAttribute(grabber(), 'aria-valuenow')).toBe('1');
+  // Half is the lowest detent: Home keeps it there, and the chat's composer must clear the nav there too (R4).
   await target.press(grabber(), 'Home');
   await expect.poll(async () => target.getAttribute(grabber(), 'aria-valuenow')).toBe('1');
-  // Chat fits the peek at rest: across a 1s window, sampled every frame, the sheet never raises itself (I5), and
+  // Chat fits half at rest: across a 1s window, sampled every frame, the sheet never raises itself (I5), and
   // nothing in it is clipped. A raise lands within a frame or two of the resize, well inside the window.
   const heldDetents = await target.evaluateLocator(grabber(), async (handle) => {
     const seen = new Set<string>();
@@ -95,7 +95,7 @@ test.each([
     return [...seen];
   });
   expect(heldDetents).toEqual(['1']);
-  expect(await target.getAttribute(grabber(), 'aria-valuetext')).toBe('Peek');
+  expect(await target.getAttribute(grabber(), 'aria-valuetext')).toBe('Half');
   const clipped = await target.evaluateLocator(
     selectors.getByRole('region', { name: 'Chat', exact: true }),
     (surface) => {
@@ -129,7 +129,7 @@ test.each([
   { width: 320, height: 640 },
   { width: 390, height: 844 },
 ])(
-  'gives the sheet grabber a 44px target that covers neither the pane header nor the viewer bar at $width×$height',
+  'gives the sheet grabber a target that covers neither the pane header nor the viewer bar at $width×$height',
   async (viewport) => {
     await target.commands.uiOpenTarget({ hasTouch: true, isMobile: true });
     await prepareComposerPage();
@@ -147,7 +147,15 @@ test.each([
       surface.getByCss('[data-slot=floating-panel-content-header]').first(),
       'The pane header',
     );
-    expect(handle.height).toBeGreaterThanOrEqual(44);
+    /* The bar sits a gap above the header with no row of its own below it, so the target is the 8px row plus
+     * 8px above the sheet's edge; the grabber's keys and the nav remain the other ways to move the sheet. */
+    expect(handle.height).toBeGreaterThanOrEqual(16);
+    const indicator = await boxOf(selectors.getByCss('[data-slot=drawer-handle-indicator]').first(), 'The bar');
+    // The space between the bar and the header actions equals the space below them.
+    const action = await boxOf(surface.getByRole('button', { name: /^Close/u }).first(), 'The header Close');
+    expect(
+      Math.abs(action.y - (indicator.y + indicator.height) - (header.y + header.height - (action.y + action.height))),
+    ).toBeLessThanOrEqual(1);
     expect(handle.width).toBeGreaterThanOrEqual(viewport.width - 2);
     // The target ends where the header begins, so Close and the header actions are never part of it (I3).
     expect(handle.y + handle.height).toBeLessThanOrEqual(header.y + 0.5);

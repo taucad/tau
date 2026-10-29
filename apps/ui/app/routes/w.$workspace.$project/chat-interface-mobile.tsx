@@ -9,7 +9,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { ChatInterfaceNav, surfaceTitle } from '#routes/w.$workspace.$project/chat-interface-nav.js';
 import { mobileWorkbenchNavigationHeight } from '#components/mobile-workbench-navigation.js';
 import type { MobileWorkbenchDestinationCue } from '#components/mobile-workbench-navigation.js';
-import { mobileDrawerOpenSnapPoint, mobileDrawerPeekSnapPoint } from '#constants/editor.constants.js';
+import { mobileDrawerOpenSnapPoint } from '#constants/editor.constants.js';
 import type { MobilePanelId } from '#constants/editor.constants.js';
 import { useChatInterfaceState } from '#routes/w.$workspace.$project/use-chat-interface-state.js';
 import { viewName } from '#workbench-records/view-titles.js';
@@ -287,7 +287,7 @@ const decisionSelector = '[data-decision], [data-ask-state=open]';
 /** A decision that settled (an answered question, a resolved approval): its identity can retire. */
 const settledSelector = '[data-ask-state=settled][data-ask-id], [data-decision-state=settled][data-decision-id]';
 
-/** The fixed rows' overflow at the peek, as an acknowledgement key. */
+/** The fixed rows' overflow at half, the lowest detent, as an acknowledgement key. */
 const fixedRowsKey = 'fixed-rows';
 
 /** How often a scroll re-checks at most, while a list is still catching up with its content. Milliseconds. */
@@ -356,17 +356,16 @@ function decisionsIn(section: HTMLElement): Array<[string, HTMLElement]> {
 }
 
 /**
- * Never fold away a decision (I5). When a decision arrives and the detent cuts it off, the sheet rises one detent, and
- * again from half if half still cuts it off; at the peek the same holds for fixed rows (a title, a composer with an
- * approval or a question above it) that no longer fit. A detent the person chooses is theirs: the decisions on screen
- * when they move the sheet are acknowledged, on any surface and for as long as they wait, and only a decision that
- * arrives after can raise it again.
+ * Never fold away a decision (I5). When a decision arrives and half cuts it off, the sheet rises to full; the same
+ * holds for fixed rows (a title, a composer with an approval or a question above it) that no longer fit at half. A
+ * detent the person chooses is theirs: the decisions on screen when they move the sheet are acknowledged, on any
+ * surface and for as long as they wait, and only a decision that arrives after can raise it again.
  *
  * @returns The acknowledgement to call when the person moves the sheet.
  */
 function useRaiseWhenClipped(
   section: HTMLElement | undefined,
-  detent: 'peek' | 'half' | undefined,
+  detent: 'half' | undefined,
   raise: () => void,
 ): () => void {
   const acknowledged = useRef(new Set<string>());
@@ -398,11 +397,8 @@ function useRaiseWhenClipped(
         acknowledged.current.delete(fixedRowsKey);
       }
       for (const panel of section.querySelectorAll<HTMLElement>('[data-slot=floating-panel-content]')) {
-        if (
-          detent === 'peek' &&
-          !acknowledged.current.has(fixedRowsKey) &&
-          panel.scrollHeight > panel.clientHeight + 1
-        ) {
+        // Half is the only detent below full, so the fixed rows overflowing it raise the sheet.
+        if (!acknowledged.current.has(fixedRowsKey) && panel.scrollHeight > panel.clientHeight + 1) {
           raise();
           return;
         }
@@ -453,10 +449,7 @@ function useRaiseWhenClipped(
 
 /** The detents a decision can raise the sheet from; full has nowhere higher to go. */
 // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
-function raisableDetent(point: number | string | null): 'peek' | 'half' | undefined {
-  if (point === mobileDrawerPeekSnapPoint) {
-    return 'peek';
-  }
+function raisableDetent(point: number | string | null): 'half' | undefined {
   return point === mobileDrawerOpenSnapPoint ? 'half' : undefined;
 }
 
@@ -571,8 +564,8 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
   }, [activeTab, drawerOpen, section]);
 
   const raiseOneDetent = useCallback(() => {
-    handleSnapChange(activeSnapPoint === mobileDrawerPeekSnapPoint ? mobileDrawerOpenSnapPoint : 1);
-  }, [activeSnapPoint, handleSnapChange]);
+    handleSnapChange(1);
+  }, [handleSnapChange]);
   const acknowledgeDecisions = useRaiseWhenClipped(
     section,
     drawerOpen ? raisableDetent(activeSnapPoint) : undefined,

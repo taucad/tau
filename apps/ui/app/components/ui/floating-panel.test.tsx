@@ -8,6 +8,7 @@ import {
   FloatingPanelContentHeader,
   FloatingPanelContentHeaderActions,
   FloatingPanelMenuButton,
+  FloatingPanelButtonGroup,
   FloatingPanelContentTitle,
   FloatingPanelContent,
 } from '#components/ui/floating-panel.js';
@@ -69,15 +70,16 @@ describe('FloatingPanelClose', () => {
     mockUseIsInsideDrawer.mockReset().mockReturnValue(false);
   });
 
-  it('uses the same responsive rounding as other header buttons', () => {
+  it('is a circle with one border on a phone, the shape of every other header button', () => {
     renderInPanel(
       <TooltipProvider>
         <FloatingPanelClose icon={<span />} tooltipContent={() => 'Close'} />
       </TooltipProvider>,
     );
 
-    expect(screen.getByRole('button', { name: 'Close panel' })).toHaveClass('max-md:rounded-md');
-    expect(screen.getByRole('button', { name: 'Close panel' })).not.toHaveClass('max-md:rounded-full');
+    const close = screen.getByRole('button', { name: 'Close panel' });
+    expect(close).toHaveClass('max-md:size-8', 'max-md:rounded-full', 'max-md:border');
+    expect(close).not.toHaveClass('max-md:rounded-md');
   });
 
   // `DrawerClose` is Radix `Dialog.Close`; outside a drawer it throws "`DialogClose` must be used within `Dialog`".
@@ -409,5 +411,33 @@ describe('FloatingPanelContent error boundary', () => {
       tags: { boundary: 'floating-panel' },
     });
     consoleError.mockRestore();
+  });
+});
+
+describe('phone header actions', () => {
+  beforeEach(() => {
+    mockUseIsMobile.mockReset().mockReturnValue(true);
+    mockUseIsInsideDrawer.mockReset().mockReturnValue(true);
+  });
+
+  it('should draw each action as a 32px circle with a single border, and the group as nothing around them', () => {
+    renderInPanel(
+      <FloatingPanelContentHeader>
+        <FloatingPanelContentHeaderActions>
+          <FloatingPanelButtonGroup>
+            <FloatingPanelMenuButton aria-label='Chat options'>⋮</FloatingPanelMenuButton>
+          </FloatingPanelButtonGroup>
+        </FloatingPanelContentHeaderActions>
+      </FloatingPanelContentHeader>,
+    );
+
+    const options = screen.getByRole('button', { name: 'Chat options' });
+    expect(options).toHaveClass('size-8', 'rounded-full!', 'border');
+    expect(options).not.toHaveClass('rounded-md');
+    // A bordered group around a bordered button drew the ⋯ a double border.
+    const group = screen.getByRole('group');
+    for (const drawn of ['border', 'max-md:border', 'max-md:rounded-full', 'max-md:bg-background/70']) {
+      expect(group).not.toHaveClass(drawn);
+    }
   });
 });

@@ -106,7 +106,8 @@ describe.each([
     expect(await seriousAxeViolations()).toEqual([]);
     await target.screenshot(undefined, `preview-production-${String(viewport.width)}.png`);
 
-    // The Workbench drawer holds Preview's own surfaces under their workbench titles (I6), with a 44px grabber (D4).
+    // The Workbench drawer holds Preview's own surfaces under their workbench titles (I6), with a grabber (D4) whose
+    // target is its 8px row plus 8px above the edge, with no space of its own below the bar.
     await target.click(workbench);
     const drawer = selectors.getByRole('dialog', { name: 'Project workbench' });
     await target.expectVisible(drawer);
@@ -114,7 +115,7 @@ describe.each([
       drawer,
       (element) => element.querySelector('[data-slot="drawer-handle"]')?.getBoundingClientRect().height ?? 0,
     );
-    expect(grabberHeight).toBeGreaterThanOrEqual(40);
+    expect(grabberHeight).toBeGreaterThanOrEqual(16);
     await target.click(selectors.getByRole('button', { name: 'Open workbench tab', exact: true }));
     await target.expectVisible(selectors.getByRole('menuitem', { name: 'Parameters', exact: true }));
     await target.expectCount(selectors.getByText(/^Params$/u), 0);

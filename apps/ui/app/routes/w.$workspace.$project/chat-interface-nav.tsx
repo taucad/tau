@@ -175,7 +175,7 @@ export function ChatInterfaceNav({
             }
           }}
         >
-          <DrawerTitle className='px-3'>All surfaces</DrawerTitle>
+          <DrawerTitle className='px-3 pt-2'>All surfaces</DrawerTitle>
           <DrawerDescription className='sr-only'>Choose a workbench surface</DrawerDescription>
           <div
             className='min-h-0 overflow-y-auto pb-3'

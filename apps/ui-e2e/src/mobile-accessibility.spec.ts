@@ -37,8 +37,11 @@ type Adjudication = Readonly<{
   (
     | Readonly<{ recheck: string }>
     | Readonly<{ keyboard: true }>
-    /** Measured in the page, and only on nodes matching `only` (axe's markup excerpt is truncated, so not by text). */
-    | Readonly<{ measure: 'opaque-on-top'; only: string }>
+    /**
+     * Measured in the page, and only on nodes matching `only` (axe's markup excerpt is truncated, so not by text). The
+     * text stands on the node's own fill or, with `fill: 'surface'`, on its nearest painted ancestor's.
+     */
+    | Readonly<{ measure: 'opaque-on-top'; only: string; fill?: 'own' | 'surface' }>
   );
 
 const adjudications: readonly Adjudication[] = [
@@ -77,6 +80,18 @@ const adjudications: readonly Adjudication[] = [
     reason: 'the debug FPS readout is on top, on its own opaque fill, at 4.5:1 or more',
     measure: 'opaque-on-top',
     only: 'output[aria-label="Render-loop submission FPS"]',
+  },
+  {
+    rule: 'color-contrast',
+    message: /partially overlaps other elements/u,
+    // A phone menu drawer (z-110) lies over the sidebar sheet's footer and the workbench nav. Its last row, the Help
+    // menu's version label, sits level with them, and axe gives up there although nothing paints over the label (the
+    // same label passes once moved above them). The sweep measures it instead: the label is topmost at its centre, the drawer's fill
+    // behind it is opaque, and its text meets 4.5:1 against that fill.
+    reason: 'the menu drawer label is on top, over the drawer’s own opaque fill, at 4.5:1 or more',
+    measure: 'opaque-on-top',
+    fill: 'surface',
+    only: '[data-slot="dropdown-menu-drawer-items"] > [data-slot="dropdown-menu-label"]',
   },
   {
     rule: 'aria-hidden-focus',
@@ -167,12 +182,12 @@ async function recheckUnder(rule: string, css: string): Promise<Map<string, read
 }
 
 /**
- * Whether the node is the topmost element at its centre, draws an opaque fill of its own, and its text meets 4.5:1
- * against that fill: the measurement axe could not make.
+ * Whether the node is the topmost element at its centre, stands on an opaque fill (its own, or with `fill: 'surface'`
+ * its nearest painted ancestor's), and its text meets 4.5:1 against that fill: the measurement axe could not make.
  */
-const isOpaqueOnTop = async (selector: string, only: string): Promise<boolean> =>
+const isOpaqueOnTop = async (selector: string, only: string, fill: 'own' | 'surface' = 'own'): Promise<boolean> =>
   target.evaluate(
-    ({ css, allowed }) => {
+    ({ css, allowed, isSurface }) => {
       const node = document.querySelector<HTMLElement>(css);
       if (!node?.matches(allowed)) {
         return false;
@@ -200,11 +215,19 @@ const isOpaqueOnTop = async (selector: string, only: string): Promise<boolean> =
         return 0.2126 * r + 0.7152 * g + 0.0722 * b;
       };
       const style = getComputedStyle(node);
+      // The fill the text stands on: the node's own, or the nearest painted one behind it among its ancestors.
+      let { backgroundColor } = style;
+      if (isSurface) {
+        for (let ancestor = node.parentElement; ancestor && rgba(backgroundColor)[3] === 0; ) {
+          ({ backgroundColor } = getComputedStyle(ancestor));
+          ancestor = ancestor.parentElement;
+        }
+      }
       context.clearRect(0, 0, 1, 1);
-      context.fillStyle = style.backgroundColor;
+      context.fillStyle = backgroundColor;
       context.fillRect(0, 0, 1, 1);
       const fillAlpha = context.getImageData(0, 0, 1, 1).data.at(3);
-      const [lighter = 0, darker = 0] = [luminance(rgba(style.color)), luminance(rgba(style.backgroundColor))].sort(
+      const [lighter = 0, darker = 0] = [luminance(rgba(style.color)), luminance(rgba(backgroundColor))].sort(
         (a, b) => b - a,
       );
       const { pointerEvents } = node.style;
@@ -219,7 +242,7 @@ const isOpaqueOnTop = async (selector: string, only: string): Promise<boolean> =
       const textAlpha = context.getImageData(0, 0, 1, 1).data.at(3);
       return onTop && fillAlpha === 255 && textAlpha === 255 && (lighter + 0.05) / (darker + 0.05) >= 4.5;
     },
-    { css: selector, allowed: only },
+    { css: selector, allowed: only, isSurface: fill === 'surface' },
   );
 
 /**
@@ -266,7 +289,7 @@ async function unadjudicated(incomplete: readonly AxeNodeFinding[]): Promise<Und
       }
       if ('measure' in adjudication) {
         // oxlint-disable-next-line no-await-in-loop -- one node at a time.
-        if (!(await isOpaqueOnTop(node.target, adjudication.only))) {
+        if (!(await isOpaqueOnTop(node.target, adjudication.only, adjudication.fill))) {
           // oxlint-disable-next-line no-await-in-loop -- diagnostics for a failing node only.
           undecided.push({ rule: finding.id, ...node, note: `not measured clean: ${await coverOf(node.target)}` });
         }
@@ -296,6 +319,19 @@ async function unadjudicated(incomplete: readonly AxeNodeFinding[]): Promise<Und
         rechecks.set(finding.id, flagged);
       }
       const still = flagged.get(node.target);
+      // A node the re-check still cannot decide for another adjudicated reason is measured for that reason instead.
+      const measured = still
+        ? adjudications.find(
+            (candidate) =>
+              candidate.rule === finding.id &&
+              'measure' in candidate &&
+              still.some((text) => candidate.message.test(text)),
+          )
+        : undefined;
+      // oxlint-disable-next-line no-await-in-loop -- one node at a time.
+      if (measured && 'measure' in measured && (await isOpaqueOnTop(node.target, measured.only, measured.fill))) {
+        continue;
+      }
       if (still) {
         const isTooShort = still.some((text) => /too short to determine/u.test(text));
         // oxlint-disable-next-line no-await-in-loop -- one node at a time.
@@ -489,13 +525,10 @@ describe('phone project route accessibility (T6)', () => {
 
       await sweep('stage, sheet closed', report);
 
-      // The sheet at each detent, with Chat in it: a surface opens at half (D4).
+      // The sheet at each detent, with Chat in it: a surface opens at half (D4); collapsed is the stage above.
       await openPane('Chat');
       await expect.poll(async () => target.getAttribute(grabber(), 'aria-valuetext')).toBe('Half');
       await sweep('sheet at half', report);
-      await target.press(grabber(), 'Home');
-      await expect.poll(async () => target.getAttribute(grabber(), 'aria-valuetext')).toBe('Peek');
-      await sweep('sheet at peek', report);
       await target.press(grabber(), 'End');
       await expect.poll(async () => target.getAttribute(grabber(), 'aria-valuetext')).toBe('Full');
       await sweep('sheet at full', report);
@@ -525,6 +558,13 @@ describe('phone project route accessibility (T6)', () => {
       await target.click(selectors.getByRole('button', { name: 'Open sidebar', exact: true }), { touch: true });
       await target.expectVisible(sidebarSheet());
       await sweep('sidebar sheet', report);
+      // A sidebar menu opens in a drawer above the sheet on a phone.
+      await target.click(sidebarSheet().getByRole('button', { name: 'Help', exact: true }), { touch: true });
+      const helpDrawer = selectors.getByRole('dialog', { name: 'Help', exact: true });
+      await target.expectVisible(helpDrawer);
+      await sweep('Help drawer', report);
+      await escapeClose(helpDrawer);
+      await target.expectVisible(sidebarSheet());
       await target.click(sidebarSheet().getByRole('button', { name: 'Search', exact: true }), { touch: true });
       const searchSheet = selectors.getByRole('dialog', { name: 'Search' });
       await target.expectVisible(searchSheet);
@@ -788,9 +828,9 @@ describe('phone project route keyboard-only completion (T6)', () => {
       for (const [key, detent] of [
         ['ArrowUp', 'Full'],
         ['ArrowDown', 'Half'],
-        ['Home', 'Peek'],
         ['End', 'Full'],
-        ['Enter', 'Peek'],
+        ['Home', 'Half'],
+        ['Enter', 'Full'],
         [' ', 'Half'],
       ] as const) {
         // oxlint-disable-next-line no-await-in-loop -- one key at a time.

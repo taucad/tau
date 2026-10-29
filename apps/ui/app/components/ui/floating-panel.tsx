@@ -230,11 +230,7 @@ function FloatingPanelClose({
     <FloatingPanelMenuButton
       tooltip={tooltipContent(isOpen)}
       tooltipSide='top'
-      className={cn(
-        'text-muted-foreground',
-        'max-md:border max-md:bg-background/70 max-md:backdrop-blur-lg',
-        className,
-      )}
+      className={cn('text-muted-foreground', 'max-md:bg-background/70 max-md:backdrop-blur-lg', className)}
       aria-label={label}
       onClick={close}
     >
@@ -433,9 +429,9 @@ type FloatingPanelMenuButtonProps = React.ComponentProps<typeof PaneButton>;
 /**
  * Styled icon button for floating panel headers.
  *
- * Thin wrapper around the shared `PaneButton` that adds mobile-responsive
- * sizing (`max-md:size-8 max-md:rounded-md`) and the
- * `floating-panel-menu-button` data-slot for styling hooks.
+ * Thin wrapper around the shared `PaneButton` that adds the phone shape (a
+ * 32px circle with a single border) and the `floating-panel-menu-button`
+ * data-slot for styling hooks.
  *
  * When rendered inside a mobile drawer, stops click and pointerDown
  * propagation at the button level so parent surfaces do not initiate
@@ -457,8 +453,9 @@ function FloatingPanelMenuButton({
     <PaneButton
       data-slot='floating-panel-menu-button'
       className={cn(
-        'max-md:size-8 max-md:rounded-md',
-        isMobile && 'size-8 rounded-md border bg-background shadow-xs',
+        'max-md:size-8 max-md:rounded-full max-md:border max-md:bg-background max-md:shadow-xs',
+        // An embedded phone surface is not a narrow viewport; `!` outranks the button's own radius there.
+        isMobile && 'size-8 rounded-full! border bg-background shadow-xs',
         className,
       )}
       onClick={isDrawerHandle ? chainStopPropagation(onClick) : onClick}
@@ -474,20 +471,15 @@ type FloatingPanelButtonGroupProps = {
 };
 
 /**
- * Groups action buttons into a pill-shaped bar with iOS glass styling on mobile.
- * On desktop the group is visually transparent (ghost buttons remain individually styled).
- * On mobile it renders as a frosted-glass pill.
+ * Groups action buttons. The group draws nothing itself: on desktop the ghost buttons stand alone, and on a phone each
+ * button is its own bordered circle, so a group never adds a second border around one.
  */
 function FloatingPanelButtonGroup({ children, className }: FloatingPanelButtonGroupProps): React.JSX.Element {
   return (
     <div
       role='group'
       data-slot='floating-panel-button-group'
-      className={cn(
-        'flex items-center',
-        'max-md:overflow-hidden max-md:rounded-full max-md:border max-md:bg-background/70 max-md:backdrop-blur-lg',
-        className,
-      )}
+      className={cn('flex items-center max-md:gap-1', className)}
     >
       {children}
     </div>

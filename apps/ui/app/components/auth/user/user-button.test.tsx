@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ResponsiveSurfaceProvider } from '@taucad/ui/hooks/use-mobile';
 
 const session = vi.hoisted(() => ({ data: undefined as unknown, isPending: true }));
 
@@ -41,4 +42,31 @@ describe('UserButton', () => {
     expect(signIn.closest('a')).toHaveAttribute('href', '/auth/sign-in');
     expect(screen.queryByText('Log in')).not.toBeInTheDocument();
   });
+
+  it('should open the account menu in a drawer above the sidebar sheet on a phone', async () => {
+    session.isPending = false;
+    // Vaul reads the media query when a drawer opens; jsdom has none.
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }));
+    render(
+      <ResponsiveSurfaceProvider isMobile container={undefined}>
+        <UserButton size='sm' />
+      </ResponsiveSurfaceProvider>,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Account' }));
+
+    const drawer = await screen.findByRole('dialog', { name: 'Account' });
+    expect(drawer).toHaveClass('z-110');
+    expect(within(drawer).getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/auth/sign-in');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });

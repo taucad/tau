@@ -1,4 +1,4 @@
-import { ChevronRight, Ellipsis } from 'lucide-react';
+import { ChevronRight, EllipsisVertical } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Link, matchPath, NavLink, useLocation } from 'react-router';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
@@ -17,7 +17,6 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
-  useSidebar,
 } from '#components/ui/sidebar.js';
 import { Loader } from '@taucad/ui/components/loader';
 import { cn } from '@taucad/ui/utils/cn';
@@ -29,22 +28,21 @@ type NavMoreItem = {
   action?: () => void;
 };
 
-/** The "More" row: secondary destinations in a menu beside the sidebar. */
+/** The "More" row: secondary destinations in a menu beside the sidebar, or in a drawer on a phone. */
 function NavMore({ items }: { readonly items: readonly NavMoreItem[] }): React.JSX.Element {
-  const { isMobile } = useSidebar();
   const { pathname } = useLocation();
   const isActive = items.some((item) => matchPath({ path: item.url, end: false }, pathname) !== null);
 
   return (
     <SidebarMenuItem>
-      <DropdownMenu>
+      <DropdownMenu isResponsive>
         <DropdownMenuTrigger asChild>
           <SidebarMenuButton isActive={isActive}>
-            <Ellipsis className='size-4 shrink-0' />
+            <EllipsisVertical className='size-4 shrink-0' />
             <span className='flex-1 truncate'>More</span>
           </SidebarMenuButton>
         </DropdownMenuTrigger>
-        <DropdownMenuContent side={isMobile ? 'bottom' : 'right'} align='start' className='min-w-48'>
+        <DropdownMenuContent drawerTitle='More' side='right' align='start' className='min-w-48'>
           {items.map((item) => {
             const content = (
               <>

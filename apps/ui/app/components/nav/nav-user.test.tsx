@@ -45,8 +45,24 @@ vi.mock('#hooks/use-network-connectivity.js', () => ({
 }));
 
 vi.mock('@taucad/ui/components/dropdown-menu', () => ({
-  DropdownMenu: ({ children }: { readonly children?: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuContent: ({ children }: { readonly children?: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenu: ({
+    children,
+    isResponsive,
+  }: {
+    readonly children?: React.ReactNode;
+    readonly isResponsive?: boolean;
+  }) => (
+    <div data-testid='dropdown-menu' data-responsive={isResponsive ? 'true' : undefined}>
+      {children}
+    </div>
+  ),
+  DropdownMenuContent: ({
+    children,
+    drawerTitle,
+  }: {
+    readonly children?: React.ReactNode;
+    readonly drawerTitle?: string;
+  }) => <div data-drawer-title={drawerTitle}>{children}</div>,
   DropdownMenuItem: ({ children }: { readonly children?: React.ReactNode }) => <div role='menuitem'>{children}</div>,
   DropdownMenuLabel: ({ children }: { readonly children?: React.ReactNode }) => <div>{children}</div>,
   DropdownMenuSeparator: () => <hr />,
@@ -130,6 +146,15 @@ describe('NavUser', () => {
     expect(screen.getByText('Community Discord')).toBeInTheDocument();
     expect(screen.getByText(`Tau v${metaConfig.version}`)).toBeInTheDocument();
     expect(screen.queryByText('About Tau')).not.toBeInTheDocument();
+  });
+
+  /* A phone opens the sidebar as a sheet (z-100) the dropdown would sit behind; the Help menu opens in a drawer there. */
+  it('should open Help in a drawer titled Help on a phone', () => {
+    render(<NavUser />, { wrapper: MemoryRouter });
+
+    const help = screen.getByRole('button', { name: 'Help' }).closest('[data-testid=dropdown-menu]');
+    expect(help).toHaveAttribute('data-responsive', 'true');
+    expect(help?.querySelector('[data-drawer-title]')).toHaveAttribute('data-drawer-title', 'Help');
   });
 
   it('should link the legal pages to the web deployment the desktop shell is bound to', () => {

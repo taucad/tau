@@ -1,9 +1,9 @@
 import { defineTranscoder } from '@taucad/runtime/transcoder';
 import { lookupMimeType } from '@taucad/runtime/types';
-import { conversionEdges, createAssimp } from 'libassimp';
+import { AssimpError, conversionEdges, createAssimp } from 'libassimp';
 import type { Assimp, ConversionEdge, ExportFormat, ExportOptionsFor } from 'libassimp';
 import { z } from 'zod';
-import { assimpEdgeSchemas } from '#assimp-export-options.js';
+import { assimpEdgeSchemas, pointCloudExportOptions, tauSetExportOptions } from '#assimp-export-options.js';
 
 type TauAssimpRoute = Extract<ConversionEdge, { from: 'glb' | 'gltf'; to: Exclude<ExportFormat, 'assjson'> }>;
 
@@ -43,11 +43,68 @@ const assimpTranscoderOptionsSchema = z
   .object({ backend: z.enum(['auto', 'native', 'wasm']).default('auto') })
   .strict();
 
+type InputFile = Readonly<{ name: string; bytes: Uint8Array<ArrayBuffer> }>;
+
+const gltfPointsMode = 0;
+const glbMagic = 0x46_54_6c_67;
+const glbJsonChunk = 0x4e_4f_53_4a;
+
+/** The glTF JSON of a `.gltf` file or a GLB's first chunk, or `undefined` when the bytes are neither. */
+const gltfJson = ({ name, bytes }: InputFile): unknown => {
+  try {
+    if (name.toLowerCase().endsWith('.gltf')) {
+      return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+    }
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (bytes.byteLength < 20 || view.getUint32(0, true) !== glbMagic || view.getUint32(16, true) !== glbJsonChunk) {
+      return undefined;
+    }
+    return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + view.getUint32(12, true)))) as unknown;
+  } catch {
+    return undefined;
+  }
+};
+
+/** Whether the model has primitives and every one of them draws points, so no mesh has faces or lines. */
+const isPointCloud = (files: readonly InputFile[]): boolean => {
+  const document = files.map((file) => gltfJson(file)).find((json) => json !== undefined) as
+    | { meshes?: Array<{ primitives?: Array<{ mode?: number }> }> }
+    | undefined;
+  const primitives = document?.meshes?.flatMap((mesh) => mesh.primitives ?? []) ?? [];
+  return primitives.length > 0 && primitives.every((primitive) => primitive.mode === gltfPointsMode);
+};
+
+/** The form options plus the hidden ones tau chooses for this model. */
+const exportOptionsFor = (
+  to: ExportFormat,
+  formOptions: unknown,
+  files: readonly InputFile[],
+): ExportOptionsFor<typeof to> => {
+  const options: Record<string, unknown> = {
+    ...tauSetExportOptions[to],
+    ...(formOptions as Record<string, unknown>),
+    ...(isPointCloud(files) ? pointCloudExportOptions : {}),
+  };
+  return options as ExportOptionsFor<typeof to>;
+};
+
+/** The libassimp message, plus what to change when the failure comes from a setting or a size limit. */
+const failureMessage = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : 'Transcoding failed';
+  if (error instanceof AssimpError && error.code === 'LIMIT_EXCEEDED') {
+    return `${message} The model is too large to export here. Try a coarser tessellation.`;
+  }
+  if (/is not manifold and oriented/u.test(message)) {
+    return `${message} The model has open or inconsistently oriented surfaces. Turn off Require manifold to export it anyway.`;
+  }
+  return message;
+};
+
 /** Assimp-backed glTF/GLB mesh export transcoder. @public */
 export const assimpTranscoder = defineTranscoder({
   id: 'assimp',
   name: 'AssimpTranscoder',
-  version: '0.1.1',
+  version: '0.1.2',
   edges,
   optionsSchema: assimpTranscoderOptionsSchema,
 
@@ -76,7 +133,7 @@ export const assimpTranscoder = defineTranscoder({
       services.logger.log(`Transcoding ${input.from} -> ${input.to}`);
       const options = {
         to: input.to,
-        exportOptions: input.options as ExportOptionsFor<typeof input.to>,
+        exportOptions: exportOptionsFor(input.to, input.options, input.files),
         signal: services.signal,
       };
       const { files } = await context.assimp.convert(
@@ -91,10 +148,9 @@ export const assimpTranscoder = defineTranscoder({
       services.logger.log(`Successfully transcoded to ${input.to}`);
       return { success: true, data: output, issues: [] };
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Transcoding failed';
       return {
         success: false,
-        issues: [{ message, code: 'RUNTIME', type: 'runtime', severity: 'error' }],
+        issues: [{ message: failureMessage(error), code: 'RUNTIME', type: 'runtime', severity: 'error' }],
       };
     }
   },

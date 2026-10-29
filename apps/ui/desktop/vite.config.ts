@@ -18,6 +18,8 @@ import { createUiReactCompilerPlugin, createUiSourceAliasPlugin, uiResolveAlias,
 import { resolveTauCloudBuildEnabled, resolveTauTelemetryHostCloud } from '../build-environment';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
 import { createGeoSpecMtAssets } from '../geospec-mt-assets.vite-plugin';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vite configuration runs outside the app alias resolver.
+import { createPicogkBrowserAssets } from '../picogk-browser-assets.vite-plugin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /* The renderer stamps the desktop app's own semver as its runtime telemetry release, as desktop main does. */
@@ -27,6 +29,7 @@ const desktopRelease = (
 // oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
 const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
 const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
+const picogkAssets = createPicogkBrowserAssets(process.env['PICOGK_BROWSER_ASSETS_ROOT']);
 
 /**
  * Desktop (Electron) build of `apps/ui`.
@@ -54,11 +57,13 @@ export default defineConfig({
     // oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
     tauTelemetryHostCloudBuild: JSON.stringify(resolveTauTelemetryHostCloud(process.env['TAU_TELEMETRY_HOST'])),
     tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
+    tauPicogkBrowserAssets: picogkAssets.assets ? JSON.stringify(picogkAssets.assets) : 'undefined',
     // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
     'import.meta.env.TAU_TARGET': '"desktop"',
   },
   plugins: [
     mtAssets.plugin,
+    picogkAssets.plugin,
     // Prune unused runtime assets before the module graph inventories them.
     tauRuntime(),
     createUiSourceAliasPlugin({

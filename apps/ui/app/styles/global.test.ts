@@ -328,7 +328,8 @@ describe('action cursor contract', () => {
     expect(appStyles).toContain('.dockview-theme-tau');
     expect(appStyles).toContain('cursor: var(--cursor-action) !important;');
     expect(appStyles).not.toContain('.editor-container .cm-tooltip-autocomplete li');
-    expect(codeEditorStyles).toContain('.editor-container .cm-tooltip-autocomplete li');
+    expect(codeEditorStyles).toContain('.cm-editor .cm-tooltip-autocomplete li');
+    expect(codeEditorStyles).toContain('.cm-editor .cm-tooltip button');
     expect(codeEditorStyles).toContain('--cm-keyword: oklch(77.882% 0.1293 21.59);');
     expect(appStyles).toContain('[data-sonner-toast] [data-button]');
     expect(appStyles).toContain('#profiler-toggle');

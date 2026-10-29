@@ -16,12 +16,16 @@ import { maximumPostedReceiptLength } from '#api/git/forwarding/contract/receipt
 import { GitRepositoryService } from '#api/git/git.service.js';
 
 /**
- * Posts one address may make per window. tau-storage posts one receipt per
- * deferred compaction and one per compacting sweep, so this is far above any
- * real rate and only bounds what a caller replaying receipts can make the API
- * re-read.
+ * Posts one address may make per window. tau-storage posts two receipts per
+ * compaction it runs after a reply — the compaction's `commit` and its sweep's
+ * `retained` — where it posted one per compacting push before compaction
+ * moved off the reply, so the budget doubled with it (240 from 120). At the
+ * observed 13% of pushes compacting, that is still ~900 pushes a minute from
+ * one storage address before a `429`, which the poster waits out
+ * (`Retry-After`); it only bounds what a caller replaying receipts can make
+ * the API re-read.
  */
-export const receiptPostsPerWindow = 120;
+export const receiptPostsPerWindow = 240;
 
 /** The receipt route's window, in seconds. */
 export const receiptPostWindowSeconds = 60;

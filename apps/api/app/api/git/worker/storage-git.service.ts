@@ -188,14 +188,19 @@ export class StorageGitService extends GitLeaseHost {
   /** The projects whose sweep is running (`sweepAfterReply`). */
   readonly #sweeping = new Set<string>();
 
-  /** The projects whose deferred compaction is running (`compactAfterReply`). */
-  readonly #compacting = new Set<string>();
+  /**
+   * Each project's deferred compactions on this worker (`compactAfterReply`):
+   * the newest one owed, which is the only one that may still run, and when
+   * the one before it has finished. They run one at a time per project.
+   */
+  readonly #compactions = new Map<string, { readonly newest: symbol; readonly finished: Promise<void> }>();
 
   /**
-   * The pushes this process is serving now, by project: a deferred compaction
-   * gives way to any of them but its own (`compactAfterReply`).
+   * The manifest writers this process is serving now — pushes and ref
+   * removals — by project: a deferred compaction gives way to any of them
+   * (`compactAfterReply`).
    */
-  readonly #pushesInFlight = new Map<string, Set<symbol>>();
+  readonly #writersInFlight = new Map<string, Set<symbol>>();
 
   /** Each repository's last LFS walk, so a receipt's walk covers only what is new (push latency F4). */
   readonly #lfsReferences = new LfsReferenceCache();
@@ -354,7 +359,7 @@ export class StorageGitService extends GitLeaseHost {
    */
   public async receivePack(args: StorageRpcArguments): Promise<ReceivePackResult> {
     const { grant } = args;
-    const push = this.#pushStarted(grant.project);
+    const push = this.#writerStarted(grant.project);
     return this.runLeaseThen('receive_pack', this.leaseRequest(grant), async (lease, digest) => {
       const ceilingRemaining = Math.max(0, this.repositoryByteCeiling - manifestPackBytes(lease.manifest));
       const child = this.spawnService({
@@ -451,7 +456,7 @@ export class StorageGitService extends GitLeaseHost {
         ? { value }
         : { value, after: async () => this.compactAfterReply({ grant, push, compaction, facts }) };
     }).finally(() => {
-      this.#pushEnded(grant.project, push);
+      this.#writerEnded(grant.project, push);
     });
   }
 
@@ -478,6 +483,7 @@ export class StorageGitService extends GitLeaseHost {
         message: 'Only a named version (refs/tags/*) or a conflict line (refs/heads/conflicts/*) can be removed.',
       });
     }
+    const removal = this.#writerStarted(grant.project);
     return this.runLease('remove_ref', this.leaseRequest(grant), async (lease) => {
       const held = lease.manifest?.refs[ref]?.oid;
       if (held === undefined) {
@@ -511,6 +517,8 @@ export class StorageGitService extends GitLeaseHost {
       const facts = await this.commitFacts(grant, lease, result);
       this.sweepAfterReply(grant, result);
       return { ref, tip: held, generation: result.manifest.generation, receipt: this.signQuietly(grant, facts) };
+    }).finally(() => {
+      this.#writerEnded(grant.project, removal);
     });
   }
 
@@ -847,37 +855,93 @@ export class StorageGitService extends GitLeaseHost {
 
   /**
    * Runs the compaction a push's commit left owed, after the push was answered
-   * and over the push's lease, which is disposed once this returns (push
-   * latency F2: the compacting commit's repack and re-upload were the >5 s
-   * tail of the reply). At most one runs per project on this worker.
+   * and over the push's lease (push latency F2: the compacting commit's repack
+   * and re-upload were the >5 s tail of the reply).
+   *
+   * One runs at a time per project on this worker, and only the newest owed
+   * one: a push that owes a compaction while another runs waits for it, and
+   * any older one still waiting, or still running, gives way to it.
    *
    * It gives way rather than race: it is abandoned before each step while any
-   * other push for the project is in flight here or the process is stopping,
-   * and a lost conditional write is a lost compaction, never a lost push. In
-   * either case the next push past the bound owes it again, and past
+   * other manifest writer for the project (a push, a ref removal) is in flight
+   * here or the process is stopping, and it stops before the repack and before
+   * its first upload once the manifest has moved past the push it follows. A
+   * lost conditional write is a lost compaction, never a lost push; a writer
+   * elsewhere that hydrated the push's generation rebases over a compaction
+   * that won (`rebaseOverCompaction` in `commit.ts`). In every case where it
+   * does not commit, the next push past the bound owes it again, and past
    * `deferredCompactionPackLimit` a push compacts inline.
    *
-   * A compaction that wins posts a `commit` receipt for its generation —
-   * a fresh request id, the push's moved refs and the push's whole LFS walk,
-   * both unchanged because the refs are — so the API records the generation
-   * and the compacted bytes rather than repairing them on the next request,
-   * and, should the compaction have overtaken the push's own receipt (which
-   * the API then finds stale), still announces what the push moved. Its sweep
-   * then runs as a compacting commit's does.
-   *
-   * Never rejects: the push is durable whatever happens here.
+   * @returns What to run once the lease is disposed and its admission given
+   *   back, when the compaction committed: its sweep, then a `commit` receipt
+   *   for its generation — a fresh request id, no moved refs (it moved none,
+   *   and the push's own receipt announces the push), and the push's whole LFS
+   *   walk, unchanged because the refs are — so the API records the generation
+   *   and the compacted bytes rather than repairing them on the next request.
+   *   Never rejects: the push is durable whatever happens here.
    */
   private async compactAfterReply(args: {
     readonly grant: StorageGrant;
+    /** The push that owes it, which may still be finishing its answer: not a writer it gives way to. */
     readonly push: symbol;
     readonly compaction: NonNullable<Extract<CommitResult, { committed: true }>['compaction']>;
     readonly facts: StorageReceiptFacts | undefined;
-  }): Promise<void> {
-    const { grant, push } = args;
-    if (this.#compacting.has(grant.project)) {
-      return;
+  }): Promise<(() => Promise<void>) | undefined> {
+    const { grant } = args;
+    const ticket = Symbol(grant.project);
+    const before = this.#compactions.get(grant.project)?.finished;
+    let finish: () => void = () => undefined;
+    const finished = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    this.#compactions.set(grant.project, { newest: ticket, finished });
+    const newest = (): boolean => this.#compactions.get(grant.project)?.newest === ticket;
+    try {
+      await before;
+      if (!newest()) {
+        this.logger.log({ projectId: grant.project }, 'A deferred compaction gave way to a newer one owed');
+        return undefined;
+      }
+      const done = await this.runCompaction({
+        ...args,
+        shouldAbandon: () =>
+          this.shutdown.signal.aborted ||
+          !newest() ||
+          [...(this.#writersInFlight.get(grant.project) ?? [])].some((writer) => writer !== args.push),
+      });
+      if (done?.outcome !== 'committed') {
+        return undefined;
+      }
+      const { manifest, sweep } = done;
+      const { facts } = args;
+      return async () => {
+        this.sweepAfterReply(grant, { compacted: true, manifest, sweep });
+        if (facts !== undefined) {
+          await this.receipts.post({
+            ...facts,
+            rid: randomBytes(16).toString('hex'),
+            generation: manifest.generation,
+            incarnation: manifest.incarnation,
+            manifestSha256: committedDigest(manifest),
+            movedRefs: [],
+          });
+        }
+      };
+    } finally {
+      finish();
+      if (this.#compactions.get(grant.project)?.finished === finished) {
+        this.#compactions.delete(grant.project);
+      }
     }
-    this.#compacting.add(grant.project);
+  }
+
+  /** One deferred compaction, counted and timed as kind `compaction`; `undefined` when it failed. */
+  private async runCompaction(args: {
+    readonly grant: StorageGrant;
+    readonly compaction: NonNullable<Extract<CommitResult, { committed: true }>['compaction']>;
+    readonly shouldAbandon: () => boolean;
+  }): Promise<DeferredCompactionOutcome | undefined> {
+    const { grant } = args;
     const startedAt = performance.now();
     const phases: Array<[CommitPhase, number]> = [];
     const attempt = (outcome: GitCommitAttemptAttributes['outcome']): void => {
@@ -895,9 +959,7 @@ export class StorageGitService extends GitLeaseHost {
     let done: DeferredCompactionOutcome;
     try {
       done = await args.compaction({
-        shouldAbandon: () =>
-          this.shutdown.signal.aborted ||
-          [...(this.#pushesInFlight.get(grant.project) ?? [])].some((other) => other !== push),
+        shouldAbandon: args.shouldAbandon,
         onPhase: (phase, seconds) => {
           phases.push([phase, seconds]);
         },
@@ -909,32 +971,32 @@ export class StorageGitService extends GitLeaseHost {
         { err: error, projectId: grant.project },
         'A deferred compaction failed; the next push past the pack bound compacts again',
       );
-      return;
-    } finally {
-      this.#compacting.delete(grant.project);
+      return undefined;
     }
-
-    if (done.outcome === 'abandoned') {
-      this.logger.log({ projectId: grant.project }, 'A deferred compaction gave way to a push in flight');
-      return;
+    switch (done.outcome) {
+      case 'abandoned': {
+        this.logger.log(
+          { projectId: grant.project },
+          'A deferred compaction gave way to another writer or a newer compaction',
+        );
+        break;
+      }
+      case 'superseded': {
+        this.logger.log({ projectId: grant.project }, 'A deferred compaction stopped: the manifest had moved on');
+        break;
+      }
+      case 'lost': {
+        this.metrics.syncManifestConflicts.add(1);
+        attempt('lost_race');
+        break;
+      }
+      case 'committed': {
+        attempt('committed');
+        this.metrics.gitRepositorySize.record(manifestPackBytes(done.manifest));
+        break;
+      }
     }
-    if (done.outcome === 'lost') {
-      this.metrics.syncManifestConflicts.add(1);
-      attempt('lost_race');
-      return;
-    }
-    attempt('committed');
-    this.metrics.gitRepositorySize.record(manifestPackBytes(done.manifest));
-    if (args.facts !== undefined) {
-      await this.receipts.post({
-        ...args.facts,
-        rid: randomBytes(16).toString('hex'),
-        generation: done.manifest.generation,
-        incarnation: done.manifest.incarnation,
-        manifestSha256: committedDigest(done.manifest),
-      });
-    }
-    this.sweepAfterReply(grant, { compacted: true, manifest: done.manifest, sweep: done.sweep });
+    return done;
   }
 
   /**
@@ -1194,21 +1256,21 @@ export class StorageGitService extends GitLeaseHost {
     });
   }
 
-  /** Records a push this process now serves, which a deferred compaction of its project gives way to. */
-  #pushStarted(project: string): symbol {
-    const push = Symbol(project);
-    const inFlight = this.#pushesInFlight.get(project) ?? new Set<symbol>();
-    inFlight.add(push);
-    this.#pushesInFlight.set(project, inFlight);
-    return push;
+  /** Records a manifest writer this process now serves, which a deferred compaction of its project gives way to. */
+  #writerStarted(project: string): symbol {
+    const writer = Symbol(project);
+    const inFlight = this.#writersInFlight.get(project) ?? new Set<symbol>();
+    inFlight.add(writer);
+    this.#writersInFlight.set(project, inFlight);
+    return writer;
   }
 
-  /** Forgets a push once it has answered. */
-  #pushEnded(project: string, push: symbol): void {
-    const inFlight = this.#pushesInFlight.get(project);
-    inFlight?.delete(push);
+  /** Forgets a writer once it has answered. */
+  #writerEnded(project: string, writer: symbol): void {
+    const inFlight = this.#writersInFlight.get(project);
+    inFlight?.delete(writer);
     if (inFlight?.size === 0) {
-      this.#pushesInFlight.delete(project);
+      this.#writersInFlight.delete(project);
     }
   }
 

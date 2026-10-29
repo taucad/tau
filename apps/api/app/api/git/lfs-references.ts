@@ -245,25 +245,42 @@ export const referencedLfsOidsSince = async (
  * Process-local, like the pack cache: an entry is an exact answer for its
  * tips whichever lease produced it, so a miss — another Machine, a restart, an
  * evicted repository — costs one whole walk and nothing else. Bounded by
- * repositories (least recently walked out first) and by the set it will hold
- * for any one of them.
+ * repositories (least recently walked out first), by the set it will hold for
+ * any one of them, and by the oids it holds across all of them: each is a
+ * 64-character string in a set, about 120 bytes of heap, so the default
+ * 200 000 is about 24 MiB however many repositories share it (review of
+ * push latency F4).
  */
 export class LfsReferenceCache {
   readonly #entries = new Map<string, LfsReferenceBase>();
   readonly #maximumRepositories: number;
   readonly #maximumOids: number;
+  readonly #maximumTotalOids: number;
+  #totalOids = 0;
 
   /**
-   * @param bounds - The most repositories kept, and the largest set kept for one.
+   * @param bounds - The most repositories kept, the largest set kept for one, and the most oids kept across all.
    */
-  public constructor(bounds: { readonly maximumRepositories?: number; readonly maximumOids?: number } = {}) {
+  public constructor(
+    bounds: {
+      readonly maximumRepositories?: number;
+      readonly maximumOids?: number;
+      readonly maximumTotalOids?: number;
+    } = {},
+  ) {
     this.#maximumRepositories = bounds.maximumRepositories ?? 1024;
-    this.#maximumOids = bounds.maximumOids ?? 50_000;
+    this.#maximumTotalOids = bounds.maximumTotalOids ?? 200_000;
+    this.#maximumOids = Math.min(bounds.maximumOids ?? 50_000, this.#maximumTotalOids);
   }
 
   /** Repositories held now. */
   public get size(): number {
     return this.#entries.size;
+  }
+
+  /** Oids held now, across every repository. */
+  public get oids(): number {
+    return this.#totalOids;
   }
 
   /**
@@ -277,16 +294,25 @@ export class LfsReferenceCache {
   public async walk(repository: string, directory: string, tips: RefTips): Promise<LfsWalkResult> {
     const base = this.#entries.get(repository);
     const result = await referencedLfsOidsSince(directory, { tips, ...(base === undefined ? {} : { base }) });
-    this.#entries.delete(repository);
+    this.#forget(repository);
     if (result.oids.size <= this.#maximumOids) {
       this.#entries.set(repository, { tips, oids: result.oids });
+      this.#totalOids += result.oids.size;
       for (const oldest of this.#entries.keys()) {
-        if (this.#entries.size <= this.#maximumRepositories) {
+        if (this.#entries.size <= this.#maximumRepositories && this.#totalOids <= this.#maximumTotalOids) {
           break;
         }
-        this.#entries.delete(oldest);
+        this.#forget(oldest);
       }
     }
     return result;
+  }
+
+  #forget(repository: string): void {
+    const held = this.#entries.get(repository);
+    if (held !== undefined) {
+      this.#totalOids -= held.oids.size;
+      this.#entries.delete(repository);
+    }
   }
 }

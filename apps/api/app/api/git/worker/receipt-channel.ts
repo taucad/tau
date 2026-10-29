@@ -50,7 +50,17 @@ export const createReceiptChannel = (args: {
         );
         return;
       }
-      const receipt = signReceipt(facts, { key: args.key });
+      let receipt: string;
+      try {
+        receipt = signReceipt(facts, { key: args.key });
+      } catch (error) {
+        /* Never rejects: a caller posts after a durable commit, with its sweep still to run. */
+        args.logger.warn(
+          { kind: facts.kind, projectId: facts.project, err: error },
+          'A receipt could not be signed for posting; it was dropped',
+        );
+        return;
+      }
       if (receipt.length > maximumPostedReceiptLength) {
         /* The route would refuse it; the next grant's recorded generation repairs what it says. */
         args.logger.warn(

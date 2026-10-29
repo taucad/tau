@@ -10,11 +10,10 @@ import { mintGrant, storagePath } from '#api/git/forwarding/contract/grant.js';
 import type { StorageGrant } from '#api/git/forwarding/contract/grant.js';
 import { parseSigningKey } from '#api/git/forwarding/contract/keys.js';
 import type { StorageReceiptFacts } from '#api/git/forwarding/contract/receipt.js';
-import { compactionCommitter } from '#api/git/store/commit.js';
 import type { FaultPoint } from '#api/git/store/fault-points.js';
 import { livePackBound } from '#api/git/store/limits.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
-import { decodeManifest } from '#api/git/store/manifest.js';
+import { compactionCommitter, decodeManifest } from '#api/git/store/manifest.js';
 import type { Manifest } from '#api/git/store/manifest.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
 import { StorageGitService } from '#api/git/worker/storage-git.service.js';
@@ -79,8 +78,8 @@ const newRepository = (
   commitPointer: () => string;
   /** Commits a plain revision. */
   revise: () => void;
-  /** The smart-HTTP body `git push` sends for `main`, against the stored tip. */
-  pushBody: () => Promise<Uint8Array<ArrayBuffer>>;
+  /** The smart-HTTP body `git push` sends for `branch` (`main` by default), against the stored tip. */
+  pushBody: (branch?: string) => Promise<Uint8Array<ArrayBuffer>>;
   grant: () => StorageGrant;
   read: () => Promise<Manifest | undefined>;
 } => {
@@ -118,11 +117,11 @@ const newRepository = (
       revision += 1;
       commit('main.scad', `cube(${String(revision)});\n`);
     },
-    pushBody: async () => {
-      const tip = gitText(client, ['rev-parse', 'main']);
+    pushBody: async (branch = 'main') => {
+      const tip = gitText(client, ['rev-parse', branch]);
       const stored = await read();
-      const old = stored?.refs['refs/heads/main']?.oid;
-      const command = `${old ?? '0'.repeat(40)} ${tip} refs/heads/main\0report-status\n`;
+      const old = stored?.refs[`refs/heads/${branch}`]?.oid;
+      const command = `${old ?? '0'.repeat(40)} ${tip} refs/heads/${branch}\0report-status\n`;
       const pack = git(
         client,
         ['pack-objects', '--stdout', '--revs', '--quiet'],
@@ -153,6 +152,7 @@ const newRepository = (
 /** A worker whose receipts are the facts themselves, signed or posted, so a test can read them. */
 const newWorker = (
   store: RepositoryStore,
+  options: { readonly beforePost?: (facts: StorageReceiptFacts) => Promise<void> } = {},
 ): { service: StorageGitService; signed: StorageReceiptFacts[]; posted: StorageReceiptFacts[] } => {
   const signed: StorageReceiptFacts[] = [];
   const posted: StorageReceiptFacts[] = [];
@@ -164,6 +164,7 @@ const newWorker = (
         return JSON.stringify(facts);
       },
       post: async (facts) => {
+        await options.beforePost?.(facts);
         posted.push(facts);
       },
     },
@@ -172,14 +173,15 @@ const newWorker = (
   return { service, signed, posted };
 };
 
-/** Pushes `main` through the worker and waits for whatever the push left running. */
+/** Pushes `branch` (`main` by default) through the worker; what the push left running is not awaited. */
 const push = async (
   service: StorageGitService,
   repository: ReturnType<typeof newRepository>,
+  branch?: string,
 ): Promise<{ report: string; receipt: StorageReceiptFacts | undefined }> => {
   const result = await service.receivePack({
     grant: repository.grant(),
-    body: Readable.from([await repository.pushBody()]),
+    body: Readable.from([await repository.pushBody(branch)]),
     gzipped: false,
   });
   return {
@@ -246,7 +248,8 @@ describe('StorageGitService deferred compaction (push latency F2)', () => {
       kind: 'commit',
       generation: compacted?.generation,
       incarnation: compacted?.incarnation,
-      movedRefs: answered.receipt?.movedRefs,
+      /* It moved no ref; the push's own receipt announces the push. */
+      movedRefs: [],
       reachableLfsOids: answered.receipt?.reachableLfsOids,
     });
     /* A fresh request id: the push's own receipt already claimed `(rid, commit)` in the API's ledger. */
@@ -307,5 +310,150 @@ describe('StorageGitService deferred compaction (push latency F2)', () => {
     expect(settled?.packs.length).toBeLessThanOrEqual(2);
     expect(settled?.pushes.at(-1)).toMatchObject({ committedBy: compactionCommitter });
     expect(posted.map((facts) => facts.kind)).toStrictEqual(['commit', 'retained']);
+  }, 120_000);
+
+  it('should give the lease and its admission back before it posts its receipt', async () => {
+    const repository = newRepository();
+    const posting = gate();
+    const reached = gate();
+    const { service, posted } = newWorker(repository.store, {
+      beforePost: async (facts) => {
+        if (facts.kind === 'commit') {
+          reached.open();
+          await posting.opened;
+        }
+      },
+    });
+    for (let pushes = 0; pushes <= livePackBound; pushes += 1) {
+      repository.revise();
+      // oxlint-disable-next-line no-await-in-loop -- each push builds on the generation before it
+      await push(service, repository);
+    }
+
+    await reached.opened;
+    /* The compaction committed and its receipt is on its way: nothing is reserved any more. */
+    const compacted = await repository.read();
+    expect(compacted?.pushes.at(-1)?.committedBy).toBe(compactionCommitter);
+    expect(service.reservedLeaseBytes).toBe(0);
+
+    posting.open();
+    await service.settled();
+    expect(posted.map((facts) => facts.kind)).toStrictEqual(['commit', 'retained']);
+  }, 120_000);
+
+  it('should give way to a ref removal for the project, which commits; the compaction does not', async () => {
+    const repository = newRepository();
+    const { service, posted } = newWorker(repository.store);
+    repository.revise();
+    await push(service, repository);
+    gitText(repository.client, ['switch', '--quiet', '-c', 'conflicts/main/laptop']);
+    repository.revise();
+    const branched = await push(service, repository, 'conflicts/main/laptop');
+    expect(branched.report).toContain('ok refs/heads/conflicts');
+    gitText(repository.client, ['switch', '--quiet', 'main']);
+    for (let pushes = 2; pushes < livePackBound; pushes += 1) {
+      repository.revise();
+      // oxlint-disable-next-line no-await-in-loop -- each push builds on the generation before it
+      await push(service, repository);
+    }
+    await service.settled();
+
+    /* The compaction holds at its repack; the removal, which compacts inline, holds at its own. */
+    const held = gate();
+    const reached = gate();
+    const removalHeld = gate();
+    const removalReached = gate();
+    let compactions = 0;
+    service.faults = async (point: FaultPoint) => {
+      if (point === 'mid-compaction') {
+        compactions += 1;
+        if (compactions === 1) {
+          reached.open();
+          await held.opened;
+        } else if (compactions === 2) {
+          removalReached.open();
+          await removalHeld.opened;
+        }
+      }
+    };
+    repository.revise();
+    await push(service, repository);
+    await reached.opened;
+    const answered = await repository.read();
+    const side = answered?.refs['refs/heads/conflicts/main/laptop']?.oid;
+
+    const removing = service.removeRef({
+      ...repository.grant(),
+      ref: 'refs/heads/conflicts/main/laptop',
+      tip: side,
+    });
+    await removalReached.opened;
+    /* The removal is in flight and has not committed: only its registration can make the compaction give way. */
+    held.open();
+    await service.settled();
+    const unmoved = await repository.read();
+    expect(unmoved?.generation).toBe(answered?.generation);
+    removalHeld.open();
+    const removed = await removing;
+    await service.settled();
+
+    const settled = await repository.read();
+    expect(removed.generation).toBe((answered?.generation ?? 0) + 1);
+    expect(settled?.generation).toBe(removed.generation);
+    expect(settled?.refs['refs/heads/conflicts/main/laptop']).toBeUndefined();
+    expect(settled?.pushes.at(-1)?.committedBy).not.toBe(compactionCommitter);
+    expect(posted.map((facts) => facts.kind)).not.toContain('commit');
+  }, 120_000);
+
+  it('should run only the newest owed compaction when a push owes one while another is repacking', async () => {
+    const repository = newRepository();
+    const { service, posted } = newWorker(repository.store);
+    for (let pushes = 0; pushes < livePackBound; pushes += 1) {
+      repository.revise();
+      // oxlint-disable-next-line no-await-in-loop -- each push builds on the generation before it
+      await push(service, repository);
+    }
+    await service.settled();
+
+    const held = gate();
+    const reached = gate();
+    let compactions = 0;
+    service.faults = async (point: FaultPoint) => {
+      if (point === 'mid-compaction') {
+        compactions += 1;
+        if (compactions === 1) {
+          reached.open();
+          await held.opened;
+        }
+      }
+    };
+    repository.revise();
+    await push(service, repository);
+    await reached.opened;
+
+    /* Push B commits while A repacks, and owes a compaction of its own. */
+    repository.revise();
+    const second = await push(service, repository);
+    expect(second.report).toContain('ok refs/heads/main');
+    const pushed = await repository.read();
+    expect(pushed?.packs).toHaveLength(livePackBound + 2);
+    held.open();
+    await service.settled();
+
+    /* A gave way without a marker or an upload; B's compaction ran once and committed. */
+    expect(compactions).toBe(2);
+    const settled = await repository.read();
+    expect(settled?.generation).toBe((pushed?.generation ?? 0) + 1);
+    expect(settled?.pushes.at(-1)?.committedBy).toBe(compactionCommitter);
+    expect(settled?.packs.length).toBeLessThanOrEqual(2);
+    expect(posted.map((facts) => facts.kind)).toStrictEqual(['commit', 'retained']);
+    const locator = repositoryLocator({ ownerId: repository.owner, projectId: repository.project });
+    const markers: string[] = [];
+    for await (const object of repository.store.listObjects(locator, 'retired/')) {
+      markers.push(object.key);
+    }
+    const live = new Set(settled?.packs.map((pack) => path.posix.basename(pack.key)));
+    expect(markers.filter((key) => live.has(key.slice(key.indexOf('-') + 1)))).toStrictEqual([]);
+    expect(markers).toHaveLength((pushed?.packs.length ?? 0) - 1);
   }, 120_000);
 });

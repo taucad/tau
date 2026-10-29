@@ -279,4 +279,27 @@ describe('LfsReferenceCache', () => {
     const again = await cache.walk('owner/project', repository.server, tipsOf(repository.server));
     expect(again.walk).toBe('full');
   });
+
+  it('should hold at most its bound of oids across repositories, the least recently walked leaving first', async () => {
+    const one = newRepository();
+    const two = newRepository();
+    one.commitPointer('a.stl');
+    one.commitPointer('b.stl');
+    one.push('main');
+    two.commitPointer('c.stl');
+    two.push('main');
+    const cache = new LfsReferenceCache({ maximumTotalOids: 2 });
+    await cache.walk('one', one.server, tipsOf(one.server));
+    expect(cache.oids).toBe(2);
+    await cache.walk('two', two.server, tipsOf(two.server));
+    expect(cache.size).toBe(1);
+    expect(cache.oids).toBe(1);
+
+    const evicted = await cache.walk('one', one.server, tipsOf(one.server));
+    expect(evicted.walk).toBe('full');
+    expect(cache.oids).toBe(2);
+    const kept = await cache.walk('one', one.server, tipsOf(one.server));
+    expect(kept.walk).toBe('unchanged');
+    expect(cache.oids).toBe(2);
+  });
 });

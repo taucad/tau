@@ -247,9 +247,15 @@ export class GitLeaseHost {
     return this.#admission.reservedBytes;
   }
 
-  /** Waits for the work a finished request left running. */
+  /**
+   * Waits for the work a finished request left running, and for any that
+   * work started in turn (a deferred compaction starts its sweep).
+   */
   public async settled(): Promise<void> {
-    await Promise.all(this.#background);
+    while (this.#background.size > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- each round waits for what the round before started
+      await Promise.all(this.#background);
+    }
   }
 
   /**
@@ -448,10 +454,14 @@ export class GitLeaseHost {
   /**
    * {@link runLease}, where `work` may hand back an `after` step that still
    * needs the lease once the request has its answer: the answer is returned at
-   * once, and the lease is disposed and its admission given back only when
+   * once, and the lease is disposed and its admission given back as soon as
    * `after` settles, tracked like every other post-reply step ({@link track}).
    * A push's deferred compaction is one: it runs over the push's lease, inside
    * the reservation the push was admitted with.
+   *
+   * `after` may answer a last step that needs no lease — posting a receipt,
+   * sweeping the store — which runs, still tracked, only once the lease is
+   * disposed and its disk reservation and owner share are back.
    *
    * @param operation - What the lease is for.
    * @param request - What admission needs.
@@ -464,7 +474,7 @@ export class GitLeaseHost {
     work: (
       lease: RepositoryLease,
       digest: string | undefined,
-    ) => Promise<{ readonly value: T; readonly after?: () => Promise<void> }>,
+    ) => Promise<{ readonly value: T; readonly after?: () => Promise<(() => Promise<void>) | undefined> }>,
   ): Promise<T> {
     const admitted = await this.admitLeaseSlot(request, operation);
     let lease: RepositoryLease | undefined;
@@ -477,12 +487,14 @@ export class GitLeaseHost {
         handedOver = true;
         this.track(
           (async (): Promise<void> => {
+            let then: (() => Promise<void>) | undefined;
             try {
-              await after();
+              then = await after();
             } finally {
               await this.disposeQuietly(held, admitted.locator.projectId);
               admitted.release();
             }
+            await then?.();
           })(),
         );
       }

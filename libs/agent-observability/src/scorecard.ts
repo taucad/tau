@@ -21,7 +21,11 @@ import { compareEvidence, evidenceKeys } from '#identity.js';
 type Outcome = 'completed' | 'cancelled' | 'failed' | 'abandoned' | 'unknown';
 type Protection = Evidence['lineage'][number]['protection'];
 type Interval = Evidence['clocks']['intervals'][number];
-type ToolFact = Extract<Extract<Evidence['payload'], { plane: 'summary' }>['fact'], { kind: 'tool' }>;
+type SummaryFact = Extract<Evidence['payload'], { plane: 'summary' }>['fact'];
+type ToolFact = Extract<SummaryFact, { kind: 'tool' }>;
+type ProviderFact = Extract<SummaryFact, { kind: 'provider' }>;
+type Usage = ProviderFact['usage'];
+type FinancialFact = Extract<SummaryFact, { kind: 'financial' }>;
 
 /** What deduplication found in the evidence read. @public */
 export type EvidenceReconciliation = Readonly<{
@@ -85,6 +89,64 @@ export type CohortScore = Readonly<{
   openIntervals: number;
 }>;
 
+/** One supplier attempt, as its provider fact reports it. @public */
+export type AttemptRecord = Readonly<{
+  /** The logical call it serves; a retry is another attempt of the same call. */
+  call: string;
+  provider: string;
+  /** The requested model, else `unknown`. */
+  model: string;
+  /** Whether the resolved model is known and differs from the requested one. */
+  rerouted: boolean;
+  purpose: ProviderFact['purpose'];
+  stop: ProviderFact['stop'];
+  /** Milliseconds from the attempt's start, in its clock domain. */
+  firstOutput: ProviderFact['firstOutput'];
+  usage: Usage;
+}>;
+
+/** One ledger settlement, as its financial fact reports it. @public */
+export type CostRecord = Readonly<Pick<FinancialFact, 'credits' | 'supplierCost' | 'adjustment'>>;
+
+/** How many attempts reported a time, and its median and 90th percentile, in milliseconds. @public */
+export type Latency = Readonly<{ attempts: number; median: number; p90: number }>;
+
+/** Supplier attempts; every count is of attempts unless it names calls. @public */
+export type AttemptCohort = Readonly<{
+  attempts: number;
+  /** Distinct logical calls. */
+  calls: number;
+  /** Calls with more than one attempt. */
+  retried: number;
+  stops: Distribution;
+  purposes: Distribution;
+  rerouted: number;
+  /** Per `chunk@domain` and `text@domain`: time to the attempt's first chunk and first text. */
+  firstOutput: Readonly<Record<string, Latency>>;
+  /** Reported token counts, summed; a count an attempt did not report adds nothing. */
+  usage: Readonly<Record<Exclude<keyof Usage, 'missing'>, number>>;
+  /** Attempts by how completely they reported usage. */
+  usageCoverage: Distribution;
+}>;
+
+/** Ledger settlements: credits charged and supplier cost, with what is unknown counted. @public */
+export type CostScore = Readonly<{
+  settlements: number;
+  adjustments: number;
+  credits: number;
+  /** Summed over settlements that reported it, in USD. */
+  supplierCost: number;
+  supplierCostUnknown: number;
+}>;
+
+/** Supplier attempts and their settlement, overall and per provider and requested model. @public */
+export type AttemptScorecard = Readonly<{
+  overall: AttemptCohort;
+  byProvider: Readonly<Record<string, AttemptCohort>>;
+  byModel: Readonly<Record<string, AttemptCohort>>;
+  cost: CostScore;
+}>;
+
 /** A scorecard over admitted evidence. @public */
 export type Scorecard = Readonly<{
   reconciliation: EvidenceReconciliation;
@@ -94,6 +156,7 @@ export type Scorecard = Readonly<{
   /** Keyed by each run's most protective lineage. */
   byProtection: Readonly<Record<string, CohortScore>>;
   runs: readonly RunScore[];
+  attempts: AttemptScorecard;
 }>;
 
 /**
@@ -376,15 +439,131 @@ export const scoreCohort = (runs: readonly RunScore[]): CohortScore => {
   };
 };
 
-const cohortsBy = (
-  runs: readonly RunScore[],
-  key: (run: RunScore) => string,
-): Readonly<Record<string, CohortScore>> => {
-  const groups = new Map<string, RunScore[]>();
-  for (const run of runs) {
-    groups.set(key(run), [...(groups.get(key(run)) ?? []), run]);
+/* Summed in sorted order, so a total never depends on the order facts were read in. */
+const total = (values: readonly number[]): number =>
+  [...values].sort((a, b) => a - b).reduce((sum, value) => sum + value, 0);
+
+const latency = (values: readonly number[]): Latency => {
+  const sorted = [...values].sort((a, b) => a - b);
+  return { attempts: sorted.length, median: quantile(sorted, 0.5), p90: quantile(sorted, 0.9) };
+};
+
+const usageKeys = ['input', 'output', 'cacheRead', 'cacheWrite', 'reasoning'] as const;
+
+const attemptCohort = (attempts: readonly AttemptRecord[]): AttemptCohort => {
+  const calls = new Map<string, number>();
+  const stops: Record<string, number> = {};
+  const purposes: Record<string, number> = {};
+  const usageCoverage: Record<string, number> = {};
+  const times = new Map<string, number[]>();
+  let rerouted = 0;
+  for (const attempt of attempts) {
+    calls.set(attempt.call, (calls.get(attempt.call) ?? 0) + 1);
+    increment(stops, attempt.stop);
+    increment(purposes, attempt.purpose);
+    increment(usageCoverage, attempt.usage.missing);
+    rerouted += attempt.rerouted ? 1 : 0;
+    const { firstOutput } = attempt;
+    for (const [measure, value] of [
+      ['chunk', firstOutput?.chunk],
+      ['text', firstOutput?.text],
+    ] as const) {
+      if (firstOutput !== null && value !== null && value !== undefined) {
+        const key = `${measure}@${firstOutput.domain}`;
+        times.set(key, [...(times.get(key) ?? []), value]);
+      }
+    }
   }
-  return Object.fromEntries([...groups].map(([name, members]) => [name, scoreCohort(members)]));
+  const usage = Object.fromEntries(
+    usageKeys.map((key) => [key, total(attempts.flatMap((attempt) => attempt.usage[key] ?? []))]),
+  ) as AttemptCohort['usage'];
+  return {
+    attempts: attempts.length,
+    calls: calls.size,
+    retried: [...calls.values()].filter((count) => count > 1).length,
+    stops,
+    purposes,
+    rerouted,
+    firstOutput: Object.fromEntries([...times].map(([key, values]) => [key, latency(values)])),
+    usage,
+    usageCoverage,
+  };
+};
+
+const groupBy = <T, R>(
+  items: readonly T[],
+  key: (item: T) => string,
+  score: (members: readonly T[]) => R,
+): Readonly<Record<string, R>> => {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    groups.set(key(item), [...(groups.get(key(item)) ?? []), item]);
+  }
+  return Object.fromEntries([...groups].map(([name, members]) => [name, score(members)]));
+};
+
+/**
+ * Aggregate supplier attempts and settlements, however they were read.
+ *
+ * @param attempts - Each attempt once.
+ * @param costs - Each settlement once.
+ * @returns The attempt cohorts and cost.
+ * @public
+ */
+export const summarizeAttempts = (
+  attempts: readonly AttemptRecord[],
+  costs: readonly CostRecord[],
+): AttemptScorecard => {
+  const known = costs.flatMap((cost) => (cost.supplierCost === null ? [] : [cost.supplierCost]));
+  return {
+    overall: attemptCohort(attempts),
+    byProvider: groupBy(attempts, (attempt) => attempt.provider, attemptCohort),
+    byModel: groupBy(attempts, (attempt) => attempt.model, attemptCohort),
+    cost: {
+      settlements: costs.length,
+      adjustments: costs.filter((cost) => cost.adjustment).length,
+      credits: total(costs.map((cost) => cost.credits)),
+      supplierCost: total(known),
+      supplierCostUnknown: costs.length - known.length,
+    },
+  };
+};
+
+/**
+ * The supplier attempts and settlements in reconciled facts. Only the API reports them: a host never sees the
+ * supplier or the ledger.
+ *
+ * @param facts - Reconciled facts, from {@link reconcileEvidence}.
+ * @returns Each attempt and settlement once.
+ * @public
+ */
+export const attemptRecords = (
+  facts: readonly Evidence[],
+): Readonly<{ attempts: readonly AttemptRecord[]; costs: readonly CostRecord[] }> => {
+  const attempts: AttemptRecord[] = [];
+  const costs: CostRecord[] = [];
+  for (const item of facts) {
+    if (item.authority !== 'api-reported' || item.payload.plane !== 'summary') {
+      continue;
+    }
+    const { fact } = item.payload;
+    if (fact.kind === 'provider') {
+      attempts.push({
+        call: fact.logicalCall,
+        provider: fact.provider ?? 'unknown',
+        model: fact.requestedModel ?? 'unknown',
+        rerouted:
+          fact.requestedModel !== null && fact.resolvedModel !== null && fact.requestedModel !== fact.resolvedModel,
+        purpose: fact.purpose,
+        stop: fact.stop,
+        firstOutput: fact.firstOutput,
+        usage: fact.usage,
+      });
+    } else if (fact.kind === 'financial') {
+      costs.push({ credits: fact.credits, supplierCost: fact.supplierCost, adjustment: fact.adjustment });
+    }
+  }
+  return { attempts, costs };
 };
 
 /**
@@ -398,8 +577,8 @@ export const summarizeRuns = (
   runs: readonly RunScore[],
 ): Pick<Scorecard, 'overall' | 'byRelease' | 'byProtection'> => ({
   overall: scoreCohort(runs),
-  byRelease: cohortsBy(runs, (run) => run.release),
-  byProtection: cohortsBy(runs, (run) => run.protection),
+  byRelease: groupBy(runs, (run) => run.release, scoreCohort),
+  byProtection: groupBy(runs, (run) => run.protection, scoreCohort),
 });
 
 /**
@@ -415,5 +594,6 @@ export const summarizeRuns = (
 export const scorecard = (evidence: readonly Evidence[]): Scorecard => {
   const { facts, reconciliation } = reconcileEvidence(evidence);
   const runs = scoreRuns(facts);
-  return { reconciliation, ...summarizeRuns(runs), runs };
+  const { attempts, costs } = attemptRecords(facts);
+  return { reconciliation, ...summarizeRuns(runs), runs, attempts: summarizeAttempts(attempts, costs) };
 };

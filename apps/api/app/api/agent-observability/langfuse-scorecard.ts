@@ -1,5 +1,5 @@
-import type { RunScore, Scorecard } from '@taucad/agent-observability/scorecard';
-import { phaseDurations, summarizeRuns } from '@taucad/agent-observability/scorecard';
+import type { AttemptRecord, CostRecord, RunScore, Scorecard } from '@taucad/agent-observability/scorecard';
+import { phaseDurations, summarizeAttempts, summarizeRuns } from '@taucad/agent-observability/scorecard';
 import { observationMapperVersion } from '#api/agent-observability/langfuse-observation.js';
 
 /**
@@ -61,6 +61,52 @@ const text = (metadata: Readonly<Record<string, unknown>>, key: string): string 
   const value = metadata[key];
   return typeof value === 'string' ? value : undefined;
 };
+
+/* Langfuse returns an integer as a number; a value that reads as neither number nor numeric string is unreported. */
+const numeric = (metadata: Readonly<Record<string, unknown>>, key: string): AttemptRecord['usage']['input'] => {
+  const value = metadata[key];
+  const parsed = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+  return typeof parsed === 'number' && Number.isFinite(parsed) ? parsed : null;
+};
+
+const flag = (metadata: Readonly<Record<string, unknown>>, key: string): boolean =>
+  metadata[key] === true || metadata[key] === 'true';
+
+const attemptOf = (metadata: Readonly<Record<string, unknown>>): AttemptRecord => {
+  const requested = text(metadata, 'fact.requestedModel');
+  const resolved = text(metadata, 'fact.resolvedModel');
+  const domain = text(metadata, 'fact.firstOutput.domain');
+  return {
+    call: text(metadata, 'fact.logicalCall') ?? 'unknown',
+    provider: text(metadata, 'fact.provider') ?? 'unknown',
+    model: requested ?? 'unknown',
+    rerouted: requested !== undefined && resolved !== undefined && requested !== resolved,
+    purpose: (text(metadata, 'fact.purpose') ?? 'generation') as AttemptRecord['purpose'],
+    stop: (text(metadata, 'fact.stop') ?? 'error') as AttemptRecord['stop'],
+    firstOutput:
+      domain === undefined
+        ? null
+        : {
+            domain,
+            chunk: numeric(metadata, 'fact.firstOutput.chunk'),
+            text: numeric(metadata, 'fact.firstOutput.text'),
+          },
+    usage: {
+      input: numeric(metadata, 'fact.usage.input'),
+      output: numeric(metadata, 'fact.usage.output'),
+      cacheRead: numeric(metadata, 'fact.usage.cacheRead'),
+      cacheWrite: numeric(metadata, 'fact.usage.cacheWrite'),
+      reasoning: numeric(metadata, 'fact.usage.reasoning'),
+      missing: (text(metadata, 'fact.usage.missing') ?? 'unreported') as AttemptRecord['usage']['missing'],
+    },
+  };
+};
+
+const costOf = (metadata: Readonly<Record<string, unknown>>): CostRecord => ({
+  credits: numeric(metadata, 'fact.credits') ?? 0,
+  supplierCost: numeric(metadata, 'fact.supplierCost'),
+  adjustment: flag(metadata, 'fact.adjustment'),
+});
 
 const increment = (counts: Record<string, number>, key: string): void => {
   counts[key] = (counts[key] ?? 0) + 1;
@@ -211,6 +257,8 @@ export const scoreObservations = (rows: readonly LangfuseObservationRow[]): Obse
   const sources = new Set<string>();
   const semantics = new Set<string>();
   const drafts = new Map<string, RunDraft>();
+  const attempts: AttemptRecord[] = [];
+  const costs: CostRecord[] = [];
   let duplicates = 0;
   let replicas = 0;
   let content = 0;
@@ -237,8 +285,14 @@ export const scoreObservations = (rows: readonly LangfuseObservationRow[]): Obse
     } else {
       sources.add(source);
       semantics.add(semantic);
-      const run = text(metadata, 'authority') === 'host-reported' ? runOf(metadata) : undefined;
-      if (run !== undefined) {
+      const authority = text(metadata, 'authority');
+      const family = text(metadata, 'family');
+      const run = authority === 'host-reported' ? runOf(metadata) : undefined;
+      if (authority === 'api-reported' && text(metadata, 'plane') === 'summary' && family === 'provider') {
+        attempts.push(attemptOf(metadata));
+      } else if (authority === 'api-reported' && text(metadata, 'plane') === 'summary' && family === 'financial') {
+        costs.push(costOf(metadata));
+      } else if (run !== undefined) {
         const draft = draftOf(drafts, metadata, run);
         if (text(metadata, 'plane') === 'feedback') {
           applyFeedback(draft, metadata);
@@ -253,5 +307,6 @@ export const scoreObservations = (rows: readonly LangfuseObservationRow[]): Obse
     reconciliation: { read: rows.length, duplicates, replicas, content, unscorable },
     ...summarizeRuns(runs),
     runs,
+    attempts: summarizeAttempts(attempts, costs),
   };
 };

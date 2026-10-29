@@ -34,7 +34,7 @@ export type ObservationContext = Readonly<{
 export type ObservationIdentity = Readonly<{ traceId: string; spanId: string }>;
 
 /** Bumped whenever the attributes written for the same evidence change. */
-export const observationMapperVersion = 'langfuse-v4.2';
+export const observationMapperVersion = 'langfuse-v4.3';
 
 /**
  * Fact fields that name a Tau record (a run, message, call, attempt or ledger
@@ -127,7 +127,16 @@ const factAttributes = (evidence: Evidence, group: (value: string) => string): O
     return [];
   }
   const { fact } = evidence.payload;
-  const attributes = Object.entries(fact)
+  /* A nested field (a provider's first output and usage) is written one level deep, so a reader can score it. */
+  const fields = Object.entries(fact).flatMap(
+    ([key, value]): Array<readonly [string, unknown]> =>
+      value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? Object.entries(value as Readonly<Record<string, unknown>>).map(
+            ([field, nested]) => [`${key}.${field}`, nested] as const,
+          )
+        : [[key, value]],
+  );
+  const attributes = fields
     .map(([key, value]) =>
       scalar(
         `langfuse.observation.metadata.fact.${key}`,

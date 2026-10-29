@@ -9,6 +9,10 @@ import type { OtlpSpan } from '#api/agent-observability/langfuse-observation.js'
 import { langfuseObservation, pseudonymKey } from '#api/agent-observability/langfuse-observation.js';
 import type { LangfuseObservationRow } from '#api/agent-observability/langfuse-scorecard.js';
 import { scoreObservations } from '#api/agent-observability/langfuse-scorecard.js';
+import type { ObservedAttempt } from '#api/agent-observability/model-invocation-evidence.js';
+import { providerAttemptEvidence } from '#api/agent-observability/model-invocation-evidence.js';
+import type { ObservedSettlement } from '#api/agent-observability/settlement-evidence.js';
+import { settlementEvidence } from '#api/agent-observability/settlement-evidence.js';
 
 const at = Date.parse('2026-10-29T00:00:00.000Z');
 const pseudonym = pseudonymKey(Uint8Array.from(randomBytes(32)));
@@ -91,6 +95,49 @@ const delivered = (evidence: readonly Evidence[], protection: 'free' | 'pro' = '
     );
   });
 
+const attempt = (change: Partial<ObservedAttempt> = {}): ObservedAttempt => ({
+  principal: 'user-a',
+  project: 'project-a',
+  attemptKey: 'attempt-1',
+  chat: 'chat-1',
+  surface: 'gateway',
+  wire: 'openai-responses',
+  requestedModel: 'model-a',
+  provider: 'provider-a',
+  operation: 'op-1',
+  startedAt: at,
+  duration: 900,
+  stream: {
+    stop: 'stop',
+    usage: { input: 120, output: 40, cacheRead: 100, cacheWrite: null, reasoning: 8, missing: 'none' },
+    resolvedModel: 'model-a',
+    response: 'response-1',
+    firstChunk: 150,
+    firstText: 210,
+  },
+  ended: 'completed',
+  ...change,
+});
+
+const settlement = (
+  operation: string,
+  chargedAtoms: bigint,
+  supplierCostPicoUsd: ObservedSettlement['receipt']['supplierCostPicoUsd'],
+): ObservedSettlement => ({
+  operation: {
+    id: operation,
+    accountId: 'account-a',
+    environment: 'synthetic',
+    attemptKey: 'attempt-1',
+    projectHint: 'project-a',
+    chatHint: 'chat-1',
+    admittedAt: new Date(at),
+    activationId: 'activation-1',
+  },
+  receipt: { terminalRevision: 1n, chargedAtoms, supplierCostPicoUsd, resolvedAt: new Date(at + 1000) },
+  normalization: 'openai-responses-v1',
+});
+
 const withoutIds = ({ run: _run, chat: _chat, ...score }: RunScore) => score;
 
 describe('scoreObservations', () => {
@@ -120,6 +167,40 @@ describe('scoreObservations', () => {
     expect(fromLangfuse.runs[0]?.phases).toEqual({ 'admission@host-recorded': 1000, 'tool@host-recorded': 3000 });
     const read = JSON.stringify(fromLangfuse);
     for (const id of ['run-1', 'run-2', 'chat-1', 'user-a', 'project-a', 'SYNTHETIC_TOOL']) {
+      expect(read).not.toContain(id);
+    }
+  });
+
+  it('scores supplier attempts and settlements from Langfuse exactly as from the evidence', async () => {
+    const authority = { policyEpoch: 'epoch-1', protection: 'free' } as const;
+    const evidence = [
+      await providerAttemptEvidence(attempt({ ended: 'failed', stream: undefined }), authority),
+      await providerAttemptEvidence(attempt({ attemptKey: 'attempt-2', operation: 'op-2' }), authority),
+      await providerAttemptEvidence(
+        attempt({ attemptKey: 'attempt-3', surface: 'commit_name', requestedModel: undefined, provider: undefined }),
+        authority,
+      ),
+      await settlementEvidence(settlement('op-1', 2_500_000n, 750_000_000_000n), 'user-a', {
+        ...authority,
+        project: 'project-a',
+      }),
+      await settlementEvidence(settlement('op-2', 1_000_000n, null), 'user-a', { ...authority, project: 'project-a' }),
+    ];
+
+    const fromLangfuse = scoreObservations(delivered(evidence));
+    const fromEvidence = scorecard(evidence);
+
+    expect(fromLangfuse.attempts).toEqual(fromEvidence.attempts);
+    expect(fromEvidence.attempts.overall).toMatchObject({
+      attempts: 3,
+      stops: { error: 1, stop: 2 },
+      usage: { input: 240, output: 80, cacheRead: 200, cacheWrite: 0, reasoning: 16 },
+      usageCoverage: { unreported: 1, none: 2 },
+    });
+    expect(fromEvidence.attempts.cost).toMatchObject({ settlements: 2, credits: 3.5, supplierCostUnknown: 1 });
+    expect(fromLangfuse.reconciliation).toMatchObject({ read: 5, unscorable: 0 });
+    const read = JSON.stringify(fromLangfuse);
+    for (const id of ['attempt-1', 'chat-1', 'user-a', 'project-a', 'op-1']) {
       expect(read).not.toContain(id);
     }
   });

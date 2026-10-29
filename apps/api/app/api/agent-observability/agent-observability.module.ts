@@ -3,9 +3,11 @@ import type { DynamicModule } from '@nestjs/common';
 import { DatabaseModule } from '#database/database.module.js';
 import { EvidenceIngressController } from '#api/agent-observability/evidence-ingress.controller.js';
 import { EvidenceIngressService } from '#api/agent-observability/evidence-ingress.service.js';
+import { EvidenceDeliveryService } from '#api/agent-observability/evidence-delivery.service.js';
 
 /**
- * Agent-evidence ingress, receipt and delivery backlog (blueprint T06). Purpose
+ * Agent-evidence ingress, receipt and delivery backlog (blueprint T06), and
+ * its delivery to Langfuse (T08). Purpose
  * authority comes from the global `TelemetryPurposeModule`, which the API module
  * registers first.
  */
@@ -16,7 +18,7 @@ export class AgentObservabilityModule {
       module: AgentObservabilityModule,
       imports: [DatabaseModule],
       controllers: [EvidenceIngressController],
-      providers: [EvidenceIngressService],
+      providers: [EvidenceIngressService, EvidenceDeliveryService],
     };
   }
 }

@@ -95,6 +95,19 @@ export const environmentSchemaBase = z.object({
     .positive()
     .default(64 * 1024 * 1024)
     .describe('Sealed evidence one principal may hold in the backlog before their admission is refused.'),
+  /*
+   * Blueprint T08: deliver the admitted backlog to Langfuse. Off by default;
+   * on, it requires the payload key and one Langfuse project's credentials,
+   * which stay server-side and never reach a client, log or span.
+   */
+  TAU_OBSERVABILITY_DELIVERY_ENABLED: strictEnvironmentBoolean(false).describe(
+    'Deliver admitted agent evidence to Langfuse. Requires TAU_OBSERVABILITY_PAYLOAD_KEY and the LANGFUSE_* credentials.',
+  ),
+  LANGFUSE_BASE_URL: unsetWhenEmpty(z.url().optional()).describe(
+    'Origin of the Langfuse region evidence is delivered to.',
+  ),
+  LANGFUSE_PUBLIC_KEY: unsetWhenEmpty(z.string().min(1).optional()),
+  LANGFUSE_SECRET_KEY: unsetWhenEmpty(z.string().min(1).optional()),
   PORT: z.string().default('3000'),
   DATABASE_URL: z.string(),
   // Bounded runtime pool (B8 R3). Every value fails closed: a non-numeric or out-of-range
@@ -415,6 +428,35 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
       code: 'custom',
       message: 'TAU_TRANSCRIPTION_UPSTREAM_URL is refused under NODE_ENV=production',
       path: ['TAU_TRANSCRIPTION_UPSTREAM_URL'],
+    });
+  }
+
+  // Langfuse credentials are all or none; delivery needs them and the payload key, and a production
+  // deployment sends evidence only over TLS.
+  const langfuseKeys = ['LANGFUSE_BASE_URL', 'LANGFUSE_PUBLIC_KEY', 'LANGFUSE_SECRET_KEY'] as const;
+  if (data.TAU_OBSERVABILITY_DELIVERY_ENABLED || langfuseKeys.some((key) => data[key] !== undefined)) {
+    for (const key of langfuseKeys) {
+      if (data[key] === undefined) {
+        context.addIssue({ code: 'custom', message: `${key} is required when Langfuse is configured`, path: [key] });
+      }
+    }
+  }
+  if (data.TAU_OBSERVABILITY_DELIVERY_ENABLED && data.TAU_OBSERVABILITY_PAYLOAD_KEY === undefined) {
+    context.addIssue({
+      code: 'custom',
+      message: 'TAU_OBSERVABILITY_PAYLOAD_KEY is required when evidence delivery is enabled',
+      path: ['TAU_OBSERVABILITY_PAYLOAD_KEY'],
+    });
+  }
+  if (
+    data.NODE_ENV === 'production' &&
+    data.LANGFUSE_BASE_URL !== undefined &&
+    new URL(data.LANGFUSE_BASE_URL).protocol !== 'https:'
+  ) {
+    context.addIssue({
+      code: 'custom',
+      message: 'LANGFUSE_BASE_URL must be https under NODE_ENV=production',
+      path: ['LANGFUSE_BASE_URL'],
     });
   }
 

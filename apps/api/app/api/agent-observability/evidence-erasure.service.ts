@@ -12,9 +12,11 @@ import {
   settleErasureTraces,
 } from '#api/agent-observability/evidence-erasure.js';
 import type { LeasedErasureTrace } from '#api/agent-observability/evidence-erasure.js';
+import { expireBacklog } from '#api/agent-observability/evidence-delivery.js';
+import { reapExpiredEvidence } from '#api/agent-observability/evidence-expiry.js';
 import { LangfuseClient } from '#api/agent-observability/langfuse-client.js';
 
-/** Erasure pacing. Slow and bounded: erasure is owed within days, not seconds. */
+/** Lifecycle pacing. Slow and bounded: expiry and erasure are owed within a day, not seconds. */
 export const erasureTiming = Object.freeze({
   intervalMilliseconds: 60_000,
   batch: 50,
@@ -29,6 +31,9 @@ export const erasureTiming = Object.freeze({
   recheckAfterMilliseconds: 15 * 60_000,
   unavailableRecheckMilliseconds: 5 * 60_000,
   maxBackoffMilliseconds: 60 * 60_000,
+  /** How long past its expiry a receipt is kept; longer than any clock skew ingress allows. */
+  receiptGraceMilliseconds: 86_400_000,
+  reapBatch: 1000,
 });
 
 /** Backoff for a deletion request that did not reach Langfuse, or a trace still present after one. */
@@ -48,15 +53,18 @@ const runInPool = async <T>(items: readonly T[], width: number, task: (item: T) 
 };
 
 /**
- * Deletes erased subjects' traces from Langfuse (blueprint T13).
+ * Expires Tau's agent-evidence records and deletes erased subjects' traces
+ * from Langfuse (blueprint T13).
  *
- * Each pass asks Langfuse to delete a batch of journal traces, then, once the
+ * Each pass first purges backlog payloads past their retention and deletes
+ * receipts a day past it, with no vendor call, so it runs whether or not
+ * delivery or Langfuse is configured. It then asks Langfuse to delete a batch of journal traces, then, once the
  * recheck window has passed, reads each one back: only a 404 settles it. A
  * trace still present is requested again with backoff, and an unanswered
- * read is retried without counting as absence. It runs whenever Langfuse
- * credentials are configured, whether or not delivery is enabled, so
- * pausing delivery never pauses erasure. Only counts and bounded codes are
- * logged.
+ * read is retried without counting as absence. That half runs whenever
+ * Langfuse credentials are configured, whether or not delivery is enabled,
+ * so pausing delivery never pauses erasure. Only counts and bounded codes
+ * are logged.
  */
 @Injectable()
 export class EvidenceErasureService implements OnModuleInit, OnModuleDestroy {
@@ -80,9 +88,6 @@ export class EvidenceErasureService implements OnModuleInit, OnModuleDestroy {
   }
 
   public onModuleInit(): void {
-    if (this.client === undefined) {
-      return;
-    }
     this.timer = setInterval(() => {
       this.tick();
     }, erasureTiming.intervalMilliseconds);
@@ -94,22 +99,30 @@ export class EvidenceErasureService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * One erasure pass. Public for tests and the maintenance command.
+   * One lifecycle pass. Public for tests and the maintenance command.
    *
    * @param now - The clock.
    * @returns Counts of what the pass did.
    */
   public async drain(now = new Date()): Promise<Readonly<Record<string, number>>> {
     const { client } = this;
-    if (client === undefined) {
-      return {};
-    }
     const counts: Record<string, number> = {};
     const add = (key: string, value: number): void => {
       counts[key] = (counts[key] ?? 0) + value;
     };
     const { database } = this.databaseService;
     try {
+      add('expired', await expireBacklog(database, now));
+      add(
+        'reaped',
+        await reapExpiredEvidence(database, {
+          before: new Date(now.getTime() - erasureTiming.receiptGraceMilliseconds),
+          limit: erasureTiming.reapBatch,
+        }),
+      );
+      if (client === undefined) {
+        return counts;
+      }
       const lease = {
         owner: this.owner,
         leaseMilliseconds: erasureTiming.leaseMilliseconds,
@@ -126,10 +139,11 @@ export class EvidenceErasureService implements OnModuleInit, OnModuleDestroy {
       });
       add('completed', await completeErasures(database, now));
     } catch (error) {
-      this.logger.warn({ name: error instanceof Error ? error.name : typeof error }, 'Evidence erasure pass failed');
-    }
-    if (Object.values(counts).some((value) => value > 0)) {
-      this.logger.log({ counts }, 'Evidence erasure pass');
+      this.logger.warn({ name: error instanceof Error ? error.name : typeof error }, 'Evidence lifecycle pass failed');
+    } finally {
+      if (Object.values(counts).some((value) => value > 0)) {
+        this.logger.log({ counts }, 'Evidence lifecycle pass');
+      }
     }
     return counts;
   }

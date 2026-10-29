@@ -29,6 +29,7 @@
     "build-environment.ts",
     "build-environment.test.ts",
     "geospec-mt-assets.vite-plugin.test.ts",
+    "csharp-language-assets.vite-plugin.test.ts",
     "asset-integrity.vite-plugin.test.ts",
     "desktop/**/*.ts",
     "serve/**/*.ts",

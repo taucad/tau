@@ -108,6 +108,12 @@
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
         },
         {
+          "env": "TAU_CSHARP_LANGUAGE_STAGE"
+        },
+        {
+          "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
+        },
+        {
           "env": "POSTHOG_CLIENT_KEY"
         },
         {
@@ -150,6 +156,12 @@
         },
         {
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
+        },
+        {
+          "env": "TAU_CSHARP_LANGUAGE_STAGE"
+        },
+        {
+          "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
         }
       ],
       "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",
@@ -179,6 +191,12 @@
         },
         {
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
+        },
+        {
+          "env": "TAU_CSHARP_LANGUAGE_STAGE"
+        },
+        {
+          "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
         }
       ],
       "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",

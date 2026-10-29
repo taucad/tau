@@ -10,7 +10,7 @@ export type VirtualDeclaration = Readonly<{
   column: number;
 }>;
 
-/** Read-only source view for a declaration held by the TypeScript worker. */
+/** Read-only source view for a library declaration held by a language worker (TypeScript `.d.ts`, C# metadata). */
 export function VirtualDeclarationDialog({
   declaration,
   onClose,
@@ -20,6 +20,8 @@ export function VirtualDeclarationDialog({
   readonly onClose: () => void;
   readonly restoreFocus: () => void;
 }): React.JSX.Element {
+  const languageId = declaration?.document.path.endsWith('.cs') ? 'csharp' : 'typescript';
+  const languageName = languageId === 'csharp' ? 'C#' : 'TypeScript';
   const reveal = (view: EditorView): void => {
     if (!declaration) {
       return;
@@ -46,15 +48,17 @@ export function VirtualDeclarationDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle>{declaration?.document.path.split('/').at(-1) ?? 'TypeScript declaration'}</DialogTitle>
-          <DialogDescription>Read-only TypeScript declaration at {declaration?.uri}</DialogDescription>
+          <DialogTitle>{declaration?.document.path.split('/').at(-1) ?? `${languageName} declaration`}</DialogTitle>
+          <DialogDescription>
+            Read-only {languageName} declaration at {declaration?.uri}
+          </DialogDescription>
         </DialogHeader>
         {declaration && (
           <div className='min-h-0 flex-1 overflow-hidden rounded-md border'>
             <CodeEditor
               document={declaration.document}
               viewId='virtual-declaration'
-              languageId='typescript'
+              languageId={languageId}
               readOnly
               onApply={() => undefined}
               onHistory={() => undefined}

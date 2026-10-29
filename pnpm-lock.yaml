@@ -2789,6 +2789,9 @@ importers:
       '@taucad/converter':
         specifier: workspace:*
         version: link:../libs/converter
+      '@taucad/csharp-language':
+        specifier: workspace:*
+        version: link:../libs/csharp-language
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../../packages/plugins/esbuild

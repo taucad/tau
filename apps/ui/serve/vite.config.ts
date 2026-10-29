@@ -17,6 +17,8 @@ import { createUiReactCompilerPlugin, createUiSourceAliasPlugin, uiResolveAlias,
 import { resolveTauCloudBuildEnabled } from '../build-environment';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
 import { createGeoSpecMtAssets } from '../geospec-mt-assets.vite-plugin';
+// oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
+import { createCsharpLanguageAssets } from '../csharp-language-assets.vite-plugin';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load integrity plugin.
 import { createAssetIntegrity } from '../asset-integrity.vite-plugin';
 
@@ -24,6 +26,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
 const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
 const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
+// oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
+const csharpAssets = createCsharpLanguageAssets(process.env['TAU_CSHARP_LANGUAGE_STAGE']);
 
 /**
  * Serve build of `apps/ui` — the SPA a daemon hands to a browser.
@@ -55,6 +59,7 @@ export default defineConfig({
     /* A `tau serve` bundle is never a Tau Cloud host, whatever `TAU_TELEMETRY_HOST` says. */
     tauTelemetryHostCloudBuild: 'false',
     tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
+    tauCsharpLanguageAssets: JSON.stringify(csharpAssets.assets ?? null),
     /* Not `desktop`: `isDesktopTarget()` must fold to `false` here, or the
      * bundle takes the Electron preload's ENV and IPC paths in a plain tab. */
     // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
@@ -62,6 +67,7 @@ export default defineConfig({
   },
   plugins: [
     mtAssets.plugin,
+    csharpAssets.plugin,
     createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
     createAssetIntegrity({ receipt: true }),
     tauRuntime(),

@@ -24,6 +24,8 @@ import {
 } from './build-environment.js';
 /* oxlint-enable eslint/no-restricted-imports */
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
+import { createCsharpLanguageAssets } from './csharp-language-assets.vite-plugin.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createGeoSpecMtAssets } from './geospec-mt-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createAssetIntegrity } from './asset-integrity.vite-plugin.js';
@@ -440,6 +442,7 @@ const createReleaseManifestPlugin = (release: string): Plugin => ({
 
 export default defineConfig(({ command, mode }) => {
   const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
+  const csharpAssets = createCsharpLanguageAssets(process.env['TAU_CSHARP_LANGUAGE_STAGE']);
   const isTest = mode === 'test';
   /*
    * Ordered build identity for the stale-tab skew guard (blueprint DF20).
@@ -488,6 +491,7 @@ export default defineConfig(({ command, mode }) => {
         !isTest && resolveTauTelemetryHostCloud(process.env['TAU_TELEMETRY_HOST']),
       ),
       tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
+      tauCsharpLanguageAssets: JSON.stringify(csharpAssets.assets ?? null),
       /*
        * Compile-time host seam (charter D2). `desktop/vite.config.ts` sets
        * `"desktop"`. Left undefined under `mode === 'test'` so unit tests can
@@ -528,6 +532,7 @@ export default defineConfig(({ command, mode }) => {
     },
     plugins: [
       mtAssets.plugin,
+      csharpAssets.plugin,
       createUiSourceAliasPlugin({
         emitModuleGraph: true,
         tauCloudEnabled,

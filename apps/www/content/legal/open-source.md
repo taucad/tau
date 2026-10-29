@@ -31,7 +31,7 @@ including how it builds and links OCCT, is at [github.com/taucad/geospec](https:
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 879 packages, with the license each declares.
+The web and desktop apps include the following 870 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -52,26 +52,22 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@aurigax-ai/ghostty-web](https://github.com/aurigax-ai/ghostty-web) | 0.3.6 | MIT |
 | [@aws-sdk/client-bedrock-runtime](https://github.com/aws/aws-sdk-js-v3) | 3.1127.0 | Apache-2.0 |
 | [@aws-sdk/core](https://github.com/aws/aws-sdk-js-v3) | 3.978.3 | Apache-2.0 |
-| [@aws-sdk/core](https://github.com/aws/aws-sdk-js-v3) | 3.978.6 | Apache-2.0 |
-| [@aws-sdk/credential-provider-env](https://github.com/aws/aws-sdk-js-v3) | 3.972.77 | Apache-2.0 |
-| [@aws-sdk/credential-provider-http](https://github.com/aws/aws-sdk-js-v3) | 3.972.79 | Apache-2.0 |
-| [@aws-sdk/credential-provider-ini](https://github.com/aws/aws-sdk-js-v3) | 3.973.22 | Apache-2.0 |
-| [@aws-sdk/credential-provider-login](https://github.com/aws/aws-sdk-js-v3) | 3.972.84 | Apache-2.0 |
+| [@aws-sdk/credential-provider-env](https://github.com/aws/aws-sdk-js-v3) | 3.972.74 | Apache-2.0 |
+| [@aws-sdk/credential-provider-http](https://github.com/aws/aws-sdk-js-v3) | 3.972.76 | Apache-2.0 |
+| [@aws-sdk/credential-provider-ini](https://github.com/aws/aws-sdk-js-v3) | 3.973.19 | Apache-2.0 |
+| [@aws-sdk/credential-provider-login](https://github.com/aws/aws-sdk-js-v3) | 3.972.81 | Apache-2.0 |
 | [@aws-sdk/credential-provider-node](https://github.com/aws/aws-sdk-js-v3) | 3.972.86 | Apache-2.0 |
-| [@aws-sdk/credential-provider-process](https://github.com/aws/aws-sdk-js-v3) | 3.972.77 | Apache-2.0 |
-| [@aws-sdk/credential-provider-sso](https://github.com/aws/aws-sdk-js-v3) | 3.973.21 | Apache-2.0 |
-| [@aws-sdk/credential-provider-web-identity](https://github.com/aws/aws-sdk-js-v3) | 3.972.83 | Apache-2.0 |
+| [@aws-sdk/credential-provider-process](https://github.com/aws/aws-sdk-js-v3) | 3.972.74 | Apache-2.0 |
+| [@aws-sdk/credential-provider-sso](https://github.com/aws/aws-sdk-js-v3) | 3.973.18 | Apache-2.0 |
+| [@aws-sdk/credential-provider-web-identity](https://github.com/aws/aws-sdk-js-v3) | 3.972.80 | Apache-2.0 |
 | [@aws-sdk/eventstream-handler-node](https://github.com/aws/aws-sdk-js-v3) | 3.972.36 | Apache-2.0 |
 | [@aws-sdk/middleware-eventstream](https://github.com/aws/aws-sdk-js-v3) | 3.972.31 | Apache-2.0 |
 | [@aws-sdk/middleware-websocket](https://github.com/aws/aws-sdk-js-v3) | 3.972.56 | Apache-2.0 |
 | [@aws-sdk/nested-clients](https://github.com/aws/aws-sdk-js-v3) | 3.997.48 | Apache-2.0 |
-| [@aws-sdk/nested-clients](https://github.com/aws/aws-sdk-js-v3) | 3.997.51 | Apache-2.0 |
 | [@aws-sdk/signature-v4-multi-region](https://github.com/aws/aws-sdk-js-v3) | 3.996.48 | Apache-2.0 |
-| [@aws-sdk/signature-v4-multi-region](https://github.com/aws/aws-sdk-js-v3) | 3.996.49 | Apache-2.0 |
 | [@aws-sdk/token-providers](https://github.com/aws/aws-sdk-js-v3) | 3.1127.0 | Apache-2.0 |
-| [@aws-sdk/token-providers](https://github.com/aws/aws-sdk-js-v3) | 3.1157.0 | Apache-2.0 |
+| [@aws-sdk/token-providers](https://github.com/aws/aws-sdk-js-v3) | 3.1150.0 | Apache-2.0 |
 | [@aws-sdk/types](https://github.com/aws/aws-sdk-js-v3) | 3.974.6 | Apache-2.0 |
-| [@aws-sdk/types](https://github.com/aws/aws-sdk-js-v3) | 3.975.0 | Apache-2.0 |
 | [@aws-sdk/xml-builder](https://github.com/aws/aws-sdk-js-v3) | 3.972.41 | Apache-2.0 |
 | [@aws/lambda-invoke-store](https://github.com/awslabs/aws-lambda-invoke-store) | 0.3.0 | Apache-2.0 |
 | [@babel/runtime](https://github.com/babel/babel) | 7.29.10 | MIT |
@@ -270,11 +266,9 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@shikijs/types](https://github.com/shikijs/shiki) | 3.23.0 | MIT |
 | [@shikijs/vscode-textmate](https://github.com/shikijs/vscode-textmate) | 10.0.2 | MIT |
 | [@smithy/core](https://github.com/smithy-lang/smithy-typescript) | 3.35.2 | Apache-2.0 |
-| [@smithy/core](https://github.com/smithy-lang/smithy-typescript) | 3.37.0 | Apache-2.0 |
 | [@smithy/credential-provider-imds](https://github.com/smithy-lang/smithy-typescript) | 4.5.2 | Apache-2.0 |
 | [@smithy/fetch-http-handler](https://github.com/smithy-lang/smithy-typescript) | 5.8.0 | Apache-2.0 |
 | [@smithy/node-http-handler](https://github.com/smithy-lang/smithy-typescript) | 4.12.1 | Apache-2.0 |
-| [@smithy/node-http-handler](https://github.com/smithy-lang/smithy-typescript) | 4.13.0 | Apache-2.0 |
 | [@smithy/signature-v4](https://github.com/smithy-lang/smithy-typescript) | 5.7.4 | Apache-2.0 |
 | [@smithy/types](https://github.com/smithy-lang/smithy-typescript) | 4.19.0 | Apache-2.0 |
 | [@stablelib/base64](https://github.com/StableLib/stablelib) | 1.0.1 | MIT |
@@ -370,7 +364,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [bl](https://github.com/rvagg/bl) | 6.1.6 | MIT |
 | [body-parser](https://github.com/expressjs/body-parser) | 2.3.0 | MIT |
 | [bowser](https://github.com/bowser-js/bowser) | 2.14.1 | MIT |
-| [bowser](https://github.com/bowser-js/bowser) | 2.15.0 | MIT |
 | [brace-expansion](https://github.com/juliangruber/brace-expansion) | 5.0.12 | MIT |
 | [broker-factory](https://github.com/chrisguttandin/broker-factory) | 3.1.15 | MIT |
 | [buffer](https://github.com/feross/buffer) | 6.0.3 | MIT |
@@ -496,7 +489,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [events](https://github.com/Gozala/events) | 3.3.0 | MIT |
 | [eventsource](https://git@github.com/EventSource/eventsource) | 3.0.7 | MIT |
 | [eventsource-parser](https://github.com/rexxars/eventsource-parser) | 3.1.0 | MIT |
-| [eventsource-parser](https://github.com/rexxars/eventsource-parser) | 3.1.1 | MIT |
 | [express](https://github.com/expressjs/express) | 5.3.0 | MIT |
 | [express-rate-limit](https://github.com/express-rate-limit/express-rate-limit) | 8.7.1 | MIT |
 | [extend](https://github.com/justmoon/node-extend) | 3.0.2 | MIT |
@@ -566,7 +558,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [internmap](https://github.com/mbostock/internmap) | 2.0.3 | ISC |
 | [iota-array](https://github.com/mikolalysenko/iota-array) | 1.0.0 | MIT |
 | [ip-address](https://github.com/beaugunderson/ip-address) | 10.7.4 | MIT |
-| [ip-address](https://github.com/beaugunderson/ip-address) | 10.7.5 | MIT |
 | [ipaddr.js](https://github.com/whitequark/ipaddr.js) | 1.9.1 | MIT |
 | [is-buffer](https://github.com/feross/is-buffer) | 1.1.6 | MIT |
 | [is-callable](https://github.com/inspect-js/is-callable) | 1.2.7 | MIT |

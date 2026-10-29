@@ -42,6 +42,15 @@ vi.mock('#components/settings/billing-settings.js', () => ({
 vi.mock('#components/settings/filesystem-settings.js', () => ({
   FileSystemSettings: () => <div>Mounted filesystem</div>,
 }));
+vi.mock('#components/settings/github-repository-settings.js', () => ({
+  GithubRepositorySettings: () => <div>Mounted repositories</div>,
+}));
+vi.mock('#components/browser/browser-settings.js', () => ({
+  BrowserSettingsPanel: () => <div>Mounted browser settings</div>,
+}));
+vi.mock('#components/settings/machines-settings.js', () => ({
+  MachinesSettings: () => <div>Mounted machines</div>,
+}));
 vi.mock('#components/settings/general-settings.js', () => {
   loadGeneralSettings();
   return {

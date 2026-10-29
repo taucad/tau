@@ -43,6 +43,7 @@ import {
 } from 'isomorphic-git';
 import type { TreeEntry } from 'isomorphic-git';
 import { ResourceQueue } from '@taucad/filesystem';
+import { randomUuid } from '@taucad/utils/id';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileMode, FileSystemProvider } from '@taucad/filesystem';
 import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
@@ -806,18 +807,42 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   const lfsObjectFile = (oid: string): string => `${gitdir}/${lfsObjectPath(oid)}`;
 
   /**
+   * One large object's bytes from this store, when they are here whole.
+   *
+   * @param pointer - The pointer naming the object.
+   * @returns Its bytes, or `undefined` when it is absent or not the size the pointer names.
+   */
+  const readLocalLfsObject = async (pointer: LfsPointer): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+    const file = lfsObjectFile(pointer.oid);
+    if (!(await filesystem.exists(file))) {
+      return undefined;
+    }
+    const content = await filesystem.readFile(file);
+    return content.byteLength === pointer.size ? content : undefined;
+  };
+
+  /**
    * Put one large object in this store. Content-addressed, so a repeat writes nothing.
+   *
+   * Written beside its name and renamed into place, so a write a close or a
+   * crash cut short never leaves a truncated object under the oid.
    *
    * @param oid - The pointer's object id.
    * @param content - The object's real bytes.
    */
   const storeLfsObject = async (oid: string, content: Uint8Array<ArrayBuffer>): Promise<void> => {
-    const file = lfsObjectFile(oid);
-    if (await filesystem.exists(file)) {
+    if ((await readLocalLfsObject({ oid, size: content.byteLength })) !== undefined) {
       return;
     }
+    const file = lfsObjectFile(oid);
     await filesystem.mkdir(file.slice(0, file.lastIndexOf('/')), { recursive: true });
-    await filesystem.writeFile(file, content);
+    const partial = `${file}.${randomUuid()}.partial`;
+    await filesystem.writeFile(partial, content);
+    /* A copy cut short by an earlier write; not every provider's rename replaces. */
+    if (await filesystem.exists(file)) {
+      await filesystem.unlink(file);
+    }
+    await filesystem.rename(partial, file);
   };
 
   /**
@@ -860,11 +885,13 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    *
    * @param pointers - The pointers, in tree order; repeats are resolved once.
    * @param delivered - Told about each object this read fetched, as it lands.
+   * @param signal - Stops this read's transfers; a concurrent reader waiting on one fetches it itself.
    * @returns The bytes by oid, and what the phase cost.
    */
   const hydrate = async (
     pointers: readonly LfsPointer[],
     delivered?: ReadTreeOptions['onLargeObject'],
+    signal?: AbortSignal,
   ): Promise<Readonly<{ contents: ReadonlyMap<string, Uint8Array<ArrayBuffer>>; report: LfsFetchReport }>> => {
     const startedAt = Date.now();
     const contents = new Map<string, Uint8Array<ArrayBuffer>>();
@@ -890,6 +917,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       }
       await client.downloadMany({
         pointers: [...wanted.values()],
+        ...(signal === undefined ? {} : { signal }),
         received: async (pointer, content) => {
           await storeLfsObject(pointer.oid, content);
           contents.set(pointer.oid, content);
@@ -921,15 +949,9 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           }
           continue;
         }
-        const file = lfsObjectFile(pointer.oid);
         // oxlint-disable-next-line no-await-in-loop -- local reads stay one at a time; the returned tree already retains every object.
-        if (await filesystem.exists(file)) {
-          // oxlint-disable-next-line no-await-in-loop -- as above.
-          const content = await filesystem.readFile(file);
-          contents.set(pointer.oid, content);
-          localObjects += 1;
-          localBytes += content.byteLength;
-        } else {
+        const content = await readLocalLfsObject(pointer);
+        if (content === undefined) {
           missing.set(pointer.oid, pointer);
           const settled = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
           /* Only a concurrent reader awaits this; with none, a failure is reported by `downloadMany` below. */
@@ -938,6 +960,10 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           downloads.set(pointer.oid, settled.promise);
           registered.set(pointer.oid, settled.promise);
           pending.set(pointer.oid, settled);
+        } else {
+          contents.set(pointer.oid, content);
+          localObjects += 1;
+          localBytes += content.byteLength;
         }
       }
       if (missing.size > 0) {
@@ -1544,12 +1570,11 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       if (readOptions?.largeObjects === 'local') {
         /* No transfer: what is here already is read, and the rest stay pointers for the caller to track. */
         const local = new Map<string, Uint8Array<ArrayBuffer>>();
-        for (const { oid } of pointers) {
-          const file = lfsObjectFile(oid);
+        for (const pointer of pointers) {
           // oxlint-disable-next-line no-await-in-loop -- one local read at a time, as the hydrate's own scan does.
-          if (!local.has(oid) && (await filesystem.exists(file))) {
-            // oxlint-disable-next-line no-await-in-loop -- as above.
-            local.set(oid, await filesystem.readFile(file));
+          const content = local.has(pointer.oid) ? undefined : await readLocalLfsObject(pointer);
+          if (content !== undefined) {
+            local.set(pointer.oid, content);
           }
         }
         return new ImmutableRevisionTree(
@@ -1560,7 +1585,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           ]),
         );
       }
-      const hydrated = pointers.length === 0 ? undefined : await hydrate(pointers, readOptions?.onLargeObject);
+      const hydrated =
+        pointers.length === 0 ? undefined : await hydrate(pointers, readOptions?.onLargeObject, readOptions?.signal);
       if (hydrated !== undefined && hydrated.report.networkObjects > 0) {
         options.onLfsFetch?.(hydrated.report);
       }

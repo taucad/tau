@@ -563,7 +563,7 @@ describe('reading a tree with large objects', () => {
     const evict = async (...contents: readonly string[]): Promise<void> => {
       await Promise.all(contents.map(async (content) => filesystem.unlink(`.git/${lfsObjectPath(oidOf(content))}`)));
     };
-    return { port, head: revisionId(receipt.commitId), asked, transfer, evict };
+    return { port, head: revisionId(receipt.commitId), asked, transfer, evict, filesystem };
   };
 
   it('fetches only the objects its store lacks, in one batch call, and reports what it cost', async () => {
@@ -687,5 +687,38 @@ describe('reading a tree with large objects', () => {
     await Promise.all([port.readTree(head), port.readTree(head, { onLargeObject: (oid) => landed.push(oid) })]);
     expect(asked).toHaveLength(1);
     expect(landed).toStrictEqual([oidOf(parts[1]![1]!)]);
+  });
+
+  it('treats a stored object cut short as missing, and stores the fetched one whole', async () => {
+    const { port, head, asked, filesystem } = await lfsStore();
+    const [path, content] = parts[0]! as [string, string];
+    const file = `.git/${lfsObjectPath(oidOf(content))}`;
+    await filesystem.writeFile(file, encoder.encode(content).slice(0, 3));
+    const local = await port.readTree(head, { largeObjects: 'local' });
+    expect(local?.get(path)).toStrictEqual(lfsPointerFor(encoder.encode(content)).bytes);
+    const read = await port.readTree(head);
+    expect(read?.get(path)).toStrictEqual(encoder.encode(content));
+    expect(asked).toStrictEqual([[oidOf(content)]]);
+    expect(await filesystem.readFile(file)).toStrictEqual(encoder.encode(content));
+    const directory = file.slice(0, file.lastIndexOf('/'));
+    const names = await filesystem.readdir(directory);
+    expect(names.filter((name) => String(name).includes('.partial'))).toStrictEqual([]);
+  });
+
+  it('stops a fetching read when its signal aborts', async () => {
+    const { port, head, transfer, evict } = await lfsStore();
+    await evict(parts[0]![1]!);
+    const deliver = transfer.getMockImplementation()!;
+    transfer.mockImplementation(async (url, init) => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+      init?.signal?.throwIfAborted();
+      return deliver(url, init);
+    });
+    const controller = new AbortController();
+    const read = port.readTree(head, { signal: controller.signal });
+    controller.abort(new Error('Closing stopped the large-object fill.'));
+    await expect(read).rejects.toThrow();
   });
 });

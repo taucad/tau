@@ -928,6 +928,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       /* A store that could not be created is reported where it was asked for,
        * never from the close that waits for it. */
     }
+    await stopFills();
     while (activeOperations.size > 0) {
       // oxlint-disable-next-line no-await-in-loop -- operations may admit another tracked authority operation before settling.
       await Promise.allSettled(activeOperations);
@@ -1375,9 +1376,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     validateLegacyProjectIdentity(target.get('tau.json'), options.projectId);
     return applyMaterializedTree(place, target, materialization);
   };
-  /* The files open before their large objects arrive; the fill writes each one as it lands. */
+  /* The files open before their large objects arrive; the fill writes each one as it lands.
+   * Its reads are transfers, so a close that cancels transfers stops them too. */
   const largeObjects = createLargeObjectFill({
-    port,
+    port: {
+      readTree: async (id, readOptions) =>
+        transport(readOptions?.signal, async (signal) => port.readTree(id, { ...readOptions, signal })),
+    },
     capture: async (place) => capture(place),
     withCheckoutFence,
     materializeTree,
@@ -1385,25 +1390,67 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   });
   /* Once per checkout per session: placeholders a reload left mid-download are picked up again. */
   const resumedFills = new Set<string>();
-  const resumeFill = (place: Checkout): void => {
-    if (resumedFills.has(place.id)) {
+  const resumeTimers = new Set<ReturnType<typeof setTimeout>>();
+  let fillsStopped = false;
+  /*
+   * Off the caller's path: a resume starts a fill only where none runs, and a
+   * refill (`replace`) begins the running one again. No place is the project
+   * directory, found as the root starts.
+   */
+  const fillLater = (place: Checkout | undefined, replace: boolean): void => {
+    if (fillsStopped) {
       return;
     }
-    resumedFills.add(place.id);
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      resumeTimers.delete(timer);
       // async-iife: bootstrap -- a background fill; its failures are reported through `onLargeObjects`.
       void (async (): Promise<void> => {
+        let target = place;
         try {
-          const head = await headOf(place);
-          if (head !== undefined) {
-            await largeObjects.resume(place, revisionId(head));
+          if (target === undefined) {
+            const places = await listPlaces();
+            target = places.find((candidate) => candidate.kind === 'live');
+          }
+          const head = target === undefined ? undefined : await headOf(target);
+          if (target !== undefined && head !== undefined && !fillsStopped) {
+            resumedFills.add(target.id);
+            await largeObjects.resume(target, revisionId(head), replace);
           }
         } catch (error) {
+          /* Unmarked, so the next capture or pull checks again. */
+          resumedFills.delete(target?.id ?? '');
           console.warn('[revisions] large-object placeholders could not be checked', error);
         }
       })();
     }, 0);
+    resumeTimers.add(timer);
   };
+  const resumeFill = (place: Checkout): void => {
+    if (!resumedFills.has(place.id)) {
+      resumedFills.add(place.id);
+      fillLater(place, false);
+    }
+  };
+  /*
+   * After a write that replaced files wholesale (a restore, an undo, a branch
+   * switch, a merge), the running fill is begun again from what the checkout
+   * now holds and its head now is: placeholders it overwrote are dropped, and
+   * any it wrote are filled.
+   */
+  const refillAfter = (place: Checkout): void => {
+    fillLater(place, true);
+  };
+  /* A close: no fill starts again, and none is still writing when this resolves. */
+  const stopFills = async (): Promise<void> => {
+    fillsStopped = true;
+    for (const timer of resumeTimers) {
+      clearTimeout(timer);
+    }
+    resumeTimers.clear();
+    await largeObjects.stop();
+  };
+  /* The project directory's own placeholders, checked as the root starts: a reload that never captures still resumes. */
+  fillLater(undefined, false);
 
   /**
    * The project's *Sync chats* answer, read per push (D25, W17).
@@ -2744,6 +2791,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         validate: validateTarget,
         publish: async () => landMerge(ours, theirs),
       });
+      refillAfter(target);
       return { status: 'merged', revisionId: theirs, checkoutId: target.id };
     }
 
@@ -2780,6 +2828,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       validate: validateTarget,
       publish: async () => landMerge(ours, revisionId(receipt.commitId)),
     });
+    refillAfter(target);
     return { status: 'merged', revisionId: receipt.commitId, checkoutId: target.id };
   };
 
@@ -3466,6 +3515,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               }
             },
           });
+          refillAfter(place);
           if (plan.undoes === undefined) {
             const treeId = await treeIdOf(plan.revisionId);
             return { revisionId: plan.revisionId, treeId: treeId ?? '' };
@@ -3606,6 +3656,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         await materializeTree(place, tree, {
           publish: place.kind === 'live' ? async () => port.setHead(input.branch) : undefined,
         });
+        refillAfter(place);
         return {
           checkoutId: place.id,
           revisionId: head,
@@ -3916,6 +3967,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               await land();
             },
           });
+          refillAfter(place);
         }
         resolutions.delete(input.revisionId);
         return { revisionId: receipt.commitId, branch: perspective.line };

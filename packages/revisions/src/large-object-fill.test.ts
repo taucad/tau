@@ -3,6 +3,7 @@ import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createLargeObjectFill, largeObjectPlaceholders } from '#large-object-fill.js';
 import { lfsPointerFor } from '#lfs.js';
 import type { LargeObjectsReport } from '#project-revisions.types.js';
+import { RevisionPortError } from '#revision-port.js';
 import type { Checkout, ReadTreeOptions } from '#revision-port.js';
 
 const encoder = new TextEncoder();
@@ -28,16 +29,23 @@ const setup = () => {
   }
   const reports: LargeObjectsReport[] = [];
   let onLargeObject: ReadTreeOptions['onLargeObject'];
+  let signal: AbortSignal | undefined;
   let finish: (tree: ImmutableRevisionTree) => void = () => undefined;
   let fail: (error: Error) => void = () => undefined;
   const readTree = vi.fn(
     async (_id: unknown, options?: ReadTreeOptions) =>
       new Promise<ImmutableRevisionTree>((resolve, reject) => {
         onLargeObject = options?.onLargeObject;
+        signal = options?.signal;
+        signal?.addEventListener('abort', () => {
+          reject(signal?.reason as Error);
+        });
         finish = resolve;
         fail = reject;
       }),
   );
+  /* Writers that move the checkout under the next materialization, as an editor's save would. */
+  let conflicts = 0;
   const fullTree = (): ImmutableRevisionTree =>
     new ImmutableRevisionTree([
       ['main.scad', files.get('main.scad')!],
@@ -46,6 +54,10 @@ const setup = () => {
   const capture = async (): Promise<ImmutableRevisionTree> =>
     new ImmutableRevisionTree([...files].map(([path, content]) => [path, content] as const));
   const materializeTree = vi.fn(async (_place: Checkout, target: ImmutableRevisionTree) => {
+    if (conflicts > 0) {
+      conflicts -= 1;
+      throw new RevisionPortError('CHECKOUT_CONFLICT', 'These files changed while they were written.');
+    }
     for (const { path, content } of target.entries()) {
       files.set(path, content);
     }
@@ -78,6 +90,10 @@ const setup = () => {
     },
     fullTree,
     text,
+    signal: () => signal,
+    conflictNext: (count: number) => {
+      conflicts = count;
+    },
   };
 };
 
@@ -179,5 +195,137 @@ describe('large-object fill', () => {
     await harness.fill.resume(place, head);
     expect(harness.readTree).toHaveBeenCalledTimes(1);
     expect(harness.reports).toHaveLength(count);
+  });
+
+  it('never fills a placeholder with a head file that is not its object', async () => {
+    const harness = setup();
+    /* Two placeholders for an object the head no longer holds: a.step's content changed upstream. */
+    const old = pointerOf('solid old');
+    harness.files.set('models/a.step', old.bytes);
+    harness.files.set('models/c.step', old.bytes);
+    harness.files.delete('models/b.step');
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.files.get('models/a.step')).toStrictEqual(old.bytes);
+    expect(harness.files.get('models/c.step')).toStrictEqual(old.bytes);
+    expect(harness.materializeTree).not.toHaveBeenCalled();
+    expect(harness.reports.at(-1)?.facet).toBeUndefined();
+  });
+
+  it('fills an object the head holds at another path, found by its hash', async () => {
+    const harness = setup();
+    harness.files.set('models/renamed.step', harness.files.get('models/a.step')!);
+    harness.files.delete('models/a.step');
+    const done = harness.fill.fill(
+      place,
+      head,
+      new Map([
+        [
+          'models/renamed.step',
+          {
+            ...pointerOf('solid a').pointer,
+            pointer: pointerOf('solid a').bytes,
+          },
+        ],
+      ]),
+    );
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    /* Not delivered by the transfer (already local): only the head tree has it, at its own path. */
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.text('models/renamed.step')).toBe('solid a');
+  });
+
+  it('fills a placeholder renamed or copied after the open, and tracks it until it lands', async () => {
+    const harness = setup();
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.files.set('models/moved.step', harness.files.get('models/a.step')!);
+    harness.files.delete('models/a.step');
+    harness.files.set('models/copy.step', harness.files.get('models/b.step')!);
+    harness.land('models/b.step');
+    await vi.waitFor(() => {
+      expect(harness.text('models/copy.step')).toBe('solid bb');
+    });
+    expect(harness.text('models/b.step')).toBe('solid bb');
+    await vi.waitFor(() => {
+      expect(harness.reports.at(-1)?.facet?.paths).toStrictEqual(['models/moved.step']);
+    });
+    harness.land('models/a.step');
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.text('models/moved.step')).toBe('solid a');
+    expect(harness.files.has('models/a.step')).toBe(false);
+    expect(harness.reports.at(-1)?.facet).toBeUndefined();
+  });
+
+  it('sweeps what changed meanwhile when the transfer fails with nothing landed', async () => {
+    const harness = setup();
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.files.set('models/a.step', encoder.encode('solid mine'));
+    harness.fail(new Error('offline'));
+    await done;
+    expect(harness.reports.at(-1)?.facet).toMatchObject({ phase: 'failed', paths: ['models/b.step'] });
+  });
+
+  it('sweeps again when a writer moves the checkout under a flush, rather than failing', async () => {
+    const harness = setup();
+    harness.conflictNext(1);
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.materializeTree).toHaveBeenCalledTimes(2);
+    expect(harness.text('models/a.step')).toBe('solid a');
+    expect(harness.text('models/b.step')).toBe('solid bb');
+    expect(harness.reports.at(-1)?.facet).toBeUndefined();
+  });
+
+  it('leaves a flush a writer keeps conflicting to a later one, still fetching', async () => {
+    const harness = setup();
+    harness.conflictNext(3);
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.reports.at(-1)?.facet).toMatchObject({ phase: 'fetching', objects: 2 });
+    await vi.waitFor(() => {
+      expect(harness.reports.at(-1)?.facet).toBeUndefined();
+    });
+    expect(harness.text('models/a.step')).toBe('solid a');
+  });
+
+  it('stops on close: the transfer is aborted, timers clear, and nothing more is written or told', async () => {
+    const harness = setup();
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.land('models/a.step');
+    const told = harness.reports.length;
+    await harness.fill.stop();
+    await done;
+    expect(harness.signal()?.aborted).toBe(true);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10);
+    });
+    expect(harness.materializeTree).not.toHaveBeenCalled();
+    expect(harness.files.get('models/a.step')).toStrictEqual(pointerOf('solid a').bytes);
+    expect(harness.reports).toHaveLength(told);
   });
 });

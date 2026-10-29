@@ -537,6 +537,8 @@ export type ReadTreeOptions = Readonly<{
   largeObjects?: 'local';
   /** Told about each large object as the remote delivers it, while a fetching read runs. */
   onLargeObject?: (oid: string, content: Uint8Array<ArrayBuffer>) => void;
+  /** Stops a fetching read's transfers; the read then rejects. */
+  signal?: AbortSignal;
 }>;
 
 /**

@@ -1543,6 +1543,11 @@ describe('the checkout registry', () => {
         events.push(placement.status);
       },
     });
+    /* The root checks the project directory for large-object placeholders as it starts. */
+    await vi.waitFor(() => {
+      expect(events).toEqual(['open:live', 'close:live']);
+    });
+    events.length = 0;
 
     await run(actors.turn.prepare, {
       key: { turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1', attempt: 0 },
@@ -4448,5 +4453,119 @@ describe('opening before large objects arrive', () => {
       expect(reports.at(-1)?.facet).toBeUndefined();
     });
     expect(await filesystem.readFile('models/part.step', 'utf8')).toBe(part);
+  }, 30_000);
+  /* A project a reload left mid-download: its checkout holds the part's pointer, and the store lacks the bytes. */
+  const leftMidDownload = async () => {
+    const reports: LargeObjectsReport[] = [];
+    const part = 'solid part\n';
+    const { pointer, bytes: pointerBytes } = lfsPointerFor(new TextEncoder().encode(part));
+    const gate = Promise.withResolvers<void>();
+    const { port: real, filesystem } = await fixture();
+    await real.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await real.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([
+        ['main.scad', 'import("models/part.step");\n'],
+        ['models/part.step', part],
+      ]),
+      provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 9, 29) },
+      summary: { generated: 'Remote' },
+    });
+    const head = revisionId(receipt.commitId);
+    await real.updateRef({ name: 'refs/heads/main', expectedHead: undefined, head });
+    await real.setHead('main');
+    const objectFile = `.git/${lfsObjectPath(pointer.oid)}`;
+    await filesystem.unlink(objectFile);
+    await filesystem.writeFile('main.scad', 'import("models/part.step");\n');
+    await filesystem.mkdir('models', { recursive: true });
+    await filesystem.writeFile('models/part.step', pointerBytes);
+    const signals: AbortSignal[] = [];
+    const port: RevisionPort = {
+      ...real,
+      readTree: async (id, options) => {
+        if (options?.largeObjects === 'local' || id !== head) {
+          return real.readTree(id, options);
+        }
+        if (options?.signal !== undefined) {
+          signals.push(options.signal);
+        }
+        const aborted = new Promise<never>((_resolve, reject) => {
+          options?.signal?.addEventListener('abort', () => {
+            reject(new Error('aborted'));
+          });
+        });
+        await Promise.race([gate.promise, aborted]);
+        await filesystem.writeFile(objectFile, part);
+        options?.onLargeObject?.(pointer.oid, new TextEncoder().encode(part));
+        return real.readTree(id);
+      },
+    };
+    const actors = createRevisionActors({
+      port,
+      projectId: 'project-1',
+      filesystem: async () => filesystem,
+      onLargeObjects: (report) => reports.push(report),
+    });
+    return {
+      actors,
+      real,
+      filesystem,
+      reports,
+      part,
+      pointerBytes,
+      signals,
+      land: () => {
+        gate.resolve();
+      },
+    };
+  };
+
+  it('resumes as the root starts, with no capture or pull to prompt it', async () => {
+    const project = await leftMidDownload();
+    await vi.waitFor(() => {
+      expect(project.reports.at(-1)?.facet).toMatchObject({ phase: 'fetching', paths: ['models/part.step'] });
+    });
+    project.land();
+    await vi.waitFor(() => {
+      expect(project.reports.at(-1)?.facet).toBeUndefined();
+    });
+    expect(await project.filesystem.readFile('models/part.step', 'utf8')).toBe(project.part);
+  }, 30_000);
+
+  it('stops the fill when the project closes, and writes nothing after', async () => {
+    const project = await leftMidDownload();
+    await vi.waitFor(() => {
+      expect(project.signals).toHaveLength(1);
+    });
+    await project.actors.settled();
+    expect(project.signals[0]?.aborted).toBe(true);
+    project.land();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+    expect(await project.filesystem.readFile('models/part.step')).toStrictEqual(project.pointerBytes);
+  }, 30_000);
+
+  it('begins the fill again after a branch switch replaces the placeholders', async () => {
+    const project = await leftMidDownload();
+    await vi.waitFor(() => {
+      expect(project.reports.at(-1)?.facet).toMatchObject({ phase: 'fetching' });
+    });
+    const other = await project.real.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.scad', 'cube(1);\n']]),
+      provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 9, 29) },
+      summary: { generated: 'Other' },
+    });
+    await project.real.updateRef({
+      name: 'refs/heads/other',
+      expectedHead: undefined,
+      head: revisionId(other.commitId),
+    });
+    await run(project.actors.branch.applySwitch, { projectId: 'project-1', branch: 'other', checkoutId: undefined });
+    await vi.waitFor(() => {
+      expect(project.reports.at(-1)?.facet).toBeUndefined();
+    });
+    expect(project.signals[0]?.aborted).toBe(true);
   }, 30_000);
 });

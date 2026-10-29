@@ -1,3 +1,5 @@
+import { completionTypeFromLsp } from '#components/code/editor-completion-icon.js';
+import { editorCompletionInfo, renderEditorDocumentation } from '#components/code/editor-documentation.js';
 import { StateEffect, StateField } from '@codemirror/state';
 import type { Extension, StateEffectType } from '@codemirror/state';
 import { autocompletion, snippet } from '@codemirror/autocomplete';
@@ -486,8 +488,8 @@ export function symbolCompletion(symbol: KclSymbol, boost: number): Completion {
       label: symbol.name,
       type: 'function',
       detail: `fn ${symbol.name}(${signature})${suffix}`,
-      info: formatSymbolHover(symbol, { isAlias: Boolean(symbol.importPath), importPath: symbol.importPath }).join(
-        '\n',
+      info: editorCompletionInfo(
+        formatSymbolHover(symbol, { isAlias: Boolean(symbol.importPath), importPath: symbol.importPath }).join('\n'),
       ),
       boost,
       apply: snippet(`${symbol.name}(${fields})`),
@@ -498,7 +500,7 @@ export function symbolCompletion(symbol: KclSymbol, boost: number): Completion {
       label: symbol.name,
       type: 'property',
       detail: `(param) ${symbol.name}: ${symbol.value ? 'value' : 'unknown'}`,
-      info: symbol.containingFunction ? `Parameter of ${symbol.containingFunction}` : undefined,
+      info: editorCompletionInfo(symbol.containingFunction ? `Parameter of ${symbol.containingFunction}` : undefined),
       boost,
       apply: `${symbol.name} = `,
     };
@@ -507,7 +509,9 @@ export function symbolCompletion(symbol: KclSymbol, boost: number): Completion {
     label: symbol.name,
     type: 'variable',
     detail: symbol.kind,
-    info: formatSymbolHover(symbol, { isAlias: Boolean(symbol.importPath), importPath: symbol.importPath }).join('\n'),
+    info: editorCompletionInfo(
+      formatSymbolHover(symbol, { isAlias: Boolean(symbol.importPath), importPath: symbol.importPath }).join('\n'),
+    ),
     boost,
   };
 }
@@ -522,7 +526,8 @@ export function kclLspCompletion(
     displayLabel: item.filterText && item.filterText !== item.label ? item.label : undefined,
     sortText: item.sortText,
     detail: item.detail,
-    info: typeof item.documentation === 'string' ? item.documentation : item.documentation?.value,
+    info: editorCompletionInfo(typeof item.documentation === 'string' ? item.documentation : item.documentation?.value),
+    type: completionTypeFromLsp(item.kind),
     boost: item.preselect ? 99 : 4,
     // oxlint-disable-next-line max-params -- CodeMirror completion apply callback contract.
     apply(view, completion, from, to) {
@@ -722,8 +727,7 @@ export function kclExtensions({
         pos: result?.range ? offsetAt(document.text, result.range.start) : pos,
         end: result?.range ? offsetAt(document.text, result.range.end) : undefined,
         create() {
-          const dom = globalThis.document.createElement('div');
-          dom.textContent = text;
+          const dom = renderEditorDocumentation(text);
           return { dom };
         },
       };
@@ -944,8 +948,7 @@ async function showSignature(
           pos: view.state.selection.main.head,
           above: true,
           create() {
-            const dom = globalThis.document.createElement('div');
-            dom.textContent = parameter ? `${label} — ${parameter}` : label;
+            const dom = renderEditorDocumentation(['```', label, '```', '', parameter ?? ''].join('\n'));
             return { dom };
           },
         }),

@@ -286,7 +286,7 @@ export const openShellProjectionMount = (
         interrupt(request.id);
         return;
       }
-      trace('inbound id=', request.id, 'op=', request.operation, 'inode=', 'inode' in request ? request.inode : '-');
+      trace('inbound id=', request.id, 'op=', request.operation, 'inode=', 'inode' in request ? request.inode : '-', 'offset=', 'offset' in request ? request.offset : '-', 'length=', 'length' in request ? request.length : '-');
       const operations = request.operation === 'lifetime' ? lifetime(request) : [settle(request)];
       for (const operation of operations) {
         track(operation);

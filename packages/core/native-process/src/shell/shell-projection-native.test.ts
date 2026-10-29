@@ -993,22 +993,29 @@ await held.close(); await mount[Symbol.asyncDispose](); process.stdout.write('cl
         const child = python(
           `
 import os, signal, sys, traceback
+log = open(sys.argv[2], "w", buffering=1)
+def say(message): log.write(message + "\n"); log.flush()
 class Stop(Exception): pass
-def stop(*_): raise Stop()
+def stop(*_): say("signal handler ran"); raise Stop()
 signal.signal(signal.SIGUSR1, stop)
+say("start")
 fd = os.open(sys.argv[1], os.O_RDONLY)
 print("ready", flush=True)
+say("opened fd")
 try:
-    os.pread(fd, 1, 0)
+    data = os.pread(fd, 1, 0)
+    say("pread returned " + repr(data))
     print("read", flush=True)
 except Stop:
+    say("Stop caught")
     print("interrupted", flush=True)
 except BaseException as error:
-    print("OTHER " + type(error).__name__ + " " + repr(error), flush=True)
-    traceback.print_exc()
-print("after", flush=True)
+    say("OTHER " + type(error).__name__ + " " + repr(error))
+    traceback.print_exc(file=log)
+say("end of script")
 `,
           join(mountpoint, 'blocked'),
+          '/tmp/g4-child.log',
         );
         const next0 = lines(child);
         const next = async (): Promise<string> => {

@@ -52,6 +52,21 @@ public sealed class EditingTests
     }
 
     [Fact]
+    public async Task CompletingAnUnimportedTypeResolvesItsUsingDirective()
+    {
+        const string text = "var v = Vector3\n";
+        using var harness = await StartAsync();
+        await harness.OpenAsync("main.cs", text);
+        var items = await CompletionsAsync(harness, "main.cs", At(text, "Vector3", 7));
+        var vector = items.First(item => item.GetProperty("label").GetString() == "Vector3" &&
+            item.TryGetProperty("detail", out var detail) && detail.GetString() == "System.Numerics");
+        var resolved = await harness.RequestAsync("completionItem/resolve", JsonNode.Parse(vector.GetRawText())!);
+        var edits = resolved.GetProperty("additionalTextEdits");
+        Assert.Equal("using System.Numerics;\n\nvar v = Vector3\n", ApplyEdits(text, edits));
+        Assert.Equal("Vector3", resolved.GetProperty("textEdit").GetProperty("newText").GetString());
+    }
+
+    [Fact]
     public async Task StaleCompletionResolveReturnsTheItemUnchanged()
     {
         const string text = "var root = Math.\n";

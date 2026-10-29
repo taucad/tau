@@ -292,7 +292,7 @@ const picogkKernelDefinition = defineKernel({
           ),
         ];
         try {
-          glb = picogkArtifactToGlb(artifact, result, (mechanismIssues) => issues.push(...mechanismIssues));
+          glb = await picogkArtifactToGlb(artifact, result, (mechanismIssues) => issues.push(...mechanismIssues));
         } finally {
           transformSpan.end();
         }

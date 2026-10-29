@@ -71,7 +71,11 @@ internal sealed record DocumentDiagnosticReport(string Kind, IReadOnlyList<Diagn
 
 internal sealed record MarkupContent(string Kind, string Value);
 
-internal sealed record Hover(MarkupContent Contents, Range? Range);
+/// <summary>
+/// An LSP hover. <c>DefinitionTargets</c> is a Tau extension: the locations that the markdown's
+/// <c>#tau-definition-N</c> links open, indexed by N.
+/// </summary>
+internal sealed record Hover(MarkupContent Contents, Range? Range, IReadOnlyList<Location>? DefinitionTargets = null);
 
 internal sealed record TextEdit(Range Range, string NewText);
 

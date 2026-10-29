@@ -167,12 +167,20 @@ public sealed partial class CSharpLanguageServer
         {
             return null;
         }
+        var targets = new List<Location>();
+        var summary = await SymbolAtAsync(document, offset, cancellationToken).ConfigureAwait(false) is { } symbol &&
+            await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false) is { } model
+            ? await LinkedSummaryAsync(symbol, model.Compilation, targets, cancellationToken).ConfigureAwait(false)
+            : null;
         var markdown = new StringBuilder();
         foreach (var section in info.Sections)
         {
-            var body = section.Kind == QuickInfoSectionKinds.Description
-                ? $"```csharp\n{section.Text}\n```"
-                : Markdown(section.TaggedParts);
+            var body = section.Kind switch
+            {
+                QuickInfoSectionKinds.Description => $"```csharp\n{section.Text}\n```",
+                QuickInfoSectionKinds.DocumentationComments when summary is not null => summary,
+                _ => Markdown(section.TaggedParts),
+            };
             if (string.IsNullOrWhiteSpace(body))
             {
                 continue;
@@ -183,7 +191,40 @@ public sealed partial class CSharpLanguageServer
             }
             markdown.Append(body);
         }
-        return new Hover(new MarkupContent("markdown", markdown.ToString()), Positions.ToRange(text, info.Span));
+        return new Hover(
+            new MarkupContent("markdown", markdown.ToString()),
+            Positions.ToRange(text, info.Span),
+            targets.Count == 0 ? null : targets);
+    }
+
+    /// <summary>
+    /// The symbol's summary with each <c>see cref</c> that resolves to a definition rendered as a link, as VS Code
+    /// renders C# documentation. Each link's index addresses <paramref name="targets"/>.
+    /// </summary>
+    private async Task<string?> LinkedSummaryAsync(
+        ISymbol symbol,
+        Compilation compilation,
+        List<Location> targets,
+        CancellationToken cancellationToken)
+    {
+        if (DocumentationComments.Element(symbol, "summary") is not { } summary)
+        {
+            return null;
+        }
+        var links = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var cref in DocumentationComments.Crefs(summary))
+        {
+            if (links.ContainsKey(cref) ||
+                DocumentationCommentId.GetFirstSymbolForDeclarationId(cref, compilation) is not { } target ||
+                await LocationsOfAsync(target, cancellationToken).ConfigureAwait(false) is not [var location, ..])
+            {
+                continue;
+            }
+            links[cref] = targets.Count;
+            targets.Add(location);
+        }
+        var text = DocumentationComments.Flatten(summary, cref => links.TryGetValue(cref, out var index) ? index : null);
+        return string.IsNullOrWhiteSpace(text) ? null : text;
     }
 
     /// <summary>Render tagged text as Markdown, fencing nothing: hover descriptions are fenced by the caller.</summary>

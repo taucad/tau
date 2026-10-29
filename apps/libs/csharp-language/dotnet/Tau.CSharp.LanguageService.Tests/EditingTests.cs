@@ -85,6 +85,47 @@ public sealed class EditingTests
     }
 
     [Fact]
+    public async Task HoverLinksDocumentationReferencesToTheirDefinitions()
+    {
+        const string wrapper = """
+            using System.Collections.Generic;
+            using PicoGK;
+
+            /// <summary>
+            /// Wraps <see cref="ShapeFactory.Create(float)"/> into a <see cref="Voxels"/> list
+            /// (<see cref="List{T}"/>); <see cref="ShapeFactory.Create(float)"/> again, <see cref="Missing"/> and <see langword="null"/>.
+            /// </summary>
+            public static class Wrapper
+            {
+                public static List<Voxels> Make() => [ShapeFactory.Create(1f)];
+            }
+            """;
+        const string main = "var shapes = Wrapper.Make();\n";
+        using var harness = await StartAsync(new Dictionary<string, string>
+        {
+            ["ShapeFactory.cs"] = Sources.ShapeFactory,
+            ["Wrapper.cs"] = wrapper,
+        });
+        await harness.OpenAsync("main.cs", main);
+        var hover = await harness.RequestAsync("textDocument/hover", DocumentPosition("main.cs", At(main, "Wrapper", 2)));
+        var markdown = hover.GetProperty("contents").GetProperty("value").GetString()!;
+        Assert.Contains(
+            "Wraps [`ShapeFactory.Create`](#tau-definition-0) into a [`Voxels`](#tau-definition-1) list ([`List`](#tau-definition-2)); [`ShapeFactory.Create`](#tau-definition-0) again, `Missing` and `null`.",
+            markdown,
+            StringComparison.Ordinal);
+        var targets = hover.GetProperty("definitionTargets").EnumerateArray()
+            .Select(target => (target.GetProperty("uri").GetString(), target.GetProperty("range").GetProperty("start").GetProperty("line").GetInt32()))
+            .ToArray();
+        Assert.Equal(3, targets.Length);
+        Assert.Equal((Uri("ShapeFactory.cs"), 8), targets[0]);
+        Assert.Equal("file:///__csharp_metadata__/PicoGK/PicoGK.Voxels.cs", targets[1].Item1);
+        Assert.Equal("file:///__csharp_metadata__/System.Collections/System.Collections.Generic.List%601.cs", targets[2].Item1);
+        // Symbols whose documentation references nothing keep a plain hover.
+        var plain = await harness.RequestAsync("textDocument/hover", DocumentPosition("main.cs", At(main, "Make", 1)));
+        Assert.False(plain.TryGetProperty("definitionTargets", out _));
+    }
+
+    [Fact]
     public async Task SignatureHelpTracksTheActiveParameterAndOverloads()
     {
         const string text = "using System.Numerics;\nusing PicoGK;\nvar a = Voxels.voxSphere(Vector3.Zero, 2f);\nvar b = Math.Max(1, 2);\nvar c = new Vector3(1, 2, 3);\nvar d = ShapeFactory.Create(1f);\n";

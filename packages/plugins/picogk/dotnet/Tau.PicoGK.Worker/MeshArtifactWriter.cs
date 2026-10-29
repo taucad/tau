@@ -63,7 +63,7 @@ internal sealed record WorkerTimings(
 internal sealed record WorkerMetrics(
     long ManagedHeapBytes,
     long PicoGkNativeBytes,
-    long ProcessWorkingSetBytes);
+    long? ProcessWorkingSetBytes);
 internal sealed record WorkerDiagnostics(WorkerTimings Timings, WorkerMetrics Metrics);
 
 internal static class MeshArtifactWriter

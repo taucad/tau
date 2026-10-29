@@ -57,7 +57,8 @@ export const picogkWorkerTimingsSchema = z.object({
 export const picogkWorkerMetricsSchema = z.object({
   managedHeapBytes: z.number().int().nonnegative(),
   picoGkNativeBytes: z.number().int().nonnegative(),
-  processWorkingSetBytes: z.number().int().nonnegative(),
+  // Browser workers have no process resident-memory measurement.
+  processWorkingSetBytes: z.number().int().nonnegative().nullable(),
 });
 
 /** The C# files one entry compiles with: its own program and every helper, as project paths. */

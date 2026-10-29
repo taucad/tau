@@ -22,7 +22,8 @@ import {
   picogkPreviewAdaptivity,
   picogkRenderSchema,
 } from '#picogk.schemas.js';
-import { PicogkSession, PicogkWorkerError } from '#picogk-session.js';
+import { PicogkSession } from '#picogk-session.js';
+import { PicogkWorkerError } from '#picogk-worker-error.js';
 import { picogkNative } from '#native.js';
 import { libraryVersionMismatches } from '#project-manifest.js';
 
@@ -303,7 +304,12 @@ const picogkKernelDefinition = defineKernel({
           }
           computeJob = undefined;
         }
-        span.end({ ...result.timings, ...result.metrics });
+        const { processWorkingSetBytes, ...metrics } = result.metrics;
+        span.end({
+          ...result.timings,
+          ...metrics,
+          ...(processWorkingSetBytes === null ? {} : { processWorkingSetBytes }),
+        });
         const handle: PicogkNativeHandle = { glb, tessellation: picogkTessellation(result) };
         return {
           handle,

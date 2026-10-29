@@ -1,0 +1,282 @@
+import { z } from 'zod';
+
+import { picogkProtocolVersion, picogkReadySchema, picogkResponseSchema } from '#picogk.protocol.js';
+import { PicogkWorkerError } from '#picogk-worker-error.js';
+
+/** One immutable, authorized project projection. @internal */
+export type PicogkBrowserSnapshot = {
+  readonly revision: string;
+  readonly files: ReadonlyArray<{ readonly path: string; readonly contents: Uint8Array<ArrayBuffer> }>;
+};
+
+/** Prepared runtime and compiler references selected by the host. @internal */
+export type PicogkBrowserAssets = {
+  readonly bootstrapUrl: string;
+  readonly compilerIdentity: string;
+  readonly references: ReadonlyArray<{ readonly path: string; readonly url: string; readonly sha256: string }>;
+};
+
+/** Browser worker ownership and bounded startup/request waits. @internal */
+export type PicogkBrowserSessionOptions = {
+  readonly createWorker: () => Worker;
+  readonly assets: PicogkBrowserAssets;
+  /** Milliseconds. */
+  readonly startupTimeout: number;
+  /** Milliseconds. Zero waits for completion or an explicit abort. */
+  readonly requestTimeout: number;
+};
+
+/** A typed operation against one source snapshot. @internal */
+export type PicogkBrowserRequest<Result> = {
+  readonly snapshot: PicogkBrowserSnapshot;
+  readonly method: string;
+  readonly params: Record<string, unknown>;
+  readonly schema: z.ZodType<Result>;
+  readonly signal: AbortSignal;
+};
+
+const envelopeSchema = z.object({
+  generation: z.number().int().positive(),
+  kind: z.enum(['ready', 'response', 'failed']),
+  frame: z.unknown().optional(),
+  message: z.string().optional(),
+});
+
+type Pending = {
+  readonly requestId?: string;
+  readonly resolve: (value: unknown) => void;
+  readonly reject: (error: Error) => void;
+};
+
+/** Owns a serialized source-revision worker; aborts destroy its managed heap. @internal */
+export class PicogkBrowserSession {
+  private worker: Worker | undefined;
+  private snapshot: PicogkBrowserSnapshot | undefined;
+  private generation = 0;
+  private requestOrdinal = 0;
+  private pending: Pending | undefined;
+  private tail: Promise<void> = Promise.resolve();
+  private disposed = false;
+
+  // oxlint-disable-next-line typescript/parameter-properties -- The browser build requires erasable TypeScript syntax.
+  private readonly options: PicogkBrowserSessionOptions;
+  private listenerController: AbortController | undefined;
+
+  public constructor(options: PicogkBrowserSessionOptions) {
+    this.options = options;
+    if (
+      !Number.isFinite(options.startupTimeout) ||
+      options.startupTimeout <= 0 ||
+      !Number.isFinite(options.requestTimeout) ||
+      options.requestTimeout < 0
+    ) {
+      throw new Error('Invalid PicoGK browser worker timeouts.');
+    }
+  }
+
+  /**
+   * Submit an operation; a new source immediately invalidates older queued and active work.
+   * @param request - Operation and authorized source snapshot.
+   * @returns The validated worker result.
+   */
+  public async request<Result>(request: PicogkBrowserRequest<Result>): Promise<Result> {
+    if (this.disposed) {
+      throw new Error('The PicoGK browser session is closed.');
+    }
+    request.signal.throwIfAborted();
+    if (this.snapshot?.revision !== request.snapshot.revision) {
+      this.stop(new DOMException('The C# source was replaced.', 'AbortError'));
+      this.generation++;
+      this.snapshot = {
+        revision: request.snapshot.revision,
+        files: request.snapshot.files.map(({ path, contents }) => ({ path, contents: new Uint8Array(contents) })),
+      };
+    }
+    const { generation } = this;
+    const assertCurrent = (): void => {
+      request.signal.throwIfAborted();
+      if (this.disposed || generation !== this.generation) {
+        throw new DOMException('The C# request was superseded.', 'AbortError');
+      }
+    };
+    const execute = async (): Promise<Result> => {
+      assertCurrent();
+      await this.ensureWorker(request.signal);
+      assertCurrent();
+      const requestId = String(++this.requestOrdinal);
+      const response = picogkResponseSchema.parse(
+        await this.exchange({
+          signal: request.signal,
+          exchangeTimeout: this.options.requestTimeout,
+          requestId,
+          send: () => {
+            this.worker!.postMessage({
+              kind: 'request',
+              generation,
+              frame: {
+                protocolVersion: picogkProtocolVersion,
+                requestId,
+                method: request.method,
+                params: request.params,
+              },
+            });
+          },
+        }),
+      );
+      assertCurrent();
+      if ((response.result === undefined) === (response.error === undefined)) {
+        const error = new Error('The PicoGK browser response must contain exactly one result or error.');
+        this.stop(error);
+        throw error;
+      }
+      if (response.error) {
+        throw new PicogkWorkerError(response.error.issues);
+      }
+      return request.schema.parse(response.result);
+    };
+    const previous = this.tail;
+    const result = (async () => {
+      await previous;
+      return execute();
+    })();
+    this.tail = (async () => {
+      try {
+        await result;
+      } catch {
+        /* The caller owns the failure; keep the serial queue usable. */
+      }
+    })();
+    return result;
+  }
+
+  /** Terminate active work and release worker callbacks; queued requests remain rejected. */
+  public cleanup(): void {
+    this.disposed = true;
+    this.stop(new DOMException('The PicoGK browser session was closed.', 'AbortError'));
+    this.snapshot = undefined;
+  }
+
+  private async ensureWorker(signal: AbortSignal): Promise<void> {
+    if (this.worker) {
+      return;
+    }
+    const worker = this.options.createWorker();
+    this.worker = worker;
+    const listeners = new AbortController();
+    this.listenerController = listeners;
+    worker.addEventListener(
+      'message',
+      (event: MessageEvent<unknown>): void => {
+        if (this.worker !== worker) {
+          return;
+        }
+        try {
+          const envelope = envelopeSchema.parse(event.data);
+          if (envelope.generation !== this.generation) {
+            return;
+          }
+          if (envelope.kind === 'failed') {
+            throw new Error(envelope.message ?? 'The PicoGK browser worker failed.');
+          }
+          const frame =
+            envelope.kind === 'ready'
+              ? picogkReadySchema.parse(envelope.frame)
+              : picogkResponseSchema.parse(envelope.frame);
+          const requestId = 'requestId' in frame ? frame.requestId : undefined;
+          if (requestId !== this.pending?.requestId) {
+            return;
+          }
+          this.pending?.resolve(frame);
+        } catch (error) {
+          this.stop(new Error('Invalid PicoGK browser worker message.', { cause: error }));
+        }
+      },
+      { signal: listeners.signal },
+    );
+    worker.addEventListener(
+      'error',
+      (event): void => {
+        if (this.worker === worker) {
+          this.stop(new Error(event.message || 'The PicoGK browser worker crashed.'));
+        }
+      },
+      { signal: listeners.signal },
+    );
+    worker.addEventListener(
+      'messageerror',
+      (): void => {
+        if (this.worker === worker) {
+          this.stop(new Error('The PicoGK browser worker sent an unreadable message.'));
+        }
+      },
+      { signal: listeners.signal },
+    );
+    await this.exchange({
+      signal,
+      exchangeTimeout: this.options.startupTimeout,
+      send: () => {
+        const snapshot = {
+          ...this.snapshot!,
+          files: this.snapshot!.files.map(({ path, contents }) => ({ path, contents: new Uint8Array(contents) })),
+        };
+        worker.postMessage(
+          {
+            kind: 'initialize',
+            generation: this.generation,
+            snapshot,
+            assets: this.options.assets,
+          },
+          snapshot.files.map(({ contents }) => contents.buffer),
+        );
+      },
+    });
+  }
+
+  private async exchange(options: {
+    readonly signal: AbortSignal;
+    /** Milliseconds. */
+    readonly exchangeTimeout: number;
+    readonly requestId?: string;
+    readonly send: () => void;
+  }): Promise<unknown> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const abort = (): void => {
+      this.stop(new DOMException('The PicoGK browser request was aborted.', 'AbortError'));
+    };
+    try {
+      return await new Promise<unknown>((resolve, reject) => {
+        this.pending = { requestId: options.requestId, resolve, reject };
+        options.signal.addEventListener('abort', abort, { once: true });
+        if (options.signal.aborted) {
+          abort();
+          return;
+        }
+        if (options.exchangeTimeout > 0) {
+          timer = setTimeout(() => {
+            this.stop(new Error('The PicoGK browser request timed out.'));
+          }, options.exchangeTimeout);
+        }
+        try {
+          options.send();
+        } catch (error) {
+          this.stop(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
+    } finally {
+      clearTimeout(timer);
+      options.signal.removeEventListener('abort', abort);
+      this.pending = undefined;
+    }
+  }
+
+  private stop(error: Error): void {
+    const { worker } = this;
+    this.worker = undefined;
+    if (worker) {
+      this.listenerController?.abort();
+      this.listenerController = undefined;
+      worker.terminate();
+    }
+    this.pending?.reject(error);
+  }
+}

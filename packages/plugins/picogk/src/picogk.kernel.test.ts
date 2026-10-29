@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { picogkKernel } from '#picogk.kernel.js';
 import { picogkExportSchemas, picogkOptionsSchema, picogkRenderSchema } from '#picogk.schemas.js';
-import { PicogkWorkerError } from '#picogk-session.js';
+import { PicogkWorkerError } from '#picogk-worker-error.js';
 import type { PicogkSession } from '#picogk-session.js';
 
 const runtime = createMockKernelRuntime();
@@ -279,6 +279,18 @@ describe('PicoGK kernel', () => {
     // The mirror reuses its own walk per operation id.
     expect(value.mirror.sync.mock.calls.map((call): unknown => call[2])).toEqual([1, 1, 1]);
     expect(requestedMethods(value.session.request)).toEqual(['resolve', 'analyze', 'build']);
+  });
+
+  it('should omit unavailable process memory from trace attributes', async () => {
+    const value = context();
+    const result = buildResult();
+    value.session.request.mockResolvedValueOnce({
+      ...result,
+      metrics: { ...result.metrics, processWorkingSetBytes: null },
+    });
+    await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: uniform }, runtime, value);
+    expect(endedSpanAttributes('picogk.build')).toMatchObject({ managedHeapBytes: 10, picoGkNativeBytes: 0 });
+    expect(endedSpanAttributes('picogk.build')).not.toHaveProperty('processWorkingSetBytes');
   });
 
   it('preserves worker warnings and shared mechanism warnings alongside valid geometry', async () => {

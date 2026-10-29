@@ -3,7 +3,7 @@ import type { LoaderFunctionArgs, MetaFunction } from 'react-router';
 import { data, isRouteErrorResponse, useLoaderData, useRouteError } from 'react-router';
 import { useSession } from '@better-auth-ui/react';
 import { authClient } from '#lib/auth-client.js';
-import { ENV, getEnvironment } from '#environment.config.js';
+import { getEnvironment } from '#environment.config.js';
 import { cacheTag, cdnBackedSsrRouteHeaders } from '#lib/react-router.lib.js';
 import { SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { Loader } from '@taucad/ui/components/loader';
@@ -12,7 +12,6 @@ import { PublicationLockScreen, parsePublicationLockPayload } from '#components/
 import type { PublicationLockReason, PublicationLockScreenVariant } from '#components/share/publication-lock-screen.js';
 import { parsePublicationRecord, publicationFileFetchInit } from '#components/share/parsed-publication.js';
 import type { ParsedPublication } from '#components/share/parsed-publication.js';
-import { useViewPing } from '#components/share/use-view-ping.js';
 import { ClientOnly } from '@taucad/ui/components/client-only';
 
 const SharedProjectWorkbench = lazy(async () => {
@@ -151,21 +150,6 @@ export const publicationMeta: MetaFunction<typeof loadPublication> = ({ loaderDa
   return tags;
 };
 
-const PublicationViewPingMount = ({ publicationId }: { readonly publicationId: string }): React.ReactNode => {
-  return <PublicationViewPingInner publicationId={publicationId} apiBase={ENV.TAU_API_URL} />;
-};
-
-const PublicationViewPingInner = ({
-  publicationId,
-  apiBase,
-}: {
-  readonly publicationId: string;
-  readonly apiBase: string;
-}): React.ReactNode => {
-  useViewPing({ publicationId, apiBaseUrl: apiBase });
-  return null;
-};
-
 export const PublicationInteractiveSurface = ({
   data,
   publication,
@@ -245,34 +229,32 @@ export const PublicationInteractiveSurface = ({
   }
 
   return (
-    <>
-      {shouldTrackView ? <PublicationViewPingMount publicationId={publication.id} /> : null}
-      <ClientOnly
+    <ClientOnly
+      fallback={
+        <div className='flex h-dvh items-center justify-center bg-background'>
+          <Loader className='size-8' />
+        </div>
+      }
+    >
+      <Suspense
         fallback={
           <div className='flex h-dvh items-center justify-center bg-background'>
             <Loader className='size-8' />
           </div>
         }
       >
-        <Suspense
-          fallback={
-            <div className='flex h-dvh items-center justify-center bg-background'>
-              <Loader className='size-8' />
-            </div>
-          }
-        >
-          <SharedProjectWorkbench
-            projectId={data.manifest.projectId}
-            publication={publication}
-            hydratedFiles={filesRecord}
-            archive={archive}
-            shareUrl={shareUrl}
-            sourceLabel={sourceLabel}
-            managementActions={managementActions}
-          />
-        </Suspense>
-      </ClientOnly>
-    </>
+        <SharedProjectWorkbench
+          shouldTrackView={shouldTrackView}
+          projectId={data.manifest.projectId}
+          publication={publication}
+          hydratedFiles={filesRecord}
+          archive={archive}
+          shareUrl={shareUrl}
+          sourceLabel={sourceLabel}
+          managementActions={managementActions}
+        />
+      </Suspense>
+    </ClientOnly>
   );
 };
 

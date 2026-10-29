@@ -3,27 +3,6 @@ import { act } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useViewPing } from '#components/share/use-view-ping.js';
 
-const cadPreviewMocks = vi.hoisted(() => {
-  const parameters: Record<string, unknown> = {};
-  // oxlint-disable-next-line typescript-eslint/no-restricted-types -- empty object placeholder for mock cadRef
-  const cadRef: object = {};
-  return { parameters, cadRef };
-});
-
-vi.mock('#hooks/use-cad-preview.js', () => ({
-  useCadPreview: () => ({
-    cadRef: cadPreviewMocks.cadRef,
-    defaultParameters: {},
-  }),
-}));
-
-vi.mock('@xstate/react', () => ({
-  useSelector: vi.fn(
-    (_actorRef: unknown, selector: (s: { context: { parameters: Record<string, unknown> } }) => unknown) =>
-      selector({ context: { parameters: cadPreviewMocks.parameters } }),
-  ),
-}));
-
 const fetchMock = vi.fn();
 
 beforeEach(() => {
@@ -31,7 +10,6 @@ beforeEach(() => {
   fetchMock.mockReset();
   fetchMock.mockResolvedValue({ ok: true });
   globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
-  cadPreviewMocks.parameters = {};
 });
 
 afterEach(() => {
@@ -87,5 +65,24 @@ describe('useViewPing', () => {
     expect(url).toBe('https://api.example/v1/publications/pub_x/views');
     expect(init?.method).toBe('PATCH');
     expect(init?.credentials).toBe('include');
+  });
+  it('counts a parameter change after initial resolution as an interaction', async () => {
+    const initial = { radius: 4 };
+    const { rerender } = renderHook(
+      ({ parameters }: { parameters: Record<string, unknown> | undefined }) => {
+        useViewPing({ publicationId: 'pub_x', apiBaseUrl: 'https://api.example', parameters });
+      },
+      { initialProps: { parameters: undefined as Record<string, unknown> | undefined } },
+    );
+    rerender({ parameters: initial });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(11_000);
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    rerender({ parameters: { radius: 5 } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

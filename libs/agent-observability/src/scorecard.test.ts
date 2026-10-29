@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Evidence } from '#contract.js';
 import type { ProjectedRun, ProjectionContext } from '#projection.js';
 import { projectRun } from '#projection.js';
+import type { FeedbackGrants } from '#scorecard.js';
 import { phaseDurations, reconcileEvidence, scoreCohort, scorecard } from '#scorecard.js';
 
 const at = Date.parse('2026-10-29T00:00:00.000Z');
@@ -250,6 +251,36 @@ describe('scorecard', () => {
     expect(forward).toMatchObject({ settlements: 3, adjustments: 0, supplierCostUnknown: 1 });
     expect(forward.credits).toBeCloseTo(1);
     expect(forward.supplierCost).toBeCloseTo(0.04);
+  });
+
+  it('reads a rate only against runs whose account allowed feedback when they ran', async () => {
+    const early = run({ runId: 'run-0', tools: [], intervals: [], ending: { source: row(2), at: at + 2000 } });
+    const evidence = [
+      ...(await project(early)),
+      ...(await project(run({ rating: { value: 'negative', at: at + 9000 } }), { plane: 'feedback' })),
+      ...(await project(run())),
+      ...(await project(run({ runId: 'run-2', ending: { source: row(20), at: at + 20_000 } }))),
+      ...(await project(run({ runId: 'run-3', ending: { source: row(30), at: at + 30_000 } }), {
+        principal: 'user-b',
+      })),
+    ];
+    /* The first account granted feedback after run-0 ended; the second never did. */
+    const grants: FeedbackGrants = (account, time) =>
+      account === 'user-a' && time >= at + 5000 ? 'granted' : 'withheld';
+
+    const card = scorecard(evidence, grants);
+    const unanswered = scorecard(evidence);
+
+    expect(card.runs.map((score) => [score.run, score.rating, score.feedback])).toEqual([
+      ['run-0', 'none', 'withheld'],
+      ['run-1', 'negative', 'granted'],
+      ['run-2', 'none', 'granted'],
+      ['run-3', 'none', 'withheld'],
+    ]);
+    expect(card.overall.feedback).toEqual({ withheld: 2, granted: 2 });
+    expect(card.overall.granted).toEqual({ runs: 2, rating: { negative: 1, none: 1 }, judgement: { none: 2 } });
+    expect(unanswered.overall.feedback).toEqual({ unknown: 4 });
+    expect(unanswered.overall.granted).toEqual({ runs: 0, rating: {}, judgement: {} });
   });
 
   it('gives each run the attempts and settlements that name it, and leaves the rest joined to no run', async () => {

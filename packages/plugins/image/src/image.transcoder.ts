@@ -146,7 +146,8 @@ export const imageTranscoder = defineTranscoder({
   // 12.0.0 = scale-independent ambient occlusion normals.
   // 13.0.0 = nanoraster 0.7: sections are never refused; open cut outlines are drawn in red.
   // 13.0.1 = nanoraster 0.7.1: hidden edges ending on a face boundary no longer show past it.
-  version: '13.0.1',
+  // 14.0.0 = AO-enabled images and the qualified Nanoraster export profile.
+  version: '14.0.0',
   edges,
 
   async initialize() {

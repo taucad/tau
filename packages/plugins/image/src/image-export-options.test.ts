@@ -36,6 +36,7 @@ describe('imageEdgeSchemas', () => {
         lines: true,
         axes: false,
         scaleBar: false,
+        ao: { intensity: 3, distanceFalloff: 0.2 },
         lighting: {
           lights: [
             { direction: [1, 1, 1], color: [2.5, 2.5, 2.5] },
@@ -293,9 +294,10 @@ describe('imageEdgeSchemas', () => {
       expect(imageEdgeSchemas.png.safeParse({ lighting: { lights: [], exposure: 17 } }).success).toBe(false);
     });
 
-    it('should accept and bound ambient occlusion without changing the default', () => {
-      expect(imageEdgeSchemas.webp.parse({}).ao).toBeUndefined();
-      expect(imageEdgeSchemas.webp.parse({ ao: {} }).ao).toEqual({});
+    it('should enable the pinned AO profile and preserve runtime controls', () => {
+      expect(imageEdgeSchemas.webp.parse({}).ao).toEqual({ intensity: 3, distanceFalloff: 0.2 });
+      expect(imageEdgeSchemas.webp.parse({ ao: {} }).ao).toEqual({ intensity: 3, distanceFalloff: 0.2 });
+      expect(imageEdgeSchemas.webp.parse({ ao: { intensity: 0 } }).ao).toEqual({ intensity: 0, distanceFalloff: 0.2 });
       const ao = { radiusPixels: 12, intensity: 2, distanceFalloff: 0.25 };
       expect(imageEdgeSchemas.webp.parse({ ao }).ao).toEqual(ao);
       expect(imageEdgeSchemas.webp.safeParse({ ao: { radiusPixels: 0 } }).success).toBe(false);

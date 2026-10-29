@@ -1020,7 +1020,10 @@ const settlePage = async (options: {
         let stableBottomSamples = 0;
         let growths = 0;
         for (let step = 0; ; step += 1) {
-          const height = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+          // Body layout can extend outside the root's scrollable range (for
+          // example mdBook's negative top margin). Only the scrolling element
+          // defines the bottom window.scrollTo can actually reach.
+          const height = (document.scrollingElement ?? document.documentElement).scrollHeight;
           if (previousHeight !== 0 && height > previousHeight) {
             growths += 1;
             if (growths > maximumGrowths) {

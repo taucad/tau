@@ -70,6 +70,7 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
         default: {
           wasm: config.memoryConstrained ? 'single' : 'auto',
           assets: picogkBrowserAssets(),
+          recycleHeapBytes: runtimeRecycleHeapBytes(config.memoryConstrained),
         },
       },
     }),

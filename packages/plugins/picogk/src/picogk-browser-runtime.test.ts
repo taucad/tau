@@ -63,6 +63,48 @@ describe('PicoGK browser runtime integrity', () => {
     );
   });
 
+  it('should hand every worker destination the already-verified blob and refuse any other script', async () => {
+    setup();
+    const blobs: Blob[] = [];
+    vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+      if (!(blob instanceof Blob)) {
+        throw new Error('Expected module blob');
+      }
+      blobs.push(blob);
+      return `blob:verified-${blobs.length}`;
+    });
+    await preparePicogkBrowserRuntime({ bootstrapUrl, files: [bootstrap, binary] });
+    // The guard is injected code, so proving it means running it: a worker destination is the one
+    // place the runtime would otherwise fetch the bootstrap again, unverified.
+    const spawned: { script: unknown; type: unknown }[] = [];
+    vi.stubGlobal(
+      'Worker',
+      class {
+        constructor(script: unknown, options?: { type?: string }) {
+          spawned.push({ script, type: options?.type });
+        }
+      },
+    );
+    const evaluated = `data:text/javascript;base64,${Buffer.from(await blobs[0]!.text()).toString('base64')}`;
+    await import(/* @vite-ignore */ evaluated);
+    const Guarded = globalThis.Worker;
+    new Guarded(bootstrapUrl, { type: 'module' });
+    new Guarded('./dotnet.js', { type: 'module' });
+    new Guarded(evaluated, { type: 'module' });
+    expect(spawned).toEqual([
+      { script: evaluated, type: 'module' },
+      { script: evaluated, type: 'module' },
+      { script: evaluated, type: 'module' },
+    ]);
+    expect(() => new Guarded('https://example.test/_framework/other.js', { type: 'module' })).toThrow(
+      'Unlisted PicoGK runtime worker bootstrap.',
+    );
+    expect(() => new Guarded('https://elsewhere.test/dotnet.js', { type: 'module' })).toThrow(
+      'Unlisted PicoGK runtime worker bootstrap.',
+    );
+    expect(spawned).toHaveLength(3);
+  });
+
   it.each([
     { ...bootstrap, url: 'file:///dotnet.js' },
     { ...bootstrap, url: 'https://user:pass@example.test/dotnet.js' },

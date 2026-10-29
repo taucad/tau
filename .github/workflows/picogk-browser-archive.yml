@@ -78,6 +78,31 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build cmake
       - run: corepack enable && pnpm install --frozen-lockfile
+      - name: Acquire the managed dependency the package declares
+        # Staging copies the one managed dependency out of this machine's NuGet cache, at the
+        # version the package's own props name. The restore it does next writes into the staged
+        # tree rather than the cache, and nothing earlier in this job populates it, so acquire
+        # exactly that version first. The version is read from the packed props, so it cannot
+        # drift from what the receipt was built against.
+        run: |
+          mkdir -p out/dependency-stage
+          unzip -p out/package/feed/PicoVoxel.PicoGK.*.nupkg build/PicoVoxel.PicoGK.props \
+            > out/dependency-stage/package.props
+          version=$(sed -n 's:.*<PicoVoxelPicoGKSkiaSharp>\(.*\)</PicoVoxelPicoGKSkiaSharp>.*:\1:p' \
+            out/dependency-stage/package.props)
+          test -n "$version"
+          cat > out/dependency-stage/Dependency.csproj <<XML
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <TargetFramework>net11.0</TargetFramework>
+            </PropertyGroup>
+            <ItemGroup>
+              <PackageReference Include="SkiaSharp" Version="$version" />
+            </ItemGroup>
+          </Project>
+          XML
+          dotnet restore out/dependency-stage/Dependency.csproj
+          test -f "$HOME/.nuget/packages/skiasharp/$version/lib/net8.0/SkiaSharp.dll"
       - name: Stage the qualified package
         run: |
           cat > out/stage-config.json <<JSON

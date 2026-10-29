@@ -65,7 +65,11 @@ jobs:
       - name: Install the matched workload and native build tools
         run: |
           mkdir -p out/workload-install
-          cp packages/plugins/picogk/dotnet/global.json out/workload-install/global.json
+          # The archive's own toolchain pin, not the plugin's: `packages/plugins/picogk/dotnet`
+          # builds the shipped native kernel against the product's SDK, while the workload this
+          # job installs has to match the SDK the archives were built by, which is the pin each
+          # receipt is compared against.
+          cp out/picovoxel/dotnet/global.json out/workload-install/global.json
           cd out/workload-install
           dotnet workload install wasm-tools --version 11.0.100-rc.3.26524.4
           sudo apt-get update

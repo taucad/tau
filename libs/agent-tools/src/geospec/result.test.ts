@@ -530,6 +530,8 @@ describe('per-assertion results', () => {
         ordinal: 1,
         status: 'inconclusive',
         matcher: 'componentInterference',
+        capability: 'toHaveNoComponentInterference',
+        subject: 'load-1',
         code: 'GEOSPEC_ANALYSIS_LIMIT',
         message: refusal.message,
         limit: {
@@ -546,6 +548,82 @@ describe('per-assertion results', () => {
       },
     ]);
   });
+
+  it('should carry each measured claim duration, with its capability and subject, into the test rows', () => {
+    const report = claimReport({ claimId: 'volume', polarity: 'positive', seed: 7, status: 'passed' });
+    const output = project({
+      suite: ['gears'],
+      name: 'is dense enough',
+      status: 'passed',
+      assertions: [
+        {
+          kind: 'volume',
+          subject: null,
+          expected: {},
+          passed: true,
+          report: { ...report, claim: { claimId: 'volume', capability: 'toHaveVolume' } },
+          loadId: 'load-1',
+          durationMs: 141.119,
+        },
+        {
+          kind: 'watertight',
+          subject: null,
+          expected: {},
+          passed: true,
+          report: { ...report, claim: { claimId: 'watertight', capability: 'toBeWatertight' } },
+          loadId: 'load-1',
+          durationMs: 0,
+        },
+      ],
+      diagnostics: [],
+    });
+
+    expect(testModelOutputSchema.parse(output)).toStrictEqual(output);
+    expect(output.tests?.[0]?.assertions).toStrictEqual([
+      {
+        ordinal: 0,
+        status: 'passed',
+        matcher: 'volume',
+        capability: 'toHaveVolume',
+        subject: 'load-1',
+        durationMs: 141.119,
+      },
+      {
+        ordinal: 1,
+        status: 'passed',
+        matcher: 'watertight',
+        capability: 'toBeWatertight',
+        subject: 'load-1',
+        durationMs: 0,
+      },
+    ]);
+  });
+
+  it.each([undefined, Number.NaN, Number.POSITIVE_INFINITY, -1] as const)(
+    'should leave an unmeasured claim (%s) without a duration rather than reporting zero cost',
+    (durationMs) => {
+      const output = project({
+        suite: ['gears'],
+        name: 'is dense enough',
+        status: 'passed',
+        assertions: [
+          {
+            kind: 'volume',
+            subject: null,
+            expected: {},
+            passed: true,
+            ...(durationMs === undefined ? {} : { durationMs }),
+          },
+        ],
+        diagnostics: [],
+      });
+
+      expect(testModelOutputSchema.parse(output)).toStrictEqual(output);
+      const [assertion] = output.tests?.[0]?.assertions ?? [];
+      expect(assertion).toStrictEqual({ ordinal: 0, status: 'passed', matcher: 'volume' });
+      expect(assertion && 'durationMs' in assertion).toBe(false);
+    },
+  );
 
   it.each([
     ['failed', 'failed'],

@@ -353,6 +353,7 @@ describe('GitProxyController', () => {
                     download: {
                       href: 'https://127.0.0.1/signed/object?secret=yes',
                       header: { Authorization: 'signed', Host: 'metadata.internal', Cookie: 'secret=cookie' },
+                      expires_in: 3600,
                     },
                   },
                 },
@@ -390,6 +391,8 @@ describe('GitProxyController', () => {
       })
       .parse(JSON.parse(body)).objects[0]?.actions.download.header['x-tau-lfs-key'];
     expect(issued).toMatch(/^[\w-]{43}$/u);
+    /* The handle's own lifetime, not the longer upstream one, so the client refreshes before the handle lapses. */
+    expect(JSON.parse(body)).toMatchObject({ objects: [{ actions: { download: { expires_in: 300 } } }] });
 
     const storedKey = [...records.keys()][0];
     if (storedKey === undefined || issued === undefined) {

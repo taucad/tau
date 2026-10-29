@@ -22,15 +22,29 @@ For managed source, apply `PicoGK.hosted.patch`, then PicoVoxel's
 registry the browser boundary consults before falling back to a per-voxel
 callback; it is reached only from `PICOGK_BROWSER` branches and needs the
 archive's ordinary `Voxels_IntersectImplicitTape` and `Voxels_RenderImplicitTape`
-exports. Build PicoVoxel's `dotnet/generator/PicoVoxel.Sdf.Generator` and pass the
-resulting assembly as `TauPicoGKGeneratorPath`: the browser host resolves no
-analyzer assemblies from disk, so `CompilationService` drives that one generator
-explicitly. Apply the build-time `stl-normal-canonicalization.patch`
+exports. The host resolves no analyzer assemblies from disk, so
+`CompilationService` drives PicoVoxel's signed-distance generator explicitly.
+Apply the build-time `stl-normal-canonicalization.patch`
 to the parity library on both targets; it writes historical NaN normal bits after
 float storage without changing finite normals or vertices. Do not also apply the plain upstream
 `browser-callbacks.patch`: the hosted supplement routes through the existing
 checked operations. Define `PICOGK_BROWSER` only for the browser build. Desktop
 branches retain their original signatures and implementations.
+
+`scripts/stage-picogk-package.mts` assembles all of that from one restored
+package, so no step of it is done by hand. PicoVoxel packs the engine archives, the managed base and its patches, the
+generator, the adapted compiler and the pinned toolchain identity as
+`PicoVoxel.PicoGK`, for a local directory feed only. Staging restores it with
+every package source cleared, compares the restored payload to the package's
+manifest byte for byte, composes the managed base at the order above, stages the
+framework reference assemblies this install offers after verifying them against
+the package's recorded inventory, adds the one managed dependency the library
+carries (`skiasharp/<version>/lib/net8.0/SkiaSharp.dll`, the implementation
+assembly NuGet resolves for `net11.0`), makes the staged assets read-only, and
+writes the host preparation configuration. `prepare-browser-host.mts` then takes
+that package root rather than seven separately staged directories, and verifies
+the payload again before publishing, so a payload edited between staging and
+publishing is refused.
 
 The existing hosted viewer remains responsible for scene capture. Native viewer
 entry points are excluded from browser imports; attempting to construct a native

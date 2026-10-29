@@ -32,15 +32,43 @@ const configSchema = z.object({
   dotnet: absolute,
   nuget: absolute,
   hostRid: z.enum(['osx-arm64', 'osx-x64', 'linux-x64', 'linux-arm64']),
-  validatorRoot: absolute,
-  archiveRoot: absolute,
-  threadedArchiveRoot: absolute.optional(),
+  /** A restored, manifest-verified PicoVoxel.PicoGK payload, as `stage-picogk-package.mts` leaves it. */
+  packageRoot: absolute,
+  /** The managed base composed from that payload at Tau's patch order. */
   picoGkProject: absolute,
-  roslynRoot: absolute,
-  generatorPath: absolute,
-  retentionProps: absolute,
   referencesRoot: absolute,
   outputRoot: absolute,
+  /** Prepare the serial variant alone, for a step that does not need the threaded pair. */
+  serialOnly: z.boolean().optional(),
+});
+/**
+ * Everything the host used to receive as a separate staged directory now comes from one payload, so
+ * a mismatched engine, compiler or generator is no longer expressible in a configuration file.
+ */
+const packaged = (
+  config: z.output<typeof configSchema>,
+): {
+  validatorRoot: string;
+  archiveRoot: string;
+  threadedArchiveRoot: string | undefined;
+  roslynRoot: string;
+  generatorPath: string;
+  retentionProps: string;
+} => ({
+  validatorRoot: join(config.packageRoot, 'toolchain'),
+  archiveRoot: join(config.packageRoot, 'engine/serial'),
+  threadedArchiveRoot: config.serialOnly ? undefined : join(config.packageRoot, 'engine/threaded'),
+  roslynRoot: join(config.packageRoot, 'roslyn'),
+  generatorPath: join(config.packageRoot, 'generator/PicoVoxel.Sdf.Generator.dll'),
+  retentionProps: join(config.packageRoot, 'browser/AuthoringRetention.props'),
+});
+/** The payload fields this script consumes; the package's own driver owns the rest. */
+const packageManifestSchema = z.object({
+  schemaVersion: z.literal(1),
+  version: z.string(),
+  compiler: z.object({ patched: z.record(z.string(), z.string()) }),
+  generator: z.object({ sha256: z.string() }),
+  payload: z.record(z.string(), z.string()),
 });
 const sha256 = (bytes: BinaryLike): string => createHash('sha256').update(bytes).digest('hex');
 /**
@@ -83,9 +111,10 @@ type PreparationConfig = z.output<typeof configSchema>;
 const prepareVariant = async (
   config: PreparationConfig,
   execution: 'serial' | 'threaded',
-  archiveRoot: string,
+  inputs: ReturnType<typeof packaged> & { archiveRoot: string },
 ): Promise<z.output<typeof picogkBrowserManifestSchema>['single']> => {
   const prefix = execution === 'serial' ? '' : 'multi/';
+  const { archiveRoot } = inputs;
   const receiptBytes = await readFile(join(archiveRoot, 'inputs.json'));
   const receipt = z
     .object({
@@ -105,7 +134,7 @@ const prepareVariant = async (
     ['inputs.json', receipt.pinsSha256],
   ] as const;
   for (const [name, expected] of validatorFiles) {
-    if (sha256(await readFile(join(config.validatorRoot, name))) !== expected) {
+    if (sha256(await readFile(join(inputs.validatorRoot, name))) !== expected) {
       throw new Error(`Qualified toolchain validator input changed: ${name}.`);
     }
   }
@@ -116,7 +145,7 @@ const prepareVariant = async (
         output: z.unknown(),
       }),
     })
-    .parse(await import(pathToFileURL(join(config.validatorRoot, 'validate-inputs.mjs')).href));
+    .parse(await import(pathToFileURL(join(inputs.validatorRoot, 'validate-inputs.mjs')).href));
   const actual = validator.toolchainIdentity(config.dotnet, config.nuget, config.hostRid, execution);
   deepStrictEqual(actual, receipt.toolchain, 'The browser host toolchain differs from the archive toolchain.');
   const inputReceipt = sha256(receiptBytes);
@@ -148,10 +177,10 @@ const prepareVariant = async (
       artifacts,
       `-p:WasmEnableThreads=${execution === 'threaded'}`,
       `-p:PicoGKProject=${config.picoGkProject}`,
-      `-p:TauPicoGKRoslynRoot=${config.roslynRoot}`,
+      `-p:TauPicoGKRoslynRoot=${inputs.roslynRoot}`,
       `-p:TauPicoGKArchiveRoot=${join(archiveRoot, 'native')}`,
-      `-p:TauPicoGKGeneratorPath=${config.generatorPath}`,
-      `-p:TauPicoGKRetentionProps=${config.retentionProps}`,
+      `-p:TauPicoGKGeneratorPath=${inputs.generatorPath}`,
+      `-p:TauPicoGKRetentionProps=${inputs.retentionProps}`,
     ],
     { cwd: projectRoot, stdio: 'inherit', env: await emscriptenEnvironment(config.outputRoot) },
   );
@@ -253,16 +282,33 @@ const main = async (): Promise<void> => {
   if (!outputRelative || outputRelative.startsWith('..') || isAbsolute(outputRelative)) {
     throw new Error('Browser preparation output must be a child of this workspace out directory.');
   }
-  if (config.threadedArchiveRoot) {
+  const inputs = packaged(config);
+  // The payload was verified when it was staged; verify it again here, so a host prepared from a
+  // payload edited in between is refused rather than published.
+  const payload = packageManifestSchema.parse(await json(join(config.packageRoot, 'manifest.json')));
+  for (const [path, expected] of Object.entries(payload.payload)) {
+    if (sha256(await readFile(join(config.packageRoot, path))) !== expected) {
+      throw new Error(`The staged PicoGK payload changed since it was restored: ${path}.`);
+    }
+  }
+  if (sha256(await readFile(inputs.generatorPath)) !== payload.generator.sha256) {
+    throw new Error('The staged signed-distance generator is not the packaged generator.');
+  }
+  for (const [name, expected] of Object.entries(payload.compiler.patched)) {
+    if (sha256(await readFile(join(inputs.roslynRoot, name))) !== expected) {
+      throw new Error(`The staged C# compiler is not the packaged compiler: ${name}.`);
+    }
+  }
+  if (inputs.threadedArchiveRoot) {
     deepStrictEqual(
-      await pairedSource(config.threadedArchiveRoot),
-      await pairedSource(config.archiveRoot),
+      await pairedSource(inputs.threadedArchiveRoot),
+      await pairedSource(inputs.archiveRoot),
       'The threaded archive was built from different source than the serial archive.',
     );
   }
-  const single = await prepareVariant(config, 'serial', config.archiveRoot);
-  const multi = config.threadedArchiveRoot
-    ? await prepareVariant(config, 'threaded', config.threadedArchiveRoot)
+  const single = await prepareVariant(config, 'serial', inputs);
+  const multi = inputs.threadedArchiveRoot
+    ? await prepareVariant(config, 'threaded', { ...inputs, archiveRoot: inputs.threadedArchiveRoot })
     : undefined;
   const bundle = join(config.outputRoot, 'bundle');
   const manifest = picogkBrowserManifestSchema.parse({

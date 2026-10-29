@@ -875,7 +875,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         /* A checkout on disk can hold a symlink, so an ordinary name may not
          * resolve into a path the views above hide (CI1). */
         policy: tauPathPolicy,
-      }),
+      }).close,
       ports,
     };
     agentFileSystem = filesystem;

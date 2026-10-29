@@ -188,7 +188,7 @@ const nodeFileSystem = async (sandbox: string, workspaceRoot: string): Promise<P
     authority,
     allowRoot: (root) => admitted.has(root),
     policy: tauPathPolicy,
-  });
+  }).close;
   const channel = new NodeFsChannel(toNodeFsPort(ports.port2));
   seams.channel = channel;
   cleanups.push(async () => {

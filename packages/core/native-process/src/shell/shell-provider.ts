@@ -31,6 +31,14 @@ export type ShellFilesystem = Readonly<{
   writable: readonly string[];
   readOnly?: readonly string[] | undefined;
   denied: readonly string[];
+  /**
+   * Containers hidden except for explicit strict-descendant readable, writable and read-only roots. Ancestor
+   * grants never reopen their children; denied still wins. Existing containers must be real directories.
+   * Absent containers require a canonical immediate parent and remain uncreatable on Linux.
+   * Linux rebinds existing children: file roots cannot be created if absent, deleted or atomically replaced,
+   * and absent directory roots are omitted. Unknown temporary children never reach the host filesystem.
+   */
+  masked?: readonly string[] | undefined;
   directories?: readonly string[] | undefined;
 }>;
 

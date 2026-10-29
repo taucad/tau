@@ -393,6 +393,7 @@ export type ShellFilesystemPlan = Readonly<{
   writable: readonly string[];
   readOnly: readonly string[];
   denied: readonly string[];
+  masked: readonly string[];
   /** Protected paths that are directories when present, so an absent one is never stood in for by a file. */
   directories: readonly string[];
 }>;
@@ -416,6 +417,43 @@ export const compileShellFilesystem = async (
 ): Promise<ShellFilesystemPlan> => {
   const { checkout, host, access } = input;
   const writable = [checkout, ...input.session, ...access.write];
+  const names = await readdir(checkout);
+  const containers = names.filter((name) => name.toLowerCase() === reservedTauDirectory);
+  const masked = (containers.length === 0 ? [reservedTauDirectory] : containers).map((name) => join(checkout, name));
+  const unsafeChildren: string[] = [];
+  for (const container of masked) {
+    let children: string[] = [];
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- only the checkout's reserved containers.
+      children = await readdir(container);
+    } catch {
+      // The provider refuses missing or invalid containers before launching.
+    }
+    const authored = pathRegistry.filter(
+      (row) => row.prefix.startsWith(`${reservedTauDirectory}/`) && row.agentAccess === 'read-write',
+    );
+    const candidates = new Set([
+      ...authored.map((row) => row.prefix.slice(reservedTauDirectory.length + 1)),
+      ...children.filter((name) => classify(`${reservedTauDirectory}/${name}`).agentAccess === 'read-write'),
+    ]);
+    for (const name of candidates) {
+      const path = join(container, name);
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- validate each exact authored child before granting it.
+        const info = await lstat(path);
+        if (info.isSymbolicLink() || (!info.isDirectory() && !info.isFile())) {
+          unsafeChildren.push(path);
+        } else {
+          writable.push(path);
+        }
+      } catch {
+        // On macOS the shell can create an authored name; Linux can only rebind an existing child.
+        if (host.platform === 'darwin') {
+          writable.push(path);
+        }
+      }
+    }
+  }
   const readable = [...input.toolchain, ...access.read];
   const projects = await Promise.all(host.projectRoots.map(async (root) => physical(root)));
   /* Every other admitted project is denied whole (D20, F-22); a grant inside one is carved out exactly. */
@@ -431,12 +469,14 @@ export const compileShellFilesystem = async (
   const opened = await carve(host.platform, [...others, ...appData], [...writable, ...readable]);
   const denied = [
     ...input.checkoutProtected.denied,
+    ...unsafeChildren,
     ...opened,
     ...others.flatMap((root) => projectControls(root)),
     ...writeControls,
   ];
   const deniedPaths = [...new Set(denied)].filter((path) => isAbsolute(path));
   return {
+    masked,
     readable: [...new Set(readable)],
     writable: [...new Set(writable)],
     /* A read-only path under a denied one stays denied: the provider re-allows reads of every read-only root. */

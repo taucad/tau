@@ -47,11 +47,23 @@ export type HostEvidenceOptions = Readonly<{
 export type HostEvidence = Readonly<{
   /** The launcher's quiescence hook. */
   onChatQuiescent: (chatId: string, quiescent: boolean) => void;
+  /**
+   * The UI showed a live run's model text at `at`, on this device's clock. The first time per run is kept, for the most
+   * recent runs, and reported with the run once it has ended; a later time for the same run, as from another tab, or a
+   * time in the future is dropped.
+   */
+  onPresented: (chatId: string, runId: string, at: number) => void;
   reporter: EvidenceReporter;
   close: () => void;
 }>;
 
 const contractIdPattern = /^[\w:.-]{1,128}$/u;
+
+/** How many runs' presentation times a host keeps; a reported run's facts are not sent again, so this only bounds memory. */
+const presentedLimit = 256;
+
+/** How far ahead of the host's clock the UI's may be; anything later is not a time this device saw. */
+const clockSlackMilliseconds = 5000;
 
 /**
  * The server's summary grant for this account and project, read now. A
@@ -115,15 +127,33 @@ export const createHostEvidence = (options: HostEvidenceOptions): HostEvidence =
       /* The next quiescence reads the rows and the grant again. */
     }
   };
+  const presented = new Map<string, number>();
+  const presentedKey = (chatId: string, runId: string): string => `${chatId}\u0000${runId}`;
   const report = async (chatId: string): Promise<void> => {
     const { runs, ownsEpoch } = await options.observe(chatId);
-    await reporter.report(runs, ownsEpoch);
+    await reporter.report(
+      runs.map((run) => {
+        const at = presented.get(presentedKey(run.chatId, run.runId));
+        return at === undefined ? run : { ...run, presentedAt: at };
+      }),
+      ownsEpoch,
+    );
   };
   void quietly(async () => reporter.refresh());
   return {
     onChatQuiescent: (chatId, quiescent) => {
       if (quiescent) {
         void quietly(async () => report(chatId));
+      }
+    },
+    onPresented: (chatId, runId, at) => {
+      const key = presentedKey(chatId, runId);
+      if (!Number.isFinite(at) || at < 0 || at > now() + clockSlackMilliseconds || presented.has(key)) {
+        return;
+      }
+      presented.set(key, at);
+      if (presented.size > presentedLimit) {
+        presented.delete(presented.keys().next().value!);
       }
     },
     reporter,

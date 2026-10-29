@@ -101,6 +101,8 @@ export type BrowserProjectHost = Readonly<{
   needsRebridge: () => boolean;
   /** Read this host's current leadership actor without taking a lock. */
   stoppability: (chatId: string) => ReturnType<AgentLauncher['stoppability']>;
+  /** The page showed a live run's model text at `at`; reported with the run's summaries, when they are allowed (T10). */
+  presented: (chatId: string, runId: string, at: number) => void;
   /** Serve one stream; closing it only detaches (D17). */
   connect: (port: MessagePort) => void;
   /** Swap in fresh bridges, as after a file-manager restart; the launcher and its runs stay (RV1-F1). */
@@ -885,6 +887,9 @@ const composeProjectHost = async (
     hostId: provide.hostId,
     needsRebridge: placement.needsRecovery,
     stoppability: (chatId) => launcher.stoppability(chatId),
+    presented: (chatId, runId, at) => {
+      evidence?.onPresented(chatId, runId, at);
+    },
     connect: (port) => {
       const channel = serveAgentChannel(port, launcher, {
         build: agentHostWorkerBuild,

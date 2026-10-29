@@ -174,6 +174,11 @@ workerScope.addEventListener('message', (event) => {
           const { projectId, chatId } = args as Calls['runStoppability']['args'];
           return hosts.hostOf(projectId)?.stoppability(chatId) ?? 'background-window';
         }
+        case 'runPresented': {
+          const { projectId, chatId, runId, at } = args as Calls['runPresented']['args'];
+          hosts.hostOf(projectId)?.presented(chatId, runId, at);
+          return undefined;
+        }
         case 'visibility': {
           visible = (args as Calls['visibility']['args']).visible;
           visibilityTopic.emit(visible);

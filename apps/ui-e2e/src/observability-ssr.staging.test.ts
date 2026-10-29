@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
 import {
   createObservabilityRunId,
+  harnessNavigationTimeout,
   observeHarnessPage,
   observabilityUrl,
   pollSentryEventIds,
@@ -20,7 +21,12 @@ import {
  */
 
 const sentryApi = 'https://us.sentry.io/api/0';
-const harnessRouteId = 'routes/[__debug].observability/route';
+// React Router gives a folder route the folder's path as its id, so
+// `routes/[__debug].observability/route.tsx` is `routes/[__debug].observability`
+// with no `/route` suffix. The unit-test fixtures in `sentry.server.test.ts` and
+// `sentry.server-sdk.test.ts` carry a `/route` suffix, but those are arbitrary
+// strings the code under test only passes through; they do not describe the real id.
+const harnessRouteId = 'routes/[__debug].observability';
 /** The blueprint's bound on waiting for Sentry to index an event. */
 const pollTimeout = 180_000;
 const pollInterval = 5000;
@@ -170,7 +176,10 @@ describe('P2 staging signal acceptance: SSR errors and API correlation', () => {
       const failed = page.waitForResponse((answer) => answer.url().includes('/v1/__debug/observability/failure'), {
         timeout: 60_000,
       });
-      await page.goto(observabilityUrl(runId, 'api-failure'), { waitUntil: 'domcontentloaded' });
+      await page.goto(observabilityUrl(runId, 'api-failure'), {
+        timeout: harnessNavigationTimeout,
+        waitUntil: 'domcontentloaded',
+      });
       const answer = await failed;
       console.info('API trigger answered', { runId, status: answer.status() });
       expect(answer.ok()).toBe(false);

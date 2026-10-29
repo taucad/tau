@@ -21,6 +21,7 @@
     "@parcel/watcher": "catalog:",
     "@sentry/electron": "catalog:",
     "@taucad/agent-host": "workspace:*",
+    "@taucad/agent-observability": "workspace:*",
     "@taucad/agent-tools": "workspace:*",
     "@taucad/assimp": "workspace:*",
     "@taucad/bambu": "workspace:*",

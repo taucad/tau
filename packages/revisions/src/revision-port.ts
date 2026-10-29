@@ -340,6 +340,19 @@ export type RevisionPushRef = Readonly<{
 }>;
 
 /**
+ * Identity of one sync attempt's pushes (F5): any fresh object, kept for that attempt and dropped after it.
+ *
+ * An attempt offers the history set and the record set as separate pushes
+ * (A39). A leg that reads the remote's ref advertisement itself reads it once
+ * per session and keeps it current with what each push of the session moved,
+ * instead of once per push; a leg whose transport advertises on its own (native
+ * Git) ignores it. The object carries nothing: its identity is the key.
+ *
+ * @public
+ */
+export type RevisionPushSession = Readonly<Record<string, never>>;
+
+/**
  * What one push asks of a remote.
  *
  * The caller splits the two sets (A39) and this is where the difference is
@@ -358,6 +371,8 @@ export type RevisionPushInput = Readonly<{
   refs: readonly RevisionPushRef[];
   /** All-or-nothing across the listed refs. Default `false`. */
   atomic?: boolean;
+  /** Share one advertisement with the other pushes of the same sync attempt. Absent, this push reads its own. */
+  session?: RevisionPushSession;
 }>;
 
 /** How one ref of a push ended. @public */
@@ -508,6 +523,25 @@ export type AddCheckoutInput = Readonly<{
 }>;
 
 /**
+ * How one tree read treats large objects that are not in this store yet.
+ *
+ * @public
+ */
+export type ReadTreeOptions = Readonly<{
+  /**
+   * `local` answers from this store alone: an object that is not here yet
+   * stays its pointer, and nothing is fetched. A caller that asks for it
+   * either reads only small files or tracks every pointer it got back.
+   * Absent, every pointer is resolved, from the remote if need be.
+   */
+  largeObjects?: 'local';
+  /** Told about each large object as the remote delivers it, while a fetching read runs. */
+  onLargeObject?: (oid: string, content: Uint8Array<ArrayBuffer>) => void;
+  /** Stops a fetching read's transfers; the read then rejects. */
+  signal?: AbortSignal;
+}>;
+
+/**
  * The substrate capability. Every host constructs one; the port, not the
  * engine, is the seam callers program against.
  *
@@ -517,7 +551,8 @@ export type RevisionPort = Readonly<{
   describe(): Promise<RevisionEngineDescriptor>;
   init(input: InitRevisionStoreInput): Promise<void>;
   readRevision(id: RevisionId): Promise<RevisionRecord | undefined>;
-  readTree(id: RevisionId): Promise<ImmutableRevisionTree | undefined>;
+  /** The tree; a host without large objects, or with its own smudge, may ignore `options`. */
+  readTree(id: RevisionId, options?: ReadTreeOptions): Promise<ImmutableRevisionTree | undefined>;
   writeRevision(input: WriteRevisionInput): Promise<RevisionReceipt>;
   /** A branch by name, or any other ref spelled in full. */
   readRef(name: string): Promise<RevisionId | undefined>;

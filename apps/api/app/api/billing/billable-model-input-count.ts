@@ -6,6 +6,7 @@ import { safeParseBillableModelRequest } from '#api/billing/billable-model-reque
 import type { BillingEnvironment, InputCountEvidence } from '#api/billing/credit-ledger.types.js';
 
 const countModels = new Set([
+  'gpt-6.1-terra',
   'gpt-6-astra',
   'gpt-6-sol',
   'gpt-6-luna',

@@ -97,7 +97,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@better-auth/utils](https://github.com/better-auth/utils) | 0.5.0 | MIT |
 | [@better-fetch/fetch](https://github.com/better-auth/better-fetch) | 1.3.2 | MIT |
 | [@cfworker/json-schema](https://github.com/cfworker/cfworker) | 4.1.1 | MIT |
-| [@classcad/smlibwasm](https://github.com/awv-informatik/smlibpy) | 0.3.4 | MIT AND Apache-2.0 AND OFL-1.1 |
+| [@classcad/smlibwasm](https://github.com/awv-informatik/smlibpy) | 0.6.2 | MIT AND Apache-2.0 AND OFL-1.1 |
 | [@codemirror/autocomplete](https://code.haverbeke.berlin/codemirror/autocomplete) | 6.20.4 | MIT |
 | [@codemirror/commands](https://code.haverbeke.berlin/codemirror/commands) | 6.11.1 | MIT |
 | [@codemirror/lang-css](https://github.com/codemirror/lang-css) | 6.3.1 | MIT |
@@ -733,7 +733,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [radix-ui](https://github.com/radix-ui/primitives) | 1.8.0 | MIT |
 | [range-parser](https://github.com/jshttp/range-parser) | 1.3.0 | MIT |
 | [raw-body](https://github.com/stream-utils/raw-body) | 3.0.2 | MIT |
-| [react](https://github.com/facebook/react) | 19.2.7 | MIT |
+| [react](https://github.com/react/react) | 19.3.1 | MIT |
 | [react-colorful](https://github.com/omgovich/react-colorful) | 5.8.1 | MIT |
 | [react-day-picker](https://github.com/gpbl/react-day-picker) | 10.0.2 | MIT |
 | [react-is](https://github.com/facebook/react) | 18.3.1 | MIT |
@@ -1006,7 +1006,7 @@ The circuit kernel bundles the following components. Their full license texts ac
 | parseunit | 0.3.1 | MIT |
 | performance-now | 2.1.0 | MIT |
 | polished | 4.3.1 | MIT |
-| react | 19.2.7 | MIT |
+| react | 19.3.1 | MIT |
 | react-reconciler | 0.32.0 | MIT |
 | scheduler | 0.26.0 | MIT |
 | schematic-symbols | 0.0.244 | MIT |

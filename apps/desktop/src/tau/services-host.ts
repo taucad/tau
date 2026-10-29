@@ -43,6 +43,8 @@ const machinesDirectory = process.env['TAU_DESKTOP_MACHINES_DIR'];
 const legacyMachinesDirectory = process.env['TAU_DESKTOP_LEGACY_MACHINES_DIR'];
 /* The permission store's home (W9); absent, permission requests are refused and every chat reads Ask. */
 const permissionsDirectory = process.env['TAU_DESKTOP_PERMISSIONS_DIR'];
+/* T11: the agent-observability queues' home; absent, no project observes its chats. */
+const evidenceDirectory = process.env['TAU_DESKTOP_EVIDENCE_DIR'];
 const diagnostics =
   logDirectory === undefined ? undefined : createDiagnosticsLog({ directory: logDirectory, producer: 'services' });
 const pendingRuntimePorts = new Map<
@@ -174,6 +176,7 @@ const host = createServicesHost({
   ...(machinesDirectory === undefined || machinesDirectory === '' ? {} : { machinesDirectory }),
   ...(legacyMachinesDirectory === undefined || legacyMachinesDirectory === '' ? {} : { legacyMachinesDirectory }),
   ...(permissionsDirectory === undefined || permissionsDirectory === '' ? {} : { permissionsDirectory }),
+  ...(evidenceDirectory === undefined || evidenceDirectory === '' ? {} : { evidenceDirectory }),
   permissionsAnswered: (frame) => {
     parentPort.postMessage(frame);
   },

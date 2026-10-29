@@ -130,3 +130,27 @@ it('should release status waits and reject new reads when the revision connectio
     port2.close();
   }
 });
+
+it("should answer the newest status's large objects, and none once closed", async () => {
+  const { port1, port2 } = new MessageChannel();
+  port2.start();
+  const client = createPortRevisionsClient(port1);
+  expect(client.largeObjects()).toBeUndefined();
+  const facet = {
+    phase: 'fetching',
+    paths: ['models/a.step'],
+    objects: 0,
+    totalObjects: 1,
+    bytes: 0,
+    totalBytes: 9,
+  } as const;
+  port2.postMessage({ type: 'status', status: { largeObjects: facet } });
+  await expect.poll(() => client.largeObjects()).toEqual(facet);
+  port2.postMessage({ type: 'status', status: {} });
+  await expect.poll(() => client.largeObjects()).toBeUndefined();
+  port2.postMessage({ type: 'status', status: { largeObjects: facet } });
+  await expect.poll(() => client.largeObjects()).toEqual(facet);
+  client.close();
+  expect(client.largeObjects()).toBeUndefined();
+  port2.close();
+});

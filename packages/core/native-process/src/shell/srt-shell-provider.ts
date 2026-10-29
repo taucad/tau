@@ -28,6 +28,7 @@ import { bindMaskedDirectories, maskProblem } from '#shell/shell-project-mask.js
 import { shellBaselineDenied } from '#shell/shell-baseline.js';
 import { refusedShellEnvironment } from '#shell/shell-environment.js';
 import { holdProtectedStandIns, useStandInJournal } from '#shell/shell-stand-ins.js';
+import type { StandInProfile } from '#shell/shell-stand-ins.js';
 import type {
   ShellExit,
   ShellLaunch,
@@ -793,6 +794,21 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
   return createProvider(options);
 };
 
+/** The runtime lists a hold is computed from: exactly those of the profile, plus the grant's directory rows and masks. */
+const standInProfile = (profile: Record<string, unknown>, launch: ShellLaunch): StandInProfile => {
+  const { denyWrite, allowWrite } = profile['filesystem'] as Readonly<{
+    denyWrite: readonly string[];
+    allowWrite: readonly string[];
+  }>;
+  return {
+    denyWrite,
+    allowWrite,
+    directories: launch.filesystem.directories,
+    masked: deniedVariants(launch.filesystem.masked ?? []),
+    writable: physicalVariants(launch.filesystem.writable),
+  };
+};
+
 const createProvider = (options: SandboxShellProviderOptions): ShellProvider => ({
   name: 'srt-0.0.75',
   launch: async (launch) => {
@@ -827,16 +843,27 @@ const createProvider = (options: SandboxShellProviderOptions): ShellProvider => 
       };
     }
     const runtimeDirectory = createRuntimeDirectory();
-    const profile = shellSandboxProfile(launch, options, runtimeDirectory);
     // Absent protected paths get shared stand-ins, computed from exactly the lists the runtime is handed, before it
-    // observes the filesystem; released only once this launch's supervisor is gone (see holdProtectedStandIns).
+    // observes the filesystem; released only once this launch's supervisor is gone (see holdProtectedStandIns). A
+    // masked container's stand-in changes the profile (it is no longer absent), so the profile handed to the runtime is
+    // computed again once the stand-ins exist and held from its own lists.
     let releaseStandIns: () => void;
+    let profile: Record<string, unknown>;
     try {
-      const { denyWrite, allowWrite } = profile['filesystem'] as Readonly<{
-        denyWrite: readonly string[];
-        allowWrite: readonly string[];
-      }>;
-      releaseStandIns = holdProtectedStandIns({ denyWrite, allowWrite, directories: launch.filesystem.directories });
+      const releaseFirst = holdProtectedStandIns(
+        standInProfile(shellSandboxProfile(launch, options, runtimeDirectory), launch),
+      );
+      try {
+        profile = shellSandboxProfile(launch, options, runtimeDirectory);
+        const releaseSecond = holdProtectedStandIns(standInProfile(profile, launch));
+        releaseStandIns = () => {
+          releaseSecond();
+          releaseFirst();
+        };
+      } catch (error) {
+        releaseFirst();
+        throw error;
+      }
     } catch (error) {
       if (runtimeDirectory !== undefined) {
         rmSync(runtimeDirectory, { recursive: true, force: true });

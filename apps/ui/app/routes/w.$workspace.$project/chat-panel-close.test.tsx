@@ -6,7 +6,11 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 /* The Files and Editor panels name their Close after the panel, as their tooltips do (I6, D4). */
 
-vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
+vi.mock('#hooks/use-project-availability.js', () => ({
+  useProjectAvailability: () => 'ready',
+  useModelAvailability: () => 'ready',
+  useLargeObjectPending: () => false,
+}));
 vi.mock('#routes/w.$workspace.$project/chat-editor-file-tree.js', () => ({
   ChatEditorFileTree: ({ closeButton }: { readonly closeButton?: React.ReactNode }) => <div>{closeButton}</div>,
 }));

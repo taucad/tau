@@ -12,6 +12,20 @@ export type { FoldProjectionFactsInput } from '#log/chat-ledger.js';
 export { EventLogError } from '#log/event-log-error.js';
 export { parseEventLog, serializeLogEvent } from '#log/serialization.js';
 export { reduceEventLog } from '#log/reducer.js';
+export { observeOwnTurns, observeTurns } from '#log/turn-observation.js';
+export type {
+  ObservedCheck,
+  ObservedCheckResult,
+  ObservedInterval,
+  ObservedInvocation,
+  ObservedOutcome,
+  ObservedSource,
+  ObservedToolCall,
+  ObservedTransformation,
+  OwnRowsRead,
+  OwnTurns,
+  TurnObservation,
+} from '#log/turn-observation.js';
 export { compareSegmentDeviceIds, mergeLogSegments, mergeSegmentRows, parseLogSegments } from '#log/segments.js';
 export type { ChatLogSegment, MergeLogSegmentsOptions, ParsedLogSegment } from '#log/segments.js';
 export {
@@ -191,4 +205,5 @@ export type {
   GatewayModelErrorCode,
   GatewayModelTransportOptions,
 } from '#transport/gateway-model-transport.js';
+export type { ModelTelemetryParent, ModelTelemetrySeam, ModelTelemetrySubject } from '#transport/model-telemetry.js';
 export type { HostToolExecutionDetails, ToolResultSubstituter } from '#harness/tools.js';

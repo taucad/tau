@@ -1,4 +1,4 @@
-import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { useModelAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
 import { z } from 'zod';
@@ -651,7 +651,7 @@ function useProjectExportSource({ downloadOnly }: { readonly downloadOnly: boole
 export function ConverterPanelBody(
   props: { readonly downloadOnly?: boolean; readonly isShown?: boolean } = {},
 ): ReactElement {
-  const availability = useProjectAvailability();
+  const availability = useModelAvailability();
   return availability === 'ready' ? (
     <ConverterPanelBodyContent {...props} />
   ) : (

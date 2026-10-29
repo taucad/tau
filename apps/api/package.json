@@ -12,6 +12,7 @@
     "@pyroscope/nodejs": "catalog:",
     "@sentry/node": "catalog:",
     "@taucad/api-extractor": "workspace:*",
+    "@taucad/agent-observability": "workspace:*",
     "@taucad/billing": "workspace:*",
     "@taucad/chat": "workspace:*",
     "@taucad/events": "workspace:*",

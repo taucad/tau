@@ -52,6 +52,12 @@
 #     daemon's revision tree records and pushes the agent's turns from it.
 #     `git lfs install --system` so that clone smudges large files rather than
 #     leaving pointers in the working tree.
+#   - Agent observability (T11): the build bundles the private cloud-host
+#     observer (`agent-observability:bundle-cloud-host-observer`) into one
+#     module, and `TAU_HOST_OBSERVER_MODULE` names it. The published CLI only
+#     loads it, and only when the provisioner sets `TAU_CLOUD_HOST=1`; it
+#     reports for the bound project with the device credential, and only what
+#     the owner's grant for that project allows.
 
 # Node 26, not the API image's 24.3.0: tsdown's config loader trips a Node bug
 # fixed in 24.11.1 ("Failed to load the config file due to a known Node.js bug"),
@@ -89,7 +95,8 @@ COPY . .
 ENV OXC_TSCONFIG_PATH=/app/tools/typescript/base.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     --mount=type=cache,id=nx,target=/app/.nx/cache \
-    pnpm nx run cli:pkgcheck-deps && pnpm nx build cli
+    pnpm nx run cli:pkgcheck-deps && pnpm nx build cli && \
+    pnpm nx run agent-observability:bundle-cloud-host-observer
 
 # ── Prune to production deploy tree ───────────────────────────────────────
 FROM build AS pruned
@@ -113,6 +120,7 @@ RUN groupadd --system --gid 1001 tau && \
     useradd --system --uid 1001 --gid tau --home /app --shell /usr/sbin/nologin tau
 COPY --from=pruned --chown=tau:tau /pruned /app
 COPY --chown=tau:tau packages/host/docker-entrypoint.sh /usr/local/bin/tau-host-entrypoint
+COPY --from=build --chown=tau:tau /app/out/cloud-host-observer/cloud-host-observer.mjs /app/observer/cloud-host-observer.mjs
 RUN chmod 0755 /usr/local/bin/tau-host-entrypoint && \
     mkdir -p /workspace /config && chown tau:tau /workspace /config && chmod 0700 /config
 USER tau
@@ -121,7 +129,8 @@ USER tau
 # script alone is the recipe for a cloud host.
 ENV NODE_ENV="production" \
     TAU_CONFIG_DIR="/config" \
-    TAU_HOST_WORKSPACE="/workspace"
+    TAU_HOST_WORKSPACE="/workspace" \
+    TAU_HOST_OBSERVER_MODULE="/app/observer/cloud-host-observer.mjs"
 VOLUME ["/workspace"]
 
 ENTRYPOINT ["/usr/local/bin/tau-host-entrypoint"]

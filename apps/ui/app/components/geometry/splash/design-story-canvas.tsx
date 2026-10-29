@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { RefCallback } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { agentLane, assemblyStep, assemblySteps, explodeLift, partPose, printedPart } from '@taucad/planetary-gearbox';
@@ -296,6 +297,13 @@ export function DesignStoryCanvas({ actor, isPlaying, onReady }: StoryProperties
   // Public viewers stay on WebGL; the existing internal override is used for parity checks.
   const backend = readGraphicsBackendQueryOverride() ?? 'webgl';
   const gl = useMemo(() => createTauR3fGlProp(backend, [], { onCreateError: setError }), [backend]);
+  // Removing the canvas retires the factory, which settles R3F's renderer request so its root is torn down.
+  const bindCanvas = useCallback<RefCallback<HTMLCanvasElement>>(
+    (canvas): void => {
+      gl.bindCanvas(canvas ?? undefined);
+    },
+    [gl],
+  );
   const parts = useGearboxParts(onReady, setError);
   if (error) {
     throw error;
@@ -303,6 +311,7 @@ export function DesignStoryCanvas({ actor, isPlaying, onReady }: StoryProperties
   return parts ? (
     <Canvas
       key={backend}
+      ref={bindCanvas}
       gl={gl}
       data-graphics-backend={backend}
       frameloop='demand'

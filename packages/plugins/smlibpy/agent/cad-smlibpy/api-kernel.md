@@ -4,7 +4,7 @@
 
 # Category: _kernel
 # An SMLib operation failed
-# Remarks: ``operation`` names the smlibpy call, ``status`` the kernel status code (e.g. ``SM_ERR_INVALID_INPUT``) and ``hint`` a suggestion when one is known.
+# Remarks: ``operation`` names the smlibpy call, ``status`` the kernel status code (e.g. ``SM_ERR_INVALID_INPUT``) and ``hint`` a suggestion when one is known. ``trace`` says where the kernel gave up: the failures it reported during the call, oldest first, at most the last 48, as ``"SM_ERR at SmFilletExecutive.cpp:1603 (DoFillet)"``. It ends with the chain from the deepest function that failed to the kernel's API function; what comes before are errors the kernel recovered from. Empty where the error did not come from a kernel function. For bug reports: the sites change with the kernel.
 # smlibpy._kernel.KernelError (class)
 class KernelError(ModelingError)
 

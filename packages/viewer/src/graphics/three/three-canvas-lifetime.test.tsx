@@ -8,6 +8,7 @@ import { Component, StrictMode } from 'react';
 import type { ReactNode } from 'react';
 import { ThreeCanvasInstance } from '#graphics/three/three-canvas-instance.jsx';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
+import { createTauR3fGlProp, RetiredCanvasError } from '#graphics/three/canvas-three-gl.js';
 
 /** Stands in for the viewer's error boundary: records what the canvas throws and renders nothing after. */
 class CatchRendererError extends Component<
@@ -92,7 +93,6 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
   let frameId = 0;
   let release: (() => void) | undefined;
   let width = 475;
-  let cleanupCallbacks = 0;
 
   const drain = async (): Promise<void> => {
     await act(async () => {
@@ -111,19 +111,6 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
   beforeEach(() => {
     graphicsRef.send.mockClear();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    cleanupCallbacks = 0;
-    const allocateTimeout = globalThis.setTimeout;
-    vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback, cleanupDelay, ...args) => {
-      if (cleanupDelay !== 500) {
-        return allocateTimeout(callback, cleanupDelay, ...args);
-      }
-      return allocateTimeout(() => {
-        cleanupCallbacks += 1;
-        if (typeof callback === 'function') {
-          callback(...args);
-        }
-      }, cleanupDelay);
-    });
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       frameId += 1;
       frameCallbacks.set(frameId, callback);
@@ -402,26 +389,34 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
   it.each([0, 501])(
     'should prevent a retired configure/render continuation from replacing a fresh same-canvas root at %i ms',
     async (elapsed) => {
+      // The viewer's own factory, retired while its renderer is still initializing, against a fresh root on the
+      // same canvas. R3F 9.8 tears a root down only once its renderer request settles, so the factory must settle.
+      release = () => undefined;
       const canvas = document.createElement('canvas');
-      let resolveOld: ((renderer: WebGPURenderer) => void) | undefined;
-      const oldRenderer = new WebGPURenderer({ canvas });
+      document.body.append(canvas);
+      const factory = createTauR3fGlProp('webgpu');
+      factory.bindCanvas(canvas);
       const old = createRoot(canvas);
       const oldConfiguration = old.configure({
-        gl: async () =>
-          new Promise<WebGPURenderer>((resolve) => {
-            resolveOld = resolve;
-          }),
+        gl: factory,
         size: { width: 10, height: 10, top: 0, left: 0 },
         frameloop: 'never',
       });
       old.render(<group name='retired-child' />);
+      await drain();
+      expect(renderers).toHaveLength(1);
       flushThreeSync(() => {
         old.unmount();
       });
+      canvas.remove();
+      factory.bindCanvas(undefined);
+      await expect(oldConfiguration).rejects.toBeInstanceOf(RetiredCanvasError);
       await drain();
       await act(async () => {
         await vi.advanceTimersByTimeAsync(elapsed);
       });
+      // The removed canvas's root is gone before its renderer exists, so nothing can resume it.
+      expect(_roots.has(canvas)).toBe(false);
       const survivor = createRoot(canvas);
       const newRenderer = new WebGPURenderer({ canvas });
       await survivor.configure({
@@ -433,8 +428,7 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
       survivor.render(<group name='survivor-child' />);
       await drain();
       await act(async () => {
-        resolveOld!(oldRenderer);
-        await oldConfiguration;
+        release!();
       });
       await drain();
       await act(async () => {
@@ -447,6 +441,8 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
       expect(state.scene.getObjectByName('retired-child')).toBeUndefined();
       expect(state.size.width).toBe(20);
       expect(newRenderer.getPixelRatio()).toBe(1.5);
+      // The late renderer of the retired request is released by its factory, once.
+      expect(disposeCalls[0]).toHaveBeenCalledOnce();
       survivor.unmount();
     },
   );
@@ -455,6 +451,8 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
     const canvas = document.createElement('canvas');
     const renderer = new WebGPURenderer({ canvas });
     const root = createRoot(canvas);
+    // Observe the root this canvas had; R3F 9.8 removes it from `_roots` once teardown completes.
+    const created = _roots.get(canvas)!;
     let resolveRenderer: ((renderer: WebGPURenderer) => void) | undefined;
     const configuration = root.configure({
       gl: async () =>
@@ -473,10 +471,9 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
     });
     await configuration;
     await drain();
-    const state = _roots.get(canvas)!.store.getState();
+    const state = created.store.getState();
     expect(state.internal.active).toBe(false);
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- R3F declares Scene but its pre-init store contains null.
-    expect(state.scene?.getObjectByName('late-child')).toBeUndefined();
+    expect(state.scene.getObjectByName('late-child')).toBeUndefined();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(501);
     });
@@ -504,10 +501,8 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(elapsed);
       });
-      const cleanupCallbacksBeforeResolution = cleanupCallbacks;
-      if (elapsed > 500) {
-        expect(cleanupCallbacksBeforeResolution).toBeGreaterThan(0);
-      }
+      // The removed canvas is torn down without waiting for its renderer: no root stays registered for it.
+      expect(_roots.has(renderer.domElement)).toBe(false);
       perspectiveCamera.coordinateSystem = WebGLCoordinateSystem;
       orthographicCamera.coordinateSystem = WebGLCoordinateSystem;
       await act(async () => {

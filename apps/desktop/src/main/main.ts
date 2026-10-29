@@ -951,6 +951,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_PERMISSIONS_DIR: join(app.getPath('userData'), 'permissions'),
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+      TAU_DESKTOP_EVIDENCE_DIR: join(app.getPath('userData'), 'agent-evidence'),
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
     createChannel: () => new MessageChannelMain(),

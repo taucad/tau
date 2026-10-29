@@ -291,6 +291,7 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/ui/app/components/printer/printer.vitest.browser.config.ts',
         'apps/ui/app/components/project-library/project-cloud-delete.vitest.browser.config.ts',
         'apps/ui/app/components/terminal/terminal-renderer.vitest.browser.config.ts',
+        'apps/ui/app/machines/project-open.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-viewer.vitest.browser.config.ts',

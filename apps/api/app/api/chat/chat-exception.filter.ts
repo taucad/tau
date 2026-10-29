@@ -16,6 +16,7 @@ import { errorCategory } from '@taucad/types/constants';
 import type { ChatError } from '@taucad/types';
 import { httpStatusToCategory, errorCategoryTitles } from '@taucad/chat/utils';
 import { httpHeader } from '#constants/http-header.constant.js';
+import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import { normalizeError } from '#api/chat/utils/error-normalizer.js';
 import { isCompactionPipelineError } from '#api/chat/utils/compaction-errors.js';
 import { fundedRetryAfterSeconds } from '#filters/http-exception.filter.js';
@@ -150,8 +151,11 @@ export class ChatExceptionFilter implements ExceptionFilter {
       };
     }
 
-    // Log error details
-    if (statusCode >= 500) {
+    /* Log error details. A gateway refusal's message can carry a provider's sentence that
+     * quotes the request, so its log line names the code and leaves the message to the client. */
+    if (exception instanceof LlmGatewayError) {
+      this.logger.warn(`Chat model refusal: ${chatError.code} (${statusCode})`);
+    } else if (statusCode >= 500) {
       this.logger.error(exception, `Chat exception: ${chatError.message}`);
     } else if (statusCode >= 400) {
       this.logger.warn(`Chat client error: ${chatError.message}`);

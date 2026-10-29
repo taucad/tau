@@ -213,15 +213,15 @@
     {
       "title": "Save-to-acknowledged lag p50 / p95 by placement",
       "type": "timeseries",
-      "description": "Client-reported time from the first unsynced mint to the server acknowledging it: the save time a person sees.",
+      "description": "Client-reported time from the first unsynced change (a mint, a record change, or the push request itself) to the server acknowledging it, on every acknowledged push: the save time a person sees. Pushes nothing dated (sync.lag.since=request, a bare Sync now or an ahead push) only measure their own duration and are left out.",
       "targets": [
         {
-          "expr": "histogram_quantile(0.5, sum by (le, agent_placement) (rate(tau_sync_client_lag_bucket{app=~\"$app\",service_name=~\"$service\"}[15m])))",
+          "expr": "histogram_quantile(0.5, sum by (le, agent_placement) (rate(tau_sync_client_lag_bucket{app=~\"$app\",service_name=~\"$service\",sync_lag_since!=\"request\"}[15m])))",
           "legendFormat": "p50 {{agent_placement}}",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum by (le, agent_placement) (rate(tau_sync_client_lag_bucket{app=~\"$app\",service_name=~\"$service\"}[15m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, agent_placement) (rate(tau_sync_client_lag_bucket{app=~\"$app\",service_name=~\"$service\",sync_lag_since!=\"request\"}[15m])))",
           "legendFormat": "p95 {{agent_placement}}",
           "refId": "B"
         }
@@ -274,10 +274,50 @@
       "id": 13
     },
     {
+      "title": "Open large-object fetch p50 / p95 by cache",
+      "type": "timeseries",
+      "description": "Client-reported wall time of a tree read's large-object phase (local reads, batch calls and transfers), on reads that fetched from the remote: an open's hydrate, which settles after the pull attempt above is reported. cold: nothing was local yet; partial: some objects were.",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le, cache) (rate(tau_sync_client_lfs_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[1h])))",
+          "legendFormat": "p50 {{cache}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, cache) (rate(tau_sync_client_lfs_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[1h])))",
+          "legendFormat": "p95 {{cache}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
+      "id": 98
+    },
+    {
+      "title": "Client large objects resolved by source",
+      "type": "timeseries",
+      "description": "Objects and bytes a client tree read that fetched from the remote took from the network and from the local store.",
+      "targets": [
+        {
+          "expr": "sum by (source) (increase(tau_sync_client_lfs_objects_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
+          "legendFormat": "objects {{source}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (source) (increase(tau_sync_client_lfs_bytes_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
+          "legendFormat": "bytes {{source}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
+      "id": 99
+    },
+    {
       "title": "API → tau-storage hop, grants and receipts",
       "type": "row",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 42 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 50 },
       "panels": [],
       "id": 14
     },
@@ -293,7 +333,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 43 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 51 },
       "id": 15
     },
     {
@@ -307,7 +347,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 43 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 51 },
       "id": 16
     },
     {
@@ -327,7 +367,7 @@
         { "expr": "sum(fly_instance_up{app=~\"$storage_app\"})", "legendFormat": "workers up (Fly)", "refId": "C" }
       ],
       "fieldConfig": { "defaults": { "unit": "short" } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 43 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 51 },
       "id": 17
     },
     {
@@ -341,7 +381,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 51 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 59 },
       "id": 18
     },
     {
@@ -355,7 +395,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "ops" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 51 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 59 },
       "id": 19
     },
     {
@@ -369,14 +409,14 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 51 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 59 },
       "id": 20
     },
     {
       "title": "Git execution: admission, leases and disk (tau-storage, or tau-api in process)",
       "type": "row",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 59 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 67 },
       "panels": [],
       "id": 21
     },
@@ -392,7 +432,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "ops" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 60 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 68 },
       "id": 22
     },
     {
@@ -407,7 +447,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 60 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 68 },
       "id": 23
     },
     {
@@ -426,7 +466,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "bytes" } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 60 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 68 },
       "id": 24
     },
     {
@@ -440,7 +480,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "percentunit" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 68 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 76 },
       "id": 25
     },
     {
@@ -454,7 +494,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "bytes" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 68 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 76 },
       "id": 26
     },
     {
@@ -468,14 +508,14 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 68 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 76 },
       "id": 27
     },
     {
       "title": "Pack cache and hydrate",
       "type": "row",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 76 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 84 },
       "panels": [],
       "id": 28
     },
@@ -490,7 +530,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "ops" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 77 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 85 },
       "id": 29
     },
     {
@@ -504,7 +544,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "Bps" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 77 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 85 },
       "id": 30
     },
     {
@@ -518,7 +558,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "s" } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 77 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 85 },
       "id": 31
     },
     {
@@ -537,7 +577,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "bytes" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 85 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 93 },
       "id": 32
     },
     {
@@ -556,7 +596,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "short" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 85 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 93 },
       "id": 33
     },
     {
@@ -570,14 +610,14 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 85 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 93 },
       "id": 34
     },
     {
       "title": "Commit protocol (manifest compare-and-swap)",
       "type": "row",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 93 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 101 },
       "panels": [],
       "id": 35
     },
@@ -592,7 +632,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "ops" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 94 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 102 },
       "id": 36
     },
     {
@@ -611,7 +651,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "s" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 94 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 102 },
       "id": 37
     },
     {
@@ -626,7 +666,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "short" } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 94 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 102 },
       "id": 38
     },
     {
@@ -641,7 +681,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "short" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 102 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 110 },
       "id": 39
     },
     {
@@ -655,7 +695,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 102 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 110 },
       "id": 40
     },
     {
@@ -675,7 +715,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "bytes" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 110 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 118 },
       "id": 42
     },
     {
@@ -694,14 +734,14 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 110 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 118 },
       "id": 43
     },
     {
       "title": "Object store (R2 in the cloud, MinIO locally)",
       "type": "row",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 118 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 126 },
       "panels": [],
       "id": 44
     },
@@ -717,7 +757,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 119 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 127 },
       "id": 45
     },
     {
@@ -731,7 +771,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "s" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 119 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 127 },
       "id": 46
     },
     {
@@ -745,7 +785,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps" } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 119 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 127 },
       "id": 47
     },
     {
@@ -759,7 +799,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 127 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 135 },
       "id": 48
     },
     {
@@ -773,7 +813,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "Bps" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 127 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 135 },
       "id": 49
     },
     {
@@ -788,7 +828,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 127 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 135 },
       "id": 50
     },
     {
@@ -807,7 +847,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "short" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 135 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 143 },
       "id": 51
     },
     {
@@ -821,7 +861,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "bytes" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 135 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 143 },
       "id": 52
     },
     {
@@ -836,14 +876,14 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps" } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 135 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 143 },
       "id": 53
     },
     {
       "title": "Route table and freeze",
       "type": "row",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 143 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 151 },
       "panels": [],
       "id": 54
     },
@@ -864,7 +904,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "short" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 144 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 152 },
       "id": 55
     },
     {
@@ -883,7 +923,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "short" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 144 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 152 },
       "id": 56
     },
     {
@@ -897,14 +937,14 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "s" } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 144 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 152 },
       "id": 57
     },
     {
       "title": "B2 second copy (W13; lag objective B5)",
       "type": "row",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 152 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 160 },
       "panels": [],
       "id": 58
     },
@@ -921,7 +961,7 @@
         { "expr": "vector(3600)", "legendFormat": "page 60 min", "refId": "C" }
       ],
       "fieldConfig": { "defaults": { "unit": "s" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 153 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 161 },
       "id": 59
     },
     {
@@ -935,7 +975,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 153 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 161 },
       "id": 60
     },
     {
@@ -964,7 +1004,7 @@
           }
         }
       },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 153 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 161 },
       "id": 61
     },
     {
@@ -983,7 +1023,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 161 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 169 },
       "id": 62
     },
     {
@@ -1007,7 +1047,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "s" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 161 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 169 },
       "id": 63
     },
     {
@@ -1021,7 +1061,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "ops" } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 161 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 169 },
       "id": 64
     },
     {
@@ -1035,7 +1075,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "ops" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 169 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 177 },
       "id": 65
     },
     {
@@ -1049,7 +1089,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "Bps" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 169 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 177 },
       "id": 66
     },
     {
@@ -1063,7 +1103,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 169 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 177 },
       "id": 67
     },
     {
@@ -1077,7 +1117,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 177 },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 185 },
       "id": 68
     },
     {
@@ -1098,7 +1138,7 @@
         { "expr": "vector(35)", "legendFormat": "overlong 35 d", "refId": "D" }
       ],
       "fieldConfig": { "defaults": { "unit": "d" } },
-      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 177 },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 185 },
       "id": 69
     },
     {
@@ -1122,7 +1162,7 @@
           }
         }
       },
-      "gridPos": { "h": 7, "w": 4, "x": 16, "y": 177 },
+      "gridPos": { "h": 7, "w": 4, "x": 16, "y": 185 },
       "id": 70
     },
     {
@@ -1146,7 +1186,7 @@
           }
         }
       },
-      "gridPos": { "h": 7, "w": 4, "x": 20, "y": 177 },
+      "gridPos": { "h": 7, "w": 4, "x": 20, "y": 185 },
       "id": 71
     },
     {
@@ -1161,7 +1201,7 @@
         { "expr": "vector(36)", "legendFormat": "stale line (active)", "refId": "B" }
       ],
       "fieldConfig": { "defaults": { "unit": "h" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 184 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 192 },
       "id": 72
     },
     {
@@ -1175,7 +1215,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 184 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 192 },
       "id": 73
     },
     {
@@ -1194,7 +1234,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "short" } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 184 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 192 },
       "id": 74
     },
     {
@@ -1213,7 +1253,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 192 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 200 },
       "id": 75
     },
     {
@@ -1238,7 +1278,7 @@
           }
         }
       },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 192 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 200 },
       "id": 76
     },
     {
@@ -1258,14 +1298,14 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "short" } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 192 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 200 },
       "id": 77
     },
     {
       "title": "Capacity and autoscaling",
       "type": "row",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 200 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 208 },
       "panels": [],
       "id": 78
     },
@@ -1277,7 +1317,7 @@
         { "expr": "count(fly_instance_up{app=~\"$storage_app\"})", "legendFormat": "reporting", "refId": "B" }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 201 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 209 },
       "id": 79
     },
     {
@@ -1296,7 +1336,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 201 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 209 },
       "id": 80
     },
     {
@@ -1320,7 +1360,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 201 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 209 },
       "id": 81
     },
     {
@@ -1334,7 +1374,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "s" } },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 209 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 217 },
       "id": 82
     },
     {
@@ -1348,14 +1388,14 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 209 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 217 },
       "id": 83
     },
     {
       "title": "Cost (estimates at list price)",
       "type": "row",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 217 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 225 },
       "panels": [],
       "id": 84
     },
@@ -1380,7 +1420,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "currencyUSD" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 218 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 226 },
       "id": 85
     },
     {
@@ -1394,7 +1434,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "currencyUSD" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 218 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 226 },
       "id": 86
     },
     {
@@ -1409,14 +1449,14 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "currencyUSD" } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 218 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 226 },
       "id": 87
     },
     {
       "title": "Usage by plan (accounting scheduler, OB3)",
       "type": "row",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 226 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 234 },
       "panels": [],
       "id": 88
     },
@@ -1431,7 +1471,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "bytes" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 227 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 235 },
       "id": 89
     },
     {
@@ -1445,7 +1485,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "bytes" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 227 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 235 },
       "id": 90
     },
     {
@@ -1459,7 +1499,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 227 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 235 },
       "id": 91
     },
     {
@@ -1476,7 +1516,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 235 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 243 },
       "id": 92
     },
     {
@@ -1490,7 +1530,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 235 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 243 },
       "id": 93
     },
     {
@@ -1504,14 +1544,14 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 235 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 243 },
       "id": 94
     },
     {
       "title": "Logs",
       "type": "row",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 243 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 251 },
       "panels": [],
       "id": 95
     },
@@ -1526,7 +1566,7 @@
         }
       ],
       "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 244 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 252 },
       "id": 96
     },
     {
@@ -1535,7 +1575,7 @@
       "datasource": { "type": "loki", "uid": "loki" },
       "targets": [{ "expr": "{service_name=~\"$service\"} |= \"git.hot_projects\"", "refId": "A" }],
       "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 244 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 252 },
       "id": 97
     }
   ]

@@ -26,6 +26,7 @@ import type {
   TargetLinkedGithubState,
   TargetMouseOptions,
   TargetReadOptions,
+  TargetRequestFailure,
   TargetState,
   TargetSurface,
   TargetTauBillingOperation,
@@ -108,6 +109,8 @@ type Session = {
   readonly consoleMessages: Array<{
     readonly text: string;
     readonly type: string;
+    /** The source the message names: the script that logged it, or the resource a network error is about. */
+    readonly url?: string;
   }>;
   readonly context: ProviderContext;
   /** The DevTools session of each page whose CPU profile `uiCpuProfile` is recording. */
@@ -121,6 +124,8 @@ type Session = {
     }
   >;
   readonly pageErrors: string[];
+  /** Requests the page made that failed or answered 4xx/5xx, as `observePage` saw them. */
+  readonly requestFailures: TargetRequestFailure[];
   readonly posthogEvents: Array<{ readonly event: string; readonly decoded: string }>;
   readonly posthogRequests: string[];
   readonly primary: TargetPage;
@@ -256,9 +261,26 @@ const observePage = (session: Session, page: TargetPage): void => {
     session.consoleMessages.push({
       text: message.text(),
       type: message.type(),
+      ...(message.location().url ? { url: message.location().url } : {}),
     }),
   );
   page.on('pageerror', (error) => session.pageErrors.push(error.message));
+  page.on('requestfailed', (request) =>
+    session.requestFailures.push({
+      url: request.url(),
+      resourceType: request.resourceType(),
+      failure: request.failure()?.errorText ?? 'failed',
+    }),
+  );
+  page.on('response', (response) => {
+    if (response.status() >= 400) {
+      session.requestFailures.push({
+        url: response.url(),
+        resourceType: response.request().resourceType(),
+        failure: `HTTP ${String(response.status())}`,
+      });
+    }
+  });
 };
 
 const disposeSession = async (session: Session): Promise<void> => {
@@ -412,6 +434,7 @@ export const uiOpenTarget: BrowserCommand<
     context,
     cpuProfiles: new Map(),
     pageErrors: [],
+    requestFailures: [],
     posthogEvents: [],
     posthogRequests: [],
     primary,
@@ -2421,6 +2444,20 @@ const startWorkerCpuProfiles = async (
 };
 
 /**
+ * Run a full V8 garbage collection in one page, so a count read next sees only what the page still references. Not a
+ * memory measurement: it only settles which objects a spec's weak references still reach.
+ */
+export const uiCollectGarbage: BrowserCommand<[surface?: TargetSurface]> = async (commandContext, surface) => {
+  const session = sessionFor(commandContext);
+  const cdp = await session.context.newCDPSession(pageFor(session, surface));
+  try {
+    await cdp.send('HeapProfiler.collectGarbage');
+  } finally {
+    await cdp.detach();
+  }
+};
+
+/**
  * Records a CPU profile of one target page through the DevTools protocol.
  *
  * `start` begins sampling at 100 µs; `stop` ends it and writes the profile as `artifactName`
@@ -3104,8 +3141,10 @@ export const uiReadTargetEvents: BrowserCommand<
     readonly consoleMessages: ReadonlyArray<{
       readonly text: string;
       readonly type: string;
+      readonly url?: string;
     }>;
     readonly pageErrors: readonly string[];
+    readonly requestFailures: readonly TargetRequestFailure[];
     readonly geospecWasm?: TargetDiagnostics['geospecWasm'];
     readonly geospecFault?: TargetDiagnostics['geospecFault'];
   }
@@ -3114,6 +3153,7 @@ export const uiReadTargetEvents: BrowserCommand<
   return {
     consoleMessages: session.consoleMessages,
     pageErrors: session.pageErrors,
+    requestFailures: session.requestFailures,
     geospecWasm: await session.geospecWasm,
     geospecFault: session.geospecFault,
   };
@@ -3130,6 +3170,7 @@ export const uiBrowserCommands = {
   uiClickTarget,
   uiCloseSecondaryTarget,
   uiCloseTarget,
+  uiCollectGarbage,
   uiCookies,
   uiCpuProfile,
   uiDragTarget,

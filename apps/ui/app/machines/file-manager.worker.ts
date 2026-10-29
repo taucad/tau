@@ -56,6 +56,8 @@ import {
 } from '#machines/file-manager.worker.revisions.js';
 import { dependencyMountRoot } from '#lib/bundled-types-tree.constants.js';
 import { readBuildIdentity } from '#lib/build-identity.js';
+import { isDesktopTarget } from '#lib/build-target.js';
+import { reportToApi } from '#runtime/observability/report-to-api.js';
 import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 
 /**
@@ -435,6 +437,19 @@ const revisionRegistry = createWorkerRevisionRegistry({
        * credential and never the Tau session — which is the whole of
        * `createGitRemoteTransport` (S34, P17, W12). */
       http: recorder.client,
+      /* Load-path audit: the open's hydrate settles after the pull attempt is reported, so it is reported on its own. */
+      onLfsFetch: ({ durationMilliseconds, ...detail }) => {
+        const apiBaseUrl = credential()?.apiBaseUrl;
+        if (apiBaseUrl === undefined || isDesktopTarget()) {
+          return;
+        }
+        reportToApi({
+          reportUrl: `${apiBaseUrl}/v1/telemetry/ingest`,
+          name: 'observability.lfsFetch',
+          duration: durationMilliseconds,
+          detail: { ...detail, placement: 'browser' },
+        });
+      },
     });
   },
   createCandidatePort: (projectId, credential, signal) =>

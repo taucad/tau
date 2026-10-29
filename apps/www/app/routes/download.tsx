@@ -7,28 +7,21 @@ import { MarketingPage } from '#app/marketing-page.js';
 import { loader as loadMarketingPage } from '#app/route-loader.server.js';
 export const loader: typeof loadMarketingPage = loadMarketingPage;
 
-function DownloadLabel({ platform }: { platform: keyof typeof desktopDownloads }): React.JSX.Element {
-  return (
-    <span
-      className='inline-flex items-center gap-2'
-      // oxlint-disable-next-line react/no-danger -- Only checked-in brand SVGs and product constants form this markup.
-      dangerouslySetInnerHTML={{ __html: desktopFileLabel(platform) }}
-    />
-  );
-}
+/**
+ * The icon and label are the link's own children, as the client relabels them, so a button's icon padding applies.
+ * @param platform - Published desktop build.
+ * @returns Inner HTML from checked-in brand SVGs and product constants only.
+ */
+const downloadLabel = (platform: keyof typeof desktopDownloads): { __html: string } => ({
+  __html: desktopFileLabel(platform),
+});
 
 export const content = (): React.JSX.Element => (
   <section className='band'>
     {intro({
       eyebrow: 'Tau Desktop',
-      title: (
-        <>
-          Your workshop.
-          <br />
-          On your computer.
-        </>
-      ),
-      body: 'Design with local files, native CAD kernels and your own coding agents. Choose Tau for Mac, Windows or Linux.',
+      title: 'Download Tau',
+      body: 'Tau Desktop is available for macOS, Windows and Linux. Work with local files, native CAD kernels and your own coding agents.',
       aside: (
         <div className='actions download-actions'>
           <div>
@@ -42,7 +35,7 @@ export const content = (): React.JSX.Element => (
               Choose your download {down}
             </SiteLink>
             <p className='fine' data-download-detail='host'>
-              Mac · Windows · Linux
+              macOS · Windows · Linux
             </p>
           </div>
           <div data-mac-intel hidden>
@@ -52,9 +45,9 @@ export const content = (): React.JSX.Element => (
               data-event='download'
               data-placement='download'
               data-download-platform='macIntel'
-            >
-              <DownloadLabel platform='macIntel' />
-            </SiteLink>
+              // oxlint-disable-next-line react/no-danger -- Only checked-in brand SVGs and product constants form this markup.
+              dangerouslySetInnerHTML={downloadLabel('macIntel')}
+            />
             <p className='fine' data-download-detail='macIntel'>
               {desktopDownloads.macIntel.detail}
             </p>
@@ -64,22 +57,24 @@ export const content = (): React.JSX.Element => (
     })}
     <div className='download-grid'>
       <article className='cell' data-platform-card='desktop'>
-        <p className='kicker'>Get started</p>
-        <h2>Make room for your next idea.</h2>
+        <p className='kicker'>Installation</p>
+        <h2>Install Tau</h2>
         <p data-install-instructions>
-          Choose the build for your computer below, extract the archive, then launch Tau and sign in.
+          Download the build for your computer, extract the archive, then open Tau and sign in.
         </p>
-        <p data-platform-note>Mac builds update automatically. Windows and Linux builds are updated manually.</p>
+        <p data-platform-note>
+          Mac builds update automatically. On Windows and Linux, download new versions from this page.
+        </p>
         <SiteLink className='text-link' href={`${sourceUrl}/releases`}>
           Release notes {out}
         </SiteLink>
       </article>
       <article className='cell' id='downloads'>
-        <p className='kicker'>All desktop downloads</p>
-        <h2>Pick your workspace.</h2>
+        <p className='kicker'>All downloads</p>
+        <h2>Choose your platform</h2>
         <div className='download-options'>
           <p className='fine'>
-            On a Mac, choose Apple silicon or Intel. Find your chip in Apple menu → About This Mac.
+            Not sure which Mac you have? Open Apple menu → About This Mac and check the Chip or Processor line.
           </p>
           <div className='actions'>
             {(['mac', 'macIntel', 'windows', 'linux'] as const).map((platform) => (
@@ -90,9 +85,9 @@ export const content = (): React.JSX.Element => (
                   data-download-platform={platform}
                   data-event='download'
                   data-placement='download'
-                >
-                  <DownloadLabel platform={platform} />
-                </SiteLink>
+                  // oxlint-disable-next-line react/no-danger -- Only checked-in brand SVGs and product constants form this markup.
+                  dangerouslySetInnerHTML={downloadLabel(platform)}
+                />
                 <p className='fine' data-download-detail={platform}>
                   {desktopDownloads[platform].detail}
                 </p>
@@ -101,7 +96,7 @@ export const content = (): React.JSX.Element => (
           </div>
         </div>
         <SiteLink className='text-link' href={`${appOrigin}/projects`} data-event='cta' data-placement='download-web'>
-          Open in browser {out}
+          Use Tau in your browser instead {out}
         </SiteLink>
       </article>
     </div>

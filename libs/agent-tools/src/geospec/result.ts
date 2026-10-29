@@ -540,6 +540,16 @@ const worstAssertionStatus = (test: GeoSpecTestCase): 'failed' | 'inconclusive' 
   return 'failed';
 };
 
+/**
+ * The runner's measured wall-clock cost of one claim, or nothing at all.
+ *
+ * An unmeasured claim has no duration. It is never reported as `0`, which is a
+ * measurement of a claim that cost nothing, so a missing, non-finite or
+ * negative value is dropped rather than coerced.
+ */
+const assertionDuration = (durationMs: number | undefined): Pick<AssertionRow, 'durationMs'> =>
+  durationMs !== undefined && Number.isFinite(durationMs) && durationMs >= 0 ? { durationMs } : {};
+
 /** One row per claim the test made, in order, so a passed claim stays visible beside a refused one. */
 const assertionRows = (test: GeoSpecTestCase): Pick<TestRow, 'assertions'> => {
   if (test.assertions.length === 0) {
@@ -563,6 +573,9 @@ const assertionRows = (test: GeoSpecTestCase): Pick<TestRow, 'assertions'> => {
         ordinal,
         status,
         matcher: assertion.kind,
+        ...(typeof capability === 'string' ? { capability } : {}),
+        ...(assertion.loadId === undefined ? {} : { subject: assertion.loadId }),
+        ...assertionDuration(assertion.durationMs),
         ...(first === undefined ? {} : { code: first.code, message: first.message }),
         ...(limit === undefined ? {} : { limit }),
       };

@@ -100,6 +100,12 @@ export type AgentLauncherOptions = Readonly<{
    * other verb is served.
    */
   admitting?: ((run: Readonly<{ chatId: string; runId: string }>) => boolean) | undefined;
+  /**
+   * Told each time a chat this process leads becomes quiescent (`true`) or stops being so (`false`), after the
+   * leadership has heard it (`CreateTauAgentHostOptions.onChatQuiescent`). A run's rows are settled here when it is
+   * `true`: what an observer reads them at. It runs synchronously in the host and must not throw.
+   */
+  onChatQuiescent?: ((chatId: string, quiescent: boolean) => void) | undefined;
 }>;
 
 /** A running launcher: one per project, in any process. @public */
@@ -623,6 +629,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     },
     onChatQuiescent: (chatId, quiescent) => {
       leading.port?.quiescent(chatId, quiescent);
+      options.onChatQuiescent?.(chatId, quiescent);
     },
   });
 

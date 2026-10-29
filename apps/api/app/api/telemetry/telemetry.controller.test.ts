@@ -35,6 +35,9 @@ function createMockMetrics() {
     syncClientLag: { record: vi.fn() },
     syncClientAttemptDuration: { record: vi.fn() },
     syncClientPending: { record: vi.fn() },
+    syncClientLfsDuration: { record: vi.fn() },
+    syncClientLfsObjects: { add: vi.fn() },
+    syncClientLfsBytes: { add: vi.fn() },
   };
 }
 
@@ -143,7 +146,14 @@ describe('TelemetryController', () => {
           {
             name: IngestEntryName.SYNC_ATTEMPT,
             duration: 120,
-            detail: { direction: 'push', outcome: 'ok', placement: 'browser', lagMilliseconds: 2500, pending: 3 },
+            detail: {
+              direction: 'push',
+              outcome: 'ok',
+              placement: 'browser',
+              lagMilliseconds: 2500,
+              lagSince: 'request',
+              pending: 3,
+            },
           },
           {
             name: IngestEntryName.SYNC_ATTEMPT,
@@ -169,12 +179,51 @@ describe('TelemetryController', () => {
         [0, { direction: 'pull', outcome: 'offline', 'agent.placement': 'desktop' }],
       ]);
       expect(mockMetrics.syncClientLag.record.mock.calls).toEqual([
-        [2.5, { 'agent.placement': 'browser' }],
-        [86_400, { 'agent.placement': 'daemon' }],
+        [2.5, { 'agent.placement': 'browser', 'sync.lag.since': 'request' }],
+        /* A client that predates `lagSince` dated its lag from a change. */
+        [86_400, { 'agent.placement': 'daemon', 'sync.lag.since': 'change' }],
       ]);
       expect(mockMetrics.syncClientPending.record.mock.calls).toEqual([
         [3, { 'agent.placement': 'browser' }],
         [10_000, { 'agent.placement': 'daemon' }],
+      ]);
+    });
+
+    it('should record a tree read’s large-object fetch by cache state and source, minting no series for an unused source', () => {
+      ingestSignedIn({
+        entries: [
+          {
+            name: IngestEntryName.LFS_FETCH,
+            duration: 17_500,
+            detail: {
+              placement: 'browser',
+              networkObjects: 295,
+              networkBytes: 69_960_000,
+              localObjects: 0,
+              localBytes: 0,
+            },
+          },
+          {
+            name: IngestEntryName.LFS_FETCH,
+            duration: 1e12,
+            detail: { placement: 'browser', networkObjects: 1e9, networkBytes: 1e15, localObjects: 3, localBytes: 300 },
+          },
+        ],
+      });
+
+      expect(mockMetrics.syncClientLfsDuration.record.mock.calls).toEqual([
+        [17.5, { 'agent.placement': 'browser', cache: 'cold' }],
+        [3600, { 'agent.placement': 'browser', cache: 'partial' }],
+      ]);
+      expect(mockMetrics.syncClientLfsObjects.add.mock.calls).toEqual([
+        [295, { 'agent.placement': 'browser', source: 'network' }],
+        [100_000, { 'agent.placement': 'browser', source: 'network' }],
+        [3, { 'agent.placement': 'browser', source: 'local' }],
+      ]);
+      expect(mockMetrics.syncClientLfsBytes.add.mock.calls).toEqual([
+        [69_960_000, { 'agent.placement': 'browser', source: 'network' }],
+        [64 * 1024 * 1024 * 1024, { 'agent.placement': 'browser', source: 'network' }],
+        [300, { 'agent.placement': 'browser', source: 'local' }],
       ]);
     });
   });
@@ -459,6 +508,10 @@ describe('TelemetryController', () => {
       ['an unknown placement', { direction: 'push', outcome: 'ok', placement: 'mars' }],
       ['a fractional queue depth', { direction: 'push', outcome: 'ok', placement: 'browser', pending: 1.5 }],
       ['a negative lag', { direction: 'push', outcome: 'ok', placement: 'browser', lagMilliseconds: -1 }],
+      [
+        'an unknown lag origin',
+        { direction: 'push', outcome: 'ok', placement: 'browser', lagMilliseconds: 1, lagSince: 'mint' },
+      ],
     ])('should reject a sync attempt with %s', (_label, detail) => {
       expect(() =>
         // oxlint-disable-next-line @typescript-eslint/no-unsafe-return -- pipe.transform return type is any from NestJS ValidationPipe

@@ -1849,6 +1849,9 @@ importers:
       '@sentry/node':
         specifier: 'catalog:'
         version: 10.75.0(@opentelemetry/core@2.12.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.223.0(@opentelemetry/api@1.9.1))
+      '@taucad/agent-observability':
+        specifier: workspace:*
+        version: link:../../libs/agent-observability
       '@taucad/api-extractor':
         specifier: workspace:*
         version: link:../../libs/api-extractor
@@ -2731,6 +2734,9 @@ importers:
       '@taucad/agent-host':
         specifier: workspace:*
         version: link:../../packages/agent-host
+      '@taucad/agent-observability':
+        specifier: workspace:*
+        version: link:../../libs/agent-observability
       '@taucad/agent-tools':
         specifier: workspace:*
         version: link:../../libs/agent-tools
@@ -3352,6 +3358,9 @@ importers:
       '@opentelemetry/sdk-trace-base':
         specifier: 'catalog:'
         version: 2.12.0(@opentelemetry/api@1.9.1)
+      fake-indexeddb:
+        specifier: 'catalog:'
+        version: 6.2.5
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
@@ -3691,6 +3700,9 @@ importers:
       '@earendil-works/pi-ai':
         specifier: 'catalog:'
         version: 1.4.0(@aws-sdk/credential-provider-node@3.972.86)(@modelcontextprotocol/sdk@1.32.1(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(@smithy/signature-v4@5.7.4)(undici@8.11.2)(ws@8.22.0)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
+      '@earendil-works/pi-telemetry':
+        specifier: 'catalog:'
+        version: 1.4.0
       '@msgpack/msgpack':
         specifier: 'catalog:'
         version: 3.1.3

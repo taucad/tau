@@ -62,7 +62,13 @@ import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { hydrateLease } from '#api/git/store/lease.js';
 import type * as LeaseModule from '#api/git/store/lease.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
-import { decodeManifest, encodeManifest, tombstoneManifest } from '#api/git/store/manifest.js';
+import {
+  compactionCommitter,
+  decodeManifest,
+  encodeManifest,
+  succeedManifest,
+  tombstoneManifest,
+} from '#api/git/store/manifest.js';
 import type {
   CommitToken,
   ManifestBytes,
@@ -921,6 +927,185 @@ describe('storage receipts and the repair after a lost one (DC1)', () => {
     /* The LFS reachability pass ran inside the derivation: every pointer this
        walk did not reach is marked with the moment it was first unreachable. */
     expect(updates.some((update) => 'unreachableAt' in update)).toBe(true);
+  }, 60_000);
+});
+
+/**
+ * A push's receipt against tau-storage's deferred compaction of it (review of
+ * push latency F2, finding 3): whichever order the two receipts reach the API
+ * in, and when the compaction's never arrives, the push is announced once and
+ * its derived state lands at the compacted generation.
+ */
+describe('a push receipt and the deferred compaction after it', () => {
+  const receiptKey = parseSigningKey(developmentSigningKeyJson('receipt'), 'receipt');
+
+  /** A repository at the push's generation 2, and the compaction that may follow it at 3. */
+  const pushedRepository = async (): Promise<{
+    store: RepositoryStore;
+    pushed: Uint8Array<ArrayBuffer>;
+    head: string;
+    /** Commits generation 3 over the push, as `committedBy`: a compaction unless told otherwise. */
+    follow: (committedBy?: string) => Promise<Uint8Array<ArrayBuffer>>;
+  }> => {
+    const store = memoryStore();
+    const locator = repositoryLocator({ ownerId, projectId });
+    const client = scratch('compaction-receipt-client');
+    git(client, 'init', '--quiet', '--initial-branch=main', '.');
+    git(client, 'config', 'user.name', 'F2');
+    git(client, 'config', 'user.email', 'f2@tau.test');
+    for (const revision of [1, 2]) {
+      writeFileSync(path.join(client, 'main.scad'), `cube(${String(revision)});\n`);
+      git(client, 'add', '.');
+      git(client, 'commit', '--quiet', '-m', `revision ${String(revision)}`);
+      // oxlint-disable-next-line no-await-in-loop -- each push builds on the generation before it
+      const lease = await hydrateLease({ store, locator, parentDirectory: scratch('compaction-receipt-lease') });
+      try {
+        execFileSync('git', ['push', lease.directory, 'main'], {
+          cwd: client,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: gitEnvironment,
+        });
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        await commitLease({ store, lease, committedBy: ownerId });
+      } finally {
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        await lease.dispose();
+      }
+    }
+    const read = await store.readManifest(locator);
+    if (read === undefined) {
+      throw new Error('nothing committed');
+    }
+    const pushed = read.manifest;
+    return {
+      store,
+      pushed,
+      head: git(client, 'rev-parse', 'main').trim(),
+      follow: async (committedBy = compactionCommitter) => {
+        const base = decodeManifest(pushed);
+        const bytes = encodeManifest(succeedManifest(base, { refs: base.refs, packs: base.packs, committedBy }));
+        await store.commitManifest(locator, bytes, read.token);
+        return bytes;
+      },
+    };
+  };
+
+  const receiptOf = (bytes: Uint8Array<ArrayBuffer>, moved: StorageReceiptFacts['movedRefs']): string => {
+    const manifest = decodeManifest(bytes as ManifestBytes);
+    return signReceipt(
+      {
+        rid: randomBytes(16).toString('hex'),
+        kind: 'commit',
+        owner: ownerId,
+        project: projectId,
+        generation: manifest.generation,
+        incarnation: manifest.incarnation,
+        manifestSha256: createHash('sha256').update(bytes).digest('hex'),
+        movedRefs: moved,
+        materializedTags: [],
+        reachableLfsOids: [],
+      },
+      { key: receiptKey },
+    );
+  };
+
+  it('should apply the push receipt in the usual order, and the compaction receipt after it without a second announcement', async () => {
+    const repository = await pushedRepository();
+    const row: GitRow = { generation: 1, derivedGeneration: 1, storageBytes: 0 };
+    const durableEvents = mock<DurableEventsService>();
+    const service = createService(repository.store, databaseStub(row, { failTransaction: false }), { durableEvents });
+    const moved = [{ ref: 'refs/heads/main', after: repository.head }];
+
+    expect(await service.applyReceipt(receiptOf(repository.pushed, moved), access)).toBe('applied');
+    const compacted = await repository.follow();
+    expect(await service.applyReceipt(receiptOf(compacted, []))).toBe('applied');
+    await settledBoth(service);
+
+    expect(row).toMatchObject({ generation: 3, derivedGeneration: 3 });
+    expect(durableEvents.appendRevision.mock.calls).toEqual([
+      [
+        expect.objectContaining({
+          generation: 2,
+          refs: ['refs/heads/main'],
+          heads: { 'refs/heads/main': repository.head },
+        }),
+      ],
+    ]);
+  }, 60_000);
+
+  it('should apply a push receipt the compaction overtook, at the compacted generation, and announce the push once', async () => {
+    const repository = await pushedRepository();
+    const row: GitRow = { generation: 1, derivedGeneration: 1, storageBytes: 0 };
+    const durableEvents = mock<DurableEventsService>();
+    const service = createService(repository.store, databaseStub(row, { failTransaction: false }), { durableEvents });
+    const moved = [{ ref: 'refs/heads/main', after: repository.head }];
+    const compacted = await repository.follow();
+
+    /* The compaction's receipt first, then the push's, which its manifest no longer matches. */
+    expect(await service.applyReceipt(receiptOf(compacted, []))).toBe('applied');
+    expect(await service.applyReceipt(receiptOf(repository.pushed, moved), access)).toBe('applied');
+    await settledBoth(service);
+
+    expect(row).toMatchObject({ generation: 3, derivedGeneration: 3 });
+    expect(durableEvents.appendRevision.mock.calls).toEqual([
+      [
+        expect.objectContaining({
+          generation: 3,
+          refs: ['refs/heads/main'],
+          heads: { 'refs/heads/main': repository.head },
+        }),
+      ],
+    ]);
+  }, 60_000);
+
+  it('should apply a push receipt the compaction overtook when the compaction receipt never arrives', async () => {
+    const repository = await pushedRepository();
+    const row: GitRow = { generation: 1, derivedGeneration: 1, storageBytes: 0 };
+    const durableEvents = mock<DurableEventsService>();
+    const service = createService(repository.store, databaseStub(row, { failTransaction: false }), { durableEvents });
+    await repository.follow();
+
+    const outcome = await service.applyReceipt(
+      receiptOf(repository.pushed, [{ ref: 'refs/heads/main', after: repository.head }]),
+      access,
+    );
+    await settledBoth(service);
+
+    expect(outcome).toBe('applied');
+    expect(row).toMatchObject({ generation: 3, derivedGeneration: 3 });
+    expect(durableEvents.appendRevision).toHaveBeenCalledOnce();
+  }, 60_000);
+
+  it('should still find a push receipt stale when a later generation is not a compaction', async () => {
+    const repository = await pushedRepository();
+    const row: GitRow = { generation: 1, derivedGeneration: 1, storageBytes: 0 };
+    const durableEvents = mock<DurableEventsService>();
+    const service = createService(repository.store, databaseStub(row, { failTransaction: false }), { durableEvents });
+    await repository.follow(ownerId);
+
+    const outcome = await service.applyReceipt(
+      receiptOf(repository.pushed, [{ ref: 'refs/heads/main', after: repository.head }]),
+      access,
+    );
+    await settledBoth(service);
+
+    expect(outcome).toBe('stale');
+    expect(row).toMatchObject({ generation: 1, derivedGeneration: 1 });
+    expect(durableEvents.appendRevision).not.toHaveBeenCalled();
+  }, 60_000);
+
+  it('should find a push receipt stale when its moved ref no longer holds the head it names', async () => {
+    const repository = await pushedRepository();
+    const row: GitRow = { generation: 1, derivedGeneration: 1, storageBytes: 0 };
+    const service = createService(repository.store, databaseStub(row, { failTransaction: false }));
+    await repository.follow();
+
+    expect(
+      await service.applyReceipt(
+        receiptOf(repository.pushed, [{ ref: 'refs/heads/main', after: 'a'.repeat(40) }]),
+        access,
+      ),
+    ).toBe('stale');
   }, 60_000);
 });
 

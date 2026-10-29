@@ -223,7 +223,9 @@ const main = async (): Promise<void> => {
       await page.getByLabel('Project Name *', { exact: true }).fill('Qualification retained project');
       await page.locator('label[for="kernel-build123d"]').click();
       await page.getByRole('button', { name: /^Create Project/u }).click();
-      await page.getByRole('tab', { name: 'main.py', exact: true }).last().click();
+      // The viewer and source panes share a filename; explicitly open the source editor.
+      await page.getByRole('tab', { name: 'main.py', exact: true }).first().click({ button: 'right' });
+      await page.getByRole('menuitem', { name: 'Open in Editor', exact: true }).click();
       // Focus the visible CodeMirror content, not its surrounding scroll container.
       const editor = page.locator('.editor-container:visible .cm-editor:visible').last();
       await editor.waitFor({ state: 'visible' });

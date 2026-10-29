@@ -44,6 +44,23 @@ const gatewayRetryAfterSeconds = (error: { type?: unknown; details?: unknown } |
   return typeof error?.type === 'string' ? fundedRetryAfterSeconds.get(error.type) : undefined;
 };
 
+/**
+ * A gateway refusal as the server log keeps it: its status, type and details,
+ * without the message its client reads.
+ *
+ * @param status - The refusal's HTTP status.
+ * @param response - The typed envelope.
+ * @returns The loggable fields.
+ */
+const gatewayRefusalOf = (status: number, response: unknown): Record<string, unknown> => {
+  const error: unknown = typeof response === 'object' && response !== null ? Reflect.get(response, 'error') : undefined;
+  if (typeof error !== 'object' || error === null) {
+    return { status };
+  }
+  const { message: _message, ...rest } = error as Record<string, unknown>;
+  return { status, ...rest };
+};
+
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpExceptionFilter.name);
@@ -75,8 +92,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
       const gatewayStatus = exception.getStatus();
       const gatewayResponse = exception.getResponse();
       /* Structured, not interpolated: pino-pretty reads every `{…}` in a message as a
-       * format token, so an interpolated envelope logged as `{"type":"error","error":}`. */
-      this.logger.warn({ gatewayResponse, requestId }, 'Model gateway refusal');
+       * format token, so an interpolated envelope logged as `{"type":"error","error":}`.
+       * The message is the client's only: a direct-route refusal carries the provider's
+       * sentence, which can quote the request it rejected. */
+      this.logger.warn(
+        { gatewayRefusal: gatewayRefusalOf(gatewayStatus, gatewayResponse), requestId },
+        'Model gateway refusal',
+      );
       if (requestId) {
         void response.header(httpHeader.requestId, requestId);
       }

@@ -1434,11 +1434,14 @@ export const TauMetrics = {
   syncClientLag: defineHistogram({
     name: 'tau.sync.client.lag',
     unit: 's',
-    description: 'Client-reported time from the first unsynced mint to the server acknowledging it',
+    description:
+      'Client-reported time from the first unsynced change (a mint, a record change, or the push request itself) to the server acknowledging it, on every acknowledged push',
     /* Dense through 3–30 s, where a save's debounce, a push and one retry land. */
     buckets: [0.5, 1, 2, 3, 4, 5, 7.5, 10, 15, 20, 30, 60, 120, 300, 900, 3600],
     attributes: z.object({
       'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
+      /* What dated the lag: `request` is a push nothing dated, which measures only its own duration. */
+      'sync.lag.since': z.enum(['change', 'queue', 'request']),
     }),
   }),
 
@@ -1462,6 +1465,44 @@ export const TauMetrics = {
     buckets: [0, 1, 2, 5, 10, 25, 50, 100, 500],
     attributes: z.object({
       'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
+    }),
+  }),
+
+  /*
+   * The large-object phase of a client tree read that fetched from the remote: an open's hydrate,
+   * which the pull attempt above settles before (load-path audit). `cache` is cold when nothing was
+   * local yet, partial when some objects were; a read that fetched nothing is not reported.
+   */
+  syncClientLfsDuration: defineHistogram({
+    name: 'tau.sync.client.lfs.duration',
+    unit: 's',
+    description:
+      'Client-reported wall time of one tree read’s large-object phase (local reads, batch calls and transfers), on reads that fetched from the remote',
+    buckets: [0.5, 1, 2, 3, 5, 7.5, 10, 15, 20, 30, 60, 120, 300, 900],
+    attributes: z.object({
+      'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
+      cache: z.enum(['cold', 'partial']),
+    }),
+  }),
+
+  syncClientLfsObjects: defineCounter({
+    name: 'tau.sync.client.lfs.objects',
+    unit: '{object}',
+    description:
+      'Large objects a client tree read resolved, by whether they came from the remote or the local store, on reads that fetched from the remote',
+    attributes: z.object({
+      'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
+      source: z.enum(['network', 'local']),
+    }),
+  }),
+
+  syncClientLfsBytes: defineCounter({
+    name: 'tau.sync.client.lfs.bytes',
+    unit: 'By',
+    description: 'Large-object bytes a client tree read resolved, by source, on reads that fetched from the remote',
+    attributes: z.object({
+      'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
+      source: z.enum(['network', 'local']),
     }),
   }),
 

@@ -20,6 +20,7 @@ import {
 } from '#api/llm/upstream-refusal.js';
 import { createProviderAccountFrameFilter } from '#api/llm/provider-account-stream.js';
 import type { ProviderTerminalFailure } from '#api/llm/provider-account-stream.js';
+import { errorDiagnostic, providerDiagnostic, textMarker } from '#api/llm/provider-diagnostic.js';
 import type {
   ModelInvocationIntent,
   ModelInvocationResult,
@@ -97,7 +98,8 @@ export class DirectModelInvocationService implements ModelInvocationService {
     if (!response.ok) {
       const { body, loggedBody } = await readUpstreamRefusal(response);
       // The refusal is undiagnosable without the provider's own body, and the body can
-      // name the account behind the key, so it stays here and never joins the envelope.
+      // name the account behind the key, so its content-free projection stays here and
+      // never joins the envelope.
       this.logger.warn(
         {
           providerId: route.providerId,
@@ -172,10 +174,9 @@ export class DirectModelInvocationService implements ModelInvocationService {
    * `response.failed` or an `error` event leaves nothing behind (R8).
    *
    * Logged: the route, the provider's request id, the frame's code or type, and
-   * the provider's own sentence clamped to 500 characters the way a relayed
-   * reason is. Generated output is never read, but a provider sentence can
-   * quote a fragment of the request it rejected, so this line is operator
-   * evidence and not safe to forward further.
+   * the length and digest of the provider's sentence. The sentence itself can
+   * quote a fragment of the request it rejected, so it never reaches the log;
+   * the request id finds it in the provider's own console.
    *
    * @param input - The route the request took, the provider's own identifier
    * for the call when it sent one, and what the terminal frame said about itself.
@@ -190,7 +191,7 @@ export class DirectModelInvocationService implements ModelInvocationService {
     this.logger.error(
       `Provider stream failed for ${input.providerId} ${input.modelId} (${failure.code ?? failure.type ?? 'no code'})` +
         `${input.requestId === undefined ? '' : ` request ${input.requestId}`}: ` +
-        `${failure.message?.slice(0, 500) ?? 'no message'}`,
+        `${failure.message === undefined ? 'no message' : textMarker(failure.message)}`,
     );
   }
 
@@ -219,9 +220,11 @@ export class DirectModelInvocationService implements ModelInvocationService {
         return this.providerAccountExhausted(providerId, refusal);
       }
     }
+    // A LangChain error's message and stack embed the provider's body, which can quote the request.
+    const body = thrownProviderBody(error);
     this.logger.error(
-      'The configured model provider failed before the first helper chunk',
-      error instanceof Error ? error.stack : String(error),
+      `The configured model provider failed before the first helper chunk (${errorDiagnostic(error)}): ` +
+        `${body === undefined ? 'no provider body' : providerDiagnostic(body)}`,
     );
     return new LlmGatewayError(
       HttpStatus.SERVICE_UNAVAILABLE,

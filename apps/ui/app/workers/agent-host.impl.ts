@@ -54,6 +54,9 @@ import { createResidentPlacement } from '#workers/agent-host-placement.js';
 import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { createIdleRuntimeClient } from '#workers/idle-runtime-client.js';
+import { createWorkerEvidence } from '#workers/agent-host-evidence.js';
+import type { HostEvidence } from '@taucad/agent-observability/host-evidence';
+import { readBuildRelease } from '#lib/build-identity.js';
 import { forwardOperations } from '#telemetry/worker-forwarding.js';
 import type { ForwardEntry, WorkerTelemetry } from '#telemetry/worker-forwarding.js';
 import type { IdleRuntimeClient } from '#workers/idle-runtime-client.js';
@@ -769,8 +772,13 @@ const composeProjectHost = async (
   /* T3: set as a release drains. A new start is refused HOST_CLOSED; another tab that forwarded it keeps it for this
    * host's release or a successor (M2, C11). */
   let draining = false;
+  /* T10: agent-observability summaries, composed once the launcher whose rows it reads exists. */
+  let evidence: HostEvidence | undefined;
   const launcher: AgentLauncher = createAgentLauncher({
     admitting: () => !draining,
+    onChatQuiescent: (chatId, quiescent) => {
+      evidence?.onChatQuiescent(chatId, quiescent);
+    },
     chats: createBrowserChatStore({
       projectId: provide.authority.projectId,
       /* Per incarnation: a released host drains beside its successor in this worker, and M2 never hears its own
@@ -860,6 +868,17 @@ const composeProjectHost = async (
       };
     },
   });
+  /* Only for a signed-in account; the server's answer, never this flag, decides whether anything is sent. */
+  if (provide.principal !== undefined) {
+    evidence = createWorkerEvidence({
+      apiBaseUrl: provide.gatewayBaseUrl.replace(/\/+$/u, ''),
+      principal: provide.principal,
+      projectId: provide.authority.projectId,
+      hostBuild: readBuildRelease(),
+      readEvents: async (input) => launcher.host.readEvents(input),
+    });
+    opened(() => evidence?.close());
+  }
   const channels = new Set<ReturnType<typeof serveAgentChannel>>();
 
   return {
@@ -963,6 +982,7 @@ const composeProjectHost = async (
     },
     close: async () => {
       diagnose('host.closed');
+      evidence?.close();
       for (const channel of channels) {
         channel.dispose('project host closed');
       }

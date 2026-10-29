@@ -186,6 +186,58 @@ export const agentEvidenceOutbox = pgTable(
   ],
 );
 
+/**
+ * An admitted erasure of an account's or a project's agent evidence (blueprint
+ * T13). Content-free, and deliberately **without** foreign keys: it is written
+ * before the account cascade or the project retirement it precedes, and has to
+ * outlive both, because afterwards nothing else says which Langfuse traces were
+ * theirs. One row per subject; a second request for it is the same erasure.
+ */
+export const agentEvidenceErasure = pgTable(
+  'agent_evidence_erasure',
+  {
+    id: text('id').primaryKey(),
+    scope: text('scope').$type<'account' | 'project'>().notNull(),
+    /** The account or project id the erasure covers. */
+    subjectId: text('subject_id').notNull(),
+    admittedAt: timestamp('admitted_at', { withTimezone: true }).defaultNow().notNull(),
+    /** Set once every trace it named was read back absent. */
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('agent_evidence_erasure_subject_idx').on(table.scope, table.subjectId),
+    check('agent_evidence_erasure_scope_check', sql`${table.scope} IN ('account', 'project')`),
+  ],
+);
+
+/**
+ * One Langfuse trace an erasure must remove, copied from the backlog when the
+ * erasure was admitted. A trace is deleted, then read back after delivery's
+ * visibility window; only an absent read settles it.
+ */
+export const agentEvidenceErasureTrace = pgTable(
+  'agent_evidence_erasure_trace',
+  {
+    erasureId: text('erasure_id')
+      .notNull()
+      .references(() => agentEvidenceErasure.id, { onDelete: 'cascade' }),
+    traceId: text('trace_id').notNull(),
+    state: text('state').$type<'pending' | 'requested' | 'absent'>().default('pending').notNull(),
+    attempts: integer('attempts').default(0).notNull(),
+    leaseOwner: text('lease_owner'),
+    /** A lease's end while held; otherwise when the trace is next due. */
+    dueAt: timestamp('due_at', { withTimezone: true }).defaultNow().notNull(),
+    requestedAt: timestamp('requested_at', { withTimezone: true }),
+    /** Bounded code for the last outcome (e.g. `http-503`); never vendor text. */
+    reason: text('reason'),
+  },
+  (table) => [
+    primaryKey({ columns: [table.erasureId, table.traceId] }),
+    index('agent_evidence_erasure_trace_due_idx').on(table.state, table.dueAt),
+    check('agent_evidence_erasure_trace_state_check', sql`${table.state} IN ('pending', 'requested', 'absent')`),
+  ],
+);
+
 /** Short-lived browser-approved CLI sign-in requests, owned by Better Auth. */
 export const deviceCode = pgTable(
   'device_code',

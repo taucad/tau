@@ -4,11 +4,12 @@ import { DatabaseModule } from '#database/database.module.js';
 import { EvidenceIngressController } from '#api/agent-observability/evidence-ingress.controller.js';
 import { EvidenceIngressService } from '#api/agent-observability/evidence-ingress.service.js';
 import { EvidenceDeliveryService } from '#api/agent-observability/evidence-delivery.service.js';
+import { EvidenceErasureService } from '#api/agent-observability/evidence-erasure.service.js';
 import { ModelInvocationEvidenceRecorder } from '#api/agent-observability/model-invocation-recorder.service.js';
 
 /**
  * Agent-evidence ingress, receipt and delivery backlog (blueprint T06), and
- * its delivery to Langfuse (T08). Global so the model invocation owner can
+ * its delivery to Langfuse (T08) and erasure from it (T13). Global so the model invocation owner can
  * take the API-reported attempt recorder (T07) without importing this module. Purpose
  * authority comes from the global `TelemetryPurposeModule`, which the API module
  * registers first.
@@ -21,7 +22,12 @@ export class AgentObservabilityModule {
       global: true,
       imports: [DatabaseModule],
       controllers: [EvidenceIngressController],
-      providers: [EvidenceIngressService, EvidenceDeliveryService, ModelInvocationEvidenceRecorder],
+      providers: [
+        EvidenceIngressService,
+        EvidenceDeliveryService,
+        EvidenceErasureService,
+        ModelInvocationEvidenceRecorder,
+      ],
       exports: [ModelInvocationEvidenceRecorder],
     };
   }

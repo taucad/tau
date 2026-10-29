@@ -19,6 +19,12 @@ export type SendOutcome =
 /** What one reconciliation read established; `unavailable` is never absence. */
 export type FindOutcome = 'present' | 'absent' | 'unavailable';
 
+/**
+ * What one bulk trace deletion request established. Langfuse queues the
+ * deletion, so `requested` is not removal: only a later read can say.
+ */
+export type DeleteOutcome = Readonly<{ kind: 'requested' }> | Readonly<{ kind: 'retry'; reason: string }>;
+
 /** Connection failures that precede any request byte reaching the vendor. */
 const unsentCodes = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ERR_INVALID_URL', 'CERT_HAS_EXPIRED']);
 
@@ -168,6 +174,58 @@ export class LangfuseClient {
         url.searchParams.set('cursor', cursor);
       }
       return 'unavailable';
+    } catch {
+      return 'unavailable';
+    }
+  }
+
+  /**
+   * Ask Langfuse to delete whole traces, with every observation and score on
+   * them. Deletion is idempotent, so any failure is retried later.
+   *
+   * @param traceIds - The traces to delete, at most a bounded batch.
+   * @param signal - Aborts the request.
+   * @returns Requested, or retry with a bounded reason.
+   */
+  public async deleteTraces(traceIds: readonly string[], signal?: AbortSignal): Promise<DeleteOutcome> {
+    const deadline = AbortSignal.timeout(this.timeoutMilliseconds);
+    try {
+      const response = await this.fetcher(new URL('/api/public/traces', this.target.baseUrl), {
+        method: 'DELETE',
+        headers: { authorization: authorization(this.target), 'content-type': 'application/json' },
+        body: JSON.stringify({ traceIds }),
+        signal: signal === undefined ? deadline : AbortSignal.any([deadline, signal]),
+        redirect: 'error',
+      });
+      return response.ok ? { kind: 'requested' } : { kind: 'retry', reason: `http-${response.status}` };
+    } catch (error) {
+      return { kind: 'retry', reason: classifySendError(error).kind === 'not-sent' ? 'unreachable' : 'transport' };
+    }
+  }
+
+  /**
+   * Whether a trace is still readable, to confirm a requested deletion.
+   *
+   * @param traceId - The trace.
+   * @param signal - Aborts the read.
+   * @returns Present, absent (404) or unavailable.
+   */
+  public async traceExists(traceId: string, signal?: AbortSignal): Promise<FindOutcome> {
+    const deadline = AbortSignal.timeout(this.timeoutMilliseconds);
+    try {
+      const response = await this.fetcher(
+        new URL(`/api/public/traces/${encodeURIComponent(traceId)}`, this.target.baseUrl),
+        {
+          headers: { authorization: authorization(this.target) },
+          signal: signal === undefined ? deadline : AbortSignal.any([deadline, signal]),
+          redirect: 'error',
+        },
+      );
+      await response.body?.cancel();
+      if (response.status === 404) {
+        return 'absent';
+      }
+      return response.ok ? 'present' : 'unavailable';
     } catch {
       return 'unavailable';
     }

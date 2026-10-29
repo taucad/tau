@@ -26,8 +26,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
 const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
 const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
-// oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
-const csharpAssets = createCsharpLanguageAssets(process.env['TAU_CSHARP_LANGUAGE_STAGE']);
+const csharpAssets = createCsharpLanguageAssets(path.resolve(__dirname, '../../../out/csharp-language/stage'));
 
 /**
  * Serve build of `apps/ui` — the SPA a daemon hands to a browser.

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { Plugin } from 'vite';
 import type { CsharpLanguageAssets } from '@taucad/csharp-language/protocol';
@@ -23,8 +23,8 @@ const contentTypes: Readonly<Record<string, string>> = {
 
 /**
  * Admit the C# language server stage that `csharp-language:prepare` writes, verifying every file against its
- * manifest, and serve it content-addressed under `/csharp-language/<manifest sha256>/`. Without a stage the build
- * carries no C# language service and `.cs` files keep syntax editing only.
+ * manifest, and serve it content-addressed under `/csharp-language/<manifest sha256>/`. Every UI build and dev target
+ * depends on that prepare step, so a missing stage is an error; only test runs pass no stage and go without the service.
  */
 export const createCsharpLanguageAssets = (
   stage: string | undefined,
@@ -32,7 +32,10 @@ export const createCsharpLanguageAssets = (
   const files = new Map<string, Uint8Array<ArrayBuffer>>();
   let assets: CsharpLanguageAssets | undefined;
   let prefix = '';
-  if (stage) {
+  if (stage !== undefined) {
+    if (!existsSync(path.join(stage, manifestName))) {
+      throw new Error(`The C# language server is not staged at ${stage}; run \`pnpm nx run csharp-language:prepare\`.`);
+    }
     const manifestBytes = Uint8Array.from(readFileSync(path.join(stage, manifestName)));
     const manifest = JSON.parse(new TextDecoder().decode(manifestBytes)) as Manifest | undefined;
     const entries = Array.isArray(manifest?.files) ? (manifest.files as ManifestFile[]) : [];

@@ -31,7 +31,7 @@ const diagnosticsOwner = 'csharp-lsp';
 const diagnosticsDelayMilliseconds = 250;
 const workspaceRefreshDelayMilliseconds = 500;
 
-/** The bundle this build staged (`TAU_CSHARP_LANGUAGE_STAGE`); absent builds keep C# syntax editing only. */
+/** The bundle this build carries from `csharp-language:prepare`; absent only in test runs, which keep syntax editing. */
 export const stagedCsharpLanguageAssets = (): CsharpLanguageAssets | undefined =>
   typeof tauCsharpLanguageAssets === 'undefined' ? undefined : (tauCsharpLanguageAssets ?? undefined);
 

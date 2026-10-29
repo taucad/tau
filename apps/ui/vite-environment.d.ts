@@ -7,7 +7,7 @@ declare const tauCloudBuildEnabled: boolean;
 declare const tauTelemetryHostCloudBuild: boolean;
 /** The build's release label (short commit or semver); `''` when the build had none. Read through `#lib/build-identity`. */
 declare const tauBuildRelease: string;
-/** The staged C# language server bundle (`TAU_CSHARP_LANGUAGE_STAGE`), or `null` when the build carries none. */
+/** The C# language server bundle `csharp-language:prepare` staged; `null` only in test runs, which carry none. */
 // oxlint-disable-next-line typescript/no-restricted-types -- JSON defines spell absence as null.
 declare const tauCsharpLanguageAssets: Readonly<{ url: string; sha256: string }> | null;
 

@@ -442,8 +442,10 @@ const createReleaseManifestPlugin = (release: string): Plugin => ({
 
 export default defineConfig(({ command, mode }) => {
   const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
-  const csharpAssets = createCsharpLanguageAssets(process.env['TAU_CSHARP_LANGUAGE_STAGE']);
   const isTest = mode === 'test';
+  const csharpAssets = createCsharpLanguageAssets(
+    isTest ? undefined : path.resolve(__dirname, '../../out/csharp-language/stage'),
+  );
   /*
    * Ordered build identity for the stale-tab skew guard (blueprint DF20).
    * Evaluated once per build / dev-server start, which is exactly the

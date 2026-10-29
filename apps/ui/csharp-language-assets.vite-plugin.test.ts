@@ -9,8 +9,17 @@ import { createCsharpLanguageAssets } from './csharp-language-assets.vite-plugin
 const hash = (bytes: string): string => createHash('sha256').update(bytes).digest('hex');
 
 describe('C# language server assets', () => {
-  it('carries no C# language service without a staged bundle', () => {
+  it('carries no C# language service in a test run, which passes no stage', () => {
     expect(createCsharpLanguageAssets(undefined).assets).toBeUndefined();
+  });
+
+  it('fails a build whose stage is missing instead of shipping without the service', () => {
+    const stage = mkdtempSync(path.join(tmpdir(), 'csharp-language-ui-'));
+    try {
+      expect(() => createCsharpLanguageAssets(stage)).toThrow(/csharp-language:prepare/u);
+    } finally {
+      rmSync(stage, { recursive: true, force: true });
+    }
   });
 
   it('addresses a verified stage by its manifest and refuses changed bytes', () => {

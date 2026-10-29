@@ -1,0 +1,91 @@
+<!-- Test backend only: the geometry parity fixture, built for the browser the shipped host targets.
+     One project serves both measured modes. `aot` compiles the fixture and every author source into
+     the app, as a build-time consumer ships them; `dynamic` compiles the same sources in the browser
+     at run time, through the same compilation service the product uses. -->
+<Project Sdk="Microsoft.NET.Sdk.WebAssembly">
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <RuntimeIdentifier>browser-wasm</RuntimeIdentifier>
+    <UseMonoRuntime>true</UseMonoRuntime>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Tau.PicoGK.Parity</AssemblyName>
+    <RootNamespace>Tau.PicoGK.Parity</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Annotations, not warnings: the author sources carry `?` annotations without enabling the
+         context, and their nullability is not Tau's to change. -->
+    <Nullable>annotations</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <DefineConstants>$(DefineConstants);PICOGK_BROWSER</DefineConstants>
+    <!-- The author sources are LEAP 71's, compiled unchanged; their warnings are not Tau's to fix,
+         and CS0618 is their own deprecated helpers, which I2 forbids editing away. -->
+    <NoWarn>$(NoWarn);CS0168;CS0219;CS0414;CS0618;CS1591;CS8981</NoWarn>
+    <WasmMainJSPath>main.mjs</WasmMainJSPath>
+    <!-- Measured like the shipped host: the same engine archive, the same AOT, SIMD and exception
+         handling, and the same heap. A parity run that differed in any of these would compare a
+         different browser build. -->
+    <WasmBuildNative>true</WasmBuildNative>
+    <RunAOTCompilation>true</RunAOTCompilation>
+    <WasmEnableSIMD>true</WasmEnableSIMD>
+    <WasmEnableExceptionHandling>true</WasmEnableExceptionHandling>
+    <WasmEnableThreads Condition="'$(WasmEnableThreads)' == ''">false</WasmEnableThreads>
+    <DefineConstants Condition="'$(WasmEnableThreads)' == 'true'">$(DefineConstants);PICOGK_BROWSER_THREADS</DefineConstants>
+    <EmccInitialHeapSize>268435456</EmccInitialHeapSize>
+    <EmccMaximumHeapSize>4294967296</EmccMaximumHeapSize>
+    <EmccStackSize>8388608</EmccStackSize>
+    <!-- The gate serves the app's own bytes, so the pre-compressed copies of every asset are three
+         times the disk for nothing a parity run reads. -->
+    <CompressionEnabled>false</CompressionEnabled>
+    <!-- Trimmed, because AOT requires it and because an untrimmed app is not the app the product
+         ships. Retention, not static analysis, is what keeps runtime-authored IL reachable, so the
+         link warnings stay visible rather than failing the build. -->
+    <PublishTrimmed>true</PublishTrimmed>
+    <ILLinkTreatWarningsAsErrors>false</ILLinkTreatWarningsAsErrors>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);IL2026;IL2072;IL2075</WarningsNotAsErrors>
+    <TauParityMode Condition="'$(TauParityMode)' == ''">aot</TauParityMode>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="ParityProgram.cs" />
+    <ProjectReference Include="$(PicoGKProject)" AdditionalProperties="DefineConstants=PICOGK_BROWSER" />
+    <NativeFileReference Include="$(TauPicoGKArchiveRoot)/picogk.26.2.a" />
+    <NativeFileReference Include="$(TauPicoGKArchiveRoot)/float-trig.o" />
+    <NativeFileReference Include="$(TauPicoGKArchiveRoot)/libopenvdb.a" />
+    <NativeFileReference Include="$(TauPicoGKArchiveRoot)/libtbb.a" />
+    <NativeFileReference Include="$(TauPicoGKArchiveRoot)/libblosc.a" />
+    <NativeFileReference Include="$(TauPicoGKArchiveRoot)/libz.a" />
+  </ItemGroup>
+  <!-- The author sources, at their pins, exactly as the native driver compiles them, with the
+       signed-distance generator resolved as an ordinary analyzer: that is how a build-time consumer
+       ships them, so it is what an AOT parity run must measure. -->
+  <ItemGroup Condition="'$(TauParityMode)' == 'aot'">
+    <Analyzer Include="$(TauPicoGKGeneratorPath)" />
+    <Compile Include="$(TauParityFixture)" />
+    <Compile Include="$(TauParityShapeKernel)/ShapeKernel/**/*.cs" />
+    <Compile Include="$(TauParityShapeKernel)/Examples/Ex_ImplicitGyroidSphere.cs" />
+    <Compile Include="$(TauParityHeatX)/src/**/*.cs" />
+  </ItemGroup>
+  <PropertyGroup Condition="'$(TauParityMode)' == 'aot'">
+    <DefineConstants>$(DefineConstants);PICOGK_PARITY_AOT</DefineConstants>
+  </PropertyGroup>
+  <!-- Dynamic mode compiles the same sources in the browser through the product's own compilation
+       service, driving the signed-distance generator explicitly rather than loading it as an
+       analyzer, exactly as the shipped worker does. -->
+  <ItemGroup Condition="'$(TauParityMode)' == 'dynamic'">
+    <Compile Include="../Tau.PicoGK.Worker/CompilationService.cs" />
+    <Compile Include="../Tau.PicoGK.Worker/Protocol.cs" />
+    <Reference Include="PicoVoxel.Sdf.Generator" HintPath="$(TauPicoGKGeneratorPath)" />
+    <Reference Include="Microsoft.CodeAnalysis" HintPath="$(TauPicoGKRoslynRoot)/Microsoft.CodeAnalysis.dll" />
+    <Reference Include="Microsoft.CodeAnalysis.CSharp" HintPath="$(TauPicoGKRoslynRoot)/Microsoft.CodeAnalysis.CSharp.dll" />
+  </ItemGroup>
+  <Import Project="$(TauPicoGKRetentionProps)" Condition="Exists('$(TauPicoGKRetentionProps)')" />
+  <Target Name="ValidateParityInputs" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(TauPicoGKRetentionProps)')" Text="Provide the qualified AuthoringRetention.props via TauPicoGKRetentionProps." />
+    <Error Condition="!Exists('$(TauPicoGKGeneratorPath)')" Text="Provide PicoVoxel's signed-distance generator via TauPicoGKGeneratorPath." />
+    <Error Condition="'$(TauParityMode)' == 'dynamic' and !Exists('$(TauPicoGKRoslynRoot)/Microsoft.CodeAnalysis.CSharp.dll')" Text="Provide the patched browser compiler via TauPicoGKRoslynRoot." />
+    <Error Condition="!Exists('$(PicoGKProject)')" Text="Provide the composed browser PicoGK project via PicoGKProject." />
+    <Error Condition="!Exists('$(TauPicoGKArchiveRoot)/picogk.26.2.a')" Text="Provide a verified browser archive via TauPicoGKArchiveRoot." />
+    <Error Condition="'$(TauParityMode)' != 'aot' and '$(TauParityMode)' != 'dynamic'" Text="TauParityMode is aot or dynamic." />
+    <Error Condition="'$(TauParityMode)' == 'aot' and !Exists('$(TauParityFixture)')" Text="Provide the parity fixture source via TauParityFixture." />
+  </Target>
+</Project>

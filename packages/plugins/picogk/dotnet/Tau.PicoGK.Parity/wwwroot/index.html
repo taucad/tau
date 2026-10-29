@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>waiting</title>
+  </head>
+  <body>
+    <script type="module">
+      /*
+       * Drives one parity subject and hands each capture to the gate. The gate serves this page and
+       * accepts `PUT capture/<file name>`, so the bytes the fixture wrote reach disk unchanged; the
+       * title is the run's verdict, which is what the gate waits on.
+       *
+       * In dynamic mode the sources and the verified compiler references are staged into the
+       * runtime's own file system first, the same way the shipped worker's owner stages them, and
+       * the program compiles them in the browser rather than running an ahead-of-time build.
+       */
+      const subject = new URL(location.href).searchParams.get('subject') ?? 'gyroid';
+      const bytesOf = async (url) => new Uint8Array(await (await fetch(url)).arrayBuffer());
+      const hex = (buffer) => [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+      try {
+        const { mode } = await (await fetch('./parity-mode.json')).json();
+        const { dotnet } = await import('./_framework/dotnet.js');
+        const runtime = await dotnet.create();
+        let referenceList = '';
+        let identity = '';
+        if (mode === 'dynamic') {
+          const write = (path, contents) => {
+            runtime.Module.FS.mkdirTree(path.slice(0, path.lastIndexOf('/')));
+            runtime.Module.FS.writeFile(path, contents);
+          };
+          const staged = await (await fetch('./staged/manifest.json')).json();
+          const references = [];
+          for (const name of staged.references) {
+            write(`/refs/${name}`, await bytesOf(`./staged/refs/${name}`));
+            references.push(`/refs/${name}`);
+          }
+          for (const name of staged.sources) {
+            write(`/project/${name}`, await bytesOf(`./staged/project/${name}`));
+          }
+          referenceList = '/compiler-refs.json';
+          write(referenceList, JSON.stringify(references));
+          // The library the references carry is the compiler's build identity, as on the desktop.
+          identity = hex(await crypto.subtle.digest('SHA-256', await bytesOf('./staged/refs/PicoGK.dll')));
+          console.log(`PARITY_STAGED ${String(references.length)} references ${String(staged.sources.length)} sources`);
+        }
+        runtime.setModuleImports('tau-picogk-parity', {
+          upload: async (name, bytes) => {
+            const response = await fetch(`capture/${encodeURIComponent(name)}`, { method: 'PUT', body: bytes });
+            if (!response.ok) throw new Error(`The gate refused ${name}: ${String(response.status)}`);
+          },
+          compilerReferences: () => referenceList,
+          buildIdentity: () => identity,
+        });
+        console.log(`PARITY_START ${mode} ${subject} isolated ${String(crossOriginIsolated)}`);
+        const code = await runtime.runMain(runtime.getConfig().mainAssemblyName, [subject]);
+        document.title = code === 0 ? 'done' : 'failed';
+      } catch (error) {
+        console.log(`PARITY_FAILED ${error instanceof Error ? error.message : String(error)}`);
+        document.title = 'failed';
+      }
+    </script>
+  </body>
+</html>

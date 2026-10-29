@@ -237,6 +237,7 @@ internal static partial class Program
                 }
                 catch (System.Runtime.InteropServices.JavaScript.JSException error)
                 {
+                    File.Delete(result.ArtifactPath);
                     throw MaterialCapture.Invalid("Image.Data", error.Message);
                 }
 #endif

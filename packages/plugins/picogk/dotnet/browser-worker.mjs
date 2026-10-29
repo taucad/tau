@@ -5,7 +5,7 @@ import { validatePicogkBrowserImage } from '#picogk-browser-images.js';
 // Isolated .NET host. Only the owner supplies runtime URLs and authorized project bytes.
 /**
  * @typedef {Object} BrowserRuntime
- * @property {{FS: {mkdirTree(path: string): void, writeFile(path: string, bytes: Uint8Array | string): void, stat(path: string): {size: number}, open(path: string, flags: string): unknown, read(stream: unknown, bytes: Uint8Array, offset: number, length: number, position: number): number, close(stream: unknown): void}}} Module
+ * @property {{FS: {mkdirTree(path: string): void, writeFile(path: string, bytes: Uint8Array | string): void, stat(path: string): {size: number}, open(path: string, flags: string): unknown, read(stream: unknown, bytes: Uint8Array, offset: number, length: number, position: number): number, close(stream: unknown): void, unlink(path: string): void}}} Module
  * @property {(name: string, imports: {nextRequest(): Promise<string>, respond(json: string): void, validateImages(artifactPath: string, json: string): Promise<void>}) => void} setModuleImports
  * @property {() => {mainAssemblyName: string}} getConfig
  * @property {(assembly: string, args: string[]) => Promise<number>} runMain
@@ -229,7 +229,8 @@ globalThis.addEventListener('message', async (/** @type {MessageEvent<Incoming |
         receipt.byteLength !== input.byteLength ||
         receipt.sha256 !== input.sha256 ||
         !input.artifactPath.startsWith('/artifacts/') ||
-        input.offset + input.length > receipt.byteLength
+        input.offset + input.length > receipt.byteLength ||
+        (input.length === 0 && receipt.byteLength !== 0)
       ) {
         throw new Error('Unknown or invalid PicoGK artifact range.');
       }
@@ -245,6 +246,10 @@ globalThis.addEventListener('message', async (/** @type {MessageEvent<Incoming |
         }
       } finally {
         runtime.Module.FS.close(stream);
+      }
+      if (input.offset + input.length === receipt.byteLength) {
+        runtime.Module.FS.unlink(input.artifactPath);
+        artifacts.delete(input.artifactPath);
       }
       globalThis.postMessage(
         {

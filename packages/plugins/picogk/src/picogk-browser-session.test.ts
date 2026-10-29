@@ -416,15 +416,17 @@ describe('PicoGK browser artifact transfer', () => {
     expect(received === bytes).toBe(false);
   });
 
-  it('should verify empty artifacts without a chunk request', async () => {
+  it('should consume empty artifacts with one bounded request', async () => {
     const { session, worker } = await initialized();
-    const result = await session.readArtifact({
+    const result = session.readArtifact({
       snapshot,
       artifact: receipt(new Uint8Array()),
       signal: new AbortController().signal,
     });
-    expect(result).toHaveLength(0);
-    expect(worker.postMessage).toHaveBeenCalledTimes(2);
+    await tick();
+    reply(worker, { requestId: '2', result: new Uint8Array() });
+    expect(await result).toHaveLength(0);
+    expect(worker.postMessage).toHaveBeenCalledTimes(3);
   });
 
   it.each([new Uint8Array([1]), new Uint8Array([1, 3])])(

@@ -178,7 +178,7 @@ export class PicogkBrowserSession {
       throw new Error('Invalid PicoGK artifact receipt.');
     }
     const bytes = new Uint8Array(byteLength);
-    for (let offset = 0; offset < byteLength; offset += 8 * 1024 * 1024) {
+    for (let offset = 0; offset < byteLength || offset === 0; offset += 8 * 1024 * 1024) {
       assertCurrent();
       const length = Math.min(8 * 1024 * 1024, byteLength - offset);
       // oxlint-disable-next-line no-await-in-loop -- Transfer one bounded chunk at a time from the owning generation.

@@ -140,10 +140,10 @@ export type ShellProjectProtected = Readonly<{
 export const projectProtected = async (root: string): Promise<ShellProjectProtected> => {
   const denied = new Set<string>();
   const readOnly = new Set<string>();
+  const directories = new Set<string>();
   const protect = (path: string, agentAccess: string): void => {
     (agentAccess === 'read-only' ? readOnly : denied).add(path);
   };
-  const directories = new Set<string>();
   for (const row of pathRegistry) {
     if (row.agentAccess !== 'read-write') {
       const path = join(root, ...row.prefix.split('/'));

@@ -94,10 +94,10 @@ export type SessionsMachineContext = Readonly<{
   /** A policy that declined to close a project, and what stopped it (I24/I25). */
   refusals: Readonly<Record<string, SessionsCloseRefusal>>;
   /**
-   * The project a budget close is making room for (P47).
+   * The project waiting for a closing session to release its slot (P47).
    *
    * The slot only exists once the closing session has flushed and released, so
-   * the ninth open is remembered here and resumed on `sessionClosed`.
+   * a new destination or reopen is remembered here and resumed on `sessionClosed`.
    */
   pendingOpen: string | undefined;
   /** An effect or child failure no transition modelled; the registry keeps answering (MC-R12). */
@@ -141,7 +141,7 @@ const statusOf = (context: SessionsMachineContext, projectId: string): SessionsP
 /** A project a policy may close: no run, clean tree, nothing unpushed. */
 const isClosable = (context: SessionsMachineContext, projectId: string): boolean => {
   const status = statusOf(context, projectId);
-  return status?.runs === 0 && !status.dirty && status.pushed;
+  return status?.runs === 0 && status.state !== 'closing' && !status.dirty && status.pushed;
 };
 
 /** What stopped a policy from closing this project. */
@@ -252,7 +252,7 @@ export const sessionsMachine = setup({
   },
 }).createMachine({
   id: 'sessions',
-  version: '1',
+  version: '3',
   /* A fault no transition modelled is recorded and the registry keeps answering (MC-R12). */
   onError: ({ event }) => ({
     context: { fault: event.error instanceof Error ? event.error.message : 'sessions fault' },
@@ -278,15 +278,15 @@ export const sessionsMachine = setup({
       /* A close made to free a slot came back live or failed (a producer
        * refused, R4): the slot will not free, so the open the registry was
        * holding for it becomes the refusal the person answers (I28). */
-      if (
-        context.pendingOpen !== undefined &&
-        context.status[event.projectId]?.state === 'closing' &&
-        (event.state === 'live' || event.state === 'failed')
-      ) {
+      const closeRefused =
+        context.status[event.projectId]?.state === 'closing' && (event.state === 'live' || event.state === 'failed');
+      const reopenRetained = closeRefused && event.state === 'live' && context.pendingOpen === event.projectId;
+      if (context.pendingOpen !== undefined && closeRefused && !reopenRetained) {
         enq.emit({ type: 'budgetRefused', projectId: context.pendingOpen, suggestions: Object.keys(context.refs) });
       }
       return {
         context: {
+          pendingOpen: reopenRetained ? undefined : context.pendingOpen,
           status: {
             ...context.status,
             [event.projectId]: {
@@ -337,10 +337,16 @@ export const sessionsMachine = setup({
     ready: {
       on: {
         open: ({ context, event, guards, self, actors }, enq) => {
-          /* Already live: opening is a touch. Navigation never restarts a
-           * project, which is why returning is instant (I22). */
+          /* A closing ref still owns its slot until flush and release finish.
+           * Remember a return to it; any newer live destination supersedes that
+           * intent. A live project itself only needs a touch (I22). */
           if (guards.isLive(context, event.projectId)) {
-            return { context: touchProject(context, event.projectId) };
+            return {
+              context: {
+                ...touchProject(context, event.projectId),
+                pendingOpen: context.status[event.projectId]?.state === 'closing' ? event.projectId : undefined,
+              },
+            };
           }
           if (guards.hasRoom(context)) {
             const ref = enq.spawn(actors.projectSession, {
@@ -359,10 +365,17 @@ export const sessionsMachine = setup({
               context: {
                 ...touchProject(context, event.projectId),
                 refs: liveSessions,
+                pendingOpen: undefined,
                 closed: withoutKey(context.closed, event.projectId),
                 refusals: withoutKey(context.refusals, event.projectId),
               },
             };
+          }
+          /* A closing slot is already making room. Restarting its close would
+           * cancel the active flush; selecting another victim would close more
+           * projects than this open needs. Keep only the latest destination. */
+          if (Object.values(context.status).some((status) => status.state === 'closing')) {
+            return { context: { pendingOpen: event.projectId } };
           }
           /* Over budget with something idle: close the least recently touched
            * idle project and say so on its row, then open (P47, AC24). The

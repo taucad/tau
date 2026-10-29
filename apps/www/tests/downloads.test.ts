@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { createDesktopDownloadCatalog, desktopDownloadHref, desktopDownloads } from '#www/downloads.js';
+import {
+  createDesktopDownloadCatalog,
+  desktopDownloadHref,
+  desktopDownloadLabel,
+  desktopDownloads,
+  desktopFileLabel,
+} from '#www/downloads.js';
 
 import { projection } from '#www/download-catalog.fixture.js';
 
@@ -78,5 +84,136 @@ describe('qualified desktop download catalog', () => {
     const catalog = createDesktopDownloadCatalog({ enabled: true, channel: 'staging', qualification: value });
     expect(catalog?.[0]?.href).toContain('https://downloads.taucad.dev/releases/desktop-staging%400.1.0-staging.75/');
     expect(() => select(value)).toThrow();
+  });
+  it('names the Mac file format a direct link serves and keeps Windows and Linux labels', () => {
+    expect(desktopFileLabel('mac')).toContain('<span>Download ZIP for Apple silicon</span>');
+    expect(desktopFileLabel('macIntel')).toContain('<span>Download ZIP for Intel Mac</span>');
+    expect(desktopFileLabel('mac', 'DMG')).toContain('<span>Download DMG for Apple silicon</span>');
+    expect(desktopFileLabel('macIntel', 'DMG')).toContain('<span>Download DMG for Intel Mac</span>');
+    expect(desktopFileLabel('windows', 'DMG')).toBe(desktopDownloadLabel('windows'));
+    expect(desktopFileLabel('linux')).toBe(desktopDownloadLabel('linux'));
+    expect(desktopDownloads.mac.detail).toContain('ZIP');
+    expect(desktopDownloads.macIntel.detail).toContain('ZIP');
+  });
+  it('selects both Mac disk images from a Mac-only staging catalog with mount, drag, eject and launch steps', () => {
+    const value = projection();
+    const catalog = createDesktopDownloadCatalog({
+      enabled: true,
+      channel: 'staging',
+      qualification: {
+        ...value,
+        tag: 'desktop-staging@0.1.0-staging.455',
+        version: '1.4.55',
+        channel: 'staging',
+        routes: value.routes.slice(0, 2),
+      },
+    })!;
+    expect(catalog.map((choice) => [choice.platform, choice.primaryKind, choice.href])).toEqual([
+      [
+        'mac',
+        'macos-dmg',
+        'https://downloads.taucad.dev/releases/desktop-staging%400.1.0-staging.455/Tau-macos-arm64.dmg',
+      ],
+      [
+        'macIntel',
+        'macos-dmg',
+        'https://downloads.taucad.dev/releases/desktop-staging%400.1.0-staging.455/Tau-macos-x64.dmg',
+      ],
+    ]);
+    for (const choice of catalog) {
+      expect(choice.detail).toContain('DMG installer');
+      expect(choice.install).toMatch(
+        /Open the DMG to mount it, drag Tau to Applications, eject the disk image, then launch/u,
+      );
+      expect(choice.alternatives.map((artifact) => artifact.href)).toEqual([choice.href.replace(/\.dmg$/u, '.zip')]);
+    }
+    expect(() =>
+      createDesktopDownloadCatalog({
+        enabled: true,
+        channel: 'production',
+        qualification: { ...value, routes: value.routes.slice(0, 2) },
+      }),
+    ).toThrow(/every supported route/u);
+  });
+  it('offers staging Mac disk images admitted on CI evidence and says clean-host testing is pending', () => {
+    const value = projection();
+    const staging = (routes: unknown[]) => ({
+      ...value,
+      tag: 'desktop-staging@0.1.0-staging.455',
+      version: '1.4.55',
+      channel: 'staging',
+      routes,
+    });
+    const pending = value.routes.slice(0, 2).map((route) => ({
+      ...route,
+      qualification: { ci: true, vm: 'pending', trust: 'release' },
+    }));
+    const catalog = createDesktopDownloadCatalog({
+      enabled: true,
+      channel: 'staging',
+      qualification: staging(pending),
+    })!;
+    expect(catalog.map((choice) => [choice.platform, choice.primaryKind, choice.cleanHost])).toEqual([
+      ['mac', 'macos-dmg', 'pending'],
+      ['macIntel', 'macos-dmg', 'pending'],
+    ]);
+    expect(catalog.map((choice) => choice.detail)).toEqual([
+      'Apple silicon · DMG installer · clean-Mac install testing pending',
+      'Intel Mac · DMG installer · clean-Mac install testing pending',
+    ]);
+    expect(catalog.every((choice) => choice.href.endsWith('.dmg'))).toBe(true);
+    // One route may be clean-host qualified while the other is pending; each says only what it has.
+    const mixed = createDesktopDownloadCatalog({
+      enabled: true,
+      channel: 'staging',
+      qualification: staging([value.routes[0]!, pending[1]!]),
+    })!;
+    expect(mixed.map((choice) => [choice.cleanHost, choice.detail.includes('pending')])).toEqual([
+      ['passed', false],
+      ['pending', true],
+    ]);
+    expect(
+      select(projection())!.every((choice) => choice.cleanHost === 'passed' && !choice.detail.includes('pending')),
+    ).toBe(true);
+    // Production never admits pending clean-host acceptance, for any route.
+    for (const index of value.routes.keys()) {
+      const production = projection();
+      production.routes[index]!.qualification = { ci: true, vm: 'pending', trust: 'release' };
+      expect(() => select(production)).toThrow(/release qualification/u);
+    }
+    // Staging admits it only on Mac routes, and only as the exact `pending` marker with release CI evidence.
+    for (const index of [2, 3, 4]) {
+      const route = { ...value.routes[index]!, qualification: { ci: true, vm: 'pending', trust: 'release' } };
+      expect(() =>
+        createDesktopDownloadCatalog({ enabled: true, channel: 'staging', qualification: staging([route]) }),
+      ).toThrow(/release qualification/u);
+    }
+    for (const qualification of [
+      { ci: true, vm: false, trust: 'release' },
+      { ci: true, vm: 'skipped', trust: 'release' },
+      { ci: true, vm: 'Pending', trust: 'release' },
+      { ci: false, vm: 'pending', trust: 'release' },
+      { ci: 'pending', vm: 'pending', trust: 'release' },
+      { ci: true, vm: 'pending', trust: 'test' },
+      { ci: true, vm: 'pending', trust: 'release', cleanHost: 'passed' },
+    ]) {
+      expect(() =>
+        createDesktopDownloadCatalog({
+          enabled: true,
+          channel: 'staging',
+          qualification: staging([{ ...pending[0]!, qualification }, pending[1]!]),
+        }),
+      ).toThrow();
+    }
+  });
+  it('rejects a Mac route whose disk image is missing or replaced by another kind', () => {
+    for (const artifacts of [
+      [projection().routes[0]!.artifacts[1]!],
+      [{ ...projection().routes[0]!.artifacts[1]! }, { ...projection().routes[0]!.artifacts[1]! }],
+    ]) {
+      const value = projection();
+      value.routes[0]!.artifacts = artifacts;
+      expect(() => select(value)).toThrow();
+    }
   });
 });

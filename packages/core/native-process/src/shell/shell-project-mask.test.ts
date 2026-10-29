@@ -3,9 +3,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   realpathSync,
-  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -16,13 +14,9 @@ import { dirname, join } from 'node:path';
 import { wrapCommandWithSandboxMacOS } from '@anthropic-ai/sandbox-runtime/dist/sandbox/macos-sandbox-utils.js';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import {
-  bindMaskedDirectories,
-  holdProtectedStandIns,
-  maskProblem,
-  useStandInJournal,
-} from '#shell/shell-project-mask.js';
-import type { StandInProfile } from '#shell/shell-project-mask.js';
+import { bindMaskedDirectories, maskProblem } from '#shell/shell-project-mask.js';
+import { holdProtectedStandIns } from '#shell/shell-stand-ins.js';
+import type { StandInProfile } from '#shell/shell-stand-ins.js';
 import type { ShellFilesystem } from '#shell/shell-provider.js';
 
 const roots: string[] = [];
@@ -173,18 +167,6 @@ describe.runIf(process.platform === 'linux')('Linux protected-path stand-ins', (
     };
   };
 
-  /** The same checkout with no mask: every reserved row is its own protected path. */
-  const unmasked = (): StandInProfile & { root: string } => {
-    const profile = absent();
-    const reserved = join(profile.root, '.tau');
-    return {
-      ...profile,
-      masked: [],
-      denyWrite: [join(reserved, 'binding.json'), join(profile.root, '.git'), join(reserved, 'runs')],
-      directories: [join(reserved, 'runs'), join(profile.root, '.git')],
-    };
-  };
-
   it('should keep a stand-in shared by overlapping launches until the last of them releases it', () => {
     const profile = absent();
     const reserved = join(profile.root, '.tau');
@@ -224,106 +206,5 @@ describe.runIf(process.platform === 'linux')('Linux protected-path stand-ins', (
     expect(existsSync(join(reserved, 'chats'))).toBe(false);
     again();
     expect(existsSync(join(profile.root, '.git'))).toBe(false);
-  });
-
-  it('should stand in for an absent directory row as a directory and a file row as a file', () => {
-    const profile = unmasked();
-    const reserved = join(profile.root, '.tau');
-    const release = holdProtectedStandIns(profile);
-    expect(lstatSync(join(profile.root, '.git')).isDirectory()).toBe(true);
-    expect(lstatSync(reserved).isDirectory()).toBe(true);
-    // The whole protected path is present, so the runtime makes no mount point of its own.
-    expect(lstatSync(join(reserved, 'runs')).isDirectory()).toBe(true);
-    expect(lstatSync(join(reserved, 'binding.json')).isFile()).toBe(true);
-    // The host's own write into a stand-in is real data and survives the release.
-    writeFileSync(join(reserved, 'runs', 'lease.json'), '{}');
-    release();
-    expect(existsSync(join(reserved, 'runs', 'lease.json'))).toBe(true);
-    expect(existsSync(join(reserved, 'binding.json'))).toBe(false);
-    expect(existsSync(join(profile.root, '.git'))).toBe(false);
-  });
-
-  it('should not make a stand-in outside a writable root or beneath a symbolic link', () => {
-    const profile = absent();
-    const elsewhere = temporary('tau-stand-in-elsewhere-');
-    symlinkSync(elsewhere, join(profile.root, 'linked'));
-    const release = holdProtectedStandIns({
-      ...profile,
-      denyWrite: [join(elsewhere, '.git'), join(profile.root, 'linked', 'hidden')],
-      masked: [],
-    });
-    expect(existsSync(join(elsewhere, '.git'))).toBe(false);
-    expect(existsSync(join(elsewhere, 'hidden'))).toBe(false);
-    release();
-  });
-
-  it('should release what a hold already took when it throws midway', () => {
-    const profile = unmasked();
-    const control = join(profile.root, '.git');
-    // A name longer than any filesystem allows: lstat throws ENAMETOOLONG rather than reporting it absent.
-    const unreadable = join(profile.root, 'x'.repeat(300));
-    expect(() => holdProtectedStandIns({ ...profile, denyWrite: [control, unreadable] })).toThrow(/ENAMETOOLONG/u);
-    expect(existsSync(control)).toBe(false);
-    // Nothing is still counted: a fresh hold creates and its release removes again.
-    const release = holdProtectedStandIns({ ...profile, denyWrite: [control] });
-    expect(existsSync(control)).toBe(true);
-    release();
-    expect(existsSync(control)).toBe(false);
-  });
-
-  it('should never remove a file that replaced a stand-in, even an empty one', () => {
-    const profile = unmasked();
-    const binding = join(profile.root, '.tau', 'binding.json');
-    const release = holdProtectedStandIns({ ...profile, denyWrite: [binding] });
-    // A host writer atomically replaces the stand-in with its own (empty) file: a different inode.
-    writeFileSync(`${binding}.next`, '');
-    renameSync(`${binding}.next`, binding);
-    release();
-    expect(existsSync(binding)).toBe(true);
-  });
-
-  it('should journal live stand-ins and sweep at the next start only those still empty and unchanged', () => {
-    const profile = unmasked();
-    const state = temporary('tau-stand-in-state-');
-    const journal = join(state, 'shell-stand-ins.json');
-    const reserved = join(profile.root, '.tau');
-    useStandInJournal(journal);
-    const release = holdProtectedStandIns(profile);
-    const rows = JSON.parse(readFileSync(journal, 'utf8')) as Array<{ path: string }>;
-    expect(rows.map((row) => row.path).toSorted()).toStrictEqual(
-      [reserved, join(reserved, 'binding.json'), join(reserved, 'runs'), join(profile.root, '.git')].toSorted(),
-    );
-    release();
-    expect(JSON.parse(readFileSync(journal, 'utf8'))).toStrictEqual([]);
-
-    // What a crashed process leaves: entries on disk and their journal rows, with no live holder.
-    const left = temporary('tau-stand-in-left-');
-    const row = (path: string, directory: boolean) => {
-      const info = lstatSync(path, { bigint: true });
-      return { path, directory, dev: String(info.dev), ino: String(info.ino) };
-    };
-    mkdirSync(join(left, '.git'));
-    mkdirSync(join(left, '.tau', 'runs'), { recursive: true });
-    writeFileSync(join(left, '.tau', 'binding.json'), '');
-    writeFileSync(join(left, 'thumbnail.webp'), '');
-    const crashed = [
-      row(join(left, '.git'), true),
-      row(join(left, '.tau'), true),
-      row(join(left, '.tau', 'runs'), true),
-      row(join(left, '.tau', 'binding.json'), false),
-      row(join(left, 'thumbnail.webp'), false),
-    ];
-    // Since the crash: real data in one stand-in, and another replaced by a different (empty) file.
-    writeFileSync(join(left, '.tau', 'runs', 'lease.json'), '{}');
-    writeFileSync(join(left, 'thumbnail.next'), '');
-    renameSync(join(left, 'thumbnail.next'), join(left, 'thumbnail.webp'));
-    const next = join(state, 'next.json');
-    writeFileSync(next, JSON.stringify(crashed));
-    useStandInJournal(next);
-    expect(existsSync(join(left, '.git'))).toBe(false);
-    expect(existsSync(join(left, '.tau', 'binding.json'))).toBe(false);
-    expect(existsSync(join(left, '.tau', 'runs', 'lease.json'))).toBe(true);
-    expect(existsSync(join(left, 'thumbnail.webp'))).toBe(true);
-    expect(JSON.parse(readFileSync(next, 'utf8'))).toStrictEqual([]);
   });
 });

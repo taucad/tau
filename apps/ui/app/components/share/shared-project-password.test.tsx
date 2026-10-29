@@ -64,4 +64,21 @@ describe('SharedProjectPassword', () => {
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.getByLabelText('Password')).toBeDisabled();
   });
+
+  it('marks the form and its button busy while a password is tried, not before or after', () => {
+    const props = {
+      password: 'local-review-password-32-characters',
+      onPasswordChange: vi.fn(),
+      onSubmit: vi.fn(),
+    };
+    const { rerender } = render(<SharedProjectPassword {...props} isOpening={false} />);
+    const button = (): HTMLElement => screen.getByRole('button', { name: 'Open project' });
+    expect(button().closest('form')).toHaveAttribute('aria-busy', 'false');
+    expect(button()).toHaveAttribute('aria-busy', 'false');
+
+    rerender(<SharedProjectPassword {...props} isOpening />);
+    // The spinner is aria-hidden, so the busy state is what tells assistive technology the try is under way.
+    expect(button().closest('form')).toHaveAttribute('aria-busy', 'true');
+    expect(button()).toHaveAttribute('aria-busy', 'true');
+  });
 });

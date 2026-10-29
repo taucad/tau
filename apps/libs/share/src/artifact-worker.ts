@@ -1,5 +1,7 @@
 import type { ShareArtifactCodec, ShareOpenedArtifact, SharePlainArtifact, ShareProtectedArtifact } from '#artifact.js';
 import type { ShareProjectSnapshot } from '#snapshot.js';
+import { ShareError } from '#provider.js';
+import type { ShareErrorCode } from '#provider.js';
 
 type WorkerCommand =
   | { readonly operation: 'pack'; readonly snapshot: ShareProjectSnapshot }
@@ -15,6 +17,32 @@ type WorkerResponse =
       readonly result: SharePlainArtifact | ShareProtectedArtifact | ShareOpenedArtifact;
     }
   | { readonly id: number; readonly success: false; readonly code?: string; readonly message: string };
+
+/** Every share failure code, so a worker reply's code is checked rather than trusted. */
+/* eslint-disable @typescript-eslint/naming-convention -- keys are the ShareErrorCode wire values. */
+const shareErrorCodes = {
+  SHARE_ARTIFACT_INVALID: true,
+  SHARE_ARTIFACT_LIMIT: true,
+  SHARE_AUTH_REQUIRED: true,
+  SHARE_PERMISSION_REQUIRED: true,
+  SHARE_PROVIDER_INVALID_RESPONSE: true,
+  SHARE_PROVIDER_UNAVAILABLE: true,
+  SHARE_LOCATOR_INVALID: true,
+  SHARE_PASSWORD_REQUIRED: true,
+  SHARE_PROVIDER_UNKNOWN: true,
+} as const satisfies Record<ShareErrorCode, true>;
+/* eslint-enable @typescript-eslint/naming-convention -- end of the wire-value keys. */
+
+const isShareErrorCode = (code: string | undefined): code is ShareErrorCode =>
+  code !== undefined && Object.hasOwn(shareErrorCodes, code);
+
+/**
+ * The worker's failure as the caller's realm knows it. A `ShareError` crosses `postMessage` as its code and message,
+ * so it is rebuilt here: `isShareError` checks the name, and a plain `Error` carrying a code would read as an unknown
+ * failure (a wrong password became "Unable to open this shared project" instead of staying on the password form).
+ */
+const workerFailure = (code: string | undefined, message: string): Error =>
+  isShareErrorCode(code) ? new ShareError(code, message) : new Error(message);
 
 /** Worker-backed artifact codec with explicit cleanup. @public */
 export type ShareArtifactWorkerCodec = ShareArtifactCodec & {
@@ -45,7 +73,7 @@ export const createShareArtifactWorkerCodec = (): ShareArtifactWorkerCodec => {
       slot.resolve(event.data.result);
       return;
     }
-    slot.reject(Object.assign(new Error(event.data.message), event.data.code ? { code: event.data.code } : {}));
+    slot.reject(workerFailure(event.data.code, event.data.message));
   });
   const call = async (
     request: WorkerCommand,

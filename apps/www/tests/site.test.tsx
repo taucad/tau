@@ -174,7 +174,8 @@ test('should keep staging application links on staging and leave production unch
   expect(environmentHref('https://docs.tau.new/', 'taucad.dev')).toBe('https://docs.taucad.dev/');
   expect(environmentHref('https://tau.new/projects/new', 'tau.new')).toBe('https://tau.new/projects/new');
   expect(stagingDesktopNote('tau.new')).toBeUndefined();
-  expect(stagingDesktopNote('taucad.dev')).toContain('signed without notarization');
+  expect(stagingDesktopNote('taucad.dev')).toContain('staging channel');
+  expect(stagingDesktopNote('taucad.dev')).not.toMatch(/notari[sz]/iu);
   expect(environmentHref('https://downloads.tau.new/latest/Tau-macos-arm64.zip', 'taucad.dev')).toBe(
     'https://downloads.taucad.dev/latest/Tau-macos-arm64.zip',
   );
@@ -229,7 +230,11 @@ test('should render download CTAs and every archive before JavaScript', () => {
     expect(downloads).toContain(desktopDownloadHref(platform));
   }
   expect(downloads).toContain('data-mac-intel="true" hidden=""');
-  expect(downloads).toContain('Download for Intel');
+  expect(downloads).toContain('Download ZIP for Apple silicon');
+  expect(downloads).toContain('Download ZIP for Intel Mac');
+  expect(downloads).toContain('Download for Windows');
+  expect(downloads).toContain('Download for Linux');
+  expect(downloads).not.toContain('DMG');
   expect(downloads).not.toContain('No installer is published');
 });
 

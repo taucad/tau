@@ -61,7 +61,12 @@ sudo setfacl -m "u:$(id -un):rw" /dev/kvm
 curl --fail --location --proto '=https' --proto-redir '=https' --retry 3 "$url" -o "$work/base.qcow2"
 printf '%s  %s\n' "$digest" "$work/base.qcow2" | "$algorithm" --check
 printf '%s\n%s %s\n' "$url" "$algorithm" "$digest" > "$output/image.txt"
-qemu-img create -f qcow2 -F qcow2 -b "$work/base.qcow2" "$work/guest.qcow2" 24G
+# Qualification retains three signed archives, unpacked candidates, dependencies and runtime generations.
+# The sparse overlay grows only as used; the original 24 GiB guest exhausted native payload headroom.
+guest_size=24G
+if [[ "$mode" == qualification ]]; then guest_size=48G; fi
+df -h "$work"
+qemu-img create -f qcow2 -F qcow2 -b "$work/base.qcow2" "$work/guest.qcow2" "$guest_size"
 ssh-keygen -q -t ed25519 -N '' -f "$work/client"
 ssh-keygen -q -t ed25519 -N '' -f "$work/host"
 printf '[127.0.0.1]:2222 %s\n' "$(cat "$work/host.pub")" > "$work/known_hosts"
@@ -131,7 +136,7 @@ if [[ "$mode" != proof ]]; then
 import json, os, sys
 names = ['GH_TOKEN', 'GITHUB_SHA', 'GITHUB_REF', 'GITHUB_EVENT_NAME', 'GITHUB_REPOSITORY', 'GITHUB_RUN_ID',
          'TAU_DESKTOP_QUALIFICATION_SCOPE', 'TAU_QUALIFICATION_ROUTE', 'TAU_QUALIFICATION_CHANNEL',
-         'TAU_QUALIFICATION_RUN_A', 'TAU_QUALIFICATION_RUN_B', 'TAU_QUALIFICATION_RUN_C',
+         'TAU_QUALIFICATION_RUN_A', 'TAU_QUALIFICATION_RUN_B', 'TAU_QUALIFICATION_RUN_C', 'TAU_QUALIFICATION_GRAPHICS',
          'TAU_APPIMAGE_PUBLIC_KEYS', 'TAU_APPIMAGE_KEY_ID', 'TAU_APT_PRIMARY_FINGERPRINT', 'TAU_APT_SIGNING_FINGERPRINT']
 if os.environ['TAU_VM_MODE'] == 'tooling':
     names = ['GITHUB_SHA']
@@ -151,7 +156,7 @@ PYENV
 import glob, os, sys, tarfile
 root = os.path.expanduser('~/tau/out/route-qualification')
 with tarfile.open(fileobj=sys.stdout.buffer, mode='w|') as output:
-    for pattern in ['qualification-*.json', 'renderer-*.json', 'renderer-*.png', 'mirror-trust.json', 'route-receipts.json']:
+    for pattern in ['qualification-*.json', 'renderer-*.json', 'renderer-*.png', 'mirror-trust.json', 'route-receipts.json', 'software-ci-evidence.json']:
         for path in glob.glob(os.path.join(root, pattern)):
             if os.path.isfile(path) and not os.path.islink(path):
                 output.add(path, arcname=os.path.basename(path), recursive=False)

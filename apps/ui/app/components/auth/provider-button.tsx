@@ -64,10 +64,12 @@ export function ProviderButton({
         signInSocial({ provider, callbackURL });
       }}
       {...props}
-      aria-label={getProviderName(provider)}
+      // Only the icon-only layout has no visible text; otherwise the visible text is the name (WCAG 2.5.3).
+      aria-label={display === 'icon' ? getProviderName(provider) : undefined}
       aria-busy={isActiveProvider}
     >
-      {isActiveProvider ? <Spinner /> : ProviderIcon ? <ProviderIcon /> : null}
+      {/* The icon is `role=img` named by its provider: hidden, or the name repeats it. */}
+      {isActiveProvider ? <Spinner /> : ProviderIcon ? <ProviderIcon aria-hidden /> : null}
 
       {display === 'full'
         ? localization.auth.continueWith.replace('{{provider}}', getProviderName(provider))

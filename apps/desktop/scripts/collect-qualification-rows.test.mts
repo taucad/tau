@@ -29,21 +29,23 @@ const specifications = [
   ['debian-apt-x11', 'linux-apt', 'linux-x64', '6.12.0 NAME="Debian GNU/Linux"\nID=debian\nVERSION_ID="13"'],
   ['debian-appimage-x11', 'linux-appimage', 'linux-x64', '6.12.0 NAME="Debian GNU/Linux"\nID=debian\nVERSION_ID="13"'],
 ] as const;
-const fixture = () => {
+const fixture = (macOnly = false) => {
   const channel = 'staging';
   const version = '1.0.3';
-  const targets: Array<[DesktopReleaseTarget, DesktopArtifactKind]> = [
-    ['darwin-arm64', 'macos-zip'],
-    ['darwin-arm64', 'macos-dmg'],
-    ['darwin-x64', 'macos-zip'],
-    ['darwin-x64', 'macos-dmg'],
-    ['win32-x64', 'windows-nsis'],
-    ['linux-x64', 'linux-deb-runtime'],
-    ['linux-x64', 'linux-deb-selector'],
-    ['linux-x64', 'linux-appimage'],
-    ['linux-x64', 'linux-appimage-deb-runtime'],
-    ['linux-x64', 'linux-appimage-deb-selector'],
-  ];
+  const targets: Array<[DesktopReleaseTarget, DesktopArtifactKind]> = (
+    [
+      ['darwin-arm64', 'macos-zip'],
+      ['darwin-arm64', 'macos-dmg'],
+      ['darwin-x64', 'macos-zip'],
+      ['darwin-x64', 'macos-dmg'],
+      ['win32-x64', 'windows-nsis'],
+      ['linux-x64', 'linux-deb-runtime'],
+      ['linux-x64', 'linux-deb-selector'],
+      ['linux-x64', 'linux-appimage'],
+      ['linux-x64', 'linux-appimage-deb-runtime'],
+      ['linux-x64', 'linux-appimage-deb-selector'],
+    ] as Array<[DesktopReleaseTarget, DesktopArtifactKind]>
+  ).filter(([target]) => !macOnly || target.startsWith('darwin-'));
   const candidate = parseDesktopArtifactManifest({
     schemaVersion: 1,
     tag: 'desktop-staging@0.1.0-staging.3',
@@ -74,35 +76,37 @@ const fixture = () => {
     sourceCommit: candidate.sourceCommit,
     runId: '1234',
     trustIdentities,
-    rows: specifications.map(([id, route, target, os]) => ({
-      id,
-      receipts: [
-        {
-          schemaVersion: 1,
-          status: 'passed',
-          tag: candidate.tag,
-          channel,
-          version,
-          sourceCommit: candidate.sourceCommit,
-          route,
-          target,
-          artifacts: candidate.artifacts
-            .filter(
-              (artifact) =>
-                artifact.target === target &&
-                (desktopAcceptanceRoutes[route] as readonly string[]).includes(artifact.kind),
-            )
-            .map(({ name, sha256 }) => ({ name, sha256 })),
-          baseline: { version: '1.0.1', artifactSha256: 'b'.repeat(64) },
-          installed: { version, executableSha256: 'c'.repeat(64) },
-          environment: { os, arch: target.endsWith('arm64') ? 'arm64' : 'x64', kind: 'ci', sandbox: 'enabled' },
-          trust: { kind: 'release', identity: trustIdentities[route] },
-          checks: { cleanInstall: true, upgrade: true, dataPreserved: true },
-          suite: 'installed-route-a-b-c-v1',
-          logs: 'https://github.com/taucad/tau/actions/runs/1234',
-        } satisfies DesktopAcceptanceReceipt,
-      ],
-    })),
+    rows: specifications
+      .filter(([, route]) => !macOnly || route.startsWith('macos-'))
+      .map(([id, route, target, os]) => ({
+        id,
+        receipts: [
+          {
+            schemaVersion: 1,
+            status: 'passed',
+            tag: candidate.tag,
+            channel,
+            version,
+            sourceCommit: candidate.sourceCommit,
+            route,
+            target,
+            artifacts: candidate.artifacts
+              .filter(
+                (artifact) =>
+                  artifact.target === target &&
+                  (desktopAcceptanceRoutes[route] as readonly string[]).includes(artifact.kind),
+              )
+              .map(({ name, sha256 }) => ({ name, sha256 })),
+            baseline: { version: '1.0.1', artifactSha256: 'b'.repeat(64) },
+            installed: { version, executableSha256: 'c'.repeat(64) },
+            environment: { os, arch: target.endsWith('arm64') ? 'arm64' : 'x64', kind: 'ci', sandbox: 'enabled' },
+            trust: { kind: 'release', identity: trustIdentities[route] },
+            checks: { cleanInstall: true, upgrade: true, dataPreserved: true },
+            suite: 'installed-route-a-b-c-v1',
+            logs: 'https://github.com/taucad/tau/actions/runs/1234',
+          } satisfies DesktopAcceptanceReceipt,
+        ],
+      })),
   };
 };
 const complete = fixture();
@@ -225,6 +229,129 @@ reject((value) => ({
       : row,
   ),
 }));
+// A Mac-only run admits exactly ZIP and DMG on both native architectures from the Mac-only candidate, with only the
+// Apple identity; it can neither include nor omit another platform's row.
+const mac = {
+  ...fixture(true),
+  scope: 'macos',
+  trustIdentities: {
+    'macos-zip': complete.trustIdentities['macos-zip'],
+    'macos-dmg': complete.trustIdentities['macos-dmg'],
+  },
+};
+const macResult = collectQualificationRows(mac);
+assert.deepEqual(
+  macResult.hostMatrix.map(({ id }) => id),
+  ['macos-zip-arm64', 'macos-dmg-arm64', 'macos-zip-x64', 'macos-dmg-x64'],
+);
+assert.deepEqual(
+  macResult.receipts.map(({ route, target }) => `${target}/${route}`),
+  ['darwin-arm64/macos-zip', 'darwin-arm64/macos-dmg', 'darwin-x64/macos-zip', 'darwin-x64/macos-dmg'],
+);
+assert.ok(macResult.receipts.every((receipt) => receipt.environment.kind === 'ci'));
+const rejectMac = (change: (value: typeof mac) => unknown): void => {
+  assert.throws(() => collectQualificationRows(change({ ...mac, rows: [...mac.rows] })));
+};
+for (const row of mac.rows) {
+  rejectMac((value) => ({ ...value, rows: value.rows.filter((other) => other.id !== row.id) }));
+  rejectMac((value) => ({ ...value, rows: [...value.rows, row] }));
+}
+// Single-architecture evidence, other-platform rows and a full or production candidate are refused.
+rejectMac((value) => ({ ...value, rows: value.rows.filter((row) => row.id.endsWith('-arm64')) }));
+rejectMac((value) => ({ ...value, rows: complete.rows }));
+rejectMac((value) => ({ ...value, rows: [...value.rows, complete.rows[4]] }));
+rejectMac((value) => ({ ...value, candidate: complete.candidate, rows: complete.rows.slice(0, 4) }));
+rejectMac((value) => ({ ...value, channel: 'production' }));
+rejectMac((value) => ({ ...value, scope: 'all' }));
+rejectMac((value) => ({ ...value, scope: 'linux' }));
+rejectMac((value) => ({ ...value, trustIdentities: { 'macos-zip': 'TEAM123456' } }));
+rejectMac((value) => ({ ...value, trustIdentities: { ...value.trustIdentities, 'macos-dmg': 'OTHERTEAM1' } }));
+for (const index of mac.rows.keys()) {
+  const alterMac = (change: (receipt: DesktopAcceptanceReceipt) => unknown): void => {
+    rejectMac((value) => ({
+      ...value,
+      rows: value.rows.map((row, rowIndex) =>
+        rowIndex === index ? { ...row, receipts: [change(row.receipts[0]!)] } : row,
+      ),
+    }));
+  };
+  alterMac((receipt) => ({ ...receipt, channel: 'production' }));
+  alterMac((receipt) => ({ ...receipt, sourceCommit: 'd'.repeat(40) }));
+  alterMac((receipt) => ({ ...receipt, version: '1.0.4' }));
+  alterMac((receipt) => ({ ...receipt, trust: { ...receipt.trust, identity: 'OTHERTEAM1' } }));
+  alterMac((receipt) => ({
+    ...receipt,
+    artifacts: receipt.artifacts.map((artifact) => ({ ...artifact, sha256: 'f'.repeat(64) })),
+  }));
+  alterMac((receipt) => ({ ...receipt, environment: { ...receipt.environment, kind: 'vm' } }));
+  alterMac((receipt) => ({ ...receipt, route: receipt.route === 'macos-zip' ? 'macos-dmg' : 'macos-zip' }));
+  alterMac((receipt) => ({ ...receipt, target: receipt.target === 'darwin-arm64' ? 'darwin-x64' : 'darwin-arm64' }));
+  alterMac((receipt) => ({ ...receipt, logs: 'https://github.com/fork/tau/actions/runs/1234' }));
+}
+// Clean-host (vm) rows: only the Mac-scoped staging producer, each with observed host facts and the clean-host suite.
+const cleanHost = (arch: 'arm64' | 'x64') => ({
+  platform: 'darwin',
+  runner: 'local-mac-1',
+  productVersion: '26.0.1',
+  nativeArch: arch,
+  translated: false,
+  sip: 'enabled',
+  gatekeeper: 'enabled',
+  quarantine: {
+    downloaded: '0083;6720a1b2;Chromium;4D3F1C2B-0000-4000-8000-000000000001',
+    installed: '0083;6720a1b2;Chromium;4D3F1C2B-0000-4000-8000-000000000001',
+  },
+  assessment: 'Notarized Developer ID',
+  staple: 'validated-offline',
+  installedPath: '/Applications/Tau.app',
+  launch: 'open',
+});
+const vm = {
+  ...mac,
+  kind: 'vm',
+  rows: mac.rows.map((row) => ({
+    ...row,
+    receipts: row.receipts.map((receipt) => ({
+      ...receipt,
+      suite: 'clean-host-route-a-b-c-v1',
+      environment: { ...receipt.environment, kind: 'vm', host: cleanHost(receipt.environment.arch) },
+    })),
+  })),
+};
+const vmResult = collectQualificationRows(vm);
+assert.ok(vmResult.receipts.every((receipt) => receipt.environment.kind === 'vm' && receipt.environment.host));
+const rejectVm = (change: (value: typeof vm) => unknown): void => {
+  assert.throws(() => collectQualificationRows(change({ ...vm, rows: [...vm.rows] })));
+};
+rejectVm((value) => ({ ...value, scope: 'all' }));
+rejectVm((value) => ({ ...value, channel: 'production' }));
+// A CI receipt can never be collected as clean-host evidence, nor a clean-host receipt as CI.
+rejectVm((value) => ({ ...value, rows: mac.rows }));
+rejectVm((value) => ({ ...value, kind: 'ci' }));
+rejectVm((value) => ({ ...value, rows: value.rows.filter((row) => row.id.endsWith('-arm64')) }));
+for (const index of vm.rows.keys()) {
+  const alterVm = (change: (receipt: DesktopAcceptanceReceipt) => unknown): void => {
+    rejectVm((value) => ({
+      ...value,
+      rows: value.rows.map((row, rowIndex) =>
+        rowIndex === index ? { ...row, receipts: [change(row.receipts[0] as DesktopAcceptanceReceipt)] } : row,
+      ),
+    }));
+  };
+  alterVm((receipt) => ({ ...receipt, suite: 'installed-route-a-b-c-v1' }));
+  alterVm((receipt) => {
+    const { host: _host, ...environment } = receipt.environment;
+    return { ...receipt, environment };
+  });
+  alterVm((receipt) => ({
+    ...receipt,
+    environment: { ...receipt.environment, host: { ...receipt.environment.host, sip: 'disabled' } },
+  }));
+  alterVm((receipt) => ({
+    ...receipt,
+    environment: { ...receipt.environment, host: { ...receipt.environment.host, gatekeeper: 'disabled' } },
+  }));
+}
 const cli = spawnSync(
   process.execPath,
   ['--import', '@oxc-node/core/register', fileURLToPath(new URL('collect-qualification-rows.mts', import.meta.url))],
@@ -243,7 +370,7 @@ const cli = spawnSync(
 assert.equal(cli.status, 1);
 assert.match(cli.stderr, /trusted main dispatch/u);
 console.log(
-  'PASS synthetic nine-host admission, seven canonical receipts, strict source/route/signer/OS/run binding and main guard; no evidence files written',
+  'PASS synthetic nine-host and Mac-only four-host admission, canonical receipts, strict source/route/signer/OS/run binding and main guard; no evidence files written',
 );
 
 const repository = mkdtempSync(join(tmpdir(), 'tau-qualification-source-'));
@@ -272,6 +399,14 @@ try {
   assert.throws(() => {
     assertQualificationSource({ ...admitted, scope: 'unknown' });
   }, /scope\/channel/u);
+  // Mac-only receipts feed publication, so they stay bound to the exact workflow source and to staging.
+  assertQualificationSource({ ...admitted, sourceCommit: workflowCommit, scope: 'macos' });
+  assert.throws(() => {
+    assertQualificationSource({ ...admitted, scope: 'macos' });
+  }, /exact source/u);
+  assert.throws(() => {
+    assertQualificationSource({ ...admitted, sourceCommit: workflowCommit, scope: 'macos', channel: 'production' });
+  }, /scope\/channel/u);
   assert.throws(() => {
     assertQualificationSource({ ...admitted, sourceCommit: '--all' });
   }, /scope\/channel/u);
@@ -288,3 +423,66 @@ try {
   rmSync(repository, { recursive: true, force: true });
 }
 console.log('PASS real Git ancestry, Linux staging pinning and unchanged all-platform/production exact-source guards');
+
+const consumerScope = fixture();
+consumerScope.rows = consumerScope.rows.filter((row) => row.id === 'windows-nsis-x64');
+assert.throws(() => collectQualificationRows({ ...consumerScope, scope: 'windows' }), /consumer VM/u);
+assert.throws(() => collectQualificationRows({ ...consumerScope, scope: 'windows', kind: 'vm' }));
+assert.throws(() => collectQualificationRows({ ...consumerScope, scope: 'all', kind: 'vm' }));
+assert.throws(() => collectQualificationRows({ ...consumerScope, scope: 'windows', kind: 'vm', rows: [] }));
+
+const windowsRow = consumerScope.rows[0]!;
+const windowsReceipt: DesktopAcceptanceReceipt = {
+  ...windowsRow.receipts[0]!,
+  suite: 'clean-host-route-a-b-c-v1',
+  environment: {
+    os: 'Microsoft Windows 11 Pro',
+    arch: 'x64',
+    kind: 'vm',
+    sandbox: 'enabled',
+    host: {
+      platform: 'win32',
+      runner: 'synthetic',
+      nativeArch: 'x64',
+      osBuild: 26_100,
+      account: 'standard-user',
+      uac: 'enabled',
+      defender: 'enabled',
+      download: 'browser-internet-zone',
+      reputationScope: 'qualification-mirror',
+      manualEvidence: ['initial', 'reinstall'].map((stage, index) => ({
+        stage: index === 0 ? 'initial' : 'reinstall',
+        nonce: '123e4567-e89b-42d3-a456-426614174000',
+        hostSha256: 'd'.repeat(64),
+        artifactSha256: index === 0 ? 'b'.repeat(64) : windowsRow.receipts[0]!.artifacts[0]!.sha256,
+        observedAt: 200,
+        smartScreen: 'not-shown',
+        screenshots: [
+          {
+            kind: 'security-settings',
+            name: `${stage}-security.png`,
+            capturedAt: 150,
+            sha256: 'e'.repeat(64),
+            size: 10,
+          },
+          { kind: 'installer-result', name: `${stage}-result.png`, capturedAt: 150, sha256: 'f'.repeat(64), size: 10 },
+        ],
+      })),
+    },
+  },
+};
+const windowsInput = {
+  ...consumerScope,
+  scope: 'windows',
+  kind: 'vm',
+  rows: [{ id: windowsRow.id, receipts: [windowsReceipt] }],
+};
+assert.deepEqual(
+  collectQualificationRows(windowsInput).hostMatrix.map(({ id }) => id),
+  ['windows-nsis-x64'],
+);
+assert.throws(
+  () => collectQualificationRows({ ...windowsInput, rows: [...windowsInput.rows, ...windowsInput.rows] }),
+  /duplicated/u,
+);
+assert.throws(() => collectQualificationRows({ ...windowsInput, scope: 'all' }), /Clean-host/u);

@@ -14,7 +14,7 @@ describe('MemoryKillReporter (B-01)', () => {
 
     const signal = createMemoryKillSignal({ storage, navigationType: 'reload', deviceClass: 'constrained' });
     const capture = vi.fn();
-    const analytics = { capture, captureException: vi.fn() };
+    const analytics = { capture };
     const { rerender } = render(
       <AnalyticsContextProvider analytics={analytics}>
         <MemoryKillReporter signal={signal} liveProjectCount={0} chatCount={0} />

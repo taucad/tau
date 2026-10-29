@@ -32,6 +32,7 @@ import {
 } from '#hooks/use-sidebar-status.js';
 import type { SidebarFacts } from '#hooks/use-sidebar-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import { isUnownedChatObservation } from '#lib/chat-observation-guard.js';
 import { toast } from '#components/ui/sonner.js';
 
 const chatsPerPage = 5;
@@ -60,7 +61,10 @@ export function ProjectChatList({
   const isLoadingCloudChats = useProjectSidebarRow(project.id).sync?.chats === 'loading';
   const { updateChatName, deleteChat } = useChats(project.id, { enabled: false });
   const chats = useMemo(
-    () => allChats.filter((chat) => chat.deletedAt === undefined && chat.purgedAt === undefined),
+    () =>
+      allChats.filter(
+        (chat) => chat.deletedAt === undefined && chat.purgedAt === undefined && !isUnownedChatObservation(chat.id),
+      ),
     [allChats],
   );
   const store = useChatSessionStore();
@@ -97,7 +101,7 @@ export function ProjectChatList({
     () => '',
   );
   const observedKey = [...new Set([...visibleChats.map((chat) => chat.id), ...unreadKey.split(observedKeySeparator)])]
-    .filter((chatId) => chatId !== '')
+    .filter((chatId) => chatId !== '' && !isUnownedChatObservation(chatId))
     .join(observedKeySeparator);
   useEffect(() => {
     const releases = observations.leases;

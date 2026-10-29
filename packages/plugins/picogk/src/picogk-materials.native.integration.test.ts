@@ -380,6 +380,9 @@ Library.Go(1f, () => {
             entry: 'main.cs',
             files: { 'main.cs': source, 'map.png': image },
           },
+          // A uniform view is what the export builds, so the export reuses it: one build per source.
+          // An adaptive default view would rebuild for the export (exports always mesh at 0).
+          evaluateOptions: { meshAdaptivity: 0 },
         });
         const result = await opened.view('model').rendering();
         if (result.superseded) {

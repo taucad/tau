@@ -503,7 +503,8 @@ describe('dockviewStyleOverrides', () => {
     const horizontalTabSelector = '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab]';
 
     expect(dockviewStyleOverrides).toContain(`${horizontalTabSelector}:w-40`);
-    expect(dockviewStyleOverrides).toContain(`${horizontalTabSelector}:min-w-28`);
+    // The floor is capped at the strip's width so a lone tab at large text sizes still fits.
+    expect(dockviewStyleOverrides).toContain(`${horizontalTabSelector}:min-w-[min(7rem,100%)]`);
     expect(dockviewStyleOverrides).toContain(`${horizontalTabSelector}:max-w-40`);
     expect(dockviewStyleOverrides).toContain(`${horizontalTabSelector}:grow`);
     expect(dockviewStyleOverrides).toContain(`${horizontalTabSelector}:!shrink`);

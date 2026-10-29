@@ -1,3 +1,5 @@
+// oxlint-disable-next-line eslint/no-restricted-imports -- Route/build configuration runs before app aliases are installed.
+import { isObservabilityHarnessBuild } from './app/lib/observability-harness-gate.js';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -44,6 +46,9 @@ const toOriginOrRaw = (value: string | undefined): string | undefined => {
     return value;
   }
 };
+
+/** Netlify sets `CONTEXT` for builds only; the error tracker's `deploy_context` tag (`resolveDeployContext`). */
+const buildDeployContext = (environment: NodeJS.ProcessEnv): string => environment['CONTEXT'] ?? '';
 
 const resolveBuildFrontendUrl = (environment: NodeJS.ProcessEnv): string | undefined => {
   if (environment['TAU_FRONTEND_URL']) {
@@ -105,9 +110,15 @@ export const uiResolveAlias = [
 
 type UiSourceAliasPluginOptions = {
   readonly emitModuleGraph?: boolean;
+  readonly observabilityHarnessEnabled?: boolean;
   readonly tauCloudEnabled?: boolean;
   readonly target?: 'web' | 'desktop';
 };
+
+const harnessDisabledOverrides = new Map([
+  ['#lib/observability-harness-context.js', '#lib/observability-harness-disabled.js'],
+  ['#lib/observability-harness-hydration.js', '#lib/observability-harness-hydration-disabled.js'],
+]);
 
 const cloudBoundarySpecifiers = new Set([
   '#cloud/commercial-features.js',
@@ -131,6 +142,7 @@ const desktopSourceOverrides = new Map([
   ['#services/browser-geospec-worker.js', '#services/browser-geospec-worker.desktop.js'],
   ['#workers/measurement-exact.transport.js', '#workers/measurement-exact.transport.desktop.js'],
   ['#components/cookie-preferences.js', '#components/cookie-preferences.desktop.js'],
+  ['#hooks/use-cookie-consent.js', '#hooks/use-cookie-consent.desktop.js'],
 ]);
 
 const selfHostSourceOverrides = new Map([
@@ -198,10 +210,14 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
         }
 
         const [requestedSpecifier, query] = source.split('?', 2);
+        const harnessSpecifier =
+          options.observabilityHarnessEnabled === true
+            ? requestedSpecifier
+            : (harnessDisabledOverrides.get(requestedSpecifier ?? '') ?? requestedSpecifier);
         const hostSpecifier =
-          options.target === 'desktop' && requestedSpecifier
-            ? (desktopSourceOverrides.get(requestedSpecifier) ?? requestedSpecifier)
-            : requestedSpecifier;
+          options.target === 'desktop' && harnessSpecifier
+            ? (desktopSourceOverrides.get(harnessSpecifier) ?? harnessSpecifier)
+            : harnessSpecifier;
         const targetSpecifier =
           options.tauCloudEnabled === false && hostSpecifier
             ? (selfHostSourceOverrides.get(hostSpecifier) ?? hostSpecifier)
@@ -454,7 +470,16 @@ export default defineConfig(({ command, mode }) => {
     root: __dirname,
     cacheDir: '../../node_modules/.vite/apps/ui',
     define: {
+      // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
+      ...(isTest
+        ? {}
+        : {
+            'import.meta.env.TAU_OBSERVABILITY_HARNESS': JSON.stringify(
+              isObservabilityHarnessBuild(process.env) ? 'enabled' : 'disabled',
+            ),
+          }),
       tauBuildFrontendUrl: JSON.stringify(buildFrontendUrl ?? ''),
+      tauBuildDeployContext: JSON.stringify(buildDeployContext(process.env)),
       ...(isProductionBuild ? {} : buildIdDefine),
       tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
       /* Telemetry's own Cloud-host signal, beside the billing gate and never derived from it; tests stub the module. */
@@ -502,7 +527,11 @@ export default defineConfig(({ command, mode }) => {
     },
     plugins: [
       mtAssets.plugin,
-      createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
+      createUiSourceAliasPlugin({
+        emitModuleGraph: true,
+        tauCloudEnabled,
+        observabilityHarnessEnabled: isTest || isObservabilityHarnessBuild(process.env),
+      }),
       // WASM `fetch` integrity and the asset receipt (charter D26): build only.
       createAssetIntegrity({ receipt: true }),
       ...(buildRelease === undefined ? [] : [createReleaseManifestPlugin(buildRelease)]),
@@ -544,7 +573,11 @@ export default defineConfig(({ command, mode }) => {
       // Workers need their own plugins.
       // https://vite.dev/config/worker-options.html#worker-plugins
       plugins: () => [
-        createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
+        createUiSourceAliasPlugin({
+          emitModuleGraph: true,
+          tauCloudEnabled,
+          observabilityHarnessEnabled: isTest || isObservabilityHarnessBuild(process.env),
+        }),
         createAssetIntegrity({ receipt: false }),
       ],
     },
@@ -575,9 +608,11 @@ export default defineConfig(({ command, mode }) => {
     },
     build: {
       /*
-       * Source maps: client uses `react-router build --sourcemapClient hidden`
-       * (apps/ui/project.json). Omit server maps by not passing `--sourcemapServer`
-       * so the SSR `sourcemap` option stays unset (Rolldown rejects boolean `false`).
+       * Source maps: `ui:build` passes `--sourcemapClient hidden --sourcemapServer hidden`
+       * (apps/ui/project.json; Rolldown rejects boolean `false` for the SSR `sourcemap`).
+       * Server maps are moved out of `build/server` into `build/server-sourcemaps` and never
+       * ship in the function; `ui:sourcemaps` uploads them to Sentry and deletes them (SSR bundle
+       * policy rule 5).
        */
       /*
        * SVGs are forced out of the base64 inline path so the icon sprite

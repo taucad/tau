@@ -1,7 +1,5 @@
 /* oxlint-disable no-await-in-loop -- Observe sequential UI saves and bounded filesystem polling. */
 /** Drive the installed renderer over loopback CDP; no main inspector, fixture gateway, or injected filesystem. */
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import { readFile, readdir, writeFile, stat } from 'node:fs/promises';
 import { join, relative, resolve, dirname, basename } from 'node:path';
@@ -14,22 +12,6 @@ import { requestQualificationQuit } from './qualification-quit.mjs';
 
 const source =
   'from dataclasses import dataclass\nfrom build123d import Box, Shape\n\n@dataclass(frozen=True)\nclass Params:\n    width: float = 12\n    depth: float = 18\n    height: float = 6\n\ndef main(params: Params) -> Shape:\n    return Box(params.width, params.depth, params.height)\n';
-const readNativeClipboard = async (): Promise<string> => {
-  const command =
-    process.platform === 'darwin'
-      ? { executable: '/usr/bin/pbpaste', args: [] }
-      : process.platform === 'win32'
-        ? {
-            executable: 'powershell.exe',
-            args: ['-NoProfile', '-NonInteractive', '-Command', '[Console]::Write((Get-Clipboard -Raw))'],
-          }
-        : { executable: 'xclip', args: ['-selection', 'clipboard', '-o'] };
-  const { stdout } = await promisify(execFile)(command.executable, command.args, {
-    timeout: 10_000,
-    maxBuffer: 1024 * 1024,
-  });
-  return stdout;
-};
 const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 const findSource = async (root: string): Promise<string[]> => {
   const result: string[] = [];
@@ -132,8 +114,8 @@ const main = async (): Promise<void> => {
     throw new Error('Invalid renderer debugging port');
   }
   const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+  let page: Page | undefined;
   try {
-    let page: Page | undefined;
     const rendererDeadline = Date.now() + 120_000;
     while (!page && Date.now() < rendererDeadline) {
       page = browser
@@ -242,16 +224,14 @@ const main = async (): Promise<void> => {
       await page.locator('label[for="kernel-build123d"]').click();
       await page.getByRole('button', { name: /^Create Project/u }).click();
       await page.getByRole('tab', { name: 'main.py', exact: true }).last().click();
-      await page.locator('.monaco-editor').first().waitFor({ state: 'visible' });
-      await page.locator('.monaco-editor').first().locator('.native-edit-context, textarea.inputarea').last().focus();
+      // Focus the visible CodeMirror content, not its surrounding scroll container.
+      const editor = page.locator('.editor-container:visible .cm-editor:visible').last();
+      await editor.waitFor({ state: 'visible' });
+      await editor.locator('.cm-content[contenteditable="true"]').last().focus();
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+a' : 'Control+a');
-      const previousClipboard = await readNativeClipboard();
-      try {
-        await page.evaluate(async (text) => navigator.clipboard.writeText(text), source);
-        await page.keyboard.press(process.platform === 'darwin' ? 'Meta+v' : 'Control+v');
-      } finally {
-        await page.evaluate(async (text) => navigator.clipboard.writeText(text), previousClipboard);
-      }
+      // This disposable host may have no clipboard owner. Keep the paste payload until save is verified.
+      await page.evaluate(async (text) => navigator.clipboard.writeText(text), source);
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+v' : 'Control+v');
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+s' : 'Control+s');
     }
     const projectMatch = /^\/w\/home\/([a-z0-9-]+)$/u.exec(new URL(page.url()).pathname);
@@ -299,6 +279,30 @@ const main = async (): Promise<void> => {
       throw new Error('Installed renderer produced no fresh admitted Build123d payload record');
     }
     await page.screenshot({ path: `${output}.png`, fullPage: true });
+    let softwareRenderer: string | undefined;
+    if (process.env['TAU_QUALIFICATION_GRAPHICS'] === 'isolated-software') {
+      softwareRenderer = await page
+        .getByTestId('cad-viewer-canvas-region')
+        .locator('canvas')
+        .evaluate((canvas) => {
+          if (!(canvas instanceof HTMLCanvasElement)) {
+            throw new Error('Viewer canvas is not an HTML canvas');
+          }
+          const gl = canvas.getContext('webgl2');
+          const debug = gl?.getExtension('WEBGL_debug_renderer_info');
+          if (!gl || !debug) {
+            throw new Error('Viewer WebGL2 renderer identity unavailable');
+          }
+          const renderer: unknown = gl.getParameter(debug.UNMASKED_RENDERER_WEBGL);
+          if (typeof renderer !== 'string') {
+            throw new TypeError('Viewer WebGL2 renderer identity is not a string');
+          }
+          return renderer;
+        });
+      if (!/SwiftShader/iu.test(softwareRenderer)) {
+        throw new Error('Isolated software CI did not observe the SwiftShader viewer backend');
+      }
+    }
     await writeFile(
       output,
       JSON.stringify(
@@ -311,12 +315,88 @@ const main = async (): Promise<void> => {
           exported,
           logOffset,
           observedAt: new Date().toISOString(),
+          ...(softwareRenderer ? { softwareRenderer } : {}),
         },
         undefined,
         2,
       ),
       { flag: 'wx' },
     );
+  } catch (error) {
+    if (page) {
+      // Read-only failure evidence from the disposable fixture, never a substitute for acceptance.
+      const observations = await Promise.allSettled([
+        page.screenshot({ path: `${output}.failure.png`, fullPage: true, timeout: 10_000 }),
+        page.locator('body').evaluate(
+          () => {
+            const describe = (element: Element) => {
+              const bounds = element.getBoundingClientRect();
+              return {
+                tag: element.tagName,
+                role: element.getAttribute('role'),
+                label: element.getAttribute('aria-label'),
+                className: element.className,
+                width: bounds.width,
+                height: bounds.height,
+                display: getComputedStyle(element).display,
+                visibility: getComputedStyle(element).visibility,
+              };
+            };
+            return {
+              url: location.href,
+              focused: document.activeElement ? describe(document.activeElement) : undefined,
+              editors: [...document.querySelectorAll('.editor-container, .cm-editor')]
+                .slice(0, 20)
+                .map((element) => describe(element)),
+              tabs: [...document.querySelectorAll('[role="tab"]')].slice(0, 30).map((element) => ({
+                ...describe(element),
+                text: element.textContent.slice(0, 200),
+                selected: element.getAttribute('aria-selected'),
+              })),
+              alerts: [...document.querySelectorAll('[role="alert"]')]
+                .slice(0, 10)
+                .map((element) => element.textContent.slice(0, 1000)),
+            };
+          },
+          undefined,
+          { timeout: 10_000 },
+        ),
+        (async () => {
+          const projectMatch = /^\/w\/home\/([a-z0-9-]+)$/u.exec(new URL(page.url()).pathname);
+          if (!projectMatch?.[1]) {
+            return [];
+          }
+          const paths = await findSource(join(profile, 'home', projectMatch[1]));
+          return Promise.all(
+            paths.slice(0, 20).map(async (path) => {
+              const bytes = await readFile(path, 'utf8');
+              return { path: relative(profile, path), bytes: Buffer.byteLength(bytes), sha256: sha256(bytes) };
+            }),
+          );
+        })(),
+      ]);
+      await writeFile(
+        `${output}.failure.json`,
+        JSON.stringify(
+          {
+            stage,
+            expectedSourceSha256: sha256(source),
+            error: error instanceof Error ? error.message : String(error),
+            observations: observations.map((result) =>
+              result.status === 'fulfilled'
+                ? { status: result.status, value: Buffer.isBuffer(result.value) ? 'screenshot saved' : result.value }
+                : { status: result.status, error: String(result.reason) },
+            ),
+          },
+          undefined,
+          2,
+        ),
+        { flag: 'wx' },
+      ).catch((diagnosticError: unknown) => {
+        console.error('Could not save renderer failure observations', diagnosticError);
+      });
+    }
+    throw error;
   } finally {
     // CDP disconnect leaves the shipping process alive for the actual updater.
     await browser.close();

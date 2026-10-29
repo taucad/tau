@@ -69,22 +69,11 @@ describe('runtime vocabularies (T30)', () => {
       ...capabilities.flatMap((capability) => capability.edges.map((edge) => edge.to)),
     ]);
     expect(new Set(generated.exportFormats)).toEqual(expected);
-    for (const format of [
-      'webp',
-      'jpeg',
-      'gcode.3mf',
-      '3ds',
-      'dae',
-      'fbx',
-      'usda',
-      'usdz',
-      'x',
-      'x3d',
-      'csv',
-      'txt',
-      'json',
-    ]) {
+    for (const format of ['webp', 'jpeg', 'gcode.3mf', 'dae', 'fbx', 'usda', 'usdc', 'usdz', 'csv', 'txt', 'json']) {
       expect(generated.exportFormats).toContain(format);
+    }
+    for (const format of ['3ds', 'x', 'x3d', 'wrl', 'vrml']) {
+      expect(generated.exportFormats).not.toContain(format);
     }
   });
 
@@ -95,7 +84,7 @@ describe('runtime vocabularies (T30)', () => {
     }
     const capabilities = await registry.registryCapabilities();
     const assimp = capabilities.find((capability) => capability.kind === 'kernels' && capability.id === 'assimp');
-    expect(assimp?.extensions.length).toBeGreaterThanOrEqual(30);
+    expect(assimp?.extensions).toHaveLength(24);
     for (const extension of assimp?.extensions ?? []) {
       expect(fileFormats.has(extension)).toBe(true);
     }

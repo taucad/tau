@@ -2,6 +2,7 @@ import { Octokit } from '@octokit/rest';
 import { z } from 'zod';
 import { metaConfig } from '#constants/meta.constants.js';
 import { ENV } from '#environment.config.js';
+import { recordApiRequestId } from '#lib/api-request-id.js';
 
 type GithubBranchesResponse = {
   readonly branches: ReadonlyArray<{ name: string; sha: string; updatedAt: number }>;
@@ -167,7 +168,7 @@ class GitHubApiClient {
 
     const response = await fetch(`${ENV.TAU_API_URL}/v1/repositories/branches?${parameters.toString()}`);
     if (!response.ok) {
-      throw await readRefusal(response);
+      throw recordApiRequestId(await readRefusal(response), response);
     }
 
     const body = (await response.json()) as GithubBranchesResponse;

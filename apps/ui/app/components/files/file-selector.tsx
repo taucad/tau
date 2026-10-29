@@ -19,7 +19,7 @@ import { OmniScroller } from '#components/ui/omni-scroller.js';
 type FileSelectorProps = {
   readonly popoverProperties?: React.ComponentProps<typeof PopoverContent>;
   /** Explicit data source. When omitted, auto-resolves from FileManagerProvider context. */
-  readonly dataSource?: FileSelectorDataSource;
+  readonly dataSource?: FileSelectorDataSource & { readonly revision?: number };
   /** Include directories in search results (only applies to context-based data source). */
   readonly shouldIncludeDirectories?: boolean;
   readonly selectedFile: string | undefined;
@@ -100,6 +100,7 @@ export function FileSelector({
     dataSource: explicitSource,
     search: explicitSource ?? contextSearch,
     isActive: open,
+    revision: explicitSource?.revision,
     describeError: describeListingError,
   });
   const { currentPath, reset } = browser;
@@ -180,14 +181,14 @@ export function FileSelector({
     <FileBrowser
       {...browser}
       entries={isExplicitBrowse || isSearching ? browser.entries : contextEntries}
-      status={isExplicitBrowse ? browser.status : contextStatus}
+      status={isExplicitBrowse || isSearching ? browser.status : contextStatus}
       selectedFile={selectedFile}
       searchPlaceholder={searchPlaceholder}
       emptyMessage={emptyMessage}
       virtualizationThreshold={virtualizationThreshold}
       FileIcon={FileExtensionIcon}
       BreadcrumbScroller={OmniScroller}
-      onRetry={isExplicitBrowse ? browser.onRetry : handleContextRetry}
+      onRetry={isExplicitBrowse || isSearching ? browser.onRetry : handleContextRetry}
       onSelect={handleSelect}
     />
   );
@@ -196,13 +197,9 @@ export function FileSelector({
     return (
       <Drawer open={open} onOpenChange={handleOpenChange}>
         <DrawerTrigger asChild>{triggerButton}</DrawerTrigger>
-        <DrawerContent aria-labelledby='drawer-title' aria-describedby='drawer-description'>
-          <DrawerTitle className='sr-only' id='drawer-title'>
-            {title}
-          </DrawerTitle>
-          <DrawerDescription className='sr-only' id='drawer-description'>
-            {description}
-          </DrawerDescription>
+        <DrawerContent>
+          <DrawerTitle className='sr-only'>{title}</DrawerTitle>
+          <DrawerDescription className='sr-only'>{description}</DrawerDescription>
           {content}
         </DrawerContent>
       </Drawer>

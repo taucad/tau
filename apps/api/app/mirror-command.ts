@@ -23,6 +23,7 @@ import { runRetentionSweep } from '#api/git/mirror/retention.js';
 import { R2MirrorSource } from '#api/git/mirror/source.js';
 import { PostgresMirrorLedger } from '#api/git/mirror/watermark.js';
 import { exportBacklog, runMirrorWorker } from '#api/git/mirror/worker.js';
+import { applicationNameOf } from '#database/application-name.js';
 
 /**
  * `tau-mirror`: the B2 second copy's copier (W13 DM1, B3a). It runs in its own
@@ -134,6 +135,7 @@ async function main(): Promise<void> {
     connect_timeout: environment.DATABASE_CONNECT_TIMEOUT_SECONDS,
     idle_timeout: environment.DATABASE_IDLE_TIMEOUT_SECONDS,
     connection: {
+      application_name: applicationNameOf('mirror'),
       statement_timeout: environment.DATABASE_STATEMENT_TIMEOUT_MS,
       lock_timeout: environment.DATABASE_LOCK_TIMEOUT_MS,
       idle_in_transaction_session_timeout: environment.DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS,

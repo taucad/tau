@@ -100,10 +100,8 @@ const createGeometrySource = async (sizeX: number, sizeY = 1, sizeZ = 1): Promis
   return { format: 'glb', source: await new WebIO().writeBinary(document), name: 'box' };
 };
 
-const brepFixture = resolve(
-  import.meta.dirname,
-  '../../../../packages/geospec/fixtures/contact/valve-seat-cone-positive/model.step',
-);
+// A byte-for-byte copy of taucad/geospec's `fixtures/contact/valve-seat-cone-positive/model.step`.
+const brepFixture = resolve(import.meta.dirname, '__fixtures__/valve-seat-cone-positive.step');
 
 describe('runTauGeoSpecTests', () => {
   it('releases renderer results that arrive after a test timeout', async () => {

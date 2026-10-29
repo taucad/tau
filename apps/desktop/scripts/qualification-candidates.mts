@@ -14,7 +14,28 @@ export type QualificationCandidateInput = {
   runId: string;
 };
 
-/** Keep Linux staging evidence pinned to a trusted ancestor; other qualification scopes remain exact-source. */
+/** Refuse unsupported consumer runs before observing the host or creating qualification state. */
+export const assertQualificationConsumerScope = (options: {
+  kind: 'ci' | 'vm';
+  route: string;
+  scope: string | undefined;
+  channel: string;
+}): void => {
+  if (options.kind !== 'vm') {
+    return;
+  }
+  const expected =
+    options.route === 'windows-nsis' ? 'windows' : options.route.startsWith('macos-') ? 'macos' : undefined;
+  if (!expected || options.scope !== expected || options.channel !== 'staging') {
+    throw new Error('Consumer acceptance requires its staging platform scope');
+  }
+};
+
+/**
+ * Keep Linux staging evidence pinned to a trusted ancestor; other qualification scopes remain exact-source. The
+ * Mac-only staging scope stays exact-source because its receipts feed publication, whose provenance requires the
+ * qualification run's head to equal the candidate source.
+ */
 export const assertQualificationSource = (options: {
   sourceCommit: string;
   workflowCommit: string;
@@ -24,9 +45,9 @@ export const assertQualificationSource = (options: {
   if (
     !/^[a-f\d]{40}$/u.test(options.sourceCommit) ||
     !/^[a-f\d]{40}$/u.test(options.workflowCommit) ||
-    !['all', 'linux'].includes(options.scope) ||
+    !['all', 'linux', 'macos', 'windows'].includes(options.scope) ||
     !['staging', 'production'].includes(options.channel) ||
-    (options.scope === 'linux' && options.channel !== 'staging')
+    (options.scope !== 'all' && options.channel !== 'staging')
   ) {
     throw new Error('Invalid qualification source scope/channel');
   }
@@ -60,6 +81,7 @@ export const fetchQualificationCandidates = async (options: {
           TAU_INSTALLER_CANDIDATE_RUN_ID: runId,
           DESKTOP_ASSETS_DIR: artifactDirectory,
           GITHUB_SHA: options.sourceCommit,
+          TAU_DESKTOP_QUALIFICATION_SCOPE: options.scope,
         },
         stdio: 'inherit',
         timeout: 900_000,

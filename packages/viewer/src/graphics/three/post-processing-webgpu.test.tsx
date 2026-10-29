@@ -1095,6 +1095,15 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     // Shared targets must be initialized together before the first scene write.
     // Requalify the adaptation if Three changes initialization, clearing or retirement.
     for (const [file, digest] of [
+      ['three/src/materials/nodes/NodeMaterial.js', 'f4ba7cbf3c79c62aee417867d4ff4cce7951135d2cede2cf922646b680ab80a1'],
+      [
+        'three/src/renderers/common/RenderObject.js',
+        '3efeff495ae23dba0b5ac4b795084d952626395b1c596d884f6a7752df07c8aa',
+      ],
+      [
+        'three/src/nodes/display/ViewportDepthNode.js',
+        '4090bce996d51b6c5ca00b3276a833ca05bfa5d63ab4766b38dae8a6c171d382',
+      ],
       ['three/src/renderers/common/Textures.js', 'f254ca8221e17bf58a2aad3e99735bc6b5b183331dc9aeafd530d73bf2b3347c'],
       ['three/src/nodes/display/PassNode.js', 'e4547bb6d360cc7b2459bdfa1d1ca53a2f43f47538b37607d19d32c45a7526e5'],
     ]) {

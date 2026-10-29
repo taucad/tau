@@ -60,8 +60,12 @@ vi.mock('#components/chat/chat-context-insertion.js', () => ({
   ChatContextInsertionProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock('allotment', () => {
-  const Pane = ({ children, visible = true }: React.PropsWithChildren<{ readonly visible?: boolean }>) => (
-    <div data-pane data-visible={visible}>
+  const Pane = ({
+    children,
+    visible = true,
+    minSize,
+  }: React.PropsWithChildren<{ readonly visible?: boolean; readonly minSize?: number }>) => (
+    <div data-pane data-visible={visible} data-min-size={minSize}>
       {children}
     </div>
   );
@@ -98,6 +102,8 @@ const resizeObserver: ResizeObserver = {
 };
 
 const { ChatInterfaceDesktop, compactWorkspaceWidth } = await import('./chat-interface-desktop.js');
+const { panelMinSizeChat, panelMinSizeViewer, panelMinSizeViewerTight, panelMinSizeWorkbench, tightWorkspaceWidth } =
+  await import('#constants/editor.constants.js');
 const { revealDelayMilliseconds } = await import('./workspace-skeleton.js');
 
 const renderDesktop = () =>
@@ -182,6 +188,34 @@ describe('ChatInterfaceDesktop', () => {
     expect(screen.getByTestId('workbench-lane').closest('[data-pane]')).toHaveAttribute('data-visible', 'true');
     expect(screen.getByTestId('viewer-lane')).toBe(viewer);
     expect(document.querySelectorAll('[data-pane]')).toHaveLength(3);
+  });
+
+  /* From 768px with the sidebar open (544px of workspace) or on a landscape phone, a lane beside the full viewer
+   * minimum would run past the viewport's edge; the viewer's minimum drops instead, and wide desktop keeps it. */
+  it('lowers the viewer minimum only where a lane cannot fit beside the full viewer', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(DOMRect.fromRect({ width: 544 }));
+    renderDesktop();
+    const viewerLane = await screen.findByTestId('viewer-lane');
+    const viewerPane = viewerLane.closest('[data-pane]');
+    expect(viewerPane).toHaveAttribute('data-min-size', String(panelMinSizeViewerTight));
+    expect(panelMinSizeChat + panelMinSizeViewerTight).toBeLessThanOrEqual(544);
+    expect(panelMinSizeWorkbench + panelMinSizeViewerTight).toBeLessThanOrEqual(544);
+
+    resizeTo(tightWorkspaceWidth);
+    expect(screen.getByTestId('viewer-lane').closest('[data-pane]')).toHaveAttribute(
+      'data-min-size',
+      String(panelMinSizeViewer),
+    );
+    resizeTo(tightWorkspaceWidth - 1);
+    expect(screen.getByTestId('viewer-lane').closest('[data-pane]')).toHaveAttribute(
+      'data-min-size',
+      String(panelMinSizeViewerTight),
+    );
+    resizeTo(1400);
+    expect(screen.getByTestId('viewer-lane').closest('[data-pane]')).toHaveAttribute(
+      'data-min-size',
+      String(panelMinSizeViewer),
+    );
   });
 
   /* The editor state loads from storage before the lanes can take their

@@ -56,8 +56,16 @@ const main = async (): Promise<void> => {
       ),
     })
     .parse(api(`actions/runs/${runId}/artifacts?per_page=100`));
-  const scope = z.enum(['all', 'linux']).parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
-  const name = scope === 'linux' ? 'desktop-linux-installer-candidate' : 'desktop-installer-candidate';
+  const scope = z
+    .enum(['all', 'linux', 'macos', 'windows'])
+    .parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
+  // Windows consumer acceptance uses the existing all-platform candidate producer.
+  const name = {
+    all: 'desktop-installer-candidate',
+    linux: 'desktop-linux-installer-candidate',
+    macos: 'desktop-macos-installer-candidate',
+    windows: 'desktop-installer-candidate',
+  }[scope];
   const matches = list.artifacts.filter((entry) => entry.name === name);
   const artifact = matches[0];
   if (

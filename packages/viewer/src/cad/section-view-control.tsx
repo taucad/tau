@@ -16,6 +16,8 @@ type ToolToggleProps = Readonly<{
   label: string;
   icon: React.ReactNode;
   isActive: boolean;
+  /** The requested tool is preparing its interaction surface; cancellation remains available. */
+  isBusy?: boolean;
   /** The formatted shortcut the tooltip shows. */
   shortcut?: string;
   onToggle: () => void;
@@ -32,6 +34,7 @@ export function ToolToggle({
   label,
   icon,
   isActive,
+  isBusy,
   shortcut,
   onToggle,
 }: ToolToggleProps): React.JSX.Element {
@@ -46,6 +49,7 @@ export function ToolToggle({
           size={controlSize}
           aria-label={name}
           aria-pressed={isActive}
+          aria-busy={isBusy}
           data-active={isActive}
           data-tool={tool}
           className='gap-1 text-xs data-[active=true]:bg-accent @min-[520px]/viewer:w-auto @min-[520px]/viewer:px-2 data-[active=true]:[&_svg]:text-viewer-tool-active'

@@ -6,6 +6,7 @@ import { toast } from '#components/ui/sonner.js';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { PublicationEmailTagsField, getPublicationEmailTagsError } from '#components/publish/publication-email-tags.js';
+import { recordApiRequestId } from '#lib/api-request-id.js';
 
 export type PublicationAccessGrant = {
   id: string;
@@ -66,7 +67,7 @@ export function PublicationAccessPanel({
           });
 
           if (!response.ok) {
-            throw new Error(email);
+            throw recordApiRequestId(new Error(email), response);
           }
         }),
       );
@@ -91,7 +92,7 @@ export function PublicationAccessPanel({
       });
 
       if (!response.ok) {
-        throw new Error(grant.recipientEmail);
+        throw recordApiRequestId(new Error(grant.recipientEmail), response);
       }
 
       await onGrantsChanged();

@@ -17,6 +17,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+// oxlint-disable-next-line no-restricted-imports -- Include script transport tests in this existing Nx gate.
+import { runMirrorReadbackTests } from './mirror-readback.test.mjs';
+
+await runMirrorReadbackTests();
+
 const workspace = resolve(import.meta.dirname, '../../..');
 const root = mkdtempSync(join(tmpdir(), 'tau-publish-desktop-test-'));
 const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workspace, encoding: 'utf8' }).trim();

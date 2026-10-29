@@ -104,6 +104,8 @@ export type RjsfLayoutContextValue = {
   readonly objectArrayItem?: boolean;
   /** RJSF array identity and parent depth keep disclosure choices attached through removal/reorder. */
   readonly arrayDisclosure?: { readonly key: string; readonly parentDepth: number };
+  /** The path of a choice union whose selected object branch draws its rows inline rather than as a nested group. */
+  readonly choiceUnionPath?: string;
 };
 
 /**

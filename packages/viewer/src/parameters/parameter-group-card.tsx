@@ -6,6 +6,14 @@ import { HighlightText } from '@taucad/ui/components/highlight-text';
 import { disclosureMotion } from '@taucad/ui/components/actions';
 
 /**
+ * Added to a container's own 4 px vertical inset (`py-1`), a group card at the container's top or bottom edge sits
+ * the group gap (8 px) from the container's border, as it does from a sibling card.
+ * @public
+ */
+export const edgeCardGapClassName =
+  '[&>[data-slot=field-group]:first-child]:pt-1 [&>[data-slot=field-group]:last-child]:pb-1';
+
+/**
  * The Parameters pane's group card: a header row with the title, a trailing status such as a count and a chevron
  * that turns; opening it adds the border and `bg-background`, and its body slides open.
  *
@@ -84,10 +92,12 @@ export function ParameterGroupCard({
         {headerActions}
       </div>
       <CollapsibleContent data-slot='parameter-group-content' className={disclosureMotion}>
-        {/* Padding sits inside the animated content, so the height animation starts without a jump. */}
+        {/* Padding sits inside the animated content, so the height animation starts without a jump. A card at
+         * either edge of the body adds 4 px to the body's own, so it sits the group gap (8 px) from this card's
+         * border, as far as from a sibling card, rather than stacking its border against this one. */}
         <div
           data-slot='parameter-group-body'
-          className={cn('border-t border-border/70 py-1 [&>.field-group]:mx-1', bodyClassName)}
+          className={cn('border-t border-border/70 py-1 [&>.field-group]:mx-1', edgeCardGapClassName, bodyClassName)}
         >
           {children}
         </div>

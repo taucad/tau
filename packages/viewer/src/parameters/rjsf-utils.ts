@@ -134,6 +134,26 @@ export const getDiscriminatedUnionInfo = (schema: RJSFSchema): DiscriminatedUnio
   return undefined;
 };
 
+/**
+ * Read a `oneOf` or `anyOf` schema whose branches share no discriminator, such as a preset name or an explicit
+ * tolerance object. RJSF draws it with a branch selector above the selected branch's own field.
+ *
+ * @param schema - The schema to read.
+ * @returns The union's branches, or `undefined` for a discriminated union, a select of constants or no union.
+ * @public
+ */
+export const getChoiceUnionBranches = (schema: RJSFSchema): readonly RJSFSchema[] | undefined => {
+  const definitions = schema.oneOf ?? schema.anyOf;
+  if (!definitions || definitions.length < 2 || getDiscriminatedUnionInfo(schema) !== undefined) {
+    return undefined;
+  }
+  const branches = definitions.filter((definition) => isRjsfSchema(definition));
+  if (branches.length !== definitions.length || branches.every((branch) => getLiteralValue(branch) !== undefined)) {
+    return undefined;
+  }
+  return branches;
+};
+
 const objectValue = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 

@@ -10,9 +10,10 @@ import type {
   ArrayFieldTemplateProps,
   ArrayFieldItemTemplateProps,
   ErrorListProps,
+  MultiSchemaFieldTemplateProps,
   RJSFSchema,
 } from '@rjsf/utils';
-import { ChevronDown, Info, SearchX, Trash2 } from 'lucide-react';
+import { Info, SearchX, Trash2 } from 'lucide-react';
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import { projectParameterField } from '@taucad/parameters';
@@ -21,7 +22,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import { Input } from '@taucad/ui/components/input';
 import { ParametersBoolean } from '#parameters/parameters-boolean.jsx';
 import { ParameterSelect } from '#parameters/parameter-select.jsx';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { cn } from '@taucad/ui/utils/cn';
 import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 import { formatDisplayLabel, formatFieldLabel } from '@taucad/ui/utils/label';
@@ -29,11 +29,12 @@ import { ModifiedIndicator } from '@taucad/ui/components/modified-indicator';
 import { HighlightText } from '@taucad/ui/components/highlight-text';
 import { PaneVirtualList } from '@taucad/ui/components/pane-virtual-list';
 import { paneFieldGroupSpacingClassName } from '@taucad/ui/components/pane-spacing.variants';
-import { ParameterGroupCard } from '#parameters/parameter-group-card.jsx';
+import { ParameterGroupCard, edgeCardGapClassName } from '#parameters/parameter-group-card.jsx';
 import { FieldLabelContext, ParametersWidget, useFieldLabel } from '#parameters/parameters-widget.jsx';
 import {
   isSchemaMatchingSearch,
   getFieldDefaultValue,
+  getChoiceUnionBranches,
   getDiscriminatedUnionInfo,
   isObjectLikeSchema,
 } from '#parameters/rjsf-utils.js';
@@ -96,6 +97,67 @@ function useParameterDisclosure(formContext: RJSFContext, id: string) {
   return [isOpen, setIsOpen] as const;
 }
 
+/** The label column of a parameter row: 40% of the row once the row is wide enough to sit beside its control. */
+const parameterLabelColumnClassName = 'flex min-w-0 shrink-0 items-center gap-1.5 @[200px]/parameter:w-[40%]';
+
+/**
+ * Whether an object schema is the selected branch of the enclosing union card: a discriminated branch carries the
+ * card's discriminator, and a choice union's branch renders at the union's own path.
+ *
+ * @param layoutContext - The enclosing template's layout context.
+ * @param schema - The object's schema.
+ * @param path - The object's rendered field path.
+ * @returns The kind of union the object is a branch of, or `undefined` for an ordinary object.
+ */
+const getUnionBranchKind = (
+  layoutContext: RjsfLayoutContextValue,
+  schema: RJSFSchema,
+  path: readonly string[] | undefined,
+): 'discriminated' | 'choice' | undefined => {
+  if (
+    layoutContext.embeddedDiscriminator !== undefined &&
+    Object.hasOwn(schema.properties ?? {}, layoutContext.embeddedDiscriminator)
+  ) {
+    return 'discriminated';
+  }
+  return layoutContext.choiceUnionPath !== undefined && layoutContext.choiceUnionPath === JSON.stringify(path)
+    ? 'choice'
+    : undefined;
+};
+
+/**
+ * A union's branch selector drawn as an ordinary parameter row: the choice's name beside the select. RJSF's
+ * default template stacks the selector and the selected branch in Bootstrap panels, which the parameter rows
+ * cannot lay out.
+ *
+ * @param props - RJSF's selector widget, the selected branch's field and the union schema.
+ * @returns The selector row followed by the selected branch's field.
+ */
+function MultiSchemaFieldTemplate({
+  selector,
+  optionSchemaField,
+  schema,
+}: MultiSchemaFieldTemplateProps<Record<string, unknown>, RJSFSchema, RJSFContext>): React.ReactNode {
+  const union = getDiscriminatedUnionInfo(schema);
+  const selectorLabel = union ? formatDisplayLabel(union.discriminator) : 'Type';
+
+  return (
+    <>
+      {selector ? (
+        <div data-slot='union-selector' className='@container/parameter my-1.5 px-2.5'>
+          <div className='flex items-center gap-2'>
+            <div className={parameterLabelColumnClassName}>
+              <span className='min-w-0 truncate text-sm text-muted-foreground'>{selectorLabel}</span>
+            </div>
+            <div className='flex min-w-0 flex-1 items-center justify-end'>{selector}</div>
+          </div>
+        </div>
+      ) : null}
+      {optionSchemaField}
+    </>
+  );
+}
+
 function CompositeFieldTemplate({
   children,
   formData,
@@ -104,6 +166,7 @@ function CompositeFieldTemplate({
   formContext,
   id,
   action,
+  registry,
 }: {
   readonly children: React.ReactNode;
   readonly formData: unknown;
@@ -112,15 +175,19 @@ function CompositeFieldTemplate({
   readonly formContext: RJSFContext;
   readonly id: string;
   readonly action?: RjsfLayoutContextValue['arrayItemAction'];
+  readonly registry: FieldTemplateProps<Record<string, unknown>, RJSFSchema, RJSFContext>['registry'];
 }): React.ReactNode {
   'use no memo';
 
   const union = getDiscriminatedUnionInfo(schema);
+  const choiceBranches = union ? undefined : getChoiceUnionBranches(schema);
   const { arrayDisclosure } = useRjsfLayoutContext();
+  const fieldPath = useRenderedFieldPath()?.path;
+  const choiceUnionPath = choiceBranches && fieldPath ? JSON.stringify(fieldPath) : undefined;
   const [isOpen, setIsOpen] = useParameterDisclosure(formContext, id);
   const selectedBranchContext = useMemo(
-    () => ({ embeddedDiscriminator: union?.discriminator, arrayDisclosure }),
-    [union?.discriminator, arrayDisclosure],
+    () => ({ embeddedDiscriminator: union?.discriminator, arrayDisclosure, choiceUnionPath }),
+    [union?.discriminator, arrayDisclosure, choiceUnionPath],
   );
 
   useEffect(() => {
@@ -130,34 +197,53 @@ function CompositeFieldTemplate({
     }
   }, [formContext.searchTerm]);
 
-  if (!union) {
+  const prettyTitle = formatFieldLabel(label, schema.title);
+  let trailing: React.ReactNode;
+  if (union) {
+    const selectedValue =
+      typeof formData === 'object' && formData !== null
+        ? (formData as Record<string, unknown>)[union.discriminator]
+        : undefined;
+    const selectedIndex = union.values.findIndex((value) => Object.is(value, selectedValue));
+    const selectedBranch = union.branches[Math.max(0, selectedIndex)];
+    const propertyCount = Object.keys(selectedBranch?.properties ?? {}).length;
+    trailing = <span className='shrink-0 text-xs text-muted-foreground tabular-nums'>({propertyCount})</span>;
+  } else if (choiceBranches) {
+    // The closed card still names the chosen branch, such as `Preset` or `Explicit`.
+    // RJSF types form data by the root object, while a union's value may be a scalar such as `'high'`.
+    const branchData = formData as Record<string, unknown> | undefined;
+    const selectedIndex = registry.schemaUtils.getClosestMatchingOption(branchData, [...choiceBranches], 0);
+    const selectedTitle = choiceBranches[selectedIndex]?.title;
+    trailing = selectedTitle ? (
+      <span className='min-w-0 shrink truncate text-xs text-muted-foreground'>{selectedTitle}</span>
+    ) : undefined;
+  } else {
     return children;
   }
-
-  const selectedValue =
-    typeof formData === 'object' && formData !== null
-      ? (formData as Record<string, unknown>)[union.discriminator]
-      : undefined;
-  const selectedIndex = union.values.findIndex((value) => Object.is(value, selectedValue));
-  const selectedBranch = union.branches[Math.max(0, selectedIndex)];
-  const propertyCount = Object.keys(selectedBranch?.properties ?? {}).length;
-  const prettyTitle = formatFieldLabel(label, schema.title);
-  const discriminatorLabel = formatDisplayLabel(union.discriminator);
+  const descriptionText = typeof schema.description === 'string' ? schema.description : '';
 
   return (
     <ParameterGroupCard
       title={prettyTitle}
       searchTerm={formContext.searchTerm}
-      trailing={<span className='shrink-0 text-xs text-muted-foreground tabular-nums'>({propertyCount})</span>}
+      trailing={trailing}
       isOpen={isOpen}
       headerActions={<ArrayItemRemoveAction action={action} />}
-      bodyClassName='grid grid-cols-[minmax(0,40%)_minmax(0,1fr)] items-center [&>.panel]:contents [&>.panel>.field-group]:col-span-2 [&>.panel>.form-group]:col-start-2 [&>.panel>.form-group]:row-start-1 [&>.panel>.form-group]:flex [&>.panel>.form-group]:justify-end [&>.panel>.form-group]:py-1.5 [&>.panel>.form-group]:pr-2.5'
       onOpenChange={setIsOpen}
     >
-      <span className='col-start-1 row-start-1 truncate px-2.5 text-sm text-muted-foreground'>
-        {discriminatorLabel}
-      </span>
-      <rjsfLayoutContext.Provider value={selectedBranchContext}>{children}</rjsfLayoutContext.Provider>
+      {descriptionText ? (
+        <div className='px-2.5 pt-1 pb-0.5 text-xs text-muted-foreground'>
+          <HighlightText text={descriptionText} searchTerm={formContext.searchTerm} />
+        </div>
+      ) : null}
+      <rjsfLayoutContext.Provider value={selectedBranchContext}>
+        {/* The branch selector's accessible name: the union's own label, as `Select for Tessellation`. */}
+        {choiceBranches ? (
+          <FieldLabelContext.Provider value={prettyTitle}>{children}</FieldLabelContext.Provider>
+        ) : (
+          children
+        )}
+      </rjsfLayoutContext.Provider>
     </ParameterGroupCard>
   );
 }
@@ -188,8 +274,8 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
     return null;
   }
 
-  const discriminatedUnion = getDiscriminatedUnionInfo(schema);
-  if (discriminatedUnion) {
+  const isUnion = getDiscriminatedUnionInfo(schema) !== undefined || getChoiceUnionBranches(schema) !== undefined;
+  if (isUnion) {
     if (formContext.searchTerm && !ancestorMatches && !isSchemaMatchingSearch(schema, formContext.searchTerm, label)) {
       return null;
     }
@@ -203,6 +289,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
           schema={schema}
           formContext={formContext}
           action={layoutContext.arrayItemAction}
+          registry={registry}
         >
           {children}
         </CompositeFieldTemplate>
@@ -221,6 +308,11 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
       !isSchemaMatchingSearch(schema, formContext.searchTerm, label)
     ) {
       return null;
+    }
+
+    // A union's selected object branch lays its rows straight into the union's card, under the branch selector.
+    if (getUnionBranchKind(layoutContext, schema, fieldPath) !== undefined) {
+      return children;
     }
 
     return (
@@ -290,6 +382,8 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
       )}
       role='group'
       aria-label={`Parameter: ${prettyLabel}`}
+      // A narrow pane truncates long names; hovering shows the whole name.
+      title={prettyLabel}
     >
       <HighlightText text={prettyLabel} searchTerm={formContext.searchTerm} />
       {required ? <span className='text-feature/50'>*</span> : null}
@@ -304,13 +398,13 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
       <div
         data-switch-row={isSwitchRow ? '' : undefined}
         className={cn(
-          'flex items-center gap-2 @[240px]/parameter:flex-row',
+          'flex items-center gap-2 @[200px]/parameter:flex-row',
           isSwitchRow &&
             "relative min-h-(--param-field-h) [&_[data-slot=switch]]:after:absolute [&_[data-slot=switch]]:after:inset-0 [&_[data-slot=switch]]:after:content-['']",
           isSwitchRow && !isSwitchDisabled && '[&_[data-slot=switch]]:cursor-action',
         )}
       >
-        <div className='flex min-w-0 shrink-0 items-center gap-1.5 @[240px]/parameter:w-[40%]'>
+        <div className={parameterLabelColumnClassName}>
           <div className='flex min-w-0 items-center gap-0.5'>
             {isSwitchRow ? (
               <label htmlFor={id} className={cn('min-w-0', !isSwitchDisabled && 'cursor-action')}>
@@ -406,8 +500,14 @@ function ObjectFieldTemplate(
 
   if (isRoot) {
     if (formContext.rootPresentation === 'embedded') {
+      // The same 4 px inset on every side as the catalog's `p-1` and a group body's `py-1`; a card that opens or
+      // closes the form takes the group gap above or below it, as in a group body, instead of stacking its border
+      // on the host's.
       return (
-        <div data-slot='embedded-form-root' className='properties empty:hidden'>
+        <div
+          data-slot='embedded-form-root'
+          className={cn('properties py-1 empty:hidden [&>.field-group]:mx-1', edgeCardGapClassName)}
+        >
           <ParameterPropertyList
             properties={properties}
             schema={schema}
@@ -440,11 +540,23 @@ function ObjectFieldTemplate(
     );
   }
 
-  const isEmbeddedUnionBranch =
-    layoutContext.embeddedDiscriminator !== undefined &&
-    Object.hasOwn(schema.properties ?? {}, layoutContext.embeddedDiscriminator);
+  const unionBranchKind = getUnionBranchKind(layoutContext, schema, groupPath);
 
-  if (isEmbeddedUnionBranch) {
+  if (unionBranchKind === 'choice') {
+    return (
+      <rjsfLayoutContext.Provider value={descendantLayout}>
+        {description ? <div className='px-2.5 py-1.5 text-xs text-muted-foreground'>{description}</div> : null}
+        <ParameterPropertyList
+          properties={properties}
+          schema={schema}
+          searchTerm={formContext.searchTerm}
+          title={prettyTitle}
+        />
+      </rjsfLayoutContext.Provider>
+    );
+  }
+
+  if (unionBranchKind === 'discriminated') {
     return (
       <>
         {description ? <div className='px-2.5 py-1.5 text-xs text-muted-foreground'>{description}</div> : null}
@@ -555,38 +667,26 @@ function ArrayFieldTemplate(
   const hasObjectItems = itemSchema !== undefined && isObjectLikeSchema(schemaUtils.retrieveSchema(itemSchema));
 
   return (
-    <Collapsible
-      data-slot='parameter-group'
-      open={isOpen}
-      className='group/parameter-group w-full overflow-hidden rounded-lg border border-transparent transition-colors duration-150 data-[state=open]:border-border data-[state=open]:bg-background motion-reduce:transition-none'
+    <ParameterGroupCard
+      title={prettyTitle}
+      searchTerm={formContext.searchTerm}
+      trailing={<span className='shrink-0 text-xs text-muted-foreground tabular-nums'>{countDisplay}</span>}
+      isOpen={isOpen}
       onOpenChange={setIsOpen}
     >
-      <CollapsibleTrigger
-        className='group/collapsible flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-sidebar-accent focus-visible:focus-outline data-[state=open]:rounded-b-none motion-reduce:transition-none'
-        aria-label={`Group: ${prettyTitle}`}
-      >
-        <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
-          <HighlightText text={prettyTitle} searchTerm={formContext.searchTerm} />
-        </h3>
-        <span className='shrink-0 text-xs text-muted-foreground tabular-nums'>{countDisplay}</span>
-        <ChevronDown
-          aria-hidden='true'
-          className='size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/collapsible:rotate-180 motion-reduce:transition-none'
-        />
-      </CollapsibleTrigger>
-
-      <CollapsibleContent data-slot='parameter-group-content' className='border-t border-border/70 px-2.5 py-1'>
-        {optionalDataControl}
-        <arrayTitleContext.Provider value={prettyTitle}>
+      {optionalDataControl}
+      <arrayTitleContext.Provider value={prettyTitle}>
+        {/* Item rows carry their own inset like any group's rows; item cards sit 4 px in, like nested groups. */}
+        <div className={cn(hasObjectItems && 'px-1')}>
           <ParameterArrayList items={items} title={prettyTitle} hasObjectItems={hasObjectItems} />
-        </arrayTitleContext.Provider>
-        {canAdd ? (
-          <Button type='button' variant='outline' size='sm' className='my-1.5' onClick={onAddClick}>
-            Add item ({prettyTitle})
-          </Button>
-        ) : null}
-      </CollapsibleContent>
-    </Collapsible>
+        </div>
+      </arrayTitleContext.Provider>
+      {canAdd ? (
+        <Button type='button' variant='outline' size='sm' className='mx-2.5 my-1.5' onClick={onAddClick}>
+          Add item ({prettyTitle})
+        </Button>
+      ) : null}
+    </ParameterGroupCard>
   );
 }
 
@@ -667,6 +767,22 @@ const ParameterArrayList = memo(function ParameterArrayList({
   );
 });
 
+/**
+ * An option's display label. A string value shown as itself, with no title and no distinct `ui:enumNames` entry,
+ * starts with a capital letter (`extra-high` reads `Extra-high`, `+z` stays `+z`); the option's value is unchanged.
+ *
+ * @param option - RJSF's enum option.
+ * @returns The label to show.
+ */
+const formatOptionLabel = (option: {
+  readonly label: string;
+  readonly value: unknown;
+  readonly schema?: RJSFSchema;
+}): string =>
+  typeof option.value === 'string' && option.label === option.value && option.schema?.title === undefined
+    ? option.label.replace(/^\p{L}/u, (letter) => letter.toUpperCase())
+    : String(option.label);
+
 // Custom Select Widget for Enums
 function SelectWidget(props: WidgetProps): React.ReactNode {
   const { id, options, onChange, onBlur, onFocus, placeholder, name, disabled, readonly, autofocus } = props;
@@ -712,7 +828,7 @@ function SelectWidget(props: WidgetProps): React.ReactNode {
         {
           options: enumOptions.map((option) => ({
             value: String(option.value),
-            label: String(option.label),
+            label: formatOptionLabel(option),
             // oxlint-disable-next-line @typescript-eslint/no-unsafe-argument -- value is untyped in RJSF
             disabled: enumDisabled?.includes(option.value),
           })),
@@ -873,6 +989,7 @@ export const templates: Partial<TemplatesType<Record<string, unknown>, RJSFSchem
     ),
   },
   FieldTemplate,
+  MultiSchemaFieldTemplate,
   ObjectFieldTemplate,
   ArrayFieldTemplate,
   ArrayFieldDescriptionTemplate: ({ description }) =>

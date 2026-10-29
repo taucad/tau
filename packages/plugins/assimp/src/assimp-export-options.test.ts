@@ -20,6 +20,16 @@ describe('assimp export option schemas', () => {
     }
   });
 
+  it('should keep prose descriptions and drop ones that only name an Assimp config key', () => {
+    const { properties } = toJSONSchema(assimpEdgeSchemas['3mf'], { target: 'draft-7', io: 'input' }) as {
+      properties: Record<string, { description?: string }>;
+    };
+    // The registry describes these with `3MF_EXPORT_UNIT.` and similar keys, which a form would show as prose.
+    expect(properties['unit']?.description).toBeUndefined();
+    expect(properties['application']?.description).toBeUndefined();
+    expect(properties['requireManifold']?.description).toMatch(/manifold and oriented/u);
+  });
+
   it('covers every canonical target from the generated registry', () => {
     expect(Object.keys(assimpEdgeSchemas)).toEqual(Object.keys(assimpCapabilities.export));
   });

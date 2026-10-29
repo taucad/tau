@@ -250,7 +250,72 @@ describe('SelectWidget', () => {
       render(<SelectWidget {...props} />);
 
       const trigger = screen.getByRole('combobox');
-      expect(trigger).toHaveTextContent('wood');
+      expect(trigger).toHaveTextContent('Wood');
+    });
+
+    it('should capitalise raw string labels in the trigger and options while emitting the raw value', async () => {
+      Element.prototype.scrollIntoView = vi.fn();
+      Element.prototype.hasPointerCapture = vi.fn(() => false);
+      Element.prototype.setPointerCapture = vi.fn();
+      Element.prototype.releasePointerCapture = vi.fn();
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      const presets = ['low', 'medium', 'high', 'extra-high'].map((value) => ({ value, label: value }));
+      render(
+        <SelectWidget
+          {...createWidgetProps({ value: 'medium', schema: stringSchema, options: { enumOptions: presets }, onChange })}
+        />,
+      );
+
+      expect(screen.getByRole('combobox')).toHaveTextContent('Medium');
+      await user.click(screen.getByRole('combobox'));
+      expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+        'Low',
+        'Medium',
+        'High',
+        'Extra-high',
+      ]);
+      await user.click(screen.getByRole('option', { name: 'High' }));
+      expect(onChange).toHaveBeenCalledWith('high');
+    });
+
+    it.each([
+      ['y-up', 'Y-up'],
+      ['meter', 'Meter'],
+      ['+z', '+z'],
+      ['-y', '-y'],
+    ])('should display the raw value %s as %s', (value, label) => {
+      render(
+        <SelectWidget
+          {...createWidgetProps({ value, schema: stringSchema, options: { enumOptions: [{ value, label: value }] } })}
+        />,
+      );
+
+      expect(screen.getByRole('combobox')).toHaveTextContent(label);
+    });
+
+    it('should keep explicit titles and enum names verbatim', () => {
+      const { rerender } = render(
+        <SelectWidget
+          {...createWidgetProps({
+            value: 'mm',
+            schema: stringSchema,
+            options: { enumOptions: [{ value: 'mm', label: 'mm', schema: { const: 'mm', title: 'mm' } }] },
+          })}
+        />,
+      );
+      expect(screen.getByRole('combobox')).toHaveTextContent('mm');
+
+      rerender(
+        <SelectWidget
+          {...createWidgetProps({
+            value: 'mm',
+            schema: stringSchema,
+            options: { enumOptions: [{ value: 'mm', label: 'millimetre' }] },
+          })}
+        />,
+      );
+      expect(screen.getByRole('combobox')).toHaveTextContent('millimetre');
     });
   });
 
@@ -513,18 +578,92 @@ describe('composite fields', () => {
     });
 
     const cameraTrigger = screen.getByRole('button', { name: 'Group: Camera' });
-    const cameraContent = cameraTrigger
+    const cameraBody = cameraTrigger
       .closest('[data-slot="parameter-group"]')
       ?.querySelector(':scope > [data-slot="parameter-group-content"] > [data-slot="parameter-group-body"]');
     expect(screen.getAllByRole('button', { name: 'Group: Camera' })).toHaveLength(1);
-    expect(cameraContent).toHaveClass('[&>.panel>.form-group]:flex', '[&>.panel>.form-group]:justify-end');
+    // The branch selector is the card's first row: the discriminator's name beside the select.
+    const framingRow = cameraBody?.querySelector(':scope > [data-slot="union-selector"]');
+    expect(framingRow).toHaveTextContent('Framing');
+    expect(framingRow).toContainElement(screen.getByRole('combobox', { name: 'Select for Framing' }));
     expect(screen.getByRole('combobox', { name: 'Select for Framing' })).toHaveTextContent('Fit');
+    // The selected branch's rows sit straight in the card rather than in a nested field group.
+    expect(screen.getByLabelText('Parameter: Margin').closest('[data-slot="parameter-field"]')?.parentElement).toBe(
+      cameraBody,
+    );
     expect(screen.getByRole('button', { name: 'Group: Projection' })).toBeInTheDocument();
+    // Projection closes the Camera card, so it takes the group gap below it rather than stacking the two borders.
+    expect(screen.getByRole('button', { name: 'Group: Projection' }).closest('[data-slot="field-group"]')).toBe(
+      cameraBody?.lastElementChild,
+    );
+    expect(cameraBody).toHaveClass('[&>[data-slot=field-group]:last-child]:pb-1');
     expect(screen.getByRole('combobox', { name: 'Select for Kind' })).toHaveTextContent('Perspective');
     expect(screen.queryByText('Option 1')).toBeNull();
     expect(screen.queryByLabelText('Parameter: Framing')).toBeNull();
     expect(screen.queryByLabelText('Parameter: Kind')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Reset Framing' })).toBeNull();
+  });
+
+  const tessellationSchema: RJSFSchema = {
+    type: 'object',
+    properties: {
+      tessellation: {
+        default: 'high',
+        description: 'Tessellation quality for mesh-based exports',
+        oneOf: [
+          {
+            type: 'string',
+            enum: ['low', 'medium', 'high'],
+            title: 'Preset',
+            description: 'Quality preset derived from the shape bounding-box diagonal',
+          },
+          {
+            type: 'object',
+            title: 'Explicit',
+            description: 'Explicit tolerances in millimetres and degrees',
+            properties: {
+              linearTolerance: { type: 'number', description: 'Linear tolerance (distance) for tessellation' },
+              angularTolerance: { type: 'number', description: 'Angular tolerance (degrees) for tessellation' },
+            },
+            additionalProperties: false,
+            minProperties: 1,
+          },
+        ],
+      },
+    },
+  };
+
+  it('should render a preset-or-object union as a card with a branch selector row and the preset row', () => {
+    renderSchemaForm({ schema: tessellationSchema, formData: { tessellation: 'high' } });
+
+    const trigger = screen.getByRole('button', { name: 'Group: Tessellation' });
+    const card = trigger.closest('[data-slot="parameter-group"]');
+    // The closed card still names the chosen branch.
+    expect(trigger).toHaveTextContent('Preset');
+    expect(card).toHaveTextContent('Tessellation quality for mesh-based exports');
+    const typeRow = card?.querySelector('[data-slot="union-selector"]');
+    expect(typeRow).toHaveTextContent('Type');
+    expect(typeRow).toContainElement(screen.getByRole('combobox', { name: 'Select for Tessellation' }));
+    expect(screen.getByRole('combobox', { name: 'Select for Tessellation' })).toHaveTextContent('Preset');
+    // The preset is an ordinary parameter row with its own description, not stacked beside the selector.
+    expect(screen.getByLabelText('Parameter: Preset').closest('[data-slot="parameter-field"]')).toHaveTextContent(
+      'Quality preset derived from the shape bounding-box diagonal',
+    );
+    expect(screen.getByRole('combobox', { name: 'Select for Preset' })).toHaveTextContent('High');
+    expect(typeRow?.contains(screen.getByLabelText('Parameter: Preset'))).toBe(false);
+  });
+
+  it('should lay an explicit object branch of a choice union inline rather than as a nested group', () => {
+    renderSchemaForm({
+      schema: tessellationSchema,
+      formData: { tessellation: { linearTolerance: 0.05, angularTolerance: 15 } },
+    });
+
+    expect(screen.getByRole('combobox', { name: 'Select for Tessellation' })).toHaveTextContent('Explicit');
+    expect(screen.queryByRole('button', { name: 'Group: Explicit' })).toBeNull();
+    expect(screen.getByText('Explicit tolerances in millimetres and degrees')).toBeInTheDocument();
+    expect(screen.getByLabelText('Parameter: Linear Tolerance')).toBeInTheDocument();
+    expect(screen.getByLabelText('Parameter: Angular Tolerance')).toBeInTheDocument();
   });
 
   it('should open a matching composite group while filtering', () => {
@@ -668,7 +807,10 @@ describe('composite fields', () => {
       'focus-within:bg-sidebar-accent',
     );
     expect(itemTrigger).toHaveClass('hover:bg-transparent');
-    expect(outerContent).toHaveClass('px-2.5');
+    // Item cards sit 4 px inside the array's card, like a group nested in a group.
+    expect(itemTrigger.closest('.px-1')?.parentElement?.closest('[data-slot="parameter-group-content"]')).toBe(
+      outerContent,
+    );
     expect(remove).not.toHaveClass('bg-destructive');
     // The sidebar row's action (nested-action surfaces R4): 24 px with the nested-action tone.
     expect(remove).toHaveClass('size-6', 'hover:bg-nested-action-hover');
@@ -800,6 +942,19 @@ describe('root presentation', () => {
     expect(screen.getByLabelText('Parameter: Binary')).toBeDefined();
     expect(screen.getByLabelText('Group: Tessellation')).toBeDefined();
     expect(screen.queryByLabelText(/^Group:\s*$/)).toBeNull();
+  });
+
+  it('should inset an embedded root on every side, so edge cards keep a gap from the host', () => {
+    const { container } = renderForm({ rootPresentation: 'embedded' });
+
+    const root = container.querySelector('[data-slot="embedded-form-root"]');
+    expect(root).toHaveClass(
+      'py-1',
+      '[&>.field-group]:mx-1',
+      '[&>[data-slot=field-group]:first-child]:pt-1',
+      '[&>[data-slot=field-group]:last-child]:pb-1',
+    );
+    expect(screen.getByLabelText('Group: Tessellation').closest('[data-slot="field-group"]')?.parentElement).toBe(root);
   });
 
   it('should reset an embedded Export field using its dynamic root path', () => {

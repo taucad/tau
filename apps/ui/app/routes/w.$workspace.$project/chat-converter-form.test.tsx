@@ -240,7 +240,7 @@ describe('ExportSchemaForm', async () => {
       {},
       published(openrscadExportSchemas.glb, openrscadExportSchemas.glb.parse({ tessellation: { linearTolerance: 2 } })),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Group: Explicit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Group: Tessellation' }));
     expect(fieldUnit('Linear Tolerance')).toBe('mm');
     expect(fieldUnit('Angular Tolerance')).toBe('°');
     expect(fieldUnit('Segments')).toBeFalsy();
@@ -261,7 +261,7 @@ describe('ExportSchemaForm', async () => {
       published(openrscadExportSchemas.glb, openrscadExportSchemas.glb.parse({ tessellation: { linearTolerance: 2 } })),
       'cm',
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Group: Explicit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Group: Tessellation' }));
 
     expect(fieldUnit('Linear Tolerance')).toBe('cm');
     expect(screen.getByRole('spinbutton', { name: 'Input for Linear Tolerance' })).toHaveValue('0.2');
@@ -278,9 +278,10 @@ describe('ExportSchemaForm', async () => {
       published(openrscadExportSchemas.glb, openrscadExportSchemas.glb.parse({})),
       'cm',
     );
+    // The explicit tolerances sit inline in the Tessellation card, under its branch selector.
+    await user.click(screen.getByRole('button', { name: 'Group: Tessellation' }));
     await user.click(screen.getByRole('combobox', { name: 'Select for Tessellation' }));
     await user.click(screen.getByRole('option', { name: 'Explicit' }));
-    await user.click(screen.getByRole('button', { name: 'Group: Explicit' }));
     const input = screen.getByRole('spinbutton', { name: 'Input for Linear Tolerance' });
 
     expect(input).toHaveValue(null);

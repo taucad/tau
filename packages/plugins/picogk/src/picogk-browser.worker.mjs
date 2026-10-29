@@ -15,15 +15,15 @@ import { preparePicogkBrowserRuntime } from '#picogk-browser-runtime.js';
  * @typedef {Object} Incoming
  * @property {string} kind
  * @property {number} generation
- * @property {import('../src/picogk-browser-session.ts').PicogkBrowserAssets | undefined} assets
- * @property {import('../src/picogk-browser-session.ts').PicogkBrowserSnapshot | undefined} snapshot
+ * @property {import('./picogk-browser-session.ts').PicogkBrowserAssets | undefined} assets
+ * @property {import('./picogk-browser-session.ts').PicogkBrowserSnapshot | undefined} snapshot
  * @property {{method: string, requestId: string, protocolVersion: number, params: unknown}} frame
  */
 let generation = 0;
 let state = 'new';
 /** @type {BrowserRuntime} */
 let runtime;
-/** @type {import('../src/picogk-browser-runtime.ts').PicogkBrowserRuntimeLoader | undefined} */
+/** @type {import('./picogk-browser-runtime.ts').PicogkBrowserRuntimeLoader | undefined} */
 let runtimeLoader;
 /** @type {string | undefined} */
 let queued;
@@ -93,13 +93,13 @@ const initialize = async (message) => {
   }
   runtimeLoader = await preparePicogkBrowserRuntime({ bootstrapUrl: assets.bootstrapUrl, files: assets.runtimeFiles });
   const module =
-    /** @type {{dotnet: {withResourceLoader(load: import('../src/picogk-browser-runtime.ts').PicogkBrowserRuntimeLoader['loadResource']): {create(): Promise<BrowserRuntime>}}}} */ (
+    /** @type {{dotnet: {withResourceLoader(load: import('./picogk-browser-runtime.ts').PicogkBrowserRuntimeLoader['loadResource']): {create(): Promise<BrowserRuntime>}}}} */ (
       await import(runtimeLoader.bootstrapUrl)
     );
   runtime = await module.dotnet.withResourceLoader(runtimeLoader.loadResource).create();
   const references = [];
   const paths = new Set();
-  for (const reference of /** @type {import('../src/picogk-browser-session.ts').PicogkBrowserAssets['references']} */ (
+  for (const reference of /** @type {import('./picogk-browser-session.ts').PicogkBrowserAssets['references']} */ (
     assets.references
   )) {
     const path = `/refs/${relativePath(reference.path)}`;
@@ -124,7 +124,7 @@ const initialize = async (message) => {
     writeFile(path, bytes);
     references.push(path);
   }
-  for (const file of /** @type {import('../src/picogk-browser-session.ts').PicogkBrowserSnapshot['files']} */ (
+  for (const file of /** @type {import('./picogk-browser-session.ts').PicogkBrowserSnapshot['files']} */ (
     snapshot.files
   )) {
     const path = `/project/${relativePath(file.path)}`;
@@ -227,7 +227,7 @@ globalThis.addEventListener('message', async (/** @type {MessageEvent<Incoming |
           length: z
             .number()
             .int()
-            .positive()
+            .nonnegative()
             .max(8 * 1024 * 1024),
         })
         .parse(data.frame.params);

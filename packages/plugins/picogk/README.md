@@ -37,6 +37,33 @@ const runtime = defineRuntime({ plugins: [picogk()] });
 Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, or your own host. See
 [`@taucad/runtime`](https://www.npmjs.com/package/@taucad/runtime) for the client lifecycle.
 
+### Prepared browser host
+
+Browser hosts import the explicit browser entry and provide a prepared asset receipt:
+
+```typescript
+import { defineRuntime } from '@taucad/runtime/worker';
+import { picogk } from '@taucad/picogk/browser';
+
+// Obtained from the host build's verified assets-receipt.json.
+declare const assets: { url: string; sha256: string };
+const runtime = defineRuntime({
+  plugins: [picogk({ kernels: { default: { assets, wasm: 'auto' } } })],
+});
+```
+
+The browser compiles authored C# with Roslyn against a prebuilt .NET base and uses the same
+headless capture, parameters and GLB conversion as desktop. Rendering remains in Tau's viewer.
+Without a prepared manifest, initialization reports `KERNEL_NOT_PREPARED`. `auto` selects a
+threaded variant only when the bundle contains one and the host is cross-origin isolated;
+`single` selects serial execution, and unsupported `multi` requests fail explicitly.
+
+See [browser host preparation](dotnet/Tau.PicoGK.Browser/README.md) for the explicit input
+configuration. The currently qualified preparation target produces a serial bundle; automatic
+package provisioning and threaded-host qualification are separate implementation gates.
+Tau UI builds consume that bundle through `PICOGK_BROWSER_ASSETS_ROOT`, verify its bytes and
+preserve its resource directory layout. Default native imports and desktop preparation are unchanged.
+
 PicoGK source stays PicoGK source:
 
 ```csharp

@@ -35,7 +35,8 @@ type PicogkSerializedHandle =
 // Tau metadata remains execution context; the generated root thumbnail is not an execution input.
 const tauSystemArtifacts = new Set(['tau.json', 'thumbnail.webp']);
 
-class PicogkKernelError extends Error {
+/** Structured issues from environment initialization or shared geometry operations. @internal */
+export class PicogkKernelError extends Error {
   public readonly issues: KernelIssue[];
 
   public constructor(issues: KernelIssue[]) {

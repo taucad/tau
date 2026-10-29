@@ -4759,6 +4759,9 @@ importers:
 
   packages/plugins/picogk:
     dependencies:
+      '@gltf-transform/core':
+        specifier: 'catalog:'
+        version: 4.5.1
       '@taucad/cache-core':
         specifier: workspace:*
         version: link:../../core/cache
@@ -4781,9 +4784,6 @@ importers:
         specifier: 'catalog:'
         version: 1.6.0
     devDependencies:
-      '@gltf-transform/core':
-        specifier: 'catalog:'
-        version: 4.5.1
       '@taucad/assimp':
         specifier: workspace:*
         version: link:../assimp

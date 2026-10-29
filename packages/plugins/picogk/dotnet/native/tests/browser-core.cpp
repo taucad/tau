@@ -57,6 +57,17 @@ int main() try {
     check(PicoDotNet_RenderImplicit(lib,vox,&bounds,&context,sphere)==0&&context.calls>1&&context.nested,"nested callback");
     auto mesh=Mesh_hCreateFromVoxels(lib,vox);const auto hash=digest(lib,mesh);
     check(hash==0xb8aa4cfd3b2b77f9ULL,"historical raw sphere pin");
+    check(TauLibrary_SetMeshing(lib,.2f,true)==0,"adaptive display setup");
+    uint64_t adaptiveSnapshot=0,adaptiveGeneration=0;int32_t adaptivePositions=0,adaptiveIndices=0;PKColorFloat adaptiveColor{};
+    check(TauCapture_Acquire(lib,1,vox,&adaptiveSnapshot,&adaptiveGeneration,&adaptivePositions,&adaptiveIndices,&adaptiveColor)==0&&adaptivePositions>0&&adaptiveIndices>0,"adaptive capture");
+    check(TauCapture_Release(lib,adaptiveSnapshot)==0,"adaptive capture release");
+    const auto exactAfterAdaptive=Mesh_hCreateFromVoxels(lib,vox);
+    check(digest(lib,exactAfterAdaptive)==hash,"adaptive display preserves exact export");
+    Mesh_Destroy(lib,exactAfterAdaptive);
+    check(TauLibrary_SetMeshing(lib,0.f,false)==0,"uniform display reset");
+    const auto appended=Mesh_hCreate(lib);const float trianglePositions[]{0,0,0,1,0,0,0,1,0};const int32_t triangleIndices[]{0,1,2};
+    check(TauMesh_AppendElements(lib,appended,trianglePositions,9,triangleIndices,3)==0&&Mesh_nVertexCount(lib,appended)==3&&Mesh_nTriangleCount(lib,appended)==1,"bulk mesh append");
+    Mesh_Destroy(lib,appended);
     const auto gyroidVox=Voxels_hCreateCopy(lib,vox);
     check(PicoDotNet_IntersectImplicit(lib,gyroidVox,&context,gyroid)==0,"gyroid intersection");
     const auto gyroidMesh=Mesh_hCreateFromVoxels(lib,gyroidVox);
@@ -91,6 +102,9 @@ int main() try {
     int scalarIndex=-1;
     for(int i=0;i<VdbFile_nFieldCount(lib,restored);++i){char name[PKINFOSTRINGLEN]{};VdbFile_GetFieldName(lib,restored,i,name);if(std::strcmp(name,"scalar")==0)scalarIndex=i;}
     check(scalarIndex>=0,"VDB scalar name");
+    PKMETADATA restoredMetadata=0;
+    check(TauVdbFile_GetFieldMetadata(lib,restored,scalarIndex,1,&restoredMetadata)==0&&restoredMetadata,"VDB field metadata");
+    Metadata_Destroy(lib,restoredMetadata);
     const auto restoredScalar=VdbFile_hGetScalarField(lib,restored,scalarIndex);float scalarValue=0;
     check(ScalarField_bGetValue(lib,restoredScalar,&zero,&scalarValue)&&scalarValue==3.25f,"VDB scalar value");
     ScalarField_Destroy(lib,restoredScalar);VdbFile_Destroy(lib,restored);

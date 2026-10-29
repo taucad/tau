@@ -7,17 +7,17 @@
 +#if !PICOGK_BROWSER
      [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
      internal delegate int Sdf(in Vector3 point, out float distance);
-     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-@@ -22,6 +23,8 @@
-     internal static extern int TraverseScalar(LibHandle library, ScalarFieldHandle field, Scalar callback);
+     // One transition per z-row: fill distances[0, count) in order and report how many were filled.
+@@ -30,6 +31,8 @@
      [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_VectorField_TraverseActiveChecked")]
      internal static extern int TraverseVector(LibHandle library, VectorFieldHandle field, Vector callback);
-+
-+#endif
  
++#endif
++
      internal static void Check(int status, ExceptionDispatchInfo? error, object owner)
      {
-@@ -40,6 +43,10 @@
+         // Never unwind a managed exception through OpenVDB/C++. Restore the exact first error here.
+@@ -47,6 +50,10 @@
      {
          ArgumentNullException.ThrowIfNull(implicitFunction);
          ObjectDisposedException.ThrowIf(m_bDisposed, this);
@@ -26,17 +26,17 @@
 +        else BrowserCallbacks.Render(lib.hThis, hThis, in bounds, implicitFunction);
 +#else
          ExceptionDispatchInfo? failure = null;
-         TauCheckedCallbacks.Sdf callback = (in Vector3 point, out float distance) =>
-         {
-@@ -61,6 +68,7 @@
-             : TauCheckedCallbacks.Render(lib.hThis, hThis, bounds, callback);
+         // The author sees the per-voxel sequence: the same points in the same order, and no call after a
+         // throw or a nonfinite distance, which ends the row there as the per-voxel adapter ended the render.
+@@ -80,6 +87,7 @@
+             : TauCheckedCallbacks.RenderBatch(lib.hThis, hThis, bounds, callback);
          GC.KeepAlive(callback);
          TauCheckedCallbacks.Check(status, failure, this);
 +#endif
      }
  }
  
-@@ -70,6 +78,9 @@
+@@ -89,6 +97,9 @@
      {
          ArgumentNullException.ThrowIfNull(traversal);
          ObjectDisposedException.ThrowIf(m_bDisposed, this);
@@ -46,7 +46,7 @@
          ExceptionDispatchInfo? failure = null;
          TauCheckedCallbacks.Scalar callback = (in Vector3 point, float value) =>
          {
-@@ -80,6 +91,7 @@
+@@ -99,6 +110,7 @@
          var status = TauCheckedCallbacks.TraverseScalar(lib.hThis, hThis, callback);
          GC.KeepAlive(callback);
          TauCheckedCallbacks.Check(status, failure, this);
@@ -54,7 +54,7 @@
      }
  }
  
-@@ -89,6 +101,9 @@
+@@ -108,6 +120,9 @@
      {
          ArgumentNullException.ThrowIfNull(traversal);
          ObjectDisposedException.ThrowIf(m_bDisposed, this);
@@ -64,7 +64,7 @@
          ExceptionDispatchInfo? failure = null;
          TauCheckedCallbacks.Vector callback = (in Vector3 point, in Vector3 value) =>
          {
-@@ -99,5 +114,6 @@
+@@ -118,5 +133,6 @@
          var status = TauCheckedCallbacks.TraverseVector(lib.hThis, hThis, callback);
          GC.KeepAlive(callback);
          TauCheckedCallbacks.Check(status, failure, this);
@@ -73,7 +73,7 @@
  }
 --- a/Internals/Interop.cs
 +++ b/Internals/Interop.cs
-@@ -369,16 +369,20 @@
+@@ -383,16 +383,20 @@
          [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
          private delegate float CallbackImplicitDistance(in Vector3 vec);
  
@@ -95,7 +95,7 @@
  
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_RenderLattice")]
          private static extern int _RenderLattice(  LibHandle   hLib,
-@@ -608,6 +612,7 @@
+@@ -624,6 +628,7 @@
                                                      in Vector2 vecWindowSize);
  
          // Define the P/Invoke signature for Viewer_hCreate
@@ -103,7 +103,7 @@
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_hCreate", CharSet = CharSet.Ansi)]
          public static extern IntPtr _hCreate(   string              strWindowTitle,
                                                  in Vector2          vecSize,
-@@ -618,107 +623,264 @@
+@@ -634,30 +639,75 @@
                                                  MouseButtonCallback fnMouseButtonCallback,
                                                  ScrollWheelCallback fnScrollWheelCallback,
                                                  WindowSizelCallback fnWindowSizeCallback);
@@ -123,6 +123,7 @@
 +
 +#if !PICOGK_BROWSER
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_bIsValid")]
+         [return: MarshalAs(UnmanagedType.U1)]
          internal static extern bool _bIsValid(IntPtr hThis);
 -
 +#else
@@ -159,6 +160,7 @@
 +
 +#if !PICOGK_BROWSER
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RequestScreenShot")]
+         [return: MarshalAs(UnmanagedType.U1)]
          private static extern bool _RequestScreenShot(  IntPtr hThis,
                                                          string strScreenShotPath);
 -
@@ -170,10 +172,10 @@
 +
 +#if !PICOGK_BROWSER
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_EnableExperimental")]
+         [return: MarshalAs(UnmanagedType.U1)]
          private static extern bool _EnableExperimental( IntPtr hThis,
--                                                        bool bEnable);                                            
+                                                         [MarshalAs(UnmanagedType.U1)] bool bEnable);
 -
-+                                                        bool bEnable);
 +#else
 +        private static bool _EnableExperimental( IntPtr hThis,
 +                                                        bool bEnable)
@@ -182,8 +184,9 @@
 +
 +#if !PICOGK_BROWSER
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_bLoadLightSetup")]
+         [return: MarshalAs(UnmanagedType.U1)]
          private static extern bool _bLoadLightSetup(    IntPtr  hThis,
-                                                         byte [] abyDiffuseDdsBuffer,
+@@ -665,80 +715,192 @@
                                                          int     nDiffuseSize,
                                                          byte [] pSpecularDdsBuffer,
                                                          int     nSpecularSize);
@@ -314,7 +317,7 @@
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_SetGroupVisible")]
          private static extern void _SetGroupVisible(    IntPtr  hThis,
                                                          int     nGroupID,
-                                                         bool    bVisible);
+                                                         [MarshalAs(UnmanagedType.U1)] bool    bVisible);
 -
 +#else
 +        private static void _SetGroupVisible(    IntPtr  hThis,
@@ -391,7 +394,7 @@
  
          // Dispose Pattern
  
-@@ -766,20 +928,41 @@
+@@ -786,20 +948,41 @@
  
          public partial class GpuTex : IDisposable
          {
@@ -435,7 +438,7 @@
              
              ~GpuTex()
              {
-@@ -820,6 +1003,7 @@
+@@ -840,6 +1023,7 @@
  
          public partial class ImageQuad : IDisposable
          {
@@ -443,10 +446,10 @@
              [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_Quad_hCreate")]
              private static extern QuadHandle _hCreate(  IntPtr          hThis,
                                                          GpuTexHandle    hTexDefault,
-@@ -829,15 +1013,39 @@
-                                                         bool            bFlipX,
-                                                         bool            bFlipY,
-                                                         bool            bDoubleSided);
+@@ -849,15 +1033,39 @@
+                                                         [MarshalAs(UnmanagedType.U1)] bool            bFlipX,
+                                                         [MarshalAs(UnmanagedType.U1)] bool            bFlipY,
+                                                         [MarshalAs(UnmanagedType.U1)] bool            bDoubleSided);
 -
 +#else
 +            private static QuadHandle _hCreate(  IntPtr          hThis,
@@ -485,15 +488,15 @@
  
              ~ImageQuad()
              {
-@@ -879,6 +1087,7 @@
+@@ -899,6 +1107,7 @@
  
          public partial class SideBar : IDisposable
          {
 +#if !PICOGK_BROWSER
              [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_SideBar_hCreate")]
              extern internal static GuiSideBarHandle _hCreate(   IntPtr hViewer,
-                                                                 bool bLeft,
-@@ -887,10 +1096,26 @@
+                                                                 [MarshalAs(UnmanagedType.U1)] bool bLeft,
+@@ -907,10 +1116,26 @@
                                                                  int nDef,
                                                                  ColorFloat clrBackground,
                                                                  ColorFloat clrBackgroundHv);
@@ -521,7 +524,7 @@
  
              ~SideBar()
              {
-@@ -1092,10 +1317,12 @@
+@@ -1115,10 +1340,12 @@
                                                          int nZSlice,
                                                          IntPtr afBuffer);
  
@@ -534,7 +537,7 @@
  
  
          // Dispose Pattern
-@@ -1179,10 +1406,12 @@
+@@ -1203,10 +1430,12 @@
                                                      VectorFieldHandle  hThis,
                                                      in  Vector3 vecPosition);
  
@@ -584,8 +587,8 @@
  
 --- a/Library/GridAdmission.cs
 +++ b/Library/GridAdmission.cs
-@@ -12,12 +12,33 @@
-         out ulong output, out VdbMetaHandle metadata);
+@@ -15,12 +15,33 @@
+         out VdbMetaHandle metadata);
      [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Metadata_Destroy")]
      private static extern void TauDestroyLoadedMetadata(LibHandle library, VdbMetaHandle metadata);
 +#if !PICOGK_BROWSER
@@ -620,7 +623,7 @@
          if (kind == 0) TauDestroyLoadedVoxels(library, field);
 --- a/IO/OpenVdbFile.cs
 +++ b/IO/OpenVdbFile.cs
-@@ -278,7 +278,11 @@
+@@ -280,7 +280,11 @@
              try
              {
                  metadata = new FieldMetadata(lib, metadataHandle);
@@ -632,7 +635,7 @@
              }
              catch
              {
-@@ -345,7 +349,11 @@
+@@ -347,7 +351,11 @@
              try
              {
                  metadata = new FieldMetadata(lib, metadataHandle);

@@ -79,8 +79,8 @@ public sealed partial class WorkerTests
     public void TemplateCompilationEmitsAndDiagnosesExactlyAsAFreshCompilation()
     {
         var service = typeof(CompilationService);
-        var template = (CSharpCompilation)service.GetField("Template", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
-        var references = (IEnumerable<MetadataReference>)service.GetField("References", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
+        var template = ((Lazy<CSharpCompilation>)service.GetField("Template", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!).Value;
+        var references = CompilationService.CreateReferences(AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string);
         var options = new CSharpCompilationOptions(
             OutputKind.ConsoleApplication,
             optimizationLevel: OptimizationLevel.Release,

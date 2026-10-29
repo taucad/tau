@@ -13,6 +13,7 @@ import {
   verifyMacosQualificationArtifact,
 } from './qualification-macos.mjs';
 import { QualificationUnavailable } from './qualification-platform-types.mjs';
+import type { MacosCleanHost } from './qualification-evidence.mjs';
 /* oxlint-enable no-restricted-imports */
 const main = async (): Promise<void> => {
   // Exact desktopManifestFields production contract omits channel and false environmentOverrides.
@@ -105,8 +106,51 @@ const main = async (): Promise<void> => {
       verifyMacosQualificationArtifact({ manifest, artifactDirectory: root, route: 'macos-zip' }, 'arm64', 'zip'),
       /canonical regular/u,
     );
+    if (process.platform === 'darwin') {
+      // Clean-host mode admits only a release run into /Applications/Tau.app on an observed SIP/Gatekeeper-enabled native host.
+      process.env['TAU_QUALIFICATION_DISPOSABLE_HOST'] = '1';
+      const architecture = process.arch === 'arm64' ? 'arm64' : 'x64';
+      const host: MacosCleanHost = {
+        runner: 'fixture',
+        productVersion: '26.0.1',
+        machine: architecture === 'arm64' ? 'arm64' : 'x86_64',
+        arm64: architecture === 'arm64' ? '1' : 'absent',
+        translated: '0',
+        sip: 'System Integrity Protection status: enabled.',
+        gatekeeper: 'assessments enabled',
+        existing: [],
+      };
+      const cleanHost = (change: Partial<MacosCleanHost> = {}) => ({
+        host: { ...host, ...change },
+        origin: 'https://127.0.0.1:4443',
+        directory: root,
+        download: async () => {
+          throw new Error('fixture never downloads');
+        },
+      });
+      const clean = (mode: 'release' | 'fixture', installationPath: string, change?: Partial<MacosCleanHost>) => () =>
+        createMacosQualificationDriver({
+          mode,
+          installationPath,
+          architecture,
+          teamId: 'AAAAAAAAAA',
+          installFormat: 'dmg',
+          cleanHost: cleanHost(change),
+        });
+      assert.equal(typeof clean('release', '/Applications/Tau.app')().launch, 'function');
+      assert.throws(clean('fixture', '/Applications/Tau.app'), /release candidate/u);
+      assert.throws(clean('release', join(root, 'Tau.app')), /release candidate/u);
+      assert.throws(
+        clean('release', '/Applications/Tau.app', { sip: 'System Integrity Protection status: disabled.' }),
+        /System Integrity/u,
+      );
+      assert.throws(clean('release', '/Applications/Tau.app', { gatekeeper: 'assessments disabled' }), /Gatekeeper/u);
+      assert.throws(clean('release', '/Applications/Tau.app', { translated: '1' }), /native architecture/u);
+      assert.throws(clean('release', '/Applications/Tau.app', { existing: ['/Applications/Tau.app'] }), /already has/u);
+      delete process.env['TAU_QUALIFICATION_DISPOSABLE_HOST'];
+    }
     console.log(
-      'PASS Mac ZIP/DMG artifact byte admission and host/architecture/path guards; no native app qualification claimed',
+      'PASS Mac ZIP/DMG artifact byte admission, clean-host admission and host/architecture/path guards; no native app qualification claimed',
     );
   } finally {
     if (originalGuard === undefined) {

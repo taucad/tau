@@ -1,8 +1,10 @@
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import type { DesktopTerminalBridge, DesktopTerminalSession, TerminalHostFrame } from '@taucad/types/desktop-terminal';
 import { TerminalPane } from '#components/terminal/terminal-pane.js';
+import { closePanel, TerminalCloseContext, useDockviewTerminalCloseHost } from '#components/terminal/terminal-close.js';
 import type { TerminalRendererLoader } from '#components/terminal/terminal-pane.js';
 import type { TerminalAvailability } from '#components/terminal/terminal-availability.js';
 import type { TerminalRendererOptions, TerminalRendererView } from '#components/terminal/terminal-renderer.js';
@@ -323,5 +325,244 @@ describe('TerminalPane', () => {
     });
     expect(document.activeElement).toHaveAttribute('data-slot', 'terminal-chrome');
     expect(screen.getByRole('button', { name: 'Screen reader mode' })).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+type PanelApi = { close: Mock<() => void>; setActive: Mock<() => void> };
+
+/** The pane as Dockview hosts it: its close affordances reach it through `closePanel` on the panel's api. */
+function DockedTerminal({
+  api,
+  hide,
+  availability,
+}: {
+  readonly api: PanelApi;
+  readonly hide: () => void;
+  readonly availability: TerminalAvailability;
+}): React.JSX.Element {
+  const closeHost = useDockviewTerminalCloseHost(api, hide);
+  return (
+    <TerminalCloseContext.Provider value={closeHost}>
+      <TerminalPane availability={availability} loadRenderer={harness.loadRenderer} />
+    </TerminalCloseContext.Provider>
+  );
+}
+
+describe('TerminalPane close (T15)', () => {
+  let api: PanelApi;
+  let hide: Mock<() => void>;
+  beforeEach(() => {
+    api = { close: vi.fn<() => void>(), setActive: vi.fn<() => void>() };
+    hide = vi.fn<() => void>();
+  });
+  const requestClose = (): void => {
+    act(() => {
+      closePanel(api);
+    });
+  };
+  const decision = (): HTMLElement => screen.getByRole('alertdialog', { name: 'Close the Terminal in project-1?' });
+
+  it('closes at once when no session was started or the session has ended', async () => {
+    render(<DockedTerminal api={api} hide={hide} availability={available(harness)} />);
+    requestClose();
+    expect(api.close).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+
+    await startTerminal();
+    harness.emit({ type: 'exited', exitCode: 0, signal: null, reason: 'shell-exited' });
+    requestClose();
+    expect(api.close).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('asks before closing a running session, idle prompt included, without claiming a command is busy', async () => {
+    render(<DockedTerminal api={api} hide={hide} availability={available(harness)} />);
+    await startTerminal();
+    requestClose();
+
+    expect(api.close).not.toHaveBeenCalled();
+    expect(api.setActive).toHaveBeenCalledOnce();
+    expect(harness.session.calls.close).toHaveLength(0);
+    expect(decision()).toHaveAccessibleDescription(
+      'Closing this Terminal stops its session. Hide keeps it running out of sight.',
+    );
+    expect(decision()).not.toHaveTextContent(/command|busy/iu);
+    const buttons = within(decision()).getAllByRole('button');
+    expect(buttons.map((button) => button.textContent)).toEqual(['Keep open', 'Hide', 'Close and stop']);
+    expect(buttons[0]).toHaveFocus();
+
+    /* A second request while the question is open does not stack another. */
+    requestClose();
+    expect(screen.getAllByRole('alertdialog')).toHaveLength(1);
+    expect(api.close).not.toHaveBeenCalled();
+  });
+
+  it('Keep open, by button or Escape, leaves the session and the pane as they were', async () => {
+    render(<DockedTerminal api={api} hide={hide} availability={available(harness)} />);
+    await startTerminal();
+    vi.mocked(harness.view.focus).mockClear();
+    requestClose();
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(harness.view.focus).toHaveBeenCalledOnce();
+
+    requestClose();
+    await userEvent.click(within(decision()).getByRole('button', { name: 'Keep open' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(api.close).not.toHaveBeenCalled();
+    expect(hide).not.toHaveBeenCalled();
+    expect(harness.session.calls.close).toHaveLength(0);
+    harness.emit({ type: 'output', data: 'still here', offset: 10 });
+    expect(harness.view.writes.at(-1)?.data).toBe('still here');
+  });
+
+  it('Hide puts the pane out of sight with its session still running', async () => {
+    render(<DockedTerminal api={api} hide={hide} availability={available(harness)} />);
+    await startTerminal();
+    requestClose();
+    await userEvent.click(within(decision()).getByRole('button', { name: 'Hide' }));
+    expect(hide).toHaveBeenCalledOnce();
+    expect(api.close).not.toHaveBeenCalled();
+    expect(harness.session.calls.close).toHaveLength(0);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('Close and stop ends the session once, removes the pane, and ignores the old session afterwards', async () => {
+    const { unmount } = render(<DockedTerminal api={api} hide={hide} availability={available(harness)} />);
+    await startTerminal();
+    await userEvent.keyboard('ls');
+    requestClose();
+    await userEvent.click(within(decision()).getByRole('button', { name: 'Close and stop' }));
+    expect(harness.session.calls.close).toHaveLength(1);
+    expect(harness.view.dispose).toHaveBeenCalledOnce();
+    expect(api.close).toHaveBeenCalledOnce();
+
+    const writes = harness.view.writes.length;
+    harness.emit({ type: 'output', data: 'late', offset: 4 });
+    harness.view.type('late input');
+    expect(harness.view.writes).toHaveLength(writes);
+    expect(harness.session.calls.input).toEqual([]);
+    unmount();
+    expect(harness.session.calls.close).toHaveLength(1);
+  });
+
+  it('withdraws the question when the session ends while it is open, and the next close needs no answer', async () => {
+    render(<DockedTerminal api={api} hide={hide} availability={available(harness)} />);
+    await startTerminal();
+    requestClose();
+    harness.emit({ type: 'exited', exitCode: 0, signal: null, reason: 'shell-exited' });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(api.close).not.toHaveBeenCalled();
+
+    /* A new session does not bring the old question back. */
+    await userEvent.click(screen.getByRole('button', { name: 'Start a new Terminal' }));
+    harness.emit(opened);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+
+    harness.emit({ type: 'exited', exitCode: 0, signal: null, reason: 'shell-exited' });
+    requestClose();
+    expect(api.close).toHaveBeenCalledOnce();
+  });
+
+  it('withdraws the question on a project change, which ends the old session without asking', async () => {
+    const { rerender } = render(<DockedTerminal api={api} hide={hide} availability={available(harness)} />);
+    await startTerminal();
+    requestClose();
+    rerender(<DockedTerminal api={api} hide={hide} availability={available(harness, '/home/me/Tau/project-2')} />);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(harness.session.calls.close).toHaveLength(1);
+    expect(api.close).not.toHaveBeenCalled();
+  });
+
+  it('stops answering for the panel once the pane unmounts', async () => {
+    const { unmount } = render(<DockedTerminal api={api} hide={hide} availability={available(harness)} />);
+    await startTerminal();
+    unmount();
+    requestClose();
+    expect(api.close).toHaveBeenCalledOnce();
+  });
+});
+
+describe('TerminalPane running report (T15)', () => {
+  it('reports a running session, and its end, so the navigation guard exists only meanwhile', async () => {
+    const onRunningChange = vi.fn<(projectLabel: string | undefined) => void>();
+    render(
+      <TerminalPane
+        availability={available(harness)}
+        loadRenderer={harness.loadRenderer}
+        onRunningChange={onRunningChange}
+      />,
+    );
+    expect(onRunningChange.mock.calls).toEqual([[undefined]]);
+    await startTerminal();
+    expect(onRunningChange).toHaveBeenLastCalledWith('project-1');
+    harness.emit({ type: 'exited', exitCode: 0, signal: null, reason: 'shell-exited' });
+    expect(onRunningChange).toHaveBeenLastCalledWith(undefined);
+  });
+});
+
+describe('TerminalPane unload hold (T15)', () => {
+  const unload = (): Event => {
+    const event = new Event('beforeunload', { cancelable: true });
+    globalThis.dispatchEvent(event);
+    return event;
+  };
+
+  it('holds the page unload only while a session runs', async () => {
+    const { unmount } = render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
+    /* Negative control: no session, no hold. */
+    expect(unload().defaultPrevented).toBe(false);
+    await startTerminal();
+    expect(unload().defaultPrevented).toBe(true);
+    harness.emit({ type: 'exited', exitCode: 0, signal: null, reason: 'shell-exited' });
+    expect(unload().defaultPrevented).toBe(false);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Start a new Terminal' }));
+    harness.emit(opened);
+    expect(unload().defaultPrevented).toBe(true);
+    unmount();
+    expect(unload().defaultPrevented).toBe(false);
+  });
+});
+
+describe('TerminalPane project change (T15)', () => {
+  it('keeps the old session out of the new project and starts the new one clean, with nothing replayed', async () => {
+    const first = harness;
+    const { rerender } = render(<TerminalPane availability={available(first)} loadRenderer={first.loadRenderer} />);
+    await startTerminal();
+    first.view.type('make build\r');
+    expect(first.session.calls.input).toEqual([['make build\r']]);
+
+    harness = createHarness();
+    const second = harness;
+    rerender(
+      <TerminalPane availability={available(second, '/home/me/Tau/project-2')} loadRenderer={second.loadRenderer} />,
+    );
+    expect(first.session.calls.close).toHaveLength(1);
+    expect(first.view.dispose).toHaveBeenCalledOnce();
+    /* Nothing starts by itself in the new project (D21). */
+    expect(second.open).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Start Terminal' })).toBeEnabled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Start Terminal' }));
+    second.emit({
+      type: 'opened',
+      session: { id: 'session-2', projectLabel: 'project-2', access: { read: [], write: [], domains: [] } },
+    });
+    expect(second.open).toHaveBeenCalledExactlyOnceWith(
+      { projectRoot: '/home/me/Tau/project-2', size: { columns: 120, rows: 30 } },
+      expect.any(Function),
+    );
+
+    /* The old session's late frames and the old view's input reach nothing in the new project. */
+    first.emit({ type: 'output', data: 'old project output', offset: 18 });
+    first.emit({ type: 'exited', exitCode: 0, signal: null, reason: 'project-changed' });
+    first.view.type('rm -rf build\r');
+    expect(second.view.writes).toEqual([]);
+    expect(first.view.writes).toEqual([]);
+    expect(second.session.calls.input).toEqual([]);
+    expect(first.session.calls.input).toEqual([['make build\r']]);
+    expect(screen.getByText('project-2')).toBeInTheDocument();
+    expect(screen.queryByText(/project changed/iu)).toBeNull();
   });
 });

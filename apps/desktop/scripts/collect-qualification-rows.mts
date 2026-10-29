@@ -21,13 +21,15 @@ const rows = [
   ['debian-apt-x11', 'linux-apt', 'linux-x64'],
   ['debian-appimage-x11', 'linux-appimage', 'linux-x64'],
 ] as const;
-const scopes = ['all', 'linux', 'macos'] as const;
+const scopes = ['all', 'linux', 'macos', 'windows'] as const;
 type QualificationScope = (typeof scopes)[number];
 /** Rows each explicit scope must produce; a scoped run can neither omit nor add another platform's host. */
 const scopeRows = (scope: QualificationScope) =>
-  scope === 'all' ? rows : rows.filter(([, route]) => route.startsWith(scope === 'linux' ? 'linux-' : 'macos-'));
+  scope === 'all' ? rows : rows.filter(([, route]) => route.startsWith(`${scope}-`));
 const inputSchema = z.strictObject({
   scope: z.enum(scopes).default('all'),
+  /** `vm` collects clean-host acceptance rows from the Mac- or Windows-scoped staging producer; never inferred from receipts. */
+  kind: z.enum(['ci', 'vm']).default('ci'),
   candidate: z.unknown(),
   sourceCommit: z.string().regex(/^[a-f\d]{40}$/u),
   channel: z.enum(['staging', 'production']),
@@ -67,6 +69,12 @@ export const collectQualificationRows = (
   if (request.scope !== 'all' && manifest.channel !== 'staging') {
     throw new Error('Platform-scoped evidence is staging qualification only');
   }
+  if (request.kind === 'vm' && (!['macos', 'windows'].includes(request.scope) || manifest.channel !== 'staging')) {
+    throw new Error('Clean-host receipts come only from a Mac- or Windows-scoped staging producer');
+  }
+  if (request.scope === 'windows' && request.kind !== 'vm') {
+    throw new Error('Windows scope requires consumer VM evidence');
+  }
   if (request.scope === 'macos') {
     // The final candidate must be exactly the Mac-only candidate that publication will later admit.
     desktopCandidateRoutes(manifest, 'macos');
@@ -86,11 +94,12 @@ export const collectQualificationRows = (
     if (
       receipt.route !== route ||
       receipt.target !== target ||
-      receipt.environment.kind !== 'ci' ||
+      receipt.environment.kind !== request.kind ||
+      (request.kind === 'vm') !== (receipt.environment.host !== undefined) ||
       receipt.trust.kind !== 'release' ||
       !request.trustIdentities[route] ||
       receipt.trust.identity !== request.trustIdentities[route] ||
-      receipt.suite !== 'installed-route-a-b-c-v1' ||
+      receipt.suite !== (request.kind === 'vm' ? 'clean-host-route-a-b-c-v1' : 'installed-route-a-b-c-v1') ||
       receipt.logs !== `https://github.com/taucad/tau/actions/runs/${request.runId}`
     ) {
       throw new Error('Native row identity, signer or workflow evidence differs');
@@ -136,20 +145,21 @@ const main = async (): Promise<void> => {
   });
   const result = collectQualificationRows({
     scope,
+    kind: z.enum(['ci', 'vm']).parse(process.env['TAU_DESKTOP_ACCEPTANCE_KIND'] ?? 'ci'),
     candidate,
     sourceCommit: candidate.sourceCommit,
     channel: required('TAU_QUALIFICATION_CHANNEL'),
     runId: required('GITHUB_RUN_ID'),
     // Only the selected platforms' protected identities are read; a Mac-only run needs no Linux or Windows trust.
     trustIdentities: {
-      ...(scope === 'linux'
+      ...(scope === 'linux' || scope === 'windows'
         ? {}
         : {
             'macos-zip': required('APPLE_TEAM_ID'),
             'macos-dmg': required('APPLE_TEAM_ID'),
           }),
-      ...(scope === 'all' ? { 'windows-nsis': required('TAU_WINDOWS_PUBLISHER') } : {}),
-      ...(scope === 'macos'
+      ...(scope === 'all' || scope === 'windows' ? { 'windows-nsis': required('TAU_WINDOWS_PUBLISHER') } : {}),
+      ...(scope === 'macos' || scope === 'windows'
         ? {}
         : {
             'linux-apt': `${required('TAU_APT_PRIMARY_FINGERPRINT')}/${required('TAU_APT_SIGNING_FINGERPRINT')}`,

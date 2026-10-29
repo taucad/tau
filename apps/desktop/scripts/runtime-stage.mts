@@ -32,7 +32,8 @@ export type RuntimeTarget = 'darwin-arm64' | 'darwin-x64' | 'linux-x64' | 'win32
 /** Match binary basenames and relative package directories so hidden checkout ancestors cannot defeat ASAR unpacking. */
 export const runtimeAsarOptions = {
   unpack: '{*.node,*.dll,esbuild,esbuild.exe}',
-  unpackDir: '**/node_modules/{@agentclientprotocol,@img}',
+  unpackDir:
+    '**/node_modules/{@agentclientprotocol,@img,@anthropic-ai/sandbox-runtime/vendor/{seccomp,java-proxy-agent}}',
 };
 
 /** The optional platform package each runtime engine loads its native payload from. */

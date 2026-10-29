@@ -20,7 +20,7 @@ export type SignOutProps = {
  * @returns The spinner shown during sign-out
  */
 export function SignOut({ className }: SignOutProps): React.JSX.Element {
-  const { authClient, basePaths, navigate, viewPaths } = useAuth();
+  const { authClient, basePaths, localization, navigate, viewPaths } = useAuth();
   const purgeFinancial = useCloudFinancialPurge();
 
   const { mutate: signOut } = useSignOut(authClient, {
@@ -57,5 +57,11 @@ export function SignOut({ className }: SignOutProps): React.JSX.Element {
     signOut();
   }, [purgeFinancial, signOut]);
 
-  return <Spinner className={cn('mx-auto my-auto', className)} />;
+  return (
+    <>
+      {/* The page's one heading: the spinner is all a person sees while the session ends. */}
+      <h1 className='sr-only'>{localization.auth.signOut}</h1>
+      <Spinner className={cn('mx-auto my-auto', className)} />
+    </>
+  );
 }

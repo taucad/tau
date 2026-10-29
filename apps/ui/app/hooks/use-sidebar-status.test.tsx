@@ -8,6 +8,7 @@ import { createActor } from 'xstate';
 import type { Chat } from '@taucad/chat';
 import type { RevisionStatusProjection } from '@taucad/revisions';
 import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
+import * as questionTool from '#utils/question-tool.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type { ChatSessionActorRef, ChatSessionMachineEvent } from '#machines/chat-session.machine.js';
@@ -415,6 +416,32 @@ const agentStateRows: ReadonlyArray<{
     sentence: 'Waiting for you',
   },
   {
+    /* WB-08, I5: a native question waits as its `ask_questions` call in flight; it is a decision, never "Running". */
+    signal: 'ask_questions call in flight',
+    target: 'chat',
+    events: [
+      { type: 'runLifecycle', phase: 'running' },
+      { type: 'toolParts', inFlight: 1, approvals: 0, toolName: 'ask_questions' },
+    ],
+    state: 'question',
+    label: 'Waiting for you',
+    mark: 'attention',
+    sentence: 'Waiting for you',
+  },
+  {
+    /* I6: an external agent's question arrives under its native name over ACP; it reads as the transcript reads it. */
+    signal: 'AskUserQuestion call in flight',
+    target: 'chat',
+    events: [
+      { type: 'runLifecycle', phase: 'running' },
+      { type: 'toolParts', inFlight: 1, approvals: 0, toolName: 'AskUserQuestion' },
+    ],
+    state: 'question',
+    label: 'Waiting for you',
+    mark: 'attention',
+    sentence: 'Waiting for you',
+  },
+  {
     /* PV-A7, V5 B1: Done at the terminal row; the revision card alone waits on the settlement row. */
     signal: 'run.lifecycle: completed, settlement row late',
     target: 'chat',
@@ -801,6 +828,28 @@ describe('use-sidebar-status — pin (d): the project row rolls up its chats (A3
       sentence: 'Waiting for you',
     });
     expect(facts([])).toEqual({ mark: 'none', sentence: undefined });
+  });
+
+  it('counts a chat whose agent is asking in the project row, as it counts an approval (WB-08, I5)', () => {
+    liveProject('desk');
+    const asking = driveChat('desk', 'asking', [
+      { type: 'runLifecycle', phase: 'running' },
+      { type: 'toolParts', inFlight: 1, approvals: 0, toolName: 'ask_questions' },
+    ]);
+    driveChat('desk', 'approving', [
+      { type: 'runLifecycle', phase: 'running' },
+      { type: 'interruptRecorded', state: 'requested', count: 1 },
+    ]);
+    driveChat('desk', 'meshing', [
+      { type: 'runLifecycle', phase: 'running' },
+      { type: 'toolParts', inFlight: 1, approvals: 0, toolName: 'geospec_check' },
+    ]);
+    const row = rowOf('desk');
+    expect(row.attention).toBe(2);
+    expect(row.running).toBe(1);
+    // The ask ends: the run works on, and the chat no longer needs the person.
+    asking.send({ type: 'toolParts', inFlight: 0, approvals: 0 });
+    expect(rowOf('desk').attention).toBe(1);
   });
 });
 
@@ -1198,6 +1247,7 @@ const compiledHooks = await (async () => {
   const modules: Record<string, unknown> = {
     react: await import('react'),
     'react/compiler-runtime': await import('react/compiler-runtime'),
+    '#utils/question-tool.js': questionTool,
     '#machines/sessions.machine.js': await import('#machines/sessions.machine.js'),
     '#services/sessions-store.js': await import('#services/sessions-store.js'),
     '#hooks/use-revision-status.js': await import('#hooks/use-revision-status.js'),

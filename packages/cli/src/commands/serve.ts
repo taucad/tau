@@ -286,7 +286,7 @@ export const handOffLink = (target: HandOffTarget, served: string, code: string)
   if (target.kind === 'desktop') {
     return `tau://host/${origin}?code=${encodeURIComponent(code)}`;
   }
-  return `${target.origin}/#${new URLSearchParams({ 'tau-host': origin, 'tau-code': code }).toString()}`;
+  return `${target.origin}/projects#${new URLSearchParams({ 'tau-host': origin, 'tau-code': code }).toString()}`;
 };
 
 /**

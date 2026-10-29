@@ -998,6 +998,14 @@
       "owner": "machines"
     },
     {
+      "id": "SHELL-TERMINAL-COUNT-TIMEOUT",
+      "bound": "Desktop quit, window close and reload question to the services utility: how many Terminal sessions are live (bound derived from the quit assessment bound)",
+      "site": "apps/desktop/src/main/services-broker.ts",
+      "token": "The desktop shell service did not say whether a Terminal is running.",
+      "class": "External edge",
+      "owner": "desktop-bash-terminal W7"
+    },
+    {
       "id": "ACP-PERMISSION-READBACK",
       "bound": "Optional native Grok version/repository probes and settings snapshot, 2 s; expiry reports unverified state and never decides approval",
       "site": "packages/host/src/acp/grok-permission-readback.ts",

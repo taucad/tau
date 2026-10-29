@@ -164,7 +164,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await definition.onDispose?.(context);
-  fullAssimp.dispose();
+  await fullAssimp.dispose();
 });
 
 describe('assimp transcoder integration', () => {

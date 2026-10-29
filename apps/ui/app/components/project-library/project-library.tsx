@@ -740,6 +740,7 @@ export function ProjectLibrary({
           viewMode={viewMode}
           actions={actions}
           onOpenCloudProject={handleOpenCloudProject}
+          emptyTitleLevel={headingLevel === 1 ? 2 : 3}
         />
       )}
       <AlertDialog
@@ -807,6 +808,8 @@ type UnifiedProjectListProps = {
   readonly viewMode: 'grid' | 'table';
   readonly actions: ProjectActions;
   readonly onOpenCloudProject: (entry: CloudProject) => Promise<void>;
+  /** The no-match state's heading level: one below the library's own heading. */
+  readonly emptyTitleLevel: 2 | 3;
 };
 
 // Page size options, shared by both view modes so the remembered choice survives a view switch.
@@ -836,6 +839,7 @@ function UnifiedProjectList({
   isCatalogUnavailable,
   controls,
   isLoading,
+  emptyTitleLevel,
 }: UnifiedProjectListProps) {
   'use no memo';
 
@@ -963,6 +967,7 @@ function UnifiedProjectList({
         <PanelEmptyState
           className='h-60'
           icon={PackageX}
+          titleLevel={emptyTitleLevel}
           title={isCatalogUnavailable ? 'No matches on this device' : 'No matching projects'}
           description={isCatalogUnavailable ? 'Tau Cloud projects are not all available yet.' : undefined}
         >

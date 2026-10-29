@@ -8,7 +8,7 @@
  */
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { closeSync, existsSync, lstatSync, mkdtempSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -16,12 +16,20 @@ import type { Readable, Writable } from 'node:stream';
 import { ReadStream } from 'node:tty';
 import { fileURLToPath } from 'node:url';
 
-import { deniedReadRoots, deniedWriteRoots, physicalVariants, sandboxRuntimeReadRoots } from '#native-sandbox.js';
+import {
+  deniedReadRoots,
+  deniedWriteRoots,
+  physicalVariants,
+  sandboxRuntimeReadRoots,
+  sandboxRuntimeJavaAgent,
+  sandboxRuntimeSeccomp,
+} from '#native-sandbox.js';
 import { terminateOwnedProcesses, trackDescendants } from '#shell/process-tree.js';
 import type { ProcessRow } from '#shell/process-tree.js';
 import { shellBaselineDenied } from '#shell/shell-baseline.js';
 import { createShellCustody } from '#shell/shell-custody.js';
 import { refusedShellEnvironment } from '#shell/shell-environment.js';
+import { holdProtectedStandIns, useStandInJournal } from '#shell/shell-stand-ins.js';
 import type {
   ShellExit,
   ShellLaunch,
@@ -121,6 +129,11 @@ export type SandboxShellProviderOptions = Readonly<{
    * parent; a host with application data passes a directory there, so receipts survive until recovery.
    */
   custody?: Readonly<{ directory: string; sessionDirectory: string }>;
+  /**
+   * On Linux, a file under host-owned state (never inside a checkout) journalling the stand-ins this process holds, so
+   * the next start sweeps the ones a crash left behind.
+   */
+  standInJournal?: string;
 }>;
 
 const quote = (value: string): string => `'${value.replaceAll("'", String.raw`'\''`)}'`;
@@ -176,21 +189,31 @@ const inside = (path: string, root: string): boolean => {
  * @returns A complete sandbox-runtime configuration.
  */
 /**
- * The spellings of each denied path the runtime can mask. Bubblewrap masks a directory by mounting over it, which it
- * cannot do through a symbolic link (`/var/run` is one to `/run` on current distributions), so on Linux a link is
- * replaced by its target. Seatbelt matches both spellings, so macOS keeps them.
+ * The spellings of each denied path the runtime can mask. Bubblewrap masks a file by binding `/dev/null` over it, and
+ * it refuses that bind through a symbolic link, whether at the leaf or at an ancestor (`/var/run` is a link to `/run`
+ * on current distributions, so it refuses `/var/run/docker.sock`). On Linux a spelling whose physical
+ * path differs is therefore dropped, but only when that physical spelling is itself in the set, so the target stays
+ * masked; a path that cannot be resolved keeps its literal spelling. Seatbelt matches both spellings, so macOS keeps
+ * them.
+ *
+ * @param paths - The denied or read-only paths.
+ * @returns The spellings to hand the runtime.
  */
-const deniedVariants = (paths: readonly string[]): string[] =>
-  physicalVariants(paths).filter((path) => {
-    if (process.platform !== 'linux') {
-      return true;
-    }
+const deniedVariants = (paths: readonly string[]): string[] => {
+  const variants = physicalVariants(paths);
+  if (process.platform !== 'linux') {
+    return variants;
+  }
+  const spelled = new Set(variants);
+  return variants.filter((path) => {
     try {
-      return !lstatSync(path).isSymbolicLink();
+      const physical = realpathSync(path);
+      return physical === path || !spelled.has(physical);
     } catch {
       return true;
     }
   });
+};
 
 /**
  * Every directory between a writable root and a protected path inside it (D20, E04). On Linux each is bound onto itself,
@@ -235,6 +258,8 @@ export const shellSandboxProfile = (
   const readOnly = launch.filesystem.readOnly ?? [];
   const { domains } = launch.network;
   return {
+    seccomp: sandboxRuntimeSeccomp(),
+    javaAgentJarPath: sandboxRuntimeJavaAgent(),
     network: { allowedDomains: [...domains], deniedDomains: domains.length > 0 ? [] : ['*'], strictAllowlist: true },
     filesystem: {
       denyRead: [...new Set([...deniedReadRoots(), ...denied])],
@@ -376,6 +401,8 @@ const startSupervisor = async (
   const { executablePath, arguments: supervisorArguments } = options.supervisor ?? defaultSupervisor();
   const temporaryDirectory = runtimeDirectory ?? process.env['TMPDIR'];
   const child = spawn(executablePath, supervisorArguments, {
+    /* The runtime resolves its mandatory deny names against this directory: never a checkout. */
+    ...(runtimeDirectory === undefined ? {} : { cwd: runtimeDirectory }),
     /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
     env: {
       PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
@@ -903,6 +930,9 @@ const defaultCustody = (): Readonly<{ directory: string; sessionDirectory: strin
  * @returns A provider; each launch is fully contained or refused.
  */
 export const createSandboxShellProvider = (options: SandboxShellProviderOptions = {}): ShellProvider => {
+  if (process.platform === 'linux' && options.standInJournal !== undefined) {
+    useStandInJournal(options.standInJournal);
+  }
   const custody = createShellCustody(options.custody ?? defaultCustody());
   const stage = async (launch: ShellLaunch, binding: PtyBinding | undefined): Promise<ShellLaunchOutcome> => {
     let lock: number;
@@ -911,18 +941,64 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
     } catch {
       return { status: 'sandbox-unavailable', message: 'This launch was not prepared, so nothing started.' };
     }
+    // The runtime also masks its own mandatory names relative to the supervisor's working directory. The supervisor
+    // runs in its private runtime directory; a host that itself runs inside a writable root is refused as well.
+    if (
+      process.platform === 'linux' &&
+      physicalVariants(launch.filesystem.writable).some((root) => inside(process.cwd(), root))
+    ) {
+      return {
+        status: 'sandbox-unavailable',
+        message: `the host process runs inside a writable root (${process.cwd()}); start it outside every project.`,
+      };
+    }
     const runtimeDirectory = createRuntimeDirectory();
-    const supervisor = await startSupervisor(
-      {
-        profile: shellSandboxProfile(launch, options, runtimeDirectory),
-        command: shellSandboxCommand(launch),
-        workingDirectory: launch.workingDirectory,
-        commandId: launch.commandId,
-        guard: launch.network.domains.length > 0,
+    const profile = shellSandboxProfile(launch, options, runtimeDirectory);
+    // Absent protected paths get shared stand-ins, computed from exactly the lists the runtime is handed, before it
+    // observes the filesystem; released only once this launch's supervisor is gone (see holdProtectedStandIns).
+    let releaseStandIns: () => void;
+    try {
+      const { denyWrite, allowWrite } = profile['filesystem'] as Readonly<{
+        denyWrite: readonly string[];
+        allowWrite: readonly string[];
+      }>;
+      releaseStandIns = holdProtectedStandIns({ denyWrite, allowWrite, directories: launch.filesystem.directories });
+    } catch (error) {
+      if (runtimeDirectory !== undefined) {
+        rmSync(runtimeDirectory, { recursive: true, force: true });
+      }
+      return {
+        status: 'sandbox-unavailable',
+        message: `a protected path could not be prepared: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    let started: Supervisor;
+    try {
+      started = await startSupervisor(
+        {
+          profile,
+          command: shellSandboxCommand(launch),
+          workingDirectory: launch.workingDirectory,
+          commandId: launch.commandId,
+          guard: launch.network.domains.length > 0,
+        },
+        options,
+        { runtimeDirectory, lock },
+      );
+    } catch (error) {
+      releaseStandIns();
+      throw error;
+    }
+    const supervisor: Supervisor = {
+      ...started,
+      close: async () => {
+        try {
+          await started.close();
+        } finally {
+          releaseStandIns();
+        }
       },
-      options,
-      { runtimeDirectory, lock },
-    );
+    };
     if (supervisor.reply.status !== 'ready') {
       await supervisor.close();
       return { status: 'sandbox-unavailable', message: supervisor.reply.message };

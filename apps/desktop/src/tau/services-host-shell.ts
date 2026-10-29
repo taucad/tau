@@ -40,6 +40,8 @@ export type DesktopShellOptions = Readonly<{
   bwrapPath?: string | undefined;
   platform?: NodeJS.Platform | undefined;
   home?: string | undefined;
+  /** On Linux, the host-owned file journalling protected-path stand-ins, swept at the next start after a crash. */
+  standInJournal?: string | undefined;
   /** Injected for tests; otherwise {@link desktopShellProvider}. */
   provider?: ShellProvider | undefined;
   log?: ((event: string, detail?: unknown, level?: 'info' | 'warn') => void) | undefined;
@@ -103,7 +105,7 @@ export const bundledShellSupervisor = (): SandboxShellProviderOptions['superviso
  * @returns The provider, or `undefined` when this platform has none.
  */
 export const desktopShellProvider = (
-  options: Pick<DesktopShellOptions, 'bwrapPath' | 'home'> &
+  options: Pick<DesktopShellOptions, 'bwrapPath' | 'home' | 'standInJournal'> &
     Partial<Pick<DesktopShellOptions, 'appDataRoots'>> &
     Readonly<{ platform: NodeJS.Platform }>,
 ): ShellProvider | undefined => {
@@ -119,6 +121,7 @@ export const desktopShellProvider = (
       return createSandboxShellProvider({
         ...shared,
         ...(options.bwrapPath === undefined ? {} : { bwrapPath: options.bwrapPath }),
+        ...(options.standInJournal === undefined ? {} : { standInJournal: options.standInJournal }),
       });
     }
     case 'darwin': {
@@ -249,6 +252,7 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
           bwrapPath: options.bwrapPath,
           home: options.home,
           appDataRoots: options.appDataRoots,
+          standInJournal: options.standInJournal,
         });
       const outcome =
         provider === undefined

@@ -86,6 +86,7 @@ const evaluation = discriminatedWireUnion('success', [
       transient: z.boolean(),
       views: z.array(viewOffer).readonly(),
       exports: z.array(exportOffer).readonly(),
+      evaluateOptions: options.optional(),
       issues,
       ...provenance,
     })
@@ -124,6 +125,8 @@ const tessellationReport = z
     voxelSize: z.number().positive().optional(),
     activeVoxels: count.optional(),
     memoryBytes: count.optional(),
+    adaptivity: z.number().gt(0).lt(1).optional(),
+    relax: z.boolean().optional(),
     requested: z.enum(['low', 'medium', 'high', 'extra-high', 'explicit']).optional(),
     linearTolerance: z.number().positive().optional(),
     angularTolerance: z.number().positive().optional(),

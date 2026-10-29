@@ -6,19 +6,30 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { MeasureControl } from '#cad/measure-control.jsx';
 
 type GraphicsState = {
-  readonly context: { readonly isMeasureActive: boolean; readonly geometryRadius: number };
+  readonly context: {
+    readonly isMeasureActive: boolean;
+    readonly isMeasureInputReady: boolean;
+    readonly geometryRadius: number;
+  };
 };
 
 const mocks = vi.hoisted(() => ({
   graphicsSend: vi.fn(),
   isMeasureActive: false,
+  isMeasureInputReady: false,
   geometryRadius: 1,
 }));
 
 vi.mock('#hooks/use-graphics.jsx', () => ({
   useGraphics: () => ({ send: mocks.graphicsSend }),
   useGraphicsSelector: <T,>(selector: (state: GraphicsState) => T): T =>
-    selector({ context: { isMeasureActive: mocks.isMeasureActive, geometryRadius: mocks.geometryRadius } }),
+    selector({
+      context: {
+        isMeasureActive: mocks.isMeasureActive,
+        isMeasureInputReady: mocks.isMeasureInputReady,
+        geometryRadius: mocks.geometryRadius,
+      },
+    }),
 }));
 
 const renderToggle = (properties: React.ComponentProps<typeof MeasureControl> = {}): void => {
@@ -34,6 +45,7 @@ describe('MeasureControl', () => {
     vi.clearAllMocks();
     mocks.geometryRadius = 1;
     mocks.isMeasureActive = false;
+    mocks.isMeasureInputReady = false;
   });
 
   it('should start measuring and then call onStart', async () => {
@@ -57,6 +69,16 @@ describe('MeasureControl', () => {
 
     expect(mocks.graphicsSend).toHaveBeenCalledWith({ type: 'setMeasureActive', payload: false });
     expect(onStart).not.toHaveBeenCalled();
+  });
+
+  it('should keep a preparing tool named and cancellable', async () => {
+    mocks.isMeasureActive = true;
+    const user = userEvent.setup();
+    renderToggle();
+    const button = screen.getByRole('button', { name: 'Measure', pressed: true });
+    expect(button).toHaveAttribute('aria-busy', 'true');
+    await user.click(button);
+    expect(mocks.graphicsSend).toHaveBeenCalledWith({ type: 'setMeasureActive', payload: false });
   });
 
   it('should show the name and the shortcut at rest', async () => {

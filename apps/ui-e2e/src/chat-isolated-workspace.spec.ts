@@ -29,7 +29,7 @@ const waitForComposer = async (): Promise<void> =>
     timeout: 60_000,
   });
 const readActiveEditorText = async (): Promise<string> => {
-  const lines = selectors.getByCss('.monaco-editor .view-lines').last();
+  const lines = selectors.getByCss('.cm-editor .cm-content').last();
   await target.expectVisible(lines, 30_000);
   const state = await target.read(lines);
   return (state.text ?? '').replaceAll('\u00A0', ' ');

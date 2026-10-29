@@ -112,6 +112,8 @@ export type QualifiedDesktopDownload = {
   readonly href: string;
   /** The primary artifact's kind; only `macos-dmg` is a disk image. */
   readonly primaryKind: string;
+  /** Whether clean-host (operator VM) acceptance passed; `pending` is admitted only on staging Mac routes. */
+  readonly cleanHost: 'passed' | 'pending';
   readonly sha256: string;
   readonly size: number;
   readonly alternatives: ReadonlyArray<{ name: string; href: string; sha256: string; size: number }>;
@@ -241,7 +243,10 @@ export const createDesktopDownloadCatalog = (options: {
     seen.add(key);
     const definition = routeDefinitions[key as keyof typeof routeDefinitions];
     const proof = catalogRecord(route['qualification'], ['ci', 'vm', 'trust']);
-    if (proof['ci'] !== true || proof['vm'] !== true || proof['trust'] !== 'release') {
+    // Clean-host acceptance may be pending only for a staging Mac route the publisher admitted on CI evidence alone.
+    const cleanHostPending =
+      proof['vm'] === 'pending' && options.channel === 'staging' && definition.primary === 'macos-dmg';
+    if (proof['ci'] !== true || (proof['vm'] !== true && !cleanHostPending) || proof['trust'] !== 'release') {
       throw new TypeError('Installer route has not passed release qualification');
     }
     if (!Array.isArray(route['artifacts']) || route['artifacts'].length !== Object.keys(definition.names).length) {
@@ -280,11 +285,12 @@ export const createDesktopDownloadCatalog = (options: {
     result.push({
       platform: definition.platform,
       label: definition.platform === 'linuxPortable' ? 'Linux portable' : desktopDownloads[definition.platform].label,
-      detail: definition.detail,
+      detail: cleanHostPending ? `${definition.detail} · clean-Mac install testing pending` : definition.detail,
       install: definition.install,
       updates: definition.updates,
       href: definition.platform === 'linux' ? '#linux-installation' : primary.href,
       primaryKind: definition.primary,
+      cleanHost: cleanHostPending ? 'pending' : 'passed',
       sha256: primary.sha256,
       size: primary.size,
       alternatives: [...artifacts.entries()]

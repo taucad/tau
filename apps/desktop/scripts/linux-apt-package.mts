@@ -221,7 +221,7 @@ export const buildLinuxAptPackages = async (options: LinuxAptPackageOptions): Pr
     control(
       runtimeName,
       'Tau immutable desktop runtime',
-      'libc6 (>= 2.38), libgtk-3-0 | libgtk-3-0t64, libnss3, libasound2t64 | libasound2, libgbm1, libdrm2, libx11-6, libxcomposite1, libxdamage1, libxrandr2, libxkbcommon0, libsecret-1-0, libatk1.0-0 | libatk1.0-0t64, libatk-bridge2.0-0 | libatk-bridge2.0-0t64, libcups2 | libcups2t64, bubblewrap, xdg-utils' +
+      'libc6 (>= 2.38), libgtk-3-0 | libgtk-3-0t64, libnss3, libasound2t64 | libasound2, libgbm1, libdrm2, libx11-6, libxcomposite1, libxdamage1, libxrandr2, libxkbcommon0, libsecret-1-0, libatk1.0-0 | libatk1.0-0t64, libatk-bridge2.0-0 | libatk-bridge2.0-0t64, libcups2 | libcups2t64, bubblewrap, ripgrep, socat, xdg-utils' +
         (appImage ? ', libfuse2t64 | libfuse2, fuse3' : ''),
     ),
   );

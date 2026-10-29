@@ -58,6 +58,9 @@
 \* legacy receipt rebasing; this module retains its single-host FIFO scope.
 \* Skipping observation of the registration probe, or of a chat this tab already
 \* crashed on, never enqueues, prepares or acknowledges; queue paths unchanged.
+\* Home's server-rendered composer input stays live until the rich composer hydrates; its edit
+\* enters the existing draft owner through one setDraftText, and that early input carries no submit
+\* path, so nothing enqueues, prepares or acknowledges before hydration; queue paths unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

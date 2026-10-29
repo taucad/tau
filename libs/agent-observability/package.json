@@ -52,7 +52,8 @@
   },
   "dependencies": {
     "@earendil-works/pi-telemetry": "catalog:",
-    "@opentelemetry/api": "catalog:"
+    "@opentelemetry/api": "catalog:",
+    "@taucad/agent-host": "workspace:*"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "catalog:",

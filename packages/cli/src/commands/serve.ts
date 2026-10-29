@@ -1113,7 +1113,6 @@ export const serveCommand = defineCommand({
     process.env['TAU_SERVE_ROLE'] ??= 'serve';
     const runtimeTelemetry =
       process.env['TAU_CLOUD_HOST'] === '1' ? cliRuntimeTelemetry('cloud', packageJson.version) : undefined;
-    /* Agent observability (T11): only the provisioned cloud host's image carries an observer. */
     const observeChats = await loadCloudHostObserver();
     const daemon = startHostDaemon({
       relayUrl: new URL(apiUrl),

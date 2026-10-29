@@ -118,9 +118,9 @@ observer=$(docker run --rm --network none --entrypoint node \
   -e TAU_API_URL=http://127.0.0.1:9 -e TAU_HOST_DEVICE_ID=check-device -e TAU_HOST_CREDENTIAL=check-only \
   -e TAU_HOST_PROJECT_ID=check-project -e TAU_HOST_OWNER_ID=check-owner "$image" --input-type=module -e \
   "const { default: observer } = await import(process.env.TAU_HOST_OBSERVER_MODULE);
-const observe = async () => ({ runs: [], ownsEpoch: () => true });
-const own = observer({ projectId: 'check-project', observe });
-console.log(typeof own?.onChatQuiescent, observer({ projectId: 'other-project', observe }) === undefined);
+const read = async ({ cursor }) => ({ cursor, nextCursor: cursor, endCursor: 0, events: [] });
+const own = observer('check-project', read);
+console.log(typeof own.onChatQuiescent, own !== observer('other-project', read));
 own.close();" 2>&1)
 [[ "$observer" == 'function true' ]] && verdict=pass || verdict=fail
 check 'agent-evidence observer loads and stays on its project' "$verdict" "$observer"

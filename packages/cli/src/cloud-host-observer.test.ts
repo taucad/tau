@@ -5,13 +5,6 @@ import { loadCloudHostObserver } from '#cloud-host-observer.js';
 const cloud = { TAU_CLOUD_HOST: '1', TAU_HOST_OBSERVER_MODULE: '/app/observer/cloud-host-observer.mjs' };
 /* eslint-enable @typescript-eslint/naming-convention -- end of the environment table */
 
-const noRows = vi.fn(async ({ cursor }: { cursor: number }) => ({
-  cursor,
-  nextCursor: cursor,
-  endCursor: 0,
-  events: [],
-}));
-
 describe('loadCloudHostObserver', () => {
   it.each([
     { TAU_HOST_OBSERVER_MODULE: cloud.TAU_HOST_OBSERVER_MODULE },
@@ -31,44 +24,14 @@ describe('loadCloudHostObserver', () => {
       }),
     ).toBeUndefined();
     expect(await loadCloudHostObserver(cloud, async () => ({ default: 'not a factory' }))).toBeUndefined();
+    expect(await loadCloudHostObserver(cloud, async () => undefined)).toBeUndefined();
   });
 
-  it('should hand the module its project and own-turn observation, and contain what it throws', async () => {
-    const onChatQuiescent = vi.fn(() => {
-      throw new Error('observer failed');
-    });
-    const factory = vi.fn((input: { projectId: string }) =>
-      input.projectId === 'project-1' ? { onChatQuiescent, close: vi.fn() } : undefined,
-    );
-    const load = vi.fn(async () => ({ default: factory }));
+  it('should answer the module’s default export as the daemon’s hook', async () => {
+    const observeChats = vi.fn();
+    const load = vi.fn(async () => ({ default: observeChats }));
 
-    const observeChats = (await loadCloudHostObserver(cloud, load))!;
-    const observer = observeChats('project-1', noRows);
-    const other = observeChats('project-2', noRows);
-
+    expect(await loadCloudHostObserver(cloud, load)).toBe(observeChats);
     expect(load).toHaveBeenCalledExactlyOnceWith('file:///app/observer/cloud-host-observer.mjs');
-    expect(() => {
-      observer.onChatQuiescent('chat-1', true);
-    }).not.toThrow();
-    expect(onChatQuiescent).toHaveBeenCalledExactlyOnceWith('chat-1', true);
-    expect(() => {
-      other.onChatQuiescent('chat-1', true);
-      other.close();
-    }).not.toThrow();
-    const { observe } = factory.mock.calls[0]![0] as unknown as { observe: (chatId: string) => Promise<unknown> };
-    await expect(observe('chat-1')).resolves.toBeDefined();
-    expect(noRows).toHaveBeenCalled();
-  });
-
-  it('should answer an inert observer when the factory throws', async () => {
-    const observeChats = (await loadCloudHostObserver(cloud, async () => ({
-      default: () => {
-        throw new Error('bad environment');
-      },
-    })))!;
-
-    expect(() => {
-      observeChats('project-1', noRows).close();
-    }).not.toThrow();
   });
 });

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cloudHostObserver } from '#cloud-host-observer.js';
 import type { ProjectedRun } from '#projection.js';
+import type { OwnRowsRead } from '@taucad/agent-host';
 
 let directory: string;
 
@@ -36,26 +37,45 @@ const provisioned = (overrides: Readonly<Record<string, string | undefined>> = {
 });
 /* eslint-enable @typescript-eslint/naming-convention -- end of the environment table */
 
-const observe = async () => ({ runs: [run], ownsEpoch: () => true });
+const observeTurns = async () => ({ runs: [run], ownsEpoch: () => true });
+const read = vi.fn<OwnRowsRead>();
 
 describe('cloudHostObserver', () => {
   it.each(['TAU_API_URL', 'TAU_HOST_DEVICE_ID', 'TAU_HOST_CREDENTIAL', 'TAU_HOST_PROJECT_ID', 'TAU_HOST_OWNER_ID'])(
     'should observe nothing without %s',
-    (name) => {
+    async (name) => {
       const fetchMock = vi.fn<typeof fetch>();
+      const observe = cloudHostObserver(provisioned({ [name]: undefined }), fetchMock, observeTurns);
 
-      expect(
-        cloudHostObserver(provisioned({ [name]: undefined }), fetchMock)({ projectId: 'project-1', observe }),
-      ).toBe(undefined);
+      const observer = observe('project-1', read);
+      observer.onChatQuiescent('chat-1', true);
+      await Promise.resolve();
+      observer.close();
+
+      expect(observer).toBe(observe('project-2', read));
       expect(fetchMock).not.toHaveBeenCalled();
     },
   );
 
   it('should observe only the project it was provisioned for', () => {
     const fetchMock = vi.fn<typeof fetch>();
+    const observe = cloudHostObserver(provisioned(), fetchMock, observeTurns);
 
-    expect(cloudHostObserver(provisioned(), fetchMock)({ projectId: 'project-2', observe })).toBeUndefined();
+    expect(observe('project-2', read)).toBe(observe('project-3', read));
+    expect(observe('project-1', read)).not.toBe(observe('project-2', read));
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('should contain what composing or running the observer throws', () => {
+    const observer = cloudHostObserver(provisioned({ TAU_API_URL: 42 as unknown as string }), vi.fn<typeof fetch>())(
+      'project-1',
+      read,
+    );
+
+    expect(() => {
+      observer.onChatQuiescent('chat-1', true);
+      observer.close();
+    }).not.toThrow();
   });
 
   it('should report under its own device and the owner’s grant, with the device credential', async () => {
@@ -77,7 +97,7 @@ describe('cloudHostObserver', () => {
             status: 200,
           });
     });
-    const observer = cloudHostObserver(provisioned(), fetchMock)({ projectId: 'project-1', observe })!;
+    const observer = cloudHostObserver(provisioned(), fetchMock, observeTurns)('project-1', read);
 
     observer.onChatQuiescent('chat-1', true);
     await vi.waitFor(() => {

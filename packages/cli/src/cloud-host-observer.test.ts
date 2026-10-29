@@ -3,19 +3,23 @@ import { loadCloudHostObserver } from '#cloud-host-observer.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names */
 const cloud = { TAU_CLOUD_HOST: '1', TAU_HOST_OBSERVER_MODULE: '/app/observer/cloud-host-observer.mjs' };
+const unprovisioned = [
+  { TAU_HOST_OBSERVER_MODULE: cloud.TAU_HOST_OBSERVER_MODULE },
+  { TAU_CLOUD_HOST: '1' },
+  { ...cloud, TAU_HOST_OBSERVER_MODULE: 'observer.mjs' },
+];
 /* eslint-enable @typescript-eslint/naming-convention -- end of the environment table */
 
 describe('loadCloudHostObserver', () => {
-  it.each([
-    { TAU_HOST_OBSERVER_MODULE: cloud.TAU_HOST_OBSERVER_MODULE },
-    { TAU_CLOUD_HOST: '1' },
-    { ...cloud, TAU_HOST_OBSERVER_MODULE: 'observer.mjs' },
-  ])('should load nothing outside a provisioned cloud host or for a relative module: %o', async (environment) => {
-    const load = vi.fn();
+  it.each(unprovisioned)(
+    'should load nothing outside a provisioned cloud host or for a relative module: %o',
+    async (environment) => {
+      const load = vi.fn();
 
-    expect(await loadCloudHostObserver(environment, load)).toBeUndefined();
-    expect(load).not.toHaveBeenCalled();
-  });
+      expect(await loadCloudHostObserver(environment, load)).toBeUndefined();
+      expect(load).not.toHaveBeenCalled();
+    },
+  );
 
   it('should load nothing when the module is missing or exports no factory', async () => {
     expect(

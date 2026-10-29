@@ -67,10 +67,9 @@ describe('cloudHostObserver', () => {
   });
 
   it('should contain what composing or running the observer throws', () => {
-    const observer = cloudHostObserver(provisioned({ TAU_API_URL: 42 as unknown as string }), vi.fn<typeof fetch>())(
-      'project-1',
-      read,
-    );
+    /* A non-string URL makes composing the reporter throw. */
+    const environment = provisioned(Object.fromEntries([['TAU_API_URL', 42 as unknown as string]]));
+    const observer = cloudHostObserver(environment, vi.fn<typeof fetch>())('project-1', read);
 
     expect(() => {
       observer.onChatQuiescent('chat-1', true);

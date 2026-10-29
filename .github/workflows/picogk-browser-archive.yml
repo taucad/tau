@@ -232,7 +232,10 @@ jobs:
   # evidence, and a check that did not run is reported as unproven rather than passed.
   parity-gate:
     needs: [parity, desktop-neutrality]
-    if: always()
+    # Not `always()`: a failed or skipped parity must still reach the gate, so that an engine that
+    # did not run cannot pass by absence, but a cancelled run has no evidence to judge and a gate
+    # that runs anyway reports a failure that means nothing.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -281,7 +284,8 @@ jobs:
           node dotnet/gate-performance.mjs "$SUBJECT" out/inputs/performance-native.json out/evidence \
             out/performance/*/performance.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
+        # Whatever the verdict, as long as the gate reached the point of writing one.
+        if: ${{ !cancelled() && hashFiles('out/evidence/**') != '' }}
         with:
           name: picogk-parity-evidence
           path: out/evidence/

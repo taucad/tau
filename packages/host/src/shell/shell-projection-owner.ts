@@ -1,8 +1,13 @@
 import { mkdir, open, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { NodeFsRootRun, NodeFsRootScope } from '@taucad/filesystem/backend/node';
-import { classify } from '@taucad/filesystem/path-registry';
-import { publishShellProjectionEntry, publishShellProjectionFile } from '#shell/shell-projection.js';
+import {
+  publishShellProjectionEntry,
+  publishShellProjectionFile,
+  shellProjectionAccess,
+  shellProjectionGrantSet,
+} from '#shell/shell-projection.js';
+import type { ShellProjectionGrants } from '#shell/shell-projection.js';
 
 const isMissing = (error: unknown): boolean => error instanceof Error && 'code' in error && error.code === 'ENOENT';
 
@@ -110,17 +115,32 @@ const join_ = (parent: string, name: string): string => (parent === '' ? name : 
  * so no cached page is ever overwritten from outside. A refused write, truncation or mapping writeback asks the
  * transport to drop that inode's cached pages, so the shell sees the generation's accepted bytes again.
  *
+ * Authority (D8): the owner decides nothing from the path registry alone. Its launch's grant set is normalized
+ * once here and composed with the registry by {@link shellProjectionAccess} for every name it captures, lists,
+ * reports a mode for or publishes, so the projection shows and writes exactly what that launch was granted.
+ * A name the grant set does not reach is absent, and a name it grants read-only is reported read-only.
+ *
  * @internal
- * @param options - The served owner's root claim and admitted root, the byte quota, and the private journal
- * directory, which the shell never sees.
+ * @param options - The served owner's root claim and admitted root, the launch's authority grant set, the byte
+ * quota, and the private journal directory, which the shell never sees.
  * @returns The request handler and read-only views of its journal and accounting.
  */
 export const openShellProjectionOwner = async (
-  options: Readonly<{ run: NodeFsRootRun; root: string; quotaBytes: number; journalDirectory: string }>,
+  options: Readonly<{
+    run: NodeFsRootRun;
+    root: string;
+    grants: ShellProjectionGrants;
+    quotaBytes: number;
+    journalDirectory: string;
+  }>,
 ): Promise<ShellProjectionOwner> => {
   if (!Number.isSafeInteger(options.quotaBytes) || options.quotaBytes < 0) {
     throw new TypeError('The shell projection quota must be a nonnegative safe integer.');
   }
+  /* One normalization for the whole mount: a grant root nobody can place throws here, before a single request is
+   * served, rather than being narrowed silently at the first name that touches it. */
+  const grants = shellProjectionGrantSet(options.grants);
+  const access = (path: string): ReturnType<typeof shellProjectionAccess> => shellProjectionAccess(grants, path);
   const generations = new Map<bigint, Generation>([
     [
       1n,
@@ -205,9 +225,9 @@ export const openShellProjectionOwner = async (
       generations.delete(inode);
     }
   };
-  const visible = (path: string): boolean => classify(path).agentAccess !== 'hidden';
+  const visible = (path: string): boolean => access(path) !== 'denied';
   const mode = (generation: Generation): number => {
-    const writable = generation.path === undefined || classify(generation.path).agentAccess === 'read-write';
+    const writable = generation.path === undefined || access(generation.path) === 'read-write';
     if (generation.directory) {
       return writable || generation.path === '' ? 0o4_0700 : 0o4_0500;
     }
@@ -307,7 +327,7 @@ export const openShellProjectionOwner = async (
       const outcome = await publishShellProjectionFile(
         scope,
         { path, baseline: generation.baseline, projected },
-        { maximumBytes: options.quotaBytes, signal: scope.signal },
+        { grants, maximumBytes: options.quotaBytes, signal: scope.signal },
       );
       if (outcome.status === 'refused') {
         return outcome.reason === 'protected-path' ? errno.access : errno.nospace;
@@ -398,7 +418,11 @@ export const openShellProjectionOwner = async (
         return { error: errno.exist };
       }
       if (directory) {
-        const outcome = await publishShellProjectionEntry(scope, { kind: 'mkdir', path }, { signal: scope.signal });
+        const outcome = await publishShellProjectionEntry(
+          scope,
+          { kind: 'mkdir', path },
+          { grants, signal: scope.signal },
+        );
         if (outcome.status === 'refused') {
           return { error: errno.access };
         }
@@ -413,7 +437,7 @@ export const openShellProjectionOwner = async (
       const outcome = await publishShellProjectionFile(
         scope,
         { path, baseline: null, projected: empty() },
-        { maximumBytes: options.quotaBytes, signal: scope.signal },
+        { grants, maximumBytes: options.quotaBytes, signal: scope.signal },
       );
       if (outcome.status === 'refused') {
         return { error: outcome.reason === 'protected-path' ? errno.access : errno.nospace };
@@ -436,7 +460,11 @@ export const openShellProjectionOwner = async (
         return { error: errno.noent };
       }
       if (generation.directory) {
-        const outcome = await publishShellProjectionEntry(scope, { kind: 'rmdir', path }, { signal: scope.signal });
+        const outcome = await publishShellProjectionEntry(
+          scope,
+          { kind: 'rmdir', path },
+          { grants, signal: scope.signal },
+        );
         if (outcome.status === 'refused') {
           return { error: errno.access };
         }
@@ -483,7 +511,7 @@ export const openShellProjectionOwner = async (
           ],
           descendants: below.map(([, item]) => item.path!.slice(from.length + 1)),
         },
-        { signal: scope.signal },
+        { grants, signal: scope.signal },
       );
       if (outcome.status === 'refused') {
         return { error: errno.access };

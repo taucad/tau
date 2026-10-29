@@ -9,6 +9,7 @@ import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend'
 import { NodeFsAuthorityHost, serveNodeFsProvider } from '@taucad/filesystem/backend/node';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { openShellProjectionOwner } from '#shell/shell-projection-owner.js';
+import type { ShellProjectionGrants } from '#shell/shell-projection.js';
 import type {
   ShellProjectionConflict,
   ShellProjectionOwner,
@@ -22,6 +23,9 @@ import type {
  * loaded by file URL because it is internal to its package.
  */
 const enabled = process.env['TAU_SHELL_PROJECTION_CONFORMANCE'] === '1';
+
+/** Every case below but the grant-composition ones is about convergence, so the launch holds its whole checkout. */
+const wholeCheckout = { writable: [''], readOnly: [], denied: [], masked: [] } as const;
 const nativeRoot = new URL('../../../core/native-process/', import.meta.url);
 const binary = fileURLToPath(new URL('dist/native/linux-x64/shell-projection.node', nativeRoot));
 
@@ -150,7 +154,13 @@ const mountOwner = async (quotaBytes: number) => {
   });
   const channel = new NodeFsChannel(port1);
   const editor = new NodeFsProviderClient(channel, root);
-  const owner = await openShellProjectionOwner({ run: server.run, root, quotaBytes, journalDirectory });
+  const owner = await openShellProjectionOwner({
+    run: server.run,
+    root,
+    grants: wholeCheckout,
+    quotaBytes,
+    journalDirectory,
+  });
   const transport = (await import(new URL('src/shell/shell-projection-native.ts', nativeRoot).href)) as Transport;
   const mount = transport.openShellProjectionMount({ binary, mountpoint, handle: owner.handle });
   const { ask, child } = shell(mountpoint);
@@ -175,6 +185,7 @@ const withAuthorityOwner = async (
     journalDirectory: string;
   }) => Promise<void>,
   seed?: (root: string) => Promise<void>,
+  grants?: ShellProjectionGrants,
 ): Promise<void> => {
   const sandbox = await realpath(await mkdtemp(join(tmpdir(), 'tau-owner-authority-')));
   const root = join(sandbox, 'project');
@@ -192,7 +203,13 @@ const withAuthorityOwner = async (
   });
   const channel = new NodeFsChannel(port1);
   try {
-    const owner = await openShellProjectionOwner({ run: server.run, root, quotaBytes: 1024 * 1024, journalDirectory });
+    const owner = await openShellProjectionOwner({
+      run: server.run,
+      root,
+      grants: grants ?? wholeCheckout,
+      quotaBytes: 1024 * 1024,
+      journalDirectory,
+    });
     await operation({ owner, editor: new NodeFsProviderClient(channel, root), root, journalDirectory });
   } finally {
     channel.close();
@@ -347,6 +364,106 @@ describe('projection owner through the real authority without FUSE', () => {
         authority: 'bytes',
       });
     });
+  });
+});
+
+describe('projection owner under its launch grant set', () => {
+  it('should hide a name the grant set denies even where the registry leaves it read-write', async () => {
+    await withAuthorityOwner(
+      async ({ owner }) => {
+        // The registry leaves both read-write; only the launch's grant set tells them apart (D8).
+        expect(await owner.handle(ownerRequest({ operation: 'lookup', inode: 1n, name: 'secrets' }))).toEqual({
+          error: 2,
+        });
+        expect(await owner.handle(ownerRequest({ operation: 'lookup', inode: 1n, name: 'notes.md' }))).toMatchObject({
+          entry: { mode: 0o10_0600 },
+        });
+        const listing = await owner.handle(ownerRequest({ operation: 'readdir', inode: 1n }));
+        expect(listing.entries?.map((row) => row.name).toSorted()).toEqual(['docs', 'notes.md']);
+      },
+      async (root) => {
+        await mkdir(join(root, 'secrets'));
+        await writeFile(join(root, 'secrets', 'key.txt'), 'secret');
+      },
+      { writable: [''], readOnly: [], denied: ['secrets'], masked: [] },
+    );
+  });
+
+  it('should report a read-only grant root as read-only and refuse the shell write that follows', async () => {
+    await withAuthorityOwner(
+      async ({ owner, root }) => {
+        const found = await owner.handle(ownerRequest({ operation: 'lookup', inode: 1n, name: 'docs' }));
+        expect(found.entry?.mode).toBe(0o4_0500);
+        const file = await owner.handle(
+          ownerRequest({ operation: 'lookup', inode: found.entry!.inode, name: 'notes.md' }),
+        );
+        expect(file.entry?.mode).toBe(0o10_0400);
+        const written = await owner.handle(
+          ownerRequest({
+            operation: 'write',
+            inode: file.entry!.inode,
+            length: 4,
+            data: new TextEncoder().encode('leak'),
+          }),
+        );
+        // EACCES, with the inode's cached pages dropped, and the authority's bytes untouched.
+        expect(written).toEqual({ error: 13, invalidate: [file.entry!.inode] });
+        expect(await readFile(join(root, 'docs', 'notes.md'), 'utf8')).toBe('v1');
+      },
+      async (root) => {
+        await writeFile(join(root, 'docs', 'notes.md'), 'v1');
+      },
+      { writable: [''], readOnly: ['docs'], denied: [], masked: [] },
+    );
+  });
+
+  it('should refuse the shell creating a name below a masked container the grant set did not grant back', async () => {
+    await withAuthorityOwner(
+      async ({ owner, root }) => {
+        const container = await owner.handle(ownerRequest({ operation: 'lookup', inode: 1n, name: '.tau' }));
+        // The container is reachable so the grants inside it are, and is never writable.
+        expect(container.entry?.mode).toBe(0o4_0500);
+        const parameters = await owner.handle(
+          ownerRequest({ operation: 'lookup', inode: container.entry!.inode, name: 'parameters' }),
+        );
+        expect(parameters.entry?.mode).toBe(0o4_0700);
+        // C13: the granted child inside the masked container still accepts the shell's creation.
+        expect(
+          await owner.handle(ownerRequest({ operation: 'create', inode: parameters.entry!.inode, name: 'part.json' })),
+        ).toMatchObject({ entry: { mode: 0o10_0600 } });
+        // NESTED-CANARY: the denied child inside the same granted root is absent, and stays unwritable.
+        expect(
+          await owner.handle(ownerRequest({ operation: 'lookup', inode: parameters.entry!.inode, name: 'private' })),
+        ).toEqual({ error: 2 });
+        expect(
+          await owner.handle(ownerRequest({ operation: 'create', inode: container.entry!.inode, name: 'cache' })),
+        ).toEqual({ error: 13, invalidate: undefined });
+        expect(await readdir(join(root, '.tau', 'parameters'))).toContain('private');
+        expect(await readdir(join(root, '.tau'))).not.toContain('cache');
+        expect(await readFile(join(root, '.tau', 'parameters', 'private', 'canary'), 'utf8')).toBe('secret');
+      },
+      async (root) => {
+        await mkdir(join(root, '.tau', 'parameters', 'private'), { recursive: true });
+        await writeFile(join(root, '.tau', 'parameters', 'private', 'canary'), 'secret');
+      },
+      {
+        writable: ['', '.tau/parameters'],
+        readOnly: [],
+        denied: ['.tau/parameters/private'],
+        masked: ['.tau'],
+      },
+    );
+  });
+
+  it('should refuse to open at all on a grant root that is not a canonical root-relative path', async () => {
+    await expect(
+      withAuthorityOwner(async () => expect.unreachable('the owner must not open'), undefined, {
+        writable: ['/etc'],
+        readOnly: [],
+        denied: [],
+        masked: [],
+      }),
+    ).rejects.toThrow();
   });
 });
 

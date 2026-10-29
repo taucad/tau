@@ -16,8 +16,24 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { NodeFsAuthorityHost, serveNodeFsProvider } from '@taucad/filesystem/backend/node';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
-import { publishShellProjectionEntry, publishShellProjectionFile } from '#shell/shell-projection.js';
-import type { ShellProjectionEntryChange, ShellProjectionFile } from '#shell/shell-projection.js';
+import {
+  publishShellProjectionEntry,
+  publishShellProjectionFile,
+  shellProjectionAccess,
+  shellProjectionGrantSet,
+} from '#shell/shell-projection.js';
+import type {
+  ShellProjectionEntryChange,
+  ShellProjectionFile,
+  ShellProjectionGrants,
+} from '#shell/shell-projection.js';
+
+/**
+ * The grant set of a launch that was granted its whole checkout and nothing else: the registry alone then decides,
+ * which is what every publication case below that is not about grants expects.
+ */
+const wholeCheckout: ShellProjectionGrants = { writable: [''], readOnly: [], denied: [], masked: [] };
+const granted = (grants: ShellProjectionGrants = wholeCheckout) => shellProjectionGrantSet(grants);
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -53,18 +69,21 @@ const connect = () => {
   });
   const publish = async (
     observation: ShellProjectionFile,
-    options: Readonly<{ maximumBytes?: number; signal?: AbortSignal }> = {},
+    options: Readonly<{ maximumBytes?: number; signal?: AbortSignal; grants?: ShellProjectionGrants }> = {},
   ) => {
     const signal = options.signal ?? new AbortController().signal;
     return server.run({ root, signal }, async (scope) =>
       publishShellProjectionFile(scope, observation, {
+        grants: granted(options.grants),
         maximumBytes: options.maximumBytes ?? 1024,
         signal: AbortSignal.any([signal, scope.signal]),
       }),
     );
   };
-  const publishEntry = async (change: ShellProjectionEntryChange) =>
-    server.run({ root }, async (scope) => publishShellProjectionEntry(scope, change, { signal: scope.signal }));
+  const publishEntry = async (change: ShellProjectionEntryChange, grants?: ShellProjectionGrants) =>
+    server.run({ root }, async (scope) =>
+      publishShellProjectionEntry(scope, change, { grants: granted(grants), signal: scope.signal }),
+    );
   return { editor, publish, publishEntry, root, server };
 };
 
@@ -353,7 +372,7 @@ describe('shell projection outbound publication', () => {
         },
       };
       const refusals = [
-        await publishShellProjectionEntry(recorded, change, { signal: scope.signal }),
+        await publishShellProjectionEntry(recorded, change, { grants: granted(), signal: scope.signal }),
         // A moved descendant that folds onto a reserved row refuses the whole move before any rename is attempted.
         await publishShellProjectionEntry(
           recorded,
@@ -364,7 +383,7 @@ describe('shell projection outbound publication', () => {
             descendants: ['chats'],
             preconditions: [{ path: '.TAU.', expected: null }],
           },
-          { signal: scope.signal },
+          { grants: granted(), signal: scope.signal },
         ),
       ];
       return refusals;
@@ -385,10 +404,14 @@ describe('shell projection outbound publication', () => {
     const { server, root } = connect();
     await server.run({ root }, async (scope) => {
       await expect(
-        publishShellProjectionEntry(scope, { kind: 'mkdir', path: '' }, { signal: scope.signal }),
+        publishShellProjectionEntry(scope, { kind: 'mkdir', path: '' }, { grants: granted(), signal: scope.signal }),
       ).rejects.toThrow(TypeError);
       await expect(
-        publishShellProjectionEntry(scope, { kind: 'mkdir', path: 'x' }, { signal: AbortSignal.abort() }),
+        publishShellProjectionEntry(
+          scope,
+          { kind: 'mkdir', path: 'x' },
+          { grants: granted(), signal: AbortSignal.abort() },
+        ),
       ).rejects.toThrow();
     });
   });
@@ -420,7 +443,7 @@ describe('shell projection outbound publication', () => {
       const publication = publishShellProjectionFile(
         scope,
         { path: 'part.ts', baseline: null, projected },
-        { maximumBytes: 1024, signal: scope.signal },
+        { grants: granted(), maximumBytes: 1024, signal: scope.signal },
       );
       projected.fill(0);
       return publication;
@@ -448,6 +471,243 @@ describe('shell projection outbound publication', () => {
     await expect(publish({ path: 'part.ts', baseline: null, projected: 'edit' })).rejects.toMatchObject({
       code: 'AUTHORITY_HOST_INACTIVE',
     });
+  });
+});
+
+describe('shell projection grant composition', () => {
+  /* The shape a launch over an admitted checkout actually has (D8): the checkout writable, its reserved container
+   * masked, the authored children inside it granted back one by one, and its control state denied. Bound over a
+   * checkout by the registry alone, the projection widened all of this. */
+  const launch: ShellProjectionGrants = {
+    writable: ['', '.tau/parameters', '.tau/AGENTS.md'],
+    readOnly: ['.tau/chats'],
+    denied: ['.tau/parameters/private', 'vendor/.git'],
+    masked: ['.tau'],
+  };
+
+  it('should refuse every path when the launch grant set is unknown', () => {
+    for (const path of ['part.ts', '.tau/parameters/part.json', '']) {
+      expect(shellProjectionAccess(undefined, path)).toBe('denied');
+    }
+  });
+
+  it('should deny a path that no grant root covers rather than fall back to the registry', () => {
+    const narrow = granted({ writable: ['src'], readOnly: [], denied: [], masked: [] });
+    // The registry leaves both read-write; only the grant set tells them apart.
+    expect(tauPathPolicy.classify('src/part.ts').agentAccess).toBe('read-write');
+    expect(tauPathPolicy.classify('docs/notes.md').agentAccess).toBe('read-write');
+    expect(shellProjectionAccess(narrow, 'src/part.ts')).toBe('read-write');
+    expect(shellProjectionAccess(narrow, 'docs/notes.md')).toBe('denied');
+    expect(shellProjectionAccess(narrow, 'src')).toBe('read-write');
+    expect(shellProjectionAccess(narrow, 'srcx/part.ts')).toBe('denied');
+  });
+
+  it('should keep the registry answer where the grant set is the broader of the two', () => {
+    const whole = granted();
+    // A grant of the whole checkout never reopens the registry's own records or hidden control state.
+    expect(shellProjectionAccess(whole, '.tau/chats/a.json')).toBe('read-only');
+    expect(shellProjectionAccess(whole, '.tau/project.json')).toBe('denied');
+    expect(shellProjectionAccess(whole, '.git/config')).toBe('denied');
+  });
+
+  it('should keep the grant answer where the grant set is the narrower of the two', () => {
+    const narrowed = granted({ writable: [''], readOnly: ['docs'], denied: ['secrets'], masked: [] });
+    expect(tauPathPolicy.classify('docs/notes.md').agentAccess).toBe('read-write');
+    expect(tauPathPolicy.classify('secrets/key.txt').agentAccess).toBe('read-write');
+    expect(shellProjectionAccess(narrowed, 'docs/notes.md')).toBe('read-only');
+    expect(shellProjectionAccess(narrowed, 'secrets/key.txt')).toBe('denied');
+  });
+
+  it('should never let a grant root widen a path the registry protects', () => {
+    // The grant set names the records and the control plane writable; the registry still wins.
+    const overreaching = granted({
+      writable: ['', '.tau/chats', '.tau/project.json', '.git'],
+      readOnly: [],
+      denied: [],
+      masked: [],
+    });
+    expect(shellProjectionAccess(overreaching, '.tau/chats/a.json')).toBe('read-only');
+    expect(shellProjectionAccess(overreaching, '.tau/project.json')).toBe('denied');
+    expect(shellProjectionAccess(overreaching, '.git/config')).toBe('denied');
+  });
+
+  it('should let a masked container deny what is below it while the grants inside it stay reachable', () => {
+    const set = granted(launch);
+    // C13: the authored children the launch was granted inside the masked container.
+    expect(shellProjectionAccess(set, '.tau/parameters/part.json')).toBe('read-write');
+    expect(shellProjectionAccess(set, '.tau/AGENTS.md')).toBe('read-write');
+    // The container itself stays readable so those children are reachable, and is never writable.
+    expect(shellProjectionAccess(set, '.tau')).toBe('read-only');
+    // NESTED-CANARY: the mask denies everything below it that no deeper grant root names, and a deny root inside
+    // a granted one wins however broad the grant above it is.
+    expect(tauPathPolicy.classify('.tau/parameters/private/canary').agentAccess).toBe('read-write');
+    expect(shellProjectionAccess(set, '.tau/parameters/private/canary')).toBe('denied');
+    expect(shellProjectionAccess(set, '.tau/hidden/canary')).toBe('denied');
+    expect(shellProjectionAccess(set, '.tau/cache/blob')).toBe('denied');
+    // A nested control directory the grant set denied, inside the writable checkout.
+    expect(shellProjectionAccess(set, 'vendor/.git/config')).toBe('denied');
+    // And the launch's own records grant stays read-only, not denied by the mask above it.
+    expect(shellProjectionAccess(set, '.tau/chats/a.json')).toBe('read-only');
+  });
+
+  it('should keep the most restrictive list when several name the same grant root', () => {
+    const both = granted({ writable: ['shared'], readOnly: ['shared'], denied: ['shared'], masked: [] });
+    expect(shellProjectionAccess(both, 'shared/a.ts')).toBe('denied');
+    const readable = granted({ writable: ['shared'], readOnly: ['shared'], denied: [], masked: [] });
+    expect(shellProjectionAccess(readable, 'shared/a.ts')).toBe('read-only');
+  });
+
+  it('should refuse a grant root that is not a canonical root-relative path', () => {
+    for (const root of ['/abs', 'a/../b', './a', 'a/', 'a//b']) {
+      expect(() => granted({ writable: [root], readOnly: [], denied: [], masked: [] })).toThrow();
+      expect(() => granted({ writable: [], readOnly: [], denied: [root], masked: [] })).toThrow();
+      expect(() => granted({ writable: [], readOnly: [], denied: [], masked: [root] })).toThrow();
+    }
+  });
+});
+
+describe('shell projection publication under a launch grant set', () => {
+  it('should refuse a file publication the grant set did not make writable and leave the bytes alone', async () => {
+    const { publish, root } = connect();
+    mkdirSync(join(root, 'docs'));
+    writeFileSync(join(root, 'docs', 'notes.md'), 'baseline');
+    const grants: ShellProjectionGrants = { writable: ['src'], readOnly: ['docs'], denied: [], masked: [] };
+    expect(await publish({ path: 'docs/notes.md', baseline: 'baseline', projected: 'edit' }, { grants })).toEqual({
+      status: 'refused',
+      reason: 'protected-path',
+    });
+    expect(readFileSync(join(root, 'docs', 'notes.md'), 'utf8')).toBe('baseline');
+  });
+
+  it('should refuse a file publication below a masked container the grant set did not grant back', async () => {
+    const { publish, root } = connect();
+    mkdirSync(join(root, '.tau', 'parameters', 'private'), { recursive: true });
+    writeFileSync(join(root, '.tau', 'parameters', 'private', 'canary'), 'secret');
+    const grants: ShellProjectionGrants = {
+      writable: ['', '.tau/parameters'],
+      readOnly: [],
+      denied: ['.tau/parameters/private'],
+      masked: ['.tau'],
+    };
+    expect(
+      await publish({ path: '.tau/parameters/private/canary', baseline: 'secret', projected: 'leak' }, { grants }),
+    ).toEqual({ status: 'refused', reason: 'protected-path' });
+    expect(readFileSync(join(root, '.tau', 'parameters', 'private', 'canary'), 'utf8')).toBe('secret');
+    // The grant the launch does hold inside the same masked container still publishes.
+    expect(
+      await publish({ path: '.tau/parameters/part.json', baseline: null, projected: '{}' }, { grants }),
+    ).toMatchObject({ status: 'settled', result: { status: 'applied' } });
+  });
+
+  it('should refuse every file publication when the grant set is unknown', async () => {
+    const { root, server } = connect();
+    writeFileSync(join(root, 'part.ts'), 'baseline');
+    const outcome = await server.run({ root }, async (scope) =>
+      publishShellProjectionFile(
+        scope,
+        { path: 'part.ts', baseline: 'baseline', projected: 'edit' },
+        { grants: undefined, maximumBytes: 1024, signal: scope.signal },
+      ),
+    );
+    expect(outcome).toEqual({ status: 'refused', reason: 'protected-path' });
+    expect(readFileSync(join(root, 'part.ts'), 'utf8')).toBe('baseline');
+  });
+
+  it('should refuse directory creation and removal outside the grant set', async () => {
+    const { publishEntry, root } = connect();
+    mkdirSync(join(root, 'docs'));
+    const grants: ShellProjectionGrants = { writable: ['src'], readOnly: [], denied: [], masked: [] };
+    expect(await publishEntry({ kind: 'mkdir', path: 'docs/drafts' }, grants)).toEqual({
+      status: 'refused',
+      reason: 'protected-path',
+    });
+    expect(await publishEntry({ kind: 'rmdir', path: 'docs' }, grants)).toEqual({
+      status: 'refused',
+      reason: 'protected-path',
+    });
+    expect(existsSync(join(root, 'docs'))).toBe(true);
+    expect(existsSync(join(root, 'docs', 'drafts'))).toBe(false);
+  });
+
+  it('should refuse the canonical container when the grant set masks it', async () => {
+    const { publishEntry, root } = connect();
+    const grants: ShellProjectionGrants = { writable: [''], readOnly: [], denied: [], masked: ['.tau'] };
+    expect(await publishEntry({ kind: 'mkdir', path: '.tau' }, grants)).toEqual({
+      status: 'refused',
+      reason: 'protected-path',
+    });
+    expect(existsSync(join(root, '.tau'))).toBe(false);
+    // Without the mask the registry's own canonical-container rule still admits it, unchanged.
+    expect(await publishEntry({ kind: 'mkdir', path: '.tau' })).toMatchObject({ status: 'settled' });
+  });
+
+  it('should refuse a rename whose destination leaves the grant set', async () => {
+    const { publishEntry, root } = connect();
+    mkdirSync(join(root, 'src'));
+    mkdirSync(join(root, 'src', 'models'));
+    const grants: ShellProjectionGrants = { writable: ['src'], readOnly: [], denied: [], masked: [] };
+    expect(
+      await publishEntry(
+        { kind: 'rename', from: 'src/models', to: 'models', descendants: [], preconditions: [] },
+        grants,
+      ),
+    ).toEqual({ status: 'refused', reason: 'protected-path' });
+    expect(existsSync(join(root, 'src', 'models'))).toBe(true);
+    expect(existsSync(join(root, 'models'))).toBe(false);
+  });
+
+  it('should refuse a rename whose moved descendant leaves the grant set', async () => {
+    const { publishEntry, root } = connect();
+    mkdirSync(join(root, 'src', 'models', 'private'), { recursive: true });
+    writeFileSync(join(root, 'src', 'models', 'private', 'canary'), 'secret');
+    /* The ends are both granted; only the walk under the held claim sees that one moved descendant is denied, so
+     * the move cannot carry it to a name the launch may read. */
+    const grants: ShellProjectionGrants = {
+      writable: ['src'],
+      readOnly: [],
+      denied: ['src/models/private'],
+      masked: [],
+    };
+    expect(
+      await publishEntry(
+        {
+          kind: 'rename',
+          from: 'src/models',
+          to: 'src/moved',
+          descendants: ['private', 'private/canary'],
+          preconditions: [
+            { path: 'src/models/private/canary', expected: 'secret' },
+            { path: 'src/moved', expected: null },
+          ],
+        },
+        grants,
+      ),
+    ).toEqual({ status: 'refused', reason: 'protected-path' });
+    expect(readFileSync(join(root, 'src', 'models', 'private', 'canary'), 'utf8')).toBe('secret');
+    expect(existsSync(join(root, 'src', 'moved'))).toBe(false);
+  });
+
+  it('should refuse every entry publication when the grant set is unknown', async () => {
+    const { root, server } = connect();
+    mkdirSync(join(root, 'docs'));
+    const outcomes = await server.run({ root }, async (scope) => [
+      await publishShellProjectionEntry(
+        scope,
+        { kind: 'mkdir', path: 'src' },
+        { grants: undefined, signal: scope.signal },
+      ),
+      await publishShellProjectionEntry(
+        scope,
+        { kind: 'rmdir', path: 'docs' },
+        { grants: undefined, signal: scope.signal },
+      ),
+    ]);
+    expect(outcomes).toEqual([
+      { status: 'refused', reason: 'protected-path' },
+      { status: 'refused', reason: 'protected-path' },
+    ]);
+    expect(existsSync(join(root, 'docs'))).toBe(true);
+    expect(existsSync(join(root, 'src'))).toBe(false);
   });
 });
 

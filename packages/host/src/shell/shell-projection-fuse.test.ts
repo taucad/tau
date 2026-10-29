@@ -9,8 +9,15 @@ import type { CheckedEntryResult, NodeFsRootScope } from '@taucad/filesystem/bac
 import { NodeFsAuthorityHost, serveNodeFsProvider } from '@taucad/filesystem/backend/node';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { CheckedFileWriteResult } from '@taucad/types';
-import { publishShellProjectionEntry, publishShellProjectionFile } from '#shell/shell-projection.js';
+import {
+  publishShellProjectionEntry,
+  publishShellProjectionFile,
+  shellProjectionGrantSet,
+} from '#shell/shell-projection.js';
 import type { ShellProjectionEntryChange, ShellProjectionFile } from '#shell/shell-projection.js';
+
+/** These families are about PP3 spellings, so the launch is granted its whole checkout and the registry decides. */
+const wholeCheckout = shellProjectionGrantSet({ writable: [''], readOnly: [], denied: [], masked: [] });
 
 /*
  * G5: the PP3 spelling families reach the rooted authority through a real FUSE mount. The owner below is a
@@ -63,13 +70,17 @@ type Publisher = Readonly<{
 const classified = (scope: NodeFsRootScope): Publisher => ({
   file: async (observation) => {
     const outcome = await publishShellProjectionFile(scope, observation, {
+      grants: wholeCheckout,
       maximumBytes: 1024 * 1024,
       signal: scope.signal,
     });
     return outcome.status === 'refused' ? 'refused' : outcome.result.status;
   },
   entry: async (change) => {
-    const outcome = await publishShellProjectionEntry(scope, change, { signal: scope.signal });
+    const outcome = await publishShellProjectionEntry(scope, change, {
+      grants: wholeCheckout,
+      signal: scope.signal,
+    });
     return outcome.status === 'refused' ? 'refused' : outcome.result.status;
   },
 });

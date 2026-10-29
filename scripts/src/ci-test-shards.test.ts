@@ -94,6 +94,12 @@ describe('CI test shard assignment', () => {
       'file-count',
     );
   });
+  it.each(['constructor', 'toString'])('should not mistake an inherited object member for a timing: %s', (name) => {
+    const result = planTestShards({ projects: [{ name, fileWeight: 3 }], history, environment, now });
+    expect(result.strategy).toBe('file-count');
+    expect(result.weights).toEqual({ [name]: 3 });
+    expect(result.shards).toEqual([[name], [], []]);
+  });
   it('should reject invalid or duplicate selected targets rather than silently losing coverage', () => {
     expect(() => planTestShards({ projects: [...projects, projects[0]!], history, environment, now })).toThrow(
       'duplicate',

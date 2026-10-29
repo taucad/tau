@@ -102,7 +102,7 @@ export const planTestShards = (options: {
       durations[project] = (values[Math.floor((values.length - 1) / 2)]! + values[Math.floor(values.length / 2)]!) / 2;
     }
   }
-  const missing = selected.filter((project) => durations[project] === undefined);
+  const missing = selected.filter((project) => !Object.hasOwn(durations, project));
   const strategy = compatible && missing.length === 0 ? 'duration' : 'file-count';
   const reason =
     strategy === 'duration'

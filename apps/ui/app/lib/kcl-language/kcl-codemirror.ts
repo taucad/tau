@@ -5,8 +5,17 @@ import { StateEffect, StateField } from '@codemirror/state';
 import type { Extension, StateEffectType } from '@codemirror/state';
 import { autocompletion, snippet } from '@codemirror/autocomplete';
 import type { Completion } from '@codemirror/autocomplete';
-import { Decoration, EditorView, hoverTooltip, keymap, showDialog, showTooltip, ViewPlugin } from '@codemirror/view';
-import type { Tooltip } from '@codemirror/view';
+import {
+  Decoration,
+  EditorView,
+  hoverTooltip,
+  keymap,
+  showDialog,
+  showTooltip,
+  ViewPlugin,
+  WidgetType,
+} from '@codemirror/view';
+import type { DecorationSet, Tooltip, ViewUpdate } from '@codemirror/view';
 import { setDiagnostics } from '@codemirror/lint';
 import { foldService } from '@codemirror/language';
 import type * as LSP from 'vscode-languageserver-protocol';
@@ -27,6 +36,17 @@ import { KclSymbolService, formatModuleHover, formatSymbolHover } from '#lib/kcl
 import type { KclSymbol } from '#lib/kcl-language/lsp/kcl-symbol-service.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
 import { applyLspCompletion } from '#lib/lsp-completion-apply.js';
+import {
+  kclDefinition,
+  kclDocumentationMarkdown,
+  kclParameterHints,
+  kclWorkspaceFileLimit,
+  kclWorkspaceSources,
+  openKclTarget,
+} from '#lib/kcl-language/kcl-navigation.js';
+import type { KclNavigationContext } from '#lib/kcl-language/kcl-navigation.js';
+import { loadKclStdlib } from '#lib/kcl-language/kcl-stdlib.js';
+import type { KclStdlib } from '#lib/kcl-language/kcl-stdlib.js';
 
 type OpenDocument = { count: number; text: string; unsubscribe: () => void };
 type EditBasis = ReadonlyMap<string, Readonly<{ version: number; text: string }>>;
@@ -37,26 +57,12 @@ async function captureKclBasis(document: EditorDocument, environment: EditorLang
   const basis = new Map<string, { version: number; text: string }>([
     [document.uri, { version: document.version, text: document.text }],
   ]);
-  const paths = new WorkspacePathResolver(environment.fileManagerRef.getSnapshot().context.rootDirectory);
-  const files = await environment.treeService.searchFiles('.kcl', { maxResults: 513 });
-  if (files.length > 512) {
+  const { sources, truncated } = await kclWorkspaceSources(environment, kclWorkspaceFileLimit);
+  if (truncated) {
     throw new Error('KCL workspace edit exceeds the bounded source snapshot');
   }
-  for (const file of files) {
-    const path = file.path.startsWith('/') ? paths.toRelativePath(file.path) : file.path;
-    if (!path?.endsWith('.kcl') || file.type !== 'file' || (file.provenance && file.provenance.source !== 'project')) {
-      continue;
-    }
-    const loaded = environment.session.get(path);
-    if (loaded) {
-      basis.set(loaded.uri, { version: loaded.version, text: loaded.text });
-      continue;
-    }
-    // oxlint-disable-next-line eslint/no-await-in-loop -- bounded snapshot is ordered before the server request.
-    const result = await environment.contentService.resolve(path);
-    if (result.kind === 'text') {
-      basis.set(URI.file(`/${path}`).toString(), { version: 1, text: decodeTextFile(result.content) });
-    }
+  for (const source of sources) {
+    basis.set(source.uri, { version: source.version, text: source.text });
   }
   if (document.version !== basis.get(document.uri)?.version) {
     throw new Error('KCL source changed during snapshot');
@@ -110,9 +116,12 @@ export function kclHoverFallback({
   offset,
   uri,
   symbols,
-}: Readonly<{ text: string; offset: number; uri: string; symbols: Pick<KclSymbolService, 'getDefinitionForUsage'> }>):
-  | string
-  | undefined {
+}: Readonly<{
+  text: string;
+  offset: number;
+  uri: string;
+  symbols: Pick<KclSymbolService, 'getDefinitionForUsage'>;
+}>): string | undefined {
   const importPath = kclImportAt(text, offset);
   if (importPath) {
     return formatModuleHover(importPath).join('\n');
@@ -122,14 +131,24 @@ export function kclHoverFallback({
     return undefined;
   }
   const position = positionAt(text, offset);
-  const symbol = symbols.getDefinitionForUsage({ uri, line: position.line + 1, column: position.character + 1, word });
+  const symbol = symbols.getDefinitionForUsage({
+    uri,
+    line: position.line + 1,
+    column: position.character + 1,
+    word,
+  });
   return symbol ? formatSymbolHover(symbol).join('\n') : undefined;
 }
 
 function mappedDiagnostics(
   document: EditorDocument,
   environment: EditorLanguageEnvironment,
-): Array<{ from: number; to: number; message: string; severity: 'error' | 'warning' | 'info' | 'hint' }> {
+): Array<{
+  from: number;
+  to: number;
+  message: string;
+  severity: 'error' | 'warning' | 'info' | 'hint';
+}> {
   return (environment.diagnostics.get(document.uri).get('kcl-lsp') ?? []).map((diagnostic) => ({
     from: diagnostic.from,
     to: diagnostic.to,
@@ -209,7 +228,10 @@ export class KclBackend {
         errors: unknown[];
         sourceFiles?: Record<
           string,
-          { path: { type: 'Main' } | { type: 'Local'; value: string } | { type: 'Std'; value: string }; source: string }
+          {
+            path: { type: 'Main' } | { type: 'Local'; value: string } | { type: 'Std'; value: string };
+            source: string;
+          }
         >;
       };
       if (result.sourceFiles) {
@@ -241,11 +263,20 @@ export class KclBackend {
       existing.count += 1;
       return;
     }
-    const entry: OpenDocument = { count: 1, text: document.text, unsubscribe: () => undefined };
+    const entry: OpenDocument = {
+      count: 1,
+      text: document.text,
+      unsubscribe: () => undefined,
+    };
     this.#documents.set(document, entry);
     this.#client.setCurrentDocumentUri(document.uri);
     this.#client.textDocumentDidOpen({
-      textDocument: { uri: document.uri, languageId: 'kcl', version: document.version, text: document.text },
+      textDocument: {
+        uri: document.uri,
+        languageId: 'kcl',
+        version: document.version,
+        text: document.text,
+      },
     });
     this.#refreshSymbols(document);
     entry.unsubscribe = document.subscribe((event) => {
@@ -259,7 +290,9 @@ export class KclBackend {
       entry.count -= 1;
       if (entry.count === 0) {
         entry.unsubscribe();
-        this.#client.textDocumentDidClose({ textDocument: { uri: document.uri } });
+        this.#client.textDocumentDidClose({
+          textDocument: { uri: document.uri },
+        });
         this.#symbols.removeDocument(document.uri);
         this.#symbolUpdates.delete(document);
         this.#documents.delete(document);
@@ -288,7 +321,9 @@ export class KclBackend {
     for (const [document, entry] of this.#documents) {
       entry.unsubscribe();
       if (notifyClose) {
-        this.#client.textDocumentDidClose({ textDocument: { uri: document.uri } });
+        this.#client.textDocumentDidClose({
+          textDocument: { uri: document.uri },
+        });
       }
     }
     this.#documents.clear();
@@ -316,7 +351,10 @@ export class KclBackend {
     const changes: LSP.TextDocumentContentChangeEvent[] =
       kind === 2
         ? [...event.changes].reverse().map((change) => ({
-            range: { start: positionAt(entry.text, change.from), end: positionAt(entry.text, change.to) },
+            range: {
+              start: positionAt(entry.text, change.from),
+              end: positionAt(entry.text, change.to),
+            },
             rangeLength: change.to - change.from,
             text: change.insert,
           }))
@@ -385,7 +423,12 @@ export class KclBackend {
   }
 }
 
-type SharedBackend = { backend: KclBackend; ready: Promise<KclBackend>; pending: number; active: number };
+type SharedBackend = {
+  backend: KclBackend;
+  ready: Promise<KclBackend>;
+  pending: number;
+  active: number;
+};
 const backends = new WeakMap<EditorLanguageEnvironment['session'], SharedBackend>();
 
 export async function acquireKclLanguage({
@@ -403,7 +446,12 @@ export async function acquireKclLanguage({
   let shared = backends.get(environment.session);
   if (!shared) {
     const backend = new KclBackend(environment);
-    shared = { backend, ready: initializeBackend(backend), pending: 0, active: 0 };
+    shared = {
+      backend,
+      ready: initializeBackend(backend),
+      pending: 0,
+      active: 0,
+    };
     backends.set(environment.session, shared);
     backend.onFailure(() => {
       if (backends.get(environment.session)?.backend === backend) {
@@ -468,7 +516,15 @@ export async function acquireKclLanguage({
     }
   };
   signal.addEventListener('abort', dispose, { once: true });
-  return { extensions: kclExtensions({ backend, document, environment, isDisposed: () => disposed }), dispose };
+  return {
+    extensions: kclExtensions({
+      backend,
+      document,
+      environment,
+      isDisposed: () => disposed,
+    }),
+    dispose,
+  };
 }
 
 async function initializeBackend(backend: KclBackend): Promise<KclBackend> {
@@ -476,8 +532,15 @@ async function initializeBackend(backend: KclBackend): Promise<KclBackend> {
   return backend;
 }
 
+/** Render completion documentation; KCL passes one whose docs links open definitions. */
+export type KclCompletionInfo = (markdown: string | undefined) => Completion['info'];
+
 /** Keep the prior symbol completion text, signature and snippet behavior. */
-export function symbolCompletion(symbol: KclSymbol, boost: number): Completion {
+export function symbolCompletion(
+  symbol: KclSymbol,
+  boost: number,
+  info: KclCompletionInfo = editorCompletionInfo,
+): Completion {
   if (symbol.kind === 'function') {
     const parameters = symbol.parameters ?? [];
     const signature = parameters
@@ -489,8 +552,11 @@ export function symbolCompletion(symbol: KclSymbol, boost: number): Completion {
       label: symbol.name,
       type: 'function',
       detail: `fn ${symbol.name}(${signature})${suffix}`,
-      info: editorCompletionInfo(
-        formatSymbolHover(symbol, { isAlias: Boolean(symbol.importPath), importPath: symbol.importPath }).join('\n'),
+      info: info(
+        formatSymbolHover(symbol, {
+          isAlias: Boolean(symbol.importPath),
+          importPath: symbol.importPath,
+        }).join('\n'),
       ),
       boost,
       apply: snippet(`${symbol.name}(${fields})`),
@@ -501,7 +567,7 @@ export function symbolCompletion(symbol: KclSymbol, boost: number): Completion {
       label: symbol.name,
       type: 'property',
       detail: `(param) ${symbol.name}: ${symbol.value ? 'value' : 'unknown'}`,
-      info: editorCompletionInfo(symbol.containingFunction ? `Parameter of ${symbol.containingFunction}` : undefined),
+      info: info(symbol.containingFunction ? `Parameter of ${symbol.containingFunction}` : undefined),
       boost,
       apply: `${symbol.name} = `,
     };
@@ -510,8 +576,11 @@ export function symbolCompletion(symbol: KclSymbol, boost: number): Completion {
     label: symbol.name,
     type: 'variable',
     detail: symbol.kind,
-    info: editorCompletionInfo(
-      formatSymbolHover(symbol, { isAlias: Boolean(symbol.importPath), importPath: symbol.importPath }).join('\n'),
+    info: info(
+      formatSymbolHover(symbol, {
+        isAlias: Boolean(symbol.importPath),
+        importPath: symbol.importPath,
+      }).join('\n'),
     ),
     boost,
   };
@@ -520,23 +589,65 @@ export function symbolCompletion(symbol: KclSymbol, boost: number): Completion {
 /** Map one KCL LSP completion to CodeMirror with its request-time version guard. */
 export function kclLspCompletion(
   item: LSP.CompletionItem,
-  { document, version, isDisposed }: Readonly<{ document: EditorDocument; version: number; isDisposed: () => boolean }>,
+  {
+    document,
+    version,
+    isDisposed,
+    info = editorCompletionInfo,
+  }: Readonly<{
+    document: EditorDocument;
+    version: number;
+    isDisposed: () => boolean;
+    info?: KclCompletionInfo;
+  }>,
 ): Completion {
   return {
     label: item.filterText ?? item.label,
     displayLabel: item.filterText && item.filterText !== item.label ? item.label : undefined,
     sortText: item.sortText,
     detail: item.detail,
-    info: editorCompletionInfo(typeof item.documentation === 'string' ? item.documentation : item.documentation?.value),
+    info: info(typeof item.documentation === 'string' ? item.documentation : item.documentation?.value),
     type: completionTypeFromLsp(item.kind),
     boost: item.preselect ? 99 : 4,
     // oxlint-disable-next-line max-params -- CodeMirror completion apply callback contract.
     apply(view, completion, from, to) {
       if (!isDisposed()) {
-        applyLspCompletion(view, completion, { item, from, to, current: document.version === version });
+        applyLspCompletion(view, completion, {
+          item,
+          from,
+          to,
+          current: document.version === version,
+        });
       }
     },
   };
+}
+
+class KclHintWidget extends WidgetType {
+  readonly #label: string;
+  public constructor(label: string) {
+    super();
+    this.#label = label;
+  }
+  public override eq(other: KclHintWidget): boolean {
+    return other.#label === this.#label;
+  }
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- CodeMirror WidgetType requires toDOM.
+  public toDOM(view: EditorView): HTMLElement {
+    const span = view.dom.ownerDocument.createElement('span');
+    span.className = 'cm-kcl-inlay-hint';
+    span.textContent = this.#label;
+    return span;
+  }
+}
+
+/** The standard library declarations, or none when their chunk cannot load; links then open externally. */
+async function optionalStdlib(): Promise<KclStdlib | undefined> {
+  try {
+    return await loadKclStdlib();
+  } catch {
+    return undefined;
+  }
 }
 
 export function kclExtensions({
@@ -552,6 +663,23 @@ export function kclExtensions({
 }>): Extension[] {
   const { client } = backend;
   const { symbols } = backend;
+  const navigation: KclNavigationContext = { document, environment, symbols };
+  /** KCL docs links to standard library pages open the declaration, like `{@link}` in TypeScript. */
+  const renderDocumentation = (
+    markdown: string,
+    stdlib: KclStdlib | undefined,
+    ownerDocument?: Document,
+  ): HTMLElement => {
+    const rewritten = kclDocumentationMarkdown(markdown, stdlib);
+    return renderEditorDocumentation(rewritten.markdown, ownerDocument, (index) => {
+      const target = rewritten.targets[index];
+      if (target && !isDisposed()) {
+        void observeKclOperation(openKclTarget(environment, target), document, isDisposed);
+      }
+    });
+  };
+  const completionInfo: KclCompletionInfo = (markdown) =>
+    markdown ? async () => renderDocumentation(markdown, await optionalStdlib()) : undefined;
   const tokenEffect = StateEffect.define<ReturnType<typeof Decoration.set>>();
   const tokenField = StateField.define<ReturnType<typeof Decoration.set>>({
     create: () => Decoration.none,
@@ -594,13 +722,20 @@ export function kclExtensions({
       '.cm-kcl-semantic-comment': { color: 'var(--syntax-comment, #7a7a7a)' },
       '.cm-kcl-semantic-variable': { color: 'var(--syntax-variable, #333)' },
       '.cm-kcl-semantic-operator': { color: 'var(--syntax-operator, #333)' },
-      '.cm-kcl-semantic-parameter': { color: 'var(--syntax-parameter, #92593a)' },
+      '.cm-kcl-semantic-parameter': {
+        color: 'var(--syntax-parameter, #92593a)',
+      },
       '.cm-kcl-semantic-property': { color: 'var(--syntax-property, #92593a)' },
     }),
     foldService.of((state, from) => {
       const line = state.doc.lineAt(from).number - 1;
       const range = folds.find((candidate) => candidate.startLine === line && candidate.endLine > line);
-      return range ? { from: state.doc.line(range.startLine + 1).to, to: state.doc.line(range.endLine + 1).to } : null;
+      return range
+        ? {
+            from: state.doc.line(range.startLine + 1).to,
+            to: state.doc.line(range.endLine + 1).to,
+          }
+        : null;
     }),
     ViewPlugin.fromClass(
       class {
@@ -631,15 +766,21 @@ export function kclExtensions({
         private async load(): Promise<void> {
           const { version, text } = document;
           const [tokens, ranges] = await Promise.all([
-            client.textDocumentSemanticTokensFull({ textDocument: { uri: document.uri } }),
-            client.textDocumentFoldingRange({ textDocument: { uri: document.uri } }),
+            client.textDocumentSemanticTokensFull({
+              textDocument: { uri: document.uri },
+            }),
+            client.textDocumentFoldingRange({
+              textDocument: { uri: document.uri },
+            }),
           ]);
           if (isDisposed() || document.version !== version) {
             return;
           }
           folds = ranges ?? [];
           if (tokens) {
-            this.#view.dispatch({ effects: tokenEffect.of(semanticDecorations(text, tokens.data)) });
+            this.#view.dispatch({
+              effects: tokenEffect.of(semanticDecorations(text, tokens.data)),
+            });
           }
         }
       },
@@ -654,7 +795,10 @@ export function kclExtensions({
           const position = positionAt(document.text, context.pos);
           let result: LSP.CompletionItem[] | LSP.CompletionList | undefined;
           try {
-            result = await client.textDocumentCompletion({ textDocument: { uri: document.uri }, position });
+            result = await client.textDocumentCompletion({
+              textDocument: { uri: document.uri },
+              position,
+            });
           } catch {
             /* Symbol fallback remains available. */
           }
@@ -662,13 +806,20 @@ export function kclExtensions({
             return null;
           }
           const items = result ? (Array.isArray(result) ? result : result.items) : [];
-          const options: Completion[] = items.map((item) => kclLspCompletion(item, { document, version, isDisposed }));
+          const options: Completion[] = items.map((item) =>
+            kclLspCompletion(item, {
+              document,
+              version,
+              isDisposed,
+              info: completionInfo,
+            }),
+          );
           const seen = new Set(items.map((item) => item.label));
           const addSymbols = (candidates: readonly KclSymbol[], boost: number): void => {
             for (const symbol of candidates) {
               if (!seen.has(symbol.name)) {
                 seen.add(symbol.name);
-                options.push(symbolCompletion(symbol, boost));
+                options.push(symbolCompletion(symbol, boost, completionInfo));
               }
             }
           };
@@ -681,11 +832,14 @@ export function kclExtensions({
             return null;
           }
           addSymbols(imported, 1);
-          return { from: context.matchBefore(/[\w$]*/)?.from ?? context.pos, options };
+          return {
+            from: context.matchBefore(/[\w$]*/)?.from ?? context.pos,
+            options,
+          };
         },
       ],
     }),
-    hoverTooltip(async (_view, pos) => {
+    hoverTooltip(async (view, pos) => {
       if (isDisposed()) {
         return null;
       }
@@ -705,7 +859,12 @@ export function kclExtensions({
       const contents = result?.contents;
       const text =
         contents === undefined
-          ? kclHoverFallback({ text: document.text, offset: pos, uri: document.uri, symbols })
+          ? kclHoverFallback({
+              text: document.text,
+              offset: pos,
+              uri: document.uri,
+              symbols,
+            })
           : typeof contents === 'string'
             ? contents
             : Array.isArray(contents)
@@ -714,11 +873,15 @@ export function kclExtensions({
       if (!text) {
         return null;
       }
+      const stdlib = await optionalStdlib();
+      if (isDisposed() || document.version !== version) {
+        return null;
+      }
       return {
         pos: result?.range ? offsetAt(document.text, result.range.start) : pos,
         end: result?.range ? offsetAt(document.text, result.range.end) : undefined,
         create() {
-          const dom = renderEditorDocumentation(text);
+          const dom = renderDocumentation(text, stdlib, view.dom.ownerDocument);
           return { dom };
         },
       };
@@ -747,6 +910,49 @@ export function kclExtensions({
     ),
     definitionProvider.of(async (view) =>
       observeKclOperation(jumpToDefinition(view, client, { document, environment, symbols }), document, isDisposed),
+    ),
+    ViewPlugin.fromClass(
+      class {
+        public decorations: DecorationSet = Decoration.none;
+        readonly #view: EditorView;
+        #generation = 0;
+        public constructor(view: EditorView) {
+          this.#view = view;
+          void this.refresh();
+        }
+        public update(update: ViewUpdate): void {
+          if (update.docChanged || update.viewportChanged) {
+            void this.refresh();
+          }
+        }
+        private async refresh(): Promise<void> {
+          const generation = ++this.#generation;
+          const { version } = document;
+          const ranges = this.#view.visibleRanges;
+          try {
+            const groups = await Promise.all(ranges.map(async (range) => kclParameterHints(navigation, range)));
+            if (generation !== this.#generation || isDisposed() || document.version !== version) {
+              return;
+            }
+            this.decorations = Decoration.set(
+              groups.flat().map((hint) =>
+                Decoration.widget({
+                  widget: new KclHintWidget(hint.label),
+                  side: -1,
+                }).range(hint.position),
+              ),
+              true,
+            );
+            this.#view.dispatch({});
+          } catch (error) {
+            if (!isDisposed() && document.version === version) {
+              // oxlint-disable-next-line no-console -- Hints are optional; editing continues without them.
+              console.warn('[kcl] inlay hints failed', error);
+            }
+          }
+        }
+      },
+      { decorations: (value) => value.decorations },
     ),
     keymap.of([
       {
@@ -786,7 +992,11 @@ export function kclExtensions({
 }
 
 function semanticDecorations(text: string, data: readonly number[]): ReturnType<typeof Decoration.set> {
-  const ranges: Array<{ from: number; to: number; value: ReturnType<typeof Decoration.mark> }> = [];
+  const ranges: Array<{
+    from: number;
+    to: number;
+    value: ReturnType<typeof Decoration.mark>;
+  }> = [];
   let line = 0;
   let character = 0;
   for (let index = 0; index + 4 < data.length; index += 5) {
@@ -796,7 +1006,11 @@ function semanticDecorations(text: string, data: readonly number[]): ReturnType<
     const to = Math.min(from + (data[index + 2] ?? 0), text.length);
     const kind = semanticTokenTypes[data[index + 3] ?? -1];
     if (kind && to > from) {
-      ranges.push({ from, to, value: Decoration.mark({ class: `cm-kcl-semantic-${kind}` }) });
+      ranges.push({
+        from,
+        to,
+        value: Decoration.mark({ class: `cm-kcl-semantic-${kind}` }),
+      });
     }
   }
   return Decoration.set(ranges, true);
@@ -804,7 +1018,7 @@ function semanticDecorations(text: string, data: readonly number[]): ReturnType<
 
 export async function jumpToDefinition(
   view: Pick<EditorView, 'state'>,
-  client: Pick<KclLspClient, 'textDocumentDefinition' | 'getFileManager'>,
+  client: Pick<KclLspClient, 'textDocumentDefinition' | 'getFileManager' | 'getServerCapabilities'>,
   {
     document,
     environment,
@@ -812,19 +1026,25 @@ export async function jumpToDefinition(
   }: Readonly<{
     document: EditorDocument;
     environment: EditorLanguageEnvironment;
-    symbols: Pick<KclSymbolService, 'getDefinitionForUsage' | 'resolveImportedSymbol'>;
+    symbols: Pick<
+      KclSymbolService,
+      'getDefinitionForUsage' | 'resolveImportedSymbol' | 'getIndex' | 'getVariableValue'
+    >;
   }>,
 ): Promise<void> {
   const { version } = document;
   const { head } = view.state.selection.main;
   let result: LSP.Definition | LSP.DefinitionLink[] | undefined;
-  try {
-    result = await client.textDocumentDefinition({
-      textDocument: { uri: document.uri },
-      position: positionAt(document.text, head),
-    });
-  } catch {
-    /* Symbol fallback remains available. */
+  // The bundled server does not implement definitions yet; ask only once it says it does.
+  if (client.getServerCapabilities().definitionProvider) {
+    try {
+      result = await client.textDocumentDefinition({
+        textDocument: { uri: document.uri },
+        position: positionAt(document.text, head),
+      });
+    } catch {
+      /* The AST resolution below remains available. */
+    }
   }
   if (document.version !== version) {
     return;
@@ -833,7 +1053,11 @@ export async function jumpToDefinition(
   if (first) {
     const uri = 'targetUri' in first ? first.targetUri : first.uri;
     const start = 'targetSelectionRange' in first ? first.targetSelectionRange.start : first.range.start;
-    await environment.navigate({ uri, line: start.line + 1, column: start.character + 1 });
+    await environment.navigate({
+      uri,
+      line: start.line + 1,
+      column: start.character + 1,
+    });
     return;
   }
   const importPath = kclImportAt(document.text, head);
@@ -843,6 +1067,15 @@ export async function jumpToDefinition(
     await environment.navigate({ uri, line: 1, column: 1 });
     return;
   }
+  const target = await kclDefinition({ document, environment, symbols }, head);
+  if (document.version !== version) {
+    return;
+  }
+  if (target) {
+    await openKclTarget(environment, target);
+    return;
+  }
+  // Text that no longer parses keeps the last parsed symbols, so navigation survives a broken edit.
   const word = wordAt(document.text, head);
   if (!word) {
     return;
@@ -857,7 +1090,11 @@ export async function jumpToDefinition(
     symbol = (await symbols.resolveImportedSymbol(document.uri, word, client.getFileManager())) ?? symbol;
   }
   if (symbol && document.version === version) {
-    await environment.navigate({ uri: symbol.uri, line: symbol.lineNumber, column: symbol.column });
+    await environment.navigate({
+      uri: symbol.uri,
+      line: symbol.lineNumber,
+      column: symbol.column,
+    });
   }
 }
 
@@ -881,18 +1118,29 @@ async function formatDocument(view: EditorView, client: KclLspClient, document: 
 async function renameSymbol(
   view: EditorView,
   client: KclLspClient,
-  { document, environment }: Readonly<{ document: EditorDocument; environment: EditorLanguageEnvironment }>,
+  {
+    document,
+    environment,
+  }: Readonly<{
+    document: EditorDocument;
+    environment: EditorLanguageEnvironment;
+  }>,
 ): Promise<void> {
   const basis = await captureKclBasis(document, environment);
   const { version } = document;
   const position = positionAt(document.text, view.state.selection.main.head);
-  const prepared = await client.textDocumentPrepareRename({ textDocument: { uri: document.uri }, position });
+  const prepared = await client.textDocumentPrepareRename({
+    textDocument: { uri: document.uri },
+    position,
+  });
   if (!prepared || document.version !== version) {
     return;
   }
   const dialog = showDialog(view, {
     label: 'Rename symbol',
-    input: { value: typeof prepared === 'object' && 'placeholder' in prepared ? prepared.placeholder : '' },
+    input: {
+      value: typeof prepared === 'object' && 'placeholder' in prepared ? prepared.placeholder : '',
+    },
     submitLabel: 'Rename',
   });
   const submitted = await dialog.result;
@@ -900,7 +1148,11 @@ async function renameSymbol(
   if (!name || document.version !== version) {
     return;
   }
-  const edit = await client.textDocumentRename({ textDocument: { uri: document.uri }, position, newName: name });
+  const edit = await client.textDocumentRename({
+    textDocument: { uri: document.uri },
+    position,
+    newName: name,
+  });
   if (edit && document.version === version) {
     await applyKclWorkspaceEdit(edit, environment, basis);
   }
@@ -909,7 +1161,13 @@ async function renameSymbol(
 async function showSignature(
   view: EditorView,
   client: KclLspClient,
-  { document, effect }: Readonly<{ document: EditorDocument; effect: StateEffectType<NullableTooltip> }>,
+  {
+    document,
+    effect,
+  }: Readonly<{
+    document: EditorDocument;
+    effect: StateEffectType<NullableTooltip>;
+  }>,
 ): Promise<void> {
   const { version } = document;
   const result = await client.textDocumentSignatureHelp({
@@ -947,14 +1205,23 @@ function isStandaloneCommand(action: LSP.CodeAction | LSP.Command): action is LS
 async function showCodeActions(
   view: EditorView,
   client: KclLspClient,
-  { document, environment }: Readonly<{ document: EditorDocument; environment: EditorLanguageEnvironment }>,
+  {
+    document,
+    environment,
+  }: Readonly<{
+    document: EditorDocument;
+    environment: EditorLanguageEnvironment;
+  }>,
 ): Promise<void> {
   const selection = view.state.selection.main;
   const basis = await captureKclBasis(document, environment);
   const { version } = document;
   const diagnostics: LSP.Diagnostic[] = (environment.diagnostics.get(document.uri).get('kcl-lsp') ?? []).map(
     (item) => ({
-      range: { start: positionAt(document.text, item.from), end: positionAt(document.text, item.to) },
+      range: {
+        start: positionAt(document.text, item.from),
+        end: positionAt(document.text, item.to),
+      },
       message: item.message,
       severity: item.severity === 'warning' ? 2 : item.severity === 'info' ? 3 : item.severity === 'hint' ? 4 : 1,
       source: item.source,
@@ -963,7 +1230,10 @@ async function showCodeActions(
   );
   const actions = await client.textDocumentCodeAction({
     textDocument: { uri: document.uri },
-    range: { start: positionAt(document.text, selection.from), end: positionAt(document.text, selection.to) },
+    range: {
+      start: positionAt(document.text, selection.from),
+      end: positionAt(document.text, selection.to),
+    },
     context: { diagnostics },
   });
   if (document.version !== version) {
@@ -1002,7 +1272,10 @@ async function showCodeActions(
   }
   const command = isStandaloneCommand(chosen) ? chosen : chosen.command;
   if (command) {
-    await client.executeCommand({ command: command.command, arguments: command.arguments });
+    await client.executeCommand({
+      command: command.command,
+      arguments: command.arguments,
+    });
   }
 }
 
@@ -1012,7 +1285,11 @@ export async function applyKclWorkspaceEdit(
   environment: EditorLanguageEnvironment,
   basis: EditBasis = new Map(),
 ): Promise<void> {
-  const entries: Array<{ uri: string; version?: number; edits: LSP.TextEdit[] }> =
+  const entries: Array<{
+    uri: string;
+    version?: number;
+    edits: LSP.TextEdit[];
+  }> =
     edit.documentChanges?.flatMap((change) =>
       'textDocument' in change
         ? [
@@ -1023,7 +1300,12 @@ export async function applyKclWorkspaceEdit(
             },
           ]
         : [],
-    ) ?? Object.entries(edit.changes ?? {}).map(([uri, edits]) => ({ uri, version: undefined, edits }));
+    ) ??
+    Object.entries(edit.changes ?? {}).map(([uri, edits]) => ({
+      uri,
+      version: undefined,
+      edits,
+    }));
   const prepared = entries.map((entry): EditorWorkspaceEdit => {
     const requestBasis = basis.get(entry.uri);
     if (!requestBasis) {

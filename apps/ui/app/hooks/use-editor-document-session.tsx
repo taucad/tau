@@ -16,7 +16,10 @@ type EditorContextValue = {
   session: EditorDocumentSession | undefined;
   environment: EditorLanguageEnvironment | undefined;
 };
-const EditorSessionContext = createContext<EditorContextValue>({ session: undefined, environment: undefined });
+const EditorSessionContext = createContext<EditorContextValue>({
+  session: undefined,
+  environment: undefined,
+});
 
 /** Owns one filesystem-backed document session for the mounted project. */
 export function EditorDocumentSessionProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
@@ -53,7 +56,10 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
       },
     });
     return () => {
-      editorRef.send({ type: 'registerMaterialiseModel', materialiseModel: undefined });
+      editorRef.send({
+        type: 'registerMaterialiseModel',
+        materialiseModel: undefined,
+      });
       next.dispose();
       clearEditorNavigation(projectId);
       setSession((current) => (current === next ? undefined : current));
@@ -72,7 +78,10 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
       }
       const path = assertRootedPath(uri.path.slice(1));
       if (target.declaration) {
-        if ((!path.startsWith('__typescript_lib__/') && !path.startsWith('cdn-types/')) || !path.endsWith('.d.ts')) {
+        const typescriptDeclaration =
+          (path.startsWith('__typescript_lib__/') || path.startsWith('cdn-types/')) && path.endsWith('.d.ts');
+        const kclStandardLibrary = path.startsWith('__kcl_std__/') && path.endsWith('.kcl');
+        if (!typescriptDeclaration && !kclStandardLibrary) {
           return;
         }
         opener.current =

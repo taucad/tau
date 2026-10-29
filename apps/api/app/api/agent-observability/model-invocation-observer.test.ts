@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { evidenceSchema } from '@taucad/agent-observability/contract';
-import { verifyEvidenceDigest } from '@taucad/agent-observability/identity';
+import { contractId, verifyEvidenceDigest } from '@taucad/agent-observability/identity';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import type {
   ModelInvocationIntent,
@@ -218,6 +218,9 @@ describe('providerAttemptEvidence', () => {
       lineage: [{ protection: 'pro' }],
       payload: { plane: 'summary', fact: { kind: 'provider', stop: 'stop', purpose: 'generation' } },
     });
-    expect(evidence.source.kind === 'invocation' ? evidence.source.invocation : '').toMatch(/^inv-[a-f\d]{48}$/u);
+    /* The same derivation every host uses, so API and host facts about one attempt join. */
+    expect(evidence.source.kind === 'invocation' ? evidence.source.invocation : '').toBe(
+      await contractId('inv', 'attempt with spaces/and slashes'),
+    );
   });
 });

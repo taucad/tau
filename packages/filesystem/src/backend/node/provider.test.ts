@@ -364,6 +364,45 @@ describe('NodeFsProvider atomic writes', () => {
     expect(temporaryFiles(root)).toEqual([]);
   });
 
+  /*
+   * Q11/3h O4, the projection's last open activation gate. `docs/chats` classifies read-write, so every layer above
+   * admits a write to it; once an external, non-Tau writer re-points the backing `docs` at `.tau`, the bytes land in
+   * the read-only records row `.tau/chats`. Only this method can see both spellings. A read stays admitted: the
+   * asymmetry that keeps the revisions engine working over its own name is unchanged.
+   */
+  it('should refuse a mutation whose real row grants less than its spelling, and still serve the read (O4)', async () => {
+    const root = createRoot();
+    mkdirSync(join(root, '.tau', 'chats'), { recursive: true });
+    writeFileSync(join(root, '.tau', 'chats', 'record.json'), 'RECORD');
+    symlinkSync(join(root, '.tau'), join(root, 'docs'));
+    const provider = new NodeFsProvider(root, { policy: tauPathPolicy });
+    try {
+      // The spelled row is read-write and the real row is read-only: the laundered write is the whole finding.
+      expect(tauPathPolicy.classify('docs/chats').agentAccess).toBe('read-write');
+      expect(tauPathPolicy.classify('.tau/chats').agentAccess).toBe('read-only');
+
+      await expect(provider.readFile('docs/chats/record.json', 'utf8')).resolves.toBe('RECORD');
+
+      for (const mutation of [
+        async () => provider.writeFile('docs/chats/record.json', 'LAUNDERED'),
+        async () => provider.unlink('docs/chats/record.json'),
+        async () => provider.mkdir('docs/chats/planted'),
+        async () => provider.rmdir('docs/chats'),
+        async () => provider.rename('docs/chats/record.json', 'docs/chats/moved.json'),
+        async () => provider.setFileMode('docs/chats/record.json', '100755'),
+      ]) {
+        // oxlint-disable-next-line no-await-in-loop -- one laundered mutation at a time, each judged on disk after.
+        await expect(mutation()).rejects.toMatchObject({ code: 'ELOOP' });
+      }
+
+      expect(readFileSync(join(root, '.tau', 'chats', 'record.json'), 'utf8')).toBe('RECORD');
+      expect(readdirSync(join(root, '.tau', 'chats')).sort()).toEqual(['record.json']);
+      expect(temporaryFiles(root)).toEqual([]);
+    } finally {
+      provider.dispose();
+    }
+  });
+
   it('should refuse a changed parent and remove the temporary file', async () => {
     const root = createRoot();
     const provider = new NodeFsProvider(root);

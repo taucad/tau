@@ -36,12 +36,26 @@ import type {
   FileStatOptions,
   FileStat,
   HeadFileStat,
+  PathAgentAccess,
   PathPolicy,
   ProviderCapabilities,
   WatchRequest,
 } from '#types.js';
 import type { NodeFsWatchEvent } from '#backend/node/protocol.js';
 import { streamChunkSize, validateFileReadStreamOptions } from '#backend/stream-utils.js';
+
+/**
+ * Why one path is being resolved. A `mutate` resolution additionally refuses a
+ * spelling whose real row grants less authority than the spelling itself (O4).
+ */
+type ResolveIntent = 'read' | 'mutate';
+
+/** How much authority each classification grants, so a real row can be compared with a spelled one (O4). */
+const pathAuthorityRank: Readonly<Record<PathAgentAccess, number>> = Object.freeze({
+  hidden: 0,
+  'read-only': 1,
+  'read-write': 2,
+});
 
 /** The name `_atomicWrite` gives its temp file: `.<target>.<pid>.<uuid>.tmp`. */
 /**
@@ -295,7 +309,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     if (path_ === '') {
       throw this._eisdir(path_);
     }
-    const target = await this._resolve(path_);
+    const target = await this._resolve(path_, 'mutate');
     const existingEntry = await this._lstatOrUndefined(target);
     if (existingEntry?.isDirectory() === true) {
       throw this._eisdir(path_);
@@ -418,7 +432,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
 
   public async setFileMode(path_: string, mode: FileMode): Promise<void> {
     this._assertRootedPath(path_);
-    const target = await this._resolve(path_);
+    const target = await this._resolve(path_, 'mutate');
     const stats = await fs.stat(target);
     if (!stats.isFile()) {
       throw this._einval(path_);
@@ -428,7 +442,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
 
   public async unlink(path_: string): Promise<void> {
     this._assertRootedPath(path_);
-    const target = await this._resolve(path_);
+    const target = await this._resolve(path_, 'mutate');
     // MacOS answers `unlink` on a directory with EPERM; the library contract is EISDIR.
     const entry = await this._lstatOrUndefined(target);
     if (entry?.isDirectory() === true) {
@@ -444,7 +458,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       // provider. POSIX answers EINVAL for removing `.`; so does `rename` here.
       throw this._einval(path_);
     }
-    await fs.rmdir(await this._resolve(path_));
+    await fs.rmdir(await this._resolve(path_, 'mutate'));
   }
 
   public async rename(from: string, to: string): Promise<void> {
@@ -459,7 +473,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     if (to.startsWith(`${from}/`)) {
       throw this._einval(to);
     }
-    const [resolvedFrom, resolvedTo] = await Promise.all([this._resolve(from), this._resolve(to)]);
+    const [resolvedFrom, resolvedTo] = await Promise.all([this._resolve(from, 'mutate'), this._resolve(to, 'mutate')]);
     await fs.rename(resolvedFrom, resolvedTo);
   }
 
@@ -837,7 +851,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
   }
 
   protected async mkdirSingle(path_: string): Promise<void> {
-    await fs.mkdir(await this._resolve(path_));
+    await fs.mkdir(await this._resolve(path_, 'mutate'));
   }
 
   private _isDirectorySync(absolute: string): boolean {
@@ -882,7 +896,10 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     }
   }
 
-  private async _listBounded(rooted: string, limits: { maximumEntries: number; maximumBytes: number }): Promise<DirectoryEntry[]> {
+  private async _listBounded(
+    rooted: string,
+    limits: { maximumEntries: number; maximumBytes: number },
+  ): Promise<DirectoryEntry[]> {
     const absolute = await this._resolve(rooted);
     const directory = await fs.opendir(absolute, { bufferSize: 1 });
     const entries: DirectoryEntry[] = [];
@@ -898,7 +915,9 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
           throw this._errno('EOVERFLOW', 'directory exceeds entry allowance', rooted);
         }
         remaining -= Buffer.byteLength(entry.name);
-        if (remaining < 0) { throw this._errno('EFBIG', 'directory names exceed byte allowance', rooted); }
+        if (remaining < 0) {
+          throw this._errno('EFBIG', 'directory names exceed byte allowance', rooted);
+        }
         // A link is never traversed during checked membership; its own entry must be observed explicitly.
         entries.push({ name: entry.name, kind: entry.isDirectory() ? 'dir' : 'file' });
       }
@@ -1017,7 +1036,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     }
   }
 
-  private async _resolve(rootedPath: string): Promise<string> {
+  private async _resolve(rootedPath: string, intent: ResolveIntent = 'read'): Promise<string> {
     const canonical = assertRootedPath(rootedPath);
     const target = path.resolve(this._base, canonical);
     if (!isContained(this._base, target)) {
@@ -1037,13 +1056,33 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
      * decides the whole subtree (PP2).
      *
      * Asymmetric on purpose. Only a *visible* name resolving into a hidden path
-     * is refused, so a consumer that reaches the control plane by its own name —
-     * the revisions engine over `'working-copy'` — is untouched.
+     * is refused for a read, so a consumer that reaches the control plane by its
+     * own name — the revisions engine over `'working-copy'` — is untouched.
+     *
+     * A mutation is held to the stronger rule (Q11/3h O4): the row the bytes
+     * actually land in may never grant *less* than the spelling the caller was
+     * classified on. `docs/chats` is read-write, but once the backing `docs`
+     * becomes a link to `.tau`, the write lands in the read-only row
+     * `.tau/chats`; a hidden real path is only the extreme case of the same
+     * laundering. An external, non-Tau writer is the only one who can re-point
+     * the backing tree under a held claim, so this closes a TOCTOU, and it
+     * closes it the way every other refusal here does: before anything moves.
      */
-    if (this._policy !== undefined && this._policy.classify(canonical).agentAccess !== 'hidden') {
-      const realRelative = path.relative(realBase, real).split(path.sep).join('/');
-      if (this._policy.classify(realRelative).agentAccess === 'hidden') {
-        throw this._errno('ELOOP', 'refusing to follow a symbolic link into a hidden path', rootedPath);
+    if (this._policy !== undefined) {
+      const spelled = this._policy.classify(canonical).agentAccess;
+      if (spelled !== 'hidden') {
+        const realRelative = path.relative(realBase, real).split(path.sep).join('/');
+        const landed = this._policy.classify(realRelative).agentAccess;
+        if (landed === 'hidden') {
+          throw this._errno('ELOOP', 'refusing to follow a symbolic link into a hidden path', rootedPath);
+        }
+        if (intent === 'mutate' && pathAuthorityRank[landed] < pathAuthorityRank[spelled]) {
+          throw this._errno(
+            'ELOOP',
+            'refusing to change a path whose real row grants less than its spelling',
+            rootedPath,
+          );
+        }
       }
     }
     return target;
@@ -1222,7 +1261,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       }
       // Verification allocates at most the replacement size after publication.
       spendCheckedBytes(budget, bytes.byteLength);
-      const target = await this._resolve(input.path);
+      const target = await this._resolve(input.path, 'mutate');
       const existingEntry = await this._lstatOrUndefined(target);
       if (existingEntry?.isDirectory() === true) {
         throw this._eisdir(input.path);

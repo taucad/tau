@@ -20,7 +20,7 @@ import {
   utimes,
   writeFile,
 } from 'node:fs/promises';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import type * as NodeFileSystem from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -587,9 +587,7 @@ const mounted = (mountpoint: string): boolean =>
     .some((line) => line.split(' ')[4] === mountpoint);
 
 const python = (script: string, ...parameters: string[]): ChildProcessWithoutNullStreams =>
-  spawn('python3', ['-I', '-c', script, ...parameters], {
-    stdio: ['pipe', 'pipe', 'inherit'],
-  }) as ChildProcessWithoutNullStreams;
+  spawn('python3', ['-I', '-c', script, ...parameters], { stdio: ['pipe', 'pipe', 'pipe'] });
 
 const lines = (child: ChildProcessWithoutNullStreams): (() => Promise<string>) => {
   const queue: string[] = [];
@@ -646,49 +644,6 @@ const aborted = async (signal: AbortSignal): Promise<void> =>
       { once: true },
     );
   });
-
-const mark = (what: string): void => {
-  process.stderr.write(`[mark ${String(Date.now() % 1_000_000)}] ${what}\n`);
-};
-const dump = (label: string, pid: number | undefined): void => {
-  const say = (key: string, value: string): void => {
-    process.stderr.write(`[dump ${label}] ${key} = ${value}\n`);
-  };
-  try {
-    say(
-      'fuse-mounts',
-      readFileSync('/proc/self/mountinfo', 'utf8')
-        .split('\n')
-        .filter((line) => line.includes('fuse'))
-        .join(' || '),
-    );
-  } catch (error) {
-    say('fuse-mounts', String(error));
-  }
-  try {
-    for (const connection of readdirSync('/sys/fs/fuse/connections')) {
-      for (const field of ['waiting', 'max_background', 'congestion_threshold']) {
-        try {
-          say(`conn.${connection}.${field}`, readFileSync(`/sys/fs/fuse/connections/${connection}/${field}`, 'utf8').trim());
-        } catch (error) {
-          say(`conn.${connection}.${field}`, String(error));
-        }
-      }
-    }
-  } catch (error) {
-    say('connections', String(error));
-  }
-  for (const target of pid === undefined ? [] : [pid]) {
-    for (const field of ['wchan', 'syscall', 'stack', 'status']) {
-      try {
-        const text = readFileSync(`/proc/${String(target)}/${field}`, 'utf8');
-        say(`child.${field}`, (field === 'status' ? (/^State:.*$/mu.exec(text)?.[0] ?? '?') : text).trim().slice(0, 400));
-      } catch (error) {
-        say(`child.${field}`, String(error));
-      }
-    }
-  }
-};
 
 describe.runIf(enabled)('private projection D8 core-correctness gates', () => {
   const withMount = async (
@@ -974,7 +929,7 @@ await held.close(); await mount[Symbol.asyncDispose](); process.stdout.write('cl
     }
   }, 20_000);
 
-  it('G4 aborts only the interrupted request and answers its caller with EINTR', async () => {
+  it('G4 aborts only the interrupted request, answers it EINTR and fails its caller closed', async () => {
     const reading = Promise.withResolvers<void>();
     let reason: unknown;
     let other: AbortSignal | undefined;
@@ -990,64 +945,53 @@ await held.close(); await mount[Symbol.asyncDispose](); process.stdout.write('cl
           reason = signal.reason;
           throw signal.reason as Error;
         });
+        // Only one SIGUSR1 is ever sent, so exactly one of these clauses sees the handler's Stop: the inner one when
+        // the signal lands inside the read, the outer one when the read has already failed by the time Python runs the
+        // handler. Delivery is then blocked so nothing can interrupt the report itself.
         const child = python(
           `
-import os, signal, sys, traceback
-log = open(sys.argv[2], "w", buffering=1)
-def say(message): print(message, file=log, flush=True)
+import os, signal, sys
 class Stop(Exception): pass
-def stop(*_): say("signal handler ran"); raise Stop()
+def stop(*_): raise Stop()
 signal.signal(signal.SIGUSR1, stop)
-say("start")
 fd = os.open(sys.argv[1], os.O_RDONLY)
 print("ready", flush=True)
-say("opened fd")
+outcome = "none"
 try:
-    data = os.pread(fd, 1, 0)
-    say("pread returned " + repr(data))
-    print("read", flush=True)
+    try:
+        os.pread(fd, 1, 0)
+        outcome = "read"
+    except Stop:
+        outcome = "interrupted"
+    except OSError as error:
+        outcome = "errno " + str(error.errno)
 except Stop:
-    say("Stop caught")
-    print("interrupted", flush=True)
-except BaseException as error:
-    say("OTHER " + type(error).__name__ + " " + repr(error))
-    traceback.print_exc(file=log)
-say("end of script")
+    outcome = outcome + " then interrupted"
+signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR1})
+print(outcome, flush=True)
 `,
           join(mountpoint, 'blocked'),
-          '/tmp/g4-child.log',
         );
-        const next0 = lines(child);
-        const next = async (): Promise<string> => {
-          const line = await next0();
-          mark(`STDOUT ${JSON.stringify(line)}`);
-          return line;
-        };
-        child.on('exit', (code, signal) => {
-          mark(`CHILD EXIT code=${String(code)} signal=${String(signal)}`);
-        });
-        const watchdog = setTimeout(() => {
-          mark('WATCHDOG fired');
-          dump('watchdog', child.pid);
-        }, 8000);
-        mark('M0 spawned pid=' + String(child.pid));
+        const next = lines(child);
         expect(await next()).toBe('ready');
-        mark('M1 got ready');
         await reading.promise;
-        mark('M2 reading.promise resolved');
-        dump('after-M2', child.pid);
         expect(await readFile(join(mountpoint, 'free'), 'utf8')).toBe('free');
-        mark('M3 readFile(free) done');
         child.kill('SIGUSR1');
-        mark('M4 sent SIGUSR1');
-        expect(await next()).toBe('interrupted');
-        mark('M5 child printed interrupted');
+        // The projection's contract is per-request: the interrupt aborts only this request's handler signal, and
+        // `settle` answers that request EINTR because the handler rejected without committing (the assertions below
+        // prove both). What the caller then observes is a kernel property, not a projection one. The projection keeps
+        // the page cache on purpose -- the F4 and G2 rows exercise shared mappings and page-cache invalidation -- so
+        // this one-byte pread is served as a 4096-byte folio fill. The kernel retries a folio fill that came back
+        // EINTR (a second READ of the same page and offset arrives, and is itself interrupted) and then fails the fill
+        // closed, so the caller is handed EIO. Asserting EINTR at the caller would require FOPEN_DIRECT_IO, which
+        // would retire the page-cache behaviour those other rows depend on. The invariant that matters here is that
+        // the interrupted caller always fails and never reads.
+        expect(['interrupted', 'errno 4', 'errno 4 then interrupted', 'errno 5', 'errno 5 then interrupted']).toContain(
+          await next(),
+        );
         expect(await exited(child)).toBe(0);
-        mark('M6 child exited');
-        clearTimeout(watchdog);
         expect((reason as Error).message).toBe('Projection request interrupted.');
         expect(other?.aborted).toBe(false);
-        mark('M7 assertions done');
       },
       (owner) => {
         owner.names.set('blocked', 2n);

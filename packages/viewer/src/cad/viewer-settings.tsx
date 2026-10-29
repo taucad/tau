@@ -293,7 +293,7 @@ export function ViewerSettings({
             </DropdownMenuSwitchItem>
             <DropdownMenuSwitchItem isChecked={enableLines} onIsCheckedChange={handleLinesToggle}>
               <PenLine />
-              Lines
+              Edges
             </DropdownMenuSwitchItem>
             <DropdownMenuSwitchItem
               icon={<Sparkles />}

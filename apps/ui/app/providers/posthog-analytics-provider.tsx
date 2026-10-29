@@ -1,8 +1,7 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useSession } from '@better-auth-ui/react';
-import { posthog } from 'posthog-js';
-import type { PostHogConfig } from 'posthog-js';
+import type { PostHog, PostHogConfig } from 'posthog-js';
 import { authClient } from '#lib/auth-client.js';
 import { clearPostHogStorage, posthogConfig } from '#lib/posthog.lib.js';
 import { AnalyticsContextProvider } from '#hooks/use-analytics.js';
@@ -10,7 +9,9 @@ import type { Analytics } from '#hooks/use-analytics.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- PostHog configuration keys are SDK wire names. */
 
-const isCapturing = (): boolean => posthog.__loaded && !posthog.has_opted_out_capturing();
+let loadedPosthog: PostHog | undefined;
+
+const isCapturing = (posthog: PostHog): boolean => posthog.__loaded && !posthog.has_opted_out_capturing();
 
 /**
  * Starts replay outside the critical rendering path.
@@ -36,10 +37,12 @@ const whenIdle = (start: () => void): (() => void) => {
  * so a change never moves the product between React trees.
  */
 function PostHogLifecycle({
+  posthog,
   isActive,
   options,
   isReplayEnabled,
 }: {
+  readonly posthog: PostHog | undefined;
   readonly isActive: boolean;
   readonly options: Partial<PostHogConfig>;
   readonly isReplayEnabled: boolean;
@@ -50,7 +53,7 @@ function PostHogLifecycle({
   useEffect(() => {
     const { apiKey } = posthogConfig;
     if (!isActive) {
-      if (posthog.__loaded) {
+      if (posthog?.__loaded) {
         posthog.stopSessionRecording();
         posthog.opt_out_capturing();
         posthog.set_config({ disable_persistence: true, advanced_disable_flags: true });
@@ -63,6 +66,9 @@ function PostHogLifecycle({
       return undefined;
     }
 
+    if (!posthog) {
+      return undefined;
+    }
     if (posthog.__loaded) {
       posthog.set_config({ disable_persistence: false, advanced_disable_flags: false });
     } else {
@@ -79,11 +85,11 @@ function PostHogLifecycle({
     return whenIdle(() => {
       posthog.startSessionRecording();
     });
-    // `options` and `isReplayEnabled` are fixed per host, so only `isActive` re-runs this.
-  }, [isActive, options, isReplayEnabled]);
+    // Apply consent again when the deferred SDK becomes available.
+  }, [isActive, options, isReplayEnabled, posthog]);
 
   useEffect(() => {
-    if (!isActive || isPending || !posthog.__loaded) {
+    if (!isActive || isPending || !posthog?.__loaded) {
       return;
     }
     if (user) {
@@ -94,7 +100,7 @@ function PostHogLifecycle({
     } else if (posthog._isIdentified()) {
       posthog.reset();
     }
-  }, [isActive, isPending, user]);
+  }, [isActive, isPending, user, posthog]);
 
   return undefined;
 }
@@ -117,25 +123,51 @@ export function PostHogAnalyticsProvider({
   readonly isReplayEnabled: boolean;
   readonly children: ReactNode;
 }): React.JSX.Element {
+  const [posthog, setPosthog] = useState<PostHog | undefined>(() => loadedPosthog);
+  const shouldLoad = isActive && posthogConfig.apiKey !== '';
+  useEffect(() => {
+    if (!shouldLoad || posthog) {
+      return undefined;
+    }
+    const controller = new AbortController();
+    const load = async (): Promise<void> => {
+      try {
+        const module = await import('posthog-js');
+        loadedPosthog = module.posthog;
+        if (!controller.signal.aborted) {
+          setPosthog(module.posthog);
+        }
+      } catch {
+        // Optional analytics must not prevent the product from opening.
+      }
+    };
+    // async-iife: bootstrap
+    void load();
+    return () => {
+      controller.abort();
+    };
+  }, [shouldLoad, posthog]);
+
   const analytics = useMemo<Analytics>(
     () => ({
       capture(event, properties) {
-        if (isCapturing()) {
+        if (isActive && posthog && isCapturing(posthog)) {
           posthog.capture(event, properties);
         }
       },
       captureException(error, properties) {
-        if (isCapturing()) {
+        if (isActive && posthog && isCapturing(posthog)) {
           posthog.captureException(error, properties);
         }
       },
     }),
-    [],
+    [isActive, posthog],
   );
 
   return (
     <AnalyticsContextProvider analytics={analytics}>
       <PostHogLifecycle
+        posthog={posthog}
         isActive={isActive && posthogConfig.apiKey !== ''}
         options={options}
         isReplayEnabled={isReplayEnabled}

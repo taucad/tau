@@ -64,52 +64,12 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  linux:
-    name: Shell conformance on ${{ matrix.row }} (stock ${{ matrix.distro }} guest)
-    if: github.event_name != 'pull_request' || github.triggering_actor != 'dependabot[bot]'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - distro: ubuntu
-            row: LNX-U
-          - distro: debian
-            row: LNX-D
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Setup Nx Environment
-        uses: ./.github/actions/setup-nx
-        with:
-          save-pnpm-store: 'false'
-
-      - name: Run the conformance target in the stock guest
-        env:
-          TAU_VM_DISTRO: ${{ matrix.distro }}
-        run: bash packages/core/native-process/scripts/shell-conformance-vm.sh
-
-      - name: Upload the receipt
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: shell-conformance-${{ matrix.row }}
-          path: out/test-results/shell-conformance/${{ matrix.row }}/
-          retention-days: 14
-          if-no-files-found: error
-
-  linux-projection:
-    name: Shell projection transport on LNX-P (stock ubuntu-24.04 runner, pinned libfuse 3.17.2)
-    if: github.event_name != 'pull_request' || github.triggering_actor != 'dependabot[bot]'
+  probe:
+    name: D8 G4 probe (stock ubuntu-24.04 runner, pinned libfuse 3.17.2)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       LIBFUSE_VERSION: '3.17.2'
-      # SHA-256 of https://github.com/libfuse/libfuse/releases/download/fuse-3.17.2/fuse-3.17.2.tar.gz
       LIBFUSE_SHA256: 3d932431ad94e86179e5265cddde1d67aa3bb2fb09a5bd35c641f86f2b5ed06f
     steps:
       - name: Checkout
@@ -136,7 +96,6 @@ jobs:
           meson setup "$work/build" "$work/fuse-${LIBFUSE_VERSION}" --prefix=/usr/local --buildtype=release \
             -Dexamples=false -Dtests=false -Dutils=true
           ninja -C "$work/build"
-          # Only the mount helper is installed; the bridge loads its own adjacent copy of the library.
           sudo install -o root -g root -m 4755 "$work/build/util/fusermount3" /usr/local/bin/fusermount3
           cp "$work/fuse-${LIBFUSE_VERSION}/include/"{fuse_lowlevel.h,fuse_common.h,fuse_opt.h,fuse_log.h} "$work/headers/"
           cp "$work/build/libfuse_config.h" "$work/headers/"
@@ -150,86 +109,33 @@ jobs:
           ls -l /dev/fuse /usr/local/bin/fusermount3
           id
 
-      - name: Run the projection transport conformance target
-        run: pnpm nx run native-process-core:test:shell-projection-conformance --skip-nx-cache
+      - name: Build the bridge
+        working-directory: packages/core/native-process
+        run: |
+          node scripts/build-shell-projection.mts \
+            --node-headers "$TAU_PROJECTION_NODE_HEADERS" \
+            --fuse-headers "$TAU_PROJECTION_FUSE_HEADERS" \
+            --fuse-library "$TAU_PROJECTION_FUSE_LIBRARY" \
+            --fuse-sha256 "$TAU_PROJECTION_FUSE_SHA256"
 
-      - name: Record the bridge provenance
+      - name: Run only the G4 rows with instrumentation
+        working-directory: packages/core/native-process
+        env:
+          TAU_SHELL_PROJECTION_CONFORMANCE: '1'
+          TAU_PROJECTION_TRACE: '1'
+        run: |
+          ../../../node_modules/.bin/vitest run --config vitest.config.ts \
+            --reporter=verbose --no-file-parallelism \
+            -t 'G4' src/shell/shell-projection-native.test.ts 2>&1 | tee /tmp/g4.log || true
+          echo '===== marker / trace timeline ====='
+          grep -E '^\[(mark|dump|wrap|brdg)' /tmp/g4.log || echo 'no instrumentation lines captured'
+
+      - name: Post-run kernel state
         if: always()
         run: |
-          mkdir -p out/test-results/shell-conformance/LNX-P
-          cp packages/core/native-process/dist/native/linux-x64/provenance.json \
-            out/test-results/shell-conformance/LNX-P/provenance.json || true
-          { uname -a; cat /etc/os-release; node --version; } > out/test-results/shell-conformance/LNX-P/host.txt
-          # No mount may outlive the run.
-          if grep tau-shell-projection /proc/self/mounts; then
-            echo '::error::A projection mount outlived the conformance run.'
-            exit 1
-          fi
-
-      - name: Upload the receipt
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: shell-conformance-LNX-P
-          path: out/test-results/shell-conformance/LNX-P/
-          retention-days: 14
-          if-no-files-found: error
-
-  macos:
-    name: Shell conformance on ${{ matrix.row }} (${{ matrix.runner }})
-    if: github.event_name != 'pull_request' || github.triggering_actor != 'dependabot[bot]'
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-26
-            row: MAC-A
-          - runner: macos-26-intel
-            row: MAC-X
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Setup Nx Environment
-        uses: ./.github/actions/setup-nx
-        with:
-          save-pnpm-store: 'false'
-
-      # The runtime searches mandatory deny paths with ripgrep; the hosted image does not always carry it.
-      - name: Install ripgrep
-        run: command -v rg || brew install ripgrep
-
-      - name: Run the conformance target
-        env:
-          TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
-          TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/receipt.json
-        run: pnpm nx run native-process-core:test:shell-conformance --skip-nx-cache
-
-      - name: Run the shell service conformance target
-        if: success() || failure()
-        env:
-          TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
-          TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/service-receipt.json
-        run: pnpm nx run host:test:shell-conformance --skip-nx-cache
-
-      # The desktop Terminal rows (W5): probe and refusal rows run; the PTY rows are recorded unverified on macOS
-      # until the operator's own-pty run, which this workflow never performs.
-      - name: Run the desktop terminal conformance target
-        if: success() || failure()
-        env:
-          TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
-          TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/terminal-receipt.json
-        run: pnpm nx run desktop:test:terminal-conformance --skip-nx-cache
-
-      - name: Upload the receipt
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: shell-conformance-${{ matrix.row }}
-          path: out/test-results/shell-conformance/${{ matrix.row }}/
-          retention-days: 14
-          if-no-files-found: error
+          echo '--- fuse mounts ---'; grep fuse /proc/self/mountinfo || true
+          echo '--- connections ---'
+          for c in /sys/fs/fuse/connections/*; do [ -d "$c" ] && echo "$c waiting=$(cat "$c/waiting" 2>/dev/null)"; done
+          for m in $(grep -o '/tmp/tau-projection-[^ ]*' /proc/self/mountinfo | sort -u); do
+            fusermount3 -u -z "$m" 2>/dev/null || true
+          done

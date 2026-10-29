@@ -212,6 +212,26 @@ describe('runWhenRendered', () => {
     expect(locate).toHaveBeenCalledTimes(asked);
   });
 
+  it('should not run the step on a frame that comes after the reveal lapsed, as when the tab was hidden', () => {
+    let pending: FrameRequestCallback | undefined;
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      pending = callback;
+      return 1;
+    });
+    const now = vi.spyOn(performance, 'now').mockReturnValue(0);
+    const step = vi.fn<() => void>();
+    const locate = vi.fn<() => (() => void) | undefined>(() => step);
+    runWhenRendered(locate);
+
+    now.mockReturnValue(heldRevealLifetimeMilliseconds + 1);
+    pending?.(heldRevealLifetimeMilliseconds + 1);
+
+    expect(locate).not.toHaveBeenCalled();
+    expect(step).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+    now.mockRestore();
+  });
+
   it('should never run the step once cancelled, as when a newer reveal replaces it or the pane unmounts', () => {
     vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame', 'performance'] });
     let isRendered = false;

@@ -154,10 +154,14 @@ export function runWhenRendered(locate: () => (() => void) | undefined): () => v
   let frame = 0;
   const attempt = (): void => {
     frame = requestAnimationFrame(() => {
+      // A frame that comes after the reveal lapsed, such as the first one back from a hidden tab, scrolls nothing.
+      if (performance.now() >= deadline) {
+        return;
+      }
       const step = locate();
       if (step) {
         step();
-      } else if (performance.now() < deadline) {
+      } else {
         attempt();
       }
     });

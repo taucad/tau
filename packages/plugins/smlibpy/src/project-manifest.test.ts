@@ -19,7 +19,7 @@ describe('smlibpy project libraries', () => {
       expect(requirements).toMatch(new RegExp(`^${name}==${version.replaceAll('.', String.raw`\.`)}$`, 'mu'));
     }
     expect(libraryVersionMismatches(template)).toEqual([]);
-    expect(template).toContain('dependencies = [\n  "smlibpy==0.3.5",\n  "numpy==2.5.2",\n]');
+    expect(template).toContain('dependencies = [\n  "smlibpy==0.6.2",\n  "numpy==2.5.2",\n]');
   });
 });
 
@@ -41,7 +41,7 @@ describe('libraryVersionMismatches', () => {
     expect([first]).toEqual([
       {
         message:
-          'pyproject.toml pins smlibpy==0.2.0, but the smlibpy kernel runs smlibpy 0.3.5. Pin "smlibpy==0.3.5" in [project] dependencies so the project runs the same library inside and outside Tau.',
+          'pyproject.toml pins smlibpy==0.2.0, but the smlibpy kernel runs smlibpy 0.6.2. Pin "smlibpy==0.6.2" in [project] dependencies so the project runs the same library inside and outside Tau.',
         code: 'LIBRARY_VERSION_MISMATCH',
         type: 'kernel',
         severity: 'warning',
@@ -51,14 +51,14 @@ describe('libraryVersionMismatches', () => {
           manifest: 'pyproject.toml',
           library: 'smlibpy',
           declared: '0.2.0',
-          runs: '0.3.5',
+          runs: '0.6.2',
         },
       },
     ]);
   });
 
   it('accepts the kernel versions, ranges, unpinned and other libraries', () => {
-    const text = pyproject('  "smlibpy==0.3.5",\n  "numpy>=2.5",\n  "scipy==1.0.0",\n  \'trimesh\',');
+    const text = pyproject('  "smlibpy==0.6.2",\n  "numpy>=2.5",\n  "scipy==1.0.0",\n  \'trimesh\',');
 
     expect(libraryVersionMismatches(text)).toEqual([]);
   });

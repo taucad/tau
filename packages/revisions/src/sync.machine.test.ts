@@ -3263,6 +3263,7 @@ describe('syncMachine telemetry (W36 D1)', () => {
     const acknowledged = attempts(harness).at(-1);
     expect(acknowledged?.['pending']).toBe(1);
     expect(acknowledged?.['lagMilliseconds']).toEqual(expect.any(Number));
+    expect(acknowledged?.['lagSince']).toBe('change');
     expect(harness.actor.getSnapshot().context.unsyncedSince).toBeUndefined();
 
     harness.stop();
@@ -3317,6 +3318,7 @@ describe('syncMachine telemetry (W36 D1)', () => {
         expect(attempts(harness).at(-1)).toMatchObject({ direction: 'push', outcome: 'ok' });
       });
       expect(attempts(harness).at(-1)?.['lagMilliseconds']).toBe(7500);
+      expect(attempts(harness).at(-1)?.['lagSince']).toBe('change');
       expect(harness.actor.getSnapshot().context.unsyncedSince).toBeUndefined();
       harness.stop();
     } finally {
@@ -3343,6 +3345,54 @@ describe('syncMachine telemetry (W36 D1)', () => {
         expect(attempts(harness).at(-1)).toMatchObject({ direction: 'push', outcome: 'ok' });
       });
       expect(attempts(harness).at(-1)?.['lagMilliseconds']).toBe(4000);
+      /* Nothing dated it, so a panel can leave it out. */
+      expect(attempts(harness).at(-1)?.['lagSince']).toBe('request');
+      harness.stop();
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  /* Review F1: the lag is read as the push starts, so a change made while it is on the wire never dates it. */
+  it('measures a push from its own start, not from a change made while it was on the wire', async () => {
+    const now = vi.spyOn(Date, 'now');
+    try {
+      const harness = start();
+      await openCleanly(harness);
+
+      now.mockReturnValue(3_000_000);
+      harness.actor.send({ type: 'syncNow' });
+      await vi.waitFor(() => {
+        expect(harness.effects.running('push')).toBe(1);
+      });
+      expect(harness.actor.getSnapshot().context.unsyncedSince).toBeUndefined();
+      /* A record change while the push is on the wire, with nothing dated before it. */
+      now.mockReturnValue(3_003_000);
+      harness.actor.send({ type: 'recordsChanged' });
+      expect(harness.actor.getSnapshot().context.unsyncedSince).toBe(3_003_000);
+      now.mockReturnValue(3_005_000);
+      harness.effects.settle('push', { output: pushResult() });
+      await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+
+      await vi.waitFor(() => {
+        expect(attempts(harness).at(-1)).toMatchObject({ direction: 'push', outcome: 'ok' });
+      });
+      /* From the request (5 s), not from the change it did not carry (2 s). */
+      expect(attempts(harness).at(-1)).toMatchObject({ lagMilliseconds: 5000, lagSince: 'request' });
+      /* The change is still owed, and the next push reports it, once. */
+      expect(harness.actor.getSnapshot().context.unsyncedSince).toBe(3_003_000);
+      harness.clock.advance(2000);
+      await vi.waitFor(() => {
+        expect(harness.effects.running('push')).toBe(1);
+      });
+      now.mockReturnValue(3_010_000);
+      harness.effects.settle('push', { output: pushResult({ name: chatRef, status: 'updated', head: 'c1' }) });
+      await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+      await vi.waitFor(() => {
+        expect(attempts(harness).filter((attempt) => attempt['direction'] === 'push')).toHaveLength(2);
+      });
+      expect(attempts(harness).at(-1)).toMatchObject({ lagMilliseconds: 7000, lagSince: 'change' });
+      expect(harness.actor.getSnapshot().context.unsyncedSince).toBeUndefined();
       harness.stop();
     } finally {
       now.mockRestore();
@@ -3497,6 +3547,36 @@ describe('syncMachine telemetry (W36 D1)', () => {
 });
 
 describe('explicit repository pushes', () => {
+  /* Review F3: with no push to follow on its own, a record change does not start the lag clock. */
+  it('does not date a record change or a landed decision while pushing only on request', async () => {
+    const h = start({ automaticPush: false, remote: 'github' });
+    try {
+      await settleWhenRunning(h.effects, 'fetch', { output: { integration: 'upToDate', leases: {}, ahead: false } });
+      await vi.waitFor(() => {
+        expect(h.actor.getSnapshot().matches('manual')).toBe(true);
+      });
+      h.actor.send({ type: 'recordsChanged' });
+      h.actor.send({ type: 'conflictResolved', ref: mainRef });
+      expect(h.actor.getSnapshot().context.unsyncedSince).toBeUndefined();
+      expect(h.actor.getSnapshot().context.changedSincePushAt).toBeUndefined();
+    } finally {
+      h.stop();
+    }
+  });
+
+  it('does not date a record change with no remote', async () => {
+    const h = start({ remote: undefined });
+    try {
+      await vi.waitFor(() => {
+        expect(h.actor.getSnapshot().matches('noRemote')).toBe(true);
+      });
+      h.actor.send({ type: 'recordsChanged' });
+      expect(h.actor.getSnapshot().context.unsyncedSince).toBeUndefined();
+    } finally {
+      h.stop();
+    }
+  });
+
   it('should fetch but never push on open, save, close, hidden, sync or reconnection', async () => {
     const h = start({ automaticPush: false, remote: 'github' });
     try {

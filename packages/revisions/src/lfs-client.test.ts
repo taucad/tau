@@ -483,4 +483,118 @@ describe('parallel uploads', () => {
     expect(read).toHaveBeenCalledTimes(2);
     expect(signals.every((signal) => signal.aborted)).toBe(true);
   });
+
+  it('admits one object over the resident budget alone, and holds the ones after it until it is done', async () => {
+    const huge = new Uint8Array(lfsUploadResidentBytes + 1);
+    const hugePointer = lfsPointerFor(huge).pointer;
+    const listed = [hugePointer, pointers[0]!, pointers[1]!];
+    const { transfer, releases, peak } = heldTransfers();
+    const uploading = createLfsClient({
+      url: 'https://api.tau.test/git',
+      http: { request: batchOf(listed) },
+      fetch: transfer,
+    }).upload({ pointers: listed, read: async (oid) => (oid === hugePointer.oid ? huge : contentOf.get(oid)!) });
+    await vi.waitFor(() => {
+      expect(transfer).toHaveBeenCalledTimes(1);
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10);
+    });
+    /* Nothing rides beside it, small as it is. */
+    expect(transfer).toHaveBeenCalledTimes(1);
+    releases.shift()?.(new Response(''));
+    await vi.waitFor(() => {
+      expect(transfer).toHaveBeenCalledTimes(3);
+    });
+    for (const release of releases.splice(0)) {
+      release(new Response(''));
+    }
+    await expect(uploading).resolves.toEqual(listed.map((pointer) => pointer.oid));
+    expect(peak()).toBe(2);
+  });
+
+  it('on an abort from outside, admits nothing more and settles only after the transfers in flight', async () => {
+    const controller = new AbortController();
+    const read = vi.fn(async (oid: string) => contentOf.get(oid)!);
+    const { transfer, releases } = heldTransfers();
+    let settled = false;
+    const client = createLfsClient({
+      url: 'https://api.tau.test/git',
+      http: { request: batchOf(pointers) },
+      fetch: transfer,
+      uploadConcurrency: 2,
+    });
+    const uploading = (async () => {
+      try {
+        return await client.upload({ pointers, read, signal: controller.signal });
+      } finally {
+        settled = true;
+      }
+    })();
+    await vi.waitFor(() => {
+      expect(transfer).toHaveBeenCalledTimes(2);
+    });
+    controller.abort(new Error('closed'));
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10);
+    });
+    /* The two in flight have not answered yet, so the upload has not either. */
+    expect(settled).toBe(false);
+    releases.shift()?.(new Response(''));
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10);
+    });
+    /* One answered: the upload still waits for the other rather than leaving it running. */
+    expect(settled).toBe(false);
+    releases.shift()?.(new Response(''));
+    await expect(uploading).rejects.toThrow('closed');
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(transfer).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports a read that rejects, and aborts the transfer beside it', async () => {
+    const signals: AbortSignal[] = [];
+    const transfer = vi.fn<typeof fetch>(
+      async (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          signals.push(init!.signal!);
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('aborted', 'AbortError'));
+          });
+        }),
+    );
+    const read = vi.fn(async (oid: string) => {
+      if (oid === pointers[1]!.oid) {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 5);
+        });
+        throw new Error('the object store is gone');
+      }
+      return contentOf.get(oid)!;
+    });
+    await expect(
+      createLfsClient({
+        url: 'https://api.tau.test/git',
+        http: { request: batchOf(pointers) },
+        fetch: transfer,
+        uploadConcurrency: 2,
+      }).upload({ pointers, read }),
+    ).rejects.toThrow('the object store is gone');
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(transfer).toHaveBeenCalledTimes(1);
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+  });
+
+  it.each([Number.NaN, 0, -3, 0.5])('treats an upload concurrency of %s as one that still uploads', async (value) => {
+    const transfer = vi.fn<typeof fetch>(async () => new Response(''));
+    await expect(
+      createLfsClient({
+        url: 'https://api.tau.test/git',
+        http: { request: batchOf(pointers.slice(0, 2)) },
+        fetch: transfer,
+        uploadConcurrency: value,
+      }).upload({ pointers: pointers.slice(0, 2), read: async (oid) => contentOf.get(oid)! }),
+    ).resolves.toHaveLength(2);
+    expect(transfer).toHaveBeenCalledTimes(2);
+  });
 });

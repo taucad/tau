@@ -1440,6 +1440,8 @@ export const TauMetrics = {
     buckets: [0.5, 1, 2, 3, 4, 5, 7.5, 10, 15, 20, 30, 60, 120, 300, 900, 3600],
     attributes: z.object({
       'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
+      /* What dated the lag: `request` is a push nothing dated, which measures only its own duration. */
+      'sync.lag.since': z.enum(['change', 'queue', 'request']),
     }),
   }),
 

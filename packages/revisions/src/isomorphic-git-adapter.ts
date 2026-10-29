@@ -1243,6 +1243,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   type PushAdvertisement = Readonly<{
     capabilities: Awaited<ReturnType<typeof getRemoteInfo2>>['capabilities'];
     advertised: Map<string, string>;
+    /** Read by an earlier push of the session, so another writer may have moved a ref since. */
+    reused?: boolean;
   }>;
   const sessionAdvertisements = new WeakMap<RevisionPushSession, Map<string, PushAdvertisement>>();
   const takeAdvertisement = async (
@@ -1254,7 +1256,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     const taken = kept?.get(url);
     if (taken !== undefined) {
       kept?.delete(url);
-      return taken;
+      return { ...taken, reused: true };
     }
     /* `receive-pack`'s own, which carries the capabilities the request may use
      * as well as the refs. Seam 1 of 3 (N1), exactly as in `advertisedReferences`. */
@@ -1269,10 +1271,18 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   const keepAdvertisement = (session: RevisionPushSession | undefined, url: string, kept: PushAdvertisement): void => {
     if (session !== undefined) {
       const byUrl = sessionAdvertisements.get(session) ?? new Map<string, PushAdvertisement>();
-      byUrl.set(url, kept);
+      byUrl.set(url, { capabilities: kept.capabilities, advertised: kept.advertised });
       sessionAdvertisements.set(session, byUrl);
     }
   };
+  /*
+   * The server's own compare-and-set refusing a command: the ref was not at
+   * the old value this push sent. Git's receive-pack says `failed to update
+   * ref` (or `failed to lock`, `cannot lock ref`, `stale info`), and an atomic
+   * push's other commands `atomic transaction failed`.
+   */
+  const serverLockRefusal =
+    /failed to (?:update|lock) ref|cannot lock ref|stale info|is at [\da-f]+ but expected|atomic transaction failed/iu;
 
   const requireHttp = (): RevisionHttpClient => {
     if (options.http === undefined) {
@@ -1929,14 +1939,17 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
        * those are read, because an object fetched from this remote is still a
        * pointer here until somebody opens it. */
       const client = await lfsClient(configuredRemote ?? remoteOf(input.remote, url));
+      /* Uploads can take minutes, so an advertisement read before them is not kept for the session's next push. */
+      let uploaded = false;
       if (client !== undefined) {
         const pointers = await offeredPointers(ordered);
         try {
-          await client.upload({
+          const sent = await client.upload({
             signal: input.signal,
             pointers: [...pointers].map(([oid, { size }]) => ({ oid, size })),
             read: async (oid) => localLfsObject(oid, pointers.get(oid)?.path),
           });
+          uploaded = sent.length > 0;
         } catch (error) {
           /* The server counts in object ids; the person reads paths (D16). */
           if (error instanceof LfsQuotaError) {
@@ -1978,13 +1991,19 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         for (const command of commands) {
           const answer = report.refs.get(command.remoteName);
           if (answer?.ok !== true) {
+            /* An old value from an earlier push's advertisement that the server's
+             * compare-and-set refused means another writer moved the ref in
+             * between: the remote moved, which is a lost lease (D39), not raw git text. */
+            const moved = advertisement.reused === true && serverLockRefusal.test(answer?.reason ?? '');
             results.set(
               command.name,
               refused(
                 command.name,
-                answer === undefined
-                  ? 'The remote did not report this ref.'
-                  : remoteRefusalSaid(answer.reason, report.said),
+                moved
+                  ? 'leaseLost'
+                  : answer === undefined
+                    ? 'The remote did not report this ref.'
+                    : remoteRefusalSaid(answer.reason, report.said),
               ),
             );
             continue;
@@ -2007,7 +2026,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         }
       }
       const pushed = Object.freeze({ refs: Object.freeze(input.refs.map((ref) => results.get(ref.name)!)) });
-      if (pushed.refs.every((entry) => entry.status !== 'rejected')) {
+      if (!uploaded && pushed.refs.every((entry) => entry.status !== 'rejected')) {
         keepAdvertisement(input.session, url, advertisement);
       }
       return pushed;

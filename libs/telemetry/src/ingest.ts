@@ -329,8 +329,10 @@ const syncAttemptEntrySchema = z.object({
     direction: z.enum(['push', 'pull']),
     outcome: z.enum(['ok', 'retry', 'quota_refused', 'offline', 'error']),
     placement: z.enum(['browser', 'desktop', 'daemon']),
-    /** First unsynced mint to the server's ack, on an acknowledged push only. */
+    /** First unsynced change (or the push request) to the server's ack, on an acknowledged push only. */
     lagMilliseconds: z.number().nonnegative().optional(),
+    /** What dated the lag: the first unsynced change, the oldest queued entry, or the push request itself. */
+    lagSince: z.enum(['change', 'queue', 'request']).optional(),
     /** `.git/sync-pending` depth when the push started. */
     pending: z.number().int().nonnegative().optional(),
   }),

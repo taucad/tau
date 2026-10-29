@@ -1007,6 +1007,45 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
     180_000,
   );
 
+  /* Review F5b: a kept advertisement can be stale by the next push; the server's compare-and-set refusing it is a lost lease. */
+  it.skipIf(leg.name === 'native git')(
+    'row 9c: a ref another writer moved after the session read its advertisement is refused as leaseLost',
+    async () => {
+      const remote = await startGitHttpBackend({ root: await temporaryRoot('remote-stale-advert') });
+      try {
+        const one = await device({ leg, label: 'a-stale-advert', remoteUrl: remote.url, files: { 'a.ts': '1\n' } });
+        const first = await record({ device: one, files: { 'a.ts': '1\n' }, summary: 'First' });
+        const session: RevisionPushSession = {};
+        const pushed = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }], session });
+        expect(pushed.refs[0]).toMatchObject({ status: 'updated', head: first });
+        const second = await record({ device: one, files: { 'a.ts': '2\n' }, summary: 'Second', parent: first });
+        /* A second writer moves the branch between this session's two pushes. */
+        const tree = await remote.git(['rev-parse', `${first}^{tree}`]);
+        const other = await remote.git([
+          '-c',
+          'user.name=Another writer',
+          '-c',
+          'user.email=another@example.test',
+          'commit-tree',
+          tree,
+          '-p',
+          first,
+          '-m',
+          'Another writer',
+        ]);
+        await remote.git(['update-ref', mainRef, other]);
+
+        const stale = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }], session });
+        expect(stale.refs[0]).toMatchObject({ status: 'rejected', reason: 'leaseLost' });
+        expect(second).not.toBe(other);
+        await expect(remote.git(['rev-parse', mainRef])).resolves.toBe(other);
+      } finally {
+        await remote.close();
+      }
+    },
+    180_000,
+  );
+
   it('row 4 (red pin e): a device whose work the remote never took drains its queue on the next open', async () => {
     const remoteRoot = await temporaryRoot('remote-drain');
     const first = await startGitHttpBackend({ root: remoteRoot });

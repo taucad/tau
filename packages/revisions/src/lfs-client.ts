@@ -497,12 +497,16 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
        * aborted, and that failure is what the push reports. */
       const failed = new AbortController();
       const transfer = signal === undefined ? failed.signal : AbortSignal.any([signal, failed.signal]);
-      const limit = Math.max(1, options.uploadConcurrency ?? lfsUploadConcurrency);
+      const requested = options.uploadConcurrency ?? lfsUploadConcurrency;
+      /* A malformed setting (NaN, a fraction, below one) falls back to something that still uploads. */
+      const limit = Number.isFinite(requested) ? Math.max(1, Math.floor(requested)) : lfsUploadConcurrency;
       const running = new Map<number, Promise<void>>();
       let resident = 0;
       let failure: { error: unknown } | undefined;
       const stopped = (): boolean => failure !== undefined;
       const sendOne = async (answer: BatchObject, index: number): Promise<void> => {
+        /* A turn first, so the pool has recorded this task before its `finally` removes it, even if `read` throws at once. */
+        await Promise.resolve();
         try {
           const content = await read(answer.oid);
           transfer.throwIfAborted();
@@ -515,7 +519,6 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
           failed.abort();
         } finally {
           resident -= answer.size;
-          /* `read` is awaited first, so the pool has recorded this task before it settles. */
           running.delete(index);
         }
       };
@@ -527,10 +530,14 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
         ) {
           await Promise.race(running.values());
         }
+        /* An abort from outside stops admission like a failure does, so the ones in flight are still awaited. */
+        if (!stopped() && signal?.aborted === true) {
+          failure = { error: signal.reason };
+          failed.abort();
+        }
         if (stopped()) {
           break;
         }
-        signal?.throwIfAborted();
         resident += answer.size;
         running.set(index, sendOne(answer, index));
       }

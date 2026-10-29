@@ -1,7 +1,10 @@
 import { Body, Controller, Get, Put, Query } from '@nestjs/common';
 import type { AuthUser } from '#auth/auth.type.js';
 import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
-import { UpdateTelemetryPurposesDto } from '#api/telemetry-purposes/telemetry-purpose.dto.js';
+import {
+  TelemetryPurposesQueryDto,
+  UpdateTelemetryPurposesDto,
+} from '#api/telemetry-purposes/telemetry-purpose.dto.js';
 import type { EffectiveTelemetryPurposes } from '#api/telemetry-purposes/telemetry-purpose.schema.js';
 import { TelemetryPurposeService } from '#api/telemetry-purposes/telemetry-purpose.service.js';
 
@@ -20,9 +23,9 @@ export class TelemetryPurposeController {
   @Get()
   public async getEffectivePurposes(
     @User() user: AuthUser,
-    @Query('projectId') projectId?: string,
+    @Query() query: TelemetryPurposesQueryDto,
   ): Promise<EffectiveTelemetryPurposes> {
-    return this.telemetryPurposeService.getEffectivePurposes(user.id, projectId);
+    return this.telemetryPurposeService.getEffectivePurposes(user.id, query.projectId);
   }
 
   /** Record the decisions the principal took against the notice they were shown. */

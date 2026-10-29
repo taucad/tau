@@ -102,5 +102,10 @@ export const updateTelemetryPurposesSchema = z
   })
   .meta({ id: 'UpdateTelemetryPurposes' });
 
+/** The read query. A repeated or empty `projectId` is refused rather than passed on. */
+export const telemetryPurposesQuerySchema = z.object({
+  projectId: z.string().min(1).optional(),
+});
+
 /** A decision submission. */
 export type UpdateTelemetryPurposesInput = z.infer<typeof updateTelemetryPurposesSchema>;

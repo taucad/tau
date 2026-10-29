@@ -119,10 +119,8 @@ describe('useTelemetryPurposes', () => {
   });
 
   it('sends the notice it displayed with the decision', async () => {
-    const fetchMock = respond(
-      answer(),
-      answer({ purposes: [{ purpose: 'summary', allowed: true, decided: true, granted: true }] }),
-    );
+    const decided = answer({ purposes: [{ purpose: 'summary', allowed: true, decided: true, granted: true }] });
+    const fetchMock = respond(answer(), decided, decided);
     const { result } = renderHook(() => useTelemetryPurposes(), { wrapper });
     await waitFor(() => {
       expect(result.current.canDecide).toBe(true);
@@ -139,6 +137,26 @@ describe('useTelemetryPurposes', () => {
       noticeVersion: 'notice-1',
       decisions: [{ purpose: 'summary', granted: true }],
     });
+  });
+
+  it('refetches the project-scoped answer instead of caching the account-level PUT answer', async () => {
+    const scoped = answer({ projectId: 'project-a' });
+    const accountLevel = answer({ purposes: [{ purpose: 'summary', allowed: true, decided: true, granted: true }] });
+    const fetchMock = respond(scoped, accountLevel, scoped);
+    const { result } = renderHook(() => useTelemetryPurposes({ projectId: 'project-a' }), { wrapper });
+    await waitFor(() => {
+      expect(result.current.canDecide).toBe(true);
+    });
+
+    result.current.decide({ purpose: 'summary', granted: true });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+    await waitFor(() => {
+      expect(result.current.effective?.projectId).toBe('project-a');
+    });
+    expect(result.current.isAllowed('summary')).toBe(false);
   });
 
   it('cannot decide while no notice is in force', async () => {

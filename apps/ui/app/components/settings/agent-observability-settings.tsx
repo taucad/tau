@@ -113,6 +113,8 @@ export function AgentObservabilitySettings(props: Readonly<{ projectId?: string 
               const state = stateOf(purpose);
               const copy = purposeCopy[purpose];
               const blocked = state.refusal !== undefined && structuralRefusals.has(state.refusal);
+              // A grant the plan or project overrides still shows as held, so it can always be withdrawn.
+              const held = blocked && state.granted;
               return (
                 <label
                   key={purpose}
@@ -127,8 +129,8 @@ export function AgentObservabilitySettings(props: Readonly<{ projectId?: string 
                   <Switch
                     aria-label={copy.label}
                     aria-describedby={`${describedBy}-${purpose}`}
-                    checked={state.allowed}
-                    disabled={blocked || isDeciding || !canDecide}
+                    checked={state.allowed || held}
+                    disabled={(blocked && !held) || isDeciding || !canDecide}
                     onCheckedChange={(granted) => {
                       decide({ purpose, granted });
                     }}

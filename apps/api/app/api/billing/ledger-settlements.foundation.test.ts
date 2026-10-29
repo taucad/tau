@@ -162,9 +162,8 @@ describe('ledgerSettlements PostgreSQL foundation', () => {
     const pending = await admitted(fixture, `pending-${randomUUID()}`, 'project-a');
     const window = { environment, from, to: new Date(Date.now() + 1000) };
 
-    const settlements = (await ledgerSettlements(database, window)).filter(
-      ({ principal }) => principal === fixture.userId,
-    );
+    const read = await ledgerSettlements(database, window);
+    const settlements = read.filter(({ principal }) => principal === fixture.userId);
 
     expect(settlements.toSorted((a, b) => Number(b.chargedAtoms - a.chargedAtoms))).toEqual(
       charged.map(({ operation, receipt }) => ({
@@ -211,8 +210,10 @@ describe('ledgerSettlements PostgreSQL foundation', () => {
     const before = new Date(Date.now() - 1000);
     await settle(fixture, `outside-${randomUUID()}`, ['project-a', 2n]);
     const after = new Date(Date.now() + 1000);
-    const mine = async (window: Parameters<typeof ledgerSettlements>[1]) =>
-      (await ledgerSettlements(database, window)).filter(({ principal }) => principal === fixture.userId);
+    const mine = async (window: Parameters<typeof ledgerSettlements>[1]) => {
+      const read = await ledgerSettlements(database, window);
+      return read.filter(({ principal }) => principal === fixture.userId);
+    };
 
     expect(await mine({ environment, from: before, to: after })).toHaveLength(1);
     expect(await mine({ environment, from: new Date(before.getTime() - 60_000), to: before })).toEqual([]);

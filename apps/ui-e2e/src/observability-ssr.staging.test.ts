@@ -33,13 +33,13 @@ const pollInterval = 5000;
 /** How long a second query waits for a duplicate before calling one event "exactly one". */
 const duplicateWindow = 20_000;
 const requestIdPattern = /^[\w-]{1,64}$/u;
+/** The `tau-api` project, as the organization events index addresses it. */
+const apiProjectId = '4512297038512128';
 
 type SentryTag = { key: string; value: string };
 type SentryFrame = { filename?: string; function?: string; inApp?: boolean };
 type SentryEventDetail = {
   tags: SentryTag[];
-  release?: { version?: string };
-  environment?: string;
   entries: Array<{
     type: string;
     data: { values?: Array<{ value?: string; stacktrace?: { frames?: SentryFrame[] } }> };
@@ -99,19 +99,28 @@ const stagingRelease = async (): Promise<string> => {
   return `tau-ui@${String(body.buildId)}`;
 };
 
-/** `tau-api` event ids carrying a request id, polled within the same bound. */
+/**
+ * `tau-api` event ids carrying a request id, polled within the same bound. This reads the organization events
+ * index, as `pollSentryEventIds` does for `tau-ui`: the per-project events endpoint does not search tags, so it
+ * never returned an event that Sentry had already indexed with the right `request_id`.
+ */
 const pollApiEventIds = async (requestId: string, token: string): Promise<string[]> => {
-  const query = new URLSearchParams({ query: `request_id:${requestId}`, statsPeriod: '1h' });
+  const query = new URLSearchParams({
+    project: apiProjectId,
+    environment: 'staging',
+    query: `request_id:${requestId}`,
+    field: 'id',
+    statsPeriod: '1h',
+  });
   const deadline = Date.now() + pollTimeout;
   let attempts = 0;
   // oxlint-disable no-await-in-loop -- Polls are sequential and share one bounded deadline.
   while (Date.now() < deadline) {
     attempts += 1;
-    const rows = (await sentryGet(`/projects/taucad/tau-api/events/?${query.toString()}`, token)) as Array<{
-      eventID?: string;
-      id?: string;
-    }>;
-    const ids = rows.map((row) => row.eventID ?? row.id ?? '').filter(Boolean);
+    const page = (await sentryGet(`/organizations/taucad/events/?${query.toString()}`, token)) as {
+      data?: Array<{ id?: string }>;
+    };
+    const ids = (page.data ?? []).map((row) => row.id ?? '').filter(Boolean);
     if (ids.length > 0) {
       return [...new Set(ids)];
     }
@@ -144,8 +153,9 @@ describe('P2 staging signal acceptance: SSR errors and API correlation', () => {
     expect(tagOf(event, 'route')).toBe(harnessRouteId);
     expect(tagOf(event, 'http_status')).toBe('500');
     expect(tagOf(event, 'e2e_run')).toBe(runId);
-    expect(event.environment).toBe('staging');
-    expect(event.release?.version).toBe(release);
+    // The project event-detail endpoint reports both as tags; it has no top-level `environment`.
+    expect(tagOf(event, 'environment')).toBe('staging');
+    expect(tagOf(event, 'release')).toBe(release);
 
     const exception = event.entries.find((entry) => entry.type === 'exception')?.data.values?.at(-1);
     expect(exception?.value).toBe('Observability harness SSR loader error');

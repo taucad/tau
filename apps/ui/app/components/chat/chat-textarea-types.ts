@@ -147,6 +147,8 @@ export type ChatTextareaProperties = {
   readonly onEscapePressed?: () => void;
   readonly onBlur?: () => void;
   readonly enableAutoFocus?: boolean;
+  /** Let Home accept native text before the rich editor is hydrated. */
+  readonly enableEarlyInput?: boolean;
   readonly className?: string;
   readonly enableContextActions?: boolean;
   readonly enableKernelSelector?: boolean;

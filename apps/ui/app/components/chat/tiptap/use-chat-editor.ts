@@ -197,6 +197,7 @@ export type UseChatEditorOptions = {
   onSlashCommand?: (item: SlashCommandItem) => void;
   onContextAction?: (item: ContextSuggestionItem) => void;
   placeholder?: string;
+  initialText?: string;
 };
 
 export type UseChatEditorReturn = {
@@ -224,6 +225,7 @@ export function useChatEditor({
   onSlashCommand,
   onContextAction,
   placeholder = 'Ask Tau to build anything...',
+  initialText,
 }: UseChatEditorOptions): UseChatEditorReturn {
   'use no memo';
 
@@ -321,6 +323,7 @@ export function useChatEditor({
   handleImagePasteRef.current = handleImagePaste;
 
   const editor = useEditor({
+    content: initialText === undefined ? undefined : buildEditorContentJson([{ type: 'text', value: initialText }]),
     extensions: [
       Document,
       Paragraph,

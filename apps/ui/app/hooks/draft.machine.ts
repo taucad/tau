@@ -313,7 +313,12 @@ const headAddresses = (context: DraftMachineContext, target: DraftTarget): boole
 type DraftMachineEvents =
   | { type: 'initializeFromChat' }
   | ({ type: 'hydrateDraft' } & DraftHydration)
-  | { type: 'setDraftText'; text: string }
+  | {
+      type: 'setDraftText';
+      text: string;
+      /** An edit made before this actor was available, including typing then deleting back to empty. */
+      adoptedEdit?: true;
+    }
   | ({ type: 'addDraftAttachment' } & AddAttachment)
   | { type: 'removeDraftAttachment'; index: number }
   | { type: 'setDraftToolChoice'; toolChoice: string | string[] }
@@ -458,7 +463,7 @@ const abandonHeadFor =
 const whenDraftTextChanged =
   (transition: Readonly<{ target: string; reenter?: boolean }>) =>
   ({ context, event }: DraftArgs<'setDraftText'>) =>
-    event.text === context.draftText ? undefined : transition;
+    event.text === context.draftText && !(event.adoptedEdit && !context.touched.draft) ? undefined : transition;
 
 const whenEditDraftTextChanged =
   (transition: Readonly<{ target: string; reenter?: boolean }>) =>
@@ -483,7 +488,7 @@ export const draftMachine = setup({
   },
 }).createMachine({
   id: 'draft',
-  version: '1',
+  version: '2',
   /* A fault no transition modelled is recorded and the draft keeps answering (MC-R12). */
   onError: ({ event }) => ({
     context: { fault: event.error instanceof Error ? event.error.message : 'draft fault' },
@@ -532,7 +537,7 @@ export const draftMachine = setup({
           },
         },
         setDraftText: ({ context, event }) =>
-          event.text === context.draftText
+          event.text === context.draftText && !(event.adoptedEdit && !context.touched.draft)
             ? /* Idempotent re-delivery: the same text changes nothing. */ {}
             : { context: { draftText: event.text, touched: touch(context.touched, { draft: true }) } },
         addDraftAttachment: enqueueAttachment,

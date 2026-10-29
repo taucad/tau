@@ -686,6 +686,30 @@ describe('draftMachine', () => {
     ]);
     const storedEdit = userMessage([{ type: 'text', text: 'stored edit' }]);
 
+    it('should retain an adopted empty edit without clearing untouched selectors or persisting it twice', async () => {
+      const { actor, drafts, selections } = createHarness();
+      actor.start();
+      try {
+        actor.send({ type: 'setDraftText', text: '', adoptedEdit: true });
+        actor.send({ type: 'hydrateDraft', draft: recordDraft, toolChoice: 'required', mode: 'plan' });
+        expect(actor.getSnapshot().context).toMatchObject({
+          draftText: '',
+          draftAttachments: [],
+          draftToolChoice: 'required',
+          draftMode: 'plan',
+          touched: { draft: true, toolChoice: false, mode: false },
+        });
+        await waitFor(actor, () => drafts.length === 1);
+        expect(drafts[0]!.draft.parts).toEqual([]);
+        actor.send({ type: 'setDraftText', text: '', adoptedEdit: true });
+        await pastDebounce();
+        expect(drafts).toHaveLength(1);
+        expect(selections).toEqual([]);
+      } finally {
+        actor.stop();
+      }
+    });
+
     it('should populate every field on a pristine composer without persisting', async () => {
       const { actor, drafts, edits, selections, stored } = createHarness();
       actor.start();

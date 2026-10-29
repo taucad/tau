@@ -14,12 +14,14 @@ import { projectUrl } from '#utils/project-url.utils.js';
 
 type NewProjectChatComposerProperties = {
   readonly enableAutoFocus?: boolean;
+  readonly enableEarlyInput?: boolean;
   readonly className?: string;
 };
 
 /** Shared direct-create composer rendered inside an existing chat provider. */
 export function NewProjectChatComposer({
   enableAutoFocus = true,
+  enableEarlyInput = false,
   className,
 }: NewProjectChatComposerProperties): React.JSX.Element {
   const navigate = useNavigate();
@@ -143,6 +145,7 @@ export function NewProjectChatComposer({
         <KernelSelector selectedKernel={kernel} onKernelChange={setKernel} />
       </div>
       <ChatTextarea
+        enableEarlyInput={enableEarlyInput}
         ref={textareaRef}
         enableAutoFocus={enableAutoFocus}
         enableContextActions={false}

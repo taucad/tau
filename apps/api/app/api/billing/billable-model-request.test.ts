@@ -378,6 +378,21 @@ describe('billable model request contract', () => {
     ).toBe(false);
   });
 
+  /* Pi 1.4.0 stopped emitting `function.strict` on Completions tools. Absent and
+   * `false` are the same non-strict provider behaviour and the same charge, so the
+   * gate admits both; `strict: true` selects structured outputs and stays refused. */
+  it('admits a Completions function tool with strict absent or false, and refuses strict true', () => {
+    const tool = (function_: Record<string, unknown>) => ({
+      model: 'google/gemini-3.5-flash',
+      messages: [{ role: 'user', content: 'fixture' }],
+      stream: true,
+      max_completion_tokens: 16,
+      tools: [{ type: 'function', function: { name: 'screenshot', parameters: {}, ...function_ } }],
+    });
+    expect(safeParseBillableModelRequest(tool({}), 'openai-completions').success).toBe(true);
+    expect(safeParseBillableModelRequest(tool({ strict: false }), 'openai-completions').success).toBe(true);
+    expect(safeParseBillableModelRequest(tool({ strict: true }), 'openai-completions').success).toBe(false);
+  });
   it('rejects Anthropic cache metadata inside Completions content', () => {
     expect(
       safeParseBillableModelRequest(

@@ -16,7 +16,7 @@ import { validatePicogkBrowserImage } from '#picogk-browser-images.js';
  * @property {number} generation
  * @property {import('../src/picogk-browser-session.ts').PicogkBrowserAssets | undefined} assets
  * @property {import('../src/picogk-browser-session.ts').PicogkBrowserSnapshot | undefined} snapshot
- * @property {{method: string}} frame
+ * @property {{method: string, requestId: string, protocolVersion: number, params: unknown}} frame
  */
 let generation = 0;
 let state = 'new';
@@ -28,6 +28,13 @@ let queued;
 let waiting;
 /** @type {string | undefined} */
 let activeMethod;
+const artifactReceipt = z.object({
+  artifactPath: z.string(),
+  byteLength: z.number().int().nonnegative(),
+  sha256: z.string().regex(/^[a-f\d]{64}$/iu),
+});
+/** @type {Map<string, z.infer<typeof artifactReceipt>>} */
+const artifacts = new Map();
 
 /** @param {unknown} error - Runtime failure. */
 const fail = (error) => {
@@ -171,6 +178,10 @@ const initialize = async (message) => {
       if (!frame || typeof frame !== 'object') {
         throw new Error('Invalid managed response.');
       }
+      if (activeMethod === 'build' && 'result' in frame) {
+        const receipt = artifactReceipt.parse(frame.result);
+        artifacts.set(receipt.artifactPath, receipt);
+      }
       const kind = 'type' in frame && frame.type === 'ready' ? 'ready' : 'response';
       state = 'ready';
       globalThis.postMessage({ generation, kind, frame });
@@ -200,6 +211,54 @@ globalThis.addEventListener('message', async (/** @type {MessageEvent<Incoming |
     }
     if (state !== 'ready' || data.kind !== 'request' || queued !== undefined) {
       throw new Error('Overlapping or invalid PicoGK browser request.');
+    }
+    if (data.frame.method === '$readArtifact') {
+      const input = artifactReceipt
+        .extend({
+          offset: z.number().int().nonnegative(),
+          length: z
+            .number()
+            .int()
+            .positive()
+            .max(8 * 1024 * 1024),
+        })
+        .parse(data.frame.params);
+      const receipt = artifacts.get(input.artifactPath);
+      if (
+        !receipt ||
+        receipt.byteLength !== input.byteLength ||
+        receipt.sha256 !== input.sha256 ||
+        !input.artifactPath.startsWith('/artifacts/') ||
+        input.offset + input.length > receipt.byteLength
+      ) {
+        throw new Error('Unknown or invalid PicoGK artifact range.');
+      }
+      relativePath(input.artifactPath.slice('/artifacts/'.length));
+      const bytes = new Uint8Array(input.length);
+      const stream = runtime.Module.FS.open(input.artifactPath, 'r');
+      try {
+        if (
+          runtime.Module.FS.stat(input.artifactPath).size !== receipt.byteLength ||
+          runtime.Module.FS.read(stream, bytes, 0, bytes.length, input.offset) !== bytes.length
+        ) {
+          throw new Error('PicoGK artifact changed after delivery.');
+        }
+      } finally {
+        runtime.Module.FS.close(stream);
+      }
+      globalThis.postMessage(
+        {
+          generation,
+          kind: 'response',
+          frame: {
+            protocolVersion: data.frame.protocolVersion,
+            requestId: data.frame.requestId,
+            result: bytes,
+          },
+        },
+        { transfer: [bytes.buffer] },
+      );
+      return;
     }
     state = 'running';
     activeMethod = data.frame.method;

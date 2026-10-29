@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { MockProxy } from 'vitest-mock-extended';
@@ -372,5 +373,119 @@ describe('PicoGK browser session', () => {
           }),
       ).toThrow('timeouts');
     }
+  });
+});
+
+describe('PicoGK browser artifact transfer', () => {
+  const receipt = (bytes: Uint8Array<ArrayBuffer>) => ({
+    artifactPath: '/artifacts/model.tau-mesh',
+    byteLength: bytes.length,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+  });
+  const initialized = async () => {
+    const { session, workers } = harness();
+    const build = request(session);
+    await tick();
+    const worker = workers[0]!;
+    ready(worker);
+    await tick();
+    reply(worker, {});
+    await build;
+    return { session, worker };
+  };
+
+  it('should transfer bounded chunks and verify the whole digest', async () => {
+    const { session, worker } = await initialized();
+    const bytes = new Uint8Array(8 * 1024 * 1024 + 3).fill(7);
+    const result = session.readArtifact({ snapshot, artifact: receipt(bytes), signal: new AbortController().signal });
+    await tick();
+    const range = () =>
+      z
+        .object({
+          frame: z.object({ method: z.string(), params: z.object({ offset: z.number(), length: z.number() }) }),
+        })
+        .parse(worker.postMessage.mock.calls.at(-1)?.[0]).frame;
+    expect(range()).toEqual({ method: '$readArtifact', params: { offset: 0, length: 8 * 1024 * 1024 } });
+    reply(worker, { requestId: '2', result: bytes.slice(0, 8 * 1024 * 1024) });
+    await tick();
+    expect(range()).toEqual({ method: '$readArtifact', params: { offset: 8 * 1024 * 1024, length: 3 } });
+    reply(worker, { requestId: '3', result: bytes.slice(-3) });
+    const received = await result;
+    expect(received.length).toBe(bytes.length);
+    expect(received.every((value, index) => value === bytes[index])).toBe(true);
+    expect(received === bytes).toBe(false);
+  });
+
+  it('should verify empty artifacts without a chunk request', async () => {
+    const { session, worker } = await initialized();
+    const result = await session.readArtifact({
+      snapshot,
+      artifact: receipt(new Uint8Array()),
+      signal: new AbortController().signal,
+    });
+    expect(result).toHaveLength(0);
+    expect(worker.postMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([new Uint8Array([1]), new Uint8Array([1, 3])])(
+    'should reject incomplete or changed bytes %j',
+    async (chunk) => {
+      const { session, worker } = await initialized();
+      const result = session.readArtifact({
+        snapshot,
+        artifact: receipt(new Uint8Array([1, 2])),
+        signal: new AbortController().signal,
+      });
+      const rejected = expect(result).rejects.toThrow(/Incomplete|integrity/iu);
+      await tick();
+      reply(worker, { requestId: '2', result: chunk });
+      await rejected;
+    },
+  );
+
+  it.each([{ byteLength: -1 }, { byteLength: Number.NaN }, { sha256: 'invalid' }])(
+    'should refuse an invalid receipt %j',
+    async (change) => {
+      const { session } = await initialized();
+      await expect(
+        session.readArtifact({
+          snapshot,
+          artifact: { ...receipt(new Uint8Array()), ...change },
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toThrow('receipt');
+    },
+  );
+
+  it('should refuse old or absent worker generations and explicit aborts', async () => {
+    const { session } = harness();
+    const options = { snapshot, artifact: receipt(new Uint8Array()), signal: new AbortController().signal };
+    await expect(session.readArtifact(options)).rejects.toMatchObject({ name: 'AbortError' });
+    const active = await initialized();
+    await expect(
+      active.session.readArtifact({ ...options, snapshot: { ...snapshot, revision: 'old' } }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(active.session.readArtifact({ ...options, signal: AbortSignal.abort() })).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    active.session.cleanup();
+    await expect(active.session.readArtifact(options)).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('should reject an artifact read superseded by a new source', async () => {
+    const { session, worker } = await initialized();
+    const result = session.readArtifact({
+      snapshot,
+      artifact: receipt(new Uint8Array([1])),
+      signal: new AbortController().signal,
+    });
+    const rejected = expect(result).rejects.toMatchObject({ name: 'AbortError' });
+    await tick();
+    reply(worker, { requestId: '2', result: new Uint8Array([1]) });
+    const replacement = request(session, { source: { ...snapshot, revision: 'new' } });
+    const replacementRejected = expect(replacement).rejects.toMatchObject({ name: 'AbortError' });
+    session.cleanup();
+    await rejected;
+    await replacementRejected;
   });
 });

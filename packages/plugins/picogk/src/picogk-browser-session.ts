@@ -149,6 +149,62 @@ export class PicogkBrowserSession {
     return result;
   }
 
+  /**
+   * Read a delivered mesh in bounded transfers from its existing worker generation.
+   * @param options - Build receipt, authorized snapshot and operation cancellation.
+   * @returns Owned bytes after checking the complete build digest.
+   */
+  public async readArtifact(options: {
+    readonly snapshot: PicogkBrowserSnapshot;
+    readonly artifact: { readonly artifactPath: string; readonly byteLength: number; readonly sha256: string };
+    readonly signal: AbortSignal;
+  }): Promise<Uint8Array<ArrayBuffer>> {
+    const { worker, generation } = this;
+    const assertCurrent = (): void => {
+      options.signal.throwIfAborted();
+      if (
+        !worker ||
+        this.worker !== worker ||
+        this.generation !== generation ||
+        this.snapshot?.revision !== options.snapshot.revision ||
+        this.disposed
+      ) {
+        throw new DOMException('The PicoGK artifact generation is no longer available.', 'AbortError');
+      }
+    };
+    assertCurrent();
+    const { artifactPath, byteLength, sha256 } = options.artifact;
+    if (!Number.isSafeInteger(byteLength) || byteLength < 0 || !/^[a-f\d]{64}$/iu.test(sha256)) {
+      throw new Error('Invalid PicoGK artifact receipt.');
+    }
+    const bytes = new Uint8Array(byteLength);
+    for (let offset = 0; offset < byteLength; offset += 8 * 1024 * 1024) {
+      assertCurrent();
+      const length = Math.min(8 * 1024 * 1024, byteLength - offset);
+      // oxlint-disable-next-line no-await-in-loop -- Transfer one bounded chunk at a time from the owning generation.
+      const chunk = await this.request({
+        snapshot: options.snapshot,
+        method: '$readArtifact',
+        params: { artifactPath, byteLength, sha256, offset, length },
+        schema: z.instanceof(Uint8Array),
+        signal: options.signal,
+      });
+      assertCurrent();
+      if (chunk.length !== length) {
+        throw new Error('Incomplete PicoGK artifact transfer.');
+      }
+      bytes.set(chunk, offset);
+    }
+    const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (byte) =>
+      byte.toString(16).padStart(2, '0'),
+    ).join('');
+    assertCurrent();
+    if (digest !== sha256.toLowerCase()) {
+      throw new Error('PicoGK artifact integrity mismatch.');
+    }
+    return bytes;
+  }
+
   /** Terminate active work and release worker callbacks; queued requests remain rejected. */
   public cleanup(): void {
     this.disposed = true;

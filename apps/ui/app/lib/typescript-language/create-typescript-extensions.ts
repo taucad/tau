@@ -1,4 +1,8 @@
-import { renderTypeScriptDocumentation } from '#components/code/editor-documentation.js';
+import { definitionProvider } from '#components/code/editor-definition.js';
+import {
+  renderTypeScriptDocumentation,
+  typeScriptDocumentationMarkdown,
+} from '#components/code/editor-documentation.js';
 import type ts from 'typescript';
 import { autocompletion, snippet } from '@codemirror/autocomplete';
 import type { Completion, CompletionSource } from '@codemirror/autocomplete';
@@ -9,7 +13,11 @@ import { StateEffect, StateField } from '@codemirror/state';
 import type { Extension } from '@codemirror/state';
 import { Decoration, hoverTooltip, keymap, showDialog, showTooltip, ViewPlugin, WidgetType } from '@codemirror/view';
 import type { Tooltip, ViewUpdate, EditorView } from '@codemirror/view';
-import type { TypeScriptEditBasis, TypeScriptLocation } from '@taucad/lsp/typescript-worker/typescript-service';
+import type {
+  TypeScriptDocumentationPart,
+  TypeScriptEditBasis,
+  TypeScriptLocation,
+} from '@taucad/lsp/typescript-worker/typescript-service';
 import type { TypeScriptWorkerCommand } from '@taucad/lsp/typescript-worker/protocol';
 import type { EditorDocument } from '#lib/editor-document.js';
 import type { TypeScriptService } from '#lib/typescript-language/typescript-service.js';
@@ -175,6 +183,18 @@ export async function applyTypeScriptCompletionSelection(selection: CompletionSe
   } else {
     view.dispatch({ changes: { from, to, insert } });
   }
+}
+
+/** Worker documentation parts carry `{@link}` locations, so links open like F12 targets. */
+function documentationOf(
+  info:
+    | Readonly<{
+        documentation?: readonly TypeScriptDocumentationPart[];
+        tags?: ReadonlyArray<Readonly<{ name: string; text?: readonly TypeScriptDocumentationPart[] }>>;
+      }>
+    | undefined,
+): Readonly<{ markdown: string; targets: readonly TypeScriptLocation[] }> {
+  return typeScriptDocumentationMarkdown(info?.documentation ?? [], info?.tags ?? []);
 }
 
 /** Editor actions retain the worker's exact text basis for every touched file. */
@@ -390,6 +410,14 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
   let diagnosticsVersion = -1;
   let completionMarked = false;
   let diagnosticsMarked = false;
+  const openLink =
+    (targets: readonly TypeScriptLocation[]) =>
+    (index: number): void => {
+      const target = targets[index];
+      if (target) {
+        void runAction(options, async () => actions.navigateLocation(target));
+      }
+    };
   const completionSource: CompletionSource = async (context) => {
     const word = context.matchBefore(/[\w$]*/u);
     if (!context.explicit && (!word || word.from === word.to)) {
@@ -433,12 +461,15 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
             if (!unchanged(options, version)) {
               return null;
             }
-            const info = details.details?.documentation?.map((part) => part.text).join('') ?? '';
+            const documentation = documentationOf(details.details);
             const parts = details.details?.displayParts ?? [];
-            if (!info && parts.length === 0) {
+            if (!documentation.markdown && parts.length === 0) {
               return null;
             }
-            const dom = renderTypeScriptDocumentation(parts, info, context.view?.dom.ownerDocument);
+            const dom = renderTypeScriptDocumentation(parts, documentation.markdown, {
+              ownerDocument: context.view?.dom.ownerDocument,
+              onDefinitionLink: openLink(documentation.targets),
+            });
             return dom;
           } catch (error) {
             report(options, error);
@@ -556,14 +587,17 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
           return null;
         }
         const parts = info.displayParts ?? [];
-        const description = (info.documentation ?? []).map((part) => part.text).join('');
-        const text = parts.length > 0 || description;
+        const documentation = documentationOf(info);
+        const text = parts.length > 0 || documentation.markdown;
         return text
           ? {
               pos: info.textSpan.start,
               end: info.textSpan.start + info.textSpan.length,
               create: () => {
-                const dom = renderTypeScriptDocumentation(parts, description, view.dom.ownerDocument);
+                const dom = renderTypeScriptDocumentation(parts, documentation.markdown, {
+                  ownerDocument: view.dom.ownerDocument,
+                  onDefinitionLink: openLink(documentation.targets),
+                });
                 dom.classList.add('cm-typescript-hover');
                 return { dom };
               },
@@ -655,14 +689,8 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
       return span ? { from: lineEnd, to: span.textSpan.start + span.textSpan.length } : null;
     }),
     codeFolding(),
+    definitionProvider.of(async (_view, position) => runAction(options, async () => actions.definition(position))),
     keymap.of([
-      {
-        key: 'F12',
-        run: (view) => {
-          void runAction(options, async () => actions.definition(view.state.selection.main.head));
-          return true;
-        },
-      },
       {
         key: 'Alt-F12',
         run: (view) => {

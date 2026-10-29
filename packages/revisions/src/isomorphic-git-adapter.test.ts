@@ -622,11 +622,15 @@ describe('reading a tree with large objects', () => {
       }
       return deliver(url, init);
     });
-    const [first, second] = await Promise.allSettled([port.readTree(head), port.readTree(head)]);
-    expect(first.status).toBe('rejected');
-    expect(second.status === 'fulfilled' ? second.value?.get(parts[0]![0]!) : second.reason).toStrictEqual(
-      encoder.encode(parts[0]![1]),
+    const settled = await Promise.allSettled([port.readTree(head), port.readTree(head)]);
+    /* Which reader starts the shared transfer depends on how their local scans interleave, so either may be the one that fails. */
+    const failed = settled.filter((result) => result.status === 'rejected');
+    const read = settled.find(
+      (result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof port.readTree>>> =>
+        result.status === 'fulfilled',
     );
+    expect(failed).toHaveLength(1);
+    expect(read?.value?.get(parts[0]![0]!)).toStrictEqual(encoder.encode(parts[0]![1]));
   });
 
   it('fails closed, with no pointer in the tree, when there is no remote to ask', async () => {

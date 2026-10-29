@@ -236,7 +236,10 @@ describe('question dictation', () => {
     await user.click(screen.getByRole('button', { name: 'Dictate' }));
     expect(onHold).toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Send answer' })).toHaveAttribute('aria-disabled', 'false');
-    expect(screen.queryByRole('textbox', { name: 'Your answer' })).not.toBeInTheDocument();
+    // The draft stays in view beside the expanded microphone and its cancel button.
+    expect(screen.getByRole('textbox', { name: 'Your answer' })).toHaveValue('A seashell.');
+    expect(screen.getByRole('button', { name: 'Cancel dictation' })).toBeVisible();
+    expect(screen.getByRole('img', { name: 'Microphone waveform' })).toBeInTheDocument();
     expect(onAnswer).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Stop dictation' }));
     await waitFor(() => {

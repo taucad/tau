@@ -232,6 +232,8 @@ test('should render download CTAs and every archive before JavaScript', () => {
   expect(downloads).toContain('data-mac-intel="true" hidden=""');
   expect(downloads).toContain('Download ZIP for Apple silicon');
   expect(downloads).toContain('Download ZIP for Intel Mac');
+  // The icon is the link's own child, as the client renders the Apple silicon button, so both get the same padding.
+  expect(downloads).toMatch(/<a\b[^>]*data-download-platform="macIntel"[^>]*><svg/u);
   expect(downloads).toContain('Download for Windows');
   expect(downloads).toContain('Download for Linux');
   expect(downloads).not.toContain('DMG');

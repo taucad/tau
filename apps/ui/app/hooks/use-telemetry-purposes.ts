@@ -133,8 +133,9 @@ export function useTelemetryPurposes(options: Readonly<{ projectId?: string }> =
         body: JSON.stringify({ noticeVersion, decisions: [decision] }),
       });
     },
-    async onSuccess() {
-      // The PUT answers for the account alone; refetch so a project-scoped key keeps its project's answer.
+    async onSettled() {
+      // The PUT answers for the account alone, and a refusal (such as a stale notice) leaves the cached
+      // answer stale too; refetch either way so the key shows the server's current answer.
       await queryClient.invalidateQueries({ queryKey });
     },
   });

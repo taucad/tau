@@ -623,7 +623,7 @@ export const ChatTextareaDesktop = memo(function ({
           </div>
         ) : null}
 
-        <DictationFeedback transcript={dictation.transcript} error={dictation.error} />
+        <DictationFeedback transcript={dictation.transcript} />
         <ChatTextareaBar
           dictationControl={dictationControl}
           isDictating={dictationActive}

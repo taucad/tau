@@ -263,9 +263,42 @@ type ScenarioResult = Readonly<{
   stats: SectionStencilCapStats;
 }>;
 
+it.each(['webgl', 'webgpu', 'nodegl'] as const)(
+  'should clear stale color after a stencil-only draw on %s',
+  async (executionBackend) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const renderer = await createRenderer('viewport', executionBackend === 'webgpu' ? 'webgpu' : 'webgl', {
+      canvas,
+      nodePipeline: executionBackend === 'nodegl',
+    });
+    const disposables: Array<{ dispose: () => void }> = [renderer];
+    try {
+      const draw = createFrameRenderer(renderer, disposables, executionBackend === 'nodegl');
+      const scene = new THREE.Scene();
+      const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+      camera.position.z = 5;
+      camera.updateMatrixWorld();
+      scene.background = new THREE.Color(0xff_ff_ff);
+      await draw(scene, camera, () => undefined);
+      scene.background.set(0x00_00_00);
+      const pixels = await draw(scene, camera, () => undefined);
+      for (let offset = 0; offset < pixels.length; offset += 4) {
+        expect([pixels[offset], pixels[offset + 1], pixels[offset + 2]]).toEqual([0, 0, 0]);
+      }
+    } finally {
+      for (const resource of disposables.reverse()) {
+        resource.dispose();
+      }
+    }
+  },
+);
+
 type TimingResult = Readonly<{ triangles: number; medianMilliseconds: number; stats: SectionStencilCapStats }>;
 
-describe.each(['webgl', 'webgpu'] as const)('section stencil caps on %s', (backend) => {
+describe.each(['webgl', 'webgpu', 'nodegl'] as const)('section stencil caps on %s', (executionBackend) => {
+  const backend = executionBackend === 'webgl' ? 'webgl' : 'webgpu';
   const results: ScenarioResult[] = [];
   const timings: TimingResult[] = [];
   const errors: unknown[][] = [];
@@ -278,9 +311,12 @@ describe.each(['webgl', 'webgpu'] as const)('section stencil caps on %s', (backe
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
-    const renderer = await createRenderer('viewport', backend, canvas);
+    const renderer = await createRenderer('viewport', executionBackend === 'nodegl' ? 'webgl' : backend, {
+      canvas,
+      nodePipeline: executionBackend === 'nodegl',
+    });
     disposables.push(renderer);
-    const renderFrame = createFrameRenderer(renderer, disposables);
+    const renderFrame = createFrameRenderer(renderer, disposables, executionBackend === 'nodegl');
 
     // Readback row order differs per backend: a quad over the top half tells which row comes first.
     const calibration = new THREE.Scene();
@@ -348,6 +384,7 @@ describe.each(['webgl', 'webgpu'] as const)('section stencil caps on %s', (backe
       // The caps alone first, then with the outline, which follows every cut edge, overlapping ones included.
       // oxlint-disable-next-line no-await-in-loop -- one renderer draws and reads back each frame in turn.
       const capsOnly = await draw(0);
+
       // oxlint-disable-next-line no-await-in-loop -- one renderer draws and reads back each frame in turn.
       const outlined = await draw(1);
       const rayCamera = scenario.camera();
@@ -616,6 +653,7 @@ const compare = (
 const createFrameRenderer = (
   renderer: Awaited<ReturnType<typeof createRenderer>>,
   disposables: Array<{ dispose: () => void }>,
+  expectNodeWebGl = false,
 ): ((scene: THREE.Scene, camera: THREE.Camera, after: () => void) => Promise<ArrayLike<number>>) => {
   const dirty = new THREE.Scene();
   const fill = new THREE.Mesh(
@@ -657,9 +695,9 @@ const createFrameRenderer = (
       return pixels;
     };
   }
-  if (!(renderer.backend instanceof WebGPUBackend)) {
-    throw new Error(
-      'No WebGPU adapter, so three fell back to WebGL 2. Launch Chromium with one, for example --use-webgpu-adapter=swiftshader.',
+  if (renderer.backend instanceof WebGPUBackend === expectNodeWebGl) {
+    throw new TypeError(
+      `Unexpected initialized backend: expected ${expectNodeWebGl ? 'node WebGL2' : 'native WebGPU'}.`,
     );
   }
   const target = new THREE.RenderTarget(size, size, { depthBuffer: true, stencilBuffer: true });
@@ -738,7 +776,8 @@ type OutlineEdgeResult = Readonly<{
   inkedPixels: number;
 }>;
 
-describe.each(['webgl', 'webgpu'] as const)('section cap outline on %s', (backend) => {
+describe.each(['webgl', 'webgpu', 'nodegl'] as const)('section cap outline on %s', (executionBackend) => {
+  const backend = executionBackend === 'webgl' ? 'webgl' : 'webgpu';
   const results: OutlineEdgeResult[] = [];
   const disposables: Array<{ dispose: () => void }> = [];
 
@@ -746,9 +785,12 @@ describe.each(['webgl', 'webgpu'] as const)('section cap outline on %s', (backen
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
-    const renderer = await createRenderer('viewport', backend, canvas);
+    const renderer = await createRenderer('viewport', executionBackend === 'nodegl' ? 'webgl' : backend, {
+      canvas,
+      nodePipeline: executionBackend === 'nodegl',
+    });
     disposables.push(renderer);
-    const renderFrame = createFrameRenderer(renderer, disposables);
+    const renderFrame = createFrameRenderer(renderer, disposables, executionBackend === 'nodegl');
     const calibration = new THREE.Scene();
     const topHalf = new THREE.Mesh(new THREE.PlaneGeometry(2, 1), new THREE.MeshBasicMaterial({ color: 0xff_ff_ff }));
     topHalf.position.set(0, 0.5, 0);
@@ -944,7 +986,8 @@ const loopFixture = (): Array<Readonly<{ key: string; tint: number; geometry: TH
   ];
 };
 
-describe.each(['webgl', 'webgpu'] as const)('per-loop section caps on %s', (backend) => {
+describe.each(['webgl', 'webgpu', 'nodegl'] as const)('per-loop section caps on %s', (executionBackend) => {
+  const backend = executionBackend === 'webgl' ? 'webgl' : 'webgpu';
   const errors: unknown[][] = [];
   const disposables: Array<{ dispose: () => void }> = [];
   let frame: Frame | undefined;
@@ -958,9 +1001,12 @@ describe.each(['webgl', 'webgpu'] as const)('per-loop section caps on %s', (back
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
-    const renderer = await createRenderer('viewport', backend, canvas);
+    const renderer = await createRenderer('viewport', executionBackend === 'nodegl' ? 'webgl' : backend, {
+      canvas,
+      nodePipeline: executionBackend === 'nodegl',
+    });
     disposables.push(renderer);
-    const renderFrame = createFrameRenderer(renderer, disposables);
+    const renderFrame = createFrameRenderer(renderer, disposables, executionBackend === 'nodegl');
     const calibration = new THREE.Scene();
     const topHalf = new THREE.Mesh(new THREE.PlaneGeometry(2, 1), new THREE.MeshBasicMaterial({ color: 0xff_ff_ff }));
     topHalf.position.set(0, 0.5, 0);

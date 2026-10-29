@@ -18,6 +18,7 @@ const cappedModelIds = [
   'anthropic-claude-opus-4.8',
   'anthropic-claude-sonnet-5.5',
   'anthropic-claude-sonnet-5',
+  'openai-gpt-6.1-terra',
   'openai-gpt-6-astra',
   'openai-gpt-6-sol',
   'openai-gpt-6-luna',
@@ -53,6 +54,7 @@ const pdfInputModelIds = [
   'anthropic-claude-sonnet-5',
   'anthropic-claude-sonnet-4.6',
   'anthropic-claude-haiku-5.5',
+  'openai-gpt-6.1-terra',
   'openai-gpt-6-astra',
   'openai-gpt-6-sol',
   'openai-gpt-6-luna',
@@ -159,13 +161,14 @@ describe('modelList', () => {
         'anthropic-claude-opus-5',
         'anthropic-claude-opus-4.8',
         'anthropic-claude-sonnet-5.5',
+        'openai-gpt-6.1-terra',
         'openai-gpt-6-astra',
       ]);
       expect(
         getCloudCatalogEntries()
           .filter((model) => model.support?.reasoning?.levels.includes('max'))
           .map((model) => model.id),
-      ).toEqual(['anthropic-claude-sonnet-5.5']);
+      ).toEqual(['anthropic-claude-sonnet-5.5', 'openai-gpt-6.1-terra']);
     });
   });
 
@@ -329,6 +332,33 @@ describe('ModelService', () => {
     expect(service.models.map((model) => model.id)).toEqual(expect.arrayContaining(gpt56ModelIds));
     expect(listedModelIds).toEqual(expect.arrayContaining([...gpt56ModelIds, 'openai-gpt-5.5']));
     expect(modelList.openai['gpt-5.5']?.recommended).toBe(false);
+  });
+
+  it('should recommend GPT-6.1 Terra while retaining GPT-5.6 Terra as non-recommended', async () => {
+    const listedModels = await createModelService().getModels();
+    expect(listedModels.find((model) => model.id === 'openai-gpt-6.1-terra')).toMatchObject({
+      recommended: true,
+      model: 'gpt-6.1-terra',
+      provider: { id: 'openai', name: 'OpenAI' },
+      support: {
+        reasoning: { levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+        modalities: { input: ['text', 'image', 'pdf'], output: ['text'] },
+      },
+      details: {
+        contextWindow: maxEffectiveContextWindow,
+        maxTokens: 128_000,
+        knowledgeCutoff: '2026-06',
+        cost: { inputTokens: 1, outputTokens: 5, cacheReadTokens: 0.05, cacheWriteTokens: 1.25 },
+      },
+      configuration: { streaming: true, reasoning: { effort: 'high', summary: 'auto' } },
+    });
+    expect(listedModels.find((model) => model.id === 'openai-gpt-5.6-terra')).toMatchObject({ recommended: false });
+    expect(gatewayModelRoutes()).toContainEqual({
+      routeId: 'openai-gpt-6.1-terra',
+      modelId: 'gpt-6.1-terra',
+      providerId: 'openai',
+      wire: 'openai-responses',
+    });
   });
 
   it('lists GPT-6 Astra as a recommended OpenAI model', async () => {

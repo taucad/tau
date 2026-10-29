@@ -196,26 +196,11 @@ function DictationStopPill({
   );
 }
 
-/** Shared preview and recoverable error feedback; neither changes the input value. */
-export function DictationFeedback({
-  transcript,
-  error,
-}: {
-  readonly transcript: string;
-  readonly error: string | undefined;
-}): React.JSX.Element {
-  return (
-    <>
-      {transcript === '' ? null : (
-        <p data-slot='dictation-transcript' className='px-3 py-1 text-sm text-muted-foreground'>
-          {transcript}
-        </p>
-      )}
-      {error === undefined ? null : (
-        <p role='alert' aria-label='Dictation error' className='px-3 py-1 text-xs text-muted-foreground'>
-          {error}
-        </p>
-      )}
-    </>
+/** The streamed transcript preview while transcribing; it never changes the input value. Failures show as toasts. */
+export function DictationFeedback({ transcript }: { readonly transcript: string }): React.JSX.Element | undefined {
+  return transcript === '' ? undefined : (
+    <p data-slot='dictation-transcript' className='px-3 py-1 text-sm text-muted-foreground'>
+      {transcript}
+    </p>
   );
 }

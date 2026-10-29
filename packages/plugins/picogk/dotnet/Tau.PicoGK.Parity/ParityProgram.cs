@@ -204,11 +204,26 @@ internal static partial class ParityProgram
             types: entry.HasArguments ? [typeof(string[])] : Type.EmptyTypes,
             modifiers: null)
             ?? throw new InvalidOperationException("The compiled entry point could not be resolved.");
+        var arguments = entry.HasArguments ? new object?[] { Array.Empty<string>() } : null;
         var running = Stopwatch.StartNew();
-        if (method.Invoke(null, entry.HasArguments ? [Array.Empty<string>()] : null) is Task invoked)
+#if PICOGK_BROWSER_THREADS
+        /*
+         * Off the runtime owner, for the same reason the ahead-of-time path runs there and the same
+         * reason `Tau.PicoGK.Worker` does: the author's geometry can synchronously wait for TBB
+         * helpers, and Mono's owner has to stay free to start those workers and service their proxy
+         * requests. Measured without it, this path ran the geometry, reported its time, and then
+         * never completed the first awaited upload, so it produced no captures at all.
+         */
+        await Task.Run(async () =>
+        {
+            if (method.Invoke(null, arguments) is Task started) await started;
+        });
+#else
+        if (method.Invoke(null, arguments) is Task invoked)
         {
             await invoked;
         }
+#endif
         Report(runStage, running.Elapsed.TotalMilliseconds);
     }
 #endif

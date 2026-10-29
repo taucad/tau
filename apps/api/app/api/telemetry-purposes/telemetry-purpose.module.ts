@@ -1,4 +1,4 @@
-import { Injectable, Module } from '@nestjs/common';
+import { Global, Injectable, Module } from '@nestjs/common';
 import type { DynamicModule } from '@nestjs/common';
 import { DatabaseModule } from '#database/database.module.js';
 import { BillingModule } from '#api/billing/billing.module.js';
@@ -30,12 +30,18 @@ class SelfHostTierAssurance implements TierAssuranceSource {
   }
 }
 
-/** Selects the tier source before Nest creates the container, as commercial entitlements do. */
+/**
+ * Selects the tier source before Nest creates the container, as commercial
+ * entitlements do. Global so a consumer such as evidence ingress shares this
+ * one instance instead of mounting the purposes controller a second time.
+ */
+@Global()
 @Module({})
 export class TelemetryPurposeModule {
   public static forRoot(options: { readonly tauCloudEnabled: boolean }): DynamicModule {
     const implementation = options.tauCloudEnabled ? CloudTierAssurance : SelfHostTierAssurance;
     return {
+      global: true,
       module: TelemetryPurposeModule,
       imports: options.tauCloudEnabled ? [DatabaseModule, BillingModule] : [DatabaseModule],
       controllers: [TelemetryPurposeController],

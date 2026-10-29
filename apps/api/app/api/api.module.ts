@@ -50,7 +50,7 @@ export class ApiModule {
         ModelModule,
         PrivacyModule,
         TelemetryPurposeModule.forRoot(options),
-        AgentObservabilityModule.forRoot(options),
+        AgentObservabilityModule.forRoot(),
         ProjectsModule,
         ProviderModule,
         PublicationsModule,

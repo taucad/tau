@@ -246,6 +246,17 @@ export type AgentHostWorkerProtocol = {
       readonly args: { readonly projectId: string; readonly chatId: string };
       readonly result: AgentHostRunStoppability;
     };
+    /** The page showed a live run's model text at `at` (T10): the host reports it with the run's facts. */
+    readonly runPresented: {
+      readonly args: {
+        readonly projectId: string;
+        readonly chatId: string;
+        readonly runId: string;
+        readonly at: number;
+      };
+      readonly result: undefined;
+      readonly wireResult: unknown;
+    };
     /** The page's visibility: a hidden page never queues for a chat's lock (RH-R16). */
     readonly visibility: {
       readonly args: { readonly visible: boolean };
@@ -451,6 +462,15 @@ export const agentHostWorkerProtocolSchemas = {
     runStoppability: {
       args: z.strictObject({ projectId: nonEmptyString, chatId: nonEmptyString }),
       result: z.enum(['stoppable', 'other-build', 'background-window']),
+    },
+    runPresented: {
+      args: z.strictObject({
+        projectId: nonEmptyString,
+        chatId: nonEmptyString,
+        runId: nonEmptyString,
+        at: z.number().nonnegative(),
+      }),
+      result: z.unknown(),
     },
     visibility: { args: z.strictObject({ visible: z.boolean() }), result: z.unknown() },
   },

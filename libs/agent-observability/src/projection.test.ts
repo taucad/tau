@@ -77,6 +77,39 @@ describe('projectRun', () => {
     ]);
   });
 
+  it('reports the UI’s first showing of a run’s text as this device’s interaction, apart from every row fact', async () => {
+    const projection = await projectRun(run({ presentedAt: at + 2500 }), context());
+
+    expect(projection.evidence.map((evidence) => evidence.semantic.kind)).toEqual(['tool', 'outcome', 'response']);
+    const presented = projection.evidence[2]!;
+    expect(evidenceSchema.safeParse(presented).success).toBe(true);
+    expect(await verifyEvidenceDigest(presented)).toBe(true);
+    expect(presented.source).toMatchObject({
+      kind: 'interaction',
+      interaction: await contractId('presented', 'chat a/1:run-1'),
+    });
+    expect(presented.delivery.cursor.view).toBe('interaction');
+    expect(presented.clocks).toMatchObject({ occurredAt: at + 2500, intervals: [] });
+    expect(presented.payload).toEqual({
+      plane: 'summary',
+      fact: { kind: 'response', action: 'presented', evidence: await contractId('run', 'run-1') },
+    });
+    /* The row facts are those a device that never showed the run writes. */
+    const unseen = await projectRun(run(), context({ uploader: 'device-b' }));
+    expect(
+      projection.evidence.slice(0, 2).map((evidence, index) => compareEvidence(evidence, unseen.evidence[index]!)),
+    ).toEqual(['duplicate', 'duplicate']);
+  });
+
+  it('holds a presentation back until the run ends, and never sends one shown before the grant', async () => {
+    const open = await projectRun(run({ presentedAt: at + 2500, ending: undefined, tools: [] }), context());
+    const early = await projectRun(run({ presentedAt: at - 1 }), context());
+
+    expect(open).toMatchObject({ evidence: [], pending: 2 });
+    expect(early.evidence.map((evidence) => evidence.semantic.kind)).toEqual(['tool', 'outcome']);
+    expect(early.beforeGrant).toBe(1);
+  });
+
   it('holds a tool call back until its output or the run’s ending, then reports it unknown', async () => {
     const open = run({
       tools: [{ ...run().tools[0]!, output: undefined, settledAt: undefined, outcome: 'unknown' }],

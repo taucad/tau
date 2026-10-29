@@ -18,13 +18,18 @@ const run: ProjectedRun = {
 const setup = (purposes: () => Response, principal: () => string | undefined = () => 'user-1') => {
   const submitted: Array<Readonly<{ url: string; authorization: string | undefined }>> = [];
   const planes: string[] = [];
+  const facts: Array<Readonly<{ kind: string; occurredAt: number }>> = [];
   const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (url.includes('/v1/telemetry-purposes')) {
       return purposes();
     }
-    const envelope = JSON.parse(await new Response(init?.body).text()) as { payload: { plane: string } };
+    const envelope = JSON.parse(await new Response(init?.body).text()) as {
+      payload: { plane: string; fact?: { kind: string } };
+      clocks: { occurredAt: number };
+    };
     planes.push(envelope.payload.plane);
+    facts.push({ kind: envelope.payload.fact?.kind ?? '', occurredAt: envelope.clocks.occurredAt });
     submitted.push({ url, authorization: new Headers(init?.headers).get('authorization') ?? undefined });
     return new Response(JSON.stringify({ receipt: 'r-1', disposition: 'accepted', duplicate: false }), { status: 200 });
   });
@@ -42,7 +47,7 @@ const setup = (purposes: () => Response, principal: () => string | undefined = (
     store,
     observe: async () => ({ runs: [run], ownsEpoch: () => true }),
   });
-  return { evidence, submitted, planes, store };
+  return { evidence, submitted, planes, facts, store };
 };
 
 const granted = (): Response =>
@@ -96,6 +101,26 @@ describe('createHostEvidence', () => {
       url: 'https://api.test/v1/agent-observability/evidence',
       authorization: 'Bearer t',
     });
+  });
+
+  it('should report the first time the UI showed a run, and drop a later one or one from the future', async () => {
+    const { evidence, submitted, facts } = setup(granted);
+    /* Shown under the grant: a showing before this host first saw it is never sent. */
+    await evidence.reporter.refresh();
+    const shown = Date.now() + 1;
+
+    evidence.onPresented('chat-1', 'run-1', shown + 60_000);
+    evidence.onPresented('chat-1', 'run-1', shown);
+    evidence.onPresented('chat-1', 'run-1', shown + 10);
+    evidence.onChatQuiescent('chat-1', true);
+    await vi.waitFor(() => {
+      expect(submitted).toHaveLength(2);
+    });
+
+    expect(facts).toEqual([
+      { kind: 'outcome', occurredAt: endedAt },
+      { kind: 'response', occurredAt: shown },
+    ]);
   });
 
   it('should send nothing for a signed-out credential and purge what it held', async () => {

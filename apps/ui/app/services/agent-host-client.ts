@@ -526,6 +526,9 @@ type Incarnation = {
 /** What a project's clients last gave for it (how to open its bridges, and its defaults), and how many are open. */
 type ProjectRegistration = { options: AgentHostClientOptions; clients: number };
 
+/** When the page showed a live run's model text, on the page's clock (T10). @public */
+export type BrowserRunPresentation = Readonly<{ projectId: string; chatId: string; runId: string; at: number }>;
+
 /** The document's resident agent-host worker (RH-S8), as the page drives it. @internal */
 export type ResidentAgentWorker = Readonly<{
   /**
@@ -536,6 +539,8 @@ export type ResidentAgentWorker = Readonly<{
   capabilities: (durability: StorageDurabilityClass) => Promise<BrowserAgentHostCapability>;
   /** Inspect an already-open project's leadership actor, without booting a worker or taking a lock. */
   stoppability: (projectId: string, chatId: string) => Promise<'stoppable' | 'other-build' | 'background-window'>;
+  /** Tell an already-open project's host that the page showed a live run's model text at `at`; never boots a worker. */
+  presented: (presentation: BrowserRunPresentation) => Promise<void>;
   /**
    * Count one client of a project and remember its latest bridges and defaults. The returned release, called once,
    * sends `release` for the project's host when it was the last client (T3, RH-R4).
@@ -1066,6 +1071,14 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       await live.ready;
       return live.channel.call('runStoppability', { projectId, chatId });
     },
+    presented: async (presentation) => {
+      const live = current;
+      if (live === undefined || live.dead) {
+        return;
+      }
+      await live.ready;
+      await live.channel.call('runPresented', presentation);
+    },
     recover: async (projectId) => {
       const live = current;
       const opening = live?.provided.get(projectId);
@@ -1123,6 +1136,15 @@ export const readBrowserRunStoppability = async (
   projectId: string,
   chatId: string,
 ): Promise<'stoppable' | 'other-build' | 'background-window'> => residentAgentWorker().stoppability(projectId, chatId);
+
+/**
+ * Tell a browser project's host that the page showed a live run's model text (T10). Best effort: a closed host or a
+ * failed call loses only this one time, never the run's other facts.
+ *
+ * @public
+ */
+export const noteBrowserRunPresented = async (presentation: BrowserRunPresentation): Promise<void> =>
+  residentAgentWorker().presented(presentation);
 
 /**
  * Keep a browser project's existing host provided while its route is live. Short-lived command and observer clients

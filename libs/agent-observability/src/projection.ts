@@ -10,6 +10,11 @@ import { canonicalEvidence, contractId, evidenceDigest, sha256Hex } from '#ident
  * writes is derived from committed rows, so any device or replay that reads
  * the same rows writes byte-identical evidence and the API counts it once.
  *
+ * One fact is not from rows: a `response` fact for the moment this device's
+ * UI first showed a run's model text (T10). It is an interaction of this
+ * device's, sourced as one, and is kept apart from the model-text time the
+ * API reports for the provider call: the two are different clocks.
+ *
  * The input types are structural so the host package keeps owning them: the
  * host's `TurnObservation` satisfies `ProjectedRun`.
  */
@@ -42,6 +47,8 @@ export type ProjectedRun = Readonly<{
   ending: Readonly<{ source: ProjectedSource; at: number }> | undefined;
   /** Every row the observation was built from, in log order; it locates a run's tail. */
   sources?: readonly ProjectedSource[];
+  /** When this device's UI first showed the run's model text, if it was watching while the run streamed. */
+  presentedAt?: number;
 }>;
 
 type ToolFact = Extract<Evidence['payload'], { plane: 'summary' }>['fact'] & { kind: 'tool' };
@@ -108,6 +115,8 @@ type Candidate =
   | 'pending'
   | Readonly<{
       source: ProjectedSource;
+      /** An interaction on this device, rather than `source`, is what the fact is about. */
+      interaction?: string;
       lineage: readonly ProjectedSource[];
       semantic: string;
       fact: Fact;
@@ -129,7 +138,11 @@ const envelope = async (
     contractId('run', run.runId),
   ]);
   const sourceDigest = await sha256Hex(
-    canonicalEvidence(['host-row', run.chatId, item.source.leaderEpoch, item.source.sequence, item.fact]),
+    canonicalEvidence(
+      item.interaction === undefined
+        ? ['host-row', run.chatId, item.source.leaderEpoch, item.source.sequence, item.fact]
+        : ['host-interaction', run.chatId, item.interaction, item.occurredAt, item.fact],
+    ),
   );
   const expiresAt = item.occurredAt + retentionMilliseconds;
   const lineage = await Promise.all(
@@ -146,13 +159,19 @@ const envelope = async (
   );
   const evidence: Evidence = {
     version: 1,
-    source: { kind: 'row', chat, leaderEpoch, sequence: item.source.sequence, digest: sourceDigest },
+    source:
+      item.interaction === undefined
+        ? { kind: 'row', chat, leaderEpoch, sequence: item.source.sequence, digest: sourceDigest }
+        : { kind: 'interaction', interaction: item.interaction, digest: sourceDigest },
     semantic: { kind: item.fact.kind, id: item.semantic },
     projection: { version: hostTurnMapper, redactor: 'summary-only', digest: '0'.repeat(64) },
     delivery: {
       uploader: context.uploader,
       attempt: 'host-1',
-      cursor: { view: 'own', origin: context.uploader, position: await contractId('pos', rowPosition(item.source)) },
+      cursor:
+        item.interaction === undefined
+          ? { view: 'own', origin: context.uploader, position: await contractId('pos', rowPosition(item.source)) }
+          : { view: 'interaction', origin: context.uploader, position: item.interaction },
     },
     scope: {
       principal: context.principal,
@@ -253,6 +272,8 @@ const foreignTailsOf = async (
  *   is not visible here, so the host reports a gap, never a guessed fact.
  * - Host times are the rows' recorded times, labelled `host-recorded`: they
  *   order and bound phases, and are not a duration clock.
+ * - A presentation is written once the run has ended, as an interaction of
+ *   this device's at the time its UI showed the run's text.
  *
  * @param run - The host's observation of one run.
  * @param context - The account, project and grant the evidence is for.
@@ -315,7 +336,31 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
         })),
     };
   };
-  const candidates = await Promise.all([...toolCandidates, outcomeCandidate()]);
+  /* Anchored to the run's ending row: the run whose text was shown, and the host that led it reports it. */
+  const presentationCandidate = async (): Promise<Candidate | undefined> => {
+    if (run.presentedAt === undefined) {
+      return undefined;
+    }
+    if (run.ending === undefined) {
+      return 'pending';
+    }
+    const [interaction, presented] = await Promise.all([
+      contractId('presented', `${run.chatId}:${run.runId}`),
+      contractId('run', run.runId),
+    ]);
+    return {
+      source: run.ending.source,
+      interaction,
+      lineage: [run.ending.source],
+      semantic: interaction,
+      fact: { kind: 'response', action: 'presented', evidence: presented },
+      occurredAt: run.presentedAt,
+      events: 'complete',
+      intervals: [],
+    };
+  };
+  const settled = await Promise.all([...toolCandidates, outcomeCandidate(), presentationCandidate()]);
+  const candidates = settled.filter((candidate) => candidate !== undefined);
 
   const projected: Array<Promise<Evidence>> = [];
   let foreign = 0;

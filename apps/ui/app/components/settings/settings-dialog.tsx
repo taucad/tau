@@ -11,6 +11,7 @@ import type { SettingsSection } from '#hooks/use-settings-dialog.js';
 import { CloudBillingSettings } from '#cloud/settings-billing.js';
 import { FileSystemSettings } from '#components/settings/filesystem-settings.js';
 import { GeneralSettings } from '#components/settings/general-settings.js';
+import { DataControlsSettings } from '#components/settings/data-controls-settings.js';
 import { ExperimentalSettings } from '#components/settings/experimental-settings.js';
 import { ModelSettings } from '#components/settings/model-settings.js';
 import { AgentSettings } from '#components/settings/agent-settings.js';
@@ -80,6 +81,9 @@ function SettingsContent({ section }: { readonly section: SettingsSection }): Re
           <CloudBillingSettings />
         </SettingsAuthGate>
       );
+    }
+    case 'data-controls': {
+      return <DataControlsSettings />;
     }
     case 'compute': {
       return (

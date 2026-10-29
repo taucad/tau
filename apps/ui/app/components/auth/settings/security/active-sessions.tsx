@@ -1,11 +1,9 @@
 import { useAuth, useListSessions, useSession } from '@better-auth-ui/react';
 import { Button } from '@taucad/ui/components/button';
-import { Card, CardContent } from '@taucad/ui/components/card';
-import { Separator } from '@taucad/ui/components/separator';
 import { Skeleton } from '@taucad/ui/components/skeleton';
-import { cn } from '@taucad/ui/utils/cn';
 import { CircleAlert, LogIn, RefreshCw } from 'lucide-react';
 import { ActiveSession } from '#components/auth/settings/security/active-session.js';
+import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
 import { Spinner } from '#components/ui/spinner.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 
@@ -26,12 +24,12 @@ const getAuthErrorCode = (error: unknown): string | undefined => {
 };
 
 /**
- * Render a card listing all active sessions for the current user with revoke controls.
+ * Render a group listing all active sessions for the current user with revoke controls.
  *
  * Shows each session's browser, OS, IP address, and creation time. The current session is marked
  * and navigates to sign-out on click, while other sessions can be revoked individually.
  *
- * @returns A JSX element containing the sessions card
+ * @returns A JSX element containing the sessions group
  */
 export function ActiveSessions({ className }: ActiveSessionsProps): React.JSX.Element {
   const { authClient, localization, Link } = useAuth();
@@ -54,92 +52,69 @@ export function ActiveSessions({ className }: ActiveSessionsProps): React.JSX.El
   );
   const sessionIsNotFresh = getAuthErrorCode(error) === 'SESSION_NOT_FRESH';
 
+  const retry = (
+    <Button
+      variant='outline'
+      size='sm'
+      disabled={isFetching}
+      onClick={async () => {
+        await refetch();
+      }}
+    >
+      {isFetching ? <Spinner /> : <RefreshCw aria-hidden='true' />}
+      Try again
+    </Button>
+  );
+
   return (
-    <div>
-      <h2 className='mb-3 text-sm font-semibold'>{localization.settings.activeSessions}</h2>
-
-      <Card className={cn('p-0', className)}>
-        <CardContent className='p-0'>
-          {isPending ? (
-            <div role='status' aria-busy='true' aria-label='Loading active sessions'>
-              <SessionRowSkeleton />
-            </div>
-          ) : isError ? (
-            <div className='flex min-h-24 flex-wrap items-center gap-3 p-4' role='alert'>
-              <div className='flex size-10 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground'>
-                <CircleAlert className='size-4.5' aria-hidden='true' />
-              </div>
-
-              <p className='min-w-48 flex-1 text-sm text-muted-foreground'>
-                {sessionIsNotFresh
-                  ? 'For your security, sign in again to view and manage active sessions.'
-                  : "We couldn't load your active sessions."}
-              </p>
-
-              {sessionIsNotFresh ? (
-                <Button asChild className='ml-auto' size='sm'>
+    <SettingsGroup title={localization.settings.activeSessions} className={className}>
+      {isPending ? (
+        <div role='status' aria-busy='true' aria-label='Loading active sessions'>
+          <SessionRowSkeleton />
+        </div>
+      ) : isError ? (
+        <div role='alert'>
+          <SettingsRow
+            title={
+              <>
+                <CircleAlert aria-hidden='true' className='size-4 shrink-0 text-muted-foreground' />
+                {sessionIsNotFresh ? 'Confirm it’s you' : "We couldn't load your active sessions."}
+              </>
+            }
+            description={
+              sessionIsNotFresh ? 'For your security, sign in again to view and manage active sessions.' : undefined
+            }
+            control={
+              sessionIsNotFresh ? (
+                <Button asChild size='sm'>
                   <Link href={signIn}>
                     <LogIn aria-hidden='true' />
                     Sign in again
                   </Link>
                 </Button>
               ) : (
-                <Button
-                  className='ml-auto'
-                  variant='outline'
-                  size='sm'
-                  disabled={isFetching}
-                  onClick={async () => {
-                    await refetch();
-                  }}
-                >
-                  {isFetching ? <Spinner /> : <RefreshCw aria-hidden='true' />}
-                  Try again
-                </Button>
-              )}
-            </div>
-          ) : activeSessions.length === 0 ? (
-            <div className='flex min-h-24 flex-wrap items-center gap-3 p-4'>
-              <p className='min-w-48 flex-1 text-sm text-muted-foreground'>No active sessions found.</p>
-              <Button
-                className='ml-auto'
-                variant='outline'
-                size='sm'
-                disabled={isFetching}
-                onClick={async () => {
-                  await refetch();
-                }}
-              >
-                {isFetching ? <Spinner /> : <RefreshCw aria-hidden='true' />}
-                Try again
-              </Button>
-            </div>
-          ) : (
-            activeSessions.map((activeSession, index) => (
-              <div key={activeSession.id}>
-                {index > 0 && <Separator />}
-
-                <ActiveSession activeSession={activeSession} />
-              </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
-    </div>
+                retry
+              )
+            }
+          />
+        </div>
+      ) : activeSessions.length === 0 ? (
+        <SettingsRow title='No active sessions found.' control={retry} />
+      ) : (
+        activeSessions.map((activeSession) => <ActiveSession key={activeSession.id} activeSession={activeSession} />)
+      )}
+    </SettingsGroup>
   );
 }
 
-function SessionRowSkeleton() {
+function SessionRowSkeleton(): React.JSX.Element {
   return (
-    <Card className='border-0 bg-transparent shadow-none ring-0'>
-      <CardContent className='flex items-center gap-3'>
-        <Skeleton className='size-10 rounded-md' />
-
-        <div className='flex flex-col gap-1'>
-          <Skeleton className='h-4 w-20' />
-          <Skeleton className='h-3 w-32' />
-        </div>
-      </CardContent>
-    </Card>
+    <div className='flex items-center justify-between gap-4 py-3.5'>
+      <div className='flex flex-col gap-1.5'>
+        <Skeleton className='h-4 w-28' />
+        <Skeleton className='h-3 w-20' />
+      </div>
+      <Skeleton className='h-8 w-20 rounded-md' />
+    </div>
   );
 }

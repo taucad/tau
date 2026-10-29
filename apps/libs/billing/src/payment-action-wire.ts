@@ -128,6 +128,14 @@ export const paymentActionRequestSchema = z
   .object({ requestId: financialIdentitySchema, returnPath: returnPathSchema })
   .strict();
 
+/**
+ * Open the billing portal, optionally straight on one of its flows. `subscription_cancel` lands on the portal's
+ * cancellation confirmation, which ends the plan at the close of the paid period.
+ */
+export const portalActionRequestSchema = paymentActionRequestSchema
+  .extend({ flow: z.enum(['subscription_cancel']).optional() })
+  .strict();
+
 /** Inclusive USD minor-unit bounds for one top-up principal; the API, Stripe contract and UI share them. */
 export const topupPrincipalBoundsMinor = { minimum: 500, maximum: 500_000 } as const;
 

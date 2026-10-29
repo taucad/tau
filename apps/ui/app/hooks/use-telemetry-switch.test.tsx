@@ -119,7 +119,8 @@ describe('useTelemetrySwitch', () => {
   it('should disclose the producers the switch does not stop yet', () => {
     const { result } = renderHook(() => useTelemetrySwitch());
 
-    expect(result.current.description).toMatch(/three things are still sent whatever this switch says/u);
-    expect(result.current.description).toMatch(/tau telemetry off/u);
+    const details = result.current.details.join(' ');
+    expect(details).toMatch(/may still be sent while this is off/u);
+    expect(details).toMatch(/tau telemetry off/u);
   });
 });

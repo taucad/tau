@@ -1,6 +1,6 @@
 'use client';
 
-import { SettingsItem } from '#components/settings/settings-item.js';
+import { SettingsGroup, SettingsItem } from '#components/settings/settings-item.js';
 
 import { useAuth } from '@better-auth-ui/react';
 import { cn } from '@taucad/ui/utils/cn';
@@ -14,9 +14,10 @@ export type SecuritySettingsProps = {
 };
 
 /**
- * Renders the security settings layout including password management, linked accounts, and active sessions.
+ * Renders the security settings: password, sign-in methods (social providers, GitHub and its Gist access) and active sessions.
  *
- * ChangePassword is rendered when password authentication is enabled; LinkedAccounts is rendered when social providers are present.
+ * ChangePassword is rendered when password authentication is enabled; LinkedAccounts adds a row per non-GitHub social provider.
+ * GitHub repository access is a separate connection and lives under Repositories.
  * Each registered auth plugin may contribute `securityCards` (for example passkeys, delete-user).
  *
  * @param className - Optional additional CSS class names for the outer container.
@@ -26,18 +27,18 @@ export function SecuritySettings({ className }: SecuritySettingsProps): React.JS
   const { emailAndPassword, plugins, socialProviders } = useAuth();
 
   return (
-    <div className={cn('flex w-full flex-col gap-4 md:gap-6', className)}>
+    <div className={cn('flex w-full flex-col gap-6 md:gap-8', className)}>
       {emailAndPassword.enabled && (
         <SettingsItem settingId='password'>
           <ChangePassword />
         </SettingsItem>
       )}
-      {(socialProviders?.length ?? 0) > 0 ? (
-        <SettingsItem settingId='linked-accounts'>
-          <LinkedAccounts />
-        </SettingsItem>
-      ) : null}
-      <GithubPermissions />
+      <SettingsItem settingId='linked-accounts'>
+        <SettingsGroup title='Sign-in methods'>
+          {(socialProviders?.length ?? 0) > 0 ? <LinkedAccounts /> : null}
+          <GithubPermissions />
+        </SettingsGroup>
+      </SettingsItem>
       <SettingsItem settingId='active-sessions'>
         <ActiveSessions />
       </SettingsItem>

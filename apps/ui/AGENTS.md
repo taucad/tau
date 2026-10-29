@@ -13,6 +13,7 @@ This app owns the browser shell, editor, file manager, chat presentation, and br
 - Per-device composer records: `#db/composer-record-store`, `#machines/composer-record.machine`, bound by `#hooks/composer-record`. Attachments: `#db/attachment-store`, `#utils/attachment.utils`, `#hooks/use-attachment-source`. Build user messages only with `buildUserMessage` (`#utils/chat.utils`).
 - Load editor code only for mounted source panes; keep Shiki lazy. Follow [Language Contribution Policy](../../docs/policy/language-contribution-policy.md) and [Filesystem Policy](../../docs/policy/filesystem-policy.md).
 - Follow [Chat Request Config Policy](../../docs/policy/chat-request-config-policy.md) and [SSR Bundle Policy](../../docs/policy/ssr-bundle-policy.md).
+- For settings pages and the settings registry, follow [Settings Policy](../../docs/policy/settings-policy.md).
 
 ## Checks
 

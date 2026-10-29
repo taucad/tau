@@ -1,146 +1,119 @@
-import { useId } from 'react';
-import { AlertCircle } from 'lucide-react';
-import { Loader } from '@taucad/ui/components/loader';
-import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { Switch } from '@taucad/ui/components/switch';
-import { SettingsItem, SettingsSectionCard } from '#components/settings/settings-item.js';
+import { SettingsGroup, SettingsItem, SettingsRow } from '#components/settings/settings-item.js';
 import type { TelemetryPurpose, TelemetryPurposeState } from '#hooks/use-telemetry-purposes.js';
 import { telemetryPurposes, useTelemetryPurposes } from '#hooks/use-telemetry-purposes.js';
 
 type PurposeCopy = { label: string; description: string };
 
 /**
- * One entry per purpose. Each says what is recorded and what it is for, in the
- * account holder's terms: the switches are independent, so the copy never
- * implies that answering one answers another.
+ * One entry per purpose, saying what is kept and what for. The switches are independent, so no copy implies that
+ * answering one answers another.
  */
 const purposeCopy: Record<TelemetryPurpose, PurposeCopy> = {
   summary: {
     label: 'Task summaries',
-    description:
-      'Record pseudonymous summaries of your agent tasks — counts, timings, models and outcomes — linked to your account. No prompts, designs or messages.',
+    description: 'Counts, timings and outcomes of your agent tasks, without prompts or designs',
   },
   content: {
     label: 'Full task capture',
-    description:
-      'Record the prompts, designs, tool calls and replies of your agent tasks, so a run can be replayed and diagnosed.',
+    description: 'Your prompts, designs and agent replies, so a task can be replayed',
   },
   diagnosis: {
-    label: 'Incident diagnosis',
-    description:
-      'Let a named Tau operator read a captured task while investigating a specific incident or quality question. Restricted readers; no reusable copy.',
+    label: 'Incident review',
+    description: 'Let Tau staff read a captured task while investigating a problem',
   },
   reuse: {
     label: 'Evaluation examples',
-    description:
-      'Allow a captured task to be selected into Tau’s evaluation set, used to measure and improve the agent. The copy inherits this task’s expiry.',
+    description: 'Use captured tasks to test and improve the agent',
   },
   training: {
     label: 'Model training',
-    description:
-      'Allow a captured task to be used to train or fine-tune a model. Separate from every other purpose and never implied by them.',
+    description: 'Use captured tasks to train models',
   },
 };
 
-/** What each refusal means to the account holder. */
-const refusalCopy: Record<string, string> = {
-  'notice-unapproved': 'Not available yet. Tau has not published the notice this permission is given against.',
-  'no-decision': 'Off until you turn it on.',
-  'notice-superseded': 'The notice changed. Review it and decide again.',
-  withdrawn: 'Off because you turned it off.',
-  'project-fenced': 'Unavailable: this project is being deleted.',
-  'project-not-owned': 'Unavailable: this project belongs to another account.',
-  'project-mixed-source': 'Unavailable: this project contains another account’s material.',
-  'tier-excluded': 'Not available on your plan. Paid plans are never used for this.',
-  'tier-unverified': 'Unavailable while your plan cannot be confirmed.',
+/** Why a switch cannot be changed, for the refusals the account cannot answer its way out of. */
+const blockedCopy: Record<string, string> = {
+  'notice-unapproved': 'Not available yet',
+  'project-fenced': 'Unavailable while this project is being deleted',
+  'project-not-owned': 'Unavailable for another account’s project',
+  'project-mixed-source': 'Unavailable for projects with another account’s material',
+  'tier-excluded': 'Never used on your plan',
+  'tier-unverified': 'Unavailable while your plan cannot be confirmed',
 };
 
-/** Refusals the account cannot answer its way out of, so the switch is not offered. */
-const structuralRefusals = new Set([
-  'notice-unapproved',
-  'project-fenced',
-  'project-not-owned',
-  'project-mixed-source',
-  'tier-excluded',
-  'tier-unverified',
-]);
-
-const explain = (state: TelemetryPurposeState): string => {
-  if (state.allowed) {
-    return 'On.';
-  }
-  return (state.refusal === undefined ? undefined : refusalCopy[state.refusal]) ?? 'Off.';
+/** Refusals that say something about a switch the owner could otherwise flip. */
+const decisionCopy: Record<string, string> = {
+  'notice-superseded': 'The notice changed, so decide again',
 };
+
+const statusOf = (state: TelemetryPurposeState): string | undefined =>
+  state.refusal === undefined ? undefined : (blockedCopy[state.refusal] ?? decisionCopy[state.refusal]);
 
 /**
- * The account's agent-observability permissions.
+ * The account's agent-recording permissions: what Tau may keep from agent tasks, and what for.
  *
- * Every switch shows the server's effective answer rather than the account's
- * raw preference: a purpose the plan or the project excludes reads as off and
- * explains why, and nothing is shown as on because a field is missing.
+ * Every switch shows the server's effective answer, never a local default. The switches always render, so the owner
+ * can see what exists even while the answer is loading or unavailable; they are only enabled once the server has
+ * answered with a notice in force.
  *
  * @param props - `projectId` scopes the answer to one project.
- * @returns The settings card.
+ * @returns The Agent recording group.
  */
 export function AgentObservabilitySettings(props: Readonly<{ projectId?: string }> = {}): React.JSX.Element {
   const { stateOf, canDecide, isLoading, error, decide, isDeciding } = useTelemetryPurposes(
     props.projectId === undefined ? {} : { projectId: props.projectId },
   );
-  const describedBy = useId();
+  const isAnswered = !isLoading && !error;
 
   return (
     <SettingsItem settingId='agent-observability'>
-      <SettingsSectionCard>
-        <CardHeader>
-          <CardTitle>Agent recording</CardTitle>
-        </CardHeader>
-        <CardContent className='flex flex-col gap-4'>
-          <p className='text-sm text-muted-foreground'>
-            These permissions are separate from each other and from the usage and diagnostics switch above. Each one is
-            off until you turn it on.
+      <SettingsGroup
+        title='Agent recording'
+        info={
+          <>
+            <p>
+              Optional permissions for what Tau may keep from your agent tasks, to fix problems and improve the agent.
+            </p>
+            <p>Each one is off until you turn it on, and is separate from usage and diagnostics.</p>
+          </>
+        }
+      >
+        {telemetryPurposes.map((purpose) => {
+          const state = stateOf(purpose);
+          const copy = purposeCopy[purpose];
+          const isBlocked = state.refusal !== undefined && state.refusal in blockedCopy;
+          // A grant the plan or project overrides still shows as held, so it can always be withdrawn.
+          const isHeld = isBlocked && state.granted;
+          const status = isAnswered && canDecide ? statusOf(state) : undefined;
+          return (
+            <SettingsRow
+              key={purpose}
+              title={copy.label}
+              description={status === undefined ? copy.description : `${copy.description} · ${status}`}
+              control={
+                <Switch
+                  aria-label={copy.label}
+                  checked={state.allowed || isHeld}
+                  disabled={!isAnswered || !canDecide || (isBlocked && !isHeld) || isDeciding}
+                  onCheckedChange={(granted) => {
+                    decide({ purpose, granted });
+                  }}
+                />
+              }
+            />
+          );
+        })}
+        {isAnswered && canDecide ? undefined : (
+          <p role='status' className='py-3 text-xs text-muted-foreground'>
+            {isLoading
+              ? 'Loading your choices…'
+              : error
+                ? 'Couldn’t load your choices. Check your connection and refresh.'
+                : 'Agent recording isn’t available yet. Everything stays off.'}
           </p>
-          {isLoading ? (
-            <div className='flex items-center justify-center py-4'>
-              <Loader className='size-5 text-muted-foreground' />
-            </div>
-          ) : error ? (
-            <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-              <AlertCircle className='size-4 shrink-0' />
-              <span>Unable to load agent recording permissions. Check your connection and refresh.</span>
-            </div>
-          ) : (
-            telemetryPurposes.map((purpose) => {
-              const state = stateOf(purpose);
-              const copy = purposeCopy[purpose];
-              const blocked = state.refusal !== undefined && structuralRefusals.has(state.refusal);
-              // A grant the plan or project overrides still shows as held, so it can always be withdrawn.
-              const held = blocked && state.granted;
-              return (
-                <label
-                  key={purpose}
-                  className='flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center'
-                >
-                  <span className='flex flex-col gap-1'>
-                    <span className='font-medium'>{copy.label}</span>
-                    <span id={`${describedBy}-${purpose}`} className='text-sm text-muted-foreground'>
-                      {copy.description} {explain(state)}
-                    </span>
-                  </span>
-                  <Switch
-                    aria-label={copy.label}
-                    aria-describedby={`${describedBy}-${purpose}`}
-                    checked={state.allowed || held}
-                    disabled={(blocked && !held) || isDeciding || !canDecide}
-                    onCheckedChange={(granted) => {
-                      decide({ purpose, granted });
-                    }}
-                  />
-                </label>
-              );
-            })
-          )}
-        </CardContent>
-      </SettingsSectionCard>
+        )}
+      </SettingsGroup>
     </SettingsItem>
   );
 }

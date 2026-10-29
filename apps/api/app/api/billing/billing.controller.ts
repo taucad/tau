@@ -10,6 +10,7 @@ import {
   EnterpriseInvoiceRequestDto,
   TopupRequestDto,
   PaymentActionRequestDto,
+  PortalActionRequestDto,
   PaymentActionListQueryDto,
   PaymentActionIdDto,
 } from '#api/billing/billing.dto.js';
@@ -215,7 +216,7 @@ export class BillingController {
   @Header('Cache-Control', 'private, no-store')
   public async createPortal(
     @User() user: AuthUser,
-    @Body() body: PaymentActionRequestDto,
+    @Body() body: PortalActionRequestDto,
     @Headers('origin') origin: string | undefined,
   ): Promise<WirePaymentAction> {
     this.assertPaymentMutation(user, origin);

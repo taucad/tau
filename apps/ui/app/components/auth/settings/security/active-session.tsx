@@ -7,7 +7,7 @@ import { LogOut, Monitor, Smartphone, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@taucad/ui/components/button';
-import { Card, CardContent } from '@taucad/ui/components/card';
+import { SettingsRow } from '#components/settings/settings-item.js';
 import { Spinner } from '#components/ui/spinner.js';
 
 function timeAgo(date: Date) {
@@ -58,30 +58,28 @@ export function ActiveSession({ activeSession }: ActiveSessionProps): React.JSX.
   const ua = Bowser.parse(activeSession.userAgent ?? '');
   const isMobile = ua.platform.type === 'mobile' || ua.platform.type === 'tablet';
 
-  return (
-    <Card className='border-0 bg-transparent shadow-none ring-0'>
-      <CardContent className='flex items-center justify-between gap-3'>
-        <div className='flex size-10 shrink-0 items-center justify-center rounded-md bg-muted'>
-          {isMobile ? <Smartphone className='size-4.5' /> : <Monitor className='size-4.5' />}
-        </div>
+  const DeviceIcon = isMobile ? Smartphone : Monitor;
 
-        <div className='flex min-w-0 flex-col'>
-          <span className='truncate text-sm font-medium'>
+  return (
+    <SettingsRow
+      title={
+        <>
+          <DeviceIcon aria-hidden className='size-4 shrink-0' />
+          <span className='truncate'>
             {ua.browser.name ?? 'Unknown Browser'}
             {ua.os.name ? `, ${ua.os.name}` : ''}
           </span>
-
-          {isCurrentSession ? (
-            <span className='w-fit rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary'>
-              {localization.settings.currentSession}
-            </span>
-          ) : (
-            <span className='text-xs text-muted-foreground capitalize'>{timeAgo(activeSession.createdAt)}</span>
-          )}
-        </div>
-
+        </>
+      }
+      description={
+        isCurrentSession ? (
+          <span className='font-medium text-primary'>{localization.settings.currentSession}</span>
+        ) : (
+          <span className='block first-letter:uppercase'>{timeAgo(activeSession.createdAt)}</span>
+        )
+      }
+      control={
         <Button
-          className='ml-auto shrink-0'
           variant='outline'
           size='sm'
           onClick={() => {
@@ -100,7 +98,7 @@ export function ActiveSession({ activeSession }: ActiveSessionProps): React.JSX.
 
           {isCurrentSession ? localization.auth.signOut : localization.settings.revoke}
         </Button>
-      </CardContent>
-    </Card>
+      }
+    />
   );
 }

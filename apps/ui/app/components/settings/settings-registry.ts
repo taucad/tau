@@ -7,6 +7,7 @@ import {
   HardDrive,
   Lock,
   Printer,
+  Shield,
   Settings2,
   Globe,
   FolderGit2,
@@ -44,38 +45,26 @@ const settingsCatalog = [
       {
         id: 'theme',
         label: 'Theme',
-        description: 'Select your preferred color scheme',
+        description: 'Choose light, dark or match your system',
         keywords: ['appearance', 'dark mode', 'light mode', 'black', 'system', 'contrast', 'colour'],
       },
       {
         id: 'code-inlay-hints',
-        label: 'Code Inlay Hints',
-        description: 'Show inline parameter names in code editors',
-        keywords: ['appearance'],
+        label: 'Code inlay hints',
+        description: 'Show parameter names inline in code',
+        keywords: ['editor', 'appearance'],
       },
       {
         id: 'pointer-cursors',
-        label: 'Use pointer cursors',
-        description: 'Change the cursor to a pointer when hovering over interactive elements',
+        label: 'Pointer cursors',
+        description: 'Show a hand cursor over buttons and links',
         keywords: ['appearance', 'cursor', 'hand', 'mouse', 'interactive'],
       },
       {
         id: 'accent-color',
-        label: 'Accent Color',
-        description: 'Customize the primary accent color',
+        label: 'Accent color',
+        description: 'Tint buttons, links and highlights',
         keywords: ['appearance', 'colour', 'hue'],
-      },
-      {
-        id: 'privacy',
-        label: 'Privacy',
-        description: 'Choose how your data, usage metrics and diagnostics are used to improve Tau',
-        keywords: ['training', 'sharing', 'no train', 'telemetry', 'usage', 'metrics', 'anonymous', 'diagnostics'],
-      },
-      {
-        id: 'agent-observability',
-        label: 'Agent recording',
-        description: 'Choose separately what may be recorded from your agent tasks, and for what',
-        keywords: ['agent', 'recording', 'capture', 'summaries', 'diagnosis', 'evaluation', 'training', 'purposes'],
       },
     ],
   },
@@ -106,14 +95,14 @@ const settingsCatalog = [
       },
       {
         id: 'linked-accounts',
-        label: 'Linked accounts',
-        description: 'Manage connected sign-in providers',
+        label: 'Sign-in methods',
+        description: 'Manage Google, GitHub and other sign-in providers',
         keywords: ['github', 'google', 'login'],
       },
       {
         id: 'github-permissions',
-        label: 'GitHub connections',
-        description: 'Manage separate GitHub sign-in, Gist and repository connections',
+        label: 'Gist sharing',
+        description: 'Share projects as GitHub Gists and review the authorization on GitHub',
         keywords: ['github', 'gist', 'revoke', 'authorization', 'oauth', 'consent'],
       },
       {
@@ -133,8 +122,8 @@ const settingsCatalog = [
       {
         id: 'github-repositories',
         label: 'GitHub repositories',
-        description: 'Manage repository connections and enable writes per repository',
-        keywords: ['github', 'write', 'permissions', 'installation', 'push'],
+        description: 'Connect GitHub and choose which repositories Tau can use',
+        keywords: ['github', 'write', 'permissions', 'installation', 'push', 'connect', 'repository', 'disconnect'],
       },
     ],
   },
@@ -166,6 +155,44 @@ const settingsCatalog = [
         label: 'Automatic reload',
         description: 'Automatically buy credits when your balance is low',
         keywords: ['threshold', 'payment', 'budget'],
+      },
+      {
+        id: 'cancel-plan',
+        label: 'Cancel plan',
+        description: 'Cancel your plan at the end of the billing period',
+        keywords: ['subscription', 'downgrade', 'stop'],
+      },
+    ],
+  },
+  {
+    id: 'data-controls',
+    label: 'Data controls',
+    icon: Shield,
+    group: 'Personal',
+    entries: [
+      {
+        id: 'usage-diagnostics',
+        label: 'Share usage and diagnostics',
+        description: 'Send anonymous performance and reliability data',
+        keywords: ['telemetry', 'usage', 'metrics', 'anonymous', 'diagnostics', 'privacy'],
+      },
+      {
+        id: 'improve-service',
+        label: 'Improve the service for everyone',
+        description: 'Control whether your chats are used for improving the service',
+        keywords: ['training', 'sharing', 'no train', 'ai', 'privacy'],
+      },
+      {
+        id: 'agent-observability',
+        label: 'Agent recording',
+        description: 'Choose what Tau may record from your agent tasks, and why',
+        keywords: ['agent', 'recording', 'capture', 'summaries', 'diagnosis', 'evaluation', 'training', 'privacy'],
+      },
+      {
+        id: 'cookie-preferences',
+        label: 'Cookie preferences',
+        description: 'Choose whether Tau uses optional analytics',
+        keywords: ['cookies', 'analytics', 'posthog', 'consent', 'privacy'],
       },
       {
         id: 'close-account',
@@ -365,7 +392,9 @@ const cloudSections: readonly SettingsSectionDefinition[] = tauCloudEnabled
       .map((section) =>
         section.id === 'agents'
           ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'show-credits') }
-          : section,
+          : section.id === 'data-controls'
+            ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'close-account') }
+            : section,
       );
 /* Machines are hosted by the desktop services utility; the web build has no
  * host to add one to, so the section is hidden rather than shown empty. Desktop's
@@ -374,7 +403,10 @@ const platformSections: readonly SettingsSectionDefinition[] = isDesktopTarget()
   ? cloudSections.map((section) =>
       section.id === 'filesystem'
         ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'browser-storage') }
-        : section,
+        : /* The desktop shell has no optional analytics cookies to choose. */
+          section.id === 'data-controls'
+          ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'cookie-preferences') }
+          : section,
     )
   : cloudSections
       .filter((section) => section.id !== 'machines' && section.id !== 'browser')

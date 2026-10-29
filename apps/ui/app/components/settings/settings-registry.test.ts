@@ -20,11 +20,11 @@ describe('searchSettings', () => {
   });
 
   it('should match every query token across section and setting text', () => {
-    const result = searchSettings('general privacy');
+    const result = searchSettings('data training');
 
     expect(result).toHaveLength(1);
-    expect(result[0]?.section.id).toBe('general');
-    expect(result[0]?.entries.map(({ id }) => id)).toEqual(['privacy']);
+    expect(result[0]?.section.id).toBe('data-controls');
+    expect(result[0]?.entries.map(({ id }) => id)).toEqual(['improve-service', 'agent-observability']);
   });
 
   it('should reject results when any query token is unmatched', () => {

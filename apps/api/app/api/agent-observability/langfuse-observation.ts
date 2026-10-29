@@ -100,7 +100,7 @@ const failed = (evidence: Evidence): boolean => {
 };
 
 const factAttributes = (evidence: Evidence): OtlpAttribute[] => {
-  if (evidence.payload.plane !== 'summary') {
+  if (evidence.payload.plane === 'content') {
     return [];
   }
   const { fact } = evidence.payload;

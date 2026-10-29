@@ -8,7 +8,7 @@ import { z } from 'zod';
  * metrics and supplier training preference, not recorded prompts, designs or
  * account-linked task histories.
  */
-export const telemetryPurposes = ['summary', 'content', 'diagnosis', 'reuse', 'training'] as const;
+export const telemetryPurposes = ['summary', 'feedback', 'content', 'diagnosis', 'reuse', 'training'] as const;
 
 /** One processing purpose. @see telemetryPurposes */
 export const telemetryPurposeSchema = z.enum(telemetryPurposes);

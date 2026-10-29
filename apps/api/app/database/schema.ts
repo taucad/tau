@@ -126,7 +126,7 @@ export const agentEvidenceReceipt = pgTable(
     projectionKey: text('projection_key').notNull(),
     sourceDigest: text('source_digest').notNull(),
     projectionDigest: text('projection_digest').notNull(),
-    plane: text('plane').$type<'summary' | 'content'>().notNull(),
+    plane: text('plane').$type<'summary' | 'feedback' | 'content'>().notNull(),
     family: text('family').notNull(),
     /** The server's protection per lineage source at receipt; never the client's claim alone. */
     lineage: jsonb('lineage')

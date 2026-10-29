@@ -6,7 +6,7 @@ export type EvidenceSealBinding = Readonly<{
   principal: string;
   project: string;
   receipt: string;
-  plane: 'summary' | 'content';
+  plane: 'summary' | 'feedback' | 'content';
 }>;
 
 /** One configured payload key. */

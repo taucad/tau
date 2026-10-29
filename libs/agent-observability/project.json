@@ -11,6 +11,15 @@
         "cwd": "{projectRoot}"
       },
       "cache": false
+    },
+    "bundle-cloud-host-observer": {
+      "command": "esbuild src/cloud-host-observer.ts --bundle --minify --platform=node --format=esm --target=node24 --legal-comments=none --outfile=../../out/cloud-host-observer/cloud-host-observer.mjs",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "inputs": ["production", "^production"],
+      "outputs": ["{workspaceRoot}/out/cloud-host-observer"],
+      "cache": true
     }
   }
 }

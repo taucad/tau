@@ -42,6 +42,7 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { EmitterPort } from '@taucad/filesystem/backend/node';
 import { serveAgentChannel } from '@taucad/agent-host/launcher';
 import type { DesktopShell } from '#tau/services-host-shell.js';
+import { desktopChatObserver } from '#tau/services-host-evidence.js';
 import { createGatewayModelTransport, createTauCloudGatewayModelTransport } from '@taucad/agent-host';
 import {
   acpModelProbeTimeout,
@@ -247,6 +248,11 @@ export type ServicesHostOptions = {
   readonly legacyMachinesDirectory?: string;
   /** `<userData>/permissions`, the permission store's home (W9). Absent, permission requests are refused. */
   readonly permissionsDirectory?: string;
+  /**
+   * `<userData>/agent-evidence`, where each project's agent-observability queue lives (T11). Absent, no project host
+   * observes its chats.
+   */
+  readonly evidenceDirectory?: string;
   /** Reply to main with one permission request's answer (W9). */
   readonly permissionsAnswered?: (frame: PermissionAnswerFrame) => void;
   /**
@@ -576,7 +582,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       ? undefined
       : /* The reserved layout every provider this host opens enforces, so a
          * symlink inside a checkout cannot resolve onto the control plane (G0-6). */
-        serve(toNodeFsPort(internalPorts.port1), { allowRoot: isInternalRoot, authority, policy: tauPathPolicy });
+        serve(toNodeFsPort(internalPorts.port1), { allowRoot: isInternalRoot, authority, policy: tauPathPolicy }).close;
   const internalChannel =
     internalPorts === undefined ? undefined : new NodeFsChannel(toNodeFsPort(internalPorts.port2));
 
@@ -1021,6 +1027,18 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         return principal === undefined ? { mode: 'session' } : { mode: 'session', principal };
       },
       ...(turnPlacement === undefined ? {} : { turnPlacement }),
+      /* T11: summaries of the chats this host leads, only under the server's current grant for this account. */
+      ...(options.evidenceDirectory === undefined
+        ? {}
+        : {
+            observeChats: desktopChatObserver({
+              directory: options.evidenceDirectory,
+              apiBaseUrl: config.tauApiUrl,
+              projectId,
+              principal: () => sessionPrincipal,
+              token: () => authToken,
+            }),
+          }),
       ...(shell === undefined
         ? {}
         : {
@@ -1727,7 +1745,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
             allowRoot: isTrustedRoot,
             policy: tauPathPolicy,
             ...(authority ? { authority } : {}),
-          });
+          }).close;
           let stopped: Promise<void> | undefined;
           // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the repeated-close contract.
           const disposeFileSystem = (): Promise<void> => {

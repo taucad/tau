@@ -323,7 +323,10 @@ const desktopFileSystem = (files: Record<string, string>) => {
     write(path, content);
   }
   const { port1, port2 } = new MessageChannel();
-  const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: (candidate) => candidate === root });
+  const stop = serveNodeFsProvider(port2, {
+    policy: tauPathPolicy,
+    allowRoot: (candidate) => candidate === root,
+  }).close;
   const leg = { ops: [] as string[], repliedBodyBytes: 0 };
   const tapped: NodeFsPort = {
     postMessage(message) {

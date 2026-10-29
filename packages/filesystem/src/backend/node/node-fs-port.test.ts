@@ -54,7 +54,10 @@ const connect = (): Connected => {
   mkdirSync(root);
   mkdirSync(outside);
   const { port1, port2 } = new MessageChannel();
-  const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: (candidate) => candidate === root });
+  const stop = serveNodeFsProvider(port2, {
+    policy: tauPathPolicy,
+    allowRoot: (candidate) => candidate === root,
+  }).close;
   const channel = new NodeFsChannel(port1);
   cleanups.push(async () => {
     channel.close();
@@ -219,12 +222,12 @@ describe('node filesystem client/host round trip', () => {
       policy: tauPathPolicy,
       allowRoot: () => true,
       authority,
-    });
+    }).close;
     const stopSecond = serveNodeFsProvider(secondPorts.port2, {
       policy: tauPathPolicy,
       allowRoot: () => true,
       authority,
-    });
+    }).close;
     const firstChannel = new NodeFsChannel(firstPorts.port1);
     const secondChannel = new NodeFsChannel(secondPorts.port1);
     cleanups.push(async () => {
@@ -268,12 +271,12 @@ describe('node filesystem client/host round trip', () => {
       policy: tauPathPolicy,
       allowRoot: (candidate) => candidate === root || candidate === alias,
       authority,
-    });
+    }).close;
     const stopSecond = serveNodeFsProvider(secondPorts.port2, {
       policy: tauPathPolicy,
       allowRoot: (candidate) => candidate === root || candidate === alias,
       authority,
-    });
+    }).close;
     const firstChannel = new NodeFsChannel(firstPorts.port1);
     const secondChannel = new NodeFsChannel(secondPorts.port1);
     const first = new NodeFsProviderClient(firstChannel, root);
@@ -504,12 +507,12 @@ describe('node filesystem client/host round trip', () => {
         policy: tauPathPolicy,
         allowRoot: (candidate) => candidate === root,
         authority,
-      });
+      }).close;
       const stopSecond = serveNodeFsProvider(secondPorts.port2, {
         policy: tauPathPolicy,
         allowRoot: (candidate) => candidate === root,
         authority,
-      });
+      }).close;
       const firstChannel = new NodeFsChannel(firstPorts.port1);
       const secondChannel = new NodeFsChannel(secondPorts.port1);
       const first = new NodeFsProviderClient(firstChannel, root);
@@ -671,7 +674,7 @@ describe('node filesystem client/host round trip', () => {
       policy: tauPathPolicy,
       allowRoot: (candidate) => candidate === root,
       authority,
-    });
+    }).close;
     const frames: unknown[] = [];
     port1.addEventListener('message', ({ data }) => frames.push(data));
     port1.start();
@@ -712,7 +715,10 @@ describe('node filesystem client/host round trip', () => {
     const root = join(sandbox, 'root');
     mkdirSync(root);
     const { port1, port2 } = new MessageChannel();
-    const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: (candidate) => candidate === root });
+    const stop = serveNodeFsProvider(port2, {
+      policy: tauPathPolicy,
+      allowRoot: (candidate) => candidate === root,
+    }).close;
     const frames: unknown[] = [];
     port1.addEventListener('message', ({ data }) => frames.push(data));
     port1.start();
@@ -768,7 +774,10 @@ describe('node filesystem client/host round trip', () => {
     const root = join(sandbox, 'root');
     mkdirSync(root);
     const { port1, port2 } = new MessageChannel();
-    const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: (candidate) => candidate === root });
+    const stop = serveNodeFsProvider(port2, {
+      policy: tauPathPolicy,
+      allowRoot: (candidate) => candidate === root,
+    }).close;
     const replacement = Promise.withResolvers<{ unsubscribe(): Promise<void> }>();
     const lateClose = vi.fn(async () => undefined);
     let onEvents: Parameters<typeof parcelWatcher.subscribe>[1] | undefined;
@@ -826,7 +835,7 @@ describe('node filesystem client/host round trip', () => {
       policy: tauPathPolicy,
       allowRoot: (candidate) => candidate === root,
       authority,
-    });
+    }).close;
     const frames: unknown[] = [];
     port1.addEventListener('message', ({ data }) => frames.push(data));
     port1.start();
@@ -1181,7 +1190,7 @@ describe('node filesystem host hardening', () => {
       policy: tauPathPolicy,
       allowRoot: (candidate) => candidate === root,
       authority,
-    });
+    }).close;
     const channel = new NodeFsChannel(port1);
     const provider = new NodeFsProviderClient(channel, root);
 
@@ -1223,7 +1232,7 @@ describe('node filesystem host hardening', () => {
       policy: tauPathPolicy,
       allowRoot: (candidate) => candidate === root || candidate === alias,
       authority,
-    });
+    }).close;
     const channel = new NodeFsChannel(port1);
     const checked = {
       path: 'target.txt',
@@ -1306,7 +1315,7 @@ describe('node filesystem host hardening', () => {
       policy: tauPathPolicy,
       allowRoot: (candidate) => candidate === root,
       authority,
-    });
+    }).close;
     const channel = new NodeFsChannel(port1);
     const provider = new NodeFsProviderClient(channel, root);
 
@@ -1346,7 +1355,10 @@ describe('node filesystem host hardening', () => {
       return () => undefined;
     });
     const { port1, port2 } = new MessageChannel();
-    const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: (candidate) => candidate === root });
+    const stop = serveNodeFsProvider(port2, {
+      policy: tauPathPolicy,
+      allowRoot: (candidate) => candidate === root,
+    }).close;
     const frames: unknown[] = [];
     port1.addEventListener('message', ({ data }) => frames.push(data));
     const channel = new NodeFsChannel(port1);
@@ -1387,7 +1399,7 @@ describe('node filesystem host hardening', () => {
     mkdirSync(root);
     const { port1, port2 } = new MessageChannel();
     let admitted = true;
-    const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: () => admitted });
+    const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: () => admitted }).close;
     const channel = new NodeFsChannel(port1);
     cleanups.push(async () => {
       channel.close();
@@ -1433,7 +1445,7 @@ describe('host death', () => {
     const root = join(sandbox, 'root');
     mkdirSync(root);
     const { port1, port2 } = new MessageChannel();
-    const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: () => true });
+    const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: () => true }).close;
     const channel = new NodeFsChannel(port1);
     const provider = new NodeFsProviderClient(channel, root);
     cleanups.push(async () => {

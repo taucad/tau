@@ -42,7 +42,7 @@ import { smlibpyNative } from '#native.js';
 import { libraryVersionMismatches } from '#project-manifest.js';
 
 const computeNamespace = 'smlibpy.operation.v1';
-const computeProducerVersion = 'smlibpy@0.3.5|python@3.13|numpy@2.5.2|codec@smb1|worker-protocol@1|adapter@1';
+const computeProducerVersion = 'smlibpy@0.6.2|python@3.13|numpy@2.5.2|codec@smb1|worker-protocol@1|adapter@1';
 const computeEnvironment = {
   platform: process.platform,
   architecture: process.arch,
@@ -253,7 +253,7 @@ const smlibpyKernelDefinition = defineKernel({
   // A `.py` entry that imports smlibpy selects this kernel; any other falls through to the next Python kernel.
   detectImport: smlibpyDetectPattern,
   name: 'SmlibpyKernel',
-  version: '0.3.5+python3.13.protocol1.topology1.bundle1',
+  version: '0.6.2+python3.13.protocol1.topology1.bundle1',
   optionsSchema: smlibpyOptionsSchema,
   views: {
     model: {

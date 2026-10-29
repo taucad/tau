@@ -363,6 +363,20 @@ describe('rpc-handlers', () => {
       fileSystem = deps.fileSystem;
     });
 
+    it('refuses to read or write over a large-object placeholder, retryably (open first, model waits)', async () => {
+      const pointer = new TextEncoder().encode(
+        `version https://git-lfs.github.com/spec/v1\noid sha256:${'a'.repeat(64)}\nsize 12\n`,
+      );
+      mockFm.readFile.mockResolvedValue(pointer);
+      mockFm.stat.mockResolvedValue({ ...textFileStat(), size: pointer.byteLength });
+      await expect(fileSystem.readFile('models/part.step')).rejects.toMatchObject({
+        code: 'OPERATION_TIMEOUT',
+        retryable: true,
+      });
+      await expect(fileSystem.writeFile('models/part.step', 'solid mine')).rejects.toMatchObject({ retryable: true });
+      expect(mockFm.writeFile).not.toHaveBeenCalled();
+    });
+
     it('reads owned exact binary bytes without text decoding', async () => {
       const bytes = new Uint8Array([0, 255, 239, 187, 191]);
       mockFm.readFile.mockResolvedValue(bytes);

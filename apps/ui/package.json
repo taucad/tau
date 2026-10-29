@@ -40,6 +40,7 @@
     "@tanstack/react-pacer": "catalog:",
     "@tanstack/react-query": "catalog:",
     "@taucad/agent-host": "workspace:*",
+    "@taucad/agent-observability": "workspace:*",
     "@taucad/agent-tools": "workspace:*",
     "@taucad/api-extractor": "workspace:*",
     "@taucad/assimp": "workspace:*",

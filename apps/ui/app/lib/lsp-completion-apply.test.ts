@@ -1,12 +1,23 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import type * as LSP from 'vscode-languageserver-protocol';
 import { applyLspCompletion } from '#lib/lsp-completion-apply.js';
 
+const views: EditorView[] = [];
+
 function view(text: string): EditorView {
-  return new EditorView({ state: EditorState.create({ doc: text, selection: { anchor: text.length } }) });
+  const editor = new EditorView({ state: EditorState.create({ doc: text, selection: { anchor: text.length } }) });
+  views.push(editor);
+  return editor;
 }
+
+// A live view schedules a layout measure that jsdom cannot run after the test ends.
+afterEach(() => {
+  for (const editor of views.splice(0)) {
+    editor.destroy();
+  }
+});
 
 describe('applyLspCompletion', () => {
   const item: LSP.CompletionItem = {

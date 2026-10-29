@@ -177,6 +177,35 @@
       "labels": { "severity": "warning", "service": "tau-api", "component": "git" }
     },
     {
+      "uid": "project-open-cold-slow",
+      "title": "P1: Cold Project Open p75 Above 5 s",
+      "condition": "open_slow",
+      "data": [
+        {
+          "refId": "open_slow",
+          "queryType": "",
+          "relativeTimeRange": { "from": 3600, "to": 0 },
+          "datasourceUid": "prometheus",
+          "model": {
+            "instant": true,
+            "range": false,
+            "expr": "(histogram_quantile(0.75, sum by (le) (rate(tau_project_open_duration_bucket{app=~\".*\",service_name=\"tau-api\",phase=\"first_view\",cache=\"cold\"}[1h]))) > 5) and (sum(increase(tau_project_open_duration_count{app=~\".*\",service_name=\"tau-api\",phase=\"first_view\",cache=\"cold\"}[1h])) >= 5)",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "open_slow"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "15m",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/playbooks/storage-failure.md",
+        "summary": "Cold hosted project opens reach a first usable view in more than 5 s at p75 over 1 h, with at least 5 cold opens (go-live STO-25, research AC-1)."
+      },
+      "labels": { "severity": "warning", "service": "tau-api", "component": "git" }
+    },
+    {
       "uid": "storage-spill-high",
       "title": "P1: Affinity Spill Above 5%",
       "condition": "spill_high",

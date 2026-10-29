@@ -6,12 +6,13 @@
 # Lettering as a sketch in the XY plane, with the exact outlines of the font
 # Remarks: Returns: A ``Sketch`` on ``Plane.XY``: one face per separate piece of a letter, counters as holes. Outlines are exact: straight segments are lines, curved runs are B-splines through the font's on-curve points.
 # Throws: ValueError: An empty text, a size that is not positive, a character the font does not
-# Throws: have, a font file that cannot be read, or a path the text does not fit on.
+# Throws: have, or a path the text does not fit on. A font file that cannot be read raises
+# Throws: ``smlibpy.font.FontError``, a ``ValueError``.
 # smlibpy.text.Text (function)
-Text(text: str, size: float, *, font: str | os.PathLike[str] | None = None, align: AlignLike = Align.CENTER, spacing: float = 0.0, line_spacing: float = 1.6, kerning: bool = True, path: Edge | Wire | None = None) -> Sketch
+Text(text: str, size: float, *, font: str | os.PathLike[str] | bytes | Font | None = None, align: AlignLike = Align.CENTER, spacing: float = 0.0, line_spacing: float = 1.6, kerning: bool = True, path: Edge | Wire | None = None) -> Sketch
 #   text: The text
 #   size: Height of the capital letters (H, E, T) in mm, the nominal height of technical lettering
-#   font: Path of a TrueType or OpenType font (``.ttf``, ``.otf``, ``.ttc``, ``.woff``)
+#   font: Path of a TrueType or OpenType font (``.ttf``, ``.otf``, ``.ttc``, ``.woff``, ``.woff2``), the bytes of such a file (an upload, a font from a package's data), or a :class:`~smlibpy.font.Font` that ``load_font`` read
 #   align: Placement of the text's layout box (from the start to the end of the longest line, and from the baseline of the last line to the cap height of the first)
 #   spacing: Extra distance between neighbouring letters in mm (negative
 #   line_spacing: Distance between baselines as a multiple of ``size``

@@ -3,6 +3,7 @@
  * file-manager worker's revision root, which the page brokers once that project's revision client has opened (RV9-F1).
  */
 import type { RpcRevisionsClient } from '@taucad/chat/rpc';
+import type { LargeObjectsFacet } from '@taucad/revisions';
 import type {
   WorkerRevisionRequest,
   WorkerRevisionResponse,
@@ -16,6 +17,8 @@ export type PortRevisionsClient = RpcRevisionsClient &
   Readonly<{
     fetchGeoSpecCandidates: () => Promise<ReadonlyArray<Uint8Array<ArrayBuffer>>>;
     publishGeoSpecCandidate: (candidate: Uint8Array<ArrayBuffer>) => Promise<'updated' | 'upToDate' | 'rejected'>;
+    /** The checkout's large objects still to land, from the newest status; `undefined` once all are local. */
+    largeObjects: () => LargeObjectsFacet | undefined;
     close: () => void;
   }>;
 
@@ -81,6 +84,7 @@ export const createPortRevisionsClient = (port: MessagePort): PortRevisionsClien
   };
 
   return {
+    largeObjects: () => (closed ? undefined : latest?.largeObjects),
     fetchGeoSpecCandidates: async () => {
       const result = await ask({ command: 'fetchGeoSpecCandidates' }, 'geoSpecCandidates');
       return result.candidates;

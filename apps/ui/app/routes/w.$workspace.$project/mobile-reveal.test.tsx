@@ -108,7 +108,11 @@ const editorRef = {
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ editorRef, mainEntryPath: 'main.ts', projectId: 'project-1', viewRecords: new Map() }),
 }));
-vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
+vi.mock('#hooks/use-project-availability.js', () => ({
+  useProjectAvailability: () => 'ready',
+  useModelAvailability: () => 'ready',
+  useLargeObjectPending: () => false,
+}));
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => true }));
 vi.mock('react-router', async (importOriginal) => ({
   ...(await importOriginal<typeof ReactRouter>()),

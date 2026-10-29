@@ -46,6 +46,7 @@ const semantic = z.strictObject({
     'cad',
     'outcome',
     'response',
+    'rating',
     'financial',
     'governance',
   ]),
@@ -153,7 +154,7 @@ const summary = z.discriminatedUnion('kind', [
     ),
   z.strictObject({
     kind: z.literal('response'),
-    action: z.enum(['presented', 'accepted', 'rejected', 'corrected', 'edited', 'exported', 'returned']),
+    action: z.enum(['presented', 'edited', 'exported', 'returned']),
     evidence: id,
   }),
   z.strictObject({
@@ -171,6 +172,24 @@ const summary = z.discriminatedUnion('kind', [
     kind: z.literal('governance'),
     state: z.enum(['captured', 'received', 'uncertain', 'dropped', 'expired', 'revoked']),
     reason: z.enum(['none', 'permission', 'capacity', 'delivery', 'expiry', 'schema']),
+  }),
+]);
+/**
+ * The user's own judgement of an output: a rating, or an explicit acceptance, rejection or correction. It is a separate
+ * plane because it answers to its own purpose, never the summary grant, and it carries no explanation: free-form text
+ * is content.
+ */
+const feedback = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('response'),
+    action: z.enum(['accepted', 'rejected', 'corrected']),
+    evidence: id,
+  }),
+  z.strictObject({
+    kind: z.literal('rating'),
+    scale: id,
+    value: z.enum(['positive', 'negative']),
+    evidence: id,
   }),
 ]);
 const block = z.discriminatedUnion('kind', [
@@ -234,6 +253,7 @@ export const evidenceSchema = z
     coverage,
     payload: z.discriminatedUnion('plane', [
       z.strictObject({ plane: z.literal('summary'), fact: summary }),
+      z.strictObject({ plane: z.literal('feedback'), fact: feedback }),
       z.strictObject({
         plane: z.literal('content'),
         family: semantic.shape.kind,
@@ -243,7 +263,7 @@ export const evidenceSchema = z
     ]),
   })
   .superRefine((value, context) => {
-    const family = value.payload.plane === 'summary' ? value.payload.fact.kind : value.payload.family;
+    const family = value.payload.plane === 'content' ? value.payload.family : value.payload.fact.kind;
     if (family !== value.semantic.kind) {
       context.addIssue({ code: 'custom', message: 'Semantic family mismatch' });
     }

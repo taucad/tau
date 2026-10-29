@@ -1,4 +1,5 @@
-import type { AgentLogEvent, CompactionTrace, ProviderMessage, RowKey } from '#log/event-types.js';
+import type { AgentLogEvent, CompactionTrace, JsonValue, ProviderMessage, RowKey } from '#log/event-types.js';
+import type { EventLogBatch } from '#log/event-log-appender.js';
 
 /*
  * Tau's own turn facts for agent observability (T05), read from committed rows.
@@ -13,7 +14,10 @@ import type { AgentLogEvent, CompactionTrace, ProviderMessage, RowKey } from '#l
  * It is a pure fold over rows. It is never on the execution path, writes
  * nothing, and holds nothing between calls. It carries identities, names,
  * counts and times only, never message content, so its output is safe for
- * every purpose that admits summaries. Destination envelopes, scope and
+ * every purpose that admits summaries. The one exception is a `test_model`
+ * call's check (T12), whose revision and requirement keys name files so the
+ * delivery projection can write a digest of what was checked; it never writes
+ * the keys themselves. Destination envelopes, scope and
  * retention belong to the delivery projection (T09); this is its input.
  */
 
@@ -23,6 +27,22 @@ export type ObservedOutcome = 'completed' | 'cancelled' | 'failed' | 'abandoned'
 /** A committed row's identity, with the chat it belongs to. @public */
 export type ObservedSource = Readonly<{ chatId: string; leaderEpoch: string; sequence: number }>;
 
+/** A CAD check's decided status, in the evidence contract's vocabulary: only `passed` and `failed` are decided. @public */
+export type ObservedCheckResult = 'passed' | 'failed' | 'inconclusive' | 'unsupported' | 'not-run';
+
+/**
+ * What a `test_model` call's output says it checked (T12). The revision and requirement keys name files: they let
+ * the delivery projection write a digest of what was checked, and nothing else reads them.
+ * @public
+ */
+export type ObservedCheck = Readonly<{
+  result: ObservedCheckResult;
+  /** Every evaluated source closure's entry and file digests, as sorted `entry\u0000path=digest` keys; empty when unnamed. */
+  revision: readonly string[];
+  /** The observed requirements as sorted `file#ordinal` keys, plus `#omitted:<n>` when the output left some out. */
+  requirements: readonly string[];
+}>;
+
 /** One tool call the run dispatched, as its committed rows record it. @public */
 export type ObservedToolCall = Readonly<{
   call: string;
@@ -31,6 +51,11 @@ export type ObservedToolCall = Readonly<{
   outcome: ObservedOutcome;
   input: ObservedSource;
   output: ObservedSource | undefined;
+  /** When the input and the output rows were recorded; `settledAt` is absent with `output`. */
+  startedAt: number;
+  settledAt: number | undefined;
+  /** A settled `test_model` call's check, when its output records one. */
+  check?: ObservedCheck | undefined;
 }>;
 
 /** One gateway invocation the run prepared, and what the gateway answered for it. @public */
@@ -74,6 +99,8 @@ export type TurnObservation = Readonly<{
   tools: readonly ObservedToolCall[];
   transformations: readonly ObservedTransformation[];
   intervals: readonly ObservedInterval[];
+  /** The row that recorded the run's ending, and when; absent while the run has none. */
+  ending: Readonly<{ source: ObservedSource; at: number }> | undefined;
   /** Newest time any fact landed. A heartbeat is not a fact, so it never moves this. */
   lastFactAt: number;
   /** Every row the observation was built from, once each, in log order. */
@@ -85,6 +112,84 @@ const terminalStates = new Set(['completed', 'failed', 'cancelled']);
 const isExternalAgentTurn = (message: ProviderMessage): boolean =>
   message.role === 'user' && message.metadata?.tauInternal?.['kind'] === 'external-agent';
 
+const isObject = (value: JsonValue | undefined): value is Readonly<Record<string, JsonValue>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const checkResults = new Set<string>(['passed', 'failed', 'inconclusive', 'unsupported', 'not-run']);
+
+/**
+ * A run without a qualified status decides only by its tests: any failure fails, only all passing passes.
+ *
+ * @param statuses - Each observed test's status, a skip read as not run.
+ * @param timedOut - Whether the run's budget expired.
+ * @returns The run's decided or undecided result.
+ */
+const resultOfTests = (statuses: readonly string[], timedOut: boolean): ObservedCheckResult => {
+  if (statuses.includes('failed')) {
+    return 'failed';
+  }
+  if (statuses.length === 0) {
+    return timedOut ? 'inconclusive' : 'not-run';
+  }
+  if (!timedOut && statuses.every((status) => status === 'passed')) {
+    return 'passed';
+  }
+  if (timedOut || statuses.includes('inconclusive')) {
+    return 'inconclusive';
+  }
+  return statuses.includes('unsupported') ? 'unsupported' : 'not-run';
+};
+
+/**
+ * The check a `test_model` output records.
+ *
+ * @param content - The output row's recorded content.
+ * @returns The check, or `undefined` when the output records none Tau can read.
+ */
+const checkOf = (content: JsonValue): ObservedCheck | undefined => {
+  if (!isObject(content) || !Array.isArray(content['tests'])) {
+    return undefined;
+  }
+  const tests = (content['tests'] as readonly JsonValue[]).filter((test) => isObject(test));
+  const requirements = tests.flatMap((test) => {
+    const file = test['targetFile'];
+    const ordinal = test['ordinal'] ?? test['id'];
+    return typeof file === 'string' && (typeof ordinal === 'number' || typeof ordinal === 'string')
+      ? [`${file}#${ordinal}`]
+      : [];
+  });
+  const omitted = content['omittedTests'];
+  if (typeof omitted === 'number' && omitted > 0) {
+    requirements.push(`#omitted:${omitted}`);
+  }
+  const revisions = Array.isArray(content['sourceRevisions']) ? content['sourceRevisions'] : [];
+  const revision = (revisions as readonly JsonValue[])
+    .filter((closure) => isObject(closure))
+    .flatMap((closure) => {
+      const { entry, files } = closure;
+      return typeof entry === 'string' && isObject(files)
+        ? Object.entries(files).flatMap(([path, digest]) =>
+            typeof digest === 'string' ? [`${entry}\u0000${path}=${digest}`] : [],
+          )
+        : [];
+    });
+  const status = content['runStatus'];
+  return {
+    result:
+      typeof status === 'string' && checkResults.has(status)
+        ? (status as ObservedCheckResult)
+        : resultOfTests(
+            tests.map((test) => {
+              const { status: testStatus } = test;
+              return testStatus === 'skipped' ? 'not-run' : typeof testStatus === 'string' ? testStatus : 'unknown';
+            }),
+            content['timeout'] !== undefined,
+          ),
+    revision: [...new Set(revision)].toSorted(),
+    requirements: [...new Set(requirements)].toSorted(),
+  };
+};
+
 const rowKeyOf = (event: RowKey): string => `${event.leaderEpoch}\u0000${event.sequence}`;
 
 type RunDraft = {
@@ -92,8 +197,8 @@ type RunDraft = {
   runId: string;
   turnId: string | undefined;
   external: boolean;
-  /** Terminal state per attempt; the highest attempt's wins. */
-  terminal: Map<number, ObservedOutcome>;
+  /** Terminal state per attempt, with the row that recorded it; the highest attempt's wins. */
+  terminal: Map<number, Readonly<{ outcome: ObservedOutcome; source: ObservedSource; at: number }>>;
   revision: TurnObservation['revision'];
   invocations: Map<string, ObservedInvocation>;
   tools: Map<string, ObservedToolCall>;
@@ -163,7 +268,7 @@ const fold = (draft: RunDraft, event: AgentLogEvent, fact: Readonly<{ at: number
         draft.intervals.push({ phase: 'admission', start: draft.openAdmission, end: at });
         draft.openAdmission = undefined;
       } else if (terminalStates.has(event.state)) {
-        draft.terminal.set(attempt, event.state as ObservedOutcome);
+        draft.terminal.set(attempt, { outcome: event.state as ObservedOutcome, source, at });
       }
       break;
     }
@@ -182,16 +287,21 @@ const fold = (draft: RunDraft, event: AgentLogEvent, fact: Readonly<{ at: number
           outcome: 'unknown',
           input: source,
           output: undefined,
+          startedAt: at,
+          settledAt: undefined,
         });
         draft.toolStarted.set(message.toolCallId, at);
       } else if (message.role === 'tool-output') {
         const input = draft.tools.get(message.toolCallId);
         /* An output is a committed result; the first one landed is the call's. */
         if (input !== undefined && input.output === undefined) {
+          const check = message.toolName === 'test_model' && !message.isError ? checkOf(message.content) : undefined;
           draft.tools.set(message.toolCallId, {
             ...input,
             outcome: message.isError ? 'failed' : 'completed',
             output: source,
+            settledAt: at,
+            ...(check === undefined ? {} : { check }),
           });
           const started = draft.toolStarted.get(message.toolCallId);
           if (started !== undefined) {
@@ -289,16 +399,18 @@ const settle = (draft: RunDraft): TurnObservation => {
     open.unshift({ phase: 'admission', start: draft.openAdmission, end: undefined });
   }
   const intervals = [...draft.intervals, ...open];
+  const ending = last === undefined ? undefined : draft.terminal.get(last);
   return {
     chatId: draft.chatId,
     runId: draft.runId,
     turnId: draft.turnId,
-    termination: last === undefined ? 'unknown' : (draft.terminal.get(last) ?? 'unknown'),
+    termination: ending?.outcome ?? 'unknown',
     revision: draft.revision,
     invocations: [...draft.invocations.values()],
     tools: [...draft.tools.values()],
     transformations: draft.transformations,
     intervals,
+    ending: ending === undefined ? undefined : { source: ending.source, at: ending.at },
     lastFactAt: draft.lastFactAt,
     sources: draft.sources,
   };
@@ -339,4 +451,47 @@ export const observeTurns = (chatId: string, rows: readonly AgentLogEvent[]): Tu
     fold(draft, event, { at: Number.isFinite(at) ? at : draft.lastFactAt, source });
   }
   return [...runs.values()].filter((draft) => !draft.external).map((draft) => settle(draft));
+};
+
+/** A chat's own turns, and which leader epochs this device held while writing them. @public */
+export type OwnTurns = Readonly<{
+  runs: TurnObservation[];
+  /** Whether this device led the term: true for every term its own rows name. */
+  ownsEpoch: (leaderEpoch: string) => boolean;
+}>;
+
+/** How a host reads its own rows of a chat, one bounded page at a time (`TauAgentHost.readEvents`). @public */
+export type OwnRowsRead = (
+  input: Readonly<{ chatId: string; cursor: number; limit: number; maxBytes?: number | undefined }>,
+) => Promise<EventLogBatch>;
+
+const ownPageLimit = 256;
+const ownPageBytes = 4 * 1024 * 1024;
+
+/**
+ * Read every one of this device's own rows of a chat and observe its turns.
+ *
+ * Own rows are what this device wrote (XD1), so every term they name is one it
+ * led: it reports those facts, and another device reports its own. Nothing is
+ * read from another device's segment.
+ *
+ * @param read - The host's own-row read.
+ * @param chatId - The chat.
+ * @returns Its turns and the epochs this device led.
+ * @public
+ */
+export const observeOwnTurns = async (read: OwnRowsRead, chatId: string): Promise<OwnTurns> => {
+  const rows: AgentLogEvent[] = [];
+  let cursor = 0;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- each page starts where the one before it ended.
+    const batch = await read({ chatId, cursor, limit: ownPageLimit, maxBytes: ownPageBytes });
+    rows.push(...batch.events);
+    if (batch.events.length === 0 || batch.nextCursor >= batch.endCursor) {
+      break;
+    }
+    cursor = batch.nextCursor;
+  }
+  const epochs = new Set(rows.map((row) => row.leaderEpoch));
+  return { runs: observeTurns(chatId, rows), ownsEpoch: (leaderEpoch) => epochs.has(leaderEpoch) };
 };

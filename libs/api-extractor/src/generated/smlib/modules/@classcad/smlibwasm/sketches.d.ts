@@ -1,6 +1,6 @@
 import { type AlignLike } from './align.js';
 import { type VectorLike } from './geometry.js';
-import { Edge, Sketch, Wire } from './shapes.js';
+import { Edge, Sketch, Wire, type Face, type Vertex } from './shapes.js';
 /** Where a new shape sits and how it is turned. */
 export interface PlacementOptions {
     /** Degrees counterclockwise about the shape's center. */
@@ -84,17 +84,21 @@ export declare function Slot(length: number, width: number, options?: PlacementO
  */
 export declare function ArcSlot(radius: number, width: number, angle: number, options?: PlacementOptions): Sketch;
 /**
- * The region a pen `width` wide covers along a path of lines and arcs: a slot between two centers
- * (`Stroke(Line(a, b), 6)`), a slot along an arc, a rib from its centerline.
+ * The region a pen `width` wide covers along a path: a slot between two centers
+ * (`Stroke(Line(a, b), 6)`), a slot along an arc, a rib from its centerline, a groove along a
+ * spline. Lines and arcs give exact lines and arcs; splines and ellipses their offsets
+ * (`Edge.offset`), within 1e-6 of the path's size.
  *
  * `ends`: "round" (half circles, the default) or "flat" (cut square at the end points).
  * `corners`: how the outside of a bend is shaped, "round", "sharp" or "chamfer". A closed path
  * makes a ring. The path stays where it is (in its plane).
  */
 export declare function Stroke(path: Edge | Wire, width: number, options?: {
-    ends?: string;
-    corners?: string;
+    ends?: 'round' | 'flat';
+    corners?: 'round' | 'sharp' | 'chamfer';
 }): Sketch;
+/** What `Hull` takes: points, vertices, edges, wires, sketches and faces, or lists of them. */
+export type HullItem = VectorLike | Vertex | Edge | Wire | Sketch | Face | readonly HullItem[];
 /**
  * The convex hull of points and shapes: the smallest convex region around them, as if a string
  * were pulled tight around them. Around circles and arcs the outline follows the arcs exactly,
@@ -103,6 +107,6 @@ export declare function Stroke(path: Edge | Wire, width: number, options?: {
  * `items`: points ([x, y], Vectors, Vertices), edges, wires, sketches or faces, or lists of them.
  * `Hull(Circle(10), Pos(60, 0).mul(Circle(6)))` is a lever outline.
  */
-export declare function Hull(...items: unknown[]): Sketch;
+export declare function Hull(...items: HullItem[]): Sketch;
 /** The planar region inside a closed wire, minus the regions inside `holes`. */
 export declare function makeFace(outer: Wire | Edge, ...holes: (Wire | Edge)[]): Sketch;

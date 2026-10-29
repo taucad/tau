@@ -500,8 +500,10 @@ function ObjectFieldTemplate(
 
   if (isRoot) {
     if (formContext.rootPresentation === 'embedded') {
+      // The same 4 px inset on every side as the catalog's `p-1` and a group body's `py-1`, so a card that opens or
+      // closes the form keeps a gap above or below it instead of stacking its border on the host's.
       return (
-        <div data-slot='embedded-form-root' className='properties empty:hidden [&>.field-group]:mx-1'>
+        <div data-slot='embedded-form-root' className='properties py-1 empty:hidden [&>.field-group]:mx-1'>
           <ParameterPropertyList
             properties={properties}
             schema={schema}

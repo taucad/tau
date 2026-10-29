@@ -939,6 +939,14 @@ describe('root presentation', () => {
     expect(screen.queryByLabelText(/^Group:\s*$/)).toBeNull();
   });
 
+  it('should inset an embedded root on every side, so edge cards keep a gap from the host', () => {
+    const { container } = renderForm({ rootPresentation: 'embedded' });
+
+    const root = container.querySelector('[data-slot="embedded-form-root"]');
+    expect(root).toHaveClass('py-1', '[&>.field-group]:mx-1');
+    expect(screen.getByLabelText('Group: Tessellation').closest('[data-slot="field-group"]')?.parentElement).toBe(root);
+  });
+
   it('should reset an embedded Export field using its dynamic root path', () => {
     const resetSingleParameter = vi.fn();
     renderForm({

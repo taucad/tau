@@ -1004,7 +1004,19 @@ except Stop:
 `,
           join(mountpoint, 'blocked'),
         );
-        const next = lines(child);
+        const next0 = lines(child);
+        const next = async (): Promise<string> => {
+          const line = await next0();
+          mark(`STDOUT ${JSON.stringify(line)}`);
+          return line;
+        };
+        child.stderr.setEncoding('utf8');
+        child.stderr.on('data', (chunk: string) => {
+          process.stderr.write(`[chld-stderr] ${chunk.replaceAll('\n', ' | ')}\n`);
+        });
+        child.on('exit', (code, signal) => {
+          mark(`CHILD EXIT code=${String(code)} signal=${String(signal)}`);
+        });
         const watchdog = setTimeout(() => {
           mark('WATCHDOG fired');
           dump('watchdog', child.pid);

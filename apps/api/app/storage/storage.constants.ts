@@ -12,6 +12,7 @@
  * - `scripts/seed-r2-defaults.sh` (default seed object keys)
  * - `infra/docker-compose.yml` MinIO bootstrap (local parity, incl. private bucket)
  * - `apps/ui/netlify.toml` CSP `connect-src` (origin only; prefix not referenced)
+ * - `libs/file-links/src/path.ts` (the files Worker's two LFS key layouts under `tenants/` and `blobs/`)
  */
 export const storageNamespacePrefixes = {
   /**

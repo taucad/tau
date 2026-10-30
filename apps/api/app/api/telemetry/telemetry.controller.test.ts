@@ -243,6 +243,37 @@ describe('TelemetryController', () => {
         [3600, { phase: 'first_view', cache: 'warm' }],
       ]);
     });
+
+    it('should label LFS fetches and cold opens with the transport that served them', () => {
+      ingestSignedIn({
+        entries: [
+          {
+            name: IngestEntryName.LFS_FETCH,
+            duration: 6000,
+            detail: {
+              placement: 'browser',
+              networkObjects: 2,
+              networkBytes: 20,
+              localObjects: 0,
+              localBytes: 0,
+              transport: 'files',
+            },
+          },
+          {
+            name: IngestEntryName.PROJECT_OPEN,
+            duration: 6100,
+            detail: { phase: 'fully_fetched', cache: 'cold', transport: 'r2_presigned' },
+          },
+        ],
+      });
+
+      expect(mockMetrics.syncClientLfsDuration.record.mock.calls).toEqual([
+        [6, { 'agent.placement': 'browser', cache: 'cold', 'tau.lfs.transport': 'files' }],
+      ]);
+      expect(mockMetrics.projectOpenDuration.record.mock.calls).toEqual([
+        [6.1, { phase: 'fully_fetched', cache: 'cold', 'tau.lfs.transport': 'r2_presigned' }],
+      ]);
+    });
   });
 
   describe('agent usage entries', () => {

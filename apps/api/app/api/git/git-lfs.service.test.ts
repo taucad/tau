@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- environment variable names and git-lfs wire fields are spelled by their owners */
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +10,12 @@ import type { GitAccess, GitRepositoryService } from '#api/git/git.service.js';
 import { gitLfsObjectKey } from '#api/git/git.constants.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
 import { tenantLfsObjectKey } from '#api/git/lfs-keys.js';
+import type { ConfigService } from '@nestjs/config';
+import { verifyFileLink, decodeBase64, importFileLinkVerifyKey } from '@taucad/file-links';
+import { fileLinkVectors } from '@taucad/file-links/vectors';
+import { FileLinksService } from '#storage/file-links.service.js';
+import type { FileLinksEnvironment } from '#storage/file-links.service.js';
+import { TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '#storage/object-storage.service.js';
 
 const access: GitAccess = {
   projectId: 'proj_1',
@@ -497,5 +504,106 @@ describe('GitLfsService finalized-object boundary', () => {
 
     expect(lockedOwners()).toStrictEqual([access.projectId]);
     expect(updates).toStrictEqual([]);
+  });
+  // === Files service: downloads as `files.<zone>` links (files service blueprint §1, §10) ===
+
+  describe('files links', () => {
+    const [signingKey] = fileLinkVectors.keys;
+    const fileLinks = (values: Partial<FileLinksEnvironment>): FileLinksService =>
+      new FileLinksService({
+        get: (name: keyof FileLinksEnvironment) => values[name],
+      } as unknown as ConfigService<FileLinksEnvironment, true>);
+    const configured = (): FileLinksService =>
+      fileLinks({
+        TAU_FILES_BASE_URL: 'https://files.taucad.dev',
+        TAU_FILES_LINK_SIGNING_KEY: JSON.stringify({
+          kid: signingKey?.kid,
+          alg: 'HS256',
+          keyBase64: signingKey?.keyBase64,
+        }),
+      });
+    const linkedService = (links: FileLinksService, accountId = TAU_DEFAULT_STORAGE_ACCOUNT_ID): GitLfsService =>
+      new GitLfsService(
+        { ...objectStorage, account: { id: accountId } } as unknown as ObjectStorageService,
+        repositories as unknown as GitRepositoryService,
+        databaseStub(),
+        links,
+      );
+    const download = async (lfs: GitLfsService) =>
+      lfs.batch({
+        access,
+        operation: 'download',
+        objects: [{ oid, size: bytes.byteLength }],
+        authorization: undefined,
+        endpoint: 'https://api.test/repo/info/lfs/objects',
+      });
+    const downloadAction = async (lfs: GitLfsService) => {
+      const result = await download(lfs);
+      expect(result.status).toBe(200);
+      return result.status === 200 ? result.body.objects[0]?.actions?.['download'] : undefined;
+    };
+    const verified = async (href: string | undefined) => {
+      const url = new URL(href ?? '');
+      const key = await importFileLinkVerifyKey(decodeBase64(signingKey?.keyBase64 ?? '') ?? new Uint8Array());
+      return verifyFileLink({
+        path: url.pathname,
+        search: url.search,
+        audience: 'files.taucad.dev',
+        now: Math.floor(Date.now() / 1000),
+        keyFor: (kid) => (kid === signingKey?.kid ? key : undefined),
+      });
+    };
+
+    it('should answer a download with a files link the Worker verifies, keeping expires_in at 900', async () => {
+      const action = await downloadAction(linkedService(configured()));
+      expect(action?.expires_in).toBe(900);
+      expect(action?.header).toBeUndefined();
+      expect(
+        action?.href.startsWith(`https://files.taucad.dev/v1/lfs/${access.ownerId}/${access.projectId}/${oid}?`),
+      ).toBe(true);
+      expect(await verified(action?.href)).toMatchObject({
+        ok: true,
+        link: { location: { layout: 'tenant', oid }, size: bytes.byteLength },
+      });
+      expect(objectStorage.presignGet).not.toHaveBeenCalled();
+    });
+
+    it('should sign the legacy path for an object still at its pre-D24 key', async () => {
+      storedNamespace = 'blobs';
+      const action = await downloadAction(linkedService(configured()));
+      expect(action?.href.startsWith(`https://files.taucad.dev/v1/lfs-legacy/${access.projectId}/${oid}?`)).toBe(true);
+      expect(await verified(action?.href)).toMatchObject({ ok: true, link: { location: { layout: 'legacy' } } });
+    });
+
+    it('should keep presigned downloads when the files service is not configured', async () => {
+      const action = await downloadAction(linkedService(fileLinks({})));
+      expect(action).toEqual({ href: 'https://store.test/download', expires_in: 900 });
+    });
+
+    it('should keep presigned downloads for a project on a scoped storage account', async () => {
+      const action = await downloadAction(linkedService(configured(), 'account_1'));
+      expect(action?.href).toBe('https://store.test/download');
+    });
+
+    it('should keep uploads presigned with the files service on', async () => {
+      const result = await linkedService(configured()).batch({
+        access,
+        operation: 'upload',
+        objects: [{ oid, size: bytes.byteLength }],
+        authorization: 'Bearer token',
+        endpoint: 'https://api.test/repo/info/lfs/objects',
+      });
+      expect(result.status === 200 ? result.body.objects[0]?.actions?.['upload']?.href : undefined).toBe(
+        'https://store.test/upload',
+      );
+    });
+
+    it('should still refuse an object retirement removed, with no link', async () => {
+      rowSurvivesClear = false;
+      const result = await download(linkedService(configured()));
+      expect(result.status === 200 ? result.body.objects[0] : undefined).toMatchObject({
+        error: { code: 404 },
+      });
+    });
   });
 });

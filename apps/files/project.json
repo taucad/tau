@@ -1,0 +1,25 @@
+{
+  "name": "files",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/files/src",
+  "projectType": "application",
+  "metadata": {
+    "description": "The files.<zone> Cloudflare Worker (blueprint docs/research/files-service-blueprint.md). Deployed by tau-cloud's Terraform from the bundle this project builds, never by CI: it carries no deploy:staging tag."
+  },
+  "tags": ["scope:api", "type:app"],
+  "targets": {
+    "bundle": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["production", "^production", "{workspaceRoot}/pnpm-lock.yaml"],
+      "outputs": ["{projectRoot}/dist"],
+      "options": {
+        "command": "node apps/files/scripts/bundle.mts"
+      }
+    },
+    "build": {
+      "executor": "nx:noop",
+      "dependsOn": ["bundle"]
+    }
+  }
+}

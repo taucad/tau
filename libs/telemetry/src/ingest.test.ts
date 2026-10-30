@@ -56,6 +56,32 @@ describe('clientMetricEntrySchema', () => {
     ).toBe(false);
   });
 
+  it('should accept a large-object fetch and a project open naming their transport, and refuse a host', () => {
+    const fetch = {
+      name: IngestEntryName.LFS_FETCH,
+      duration: 6000,
+      detail: {
+        placement: 'browser',
+        networkObjects: 295,
+        networkBytes: 69_960_000,
+        localObjects: 0,
+        localBytes: 0,
+        transport: 'files',
+      },
+    };
+    expect(clientMetricEntrySchema.parse(fetch)).toEqual(fetch);
+    const open = {
+      name: IngestEntryName.PROJECT_OPEN,
+      duration: 6100,
+      detail: { phase: 'fully_fetched', cache: 'cold', transport: 'r2_presigned' },
+    };
+    expect(clientMetricEntrySchema.parse(open)).toEqual(open);
+    expect(
+      clientMetricEntrySchema.safeParse({ ...fetch, detail: { ...fetch.detail, transport: 'files.taucad.dev' } })
+        .success,
+    ).toBe(false);
+  });
+
   it('should accept a project open of two bounded words, and refuse any other word', () => {
     const entry = {
       name: IngestEntryName.PROJECT_OPEN,

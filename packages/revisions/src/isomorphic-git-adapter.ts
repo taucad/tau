@@ -73,6 +73,7 @@ import type { LfsPointer } from '#lfs.js';
 import { createTreeIdMemo } from '#tree-id-memo.js';
 import type { TreeObject } from '#tree-id-memo.js';
 import { createLfsClient, LfsQuotaError, withQuotaPaths } from '#lfs-client.js';
+import type { LfsTransport } from '#lfs-client.js';
 import {
   isHostLocalRef,
   lfsRemoteUnsupportedMessage,
@@ -204,7 +205,29 @@ export type LfsFetchReport = Readonly<{
   /** Objects already in this store's LFS cache, and their bytes. */
   localObjects: number;
   localBytes: number;
+  /**
+   * The kind of host that served most of this read's fetched objects, from
+   * their actions' hosts (`tau.lfs.transport`); absent when no transfer of
+   * this read's own landed.
+   */
+  transport?: LfsTransport;
 }>;
+
+/**
+ * The transport that served the most objects, as a report field; none when nothing was fetched.
+ *
+ * @param counts - Objects per transport.
+ * @returns `{transport}`, or an empty object.
+ */
+const dominantTransport = (counts: ReadonlyMap<LfsTransport, number>): Readonly<{ transport?: LfsTransport }> => {
+  let best: [LfsTransport, number] | undefined;
+  for (const entry of counts) {
+    if (best === undefined || entry[1] > best[1]) {
+      best = entry;
+    }
+  }
+  return best === undefined ? {} : { transport: best[0] };
+};
 
 const defaultGitDirectory = '.git';
 
@@ -904,6 +927,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     let localObjects = 0;
     let localBytes = 0;
     let networkBytes = 0;
+    const transports = new Map<LfsTransport, number>();
     const fetchMissing = async (wanted: ReadonlyMap<string, LfsPointer>): Promise<void> => {
       const client = await lfsClient();
       if (client === undefined) {
@@ -918,7 +942,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       await client.downloadMany({
         pointers: [...wanted.values()],
         ...(signal === undefined ? {} : { signal }),
-        received: async (pointer, content) => {
+        received: async (pointer, content, { transport }) => {
+          transports.set(transport, (transports.get(transport) ?? 0) + 1);
           await storeLfsObject(pointer.oid, content);
           contents.set(pointer.oid, content);
           networkBytes += content.byteLength;
@@ -1004,6 +1029,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         networkBytes,
         localObjects,
         localBytes,
+        ...dominantTransport(transports),
       }),
     });
   };

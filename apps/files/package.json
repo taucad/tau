@@ -1,0 +1,19 @@
+{
+  "name": "@taucad/files",
+  "version": "0.0.1",
+  "description": "The files.<zone> Cloudflare Worker: verifies API-signed links and streams private LFS objects from R2",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@taucad/file-links": "workspace:*"
+  },
+  "imports": {
+    "#scripts/*": "./scripts/*",
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "devDependencies": {
+    "esbuild": "catalog:"
+  }
+}

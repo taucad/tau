@@ -32,6 +32,7 @@ import type { KclSceneGraphDelta } from '#kcl-scene-graph-delta.js';
 import type { KclExecutionResult } from '#kcl-execution-result.types.js';
 import { buildKclSettingsJson } from '#kcl-headless-settings.js';
 import { randomUuid } from '#binary.utils.js';
+import { ensureWasmTimerGlobal } from '#kcl-wasm-timer-global.js';
 
 /**
  * URL to the KCL WASM binary exposed by the dependency package.
@@ -160,6 +161,7 @@ async function loadWasmModule(
   tracer?: RuntimeSpanTracer,
 ): Promise<{ wasmModule: WasmModule; memory: WebAssembly.Memory }> {
   try {
+    ensureWasmTimerGlobal();
     const wasmModule = await import('@taucad/kcl-wasm-lib');
 
     const compiledModule = await compileWasmStreaming(kclWasmUrl, tracer);

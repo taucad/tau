@@ -206,92 +206,40 @@
   "uncovered": [],
   "excluded": [
     {
-      "path": "simulation/import_async",
-      "reason": "imports a 5.5 MB STL"
-    },
-    {
-      "path": "simulation/import_foreign",
-      "reason": "foreign-format import panics kcl-lib under Node (no global timer object)"
-    },
-    {
-      "path": "simulation/import_glb",
-      "reason": "foreign-format import panics kcl-lib under Node (no global timer object)"
-    },
-    {
-      "path": "simulation/import_glb_no_assign",
-      "reason": "foreign-format import panics kcl-lib under Node (no global timer object)"
-    },
-    {
-      "path": "simulation/import_gltf_embedded",
-      "reason": "foreign-format import panics kcl-lib under Node (no global timer object)"
-    },
-    {
-      "path": "simulation/import_gltf_with_bin",
-      "reason": "foreign-format import panics kcl-lib under Node (no global timer object)"
-    },
-    {
-      "path": "simulation/import_mesh_clone",
-      "reason": "foreign-format import panics kcl-lib under Node (no global timer object)"
-    },
-    {
-      "path": "simulation/import_obj_with_mtl",
-      "reason": "foreign-format import panics kcl-lib under Node (no global timer object)"
-    },
-    {
-      "path": "simulation/import_obj_with_mtl_units",
-      "reason": "foreign-format import panics kcl-lib under Node (no global timer object)"
-    },
-    {
-      "path": "simulation/import_stl",
-      "reason": "imports a 5.5 MB STL"
-    },
-    {
-      "path": "simulation/import_transform",
-      "reason": "imports a 5.5 MB STL"
-    },
-    {
-      "path": "simulation/multiple-foreign-imports-all-render",
-      "reason": "foreign-format import panics kcl-lib under Node (no global timer object)"
-    },
-    {
-      "path": "simulation/named_views_hide_imported",
-      "reason": "foreign-format import panics kcl-lib under Node (no global timer object)"
-    },
-    {
       "path": "simulation/nested_windows_main_kcl",
-      "reason": "imports a Windows-style backslash path, which the host filesystem rejects"
+      "reason": "stays excluded: imports a Windows-style backslash path (nested\\foo\\bar\\main.kcl), which the host filesystem rejects by design"
     },
     {
       "path": "examples/prelude-clone-9",
-      "reason": "imports tests/inputs/cube.sldprt, a SolidWorks part only Zoo can convert"
+      "reason": "stays excluded: imports tests/inputs/cube.sldprt, a SolidWorks part that only Zoo's server-side converter reads; OpenCascade has no SolidWorks reader, so it stays out unless a converter appears"
     },
     {
       "path": "examples/prelude-clone-11",
-      "reason": "imports tests/inputs/cube.sldprt, a SolidWorks part only Zoo can convert"
+      "reason": "stays excluded: imports tests/inputs/cube.sldprt, a SolidWorks part that only Zoo's server-side converter reads; OpenCascade has no SolidWorks reader, so it stays out unless a converter appears"
     },
     {
       "path": "examples/solid-appearance-9",
-      "reason": "imports tests/inputs/cube.sldprt, a SolidWorks part only Zoo can convert"
+      "reason": "stays excluded: imports tests/inputs/cube.sldprt, a SolidWorks part that only Zoo's server-side converter reads; OpenCascade has no SolidWorks reader, so it stays out unless a converter appears"
     },
     {
       "path": "examples/transform-translate-1",
-      "reason": "imports tests/inputs/cube.sldprt, a SolidWorks part only Zoo can convert"
+      "reason": "stays excluded: imports tests/inputs/cube.sldprt, a SolidWorks part that only Zoo's server-side converter reads; OpenCascade has no SolidWorks reader, so it stays out unless a converter appears"
     },
     {
       "path": "examples/transform-translate-2",
-      "reason": "imports tests/inputs/cube.sldprt, a SolidWorks part only Zoo can convert"
+      "reason": "stays excluded: imports tests/inputs/cube.sldprt, a SolidWorks part that only Zoo's server-side converter reads; OpenCascade has no SolidWorks reader, so it stays out unless a converter appears"
     },
     {
       "path": "examples/transform-rotate-3",
-      "reason": "imports tests/inputs/cube.sldprt, a SolidWorks part only Zoo can convert"
+      "reason": "stays excluded: imports tests/inputs/cube.sldprt, a SolidWorks part that only Zoo's server-side converter reads; OpenCascade has no SolidWorks reader, so it stays out unless a converter appears"
     },
     {
       "path": "examples/transform-scale-1",
-      "reason": "imports tests/inputs/cube.sldprt, a SolidWorks part only Zoo can convert"
+      "reason": "stays excluded: imports tests/inputs/cube.sldprt, a SolidWorks part that only Zoo's server-side converter reads; OpenCascade has no SolidWorks reader, so it stays out unless a converter appears"
     },
     {
       "path": "examples/transform-hide-1",
-      "reason": "imports tests/inputs/cube.sldprt, a SolidWorks part only Zoo can convert"
+      "reason": "stays excluded: imports tests/inputs/cube.sldprt, a SolidWorks part that only Zoo's server-side converter reads; OpenCascade has no SolidWorks reader, so it stays out unless a converter appears"
     }
   ],
   "fixtures": [
@@ -6043,6 +5991,44 @@
       }
     },
     {
+      "path": "simulation/import_async",
+      "upstream": "rust/kcl-lib/tests/import_async",
+      "functions": [
+        "acos",
+        "arc",
+        "asin",
+        "atan",
+        "close",
+        "cos",
+        "involuteCircular",
+        "line",
+        "loft",
+        "offsetPlane",
+        "patternCircular2d",
+        "polar",
+        "segEndX",
+        "segEndY",
+        "sin",
+        "startProfile",
+        "startSketchOn",
+        "subtract2d",
+        "tan",
+        "translate",
+        "xLine",
+        "yLine"
+      ],
+      "kclVersion": "1.0",
+      "zoo": {
+        "volume": 8701.953493954936,
+        "area": 4134.0832415657505
+      },
+      "offline": {
+        "solids": 2,
+        "volume": 6552.691938,
+        "area": 1840.158655
+      }
+    },
+    {
       "path": "simulation/import_constant",
       "upstream": "rust/kcl-lib/tests/import_constant",
       "functions": [],
@@ -6073,6 +6059,16 @@
       }
     },
     {
+      "path": "simulation/import_foreign",
+      "upstream": "rust/kcl-lib/tests/import_foreign",
+      "functions": [],
+      "offline": {
+        "solids": 1,
+        "volume": 0.0,
+        "area": 0.0
+      }
+    },
+    {
       "path": "simulation/import_function_not_sketch",
       "upstream": "rust/kcl-lib/tests/import_function_not_sketch",
       "functions": ["close", "line", "revolve", "startProfile", "startSketchOn"],
@@ -6088,11 +6084,87 @@
       }
     },
     {
+      "path": "simulation/import_glb",
+      "upstream": "rust/kcl-lib/tests/import_glb",
+      "functions": [],
+      "kclVersion": "2.0",
+      "offline": {
+        "solids": 1,
+        "volume": 0.0,
+        "area": 0.0
+      }
+    },
+    {
+      "path": "simulation/import_glb_no_assign",
+      "upstream": "rust/kcl-lib/tests/import_glb_no_assign",
+      "functions": [],
+      "kclVersion": "2.0",
+      "offline": {
+        "solids": 1,
+        "volume": 0.0,
+        "area": 0.0
+      }
+    },
+    {
       "path": "simulation/import_glob",
       "upstream": "rust/kcl-lib/tests/import_glob",
       "functions": [],
       "offline": {
         "solids": 0,
+        "volume": 0.0,
+        "area": 0.0
+      }
+    },
+    {
+      "path": "simulation/import_gltf_embedded",
+      "upstream": "rust/kcl-lib/tests/import_gltf_embedded",
+      "functions": [],
+      "kclVersion": "2.0",
+      "offline": {
+        "solids": 1,
+        "volume": 0.0,
+        "area": 0.0
+      }
+    },
+    {
+      "path": "simulation/import_gltf_with_bin",
+      "upstream": "rust/kcl-lib/tests/import_gltf_with_bin",
+      "functions": [],
+      "kclVersion": "2.0",
+      "offline": {
+        "solids": 1,
+        "volume": 0.0,
+        "area": 0.0
+      }
+    },
+    {
+      "path": "simulation/import_mesh_clone",
+      "upstream": "rust/kcl-lib/tests/import_mesh_clone",
+      "functions": ["appearance", "clone", "translate"],
+      "offline": {
+        "solids": 4,
+        "volume": 0.0,
+        "area": 0.0
+      }
+    },
+    {
+      "path": "simulation/import_obj_with_mtl",
+      "upstream": "rust/kcl-lib/tests/import_obj_with_mtl",
+      "functions": [],
+      "kclVersion": "2.0",
+      "offline": {
+        "solids": 1,
+        "volume": 0.0,
+        "area": 0.0
+      }
+    },
+    {
+      "path": "simulation/import_obj_with_mtl_units",
+      "upstream": "rust/kcl-lib/tests/import_obj_with_mtl_units",
+      "functions": [],
+      "kclVersion": "2.0",
+      "offline": {
+        "solids": 1,
         "volume": 0.0,
         "area": 0.0
       }
@@ -6104,6 +6176,27 @@
       "kclVersion": "1.0",
       "offline": {
         "solids": 0,
+        "volume": 0.0,
+        "area": 0.0
+      }
+    },
+    {
+      "path": "simulation/import_stl",
+      "upstream": "rust/kcl-lib/tests/import_stl",
+      "functions": [],
+      "kclVersion": "2.0",
+      "offline": {
+        "solids": 1,
+        "volume": 0.0,
+        "area": 0.0
+      }
+    },
+    {
+      "path": "simulation/import_transform",
+      "upstream": "rust/kcl-lib/tests/import_transform",
+      "functions": ["rotate", "scale", "translate"],
+      "offline": {
+        "solids": 1,
         "volume": 0.0,
         "area": 0.0
       }
@@ -6644,6 +6737,20 @@
       }
     },
     {
+      "path": "simulation/multiple-foreign-imports-all-render",
+      "upstream": "rust/kcl-lib/tests/multiple-foreign-imports-all-render",
+      "functions": ["appearance", "clone", "translate"],
+      "zoo": {
+        "volume": 3000000000.0,
+        "area": 18000000.0
+      },
+      "offline": {
+        "solids": 3,
+        "volume": 3000000000.0,
+        "area": 18000000.0
+      }
+    },
+    {
       "path": "simulation/named_views_baseline_hide",
       "upstream": "rust/kcl-lib/tests/named_views_baseline_hide",
       "functions": ["coincident", "directed", "extrude", "line", "named", "region"],
@@ -6762,6 +6869,21 @@
         "solids": 1,
         "volume": 1000.0,
         "area": 600.0
+      }
+    },
+    {
+      "path": "simulation/named_views_hide_imported",
+      "upstream": "rust/kcl-lib/tests/named_views_hide_imported",
+      "functions": ["coincident", "extrude", "hide", "line", "named", "oriented", "region"],
+      "kclVersion": "2.0",
+      "zoo": {
+        "volume": 125000000.0,
+        "area": 1500000.0
+      },
+      "offline": {
+        "solids": 1,
+        "volume": 125000000.0,
+        "area": 1500000.0
       }
     },
     {

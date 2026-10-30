@@ -1,0 +1,4 @@
+@settings(kclVersion = 2.0)
+@(format = obj, lengthUnit = m)
+import "inputs/cube.obj"
+model = cube

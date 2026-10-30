@@ -103,6 +103,7 @@ import {
   sumMass,
   entityType,
 } from '#offline/offline-engine-queries.js';
+import { importFiles } from '#offline/offline-import.js';
 
 type Handler = (id: string, cmd: ModelingCommand) => Record<string, unknown> | undefined;
 
@@ -699,6 +700,7 @@ export class OfflineEngine {
         return result;
       },
       export: (_id, cmd) => ({ files: this.export(cmd['format'] as WireOutputFormat) }),
+      import_files: (id, cmd) => importFiles(this, id, cmd),
     };
   }
 

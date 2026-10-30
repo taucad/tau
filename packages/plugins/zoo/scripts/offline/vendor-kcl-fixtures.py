@@ -15,33 +15,27 @@ import json
 import os
 import re
 import shutil
+import struct
 import sys
 
-# Fixtures the suite cannot run, with why. A kcl-lib panic aborts the whole test worker, so these stay out.
+# Fixtures the suite cannot run, with the verdict. A kcl-lib panic aborts the whole test worker, so these stay out.
 EXCLUDED = {
-    'simulation/import_foreign': 'foreign-format import panics kcl-lib under Node (no global timer object)',
-    'simulation/import_glb': 'foreign-format import panics kcl-lib under Node (no global timer object)',
-    'simulation/import_glb_no_assign': 'foreign-format import panics kcl-lib under Node (no global timer object)',
-    'simulation/import_gltf_embedded': 'foreign-format import panics kcl-lib under Node (no global timer object)',
-    'simulation/import_gltf_with_bin': 'foreign-format import panics kcl-lib under Node (no global timer object)',
-    'simulation/import_mesh_clone': 'foreign-format import panics kcl-lib under Node (no global timer object)',
-    'simulation/import_obj_with_mtl': 'foreign-format import panics kcl-lib under Node (no global timer object)',
-    'simulation/import_obj_with_mtl_units': 'foreign-format import panics kcl-lib under Node (no global timer object)',
-    'simulation/multiple-foreign-imports-all-render': 'foreign-format import panics kcl-lib under Node (no global timer object)',
-    'simulation/named_views_hide_imported': 'foreign-format import panics kcl-lib under Node (no global timer object)',
-    'simulation/import_transform': 'imports a 5.5 MB STL',
-    'simulation/import_async': 'imports a 5.5 MB STL',
-    'simulation/import_stl': 'imports a 5.5 MB STL',
-    'simulation/nested_windows_main_kcl': 'imports a Windows-style backslash path, which the host filesystem rejects',
+    'simulation/nested_windows_main_kcl': (
+        'stays excluded: imports a Windows-style backslash path (nested\\foo\\bar\\main.kcl), which the host filesystem '
+        'rejects by design'
+    ),
     **{
-        f'examples/{example}': 'imports tests/inputs/cube.sldprt, a SolidWorks part only Zoo can convert'
+        f'examples/{example}': (
+            'stays excluded: imports tests/inputs/cube.sldprt, a SolidWorks part that only Zoo\'s server-side converter '
+            'reads; OpenCascade has no SolidWorks reader, so it stays out unless a converter appears'
+        )
         for example in (
             'prelude-clone-9', 'prelude-clone-11', 'solid-appearance-9', 'transform-hide-1', 'transform-rotate-3',
             'transform-scale-1', 'transform-translate-1', 'transform-translate-2',
         )
     },
 }
-# Inputs larger than this stay upstream; a fixture that needs one is excluded above.
+# Inputs larger than this stay upstream (an STL is replaced by a small stand-in); a fixture that needs one is excluded.
 MAX_INPUT_BYTES = 100_000
 
 
@@ -75,20 +69,90 @@ def physical_properties(directory):
     return {'volume': data['weight']['value'] * 1000, 'area': data['surface_area']['value']}
 
 
+def companions(target):
+    """The files a foreign file names beside itself: a glTF's external buffers and images, an OBJ's materials."""
+    directory = os.path.dirname(target)
+    if target.endswith('.gltf'):
+        gltf = json.load(open(target))
+        uris = [item.get('uri', '') for key in ('buffers', 'images') for item in gltf.get(key, [])]
+        return [os.path.join(directory, uri) for uri in uris if uri and not uri.startswith('data:')]
+    if target.endswith('.obj'):
+        names = re.findall(r'^mtllib\s+(.+?)\s*$', open(target, errors='replace').read(), re.M)
+        return [os.path.join(directory, name) for name in names]
+    return []
+
+
+def stl_vertices(file):
+    data = open(file, 'rb').read()
+    if not data.lstrip().startswith(b'solid') or b'facet' not in data[:1000]:
+        count = struct.unpack_from('<I', data, 80)[0]
+        return [struct.unpack_from('<3f', data, 84 + 50 * index + 12 + 12 * corner)
+                for index in range(count) for corner in range(3)], 'binary'
+    return [tuple(map(float, match.groups())) for match in re.finditer(
+        rb'vertex\s+(\S+)\s+(\S+)\s+(\S+)', data)], 'ascii'
+
+
+def write_small_stl(source, destination):
+    """Writes the bounding box of a large STL as a 12-triangle STL in the same encoding (ASCII or binary).
+
+    An STL over MAX_INPUT_BYTES is too large to vendor; the box keeps the fixture's import code path (format, file name,
+    units, placement) while its mesh is a stand-in. Deterministic: the same source always gives the same bytes.
+    """
+    vertices, encoding = stl_vertices(source)
+    low = [min(vertex[axis] for vertex in vertices) for axis in range(3)]
+    high = [max(vertex[axis] for vertex in vertices) for axis in range(3)]
+    corner = lambda index: [high[axis] if index >> axis & 1 else low[axis] for axis in range(3)]
+    # Two outward-wound triangles per face, as corner indices (bit 0 x, bit 1 y, bit 2 z).
+    quads = [(0, 2, 3, 1), (4, 5, 7, 6), (0, 1, 5, 4), (2, 6, 7, 3), (0, 4, 6, 2), (1, 3, 7, 5)]
+    normals = [(0, 0, -1), (0, 0, 1), (0, -1, 0), (0, 1, 0), (-1, 0, 0), (1, 0, 0)]
+    facets = [(normal, [corner(quad[0]), corner(quad[a]), corner(quad[b])])
+              for quad, normal in zip(quads, normals) for a, b in ((1, 2), (2, 3))]
+    if encoding == 'binary':
+        out = bytearray(b'small stand-in generated by vendor-kcl-fixtures.py'.ljust(80, b' '))
+        out += struct.pack('<I', len(facets))
+        for normal, triangle in facets:
+            out += struct.pack('<12fH', *normal, *(value for point in triangle for value in point), 0)
+        open(destination, 'wb').write(bytes(out))
+        return
+    lines = ['solid unnamed']
+    for normal, triangle in facets:
+        lines += [f'facet normal {normal[0]} {normal[1]} {normal[2]}', '    outer loop']
+        lines += [f'        vertex {point[0]!r} {point[1]!r} {point[2]!r}' for point in triangle]
+        lines += ['    endloop', 'endfacet']
+    open(destination, 'w').write('\n'.join(lines + ['endsolid unnamed']) + '\n')
+
+
+def vendor_input(source, destination):
+    """Copies an imported file, or a small stand-in for a large STL; False when it is too large to vendor."""
+    if os.path.getsize(source) <= MAX_INPUT_BYTES:
+        shutil.copy(source, destination)
+    elif source.lower().endswith('.stl'):
+        write_small_stl(source, destination)
+    else:
+        return False
+    return True
+
+
 def localize_imports(source, destination):
-    """Copies small files imported from outside the fixture into its `inputs/`, and points the imports there."""
+    """Copies files imported from outside the fixture into its `inputs/`, with their companions, and points the imports
+    there. Large STLs inside or outside the fixture become small stand-ins (`write_small_stl`)."""
+    for file in glob.glob(f'{destination}/**/*.stl', recursive=True):
+        if os.path.getsize(file) > MAX_INPUT_BYTES:
+            write_small_stl(file, file)
     for file in glob.glob(f'{destination}/**/*.kcl', recursive=True):
         text = open(file).read()
         relative_dir = os.path.relpath(os.path.dirname(file), destination)
 
         def localize(match):
             target = os.path.normpath(os.path.join(source, relative_dir, match.group(1)))
-            if not os.path.exists(target) or os.path.getsize(target) > MAX_INPUT_BYTES:
+            if not os.path.exists(target):
                 return match.group(0)
             os.makedirs(f'{destination}/inputs', exist_ok=True)
-            for sibling in glob.glob(os.path.splitext(target)[0] + '.*'):
-                if os.path.getsize(sibling) <= MAX_INPUT_BYTES and not sibling.endswith('.kcl'):
-                    shutil.copy(sibling, f'{destination}/inputs/')
+            if not vendor_input(target, f'{destination}/inputs/{os.path.basename(target)}'):
+                return match.group(0)
+            for companion in companions(target):
+                if os.path.exists(companion):
+                    vendor_input(companion, f'{destination}/inputs/{os.path.basename(companion)}')
             local = os.path.relpath(f'{destination}/inputs/{os.path.basename(target)}', os.path.dirname(file))
             return f'import "{local}"'
 

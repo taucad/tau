@@ -26,7 +26,13 @@ already exist.
 
 The Zoo fixtures are MIT-licensed by the Zoo Authors (`LICENSE.modeling-app`). Simulation tests are renamed from
 `input.kcl` to `main.kcl`, pinned to the KCL version Zoo ran them with, and have small imported inputs copied
-into `inputs/`.
+into `inputs/`, with the files they name (a glTF's buffers, an OBJ's materials).
+
+`2-5-long-m8-chc-screw.stl` in `import_async`, `import_stl` and `import_transform` is not Zoo's 5.5 MB screw: staging
+replaces any STL over 100 kB with a 12-triangle box over the original's bounding box, in the same encoding and under
+the same name, so the fixture keeps its import path (format, units, placement) without the size. Their KCL is
+verbatim apart from the localized import path. Imported meshes count neither volume nor area, as in Zoo's mass
+properties, so the stand-in changes only the mesh's shape, not what the fixture measures.
 
 ## Re-recording the baselines
 

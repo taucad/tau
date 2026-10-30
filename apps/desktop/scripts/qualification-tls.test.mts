@@ -229,7 +229,10 @@ const main = async (): Promise<void> => {
           return '';
         }
         if (rest[0] === 'verify-cert') {
-          assert.ok(rest[2]!.endsWith('/mac-partial/mirror-server.crt'), 'verify the server leaf as the app sees it');
+          assert.ok(
+            rest[2]!.endsWith(join('mac-partial', 'mirror-server.crt')),
+            'verify the server leaf as the app sees it',
+          );
           assert.deepEqual(rest.slice(3), ['-p', 'ssl', '-s', '127.0.0.1']);
           if (macState.trusted) {
             // The first verification fails after a successful mutation, exercising rollback.

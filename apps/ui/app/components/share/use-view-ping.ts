@@ -1,5 +1,4 @@
 import { useEffect, useRef } from 'react';
-import { useCadPreview } from '#hooks/use-cad-preview.js';
 
 /** Milliseconds — minimum dwell time before recording a view ping. */
 const viewPingDwell = 10_000;
@@ -7,6 +6,7 @@ const viewPingDwell = 10_000;
 type UseViewPingArgs = {
   readonly publicationId: string;
   readonly apiBaseUrl: string;
+  readonly parameters?: Record<string, unknown>;
 };
 
 /**
@@ -14,13 +14,12 @@ type UseViewPingArgs = {
  * dwells for at least 10 seconds AND has interacted with the model (parameter change or
  * orbit/pan controls). The hook is idempotent — subsequent rerenders never re-fire.
  */
-export const useViewPing = ({ publicationId, apiBaseUrl }: UseViewPingArgs): void => {
+export const useViewPing = ({ publicationId, apiBaseUrl, parameters }: UseViewPingArgs): void => {
   const sentRef = useRef(false);
   const interactedRef = useRef(false);
   const dwellMetRef = useRef(false);
 
   // Any parameter change after mount counts as an interaction.
-  const { parameters } = useCadPreview();
   const parametersInitRef = useRef<Record<string, unknown> | undefined>(parameters);
 
   useEffect(() => {

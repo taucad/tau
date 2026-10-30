@@ -1062,6 +1062,14 @@
       "owner": "desktop-bash-terminal W3"
     },
     {
+      "id": "SHELL-DRAIN-TIMEOUT",
+      "bound": "2-second bound on waiting for output readers after an unconfirmed cleanup",
+      "site": "packages/host/src/shell/shell-service.ts",
+      "token": "setTimeout(resolve, milliseconds)",
+      "class": "External edge",
+      "owner": "desktop-bash-terminal W3"
+    },
+    {
       "id": "TERMINAL-OPEN-TIMEOUT",
       "bound": "30-second bound on a fresh desktop terminal port's open frame; a port that never opens is closed before any shell starts",
       "site": "apps/desktop/src/tau/services-host.terminal.ts",

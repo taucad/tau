@@ -6,8 +6,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import type * as HandleStore from '#filesystem/handle-store.js';
 import type { ReactNode } from 'react';
+import { renderToString } from 'react-dom/server';
 import { StrictMode, useEffect } from 'react';
-import { renderHook, render, screen, act, waitFor, configure, getConfig } from '@testing-library/react';
+import { renderHook, render, screen, act, fireEvent, waitFor, configure, getConfig } from '@testing-library/react';
 import { createActor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
@@ -276,6 +277,7 @@ const {
   waitForFileManagerServices,
   FileManagerProvider,
   HomeFileManagerProvider,
+  HomeFileManagerNotice,
   useFileManager,
   useHomeStorageBackend,
   SharedWorkerGate,
@@ -389,7 +391,114 @@ describe('waitForFileManagerServices', () => {
 describe('HomeFileManagerProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockWaitForWorkerReady.mockResolvedValue(undefined);
     mockGetHomeStorageBackend.mockResolvedValue('opfs');
+  });
+
+  it('renders useful HTML without selecting storage or starting a worker', () => {
+    const html = renderToString(
+      <HomeFileManagerProvider rootDirectory='/'>
+        <input aria-label='Project name' />
+      </HomeFileManagerProvider>,
+    );
+    expect(html).toContain('aria-label="Project name"');
+    expect(mockGetHomeStorageBackend).not.toHaveBeenCalled();
+  });
+
+  it('preserves the page and actor identity when the pending backend resolves', async () => {
+    const selection = Promise.withResolvers<'opfs'>();
+    mockGetHomeStorageBackend.mockReturnValueOnce(selection.promise);
+    const seen: unknown[] = [];
+    function Page(): React.JSX.Element {
+      const { fileManagerRef } = useFileManager();
+      seen.push(fileManagerRef);
+      return <input aria-label='Draft' defaultValue='Keep this draft' />;
+    }
+    render(
+      <HomeFileManagerProvider rootDirectory='/' shouldInitializeOnStart={false}>
+        <Page />
+      </HomeFileManagerProvider>,
+    );
+    const original = screen.getByRole('textbox', { name: 'Draft' });
+    await act(async () => {
+      selection.resolve('opfs');
+      await selection.promise;
+    });
+    expect(screen.getByRole('textbox', { name: 'Draft' })).toBe(original);
+    expect(original).toHaveValue('Keep this draft');
+    expect(new Set(seen).size).toBe(1);
+  });
+
+  it('starts only the latest root when scope and backend resolve in the same render', async () => {
+    const selection = Promise.withResolvers<'opfs'>();
+    mockGetHomeStorageBackend.mockReturnValueOnce(selection.promise);
+    const actors: Array<ReturnType<typeof useFileManager>['fileManagerRef']> = [];
+    function Probe(): React.JSX.Element {
+      const { fileManagerRef } = useFileManager();
+      actors.push(fileManagerRef);
+      return <input aria-label='Draft' />;
+    }
+    const tree = (rootDirectory: string): React.JSX.Element => (
+      <HomeFileManagerProvider rootDirectory={rootDirectory}>
+        <Probe />
+      </HomeFileManagerProvider>
+    );
+    const view = render(tree('/old'));
+    const before = workerTestState.instances.length;
+    await act(async () => {
+      selection.resolve('opfs');
+      view.rerender(tree('/latest'));
+      await selection.promise;
+    });
+    await waitFor(() => {
+      expect(actors.at(-1)?.getSnapshot().value).toBe('ready');
+    });
+    expect(actors.at(-1)?.getSnapshot().context.rootDirectory).toBe('/latest');
+    expect(new Set(actors).size).toBe(1);
+    expect(workerTestState.instances).toHaveLength(before + 1);
+    view.unmount();
+  });
+
+  it('does not start a worker after a pending Home provider unmounts', async () => {
+    const selection = Promise.withResolvers<'opfs'>();
+    mockGetHomeStorageBackend.mockReturnValueOnce(selection.promise);
+    const before = workerTestState.instances.length;
+    const view = render(
+      <HomeFileManagerProvider rootDirectory='/'>
+        <input aria-label='Draft' />
+      </HomeFileManagerProvider>,
+    );
+    view.unmount();
+    await act(async () => {
+      selection.resolve('opfs');
+      await selection.promise;
+    });
+    expect(workerTestState.instances).toHaveLength(before);
+  });
+
+  it('keeps a draft available and retries a failed Home selection without choosing another engine', async () => {
+    mockGetHomeStorageBackend.mockRejectedValueOnce(new Error('Pin could not be read')).mockResolvedValue('opfs');
+    render(
+      <HomeFileManagerProvider rootDirectory='/' shouldInitializeOnStart={false}>
+        <main>
+          <HomeFileManagerNotice />
+          <input aria-label='Draft' defaultValue='Keep this draft' />
+        </main>
+        <SharedWorkerGate shouldReportFailure={false}>
+          <span>files ready</span>
+        </SharedWorkerGate>
+      </HomeFileManagerProvider>,
+    );
+    const original = screen.getByRole('textbox', { name: 'Draft' });
+    expect(await screen.findByRole('alert', { name: "Couldn't open Home" })).toBeInTheDocument();
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole('textbox', { name: 'Draft' })).toBe(original);
+    expect(original).toHaveValue('Keep this draft');
+    expect(mockGetHomeStorageBackend).toHaveBeenCalledTimes(2);
   });
 
   it('resolves Home once and shares the selected engine with nested mounts', async () => {
@@ -472,19 +581,18 @@ describe('SharedWorkerGate', () => {
     expect(screen.queryByText('subtree')).not.toBeInTheDocument();
   });
 
-  /* Home's own wait gates the whole app, so it takes the same placeholder. */
-  it('shows the placeholder while Home\u2019s storage engine resolves', async () => {
+  /* A pending storage selection must not hide the page or admit a worker. */
+  it('renders the page while Home\u2019s storage engine resolves', async () => {
     mockGetHomeStorageBackend.mockReturnValueOnce(Promise.withResolvers<'indexeddb' | 'opfs'>().promise);
 
     render(
-      <HomeFileManagerProvider rootDirectory='/' placeholder={<div>opening</div>}>
+      <HomeFileManagerProvider rootDirectory='/'>
         <div>subtree</div>
       </HomeFileManagerProvider>,
     );
 
-    expect(await screen.findByText('opening')).toBeInTheDocument();
-    expect(screen.queryByRole('status', { name: 'Opening Home' })).not.toBeInTheDocument();
-    expect(screen.queryByText('subtree')).not.toBeInTheDocument();
+    expect(screen.getByText('subtree')).toBeInTheDocument();
+    expect(workerTestState.instances).toHaveLength(0);
   });
 });
 

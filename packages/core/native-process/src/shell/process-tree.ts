@@ -42,13 +42,21 @@ const linuxTable = async (): Promise<readonly ProcessRow[]> => {
   return rows.filter((row) => row !== undefined);
 };
 
+/** Maximum duration of a process-table snapshot. Milliseconds. */
+const tableTimeout = 1000;
+
 const darwinTable = async (): Promise<readonly ProcessRow[]> =>
   new Promise((resolve, reject) => {
     execFile(
       '/bin/ps',
       ['-A', '-o', 'pid=,ppid=,pgid=,stat=,lstart='],
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
-      { env: { PATH: '/usr/bin:/bin', LC_ALL: 'C' }, maxBuffer: 16 * 1024 * 1024 },
+      {
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
+        env: { PATH: '/usr/bin:/bin', LC_ALL: 'C' },
+        maxBuffer: 16 * 1024 * 1024,
+        timeout: tableTimeout,
+        killSignal: 'SIGKILL',
+      },
       (error, stdout) => {
         if (error !== null) {
           reject(new Error(`ps failed: ${error.message}`, { cause: error }));
@@ -138,6 +146,35 @@ export type TerminateTreeOptions = Readonly<{
 }>;
 
 /**
+ * A failed or hung observation is uncertainty, never an empty process table.
+ *
+ * @param read - The observation being bounded.
+ * @param observationTimeout - Remaining observation budget. Milliseconds.
+ * @returns The observed rows, or a rejection when observation cannot be confirmed.
+ */
+const boundedTable = async (
+  read: () => Promise<readonly ProcessRow[]>,
+  observationTimeout: number,
+): Promise<readonly ProcessRow[]> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      read(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => {
+            reject(new Error('Process-table observation timed out; process termination is unconfirmed.'));
+          },
+          Math.max(1, observationTimeout),
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+/**
  * Stop every process this launch owns and wait until none is left (I7).
  *
  * The tree is frozen with `SIGSTOP` round by round, so a process cannot fork a new child faster than the walk sees
@@ -155,7 +192,9 @@ export const terminateOwnedProcesses = async (options: TerminateTreeOptions): Pr
   if (!Number.isInteger(options.root) || options.root <= 1 || !Number.isInteger(options.group) || options.group <= 1) {
     return [];
   }
-  const read = options.table ?? processTable;
+  const deadline = Date.now() + options.deadlineMilliseconds;
+  const read = async (): Promise<readonly ProcessRow[]> =>
+    boundedTable(options.table ?? processTable, Math.min(tableTimeout, Math.max(1, deadline - Date.now())));
   const frozen = new Set<number>();
   try {
     for (let round = 0; round < freezeRounds; round += 1) {
@@ -177,14 +216,13 @@ export const terminateOwnedProcesses = async (options: TerminateTreeOptions): Pr
     }
     signal(-options.group, 'SIGKILL');
   }
-  const deadline = Date.now() + options.deadlineMilliseconds;
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- polled until the deadline.
     const table = await read();
     const alive = new Set(table.filter((row) => !row.zombie).map((row) => row.pid));
-    /* The root is the provider's own child: Node reaps it, so its zombie is not a survivor. */
+    /* Every live writer counts, including the root. Zombie rows are already excluded above. */
     const survivors = [...frozen, ...ownedProcesses(table, options.root, options.group)].filter(
-      (pid, index, all) => pid !== options.root && alive.has(pid) && all.indexOf(pid) === index,
+      (pid, index, all) => alive.has(pid) && all.indexOf(pid) === index,
     );
     if (survivors.length === 0 || Date.now() >= deadline) {
       return survivors;
@@ -217,7 +255,7 @@ export const trackDescendants = (
 ): { stop: () => Promise<void>; table: () => Promise<readonly ProcessRow[]> } => {
   const seen = new Map<number, Readonly<{ pgid: number; started: string }>>();
   const remember = async (): Promise<readonly ProcessRow[]> => {
-    const rows = await read();
+    const rows = await boundedTable(read, tableTimeout);
     for (const [pid, identity] of seen) {
       if (!rows.some((row) => row.pid === pid && row.pgid === identity.pgid && row.started === identity.started)) {
         seen.delete(pid);
@@ -240,16 +278,22 @@ export const trackDescendants = (
     /* A remembered process still owned shows up as a child of the root, whatever its parent is now. */
     return rows.map((row) => (seen.has(row.pid) ? { ...row, ppid: root } : row));
   };
+  let polling = false;
   const poll = async (): Promise<void> => {
     try {
       await remember();
     } catch {
       /* A failed poll is retried on the next tick; termination takes a fresh table of its own. */
+    } finally {
+      polling = false;
     }
   };
   let latest: Promise<void> = Promise.resolve();
   const timer = setInterval(() => {
-    latest = poll();
+    if (!polling) {
+      polling = true;
+      latest = poll();
+    }
   }, trackingMilliseconds);
   timer.unref();
   return {

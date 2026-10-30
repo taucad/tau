@@ -30,6 +30,7 @@
     "build-environment.test.ts",
     "geospec-mt-assets.vite-plugin.test.ts",
     "picogk-browser-assets.vite-plugin.test.ts",
+    "openscad-language-assets.vite-plugin.test.ts",
     "asset-integrity.vite-plugin.test.ts",
     "desktop/**/*.ts",
     "serve/**/*.ts",

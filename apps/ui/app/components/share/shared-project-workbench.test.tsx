@@ -67,6 +67,8 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 
 // Stands in for the provider that creates the kernel and its runtime worker.
 const projectProvider = vi.hoisted(() => vi.fn());
+const viewPing = vi.hoisted(() => vi.fn());
+vi.mock('#components/share/use-view-ping.js', () => ({ useViewPing: viewPing }));
 
 vi.mock('#hooks/use-project.js', () => ({
   ProjectProvider: (props: { readonly children: React.JSX.Element; readonly profile: string }): React.JSX.Element => {
@@ -187,7 +189,12 @@ const renderWorkbench = (viewedPublication: ParsedPublication = publication): Re
   render(
     <TooltipProvider>
       <MemoryRouter>
-        <SharedProjectWorkbench projectId='shared-test' publication={viewedPublication} hydratedFiles={sharedFiles} />
+        <SharedProjectWorkbench
+          shouldTrackView
+          projectId='shared-test'
+          publication={viewedPublication}
+          hydratedFiles={sharedFiles}
+        />
       </MemoryRouter>
     </TooltipProvider>,
   );
@@ -196,6 +203,7 @@ describe('SharedProjectWorkbench', () => {
   beforeEach(() => {
     fileManager.reset();
     projectProvider.mockReset();
+    viewPing.mockReset();
     globalThis.sessionStorage.clear();
   });
 
@@ -206,6 +214,7 @@ describe('SharedProjectWorkbench', () => {
     expect(screen.getByText(/executes that code in this browser/)).toBeInTheDocument();
     expect(projectProvider).not.toHaveBeenCalled();
     expect(fileManager.mount).not.toHaveBeenCalled();
+    expect(viewPing).not.toHaveBeenCalled();
 
     await userEvent.click(screen.getByRole('button', { name: 'Run this model' }));
     await act(async () => {
@@ -214,6 +223,7 @@ describe('SharedProjectWorkbench', () => {
 
     await waitFor(() => {
       expect(projectProvider).toHaveBeenCalledWith(expect.objectContaining({ profile: 'shared' }));
+      expect(viewPing).toHaveBeenCalledWith(expect.objectContaining({ publicationId: publication.id }));
     });
   });
 

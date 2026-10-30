@@ -9086,7 +9086,9 @@
         "area": 107932.82755993473
       },
       "offline": {
-        "gap": "internal: Expected a sweep ID on the path when processing Solid3dGetExtrusionFaceInfo command, but w"
+        "solids": 3,
+        "volume": 466426.5427,
+        "area": 107968.7998
       }
     },
     {
@@ -14002,7 +14004,9 @@
       "upstream": "rust/kcl-lib/std/transform.kcl#mirror2d",
       "functions": ["extrude", "line", "mirror2d", "startProfile", "startSketchOn"],
       "offline": {
-        "gap": "internal: Expected a sweep ID on the path when processing Solid3dGetExtrusionFaceInfo command, but w"
+        "solids": 1,
+        "volume": 4180.0,
+        "area": 2579.827225
       }
     },
     {
@@ -14010,7 +14014,9 @@
       "upstream": "rust/kcl-lib/std/transform.kcl#mirror2d",
       "functions": ["extrude", "line", "mirror2d", "startProfile", "startSketchOn"],
       "offline": {
-        "gap": "internal: Expected a sweep ID on the path when processing Solid3dGetExtrusionFaceInfo command, but w"
+        "solids": 1,
+        "volume": 3400.0,
+        "area": 1549.252552
       }
     },
     {
@@ -14038,7 +14044,9 @@
       "upstream": "rust/kcl-lib/std/transform.kcl#mirror2d",
       "functions": ["extrude", "line", "mirror2d", "startProfile", "startSketchOn"],
       "offline": {
-        "gap": "internal: Expected a sweep ID on the path when processing Solid3dGetExtrusionFaceInfo command, but w"
+        "solids": 1,
+        "volume": 3400.0,
+        "area": 1549.252552
       }
     },
     {
@@ -14055,7 +14063,9 @@
         "yLine"
       ],
       "offline": {
-        "gap": "internal: Expected a sweep ID on the path when processing Solid3dGetExtrusionFaceInfo command, but w"
+        "solids": 1,
+        "volume": 50.53339625,
+        "area": 1011.432379
       }
     },
     {

@@ -3,7 +3,7 @@ title: 'Parameter Record Policy'
 description: 'What the parameter sidecar may store, and how concurrency, echoes and rendering are decided around it.'
 status: active
 created: '2026-09-17'
-updated: '2026-09-29'
+updated: '2026-10-30'
 related:
   - docs/research/agent-workbench-control-blueprint.md
 ---
@@ -86,11 +86,19 @@ A field-scoped operation names its field by `group` and `pointer` under that dec
 
 A value edit may also carry a field-scoped `base` — the value and effective binding its editor was working from. The edit commits while its own field still holds that value, so another field's commit, a group operation or an agent write elsewhere in the record never refuses it.
 
+A `base` may name its `editor`, one editing surface such as a browser tab's parameter service or a pane controller. The set actor records, per field, the editor whose edit last committed there and the value it left. While the field still holds that value, it is the base for that editor's next edit, whatever value the editor sent: the editor wrote it. Only another writer's change refuses an editor.
+
+A group replacement made by an editor carries `base`, the group values it was made from, and its `editor`. Only the fields `values` changes from `base` are written: objects merge field by field, an array or a scalar is one field, and an absent field reads as its default. A changed field that another writer also moved since `base` refuses the replacement with `STALE_MANIFEST`; the editor rule above applies to each changed field. A replacement without `base` sets the group to `values` whatever it holds, and only an explicit whole-group operation, such as resetting every field to its default, sends one.
+
+**Why**: A form submits its whole group after each change, from the values it last rendered, and renders the record late. A replacement written wholesale silently reverted any field committed after that render.
+
+A view never derives a base from the value it rendered. Each row stands on its own edits through its edit lineage (`useFieldEdits` in `@taucad/viewer`): while the rendered value still echoes the row's own writes, the row shows, and builds its next base on, its own last sent value. Only the lineage mints the `FieldBase` a row's `ParameterCommit` accepts, so a base built from a rendered value does not type-check. A form edit reaches its source through `editValues`, whose `base` is required.
+
 ### 5. Adopt an own-write echo instead of rejecting on it
 
 A watch event whose re-read returns bytes equal to the ones this actor just wrote is adopted without re-publishing. A record change arriving during planning or confirmation refreshes and re-plans. A checked-write conflict follows the same route for at most three total attempts; exhaustion rejects with `RECORD_CONFLICT`.
 
-**Why**: The write's own notification arrives after the command that caused it. Treating it as foreign made an edit reject itself.
+**Why**: The write's own notification arrives after the command that caused it. Treating it as foreign made an edit reject itself. The same holds for an editor's view: it renders the record through a deferred projection that can trail its own settled commits by more than one step, so a base it reconstructs from what it rendered can name its own superseded value. The editor lineage keeps that echo from refusing the editor's next edit as `STALE_MANIFEST`.
 
 Only `base` decides whether the field itself moved. After an uncertain write, the machine re-reads the record and compares bytes: the planned bytes settle as `committed`, the planned-from bytes as `WRITE_FAILED`, and any other valid bytes settle as indeterminate `UNKNOWN_APPLICATION` before work continues from that refreshed record. Only a failed recovery read enters uncertain mode with `RECOVERY_FAILED`; resolving the authority exits that mode.
 
@@ -117,6 +125,8 @@ At render time the precedence is `defaults ← stored ← caller overrides`: the
 - [ ] The reader calls `requireParameterRecord` and leaves refused bytes alone
 - [ ] The write's only precondition is the sidecar's own bytes
 - [ ] The request carries the live manifest revision, and a value edit carries its field `base`
+- [ ] Every editor-made edit carries its `editor`; a form's group replacement carries the `base` it was made from
+- [ ] No view builds a base from the value it rendered: rows send the lineage's `FieldBase`, forms call `editValues`
 - [ ] A field-scoped operation names its field by `group` and `pointer` only, with no parameter id or schema resource
 - [ ] Watch, staged commit and transient scrub preserve `defaults ← stored ← caller overrides`
 

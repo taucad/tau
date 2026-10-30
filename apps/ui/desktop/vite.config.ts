@@ -20,6 +20,8 @@ import { resolveTauCloudBuildEnabled, resolveTauTelemetryHostCloud } from '../bu
 import { createGeoSpecMtAssets } from '../geospec-mt-assets.vite-plugin';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite configuration runs outside the app alias resolver.
 import { createPicogkBrowserAssets } from '../picogk-browser-assets.vite-plugin.js';
+// oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
+import { createOpenscadLanguageAssets } from '../openscad-language-assets.vite-plugin';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /* The renderer stamps the desktop app's own semver as its runtime telemetry release, as desktop main does. */
@@ -30,6 +32,7 @@ const desktopRelease = (
 const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
 const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
 const picogkAssets = createPicogkBrowserAssets(process.env['PICOGK_BROWSER_ASSETS_ROOT']);
+const openscadLanguage = createOpenscadLanguageAssets(path.resolve(__dirname, '../../../out/openscad-language/stage'));
 
 /**
  * Desktop (Electron) build of `apps/ui`.
@@ -64,6 +67,7 @@ export default defineConfig({
   plugins: [
     mtAssets.plugin,
     picogkAssets.plugin,
+    openscadLanguage.plugin,
     // Prune unused runtime assets before the module graph inventories them.
     tauRuntime(),
     createUiSourceAliasPlugin({

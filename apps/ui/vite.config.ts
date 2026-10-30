@@ -28,6 +28,8 @@ import { createGeoSpecMtAssets } from './geospec-mt-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite configuration runs outside the app alias resolver.
 import { createPicogkBrowserAssets } from './picogk-browser-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
+import { createOpenscadLanguageAssets } from './openscad-language-assets.vite-plugin.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createAssetIntegrity } from './asset-integrity.vite-plugin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -443,6 +445,7 @@ const createReleaseManifestPlugin = (release: string): Plugin => ({
 export default defineConfig(({ command, mode }) => {
   const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
   const picogkAssets = createPicogkBrowserAssets(process.env['PICOGK_BROWSER_ASSETS_ROOT']);
+  const openscadLanguage = createOpenscadLanguageAssets(path.resolve(__dirname, '../../out/openscad-language/stage'));
   const isTest = mode === 'test';
   /*
    * Ordered build identity for the stale-tab skew guard (blueprint DF20).
@@ -533,6 +536,7 @@ export default defineConfig(({ command, mode }) => {
     plugins: [
       mtAssets.plugin,
       picogkAssets.plugin,
+      openscadLanguage.plugin,
       createUiSourceAliasPlugin({
         emitModuleGraph: true,
         tauCloudEnabled,

@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -35,7 +36,10 @@ vi.mock('node:fs', async (importOriginal) => {
 const roots: string[] = [];
 
 const createRoot = (): string => {
-  const root = mkdtempSync(join(tmpdir(), 'tau-node-atomic-'));
+  // The provider watches `realpathSync(base)`, because a real native watcher reports resolved
+  // paths. On macOS `tmpdir()` is `/var/folders/...`, a symlink, so a synthetic event built from an
+  // unresolved root reads as outside the watch and costs a whole-subscription reset.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'tau-node-atomic-')));
   roots.push(root);
   writeFileSync(join(root, 'target.txt'), 'old');
   return root;

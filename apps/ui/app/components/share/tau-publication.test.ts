@@ -398,7 +398,7 @@ describe('Tau publication client environment', () => {
     globalThis.window.ENV = originalClientEnvironment;
   });
 
-  it('mounts the view ping without reading the server environment', () => {
+  it('does not mount a view ping outside the client workbench', () => {
     const publication = parsePublicationRecord(sampleLoaderData.publication, 'public');
     if (!publication) {
       throw new Error('Expected the publication fixture to parse.');
@@ -412,10 +412,7 @@ describe('Tau publication client environment', () => {
     );
 
     expect(mockedGetEnvironment).not.toHaveBeenCalled();
-    expect(useViewPingMock).toHaveBeenCalledWith({
-      publicationId: 'pub_1',
-      apiBaseUrl: 'https://client-api.tau.test',
-    });
+    expect(useViewPingMock).not.toHaveBeenCalled();
   });
 });
 

@@ -63,6 +63,9 @@
 \* Rating an ended run's reply (agent observability T12) only reads the ledger
 \* and notifies the host, once the run's lifecycle ended (a pause resumes); queue
 \* paths unchanged.
+\* Home's server-rendered composer input stays live until the rich composer hydrates; its edit
+\* enters the existing draft owner through one setDraftText, and that early input carries no submit
+\* path, so nothing enqueues, prepares or acknowledges before hydration; queue paths unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

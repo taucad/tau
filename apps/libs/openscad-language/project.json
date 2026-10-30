@@ -1,0 +1,61 @@
+{
+  "name": "openscad-language",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/libs/openscad-language",
+  "projectType": "library",
+  "tags": ["scope:ui", "type:app-lib", "layer:data-access"],
+  "namedInputs": {
+    "rust": [
+      "{projectRoot}/rust/**/*",
+      "{projectRoot}/scripts/**/*",
+      {
+        "env": "TAU_WASM_CC"
+      },
+      {
+        "env": "TAU_WASM_AR"
+      }
+    ]
+  },
+  "targets": {
+    "prepare": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["rust"],
+      "outputs": ["{workspaceRoot}/out/openscad-language/stage"],
+      "metadata": {
+        "description": "Build the OpenSCAD language server's WebAssembly module with the pinned Rust toolchain and stage it with its content manifest under out/openscad-language/stage. Installs the toolchain through rustup, and wasi-sdk when no clang with the wasm32 target is present, on first run."
+      },
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/libs/openscad-language/scripts/prepare-openscad-language-server.mts"
+      }
+    },
+    "test-rust": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["rust"],
+      "metadata": {
+        "description": "Run the Rust language server tests (every LSP method against the built-ins and multi-file fixtures), clippy and rustfmt."
+      },
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/libs/openscad-language/scripts/prepare-openscad-language-server.mts --test"
+      }
+    },
+    "test": {
+      "dependsOn": ["prepare", "test-rust"]
+    },
+    "benchmark": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "dependsOn": ["prepare"],
+      "metadata": {
+        "description": "Measure the WebAssembly server's boot time and per-request latency on a generated 200-file project, with the same warm-request method as the C# language server's integration test."
+      },
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/libs/openscad-language/scripts/benchmark-openscad-language-server.mts"
+      }
+    }
+  }
+}

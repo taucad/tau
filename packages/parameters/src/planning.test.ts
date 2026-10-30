@@ -1129,3 +1129,85 @@ it.each(missingGroupOperations)('should refuse GROUP_NOT_FOUND for in-place $kin
     }),
   ).toMatchObject({ status: 'rejected', code: 'GROUP_NOT_FOUND' });
 });
+
+/*
+ * A form submits its whole group after each change, built from the values it last rendered. The
+ * form renders the record late, so that snapshot can still hold another field's older value; a
+ * replacement that writes the snapshot wholesale silently reverts that field's newer write.
+ */
+const groupReplacement = async (
+  writes: ReadonlyArray<Readonly<Record<string, unknown>>>,
+): Promise<ParameterSnapshot> => {
+  const admitted = await bindinglessScalarManifest();
+  let current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  for (const [index, values] of writes.entries()) {
+    const plan = planParameterChange({
+      current,
+      request: {
+        requestId: `write-${String(index)}`,
+        pressure: 'final',
+        expected: current.identity,
+        operation: { kind: 'replace-group-values', group: 'default', values: values as Record<string, never> },
+      },
+    });
+    if (plan.status !== 'prepared') {
+      throw new Error(JSON.stringify(plan));
+    }
+    current = plan.proposed;
+  }
+  return current;
+};
+
+const replaceFrom = (
+  current: ParameterSnapshot,
+  base: Readonly<Record<string, unknown>>,
+  values: Readonly<Record<string, unknown>>,
+) =>
+  planParameterChange({
+    current,
+    request: {
+      requestId: 'form',
+      pressure: 'final',
+      expected: current.identity,
+      operation: {
+        kind: 'replace-group-values',
+        group: 'default',
+        values: values as Record<string, never>,
+        base: base as Record<string, never>,
+      },
+    },
+  });
+
+it('writes only the fields a group replacement changed from its base, keeping a newer write of another field', async () => {
+  const current = await groupReplacement([{ label: 'lid' }]);
+  // The form rendered before `label` was written and changed only `enabled`.
+  expect(replaceFrom(current, {}, { enabled: true })).toMatchObject({
+    status: 'prepared',
+    proposed: { entry: { groups: { default: { values: { enabled: true, label: 'lid' } } } } },
+  });
+});
+
+it('removes the field a group replacement reset and keeps the rest of the record', async () => {
+  const current = await groupReplacement([{ label: 'lid', enabled: true }]);
+  const plan = replaceFrom(current, { label: 'lid', enabled: true }, { enabled: true });
+  expect(plan).toMatchObject({ status: 'prepared' });
+  expect(plan.status === 'prepared' ? plan.proposed.entry.groups['default']?.values : undefined).toEqual({
+    enabled: true,
+  });
+});
+
+it('merges a nested field a group replacement changed into a record that moved elsewhere', async () => {
+  const current = await groupReplacement([{ label: 'lid' }]);
+  expect(replaceFrom(current, {}, { settings: { enabled: true } })).toMatchObject({
+    status: 'prepared',
+    proposed: { entry: { groups: { default: { values: { label: 'lid', settings: { enabled: true } } } } } },
+  });
+});
+
+it('refuses a group replacement that changed a field another write moved since its base', async () => {
+  const current = await groupReplacement([{ label: 'lid' }]);
+  expect(replaceFrom(current, {}, { label: 'cap' })).toMatchObject({
+    status: 'rejected',
+    code: 'STALE_MANIFEST',
+  });
+});

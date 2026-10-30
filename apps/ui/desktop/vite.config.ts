@@ -19,6 +19,8 @@ import { resolveTauCloudBuildEnabled, resolveTauTelemetryHostCloud } from '../bu
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
 import { createGeoSpecMtAssets } from '../geospec-mt-assets.vite-plugin';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
+import { createCsharpLanguageAssets } from '../csharp-language-assets.vite-plugin';
+// oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
 import { createOpenscadLanguageAssets } from '../openscad-language-assets.vite-plugin';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -29,6 +31,7 @@ const desktopRelease = (
 // oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
 const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
 const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
+const csharpAssets = createCsharpLanguageAssets(path.resolve(__dirname, '../../../out/csharp-language/stage'));
 const openscadLanguage = createOpenscadLanguageAssets(path.resolve(__dirname, '../../../out/openscad-language/stage'));
 
 /**
@@ -57,11 +60,13 @@ export default defineConfig({
     // oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
     tauTelemetryHostCloudBuild: JSON.stringify(resolveTauTelemetryHostCloud(process.env['TAU_TELEMETRY_HOST'])),
     tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
+    tauCsharpLanguageAssets: JSON.stringify(csharpAssets.assets ?? null),
     // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
     'import.meta.env.TAU_TARGET': '"desktop"',
   },
   plugins: [
     mtAssets.plugin,
+    csharpAssets.plugin,
     openscadLanguage.plugin,
     // Prune unused runtime assets before the module graph inventories them.
     tauRuntime(),

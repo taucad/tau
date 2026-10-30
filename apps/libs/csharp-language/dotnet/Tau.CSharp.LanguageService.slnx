@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="Tau.CSharp.LanguageService.RoslynHost/Tau.CSharp.LanguageService.RoslynHost.csproj" />
+  <Project Path="Tau.CSharp.LanguageService/Tau.CSharp.LanguageService.csproj" />
+  <Project Path="Tau.CSharp.LanguageService.Tests/Tau.CSharp.LanguageService.Tests.csproj" />
+  <Project Path="Tau.CSharp.LanguageServer.Browser/Tau.CSharp.LanguageServer.Browser.csproj" />
+</Solution>

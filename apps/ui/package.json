@@ -53,6 +53,7 @@
     "@taucad/chat": "workspace:*",
     "@taucad/consent": "workspace:*",
     "@taucad/converter": "workspace:*",
+    "@taucad/csharp-language": "workspace:*",
     "@taucad/esbuild": "workspace:*",
     "@taucad/events": "workspace:*",
     "@taucad/filesystem": "workspace:*",

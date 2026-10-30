@@ -6,7 +6,21 @@ import { useNavigate } from 'react-router';
 import { useSelector } from '@xstate/react';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import { Button } from '@taucad/ui/components/button';
-import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from '@taucad/ui/components/drawer';
+import {
+  Drawer,
+  DrawerAction,
+  DrawerBar,
+  DrawerContent,
+  DrawerDescription,
+  DrawerDivider,
+  DrawerList,
+  drawerListItemClass,
+  DrawerTitle,
+  DrawerTrigger,
+  drawerBarTitleClass,
+  drawerRowAttributes,
+  drawerRowClass,
+} from '@taucad/ui/components/drawer';
 import { cn } from '@taucad/ui/utils/cn';
 import { ChatHistorySettings, useExportTranscript } from '#routes/w.$workspace.$project/chat-history-settings.js';
 import { useActiveChatNaming } from '#routes/w.$workspace.$project/use-active-chat-naming.js';
@@ -34,7 +48,7 @@ const newChatKeyCombination = {
   shiftKey: true,
 } satisfies KeyCombination;
 
-/** One row of the phone chat switcher: a 44px target named by its label (I3, I6). */
+/** One row of the phone chat switcher, named by its label (I6), shaped like a responsive menu's drawer row. */
 function SwitcherRow({
   icon: Icon,
   label,
@@ -49,14 +63,18 @@ function SwitcherRow({
   readonly onSelect: () => void;
 }): React.JSX.Element {
   return (
-    <li>
+    <li {...drawerRowAttributes} className={drawerListItemClass}>
       <Button
         variant='ghost'
         size='touch'
         data-slot='chat-switcher-row'
         aria-current={isCurrent ? 'true' : undefined}
         disabled={isDisabled}
-        className='w-full justify-start gap-3 rounded-none font-normal'
+        // A drawer row (I3's 40px touch row); the row, not the button, draws the inset highlight, so no full-width band.
+        className={cn(
+          drawerRowClass,
+          'h-touch-row justify-start font-normal hover:bg-transparent! dark:hover:bg-transparent!',
+        )}
         onClick={onSelect}
       >
         {Icon ? (
@@ -165,10 +183,11 @@ function ChatSwitcherSheet({
           type='button'
           data-slot='chat-title-button'
           aria-label={`${name}, ${title}`}
-          className='flex h-10 min-w-0 flex-1 cursor-action items-center gap-1 rounded-md px-1 text-left text-sm font-medium outline-none hover:bg-accent focus-visible:focus-outline'
+          className='flex h-10 min-w-0 flex-1 cursor-action items-center gap-1 rounded-md px-2 text-left text-sm font-medium outline-none hover:bg-accent focus-visible:focus-outline'
         >
+          {/* Ellipsis only when the name overflows, as the project title above does; a fade always masked its tail. */}
           <span
-            className={cn('fade-label min-w-0 text-foreground', isGeneratingName && 'animate-pulse')}
+            className={cn('min-w-0 truncate text-foreground', isGeneratingName && 'animate-pulse')}
             aria-busy={isGeneratingName}
           >
             {name}
@@ -190,24 +209,23 @@ function ChatSwitcherSheet({
           }
         }}
       >
-        <div className='flex items-center gap-2 px-4 pb-2'>
-          <DrawerTitle className='min-w-0 flex-1 truncate text-base font-medium'>{title}</DrawerTitle>
+        <DrawerBar>
+          <DrawerTitle className={drawerBarTitleClass}>{title}</DrawerTitle>
           <DrawerDescription className='sr-only'>
             Switch to another chat in this project or start a new one.
           </DrawerDescription>
-          <Button
-            variant='outline'
-            size='icon-touch'
+          <DrawerAction
             aria-label='Close chats'
             onClick={() => {
               setIsOpen(false);
             }}
           >
             <X aria-hidden className='size-4' />
-          </Button>
-        </div>
+          </DrawerAction>
+        </DrawerBar>
+        <DrawerDivider />
         <div className='min-h-0 overflow-y-auto pb-3'>
-          <ul aria-label='Chats' className='border-t py-1'>
+          <DrawerList role='list' aria-label='Chats' className='pt-1'>
             <SwitcherRow
               icon={SquarePen}
               label='New chat'
@@ -234,8 +252,9 @@ function ChatSwitcherSheet({
                 }}
               />
             ))}
-          </ul>
-          <ul aria-label='This chat' className='border-t py-1'>
+          </DrawerList>
+          <DrawerDivider variant='group' />
+          <DrawerList role='list' aria-label='This chat' className='pb-1'>
             <SwitcherRow
               icon={Pencil}
               label='Rename this chat'
@@ -253,7 +272,7 @@ function ChatSwitcherSheet({
                 choose(exportTranscript);
               }}
             />
-          </ul>
+          </DrawerList>
         </div>
       </DrawerContent>
     </Drawer>

@@ -53,15 +53,81 @@ const openSidebarSheet = async (): Promise<void> => {
 };
 
 const openMenu = (): Locator => selectors.getByRole('menu');
+/** A sidebar menu on a phone: a bottom drawer named by what it acts on, above the sheet it opens from. */
+const menuDrawer = (name: string): Locator => selectors.getByRole('dialog', { name, exact: true });
 
-/** The open menu's items, by their names and variants, in order. */
-const readOpenMenu = async (): Promise<ReadonlyArray<{ readonly name: string; readonly variant: string }>> =>
-  target.evaluateLocator(openMenu(), (menu) =>
-    [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].map((item) => ({
+type MenuItems = ReadonlyArray<{ readonly name: string; readonly variant: string }>;
+
+/** A menu's items, by their names and variants, in order: a context menu's `menuitem`s or a menu drawer's items. */
+const readItems = async (container: Locator): Promise<MenuItems> =>
+  target.evaluateLocator(container, (element) =>
+    [...element.querySelectorAll<HTMLElement>('[role="menuitem"], [data-slot="dropdown-menu-item"]')].map((item) => ({
       name: item.textContent.trim(),
       variant: item.dataset['variant'] ?? 'default',
     })),
   );
+
+/**
+ * Whether the element painted at the centre of `locator` belongs to it. Pointer events are switched on everywhere
+ * for the probe: an open modal layer switches them off on what lies beside it, and a hit test that skips those
+ * would report an item painted under the sidebar sheet as reachable.
+ */
+const isPaintedOnTop = async (locator: Locator): Promise<boolean> =>
+  target.evaluateLocator(locator, (element) => {
+    const box = element.getBoundingClientRect();
+    const probe = document.createElement('style');
+    probe.textContent = '* { pointer-events: auto !important; }';
+    document.head.append(probe);
+    try {
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return hit !== null && element.contains(hit);
+    } finally {
+      probe.remove();
+    }
+  });
+
+/**
+ * Tap a sidebar control and expect its options in a drawer painted above the sheet, with no dropdown behind it; then
+ * close the drawer from its circular Close and expect the sheet still open under it.
+ *
+ * @param trigger - The control, inside the sheet.
+ * @param title - The drawer's name.
+ * @param item - An item the drawer lists, which must be the element a tap at its centre reaches: an action is a
+ * button, a destination a link.
+ */
+const expectMenuDrawer = async (
+  trigger: Locator,
+  title: string,
+  item: Readonly<{ name: string; role: 'button' | 'link' }>,
+): Promise<void> => {
+  await target.click(trigger, { touch: true });
+  const drawer = menuDrawer(title);
+  await target.expectVisible(drawer);
+  await target.evaluateLocator(drawer, async (element) => {
+    await Promise.all(element.getAnimations().map(async (animation) => animation.finished.catch(() => undefined)));
+  });
+  await target.expectCount(openMenu(), 0);
+  const entry = drawer.getByRole(item.role, { name: item.name, exact: true });
+  await target.expectVisible(entry);
+  expect(await isPaintedOnTop(entry), `${item.name} should be painted above the sidebar sheet`).toBe(true);
+  const close = drawer.getByRole('button', { name: 'Close', exact: true });
+  const shape = await target.evaluateLocator(close, (element) => {
+    const style = getComputedStyle(element);
+    return {
+      width: element.getBoundingClientRect().width,
+      height: element.getBoundingClientRect().height,
+      radius: style.borderTopLeftRadius,
+      border: style.borderTopWidth,
+    };
+  });
+  // A circle with one border.
+  expect(shape.width).toBeCloseTo(shape.height, 0);
+  expect(Number.parseFloat(shape.radius)).toBeGreaterThanOrEqual(shape.height / 2);
+  expect(shape.border).toBe('1px');
+  await target.click(close, { touch: true });
+  await target.expectHidden(drawer);
+  await target.expectVisible(sidebarSheet());
+};
 
 test.each([
   { width: 320, height: 640 },
@@ -111,22 +177,24 @@ test.each([
   },
 );
 
-test('opens a project row’s actions from ⋯ and from a long press, with Move to Trash destructive', async () => {
+test('opens a project row’s actions from ⋯ in a drawer and from a long press, with Move to Trash destructive', async () => {
   await openSeededProject({ width: 390, height: 844 });
   await openSidebarSheet();
 
   await target.click(sidebarSheet().getByRole('button', { name: `More actions for ${projectNames.b}`, exact: true }), {
     touch: true,
   });
-  await target.expectVisible(openMenu());
-  const fromActions = await readOpenMenu();
+  const drawer = menuDrawer(projectNames.b);
+  await target.expectVisible(drawer);
+  await target.expectCount(openMenu(), 0);
+  const fromActions = await readItems(drawer);
   expect(fromActions.map(({ name }) => name)).toContain('Rename');
   expect(fromActions.find(({ name }) => name === 'Move to Trash')?.variant).toBe('destructive');
   // Every item but Trash is plain: the destructive styling is Trash's alone.
   expect(fromActions.filter(({ variant }) => variant === 'destructive')).toHaveLength(1);
   await target.keyboardPress('Escape');
-  await target.expectHidden(openMenu());
-  // Escape closes only the menu, not the sheet under it.
+  await target.expectHidden(drawer);
+  // Escape closes only the drawer, not the sheet under it.
   await target.expectVisible(sidebarSheet());
 
   // A long press on the row opens the same items (I2: long-press equals the context menu).
@@ -153,7 +221,108 @@ test('opens a project row’s actions from ⋯ and from a long press, with Move 
     },
   );
   await target.expectVisible(openMenu());
-  expect(await readOpenMenu()).toEqual(fromActions);
+  expect(await isPaintedOnTop(openMenu().getByRole('menuitem', { name: 'Rename', exact: true }))).toBe(true);
+  expect(await readItems(openMenu())).toEqual(fromActions);
+});
+
+test('opens every sidebar menu in a drawer above the sheet on a real tap, and each Close leaves the sheet open', async () => {
+  await openSeededProject({ width: 390, height: 844 });
+  await openSidebarSheet();
+  const sheet = sidebarSheet();
+
+  await expectMenuDrawer(
+    sheet.getByRole('button', { name: `More actions for ${projectNames.b}`, exact: true }),
+    projectNames.b,
+    { name: 'Rename', role: 'button' },
+  );
+  await expectMenuDrawer(
+    sheet.getByRole('button', { name: `More actions for ${chatNames[0]}`, exact: true }),
+    chatNames[0],
+    { name: 'Rename', role: 'button' },
+  );
+  // The seed leaves one project live and the other idle, so the Projects label carries its menu.
+  await expectMenuDrawer(sheet.getByRole('button', { name: 'More actions for projects', exact: true }), 'Projects', {
+    name: 'Close 1 idle project',
+    role: 'button',
+  });
+  // More is marked with vertical dots, like the rows' actions.
+  const more = sheet.getByRole('button', { name: 'More', exact: true });
+  await target.expectCount(more.getByCss('svg.lucide-ellipsis-vertical'), 1);
+  await expectMenuDrawer(more, 'More', { name: 'Community', role: 'link' });
+  await expectMenuDrawer(sheet.getByRole('button', { name: 'Account', exact: true }), 'Account', {
+    name: 'Sign in',
+    role: 'link',
+  });
+  await expectMenuDrawer(sheet.getByRole('button', { name: 'Help', exact: true }), 'Help', {
+    name: 'Documentation',
+    role: 'link',
+  });
+});
+
+test('runs a drawer item on a real tap: Rename on a project row starts the rename', async () => {
+  await openSeededProject({ width: 390, height: 844 });
+  await openSidebarSheet();
+
+  await target.click(sidebarSheet().getByRole('button', { name: `More actions for ${projectNames.b}`, exact: true }), {
+    touch: true,
+  });
+  const drawer = menuDrawer(projectNames.b);
+  await target.expectVisible(drawer);
+  await target.click(drawer.getByRole('button', { name: 'Rename', exact: true }), { touch: true });
+  await target.expectHidden(drawer);
+  await target.expectVisible(sidebarSheet());
+  await target.expectCount(sidebarSheet().getByRole('textbox'), 1);
+  // The editor has the focus: the drawer's close hands it nothing back that would end the rename.
+  await expect.poll(async () => hasFocus(sidebarSheet().getByRole('textbox'))).toBe(true);
+});
+
+test('paints a dialog opened from a sidebar drawer above the sheet: Help, then Cookie preferences', async () => {
+  await openSeededProject({ width: 390, height: 844 });
+  await openSidebarSheet();
+
+  await target.click(sidebarSheet().getByRole('button', { name: 'Help', exact: true }), { touch: true });
+  const help = menuDrawer('Help');
+  await target.expectVisible(help);
+  await target.click(help.getByRole('button', { name: 'Cookie preferences', exact: true }), { touch: true });
+  await target.expectHidden(help);
+
+  const dialog = selectors.getByRole('dialog', { name: 'Cookie preferences' });
+  await target.expectVisible(dialog);
+  await target.evaluateLocator(dialog, async (element) => {
+    await Promise.all(element.getAnimations().map(async (animation) => animation.finished.catch(() => undefined)));
+  });
+  // Its controls, its title and its overlay are above the sidebar sheet (z-100), which stays open beneath.
+  expect(await isPaintedOnTop(dialog.getByRole('heading', { name: 'Cookie preferences' })), 'the title').toBe(true);
+  const controls = await target.evaluateLocator(dialog, (element) =>
+    [...element.querySelectorAll<HTMLElement>('button')].map((button) => button.textContent.trim()).filter(Boolean),
+  );
+  expect(controls.length).toBeGreaterThan(0);
+  for (const name of controls) {
+    // oxlint-disable-next-line no-await-in-loop -- one probe at a time.
+    expect(await isPaintedOnTop(dialog.getByRole('button', { name, exact: true })), name).toBe(true);
+  }
+  // The modal dialog hides the sheet from the accessibility tree, so the sheet is found by its slot here.
+  const sheetCoveredByOverlay = await target.evaluateLocator(
+    selectors.getByCss('[data-slot=sidebar][data-mobile=true]'),
+    (sheet) => {
+      const box = sheet.getBoundingClientRect();
+      const probe = document.createElement('style');
+      probe.textContent = '* { pointer-events: auto !important; }';
+      document.head.append(probe);
+      try {
+        const hit = document.elementFromPoint(box.left + 8, box.top + 8);
+        return hit !== null && !sheet.contains(hit);
+      } finally {
+        probe.remove();
+      }
+    },
+  );
+  expect(sheetCoveredByOverlay, 'the dialog overlay dims the sheet too').toBe(true);
+  await target.screenshot(undefined, 'cookie-dialog-390.png');
+
+  await target.keyboardPress('Escape');
+  await target.expectHidden(dialog);
+  await target.expectVisible(sidebarSheet());
 });
 
 test('lists local projects signed out, with sign-in reachable from the footer', async () => {
@@ -164,7 +333,7 @@ test('lists local projects signed out, with sign-in reachable from the footer', 
   await target.expectVisible(sidebarSheet().getByRole('link', { name: projectNames.b, exact: true }));
   // The footer's account control; signed out, it carries the way in.
   await target.click(sidebarSheet().getByRole('button', { name: 'Account', exact: true }), { touch: true });
-  const signIn = selectors.getByRole('menuitem', { name: 'Sign in', exact: true });
+  const signIn = menuDrawer('Account').getByRole('link', { name: 'Sign in', exact: true });
   await target.expectVisible(signIn);
   expect(await target.getAttribute(signIn, 'href')).toMatch(/sign-in/u);
 });

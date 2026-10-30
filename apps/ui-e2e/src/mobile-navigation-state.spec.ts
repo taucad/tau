@@ -35,7 +35,7 @@ import {
  * - The open surface is the project's own state (`panelState.mobileActiveTab`, stored per project), so a reload or a
  *   history step back into a project reopens the surface that project had, and another project never shows it.
  * - The sheet's height is not stored: a surface reopens at half, the height every reopen takes
- *   (`use-chat-interface-state.ts`), whether it was left at full or at the peek; a file opens at full (WB-07).
+ *   (`use-chat-interface-state.ts`), whether it was left at full or collapsed; a file opens at full (WB-07).
  * - A chat draft lives in the chat's composer record, so it outlives every unmount and stays with its chat.
  * - Scroll offsets are not asserted: the canvas and charter specify none, and the phone mounts only the active
  *   surface, the chat reopening at its latest turn.
@@ -105,23 +105,24 @@ test.each(phoneViewports)(
   },
 );
 
-test.each(phoneViewports)(
-  'reopens a surface left at the peek at half after a reload at $width×$height',
-  async (viewport) => {
-    await openPhone(viewport, '/__e2e/project-navigation');
-    await target.expectVisible(projectTitle('Project Navigation A'), 60_000);
-    await tapDestination('Parameters');
-    await target.expectVisible(surface('Parameters'), 60_000);
-    await moveSheet('Home', detents.peek);
-    await target.expectAttribute(grabber(), 'aria-valuetext', 'Peek');
+test.each(phoneViewports)('reopens a surface collapsed from full at half at $width×$height', async (viewport) => {
+  await openPhone(viewport, '/__e2e/project-navigation');
+  await target.expectVisible(projectTitle('Project Navigation A'), 60_000);
+  await tapDestination('Parameters');
+  await target.expectVisible(surface('Parameters'), 60_000);
+  await moveSheet('End', detents.full);
+  await target.expectAttribute(grabber(), 'aria-valuetext', 'Full');
 
-    // No detent is stored: the surface comes back at the height every reopen takes.
-    await target.reload();
-    await target.expectVisible(surface('Parameters'), 60_000);
-    await expect.poll(detent).toBe(detents.half);
-    await target.expectAttribute(grabber(), 'aria-valuetext', 'Half');
-  },
-);
+  // Collapsed is the sheet closed: the Model has the screen.
+  await tapDestination('Model');
+  await target.expectCount(openSheet(), 0);
+
+  // No detent is stored: the surface comes back at the height every reopen takes.
+  await tapDestination('Parameters');
+  await target.expectVisible(surface('Parameters'), 60_000);
+  await expect.poll(detent).toBe(detents.half);
+  await target.expectAttribute(grabber(), 'aria-valuetext', 'Half');
+});
 
 test.each(phoneViewports)(
   'keeps a chat draft across the sheet, other surfaces, the Model, a reload and a chat switch at $width×$height',
@@ -186,8 +187,8 @@ test.each(phoneViewports)(
     await target.press(width, 'Enter');
     await target.expectValue(width, '31', 30_000);
 
-    await moveSheet('Home', detents.peek);
     await moveSheet('End', detents.full);
+    await moveSheet('Home', detents.half);
     await target.expectValue(width, '31');
 
     await openFromAll('Files');
@@ -270,15 +271,18 @@ const expectPersonsDetentsHold = async (parts: readonly Locator[], shownAtHalf: 
   if (shownAtHalf) {
     await expectShown(parts, 'half');
   }
-  await moveSheet('Home', detents.peek);
-  await expectDetentHeld(detents.peek);
 };
 
-/** Where the sheet settles when the decision arrives at the peek, per phone: the lowest detent that shows it whole. */
-const questionArrivalDetent: Readonly<Record<number, string>> = { 320: detents.full, 390: detents.half };
+/**
+ * Where the sheet settles when a decision arrives at half, per phone: the lowest detent that shows it whole. Half is
+ * half the screen, so the question and its answers need full on both phones; a failure and its recovery fit half at
+ * 390 but not at 320.
+ */
+const questionArrivalDetent: Readonly<Record<number, string>> = { 320: detents.full, 390: detents.full };
+const failureArrivalDetent: Readonly<Record<number, string>> = { 320: detents.full, 390: detents.half };
 
 test.each(phoneViewports)(
-  'keeps a pending question and both answers on screen at peek, half and full at $width×$height (I5, WB-09, PN-CHAT-4)',
+  'keeps a pending question and both answers on screen at half and full at $width×$height (I5, WB-09, PN-CHAT-4)',
   async (viewport) => {
     await openPhone(viewport, '/__e2e/chat-attachments');
     const { chatIds } = await seededChatIds();
@@ -293,8 +297,8 @@ test.each(phoneViewports)(
     await target.installAgentHostGatewayFixture(script);
     await tapDestination('Chat');
     await target.expectVisible(composer(), 60_000);
-    // The person rests the sheet at the peek; the question then arrives.
-    await moveSheet('Home', detents.peek);
+    // The person rests the sheet at half; the question then arrives.
+    await moveSheet('Home', detents.half);
     await send('Design a desk ornament');
 
     const question = selectors.getByText('Which form should the desk ornament take?', { exact: true });
@@ -306,14 +310,14 @@ test.each(phoneViewports)(
     // The decision raises the sheet exactly as far as it needs, and is wholly shown there.
     expect(await stableDetent()).toBe(questionArrivalDetent[viewport.width]);
     await expectShown([question, recommended, other], 'the detent it raised the sheet to');
-    await expectPersonsDetentsHold([question, recommended, other], viewport.width !== 320);
+    await expectPersonsDetentsHold([question, recommended, other], false);
 
     // Away and back: the question is still waiting, and Chat says so while another surface has the sheet (I5, WB-08).
     await tapDestination('Parameters');
     await target.expectVisible(surface('Parameters'), 60_000);
     await target.expectAccessibleDescription(navButton('Chat'), 'A chat needs you', 30_000);
     await target.expectAttribute(navButton('Chat').getByCss('[data-slot="destination-cue"]'), 'data-tone', 'attention');
-    // Back on Chat the question is still there at the peek the person chose; raised to full, answering it finishes
+    // Back on Chat the question is still there at the half a reopen takes; raised to full, answering it finishes
     // the turn.
     await tapDestination('Chat');
     await moveSheet('End', detents.full);
@@ -330,11 +334,11 @@ test.each(phoneViewports)(
     await target.installAgentHostGatewayFixture([{ text: 'Thickening the wall now.', gated: true, usage }]);
     await tapDestination('Chat');
     await target.expectVisible(composer(), 60_000);
-    await moveSheet('Home', detents.peek);
+    await moveSheet('Home', detents.half);
     await send('Thicken the wall');
     await target.waitForAgentHostGatewayGate({ kind: 'stream' });
 
-    // While the run streams, the peek carries its one activity line above the composer.
+    // While the run streams, half carries its one activity line above the composer.
     const activity = surface('Chat').getByRole('status', { name: 'Current activity', exact: true });
     await target.expectCount(activity, 1, 60_000);
     await target.expectCount(selectors.getByRole('status', { name: 'Current activity', exact: true }), 1);
@@ -368,7 +372,7 @@ const longReply = Array.from({ length: 24 }, (_, index) => `Step ${String(index 
 );
 
 test.each(phoneViewports)(
-  'raises the sheet for a failed run, keeps it and its recovery on screen, and holds for a scrolled transcript at $width×$height (I5, PN-CHAT-7)',
+  'keeps a failed run and its recovery on screen, and holds for a scrolled transcript at $width×$height (I5, PN-CHAT-7)',
   async (viewport) => {
     await openPhone(viewport, '/__e2e/chat-attachments');
     await target.installAgentHostGatewayFixture([
@@ -381,26 +385,27 @@ test.each(phoneViewports)(
     await send('Plan a bracket');
     await target.expectVisible(selectors.getByText('Step 24 of the bracket plan.', { exact: true }), 120_000);
 
-    // The person rests the sheet at the peek; the next turn is refused there.
-    await moveSheet('Home', detents.peek);
+    // The person rests the sheet at half; the next turn is refused there.
+    await moveSheet('Home', detents.half);
     await target.setAgentHostGatewayFailure({ status: 400, message: 'Refused once.', type: 'INVALID_REQUEST' });
     await send('Model a bracket');
     const recovery = selectors.getByRole('button', { name: /^(?:Resume|Try again)$/u });
     const failure = selectors.getByRole('alert').filter({ has: recovery });
     await expect.poll(async () => countOf(recovery), { timeout: 120_000 }).toBeGreaterThan(0);
     await target.setAgentHostGatewayFailure();
-    // The failure raises the sheet to half, where the resting transcript shows it whole.
-    expect(await stableDetent()).toBe(detents.half);
-    await expectShown([failure, recovery], 'half');
+    // The failure raises the sheet only as far as it must: it stays at half where half shows it whole.
+    const arrival = failureArrivalDetent[viewport.width]!;
+    expect(await stableDetent()).toBe(arrival);
+    await expectShown([failure, recovery], 'the detent the failure settled at');
 
-    // The person scrolls up past it: the failure leaves the transcript's view, and the sheet stays at half.
+    // The person scrolls up past it: the failure leaves the transcript's view, and the sheet stays where it is.
     await scrollTranscript('top');
     await expect.poll(async () => unshownEverywhere(failure)).toBeDefined();
-    await expectDetentHeld(detents.half);
+    await expectDetentHeld(arrival);
     await scrollTranscript('end');
-    await expectShown([failure, recovery], 'half, scrolled back');
+    await expectShown([failure, recovery], 'scrolled back');
 
-    await expectPersonsDetentsHold([failure, recovery], true);
+    await expectPersonsDetentsHold([failure, recovery], arrival === detents.half);
 
     // Away and back, the failure is still the chat's last word, and its recovery finishes the turn.
     await tapDestination('Parameters');

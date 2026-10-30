@@ -106,15 +106,38 @@ describe.each([
     expect(await seriousAxeViolations()).toEqual([]);
     await target.screenshot(undefined, `preview-production-${String(viewport.width)}.png`);
 
-    // The Workbench drawer holds Preview's own surfaces under their workbench titles (I6), with a 44px grabber (D4).
+    // The Workbench drawer holds Preview's own surfaces under their workbench titles (I6), with a 40px grabber (D4)
+    // that has no space of its own below the bar: its target reaches over the tab strip, whose tabs stay on top (I3).
     await target.click(workbench);
     const drawer = selectors.getByRole('dialog', { name: 'Project workbench' });
     await target.expectVisible(drawer);
-    const grabberHeight = await target.evaluateLocator(
-      drawer,
-      (element) => element.querySelector('[data-slot="drawer-handle"]')?.getBoundingClientRect().height ?? 0,
-    );
-    expect(grabberHeight).toBeGreaterThanOrEqual(40);
+    await target.evaluateLocator(drawer, async (element) => {
+      await Promise.all(element.getAnimations().map(async (animation) => animation.finished.catch(() => undefined)));
+    });
+    const grabber = await target.evaluateLocator(drawer, (element) => {
+      const handle = element.querySelector('[data-slot="drawer-handle"]')!.getBoundingClientRect();
+      const strip = element.querySelector('.dv-tabs-and-actions-container')!;
+      const stripBox = strip.getBoundingClientRect();
+      const covered = [...strip.querySelectorAll<HTMLElement>('button, [role=tab]')]
+        .filter((control) => {
+          const box = control.getBoundingClientRect();
+          if (box.width === 0 || box.height === 0) {
+            return false;
+          }
+          const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+          return !hit || !control.contains(hit);
+        })
+        .map((control) => control.getAttribute('aria-label') ?? control.textContent.trim());
+      const blank = document.elementFromPoint(stripBox.right - 4, stripBox.top + stripBox.height / 2);
+      return {
+        height: handle.height,
+        endsWithStrip: Math.abs(handle.bottom - stripBox.bottom) <= 0.5,
+        covered,
+        blankIsGrabber: blank?.closest('[data-vaul-handle]') !== null && blank !== null,
+      };
+    });
+    expect(grabber.height).toBeGreaterThanOrEqual(40);
+    expect(grabber).toMatchObject({ endsWithStrip: true, covered: [], blankIsGrabber: true });
     await target.click(selectors.getByRole('button', { name: 'Open workbench tab', exact: true }));
     await target.expectVisible(selectors.getByRole('menuitem', { name: 'Parameters', exact: true }));
     await target.expectCount(selectors.getByText(/^Params$/u), 0);

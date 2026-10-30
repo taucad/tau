@@ -329,7 +329,7 @@ function ProjectChatItem({
                 <span className='fade-label flex-1 text-muted-foreground'>{chat.name}</span>
               )}
               <SidebarRowActions>
-                <SidebarRowMenuButton name={chat.name} items={menuItems} className='w-40' />
+                <SidebarRowMenuButton isResponsive name={chat.name} items={menuItems} className='w-40' />
               </SidebarRowActions>
             </>
           )}

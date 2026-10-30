@@ -168,7 +168,7 @@ export function NavUser(): React.JSX.Element {
             </Tooltip>
           )}
         </div>
-        <DropdownMenu>
+        <DropdownMenu isResponsive>
           <DropdownMenuTrigger asChild>
             <Button
               aria-label='Help'
@@ -179,7 +179,7 @@ export function NavUser(): React.JSX.Element {
               <CircleHelp />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent side='top' align='end' sideOffset={8} className='min-w-52'>
+          <DropdownMenuContent drawerTitle='Help' side='top' align='end' sideOffset={8} className='min-w-52'>
             {helpItems}
             <DropdownMenuSeparator />
             <DropdownMenuLabel className='font-normal text-muted-foreground'>

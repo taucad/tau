@@ -316,6 +316,12 @@ describe('ChatAgentSheet', () => {
     try {
       renderSheet();
       await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
+      // In a drawer the sheet's hairlines are inset and its lists take the drawer's row geometry.
+      expect(document.querySelector('[data-slot=agent-sheet]')?.parentElement).toHaveClass(
+        'drawer-inset-hairlines',
+        'drawer-row-dividers',
+        'drawer-command-rows',
+      );
       /* A click, not a pointer sequence: vaul reads drag geometry jsdom does not lay out. */
       fireEvent.click(screen.getByRole('button', { name: /^Model: .*Change$/u }));
       expect(screen.getByPlaceholderText('Search models…')).not.toHaveFocus();

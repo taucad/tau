@@ -753,6 +753,139 @@ describe('ParametersNumber', () => {
       expect(field).toHaveValue('13');
     });
 
+    /* The form defers the record it renders, so a row's `value` can trail its own settled commits by
+     * more than one step. A step taken in that window must build on the row's own last write, never
+     * on the stale echo of an earlier one, or the authority refuses it as stale. */
+    it('builds on its own settled step while the rendered authority still trails it', async () => {
+      const user = userEvent.setup();
+      let record = 10;
+      const settles: Array<() => void> = [];
+      const outcomes: string[] = [];
+      const parameterCommit: ParameterCommit & Readonly<{ calls: CommitCall[] }> = {
+        ...createParameterCommit(),
+        calls: [],
+        commit: async (field) => {
+          parameterCommit.calls.push(field);
+          await new Promise<void>((resolve) => {
+            settles.push(resolve);
+          });
+          if (field.base?.value !== record) {
+            outcomes.push('rejected');
+            return {
+              status: 'rejected',
+              requestId: 'lagging',
+              code: 'STALE_MANIFEST',
+              message: 'The field changed since this edit began.',
+            };
+          }
+          record = field.value as number;
+          outcomes.push('committed');
+          const committed: Awaited<ReturnType<ParameterCommit['commit']>> = {
+            status: 'committed',
+            requestId: 'lagging',
+            revision: { manifestRevision: 'lagging' },
+            write: 'applied',
+          };
+          return committed;
+        },
+      };
+      const row = (value: number): React.JSX.Element => (
+        <TestWrapper>
+          <ParametersNumber
+            value={value}
+            defaultValue={10}
+            step={1}
+            fieldProjection={{ ...testProjection('length', defaultUnits), instancePointer: '/width' }}
+            parameterCommit={parameterCommit}
+            onChange={vi.fn()}
+            aria-label='Lagging width'
+          />
+        </TestWrapper>
+      );
+      const view = render(row(10));
+      const field = screen.getByRole('spinbutton', { name: 'Lagging width' });
+      await user.click(field);
+
+      await user.keyboard('{ArrowUp}');
+      await act(async () => {
+        settles[0]?.();
+      });
+      // The first step settled; the deferred form has not rendered it yet.
+      await user.keyboard('{ArrowUp}');
+      view.rerender(row(11));
+      await act(async () => {
+        settles[1]?.();
+      });
+      // The second step settled; the form now renders the first one, a step behind.
+      expect(field).toHaveValue('12');
+      await user.keyboard('{ArrowUp}');
+      await act(async () => {
+        settles[2]?.();
+      });
+      view.rerender(row(13));
+
+      expect(parameterCommit.calls.map(({ base, value }) => [base?.value, value])).toEqual([
+        [10, 11],
+        [11, 12],
+        [12, 13],
+      ]);
+      expect(outcomes).toEqual(['committed', 'committed', 'committed']);
+      expect(screen.queryByText(/changed since this edit began|changed to/)).not.toBeInTheDocument();
+      expect(field).toHaveValue('13');
+    });
+
+    it('does not report its own trailing echo as a change made elsewhere', async () => {
+      const user = userEvent.setup();
+      const settles: Array<() => void> = [];
+      const parameterCommit: ParameterCommit & Readonly<{ calls: CommitCall[] }> = {
+        ...createParameterCommit(),
+        calls: [],
+        commit: async (field) => {
+          parameterCommit.calls.push(field);
+          await new Promise<void>((resolve) => {
+            settles.push(resolve);
+          });
+          const committed: Awaited<ReturnType<ParameterCommit['commit']>> = {
+            status: 'committed',
+            requestId: 'echo',
+            revision: { manifestRevision: 'echo' },
+            write: 'applied',
+          };
+          return committed;
+        },
+      };
+      const row = (value: number): React.JSX.Element => (
+        <TestWrapper>
+          <ParametersNumber
+            value={value}
+            defaultValue={10}
+            step={1}
+            fieldProjection={{ ...testProjection('length', defaultUnits), instancePointer: '/width' }}
+            parameterCommit={parameterCommit}
+            onChange={vi.fn()}
+            aria-label='Echoed width'
+          />
+        </TestWrapper>
+      );
+      const view = render(row(10));
+      const field = screen.getByRole('spinbutton', { name: 'Echoed width' });
+      await user.click(field);
+      await user.keyboard('{ArrowUp}');
+      await user.keyboard('{ArrowUp}');
+      await act(async () => {
+        settles[0]?.();
+        settles[1]?.();
+      });
+      await user.clear(field);
+      await user.type(field, '20');
+      // The form catches up through the first step only.
+      view.rerender(row(11));
+
+      expect(screen.queryByText(/changed to/)).not.toBeInTheDocument();
+      await user.keyboard('{Enter}');
+      expect(parameterCommit.calls.at(-1)).toMatchObject({ value: 20, base: { value: 12 } });
+    });
+
     it('should overwrite the changed value on Enter after a conflict', async () => {
       const user = userEvent.setup();
       const parameterCommit = createParameterCommit();

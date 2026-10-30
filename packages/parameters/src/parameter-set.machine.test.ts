@@ -1034,3 +1034,50 @@ it('should commit a write that a watch reset overtakes and re-arm once it settle
   expect(files.opened()).toBe(2);
   actor.send({ type: 'close' });
 });
+
+/*
+ * A view reads the authority through a deferred projection, so after its own step settles it can
+ * still show the value of the step before. The base it then sends is that older value of its own,
+ * which the field no longer holds. The editor wrote what the field holds, so its edit must commit.
+ */
+it('should commit an editor step whose base is its own earlier value, superseded by its own later write', async () => {
+  const fixture = await parameterSetHarness();
+  const base = (value: number, editor: string): ParameterSetRequest['base'] => ({ pointer: '/width', value, editor });
+  const { identity } = fixture.snapshot;
+  await expect(
+    fixture.submit({ ...widthEdit('step-1', 26, identity), base: base(25.4, 'tab') }),
+  ).resolves.toMatchObject({ status: 'committed' });
+  await expect(fixture.submit({ ...widthEdit('step-2', 27, identity), base: base(26, 'tab') })).resolves.toMatchObject({
+    status: 'committed',
+  });
+  await expect(fixture.submit({ ...widthEdit('step-3', 28, identity), base: base(26, 'tab') })).resolves.toMatchObject({
+    status: 'committed',
+  });
+  expect(fixture.actor.getSnapshot().context.current?.entry.groups['default']?.values).toEqual({ width: 28 });
+  fixture.actor.stop();
+});
+
+it('should refuse a stale base from another editor that did not write the field', async () => {
+  const fixture = await parameterSetHarness();
+  const { identity } = fixture.snapshot;
+  await fixture.submit({ ...widthEdit('mine', 26, identity), base: { pointer: '/width', value: 25.4, editor: 'tab' } });
+  await expect(
+    fixture.submit({ ...widthEdit('theirs', 30, identity), base: { pointer: '/width', value: 25.4, editor: 'agent' } }),
+  ).resolves.toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+  fixture.actor.stop();
+});
+
+it('should refuse an editor whose own write was overwritten by another writer', async () => {
+  const fixture = await parameterSetHarness();
+  const { identity } = fixture.snapshot;
+  await fixture.submit({ ...widthEdit('mine', 26, identity), base: { pointer: '/width', value: 25.4, editor: 'tab' } });
+  await fixture.submit({
+    ...widthEdit('theirs', 30, identity),
+    base: { pointer: '/width', value: 26, editor: 'agent' },
+  });
+  await expect(
+    fixture.submit({ ...widthEdit('mine-again', 27, identity), base: { pointer: '/width', value: 26, editor: 'tab' } }),
+  ).resolves.toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+  expect(fixture.actor.getSnapshot().context.current?.entry.groups['default']?.values).toEqual({ width: 30 });
+  fixture.actor.stop();
+});

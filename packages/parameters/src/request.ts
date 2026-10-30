@@ -154,6 +154,9 @@ const validBase = (value: unknown, operation: unknown): boolean => {
   if (!isJsonValue(value['value'])) {
     return false;
   }
+  if (value['editor'] !== undefined && !hasText(typeof value['editor'] === 'string' ? value['editor'] : undefined)) {
+    return false;
+  }
   const { binding } = value;
   if (binding === undefined) {
     return true;

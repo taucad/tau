@@ -3,7 +3,7 @@ title: 'Parameter Record Policy'
 description: 'What the parameter sidecar may store, and how concurrency, echoes and rendering are decided around it.'
 status: active
 created: '2026-09-17'
-updated: '2026-09-29'
+updated: '2026-10-30'
 related:
   - docs/research/agent-workbench-control-blueprint.md
 ---
@@ -86,11 +86,13 @@ A field-scoped operation names its field by `group` and `pointer` under that dec
 
 A value edit may also carry a field-scoped `base` — the value and effective binding its editor was working from. The edit commits while its own field still holds that value, so another field's commit, a group operation or an agent write elsewhere in the record never refuses it.
 
+A `base` may name its `editor`, one editing surface such as a browser tab's parameter service or a pane controller. The set actor records, per field, the editor whose value edit last committed there and the value it left. While the field still holds that value, it is the base for that editor's next edit, whatever value the editor sent: the editor wrote it. Only another writer's change refuses an editor.
+
 ### 5. Adopt an own-write echo instead of rejecting on it
 
 A watch event whose re-read returns bytes equal to the ones this actor just wrote is adopted without re-publishing. A record change arriving during planning or confirmation refreshes and re-plans. A checked-write conflict follows the same route for at most three total attempts; exhaustion rejects with `RECORD_CONFLICT`.
 
-**Why**: The write's own notification arrives after the command that caused it. Treating it as foreign made an edit reject itself.
+**Why**: The write's own notification arrives after the command that caused it. Treating it as foreign made an edit reject itself. The same holds for an editor's view: it renders the record through a deferred projection that can trail its own settled commits by more than one step, so a base it reconstructs from what it rendered can name its own superseded value. The editor lineage keeps that echo from refusing the editor's next edit as `STALE_MANIFEST`.
 
 Only `base` decides whether the field itself moved. After an uncertain write, the machine re-reads the record and compares bytes: the planned bytes settle as `committed`, the planned-from bytes as `WRITE_FAILED`, and any other valid bytes settle as indeterminate `UNKNOWN_APPLICATION` before work continues from that refreshed record. Only a failed recovery read enters uncertain mode with `RECOVERY_FAILED`; resolving the authority exits that mode.
 

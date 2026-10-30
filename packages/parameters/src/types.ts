@@ -97,6 +97,12 @@ export type ParameterSetRequestBase = Readonly<{
     reference?: string;
     representation?: 'binary64' | 'safe-integer' | 'decimal';
   }>;
+  /**
+   * The editing surface the edit comes from, such as one browser tab. A field that still holds this
+   * editor's own last committed value is never a conflict for it: the editor wrote that value, so an
+   * edit built on it is fresh even when the view that sent it still showed an older one.
+   */
+  editor?: string;
 }>;
 
 /** Correlated request accepted by the parameter-set owner. @public */

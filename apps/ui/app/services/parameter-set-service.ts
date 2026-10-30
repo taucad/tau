@@ -19,6 +19,7 @@ import type {
 } from '@taucad/parameters';
 import { joinPath, parentDirectory } from '@taucad/utils/path';
 import type { ParameterDraft, ParameterValueEdit } from '@taucad/viewer/parameters/parameter-edit';
+import { randomUuid } from '@taucad/utils/id';
 
 type TargetState = {
   target: ParameterSetTarget;
@@ -184,6 +185,8 @@ export const createParameterSetService = (
   }>,
 ): ParameterSetService => {
   let sequence = 0;
+  /* This service is one editor: a field still holding its own last write is never a conflict for it. */
+  const editor = `browser:${randomUuid()}`;
   const clients = new Map<string, TargetState>();
   /** Retained row drafts, keyed by field. A plain map: rows own their own editing state. */
   const drafts = new Map<string, Readonly<{ key: ParameterDraftKey; draft: ParameterDraft; label: string }>>();
@@ -580,7 +583,7 @@ export const createParameterSetService = (
           requestId,
           expected: current.identity,
           pressure: field.pressure ?? 'final',
-          ...(field.base === undefined ? {} : { base: field.base }),
+          ...(field.base === undefined ? {} : { base: { ...field.base, editor } }),
           operation: { kind: 'native-value', group: field.group, pointer: field.pointer, value: field.value },
         });
         settleDraft(

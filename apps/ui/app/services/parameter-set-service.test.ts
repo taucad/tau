@@ -289,22 +289,34 @@ describe('parameter set service behaviours', () => {
     await fixture.service.close();
   });
 
-  it('refuses a second edit of the same field from a superseded base and commits from the fresh one', async () => {
+  it('commits a step whose base trails its own earlier write, and refuses the same base from another editor', async () => {
     const fixture = serviceFixture();
     const manifest = await fixture.manifestFor();
     await fixture.service.resolve('main.ts', manifest);
-    const release = fixture.hold();
-    const first = fixture.commit(manifest, { pointer: '/width', value: 30, base: 100 });
-    const stale = fixture.commit(manifest, { pointer: '/width', value: 40, base: 100 });
-    release();
-
-    expect(await first).toMatchObject({ status: 'committed' });
-    expect(await stale).toMatchObject({ code: 'STALE_MANIFEST' });
-    expect(await fixture.commit(manifest, { pointer: '/width', value: 40, base: 30 })).toMatchObject({
+    expect(await fixture.commit(manifest, { pointer: '/width', value: 110, base: 100 })).toMatchObject({
       status: 'committed',
     });
-    expect(fixture.stored('width')).toBe(40);
-    await fixture.service.close();
+    expect(await fixture.commit(manifest, { pointer: '/width', value: 120, base: 110 })).toMatchObject({
+      status: 'committed',
+    });
+    // The row's deferred form still showed the first step when it took the third.
+    expect(await fixture.commit(manifest, { pointer: '/width', value: 130, base: 110 })).toMatchObject({
+      status: 'committed',
+    });
+    expect(fixture.stored('width')).toBe(130);
+
+    const peer = fixture.createPeerService();
+    await peer.resolve('main.ts', manifest);
+    expect(
+      await peer.commitValue(peer.target('main.ts'), manifest, {
+        group: 'default',
+        pointer: '/width',
+        value: 140,
+        base: { pointer: '/width', value: 110, binding: fixtureBinding },
+      }),
+    ).toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+    expect(fixture.stored('width')).toBe(130);
+    await Promise.all([fixture.service.close(), peer.close()]);
   });
 
   it('settles two independent service edits against an absent sidecar with exactly one same-base winner', async () => {

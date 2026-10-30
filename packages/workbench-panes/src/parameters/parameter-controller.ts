@@ -32,6 +32,7 @@ import type {
   ParametersFailure,
   ParametersSource,
 } from '#parameters/parameters-source.js';
+import { randomUuid } from '@taucad/utils/id';
 
 /**
  * How the controller reaches one host's parameter authority.
@@ -278,6 +279,8 @@ export const createParameterController = (options: ParameterControllerOptions): 
   const own = options.drafts === undefined ? createSettlingDrafts() : undefined;
   const drafts = options.drafts ?? own!.drafts;
   let sequence = 0;
+  /* This pane is one editor: a field still holding its own last write is never a conflict for it. */
+  const editor = `pane:${randomUuid()}`;
   let gestures = 0;
   let isDisposed = false;
 
@@ -386,7 +389,7 @@ export const createParameterController = (options: ParameterControllerOptions): 
           expected: identity,
           pressure: 'final',
           operation,
-          ...(base === undefined ? {} : { base }),
+          ...(base === undefined ? {} : { base: { ...base, editor } }),
         },
       });
       /* Committed or not, the record now holds what the authority holds: a refusal shows its value again. */

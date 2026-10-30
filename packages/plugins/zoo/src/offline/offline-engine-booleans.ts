@@ -47,6 +47,11 @@ export function boolean(
 
   // Zoo cuts each target on its own and answers every resulting body in `extra_solid_ids`, which kcl-lib takes as the
   // whole output of a multi-target subtract.
+  // Resolve every operand first so an unknown id fails before any target is replaced.
+  for (const solidId of [...targets, ...tools]) {
+    engine.scene.getSolid(solidId);
+  }
+
   const ids = targets.map((_, index) => (index === 0 ? id : engine.mint()));
   for (const [index, targetId] of targets.entries()) {
     combine(engine, ids[index]!, kind, [targetId], tools, index < targets.length - 1);
@@ -324,10 +329,6 @@ export function cutEdges(engine: OfflineEngine, id: string, cmd: ModelingCommand
       }
     }
 
-    if (specs.length > 0 && found.length === 0) {
-      throw unmatched;
-    }
-
     const edgeIds = [
       ...((cmd['edge_ids'] as string[] | undefined) ?? []),
       ...(cmd['edge_id'] ? [cmd['edge_id'] as string] : []),
@@ -340,6 +341,10 @@ export function cutEdges(engine: OfflineEngine, id: string, cmd: ModelingCommand
       }
 
       found.push(engine.edgeById(body, edgeId));
+    }
+
+    if (specs.length > 0 && found.length === 0) {
+      throw unmatched;
     }
 
     return found;

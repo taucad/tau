@@ -12,10 +12,12 @@
 import type { Frame, Vec3 } from '#offline/offline-math.js';
 import {
   add,
+  cross,
   directionToGlobal,
   dot,
   frameFromAxes,
   globalFrame,
+  length,
   normalize,
   scale,
   sub,
@@ -34,6 +36,7 @@ import {
   edgeExtrudeDirection,
   extrudeProfile,
   loftProfiles,
+  moveProfile,
   revolveProfile,
   sweepProfile,
   twistExtrudeProfile,
@@ -53,7 +56,14 @@ import {
   requireEdge,
   requireFace,
 } from '#offline/offline-topology.js';
-import { childIds, entityCenter, entityShape, sketchFrameOf } from '#offline/offline-transform.js';
+import {
+  childIds,
+  entityCenter,
+  entityShape,
+  rotationTrsf,
+  sketchFrameOf,
+  translationTrsf,
+} from '#offline/offline-transform.js';
 import type {
   ModelingCommand,
   ModelingResponse,
@@ -67,7 +77,7 @@ import { randomUuid } from '#binary.utils.js';
 import type { WireOutputFormat } from '#offline/offline-export.js';
 import type { EdgeSpecifier } from '#offline/offline-engine-support.js';
 import { point3, point2, frameFromNormal, unitScale } from '#offline/offline-engine-support.js';
-import { boolean, imprint, cutEdges, shell } from '#offline/offline-engine-booleans.js';
+import { boolean, imprint, cutEdges, deleteFaces, shell } from '#offline/offline-engine-booleans.js';
 import {
   clone,
   patternTransform,
@@ -183,6 +193,11 @@ export class OfflineEngine {
   public readonly scene = new OfflineScene();
   /** Commands that reached the default handler, for coverage reports. */
   public readonly unhandled = new Map<string, number>();
+  /**
+   * Bodies a boolean consumed. Their ids still resolve to the result for edge and face lookups, but hiding one does
+   * not hide the result, as on Zoo's engine.
+   */
+  public readonly consumedByBoolean = new Set<string>();
   /** Invalid solids found in debug mode (`validate`), in command order. */
   public readonly validationIssues: ValidationIssue[] = [];
   // oxlint-disable-next-line @typescript-eslint/parameter-properties -- erasableSyntaxOnly forbids parameter properties
@@ -441,6 +456,7 @@ export class OfflineEngine {
     return {
       scene_clear_all: () => {
         this.scene.clear();
+        this.consumedByBoolean.clear();
         this.sketchFrame = undefined;
         return undefined;
       },
@@ -454,7 +470,8 @@ export class OfflineEngine {
         return undefined;
       },
       object_visible: (_id, cmd) => {
-        const entity = this.scene.find(cmd['object_id'] as string);
+        const objectId = cmd['object_id'] as string;
+        const entity = this.consumedByBoolean.has(objectId) ? undefined : this.scene.find(objectId);
         if (entity) {
           entity.hidden = Boolean(cmd['hidden']);
         }
@@ -624,6 +641,7 @@ export class OfflineEngine {
 
         return { edge_id: this.edgeId(solid, edge) };
       },
+      entity_delete_children: (_id, cmd) => deleteFaces(this, cmd),
       solid3d_get_face_uuid: (_id, cmd) => {
         const solid = this.scene.getSolid(cmd['object_id'] as string);
         const face = faces(this.oc, solid.shape)[cmd['face_index'] as number];
@@ -1098,7 +1116,7 @@ export class OfflineEngine {
 
     const result = sweepProfile(
       this.oc,
-      profile,
+      this.placeOnPath(profile, spine, cmd),
       spine,
       this.mint,
       trajectory.kind === 'curve' ? trajectory.axis : undefined,
@@ -1106,6 +1124,43 @@ export class OfflineEngine {
     this.commitSweep(profile, result, { merge: false, cut: false });
     trajectory.hidden = true;
     return {};
+  }
+
+  /**
+   * Places a sweep's profile as a version 2 sweep asks: `orient_profile_perpendicular` turns the sketch plane, about
+   * its origin, until its normal runs along the path's start tangent; `translate_profile_to_path` then moves the
+   * sketch plane's origin onto the path's start. Without either flag the profile stays where it was sketched.
+   */
+  private placeOnPath(profile: Profile, spine: TopoDS_Shape, cmd: ModelingCommand): Profile {
+    const translate = cmd['translate_profile_to_path'] === true;
+    const orient = cmd['orient_profile_perpendicular'] === true;
+    if (!translate && !orient) {
+      return profile;
+    }
+
+    const explorer = new this.oc.BRepTools_WireExplorer(this.oc.TopoDS.Wire(spine));
+    const first = explorer.Current();
+    explorer.delete();
+    const reversed = first.Orientation() === this.oc.TopAbs_Orientation.TopAbs_REVERSED;
+    const start = edgePoint(this.oc, first, reversed ? 1 : 0);
+    const tangent = normalize(reversed ? scale(start.tangent, -1) : start.tangent);
+    const { origin, z: normal } = profile.frame;
+    const trsf = new this.oc.gp_Trsf();
+    if (orient) {
+      const axis = cross(normal, tangent);
+      const angle = Math.atan2(length(axis), dot(normal, tangent));
+      if (length(axis) > 1e-12) {
+        trsf.PreMultiply(rotationTrsf(this.oc, origin, axis, angle));
+      } else if (angle > Math.PI / 2) {
+        trsf.PreMultiply(rotationTrsf(this.oc, origin, profile.frame.x, Math.PI));
+      }
+    }
+
+    if (translate) {
+      trsf.PreMultiply(translationTrsf(this.oc, sub(start.point, origin)));
+    }
+
+    return moveProfile(this.oc, profile, trsf);
   }
 
   private loft(id: string, cmd: ModelingCommand): Record<string, unknown> {

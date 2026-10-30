@@ -760,8 +760,8 @@
       },
       "offline": {
         "solids": 18,
-        "volume": 462544.8397,
-        "area": 103969.5758
+        "volume": 463216.2864,
+        "area": 104006.3569
       }
     },
     {
@@ -2086,8 +2086,8 @@
       },
       "offline": {
         "solids": 1,
-        "volume": 3639.528207,
-        "area": 2350.127448
+        "volume": 3665.343012,
+        "area": 2330.931496
       }
     },
     {
@@ -2673,8 +2673,8 @@
       },
       "offline": {
         "solids": 6,
-        "volume": 10969.84988,
-        "area": 9666.179161
+        "volume": 11044.72092,
+        "area": 9648.149603
       }
     },
     {
@@ -4218,8 +4218,8 @@
       },
       "offline": {
         "solids": 5,
-        "volume": 243249992.4,
-        "area": 80069374.37
+        "volume": 667807824.4,
+        "area": 105485812.2
       }
     },
     {
@@ -4955,8 +4955,8 @@
       },
       "offline": {
         "solids": 1,
-        "volume": 184.3526266,
-        "area": 257.9112003
+        "volume": 131.3821902,
+        "area": 222.2347374
       }
     },
     {
@@ -4984,8 +4984,8 @@
       },
       "offline": {
         "solids": 1,
-        "volume": 184.3526266,
-        "area": 257.9112003
+        "volume": 131.3821902,
+        "area": 222.2347374
       }
     },
     {
@@ -5993,8 +5993,8 @@
       },
       "offline": {
         "solids": 1,
-        "volume": 16618.88353,
-        "area": 12758.98713
+        "volume": 15858.26408,
+        "area": 11906.88134
       }
     },
     {
@@ -6214,8 +6214,8 @@
       },
       "offline": {
         "solids": 1,
-        "volume": 26048.85093,
-        "area": 19373.74247
+        "volume": 26579.88291,
+        "area": 19636.4596
       }
     },
     {
@@ -7172,8 +7172,8 @@
       },
       "offline": {
         "solids": 100,
-        "volume": 7195872614.0,
-        "area": 113218718.2
+        "volume": 116202062.8,
+        "area": 24171220.14
       }
     },
     {
@@ -7535,9 +7535,9 @@
         "area": 22.02414154339749
       },
       "offline": {
-        "solids": 0,
-        "volume": 0.0,
-        "area": 0.0
+        "solids": 1,
+        "volume": 5.322297095,
+        "area": 22.02191925
       }
     },
     {
@@ -9410,8 +9410,8 @@
       },
       "offline": {
         "solids": 2,
-        "volume": 6283.185307,
-        "area": 3150.326076
+        "volume": 7068.583471,
+        "area": 3303.038997
       }
     },
     {
@@ -9644,8 +9644,8 @@
       },
       "offline": {
         "solids": 11,
-        "volume": 21890014.68,
-        "area": 7900167.636
+        "volume": 31518246.05,
+        "area": 9077398.086
       }
     },
     {
@@ -10454,8 +10454,8 @@
       "functions": ["helical"],
       "offline": {
         "solids": 1,
-        "volume": 2399.26712,
-        "area": 1492.666237
+        "volume": 2471.504058,
+        "area": 1504.6169
       }
     },
     {
@@ -10477,8 +10477,8 @@
       ],
       "offline": {
         "solids": 1,
-        "volume": 2117.243045,
-        "area": 1579.828137
+        "volume": 2189.479982,
+        "area": 1591.778799
       }
     },
     {
@@ -10487,8 +10487,8 @@
       "functions": ["spur"],
       "offline": {
         "solids": 1,
-        "volume": 4933.362558,
-        "area": 2611.656564
+        "volume": 4962.722747,
+        "area": 2616.700127
       }
     },
     {
@@ -10497,8 +10497,8 @@
       "functions": ["herringbone"],
       "offline": {
         "solids": 1,
-        "volume": 1711.191696,
-        "area": 1261.711548
+        "volume": 1756.689633,
+        "area": 1275.328901
       }
     },
     {
@@ -10507,8 +10507,8 @@
       "functions": ["ring"],
       "offline": {
         "solids": 1,
-        "volume": 3889.267268,
-        "area": 4465.498307
+        "volume": 3840.363575,
+        "area": 4429.277188
       }
     },
     {
@@ -11275,8 +11275,8 @@
       "functions": ["circle", "deleteFace", "extrude", "faceId", "startSketchOn"],
       "offline": {
         "solids": 1,
-        "volume": 262.7643803,
-        "area": 233.5968917
+        "volume": 0.0,
+        "area": 181.0440156
       }
     },
     {
@@ -12540,8 +12540,8 @@
       ],
       "offline": {
         "solids": 1,
-        "volume": 4906.170695,
-        "area": 2610.707792
+        "volume": 4953.00739,
+        "area": 2626.186316
       }
     },
     {
@@ -13219,8 +13219,8 @@
       "functions": ["close", "extrude", "line", "patternTransform", "pow", "startProfile", "startSketchOn"],
       "offline": {
         "solids": 25,
-        "volume": 9414406.31,
-        "area": 616286.9641
+        "volume": 667637.3668,
+        "area": 478942.3078
       }
     },
     {
@@ -13239,8 +13239,8 @@
       "functions": ["abs", "circle", "cos", "extrude", "patternTransform", "startSketchOn"],
       "offline": {
         "solids": 100,
-        "volume": 7195872614.0,
-        "area": 113218718.2
+        "volume": 116202062.8,
+        "area": 24171220.14
       }
     },
     {
@@ -13575,8 +13575,8 @@
       "functions": ["appearance", "deleteFace", "extrude", "offsetPlane", "rectangle", "split", "startSketchOn"],
       "offline": {
         "solids": 1,
-        "volume": 1000.0,
-        "area": 920.0
+        "volume": 0.0,
+        "area": 696.0
       }
     },
     {
@@ -13630,8 +13630,8 @@
       "functions": ["close", "deleteFace", "extrude", "startProfile", "startSketchOn", "xLine", "yLine"],
       "offline": {
         "solids": 1,
-        "volume": 80.0,
-        "area": 141.6124969
+        "volume": 0.0,
+        "area": 81.61249695
       }
     },
     {
@@ -13640,8 +13640,8 @@
       "functions": ["deleteFace", "extrude", "polygon", "startSketchOn"],
       "offline": {
         "solids": 1,
-        "volume": 400.0,
-        "area": 513.137085
+        "volume": 0.0,
+        "area": 284.8528137
       }
     },
     {
@@ -13651,7 +13651,7 @@
       "offline": {
         "solids": 1,
         "volume": 0.0,
-        "area": 96.0
+        "area": 64.0
       }
     },
     {
@@ -13660,8 +13660,8 @@
       "functions": ["coincident", "deleteFace", "extrude", "horizontal", "line", "region", "vertical"],
       "offline": {
         "solids": 1,
-        "volume": 100.0,
-        "area": 130.0
+        "volume": 0.0,
+        "area": 105.0
       }
     },
     {

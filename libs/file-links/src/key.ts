@@ -9,7 +9,7 @@
 import { base64ToUint8Array, uint8ArrayToBase64 } from 'uint8array-extras';
 
 /**
- * A key id: `files-<generation>-<first 16 hex of sha256(key)>`.
+ * A key id: `files-<generation>-<first 16 hex of sha256(lowercase hex of key)>`.
  *
  * @public
  */

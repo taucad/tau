@@ -1123,3 +1123,31 @@ it('should refuse a stale group edit from another editor', async () => {
   ).resolves.toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
   fixture.actor.stop();
 });
+
+/* A final that displaces a queued one inherits its base, the value the displaced edit was made from,
+ * but the write is still its own sender's: the lineage names that editor. */
+it('should attribute a write to the editor that sent it when it carries a displaced edit base', async () => {
+  const gate = Promise.withResolvers<void>();
+  const fixture = await parameterSetHarness(false, { gate: gate.promise });
+  const { identity } = fixture.snapshot;
+  const active = fixture.submit({
+    ...widthEdit('pane-1', 26, identity),
+    base: { pointer: '/width', value: 25.4, editor: 'pane' },
+  });
+  await waitFor(fixture.actor, (state) => state.matches({ open: 'applying' }));
+  const displaced = fixture.submit({
+    ...widthEdit('pane-2', 27, identity),
+    base: { pointer: '/width', value: 26, editor: 'pane' },
+  });
+  const agent = fixture.submit({
+    ...widthEdit('agent-1', 30, identity),
+    base: { pointer: '/width', value: 26, editor: 'agent' },
+  });
+  await expect(displaced).resolves.toMatchObject({ status: 'cancelled-before-apply' });
+  gate.resolve();
+  await expect(active).resolves.toMatchObject({ status: 'committed' });
+  await expect(agent).resolves.toMatchObject({ status: 'committed' });
+
+  expect(Object.values(fixture.actor.getSnapshot().context.lineage)).toEqual([{ editor: 'agent', value: 30 }]);
+  fixture.actor.stop();
+});

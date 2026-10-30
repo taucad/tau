@@ -281,9 +281,20 @@ const isValueEdit = (
 ): request is ParameterSetRequest & { operation: Extract<ParameterSetRequest['operation'], { pointer: string }> } =>
   request.operation.kind === 'native-value' || request.operation.kind === 'unit-value';
 
-/** The base the active command was submitted with, or the one a command it displaced carried. */
-const activeRequestBase = (context: ParameterSetMachineContext): ParameterSetRequestBase | undefined =>
-  context.activeBase ?? context.active?.base;
+/**
+ * The base the active command was submitted with, or the one a command it displaced carried. A carried
+ * base keeps the value and binding the displaced edit was made from, but the write is the active
+ * command's own, so its editor is the active command's.
+ */
+const activeRequestBase = (context: ParameterSetMachineContext): ParameterSetRequestBase | undefined => {
+  const carried = context.activeBase;
+  if (carried === undefined) {
+    return context.active?.base;
+  }
+  const { editor: _carriedEditor, ...rest } = carried;
+  const editor = context.active?.base?.editor;
+  return editor === undefined ? rest : { ...rest, editor };
+};
 
 type GroupEdit = Extract<ParameterSetRequest['operation'], { kind: 'replace-group-values' }>;
 

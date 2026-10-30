@@ -114,22 +114,6 @@ export class TelemetryController {
         this.recordKernelExport(entry, durationSeconds);
         return;
       }
-      case IngestEntryName.WEBSOCKET_RECONNECTION: {
-        this.recordWebsocketReconnection(entry, durationSeconds);
-        return;
-      }
-      case IngestEntryName.EDITOR_LOAD: {
-        this.recordEditorLoad(entry, durationSeconds);
-        return;
-      }
-      case IngestEntryName.WASM_MODULE_LOAD: {
-        this.recordWasmModuleLoad(entry, durationSeconds);
-        return;
-      }
-      case IngestEntryName.INDEXEDDB_OPERATION: {
-        this.recordIndexedDbOperation(entry, durationSeconds);
-        return;
-      }
       case IngestEntryName.AGENT_SESSION: {
         this.recordAgentSession(entry);
         return;
@@ -175,43 +159,6 @@ export class TelemetryController {
     this.metrics.kernelExportDuration.record(durationSeconds, {
       [AttributeKey.KERNEL_STATUS]: status,
       [AttributeKey.EXPORT_FORMAT]: format,
-    });
-  }
-
-  private recordWebsocketReconnection(
-    entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.WEBSOCKET_RECONNECTION }>,
-    durationSeconds: number,
-  ): void {
-    this.metrics.wsReconnectionDuration.record(durationSeconds, {
-      [AttributeKey.WS_RECONNECTION_ATTEMPT]: entry.detail?.attempt ?? 0,
-    });
-  }
-
-  private recordEditorLoad(
-    entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.EDITOR_LOAD }>,
-    durationSeconds: number,
-  ): void {
-    this.metrics.editorLoadDuration.record(durationSeconds, {
-      [AttributeKey.EDITOR_KERNEL]: entry.detail?.kernel ?? 'unknown',
-    });
-  }
-
-  private recordWasmModuleLoad(
-    entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.WASM_MODULE_LOAD }>,
-    durationSeconds: number,
-  ): void {
-    this.metrics.wasmModuleLoadDuration.record(durationSeconds, {
-      [AttributeKey.WASM_MODULE]: entry.detail?.module ?? 'unknown',
-    });
-  }
-
-  private recordIndexedDbOperation(
-    entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.INDEXEDDB_OPERATION }>,
-    durationSeconds: number,
-  ): void {
-    this.metrics.indexeddbOperationDuration.record(durationSeconds, {
-      [AttributeKey.INDEXEDDB_OPERATION]: entry.detail?.operation ?? 'unknown',
-      [AttributeKey.INDEXEDDB_STORE]: entry.detail?.store ?? 'unknown',
     });
   }
 

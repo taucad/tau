@@ -147,6 +147,8 @@ describe('getSectionViewTestControlState', () => {
         openChainDrawCount: 1,
         meshDrawCount: 6,
         polygonDrawCount: 5,
+        rebuilt: true,
+        buildMilliseconds: 0.2,
         submitMilliseconds: 0.5,
       },
       loops: [

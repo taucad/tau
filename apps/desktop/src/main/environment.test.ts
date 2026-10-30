@@ -69,6 +69,7 @@ describe('desktopEnvironment', () => {
         TAU_WEBSOCKET_URL: 'wss://attacker.example',
         TAU_FRONTEND_URL: 'https://attacker.example',
         TAU_S3_ENDPOINT: 'https://attacker.example',
+        TAU_FILES_ORIGIN: 'https://attacker.example',
         ELECTRON_RENDERER_URL: 'https://attacker.example',
         TAU_DESKTOP_CLIENT_ROOT: '/tmp/attacker-spa',
         TAU_BAMBU_STUDIO_PATH: '/tmp/attacker-binary',
@@ -81,6 +82,7 @@ describe('desktopEnvironment', () => {
     );
     expect(environment).toEqual({
       TAU_S3_ENDPOINT: 'https://tau-prod-content-private.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com',
+      TAU_FILES_ORIGIN: 'https://files.tau.new',
       TAU_API_URL: 'https://api.tau.new',
       TAU_WEBSOCKET_URL: 'wss://api.tau.new',
       TAU_FRONTEND_URL: 'https://tau.new',
@@ -96,6 +98,7 @@ describe('desktopEnvironment', () => {
       ),
     ).toEqual({
       TAU_S3_ENDPOINT: 'https://tau-staging-content-private.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com',
+      TAU_FILES_ORIGIN: 'https://files.taucad.dev',
       TAU_API_URL: 'https://api.taucad.dev',
       TAU_WEBSOCKET_URL: 'wss://api.taucad.dev',
       TAU_FRONTEND_URL: 'https://taucad.dev',

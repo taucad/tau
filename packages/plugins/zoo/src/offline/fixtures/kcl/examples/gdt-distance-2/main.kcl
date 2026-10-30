@@ -1,0 +1,31 @@
+@settings(kclVersion = 3.0)
+
+// Example of a distance annotation with no tolerance.
+
+sketch001 = sketch(on = XY) {
+  line1 = line(start = [var -6.19mm, var 4.16mm], end = [var 7.91mm, var 4.16mm])
+  line2 = line(start = [var 7.91mm, var 4.16mm], end = [var 7.91mm, var -3.35mm])
+  line3 = line(start = [var 7.91mm, var -3.35mm], end = [var -6.19mm, var -3.35mm])
+  line4 = line(start = [var -6.19mm, var -3.35mm], end = [var -6.19mm, var 4.16mm])
+  coincident([line1.end, line2.start])
+  coincident([line2.end, line3.start])
+  coincident([line3.end, line4.start])
+  coincident([line4.end, line1.start])
+  parallel([line2, line4])
+  parallel([line3, line1])
+  perpendicular([line1, line2])
+  horizontal(line3)
+}
+hidden001 = hide(sketch001)
+region001 = region(segments = [sketch001.line1, sketch001.line2], direction = CW)
+extrude001 = extrude(region001, length = 1, tagEnd = $capEnd001)
+gdt::distance(
+  edges = [
+    getCommonEdge(faces = [
+      region001.tags.line1,
+      extrude001.faces.capEnd001
+    ])
+  ],
+  framePosition = [5, 5],
+  fontSize = 0.5276mm,
+)

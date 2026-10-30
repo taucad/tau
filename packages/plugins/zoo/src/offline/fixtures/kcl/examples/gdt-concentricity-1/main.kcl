@@ -1,0 +1,17 @@
+@settings(kclVersion = 3.0)
+
+datumSketch = sketch(on = XY) {
+  perimeter = circle(start = [var 6mm, var 0mm], center = [var 0mm, var 0mm])
+}
+
+datumCylinder = extrude(region(segments = [datumSketch.perimeter]), length = 10mm)
+
+controlledSketch = sketch(on = XY) {
+  perimeter = circle(start = [var 3mm, var 0mm], center = [var 0mm, var 0mm])
+}
+
+controlledCylinder = extrude(region(segments = [controlledSketch.perimeter]), length = 10mm, tagEnd = $top)
+topEdge = { sideFaces = [controlledCylinder.sketch.tags.perimeter, top] }
+
+gdt::datum(face = datumCylinder.sketch.tags.perimeter, name = "A", framePosition = [-14mm, 8mm], framePlane = XZ)
+gdt::concentricity(edges = [topEdge], tolerance = 0.05mm, datums = ["A"], framePosition = [12mm, 8mm], framePlane = XZ)

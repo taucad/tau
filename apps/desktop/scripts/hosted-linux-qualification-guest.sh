@@ -41,9 +41,9 @@ env.update({'DISPLAY': ':0', 'XAUTHORITY': str(pathlib.Path.home()/'.Xauthority'
 subprocess.run(['node', '--import', '@oxc-node/core/register', '--input-type=module', '--eval',
                 "import { assertDisposableQualificationHost } from './apps/desktop/scripts/qualification-tls.mts'; assertDisposableQualificationHost();"],
                cwd=root, env=env, check=True)
-# The harness creates its own fresh leaf with recursive=false. A fresh clone has no out parent.
+# The harness now creates both parents itself; these stay as a guest-side belt
+# and braces, and neither touches the leaves it creates with recursive=false.
 (root / 'out').mkdir(exist_ok=True)
-# Cloud images need not have the desktop config parent; the app's profile leaf must remain absent.
 (pathlib.Path.home() / '.config').mkdir(exist_ok=True)
 # Exercise the same native ZIP listing/extraction used by authenticated artifact admission.
 with tempfile.TemporaryDirectory(prefix='tau-zip-preflight-') as scratch:

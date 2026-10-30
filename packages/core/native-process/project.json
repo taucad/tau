@@ -38,6 +38,8 @@
           "TAU_SHELL_PROJECTION_CONFORMANCE": "1"
         }
       }
-    }
+    },
+    "formal": {},
+    "formal:nightly": {}
   }
 }

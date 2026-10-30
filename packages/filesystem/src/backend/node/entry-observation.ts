@@ -26,11 +26,19 @@ const sameEntry = (left: BigIntStats, right: BigIntStats): boolean =>
 const sameDirectory = (left: BigIntStats, right: BigIntStats): boolean =>
   left.dev === right.dev && left.ino === right.ino && left.birthtimeNs === right.birthtimeNs;
 
-/** Read a regular open descriptor without allocating beyond its admitted size, plus a one-byte growth probe. @internal */
-export const readBoundedDescriptor = async (
+/** Same inode, regardless of its status-change time. */
+const sameInode = (left: BigIntStats, right: BigIntStats): boolean =>
+  left.dev === right.dev &&
+  left.ino === right.ino &&
+  left.mode === right.mode &&
+  left.birthtimeNs === right.birthtimeNs;
+
+type BoundedRead = { check: () => void; unchanged: (before: BigIntStats, after: BigIntStats) => boolean };
+
+const readBounded = async (
   handle: FileHandle,
   maximumBytes: number,
-  check: () => void,
+  { check, unchanged }: BoundedRead,
 ): Promise<Uint8Array<ArrayBuffer>> => {
   check();
   const before = await handle.stat({ bigint: true });
@@ -58,12 +66,32 @@ export const readBoundedDescriptor = async (
   if (bytesRead !== 0) {
     throw failure('EFBIG', 'File grew beyond its admitted observation size.');
   }
-  if (!sameEntry(before, await handle.stat({ bigint: true }))) {
+  if (!unchanged(before, await handle.stat({ bigint: true }))) {
     throw stale();
   }
   check();
   return bytes;
 };
+
+/** Read a regular open descriptor without allocating beyond its admitted size, plus a one-byte growth probe. @internal */
+export const readBoundedDescriptor = async (
+  handle: FileHandle,
+  maximumBytes: number,
+  check: () => void,
+): Promise<Uint8Array<ArrayBuffer>> => readBounded(handle, maximumBytes, { check, unchanged: sameEntry });
+
+/**
+ * Read back the inode a rename just published, holding it to its identity but not
+ * its status-change time: a later writer replacing the path unlinks this inode,
+ * which moves its ctime without touching its bytes, and supersedes the write
+ * rather than leaving it unapplied.
+ * @internal
+ */
+export const readPublishedDescriptor = async (
+  handle: FileHandle,
+  maximumBytes: number,
+): Promise<Uint8Array<ArrayBuffer>> =>
+  readBounded(handle, maximumBytes, { check: () => undefined, unchanged: sameInode });
 
 type Budget = { bytes: number; entries: number; check(): void };
 const spendBytes = (budget: Budget, bytes: number): void => {

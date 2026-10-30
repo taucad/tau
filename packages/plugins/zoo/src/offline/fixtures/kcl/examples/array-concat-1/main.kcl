@@ -1,0 +1,6 @@
+// Concatenating an empty array has no effect.
+newArr = concat([10, 20, 30], items = [])
+assert(newArr[0], isEqualTo = 10, tolerance = 0.00001)
+assert(newArr[1], isEqualTo = 20, tolerance = 0.00001)
+assert(newArr[2], isEqualTo = 30, tolerance = 0.00001)
+assert(count(newArr), isEqualTo = 3, tolerance = 0.00001)

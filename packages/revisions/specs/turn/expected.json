@@ -75,6 +75,20 @@
       },
       "kind": "witness",
       "ref": "W5 RM-R4: DeferRelease and M1Host FALSE, 5 states"
+    },
+    "TurnExecutionCustody.today.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "CustodyBeforeSettlement"
+      },
+      "kind": "defect",
+      "ref": "Q9 I7 at3294b1dc3: interrupted command does not prevent settlement/lease retirement",
+      "fixedBy": "Q9 I7 approved execution holds"
+    },
+    "TurnExecutionCustody.target.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "Q9 I7 approved API revision3: every settlement/retirement consults execution custody"
     }
   },
   "graphs": {

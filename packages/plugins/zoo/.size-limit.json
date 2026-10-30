@@ -1,7 +1,12 @@
 [
   {
-    "name": "total (ESM JS) — measured 16.87 kB brotlied on 2026-10-11, including the proxy subpath",
-    "path": ["dist/**/*.mjs"],
+    "name": "total (ESM JS) without the lazy offline engine — measured 17.12 kB brotlied on 2026-10-29, including the proxy subpath",
+    "path": ["dist/**/*.mjs", "!dist/offline/**"],
     "limit": "18 kB"
+  },
+  {
+    "name": "Offline libcascade engine, loaded only in offline mode — measured 30.96 kB brotlied on 2026-10-29, after moving the native helpers and the custom libcascade build in",
+    "path": "dist/offline/*.mjs",
+    "limit": "32 kB"
   }
 ]

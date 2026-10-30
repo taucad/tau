@@ -1,0 +1,2 @@
+xs = [-5 .. 5]
+assert(xs[0], isEqualTo = -5, error = "first element is -5")

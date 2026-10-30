@@ -1,0 +1,21 @@
+// Loft a square, a circle, and another circle with options.
+squareSketch = startSketchOn(XY)
+    |> startProfile(at = [-100, 200])
+    |> line(end = [200, 0])
+    |> line(end = [0, -200])
+    |> line(end = [-200, 0])
+    |> line(endAbsolute = [profileStartX(%), profileStartY(%)])
+    |> close()
+
+circleSketch0 = startSketchOn(offsetPlane(XY, offset = 75))
+    |> circle( center = [0, 100], radius = 50 )
+
+circleSketch1 = startSketchOn(offsetPlane(XY, offset = 150))
+    |> circle( center = [0, 100], radius = 20 )
+
+loft([squareSketch, circleSketch0, circleSketch1],
+    baseCurveIndex = 0,
+    bezApproximateRational = false,
+    tolerance = 0.000001,
+    vDegree = 2,
+)

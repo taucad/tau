@@ -1,0 +1,17 @@
+// Create a yellow extruded triangle.
+sketch001 = startSketchOn(XY)
+profile001 = startProfile(sketch001, at = [0, 0])
+  |> yLine(length = 1, tag = $a)
+  |> xLine(length = 1, tag = $b)
+  |> close(tag = $c)
+cube = extrude(profile001, length = 1)
+|> appearance(color = "#ffaa00")
+
+// Extrude a red box from one of the triangle's side faces.
+box = extrude(
+       c,
+       length = 4,
+       hideSeams = false,
+       method = NEW,
+     )
+  |> appearance(color = "#ff0000")

@@ -282,7 +282,9 @@ const baseImageShape = {
   lighting: lightingSchema
     .default(defaultImageLighting)
     .describe('Studio lighting or an explicit directional-light rig'),
-  ao: aoSchema.optional().describe('Screen-space ambient occlusion for opaque contact shadows'),
+  ao: aoSchema
+    .optional()
+    .describe('Screen-space ambient occlusion for opaque contact shadows; on by default, intensity 0 disables it'),
 } as const;
 
 const validateAnnotatedDimensions = (

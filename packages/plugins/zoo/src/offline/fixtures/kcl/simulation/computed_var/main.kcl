@@ -1,0 +1,18 @@
+// This tests computed properties.
+
+
+arr = [0, 0, 0, 10]
+i = 3
+ten = arr[i]
+
+assert(ten, isEqualTo = 10, error = "oops")
+
+obj = { foo = 1, bar = 0 }
+one = obj.foo
+
+assert(one, isEqualTo = 1, error = "oops")
+
+assert(PI, isEqualTo = 3, tolerance = 0.2, error = "oops pi")
+
+x = cos((2 * PI): number(rad))
+assert(x, isEqualTo = 1, tolerance = 0.000001, error = "oops cos")

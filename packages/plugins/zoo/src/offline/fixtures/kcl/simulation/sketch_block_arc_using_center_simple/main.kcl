@@ -1,0 +1,18 @@
+@settings(experimentalFeatures = allow)
+
+s = sketch(on = XY) {
+  arc1 = arc(start = [var 1mm, var 0], end = [var 0, var 2mm], center = [var 0, var 0])
+  fixed([arc1.start, [1mm, 0mm]])
+  arc1.end.at[0] == 0mm
+  // arc1.end.at[1] not specified. Based on other constraints, it should solve.
+  fixed([arc1.center, [0mm, 0mm]])
+}
+
+// Tolerance matches the solver's convergence tolerance (1e-8); asserting
+// tighter than that asks for more precision than ezpz guarantees.
+assert(s.arc1.center.at[0], isEqualTo = 0, tolerance = 0.00000001)
+assert(s.arc1.center.at[1], isEqualTo = 0, tolerance = 0.00000001)
+assert(s.arc1.start.at[0], isEqualTo = 1mm, tolerance = 0.00000001)
+assert(s.arc1.start.at[1], isEqualTo = 0, tolerance = 0.00000001)
+assert(s.arc1.end.at[0], isEqualTo = 0, tolerance = 0.00000001)
+assert(s.arc1.end.at[1], isEqualTo = 1mm, tolerance = 0.00000001)

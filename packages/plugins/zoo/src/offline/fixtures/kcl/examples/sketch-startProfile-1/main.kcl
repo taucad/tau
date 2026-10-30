@@ -1,0 +1,8 @@
+exampleSketch = startSketchOn(-XZ)
+  |> startProfile(at = [10, 10])
+  |> line(end = [10, 0])
+  |> line(end = [0, 10])
+  |> line(end = [-10, 0])
+  |> close()
+
+example = extrude(exampleSketch, length = 5)

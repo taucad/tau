@@ -1,7 +1,7 @@
 name: 'Staging deploy superseded'
 description: >-
   Reports whether a newer commit on `main` has already deployed this app to staging, or
-  is on its way to, so an older `ci.yml` push run does not publish its commit. Run it
+  is on its way to, so an older `staging.yml` push run does not publish its commit. Run it
   inside the deploy job, which holds the app's staging deploy queue, just before
   publishing.
 
@@ -11,7 +11,7 @@ description: >-
 # job that passed by skipping on this check counts too: something newer than it
 # deployed first.
 #
-# When this deploy comes from a `ci.yml` push run, a newer run that is still going
+# When this deploy comes from a `staging.yml` push run, a newer run that is still going
 # supersedes it as well, once that run's plan has passed and its deploy job for this
 # app has not ended without deploying. Its plan diffs the app against the last commit
 # staging recorded (`staging-deploy-history`), which this unpublished commit is not,
@@ -42,7 +42,7 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         JOB_NAME: ${{ inputs.job-name }}
-        # The plan job of `ci.yml`.
+        # The plan job of `staging.yml`.
         PLAN_JOB: Plan affected lanes
       run: |
         set -euo pipefail
@@ -50,7 +50,7 @@ runs:
           gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$1/jobs?per_page=100" \
             --jq '.jobs[] | {name, conclusion}' | jq -s .
         }
-        # In a called workflow the run is the caller's, so this is the ci.yml push run;
+        # In a called workflow the run is the caller's, so this is the staging.yml push run;
         # a manual dispatch looks at the runs started since it began.
         created=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
         # The caller job's name, e.g. `Deploy UI (Staging)`: a newer run that decides
@@ -60,7 +60,7 @@ runs:
           caller=$(jobs_of "$GITHUB_RUN_ID" | jq -r --arg job "$JOB_NAME" \
             'map(.name | select(endswith(" / " + $job)) | rtrimstr(" / " + $job)) | first // empty')
         fi
-        runs=$(gh api --paginate -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+        runs=$(gh api --paginate -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/staging.yml/runs" \
           -f branch=main -f event=push -f created=">=$created" -f per_page=100 \
           --jq ".workflow_runs[] | select(.id != $GITHUB_RUN_ID and .head_sha != \"$GITHUB_SHA\") | \"\(.id) \(.head_sha) \(.status)\"")
         while read -r run_id sha status; do

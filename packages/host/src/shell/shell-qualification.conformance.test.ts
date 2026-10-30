@@ -151,6 +151,7 @@ const countingProvider = (
   const real = createSandboxShellProvider({
     bwrapPath,
     home,
+    custody: { directory: join(appData, 'shell-custody'), sessionDirectory: sessions },
     ...(options.supervisor === undefined ? {} : { supervisor: options.supervisor }),
   });
   const launches: ShellLaunch[] = [];
@@ -158,6 +159,10 @@ const countingProvider = (
   let highWater = 0;
   const provider: ShellProvider = {
     name: real.name,
+    prepare: real.prepare,
+    inventory: real.inventory,
+    recover: real.recover,
+    release: real.release,
     launch: async (launch) => {
       /* The probe's own launch proves the sandbox; it is not one of the row's calls. */
       if (launch.commandId === 'shell:probe') {

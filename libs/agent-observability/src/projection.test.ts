@@ -67,6 +67,18 @@ describe('projectRun', () => {
     ]);
   });
 
+  it('names the model call a tool came from as the API names that attempt, and none when the host did not see it', async () => {
+    const attemptId = 'run a:1:0';
+    const projection = await projectRun(run({ tools: [{ ...run().tools[0]!, modelCall: attemptId }] }), context());
+
+    expect(projection.evidence.map((evidence) => evidence.payload)).toMatchObject([
+      { fact: { kind: 'tool', modelCall: await contractId('inv', attemptId) } },
+      { fact: { kind: 'outcome' } },
+    ]);
+    const unseen = await projectRun(run(), context());
+    expect(unseen.evidence[0]?.payload).toMatchObject({ fact: { modelCall: null } });
+  });
+
   describe('test_model checks', () => {
     const check: NonNullable<ProjectedRun['tools'][number]['check']> = {
       result: 'passed',

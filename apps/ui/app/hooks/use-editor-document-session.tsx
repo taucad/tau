@@ -74,9 +74,10 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
       if (target.declaration) {
         const typescriptDeclaration =
           (path.startsWith('__typescript_lib__/') || path.startsWith('cdn-types/')) && path.endsWith('.d.ts');
+        const csharpDeclaration = path.startsWith('__csharp_metadata__/') && path.endsWith('.cs');
         const kclStandardLibrary = path.startsWith('__kcl_std__/') && path.endsWith('.kcl');
         const openscadBuiltins = path.startsWith('__openscad_builtins__/') && path.endsWith('.scad');
-        if (!typescriptDeclaration && !kclStandardLibrary && !openscadBuiltins) {
+        if (!typescriptDeclaration && !csharpDeclaration && !kclStandardLibrary && !openscadBuiltins) {
           return;
         }
         opener.current =

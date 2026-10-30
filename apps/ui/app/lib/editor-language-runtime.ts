@@ -56,6 +56,11 @@ async function acquireFamily(request: EditorLanguageRequest): Promise<EditorLang
       request.signal.throwIfAborted();
       return acquireOpenScadLanguage(request);
     }
+    case 'csharp': {
+      const { acquireCsharpLanguage } = await import('#lib/csharp-language/csharp-codemirror.js');
+      request.signal.throwIfAborted();
+      return acquireCsharpLanguage(request);
+    }
     case 'json':
     case 'jsonc': {
       const { acquireJsonLanguage } = await import('#lib/json-language/json-codemirror.js');

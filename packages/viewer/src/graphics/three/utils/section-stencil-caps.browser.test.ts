@@ -302,6 +302,13 @@ describe.each(['webgl', 'webgpu', 'nodegl'] as const)('section stencil caps on %
   const results: ScenarioResult[] = [];
   const timings: TimingResult[] = [];
   const errors: unknown[][] = [];
+  let reusePixels:
+    | Readonly<{
+        built: ArrayLike<number>;
+        reused: ArrayLike<number>;
+        stats: readonly SectionStencilCapStats[];
+      }>
+    | undefined;
   const disposables: Array<{ dispose: () => void }> = [];
 
   beforeAll(async () => {
@@ -397,6 +404,42 @@ describe.each(['webgl', 'webgpu', 'nodegl'] as const)('section stencil caps on %
       });
     }
 
+    // A reused draw list must draw the pixels its build drew: the same camera, built and then reused.
+    {
+      const scenario = scenarios[0]!;
+      const camera = scenario.camera();
+      writeSectionClip(clip, scenario.pieces);
+      const reuseStats: SectionStencilCapStats[] = [];
+      const drawAt = async (position: THREE.Vector3): Promise<ArrayLike<number>> => {
+        camera.position.copy(position);
+        camera.lookAt(centre);
+        camera.updateMatrixWorld();
+        return renderFrame(scene, camera, () => {
+          reuseStats.push(
+            caps.render(renderer, {
+              camera,
+              pieces: scenario.pieces,
+              sources,
+              stripes: noStripes,
+              outlineWidthPixels: 1,
+              viewportHeightPixels: size,
+            }),
+          );
+        });
+      };
+      const home = camera.position.clone();
+      // An orbit step small enough to stay on the same side of every cut plane, so the exit faces do not change.
+      const orbited = home
+        .clone()
+        .sub(centre)
+        .applyAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 36)
+        .add(centre);
+      const built = await drawAt(home);
+      await drawAt(orbited);
+      const reused = await drawAt(home);
+      reusePixels = { built, reused, stats: [...reuseStats] };
+    }
+
     // Main-thread cost against triangle count: one closed sphere per owner, cut through, coarse and then fine.
     for (const segments of [
       [24, 12],
@@ -485,6 +528,20 @@ describe.each(['webgl', 'webgpu', 'nodegl'] as const)('section stencil caps on %
         )}; ${results.map(({ label, overlapExpected, overlapDrawn, outlinePixels }) => `${label} overlap ${overlapDrawn}/${overlapExpected}, outline ${outlinePixels}`).join(', ')}`,
     );
     expect(fine!.medianMilliseconds).toBeLessThan(Math.max(coarse!.medianMilliseconds * 3, 2));
+  });
+
+  it('should draw the same pixels from a reused draw list as from the build it reuses', () => {
+    expect(reusePixels, 'the reuse pair was collected').toBeDefined();
+    const { built, reused, stats } = reusePixels!;
+    // The first frame built; the orbit step and the return to it reused that build.
+    expect(stats.map(({ rebuilt }) => rebuilt)).toEqual([true, false, false]);
+    expect(stats[1]!.meshDrawCount).toBe(stats[0]!.meshDrawCount);
+    expect(stats[1]!.polygonDrawCount).toBe(stats[0]!.polygonDrawCount);
+    const differing = [...new Uint8Array(built.length).keys()].reduce(
+      (total, index) => total + Number(built[index] !== reused[index]),
+      0,
+    );
+    expect(differing, `${differing} of ${built.length} channels differ between the built and reused frames`).toBe(0);
   });
 
   it('should compile and draw every pass without a shader or pipeline error', () => {

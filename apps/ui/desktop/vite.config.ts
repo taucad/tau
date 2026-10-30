@@ -21,6 +21,8 @@ import { createGeoSpecMtAssets } from '../geospec-mt-assets.vite-plugin';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite configuration runs outside the app alias resolver.
 import { createPicogkBrowserAssets } from '../picogk-browser-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
+import { createCsharpLanguageAssets } from '../csharp-language-assets.vite-plugin';
+// oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
 import { createOpenscadLanguageAssets } from '../openscad-language-assets.vite-plugin';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -32,6 +34,7 @@ const desktopRelease = (
 const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
 const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
 const picogkAssets = createPicogkBrowserAssets(process.env['PICOGK_BROWSER_ASSETS_ROOT']);
+const csharpAssets = createCsharpLanguageAssets(path.resolve(__dirname, '../../../out/csharp-language/stage'));
 const openscadLanguage = createOpenscadLanguageAssets(path.resolve(__dirname, '../../../out/openscad-language/stage'));
 
 /**
@@ -61,12 +64,14 @@ export default defineConfig({
     tauTelemetryHostCloudBuild: JSON.stringify(resolveTauTelemetryHostCloud(process.env['TAU_TELEMETRY_HOST'])),
     tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
     tauPicogkBrowserAssets: picogkAssets.assets ? JSON.stringify(picogkAssets.assets) : 'undefined',
+    tauCsharpLanguageAssets: JSON.stringify(csharpAssets.assets ?? null),
     // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
     'import.meta.env.TAU_TARGET': '"desktop"',
   },
   plugins: [
     mtAssets.plugin,
     picogkAssets.plugin,
+    csharpAssets.plugin,
     openscadLanguage.plugin,
     // Prune unused runtime assets before the module graph inventories them.
     tauRuntime(),

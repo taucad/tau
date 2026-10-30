@@ -20,6 +20,8 @@ import { createGeoSpecMtAssets } from '../geospec-mt-assets.vite-plugin';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite configuration runs outside the app alias resolver.
 import { createPicogkBrowserAssets } from '../picogk-browser-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
+import { createCsharpLanguageAssets } from '../csharp-language-assets.vite-plugin';
+// oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
 import { createOpenscadLanguageAssets } from '../openscad-language-assets.vite-plugin';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load integrity plugin.
 import { createAssetIntegrity } from '../asset-integrity.vite-plugin';
@@ -29,6 +31,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
 const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
 const picogkAssets = createPicogkBrowserAssets(process.env['PICOGK_BROWSER_ASSETS_ROOT']);
+const csharpAssets = createCsharpLanguageAssets(path.resolve(__dirname, '../../../out/csharp-language/stage'));
 const openscadLanguage = createOpenscadLanguageAssets(path.resolve(__dirname, '../../../out/openscad-language/stage'));
 
 /**
@@ -62,6 +65,7 @@ export default defineConfig({
     tauTelemetryHostCloudBuild: 'false',
     tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
     tauPicogkBrowserAssets: picogkAssets.assets ? JSON.stringify(picogkAssets.assets) : 'undefined',
+    tauCsharpLanguageAssets: JSON.stringify(csharpAssets.assets ?? null),
     /* Not `desktop`: `isDesktopTarget()` must fold to `false` here, or the
      * bundle takes the Electron preload's ENV and IPC paths in a plain tab. */
     // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
@@ -70,6 +74,7 @@ export default defineConfig({
   plugins: [
     mtAssets.plugin,
     picogkAssets.plugin,
+    csharpAssets.plugin,
     openscadLanguage.plugin,
     createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
     createAssetIntegrity({ receipt: true }),

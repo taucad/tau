@@ -231,7 +231,7 @@ describe('SectionContourFills', () => {
       harness.frame();
       expect(harness.snapshotStore.committed?.cutSet).toBe(step);
       const { latest } = harness.root().userData[sectionCapStencilDebugUserDataKey] as SectionCapStencilDiagnostics;
-      counts.push({ ...latest, submitMilliseconds: 0 });
+      counts.push({ ...latest, buildMilliseconds: 0, submitMilliseconds: 0 });
     }
     expect(harness.commits).toEqual([planeCut(0.1), ...steps.flatMap(({ cuts }) => cuts)].map((cut) => [cut]));
     // The same draws for a sphere of 64 times the triangles.
@@ -240,7 +240,7 @@ describe('SectionContourFills', () => {
     await harness.render(steps[0]!);
     harness.frame();
     const { latest } = harness.root().userData[sectionCapStencilDebugUserDataKey] as SectionCapStencilDiagnostics;
-    expect({ ...latest, submitMilliseconds: 0 }).toEqual(counts[0]);
+    expect({ ...latest, buildMilliseconds: 0, submitMilliseconds: 0 }).toEqual(counts[0]);
   });
 
   it('should leave the commit alone on frames whose cuts and sources are unchanged', async () => {

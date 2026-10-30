@@ -13,10 +13,13 @@ const counts = vi.hoisted((): { value: Counts | undefined } => ({ value: { liveP
 vi.mock('#lib/memory-kill-signal.js', () => ({ readDocumentSessionCounts: () => counts.value }));
 
 const { applyTauEventContext, readRouteId, setReportedUserId } = await import('#lib/sentry-context.lib.js');
+const { resetMemorySampler, setKernelHeapReader, setLiveCountsReader, takeMemorySample } =
+  await import('#lib/memory-sampler.js');
 
 type RouterWindow = Window & { __reactRouterDataRouter?: unknown };
 
 afterEach(() => {
+  resetMemorySampler();
   delete (globalThis.window as RouterWindow).__reactRouterDataRouter;
   setReportedUserId(undefined);
   environment.TAU_DEPLOY_CONTEXT = 'deploy-preview';
@@ -71,6 +74,30 @@ describe('applyTauEventContext', () => {
 
     expect(applyTauEventContext(event()).contexts?.['tau.session']).not.toHaveProperty('chatCount');
     counts.value = { liveProjectCount: 2, chatCount: 5 };
+  });
+
+  it('should carry the memory sample and high-water WASM total once a sample has been taken', () => {
+    setKernelHeapReader(() => ({ bytesByKernelId: { 'kernel-a': 9000 }, source: 'recycle-hook' }));
+    setLiveCountsReader(() => ({ projects: 1, workers: 2 }));
+    takeMemorySample();
+
+    expect(applyTauEventContext(event()).contexts?.['tau.memory']).toMatchObject({
+      wasmHeapBytes: { 'kernel-a': 9000 },
+      heapSource: 'recycle-hook',
+      highWaterWasmBytes: 9000,
+      liveProjects: 1,
+      liveWorkers: 2,
+    });
+  });
+
+  it('should report the sample\u2019s age rather than its raw timestamp, and never the raw `at`', () => {
+    setLiveCountsReader(() => ({ projects: 1 }));
+    takeMemorySample();
+
+    const memory = applyTauEventContext(event()).contexts?.['tau.memory'];
+
+    expect(memory?.['sampleAgeSeconds']).toEqual(expect.any(Number));
+    expect(memory).not.toHaveProperty('at');
   });
 
   it('should carry the opaque user id while one is set, and nothing once it is cleared', () => {

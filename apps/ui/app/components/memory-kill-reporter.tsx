@@ -13,6 +13,7 @@ import { useLiveProjectIds } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
 import { getDocumentMemoryKillSignal, memoryKillEventName } from '#lib/memory-kill-signal.js';
+import { setLiveCountsReader } from '#lib/memory-sampler.js';
 import type { MemoryKillSignal } from '#lib/memory-kill-signal.js';
 
 export function MemoryKillReporter({
@@ -41,6 +42,15 @@ export function MemoryKillReporter({
   useEffect(() => {
     signal?.setCounts({ liveProjectCount, chatCount });
   }, [chatCount, liveProjectCount, signal]);
+
+  // The one live count SB2's sampler can read on every device, iOS included, where no JavaScript
+  // memory API exists. The reader closes over the latest render's value and never asks a worker.
+  useEffect(() => {
+    setLiveCountsReader(() => ({ projects: liveProjectCount }));
+    return () => {
+      setLiveCountsReader(undefined);
+    };
+  }, [liveProjectCount]);
 
   useEffect(() => {
     if (signal === undefined) {

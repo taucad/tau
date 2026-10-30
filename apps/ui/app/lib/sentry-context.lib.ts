@@ -3,13 +3,14 @@ import { ENV } from '#environment.config.js';
 import { readBuildId } from '#lib/build-identity.js';
 import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
 import { readDocumentSessionCounts } from '#lib/memory-kill-signal.js';
+import { readHighWaterWasmBytes, readLastMemorySample } from '#lib/memory-sampler.js';
 
 /*
  * The Tau context processor (browser observability SB1): the tags and contexts every UI event
  * carries, whichever way it goes (the SDK's event processor in `#lib/sentry.lib`, and an event sent
  * without the SDK in `#lib/sentry-event.lib`, principle 7). It loads with the page's main bundle and
- * never imports the SDK's runtime. Unknown values are left absent, never guessed. `tau.memory` is
- * SB2's (the memory sampler) and is not added here until that sampler exists.
+ * never imports the SDK's runtime. Unknown values are left absent, never guessed. `tau.memory`
+ * comes from SB2's sampler (`#lib/memory-sampler`), which this processor reads but never drives.
  */
 
 /** The opaque Tau user id events carry as `user.id` (D1), or `undefined` when signed out or unknown. */
@@ -79,6 +80,29 @@ const readTauEventTags = (): Record<string, string> => {
 };
 
 /**
+ * The `tau.memory` context (SB2): the last sample this page took and the high-water WASM total.
+ *
+ * The sample is read, never taken: an event is not heavy work, and a figure from the moment the
+ * work started says more than one from after it failed. Absent until the first sample.
+ *
+ * @returns The context, or nothing while no sample has been taken.
+ */
+const readTauMemoryContext = (): Record<string, Record<string, unknown>> => {
+  const sample = readLastMemorySample();
+  const highWaterWasmBytes = readHighWaterWasmBytes();
+  if (sample === undefined) {
+    return {};
+  }
+  const { at, ...figures } = sample;
+  const context = defined<unknown>({
+    ...figures,
+    highWaterWasmBytes,
+    sampleAgeSeconds: Math.round((globalThis.performance.now() - at) / 1000),
+  });
+  return Object.keys(context).length === 0 ? {} : { 'tau.memory': context };
+};
+
+/**
  * The `tau.device` and `tau.session` contexts: hardware hints, viewport and isolation; live project
  * and chat counts, uptime and visibility. Counts and text are structure only (principle 6).
  *
@@ -103,6 +127,7 @@ const readTauEventContexts = (): Record<string, Record<string, unknown>> => {
       uptimeSeconds: Math.round(globalThis.performance.now() / 1000),
       visibility: typeof document === 'undefined' ? undefined : document.visibilityState,
     }),
+    ...readTauMemoryContext(),
   };
 };
 

@@ -60,6 +60,7 @@ import type {
 } from '#offline/offline-engine.types.js';
 import { OfflineEngineError, toRadians } from '#offline/offline-engine.types.js';
 import { exportScene } from '#offline/offline-export.js';
+import { randomUuid } from '#binary.utils.js';
 import type { WireOutputFormat } from '#offline/offline-export.js';
 import type { EdgeSpecifier } from '#offline/offline-engine-support.js';
 import { point3, point2, frameFromNormal, unitScale } from '#offline/offline-engine-support.js';
@@ -1077,17 +1078,4 @@ export class OfflineEngine {
     this.scene.subShapeOwner.set(id, solid.id);
     return id;
   }
-}
-
-/**
- * A v4 UUID from `crypto.getRandomValues`, which (unlike `crypto.randomUUID`) also exists outside secure contexts.
- *
- * @returns a random UUID string
- */
-function randomUuid(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  bytes[6] = 0x40 + (bytes[6]! % 16);
-  bytes[8] = 0x80 + (bytes[8]! % 64);
-  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }

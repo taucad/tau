@@ -86,3 +86,10 @@ it.each(['staging', 'production'] as const)('labels %s crash reports with the pa
   initializeDesktopErrorReporting(channel);
   expect(initialize).toHaveBeenCalledWith(expect.objectContaining({ environment: channel, sendDefaultPii: false }));
 });
+
+it.each(['staging', 'production'] as const)('labels an automated %s run apart from real use', async (channel) => {
+  vi.stubGlobal('tauSentryDsn', 'https://key@errors.example/1');
+  const { initializeDesktopErrorReporting } = await import('#main/error-reporting.js');
+  initializeDesktopErrorReporting(channel, true);
+  expect(initialize).toHaveBeenCalledWith(expect.objectContaining({ environment: `${channel}-e2e` }));
+});

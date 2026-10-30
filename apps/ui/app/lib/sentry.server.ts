@@ -6,7 +6,7 @@ import { ENV } from '#environment.config.js';
 import { readBuildId } from '#lib/build-identity.js';
 import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
 import { isObservabilityHarnessEnabled } from '#lib/observability-harness-context.js';
-import { scrubUrl, sentryEnvironment, sentryRelease } from '#lib/sentry-event.lib.js';
+import { automatedRunEnvironment, scrubUrl, sentryEnvironment, sentryRelease } from '#lib/sentry-event.lib.js';
 
 /*
  * Server-side render error reporting (SB10, D8): a small `@sentry/node` reporter for the SSR function, errors only,
@@ -145,16 +145,20 @@ export const reportSsrError = (error: unknown, { request, routeId, status, chann
     const sentry = await started;
     // A forked scope per event, so one request's tags never reach another's (the function serves many).
     sentry.withScope((scope) => {
+      const runTags = harnessTags(url);
       scope.setTags({
         runtime: 'ssr',
         // eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry tag name filtered on by operators.
         http_status: String(status),
         ...(routeId === undefined ? {} : { route: routeId }),
-        ...harnessTags(url),
+        ...runTags,
       });
-      // Only what an operator needs is attached; `beforeSend` scrubs it again.
+      // Only what an operator needs is attached; `beforeSend` scrubs it again. A harness run reports apart.
       scope.addEventProcessor((event) => ({
         ...event,
+        ...(Object.keys(runTags).length > 0
+          ? { environment: automatedRunEnvironment(event.environment ?? sentryEnvironment()) }
+          : {}),
         request: {
           url: url.href,
           method: request.method,

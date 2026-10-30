@@ -5,6 +5,11 @@ import type { Page } from 'playwright';
 export const stagingOrigin = 'https://taucad.dev';
 export const productionOrigin = 'https://tau.new';
 export const harnessPath = '/__debug/observability';
+/**
+ * The environment the harness's events are filed under (`staging-e2e`, apart from real staging use), with `staging`
+ * listed too: Sentry answers 404 to a query naming only environments it has never seen, as before the first run.
+ */
+export const harnessSentryEnvironments = ['staging', 'staging-e2e'] as const;
 
 /**
  * How long one harness navigation may take. The harness boots the runtime kernel and the PostHog
@@ -145,7 +150,9 @@ export async function pollSentryEventIds({
   }
   const url = new URL('https://us.sentry.io/api/0/organizations/taucad/events/');
   url.searchParams.set('project', '4512297038446593');
-  url.searchParams.set('environment', 'staging');
+  for (const environment of harnessSentryEnvironments) {
+    url.searchParams.append('environment', environment);
+  }
   url.searchParams.set('query', `e2e_run:${runId}`);
   url.searchParams.set('field', 'id');
   url.searchParams.set('statsPeriod', '1h');

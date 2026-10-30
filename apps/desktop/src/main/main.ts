@@ -240,8 +240,12 @@ if (routeQualification) {
   app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1');
   app.commandLine.appendSwitch('remote-debugging-port', '0');
 }
-// Crashpad may create profile files, so initialize only after the pristine probe admission above.
-initializeDesktopErrorReporting(desktopChannel);
+// Crashpad may create profile files, so initialize only after the pristine probe admission above. A qualification
+// run or a package that honours test overrides is a test harness, and reports apart from real use.
+initializeDesktopErrorReporting(
+  desktopChannel,
+  routeQualification !== undefined || (app.isPackaged && !environmentLocked),
+);
 /* Sentry first registers its IPC scheme and wraps subsequent registrations.
  * Register app:// afterward so both schemes retain their privileges, still
  * before app.whenReady() starts the network service. */

@@ -74,6 +74,20 @@ describe('cameraMachine', () => {
     actor.stop();
   });
 
+  it('keeps the calibrated handoff when a deep zoom leaves no FOV within the budget', () => {
+    const actor = createCameraActor().start();
+    actor.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 0 });
+    const calibrated = actor.getSnapshot().context.handoffVerticalFieldOfView;
+
+    actor.send({ type: 'setView', target: [35, -20, 12], direction: [1, -1, 0.7], up: [0, 0, 1], verticalSpan: 1e-9 });
+    const snapshot = actor.getSnapshot();
+    expect(snapshot.status).toBe('active');
+    expect(snapshot.context.view.verticalSpan).toBe(1e-9);
+    expect(snapshot.context.handoffVerticalFieldOfView).toBe(calibrated);
+
+    actor.stop();
+  });
+
   it('keeps one replaceable driver synchronized across zero-FOV crossings', () => {
     const snapshots = [] as Array<Readonly<{ projection: string; revision: number }>>;
     let driverStarts = 0;

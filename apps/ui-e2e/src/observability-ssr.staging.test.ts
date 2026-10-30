@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createObservabilityRunId,
   harnessNavigationTimeout,
+  harnessSentryEnvironments,
   observeHarnessPage,
   observabilityUrl,
   pollSentryEventIds,
@@ -107,11 +108,13 @@ const stagingRelease = async (): Promise<string> => {
 const pollApiEventIds = async (requestId: string, token: string): Promise<string[]> => {
   const query = new URLSearchParams({
     project: apiProjectId,
-    environment: 'staging',
     query: `request_id:${requestId}`,
     field: 'id',
     statsPeriod: '1h',
   });
+  for (const environment of harnessSentryEnvironments) {
+    query.append('environment', environment);
+  }
   const deadline = Date.now() + pollTimeout;
   let attempts = 0;
   // oxlint-disable no-await-in-loop -- Polls are sequential and share one bounded deadline.
@@ -153,8 +156,9 @@ describe('P2 staging signal acceptance: SSR errors and API correlation', () => {
     expect(tagOf(event, 'route')).toBe(harnessRouteId);
     expect(tagOf(event, 'http_status')).toBe('500');
     expect(tagOf(event, 'e2e_run')).toBe(runId);
-    // The project event-detail endpoint reports both as tags; it has no top-level `environment`.
-    expect(tagOf(event, 'environment')).toBe('staging');
+    // The project event-detail endpoint reports both as tags; it has no top-level `environment`. A harness run is
+    // filed apart from real staging use.
+    expect(tagOf(event, 'environment')).toBe('staging-e2e');
     expect(tagOf(event, 'release')).toBe(release);
 
     const exception = event.entries.find((entry) => entry.type === 'exception')?.data.values?.at(-1);
